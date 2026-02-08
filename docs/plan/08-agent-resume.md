@@ -1,6 +1,6 @@
 # Agent Resume Guide
 
-When an agent picks up this project with clean context, follow this sequence:
+You may be working alongside other agents. Be aware of that.
 
 ## 1. Orient
 
@@ -9,68 +9,69 @@ Read docs/plan/01-overview.md     # What is this project
 Read docs/plan/07-work-tracker.md # What's done, what's next
 ```
 
-## 2. Find the next task
+## 2. Check What Others Are Doing
 
-Look for the first `[ ]` item in `07-work-tracker.md`. That's what to work on.
-
-## 3. Find the source
-
-Each tracker item has the format:
-```
-- [ ] `pkg/ai/types.go` ← `packages/ai/src/types.ts` (295 lines)
+```bash
+# Files modified in the last 10 minutes = someone is probably active there
+find pkg/ cmd/ -name "*.go" -mmin -10 2>/dev/null
 ```
 
-The right side is the TS source path relative to `../pi-mono/`. Read it:
+## 3. Pick a Task
+
+Find `[ ]` items in `07-work-tracker.md` where:
+- Dependencies are `[x]` (the Go files exist and compile)
+- No one is actively editing nearby files (see step 2)
+
+## 4. Read the TS Source
+
+Each row has the TS path relative to `../pi-mono/packages/`:
 ```
 Read ../pi-mono/packages/ai/src/types.ts
 ```
 
-## 4. Check for patterns
+If other Go files in the package exist, read one for style consistency.
 
-If other files in the same Go package are already ported, read one to match style:
-```
-ls pkg/ai/
-Read pkg/ai/eventstream.go   # See how the first file was done
-```
+## 5. Port and Test
 
-## 5. Port the file
-
-Create the Go file. Include the header:
+Write `foo.go` + `foo_test.go`. Include the header:
 ```go
 // Ported from: packages/ai/src/types.ts
 // Upstream hash: 1caadb2e
 package ai
 ```
 
-## 6. Update tracker
+Tests must not call real APIs. Use `httptest.Server` with fixture data.
+See `docs/plan/10-testing.md` for patterns.
 
-Change `[ ]` to `[x]` in `07-work-tracker.md`.
-
-## 7. Test
+## 6. Verify
 
 ```bash
-make test       # Run tests
-make build      # Verify compilation
-make build-all  # Cross-compile all targets
+go vet ./pkg/ai/...
+go test ./pkg/ai/...
+make build
 ```
 
-## Key Reference Files
+## 7. Mark Done
 
-| Need to understand... | Read this TS file |
+**Re-read `07-work-tracker.md` first** (another agent may have updated it).
+Then change `[ ]` to `[x]` for your task. Pick the next one.
+
+## Key TS Reference Files
+
+| Need to understand... | Read |
 |---|---|
 | Message/Model types | `packages/ai/src/types.ts` |
 | How streaming works | `packages/ai/src/utils/event-stream.ts` |
 | How agent loop works | `packages/agent/src/agent-loop.ts` |
-| How tools are defined | `packages/coding-agent/src/core/tools/read.ts` (simplest) |
-| How session persistence works | `packages/coding-agent/src/core/session-manager.ts` |
-| How everything wires together | `packages/coding-agent/src/core/sdk.ts` |
-| The main entry point | `packages/coding-agent/src/main.ts` |
+| How tools are defined | `packages/coding-agent/src/core/tools/read.ts` |
+| How sessions work | `packages/coding-agent/src/core/session-manager.ts` |
+| How it wires together | `packages/coding-agent/src/core/sdk.ts` |
+| Main entry point | `packages/coding-agent/src/main.ts` |
+| Testing patterns | `docs/plan/10-testing.md` |
 
 ## TS Source Location
 
-The upstream TS code is at `../pi-mono/` relative to this repo's root.
-
-If that path doesn't exist, clone it:
+`../pi-mono/` relative to repo root. If missing:
 ```bash
 cd .. && git clone https://github.com/badlogic/pi-mono.git
 ```
