@@ -1,0 +1,348 @@
+// Ported from: packages/coding-agent/src/core/skills.ts
+// Upstream hash: 1caadb2e
+package core
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+const (
+	// MaxSkillNameLength per Agent Skills spec.
+	MaxSkillNameLength = 64
+	// MaxSkillDescriptionLength per Agent Skills spec.
+	MaxSkillDescriptionLength = 1024
+)
+
+// Skill represents a loaded skill.
+type Skill struct {
+	Name                   string `json:"name"`
+	Description            string `json:"description"`
+	FilePath               string `json:"filePath"`
+	BaseDir                string `json:"baseDir"`
+	Source                 string `json:"source"` // "user", "project", or "path"
+	DisableModelInvocation bool   `json:"disableModelInvocation"`
+}
+
+// ResourceDiagnostic reports a warning or error during skill loading.
+type ResourceDiagnostic struct {
+	Type    string `json:"type"` // "warning" or "collision"
+	Message string `json:"message"`
+	Path    string `json:"path"`
+}
+
+// LoadSkillsResult contains loaded skills and diagnostics.
+type LoadSkillsResult struct {
+	Skills      []Skill              `json:"skills"`
+	Diagnostics []ResourceDiagnostic `json:"diagnostics"`
+}
+
+// SkillFrontmatter is the YAML frontmatter in a skill file.
+type SkillFrontmatter struct {
+	Name                   string `yaml:"name"`
+	Description            string `yaml:"description"`
+	DisableModelInvocation bool   `yaml:"disable-model-invocation"`
+}
+
+// LoadSkillsFromDir loads skills from a directory.
+// Discovery rules:
+// - Direct .md children in the root
+// - Recursive SKILL.md under subdirectories
+func LoadSkillsFromDir(dir, source string) LoadSkillsResult {
+	return loadSkillsFromDirInternal(dir, source, true)
+}
+
+func loadSkillsFromDirInternal(dir, source string, includeRootFiles bool) LoadSkillsResult {
+	var skills []Skill
+	var diagnostics []ResourceDiagnostic
+
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || name == "node_modules" {
+			continue
+		}
+
+		fullPath := filepath.Join(dir, name)
+
+		if entry.IsDir() {
+			sub := loadSkillsFromDirInternal(fullPath, source, false)
+			skills = append(skills, sub.Skills...)
+			diagnostics = append(diagnostics, sub.Diagnostics...)
+			continue
+		}
+
+		if !entry.Type().IsRegular() {
+			continue
+		}
+
+		isRootMd := includeRootFiles && strings.HasSuffix(name, ".md")
+		isSkillMd := !includeRootFiles && name == "SKILL.md"
+		if !isRootMd && !isSkillMd {
+			continue
+		}
+
+		result := loadSkillFromFile(fullPath, source)
+		if result.Skill != nil {
+			skills = append(skills, *result.Skill)
+		}
+		diagnostics = append(diagnostics, result.Diagnostics...)
+	}
+
+	return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+}
+
+type skillLoadResult struct {
+	Skill       *Skill
+	Diagnostics []ResourceDiagnostic
+}
+
+func loadSkillFromFile(filePath, source string) skillLoadResult {
+	var diagnostics []ResourceDiagnostic
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		diagnostics = append(diagnostics, ResourceDiagnostic{
+			Type:    "warning",
+			Message: err.Error(),
+			Path:    filePath,
+		})
+		return skillLoadResult{Diagnostics: diagnostics}
+	}
+
+	fm := parseFrontmatterSimple(string(data))
+	skillDir := filepath.Dir(filePath)
+	parentDirName := filepath.Base(skillDir)
+
+	// Validate description
+	if fm.Description == "" {
+		diagnostics = append(diagnostics, ResourceDiagnostic{
+			Type:    "warning",
+			Message: "description is required",
+			Path:    filePath,
+		})
+		return skillLoadResult{Diagnostics: diagnostics}
+	}
+
+	// Use name from frontmatter, or fall back to filename (sans ext), then parent directory name
+	name := fm.Name
+	if name == "" {
+		base := filepath.Base(filePath)
+		ext := filepath.Ext(base)
+		fileBaseName := strings.TrimSuffix(base, ext)
+		if fileBaseName != "" && fileBaseName != "SKILL" {
+			name = fileBaseName
+		} else {
+			name = parentDirName
+		}
+	}
+
+	// Validate name
+	nameErrors := validateSkillName(name, parentDirName)
+	for _, e := range nameErrors {
+		diagnostics = append(diagnostics, ResourceDiagnostic{
+			Type:    "warning",
+			Message: e,
+			Path:    filePath,
+		})
+	}
+
+	return skillLoadResult{
+		Skill: &Skill{
+			Name:                   name,
+			Description:            fm.Description,
+			FilePath:               filePath,
+			BaseDir:                skillDir,
+			Source:                 source,
+			DisableModelInvocation: fm.DisableModelInvocation,
+		},
+		Diagnostics: diagnostics,
+	}
+}
+
+var validSkillNameRegex = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+func validateSkillName(name, parentDirName string) []string {
+	var errors []string
+
+	if name != parentDirName {
+		errors = append(errors, `name "`+name+`" does not match parent directory "`+parentDirName+`"`)
+	}
+	if len(name) > MaxSkillNameLength {
+		errors = append(errors, "name exceeds max length")
+	}
+	if !validSkillNameRegex.MatchString(name) {
+		errors = append(errors, "name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)")
+	}
+	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
+		errors = append(errors, "name must not start or end with a hyphen")
+	}
+	if strings.Contains(name, "--") {
+		errors = append(errors, "name must not contain consecutive hyphens")
+	}
+
+	return errors
+}
+
+// parseFrontmatterSimple is a basic YAML frontmatter parser.
+// Parses --- delimited frontmatter with key: value pairs.
+func parseFrontmatterSimple(content string) SkillFrontmatter {
+	var fm SkillFrontmatter
+
+	if !strings.HasPrefix(content, "---") {
+		return fm
+	}
+
+	endIdx := strings.Index(content[3:], "---")
+	if endIdx == -1 {
+		return fm
+	}
+
+	fmContent := content[3 : 3+endIdx]
+	for _, line := range strings.Split(fmContent, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "name":
+			fm.Name = value
+		case "description":
+			fm.Description = value
+		case "disable-model-invocation":
+			fm.DisableModelInvocation = value == "true"
+		}
+	}
+
+	return fm
+}
+
+// FormatSkillsForPrompt formats skills for inclusion in a system prompt.
+func FormatSkillsForPrompt(skills []Skill) string {
+	var visible []Skill
+	for _, s := range skills {
+		if !s.DisableModelInvocation {
+			visible = append(visible, s)
+		}
+	}
+
+	if len(visible) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\nThe following skills provide specialized instructions for specific tasks.\n")
+	sb.WriteString("Use the read tool to load a skill's file when the task matches its description.\n")
+	sb.WriteString("When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n")
+	sb.WriteString("\n<available_skills>\n")
+
+	for _, skill := range visible {
+		sb.WriteString("  <skill>\n")
+		sb.WriteString("    <name>" + escapeXml(skill.Name) + "</name>\n")
+		sb.WriteString("    <description>" + escapeXml(skill.Description) + "</description>\n")
+		sb.WriteString("    <location>" + escapeXml(skill.FilePath) + "</location>\n")
+		sb.WriteString("  </skill>\n")
+	}
+
+	sb.WriteString("</available_skills>")
+	return sb.String()
+}
+
+func escapeXml(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&apos;")
+	return s
+}
+
+// LoadSkillsOptions configures skill loading.
+type LoadSkillsOptions struct {
+	Cwd             string
+	AgentDir        string
+	SkillPaths      []string
+	IncludeDefaults bool
+}
+
+// LoadSkills loads skills from all configured locations.
+func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
+	if opts.Cwd == "" {
+		opts.Cwd, _ = os.Getwd()
+	}
+
+	skillMap := make(map[string]Skill)
+	var allDiagnostics []ResourceDiagnostic
+
+	addSkills := func(result LoadSkillsResult) {
+		allDiagnostics = append(allDiagnostics, result.Diagnostics...)
+		for _, skill := range result.Skills {
+			if _, exists := skillMap[skill.Name]; !exists {
+				skillMap[skill.Name] = skill
+			}
+		}
+	}
+
+	if opts.IncludeDefaults && opts.AgentDir != "" {
+		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.AgentDir, "skills"), "user", true))
+		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.Cwd, ".pi", "skills"), "project", true))
+	}
+
+	for _, rawPath := range opts.SkillPaths {
+		resolvedPath := rawPath
+		if !filepath.IsAbs(resolvedPath) {
+			resolvedPath = filepath.Join(opts.Cwd, resolvedPath)
+		}
+
+		info, err := os.Stat(resolvedPath)
+		if err != nil {
+			allDiagnostics = append(allDiagnostics, ResourceDiagnostic{
+				Type:    "warning",
+				Message: "skill path does not exist",
+				Path:    resolvedPath,
+			})
+			continue
+		}
+
+		if info.IsDir() {
+			addSkills(loadSkillsFromDirInternal(resolvedPath, "path", true))
+		} else if strings.HasSuffix(resolvedPath, ".md") {
+			result := loadSkillFromFile(resolvedPath, "path")
+			if result.Skill != nil {
+				addSkills(LoadSkillsResult{
+					Skills:      []Skill{*result.Skill},
+					Diagnostics: result.Diagnostics,
+				})
+			} else {
+				allDiagnostics = append(allDiagnostics, result.Diagnostics...)
+			}
+		}
+	}
+
+	var skills []Skill
+	for _, s := range skillMap {
+		skills = append(skills, s)
+	}
+
+	return LoadSkillsResult{Skills: skills, Diagnostics: allDiagnostics}
+}

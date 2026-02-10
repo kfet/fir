@@ -1,0 +1,229 @@
+// Ported from: packages/coding-agent/src/core/tools/read.ts
+// Upstream hash: 1caadb2e
+package tools
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/kfet/pi-go/pkg/agent"
+	"github.com/kfet/pi-go/pkg/ai"
+)
+
+// ReadToolParams are the parameters for the read tool.
+type ReadToolParams struct {
+	Path   string `json:"path"`
+	Offset *int   `json:"offset,omitempty"` // 1-indexed line number
+	Limit  *int   `json:"limit,omitempty"`
+}
+
+// ReadToolDetails contains details about truncation that occurred.
+type ReadToolDetails struct {
+	Truncation *TruncationResult `json:"truncation,omitempty"`
+}
+
+// SupportedImageExtensions lists file extensions treated as images.
+var SupportedImageExtensions = map[string]string{
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+}
+
+// NewReadTool creates the read tool for the given working directory.
+func NewReadTool(cwd string) agent.AgentTool {
+	return agent.AgentTool{
+		Tool: ai.Tool{
+			Name: "read",
+			Description: fmt.Sprintf(
+				"Read the contents of a file. Supports text files and images (jpg, png, gif, webp). "+
+					"Images are sent as attachments. For text files, output is truncated to %d lines or %dKB "+
+					"(whichever is hit first). Use offset/limit for large files. When you need the full file, "+
+					"continue with offset until complete.",
+				DefaultMaxLines, DefaultMaxBytes/1024,
+			),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Path to the file to read (relative or absolute)",
+					},
+					"offset": map[string]any{
+						"type":        "number",
+						"description": "Line number to start reading from (1-indexed)",
+					},
+					"limit": map[string]any{
+						"type":        "number",
+						"description": "Maximum number of lines to read",
+					},
+				},
+				"required": []string{"path"},
+			},
+		},
+		Label: "read",
+		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+			path, _ := params["path"].(string)
+			if path == "" {
+				return agent.AgentToolResult{}, fmt.Errorf("path is required")
+			}
+
+			var offset *int
+			if v, ok := params["offset"].(float64); ok {
+				i := int(v)
+				offset = &i
+			}
+			var limit *int
+			if v, ok := params["limit"].(float64); ok {
+				i := int(v)
+				limit = &i
+			}
+
+			if ctx.Err() != nil {
+				return agent.AgentToolResult{}, ctx.Err()
+			}
+
+			return executeRead(path, cwd, offset, limit)
+		},
+	}
+}
+
+// executeRead reads a file and returns the result.
+func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, error) {
+	absolutePath := ResolveReadPath(path, cwd)
+
+	// Check if file exists and is readable
+	info, err := os.Stat(absolutePath)
+	if err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("file not found: %s", path)
+	}
+	if info.IsDir() {
+		return agent.AgentToolResult{}, fmt.Errorf("%s is a directory, not a file", path)
+	}
+
+	// Check if it's an image by extension
+	ext := strings.ToLower(getExtension(absolutePath))
+	if mimeType, ok := SupportedImageExtensions[ext]; ok {
+		return readImage(absolutePath, path, mimeType)
+	}
+
+	// Read as text
+	data, err := os.ReadFile(absolutePath)
+	if err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("failed to read file %s: %w", path, err)
+	}
+
+	textContent := string(data)
+	allLines := strings.Split(textContent, "\n")
+	totalFileLines := len(allLines)
+
+	// Apply offset (1-indexed to 0-indexed)
+	startLine := 0
+	if offset != nil {
+		startLine = *offset - 1
+		if startLine < 0 {
+			startLine = 0
+		}
+	}
+	startLineDisplay := startLine + 1
+
+	if startLine >= len(allLines) {
+		return agent.AgentToolResult{}, fmt.Errorf("offset %d is beyond end of file (%d lines total)", *offset, len(allLines))
+	}
+
+	// Apply limit
+	var selectedContent string
+	var userLimitedLines *int
+	if limit != nil {
+		endLine := startLine + *limit
+		if endLine > len(allLines) {
+			endLine = len(allLines)
+		}
+		selectedContent = strings.Join(allLines[startLine:endLine], "\n")
+		n := endLine - startLine
+		userLimitedLines = &n
+	} else {
+		selectedContent = strings.Join(allLines[startLine:], "\n")
+	}
+
+	// Apply truncation
+	truncation := TruncateHead(selectedContent, TruncationOptions{})
+
+	var outputText string
+	var details *ReadToolDetails
+
+	if truncation.FirstLineExceedsLimit {
+		// First line at offset exceeds limit
+		firstLineSize := FormatSize(len(allLines[startLine]))
+		outputText = fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
+			startLineDisplay, firstLineSize, FormatSize(DefaultMaxBytes), startLineDisplay, path, DefaultMaxBytes)
+		details = &ReadToolDetails{Truncation: &truncation}
+	} else if truncation.Truncated {
+		endLineDisplay := startLineDisplay + truncation.OutputLines - 1
+		nextOffset := endLineDisplay + 1
+		outputText = truncation.Content
+
+		if truncation.TruncatedBy == "lines" {
+			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]",
+				startLineDisplay, endLineDisplay, totalFileLines, nextOffset)
+		} else {
+			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
+				startLineDisplay, endLineDisplay, totalFileLines, FormatSize(DefaultMaxBytes), nextOffset)
+		}
+		details = &ReadToolDetails{Truncation: &truncation}
+	} else if userLimitedLines != nil && startLine+*userLimitedLines < len(allLines) {
+		remaining := len(allLines) - (startLine + *userLimitedLines)
+		nextOffset := startLine + *userLimitedLines + 1
+		outputText = truncation.Content
+		outputText += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
+	} else {
+		outputText = truncation.Content
+	}
+
+	result := agent.AgentToolResult{
+		Content: []ai.ToolResultContent{
+			{Type: "text", Text: outputText},
+		},
+	}
+	if details != nil {
+		result.Details = details
+	}
+	return result, nil
+}
+
+// readImage reads an image file and returns it as base64.
+func readImage(absolutePath, displayPath, mimeType string) (agent.AgentToolResult, error) {
+	data, err := os.ReadFile(absolutePath)
+	if err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("failed to read image %s: %w", displayPath, err)
+	}
+
+	// Images are sent as-is in base64 (no resize in Go port yet).
+	// TODO: Add image resize support
+	b64 := base64.StdEncoding.EncodeToString(data)
+	textNote := fmt.Sprintf("Read image file [%s]", mimeType)
+
+	return agent.AgentToolResult{
+		Content: []ai.ToolResultContent{
+			{Type: "text", Text: textNote},
+			{Type: "image", Data: b64, MimeType: mimeType},
+		},
+	}, nil
+}
+
+// getExtension returns the file extension including the dot.
+func getExtension(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			return path[i:]
+		}
+		if path[i] == '/' || path[i] == '\\' {
+			break
+		}
+	}
+	return ""
+}

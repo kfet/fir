@@ -1,0 +1,16 @@
+data: {"messageStart":{"role":"assistant"}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"text":"Let me think..."}}}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"reasoningContent":{"signature":"sig_bedrock"}}}}
+
+data: {"contentBlockStop":{"contentBlockIndex":0}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":1,"delta":{"text":"The answer is 42."}}}
+
+data: {"contentBlockStop":{"contentBlockIndex":1}}
+
+data: {"messageStop":{"stopReason":"end_turn"}}
+
+data: {"metadata":{"usage":{"inputTokens":25,"outputTokens":40,"totalTokens":65}}}
+

@@ -1,0 +1,216 @@
+// Ported from: packages/coding-agent/src/modes/interactive/components/footer.ts
+// Upstream hash: 7f9a2b3c
+package components
+
+import (
+	"fmt"
+	"math"
+	"os"
+	"strings"
+
+	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
+	"github.com/kfet/pi-go/pkg/tui"
+)
+
+// FooterData provides the data needed to render the footer.
+type FooterData struct {
+	Pwd              string
+	GitBranch        string
+	SessionName      string
+	ModelID          string
+	ModelProvider    string
+	ModelReasoning   bool
+	ThinkingLevel    string
+	ContextWindow    int
+	TotalInput       int
+	TotalOutput      int
+	TotalCacheRead   int
+	TotalCacheWrite  int
+	TotalCost        float64
+	UsingSubscription bool
+	AutoCompact      bool
+	MultipleProviders bool
+	ExtensionStatuses map[string]string
+}
+
+// FooterComponent renders a status footer with pwd, token stats, and context usage.
+type FooterComponent struct {
+	getData func() FooterData
+}
+
+var _ tui.Component = (*FooterComponent)(nil)
+
+// NewFooterComponent creates a new footer component.
+// getData is called on each render to get the latest data.
+func NewFooterComponent(getData func() FooterData) *FooterComponent {
+	return &FooterComponent{getData: getData}
+}
+
+// Invalidate is a no-op.
+func (f *FooterComponent) Invalidate() {}
+
+// Render renders the footer.
+func (f *FooterComponent) Render(width int) []string {
+	data := f.getData()
+	t := theme.GetTheme()
+
+	// Build pwd line
+	pwd := data.Pwd
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = os.Getenv("USERPROFILE")
+	}
+	if home != "" && strings.HasPrefix(pwd, home) {
+		pwd = "~" + pwd[len(home):]
+	}
+	if data.GitBranch != "" {
+		pwd = fmt.Sprintf("%s (%s)", pwd, data.GitBranch)
+	}
+	if data.SessionName != "" {
+		pwd = pwd + " • " + data.SessionName
+	}
+	// Truncate pwd
+	if len(pwd) > width {
+		half := width/2 - 2
+		if half > 1 {
+			pwd = pwd[:half] + "..." + pwd[len(pwd)-(half-1):]
+		} else if width > 0 {
+			pwd = pwd[:width]
+		}
+	}
+
+	// Build stats parts
+	var statsParts []string
+	if data.TotalInput > 0 {
+		statsParts = append(statsParts, "↑"+formatTokens(data.TotalInput))
+	}
+	if data.TotalOutput > 0 {
+		statsParts = append(statsParts, "↓"+formatTokens(data.TotalOutput))
+	}
+	if data.TotalCacheRead > 0 {
+		statsParts = append(statsParts, "R"+formatTokens(data.TotalCacheRead))
+	}
+	if data.TotalCacheWrite > 0 {
+		statsParts = append(statsParts, "W"+formatTokens(data.TotalCacheWrite))
+	}
+	if data.TotalCost > 0 || data.UsingSubscription {
+		costStr := fmt.Sprintf("$%.3f", data.TotalCost)
+		if data.UsingSubscription {
+			costStr += " (sub)"
+		}
+		statsParts = append(statsParts, costStr)
+	}
+
+	// Context percentage
+	contextTokens := data.TotalInput + data.TotalOutput + data.TotalCacheRead + data.TotalCacheWrite
+	contextWindow := data.ContextWindow
+	var contextPercentValue float64
+	if contextWindow > 0 {
+		contextPercentValue = float64(contextTokens) / float64(contextWindow) * 100
+	}
+
+	autoIndicator := ""
+	if data.AutoCompact {
+		autoIndicator = " (auto)"
+	}
+	contextDisplay := fmt.Sprintf("%.1f%%/%s%s", contextPercentValue, formatTokens(contextWindow), autoIndicator)
+
+	var contextPercentStr string
+	if contextPercentValue > 90 {
+		contextPercentStr = t.Fg("error", contextDisplay)
+	} else if contextPercentValue > 70 {
+		contextPercentStr = t.Fg("warning", contextDisplay)
+	} else {
+		contextPercentStr = contextDisplay
+	}
+	statsParts = append(statsParts, contextPercentStr)
+
+	statsLeft := strings.Join(statsParts, " ")
+
+	// Right side: model name + thinking level
+	rightSide := data.ModelID
+	if rightSide == "" {
+		rightSide = "no-model"
+	}
+	if data.ModelReasoning {
+		if data.ThinkingLevel == "" || data.ThinkingLevel == "off" {
+			rightSide += " • thinking off"
+		} else {
+			rightSide += " • " + data.ThinkingLevel
+		}
+	}
+	if data.MultipleProviders && data.ModelProvider != "" {
+		full := fmt.Sprintf("(%s) %s", data.ModelProvider, rightSide)
+		if tui.VisibleWidth(statsLeft)+2+tui.VisibleWidth(full) <= width {
+			rightSide = full
+		}
+	}
+
+	// Compose stats line
+	statsLeftWidth := tui.VisibleWidth(statsLeft)
+	rightSideWidth := tui.VisibleWidth(rightSide)
+	totalNeeded := statsLeftWidth + 2 + rightSideWidth
+
+	var statsLine string
+	if totalNeeded <= width {
+		padding := strings.Repeat(" ", width-statsLeftWidth-rightSideWidth)
+		statsLine = statsLeft + padding + rightSide
+	} else {
+		avail := width - statsLeftWidth - 2
+		if avail > 3 {
+			statsLine = statsLeft + "  " + rightSide[:avail]
+		} else {
+			statsLine = statsLeft
+		}
+	}
+
+	// Dim styling
+	dimPwd := t.Fg("dim", pwd)
+	dimStatsLeft := t.Fg("dim", statsLeft)
+	remainder := statsLine[len(statsLeft):]
+	dimRemainder := t.Fg("dim", remainder)
+
+	lines := []string{dimPwd, dimStatsLeft + dimRemainder}
+
+	// Extension statuses
+	if len(data.ExtensionStatuses) > 0 {
+		var parts []string
+		for _, text := range data.ExtensionStatuses {
+			parts = append(parts, sanitizeStatusText(text))
+		}
+		statusLine := strings.Join(parts, " ")
+		if tui.VisibleWidth(statusLine) > width {
+			statusLine = tui.TruncateToWidth(statusLine, width, t.Fg("dim", "..."), false)
+		}
+		lines = append(lines, statusLine)
+	}
+
+	return lines
+}
+
+// formatTokens formats token counts for display.
+func formatTokens(count int) string {
+	if count < 1000 {
+		return fmt.Sprintf("%d", count)
+	}
+	if count < 10000 {
+		return fmt.Sprintf("%.1fk", float64(count)/1000)
+	}
+	if count < 1000000 {
+		return fmt.Sprintf("%dk", int(math.Round(float64(count)/1000)))
+	}
+	if count < 10000000 {
+		return fmt.Sprintf("%.1fM", float64(count)/1000000)
+	}
+	return fmt.Sprintf("%dM", int(math.Round(float64(count)/1000000)))
+}
+
+// sanitizeStatusText removes control characters for single-line display.
+func sanitizeStatusText(text string) string {
+	text = strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(text)
+	// Collapse multiple spaces
+	for strings.Contains(text, "  ") {
+		text = strings.ReplaceAll(text, "  ", " ")
+	}
+	return strings.TrimSpace(text)
+}

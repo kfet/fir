@@ -1,0 +1,408 @@
+// Ported from: packages/coding-agent/src/core/model-resolver.ts
+// Upstream hash: 1caadb2e
+package core
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/kfet/pi-go/pkg/ai"
+)
+
+// DefaultModelPerProvider maps known providers to their default model IDs.
+var DefaultModelPerProvider = map[ai.Provider]string{
+	"amazon-bedrock":        "us.anthropic.claude-opus-4-6-v1",
+	"anthropic":             "claude-opus-4-6",
+	"openai":                "gpt-5.1-codex",
+	"azure-openai-responses": "gpt-5.2",
+	"openai-codex":          "gpt-5.3-codex",
+	"google":                "gemini-2.5-pro",
+	"google-gemini-cli":     "gemini-2.5-pro",
+	"google-antigravity":    "gemini-3-pro-high",
+	"google-vertex":         "gemini-3-pro-preview",
+	"github-copilot":        "gpt-4o",
+	"openrouter":            "openai/gpt-5.1-codex",
+	"vercel-ai-gateway":     "anthropic/claude-opus-4-6",
+	"xai":                   "grok-4-fast-non-reasoning",
+	"groq":                  "openai/gpt-oss-120b",
+	"cerebras":              "zai-glm-4.6",
+	"zai":                   "glm-4.6",
+	"mistral":               "devstral-medium-latest",
+	"minimax":               "MiniMax-M2.1",
+	"minimax-cn":            "MiniMax-M2.1",
+	"huggingface":           "moonshotai/Kimi-K2.5",
+	"opencode":              "claude-opus-4-6",
+	"kimi-coding":           "kimi-k2-thinking",
+}
+
+// ScopedModel pairs a model with an optional explicit thinking level.
+type ScopedModel struct {
+	Model         *ai.Model
+	ThinkingLevel string // empty if not explicitly set
+}
+
+// ParsedModelResult is the result of parsing a model pattern.
+type ParsedModelResult struct {
+	Model         *ai.Model
+	ThinkingLevel string // empty if not explicitly set
+	Warning       string
+}
+
+// InitialModelResult is the result of finding the initial model.
+type InitialModelResult struct {
+	Model           *ai.Model
+	ThinkingLevel   string
+	FallbackMessage string
+}
+
+// validThinkingLevels for pattern parsing.
+var validThinkingLevels = map[string]bool{
+	"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true,
+}
+
+func isValidThinkingLevel(s string) bool {
+	return validThinkingLevels[strings.ToLower(s)]
+}
+
+// isAlias checks if a model ID looks like an alias (no date suffix).
+func isAlias(id string) bool {
+	if strings.HasSuffix(id, "-latest") {
+		return true
+	}
+	// Check if ends with -YYYYMMDD
+	if len(id) >= 9 {
+		suffix := id[len(id)-9:]
+		if suffix[0] == '-' {
+			allDigits := true
+			for _, c := range suffix[1:] {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// tryMatchModel tries to match a pattern to a model from available models.
+func tryMatchModel(pattern string, available []*ai.Model) *ai.Model {
+	lp := strings.ToLower(pattern)
+
+	// Check for provider/modelId format
+	if idx := strings.Index(pattern, "/"); idx != -1 {
+		prov := strings.ToLower(pattern[:idx])
+		mid := strings.ToLower(pattern[idx+1:])
+		for _, m := range available {
+			if strings.ToLower(m.Provider) == prov && strings.ToLower(m.ID) == mid {
+				return m
+			}
+		}
+	}
+
+	// Exact ID match (case-insensitive)
+	for _, m := range available {
+		if strings.ToLower(m.ID) == lp {
+			return m
+		}
+	}
+
+	// Partial matching
+	var matches []*ai.Model
+	for _, m := range available {
+		if strings.Contains(strings.ToLower(m.ID), lp) || strings.Contains(strings.ToLower(m.Name), lp) {
+			matches = append(matches, m)
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil
+	}
+
+	// Separate aliases and dated versions
+	var aliases, dated []*ai.Model
+	for _, m := range matches {
+		if isAlias(m.ID) {
+			aliases = append(aliases, m)
+		} else {
+			dated = append(dated, m)
+		}
+	}
+
+	if len(aliases) > 0 {
+		// Pick highest-sorting alias
+		best := aliases[0]
+		for _, m := range aliases[1:] {
+			if m.ID > best.ID {
+				best = m
+			}
+		}
+		return best
+	}
+
+	// No alias, pick latest dated version
+	best := dated[0]
+	for _, m := range dated[1:] {
+		if m.ID > best.ID {
+			best = m
+		}
+	}
+	return best
+}
+
+// ParseModelPattern parses a pattern to extract model and thinking level.
+// Handles models with colons in their IDs (e.g., OpenRouter's :exacto suffix).
+func ParseModelPattern(pattern string, available []*ai.Model) ParsedModelResult {
+	// Try exact match first
+	if m := tryMatchModel(pattern, available); m != nil {
+		return ParsedModelResult{Model: m}
+	}
+
+	// Try splitting on last colon
+	lastColon := strings.LastIndex(pattern, ":")
+	if lastColon == -1 {
+		return ParsedModelResult{}
+	}
+
+	prefix := pattern[:lastColon]
+	suffix := pattern[lastColon+1:]
+
+	if isValidThinkingLevel(suffix) {
+		result := ParseModelPattern(prefix, available)
+		if result.Model != nil {
+			if result.Warning == "" {
+				result.ThinkingLevel = strings.ToLower(suffix)
+			}
+			return result
+		}
+		return result
+	}
+
+	// Invalid suffix - recurse on prefix and warn
+	result := ParseModelPattern(prefix, available)
+	if result.Model != nil {
+		return ParsedModelResult{
+			Model:   result.Model,
+			Warning: fmt.Sprintf("Invalid thinking level %q in pattern %q. Using default instead.", suffix, pattern),
+		}
+	}
+	return result
+}
+
+// ResolveModelScope resolves model patterns to ScopedModels.
+func ResolveModelScope(patterns []string, registry *ModelRegistry) []ScopedModel {
+	available := registry.GetAvailable()
+	var scoped []ScopedModel
+
+	for _, pattern := range patterns {
+		// Glob patterns (contain *, ?, [)
+		if strings.ContainsAny(pattern, "*?[") {
+			var thinkingLevel string
+			globPattern := pattern
+
+			if lastColon := strings.LastIndex(pattern, ":"); lastColon != -1 {
+				suffix := pattern[lastColon+1:]
+				if isValidThinkingLevel(suffix) {
+					thinkingLevel = strings.ToLower(suffix)
+					globPattern = pattern[:lastColon]
+				}
+			}
+
+			var matched []*ai.Model
+			for _, m := range available {
+				fullID := m.Provider + "/" + m.ID
+				if globMatch(fullID, globPattern) || globMatch(m.ID, globPattern) {
+					matched = append(matched, m)
+				}
+			}
+
+			for _, m := range matched {
+				if !hasScopedModel(scoped, m) {
+					scoped = append(scoped, ScopedModel{Model: m, ThinkingLevel: thinkingLevel})
+				}
+			}
+			continue
+		}
+
+		result := ParseModelPattern(pattern, available)
+		if result.Model == nil {
+			continue
+		}
+		if !hasScopedModel(scoped, result.Model) {
+			scoped = append(scoped, ScopedModel{Model: result.Model, ThinkingLevel: result.ThinkingLevel})
+		}
+	}
+
+	return scoped
+}
+
+// FindInitialModel finds the initial model based on priority.
+func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
+	defaultTL := string(DefaultThinkingLevel)
+	if opts.DefaultThinkingLevel != "" {
+		defaultTL = opts.DefaultThinkingLevel
+	}
+
+	// 1. CLI args
+	if opts.CLIProvider != "" && opts.CLIModel != "" {
+		found := opts.ModelRegistry.Find(opts.CLIProvider, opts.CLIModel)
+		if found == nil {
+			return InitialModelResult{ThinkingLevel: defaultTL}
+		}
+		return InitialModelResult{Model: found, ThinkingLevel: defaultTL}
+	}
+
+	// 2. First scoped model (skip if continuing)
+	if len(opts.ScopedModels) > 0 && !opts.IsContinuing {
+		tl := opts.ScopedModels[0].ThinkingLevel
+		if tl == "" {
+			tl = defaultTL
+		}
+		return InitialModelResult{Model: opts.ScopedModels[0].Model, ThinkingLevel: tl}
+	}
+
+	// 3. Saved default from settings
+	if opts.DefaultProvider != "" && opts.DefaultModelID != "" {
+		found := opts.ModelRegistry.Find(opts.DefaultProvider, opts.DefaultModelID)
+		if found != nil {
+			return InitialModelResult{Model: found, ThinkingLevel: defaultTL}
+		}
+	}
+
+	// 4. First available model with valid API key
+	available := opts.ModelRegistry.GetAvailable()
+	if len(available) > 0 {
+		// Try default model per provider
+		for _, prov := range knownProviderOrder {
+			defaultID := DefaultModelPerProvider[prov]
+			if defaultID == "" {
+				continue
+			}
+			for _, m := range available {
+				if m.Provider == prov && m.ID == defaultID {
+					return InitialModelResult{Model: m, ThinkingLevel: defaultTL}
+				}
+			}
+		}
+		return InitialModelResult{Model: available[0], ThinkingLevel: defaultTL}
+	}
+
+	return InitialModelResult{ThinkingLevel: defaultTL}
+}
+
+// FindInitialModelOptions configures FindInitialModel.
+type FindInitialModelOptions struct {
+	CLIProvider          string
+	CLIModel             string
+	ScopedModels         []ScopedModel
+	IsContinuing         bool
+	DefaultProvider      string
+	DefaultModelID       string
+	DefaultThinkingLevel string
+	ModelRegistry        *ModelRegistry
+}
+
+// RestoreModelFromSession restores a model from session, with fallback.
+func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *ai.Model, registry *ModelRegistry) (*ai.Model, string) {
+	restored := registry.Find(savedProvider, savedModelID)
+
+	if restored != nil {
+		apiKey := registry.GetApiKey(restored)
+		if apiKey != "" {
+			return restored, ""
+		}
+	}
+
+	reason := "model no longer exists"
+	if restored != nil {
+		reason = "no API key available"
+	}
+
+	if currentModel != nil {
+		msg := fmt.Sprintf("Could not restore model %s/%s (%s). Using %s/%s.",
+			savedProvider, savedModelID, reason, currentModel.Provider, currentModel.ID)
+		return currentModel, msg
+	}
+
+	// Try any available model
+	available := registry.GetAvailable()
+	if len(available) > 0 {
+		for _, prov := range knownProviderOrder {
+			defaultID := DefaultModelPerProvider[prov]
+			for _, m := range available {
+				if m.Provider == prov && m.ID == defaultID {
+					msg := fmt.Sprintf("Could not restore model %s/%s (%s). Using %s/%s.",
+						savedProvider, savedModelID, reason, m.Provider, m.ID)
+					return m, msg
+				}
+			}
+		}
+		fallback := available[0]
+		msg := fmt.Sprintf("Could not restore model %s/%s (%s). Using %s/%s.",
+			savedProvider, savedModelID, reason, fallback.Provider, fallback.ID)
+		return fallback, msg
+	}
+
+	return nil, ""
+}
+
+// --- helpers ---
+
+// knownProviderOrder is the order to try when picking default models.
+var knownProviderOrder = []ai.Provider{
+	"anthropic", "openai", "google", "amazon-bedrock",
+	"azure-openai-responses", "openai-codex",
+	"google-gemini-cli", "google-antigravity", "google-vertex",
+	"github-copilot", "openrouter", "vercel-ai-gateway",
+	"xai", "groq", "cerebras", "zai", "mistral",
+	"minimax", "minimax-cn", "huggingface", "opencode", "kimi-coding",
+}
+
+func hasScopedModel(scoped []ScopedModel, model *ai.Model) bool {
+	for _, sm := range scoped {
+		if sm.Model.Provider == model.Provider && sm.Model.ID == model.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// globMatch is a simple glob matcher supporting * and ?.
+func globMatch(text, pattern string) bool {
+	return globMatchImpl(strings.ToLower(text), strings.ToLower(pattern))
+}
+
+func globMatchImpl(text, pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+
+	ti, pi := 0, 0
+	starTi, starPi := -1, -1
+
+	for ti < len(text) {
+		if pi < len(pattern) && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+			ti++
+			pi++
+		} else if pi < len(pattern) && pattern[pi] == '*' {
+			starTi = ti
+			starPi = pi
+			pi++
+		} else if starPi >= 0 {
+			starTi++
+			ti = starTi
+			pi = starPi + 1
+		} else {
+			return false
+		}
+	}
+
+	for pi < len(pattern) && pattern[pi] == '*' {
+		pi++
+	}
+
+	return pi == len(pattern)
+}

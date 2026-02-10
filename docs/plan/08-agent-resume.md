@@ -21,6 +21,7 @@ find pkg/ cmd/ -name "*.go" -mmin -10 2>/dev/null
 Find `[ ]` items in `07-work-tracker.md` where:
 - Dependencies are `[x]` (the Go files exist and compile)
 - No one is actively editing nearby files (see step 2)
+- Use `touch` to mark your starting work on a file, after you've checked it was not already touched by someone else in the last 10 minutes
 
 ## 4. Read the TS Source
 

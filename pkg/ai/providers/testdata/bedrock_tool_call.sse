@@ -1,0 +1,18 @@
+data: {"messageStart":{"role":"assistant"}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":"Let me read that."}}}
+
+data: {"contentBlockStop":{"contentBlockIndex":0}}
+
+data: {"contentBlockStart":{"contentBlockIndex":1,"start":{"toolUse":{"toolUseId":"tool_01","name":"read"}}}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":1,"delta":{"toolUse":{"input":"{\"path\":"}}}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":1,"delta":{"toolUse":{"input":"\"test.txt\"}"}}}}
+
+data: {"contentBlockStop":{"contentBlockIndex":1}}
+
+data: {"messageStop":{"stopReason":"tool_use"}}
+
+data: {"metadata":{"usage":{"inputTokens":30,"outputTokens":20,"totalTokens":50}}}
+

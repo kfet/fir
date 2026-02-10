@@ -1,0 +1,469 @@
+// Ported from: packages/agent/src/agent-loop.ts
+// Upstream hash: 1caadb2e
+package agent
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/kfet/pi-go/pkg/ai"
+)
+
+// AgentLoop starts an agent loop with new prompt messages.
+// Events are emitted to the returned channel.
+func AgentLoop(
+	ctx context.Context,
+	prompts []AgentMessage,
+	agentCtx *AgentContext,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	events chan<- AgentEvent,
+) []AgentMessage {
+	newMessages := make([]AgentMessage, len(prompts))
+	copy(newMessages, prompts)
+
+	currentCtx := &AgentContext{
+		SystemPrompt: agentCtx.SystemPrompt,
+		Messages:     append(append([]AgentMessage{}, agentCtx.Messages...), prompts...),
+		Tools:        agentCtx.Tools,
+	}
+
+	events <- AgentEvent{Type: EventAgentStart}
+	events <- AgentEvent{Type: EventTurnStart}
+	for i := range prompts {
+		events <- AgentEvent{Type: EventMessageStart, Message: &prompts[i]}
+		events <- AgentEvent{Type: EventMessageEnd, Message: &prompts[i]}
+	}
+
+	result := runLoop(ctx, currentCtx, newMessages, config, streamFn, events)
+	return result
+}
+
+// AgentLoopContinue continues an agent loop from the current context.
+// Used for retries where context already has user message or tool results.
+func AgentLoopContinue(
+	ctx context.Context,
+	agentCtx *AgentContext,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	events chan<- AgentEvent,
+) ([]AgentMessage, error) {
+	if len(agentCtx.Messages) == 0 {
+		return nil, fmt.Errorf("cannot continue: no messages in context")
+	}
+
+	lastMsg := agentCtx.Messages[len(agentCtx.Messages)-1]
+	if lastMsg.Role() == "assistant" {
+		return nil, fmt.Errorf("cannot continue from message role: assistant")
+	}
+
+	currentCtx := &AgentContext{
+		SystemPrompt: agentCtx.SystemPrompt,
+		Messages:     append([]AgentMessage{}, agentCtx.Messages...),
+		Tools:        agentCtx.Tools,
+	}
+
+	events <- AgentEvent{Type: EventAgentStart}
+	events <- AgentEvent{Type: EventTurnStart}
+
+	result := runLoop(ctx, currentCtx, nil, config, streamFn, events)
+	return result, nil
+}
+
+// runLoop is the main loop logic shared by AgentLoop and AgentLoopContinue.
+func runLoop(
+	ctx context.Context,
+	currentCtx *AgentContext,
+	newMessages []AgentMessage,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	events chan<- AgentEvent,
+) []AgentMessage {
+	firstTurn := true
+
+	// Check for steering messages at start
+	var pendingMessages []AgentMessage
+	if config.GetSteeringMessages != nil {
+		var err error
+		pendingMessages, err = config.GetSteeringMessages()
+		if err != nil {
+			pendingMessages = nil
+		}
+	}
+
+	// Outer loop: continues when follow-up messages arrive
+	for {
+		hasMoreToolCalls := true
+		var steeringAfterTools []AgentMessage
+
+		// Inner loop: process tool calls and steering
+		for hasMoreToolCalls || len(pendingMessages) > 0 {
+			if !firstTurn {
+				events <- AgentEvent{Type: EventTurnStart}
+			} else {
+				firstTurn = false
+			}
+
+			// Process pending messages
+			if len(pendingMessages) > 0 {
+				for i := range pendingMessages {
+					events <- AgentEvent{Type: EventMessageStart, Message: &pendingMessages[i]}
+					events <- AgentEvent{Type: EventMessageEnd, Message: &pendingMessages[i]}
+					currentCtx.Messages = append(currentCtx.Messages, pendingMessages[i])
+					newMessages = append(newMessages, pendingMessages[i])
+				}
+				pendingMessages = nil
+			}
+
+			// Stream assistant response
+			message := streamAssistantResponse(ctx, currentCtx, config, streamFn, events)
+			newMessages = append(newMessages, NewAgentMessage(ai.NewAssistantMsg(*message)))
+
+			if message.StopReason == ai.StopReasonError || message.StopReason == ai.StopReasonAborted {
+				am := NewAgentMessage(ai.NewAssistantMsg(*message))
+				events <- AgentEvent{
+					Type:        EventTurnEnd,
+					TurnMessage: &am,
+					ToolResults: nil,
+				}
+				events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
+				return newMessages
+			}
+
+			// Check for tool calls
+			var toolCalls []ai.ToolCall
+			for _, c := range message.Content {
+				if c.IsToolCall() {
+					toolCalls = append(toolCalls, *c.ToolCall)
+				}
+			}
+			hasMoreToolCalls = len(toolCalls) > 0
+
+			var toolResults []ai.ToolResultMessage
+			if hasMoreToolCalls {
+				results, steering := executeToolCalls(ctx, currentCtx.Tools, message, events, config.GetSteeringMessages)
+				toolResults = results
+				steeringAfterTools = steering
+
+				for _, result := range toolResults {
+					currentCtx.Messages = append(currentCtx.Messages, NewAgentMessage(ai.NewToolResultMsg(result)))
+					newMessages = append(newMessages, NewAgentMessage(ai.NewToolResultMsg(result)))
+				}
+			}
+
+			am := NewAgentMessage(ai.NewAssistantMsg(*message))
+			events <- AgentEvent{
+				Type:        EventTurnEnd,
+				TurnMessage: &am,
+				ToolResults: toolResults,
+			}
+
+			// Get steering messages after turn
+			if len(steeringAfterTools) > 0 {
+				pendingMessages = steeringAfterTools
+				steeringAfterTools = nil
+			} else if config.GetSteeringMessages != nil {
+				var err error
+				pendingMessages, err = config.GetSteeringMessages()
+				if err != nil {
+					pendingMessages = nil
+				}
+			}
+		}
+
+		// Agent would stop. Check for follow-up messages.
+		if config.GetFollowUpMessages != nil {
+			followUp, err := config.GetFollowUpMessages()
+			if err == nil && len(followUp) > 0 {
+				pendingMessages = followUp
+				continue
+			}
+		}
+
+		break
+	}
+
+	events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
+	return newMessages
+}
+
+// streamAssistantResponse streams an LLM response, handling context transforms.
+func streamAssistantResponse(
+	ctx context.Context,
+	agentCtx *AgentContext,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	events chan<- AgentEvent,
+) *ai.AssistantMessage {
+	// Apply context transform if configured
+	messages := agentCtx.Messages
+	if config.TransformContext != nil {
+		var err error
+		messages, err = config.TransformContext(ctx, messages)
+		if err != nil {
+			return errorAssistantMessage(config.Model, err.Error())
+		}
+	}
+
+	// Convert to LLM-compatible messages
+	if config.ConvertToLLM == nil {
+		return errorAssistantMessage(config.Model, "no ConvertToLLM function configured")
+	}
+	llmMessages, err := config.ConvertToLLM(messages)
+	if err != nil {
+		return errorAssistantMessage(config.Model, err.Error())
+	}
+
+	// Build LLM context
+	llmTools := make([]ai.Tool, len(agentCtx.Tools))
+	for i, t := range agentCtx.Tools {
+		llmTools[i] = t.Tool
+	}
+
+	llmContext := ai.Context{
+		SystemPrompt: agentCtx.SystemPrompt,
+		Messages:     llmMessages,
+		Tools:        llmTools,
+	}
+
+	// Resolve API key
+	apiKey := config.ApiKey
+	if config.GetApiKey != nil {
+		if resolved, err := config.GetApiKey(config.Model.Provider); err == nil && resolved != "" {
+			apiKey = resolved
+		}
+	}
+
+	// Stream
+	opts := &ai.SimpleStreamOptions{
+		StreamOptions: ai.StreamOptions{
+			ApiKey:          apiKey,
+			CacheRetention:  config.CacheRetention,
+			SessionID:       config.SessionID,
+			Headers:         config.Headers,
+			MaxRetryDelayMs: config.MaxRetryDelayMs,
+			Temperature:     config.Temperature,
+			MaxTokens:       config.MaxTokens,
+		},
+		Reasoning:       config.Reasoning,
+		ThinkingBudgets: config.ThinkingBudgets,
+	}
+
+	stream := streamFn(config.Model, llmContext, opts)
+
+	var addedPartial bool
+	var partialMsg *ai.AssistantMessage
+
+	for event := range stream.Events {
+		switch event.Type {
+		case ai.EventStart:
+			partialMsg = event.Partial
+			if partialMsg != nil {
+				agentCtx.Messages = append(agentCtx.Messages, NewAgentMessage(ai.NewAssistantMsg(*partialMsg)))
+				addedPartial = true
+				am := NewAgentMessage(ai.NewAssistantMsg(*partialMsg))
+				events <- AgentEvent{Type: EventMessageStart, Message: &am}
+			}
+
+		case ai.EventTextStart, ai.EventTextDelta, ai.EventTextEnd,
+			ai.EventThinkingStart, ai.EventThinkingDelta, ai.EventThinkingEnd,
+			ai.EventToolcallStart, ai.EventToolcallDelta, ai.EventToolcallEnd:
+			if event.Partial != nil {
+				partialMsg = event.Partial
+				if addedPartial {
+					agentCtx.Messages[len(agentCtx.Messages)-1] = NewAgentMessage(ai.NewAssistantMsg(*partialMsg))
+				}
+				am := NewAgentMessage(ai.NewAssistantMsg(*partialMsg))
+				events <- AgentEvent{
+					Type:                  EventMessageUpdate,
+					Message:               &am,
+					AssistantMessageEvent: &event,
+				}
+			}
+
+		case ai.EventDone, ai.EventError:
+			finalMsg := stream.Result()
+			if finalMsg == nil {
+				finalMsg = errorAssistantMessage(config.Model, "stream ended without result")
+			}
+			if addedPartial {
+				agentCtx.Messages[len(agentCtx.Messages)-1] = NewAgentMessage(ai.NewAssistantMsg(*finalMsg))
+			} else {
+				agentCtx.Messages = append(agentCtx.Messages, NewAgentMessage(ai.NewAssistantMsg(*finalMsg)))
+			}
+			if !addedPartial {
+				am := NewAgentMessage(ai.NewAssistantMsg(*finalMsg))
+				events <- AgentEvent{Type: EventMessageStart, Message: &am}
+			}
+			am := NewAgentMessage(ai.NewAssistantMsg(*finalMsg))
+			events <- AgentEvent{Type: EventMessageEnd, Message: &am}
+			return finalMsg
+		}
+	}
+
+	// Should not reach here normally
+	result := stream.Result()
+	if result == nil {
+		return errorAssistantMessage(config.Model, "stream ended unexpectedly")
+	}
+	return result
+}
+
+// executeToolCalls executes tool calls from an assistant message.
+func executeToolCalls(
+	ctx context.Context,
+	tools []AgentTool,
+	assistantMsg *ai.AssistantMessage,
+	events chan<- AgentEvent,
+	getSteeringMessages func() ([]AgentMessage, error),
+) ([]ai.ToolResultMessage, []AgentMessage) {
+	var toolCalls []ai.ToolCall
+	for _, c := range assistantMsg.Content {
+		if c.IsToolCall() {
+			toolCalls = append(toolCalls, *c.ToolCall)
+		}
+	}
+
+	var results []ai.ToolResultMessage
+	var steeringMessages []AgentMessage
+
+	for i, tc := range toolCalls {
+		events <- AgentEvent{
+			Type:       EventToolExecutionStart,
+			ToolCallID: tc.ID,
+			ToolName:   tc.Name,
+			Args:       tc.Arguments,
+		}
+
+		var result AgentToolResult
+		var isError bool
+
+		// Find the tool
+		var tool *AgentTool
+		for j := range tools {
+			if tools[j].Name == tc.Name {
+				tool = &tools[j]
+				break
+			}
+		}
+
+		if tool == nil {
+			result = AgentToolResult{
+				Content: []ai.ToolResultContent{{Type: "text", Text: fmt.Sprintf("Tool %s not found", tc.Name)}},
+			}
+			isError = true
+		} else if tool.Execute == nil {
+			result = AgentToolResult{
+				Content: []ai.ToolResultContent{{Type: "text", Text: fmt.Sprintf("Tool %s has no execute function", tc.Name)}},
+			}
+			isError = true
+		} else {
+			var err error
+			result, err = tool.Execute(ctx, tc.ID, tc.Arguments, func(partial AgentToolResult) {
+				events <- AgentEvent{
+					Type:          EventToolExecutionUpdate,
+					ToolCallID:    tc.ID,
+					ToolName:      tc.Name,
+					Args:          tc.Arguments,
+					PartialResult: partial,
+				}
+			})
+			if err != nil {
+				result = AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: err.Error()}},
+				}
+				isError = true
+			}
+		}
+
+		events <- AgentEvent{
+			Type:       EventToolExecutionEnd,
+			ToolCallID: tc.ID,
+			ToolName:   tc.Name,
+			Result:     result,
+			IsError:    isError,
+		}
+
+		toolResult := ai.ToolResultMessage{
+			Role:       "toolResult",
+			ToolCallID: tc.ID,
+			ToolName:   tc.Name,
+			Content:    result.Content,
+			Details:    result.Details,
+			IsError:    isError,
+			Timestamp:  time.Now().UnixMilli(),
+		}
+		results = append(results, toolResult)
+
+		trMsg := NewAgentMessage(ai.NewToolResultMsg(toolResult))
+		events <- AgentEvent{Type: EventMessageStart, Message: &trMsg}
+		events <- AgentEvent{Type: EventMessageEnd, Message: &trMsg}
+
+		// Check for steering messages after each tool
+		if getSteeringMessages != nil {
+			steering, err := getSteeringMessages()
+			if err == nil && len(steering) > 0 {
+				steeringMessages = steering
+				// Skip remaining tools
+				for _, skipped := range toolCalls[i+1:] {
+					results = append(results, skipToolCall(skipped, events))
+				}
+				break
+			}
+		}
+	}
+
+	return results, steeringMessages
+}
+
+// skipToolCall creates a skipped tool result.
+func skipToolCall(tc ai.ToolCall, events chan<- AgentEvent) ai.ToolResultMessage {
+	events <- AgentEvent{
+		Type:       EventToolExecutionStart,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Name,
+		Args:       tc.Arguments,
+	}
+
+	result := AgentToolResult{
+		Content: []ai.ToolResultContent{{Type: "text", Text: "Skipped due to queued user message."}},
+	}
+
+	events <- AgentEvent{
+		Type:       EventToolExecutionEnd,
+		ToolCallID: tc.ID,
+		ToolName:   tc.Name,
+		Result:     result,
+		IsError:    true,
+	}
+
+	toolResult := ai.ToolResultMessage{
+		Role:       "toolResult",
+		ToolCallID: tc.ID,
+		ToolName:   tc.Name,
+		Content:    result.Content,
+		IsError:    true,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+
+	trMsg := NewAgentMessage(ai.NewToolResultMsg(toolResult))
+	events <- AgentEvent{Type: EventMessageStart, Message: &trMsg}
+	events <- AgentEvent{Type: EventMessageEnd, Message: &trMsg}
+
+	return toolResult
+}
+
+// errorAssistantMessage creates an error assistant message.
+func errorAssistantMessage(model *ai.Model, msg string) *ai.AssistantMessage {
+	return &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		Api:          model.Api,
+		Provider:     model.Provider,
+		Model:        model.ID,
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: msg,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+}

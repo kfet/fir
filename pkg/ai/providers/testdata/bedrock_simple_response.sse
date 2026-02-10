@@ -1,0 +1,12 @@
+data: {"messageStart":{"role":"assistant"}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":"Hello"}}}
+
+data: {"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":" there!"}}}
+
+data: {"contentBlockStop":{"contentBlockIndex":0}}
+
+data: {"messageStop":{"stopReason":"end_turn"}}
+
+data: {"metadata":{"usage":{"inputTokens":20,"outputTokens":8,"totalTokens":28}}}
+
