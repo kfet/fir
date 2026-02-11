@@ -89,46 +89,156 @@ type Settings struct {
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
-// Arrays and primitives from overrides win over base.
+// Arrays and primitives from overrides win over base. Nil pointers and empty strings
+// in overrides are treated as "not set" and don't overwrite base values.
 func deepMergeSettings(base, overrides Settings) Settings {
-	// Marshal both to JSON and merge as maps for simplicity
-	baseJSON, _ := json.Marshal(base)
-	overJSON, _ := json.Marshal(overrides)
+	r := base
 
-	var baseMap, overMap map[string]any
-	json.Unmarshal(baseJSON, &baseMap)
-	json.Unmarshal(overJSON, &overMap)
+	// Simple string fields: override wins if non-empty
+	mergeStr(&r.LastChangelogVersion, overrides.LastChangelogVersion)
+	mergeStr(&r.DefaultProvider, overrides.DefaultProvider)
+	mergeStr(&r.DefaultModel, overrides.DefaultModel)
+	mergeStr(&r.DefaultThinkingLevel, overrides.DefaultThinkingLevel)
+	mergeStr(&r.SteeringMode, overrides.SteeringMode)
+	mergeStr(&r.FollowUpMode, overrides.FollowUpMode)
+	mergeStr(&r.Theme, overrides.Theme)
+	mergeStr(&r.ShellPath, overrides.ShellPath)
+	mergeStr(&r.ShellCommandPrefix, overrides.ShellCommandPrefix)
+	mergeStr(&r.DoubleEscapeAction, overrides.DoubleEscapeAction)
 
-	if baseMap == nil {
-		baseMap = map[string]any{}
+	// Pointer fields: override wins if non-nil
+	mergeBool(&r.HideThinkingBlock, overrides.HideThinkingBlock)
+	mergeBool(&r.QuietStartup, overrides.QuietStartup)
+	mergeBool(&r.CollapseChangelog, overrides.CollapseChangelog)
+	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
+	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
+	mergeInt(&r.EditorPaddingX, overrides.EditorPaddingX)
+	mergeInt(&r.AutocompleteMaxVisible, overrides.AutocompleteMaxVisible)
+
+	// Slice fields: override wins if non-nil
+	if overrides.Packages != nil {
+		r.Packages = overrides.Packages
+	}
+	if overrides.Extensions != nil {
+		r.Extensions = overrides.Extensions
+	}
+	if overrides.Skills != nil {
+		r.Skills = overrides.Skills
+	}
+	if overrides.Prompts != nil {
+		r.Prompts = overrides.Prompts
+	}
+	if overrides.Themes != nil {
+		r.Themes = overrides.Themes
+	}
+	if overrides.EnabledModels != nil {
+		r.EnabledModels = overrides.EnabledModels
 	}
 
-	for k, v := range overMap {
-		if v == nil {
-			continue
+	// Nested struct pointers: merge field-by-field if both set, override wins if only override set
+	if overrides.Compaction != nil {
+		if r.Compaction == nil {
+			r.Compaction = overrides.Compaction
+		} else {
+			c := *r.Compaction
+			mergeBool(&c.Enabled, overrides.Compaction.Enabled)
+			mergeInt(&c.ReserveTokens, overrides.Compaction.ReserveTokens)
+			mergeInt(&c.KeepRecentTokens, overrides.Compaction.KeepRecentTokens)
+			r.Compaction = &c
 		}
-		baseVal, hasBase := baseMap[k]
-		// Merge nested objects recursively
-		if overObj, ok := v.(map[string]any); ok {
-			if baseObj, ok2 := baseVal.(map[string]any); ok2 && hasBase {
-				merged := map[string]any{}
-				for bk, bv := range baseObj {
-					merged[bk] = bv
-				}
-				for ok, ov := range overObj {
-					merged[ok] = ov
-				}
-				baseMap[k] = merged
-				continue
-			}
+	}
+	if overrides.BranchSummary != nil {
+		if r.BranchSummary == nil {
+			r.BranchSummary = overrides.BranchSummary
+		} else {
+			b := *r.BranchSummary
+			mergeInt(&b.ReserveTokens, overrides.BranchSummary.ReserveTokens)
+			r.BranchSummary = &b
 		}
-		baseMap[k] = v
+	}
+	if overrides.Retry != nil {
+		if r.Retry == nil {
+			r.Retry = overrides.Retry
+		} else {
+			rt := *r.Retry
+			mergeBool(&rt.Enabled, overrides.Retry.Enabled)
+			mergeInt(&rt.MaxRetries, overrides.Retry.MaxRetries)
+			mergeInt(&rt.BaseDelayMs, overrides.Retry.BaseDelayMs)
+			mergeInt(&rt.MaxDelayMs, overrides.Retry.MaxDelayMs)
+			r.Retry = &rt
+		}
+	}
+	if overrides.Terminal != nil {
+		if r.Terminal == nil {
+			r.Terminal = overrides.Terminal
+		} else {
+			t := *r.Terminal
+			mergeBool(&t.ShowImages, overrides.Terminal.ShowImages)
+			mergeBool(&t.ClearOnShrink, overrides.Terminal.ClearOnShrink)
+			r.Terminal = &t
+		}
+	}
+	if overrides.Images != nil {
+		if r.Images == nil {
+			r.Images = overrides.Images
+		} else {
+			img := *r.Images
+			mergeBool(&img.AutoResize, overrides.Images.AutoResize)
+			mergeBool(&img.BlockImages, overrides.Images.BlockImages)
+			r.Images = &img
+		}
+	}
+	if overrides.ThinkingBudgets != nil {
+		if r.ThinkingBudgets == nil {
+			r.ThinkingBudgets = overrides.ThinkingBudgets
+		} else {
+			tb := *r.ThinkingBudgets
+			mergeInt(&tb.Minimal, overrides.ThinkingBudgets.Minimal)
+			mergeInt(&tb.Low, overrides.ThinkingBudgets.Low)
+			mergeInt(&tb.Medium, overrides.ThinkingBudgets.Medium)
+			mergeInt(&tb.High, overrides.ThinkingBudgets.High)
+			r.ThinkingBudgets = &tb
+		}
+	}
+	if overrides.Markdown != nil {
+		if r.Markdown == nil {
+			r.Markdown = overrides.Markdown
+		} else {
+			md := *r.Markdown
+			mergeStrPtr(&md.CodeBlockIndent, overrides.Markdown.CodeBlockIndent)
+			r.Markdown = &md
+		}
 	}
 
-	resultJSON, _ := json.Marshal(baseMap)
-	var result Settings
-	json.Unmarshal(resultJSON, &result)
-	return result
+	return r
+}
+
+// mergeStr overwrites dst with src if src is non-empty.
+func mergeStr(dst *string, src string) {
+	if src != "" {
+		*dst = src
+	}
+}
+
+// mergeBool overwrites dst with src if src is non-nil.
+func mergeBool(dst **bool, src *bool) {
+	if src != nil {
+		*dst = src
+	}
+}
+
+// mergeInt overwrites dst with src if src is non-nil.
+func mergeInt(dst **int, src *int) {
+	if src != nil {
+		*dst = src
+	}
+}
+
+// mergeStrPtr overwrites dst with src if src is non-nil.
+func mergeStrPtr(dst **string, src *string) {
+	if src != nil {
+		*dst = src
+	}
 }
 
 // SettingsManager manages global and project settings with file persistence.
@@ -263,7 +373,7 @@ func (sm *SettingsManager) save() {
 
 	dir := filepath.Dir(sm.settingsPath)
 	os.MkdirAll(dir, 0755)
-	os.WriteFile(sm.settingsPath, resultJSON, 0644)
+	os.WriteFile(sm.settingsPath, resultJSON, 0600)
 
 	sm.remerge()
 }

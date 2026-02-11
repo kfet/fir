@@ -66,6 +66,8 @@ For each changed `.go` file, read it fully and evaluate:
 
 ## How to Report Findings
 
+**MANDATORY: All findings MUST be written to the docs/review/ files below. A review that only produces chat output but doesn't update these files is incomplete. Even if the user asked for a one-off review rather than invoking you as a continuous skill, you must still write findings to these files. They are the authoritative record of open issues for other agents.**
+
 ### For issues that need immediate fixing (build breaks, data loss, security):
 Write them to `docs/review/URGENT.md` (create if needed):
 ```markdown
@@ -92,6 +94,9 @@ Write them to `docs/review/BACKLOG.md` (create if needed), grouped by category:
 ### For items already fixed since last review:
 Remove them from the backlog files.
 
+### Always update docs/review/ — even for ad-hoc reviews
+If the user asks you to "review code" or "review changes" without explicitly invoking the review skill loop, you are still a reviewer. Write findings to `docs/review/URGENT.md` and `docs/review/BACKLOG.md`. The user can read your chat output, but other agents (e.g., the `fix` skill) only read the docs/review/ files. If you skip the file updates, your findings are invisible to the rest of the team.
+
 ## Review Loop
 
 After completing a review cycle:
@@ -104,9 +109,9 @@ After completing a review cycle:
    This is not optional. Long-running agents drift. Re-reading your instructions every cycle prevents you from forgetting the process, changing your output format, or skipping steps. Do this even if you think you remember — your context window is finite and old instructions get pushed out.
 3. **Self-remind and repeat.** After every review, run a sleep command that echoes a reminder when it finishes. This is how you keep the loop alive — the reminder output triggers you to start the next cycle:
    ```bash
-   sleep 120 && echo "=== REVIEW CYCLE REMINDER === Time to re-read SKILL.md and run the next review cycle. Check: git diff --cached --name-only -- '*.go' && git diff --name-only -- '*.go' && find pkg/ cmd/ -name '*.go' -mmin -10 2>/dev/null | sort"
+   sleep 30 && echo "=== REVIEW CYCLE REMINDER === Time to re-read SKILL.md and run the next review cycle. Check: git diff --cached --name-only -- '*.go' && git diff --name-only -- '*.go' && find pkg/ cmd/ -name '*.go' -mmin -10 2>/dev/null | sort"
    ```
-   Use timeout 180 on the bash call. When you see the reminder output, **immediately**:
+   Use timeout 40 on the bash call. When you see the reminder output, **immediately**:
    a. Re-read this skill file (`.pi/skills/review/SKILL.md`)
    b. Run the "Before Each Review Cycle" steps
    c. Review any new/changed files

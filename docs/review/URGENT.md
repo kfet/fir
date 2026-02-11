@@ -1,4 +1,21 @@
-# URGENT — 2026-02-09
+# URGENT — 2026-02-10
+
+### ~~E2E: RPC mode stdin consumed by readPipedStdin()~~ — ✅ FIXED
+Guarded `readPipedStdin()` with `args.OutputMode != ModeRPC` so RPC server can read stdin directly.
+
+---
+
+### ~~E2E: RPC mode not wired up in app.go~~ — ✅ FIXED
+Added `isRPCMode` check in `run()`. When `args.OutputMode == ModeRPC`, dispatches to `rpcmode.NewServer(result.Session).Run()`. Import added for `pkg/modes/rpc`.
+
+---
+
+### ~~E2E: `--list-models` flag not handled~~ — ✅ FIXED
+Added `runListModels()` function and early-return in `run()` after `--version` check. Lists all models as `provider/id`, supports pattern filtering via `--list-models <pattern>`. Tests added.
+
+---
+
+# URGENT — 2026-02-09 (previous)
 
 ## Build Break
 
@@ -37,6 +54,20 @@ base.Headers["x-anthropic-thinking-budget"] = fmt.Sprintf("%d", thinkingBudget)
 Internal configuration is passed through the `Headers` map, then conditionally stripped in `buildAnthropicHeaders`. This is fragile — if any code path skips the stripping, internal state leaks to the API. The `buildAnthropicParams` function also reads these back.
 
 **Fix:** Add explicit `ThinkingEnabled bool` and `ThinkingBudget int` fields to `StreamOptions` or a separate `AnthropicOptions` struct. Don't repurpose the headers map as an internal bus.
+
+---
+
+## Committed Binaries
+
+### ~~`pi`, `rpc.test`~~ — ✅ FIXED: `git rm --cached`, `.gitignore` updated (`./pi` → `pi`, added `*.test`)
+
+---
+
+## Correctness
+
+### ~~`pkg/core/agentsession.go:488-489`~~ — ✅ INVALID: `ResumeSession` doesn't exist in agentsession.go. The session resume logic is in `session.go:BuildSessionContext()` which already uses `e.RawMessage` correctly.
+
+### ~~`pkg/modes/rpc/server.go:124-145`~~ — ✅ FIXED: `CmdSteer` now calls `Agent.Steer()`, `CmdFollowUp` now calls `Agent.FollowUp()` with proper `AgentMessage` construction.
 
 ---
 

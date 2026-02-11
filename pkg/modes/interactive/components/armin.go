@@ -446,5 +446,10 @@ func (a *ArminComponent) tickDissolve() bool {
 // Dispose stops the animation and releases resources.
 func (a *ArminComponent) Dispose() {
 	a.stopAnimation()
-	close(a.stopCh)
+	select {
+	case <-a.stopCh:
+		// already closed
+	default:
+		close(a.stopCh)
+	}
 }

@@ -13,7 +13,9 @@ import (
 	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/ai/providers"
 	"github.com/kfet/pi-go/pkg/core"
+	interactive "github.com/kfet/pi-go/pkg/modes/interactive"
 	printmode "github.com/kfet/pi-go/pkg/modes/print"
+	rpcmode "github.com/kfet/pi-go/pkg/modes/rpc"
 )
 
 // run is the main application logic.
@@ -33,18 +35,27 @@ func run() error {
 		return nil
 	}
 
-	// Read piped stdin (if not a TTY)
-	stdinContent := readPipedStdin()
-	if stdinContent != "" {
-		args.Print = true
-		args.Messages = append([]string{stdinContent}, args.Messages...)
+	if args.ListModels != nil {
+		return runListModels(args)
+	}
+
+	// Read piped stdin (if not a TTY) — skip for RPC mode which reads stdin directly
+	if args.OutputMode != ModeRPC {
+		stdinContent := readPipedStdin()
+		if stdinContent != "" {
+			args.Print = true
+			args.Messages = append([]string{stdinContent}, args.Messages...)
+		}
 	}
 
 	// Determine mode
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
+	isRPCMode := args.OutputMode == ModeRPC
 
-	if !isPrintMode {
-		return fmt.Errorf("interactive mode not yet implemented. Use -p for print mode or pipe input")
+	_ = interactive.InteractiveModeOptions{} // ensure import is used
+
+	if !isPrintMode && !isRPCMode {
+		return runInteractiveMode(args)
 	}
 
 	// Resolve working directory
@@ -164,6 +175,12 @@ func run() error {
 		}
 	}
 
+	// Run RPC mode
+	if isRPCMode {
+		server := rpcmode.NewServer(result.Session)
+		return server.Run()
+	}
+
 	// Determine initial message and remaining messages
 	var initialMessage string
 	var remainingMessages []string
@@ -183,6 +200,41 @@ func run() error {
 		InitialMessage: initialMessage,
 		Messages:       remainingMessages,
 	})
+}
+
+// runListModels lists available models and exits.
+func runListModels(args *Args) error {
+	agentDir := core.DefaultAgentDir()
+	if dir := os.Getenv("PI_AGENT_DIR"); dir != "" {
+		agentDir = dir
+	}
+
+	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+
+	if args.ApiKey != "" && args.Provider != "" {
+		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+	}
+
+	models := modelRegistry.GetAll()
+
+	// Apply search pattern if provided
+	pattern := ""
+	if s, ok := args.ListModels.(string); ok {
+		pattern = strings.ToLower(s)
+	}
+
+	for _, m := range models {
+		if pattern != "" {
+			name := strings.ToLower(m.Provider + "/" + m.ID)
+			if !strings.Contains(name, pattern) {
+				continue
+			}
+		}
+		fmt.Printf("%s/%s\n", m.Provider, m.ID)
+	}
+
+	return nil
 }
 
 // createSessionManager creates the appropriate session manager based on CLI args.
@@ -226,4 +278,123 @@ func readPipedStdin() string {
 		sb.WriteString(scanner.Text())
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// runInteractiveMode runs the full interactive TUI mode.
+func runInteractiveMode(args *Args) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	agentDir := core.DefaultAgentDir()
+	if dir := os.Getenv("PI_AGENT_DIR"); dir != "" {
+		agentDir = dir
+	}
+
+	// Setup auth, models, settings
+	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+
+	if args.ApiKey != "" {
+		if args.Provider == "" {
+			return fmt.Errorf("--api-key requires --provider")
+		}
+		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+	}
+
+	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	sessionManager := createSessionManager(args, cwd, agentDir)
+
+	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+		Cwd:                           cwd,
+		AgentDir:                      agentDir,
+		SettingsManager:               settingsManager,
+		SystemPrompt:                  args.SystemPrompt,
+		AppendSystemPrompt:            args.AppendSystemPrompt,
+		NoSkills:                      args.NoSkills,
+		AdditionalSkillPaths:          args.Skills,
+		AdditionalPromptTemplatePaths: args.PromptTemplates,
+		NoPromptTemplates:             args.NoPromptTemplates,
+	})
+	if err := rl.Reload(); err != nil {
+		return fmt.Errorf("reload resources: %w", err)
+	}
+
+	// Resolve model
+	var scopedModels []core.ScopedModel
+	modelPatterns := args.Models
+	if len(modelPatterns) == 0 {
+		modelPatterns = settingsManager.GetEnabledModels()
+	}
+	if len(modelPatterns) > 0 {
+		scopedModels = core.ResolveModelScope(modelPatterns, modelRegistry)
+	}
+
+	var model *ai.Model
+	if args.Provider != "" && args.Model != "" {
+		model = modelRegistry.Find(args.Provider, args.Model)
+		if model == nil {
+			return fmt.Errorf("model %s/%s not found", args.Provider, args.Model)
+		}
+	} else if len(scopedModels) > 0 {
+		model = scopedModels[0].Model
+	}
+
+	// Create session
+	sessionOpts := core.CreateAgentSessionOptions{
+		Cwd:             cwd,
+		AgentDir:        agentDir,
+		AuthStorage:     authStorage,
+		ModelRegistry:   modelRegistry,
+		Model:           model,
+		SessionManager:  sessionManager,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ScopedModels:    scopedModels,
+	}
+
+	if args.Thinking != "" {
+		sessionOpts.ThinkingLevel = string(args.Thinking)
+	}
+
+	result, err := core.CreateAgentSession(context.Background(), sessionOpts)
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
+	}
+	defer result.Session.Close()
+
+	if result.Session.Model() == nil {
+		fmt.Fprintln(os.Stderr, "No models available.")
+		fmt.Fprintln(os.Stderr, "\nSet an API key environment variable:")
+		fmt.Fprintln(os.Stderr, "  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+		os.Exit(1)
+	}
+
+	// Load keybindings
+	keybindings := core.NewKeybindingsManager(agentDir)
+
+	// Create interactive mode
+	var initialPrompt string
+	if len(args.Messages) > 0 {
+		initialPrompt = strings.Join(args.Messages, "\n")
+	}
+
+	mode := interactive.NewInteractiveMode(
+		result.Session,
+		keybindings,
+		settingsManager,
+		interactive.InteractiveModeOptions{
+			InitialPrompt: initialPrompt,
+			ThemeName:     "dark",
+		},
+	)
+
+	if err := mode.Init(); err != nil {
+		return fmt.Errorf("init interactive mode: %w", err)
+	}
+
+	return mode.Run(interactive.InteractiveModeOptions{
+		InitialPrompt: initialPrompt,
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -211,6 +212,11 @@ func ContinueRecentSession(cwd, sessionDir string) *SessionManager {
 	return NewSessionManager(cwd, sessionDir)
 }
 
+// SetSessionFile switches to a different session file, loading its entries.
+func (sm *SessionManager) SetSessionFile(filePath string) {
+	sm.setSessionFile(filePath)
+}
+
 func (sm *SessionManager) setSessionFile(filePath string) {
 	absPath, _ := filepath.Abs(filePath)
 	sm.sessionFile = absPath
@@ -296,12 +302,14 @@ func (sm *SessionManager) buildIndex() {
 
 func (sm *SessionManager) generateID() string {
 	for i := 0; i < 100; i++ {
-		id := uuid.New().String()[:8]
+		id := uuid.New().String()[:12]
 		if _, ok := sm.byID[id]; !ok {
 			return id
 		}
 	}
-	return uuid.New().String()
+	// Exhausted retries (practically impossible with 48-bit IDs).
+	// Fall back to full UUID but truncate to same length for consistency.
+	return uuid.New().String()[:12]
 }
 
 func (sm *SessionManager) rewriteFile() {
@@ -309,13 +317,23 @@ func (sm *SessionManager) rewriteFile() {
 		return
 	}
 	var lines []string
-	data, _ := json.Marshal(sm.header)
+	data, err := json.Marshal(sm.header)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session: marshal header: %v\n", err)
+		return
+	}
 	lines = append(lines, string(data))
 	for _, e := range sm.entries {
-		data, _ := json.Marshal(e)
+		data, err := json.Marshal(e)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session: marshal entry %s: %v\n", e.ID, err)
+			continue
+		}
 		lines = append(lines, string(data))
 	}
-	os.WriteFile(sm.sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+	if err := os.WriteFile(sm.sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write %s: %v\n", sm.sessionFile, err)
+	}
 }
 
 func (sm *SessionManager) persistEntry(entry *SessionEntry) {
@@ -346,14 +364,23 @@ func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 		sm.rewriteFile()
 		sm.flushed = true
 	} else {
-		f, err := os.OpenFile(sm.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		f, err := os.OpenFile(sm.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "session: open %s: %v\n", sm.sessionFile, err)
 			return
 		}
 		defer f.Close()
-		data, _ := json.Marshal(entry)
-		f.Write(data)
-		f.WriteString("\n")
+		data, err := json.Marshal(entry)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "session: marshal entry %s: %v\n", entry.ID, err)
+			return
+		}
+		if _, err := f.Write(data); err != nil {
+			fmt.Fprintf(os.Stderr, "session: write entry %s: %v\n", entry.ID, err)
+		}
+		if _, err := f.WriteString("\n"); err != nil {
+			fmt.Fprintf(os.Stderr, "session: write newline: %v\n", err)
+		}
 	}
 }
 
@@ -934,11 +961,9 @@ func ListSessions(cwd, sessionDir string) ([]SessionListInfo, error) {
 	}
 
 	// Sort by modified time (most recent first)
-	for i := 1; i < len(sessions); i++ {
-		for j := i; j > 0 && sessions[j].Modified.After(sessions[j-1].Modified); j-- {
-			sessions[j], sessions[j-1] = sessions[j-1], sessions[j]
-		}
-	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Modified.After(sessions[j].Modified)
+	})
 
 	return sessions, nil
 }

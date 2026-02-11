@@ -1,8 +1,9 @@
 # Compiled binaries
 pi-go
 pi-go-*
-./pi
-coverage.out
+pi
+*.test
+*.out
 
 # IDE
 .idea/

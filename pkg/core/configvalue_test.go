@@ -98,6 +98,61 @@ func TestResolveHeaders_Empty(t *testing.T) {
 	}
 }
 
+func TestResolveConfigValue_CommandTimeout(t *testing.T) {
+	ClearConfigValueCache()
+	// Use a command that would hang but verify the timeout mechanism exists
+	// by using a short sleep that completes within the 10s timeout
+	result := ResolveConfigValue("!sleep 0.1 && echo timeout-test")
+	if result != "timeout-test" {
+		t.Errorf("expected 'timeout-test', got %q", result)
+	}
+}
+
+func TestResolveConfigValue_CommandOutputTrimmed(t *testing.T) {
+	ClearConfigValueCache()
+	// echo adds a trailing newline; verify it's trimmed
+	result := ResolveConfigValue("!printf '  spaced  '")
+	if result != "spaced" {
+		t.Errorf("expected trimmed 'spaced', got %q", result)
+	}
+}
+
+func TestResolveConfigValue_CommandEmptyOutput(t *testing.T) {
+	ClearConfigValueCache()
+	result := ResolveConfigValue("!printf ''")
+	if result != "" {
+		t.Errorf("expected empty string for empty command output, got %q", result)
+	}
+}
+
+func TestResolveConfigValue_CommandCacheNilForFailure(t *testing.T) {
+	ClearConfigValueCache()
+	// First call should fail and cache nil
+	result1 := ResolveConfigValue("!false")
+	if result1 != "" {
+		t.Errorf("expected empty for failed command, got %q", result1)
+	}
+	// Second call should use cached nil result
+	result2 := ResolveConfigValue("!false")
+	if result2 != "" {
+		t.Errorf("expected empty from cached nil, got %q", result2)
+	}
+}
+
+func TestResolveHeaders_CommandInHeaders(t *testing.T) {
+	ClearConfigValueCache()
+	headers := map[string]string{
+		"Authorization": "!echo bearer-token-123",
+	}
+	resolved := ResolveHeaders(headers)
+	if resolved == nil {
+		t.Fatal("expected non-nil resolved headers")
+	}
+	if resolved["Authorization"] != "bearer-token-123" {
+		t.Errorf("expected 'bearer-token-123', got %q", resolved["Authorization"])
+	}
+}
+
 func TestClearConfigValueCache(t *testing.T) {
 	ClearConfigValueCache()
 	// Run a command to populate cache

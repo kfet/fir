@@ -368,6 +368,260 @@ func TestPrepareCompaction_SplitTurn(t *testing.T) {
 	}
 }
 
+func TestEstimateTokens_CustomBashExecution(t *testing.T) {
+	msg := agent.AgentMessage{
+		Custom: &core.BashExecutionMessage{
+			Command: strings.Repeat("c", 80),
+			Output:  strings.Repeat("o", 120),
+		},
+	}
+	// (80 + 120) / 4 = 50
+	tokens := EstimateTokens(msg)
+	if tokens != 50 {
+		t.Errorf("expected 50, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_CustomBranchSummary(t *testing.T) {
+	msg := agent.AgentMessage{
+		Custom: &core.BranchSummaryMessage{
+			Summary: strings.Repeat("s", 200),
+		},
+	}
+	tokens := EstimateTokens(msg)
+	if tokens != 50 {
+		t.Errorf("expected 50, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_CustomCompactionSummary(t *testing.T) {
+	msg := agent.AgentMessage{
+		Custom: &core.CompactionSummaryMessage{
+			Summary: strings.Repeat("s", 100),
+		},
+	}
+	tokens := EstimateTokens(msg)
+	if tokens != 25 {
+		t.Errorf("expected 25, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_CustomMessage(t *testing.T) {
+	msg := agent.AgentMessage{
+		Custom: &core.CustomMessage{
+			Content: strings.Repeat("x", 40),
+		},
+	}
+	tokens := EstimateTokens(msg)
+	if tokens != 10 {
+		t.Errorf("expected 10, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_CustomMessageNonString(t *testing.T) {
+	msg := agent.AgentMessage{
+		Custom: &core.CustomMessage{
+			Content: map[string]any{"key": "value"},
+		},
+	}
+	tokens := EstimateTokens(msg)
+	if tokens != 0 {
+		t.Errorf("expected 0 for non-string custom content, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_ImageInToolResult(t *testing.T) {
+	msg := ai.NewToolResultMsg(ai.ToolResultMessage{
+		ToolCallID: "tc1",
+		ToolName:   "read",
+		Content: []ai.ToolResultContent{
+			{Type: "image", MimeType: "image/png", Data: "base64data"},
+		},
+	})
+	tokens := EstimateTokens(agent.NewAgentMessage(msg))
+	// Image should count as 4800 chars / 4 = 1200
+	if tokens != 1200 {
+		t.Errorf("expected 1200 for image, got %d", tokens)
+	}
+}
+
+func TestEstimateTokens_EmptyMessages(t *testing.T) {
+	// Empty user message
+	emptyUser := agent.AgentMessage{Message: ai.Message{}}
+	if tokens := EstimateTokens(emptyUser); tokens != 0 {
+		t.Errorf("expected 0 for empty message, got %d", tokens)
+	}
+}
+
+func TestExtractTextFromResponse(t *testing.T) {
+	response := &ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewTextContent("first part"),
+			ai.NewThinkingContent("some thinking"),
+			ai.NewTextContent("second part"),
+		},
+	}
+	result := extractTextFromResponse(response)
+	if result != "first part\nsecond part" {
+		t.Errorf("expected 'first part\\nsecond part', got %q", result)
+	}
+}
+
+func TestExtractTextFromResponse_Empty(t *testing.T) {
+	response := &ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewThinkingContent("only thinking"),
+		},
+	}
+	result := extractTextFromResponse(response)
+	if result != "" {
+		t.Errorf("expected empty, got %q", result)
+	}
+}
+
+func TestGetMessageFromEntry_CustomMessage(t *testing.T) {
+	content, _ := json.Marshal("test content")
+	entry := &core.SessionEntry{
+		Type:       "custom_message",
+		ID:         "cm1",
+		CustomType: "my-extension",
+		Content:    content,
+		Display:    true,
+		Timestamp:  "2024-01-01T00:00:00Z",
+	}
+	msg := getMessageFromEntry(entry)
+	if msg == nil {
+		t.Fatal("expected message for custom_message entry")
+	}
+	if msg.Custom == nil {
+		t.Error("expected custom message")
+	}
+}
+
+func TestGetMessageFromEntry_BranchSummary(t *testing.T) {
+	entry := &core.SessionEntry{
+		Type:      "branch_summary",
+		ID:        "bs1",
+		Summary:   "Branch summary text",
+		FromID:    "from-id",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}
+	msg := getMessageFromEntry(entry)
+	if msg == nil {
+		t.Fatal("expected message for branch_summary entry")
+	}
+}
+
+func TestGetMessageFromEntry_CompactionEntry(t *testing.T) {
+	entry := &core.SessionEntry{
+		Type:      "compaction",
+		ID:        "c1",
+		Summary:   "Compaction summary",
+		Timestamp: "2024-01-01T00:00:00Z",
+	}
+	msg := getMessageFromEntry(entry)
+	if msg == nil {
+		t.Fatal("expected message for compaction entry")
+	}
+}
+
+func TestGetMessageFromEntry_EmptyMessage(t *testing.T) {
+	entry := &core.SessionEntry{
+		Type: "message",
+		ID:   "m1",
+	}
+	msg := getMessageFromEntry(entry)
+	if msg != nil {
+		t.Error("expected nil for entry with empty RawMessage")
+	}
+}
+
+func TestGetMessageFromEntry_InvalidJSON(t *testing.T) {
+	entry := &core.SessionEntry{
+		Type:       "message",
+		ID:         "m1",
+		RawMessage: json.RawMessage(`{invalid`),
+	}
+	msg := getMessageFromEntry(entry)
+	if msg != nil {
+		t.Error("expected nil for entry with invalid JSON")
+	}
+}
+
+func TestExtractFileOperations_WithPrevCompaction(t *testing.T) {
+	details, _ := json.Marshal(CompactionDetails{
+		ReadFiles:     []string{"/prev/read.go"},
+		ModifiedFiles: []string{"/prev/mod.go"},
+	})
+	entries := []*core.SessionEntry{
+		{Type: "compaction", ID: "c1", Details: details},
+	}
+
+	assistantMsg := ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("1", "read", map[string]any{"path": "/new/read.go"}),
+		},
+	})
+	messages := []agent.AgentMessage{agent.NewAgentMessage(assistantMsg)}
+
+	fileOps := extractFileOperations(messages, entries, 0)
+	if _, ok := fileOps.Read["/prev/read.go"]; !ok {
+		t.Error("expected /prev/read.go from previous compaction details")
+	}
+	if _, ok := fileOps.Edited["/prev/mod.go"]; !ok {
+		t.Error("expected /prev/mod.go from previous compaction details")
+	}
+	if _, ok := fileOps.Read["/new/read.go"]; !ok {
+		t.Error("expected /new/read.go from current messages")
+	}
+}
+
+func TestPrepareCompaction_EmptyEntries(t *testing.T) {
+	prep := PrepareCompaction(nil, DefaultCompactionSettings)
+	if prep != nil {
+		t.Error("expected nil for empty entries")
+	}
+}
+
+func TestBuildSummarizationPrompt_WithCustomInstructions(t *testing.T) {
+	prompt := BuildSummarizationPrompt("convo", "", "focus on Go code")
+	if !strings.Contains(prompt, "focus on Go code") {
+		t.Error("expected custom instructions in prompt")
+	}
+}
+
+func TestBuildSummarizationPrompt_UpdateWithCustomInstructions(t *testing.T) {
+	prompt := BuildSummarizationPrompt("convo", "old summary", "focus on tests")
+	if !strings.Contains(prompt, "<previous-summary>") {
+		t.Error("expected <previous-summary>")
+	}
+	if !strings.Contains(prompt, "focus on tests") {
+		t.Error("expected custom instructions in prompt")
+	}
+}
+
+func TestFindCutPoint_SingleEntry(t *testing.T) {
+	entries := []*core.SessionEntry{
+		makeUserEntry("1", "hello"),
+	}
+	result := FindCutPoint(entries, 0, 1, 1000)
+	if result.FirstKeptEntryIndex != 0 {
+		t.Errorf("expected 0, got %d", result.FirstKeptEntryIndex)
+	}
+}
+
+func TestFindTurnStartIndex_NoneFound(t *testing.T) {
+	entries := []*core.SessionEntry{
+		makeAssistantEntry("1", "response", nil),
+		makeToolResultEntry("2"),
+	}
+	idx := FindTurnStartIndex(entries, 1, 0)
+	// No user message found, should return -1
+	if idx != -1 {
+		t.Errorf("expected -1, got %d", idx)
+	}
+}
+
 func TestBuildSummarizationPrompt_Initial(t *testing.T) {
 	prompt := BuildSummarizationPrompt("convo", "", "")
 	if !strings.Contains(prompt, "<conversation>") {

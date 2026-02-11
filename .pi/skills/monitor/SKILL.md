@@ -7,6 +7,11 @@ description: Continually monitor the project for updates
 
 Continually monitor the pi-go project for progress updates and report changes to the user.
 
+> **`PROJECT_ROOT`** refers to the repository root (the directory containing `go.mod`). Set it at the start of every shell session:
+> ```bash
+> PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+> ```
+
 ## What to Monitor
 
 - `docs/plan/07-work-tracker.md` — the master checklist of all work items
@@ -22,10 +27,10 @@ Each monitoring cycle has two steps:
 This command sleeps for 2 minutes, then collects the snapshot, then prints a prompt that tells you to re-read this skill file and continue the loop:
 
 ```bash
-sleep 120 && cd /Users/kfet/dev/ai/pi-go && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15 && echo "" && echo ">>> Re-read .pi/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
+sleep 30 && cd "$PROJECT_ROOT" && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15 && echo "" && echo ">>> Re-read .pi/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
 ```
 
-Use timeout **180** on the bash call.
+Use timeout 40 on the bash call.
 
 ### Step 2: Report and loop
 

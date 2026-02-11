@@ -35,7 +35,9 @@ func daxParseImage() [][][3]int {
 		row := make([][3]int, daxWidth)
 		for x := 0; x < daxWidth; x++ {
 			idx := (y*daxWidth + x) * 3
-			row[x] = [3]int{int(data[idx]), int(data[idx+1]), int(data[idx+2])}
+			if idx+2 < len(data) {
+				row[x] = [3]int{int(data[idx]), int(data[idx+1]), int(data[idx+2])}
+			}
 		}
 		pixels[y] = row
 	}

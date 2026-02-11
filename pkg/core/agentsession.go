@@ -197,9 +197,12 @@ func (s *AgentSession) Subscribe(fn AgentSessionEventListener) func() {
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		// Nil out the listener
 		if idx < len(s.listeners) {
 			s.listeners[idx] = nil
+		}
+		// Compact: remove trailing nil entries
+		for len(s.listeners) > 0 && s.listeners[len(s.listeners)-1] == nil {
+			s.listeners = s.listeners[:len(s.listeners)-1]
 		}
 	}
 }
@@ -471,6 +474,30 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 	return true, nil
+}
+
+// SwitchSession switches to a different session file, reloading messages.
+func (s *AgentSession) SwitchSession(sessionPath string) error {
+	// Abort any in-progress streaming
+	s.Agent.Abort()
+
+	// Switch the session file (loads entries)
+	s.SessionManager.SetSessionFile(sessionPath)
+
+	// Rebuild agent messages from session context
+	ctx := s.SessionManager.BuildSessionContext()
+	s.Agent.ReplaceMessages(ctx.Messages)
+
+	// Apply session thinking level if available
+	if ctx.ThinkingLevel != "" {
+		s.SetThinkingLevel(ctx.ThinkingLevel)
+	}
+
+	// Rebuild system prompt
+	s.buildSystemPrompt()
+	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+
+	return nil
 }
 
 // Fork creates a branch at the given entry ID.

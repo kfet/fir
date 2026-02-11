@@ -97,28 +97,15 @@ If the item turned out to be invalid (code was already fixed, or the review was 
 Tell the user what you fixed:
 > Fixed: `pkg/core/tools/editdiff.go` — replaced `maxOf` with builtin `max()`. Tests pass.
 
-**Refresh your instructions.** Every cycle, re-read this skill file to keep your instructions in context:
-```
-.pi/skills/fix/SKILL.md
-```
-This is not optional. Long-running agents drift. Re-reading your instructions every cycle prevents you from forgetting the process, changing your output format, or skipping steps. Do this even if you think you remember.
+**Refresh your instructions.**
 
-Then check if there's more work:
+Sleep and wait for the reviewer to find more work, and start the next cycle with fresh instructions in the context:
 
 ```bash
-cat docs/review/URGENT.md 2>/dev/null | grep -c '###'
-cat docs/review/BACKLOG.md 2>/dev/null | grep -c '^\- '
+sleep 30 && echo "=== FIX CYCLE REMINDER === Re-read .pi/skills/fix/SKILL.md and follow its instructions to start the next cycle. Check docs/review/URGENT.md and docs/review/BACKLOG.md for new items."
 ```
 
-If items remain, go back to step 1 immediately (no sleep — the fixer works as fast as possible).
-
-If both files are empty (or only contain headers), sleep and wait for the reviewer to find more:
-
-```bash
-sleep 120
-```
-
-Use timeout 180 on the bash call. Then loop back to step 1.
+Use timeout 40 on the bash call. Then loop back to step 1.
 
 ## Rules
 

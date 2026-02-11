@@ -10,7 +10,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/kfet/pi-go/pkg/agent"
 	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/core"
 )
@@ -128,21 +130,15 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdPrompt, nil)
 
 	case CmdSteer:
-		// Steer is a prompt variant that interrupts current streaming
-		go func() {
-			if err := s.session.Prompt(cmd.Message); err != nil {
-				s.outputJSON(NewErrorResponse(id, CmdSteer, err.Error()))
-			}
-		}()
+		// Steer interrupts current streaming and injects a new message
+		msg := agent.NewAgentMessage(ai.NewUserMsg(cmd.Message, time.Now().UnixMilli()))
+		s.session.Agent.Steer(msg)
 		return NewSuccessResponse(id, CmdSteer, nil)
 
 	case CmdFollowUp:
-		// Follow-up queues after current streaming completes
-		go func() {
-			if err := s.session.Prompt(cmd.Message); err != nil {
-				s.outputJSON(NewErrorResponse(id, CmdFollowUp, err.Error()))
-			}
-		}()
+		// Follow-up queues a message for after current streaming completes
+		msg := agent.NewAgentMessage(ai.NewUserMsg(cmd.Message, time.Now().UnixMilli()))
+		s.session.Agent.FollowUp(msg)
 		return NewSuccessResponse(id, CmdFollowUp, nil)
 
 	case CmdAbort:

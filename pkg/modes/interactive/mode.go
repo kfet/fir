@@ -512,9 +512,27 @@ func (m *InteractiveMode) showSessionSelector() {
 }
 
 func (m *InteractiveMode) handleResumeSession(sessionPath string) {
-	// TODO: implement session resume when SessionManager.LoadSession is available
-	_ = sessionPath
-	m.showWarning("Session resume not yet implemented")
+	// Stop loading animation
+	if m.loadingAnimation != nil {
+		m.loadingAnimation.Stop()
+		m.loadingAnimation = nil
+	}
+	m.statusContainer.Clear()
+
+	// Clear streaming state
+	m.streamingComponent = nil
+	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
+
+	// Switch session
+	if err := m.session.SwitchSession(sessionPath); err != nil {
+		m.showWarning(fmt.Sprintf("Failed to resume session: %s", err))
+		return
+	}
+
+	// Rebuild the chat display
+	m.rebuildChatFromMessages()
+	m.footerComponent.Invalidate()
+	m.showStatus("Resumed session")
 }
 
 // ============================================================================
@@ -612,15 +630,25 @@ func (m *InteractiveMode) handleCtrlZ() {
 }
 
 func (m *InteractiveMode) handleClearCommand() {
-	_, err := m.session.NewSessionCmd()
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
-		return
+	if m.session != nil {
+		_, err := m.session.NewSessionCmd()
+		if err != nil {
+			m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
+			return
+		}
 	}
-	m.messageContainer.Clear()
-	m.statusContainer.Clear()
-	m.footerComponent.Invalidate()
-	m.ui.RequestRender(true)
+	if m.messageContainer != nil {
+		m.messageContainer.Clear()
+	}
+	if m.statusContainer != nil {
+		m.statusContainer.Clear()
+	}
+	if m.footerComponent != nil {
+		m.footerComponent.Invalidate()
+	}
+	if m.ui != nil {
+		m.ui.RequestRender(true)
+	}
 	m.showStatus("New session started")
 }
 
@@ -714,24 +742,39 @@ func (m *InteractiveMode) updateEditorBorderColor() {
 // ============================================================================
 
 func (m *InteractiveMode) showMessage(text string) {
+	if m.messageContainer == nil {
+		return
+	}
 	t := itheme.GetTheme()
 	m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	m.messageContainer.AddChild(tuicomp.NewText(t.Fg("muted", text), 1, 0, nil))
-	m.ui.RequestRender(false)
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
 }
 
 func (m *InteractiveMode) showStatus(message string) {
+	if m.statusContainer == nil {
+		return
+	}
 	t := itheme.GetTheme()
 	m.statusContainer.Clear()
 	m.statusContainer.AddChild(tuicomp.NewText(t.Fg("success", message), 1, 0, nil))
-	m.ui.RequestRender(false)
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
 }
 
 func (m *InteractiveMode) showWarning(message string) {
+	if m.statusContainer == nil {
+		return
+	}
 	t := itheme.GetTheme()
 	m.statusContainer.Clear()
 	m.statusContainer.AddChild(tuicomp.NewText(t.Fg("warning", message), 1, 0, nil))
-	m.ui.RequestRender(false)
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
 }
 
 func (m *InteractiveMode) showHelp() {
@@ -757,8 +800,10 @@ Keyboard shortcuts:
 func (m *InteractiveMode) getFooterData() components.FooterData {
 	pwd, _ := os.Getwd()
 	modelID := "unknown"
-	if model := m.session.Model(); model != nil {
-		modelID = model.ID
+	if m.session != nil {
+		if model := m.session.Model(); model != nil {
+			modelID = model.ID
+		}
 	}
 	return components.FooterData{
 		Pwd:         pwd,

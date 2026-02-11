@@ -97,12 +97,9 @@ func NewEditTool(cwd string) agent.AgentTool {
 				return agent.AgentToolResult{}, fmt.Errorf("Could not find the exact text in %s. The old text must match exactly including all whitespace and newlines.", path)
 			}
 
-			// Count occurrences for uniqueness check
-			fuzzyContent := normalizeForFuzzyMatch(normalizedContent)
-			fuzzyOldText := normalizeForFuzzyMatch(normalizedOldText)
-			occurrences := strings.Count(fuzzyContent, fuzzyOldText)
-			if occurrences > 1 {
-				return agent.AgentToolResult{}, fmt.Errorf("Found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.", occurrences, path)
+			// Check uniqueness using the count from fuzzyFindText
+			if matchResult.occurrences > 1 {
+				return agent.AgentToolResult{}, fmt.Errorf("Found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.", matchResult.occurrences, path)
 			}
 
 			if ctx.Err() != nil {
@@ -211,6 +208,7 @@ type fuzzyMatchResult struct {
 	matchLength           int
 	usedFuzzyMatch        bool
 	contentForReplacement string
+	occurrences           int // total number of matches (exact or fuzzy)
 }
 
 // fuzzyFindText tries exact match first, then fuzzy match.
@@ -226,6 +224,7 @@ func fuzzyFindText(content, oldText string) fuzzyMatchResult {
 			matchLength:           len(oldText),
 			usedFuzzyMatch:        false,
 			contentForReplacement: content,
+			occurrences:           strings.Count(content, oldText),
 		}
 	}
 
@@ -247,6 +246,7 @@ func fuzzyFindText(content, oldText string) fuzzyMatchResult {
 		matchLength:           origEnd - origStart,
 		usedFuzzyMatch:        true,
 		contentForReplacement: content,
+		occurrences:           strings.Count(fuzzyContent, fuzzyOldText),
 	}
 }
 

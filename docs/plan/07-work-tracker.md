@@ -199,9 +199,9 @@ keys, utils, fuzzy, image are independent — parallelizable.
 | Status | Go file + test | TS source | Lines | Lock key | Deps |
 |---|---|---|---|---|---|
 | [x] | `theme/theme.go` `theme/theme_test.go` | `coding-agent/src/modes/interactive/theme/theme.ts` | 1100 | `pkg-modes-interactive-theme` | tui/* |
-| [x] | `mode.go` `mode_test.go` (skeleton) | `coding-agent/src/modes/interactive/interactive-mode.ts` | 4362 | `pkg-modes-interactive-mode` | everything |
-| [x] | Components (34/35 ported, index.ts N/A) | `coding-agent/src/modes/interactive/components/` | ~7500 | various | tui/*, core/* |
-| [ ] | **🎯 MILESTONE: Full interactive TUI works** | | | | |
+| [x] | `mode.go` `mode_test.go` | `coding-agent/src/modes/interactive/interactive-mode.ts` | 4362 | `pkg-modes-interactive-mode` | everything |
+| [x] | Components (all ported, index.ts N/A) | `coding-agent/src/modes/interactive/components/` | ~7500 | various | tui/*, core/* |
+| [x] | **🎯 MILESTONE: Full interactive TUI works** | | | | |
 ## Phase 8: Print & RPC Modes
 
 | Status | Go file + test | TS source | Lines | Lock key | Deps |

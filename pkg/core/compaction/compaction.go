@@ -445,6 +445,9 @@ func extractFileOperations(messages []agent.AgentMessage, entries []*core.Sessio
 
 // PrepareCompaction prepares compaction data from session entries.
 func PrepareCompaction(pathEntries []*core.SessionEntry, settings CompactionSettings) *CompactionPreparation {
+	if len(pathEntries) == 0 {
+		return nil
+	}
 	if len(pathEntries) > 0 && pathEntries[len(pathEntries)-1].Type == "compaction" {
 		return nil
 	}

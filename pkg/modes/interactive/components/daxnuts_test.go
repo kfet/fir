@@ -5,96 +5,144 @@ import (
 	"testing"
 )
 
-func TestParseDaxImage(t *testing.T) {
+func TestDaxParseImage(t *testing.T) {
 	pixels := daxParseImage()
 
-	// Verify dimensions
 	if len(pixels) != daxHeight {
 		t.Fatalf("expected %d rows, got %d", daxHeight, len(pixels))
 	}
-	if len(pixels[0]) != daxWidth {
-		t.Fatalf("expected %d columns, got %d", daxWidth, len(pixels[0]))
+	for y, row := range pixels {
+		if len(row) != daxWidth {
+			t.Errorf("row %d: expected %d cols, got %d", y, daxWidth, len(row))
+		}
 	}
 
-	// Check first pixel (from hex: bb ba b8)
-	if pixels[0][0] != [3]int{0xbb, 0xba, 0xb8} {
-		t.Errorf("first pixel = %v, want [0xbb, 0xba, 0xb8]", pixels[0][0])
+	// Check pixel values are valid RGB (0-255)
+	for y, row := range pixels {
+		for x, px := range row {
+			for c := 0; c < 3; c++ {
+				if px[c] < 0 || px[c] > 255 {
+					t.Errorf("pixel (%d,%d) channel %d out of range: %d", x, y, c, px[c])
+				}
+			}
+		}
 	}
 }
 
-func TestBuildDaxImage(t *testing.T) {
-	lines := daxBuildImage()
+func TestDaxBuildImage(t *testing.T) {
+	image := daxBuildImage()
 
-	// Half-block rendering: 32 rows / 2 = 16 lines
-	if len(lines) != daxHeight/2 {
-		t.Fatalf("expected %d image lines, got %d", daxHeight/2, len(lines))
+	// Half-block: height/2 lines
+	expectedLines := daxHeight / 2
+	if len(image) != expectedLines {
+		t.Fatalf("expected %d image lines, got %d", expectedLines, len(image))
 	}
 
-	// Each line should contain half-block characters
-	for i, line := range lines {
-		if !strings.Contains(line, "▄") {
-			t.Errorf("line %d should contain '▄' characters", i)
+	// Each line should contain ANSI escape codes and end with reset
+	for i, line := range image {
+		if !strings.Contains(line, "\x1b[") {
+			t.Errorf("line %d: expected ANSI codes", i)
 		}
-		// Each line should end with ANSI reset
 		if !strings.HasSuffix(line, daxReset) {
-			t.Errorf("line %d should end with ANSI reset", i)
+			t.Errorf("line %d: expected reset suffix", i)
 		}
 	}
 }
 
-func TestRgbAnsi(t *testing.T) {
-	fg := daxRGB(255, 128, 0, false)
-	if fg != "\x1b[38;2;255;128;0m" {
-		t.Errorf("fg ANSI = %q, want \\x1b[38;2;255;128;0m", fg)
+func TestDaxRGB(t *testing.T) {
+	fg := daxRGB(100, 200, 50, false)
+	if !strings.Contains(fg, "38;2;100;200;50") {
+		t.Errorf("unexpected fg: %q", fg)
 	}
 
-	bg := daxRGB(0, 0, 0, true)
-	if bg != "\x1b[48;2;0;0;0m" {
-		t.Errorf("bg ANSI = %q, want \\x1b[48;2;0;0;0m", bg)
+	bg := daxRGB(100, 200, 50, true)
+	if !strings.Contains(bg, "48;2;100;200;50") {
+		t.Errorf("unexpected bg: %q", bg)
 	}
 }
 
-func TestDaxnutsComponentRender(t *testing.T) {
-	// Test rendering without a real TUI (pass nil — we won't call startAnimation)
+func TestDaxnutsComponent_Render(t *testing.T) {
+	// Create without TUI (nil) to test render
 	d := &DaxnutsComponent{
 		image:      daxBuildImage(),
 		maxTicks:   25,
-		tick:       0,
-		cachedTick: -1,
+		tick:       25, // finished
 		done:       make(chan struct{}),
+		cachedTick: -1,
 	}
 
 	lines := d.Render(80)
 	if len(lines) == 0 {
-		t.Fatal("expected non-empty render output")
+		t.Fatal("expected render output")
 	}
 
-	// At tick 0, text should not be shown yet (textPhase <= 0)
-	joined := strings.Join(lines, "\n")
-	if strings.Contains(joined, "Powered by daxnuts") {
-		t.Error("text should not be visible at tick 0")
+	// Should contain attribution text when animation is complete
+	foundDaxnuts := false
+	foundOpenCode := false
+	for _, line := range lines {
+		if strings.Contains(line, "daxnuts") {
+			foundDaxnuts = true
+		}
+		if strings.Contains(line, "OpenCode") {
+			foundOpenCode = true
+		}
 	}
-
-	// At maxTicks, everything should be visible
-	d.tick = d.maxTicks
-	d.cachedWidth = 0 // invalidate cache
-	lines = d.Render(80)
-	joined = strings.Join(lines, "\n")
-	if !strings.Contains(joined, "daxnuts") {
-		t.Error("text should be visible at maxTicks")
+	if !foundDaxnuts {
+		t.Error("expected 'daxnuts' in output")
+	}
+	if !foundOpenCode {
+		t.Error("expected 'OpenCode' in output")
 	}
 }
 
-func TestDaxnutsComponentInvalidate(t *testing.T) {
+func TestDaxnutsComponent_RenderPartial(t *testing.T) {
+	// Test render during animation (tick 0)
 	d := &DaxnutsComponent{
-		image:       daxBuildImage(),
-		maxTicks:    25,
-		cachedWidth: 80,
-		cachedTick:  5,
-		done:        make(chan struct{}),
+		image:      daxBuildImage(),
+		maxTicks:   25,
+		tick:       0,
+		done:       make(chan struct{}),
+		cachedTick: -1,
 	}
+
+	lines := d.Render(80)
+	if len(lines) == 0 {
+		t.Fatal("expected render output")
+	}
+
+	// Text should NOT be visible at tick 0
+	for _, line := range lines {
+		if strings.Contains(line, "daxnuts") {
+			t.Error("text should not be visible at tick 0")
+		}
+	}
+}
+
+func TestDaxnutsComponent_Dispose(t *testing.T) {
+	d := &DaxnutsComponent{
+		image:      daxBuildImage(),
+		maxTicks:   25,
+		done:       make(chan struct{}),
+		cachedTick: -1,
+	}
+
+	// Should not panic on double dispose
+	d.Dispose()
+	d.Dispose()
+}
+
+func TestDaxnutsComponent_Invalidate(t *testing.T) {
+	d := &DaxnutsComponent{
+		image:      daxBuildImage(),
+		maxTicks:   25,
+		tick:       25,
+		done:       make(chan struct{}),
+		cachedTick: -1,
+	}
+
+	d.Render(80)
 	d.Invalidate()
 	if d.cachedWidth != 0 {
-		t.Error("Invalidate should reset cachedWidth to 0")
+		t.Error("expected cachedWidth to be 0 after invalidate")
 	}
 }

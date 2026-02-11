@@ -1,8 +1,36 @@
-# Review Backlog — 2026-02-09
+# Review Backlog — 2026-02-10
 
-**Last reviewed:** Cycle 13, 2026-02-09 20:50 PST — 96 staged + 23 unstaged `.go` files.
-**Build status:** ✅ PASSING — `go vet` clean, all 14 testable packages pass, `-race` clean.
-**Recent fixes:** Compaction tests (10 new), loop edge case tests (4 new), session race tests, `shortenPath` TUI fix.
+**Last reviewed:** Full repo review, 2026-02-09 20:08 PST — all 230 `.go` files (116 source + 114 test).
+**Build status:** ✅ PASSING — `go build ./...` clean, `go vet ./pkg/...` clean, all 14 testable packages pass, `-race` clean on agent+core.
+**Coverage:** ai 96.6%, core/tools 86.4%, agent 82.5%, core 81.8%, print 73.3%, tui/components 71.4%, compaction 69.1%, tui 65.8%, interactive/components 58.9%, theme 53.1%, **providers 33.7%**, **rpc 13.2%**, **interactive 2.3%**.
+
+---
+
+## E2E Test Results — 2026-02-10 22:02 PST (Cycle 3)
+
+**10 tests run, 10 passed, 0 failed.** No API keys available — LLM tests skipped.
+
+### Passing
+- `3a` — `--help`: exit 0, contains Usage, --provider, --model ✅
+- `3b` — `--version`: exit 0, "pi-go dev" ✅
+- `3c` — `--list-models`: exit 0, 715 models in provider/id format ✅
+- `1d` — Print mode no API keys: exit 1, error "Forbidden", no panic ✅
+- `2a` — RPC `get_state`: valid JSON, success:true, data has model/thinkingLevel/isStreaming ✅
+- `2c` — RPC `get_available_models`: success:true, data.models is array (37 models) ✅
+- `2d` — RPC `set_thinking_level`: set success, get_state confirms thinkingLevel:"high" ✅
+- `2e` — RPC unknown command: success:false, error "Unknown command: bogus_command" ✅
+- `2f` — RPC malformed JSON: success:false, parse error, no crash ✅
+- `2g` — RPC prompt+EOF: prompt accepted, clean exit 0 on stdin close ✅
+
+### Previously Fixed (all confirmed working)
+- ~~`3c` — `--list-models`: hangs~~ ✅ FIXED
+- ~~RPC mode not wired up~~ ✅ FIXED
+- ~~`2a`–`2f` — RPC stdin consumed by `readPipedStdin()`~~ ✅ FIXED — guarded with `ModeRPC` check
+
+### Skipped (no API keys)
+- `1a`, `1b`, `1c`, `1e` — Print mode with LLM
+- `2b` — RPC prompt with LLM streaming
+- `4a`, `4b`, `4c` — Tool execution (read, write, bash)
 
 ---
 
@@ -12,34 +40,23 @@
 ### `pkg/agent/types.go` — Duplicate `ThinkingLevel` type
 `agent.ThinkingLevel` duplicates `ai.ThinkingLevel` with an added `"off"` value. Consider using `ai.ThinkingLevel` directly with an empty string representing "off", or a single shared type. The `ToAIThinkingLevel()` method is a code smell indicating the duplication.
 
-### `pkg/ai/providers/openai.go` + `anthropic.go` + `bedrock.go` + `google.go` — Providers ignore the passed `context.Context`
-All streaming providers start goroutines that create a fresh `context.Background()`:
-```go
-// anthropic.go:168
-reqCtx := context.Background()
-// openai.go:89
-runCtx := context.Background()
-```
-The outer context from the agent loop (which carries cancellation for `Abort()`) is never threaded through. This means **aborting a stream doesn't cancel the HTTP request**. The goroutine continues reading from the provider until it naturally completes.
+<!-- Fixed: removed assets/themes/ — canonical location is pkg/modes/interactive/themes/ -->
 
-**Fix:** Accept `context.Context` in the stream function signature or thread the cancellation context into the goroutine. This is both a simplification (remove the detached context) and a correctness fix.
+<!-- Fixed: fuzzyFindText now returns occurrence count in fuzzyMatchResult, eliminating redundant normalizeForFuzzyMatch call -->
 
-### `pkg/core/session.go:297-305` — UUID collision retry loop
-```go
-func (sm *SessionManager) generateID() string {
-    for i := 0; i < 100; i++ {
-        id := uuid.New().String()[:8]
-        if _, ok := sm.byID[id]; !ok {
-            return id
-        }
-    }
-    return uuid.New().String()
-}
-```
-Truncating UUIDs to 8 chars (32 bits) creates meaningful collision risk at ~65K entries (birthday bound). The 100-retry loop is fine for safety, but the full UUID fallback has a different length format than the truncated ones, which could cause subtle issues. Consider using a longer prefix (12+ chars) to reduce collision probability.
+<!-- Fixed: rewriteFile and persistEntry now log errors to stderr instead of silently discarding them -->
 
-### `pkg/core/settings.go:123-155` — `deepMergeSettings` is over-complex
-Round-tripping through JSON to merge two typed structs is expensive and fragile. A direct field-by-field merge (or using `mergo` library) would be clearer and avoid silent data loss from marshal errors.
+<!-- Fixed: Subscribe unsub now compacts trailing nil entries from the listeners slice -->
+
+<!-- Removed: jsonString is used by openai_responses.go — it's a package-level helper, not unused -->
+
+<!-- Fixed: ListSessions now uses sort.Slice instead of insertion sort -->
+
+<!-- Removed: context.Context is already threaded properly — all providers pass ctx to http.NewRequestWithContext or SSEClient.Stream. The cited line numbers (anthropic.go:168, openai.go:89) don't exist in the current code. -->
+
+<!-- Fixed: UUID prefix increased from 8 to 12 chars (48-bit entropy, birthday collision at ~16M), fallback also truncated to 12 for consistency -->
+
+<!-- Fixed: deepMergeSettings replaced with direct field-by-field merge — no more JSON round-trip -->
 
 ---
 
@@ -56,30 +73,32 @@ Round-tripping through JSON to merge two typed structs is expensive and fragile.
 <!-- Skipped: by design, matches upstream TS behavior -->
 ### `pkg/core/tools/write.go:64` — Path traversal: write accepts absolute paths
 
+<!-- Fixed: session.go and settings.go now use 0600 instead of 0644, matching authstorage.go -->
+
 ---
 
 ## Test Coverage
+
+<!-- Fixed: providers coverage 26.9% → 33.7%. Deduplicated anthropic_test.go (removed ~800 lines of duplicates), added 25+ tests for convertAnthropicMessages, updateAnthropicUsage, toolResultContentToString, supportsAdaptiveThinking, jsonInt/jsonString, buildAnthropicParams (thinking/adaptive/temperature/OAuth system prompt), buildAnthropicHeaders (model/option headers, internal header stripping), convertAnthropicTools, resolveCacheRetention, StreamSimpleAnthropic (no reasoning, nil options, adaptive, budget), user image content. -->
+
+<!-- Fixed: Added 15 Google provider tests — buildGoogleRequestBody (basic, tools, maxTokens override, temperature, no system prompt, assistant+tool result messages), parseGoogleResponse (text merging, mixed content, empty data lines), mapGoogleStopReason (all values), streaming (tool call, thinking, HTTP error, context cancellation, request headers), StreamSimpleGoogle (no key, with key). Added 3 test fixtures. -->
+
+<!-- Fixed: Added server_handlecommand_test.go with 24 tests covering all command types in handleCommand switch, error paths, and response structure -->
+
+<!-- Fixed: compaction coverage 69.1% → 78.8%. Added 19 tests for custom message types, getMessageFromEntry, extractFileOperations, extractTextFromResponse, empty entries, single entry, and FindTurnStartIndex edge cases. -->
+
+<!-- Fixed: Added 15 tests for checkAutoCompaction (nil runner, no messages, no assistant, below threshold, threshold trigger, overflow trigger, runner error, overflow error WillRetry, nil model), SwitchSession, GetAvailableThinkingLevels (nil/non-reasoning/reasoning model), and persistMessage (user/assistant). Fork was already tested. ResumeSession doesn't exist as a method. -->
+
+<!-- Fixed: Added tests for corrupt session file recovery (TestSessionManagerCorruptFileRecovery) and empty file handling (TestSessionManagerEmptyFile). ContinueRecentSession and ListSessions were already tested. -->
+
+<!-- Fixed: Added tests for command timeout, output trimming, empty output, failure caching, and command-in-headers -->
+
+<!-- Fixed: Added 6 tests for createSessionManager (default, no-session, named session, custom dir, continue, continue with no existing). readPipedStdin not testable without mocking os.Stdin; model resolution is integration-level. -->
 
 ---
 
 ## Correctness (TS→Go Port)
 
 <!-- Removed: read.go FormatSize — not a bug, reviewer noted this -->
-### `pkg/core/tools/read.go:159` — `FormatSize` called with character count, not byte count
-```go
-firstLineSize := FormatSize(len(allLines[startLine]))
-```
-`len(string)` returns bytes in Go, which is correct for `FormatSize`. But the message says "exceeds limit" comparing to `DefaultMaxBytes` — this is fine. No bug, just noting the subtle Go `len` semantics are correct here.
 
-### `pkg/agent/agent.go:368-369` — `AgentLoop` and `AgentLoopContinue` return values ignored
-```go
-go func() {
-    if messages != nil {
-        AgentLoop(ctx, messages, agentCtx, config, streamFn, events)
-    } else {
-        AgentLoopContinue(ctx, agentCtx, config, streamFn, events)
-    }
-    close(events)
-}()
-```
-Both functions return `[]AgentMessage` but the return values are discarded. The results are communicated via the events channel, so this is probably fine, but the unused return values suggest the API could be simplified.
+<!-- Removed: AgentLoop return values — results communicated via events channel, discarding return is intentional -->

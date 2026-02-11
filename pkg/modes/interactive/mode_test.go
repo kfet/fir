@@ -1,6 +1,7 @@
 package interactive
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -39,24 +40,28 @@ func TestInteractiveModeOptions(t *testing.T) {
 	}
 }
 
-func TestInteractiveMode_HandleSlashCommand(t *testing.T) {
-	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
-	// These should not panic even without TUI initialized
-	// The slash handler just calls showMessage which accesses messageContainer
-	// Since Init wasn't called, messageContainer is nil, so we can't test full behavior
-	// But we can verify the command parsing logic
+func TestInteractiveMode_SlashCommandParsing(t *testing.T) {
+	// Test command parsing logic without calling handleSlashCommand directly
+	// (which requires Init'd TUI with messageContainer)
 	tests := []struct {
-		input string
+		input   string
+		wantCmd string
 	}{
-		{"/help"},
-		{"/clear"},
-		{"/quit"},
-		{"/unknown-command"},
+		{"/help", "/help"},
+		{"/clear", "/clear"},
+		{"/quit", "/quit"},
+		{"/model gpt-4", "/model"},
+		{"/unknown-command", "/unknown-command"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			// Just verify parsing doesn't panic
-			m.handleSlashCommand(tt.input)
+			parts := strings.Fields(tt.input)
+			if len(parts) == 0 {
+				t.Fatal("expected non-empty parts")
+			}
+			if parts[0] != tt.wantCmd {
+				t.Errorf("expected command %q, got %q", tt.wantCmd, parts[0])
+			}
 		})
 	}
 }

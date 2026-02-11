@@ -587,6 +587,85 @@ func TestSessionManagerConcurrentMultipleWriters(t *testing.T) {
 	}
 }
 
+func TestSessionManagerCorruptFileRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+	os.MkdirAll(sessDir, 0755)
+
+	// Create a session file with some corrupt lines mixed in
+	header, _ := json.Marshal(SessionHeader{
+		Type:      "session",
+		ID:        "test-corrupt",
+		Version:   CurrentSessionVersion,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Cwd:       tmpDir,
+	})
+
+	userMsg := ai.NewUserMsg("hello from corrupt file", time.Now().UnixMilli())
+	userRaw, _ := json.Marshal(userMsg)
+	entry1, _ := json.Marshal(SessionEntry{
+		ID:         "entry-1",
+		Type:       "message",
+		RawMessage: userRaw,
+	})
+
+	assistantMsg := ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("response")},
+		Provider: "test",
+		Model:    "test",
+	})
+	assistantRaw, _ := json.Marshal(assistantMsg)
+	entry2, _ := json.Marshal(SessionEntry{
+		ID:         "entry-2",
+		Type:       "message",
+		ParentID:   "entry-1",
+		RawMessage: assistantRaw,
+	})
+
+	// Write file with corrupt lines interspersed
+	content := string(header) + "\n" +
+		string(entry1) + "\n" +
+		"this is garbage {{{not json\n" +
+		string(entry2) + "\n" +
+		"another corrupt line\n"
+
+	sessionFile := filepath.Join(sessDir, "test-corrupt.jsonl")
+	os.WriteFile(sessionFile, []byte(content), 0600)
+
+	// Should load successfully, skipping corrupt lines
+	sm := OpenSessionManager(sessionFile, sessDir)
+	if sm.GetSessionID() != "test-corrupt" {
+		t.Errorf("expected session ID 'test-corrupt', got %q", sm.GetSessionID())
+	}
+
+	entries := sm.GetEntries()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 valid entries (skipping corrupt lines), got %d", len(entries))
+	}
+	if entries[0].ID != "entry-1" {
+		t.Errorf("expected first entry ID 'entry-1', got %q", entries[0].ID)
+	}
+	if entries[1].ID != "entry-2" {
+		t.Errorf("expected second entry ID 'entry-2', got %q", entries[1].ID)
+	}
+}
+
+func TestSessionManagerEmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+	os.MkdirAll(sessDir, 0755)
+
+	// Create an empty session file
+	sessionFile := filepath.Join(sessDir, "empty.jsonl")
+	os.WriteFile(sessionFile, []byte(""), 0600)
+
+	sm := OpenSessionManager(sessionFile, sessDir)
+	entries := sm.GetEntries()
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for empty file, got %d", len(entries))
+	}
+}
+
 func TestIsValidSessionFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
