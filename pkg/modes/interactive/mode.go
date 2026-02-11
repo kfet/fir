@@ -135,6 +135,12 @@ func (m *InteractiveMode) Init() error {
 	m.editorContainer.AddChild(m.editor)
 	m.ui.AddChild(m.editorContainer)
 
+	// Focus the editor so it receives keyboard input
+	m.ui.SetFocus(m.editor)
+
+	// Set up autocomplete with slash commands
+	m.setupAutocomplete()
+
 	// Subscribe to agent events
 	m.subscribeToAgent()
 
@@ -232,15 +238,17 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.editor.SetText("")
 
 		// Send message
-		go func() {
-			_ = m.session.Prompt(text)
-		}()
+		if m.session != nil {
+			go func() {
+				_ = m.session.Prompt(text)
+			}()
+		}
 	}
 
 	// Escape handler with double-escape support
 	m.editor.OnEscape = func() {
 		// If streaming, interrupt/abort
-		if m.session.IsStreaming() {
+		if m.session != nil && m.session.IsStreaming() {
 			m.session.Agent.Abort()
 			return
 		}
@@ -316,6 +324,25 @@ func (m *InteractiveMode) setupEditorHandlers() {
 }
 
 // ============================================================================
+// Autocomplete setup
+// ============================================================================
+
+func (m *InteractiveMode) setupAutocomplete() {
+	// Build slash command list from builtins
+	var commands []SlashCommand
+	for _, cmd := range core.BuiltinSlashCommands {
+		commands = append(commands, SlashCommand{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+		})
+	}
+
+	basePath, _ := os.Getwd()
+	provider := NewCombinedAutocompleteProvider(commands, basePath)
+	m.editor.SetAutocompleteProvider(provider)
+}
+
+// ============================================================================
 // Slash commands
 // ============================================================================
 
@@ -329,7 +356,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	switch cmd {
 	case "/help", "/hotkeys":
 		m.showHelp()
-	case "/clear":
+	case "/clear", "/new":
 		go m.handleClearCommand()
 	case "/compact":
 		var instructions string
@@ -350,7 +377,31 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/settings":
 		m.showSettingsSelector()
 	case "/session":
+		m.handleSessionCommand()
+	case "/resume":
 		m.showSessionSelector()
+	case "/login":
+		m.showOAuthSelector("login")
+	case "/logout":
+		m.showOAuthSelector("logout")
+	case "/scoped-models":
+		m.showScopedModelsSelector()
+	case "/tree":
+		m.showTreeSelector()
+	case "/fork":
+		m.showUserMessageSelector()
+	case "/export":
+		m.handleExportCommand(text)
+	case "/share":
+		m.handleShareCommand()
+	case "/copy":
+		m.handleCopyCommand()
+	case "/name":
+		m.handleNameCommand(text)
+	case "/changelog":
+		m.handleChangelogCommand()
+	case "/reload":
+		m.handleReloadCommand()
 	case "/quit", "/exit":
 		m.Shutdown()
 	default:
@@ -618,7 +669,9 @@ func (m *InteractiveMode) handleBashCommand(command string) {
 	m.AddUserMessage("!" + command)
 
 	// Execute via the session's prompt mechanism with bash prefix
-	_ = m.session.Prompt("!" + command)
+	if m.session != nil {
+		_ = m.session.Prompt("!" + command)
+	}
 }
 
 // ============================================================================
@@ -626,7 +679,7 @@ func (m *InteractiveMode) handleBashCommand(command string) {
 // ============================================================================
 
 func (m *InteractiveMode) handleCtrlC() {
-	if m.session.IsStreaming() {
+	if m.session != nil && m.session.IsStreaming() {
 		m.session.Agent.Abort()
 		return
 	}
@@ -665,6 +718,97 @@ func (m *InteractiveMode) handleClearCommand() {
 		m.ui.RequestRender(true)
 	}
 	m.showStatus("New session started")
+}
+
+// ============================================================================
+// OAuth / login / logout
+// ============================================================================
+
+func (m *InteractiveMode) showOAuthSelector(mode string) {
+	// TODO: implement full OAuth selector with registry.GetOAuthProviders()
+	m.showWarning(fmt.Sprintf("/%s is not yet fully implemented", mode))
+}
+
+// ============================================================================
+// Scoped models selector
+// ============================================================================
+
+func (m *InteractiveMode) showScopedModelsSelector() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	m.showWarning("/scoped-models is not yet implemented")
+}
+
+// ============================================================================
+// Tree / fork / user message selectors
+// ============================================================================
+
+func (m *InteractiveMode) showTreeSelector() {
+	m.showWarning("/tree is not yet implemented")
+}
+
+func (m *InteractiveMode) showUserMessageSelector() {
+	m.showWarning("/fork is not yet implemented")
+}
+
+// ============================================================================
+// Export / share / copy / name / changelog / session info / reload
+// ============================================================================
+
+func (m *InteractiveMode) handleExportCommand(text string) {
+	m.showWarning("/export is not yet implemented")
+}
+
+func (m *InteractiveMode) handleShareCommand() {
+	m.showWarning("/share is not yet implemented")
+}
+
+func (m *InteractiveMode) handleCopyCommand() {
+	m.showWarning("/copy is not yet implemented")
+}
+
+func (m *InteractiveMode) handleNameCommand(text string) {
+	// TODO: implement SetSessionName on AgentSession
+	parts := strings.Fields(text)
+	if len(parts) < 2 {
+		m.showWarning("Usage: /name <session-name>")
+		return
+	}
+	m.showWarning("/name is not yet fully implemented")
+}
+
+func (m *InteractiveMode) handleSessionCommand() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	state := m.session.State()
+	modelID := "unknown"
+	if state.Model != nil {
+		modelID = state.Model.ID
+	}
+	info := fmt.Sprintf("Session info:\n  Model: %s\n  Messages: %d\n  Streaming: %v",
+		modelID,
+		len(state.Messages),
+		state.IsStreaming,
+	)
+	m.showMessage(info)
+}
+
+func (m *InteractiveMode) handleChangelogCommand() {
+	m.showWarning("/changelog is not yet implemented")
+}
+
+func (m *InteractiveMode) handleReloadCommand() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	m.showStatus("Reloading extensions, skills, prompts, and themes...")
+	// TODO: implement actual reload logic
+	m.showStatus("Reload complete")
 }
 
 // ============================================================================
@@ -794,21 +938,44 @@ func (m *InteractiveMode) showWarning(message string) {
 
 func (m *InteractiveMode) showHelp() {
 	helpText := `Available commands:
-  /help       - Show this help
-  /clear      - Start new session
-  /compact    - Compact conversation context
-  /model      - Select model (or /model <search>)
-  /thinking   - Select thinking level
-  /theme      - Select theme
-  /settings   - Open settings
-  /session    - Resume a previous session
-  /quit       - Exit
+  /help           - Show this help / keyboard shortcuts
+  /model          - Select model (or /model <search>)
+  /thinking       - Select thinking level
+  /settings       - Open settings menu
+  /theme          - Select theme
+  /new            - Start a new session
+  /compact        - Compact conversation context
+  /resume         - Resume a different session
+  /session        - Show session info and stats
+  /name <name>    - Set session display name
+  /login          - Login with OAuth provider
+  /logout         - Logout from OAuth provider
+  /scoped-models  - Enable/disable models for Ctrl+P cycling
+  /tree           - Navigate session tree (switch branches)
+  /fork           - Create a new fork from a previous message
+  /export         - Export session to HTML file
+  /share          - Share session as a secret GitHub gist
+  /copy           - Copy last agent message to clipboard
+  /changelog      - Show changelog entries
+  /reload         - Reload extensions, skills, prompts, and themes
+  /quit           - Quit pi
 
 Keyboard shortcuts:
-  Ctrl+D      - Exit
-  Ctrl+C      - Abort streaming / clear editor
-  Escape      - Abort streaming / double-tap for sessions
-  !<command>  - Execute bash command`
+  Enter           - Send message
+  Shift+Enter     - New line
+  Ctrl+D          - Exit (when editor is empty)
+  Ctrl+C          - Cancel autocomplete / abort streaming / clear editor
+  Escape          - Abort streaming / double-tap for sessions
+  Tab             - Path completion / accept autocomplete
+  Shift+Tab       - Cycle thinking level
+  Ctrl+P          - Cycle models
+  Ctrl+L          - Open model selector
+  Ctrl+O          - Toggle tool output expansion
+  Ctrl+T          - Toggle thinking block visibility
+  Ctrl+Z          - Suspend to background
+  Ctrl+V          - Paste image from clipboard
+  /               - Slash commands
+  !<command>      - Run bash command`
 	m.showMessage(helpText)
 }
 

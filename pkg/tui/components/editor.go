@@ -753,8 +753,14 @@ func (e *Editor) Render(width int) []string {
 		cursorInPadding := false
 
 		if ll.hasCursor {
-			before := displayText[:ll.cursorPos]
-			after := displayText[ll.cursorPos:]
+			// Clamp cursorPos to displayText length to avoid slice bounds panic
+			// when concurrent input changes text between layout and render.
+			cp := ll.cursorPos
+			if cp > len(displayText) {
+				cp = len(displayText)
+			}
+			before := displayText[:cp]
+			after := displayText[cp:]
 
 			marker := ""
 			if emitCursorMarker {
