@@ -380,7 +380,8 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 
 	headers := map[string]string{
-		"accept": "application/json",
+		"accept":            "application/json",
+		"anthropic-version": "2023-06-01",
 		"anthropic-dangerous-direct-browser-access": "true",
 	}
 
@@ -675,18 +676,30 @@ func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {
 	return result
 }
 
+// updateAnthropicUsage updates usage from an Anthropic usage object.
+// Only updates fields that are present (non-null) to preserve values from
+// earlier events (e.g. input_tokens from message_start when proxies omit
+// it in message_delta).
 func updateAnthropicUsage(output *ai.AssistantMessage, usage map[string]any, model *ai.Model) {
-	if v, ok := usage["input_tokens"].(float64); ok {
-		output.Usage.Input = int(v)
+	if v, ok := usage["input_tokens"]; ok && v != nil {
+		if f, ok := v.(float64); ok {
+			output.Usage.Input = int(f)
+		}
 	}
-	if v, ok := usage["output_tokens"].(float64); ok {
-		output.Usage.Output = int(v)
+	if v, ok := usage["output_tokens"]; ok && v != nil {
+		if f, ok := v.(float64); ok {
+			output.Usage.Output = int(f)
+		}
 	}
-	if v, ok := usage["cache_read_input_tokens"].(float64); ok {
-		output.Usage.CacheRead = int(v)
+	if v, ok := usage["cache_read_input_tokens"]; ok && v != nil {
+		if f, ok := v.(float64); ok {
+			output.Usage.CacheRead = int(f)
+		}
 	}
-	if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
-		output.Usage.CacheWrite = int(v)
+	if v, ok := usage["cache_creation_input_tokens"]; ok && v != nil {
+		if f, ok := v.(float64); ok {
+			output.Usage.CacheWrite = int(f)
+		}
 	}
 	output.Usage.TotalTokens = output.Usage.Input + output.Usage.Output +
 		output.Usage.CacheRead + output.Usage.CacheWrite

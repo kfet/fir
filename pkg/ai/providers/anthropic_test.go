@@ -417,6 +417,22 @@ func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 
 // --- Header tests ---
 
+func TestAnthropic_AnthropicVersionHeader(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
+
+	// Non-OAuth
+	headers := buildAnthropicHeaders(model, "sk-test", false, nil)
+	if headers["anthropic-version"] != "2023-06-01" {
+		t.Errorf("expected anthropic-version 2023-06-01, got %q", headers["anthropic-version"])
+	}
+
+	// OAuth
+	oauthHeaders := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil)
+	if oauthHeaders["anthropic-version"] != "2023-06-01" {
+		t.Errorf("expected anthropic-version 2023-06-01 for OAuth, got %q", oauthHeaders["anthropic-version"])
+	}
+}
+
 func TestAnthropic_OAuthHeaders(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
 	headers := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil)
@@ -828,6 +844,38 @@ func TestAnthropic_UpdateUsagePartial(t *testing.T) {
 	}
 	if output.Usage.TotalTokens != 42 {
 		t.Errorf("expected total=42, got %d", output.Usage.TotalTokens)
+	}
+}
+
+func TestAnthropic_UpdateUsagePreservesFieldsOnNull(t *testing.T) {
+	model := &ai.Model{ID: "test", Cost: ai.ModelCost{}}
+	output := &ai.AssistantMessage{Usage: ai.ZeroUsage()}
+
+	// First update: message_start sets input_tokens
+	usage1 := map[string]any{
+		"input_tokens":            float64(100),
+		"output_tokens":           float64(0),
+		"cache_read_input_tokens": float64(50),
+	}
+	updateAnthropicUsage(output, usage1, model)
+	if output.Usage.Input != 100 {
+		t.Errorf("expected input=100 after message_start, got %d", output.Usage.Input)
+	}
+
+	// Second update: message_delta only has output_tokens (proxy omits input)
+	// Simulates proxies that don't include input_tokens in message_delta
+	usage2 := map[string]any{
+		"output_tokens": float64(25),
+	}
+	updateAnthropicUsage(output, usage2, model)
+	if output.Usage.Input != 100 {
+		t.Errorf("expected input=100 preserved from message_start, got %d", output.Usage.Input)
+	}
+	if output.Usage.Output != 25 {
+		t.Errorf("expected output=25, got %d", output.Usage.Output)
+	}
+	if output.Usage.CacheRead != 50 {
+		t.Errorf("expected cacheRead=50 preserved, got %d", output.Usage.CacheRead)
 	}
 }
 

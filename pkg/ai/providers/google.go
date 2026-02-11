@@ -413,6 +413,25 @@ func buildGoogleRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 		}
 	}
 
+	// Thinking config (passed via headers from StreamSimple)
+	if options != nil && options.Headers != nil {
+		if options.Headers["x-google-thinking-enabled"] == "true" {
+			thinkingConfig := map[string]any{
+				"includeThoughts": true,
+			}
+			if level := options.Headers["x-google-thinking-level"]; level != "" {
+				thinkingConfig["thinkingLevel"] = level
+			} else if budget := options.Headers["x-google-thinking-budget"]; budget != "" {
+				var b int
+				fmt.Sscanf(budget, "%d", &b)
+				if b > 0 {
+					thinkingConfig["thinkingBudget"] = b
+				}
+			}
+			genConfig["thinkingConfig"] = thinkingConfig
+		}
+	}
+
 	return json.Marshal(body)
 }
 
@@ -431,7 +450,82 @@ func StreamSimpleGoogle(ctx context.Context, model *ai.Model, prompt ai.Context,
 	}
 
 	base := BuildBaseOptions(model, options, apiKey)
+
+	if base.Headers == nil {
+		base.Headers = map[string]string{}
+	}
+
+	if options != nil && options.Reasoning != "" && model.Reasoning {
+		base.Headers["x-google-thinking-enabled"] = "true"
+
+		effort := ClampReasoning(options.Reasoning)
+
+		// Gemini 3 models use thinking levels
+		if isGemini3Model(model) {
+			level := mapGeminiThinkingLevel(effort, model)
+			base.Headers["x-google-thinking-level"] = level
+		} else {
+			// Older models use budget-based thinking
+			budget := getGoogleBudget(model, effort, options.ThinkingBudgets)
+			base.Headers["x-google-thinking-budget"] = fmt.Sprintf("%d", budget)
+		}
+	}
+
 	return StreamGoogle(ctx, model, prompt, base)
+}
+
+// isGemini3Model returns true for Gemini 3 models (pro or flash).
+func isGemini3Model(model *ai.Model) bool {
+	id := strings.ToLower(model.ID)
+	return strings.Contains(id, "gemini-3")
+}
+
+// mapGeminiThinkingLevel maps our thinking levels to Gemini's thinking levels.
+func mapGeminiThinkingLevel(level ai.ThinkingLevel, model *ai.Model) string {
+	id := strings.ToLower(model.ID)
+	isFlash := strings.Contains(id, "flash")
+
+	switch level {
+	case ai.ThinkingMinimal:
+		if isFlash {
+			return "THINKING_LEVEL_LOW"
+		}
+		return "THINKING_LEVEL_LOW"
+	case ai.ThinkingLow:
+		return "THINKING_LEVEL_LOW"
+	case ai.ThinkingMedium:
+		return "THINKING_LEVEL_MEDIUM"
+	case ai.ThinkingHigh:
+		return "THINKING_LEVEL_HIGH"
+	case ai.ThinkingXHigh:
+		return "THINKING_LEVEL_MAX"
+	default:
+		return "THINKING_LEVEL_MEDIUM"
+	}
+}
+
+// getGoogleBudget returns the thinking budget tokens for Google models.
+func getGoogleBudget(model *ai.Model, effort ai.ThinkingLevel, budgets *ai.ThinkingBudgets) int {
+	if b := budgets.BudgetForLevel(effort); b > 0 {
+		return b
+	}
+
+	// Default budgets
+	maxTokens := model.MaxTokens
+	switch effort {
+	case ai.ThinkingMinimal:
+		return 1024
+	case ai.ThinkingLow:
+		return maxTokens / 8
+	case ai.ThinkingMedium:
+		return maxTokens / 4
+	case ai.ThinkingHigh:
+		return maxTokens / 2
+	case ai.ThinkingXHigh:
+		return maxTokens
+	default:
+		return maxTokens / 4
+	}
 }
 
 // RegisterGoogle registers the Google Gemini provider.

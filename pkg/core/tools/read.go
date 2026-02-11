@@ -195,22 +195,26 @@ func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, e
 	return result, nil
 }
 
-// readImage reads an image file and returns it as base64.
+// readImage reads an image file, resizes if needed, and returns it as base64.
 func readImage(absolutePath, displayPath, mimeType string) (agent.AgentToolResult, error) {
 	data, err := os.ReadFile(absolutePath)
 	if err != nil {
 		return agent.AgentToolResult{}, fmt.Errorf("failed to read image %s: %w", displayPath, err)
 	}
 
-	// Images are sent as-is in base64 (no resize in Go port yet).
-	// TODO: Add image resize support
 	b64 := base64.StdEncoding.EncodeToString(data)
-	textNote := fmt.Sprintf("Read image file [%s]", mimeType)
+
+	// Resize image if needed (max 2000x2000, max 4.5MB)
+	resized := ResizeImage(b64, mimeType, nil)
+	textNote := fmt.Sprintf("Read image file [%s]", resized.MimeType)
+	if dimNote := FormatDimensionNote(resized); dimNote != "" {
+		textNote += "\n" + dimNote
+	}
 
 	return agent.AgentToolResult{
 		Content: []ai.ToolResultContent{
 			{Type: "text", Text: textNote},
-			{Type: "image", Data: b64, MimeType: mimeType},
+			{Type: "image", Data: resized.Data, MimeType: resized.MimeType},
 		},
 	}, nil
 }

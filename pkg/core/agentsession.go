@@ -3,8 +3,10 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -126,6 +128,10 @@ type AgentSession struct {
 
 	// System prompt
 	baseSystemPrompt string
+
+	// Bash execution
+	bashCancel   context.CancelFunc
+	bashCancelMu sync.Mutex
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -270,8 +276,12 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 
-	// Build user message
-	content := text
+	// Expand skill commands (/skill:name args) and prompt templates (/template args)
+	content := s.expandSkillCommand(text)
+	if templates, _ := s.resourceLoader.GetPrompts(); len(templates) > 0 {
+		content = ExpandPromptTemplate(content, templates)
+	}
+
 	ts := time.Now().UnixMilli()
 	userMsg := agent.NewAgentMessage(ai.NewUserMsg(content, ts))
 
@@ -319,6 +329,48 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	s.baseSystemPrompt = prompt
+}
+
+// expandSkillCommand expands /skill:<name> commands into skill XML blocks.
+// Returns the original text unchanged if it's not a skill command.
+func (s *AgentSession) expandSkillCommand(text string) string {
+	if !strings.HasPrefix(text, "/skill:") {
+		return text
+	}
+
+	spaceIdx := strings.Index(text, " ")
+	var skillName, args string
+	if spaceIdx == -1 {
+		skillName = text[7:]
+	} else {
+		skillName = text[7:spaceIdx]
+		args = strings.TrimSpace(text[spaceIdx+1:])
+	}
+
+	skills, _ := s.resourceLoader.GetSkills()
+	var found *Skill
+	for i := range skills {
+		if skills[i].Name == skillName {
+			found = &skills[i]
+			break
+		}
+	}
+	if found == nil {
+		return text
+	}
+
+	data, err := os.ReadFile(found.FilePath)
+	if err != nil {
+		return text
+	}
+
+	body := strings.TrimSpace(StripFrontmatter(string(data)))
+	skillBlock := fmt.Sprintf("<skill name=%q location=%q>\nReferences are relative to %s.\n\n%s\n</skill>",
+		found.Name, found.FilePath, found.BaseDir, body)
+	if args != "" {
+		return skillBlock + "\n\n" + args
+	}
+	return skillBlock
 }
 
 // ============================================================================
@@ -463,6 +515,16 @@ func (s *AgentSession) ScopedModelsRef() []ScopedModel {
 	return s.scopedModels
 }
 
+// SetSessionName sets the display name for the current session.
+func (s *AgentSession) SetSessionName(name string) {
+	s.SessionManager.AppendSessionInfo(name)
+}
+
+// GetSessionName returns the display name for the current session.
+func (s *AgentSession) GetSessionName() string {
+	return s.SessionManager.GetSessionName()
+}
+
 // ============================================================================
 // Session management
 // ============================================================================
@@ -501,9 +563,111 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 }
 
 // Fork creates a branch at the given entry ID.
-// TODO: implement when SessionManager.Fork is available
-func (s *AgentSession) Fork(entryID string) error {
-	return fmt.Errorf("fork not yet implemented")
+// Returns the selected user message text and whether it was cancelled.
+func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool, err error) {
+	previousSessionFile := s.SessionManager.GetSessionFile()
+	entry := s.SessionManager.GetEntry(entryID)
+
+	if entry == nil || entry.Type != "message" {
+		return "", false, fmt.Errorf("invalid entry ID for forking")
+	}
+
+	// Verify it's a user message
+	var probe struct {
+		Role string `json:"role"`
+	}
+	if json.Unmarshal(entry.RawMessage, &probe) != nil || probe.Role != "user" {
+		return "", false, fmt.Errorf("invalid entry ID for forking")
+	}
+
+	selectedText = extractUserMessageText(entry.RawMessage)
+
+	// Create the branched session
+	if entry.ParentID == "" {
+		s.SessionManager.NewSession(&NewSessionOptions{ParentSession: previousSessionFile})
+	} else {
+		s.SessionManager.CreateBranchedSession(entry.ParentID)
+	}
+	s.Agent.SetSessionID(s.SessionManager.GetSessionID())
+
+	// Reload messages from entries
+	ctx := s.SessionManager.BuildSessionContext()
+	s.Agent.ReplaceMessages(ctx.Messages)
+
+	return selectedText, false, nil
+}
+
+// ForkMessageEntry represents a user message available for forking.
+type ForkMessageEntry struct {
+	EntryID string `json:"entryId"`
+	Text    string `json:"text"`
+}
+
+// GetUserMessagesForForking returns all user messages from the session for the fork selector.
+func (s *AgentSession) GetUserMessagesForForking() []ForkMessageEntry {
+	entries := s.SessionManager.GetEntries()
+	var result []ForkMessageEntry
+
+	for _, entry := range entries {
+		if entry.Type != "message" || len(entry.RawMessage) == 0 {
+			continue
+		}
+		var probe struct {
+			Role string `json:"role"`
+		}
+		if json.Unmarshal(entry.RawMessage, &probe) != nil || probe.Role != "user" {
+			continue
+		}
+
+		text := extractUserMessageText(entry.RawMessage)
+		if text != "" {
+			result = append(result, ForkMessageEntry{EntryID: entry.ID, Text: text})
+		}
+	}
+
+	return result
+}
+
+// extractUserMessageText extracts the text content from a user message's raw JSON.
+func extractUserMessageText(raw json.RawMessage) string {
+	// Try string content first
+	var strContent string
+	if json.Unmarshal(raw, &struct {
+		Content *string `json:"content"`
+	}{&strContent}) == nil && strContent != "" {
+		return strContent
+	}
+
+	// Try array content
+	var msg struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &msg) != nil || len(msg.Content) == 0 {
+		return ""
+	}
+
+	// Check if it's a string
+	var s2 string
+	if json.Unmarshal(msg.Content, &s2) == nil {
+		return s2
+	}
+
+	// Try array of content blocks
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(msg.Content, &blocks) != nil {
+		return ""
+	}
+
+	var parts []string
+	for _, b := range blocks {
+		if b.Type == "text" && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "")
 }
 
 // Reload reloads resources and rebuilds the system prompt.
@@ -514,6 +678,179 @@ func (s *AgentSession) Reload() error {
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 	return nil
+}
+
+// ============================================================================
+// Bash execution
+// ============================================================================
+
+// ExecuteBash executes a bash command and records the result in session history.
+func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (BashResult, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.bashCancelMu.Lock()
+	s.bashCancel = cancel
+	s.bashCancelMu.Unlock()
+
+	defer func() {
+		s.bashCancelMu.Lock()
+		s.bashCancel = nil
+		s.bashCancelMu.Unlock()
+		cancel()
+	}()
+
+	// Apply command prefix if configured
+	prefix := s.SettingsManager.GetShellCommandPrefix()
+	resolvedCommand := command
+	if prefix != "" {
+		resolvedCommand = prefix + "\n" + command
+	}
+
+	result, err := ExecuteBash(ctx, resolvedCommand, &BashExecutorOptions{
+		OnChunk: onChunk,
+	})
+	if err != nil {
+		return result, err
+	}
+
+	// Record in session
+	exitCode := result.ExitCode
+	bashMsg := &BashExecutionMessage{
+		Role:           "bashExecution",
+		Command:        command,
+		Output:         result.Output,
+		ExitCode:       &exitCode,
+		Cancelled:      result.Cancelled,
+		Truncated:      result.Truncated,
+		FullOutputPath: result.FullOutputPath,
+		Timestamp:      time.Now().UnixMilli(),
+	}
+
+	agentMsg := agent.AgentMessage{Custom: bashMsg}
+	s.Agent.AppendMessage(agentMsg)
+	s.SessionManager.AppendAgentMessage(agentMsg)
+
+	return result, nil
+}
+
+// AbortBash cancels a running bash command.
+func (s *AgentSession) AbortBash() {
+	s.bashCancelMu.Lock()
+	defer s.bashCancelMu.Unlock()
+	if s.bashCancel != nil {
+		s.bashCancel()
+	}
+}
+
+// IsBashRunning returns whether a bash command is currently executing.
+func (s *AgentSession) IsBashRunning() bool {
+	s.bashCancelMu.Lock()
+	defer s.bashCancelMu.Unlock()
+	return s.bashCancel != nil
+}
+
+// SessionStats holds statistics about the current session.
+type SessionStats struct {
+	SessionFile       string `json:"sessionFile,omitempty"`
+	SessionID         string `json:"sessionId"`
+	UserMessages      int    `json:"userMessages"`
+	AssistantMessages int    `json:"assistantMessages"`
+	ToolCalls         int    `json:"toolCalls"`
+	ToolResults       int    `json:"toolResults"`
+	TotalMessages     int    `json:"totalMessages"`
+	Tokens            struct {
+		Input      int `json:"input"`
+		Output     int `json:"output"`
+		CacheRead  int `json:"cacheRead"`
+		CacheWrite int `json:"cacheWrite"`
+		Total      int `json:"total"`
+	} `json:"tokens"`
+	Cost float64 `json:"cost"`
+}
+
+// GetSessionStats returns statistics about the current session.
+func (s *AgentSession) GetSessionStats() SessionStats {
+	state := s.State()
+	var stats SessionStats
+	stats.SessionFile = s.SessionManager.GetSessionFile()
+	stats.SessionID = s.SessionManager.GetSessionID()
+	stats.TotalMessages = len(state.Messages)
+
+	for _, msg := range state.Messages {
+		switch {
+		case msg.Message.AsUser() != nil:
+			stats.UserMessages++
+		case msg.Message.AsAssistant() != nil:
+			stats.AssistantMessages++
+			a := msg.Message.AsAssistant()
+			for _, c := range a.Content {
+				if c.ToolCall != nil {
+					stats.ToolCalls++
+				}
+			}
+			stats.Tokens.Input += a.Usage.Input
+			stats.Tokens.Output += a.Usage.Output
+			stats.Tokens.CacheRead += a.Usage.CacheRead
+			stats.Tokens.CacheWrite += a.Usage.CacheWrite
+			stats.Cost += a.Usage.Cost.Total
+		case msg.Message.AsToolResult() != nil:
+			stats.ToolResults++
+		}
+	}
+	stats.Tokens.Total = stats.Tokens.Input + stats.Tokens.Output + stats.Tokens.CacheRead + stats.Tokens.CacheWrite
+	return stats
+}
+
+// GetLastAssistantText returns the text content of the last assistant message, or empty string.
+func (s *AgentSession) GetLastAssistantText() string {
+	state := s.State()
+	for i := len(state.Messages) - 1; i >= 0; i-- {
+		if a := state.Messages[i].Message.AsAssistant(); a != nil {
+			for _, c := range a.Content {
+				if c.Text != nil {
+					return c.Text.Text
+				}
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// NavigateTreeResult is the result of tree navigation.
+type NavigateTreeResult struct {
+	EditorText string
+	Cancelled  bool
+	Aborted    bool
+}
+
+// NavigateTree navigates to a specific entry in the session tree.
+// If summarize is true, it creates a branch summary before navigating.
+func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstructions string) (*NavigateTreeResult, error) {
+	leafID := s.SessionManager.GetLeafID()
+	if entryID == leafID {
+		return &NavigateTreeResult{}, nil
+	}
+
+	if summarize {
+		// Create branch with summary
+		s.SessionManager.BranchWithSummary(leafID, "", nil, false)
+	}
+
+	// Branch to the new entry
+	s.SessionManager.Branch(entryID)
+
+	// Rebuild messages from the new branch
+	ctx := s.SessionManager.BuildSessionContext()
+	s.Agent.ReplaceMessages(ctx.Messages)
+
+	// Find user message text at this entry for editor pre-fill
+	entry := s.SessionManager.GetEntry(entryID)
+	var editorText string
+	if entry != nil && entry.Type == "message" {
+		editorText = extractUserMessageText(entry.RawMessage)
+	}
+
+	return &NavigateTreeResult{EditorText: editorText}, nil
 }
 
 // Close cleans up the session.

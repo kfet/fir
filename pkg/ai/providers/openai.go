@@ -25,25 +25,25 @@ type openaiChunk struct {
 }
 
 type openaiChoice struct {
-	Index        int               `json:"index"`
-	Delta        openaiDelta       `json:"delta"`
-	FinishReason *string           `json:"finish_reason"`
+	Index        int         `json:"index"`
+	Delta        openaiDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
 }
 
 type openaiDelta struct {
-	Role             string              `json:"role,omitempty"`
-	Content          *string             `json:"content"`
-	ReasoningContent *string             `json:"reasoning_content"`
-	Reasoning        *string             `json:"reasoning"`
-	ReasoningText    *string             `json:"reasoning_text"`
-	ToolCalls        []openaiToolCall    `json:"tool_calls,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Content          *string          `json:"content"`
+	ReasoningContent *string          `json:"reasoning_content"`
+	Reasoning        *string          `json:"reasoning"`
+	ReasoningText    *string          `json:"reasoning_text"`
+	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
 }
 
 type openaiToolCall struct {
-	Index    int                  `json:"index"`
-	ID       string               `json:"id,omitempty"`
-	Type     string               `json:"type,omitempty"`
-	Function *openaiToolCallFunc  `json:"function,omitempty"`
+	Index    int                 `json:"index"`
+	ID       string              `json:"id,omitempty"`
+	Type     string              `json:"type,omitempty"`
+	Function *openaiToolCallFunc `json:"function,omitempty"`
 }
 
 type openaiToolCallFunc struct {
@@ -68,6 +68,149 @@ type openaiUsage struct {
 type openaiBlock struct {
 	contentType string // "text", "thinking", "toolCall"
 	partialArgs string
+}
+
+// --- Compat detection (mirrors TS detectCompat/getCompat) ---
+
+// resolvedCompat holds fully resolved compatibility settings for an OpenAI-compatible provider.
+type resolvedCompat struct {
+	SupportsStore                    bool
+	SupportsDeveloperRole            bool
+	SupportsReasoningEffort          bool
+	SupportsUsageInStreaming         bool
+	MaxTokensField                   ai.MaxTokensField
+	RequiresToolResultName           bool
+	RequiresAssistantAfterToolResult bool
+	RequiresThinkingAsText           bool
+	RequiresMistralToolIds           bool
+	ThinkingFormat                   ai.ThinkingFormat
+	SupportsStrictMode               bool
+}
+
+// detectCompat auto-detects compat settings from the model's provider and base URL.
+func detectCompat(model *ai.Model) resolvedCompat {
+	provider := model.Provider
+	baseURL := model.BaseURL
+
+	isZai := provider == "zai" || strings.Contains(baseURL, "api.z.ai")
+
+	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
+		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
+		provider == "mistral" || strings.Contains(baseURL, "mistral.ai") ||
+		strings.Contains(baseURL, "chutes.ai") || strings.Contains(baseURL, "deepseek.com") ||
+		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai")
+
+	useMaxTokens := provider == "mistral" || strings.Contains(baseURL, "mistral.ai") ||
+		strings.Contains(baseURL, "chutes.ai")
+
+	isGrok := provider == "xai" || strings.Contains(baseURL, "api.x.ai")
+	isMistral := provider == "mistral" || strings.Contains(baseURL, "mistral.ai")
+
+	maxField := ai.MaxTokensFieldMaxCompletionTokens
+	if useMaxTokens {
+		maxField = ai.MaxTokensFieldMaxTokens
+	}
+
+	thinkingFmt := ai.ThinkingFormatOpenAI
+	if isZai {
+		thinkingFmt = ai.ThinkingFormatZAI
+	}
+
+	return resolvedCompat{
+		SupportsStore:                    !isNonStandard,
+		SupportsDeveloperRole:            !isNonStandard,
+		SupportsReasoningEffort:          !isGrok && !isZai,
+		SupportsUsageInStreaming:         true,
+		MaxTokensField:                   maxField,
+		RequiresToolResultName:           isMistral,
+		RequiresAssistantAfterToolResult: false,
+		RequiresThinkingAsText:           isMistral,
+		RequiresMistralToolIds:           isMistral,
+		ThinkingFormat:                   thinkingFmt,
+		SupportsStrictMode:               true,
+	}
+}
+
+// getCompat merges explicit model.Compat with auto-detected defaults.
+func getCompat(model *ai.Model) resolvedCompat {
+	detected := detectCompat(model)
+	c := model.GetOpenAICompletionsCompat()
+	if c == nil {
+		return detected
+	}
+
+	if c.SupportsStore != nil {
+		detected.SupportsStore = *c.SupportsStore
+	}
+	if c.SupportsDeveloperRole != nil {
+		detected.SupportsDeveloperRole = *c.SupportsDeveloperRole
+	}
+	if c.SupportsReasoningEffort != nil {
+		detected.SupportsReasoningEffort = *c.SupportsReasoningEffort
+	}
+	if c.SupportsUsageInStreaming != nil {
+		detected.SupportsUsageInStreaming = *c.SupportsUsageInStreaming
+	}
+	if c.MaxTokensField != "" {
+		detected.MaxTokensField = c.MaxTokensField
+	}
+	if c.RequiresToolResultName != nil {
+		detected.RequiresToolResultName = *c.RequiresToolResultName
+	}
+	if c.RequiresAssistantAfterToolResult != nil {
+		detected.RequiresAssistantAfterToolResult = *c.RequiresAssistantAfterToolResult
+	}
+	if c.RequiresThinkingAsText != nil {
+		detected.RequiresThinkingAsText = *c.RequiresThinkingAsText
+	}
+	if c.RequiresMistralToolIds != nil {
+		detected.RequiresMistralToolIds = *c.RequiresMistralToolIds
+	}
+	if c.ThinkingFormat != "" {
+		detected.ThinkingFormat = c.ThinkingFormat
+	}
+	if c.SupportsStrictMode != nil {
+		detected.SupportsStrictMode = *c.SupportsStrictMode
+	}
+
+	return detected
+}
+
+// --- Tool ID normalization ---
+
+// normalizeMistralToolID normalizes tool IDs for Mistral (exactly 9 alphanumeric chars).
+func normalizeMistralToolID(id string) string {
+	var b strings.Builder
+	for _, c := range id {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		}
+	}
+	normalized := b.String()
+	const padding = "ABCDEFGHI"
+	if len(normalized) < 9 {
+		normalized += padding[:9-len(normalized)]
+	} else if len(normalized) > 9 {
+		normalized = normalized[:9]
+	}
+	return normalized
+}
+
+// hasToolHistory checks if conversation messages contain tool calls or tool results.
+func hasToolHistory(messages []ai.Message) bool {
+	for _, msg := range messages {
+		if msg.AsToolResult() != nil {
+			return true
+		}
+		if a := msg.AsAssistant(); a != nil {
+			for _, block := range a.Content {
+				if block.IsToolCall() {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // StreamOpenAICompletions implements SSE streaming for OpenAI Chat Completions API.
@@ -153,9 +296,45 @@ func streamOpenAIHTTP(
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
+	// Model-level headers
 	for k, v := range model.Headers {
 		req.Header.Set(k, v)
 	}
+
+	// Copilot-specific headers
+	if model.Provider == "github-copilot" {
+		msgs := prompt.Messages
+		isAgentCall := false
+		if len(msgs) > 0 {
+			last := msgs[len(msgs)-1]
+			isAgentCall = last.Role() != ai.RoleUser
+		}
+		if isAgentCall {
+			req.Header.Set("X-Initiator", "agent")
+		} else {
+			req.Header.Set("X-Initiator", "user")
+		}
+		req.Header.Set("Openai-Intent", "conversation-edits")
+
+		// Check for images in conversation
+		for _, msg := range msgs {
+			if u := msg.AsUser(); u != nil {
+				if content, ok := u.Content.([]any); ok {
+					for _, item := range content {
+						if m, ok := item.(map[string]any); ok {
+							if t, _ := m["type"].(string); t == "image" {
+								req.Header.Set("Copilot-Vision-Request", "true")
+								goto doneImageCheck
+							}
+						}
+					}
+				}
+			}
+		}
+	doneImageCheck:
+	}
+
+	// Option-level headers (override all)
 	if options != nil {
 		for k, v := range options.Headers {
 			req.Header.Set(k, v)
@@ -250,13 +429,17 @@ func parseOpenAISSE(
 			if chunk.Usage.PromptTokensDetails != nil {
 				cachedTokens = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
+			reasoningTokens := 0
+			if chunk.Usage.CompletionTokensDetails != nil {
+				reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 			input := chunk.Usage.PromptTokens - cachedTokens
-			// CompletionTokens already includes reasoning tokens per OpenAI's API.
+			outputTokens := chunk.Usage.CompletionTokens + reasoningTokens
 			output.Usage = ai.Usage{
 				Input:       input,
-				Output:      chunk.Usage.CompletionTokens,
+				Output:      outputTokens,
 				CacheRead:   cachedTokens,
-				TotalTokens: input + chunk.Usage.CompletionTokens + cachedTokens,
+				TotalTokens: input + outputTokens + cachedTokens,
 			}
 			ai.CalculateCost(model, &output.Usage)
 		}
@@ -297,7 +480,7 @@ func parseOpenAISSE(
 			})
 		}
 
-		// Reasoning / thinking
+		// Reasoning / thinking — use first non-empty reasoning field
 		var reasoningDelta string
 		if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
 			reasoningDelta = *delta.ReasoningContent
@@ -387,7 +570,7 @@ func mapOpenAIStopReason(reason string) ai.StopReason {
 		return ai.StopReasonStop
 	case "length":
 		return ai.StopReasonLength
-	case "tool_calls":
+	case "tool_calls", "function_call":
 		return ai.StopReasonToolUse
 	case "content_filter":
 		return ai.StopReasonError
@@ -399,12 +582,24 @@ func mapOpenAIStopReason(reason string) ai.StopReason {
 // --- Request body building ---
 
 func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamOptions) ([]byte, error) {
+	compat := getCompat(model)
+
 	body := map[string]any{
 		"model":  model.ID,
 		"stream": true,
 	}
 
-	// Max tokens
+	// stream_options (conditional)
+	if compat.SupportsUsageInStreaming {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
+
+	// store: false for providers that support it
+	if compat.SupportsStore {
+		body["store"] = false
+	}
+
+	// Max tokens — use the correct field name per provider
 	maxTokens := 0
 	if options != nil && options.MaxTokens != nil {
 		maxTokens = *options.MaxTokens
@@ -415,68 +610,288 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 			maxTokens = 32000
 		}
 	}
-	body["max_completion_tokens"] = maxTokens
+	if compat.MaxTokensField == ai.MaxTokensFieldMaxTokens {
+		body["max_tokens"] = maxTokens
+	} else {
+		body["max_completion_tokens"] = maxTokens
+	}
 
 	// Temperature
 	if options != nil && options.Temperature != nil {
 		body["temperature"] = *options.Temperature
 	}
 
-	// Stream options for usage
-	body["stream_options"] = map[string]any{"include_usage": true}
-
 	// Messages
-	messages := convertOpenAIMessages(ctx, model)
+	messages := convertOpenAIMessages(ctx, model, compat)
+	maybeAddOpenRouterAnthropicCacheControl(model, messages)
 	body["messages"] = messages
 
 	// Tools
 	if len(ctx.Tools) > 0 {
-		body["tools"] = convertOpenAITools(ctx.Tools)
+		body["tools"] = convertOpenAITools(ctx.Tools, compat)
+	} else if hasToolHistory(ctx.Messages) {
+		// Anthropic via LiteLLM/proxy requires tools param when conversation has tool_calls/tool_results
+		body["tools"] = []any{}
+	}
+
+	// Tool choice
+	if options != nil && options.ToolChoice != "" {
+		body["tool_choice"] = options.ToolChoice
+	}
+
+	// Thinking / reasoning format
+	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
+		switch compat.ThinkingFormat {
+		case ai.ThinkingFormatZAI:
+			// Z.ai uses binary thinking: { type: "enabled" | "disabled" }
+			body["thinking"] = map[string]any{"type": "enabled"}
+		case ai.ThinkingFormatQwen:
+			body["enable_thinking"] = true
+		default:
+			if compat.SupportsReasoningEffort {
+				body["reasoning_effort"] = string(options.ReasoningEffort)
+			}
+		}
+	} else if compat.ThinkingFormat == ai.ThinkingFormatZAI && model.Reasoning {
+		// Must explicitly disable since z.ai defaults to thinking enabled
+		body["thinking"] = map[string]any{"type": "disabled"}
+	}
+
+	// OpenRouter provider routing preferences
+	if strings.Contains(model.BaseURL, "openrouter.ai") {
+		if c := model.GetOpenAICompletionsCompat(); c != nil && c.OpenRouterRouting != nil {
+			body["provider"] = c.OpenRouterRouting
+		}
+	}
+
+	// Vercel AI Gateway provider routing preferences
+	if strings.Contains(model.BaseURL, "ai-gateway.vercel.sh") {
+		if c := model.GetOpenAICompletionsCompat(); c != nil && c.VercelGatewayRouting != nil {
+			r := c.VercelGatewayRouting
+			if len(r.Only) > 0 || len(r.Order) > 0 {
+				gw := map[string]any{}
+				if len(r.Only) > 0 {
+					gw["only"] = r.Only
+				}
+				if len(r.Order) > 0 {
+					gw["order"] = r.Order
+				}
+				body["providerOptions"] = map[string]any{"gateway": gw}
+			}
+		}
 	}
 
 	return json.Marshal(body)
 }
 
-func convertOpenAIMessages(ctx ai.Context, model *ai.Model) []map[string]any {
+// normalizeOpenAIToolCallID normalizes tool call IDs for OpenAI-compatible providers.
+func normalizeOpenAIToolCallID(id string, model *ai.Model, compat resolvedCompat) string {
+	if compat.RequiresMistralToolIds {
+		return normalizeMistralToolID(id)
+	}
+
+	// Handle pipe-separated IDs from OpenAI Responses API
+	if strings.Contains(id, "|") {
+		parts := strings.SplitN(id, "|", 2)
+		callID := parts[0]
+		// Sanitize to allowed chars and truncate to 40 chars
+		var b strings.Builder
+		for _, c := range callID {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+				b.WriteRune(c)
+			} else {
+				b.WriteByte('_')
+			}
+			if b.Len() >= 40 {
+				break
+			}
+		}
+		return b.String()
+	}
+
+	if model.Provider == "openai" && len(id) > 40 {
+		return id[:40]
+	}
+
+	// Copilot Claude models need Anthropic ID format
+	if model.Provider == "github-copilot" && strings.Contains(strings.ToLower(model.ID), "claude") {
+		var b strings.Builder
+		for _, c := range id {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+				b.WriteRune(c)
+			} else {
+				b.WriteByte('_')
+			}
+			if b.Len() >= 64 {
+				break
+			}
+		}
+		return b.String()
+	}
+
+	return id
+}
+
+func convertOpenAIMessages(ctx ai.Context, model *ai.Model, compat resolvedCompat) []map[string]any {
 	var messages []map[string]any
 
-	// System prompt
+	// Tool ID normalizer that captures compat
+	normalizeToolID := func(id string, m *ai.Model, _ *ai.AssistantMessage) string {
+		return normalizeOpenAIToolCallID(id, m, compat)
+	}
+
+	// Transform messages for cross-provider compatibility
+	transformed := TransformMessages(ctx.Messages, model, normalizeToolID)
+
+	// System prompt — use developer role for reasoning models if supported
 	if ctx.SystemPrompt != "" {
+		role := "system"
+		if model.Reasoning && compat.SupportsDeveloperRole {
+			role = "developer"
+		}
 		messages = append(messages, map[string]any{
-			"role":    "system",
+			"role":    role,
 			"content": ctx.SystemPrompt,
 		})
 	}
 
-	// Transform for cross-provider compat
-	transformed := TransformMessages(ctx.Messages, model, nil)
+	var lastRole string
 
-	for _, msg := range transformed {
-		if msg.AsUser() != nil {
-			um := msg.AsUser()
-			switch c := um.Content.(type) {
+	for i := 0; i < len(transformed); i++ {
+		msg := &transformed[i]
+
+		// Insert synthetic assistant message after tool result if required
+		if compat.RequiresAssistantAfterToolResult && lastRole == "toolResult" && msg.Role() == ai.RoleUser {
+			messages = append(messages, map[string]any{
+				"role":    "assistant",
+				"content": "I have processed the tool results.",
+			})
+		}
+
+		if u := msg.AsUser(); u != nil {
+			switch content := u.Content.(type) {
 			case string:
-				if strings.TrimSpace(c) != "" {
+				if strings.TrimSpace(content) != "" {
 					messages = append(messages, map[string]any{
 						"role":    "user",
-						"content": c,
+						"content": content,
+					})
+				}
+			case []any:
+				var parts []map[string]any
+				for _, item := range content {
+					if m, ok := item.(map[string]any); ok {
+						t, _ := m["type"].(string)
+						if t == "text" {
+							text, _ := m["text"].(string)
+							parts = append(parts, map[string]any{
+								"type": "text",
+								"text": text,
+							})
+						} else if t == "image" && model.SupportsImages() {
+							data, _ := m["data"].(string)
+							mime, _ := m["mimeType"].(string)
+							parts = append(parts, map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": fmt.Sprintf("data:%s;base64,%s", mime, data),
+								},
+							})
+						}
+					}
+				}
+				// Filter out images if model doesn't support them
+				if !model.SupportsImages() {
+					var filtered []map[string]any
+					for _, p := range parts {
+						if t, _ := p["type"].(string); t != "image_url" {
+							filtered = append(filtered, p)
+						}
+					}
+					parts = filtered
+				}
+				if len(parts) > 0 {
+					messages = append(messages, map[string]any{
+						"role":    "user",
+						"content": parts,
 					})
 				}
 			}
-		} else if msg.AsAssistant() != nil {
-			am := msg.AsAssistant()
-			m := map[string]any{"role": "assistant"}
+			lastRole = "user"
 
-			var textParts []string
+		} else if a := msg.AsAssistant(); a != nil {
+			assistantMsg := map[string]any{
+				"role": "assistant",
+			}
+
+			// Text blocks
+			var textParts []map[string]any
+			for _, block := range a.Content {
+				if block.IsText() && strings.TrimSpace(block.Text.Text) != "" {
+					textParts = append(textParts, map[string]any{
+						"type": "text",
+						"text": block.Text.Text,
+					})
+				}
+			}
+
+			// Copilot needs content as string, not array
+			if model.Provider == "github-copilot" && len(textParts) > 0 {
+				var sb strings.Builder
+				for _, p := range textParts {
+					sb.WriteString(p["text"].(string))
+				}
+				assistantMsg["content"] = sb.String()
+			} else if len(textParts) > 0 {
+				assistantMsg["content"] = textParts
+			} else if compat.RequiresAssistantAfterToolResult {
+				// Mistral requires non-null content
+				assistantMsg["content"] = ""
+			}
+
+			// Thinking blocks
+			var thinkingBlocks []ai.ThinkingContent
+			for _, block := range a.Content {
+				if block.IsThinking() && strings.TrimSpace(block.Thinking.Thinking) != "" {
+					thinkingBlocks = append(thinkingBlocks, *block.Thinking)
+				}
+			}
+			if len(thinkingBlocks) > 0 {
+				if compat.RequiresThinkingAsText {
+					// Convert thinking to plain text (no tags)
+					var sb strings.Builder
+					for j, tb := range thinkingBlocks {
+						if j > 0 {
+							sb.WriteString("\n\n")
+						}
+						sb.WriteString(tb.Thinking)
+					}
+					thinkingText := sb.String()
+					if content, ok := assistantMsg["content"].([]map[string]any); ok {
+						assistantMsg["content"] = append([]map[string]any{{"type": "text", "text": thinkingText}}, content...)
+					} else {
+						assistantMsg["content"] = []map[string]any{{"type": "text", "text": thinkingText}}
+					}
+				} else {
+					// Use signature from first thinking block for providers like llama.cpp
+					sig := thinkingBlocks[0].ThinkingSignature
+					if sig != "" {
+						var sb strings.Builder
+						for j, tb := range thinkingBlocks {
+							if j > 0 {
+								sb.WriteString("\n")
+							}
+							sb.WriteString(tb.Thinking)
+						}
+						assistantMsg[sig] = sb.String()
+					}
+				}
+			}
+
+			// Tool calls
 			var toolCalls []map[string]any
-
-			for _, block := range am.Content {
-				switch {
-				case block.IsText():
-					textParts = append(textParts, block.Text.Text)
-				case block.IsThinking():
-					// Thinking blocks omitted for OpenAI format
-				case block.IsToolCall():
+			for _, block := range a.Content {
+				if block.IsToolCall() {
 					tc := block.ToolCall
 					argsJSON, _ := json.Marshal(tc.Arguments)
 					toolCalls = append(toolCalls, map[string]any{
@@ -489,48 +904,167 @@ func convertOpenAIMessages(ctx ai.Context, model *ai.Model) []map[string]any {
 					})
 				}
 			}
-
-			if len(textParts) > 0 {
-				m["content"] = strings.Join(textParts, "")
-			}
 			if len(toolCalls) > 0 {
-				m["tool_calls"] = toolCalls
+				assistantMsg["tool_calls"] = toolCalls
 			}
-			messages = append(messages, m)
-		} else if msg.AsToolResult() != nil {
-			tr := msg.AsToolResult()
-			var text string
-			for _, c := range tr.Content {
-				if c.IsText() {
-					text += c.Text
+
+			// Skip empty assistant messages (no content and no tool calls)
+			hasContent := false
+			if c, ok := assistantMsg["content"]; ok && c != nil {
+				switch v := c.(type) {
+				case string:
+					hasContent = len(v) > 0
+				case []map[string]any:
+					hasContent = len(v) > 0
+				default:
+					hasContent = true
 				}
 			}
-			messages = append(messages, map[string]any{
-				"role":         "tool",
-				"tool_call_id": tr.ToolCallID,
-				"content":      text,
-			})
+			if !hasContent && len(toolCalls) == 0 {
+				lastRole = "assistant"
+				continue
+			}
+
+			messages = append(messages, assistantMsg)
+			lastRole = "assistant"
+
+		} else if tr := msg.AsToolResult(); tr != nil {
+			var imageBlocks []map[string]any
+
+			// Collect consecutive tool results
+			for {
+				toolMsg := transformed[i].AsToolResult()
+				if toolMsg == nil {
+					break
+				}
+
+				// Extract text content
+				var textParts []string
+				for _, c := range toolMsg.Content {
+					if c.IsText() {
+						textParts = append(textParts, c.Text)
+					}
+				}
+				textResult := strings.Join(textParts, "\n")
+
+				// Check for images
+				hasImages := false
+				for _, c := range toolMsg.Content {
+					if c.IsImage() {
+						hasImages = true
+						break
+					}
+				}
+
+				content := textResult
+				if content == "" && hasImages {
+					content = "(see attached image)"
+				}
+
+				toolResultMsg := map[string]any{
+					"role":         "tool",
+					"content":      content,
+					"tool_call_id": toolMsg.ToolCallID,
+				}
+				if compat.RequiresToolResultName && toolMsg.ToolName != "" {
+					toolResultMsg["name"] = toolMsg.ToolName
+				}
+				messages = append(messages, toolResultMsg)
+
+				// Collect images for later
+				if hasImages && model.SupportsImages() {
+					for _, c := range toolMsg.Content {
+						if c.IsImage() {
+							imageBlocks = append(imageBlocks, map[string]any{
+								"type": "image_url",
+								"image_url": map[string]any{
+									"url": fmt.Sprintf("data:%s;base64,%s", c.MimeType, c.Data),
+								},
+							})
+						}
+					}
+				}
+
+				if i+1 < len(transformed) && transformed[i+1].Role() == ai.RoleToolResult {
+					i++
+				} else {
+					break
+				}
+			}
+
+			// If we have images from tool results, send as user message
+			if len(imageBlocks) > 0 {
+				if compat.RequiresAssistantAfterToolResult {
+					messages = append(messages, map[string]any{
+						"role":    "assistant",
+						"content": "I have processed the tool results.",
+					})
+				}
+				content := append([]map[string]any{{"type": "text", "text": "Attached image(s) from tool result:"}}, imageBlocks...)
+				messages = append(messages, map[string]any{
+					"role":    "user",
+					"content": content,
+				})
+				lastRole = "user"
+			} else {
+				lastRole = "toolResult"
+			}
+			continue
 		}
 	}
 
 	return messages
 }
 
-func convertOpenAITools(tools []ai.Tool) []map[string]any {
+// maybeAddOpenRouterAnthropicCacheControl adds Anthropic-style cache_control for OpenRouter.
+func maybeAddOpenRouterAnthropicCacheControl(model *ai.Model, messages []map[string]any) {
+	if model.Provider != "openrouter" || !strings.HasPrefix(model.ID, "anthropic/") {
+		return
+	}
+
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		role, _ := msg["role"].(string)
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		content := msg["content"]
+		if s, ok := content.(string); ok {
+			msg["content"] = []map[string]any{
+				{"type": "text", "text": s, "cache_control": map[string]any{"type": "ephemeral"}},
+			}
+			return
+		}
+		if arr, ok := content.([]map[string]any); ok {
+			for j := len(arr) - 1; j >= 0; j-- {
+				if t, _ := arr[j]["type"].(string); t == "text" {
+					arr[j]["cache_control"] = map[string]any{"type": "ephemeral"}
+					return
+				}
+			}
+		}
+	}
+}
+
+func convertOpenAITools(tools []ai.Tool, compat resolvedCompat) []map[string]any {
 	var result []map[string]any
 	for _, tool := range tools {
 		schema := tool.Parameters
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
+		fn := map[string]any{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"parameters":  schema,
+		}
+		// Only include strict if provider supports it. Some reject unknown fields.
+		if compat.SupportsStrictMode {
+			fn["strict"] = false
+		}
 		result = append(result, map[string]any{
-			"type": "function",
-			"function": map[string]any{
-				"name":        tool.Name,
-				"description": tool.Description,
-				"parameters":  schema,
-				"strict":      true,
-			},
+			"type":     "function",
+			"function": fn,
 		})
 	}
 	return result
@@ -553,11 +1087,14 @@ func StreamSimpleOpenAICompletions(ctx context.Context, model *ai.Model, prompt 
 
 	base := BuildBaseOptions(model, options, apiKey)
 
-	if options != nil && options.Reasoning != "" {
-		level := ClampReasoning(options.Reasoning)
-		if level != "" {
-			// Add reasoning_effort to the request via headers or params
-			// For now, just pass through — reasoning is provider-specific
+	if options != nil && options.Reasoning != "" && model.Reasoning {
+		reasoningEffort := ClampReasoning(options.Reasoning)
+		// Check if model supports xhigh (don't clamp to "high" for those)
+		if ai.SupportsXhigh(model) {
+			reasoningEffort = options.Reasoning
+		}
+		if reasoningEffort != "" {
+			base.ReasoningEffort = reasoningEffort
 		}
 	}
 

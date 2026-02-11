@@ -674,16 +674,119 @@ func (sm *SessionManager) BranchWithSummary(branchFromID string, summary string,
 	return sm.appendEntry(entry)
 }
 
-// --- Context building ---
+// CreateBranchedSession creates a new session file by copying the branch from root to leafId.
+// Returns the new session file path (empty if in-memory).
+func (sm *SessionManager) CreateBranchedSession(leafId string) string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-func (sm *SessionManager) GetBranch(fromID string) []*SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	previousSessionFile := sm.sessionFile
+	path := sm.getBranchUnlocked(leafId)
+	if len(path) == 0 {
+		panic(fmt.Sprintf("Entry %s not found", leafId))
+	}
+
+	// Filter out label entries - we'll recreate them
+	var pathWithoutLabels []*SessionEntry
+	for _, e := range path {
+		if e.Type != "label" {
+			pathWithoutLabels = append(pathWithoutLabels, e)
+		}
+	}
+
+	newSessionID := uuid.New().String()
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+
+	header := &SessionHeader{
+		Type:      "session",
+		Version:   CurrentSessionVersion,
+		ID:        newSessionID,
+		Timestamp: ts,
+		Cwd:       sm.cwd,
+	}
+	if sm.persist {
+		header.ParentSession = previousSessionFile
+	}
+
+	// Collect labels for entries in the path
+	pathEntryIDs := make(map[string]bool)
+	for _, e := range pathWithoutLabels {
+		pathEntryIDs[e.ID] = true
+	}
+	type labelPair struct {
+		targetID string
+		label    string
+	}
+	var labelsToWrite []labelPair
+	for targetID, label := range sm.labelsById {
+		if pathEntryIDs[targetID] {
+			labelsToWrite = append(labelsToWrite, labelPair{targetID, label})
+		}
+	}
+
+	// Generate label entries
+	lastEntryID := ""
+	if len(pathWithoutLabels) > 0 {
+		lastEntryID = pathWithoutLabels[len(pathWithoutLabels)-1].ID
+	}
+	parentID := lastEntryID
+	var labelEntries []*SessionEntry
+	for _, lp := range labelsToWrite {
+		id := sm.generateIDExcluding(pathEntryIDs)
+		labelEntry := &SessionEntry{
+			Type:      "label",
+			ID:        id,
+			ParentID:  parentID,
+			Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+			TargetID:  lp.targetID,
+			Label:     lp.label,
+		}
+		pathEntryIDs[id] = true
+		labelEntries = append(labelEntries, labelEntry)
+		parentID = id
+	}
+
+	if sm.persist && sm.sessionDir != "" {
+		fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
+		newSessionFile := filepath.Join(sm.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, newSessionID))
+
+		// Write header + entries + labels
+		var lines []string
+		data, _ := json.Marshal(header)
+		lines = append(lines, string(data))
+		for _, e := range pathWithoutLabels {
+			data, _ := json.Marshal(e)
+			lines = append(lines, string(data))
+		}
+		for _, e := range labelEntries {
+			data, _ := json.Marshal(e)
+			lines = append(lines, string(data))
+		}
+		_ = os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600)
+
+		sm.header = header
+		sm.sessionID = newSessionID
+		sm.sessionFile = newSessionFile
+		sm.entries = append(pathWithoutLabels, labelEntries...)
+		sm.flushed = true
+		sm.buildIndex()
+		return newSessionFile
+	}
+
+	// In-memory mode
+	sm.header = header
+	sm.sessionID = newSessionID
+	sm.entries = append(pathWithoutLabels, labelEntries...)
+	sm.buildIndex()
+	return ""
+}
+
+// getBranchUnlocked is the non-locking version of GetBranch for internal use.
+func (sm *SessionManager) getBranchUnlocked(fromID string) []*SessionEntry {
 	startID := fromID
 	if startID == "" {
 		startID = sm.leafID
 	}
-
 	var path []*SessionEntry
 	current := sm.byID[startID]
 	for current != nil {
@@ -694,6 +797,25 @@ func (sm *SessionManager) GetBranch(fromID string) []*SessionEntry {
 		current = sm.byID[current.ParentID]
 	}
 	return path
+}
+
+// generateIDExcluding generates a unique ID not in the exclude set.
+func (sm *SessionManager) generateIDExcluding(exclude map[string]bool) string {
+	for i := 0; i < 100; i++ {
+		id := uuid.New().String()[:12]
+		if _, ok := sm.byID[id]; !ok && !exclude[id] {
+			return id
+		}
+	}
+	return uuid.New().String()[:12]
+}
+
+// --- Context building ---
+
+func (sm *SessionManager) GetBranch(fromID string) []*SessionEntry {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.getBranchUnlocked(fromID)
 }
 
 func (sm *SessionManager) BuildSessionContext() SessionContext {
@@ -1057,4 +1179,84 @@ func DefaultSessionDir(agentDir, cwd string) string {
 	dir := filepath.Join(agentDir, "sessions", safePath)
 	os.MkdirAll(dir, 0755)
 	return dir
+}
+
+// ForkFrom creates a new session from a source session file, copying all entries.
+// The new session is created in the targetCwd's session directory.
+func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error) {
+	header, entries := loadEntriesFromFile(sourcePath)
+	if header == nil {
+		return nil, fmt.Errorf("cannot fork: source session file is empty or invalid: %s", sourcePath)
+	}
+
+	if sessionDir == "" {
+		return nil, fmt.Errorf("sessionDir is required for ForkFrom")
+	}
+
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		return nil, fmt.Errorf("cannot create session directory: %w", err)
+	}
+
+	newSessionID := uuid.New().String()
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
+	newSessionFile := filepath.Join(sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, newSessionID))
+
+	newHeader := &SessionHeader{
+		Type:          "session",
+		Version:       CurrentSessionVersion,
+		ID:            newSessionID,
+		Timestamp:     ts,
+		Cwd:           targetCwd,
+		ParentSession: sourcePath,
+	}
+
+	var lines []string
+	data, _ := json.Marshal(newHeader)
+	lines = append(lines, string(data))
+	for _, e := range entries {
+		data, _ := json.Marshal(e)
+		lines = append(lines, string(data))
+	}
+	if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		return nil, fmt.Errorf("cannot write forked session: %w", err)
+	}
+
+	return OpenSessionManager(newSessionFile, sessionDir), nil
+}
+
+// SessionsDir returns the parent directory that contains all per-project session directories.
+func SessionsDir(agentDir string) string {
+	return filepath.Join(agentDir, "sessions")
+}
+
+// ListAllSessions lists sessions across all project directories, sorted by modified time.
+func ListAllSessions(agentDir string) ([]SessionListInfo, error) {
+	sessionsDir := SessionsDir(agentDir)
+	dirEntries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var all []SessionListInfo
+	for _, de := range dirEntries {
+		if !de.IsDir() {
+			continue
+		}
+		subDir := filepath.Join(sessionsDir, de.Name())
+		sessions, err := ListSessions("", subDir)
+		if err != nil {
+			continue
+		}
+		all = append(all, sessions...)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Modified.After(all[j].Modified)
+	})
+
+	return all, nil
 }

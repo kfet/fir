@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kfet/pi-go/pkg/agent"
 	"github.com/kfet/pi-go/pkg/ai"
 )
 
@@ -666,6 +667,86 @@ func TestSessionManagerEmptyFile(t *testing.T) {
 	}
 }
 
+func TestSessionManagerCreateBranchedSession_InMemory(t *testing.T) {
+	sm := InMemorySessionManager("test-cwd")
+
+	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	id2 := sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewUserMsg("third", time.Now().UnixMilli()))
+
+	_ = id2
+	originalID := sm.GetSessionID()
+	sm.CreateBranchedSession(id1)
+
+	// Should have a new session ID
+	if sm.GetSessionID() == originalID {
+		t.Error("expected new session ID after branching")
+	}
+
+	// Only the branch up to id1 should remain
+	entries := sm.GetEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].ID != id1 {
+		t.Errorf("expected entry %s, got %s", id1, entries[0].ID)
+	}
+}
+
+func TestSessionManagerCreateBranchedSession_Persisted(t *testing.T) {
+	dir := t.TempDir()
+	sm := NewSessionManager("test-cwd", dir)
+
+	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	// Need an assistant to trigger write
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "reply"}}},
+	}))
+
+	oldFile := sm.GetSessionFile()
+	newFile := sm.CreateBranchedSession(id1)
+
+	if newFile == "" {
+		t.Fatal("expected new session file path")
+	}
+	if newFile == oldFile {
+		t.Error("expected different file path")
+	}
+
+	// New file should exist
+	if _, err := os.Stat(newFile); err != nil {
+		t.Fatalf("new session file not created: %v", err)
+	}
+
+	// Entries should only contain the branch
+	entries := sm.GetEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry after branch, got %d", len(entries))
+	}
+	if entries[0].ID != id1 {
+		t.Errorf("expected entry %s, got %s", id1, entries[0].ID)
+	}
+}
+
+func TestSessionManagerCreateBranchedSession_WithLabels(t *testing.T) {
+	sm := InMemorySessionManager()
+
+	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+
+	// Add a label to id1
+	sm.AppendLabelChange(id1, "important")
+
+	sm.CreateBranchedSession(id1)
+
+	// Label should be preserved
+	label := sm.GetLabel(id1)
+	if label != "important" {
+		t.Errorf("expected label 'important', got %q", label)
+	}
+}
+
 func TestIsValidSessionFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -682,5 +763,113 @@ func TestIsValidSessionFile(t *testing.T) {
 	os.WriteFile(invalid, []byte(`{"type":"wrong"}`), 0644)
 	if isValidSessionFile(invalid) {
 		t.Error("expected invalid session file")
+	}
+}
+
+func newTestAgentMsg(t *testing.T, role, text string) agent.AgentMessage {
+	t.Helper()
+	switch role {
+	case "user":
+		return agent.NewAgentMessage(ai.NewUserMsg(text, time.Now().UnixMilli()))
+	case "assistant":
+		return agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content: []ai.AssistantContent{ai.NewTextContent(text)},
+		}))
+	default:
+		t.Fatalf("unknown role: %s", role)
+		return agent.AgentMessage{}
+	}
+}
+
+func TestForkFrom(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	sessionsDir := filepath.Join(dstDir, "sessions")
+
+	// Create a source session
+	srcSM := NewSessionManager(srcDir, filepath.Join(srcDir, "sessions"))
+	srcSM.AppendAgentMessage(newTestAgentMsg(t, "user", "hello"))
+	srcSM.AppendAgentMessage(newTestAgentMsg(t, "assistant", "world"))
+	srcFile := srcSM.GetSessionFile()
+	if srcFile == "" {
+		t.Fatal("source session file not set")
+	}
+
+	// Fork it
+	forkSM, err := ForkFrom(srcFile, dstDir, sessionsDir)
+	if err != nil {
+		t.Fatalf("ForkFrom failed: %v", err)
+	}
+
+	// Verify the fork
+	if forkSM.GetCwd() != dstDir {
+		t.Errorf("expected cwd %s, got %s", dstDir, forkSM.GetCwd())
+	}
+	if forkSM.GetSessionID() == srcSM.GetSessionID() {
+		t.Error("forked session should have a different ID")
+	}
+	entries := forkSM.GetEntries()
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries in forked session, got %d", len(entries))
+	}
+	header := forkSM.GetHeader()
+	if header.ParentSession != srcFile {
+		t.Errorf("expected parent session %s, got %s", srcFile, header.ParentSession)
+	}
+}
+
+func TestForkFrom_InvalidSource(t *testing.T) {
+	_, err := ForkFrom("/nonexistent/file.jsonl", t.TempDir(), filepath.Join(t.TempDir(), "sessions"))
+	if err == nil {
+		t.Error("expected error for invalid source")
+	}
+}
+
+func TestListAllSessions(t *testing.T) {
+	agentDir := t.TempDir()
+
+	// Create two project session directories
+	project1Dir := filepath.Join(agentDir, "sessions", "project1")
+	project2Dir := filepath.Join(agentDir, "sessions", "project2")
+
+	// Create sessions in each (session file is written only after an assistant message)
+	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
+	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
+	}))
+
+	sm2 := NewSessionManager("/proj2", project2Dir)
+	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
+	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
+	}))
+
+	// Verify files exist
+	if sm1.GetSessionFile() == "" {
+		t.Fatal("sm1 session file not set")
+	}
+	if sm2.GetSessionFile() == "" {
+		t.Fatal("sm2 session file not set")
+	}
+
+	// List all
+	sessions, err := ListAllSessions(agentDir)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("expected 2 sessions, got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_Empty(t *testing.T) {
+	agentDir := t.TempDir()
+	sessions, err := ListAllSessions(agentDir)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions, got %d", len(sessions))
 	}
 }

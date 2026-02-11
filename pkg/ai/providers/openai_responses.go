@@ -120,325 +120,13 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
 
-		// Track current item for stateful SSE processing
-		type itemState struct {
-			itemType    string
-			id          string
-			callID      string
-			name        string
-			contentIdx  int
-			partialJSON string
-		}
-		var current *itemState
-
-		for evt := range sseEvents {
-			if evt.Data == "" || evt.Data == "[DONE]" {
-				continue
-			}
-
-			var raw map[string]any
-			if err := json.Unmarshal([]byte(evt.Data), &raw); err != nil {
-				continue
-			}
-
-			eventType, _ := raw["type"].(string)
-
-			switch eventType {
-			case "response.output_item.added":
-				itemRaw, _ := raw["item"].(map[string]any)
-				if itemRaw == nil {
-					continue
-				}
-				iType, _ := itemRaw["type"].(string)
-
-				switch iType {
-				case "message":
-					idx := len(output.Content)
-					output.Content = append(output.Content, ai.NewTextContent(""))
-					current = &itemState{
-						itemType:   "message",
-						id:         jsonString(itemRaw, "id"),
-						contentIdx: idx,
-					}
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventTextStart,
-						ContentIndex: idx,
-						Partial:      output,
-					})
-
-				case "reasoning":
-					idx := len(output.Content)
-					output.Content = append(output.Content, ai.NewThinkingContent(""))
-					current = &itemState{
-						itemType:   "reasoning",
-						contentIdx: idx,
-					}
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventThinkingStart,
-						ContentIndex: idx,
-						Partial:      output,
-					})
-
-				case "function_call":
-					idx := len(output.Content)
-					callID, _ := itemRaw["call_id"].(string)
-					fcID, _ := itemRaw["id"].(string)
-					fcName, _ := itemRaw["name"].(string)
-					combinedID := callID
-					if fcID != "" {
-						combinedID = callID + "|" + fcID
-					}
-					output.Content = append(output.Content, ai.NewToolCallContent(combinedID, fcName, map[string]any{}))
-					current = &itemState{
-						itemType:    "function_call",
-						id:          fcID,
-						callID:      callID,
-						name:        fcName,
-						contentIdx:  idx,
-						partialJSON: "",
-					}
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventToolcallStart,
-						ContentIndex: idx,
-						Partial:      output,
-					})
-				}
-
-			case "response.output_text.delta":
-				if current != nil && current.itemType == "message" {
-					delta, _ := raw["delta"].(string)
-					if delta != "" {
-						c := output.Content[current.contentIdx]
-						c.Text.Text += delta
-						output.Content[current.contentIdx] = c
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventTextDelta,
-							ContentIndex: current.contentIdx,
-							Delta:        delta,
-							Partial:      output,
-						})
-					}
-				}
-
-			case "response.refusal.delta":
-				if current != nil && current.itemType == "message" {
-					delta, _ := raw["delta"].(string)
-					if delta != "" {
-						c := output.Content[current.contentIdx]
-						c.Text.Text += delta
-						output.Content[current.contentIdx] = c
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventTextDelta,
-							ContentIndex: current.contentIdx,
-							Delta:        delta,
-							Partial:      output,
-						})
-					}
-				}
-
-			case "response.reasoning_summary_text.delta":
-				if current != nil && current.itemType == "reasoning" {
-					delta, _ := raw["delta"].(string)
-					if delta != "" {
-						c := output.Content[current.contentIdx]
-						c.Thinking.Thinking += delta
-						output.Content[current.contentIdx] = c
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventThinkingDelta,
-							ContentIndex: current.contentIdx,
-							Delta:        delta,
-							Partial:      output,
-						})
-					}
-				}
-
-			case "response.reasoning_summary_part.done":
-				if current != nil && current.itemType == "reasoning" {
-					c := output.Content[current.contentIdx]
-					c.Thinking.Thinking += "\n\n"
-					output.Content[current.contentIdx] = c
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventThinkingDelta,
-						ContentIndex: current.contentIdx,
-						Delta:        "\n\n",
-						Partial:      output,
-					})
-				}
-
-			case "response.function_call_arguments.delta":
-				if current != nil && current.itemType == "function_call" {
-					delta, _ := raw["delta"].(string)
-					if delta != "" {
-						current.partialJSON += delta
-						parsed := ai.ParseStreamingJSON(current.partialJSON)
-						c := output.Content[current.contentIdx]
-						c.ToolCall.Arguments = parsed
-						output.Content[current.contentIdx] = c
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventToolcallDelta,
-							ContentIndex: current.contentIdx,
-							Delta:        delta,
-							Partial:      output,
-						})
-					}
-				}
-
-			case "response.function_call_arguments.done":
-				if current != nil && current.itemType == "function_call" {
-					argsStr, _ := raw["arguments"].(string)
-					if argsStr != "" {
-						current.partialJSON = argsStr
-						parsed := ai.ParseStreamingJSON(argsStr)
-						c := output.Content[current.contentIdx]
-						c.ToolCall.Arguments = parsed
-						output.Content[current.contentIdx] = c
-					}
-				}
-
-			case "response.output_item.done":
-				if current == nil {
-					continue
-				}
-				itemRaw, _ := raw["item"].(map[string]any)
-				iType := ""
-				if itemRaw != nil {
-					iType, _ = itemRaw["type"].(string)
-				}
-
-				switch iType {
-				case "message":
-					// Finalize text
-					idx := current.contentIdx
-					finalText := output.Content[idx].Text.Text
-					if itemRaw != nil {
-						if contents, ok := itemRaw["content"].([]any); ok {
-							var textParts []string
-							for _, c := range contents {
-								cm, _ := c.(map[string]any)
-								if cm != nil {
-									ct, _ := cm["type"].(string)
-									if ct == "output_text" {
-										t, _ := cm["text"].(string)
-										textParts = append(textParts, t)
-									} else if ct == "refusal" {
-										r, _ := cm["refusal"].(string)
-										textParts = append(textParts, r)
-									}
-								}
-							}
-							if len(textParts) > 0 {
-								finalText = strings.Join(textParts, "")
-							}
-						}
-					}
-					c := output.Content[idx]
-					c.Text.Text = finalText
-					// Store item ID as text signature
-					if id, ok := itemRaw["id"].(string); ok {
-						c.Text.TextSignature = id
-					}
-					output.Content[idx] = c
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventTextEnd,
-						ContentIndex: idx,
-						Content:      finalText,
-						Partial:      output,
-					})
-
-				case "reasoning":
-					idx := current.contentIdx
-					finalThinking := output.Content[idx].Thinking.Thinking
-					// Store reasoning item as signature (JSON)
-					if sigJSON, err := json.Marshal(itemRaw); err == nil {
-						c := output.Content[idx]
-						c.Thinking.ThinkingSignature = string(sigJSON)
-						output.Content[idx] = c
-					}
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventThinkingEnd,
-						ContentIndex: idx,
-						Content:      finalThinking,
-						Partial:      output,
-					})
-
-				case "function_call":
-					idx := current.contentIdx
-					// Parse final arguments
-					if argsStr, ok := itemRaw["arguments"].(string); ok && argsStr != "" {
-						var args map[string]any
-						if err := json.Unmarshal([]byte(argsStr), &args); err == nil {
-							c := output.Content[idx]
-							c.ToolCall.Arguments = args
-							output.Content[idx] = c
-						}
-					}
-					tc := output.Content[idx].ToolCall
-					stream.Push(ai.AssistantMessageEvent{
-						Type:         ai.EventToolcallEnd,
-						ContentIndex: idx,
-						ToolCall:     tc,
-						Partial:      output,
-					})
-				}
-				current = nil
-
-			case "response.completed":
-				respRaw, _ := raw["response"].(map[string]any)
-				if respRaw != nil {
-					if usageRaw, ok := respRaw["usage"].(map[string]any); ok {
-						cachedTokens := 0
-						if details, ok := usageRaw["input_tokens_details"].(map[string]any); ok {
-							cachedTokens = jsonInt(details, "cached_tokens")
-						}
-						inputTokens := jsonInt(usageRaw, "input_tokens")
-						output.Usage.Input = inputTokens - cachedTokens
-						output.Usage.Output = jsonInt(usageRaw, "output_tokens")
-						output.Usage.CacheRead = cachedTokens
-						output.Usage.TotalTokens = jsonInt(usageRaw, "total_tokens")
-						ai.CalculateCost(model, &output.Usage)
-					}
-
-					status, _ := respRaw["status"].(string)
-					output.StopReason = mapOpenAIResponsesStatus(status)
-
-					// If there are tool calls, override stop reason
-					for _, c := range output.Content {
-						if c.IsToolCall() {
-							if output.StopReason == ai.StopReasonStop {
-								output.StopReason = ai.StopReasonToolUse
-							}
-							break
-						}
-					}
-				}
-
-			case "error":
-				code, _ := raw["code"].(string)
-				message, _ := raw["message"].(string)
-				errMsg := fmt.Sprintf("Error Code %s: %s", code, message)
-				output.StopReason = ai.StopReasonError
-				output.ErrorMessage = errMsg
-				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
-				return
-
-			case "response.failed":
-				output.StopReason = ai.StopReasonError
-				output.ErrorMessage = "Unknown error"
-				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
-				return
-			}
-		}
-
-		// Check for SSE-level errors
-		select {
-		case err := <-sseErr:
-			if err != nil {
-				output.StopReason = ai.StopReasonError
-				output.ErrorMessage = err.Error()
-				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
-				return
-			}
-		default:
+		proc := &responsesSSEProcessor{output: output, stream: stream, model: model}
+		errFromSSE := processResponsesSSEStream(proc, sseEvents, sseErr)
+		if errFromSSE != nil {
+			output.StopReason = ai.StopReasonError
+			output.ErrorMessage = errFromSSE.Error()
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			return
 		}
 
 		stream.Push(ai.AssistantMessageEvent{
@@ -494,22 +182,32 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 
 	// Tools
 	if len(ctx.Tools) > 0 {
-		var tools []map[string]any
-		for _, tool := range ctx.Tools {
-			tools = append(tools, map[string]any{
-				"type":        "function",
-				"name":        tool.Name,
-				"description": tool.Description,
-				"parameters":  tool.Parameters,
-				"strict":      false,
-			})
-		}
-		body["tools"] = tools
+		body["tools"] = convertResponsesTools(ctx.Tools, false)
 	}
 
 	// Reasoning
 	if model.Reasoning {
-		// Reasoning config can be extended via headers/options later
+		if options != nil && options.ReasoningEffort != "" {
+			effort := string(options.ReasoningEffort)
+			if effort == "" {
+				effort = "medium"
+			}
+			body["reasoning"] = map[string]any{
+				"effort":  effort,
+				"summary": "auto",
+			}
+			body["include"] = []string{"reasoning.encrypted_content"}
+		} else if strings.HasPrefix(model.Name, "gpt-5") {
+			// GPT-5 requires explicit reasoning disable
+			// https://community.openai.com/t/need-reasoning-false-option-for-gpt-5/1351588/7
+			input = append(input, map[string]any{
+				"role": "developer",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "# Juice: 0 !important"},
+				},
+			})
+			body["input"] = input
+		}
 	}
 
 	return json.Marshal(body)
@@ -629,6 +327,17 @@ func StreamSimpleOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai
 	}
 
 	base := BuildBaseOptions(model, options, apiKey)
+
+	if options != nil && options.Reasoning != "" && model.Reasoning {
+		reasoningEffort := ClampReasoning(options.Reasoning)
+		if ai.SupportsXhigh(model) {
+			reasoningEffort = options.Reasoning
+		}
+		if reasoningEffort != "" {
+			base.ReasoningEffort = reasoningEffort
+		}
+	}
+
 	return StreamOpenAIResponses(ctx, model, prompt, base)
 }
 

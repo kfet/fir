@@ -18,7 +18,7 @@
 ├──────────────────────────────────────────────┤
 │  pkg/agent/                                   │  Agent loop: stream → tool exec → repeat
 ├──────────────────────────────────────────────┤
-│  pkg/ai/                                      │  LLM providers, SSE streaming
+│  pkg/ai/                                      │  LLM providers, SSE streaming, OAuth
 ├──────────────────────────────────────────────┤
 │  pkg/tui/                                     │  Terminal rendering, components
 └──────────────────────────────────────────────┘

@@ -293,7 +293,7 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 // --- ModelRegistry ---
 
 // OAuthProviderInterface allows OAuth providers to modify models.
-// This is a simplified version; full OAuth flow is not yet implemented in Go.
+// See pkg/ai/oauth/ for the full OAuth flow implementation.
 type OAuthProviderInterface struct {
 	ID           string
 	ModifyModels func(models []*ai.Model, cred *AuthCredential) []*ai.Model
@@ -398,7 +398,7 @@ func (r *ModelRegistry) loadModels() {
 	builtInModels := r.loadBuiltInModels(result.Overrides, result.ModelOverrides)
 	combined := r.mergeCustomModels(builtInModels, result.Models)
 
-	// TODO: Let OAuth providers modify their models
+	// TODO(Phase 12): Let OAuth providers modify their models — see docs/plan/07-work-tracker.md
 	r.models = combined
 }
 

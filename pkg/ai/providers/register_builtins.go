@@ -11,7 +11,8 @@ func RegisterBuiltInApiProviders(r *ai.Registry) {
 	RegisterOpenAIResponses(r)
 	RegisterGoogle(r)
 	RegisterBedrock(r)
-	// Azure OpenAI Responses, Codex, Vertex, Gemini CLI — not yet ported
+	RegisterAzureOpenAIResponses(r)
+	// Codex, Vertex, Gemini CLI — not yet ported
 }
 
 // RegisterDefaultProviders is a convenience that registers built-in providers

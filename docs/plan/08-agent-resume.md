@@ -68,6 +68,7 @@ Then change `[ ]` to `[x]` for your task. Pick the next one.
 | How sessions work | `packages/coding-agent/src/core/session-manager.ts` |
 | How it wires together | `packages/coding-agent/src/core/sdk.ts` |
 | Main entry point | `packages/coding-agent/src/main.ts` |
+| OAuth types & flows | `packages/ai/src/utils/oauth/types.ts` + provider files |
 | Testing patterns | `docs/plan/10-testing.md` |
 
 ## TS Source Location

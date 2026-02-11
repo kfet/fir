@@ -8,9 +8,12 @@ package interactive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -217,8 +220,10 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
-		// Handle slash commands
-		if strings.HasPrefix(text, "/") {
+		// Handle slash commands — known builtins are dispatched locally;
+		// everything else (skill commands, prompt templates) falls through
+		// to session.Prompt which expands them.
+		if strings.HasPrefix(text, "/") && m.isBuiltinSlashCommand(text) {
 			m.editor.SetText("")
 			m.handleSlashCommand(text)
 			return
@@ -337,6 +342,21 @@ func (m *InteractiveMode) setupAutocomplete() {
 		})
 	}
 
+	// Add skill commands (skill:<name>) from the resource loader
+	if m.session != nil {
+		rl := m.session.ResourceLoader()
+		if rl != nil {
+			if skills, _ := rl.GetSkills(); len(skills) > 0 {
+				for _, skill := range skills {
+					commands = append(commands, SlashCommand{
+						Name:        "skill:" + skill.Name,
+						Description: skill.Description,
+					})
+				}
+			}
+		}
+	}
+
 	basePath, _ := os.Getwd()
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
 	m.editor.SetAutocompleteProvider(provider)
@@ -345,6 +365,26 @@ func (m *InteractiveMode) setupAutocomplete() {
 // ============================================================================
 // Slash commands
 // ============================================================================
+
+// isBuiltinSlashCommand checks if text is a known builtin slash command.
+// Returns false for skill commands (/skill:*), prompt templates, and unknowns
+// so they can be sent to session.Prompt() for expansion.
+func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := parts[0]
+	switch cmd {
+	case "/help", "/hotkeys", "/clear", "/new", "/compact", "/model",
+		"/thinking", "/theme", "/settings", "/session", "/resume",
+		"/login", "/logout", "/scoped-models", "/tree", "/fork",
+		"/export", "/share", "/copy", "/name", "/changelog",
+		"/reload", "/quit", "/exit":
+		return true
+	}
+	return false
+}
 
 func (m *InteractiveMode) handleSlashCommand(text string) {
 	parts := strings.Fields(text)
@@ -389,7 +429,11 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/tree":
 		m.showTreeSelector()
 	case "/fork":
-		m.showUserMessageSelector()
+		if len(parts) > 1 {
+			m.handleForkByNumber(parts[1])
+		} else {
+			m.showUserMessageSelector()
+		}
 	case "/export":
 		m.handleExportCommand(text)
 	case "/share":
@@ -725,7 +769,7 @@ func (m *InteractiveMode) handleClearCommand() {
 // ============================================================================
 
 func (m *InteractiveMode) showOAuthSelector(mode string) {
-	// TODO: implement full OAuth selector with registry.GetOAuthProviders()
+	// TODO(Phase 12): implement full OAuth selector with registry.GetOAuthProviders() — see docs/plan/07-work-tracker.md
 	m.showWarning(fmt.Sprintf("/%s is not yet fully implemented", mode))
 }
 
@@ -746,16 +790,123 @@ func (m *InteractiveMode) showScopedModelsSelector() {
 // ============================================================================
 
 func (m *InteractiveMode) showTreeSelector() {
-	m.showWarning("/tree is not yet implemented")
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	tree := m.session.SessionManager.GetTree()
+	if len(tree) == 0 {
+		m.showStatus("No entries in session")
+		return
+	}
+
+	leafID := m.session.SessionManager.GetLeafID()
+
+	// Build a text-based tree display
+	t := itheme.GetTheme()
+	var lines []string
+	lines = append(lines, t.Bold("Session Tree"))
+	lines = append(lines, "")
+	var renderNodes func(nodes []*core.SessionTreeNode, depth int)
+	renderNodes = func(nodes []*core.SessionTreeNode, depth int) {
+		for _, node := range nodes {
+			prefix := strings.Repeat("  ", depth)
+			label := node.Entry.Type
+			if node.Entry.Type == "message" {
+				text := extractEntryText(node.Entry)
+				if len(text) > 60 {
+					text = text[:60] + "..."
+				}
+				label = text
+			}
+			marker := "  "
+			if node.Entry.ID == leafID {
+				marker = t.Fg("accent", "▸ ")
+			}
+			sessionLabel := ""
+			if node.Label != "" {
+				sessionLabel = t.Fg("dim", " ["+node.Label+"]")
+			}
+			lines = append(lines, prefix+marker+label+sessionLabel)
+			if len(node.Children) > 0 {
+				renderNodes(node.Children, depth+1)
+			}
+		}
+	}
+	renderNodes(tree, 0)
+
+	m.showMessage(strings.Join(lines, "\n"))
 }
 
 func (m *InteractiveMode) showUserMessageSelector() {
-	m.showWarning("/fork is not yet implemented")
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	userMsgs := m.session.GetUserMessagesForForking()
+	if len(userMsgs) == 0 {
+		m.showStatus("No messages to fork from")
+		return
+	}
+
+	// Build a list of user messages for selection
+	t := itheme.GetTheme()
+	var lines []string
+	lines = append(lines, t.Bold("Select a message to fork from:"))
+	lines = append(lines, "")
+	for i, msg := range userMsgs {
+		text := msg.Text
+		if len(text) > 80 {
+			text = text[:80] + "..."
+		}
+		// Replace newlines for display
+		text = strings.ReplaceAll(text, "\n", " ")
+		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, text))
+	}
+	lines = append(lines, "")
+	lines = append(lines, t.Fg("dim", "Use /fork <number> to fork from a specific message"))
+
+	m.showMessage(strings.Join(lines, "\n"))
 }
 
 // ============================================================================
 // Export / share / copy / name / changelog / session info / reload
 // ============================================================================
+
+// extractEntryText extracts display text from a session entry.
+func extractEntryText(entry *core.SessionEntry) string {
+	if entry.Type != "message" || len(entry.RawMessage) == 0 {
+		return entry.Type
+	}
+	var msg struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(entry.RawMessage, &msg) != nil {
+		return entry.Type
+	}
+
+	// Try string content
+	var s string
+	if json.Unmarshal(msg.Content, &s) == nil {
+		return strings.ReplaceAll(s, "\n", " ")
+	}
+
+	// Try array of content blocks
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(msg.Content, &blocks) == nil {
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				return strings.ReplaceAll(b.Text, "\n", " ")
+			}
+		}
+	}
+
+	return fmt.Sprintf("[%s message]", msg.Role)
+}
 
 func (m *InteractiveMode) handleExportCommand(text string) {
 	m.showWarning("/export is not yet implemented")
@@ -765,18 +916,73 @@ func (m *InteractiveMode) handleShareCommand() {
 	m.showWarning("/share is not yet implemented")
 }
 
+func (m *InteractiveMode) handleForkByNumber(numStr string) {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n < 1 {
+		m.showWarning("Usage: /fork <number> — use /fork to see available messages")
+		return
+	}
+
+	userMsgs := m.session.GetUserMessagesForForking()
+	if n > len(userMsgs) {
+		m.showWarning(fmt.Sprintf("Message %d not found. Only %d user messages available.", n, len(userMsgs)))
+		return
+	}
+
+	entry := userMsgs[n-1]
+	selectedText, cancelled, forkErr := m.session.Fork(entry.EntryID)
+	if forkErr != nil {
+		m.showWarning(fmt.Sprintf("Fork failed: %s", forkErr))
+		return
+	}
+	if cancelled {
+		return
+	}
+
+	m.rebuildChatFromMessages()
+	if m.editor != nil && selectedText != "" {
+		m.editor.SetText(selectedText)
+	}
+	m.showStatus("Branched to new session")
+}
+
 func (m *InteractiveMode) handleCopyCommand() {
-	m.showWarning("/copy is not yet implemented")
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	text := m.session.GetLastAssistantText()
+	if text == "" {
+		m.showWarning("No agent messages to copy yet.")
+		return
+	}
+	core.CopyToClipboard(text)
+	m.showStatus("Copied last agent message to clipboard")
 }
 
 func (m *InteractiveMode) handleNameCommand(text string) {
-	// TODO: implement SetSessionName on AgentSession
-	parts := strings.Fields(text)
-	if len(parts) < 2 {
-		m.showWarning("Usage: /name <session-name>")
+	if m.session == nil {
+		m.showWarning("No session available")
 		return
 	}
-	m.showWarning("/name is not yet fully implemented")
+	name := strings.TrimSpace(strings.TrimPrefix(text, "/name"))
+	if name == "" {
+		currentName := m.session.SessionManager.GetSessionName()
+		if currentName != "" {
+			t := itheme.GetTheme()
+			m.showMessage(t.Fg("dim", "Session name: "+currentName))
+		} else {
+			m.showWarning("Usage: /name <name>")
+		}
+		return
+	}
+	m.session.SetSessionName(name)
+	t := itheme.GetTheme()
+	m.showMessage(t.Fg("dim", "Session name set: "+name))
 }
 
 func (m *InteractiveMode) handleSessionCommand() {
@@ -784,21 +990,76 @@ func (m *InteractiveMode) handleSessionCommand() {
 		m.showWarning("No session available")
 		return
 	}
-	state := m.session.State()
-	modelID := "unknown"
-	if state.Model != nil {
-		modelID = state.Model.ID
+	stats := m.session.GetSessionStats()
+	sessionName := m.session.SessionManager.GetSessionName()
+	t := itheme.GetTheme()
+
+	var lines []string
+	lines = append(lines, t.Bold("Session Info"))
+	lines = append(lines, "")
+	if sessionName != "" {
+		lines = append(lines, t.Fg("dim", "Name: ")+sessionName)
 	}
-	info := fmt.Sprintf("Session info:\n  Model: %s\n  Messages: %d\n  Streaming: %v",
-		modelID,
-		len(state.Messages),
-		state.IsStreaming,
-	)
-	m.showMessage(info)
+	if stats.SessionFile != "" {
+		lines = append(lines, t.Fg("dim", "File: ")+stats.SessionFile)
+	} else {
+		lines = append(lines, t.Fg("dim", "File: ")+"In-memory")
+	}
+	lines = append(lines, t.Fg("dim", "ID: ")+stats.SessionID)
+	lines = append(lines, "")
+	lines = append(lines, t.Bold("Messages"))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "User:"), stats.UserMessages))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Assistant:"), stats.AssistantMessages))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Tool Calls:"), stats.ToolCalls))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Tool Results:"), stats.ToolResults))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Total:"), stats.TotalMessages))
+	lines = append(lines, "")
+	lines = append(lines, t.Bold("Tokens"))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Input:"), stats.Tokens.Input))
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Output:"), stats.Tokens.Output))
+	if stats.Tokens.CacheRead > 0 {
+		lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Cache Read:"), stats.Tokens.CacheRead))
+	}
+	if stats.Tokens.CacheWrite > 0 {
+		lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Cache Write:"), stats.Tokens.CacheWrite))
+	}
+	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "Total:"), stats.Tokens.Total))
+
+	if stats.Cost > 0 {
+		lines = append(lines, "")
+		lines = append(lines, t.Bold("Cost"))
+		lines = append(lines, fmt.Sprintf("%s %.4f", t.Fg("dim", "Total:"), stats.Cost))
+	}
+
+	m.showMessage(strings.Join(lines, "\n"))
 }
 
 func (m *InteractiveMode) handleChangelogCommand() {
-	m.showWarning("/changelog is not yet implemented")
+	// Look for CHANGELOG.md next to the binary
+	execPath, err := os.Executable()
+	if err != nil {
+		m.showWarning("Could not determine executable path")
+		return
+	}
+	changelogPath := filepath.Join(filepath.Dir(execPath), "CHANGELOG.md")
+	entries := core.ParseChangelog(changelogPath)
+	if len(entries) == 0 {
+		m.showMessage("No changelog entries found.")
+		return
+	}
+
+	// Show newest first
+	t := itheme.GetTheme()
+	var lines []string
+	lines = append(lines, t.Bold(t.Fg("accent", "What's New")))
+	lines = append(lines, "")
+	for i := len(entries) - 1; i >= 0; i-- {
+		lines = append(lines, entries[i].Content)
+		if i > 0 {
+			lines = append(lines, "")
+		}
+	}
+	m.showMessage(strings.Join(lines, "\n"))
 }
 
 func (m *InteractiveMode) handleReloadCommand() {
@@ -806,9 +1067,18 @@ func (m *InteractiveMode) handleReloadCommand() {
 		m.showWarning("No session available")
 		return
 	}
+	if m.session.IsStreaming() {
+		m.showWarning("Wait for the current response to finish before reloading.")
+		return
+	}
+
 	m.showStatus("Reloading extensions, skills, prompts, and themes...")
-	// TODO: implement actual reload logic
-	m.showStatus("Reload complete")
+	if err := m.session.Reload(); err != nil {
+		m.showWarning(fmt.Sprintf("Reload failed: %v", err))
+		return
+	}
+	m.rebuildChatFromMessages()
+	m.showStatus("Reloaded extensions, skills, prompts, themes")
 }
 
 // ============================================================================
@@ -1000,8 +1270,24 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 
 // AddUserMessage adds a user message to the display.
 func (m *InteractiveMode) AddUserMessage(text string) {
-	m.messageContainer.AddChild(components.NewUserMessageComponent(text, nil))
+	m.addUserMessageToChat(text)
 	m.ui.RequestRender(false)
+}
+
+// addUserMessageToChat adds a user message, rendering skill blocks specially.
+func (m *InteractiveMode) addUserMessageToChat(text string) {
+	skillBlock := core.ParseSkillBlock(text)
+	if skillBlock != nil {
+		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+		skillComp := components.NewSkillInvocationMessageComponent(skillBlock, &m.markdownTheme)
+		skillComp.SetExpanded(m.toolOutputExpanded)
+		m.messageContainer.AddChild(skillComp)
+		if skillBlock.UserMessage != "" {
+			m.messageContainer.AddChild(components.NewUserMessageComponent(skillBlock.UserMessage, nil))
+		}
+	} else {
+		m.messageContainer.AddChild(components.NewUserMessageComponent(text, nil))
+	}
 }
 
 // AddAssistantMessage adds an assistant message to the display.
@@ -1019,7 +1305,7 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 	for _, agentMsg := range state.Messages {
 		if u := agentMsg.Message.AsUser(); u != nil {
 			if txt, ok := u.Content.(string); ok {
-				m.messageContainer.AddChild(components.NewUserMessageComponent(txt, nil))
+				m.addUserMessageToChat(txt)
 			}
 		} else if a := agentMsg.Message.AsAssistant(); a != nil {
 			comp := components.NewAssistantMessageComponent(a, m.hideThinking, nil)

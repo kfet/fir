@@ -45,10 +45,75 @@ func TestBaseMimeType(t *testing.T) {
 	}
 }
 
-func TestReadClipboardImage_ReturnsNil(t *testing.T) {
-	// Not implemented yet, should return nil
-	result := ReadClipboardImage()
-	if result != nil {
-		t.Error("expected nil from unimplemented ReadClipboardImage")
+func TestSelectPreferredImageMimeType(t *testing.T) {
+	tests := []struct {
+		name  string
+		types []string
+		want  string
+	}{
+		{"prefers png", []string{"text/plain", "image/png", "image/jpeg"}, "image/png"},
+		{"prefers jpeg when no png", []string{"text/plain", "image/jpeg"}, "image/jpeg"},
+		{"falls back to any image", []string{"text/plain", "image/bmp"}, "image/bmp"},
+		{"empty list", []string{}, ""},
+		{"no image types", []string{"text/plain", "application/json"}, ""},
+		{"handles whitespace", []string{"  image/png  ", "image/jpeg"}, "image/png"},
+		{"skips empty strings", []string{"", "image/png", ""}, "image/png"},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectPreferredImageMimeType(tt.types)
+			if got != tt.want {
+				t.Errorf("selectPreferredImageMimeType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSupportedImageMimeType(t *testing.T) {
+	tests := []struct {
+		mimeType string
+		want     bool
+	}{
+		{"image/png", true},
+		{"image/jpeg", true},
+		{"image/webp", true},
+		{"image/gif", true},
+		{"image/bmp", false},
+		{"text/plain", false},
+		{"IMAGE/PNG", true},
+		{"image/png; charset=utf-8", true},
+	}
+
+	for _, tt := range tests {
+		got := isSupportedImageMimeType(tt.mimeType)
+		if got != tt.want {
+			t.Errorf("isSupportedImageMimeType(%q) = %v, want %v", tt.mimeType, got, tt.want)
+		}
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"a\nb\nc", 3},
+		{"a\n\nb", 2},
+		{"  a  \n  b  ", 2},
+		{"", 0},
+		{"\n\n\n", 0},
+	}
+
+	for _, tt := range tests {
+		got := splitLines(tt.input)
+		if len(got) != tt.want {
+			t.Errorf("splitLines(%q) got %d lines, want %d", tt.input, len(got), tt.want)
+		}
+	}
+}
+
+func TestIsWaylandSessionNoPanic(t *testing.T) {
+	// Just verify the function doesn't panic - actual result depends on environment
+	_ = IsWaylandSession()
 }

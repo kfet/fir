@@ -1,9 +1,11 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -467,13 +469,117 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 // Fork (stub)
 // ============================================================================
 
-func TestAgentSession_Fork_NotImplemented(t *testing.T) {
+func TestAgentSession_Fork_InvalidEntry(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	err := session.Fork("entry-1")
+	_, _, err := session.Fork("nonexistent")
 	if err == nil {
-		t.Error("expected error for unimplemented Fork")
+		t.Error("expected error for invalid entry ID")
+	}
+}
+
+func TestAgentSession_Fork_Success(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Add a user message to the session
+	userMsg := agent.NewAgentMessage(ai.NewUserMsg("hello world", 0))
+	session.SessionManager.AppendAgentMessage(userMsg)
+
+	// Add an assistant message
+	assistantMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "hi there"}}},
+	}))
+	session.SessionManager.AppendAgentMessage(assistantMsg)
+
+	// Get the user message entry ID
+	entries := session.SessionManager.GetEntries()
+	var userEntryID string
+	for _, e := range entries {
+		if e.Type == "message" {
+			var probe struct{ Role string `json:"role"` }
+			if json.Unmarshal(e.RawMessage, &probe) == nil && probe.Role == "user" {
+				userEntryID = e.ID
+				break
+			}
+		}
+	}
+	if userEntryID == "" {
+		t.Fatal("no user entry found")
+	}
+
+	text, cancelled, err := session.Fork(userEntryID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cancelled {
+		t.Error("expected cancelled=false")
+	}
+	if text != "hello world" {
+		t.Errorf("expected text 'hello world', got %q", text)
+	}
+}
+
+func TestAgentSession_GetUserMessagesForForking(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Add user + assistant messages
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("first", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "reply1"}}},
+	})))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("second", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "reply2"}}},
+	})))
+
+	msgs := session.GetUserMessagesForForking()
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 fork messages, got %d", len(msgs))
+	}
+	if msgs[0].Text != "first" {
+		t.Errorf("expected first message text 'first', got %q", msgs[0].Text)
+	}
+	if msgs[1].Text != "second" {
+		t.Errorf("expected second message text 'second', got %q", msgs[1].Text)
+	}
+}
+
+// ============================================================================
+// extractUserMessageText
+// ============================================================================
+
+func TestExtractUserMessageText_StringContent(t *testing.T) {
+	raw := json.RawMessage(`{"role":"user","content":"hello world"}`)
+	text := extractUserMessageText(raw)
+	if text != "hello world" {
+		t.Errorf("expected 'hello world', got %q", text)
+	}
+}
+
+func TestExtractUserMessageText_ArrayContent(t *testing.T) {
+	raw := json.RawMessage(`{"role":"user","content":[{"type":"text","text":"part1"},{"type":"text","text":"part2"},{"type":"image","source":{"data":"abc"}}]}`)
+	text := extractUserMessageText(raw)
+	if text != "part1part2" {
+		t.Errorf("expected 'part1part2', got %q", text)
+	}
+}
+
+func TestExtractUserMessageText_EmptyContent(t *testing.T) {
+	raw := json.RawMessage(`{"role":"user","content":""}`)
+	text := extractUserMessageText(raw)
+	if text != "" {
+		t.Errorf("expected empty, got %q", text)
+	}
+}
+
+func TestExtractUserMessageText_InvalidJSON(t *testing.T) {
+	raw := json.RawMessage(`{invalid`)
+	text := extractUserMessageText(raw)
+	if text != "" {
+		t.Errorf("expected empty for invalid JSON, got %q", text)
 	}
 }
 
@@ -881,7 +987,87 @@ func TestParseSkillBlock_NoMatch(t *testing.T) {
 }
 
 // ============================================================================
-// checkAutoCompaction
+// expandSkillCommand
+// ============================================================================
+
+func TestExpandSkillCommand_NotSkillCommand(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Non-skill text should pass through unchanged
+	for _, text := range []string{"hello", "/help", "/model gpt-4", "just text"} {
+		got := session.expandSkillCommand(text)
+		if got != text {
+			t.Errorf("expandSkillCommand(%q) = %q, want unchanged", text, got)
+		}
+	}
+}
+
+func TestExpandSkillCommand_UnknownSkill(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	text := "/skill:nonexistent do something"
+	got := session.expandSkillCommand(text)
+	if got != text {
+		t.Errorf("expected unchanged for unknown skill, got %q", got)
+	}
+}
+
+func TestExpandSkillCommand_ValidSkill(t *testing.T) {
+	session, cwd := newTestAgentSession(t)
+	defer session.Close()
+
+	// Create a skill file in the project's .pi/skills directory
+	skillDir := filepath.Join(cwd, ".pi", "skills", "review")
+	os.MkdirAll(skillDir, 0755)
+	skillContent := `---
+name: review
+description: Review code for issues
+---
+Check the code for bugs and style issues.`
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644)
+
+	// Reload the resource loader to pick up the skill
+	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+
+	got := session.expandSkillCommand("/skill:review fix the bug")
+	if !strings.Contains(got, "<skill name=") {
+		t.Errorf("expected skill block XML, got %q", got)
+	}
+	if !strings.Contains(got, "Check the code for bugs") {
+		t.Errorf("expected skill body content, got %q", got)
+	}
+	if !strings.Contains(got, "fix the bug") {
+		t.Errorf("expected user args after skill block, got %q", got)
+	}
+}
+
+func TestExpandSkillCommand_NoArgs(t *testing.T) {
+	session, cwd := newTestAgentSession(t)
+	defer session.Close()
+
+	skillDir := filepath.Join(cwd, ".pi", "skills", "deploy")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: deploy
+description: Deploy the application
+---
+Run the deploy steps.`), 0644)
+
+	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+
+	got := session.expandSkillCommand("/skill:deploy")
+	if !strings.Contains(got, "<skill name=") {
+		t.Errorf("expected skill block, got %q", got)
+	}
+	if strings.Contains(got, "\n\n\n") {
+		t.Error("should not have double-blank separator when no args")
+	}
+}
+
+// ============================================================================
+// checkAutoCompaction (with model)
 // ============================================================================
 
 // newTestAgentSessionWithModel creates a test session with a model and optional
@@ -1395,5 +1581,231 @@ func TestAgentSession_PersistMessage_Assistant(t *testing.T) {
 	ctx := session.SessionManager.BuildSessionContext()
 	if len(ctx.Messages) != 1 {
 		t.Fatalf("expected 1 persisted message, got %d", len(ctx.Messages))
+	}
+}
+
+// ============================================================================
+// ExecuteBash
+// ============================================================================
+
+func TestAgentSession_ExecuteBash(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	result, err := session.ExecuteBash("echo hello", nil)
+	if err != nil {
+		t.Fatalf("ExecuteBash failed: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if result.Output == "" {
+		t.Error("expected non-empty output")
+	}
+
+	// Verify it was recorded in the session
+	ctx := session.SessionManager.BuildSessionContext()
+	if len(ctx.Messages) == 0 {
+		t.Fatal("expected bash execution to be recorded in session")
+	}
+}
+
+func TestAgentSession_ExecuteBash_CommandFails(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	result, err := session.ExecuteBash("exit 42", nil)
+	if err != nil {
+		t.Fatalf("ExecuteBash failed: %v", err)
+	}
+	if result.ExitCode != 42 {
+		t.Errorf("expected exit code 42, got %d", result.ExitCode)
+	}
+}
+
+func TestAgentSession_AbortBash_NoOp(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// AbortBash should not panic when no bash is running
+	session.AbortBash()
+}
+
+func TestAgentSession_IsBashRunning_InitiallyFalse(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	if session.IsBashRunning() {
+		t.Error("expected IsBashRunning to be false initially")
+	}
+}
+
+func TestAgentSession_ExecuteBash_OnChunk(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	var chunks []string
+	var mu sync.Mutex
+	result, err := session.ExecuteBash("echo chunk1; echo chunk2", func(chunk string) {
+		mu.Lock()
+		chunks = append(chunks, chunk)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("ExecuteBash failed: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(chunks) == 0 {
+		t.Error("expected onChunk to be called")
+	}
+}
+
+// ============================================================================
+// SetSessionName / GetSessionName
+// ============================================================================
+
+func TestAgentSession_SetSessionName(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.SetSessionName("my-session")
+	name := session.GetSessionName()
+	if name != "my-session" {
+		t.Errorf("expected session name 'my-session', got %q", name)
+	}
+}
+
+func TestAgentSession_SetSessionName_Override(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.SetSessionName("first")
+	session.SetSessionName("second")
+	name := session.GetSessionName()
+	if name != "second" {
+		t.Errorf("expected session name 'second', got %q", name)
+	}
+}
+
+// ============================================================================
+// GetSessionStats
+// ============================================================================
+
+func TestAgentSession_GetSessionStats_Empty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	stats := session.GetSessionStats()
+	if stats.TotalMessages != 0 {
+		t.Errorf("expected 0 total messages, got %d", stats.TotalMessages)
+	}
+	if stats.SessionID == "" {
+		t.Error("expected non-empty session ID")
+	}
+}
+
+func TestAgentSession_GetSessionStats_WithMessages(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewTextContent("hi"),
+			ai.NewToolCallContent("tc1", "read", map[string]any{}),
+		},
+		Usage: ai.Usage{Input: 100, Output: 50, CacheRead: 10, Cost: ai.UsageCost{Total: 0.005}},
+	})))
+	ctx := session.SessionManager.BuildSessionContext()
+	session.Agent.ReplaceMessages(ctx.Messages)
+
+	stats := session.GetSessionStats()
+	if stats.UserMessages != 1 {
+		t.Errorf("expected 1 user message, got %d", stats.UserMessages)
+	}
+	if stats.AssistantMessages != 1 {
+		t.Errorf("expected 1 assistant message, got %d", stats.AssistantMessages)
+	}
+	if stats.ToolCalls != 1 {
+		t.Errorf("expected 1 tool call, got %d", stats.ToolCalls)
+	}
+	if stats.TotalMessages != 2 {
+		t.Errorf("expected 2 total messages, got %d", stats.TotalMessages)
+	}
+	if stats.Tokens.Input != 100 {
+		t.Errorf("expected 100 input tokens, got %d", stats.Tokens.Input)
+	}
+	if stats.Tokens.Output != 50 {
+		t.Errorf("expected 50 output tokens, got %d", stats.Tokens.Output)
+	}
+	if stats.Cost != 0.005 {
+		t.Errorf("expected cost 0.005, got %f", stats.Cost)
+	}
+}
+
+// ============================================================================
+// GetLastAssistantText
+// ============================================================================
+
+func TestAgentSession_GetLastAssistantText_Empty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	text := session.GetLastAssistantText()
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
+	}
+}
+
+func TestAgentSession_GetLastAssistantText(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("first reply")},
+	})))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("second reply")},
+	})))
+	ctx := session.SessionManager.BuildSessionContext()
+	session.Agent.ReplaceMessages(ctx.Messages)
+
+	text := session.GetLastAssistantText()
+	if text != "second reply" {
+		t.Errorf("expected 'second reply', got %q", text)
+	}
+}
+
+// ============================================================================
+// NavigateTree
+// ============================================================================
+
+func TestAgentSession_NavigateTree(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q1", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "a1"}}},
+	})))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
+
+	entries := session.SessionManager.GetEntries()
+	if len(entries) < 1 {
+		t.Fatal("expected entries")
+	}
+
+	result, err := session.NavigateTree(entries[0].ID, false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Cancelled || result.Aborted {
+		t.Error("expected neither cancelled nor aborted")
 	}
 }

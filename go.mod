@@ -8,8 +8,9 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.16
+	golang.org/x/image v0.36.0
 	golang.org/x/term v0.39.0
-	golang.org/x/text v0.33.0
+	golang.org/x/text v0.34.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

@@ -190,7 +190,7 @@ func (s *AuthStorage) HasAuth(provider string) bool {
 // 3. Environment variable
 // 4. Fallback resolver (models.json custom providers)
 //
-// Note: OAuth token refresh is not implemented in the Go port yet.
+// Note: OAuth token refresh is tracked in Phase 12 — see docs/plan/07-work-tracker.md.
 func (s *AuthStorage) GetApiKey(provider string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -218,7 +218,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 			}
 			// For other OAuth providers (e.g. Anthropic), return access token directly
 			return cred.Access
-			// TODO: OAuth token refresh with file locking
+			// TODO(Phase 12): OAuth token refresh with file locking — see docs/plan/07-work-tracker.md
 		}
 	}
 

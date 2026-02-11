@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kfet/pi-go/pkg/agent"
+	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/core"
 	"github.com/kfet/pi-go/pkg/modes/interactive/components"
 	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
@@ -144,6 +146,47 @@ func newTestMode(t *testing.T) *testMode {
 	t.Cleanup(func() { ui.Stop() })
 
 	return &testMode{mode: m, term: term, ui: ui}
+}
+
+func newTestModeWithSession(t *testing.T) *testMode {
+	t.Helper()
+	tm := newTestMode(t)
+
+	// Create a real AgentSession
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
+	settingsManager := core.NewSettingsManager(cwd, agentDir)
+
+	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+		Cwd:      cwd,
+		AgentDir: agentDir,
+	})
+	rl.Reload()
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			ThinkingLevel: "off",
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return core.ConvertToLLM(msgs)
+		},
+	})
+
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(agentDir+"/auth.json"), ""),
+		Cwd:             cwd,
+	})
+	t.Cleanup(func() { session.Close() })
+
+	tm.mode.session = session
+	return tm
 }
 
 func (tm *testMode) typeText(text string) {
@@ -404,22 +447,75 @@ func TestInteractiveMode_SlashExit(t *testing.T) {
 	}
 }
 
+func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+
+	builtins := []string{
+		"/help", "/hotkeys", "/clear", "/new", "/compact", "/model",
+		"/thinking", "/theme", "/settings", "/session", "/resume",
+		"/login", "/logout", "/quit", "/exit",
+	}
+	for _, cmd := range builtins {
+		if !m.isBuiltinSlashCommand(cmd) {
+			t.Errorf("expected %q to be a builtin command", cmd)
+		}
+	}
+
+	nonBuiltins := []string{
+		"/skill:review", "/skill:deploy do it", "/mytemplate", "/nonexistent",
+	}
+	for _, cmd := range nonBuiltins {
+		if m.isBuiltinSlashCommand(cmd) {
+			t.Errorf("expected %q to NOT be a builtin command", cmd)
+		}
+	}
+}
+
+func TestInteractiveMode_SkillCommandFlowsToPrompt(t *testing.T) {
+	tm := newTestMode(t)
+
+	// Override OnSubmit to track what gets submitted (no session)
+	var submitted string
+	tm.mode.editor.OnSubmit = func(text string) {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return
+		}
+		// Simulate the real submit logic: builtins go to handleSlashCommand,
+		// everything else (skills, templates) goes to prompt
+		if strings.HasPrefix(text, "/") && tm.mode.isBuiltinSlashCommand(text) {
+			tm.mode.editor.SetText("")
+			tm.mode.handleSlashCommand(text)
+			return
+		}
+		// Non-builtin slash commands go to history + prompt
+		tm.mode.editor.AddToHistory(text)
+		tm.mode.editor.SetText("")
+		submitted = text
+	}
+
+	tm.typeText("/skill:review fix the bug")
+	tm.pressEnter()
+	tm.waitRender()
+
+	if submitted != "/skill:review fix the bug" {
+		t.Errorf("expected skill command to flow to prompt, got %q", submitted)
+	}
+}
+
 func TestInteractiveMode_SlashUnknownCommand(t *testing.T) {
 	tm := newTestMode(t)
 
+	// Unknown slash commands (not builtin) are treated as skill/template
+	// commands and sent to session.Prompt() for expansion.
+	// Since session is nil in tests, they are effectively no-ops.
 	tm.typeText("/nonexistent")
 	tm.pressEnter()
 	tm.waitRender()
 
-	// Editor should be cleared
+	// Editor should be cleared (submitted as regular prompt)
 	if got := tm.editorText(); got != "" {
 		t.Errorf("expected empty editor after unknown command, got %q", got)
-	}
-
-	// Should show a warning in status container
-	rendered := tm.renderedOutput()
-	if !strings.Contains(rendered, "Unknown command") {
-		t.Error("expected 'Unknown command' warning in output")
 	}
 }
 
@@ -662,7 +758,7 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		{"/share", false, false, true},   // "not yet implemented"
 		{"/copy", false, false, true},    // "not yet implemented"
 		{"/name", false, false, true},    // usage warning (no args)
-		{"/changelog", false, false, true},
+		{"/changelog", false, true, false}, // shows "No changelog entries found." message
 		{"/tree", false, false, true},
 		{"/fork", false, false, true},
 		{"/scoped-models", false, false, true},
@@ -912,5 +1008,100 @@ func TestInteractiveMode_ShowWarningAppearsInStatus(t *testing.T) {
 	output := tm.renderedOutput()
 	if !strings.Contains(output, "Something went wrong") {
 		t.Error("expected warning text in rendered output")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractEntryText
+// ---------------------------------------------------------------------------
+
+func TestExtractEntryText_NonMessage(t *testing.T) {
+	entry := &core.SessionEntry{Type: "compaction"}
+	got := extractEntryText(entry)
+	if got != "compaction" {
+		t.Errorf("expected 'compaction', got %q", got)
+	}
+}
+
+func TestExtractEntryText_StringContent(t *testing.T) {
+	raw := []byte(`{"role":"user","content":"hello world"}`)
+	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	got := extractEntryText(entry)
+	if got != "hello world" {
+		t.Errorf("expected 'hello world', got %q", got)
+	}
+}
+
+func TestExtractEntryText_StringContentNewlines(t *testing.T) {
+	raw := []byte(`{"role":"user","content":"line1\nline2"}`)
+	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	got := extractEntryText(entry)
+	if !strings.Contains(got, "line1 line2") {
+		t.Errorf("expected newlines replaced with spaces, got %q", got)
+	}
+}
+
+func TestExtractEntryText_ArrayContent(t *testing.T) {
+	raw := []byte(`{"role":"assistant","content":[{"type":"text","text":"response text"}]}`)
+	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	got := extractEntryText(entry)
+	if got != "response text" {
+		t.Errorf("expected 'response text', got %q", got)
+	}
+}
+
+func TestExtractEntryText_InvalidJSON(t *testing.T) {
+	entry := &core.SessionEntry{Type: "message", RawMessage: []byte(`{invalid`)}
+	got := extractEntryText(entry)
+	if got != "message" {
+		t.Errorf("expected 'message', got %q", got)
+	}
+}
+
+func TestExtractEntryText_EmptyRawMessage(t *testing.T) {
+	entry := &core.SessionEntry{Type: "message"}
+	got := extractEntryText(entry)
+	if got != "message" {
+		t.Errorf("expected 'message', got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /name command
+// ---------------------------------------------------------------------------
+
+func TestInteractiveMode_SlashName(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	tm.mode.handleSlashCommand("/name test-session")
+	tm.waitRender()
+
+	name := tm.mode.session.GetSessionName()
+	if name != "test-session" {
+		t.Errorf("expected session name 'test-session', got %q", name)
+	}
+}
+
+func TestInteractiveMode_SlashNameEmpty(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	tm.mode.handleSlashCommand("/name")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Usage") {
+		t.Error("expected usage warning for empty /name")
+	}
+}
+
+func TestInteractiveMode_SlashReloadWithSession(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	tm.mode.handleSlashCommand("/reload")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if strings.Contains(output, "failed") {
+		t.Error("reload should succeed")
 	}
 }

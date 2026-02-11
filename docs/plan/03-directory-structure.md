@@ -15,14 +15,22 @@ pi-go/
 │   │   ├── registry.go          # Provider registry
 │   │   ├── jsonparse.go         # Streaming JSON parser
 │   │   ├── overflow.go          # Context overflow detection
-│   │   └── providers/
-│   │       ├── anthropic.go
-│   │       ├── openai.go        # OpenAI completions + compatible
-│   │       ├── openai_responses.go
-│   │       ├── google.go
-│   │       ├── bedrock.go
-│   │       ├── options.go       # Shared reasoning/budget logic
-│   │       └── transform.go     # Message format transforms
+│   │   ├── providers/
+│   │   │   ├── anthropic.go
+│   │   │   ├── openai.go        # OpenAI completions + compatible
+│   │   │   ├── openai_responses.go
+│   │   │   ├── google.go
+│   │   │   ├── bedrock.go
+│   │   │   ├── options.go       # Shared reasoning/budget logic
+│   │   │   └── transform.go     # Message format transforms
+│   │   └── oauth/
+│   │       ├── types.go         # OAuthCredentials, OAuthProviderInterface
+│   │       ├── pkce.go          # PKCE verifier + challenge
+│   │       ├── anthropic.go     # Anthropic OAuth flow
+│   │       ├── github_copilot.go # GitHub Copilot device flow
+│   │       ├── google_antigravity.go # Google Antigravity OAuth
+│   │       ├── google_gemini_cli.go  # Gemini CLI gcloud auth
+│   │       └── openai_codex.go  # OpenAI Codex OAuth
 │   ├── agent/
 │   │   ├── types.go             # AgentTool, AgentMessage, AgentState, events
 │   │   ├── agent.go             # Agent struct

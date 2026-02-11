@@ -95,6 +95,24 @@ The 4362-line monster. Wires TUI + AgentSession + slash commands + overlays.
 
 Arg parsing, mode dispatch, package management commands.
 
+## Phase 10: OAuth Flows (`pkg/ai/oauth/`)
+
+OAuth authentication for providers. Required for Anthropic (Claude), GitHub Copilot, Google (Gemini CLI, Antigravity), and OpenAI Codex.
+
+**Port order:**
+1. `types.go` — OAuthCredentials, OAuthProviderInterface, OAuthLoginCallbacks (~59 lines TS)
+2. `pkce.go` — PKCE code verifier + challenge generation (~34 lines TS)
+3. `anthropic.go` — Anthropic OAuth flow (~138 lines TS)
+4. `github_copilot.go` — GitHub Copilot device flow (~381 lines TS)
+5. `google_antigravity.go` — Google Antigravity OAuth (~457 lines TS)
+6. `google_gemini_cli.go` — Google Gemini CLI auth via gcloud (~599 lines TS)
+7. `openai_codex.go` — OpenAI Codex OAuth (~455 lines TS)
+8. Wire into `modelregistry.go` — token refresh, model modification
+9. Wire into `interactive/mode.go` — `/login`, `/logout` slash commands
+10. Wire into `authstorage.go` — token refresh with file locking
+
+**Go-specific:** Use `crypto/sha256` for PKCE (simpler than Web Crypto). Use `net/http` for callback servers. File locking via `syscall.Flock`.
+
 ## What's Deferred
 
 | Feature | Reason | TS Lines |
@@ -102,5 +120,4 @@ Arg parsing, mode dispatch, package management commands.
 | Extension system | Needs different approach in Go | ~2,600 |
 | Package manager | npm/git specific | 1,730 |
 | HTML export | Low priority | ~650 |
-| OAuth flows | Complex, provider-specific | ~2,200 |
 | Migrations | TS-specific data migration | 295 |

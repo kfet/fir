@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FooterDataProvider provides git branch and extension statuses for the footer.
@@ -27,8 +28,42 @@ func NewFooterDataProvider(cwd string) *FooterDataProvider {
 		extensionStatuses: make(map[string]string),
 		cwd:               cwd,
 	}
-	// Note: git watcher not yet implemented (requires fsnotify or similar)
+	f.startGitWatcher()
 	return f
+}
+
+// startGitWatcher polls the git HEAD file for changes.
+func (f *FooterDataProvider) startGitWatcher() {
+	headPath := findGitHeadPath(f.cwd)
+	if headPath == "" {
+		return
+	}
+
+	stop := make(chan struct{})
+	f.stopWatcher = func() { close(stop) }
+
+	go func() {
+		var lastMod time.Time
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				info, err := os.Stat(headPath)
+				if err != nil {
+					continue
+				}
+				mod := info.ModTime()
+				if !lastMod.IsZero() && mod != lastMod {
+					f.InvalidateBranchCache()
+				}
+				lastMod = mod
+			}
+		}
+	}()
 }
 
 // GetGitBranch returns the current git branch name.

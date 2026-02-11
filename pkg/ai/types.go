@@ -139,6 +139,8 @@ type StreamOptions struct {
 	SessionID       string            `json:"sessionId,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
 	MaxRetryDelayMs *int              `json:"maxRetryDelayMs,omitempty"`
+	ReasoningEffort ThinkingLevel     `json:"reasoningEffort,omitempty"`
+	ToolChoice      string            `json:"toolChoice,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.

@@ -226,6 +226,44 @@ func TestE2E_PrintMode_ToolCall(t *testing.T) {
 }
 ```
 
+### 9. OAuth Flow Tests (mock HTTP, no real providers)
+
+OAuth tests must never call real provider endpoints. Use `httptest.Server` to mock:
+- Authorization endpoints (returns redirect with code)
+- Token exchange endpoints (returns access/refresh tokens)
+- Token refresh endpoints (returns new access token)
+- Device flow polling endpoints (returns device code, then tokens)
+
+```go
+func TestAnthropicOAuth_Login(t *testing.T) {
+    // Mock the Anthropic token endpoint
+    tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        json.NewEncoder(w).Encode(map[string]any{
+            "access_token":  "test-access",
+            "refresh_token": "test-refresh",
+            "expires_in":    3600,
+        })
+    }))
+    defer tokenServer.Close()
+
+    provider := NewAnthropicOAuth(WithTokenURL(tokenServer.URL))
+    creds, err := provider.Login(mockCallbacks())
+    require.NoError(t, err)
+    assert.Equal(t, "test-access", creds.Access)
+}
+
+func TestPKCE_GenerateVerifierAndChallenge(t *testing.T) {
+    verifier, challenge, err := GeneratePKCE()
+    require.NoError(t, err)
+    assert.Len(t, verifier, 43) // base64url of 32 bytes
+    assert.Len(t, challenge, 43)
+    assert.NotEqual(t, verifier, challenge)
+}
+```
+
+PKCE can be tested with pure unit tests (crypto operations, no network).
+For callback-server-based flows, use `httptest.Server` as the local callback.
+
 ## Test Helpers
 
 Shared test utilities in each package:

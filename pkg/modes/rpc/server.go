@@ -261,10 +261,17 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	// =================================================================
 
 	case CmdBash:
-		// TODO: wire to bash executor when available on AgentSession
-		return NewErrorResponse(id, CmdBash, "bash execution via RPC not yet implemented")
+		if cmd.Command == "" {
+			return NewErrorResponse(id, CmdBash, "command is required")
+		}
+		result, err := s.session.ExecuteBash(cmd.Command, nil)
+		if err != nil {
+			return NewErrorResponse(id, CmdBash, err.Error())
+		}
+		return NewSuccessResponse(id, CmdBash, result)
 
 	case CmdAbortBash:
+		s.session.AbortBash()
 		return NewSuccessResponse(id, CmdAbortBash, nil)
 
 	// =================================================================
@@ -272,18 +279,12 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	// =================================================================
 
 	case CmdGetSessionStats:
-		state := s.session.State()
+		coreStats := s.session.GetSessionStats()
 		stats := SessionStats{
-			SessionID:     "default",
-			TotalMessages: len(state.Messages),
-		}
-		// Count message types
-		for _, msg := range state.Messages {
-			if msg.Message.AsUser() != nil {
-				stats.UserMessages++
-			} else if msg.Message.AsAssistant() != nil {
-				stats.AssistantMessages++
-			}
+			SessionID:         coreStats.SessionID,
+			TotalMessages:     coreStats.TotalMessages,
+			UserMessages:      coreStats.UserMessages,
+			AssistantMessages: coreStats.AssistantMessages,
 		}
 		return NewSuccessResponse(id, CmdGetSessionStats, stats)
 
@@ -291,31 +292,34 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewErrorResponse(id, CmdExportHTML, "HTML export not yet implemented")
 
 	case CmdSwitchSession:
-		return NewErrorResponse(id, CmdSwitchSession, "session switching not yet implemented")
+		if cmd.SessionPath == "" {
+			return NewErrorResponse(id, CmdSwitchSession, "session path is required")
+		}
+		if err := s.session.SwitchSession(cmd.SessionPath); err != nil {
+			return NewErrorResponse(id, CmdSwitchSession, err.Error())
+		}
+		return NewSuccessResponse(id, CmdSwitchSession, nil)
 
 	case CmdFork:
-		if err := s.session.Fork(cmd.EntryID); err != nil {
+		text, cancelled, err := s.session.Fork(cmd.EntryID)
+		if err != nil {
 			return NewErrorResponse(id, CmdFork, err.Error())
 		}
-		return NewSuccessResponse(id, CmdFork, ForkData{Cancelled: false})
+		return NewSuccessResponse(id, CmdFork, ForkData{Text: text, Cancelled: cancelled})
 
 	case CmdGetForkMessages:
-		return NewSuccessResponse(id, CmdGetForkMessages, GetForkMessagesData{Messages: nil})
+		msgs := s.session.GetUserMessagesForForking()
+		forkMsgs := make([]ForkMessageEntry, len(msgs))
+		for i, m := range msgs {
+			forkMsgs[i] = ForkMessageEntry{EntryID: m.EntryID, Text: m.Text}
+		}
+		return NewSuccessResponse(id, CmdGetForkMessages, GetForkMessagesData{Messages: forkMsgs})
 
 	case CmdGetLastAssistantText:
-		state := s.session.State()
+		t := s.session.GetLastAssistantText()
 		var text *string
-		for i := len(state.Messages) - 1; i >= 0; i-- {
-			if assistant := state.Messages[i].Message.AsAssistant(); assistant != nil {
-				for _, content := range assistant.Content {
-					if content.Text != nil {
-						t := content.Text.Text
-						text = &t
-						break
-					}
-				}
-				break
-			}
+		if t != "" {
+			text = &t
 		}
 		return NewSuccessResponse(id, CmdGetLastAssistantText, GetLastAssistantTextData{Text: text})
 
@@ -324,6 +328,7 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		if name == "" {
 			return NewErrorResponse(id, CmdSetSessionName, "Session name cannot be empty")
 		}
+		s.session.SetSessionName(name)
 		return NewSuccessResponse(id, CmdSetSessionName, nil)
 
 	// =================================================================

@@ -188,9 +188,9 @@ func TestHandleCommand_NewSession(t *testing.T) {
 func TestHandleCommand_Fork(t *testing.T) {
 	s := testServer()
 	resp := s.handleCommand(RpcCommand{ID: "13", Type: CmdFork, EntryID: "nonexistent"})
-	// Fork is not yet implemented, should return error
+	// Should fail for nonexistent entry ID
 	if resp.Success {
-		t.Error("expected error for fork (not yet implemented)")
+		t.Error("expected error for nonexistent entry ID")
 	}
 }
 
@@ -253,11 +253,11 @@ func TestHandleCommand_AbortRetry(t *testing.T) {
 // handleCommand tests — misc commands
 // ---------------------------------------------------------------------------
 
-func TestHandleCommand_Bash(t *testing.T) {
+func TestHandleCommand_Bash_NoCommand(t *testing.T) {
 	s := testServer()
 	resp := s.handleCommand(RpcCommand{ID: "20", Type: CmdBash})
 	if resp.Success {
-		t.Error("expected error for unimplemented bash")
+		t.Error("expected error for empty bash command")
 	}
 }
 
@@ -269,11 +269,11 @@ func TestHandleCommand_ExportHTML(t *testing.T) {
 	}
 }
 
-func TestHandleCommand_SwitchSession(t *testing.T) {
+func TestHandleCommand_SwitchSession_NoPath(t *testing.T) {
 	s := testServer()
 	resp := s.handleCommand(RpcCommand{ID: "22", Type: CmdSwitchSession})
 	if resp.Success {
-		t.Error("expected error for unimplemented switch session")
+		t.Error("expected error for missing session path")
 	}
 }
 
