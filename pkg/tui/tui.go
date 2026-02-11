@@ -192,6 +192,7 @@ type TUI struct {
 	stopped            bool
 	overlayStack       []*overlayEntry
 	renderCh           chan struct{}
+	stopRenderOnce     sync.Once
 }
 
 // NewTUI creates a new TUI with the given terminal.
@@ -328,11 +329,23 @@ func (t *TUI) Start() {
 		func() { t.RequestRender(false) },
 	)
 	t.Terminal.HideCursor()
+
+	// Start render loop goroutine — mirrors process.nextTick(doRender) in the TS version.
+	go func() {
+		for range t.renderCh {
+			if t.stopped {
+				return
+			}
+			t.DoRender()
+		}
+	}()
+
 	t.RequestRender(false)
 }
 
 func (t *TUI) Stop() {
 	t.stopped = true
+	t.stopRenderOnce.Do(func() { close(t.renderCh) })
 	if len(t.previousLines) > 0 {
 		targetRow := len(t.previousLines)
 		lineDiff := targetRow - t.hardwareCursorRow
@@ -374,7 +387,10 @@ func (t *TUI) RequestRender(force bool) {
 		t.maxLinesRendered = 0
 		t.previousViewportTop = 0
 	}
-	// Non-blocking signal
+	// Non-blocking signal (guard against closed channel after Stop)
+	if t.stopped {
+		return
+	}
 	select {
 	case t.renderCh <- struct{}{}:
 	default:

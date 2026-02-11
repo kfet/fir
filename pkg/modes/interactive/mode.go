@@ -10,8 +10,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kfet/pi-go/pkg/agent"
@@ -142,6 +144,19 @@ func (m *InteractiveMode) Init() error {
 // Run starts the main event loop.
 func (m *InteractiveMode) Run(opts InteractiveModeOptions) error {
 	m.running = true
+
+	// Handle SIGINT/SIGTERM for clean shutdown (e.g. kill from another terminal).
+	// Note: in raw mode Ctrl+C is handled as input (\x03), not as SIGINT.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigCh:
+			m.Shutdown()
+		case <-m.ctx.Done():
+		}
+		signal.Stop(sigCh)
+	}()
 
 	// Send initial prompt if provided
 	if opts.InitialPrompt != "" {
