@@ -1,4 +1,4 @@
-.PHONY: build build-all test test-cover test-race test-live vet clean
+.PHONY: build build-all test test-cover test-race test-live vet clean pgo
 
 # Default target
 BINARY := pi-go
@@ -31,5 +31,9 @@ test-live:
 vet:
 	go vet ./...
 
+pgo:
+	go test -cpuprofile=default.pgo ./cmd/pi/
+	go build -pgo=default.pgo -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/pi/
+
 clean:
-	rm -f $(BINARY) $(BINARY)-* coverage.out
+	rm -f $(BINARY) $(BINARY)-* coverage.out default.pgo

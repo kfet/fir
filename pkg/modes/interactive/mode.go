@@ -23,6 +23,7 @@ import (
 	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/ai/oauth"
 	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/pi-go/pkg/core/tools"
 	"github.com/kfet/pi-go/pkg/modes/interactive/components"
 	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
 	"github.com/kfet/pi-go/pkg/tui"
@@ -54,6 +55,9 @@ type InteractiveMode struct {
 	streamingComponent *components.AssistantMessageComponent
 	pendingTools       map[string]*components.ToolExecutionComponent
 	toolOutputExpanded bool
+
+	// Bash execution state
+	bashComponent *components.BashExecutionComponent
 
 	// Flags
 	running         bool
@@ -321,13 +325,27 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
-		// Handle bash mode (text starting with !)
+		// Handle bash command (! for normal, !! for excluded from context)
 		if strings.HasPrefix(strings.TrimSpace(text), "!") {
-			cmd := strings.TrimSpace(text)[1:]
-			m.editor.AddToHistory(text)
-			m.editor.SetText("")
-			go m.handleBashCommand(cmd)
-			return
+			trimmed := strings.TrimSpace(text)
+			isExcluded := strings.HasPrefix(trimmed, "!!")
+			var cmd string
+			if isExcluded {
+				cmd = strings.TrimSpace(trimmed[2:])
+			} else {
+				cmd = strings.TrimSpace(trimmed[1:])
+			}
+			if cmd != "" {
+				if m.session != nil && m.session.IsBashRunning() {
+					m.showWarning("A bash command is already running. Press Esc to cancel it first.")
+					m.editor.SetText(text)
+					return
+				}
+				m.editor.AddToHistory(text)
+				m.editor.SetText("")
+				go m.handleBashCommand(cmd, isExcluded)
+				return
+			}
 		}
 
 		// Add to history and clear
@@ -350,10 +368,21 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
+		// If bash is running, abort it
+		if m.session != nil && m.session.IsBashRunning() {
+			m.session.AbortBash()
+			return
+		}
+
 		// If in bash mode, exit bash mode
-		if m.isBashMode {
+		m.mu.Lock()
+		inBash := m.isBashMode
+		m.mu.Unlock()
+		if inBash {
 			m.editor.SetText("")
+			m.mu.Lock()
 			m.isBashMode = false
+			m.mu.Unlock()
 			m.updateEditorBorderColor()
 			return
 		}
@@ -412,9 +441,12 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 	// Track bash mode on text change
 	m.editor.OnChange = func(text string) {
+		m.mu.Lock()
 		wasBashMode := m.isBashMode
 		m.isBashMode = strings.HasPrefix(strings.TrimLeft(text, " \t"), "!")
-		if wasBashMode != m.isBashMode {
+		changed := wasBashMode != m.isBashMode
+		m.mu.Unlock()
+		if changed {
 			m.updateEditorBorderColor()
 		}
 	}
@@ -682,7 +714,10 @@ func (m *InteractiveMode) showSettingsSelector() {
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
-			OnAutoCompactChange:       func(v bool) { m.autoCompact = v },
+			OnAutoCompactChange:       func(v bool) { 
+				m.autoCompact = v 
+				m.settings.SetCompactionEnabled(v)
+			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
 			OnCancel:                  func() { done() },
 		}
@@ -800,14 +835,50 @@ func (m *InteractiveMode) executeCompaction(customInstructions string, isAuto bo
 // Bash execution
 // ============================================================================
 
-func (m *InteractiveMode) handleBashCommand(command string) {
-	// Show user message for the bash command
-	m.AddUserMessage("!" + command)
+func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext bool) {
+	// Create UI component for display
+	bashComp := components.NewBashExecutionComponent(command, m.ui, excludeFromContext)
+	m.mu.Lock()
+	m.bashComponent = bashComp
+	m.mu.Unlock()
+	m.messageContainer.AddChild(bashComp)
+	m.ui.RequestRender(false)
 
-	// Execute via the session's prompt mechanism with bash prefix
 	if m.session != nil {
-		_ = m.session.Prompt("!" + command)
+		result, err := m.session.ExecuteBashWithOptions(command, func(chunk string) {
+			m.mu.Lock()
+			bc := m.bashComponent
+			m.mu.Unlock()
+			if bc != nil {
+				bc.AppendOutput(chunk)
+				m.ui.RequestRender(false)
+			}
+		}, excludeFromContext)
+
+		m.mu.Lock()
+		bc := m.bashComponent
+		m.mu.Unlock()
+		if err != nil {
+			if bc != nil {
+				bc.SetComplete(nil, false, nil, "")
+			}
+			m.showWarning(fmt.Sprintf("Bash command failed: %v", err))
+		} else if bc != nil {
+			exitCode := result.ExitCode
+			var truncResult *tools.TruncationResult
+			if result.Truncated {
+				truncResult = &tools.TruncationResult{Truncated: true, Content: result.Output}
+			}
+			bc.SetComplete(&exitCode, result.Cancelled, truncResult, result.FullOutputPath)
+		}
 	}
+
+	m.mu.Lock()
+	m.bashComponent = nil
+	m.isBashMode = false
+	m.mu.Unlock()
+	m.updateEditorBorderColor()
+	m.ui.RequestRender(false)
 }
 
 // ============================================================================
@@ -963,7 +1034,17 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
-			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", info.URL)
+			// Try to auto-open the browser.
+			browserOpened := core.OpenBrowser(info.URL) == nil
+
+			// Show a clickable OSC 8 hyperlink so the URL stays on one line.
+			link := core.Hyperlink(info.URL, info.URL)
+			var msg string
+			if browserOpened {
+				msg = fmt.Sprintf("Opening browser… if it doesn't appear, visit:\n%s", link)
+			} else {
+				msg = fmt.Sprintf("Open this URL to authenticate:\n%s", link)
+			}
 			if info.Instructions != "" {
 				msg += "\n" + info.Instructions
 			}
@@ -1386,6 +1467,13 @@ func (m *InteractiveMode) updateEditorBorderColor() {
 	m.ui.RequestRender(false)
 }
 
+// IsBashMode returns true if the editor is in bash mode (thread-safe).
+func (m *InteractiveMode) IsBashMode() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.isBashMode
+}
+
 // ============================================================================
 // Display helpers
 // ============================================================================
@@ -1619,6 +1707,10 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 }
 
 func (m *InteractiveMode) onAgentStart() {
+	// Stop any existing loading animation before creating a new one
+	if m.loadingAnimation != nil {
+		m.loadingAnimation.Stop()
+	}
 	// Clear status and show working indicator
 	m.statusContainer.Clear()
 	t := itheme.GetTheme()
@@ -1648,13 +1740,8 @@ func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
 		return
 	}
 
-	// Assistant messages: stop loading and start streaming component
+	// Assistant messages: start streaming component (spinner keeps running until agent_end)
 	if msg := ae.Message.AsAssistant(); msg != nil {
-		if m.loadingAnimation != nil {
-			m.loadingAnimation.Stop()
-			m.loadingAnimation = nil
-			m.statusContainer.Clear()
-		}
 		m.streamingComponent = components.NewAssistantMessageComponent(msg, m.hideThinking, nil)
 		m.messageContainer.AddChild(m.streamingComponent)
 		m.ui.RequestRender(false)
@@ -1685,13 +1772,7 @@ func (m *InteractiveMode) onMessageEnd(ae *agent.AgentEvent) {
 }
 
 func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
-	// Stop loading animation
-	if m.loadingAnimation != nil {
-		m.loadingAnimation.Stop()
-		m.loadingAnimation = nil
-		m.statusContainer.Clear()
-	}
-
+	// Spinner keeps running in statusContainer (stopped at agent_end)
 	args := make(map[string]any)
 	if ae.Args != nil {
 		if argMap, ok := ae.Args.(map[string]any); ok {

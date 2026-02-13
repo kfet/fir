@@ -101,6 +101,7 @@ Master mapping of TypeScript source files to their Go ports.
 | `coding-agent/src/utils/changelog.ts` | `pkg/core/changelog.go` | ✅ |
 | `coding-agent/src/core/compaction/compaction.ts` | `pkg/core/compaction/compaction.go` | ✅ |
 | `coding-agent/src/core/compaction/utils.ts` | `pkg/core/compaction/utils.go` | ✅ |
+| (compaction runner wiring) | `pkg/core/compaction/runner.go` | ✅ |
 
 ## TUI (`pkg/tui/`)
 

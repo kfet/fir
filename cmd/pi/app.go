@@ -13,6 +13,7 @@ import (
 	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/ai/providers"
 	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/pi-go/pkg/core/compaction"
 	interactive "github.com/kfet/pi-go/pkg/modes/interactive"
 	printmode "github.com/kfet/pi-go/pkg/modes/print"
 	rpcmode "github.com/kfet/pi-go/pkg/modes/rpc"
@@ -136,6 +137,10 @@ func run() error {
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ScopedModels:    scopedModels,
+		CompactionRunner: &compaction.DefaultRunner{
+			SettingsManager: settingsManager,
+			ModelRegistry:   modelRegistry,
+		},
 	}
 
 	if args.Thinking != "" {
@@ -352,6 +357,10 @@ func runInteractiveMode(args *Args) error {
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ScopedModels:    scopedModels,
+		CompactionRunner: &compaction.DefaultRunner{
+			SettingsManager: settingsManager,
+			ModelRegistry:   modelRegistry,
+		},
 	}
 
 	if args.Thinking != "" {

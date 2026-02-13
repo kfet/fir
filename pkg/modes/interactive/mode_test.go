@@ -372,14 +372,14 @@ func TestInteractiveMode_EscapeClearsBashMode(t *testing.T) {
 	tm.typeText("!ls")
 	tm.waitRender()
 
-	if !tm.mode.isBashMode {
+	if !tm.mode.IsBashMode() {
 		t.Fatal("expected bash mode after typing '!'")
 	}
 
 	tm.pressEscape()
 	tm.waitRender()
 
-	if tm.mode.isBashMode {
+	if tm.mode.IsBashMode() {
 		t.Error("expected bash mode to be cleared after Escape")
 	}
 	if got := tm.editorText(); got != "" {
@@ -584,20 +584,20 @@ func TestInteractiveMode_SubmitPromptCallsOnSubmit(t *testing.T) {
 func TestInteractiveMode_BashModeDetection(t *testing.T) {
 	tm := newTestMode(t)
 
-	if tm.mode.isBashMode {
+	if tm.mode.IsBashMode() {
 		t.Fatal("should not be in bash mode initially")
 	}
 
 	tm.typeText("!")
 	tm.waitRender()
-	if !tm.mode.isBashMode {
+	if !tm.mode.IsBashMode() {
 		t.Error("expected bash mode after typing '!'")
 	}
 
 	// Backspace to remove '!' should exit bash mode
 	tm.pressBackspace()
 	tm.waitRender()
-	if tm.mode.isBashMode {
+	if tm.mode.IsBashMode() {
 		t.Error("expected to leave bash mode after deleting '!'")
 	}
 }
@@ -608,12 +608,63 @@ func TestInteractiveMode_BashModeWithCommand(t *testing.T) {
 	tm.typeText("!echo hello")
 	tm.waitRender()
 
-	if !tm.mode.isBashMode {
+	if !tm.mode.IsBashMode() {
 		t.Error("expected bash mode with '!echo hello'")
 	}
 
 	if got := tm.editorText(); got != "!echo hello" {
 		t.Errorf("expected %q, got %q", "!echo hello", got)
+	}
+}
+
+func TestInteractiveMode_DoubleBangModeDetection(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.typeText("!!")
+	tm.waitRender()
+	if !tm.mode.IsBashMode() {
+		t.Error("expected bash mode after typing '!!'")
+	}
+}
+
+func TestInteractiveMode_BashCommandExecution(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Submit a bash command — should go through ExecuteBash, not Prompt
+	tm.typeText("!echo hello_from_bash")
+	tm.pressEnter()
+	// Wait for goroutine to complete
+	time.Sleep(500 * time.Millisecond)
+	tm.waitRender()
+
+	// Editor should be cleared
+	if got := tm.editorText(); got != "" {
+		t.Errorf("expected empty editor, got %q", got)
+	}
+
+	// Should not be in bash mode after execution
+	if tm.mode.IsBashMode() {
+		t.Error("expected to leave bash mode after command execution")
+	}
+}
+
+func TestInteractiveMode_DoubleBangCommandExecution(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Submit a !! command (excluded from context)
+	tm.typeText("!!echo excluded")
+	tm.pressEnter()
+	time.Sleep(500 * time.Millisecond)
+	tm.waitRender()
+
+	// Editor should be cleared
+	if got := tm.editorText(); got != "" {
+		t.Errorf("expected empty editor, got %q", got)
+	}
+
+	// Should not be in bash mode after execution
+	if tm.mode.IsBashMode() {
+		t.Error("expected to leave bash mode after !! command execution")
 	}
 }
 

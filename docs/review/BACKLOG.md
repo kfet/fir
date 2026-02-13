@@ -1,9 +1,9 @@
 # Review Backlog — 2026-02-13
 
-**Last reviewed:** Full review of 20 unstaged modified + 23 untracked files, 2026-02-13 00:10 PST
+**Last reviewed:** Staged changes review (9 files), 2026-02-13 01:39 PST
 **Build status:** ✅ PASSING (`go build ./...` clean, `go vet ./...` clean)
-**Test status:** ✅ ALL 16 packages pass, including `-race` — zero data races
-**New files reviewed this cycle:** 23 untracked + 3 newly modified `.go` files
+**Test status:** ✅ `go test -race` PASSES
+**Staged files reviewed this cycle:** `cmd/pi/app.go`, `pkg/core/agentsession.go`, `pkg/core/browser.go`, `pkg/core/browser_test.go`, `pkg/core/compaction/runner.go`, `pkg/core/compaction/runner_test.go`, `pkg/core/sdk.go`, `pkg/modes/interactive/mode.go`, `pkg/modes/interactive/mode_test.go`
 
 ---
 
@@ -68,6 +68,9 @@ Low priority — code works correctly as-is.
 
 ### OAuth client secrets in code — Intentional
 `google_antigravity.go:23` (`antigravityClientSecretEncoded`), `google_gemini_cli.go:24` (`geminiCLIClientSecretEncoded`): Base64-encoded Google OAuth client secrets are embedded in source. This matches upstream TS behavior. Google OAuth "installed app" client secrets are considered semi-public per Google's OAuth documentation. Not a vulnerability, but worth noting.
+
+### `pkg/core/browser.go:17` — Windows `cmd /c start` URL interpretation (Low)
+On Windows, `exec.Command("cmd", "/c", "start", url)` passes the URL through `cmd.exe` which interprets special characters (`&`, `|`, etc.). If a malicious OAuth URL were crafted with shell metacharacters, it could execute arbitrary commands. Practical risk is very low since URLs come from controlled OAuth providers. Matches standard Go browser-opening patterns. No immediate fix needed.
 
 ---
 
@@ -160,10 +163,16 @@ Changed assertion from `StopReasonStop` to `StopReasonToolUse` to match the goog
 ## Concurrency
 
 ### ~~`pkg/tui/tui.go` — All TUI/Container/Editor races~~ — ✅ FIXED
-All race conditions resolved. `go test -race ./...` passes clean across all 16 packages.
+All race conditions resolved.
 
 ### ~~`pkg/modes/interactive/mode_test.go:1098` — Session set after ui.Start() race~~ — ✅ FIXED
 Test refactored: session set BEFORE `ui.Start()` via `newTestModeInternal()`.
+
+### ~~`pkg/modes/interactive/mode.go:829-857` — Race on `isBashMode` / `bashComponent` in `handleBashCommand`~~ — ✅ FIXED
+Protected with `m.mu`. Added `IsBashMode()` accessor. `go test -race` passes.
+
+### `pkg/modes/interactive/components/bash_execution.go` — No internal synchronization
+`BashExecutionComponent` has no mutex. `AppendOutput` and `SetComplete` are called from the bash goroutine, while `Render` (via `Container.Render`) runs from the TUI render thread. The `updateDisplay` method calls `contentContainer.Clear()` + `AddChild` which could race with render. If the embedded `tui.Container` has its own synchronization this is fine; otherwise it's a latent race. Low priority since the component follows the same pattern as `ToolExecutionComponent`.
 
 ### `pkg/ai/providers/google_vertex.go:44-48` — ADC token cache ✅
 Uses `sync.Mutex` to protect `adcTokenCache`. Correct pattern.
@@ -173,9 +182,37 @@ Read-write lock for provider registry. Correct pattern.
 
 ---
 
-## Files Reviewed This Cycle
+## Test Coverage
 
-### Modified (unstaged, 18 files)
+### `pkg/core/browser.go` — No test for `OpenBrowser`
+Only `Hyperlink` is tested. `OpenBrowser` is difficult to unit test (launches real browser), but could test command construction with a mock or at least verify it doesn't panic. Low priority.
+
+### `pkg/core/compaction/runner.go` — Only `ShouldCompact` tested
+`RunCompaction` is untested because it requires a full `AgentSession` with session manager, model, and API key. Would need integration test or mocked session. Medium priority.
+
+### New staged files — test coverage
+| File | Test File | Status |
+|------|-----------|--------|
+| `pkg/core/browser.go` | `browser_test.go` | ⚠️ Partial (only `Hyperlink`) |
+| `pkg/core/compaction/runner.go` | `runner_test.go` | ⚠️ Partial (only `ShouldCompact`) |
+| `pkg/modes/interactive/mode.go` (bash changes) | `mode_test.go` | ✅ Has `BashCommandExecution` + `DoubleBangCommandExecution` + `DoubleBangModeDetection` |
+
+### Prior test coverage (carried forward)
+
+### Staged (this cycle, 9 files)
+✅ `cmd/pi/app.go` — CompactionRunner wiring (both `run()` and `runInteractiveMode()`)
+✅ `pkg/core/agentsession.go` — `ExecuteBashWithOptions` with `excludeFromContext` support
+✅ `pkg/core/browser.go` — New: `OpenBrowser` + `Hyperlink` (OSC 8)
+⚠️ `pkg/core/browser_test.go` — Only tests `Hyperlink`, not `OpenBrowser`
+✅ `pkg/core/compaction/runner.go` — New: `DefaultRunner` implementing `CompactionRunner` interface
+⚠️ `pkg/core/compaction/runner_test.go` — Only tests `ShouldCompact`, not `RunCompaction`
+✅ `pkg/core/sdk.go` — Added `CompactionRunner` to `CreateAgentSessionOptions`
+✅ `pkg/modes/interactive/mode.go` — Bash execution refactor, `!!` support, OAuth browser open, spinner fix — **race fixed**
+✅ `pkg/modes/interactive/mode_test.go` — Three new tests for bash/double-bang
+
+### Prior cycle (carried forward)
+
+### New OAuth providers — All have test files ✅
 ✅ `pkg/ai/oauth/types.go` — Comment updates, LoginCallbacks refactor
 ✅ `pkg/ai/providers/anthropic.go` — Tool choice, tool result images
 ✅ `pkg/ai/providers/anthropic_test.go` — Old test removed
@@ -216,7 +253,7 @@ Read-write lock for provider registry. Correct pattern.
 **Build:** ✅ PASSING
 **Tests (non-race):** ✅ PASSING
 **Vetting:** ✅ PASSING
-**Race detector:** ✅ ALL CLEAN — `go test -race ./...` passes all 16 packages
+**Race detector:** ✅ PASSING
 **Urgent issues:** 0
-**Backlog items:** 3 (duplicate jwtClaimPath, duplicate callback server, missing convertToolResultContent test)
-**Fixed this session:** randomID entropy ✅, pollGeminiOperation timeout ✅, ALL TUI races ✅
+**Backlog items:** 6 (race on bashComponent, BashExecutionComponent no mutex, browser.go partial test, runner.go partial test, duplicate ThinkingLevel, duplicate callback server)
+**Fixed this session:** randomID entropy ✅, pollGeminiOperation timeout ✅, ALL prior TUI races ✅

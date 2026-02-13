@@ -47,6 +47,9 @@ type CreateAgentSessionOptions struct {
 
 	// SettingsManager. Default: SettingsManager.Create(cwd, agentDir).
 	SettingsManager *SettingsManager
+
+	// CompactionRunner handles context compaction. When nil, compaction is disabled.
+	CompactionRunner CompactionRunner
 }
 
 // CreateAgentSessionResult is returned by CreateAgentSession.
@@ -234,13 +237,14 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	// Create AgentSession
 	session := NewAgentSession(AgentSessionOptions{
-		Agent:           a,
-		SessionManager:  sessionManager,
-		SettingsManager: settingsManager,
-		ResourceLoader:  resourceLoader,
-		ModelRegistry:   modelRegistry,
-		Cwd:             cwd,
-		ScopedModels:    opts.ScopedModels,
+		Agent:            a,
+		SessionManager:   sessionManager,
+		SettingsManager:  settingsManager,
+		ResourceLoader:   resourceLoader,
+		ModelRegistry:    modelRegistry,
+		CompactionRunner: opts.CompactionRunner,
+		Cwd:              cwd,
+		ScopedModels:     opts.ScopedModels,
 	})
 
 	return &CreateAgentSessionResult{

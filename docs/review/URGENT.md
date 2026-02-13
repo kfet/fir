@@ -1,5 +1,18 @@
 # URGENT — 2026-02-13
 
+## Active Issues
+
+(none)
+
+---
+
+## Previously Fixed This Cycle
+
+### ~~`pkg/modes/interactive/mode.go:829-857` — Race on `isBashMode`/`bashComponent`~~ — ✅ FIXED
+Protected writes in `handleBashCommand` with `m.mu.Lock()`/`Unlock()`. Protected reads in `OnEscape` and `OnChange`. Added `IsBashMode()` accessor; updated all test assertions to use it. `go test -race` passes.
+
+---
+
 ## Previously Fixed This Cycle
 
 ### ~~`pkg/tui/components/editor.go:587-607` — `e.mu undefined`~~ — ✅ FIXED

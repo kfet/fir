@@ -387,12 +387,16 @@ func (s *AgentSession) checkAutoCompaction() {
 		return
 	}
 
-	// Get the last assistant message
+	// Get the last assistant message and calculate total context tokens
 	var lastAssistant *ai.AssistantMessage
+	totalContextTokens := 0
 	for i := len(state.Messages) - 1; i >= 0; i-- {
 		if a := state.Messages[i].Message.AsAssistant(); a != nil {
-			lastAssistant = a
-			break
+			if lastAssistant == nil {
+				lastAssistant = a
+			}
+			// Accumulate tokens from all assistant messages
+			totalContextTokens += calculateContextTokensFromUsage(a.Usage)
 		}
 	}
 	if lastAssistant == nil {
@@ -404,14 +408,11 @@ func (s *AgentSession) checkAutoCompaction() {
 		return
 	}
 
-	// Calculate context tokens from usage
-	contextTokens := calculateContextTokensFromUsage(lastAssistant.Usage)
-
 	// Check if context overflowed
 	isOverflow := ai.IsContextOverflow(lastAssistant, model.ContextWindow)
 
 	// Check token-based threshold
-	shouldCompactNow := s.compactionRunner.ShouldCompact(contextTokens, model.ContextWindow)
+	shouldCompactNow := s.compactionRunner.ShouldCompact(totalContextTokens, model.ContextWindow)
 
 	if !isOverflow && !shouldCompactNow {
 		return
@@ -686,6 +687,12 @@ func (s *AgentSession) Reload() error {
 
 // ExecuteBash executes a bash command and records the result in session history.
 func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (BashResult, error) {
+	return s.ExecuteBashWithOptions(command, onChunk, false)
+}
+
+// ExecuteBashWithOptions executes a bash command with optional streaming, cancellation,
+// and the option to exclude the result from context.
+func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (BashResult, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.bashCancelMu.Lock()
 	s.bashCancel = cancel
@@ -715,14 +722,15 @@ func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (BashRe
 	// Record in session
 	exitCode := result.ExitCode
 	bashMsg := &BashExecutionMessage{
-		Role:           "bashExecution",
-		Command:        command,
-		Output:         result.Output,
-		ExitCode:       &exitCode,
-		Cancelled:      result.Cancelled,
-		Truncated:      result.Truncated,
-		FullOutputPath: result.FullOutputPath,
-		Timestamp:      time.Now().UnixMilli(),
+		Role:               "bashExecution",
+		Command:            command,
+		Output:             result.Output,
+		ExitCode:           &exitCode,
+		Cancelled:          result.Cancelled,
+		Truncated:          result.Truncated,
+		FullOutputPath:     result.FullOutputPath,
+		Timestamp:          time.Now().UnixMilli(),
+		ExcludeFromContext: excludeFromContext,
 	}
 
 	agentMsg := agent.AgentMessage{Custom: bashMsg}
