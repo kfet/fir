@@ -761,37 +761,108 @@ func TestAnthropic_JsonString(t *testing.T) {
 	}
 }
 
-func TestAnthropic_ToolResultContentToString(t *testing.T) {
-	tests := []struct {
-		name    string
-		content []ai.ToolResultContent
-		want    string
-	}{
-		{"empty", nil, ""},
-		{"single text", []ai.ToolResultContent{
+func TestAnthropic_ConvertToolResultContent(t *testing.T) {
+	modelWithImages := &ai.Model{
+		ID:    "claude-sonnet",
+		Input: []ai.InputModality{ai.InputText, ai.InputImage},
+	}
+	modelNoImages := &ai.Model{
+		ID:    "claude-sonnet",
+		Input: []ai.InputModality{ai.InputText},
+	}
+
+	t.Run("text only returns joined string", func(t *testing.T) {
+		content := []ai.ToolResultContent{
+			{Type: "text", Text: "line 1"},
+			{Type: "text", Text: "line 2"},
+		}
+		result := convertToolResultContent(content, modelWithImages)
+		s, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if s != "line 1\nline 2" {
+			t.Errorf("expected 'line 1\\nline 2', got %q", s)
+		}
+	})
+
+	t.Run("single text returns string", func(t *testing.T) {
+		content := []ai.ToolResultContent{
 			{Type: "text", Text: "hello"},
-		}, "hello"},
-		{"multiple text", []ai.ToolResultContent{
-			{Type: "text", Text: "line1"},
-			{Type: "text", Text: "line2"},
-		}, "line1\nline2"},
-		{"text and image mixed", []ai.ToolResultContent{
-			{Type: "text", Text: "caption"},
+		}
+		result := convertToolResultContent(content, modelWithImages)
+		s, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if s != "hello" {
+			t.Errorf("expected 'hello', got %q", s)
+		}
+	})
+
+	t.Run("mixed text and image returns blocks", func(t *testing.T) {
+		content := []ai.ToolResultContent{
+			{Type: "text", Text: "description"},
 			{Type: "image", Data: "base64data", MimeType: "image/png"},
-			{Type: "text", Text: "more text"},
-		}, "caption\nmore text"},
-		{"only images", []ai.ToolResultContent{
-			{Type: "image", Data: "data1"},
-		}, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := toolResultContentToString(tt.content)
-			if got != tt.want {
-				t.Errorf("toolResultContentToString() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+		}
+		result := convertToolResultContent(content, modelWithImages)
+		blocks, ok := result.([]map[string]any)
+		if !ok {
+			t.Fatalf("expected []map[string]any, got %T", result)
+		}
+		if len(blocks) != 2 {
+			t.Fatalf("expected 2 blocks, got %d", len(blocks))
+		}
+		if blocks[0]["type"] != "text" {
+			t.Errorf("expected first block type=text, got %v", blocks[0]["type"])
+		}
+		if blocks[0]["text"] != "description" {
+			t.Errorf("expected text='description', got %v", blocks[0]["text"])
+		}
+		if blocks[1]["type"] != "image" {
+			t.Errorf("expected second block type=image, got %v", blocks[1]["type"])
+		}
+		source, ok := blocks[1]["source"].(map[string]any)
+		if !ok {
+			t.Fatal("expected source map")
+		}
+		if source["type"] != "base64" {
+			t.Errorf("expected source type=base64, got %v", source["type"])
+		}
+		if source["media_type"] != "image/png" {
+			t.Errorf("expected media_type=image/png, got %v", source["media_type"])
+		}
+		if source["data"] != "base64data" {
+			t.Errorf("expected data=base64data, got %v", source["data"])
+		}
+	})
+
+	t.Run("image ignored when model does not support images", func(t *testing.T) {
+		content := []ai.ToolResultContent{
+			{Type: "text", Text: "some text"},
+			{Type: "image", Data: "base64data", MimeType: "image/png"},
+		}
+		result := convertToolResultContent(content, modelNoImages)
+		// Images not supported → treated as text-only → returns string
+		s, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string (images not supported), got %T", result)
+		}
+		if s != "some text" {
+			t.Errorf("expected 'some text', got %q", s)
+		}
+	})
+
+	t.Run("empty content returns empty string", func(t *testing.T) {
+		result := convertToolResultContent(nil, modelWithImages)
+		s, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+		if s != "" {
+			t.Errorf("expected empty string, got %q", s)
+		}
+	})
 }
 
 func TestAnthropic_UpdateUsage(t *testing.T) {

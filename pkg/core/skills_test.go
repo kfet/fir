@@ -176,3 +176,56 @@ func TestEscapeXml(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSkills_CollisionDiagnostics(t *testing.T) {
+	// Create two directories with skills that have the same name
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+
+	// Skill in dir1 (winner)
+	skill1Dir := filepath.Join(dir1, "myskill")
+	os.MkdirAll(skill1Dir, 0755)
+	os.WriteFile(filepath.Join(skill1Dir, "SKILL.md"), []byte("---\nname: myskill\ndescription: First one\n---\nContent1"), 0644)
+
+	// Skill in dir2 (loser — same name)
+	skill2Dir := filepath.Join(dir2, "myskill")
+	os.MkdirAll(skill2Dir, 0755)
+	os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte("---\nname: myskill\ndescription: Second one\n---\nContent2"), 0644)
+
+	result := LoadSkills(LoadSkillsOptions{
+		Cwd:             t.TempDir(),
+		IncludeDefaults: false,
+		SkillPaths:      []string{dir1, dir2},
+	})
+
+	// Should have exactly one skill (the winner)
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(result.Skills))
+	}
+	if result.Skills[0].Description != "First one" {
+		t.Errorf("expected first skill to win, got description %q", result.Skills[0].Description)
+	}
+
+	// Should have a collision diagnostic
+	var collisions []ResourceDiagnostic
+	for _, d := range result.Diagnostics {
+		if d.Type == "collision" {
+			collisions = append(collisions, d)
+		}
+	}
+	if len(collisions) != 1 {
+		t.Fatalf("expected 1 collision diagnostic, got %d", len(collisions))
+	}
+	if collisions[0].Collision == nil {
+		t.Fatal("expected collision details to be non-nil")
+	}
+	if collisions[0].Collision.Name != "myskill" {
+		t.Errorf("expected collision name 'myskill', got %q", collisions[0].Collision.Name)
+	}
+	if collisions[0].Collision.WinnerPath == "" {
+		t.Error("expected winner path to be set")
+	}
+	if collisions[0].Collision.LoserPath == "" {
+		t.Error("expected loser path to be set")
+	}
+}

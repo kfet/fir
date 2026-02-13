@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -391,6 +392,7 @@ type layoutLine struct {
 // Editor is a multi-line text editor component with word-wrap, undo,
 // kill-ring, autocomplete, history, and more.
 type Editor struct {
+	mu    sync.Mutex
 	state editorState
 
 	Focused bool
@@ -502,6 +504,9 @@ func (e *Editor) SetAutocompleteProvider(p AutocompleteProvider) {
 
 // AddToHistory adds a prompt to history for up/down arrow navigation.
 func (e *Editor) AddToHistory(text string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return
@@ -544,6 +549,9 @@ func (e *Editor) GetCursor() (line, col int) {
 
 // SetText sets the editor text, resetting history browsing.
 func (e *Editor) SetText(text string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	e.lastAction = ""
 	e.historyIndex = -1
 	if e.GetText() != text {
@@ -554,6 +562,9 @@ func (e *Editor) SetText(text string) {
 
 // InsertTextAtCursor inserts text at the cursor position.
 func (e *Editor) InsertTextAtCursor(text string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if text == "" {
 		return
 	}
@@ -577,6 +588,38 @@ func (e *Editor) SetFocused(focused bool) {
 func (e *Editor) Invalidate() {}
 
 // ---------------------------------------------------------------------------
+// Callback helpers — unlock before firing to prevent deadlock with re-entrant calls
+// ---------------------------------------------------------------------------
+
+// fireOnChange temporarily unlocks the mutex, fires OnChange, and re-locks.
+func (e *Editor) fireOnChange() {
+	if e.OnChange != nil {
+		text := strings.Join(e.state.lines, "\n")
+		e.mu.Unlock()
+		e.OnChange(text)
+		e.mu.Lock()
+	}
+}
+
+// fireOnChangeText is like fireOnChange but with a specific text value.
+func (e *Editor) fireOnChangeText(text string) {
+	if e.OnChange != nil {
+		e.mu.Unlock()
+		e.OnChange(text)
+		e.mu.Lock()
+	}
+}
+
+// fireOnSubmit temporarily unlocks the mutex, fires OnSubmit, and re-locks.
+func (e *Editor) fireOnSubmit(result string) {
+	if e.OnSubmit != nil {
+		e.mu.Unlock()
+		e.OnSubmit(result)
+		e.mu.Lock()
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -592,9 +635,7 @@ func (e *Editor) setTextInternal(text string) {
 	e.setCursorCol(len(lines[len(lines)-1]))
 	e.scrollOffset = 0
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) setCursorCol(col int) {
@@ -629,9 +670,7 @@ func (e *Editor) undo() {
 	e.state = snapshot
 	e.lastAction = ""
 	e.preferredVisualCol = nil
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +707,9 @@ func (e *Editor) navigateHistory(direction int) {
 
 // Render renders the editor to a list of lines.
 func (e *Editor) Render(width int) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	maxPadding := int(math.Max(0, math.Floor(float64(width-1)/2.0)))
 	paddingX := e.paddingX
 	if paddingX > maxPadding {
@@ -919,6 +961,9 @@ func (e *Editor) findCurrentVisualLine(vls []visualLine) int {
 
 // HandleInput processes a keyboard input event.
 func (e *Editor) HandleInput(data string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	kb := globalEditorKB
 
 	// Handle character jump mode
@@ -996,9 +1041,7 @@ func (e *Editor) HandleInput(data string) {
 				e.state.cursorLine = result.CursorLine
 				e.setCursorCol(result.CursorCol)
 				e.cancelAutocomplete()
-				if e.OnChange != nil {
-					e.OnChange(e.GetText())
-				}
+				e.fireOnChange()
 			}
 			return
 		}
@@ -1020,9 +1063,7 @@ func (e *Editor) HandleInput(data string) {
 					// Fall through to submit below
 				} else {
 					e.cancelAutocomplete()
-					if e.OnChange != nil {
-						e.OnChange(e.GetText())
-					}
+					e.fireOnChange()
 					return
 				}
 			}
@@ -1212,9 +1253,7 @@ func (e *Editor) insertCharacter(ch string, skipUndoCoalescing bool) {
 	e.state.lines[e.state.cursorLine] = before + ch + after
 	e.setCursorCol(e.state.cursorCol + len(ch))
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 
 	// Auto-trigger autocomplete
 	if e.autocompleteState == "" {
@@ -1326,9 +1365,7 @@ func (e *Editor) insertTextAtCursorInternal(text string) {
 		e.setCursorCol(len(insertedLines[len(insertedLines)-1]))
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) addNewLine() {
@@ -1351,9 +1388,7 @@ func (e *Editor) addNewLine() {
 	e.state.cursorLine++
 	e.setCursorCol(0)
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) shouldSubmitOnBackslashEnter(data string, kb *editorKeybindings) bool {
@@ -1393,12 +1428,8 @@ func (e *Editor) submitValue() {
 	e.undoStack = NewUndoStack[editorState]()
 	e.lastAction = ""
 
-	if e.OnChange != nil {
-		e.OnChange("")
-	}
-	if e.OnSubmit != nil {
-		e.OnSubmit(result)
-	}
+	e.fireOnChangeText("")
+	e.fireOnSubmit(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,9 +1459,7 @@ func (e *Editor) handleBackspace() {
 		e.setCursorCol(len(prevLine))
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 
 	// Update or re-trigger autocomplete
 	if e.autocompleteState != "" {
@@ -1466,9 +1495,7 @@ func (e *Editor) handleForwardDelete() {
 		e.state.lines = append(e.state.lines[:e.state.cursorLine+1], e.state.lines[e.state.cursorLine+2:]...)
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 
 	// Update autocomplete
 	if e.autocompleteState != "" {
@@ -1510,9 +1537,7 @@ func (e *Editor) deleteToStartOfLine() {
 		e.setCursorCol(len(prevLine))
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) deleteToEndOfLine() {
@@ -1534,9 +1559,7 @@ func (e *Editor) deleteToEndOfLine() {
 		e.state.lines = append(e.state.lines[:e.state.cursorLine+1], e.state.lines[e.state.cursorLine+2:]...)
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) deleteWordBackwards() {
@@ -1569,9 +1592,7 @@ func (e *Editor) deleteWordBackwards() {
 		e.setCursorCol(deleteFrom)
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) deleteWordForward() {
@@ -1601,9 +1622,7 @@ func (e *Editor) deleteWordForward() {
 		e.state.lines[e.state.cursorLine] = currentLine[:e.state.cursorCol] + currentLine[deleteTo:]
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 // ---------------------------------------------------------------------------
@@ -1894,9 +1913,7 @@ func (e *Editor) insertYankedText(text string) {
 		e.setCursorCol(len(lines[len(lines)-1]))
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 func (e *Editor) deleteYankedText() {
@@ -1930,9 +1947,7 @@ func (e *Editor) deleteYankedText() {
 		e.setCursorCol(startCol)
 	}
 
-	if e.OnChange != nil {
-		e.OnChange(e.GetText())
-	}
+	e.fireOnChange()
 }
 
 // ---------------------------------------------------------------------------
@@ -2061,9 +2076,7 @@ func (e *Editor) forceFileAutocomplete(explicitTab bool) {
 			e.state.lines = result.Lines
 			e.state.cursorLine = result.CursorLine
 			e.setCursorCol(result.CursorCol)
-			if e.OnChange != nil {
-				e.OnChange(e.GetText())
-			}
+			e.fireOnChange()
 			return
 		}
 

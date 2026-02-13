@@ -4,6 +4,7 @@ pi-go-*
 pi
 *.test
 *.out
+mock-e2e-server
 
 # IDE
 .idea/

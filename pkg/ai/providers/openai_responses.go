@@ -229,8 +229,8 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 		})
 	}
 
-	// Messages
-	transformed := TransformMessages(ctx.Messages, model, nil)
+	// Messages — normalize tool call IDs for Responses API compatibility
+	transformed := TransformMessages(ctx.Messages, model, normalizeResponsesToolCallID)
 	for _, msg := range transformed {
 		if msg.AsUser() != nil {
 			um := msg.AsUser()
@@ -241,6 +241,35 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 						{"type": "input_text", "text": s},
 					},
 				})
+			} else if parts, ok := um.Content.([]any); ok {
+				var content []map[string]any
+				supportsImage := false
+				for _, m := range model.Input {
+					if m == ai.InputImage {
+						supportsImage = true
+						break
+					}
+				}
+				for _, p := range parts {
+					switch v := p.(type) {
+					case ai.TextContent:
+						content = append(content, map[string]any{"type": "input_text", "text": v.Text})
+					case ai.ImageContent:
+						if supportsImage {
+							content = append(content, map[string]any{
+								"type":      "input_image",
+								"detail":    "auto",
+								"image_url": fmt.Sprintf("data:%s;base64,%s", v.MimeType, v.Data),
+							})
+						}
+					}
+				}
+				if len(content) > 0 {
+					input = append(input, map[string]any{
+						"role":    "user",
+						"content": content,
+					})
+				}
 			}
 		} else if msg.AsAssistant() != nil {
 			am := msg.AsAssistant()
@@ -250,6 +279,8 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 					msgID := block.Text.TextSignature
 					if msgID == "" {
 						msgID = fmt.Sprintf("msg_%d", len(input))
+					} else if len(msgID) > 64 {
+						msgID = "msg_" + shortHash(msgID)
 					}
 					input = append(input, map[string]any{
 						"type":   "message",
@@ -293,19 +324,55 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 			}
 		} else if msg.AsToolResult() != nil {
 			tr := msg.AsToolResult()
-			var text string
+			var textParts []string
+			var hasImages bool
 			for _, c := range tr.Content {
 				if c.IsText() {
-					text += c.Text
+					textParts = append(textParts, c.Text)
+				} else if c.IsImage() {
+					hasImages = true
 				}
 			}
-			parts := strings.SplitN(tr.ToolCallID, "|", 2)
-			callID := parts[0]
+			text := strings.Join(textParts, "\n")
+			if text == "" && hasImages {
+				text = "(see attached image)"
+			}
+			idParts := strings.SplitN(tr.ToolCallID, "|", 2)
+			callID := idParts[0]
 			input = append(input, map[string]any{
 				"type":    "function_call_output",
 				"call_id": callID,
 				"output":  text,
 			})
+
+			// Send images as a follow-up user message
+			supportsImage := false
+			for _, m := range model.Input {
+				if m == ai.InputImage {
+					supportsImage = true
+					break
+				}
+			}
+			if hasImages && supportsImage {
+				var imageParts []map[string]any
+				imageParts = append(imageParts, map[string]any{
+					"type": "input_text",
+					"text": "Attached image(s) from tool result:",
+				})
+				for _, c := range tr.Content {
+					if c.IsImage() {
+						imageParts = append(imageParts, map[string]any{
+							"type":      "input_image",
+							"detail":    "auto",
+							"image_url": fmt.Sprintf("data:%s;base64,%s", c.MimeType, c.Data),
+						})
+					}
+				}
+				input = append(input, map[string]any{
+					"role":    "user",
+					"content": imageParts,
+				})
+			}
 		}
 	}
 

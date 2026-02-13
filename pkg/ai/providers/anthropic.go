@@ -487,6 +487,17 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		}
 	}
 
+	// Tool choice
+	if options != nil && options.ToolChoice != "" {
+		switch options.ToolChoice {
+		case "auto", "any", "none":
+			params["tool_choice"] = map[string]any{"type": options.ToolChoice}
+		default:
+			// Specific tool name
+			params["tool_choice"] = map[string]any{"type": "tool", "name": options.ToolChoice}
+		}
+	}
+
 	return params
 }
 
@@ -601,11 +612,11 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 				if tr == nil {
 					break
 				}
-				contentStr := toolResultContentToString(tr.Content)
+				content := convertToolResultContent(tr.Content, model)
 				toolResults = append(toolResults, map[string]any{
 					"type":        "tool_result",
 					"tool_use_id": tr.ToolCallID,
-					"content":     contentStr,
+					"content":     content,
 					"is_error":    tr.IsError,
 				})
 				if i+1 < len(transformed) && transformed[i+1].Role() == ai.RoleToolResult {
@@ -633,14 +644,46 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 	return params
 }
 
-func toolResultContentToString(content []ai.ToolResultContent) string {
-	var parts []string
+// convertToolResultContent converts tool result content to Anthropic format.
+// Text-only results return a single string. Mixed results with images return an array of blocks.
+func convertToolResultContent(content []ai.ToolResultContent, model *ai.Model) any {
+	hasImages := false
+	supportsImages := model.SupportsImages()
 	for _, c := range content {
-		if c.IsText() {
-			parts = append(parts, c.Text)
+		if c.IsImage() && supportsImages {
+			hasImages = true
+			break
 		}
 	}
-	return strings.Join(parts, "\n")
+
+	if !hasImages {
+		// Text-only: return as simple string
+		var parts []string
+		for _, c := range content {
+			if c.IsText() {
+				parts = append(parts, c.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+
+	// Mixed content: return as array of blocks
+	var blocks []map[string]any
+	for _, c := range content {
+		if c.IsText() {
+			blocks = append(blocks, map[string]any{"type": "text", "text": c.Text})
+		} else if c.IsImage() && supportsImages {
+			blocks = append(blocks, map[string]any{
+				"type": "image",
+				"source": map[string]any{
+					"type":       "base64",
+					"media_type": c.MimeType,
+					"data":       c.Data,
+				},
+			})
+		}
+	}
+	return blocks
 }
 
 func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {

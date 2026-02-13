@@ -398,7 +398,16 @@ func (r *ModelRegistry) loadModels() {
 	builtInModels := r.loadBuiltInModels(result.Overrides, result.ModelOverrides)
 	combined := r.mergeCustomModels(builtInModels, result.Models)
 
-	// TODO(Phase 12): Let OAuth providers modify their models — see docs/plan/07-work-tracker.md
+	// Let OAuth providers modify their models (e.g., update baseUrl)
+	for _, oauthProvider := range r.authStorage.GetOAuthProviders() {
+		cred := r.authStorage.Get(oauthProvider.ID())
+		if cred != nil && cred.Type == CredentialTypeOAuth {
+			oauthCreds := authCredToOAuthCreds(cred)
+			if modified := oauthProvider.ModifyModels(combined, oauthCreds); modified != nil {
+				combined = modified
+			}
+		}
+	}
 	r.models = combined
 }
 
@@ -748,6 +757,11 @@ func (r *ModelRegistry) GetApiKeyForProvider(provider string) string {
 func (r *ModelRegistry) IsUsingOAuth(model *ai.Model) bool {
 	cred := r.authStorage.Get(model.Provider)
 	return cred != nil && cred.Type == CredentialTypeOAuth
+}
+
+// AuthStorage returns the auth storage used by this registry.
+func (r *ModelRegistry) AuthStorage() *AuthStorage {
+	return r.authStorage
 }
 
 // RegisterProvider registers a provider dynamically (from extensions).

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: bd040072
 package ai
 
 import (
@@ -141,6 +141,7 @@ type StreamOptions struct {
 	MaxRetryDelayMs *int              `json:"maxRetryDelayMs,omitempty"`
 	ReasoningEffort ThinkingLevel     `json:"reasoningEffort,omitempty"`
 	ToolChoice      string            `json:"toolChoice,omitempty"`
+	Metadata        map[string]any    `json:"metadata,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.

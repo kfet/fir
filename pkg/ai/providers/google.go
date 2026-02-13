@@ -34,14 +34,16 @@ type googleContent struct {
 }
 
 type googlePart struct {
-	Text         string              `json:"text,omitempty"`
-	Thought      *bool               `json:"thought,omitempty"`
-	FunctionCall *googleFunctionCall  `json:"functionCall,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	Thought          *bool               `json:"thought,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
+	FunctionCall     *googleFunctionCall  `json:"functionCall,omitempty"`
 }
 
 type googleFunctionCall struct {
 	Name string         `json:"name"`
 	Args map[string]any `json:"args"`
+	ID   string         `json:"id,omitempty"`
 }
 
 type googleUsageMetadata struct {
@@ -197,7 +199,7 @@ func parseGoogleResponse(
 		// Process usage
 		if resp.UsageMetadata != nil {
 			output.Usage.Input = resp.UsageMetadata.PromptTokenCount
-			output.Usage.Output = resp.UsageMetadata.CandidatesTokenCount
+			output.Usage.Output = resp.UsageMetadata.CandidatesTokenCount + resp.UsageMetadata.ThinkingTokenCount
 			output.Usage.CacheRead = resp.UsageMetadata.CachedContentTokenCount
 			output.Usage.TotalTokens = resp.UsageMetadata.TotalTokenCount
 			ai.CalculateCost(model, &output.Usage)
@@ -207,16 +209,28 @@ func parseGoogleResponse(
 		for _, candidate := range resp.Candidates {
 			if candidate.FinishReason != "" {
 				output.StopReason = mapGoogleStopReason(candidate.FinishReason)
+				// Override with toolUse if tool calls are present
+				for _, c := range output.Content {
+					if c.IsToolCall() {
+						output.StopReason = ai.StopReasonToolUse
+						break
+					}
+				}
 			}
 
 			for _, part := range candidate.Content.Parts {
 				if part.FunctionCall != nil {
-					// Tool call
+					// Tool call — use provided ID, or deduplicate if needed
 					idx := len(output.Content)
-					id := fmt.Sprintf("call_%d", idx)
-					output.Content = append(output.Content, ai.NewToolCallContent(
-						id, part.FunctionCall.Name, part.FunctionCall.Args,
-					))
+					id := part.FunctionCall.ID
+					if id == "" || toolCallIDExists(output, id) {
+						id = fmt.Sprintf("%s_%d_%d", part.FunctionCall.Name, time.Now().UnixMilli(), idx)
+					}
+					tc := ai.NewToolCallContent(id, part.FunctionCall.Name, part.FunctionCall.Args)
+					if part.ThoughtSignature != "" {
+						tc.ToolCall.ThoughtSignature = part.ThoughtSignature
+					}
+					output.Content = append(output.Content, tc)
 					stream.Push(ai.AssistantMessageEvent{
 						Type:         ai.EventToolcallStart,
 						ContentIndex: idx,
@@ -289,6 +303,16 @@ func parseGoogleResponse(
 	}
 
 	return nil
+}
+
+// toolCallIDExists checks if a tool call with the given ID already exists in the output.
+func toolCallIDExists(output *ai.AssistantMessage, id string) bool {
+	for _, c := range output.Content {
+		if c.IsToolCall() && c.ToolCall.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func mapGoogleStopReason(reason string) ai.StopReason {
@@ -481,51 +505,79 @@ func isGemini3Model(model *ai.Model) bool {
 }
 
 // mapGeminiThinkingLevel maps our thinking levels to Gemini's thinking levels.
+// Gemini 3 Pro only supports LOW and HIGH. Gemini 3 Flash supports MINIMAL-HIGH.
 func mapGeminiThinkingLevel(level ai.ThinkingLevel, model *ai.Model) string {
 	id := strings.ToLower(model.ID)
-	isFlash := strings.Contains(id, "flash")
+	isPro := strings.Contains(id, "3-pro")
 
+	if isPro {
+		// Gemini 3 Pro: only LOW and HIGH
+		switch level {
+		case ai.ThinkingMinimal, ai.ThinkingLow:
+			return "LOW"
+		case ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh:
+			return "HIGH"
+		default:
+			return "HIGH"
+		}
+	}
+
+	// Gemini 3 Flash: MINIMAL, LOW, MEDIUM, HIGH
 	switch level {
 	case ai.ThinkingMinimal:
-		if isFlash {
-			return "THINKING_LEVEL_LOW"
-		}
-		return "THINKING_LEVEL_LOW"
+		return "MINIMAL"
 	case ai.ThinkingLow:
-		return "THINKING_LEVEL_LOW"
+		return "LOW"
 	case ai.ThinkingMedium:
-		return "THINKING_LEVEL_MEDIUM"
-	case ai.ThinkingHigh:
-		return "THINKING_LEVEL_HIGH"
-	case ai.ThinkingXHigh:
-		return "THINKING_LEVEL_MAX"
+		return "MEDIUM"
+	case ai.ThinkingHigh, ai.ThinkingXHigh:
+		return "HIGH"
 	default:
-		return "THINKING_LEVEL_MEDIUM"
+		return "MEDIUM"
 	}
 }
 
 // getGoogleBudget returns the thinking budget tokens for Google models.
+// Budget values match the upstream TypeScript implementation.
 func getGoogleBudget(model *ai.Model, effort ai.ThinkingLevel, budgets *ai.ThinkingBudgets) int {
 	if b := budgets.BudgetForLevel(effort); b > 0 {
 		return b
 	}
 
-	// Default budgets
-	maxTokens := model.MaxTokens
-	switch effort {
-	case ai.ThinkingMinimal:
-		return 1024
-	case ai.ThinkingLow:
-		return maxTokens / 8
-	case ai.ThinkingMedium:
-		return maxTokens / 4
-	case ai.ThinkingHigh:
-		return maxTokens / 2
-	case ai.ThinkingXHigh:
-		return maxTokens
-	default:
-		return maxTokens / 4
+	id := strings.ToLower(model.ID)
+
+	if strings.Contains(id, "2.5-pro") {
+		switch effort {
+		case ai.ThinkingMinimal:
+			return 128
+		case ai.ThinkingLow:
+			return 2048
+		case ai.ThinkingMedium:
+			return 8192
+		case ai.ThinkingHigh, ai.ThinkingXHigh:
+			return 32768
+		default:
+			return 8192
+		}
 	}
+
+	if strings.Contains(id, "2.5-flash") {
+		switch effort {
+		case ai.ThinkingMinimal:
+			return 128
+		case ai.ThinkingLow:
+			return 2048
+		case ai.ThinkingMedium:
+			return 8192
+		case ai.ThinkingHigh, ai.ThinkingXHigh:
+			return 24576
+		default:
+			return 8192
+		}
+	}
+
+	// Dynamic budget for other models
+	return -1
 }
 
 // RegisterGoogle registers the Google Gemini provider.

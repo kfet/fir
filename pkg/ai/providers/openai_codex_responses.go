@@ -8,21 +8,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"math"
-	"net/http"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/pi-go/pkg/ai/oauth"
 )
 
 // --- Codex configuration ---
 
 const (
 	defaultCodexBaseURL = "https://chatgpt.com/backend-api"
-	jwtClaimPath        = "https://api.openai.com/auth"
 	codexMaxRetries     = 3
 	codexBaseDelayMS    = 1000
 )
@@ -50,7 +47,7 @@ func extractAccountID(token string) (string, error) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return "", fmt.Errorf("failed to extract accountId from token: %w", err)
 	}
-	authClaim, ok := claims[jwtClaimPath].(map[string]any)
+	authClaim, ok := claims[oauth.JWTClaimPath].(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("failed to extract accountId from token: no auth claim")
 	}
@@ -426,7 +423,4 @@ func RegisterOpenAICodexResponses(reg *ai.Registry) {
 	}, "builtin")
 }
 
-// Suppress unused import warnings.
-var _ = http.StatusOK
-var _ = io.EOF
-var _ = math.MaxInt
+

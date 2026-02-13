@@ -1,9 +1,14 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/pi-go/pkg/ai/oauth"
 )
 
 func TestAuthStorage_SetAndGet(t *testing.T) {
@@ -265,5 +270,199 @@ func TestAuthStorage_HasAuth(t *testing.T) {
 	s.Set("anthropic", AuthCredential{Type: "api_key", Key: "key"})
 	if !s.HasAuth("anthropic") {
 		t.Error("should have auth after set")
+	}
+}
+
+// mockOAuthProvider implements oauth.Provider for testing.
+type mockOAuthProvider struct {
+	id           string
+	refreshCalls int
+	loginCreds   *oauth.Credentials
+	refreshCreds *oauth.Credentials
+	refreshErr   error
+}
+
+func (m *mockOAuthProvider) ID() string              { return m.id }
+func (m *mockOAuthProvider) Name() string             { return "Mock " + m.id }
+func (m *mockOAuthProvider) UsesCallbackServer() bool { return false }
+
+func (m *mockOAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error) {
+	return m.loginCreds, nil
+}
+
+func (m *mockOAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
+	m.refreshCalls++
+	if m.refreshErr != nil {
+		return nil, m.refreshErr
+	}
+	return m.refreshCreds, nil
+}
+
+func (m *mockOAuthProvider) GetAPIKey(creds *oauth.Credentials) string {
+	return creds.Access
+}
+
+func (m *mockOAuthProvider) ModifyModels(models []*ai.Model, _ *oauth.Credentials) []*ai.Model {
+	return models
+}
+
+func TestAuthStorage_GetApiKey_OAuthRefresh(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+
+	mp := &mockOAuthProvider{
+		id: "test-refresh-provider",
+		refreshCreds: &oauth.Credentials{
+			Access:  "new-access-token",
+			Refresh: "new-refresh-token",
+			Expires: time.Now().UnixMilli() + 3600000,
+		},
+	}
+	oauth.RegisterProvider(mp)
+	defer func() {
+		// Can't unregister, but won't affect other tests
+	}()
+
+	s := NewAuthStorage(path)
+
+	// Set expired OAuth credentials
+	s.Set("test-refresh-provider", AuthCredential{
+		Type:    CredentialTypeOAuth,
+		Access:  "old-access-token",
+		Refresh: "old-refresh-token",
+		Expires: time.Now().UnixMilli() - 1000, // Expired
+	})
+
+	// GetApiKey should trigger refresh
+	key := s.GetApiKey("test-refresh-provider")
+	if key != "new-access-token" {
+		t.Errorf("GetApiKey() = %q, want %q", key, "new-access-token")
+	}
+	if mp.refreshCalls != 1 {
+		t.Errorf("refreshCalls = %d, want 1", mp.refreshCalls)
+	}
+
+	// Verify credentials were saved to disk
+	s2 := NewAuthStorage(path)
+	cred := s2.Get("test-refresh-provider")
+	if cred == nil {
+		t.Fatal("credentials not saved to disk")
+	}
+	if cred.Access != "new-access-token" {
+		t.Errorf("saved access = %q", cred.Access)
+	}
+}
+
+func TestAuthStorage_GetApiKey_OAuthNotExpired(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+
+	mp := &mockOAuthProvider{
+		id: "test-no-refresh",
+	}
+	oauth.RegisterProvider(mp)
+
+	s := NewAuthStorage(path)
+
+	// Set non-expired OAuth credentials
+	s.Set("test-no-refresh", AuthCredential{
+		Type:    CredentialTypeOAuth,
+		Access:  "valid-token",
+		Refresh: "r",
+		Expires: time.Now().UnixMilli() + 3600000,
+	})
+
+	key := s.GetApiKey("test-no-refresh")
+	if key != "valid-token" {
+		t.Errorf("GetApiKey() = %q, want %q", key, "valid-token")
+	}
+	if mp.refreshCalls != 0 {
+		t.Errorf("should not have refreshed; refreshCalls = %d", mp.refreshCalls)
+	}
+}
+
+func TestAuthStorage_GetApiKey_OAuthRefreshFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+
+	mp := &mockOAuthProvider{
+		id:         "test-refresh-fail",
+		refreshErr: errors.New("refresh failed"),
+	}
+	oauth.RegisterProvider(mp)
+
+	s := NewAuthStorage(path)
+
+	s.Set("test-refresh-fail", AuthCredential{
+		Type:    CredentialTypeOAuth,
+		Access:  "expired-token",
+		Refresh: "r",
+		Expires: time.Now().UnixMilli() - 1000,
+	})
+
+	// When refresh fails, should return empty string
+	key := s.GetApiKey("test-refresh-fail")
+	if key != "" {
+		t.Errorf("GetApiKey() = %q, want empty on refresh failure", key)
+	}
+}
+
+func TestAuthStorage_Login(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+
+	mp := &mockOAuthProvider{
+		id: "test-login-provider",
+		loginCreds: &oauth.Credentials{
+			Access:  "login-token",
+			Refresh: "login-refresh",
+			Expires: time.Now().UnixMilli() + 3600000,
+		},
+	}
+	oauth.RegisterProvider(mp)
+
+	s := NewAuthStorage(path)
+
+	err := s.Login("test-login-provider", oauth.LoginCallbacks{
+		OnAuth: func(_ oauth.AuthInfo) {},
+		OnPrompt: func(_ oauth.Prompt) (string, error) {
+			return "code", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	cred := s.Get("test-login-provider")
+	if cred == nil {
+		t.Fatal("credential not stored")
+	}
+	if cred.Type != CredentialTypeOAuth {
+		t.Errorf("type = %q, want oauth", cred.Type)
+	}
+	if cred.Access != "login-token" {
+		t.Errorf("access = %q", cred.Access)
+	}
+}
+
+func TestAuthStorage_Login_UnknownProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	s := NewAuthStorage(path)
+
+	err := s.Login("nonexistent-provider", oauth.LoginCallbacks{})
+	if err == nil {
+		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestAuthStorage_GetOAuthProviders(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	s := NewAuthStorage(path)
+
+	providers := s.GetOAuthProviders()
+	if len(providers) < 5 {
+		t.Errorf("GetOAuthProviders() returned %d, want at least 5", len(providers))
 	}
 }

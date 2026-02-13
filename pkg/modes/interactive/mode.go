@@ -21,6 +21,7 @@ import (
 
 	"github.com/kfet/pi-go/pkg/agent"
 	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/pi-go/pkg/ai/oauth"
 	"github.com/kfet/pi-go/pkg/core"
 	"github.com/kfet/pi-go/pkg/modes/interactive/components"
 	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
@@ -43,10 +44,11 @@ type InteractiveMode struct {
 	editorContainer *tui.Container // holds editor or selector overlay
 
 	// State
-	messageContainer *tui.Container
-	statusContainer  *tui.Container
-	footerComponent  *components.FooterComponent
-	markdownTheme    tuicomp.MarkdownTheme
+	messageContainer   *tui.Container
+	statusContainer    *tui.Container
+	footerComponent    *components.FooterComponent
+	footerDataProvider *core.FooterDataProvider
+	markdownTheme      tuicomp.MarkdownTheme
 
 	// Streaming state
 	streamingComponent *components.AssistantMessageComponent
@@ -96,13 +98,16 @@ func NewInteractiveMode(
 	// Initialize theme
 	_ = itheme.InitTheme(opts.ThemeName, opts.ThemeSearchDirs)
 
+	cwd, _ := os.Getwd()
+
 	m := &InteractiveMode{
-		session:     session,
-		keybindings: keybindings,
-		settings:    settings,
-		autoCompact: true,
-		ctx:         ctx,
-		cancel:      cancel,
+		session:            session,
+		keybindings:        keybindings,
+		settings:           settings,
+		autoCompact:        true,
+		footerDataProvider: core.NewFooterDataProvider(cwd),
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -124,12 +129,6 @@ func (m *InteractiveMode) Init() error {
 	m.statusContainer = &tui.Container{}
 	m.ui.AddChild(m.statusContainer)
 
-	// Create footer
-	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
-		return m.getFooterData()
-	})
-	m.ui.AddChild(m.footerComponent)
-
 	// Create editor container (holds editor or selector overlays)
 	m.editorContainer = &tui.Container{}
 	editorTheme := itheme.GetEditorTheme()
@@ -137,6 +136,12 @@ func (m *InteractiveMode) Init() error {
 	m.setupEditorHandlers()
 	m.editorContainer.AddChild(m.editor)
 	m.ui.AddChild(m.editorContainer)
+
+	// Create footer (below the input box)
+	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
+		return m.getFooterData()
+	})
+	m.ui.AddChild(m.footerComponent)
 
 	// Focus the editor so it receives keyboard input
 	m.ui.SetFocus(m.editor)
@@ -147,7 +152,90 @@ func (m *InteractiveMode) Init() error {
 	// Subscribe to agent events
 	m.subscribeToAgent()
 
+	// Show loaded resources and any diagnostics at startup
+	m.showLoadedResources()
+
 	return nil
+}
+
+// showLoadedResources displays skill/prompt diagnostics (collisions, parse errors) in the chat area.
+func (m *InteractiveMode) showLoadedResources() {
+	if m.session == nil {
+		return
+	}
+	t := itheme.GetTheme()
+
+	// Show skill diagnostics
+	skills, skillDiags := m.session.ResourceLoader().GetSkills()
+	prompts, promptDiags := m.session.ResourceLoader().GetPrompts()
+	_ = skills
+	_ = prompts
+
+	if len(skillDiags) > 0 {
+		lines := formatDiagnostics(t, "Skill conflicts", skillDiags)
+		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
+		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+	}
+
+	if len(promptDiags) > 0 {
+		lines := formatDiagnostics(t, "Prompt conflicts", promptDiags)
+		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
+		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+	}
+}
+
+// formatDiagnostics formats resource diagnostics for display.
+func formatDiagnostics(t *itheme.Theme, header string, diags []core.ResourceDiagnostic) string {
+	var lines []string
+	lines = append(lines, t.Fg("warning", "["+header+"]"))
+
+	// Group collision diagnostics by name
+	type collisionGroup struct {
+		name   string
+		winner string
+		losers []string
+	}
+	groups := make(map[string]*collisionGroup)
+	var otherDiags []core.ResourceDiagnostic
+
+	for _, d := range diags {
+		if d.Type == "collision" && d.Collision != nil {
+			g, ok := groups[d.Collision.Name]
+			if !ok {
+				g = &collisionGroup{
+					name:   d.Collision.Name,
+					winner: d.Collision.WinnerPath,
+				}
+				groups[d.Collision.Name] = g
+			}
+			g.losers = append(g.losers, d.Collision.LoserPath)
+		} else {
+			otherDiags = append(otherDiags, d)
+		}
+	}
+
+	for _, g := range groups {
+		lines = append(lines, t.Fg("warning", fmt.Sprintf("  \"%s\" collision:", g.name)))
+		lines = append(lines, t.Fg("dim", fmt.Sprintf("    %s %s", t.Fg("success", "✓"), g.winner)))
+		for _, loser := range g.losers {
+			lines = append(lines, t.Fg("dim", fmt.Sprintf("    %s %s (skipped)", t.Fg("warning", "✗"), loser)))
+		}
+	}
+
+	for _, d := range otherDiags {
+		color := "warning"
+		if d.Type == "error" {
+			color = "error"
+		}
+		if d.Path != "" {
+			lines = append(lines, t.Fg(color, fmt.Sprintf("  %s", d.Path)))
+			lines = append(lines, t.Fg(color, fmt.Sprintf("    %s", d.Message)))
+		} else {
+			lines = append(lines, t.Fg(color, fmt.Sprintf("  %s", d.Message)))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // Run starts the main event loop.
@@ -201,6 +289,10 @@ func (m *InteractiveMode) shutdown() {
 	if m.unsubscribe != nil {
 		m.unsubscribe()
 		m.unsubscribe = nil
+	}
+
+	if m.footerDataProvider != nil {
+		m.footerDataProvider.Dispose()
 	}
 
 	if m.ui != nil {
@@ -769,8 +861,136 @@ func (m *InteractiveMode) handleClearCommand() {
 // ============================================================================
 
 func (m *InteractiveMode) showOAuthSelector(mode string) {
-	// TODO(Phase 12): implement full OAuth selector with registry.GetOAuthProviders() — see docs/plan/07-work-tracker.md
-	m.showWarning(fmt.Sprintf("/%s is not yet fully implemented", mode))
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+
+	registry := m.session.ModelRegistryRef()
+	if registry == nil {
+		m.showWarning("Model registry not available")
+		return
+	}
+	authStorage := registry.AuthStorage()
+	if authStorage == nil {
+		m.showWarning("Auth storage not available")
+		return
+	}
+
+	if mode == "logout" {
+		// Show only providers that are logged in via OAuth
+		providers := authStorage.List()
+		var loggedIn []string
+		for _, p := range providers {
+			if cred := authStorage.Get(p); cred != nil && cred.Type == core.CredentialTypeOAuth {
+				loggedIn = append(loggedIn, p)
+			}
+		}
+		if len(loggedIn) == 0 {
+			m.showStatus("No OAuth providers logged in. Use /login first.")
+			return
+		}
+
+		selectItems := make([]tuicomp.SelectItem, len(loggedIn))
+		for i, id := range loggedIn {
+			name := id
+			if p := oauth.GetProvider(id); p != nil {
+				name = p.Name()
+			}
+			selectItems[i] = tuicomp.SelectItem{Label: name, Value: id}
+		}
+
+		m.showSelector(func(done func()) (tui.Component, tui.Component) {
+			list := tuicomp.NewSelectList(selectItems, 10, itheme.GetSelectListTheme())
+			list.OnSelect = func(item tuicomp.SelectItem) {
+				done()
+				providerName := item.Value
+				if p := oauth.GetProvider(item.Value); p != nil {
+					providerName = p.Name()
+				}
+				if err := authStorage.Logout(item.Value); err != nil {
+					m.showWarning(fmt.Sprintf("Logout failed: %v", err))
+					return
+				}
+				registry.Refresh()
+				m.showStatus(fmt.Sprintf("Logged out of %s", providerName))
+			}
+			list.OnCancel = func() { done() }
+			return list, list
+		})
+		return
+	}
+
+	// Login mode — show all available OAuth providers
+	oauthProviders := oauth.GetProviders()
+	if len(oauthProviders) == 0 {
+		m.showWarning("No OAuth providers available")
+		return
+	}
+
+	selectItems := make([]tuicomp.SelectItem, len(oauthProviders))
+	for i, p := range oauthProviders {
+		selectItems[i] = tuicomp.SelectItem{Label: p.Name(), Value: p.ID()}
+	}
+
+	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		list := tuicomp.NewSelectList(selectItems, 10, itheme.GetSelectListTheme())
+		list.OnSelect = func(item tuicomp.SelectItem) {
+			done()
+			go m.performOAuthLogin(item.Value)
+		}
+		list.OnCancel = func() { done() }
+		return list, list
+	})
+}
+
+func (m *InteractiveMode) performOAuthLogin(providerID string) {
+	providerName := providerID
+	if p := oauth.GetProvider(providerID); p != nil {
+		providerName = p.Name()
+	}
+
+	registry := m.session.ModelRegistryRef()
+	if registry == nil {
+		m.showWarning("Model registry not available")
+		return
+	}
+	authStorage := registry.AuthStorage()
+	if authStorage == nil {
+		m.showWarning("Auth storage not available")
+		return
+	}
+
+	callbacks := oauth.LoginCallbacks{
+		OnAuth: func(info oauth.AuthInfo) {
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", info.URL)
+			if info.Instructions != "" {
+				msg += "\n" + info.Instructions
+			}
+			m.showStatus(msg)
+		},
+		OnPrompt: func(prompt oauth.Prompt) (string, error) {
+			// For now, show a status message — full prompt input requires
+			// a dialog component which is not yet implemented.
+			m.showWarning(fmt.Sprintf("Login requires input: %s (use browser flow)", prompt.Message))
+			return "", fmt.Errorf("interactive prompt not yet implemented")
+		},
+		OnProgress: func(message string) {
+			m.showStatus(message)
+		},
+	}
+
+	err := authStorage.Login(providerID, callbacks)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg != "Login cancelled" {
+			m.showWarning(fmt.Sprintf("Failed to login to %s: %s", providerName, errMsg))
+		}
+		return
+	}
+
+	registry.Refresh()
+	m.showStatus(fmt.Sprintf("Logged in to %s. Credentials saved.", providerName))
 }
 
 // ============================================================================
@@ -1138,7 +1358,7 @@ func (m *InteractiveMode) cycleModel(direction string) {
 func (m *InteractiveMode) toggleToolOutputExpansion() {
 	m.toolOutputExpanded = !m.toolOutputExpanded
 	// Update all tool components in the message container
-	for _, child := range m.messageContainer.Children {
+	for _, child := range m.messageContainer.ChildrenSnapshot() {
 		if tc, ok := child.(*components.ToolExecutionComponent); ok {
 			tc.SetExpanded(m.toolOutputExpanded)
 		}
@@ -1148,7 +1368,7 @@ func (m *InteractiveMode) toggleToolOutputExpansion() {
 
 func (m *InteractiveMode) toggleThinkingBlockVisibility() {
 	m.hideThinking = !m.hideThinking
-	for _, child := range m.messageContainer.Children {
+	for _, child := range m.messageContainer.ChildrenSnapshot() {
 		if ac, ok := child.(*components.AssistantMessageComponent); ok {
 			ac.SetHideThinkingBlock(m.hideThinking)
 		}
@@ -1251,17 +1471,46 @@ Keyboard shortcuts:
 
 func (m *InteractiveMode) getFooterData() components.FooterData {
 	pwd, _ := os.Getwd()
-	modelID := "unknown"
-	if m.session != nil {
-		if model := m.session.Model(); model != nil {
-			modelID = model.ID
-		}
-	}
-	return components.FooterData{
+
+	data := components.FooterData{
 		Pwd:         pwd,
-		ModelID:     modelID,
 		AutoCompact: m.autoCompact,
 	}
+
+	if m.session == nil {
+		return data
+	}
+
+	// Model info
+	if model := m.session.Model(); model != nil {
+		data.ModelID = model.ID
+		data.ModelProvider = model.Provider
+		data.ModelReasoning = model.Reasoning
+		data.ContextWindow = model.ContextWindow
+	}
+
+	// Thinking level
+	data.ThinkingLevel = m.session.ThinkingLevel()
+
+	// Token stats from session stats
+	stats := m.session.GetSessionStats()
+	data.TotalInput = stats.Tokens.Input
+	data.TotalOutput = stats.Tokens.Output
+	data.TotalCacheRead = stats.Tokens.CacheRead
+	data.TotalCacheWrite = stats.Tokens.CacheWrite
+	data.TotalCost = stats.Cost
+
+	// Git branch from footer data provider
+	if m.footerDataProvider != nil {
+		data.GitBranch = m.footerDataProvider.GetGitBranch()
+		data.ExtensionStatuses = m.footerDataProvider.GetExtensionStatuses()
+		data.MultipleProviders = m.footerDataProvider.GetAvailableProviderCount() > 1
+	}
+
+	// Session name
+	data.SessionName = m.session.SessionManager.GetSessionName()
+
+	return data
 }
 
 // ============================================================================
@@ -1327,6 +1576,11 @@ func (m *InteractiveMode) subscribeToAgent() {
 }
 
 func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
+	// Invalidate footer on every event (token counts, etc. may have changed)
+	if m.footerComponent != nil {
+		m.footerComponent.Invalidate()
+	}
+
 	if event.AgentEvent == nil {
 		// Handle session-level events
 		switch event.Type {
@@ -1381,18 +1635,26 @@ func (m *InteractiveMode) onAgentStart() {
 }
 
 func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
-	// Stop loading animation
-	if m.loadingAnimation != nil {
-		m.loadingAnimation.Stop()
-		m.loadingAnimation = nil
-		m.statusContainer.Clear()
-	}
-
 	if ae.Message == nil {
 		return
 	}
-	msg := ae.Message.AsAssistant()
-	if msg != nil {
+
+	// User messages: add to chat display immediately
+	if u := ae.Message.AsUser(); u != nil {
+		if txt, ok := u.Content.(string); ok {
+			m.addUserMessageToChat(txt)
+		}
+		m.ui.RequestRender(false)
+		return
+	}
+
+	// Assistant messages: stop loading and start streaming component
+	if msg := ae.Message.AsAssistant(); msg != nil {
+		if m.loadingAnimation != nil {
+			m.loadingAnimation.Stop()
+			m.loadingAnimation = nil
+			m.statusContainer.Clear()
+		}
 		m.streamingComponent = components.NewAssistantMessageComponent(msg, m.hideThinking, nil)
 		m.messageContainer.AddChild(m.streamingComponent)
 		m.ui.RequestRender(false)

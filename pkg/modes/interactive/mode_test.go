@@ -111,46 +111,11 @@ type testMode struct {
 
 func newTestMode(t *testing.T) *testMode {
 	t.Helper()
-	term := tui.NewMockTerminal(80, 24)
-	ui := tui.NewTUI(term, false)
-
-	keybindings := core.NewKeybindingsManager("")
-	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
-	m.ui = ui
-	m.keybindings = keybindings
-
-	m.messageContainer = &tui.Container{}
-	ui.AddChild(m.messageContainer)
-
-	m.statusContainer = &tui.Container{}
-	ui.AddChild(m.statusContainer)
-
-	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
-		return m.getFooterData()
-	})
-	ui.AddChild(m.footerComponent)
-
-	m.editorContainer = &tui.Container{}
-	editorTheme := itheme.GetEditorTheme()
-	m.editor = components.NewCustomEditor(ui, editorTheme, keybindings)
-	m.setupEditorHandlers()
-	m.editorContainer.AddChild(m.editor)
-	ui.AddChild(m.editorContainer)
-
-	ui.SetFocus(m.editor)
-
-	// Set up autocomplete (mirrors Init())
-	m.setupAutocomplete()
-
-	ui.Start()
-	t.Cleanup(func() { ui.Stop() })
-
-	return &testMode{mode: m, term: term, ui: ui}
+	return newTestModeInternal(t, nil)
 }
 
 func newTestModeWithSession(t *testing.T) *testMode {
 	t.Helper()
-	tm := newTestMode(t)
 
 	// Create a real AgentSession
 	cwd := t.TempDir()
@@ -185,8 +150,50 @@ func newTestModeWithSession(t *testing.T) *testMode {
 	})
 	t.Cleanup(func() { session.Close() })
 
-	tm.mode.session = session
-	return tm
+	return newTestModeInternal(t, session)
+}
+
+// newTestModeInternal creates a minimal interactive mode with MockTerminal.
+// If session is non-nil it is set BEFORE ui.Start() to avoid a data race
+// between the test goroutine and the TUI render goroutine.
+func newTestModeInternal(t *testing.T, session *core.AgentSession) *testMode {
+	t.Helper()
+	term := tui.NewMockTerminal(80, 24)
+	ui := tui.NewTUI(term, false)
+
+	keybindings := core.NewKeybindingsManager("")
+	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
+	m.ui = ui
+	m.keybindings = keybindings
+	m.session = session // set before ui.Start() to avoid race with render
+
+	m.messageContainer = &tui.Container{}
+	ui.AddChild(m.messageContainer)
+
+	m.statusContainer = &tui.Container{}
+	ui.AddChild(m.statusContainer)
+
+	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
+		return m.getFooterData()
+	})
+	ui.AddChild(m.footerComponent)
+
+	m.editorContainer = &tui.Container{}
+	editorTheme := itheme.GetEditorTheme()
+	m.editor = components.NewCustomEditor(ui, editorTheme, keybindings)
+	m.setupEditorHandlers()
+	m.editorContainer.AddChild(m.editor)
+	ui.AddChild(m.editorContainer)
+
+	ui.SetFocus(m.editor)
+
+	// Set up autocomplete (mirrors Init())
+	m.setupAutocomplete()
+
+	ui.Start()
+	t.Cleanup(func() { ui.Stop() })
+
+	return &testMode{mode: m, term: term, ui: ui}
 }
 
 func (tm *testMode) typeText(text string) {
@@ -214,7 +221,7 @@ func (tm *testMode) renderedOutput() string {
 }
 
 func (tm *testMode) messageCount() int {
-	return len(tm.mode.messageContainer.Children)
+	return len(tm.mode.messageContainer.ChildrenSnapshot())
 }
 
 // ---------------------------------------------------------------------------
@@ -1091,6 +1098,33 @@ func TestInteractiveMode_SlashNameEmpty(t *testing.T) {
 	output := tm.renderedOutput()
 	if !strings.Contains(output, "Usage") {
 		t.Error("expected usage warning for empty /name")
+	}
+}
+
+func TestInteractiveMode_SlashLoginWithSession(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Should not panic when session + model registry are available
+	tm.mode.handleSlashCommand("/login")
+	tm.waitRender()
+
+	// Should show the OAuth provider selector (no panic)
+	if got := tm.editorText(); got != "" {
+		t.Errorf("expected empty editor after /login, got %q", got)
+	}
+}
+
+func TestInteractiveMode_SlashLogoutWithSession(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Should not panic when session + model registry are available
+	tm.mode.handleSlashCommand("/logout")
+	tm.waitRender()
+
+	// Should show "No OAuth providers logged in" since none logged in
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No OAuth") {
+		t.Error("expected 'No OAuth' message for logout with no logged-in providers")
 	}
 }
 

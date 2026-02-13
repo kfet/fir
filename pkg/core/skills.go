@@ -3,6 +3,7 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,11 +27,20 @@ type Skill struct {
 	DisableModelInvocation bool   `json:"disableModelInvocation"`
 }
 
-// ResourceDiagnostic reports a warning or error during skill loading.
+// ResourceCollision describes a name collision between resources.
+type ResourceCollision struct {
+	ResourceType string `json:"resourceType"` // "extension", "skill", "prompt", "theme"
+	Name         string `json:"name"`
+	WinnerPath   string `json:"winnerPath"`
+	LoserPath    string `json:"loserPath"`
+}
+
+// ResourceDiagnostic reports a warning or error during resource loading.
 type ResourceDiagnostic struct {
-	Type    string `json:"type"` // "warning" or "collision"
-	Message string `json:"message"`
-	Path    string `json:"path"`
+	Type      string             `json:"type"` // "warning", "error", or "collision"
+	Message   string             `json:"message"`
+	Path      string             `json:"path,omitempty"`
+	Collision *ResourceCollision `json:"collision,omitempty"`
 }
 
 // LoadSkillsResult contains loaded skills and diagnostics.
@@ -294,11 +304,37 @@ func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
 	skillMap := make(map[string]Skill)
 	var allDiagnostics []ResourceDiagnostic
 
+	realPathSet := make(map[string]bool)
+
 	addSkills := func(result LoadSkillsResult) {
 		allDiagnostics = append(allDiagnostics, result.Diagnostics...)
 		for _, skill := range result.Skills {
-			if _, exists := skillMap[skill.Name]; !exists {
+			// Resolve symlinks to detect duplicate files
+			realPath := skill.FilePath
+			if resolved, err := filepath.EvalSymlinks(skill.FilePath); err == nil {
+				realPath = resolved
+			}
+
+			// Skip silently if we've already loaded this exact file (via symlink)
+			if realPathSet[realPath] {
+				continue
+			}
+
+			if existing, ok := skillMap[skill.Name]; ok {
+				allDiagnostics = append(allDiagnostics, ResourceDiagnostic{
+					Type:    "collision",
+					Message: fmt.Sprintf("name %q collision", skill.Name),
+					Path:    skill.FilePath,
+					Collision: &ResourceCollision{
+						ResourceType: "skill",
+						Name:         skill.Name,
+						WinnerPath:   existing.FilePath,
+						LoserPath:    skill.FilePath,
+					},
+				})
+			} else {
 				skillMap[skill.Name] = skill
+				realPathSet[realPath] = true
 			}
 		}
 	}

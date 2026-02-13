@@ -391,6 +391,60 @@ func processResponsesSSEStream(proc *responsesSSEProcessor, sseEvents <-chan SSE
 	return nil
 }
 
+// responsesToolCallProviders is the set of providers whose tool call IDs need normalization.
+var responsesToolCallProviders = map[string]bool{
+	"openai":                 true,
+	"openai-codex":           true,
+	"opencode":               true,
+	"azure-openai-responses": true,
+}
+
+// normalizeResponsesToolCallID normalizes tool call IDs for the OpenAI Responses API.
+// IDs with "|" are split into callId|itemId and each part is sanitized.
+func normalizeResponsesToolCallID(id string, model *ai.Model, _ *ai.AssistantMessage) string {
+	if !responsesToolCallProviders[string(model.Provider)] {
+		return id
+	}
+	if !strings.Contains(id, "|") {
+		return id
+	}
+	parts := strings.SplitN(id, "|", 2)
+	callID := sanitizeIDChars(parts[0])
+	itemID := sanitizeIDChars(parts[1])
+
+	// OpenAI Responses API requires item id to start with "fc"
+	if !strings.HasPrefix(itemID, "fc") {
+		itemID = "fc_" + itemID
+	}
+
+	// Truncate to 64 chars
+	if len(callID) > 64 {
+		callID = callID[:64]
+	}
+	if len(itemID) > 64 {
+		itemID = itemID[:64]
+	}
+
+	// Strip trailing underscores (OpenAI Codex rejects them)
+	callID = strings.TrimRight(callID, "_")
+	itemID = strings.TrimRight(itemID, "_")
+
+	return callID + "|" + itemID
+}
+
+// sanitizeIDChars replaces non-alphanumeric characters (except - and _) with _.
+func sanitizeIDChars(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			b.WriteRune(c)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
+
 // convertResponsesTools converts tools to OpenAI Responses API format.
 func convertResponsesTools(tools []ai.Tool, strict bool) []map[string]any {
 	var result []map[string]any

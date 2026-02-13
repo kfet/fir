@@ -105,7 +105,7 @@ func TestStreamGoogle_ToolCall(t *testing.T) {
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
-	assert.Equal(t, ai.StopReasonStop, result.StopReason)
+	assert.Equal(t, ai.StopReasonToolUse, result.StopReason)
 
 	// Check tool call content
 	var toolCall *ai.ToolCall

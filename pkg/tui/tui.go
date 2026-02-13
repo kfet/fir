@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Component interface for all TUI components.
@@ -127,37 +128,54 @@ type overlayEntry struct {
 	hidden    bool
 }
 
-// Container holds child components.
+// Container holds child components. All methods are safe for concurrent use.
 type Container struct {
+	mu       sync.RWMutex
 	Children []Component
 }
 
 func (c *Container) AddChild(component Component) {
+	c.mu.Lock()
 	c.Children = append(c.Children, component)
+	c.mu.Unlock()
 }
 
 func (c *Container) RemoveChild(component Component) {
+	c.mu.Lock()
 	for i, child := range c.Children {
 		if child == component {
 			c.Children = append(c.Children[:i], c.Children[i+1:]...)
-			return
+			break
 		}
 	}
+	c.mu.Unlock()
 }
 
 func (c *Container) Clear() {
+	c.mu.Lock()
 	c.Children = nil
+	c.mu.Unlock()
+}
+
+// ChildrenSnapshot returns a snapshot of the children slice under read lock.
+// Use this instead of accessing Children directly when iterating concurrently.
+func (c *Container) ChildrenSnapshot() []Component {
+	c.mu.RLock()
+	snap := make([]Component, len(c.Children))
+	copy(snap, c.Children)
+	c.mu.RUnlock()
+	return snap
 }
 
 func (c *Container) Invalidate() {
-	for _, child := range c.Children {
+	for _, child := range c.ChildrenSnapshot() {
 		child.Invalidate()
 	}
 }
 
 func (c *Container) Render(width int) []string {
 	var lines []string
-	for _, child := range c.Children {
+	for _, child := range c.ChildrenSnapshot() {
 		lines = append(lines, child.Render(width)...)
 	}
 	return lines
@@ -177,7 +195,10 @@ type TUI struct {
 	Terminal           Terminal
 	OnDebug            func()
 
-	mu                 sync.Mutex
+	// renderMu serializes input handling, rendering, and stop so component
+	// state is never accessed concurrently.  This is separate from the
+	// embedded Container.mu which only protects the children slice.
+	renderMu           sync.Mutex
 	previousLines      []string
 	previousWidth      int
 	focusedComponent   Component
@@ -189,10 +210,12 @@ type TUI struct {
 	maxLinesRendered   int
 	previousViewportTop int
 	fullRedrawCount    int
-	stopped            bool
+	stopped            atomic.Bool
+	forceRedraw        atomic.Bool
 	overlayStack       []*overlayEntry
 	renderCh           chan struct{}
-	stopRenderOnce     sync.Once
+	doneCh             chan struct{} // closed by Stop to unblock render loop
+	stopOnce           sync.Once
 }
 
 // NewTUI creates a new TUI with the given terminal.
@@ -205,6 +228,7 @@ func NewTUI(terminal Terminal, showHardwareCursor ...bool) *TUI {
 		Terminal:           terminal,
 		showHardwareCursor: show,
 		renderCh:           make(chan struct{}, 1),
+		doneCh:             make(chan struct{}),
 	}
 	return t
 }
@@ -323,7 +347,7 @@ func (t *TUI) getTopmostVisibleOverlay() *overlayEntry {
 }
 
 func (t *TUI) Start() {
-	t.stopped = false
+	t.stopped.Store(false)
 	t.Terminal.Start(
 		func(data string) { t.handleInput(data) },
 		func() { t.RequestRender(false) },
@@ -332,11 +356,16 @@ func (t *TUI) Start() {
 
 	// Start render loop goroutine — mirrors process.nextTick(doRender) in the TS version.
 	go func() {
-		for range t.renderCh {
-			if t.stopped {
+		for {
+			select {
+			case <-t.doneCh:
 				return
+			case <-t.renderCh:
+				if t.stopped.Load() {
+					return
+				}
+				t.DoRender()
 			}
-			t.DoRender()
 		}
 	}()
 
@@ -344,11 +373,18 @@ func (t *TUI) Start() {
 }
 
 func (t *TUI) Stop() {
-	t.stopped = true
-	t.stopRenderOnce.Do(func() { close(t.renderCh) })
-	if len(t.previousLines) > 0 {
-		targetRow := len(t.previousLines)
-		lineDiff := targetRow - t.hardwareCursorRow
+	t.stopped.Store(true)
+	t.stopOnce.Do(func() { close(t.doneCh) })
+
+	// Wait for any in-flight DoRender to finish, then read shared state safely.
+	t.renderMu.Lock()
+	prevLines := t.previousLines
+	hcRow := t.hardwareCursorRow
+	t.renderMu.Unlock()
+
+	if len(prevLines) > 0 {
+		targetRow := len(prevLines)
+		lineDiff := targetRow - hcRow
 		if lineDiff > 0 {
 			t.Terminal.Write(fmt.Sprintf("\x1b[%dB", lineDiff))
 		} else if lineDiff < 0 {
@@ -380,21 +416,9 @@ func (t *TUI) AsRenderRequester() *RenderAdapter {
 
 func (t *TUI) RequestRender(force bool) {
 	if force {
-		t.previousLines = nil
-		t.previousWidth = -1
-		t.cursorRow = 0
-		t.hardwareCursorRow = 0
-		t.maxLinesRendered = 0
-		t.previousViewportTop = 0
+		t.forceRedraw.Store(true)
 	}
-	// Non-blocking signal (guard against closed channel after Stop)
-	if t.stopped {
-		return
-	}
-	select {
-	case t.renderCh <- struct{}{}:
-	default:
-	}
+	t.signalRender()
 }
 
 func (t *TUI) handleInput(data string) {
@@ -402,6 +426,12 @@ func (t *TUI) handleInput(data string) {
 		t.OnDebug()
 		return
 	}
+
+	// Serialize input handling with rendering so component state is never
+	// accessed concurrently. This mirrors the single-threaded event loop
+	// of the upstream TS implementation.
+	t.renderMu.Lock()
+	defer t.renderMu.Unlock()
 
 	focusedOverlay := t.findFocusedOverlay()
 	if focusedOverlay != nil && !t.isOverlayVisible(focusedOverlay) {
@@ -417,8 +447,31 @@ func (t *TUI) handleInput(data string) {
 			return
 		}
 		handler.HandleInput(data)
-		t.RequestRender(false)
+		t.signalRender()
 	}
+}
+
+// signalRender sends a non-blocking signal to the render goroutine.
+// Does not acquire t.renderMu; safe to call while holding t.renderMu.
+// Safe to call after Stop (handles closed channel gracefully).
+func (t *TUI) signalRender() {
+	if t.stopped.Load() {
+		return
+	}
+	defer func() { recover() }() // guard against send on closed channel after Stop
+	select {
+	case t.renderCh <- struct{}{}:
+	default:
+	}
+}
+
+// RunLocked executes fn while holding the TUI mutex, preventing concurrent
+// renders. Use in tests or when calling component methods from outside the
+// normal input/render path.
+func (t *TUI) RunLocked(fn func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	fn()
 }
 
 func (t *TUI) findFocusedOverlay() *overlayEntry {
@@ -432,8 +485,19 @@ func (t *TUI) findFocusedOverlay() *overlayEntry {
 
 // DoRender performs a single render cycle. Call from your event loop.
 func (t *TUI) DoRender() {
-	if t.stopped {
+	t.renderMu.Lock()
+	defer t.renderMu.Unlock()
+	if t.stopped.Load() {
 		return
+	}
+	// Consume force-redraw flag (set by RequestRender(true) without holding t.renderMu).
+	if t.forceRedraw.Swap(false) {
+		t.previousLines = nil
+		t.previousWidth = -1
+		t.cursorRow = 0
+		t.hardwareCursorRow = 0
+		t.maxLinesRendered = 0
+		t.previousViewportTop = 0
 	}
 	width := t.Terminal.Columns()
 	height := t.Terminal.Rows()

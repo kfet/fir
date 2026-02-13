@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/oauth/types.ts
-// Upstream hash: 3256d3c0
+// Upstream hash: 1caadb2e
 package oauth
 
 import (
@@ -8,18 +8,13 @@ import (
 	"github.com/kfet/pi-go/pkg/ai"
 )
 
-// Credentials holds OAuth token data persisted between sessions.
+// Credentials holds OAuth tokens for a provider.
 type Credentials struct {
-	Refresh string `json:"refresh"`
-	Access  string `json:"access"`
-	Expires int64  `json:"expires"` // Unix timestamp (seconds)
-
-	// Extra holds provider-specific fields.
-	Extra map[string]any `json:"extra,omitempty"`
+	Refresh string         `json:"refresh"`
+	Access  string         `json:"access"`
+	Expires int64          `json:"expires"` // Unix timestamp in seconds
+	Extra   map[string]any `json:"extra,omitempty"`
 }
-
-// ProviderID identifies an OAuth provider (e.g. "anthropic", "github-copilot").
-type ProviderID = string
 
 // Prompt describes a text prompt shown to the user during login.
 type Prompt struct {
@@ -28,42 +23,49 @@ type Prompt struct {
 	AllowEmpty  bool
 }
 
-// AuthInfo contains the URL and optional instructions for browser-based login.
+// AuthInfo describes a URL the user should visit for authorization.
 type AuthInfo struct {
 	URL          string
 	Instructions string
 }
 
-// LoginCallbacks are provided by the caller to interact with the user during login.
+// LoginCallbacks are UI callbacks used during the OAuth login flow.
 type LoginCallbacks struct {
-	OnAuth             func(info AuthInfo)
-	OnPrompt           func(ctx context.Context, prompt Prompt) (string, error)
-	OnProgress         func(message string)
-	OnManualCodeInput  func(ctx context.Context) (string, error)
+	// OnAuth is called when the user should visit a URL to authorize.
+	OnAuth func(info AuthInfo)
+	// OnPrompt asks the user for text input (e.g., a code).
+	OnPrompt func(prompt Prompt) (string, error)
+	// OnProgress reports a status message during the flow.
+	OnProgress func(message string)
+	// OnManualCodeInput asks the user to paste an auth code manually.
+	OnManualCodeInput func() (string, error)
+	// Ctx is used for cancellation.
+	Ctx context.Context
 }
 
-// Provider defines the interface that each OAuth provider must implement.
+// Provider is the interface that each OAuth provider implements.
 type Provider interface {
-	// ID returns the unique identifier for this provider.
-	ID() ProviderID
-
-	// Name returns a human-readable name.
+	// ID returns the unique provider identifier (e.g., "anthropic", "github-copilot").
+	ID() string
+	// Name returns a human-readable provider name.
 	Name() string
-
-	// UsesCallbackServer reports whether login uses a local HTTP callback server
+	// Login runs the full OAuth login flow and returns credentials to persist.
+	Login(callbacks LoginCallbacks) (*Credentials, error)
+	// UsesCallbackServer returns true if login uses a local HTTP callback server
 	// and supports manual code input as a fallback.
 	UsesCallbackServer() bool
+	// RefreshToken exchanges expired credentials for fresh ones.
+	RefreshToken(creds *Credentials) (*Credentials, error)
+	// GetAPIKey extracts the API key string from credentials.
+	GetAPIKey(creds *Credentials) string
+	// ModifyModels optionally adjusts models for this provider (e.g., update baseUrl).
+	// Returns nil if no modification is needed.
+	ModifyModels(models []*ai.Model, creds *Credentials) []*ai.Model
+}
 
-	// Login runs the interactive login flow and returns credentials to persist.
-	Login(ctx context.Context, callbacks LoginCallbacks) (Credentials, error)
-
-	// RefreshToken refreshes expired credentials and returns updated ones.
-	RefreshToken(ctx context.Context, creds Credentials) (Credentials, error)
-
-	// GetAPIKey converts credentials to the API key string used by the provider.
-	GetAPIKey(creds Credentials) string
-
-	// ModifyModels optionally adjusts models for this provider (e.g. updating baseUrl).
-	// Implementations that don't need this should return models unchanged.
-	ModifyModels(models []ai.Model, creds Credentials) []ai.Model
+// ProviderInfo describes an OAuth provider for display in the UI.
+type ProviderInfo struct {
+	ID        string
+	Name      string
+	Available bool
 }

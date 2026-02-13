@@ -237,7 +237,7 @@ End-to-end skill support in the interactive TUI.
 | [x] | `SkillInvocationMessageComponent` rendering | `interactive-mode.ts` L2384-2400 | Skill blocks render with collapsible UI in chat |
 | [x] | Prompt template expansion in `Prompt()` | `core/agent-session.ts` L688-689 | `ExpandPromptTemplate` called alongside skill expansion |
 | [x] | Skills reload on `/reload` command | `interactive-mode.ts` `handleReloadCommand` | `handleReloadCommand` calls `session.Reload()` and rebuilds chat |
-| [ ] | Skill collision diagnostics surfaced in TUI | `core/skills.ts` collision detection | Diagnostics exist but not shown to user |
+| [x] | Skill collision diagnostics surfaced in TUI | `core/skills.ts` collision detection | Collision diagnostics generated and displayed at startup |
 
 ## Phase 11: Provider Correctness & Missing Providers
 
@@ -252,23 +252,23 @@ Verify existing providers match upstream behavior; port missing ones.
 | [x] | OpenAI Responses | `providers/openai_responses.go` | `ai/src/providers/openai-responses.ts` (754 lines) | 642 lines Go. Registered as `openai-responses` |
 | [x] | Google Generative AI | `providers/google.go` | `ai/src/providers/google.ts` (769 lines) | 444 lines Go. Registered as `google-generative-ai` |
 | [x] | Amazon Bedrock | `providers/bedrock.go` | `ai/src/providers/amazon-bedrock.ts` (731 lines) | 477 lines Go. Registered as `bedrock-converse-stream` |
-| [ ] | **Audit: Anthropic** — diff headers, params, SSE parsing vs upstream | | | Check OAuth token handling, thinking budget, tool_choice |
-| [ ] | **Audit: OpenAI Completions** — diff request body, streaming parse | | | Check parallel_tool_calls, response_format, structured output |
-| [ ] | **Audit: OpenAI Responses** — diff response parsing, tool handling | | | Check shared logic with `openai-responses-shared.ts` (480 lines) |
-| [ ] | **Audit: Google** — diff request/response format vs upstream | | | Check shared logic with `google-shared.ts` (317 lines) |
-| [ ] | **Audit: Bedrock** — diff AWS signing, Converse API format | | | Check region/credential handling |
+| [x] | **Audit: Anthropic** — diff headers, params, SSE parsing vs upstream | | | Fixed: tool result images (mixed text+image blocks). OAuth, thinking, cache control already correct. |
+| [x] | **Audit: OpenAI Completions** — diff request body, streaming parse | | | Verified: reasoning variants, compat flags, tool handling, images, cache all match upstream |
+| [x] | **Audit: OpenAI Responses** — diff response parsing, tool handling | | | Fixed: tool call ID normalization, user image content, tool result images, long ID hashing |
+| [x] | **Audit: Google** — diff request/response format vs upstream | | | Fixed: thinking token count, thoughtSignature, functionCall ID dedup, toolUse stopReason, budget values, thinking level mapping |
+| [x] | **Audit: Bedrock** — diff AWS signing, Converse API format | | | Fixed: prompt caching, tool choice, thinking signature filtering, consecutive tool result merging, user image content, thinking config, adaptive thinking |
 
 ### Missing providers — port
 
 | Status | Provider | TS source | Lines | Priority | Notes |
 |---|---|---|---|---|---|
 | [x] | Azure OpenAI Responses | `ai/src/providers/azure-openai-responses.ts` | 256 | High | `azure_openai_responses.go` — 280 lines. Registered. |
-| [ ] | OpenAI Codex Responses | `ai/src/providers/openai-codex-responses.ts` | 457 | Medium | Codex-specific response format |
-| [ ] | Google Gemini CLI | `ai/src/providers/google-gemini-cli.ts` | 940 | Medium | Uses `gcloud` CLI auth, different endpoint |
-| [ ] | Google Vertex | `ai/src/providers/google-vertex.ts` | 482 | Medium | Vertex AI endpoint + service account auth |
+| [x] | OpenAI Codex Responses | `ai/src/providers/openai-codex-responses.ts` | 457 | Medium | `openai_codex_responses.go` — 340 lines. Registered. |
+| [x] | Google Gemini CLI | `ai/src/providers/google-gemini-cli.ts` | 940 | Medium | `google_gemini_cli.go` — Cloud Code Assist API + Antigravity |
+| [x] | Google Vertex | `ai/src/providers/google-vertex.ts` | 482 | Medium | `google_vertex.go` — 260 lines. ADC auth + Vertex endpoint. Registered. |
 | [x] | Shared utilities | `ai/src/providers/openai-responses-shared.ts` | 480 | High | `openai_responses_shared.go` — SSE processor, tools, hash |
-| [ ] | Shared utilities | `ai/src/providers/google-shared.ts` | 317 | Medium | Used by Google + Vertex + Gemini CLI |
-| [ ] | Register all in `register_builtins.go` | `ai/src/providers/register-builtins.ts` | — | — | Update after each provider is ported |
+| [x] | Shared utilities | `ai/src/providers/google-shared.ts` | 317 | Medium | `google_shared.go` — message conv, tools, thinking, signatures |
+| [x] | Register all in `register_builtins.go` | `ai/src/providers/register-builtins.ts` | — | — | All providers registered |
 
 ## Phase 12: OAuth Flows (`pkg/ai/oauth/`)
 
@@ -278,25 +278,25 @@ OAuth authentication for all providers. **Not deferred** — required for Anthro
 
 | Status | Go file + test | TS source | Lines | Lock key | Deps |
 |---|---|---|---|---|---|
-| [ ] | `oauth/types.go` `oauth/types_test.go` | `ai/src/utils/oauth/types.ts` | 59 | `pkg-ai-oauth-types` | ai/types |
-| [ ] | `oauth/pkce.go` `oauth/pkce_test.go` | `ai/src/utils/oauth/pkce.ts` | 34 | `pkg-ai-oauth-pkce` | none |
+| [x] | `oauth/types.go` `oauth/types_test.go` | `ai/src/utils/oauth/types.ts` | 59 | `pkg-ai-oauth-types` | ai/types |
+| [x] | `oauth/pkce.go` `oauth/pkce_test.go` | `ai/src/utils/oauth/pkce.ts` | 34 | `pkg-ai-oauth-pkce` | none |
 
 ### OAuth providers — port in dependency order (types + pkce first, then all providers can be parallelized)
 
 | Status | Go file + test | TS source | Lines | Lock key | Deps |
 |---|---|---|---|---|---|
-| [ ] | `oauth/anthropic.go` `oauth/anthropic_test.go` | `ai/src/utils/oauth/anthropic.ts` | 138 | `pkg-ai-oauth-anthropic` | types, pkce |
-| [ ] | `oauth/github_copilot.go` `oauth/github_copilot_test.go` | `ai/src/utils/oauth/github-copilot.ts` | 381 | `pkg-ai-oauth-github-copilot` | types |
-| [ ] | `oauth/google_antigravity.go` `oauth/google_antigravity_test.go` | `ai/src/utils/oauth/google-antigravity.ts` | 457 | `pkg-ai-oauth-google-antigravity` | types, pkce |
-| [ ] | `oauth/google_gemini_cli.go` `oauth/google_gemini_cli_test.go` | `ai/src/utils/oauth/google-gemini-cli.ts` | 599 | `pkg-ai-oauth-google-gemini-cli` | types, pkce |
-| [ ] | `oauth/openai_codex.go` `oauth/openai_codex_test.go` | `ai/src/utils/oauth/openai-codex.ts` | 455 | `pkg-ai-oauth-openai-codex` | types, pkce |
+| [x] | `oauth/anthropic.go` `oauth/anthropic_test.go` | `ai/src/utils/oauth/anthropic.ts` | 138 | `pkg-ai-oauth-anthropic` | types, pkce |
+| [x] | `oauth/github_copilot.go` `oauth/github_copilot_test.go` | `ai/src/utils/oauth/github-copilot.ts` | 381 | `pkg-ai-oauth-github-copilot` | types |
+| [x] | `oauth/google_antigravity.go` `oauth/google_antigravity_test.go` | `ai/src/utils/oauth/google-antigravity.ts` | 457 | `pkg-ai-oauth-google-antigravity` | types, pkce |
+| [x] | `oauth/google_gemini_cli.go` `oauth/google_gemini_cli_test.go` | `ai/src/utils/oauth/google-gemini-cli.ts` | 599 | `pkg-ai-oauth-google-gemini-cli` | types, pkce |
+| [x] | `oauth/openai_codex.go` `oauth/openai_codex_test.go` | `ai/src/utils/oauth/openai-codex.ts` | 455 | `pkg-ai-oauth-openai-codex` | types, pkce |
 
 ### OAuth integration — wire into existing code
 
 | Status | Task | Go file | Notes |
 |---|---|---|---|
-| [ ] | Token refresh with file locking | `pkg/core/authstorage.go` | Replace `TODO: OAuth token refresh with file locking` |
-| [ ] | OAuth providers modify models | `pkg/core/modelregistry.go` | Replace `TODO: Let OAuth providers modify their models` |
-| [ ] | `/login` + `/logout` slash commands | `pkg/modes/interactive/mode.go` | Replace `TODO: implement full OAuth selector` |
-| [ ] | OAuth provider registration | `pkg/core/modelregistry.go` | Register all OAuth providers with model registry |
-| [ ] | **🎯 MILESTONE: `/login` and `/logout` work for all providers** | | |
+| [x] | Token refresh with file locking | `pkg/core/authstorage.go` | Auto-refreshes expired OAuth tokens under write lock, re-reads from disk |
+| [x] | OAuth providers modify models | `pkg/core/modelregistry.go` | Calls `ModifyModels()` for each logged-in OAuth provider during model load |
+| [x] | `/login` + `/logout` slash commands | `pkg/modes/interactive/mode.go` | Select list for provider, login via callbacks, logout removes credentials |
+| [x] | OAuth provider registration | `pkg/ai/oauth/registry.go` | All 5 providers auto-registered at init; `GetProvider`/`GetProviders` available |
+| [x] | **🎯 MILESTONE: `/login` and `/logout` work for all providers** | | |

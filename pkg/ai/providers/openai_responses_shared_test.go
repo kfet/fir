@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kfet/pi-go/pkg/ai"
@@ -174,6 +175,77 @@ func TestConvertResponsesTools(t *testing.T) {
 	result = convertResponsesTools(tools, true)
 	if result[0]["strict"] != true {
 		t.Errorf("expected strict=true")
+	}
+}
+
+func TestNormalizeResponsesToolCallID_NoChange(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "other-provider"}
+	got := normalizeResponsesToolCallID("some-id", model, nil)
+	if got != "some-id" {
+		t.Errorf("expected no change for non-responses provider, got %q", got)
+	}
+}
+
+func TestNormalizeResponsesToolCallID_NoPipe(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	got := normalizeResponsesToolCallID("call_123", model, nil)
+	if got != "call_123" {
+		t.Errorf("expected no change for ID without pipe, got %q", got)
+	}
+}
+
+func TestNormalizeResponsesToolCallID_WithPipe(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	got := normalizeResponsesToolCallID("call_123|fc_456", model, nil)
+	if got != "call_123|fc_456" {
+		t.Errorf("expected 'call_123|fc_456', got %q", got)
+	}
+}
+
+func TestNormalizeResponsesToolCallID_AddFcPrefix(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	got := normalizeResponsesToolCallID("call_123|item_456", model, nil)
+	if got != "call_123|fc_item_456" {
+		t.Errorf("expected 'call_123|fc_item_456', got %q", got)
+	}
+}
+
+func TestNormalizeResponsesToolCallID_Sanitize(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	got := normalizeResponsesToolCallID("call.123|fc.456", model, nil)
+	if got != "call_123|fc_456" {
+		t.Errorf("expected sanitized IDs, got %q", got)
+	}
+}
+
+func TestNormalizeResponsesToolCallID_Truncate(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	longID := strings.Repeat("a", 100) + "|fc_" + strings.Repeat("b", 100)
+	got := normalizeResponsesToolCallID(longID, model, nil)
+	parts := strings.SplitN(got, "|", 2)
+	if len(parts[0]) > 64 {
+		t.Errorf("callID should be truncated to 64, got %d", len(parts[0]))
+	}
+	if len(parts[1]) > 64 {
+		t.Errorf("itemID should be truncated to 64, got %d", len(parts[1]))
+	}
+}
+
+func TestNormalizeResponsesToolCallID_StripTrailingUnderscores(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "openai"}
+	got := normalizeResponsesToolCallID("call___||fc___", model, nil)
+	parts := strings.SplitN(got, "|", 2)
+	if strings.HasSuffix(parts[0], "_") {
+		t.Error("callID should not end with underscore")
+	}
+}
+
+func TestSanitizeIDChars(t *testing.T) {
+	if sanitizeIDChars("abc-123_XYZ") != "abc-123_XYZ" {
+		t.Error("should preserve valid chars")
+	}
+	if sanitizeIDChars("a.b+c") != "a_b_c" {
+		t.Errorf("should replace invalid chars: got %q", sanitizeIDChars("a.b+c"))
 	}
 }
 

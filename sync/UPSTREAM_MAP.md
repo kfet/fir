@@ -26,6 +26,10 @@ Master mapping of TypeScript source files to their Go ports.
 | `ai/src/providers/openai-responses.ts` | `pkg/ai/providers/openai_responses.go` | ✅ |
 | `ai/src/providers/openai-responses-shared.ts` | `pkg/ai/providers/openai_responses_shared.go` | ✅ |
 | `ai/src/providers/azure-openai-responses.ts` | `pkg/ai/providers/azure_openai_responses.go` | ✅ |
+| `ai/src/providers/openai-codex-responses.ts` | `pkg/ai/providers/openai_codex_responses.go` | ✅ |
+| `ai/src/providers/google-vertex.ts` | `pkg/ai/providers/google_vertex.go` | ✅ |
+| `ai/src/providers/google-shared.ts` | `pkg/ai/providers/google_shared.go` | ✅ |
+| `ai/src/providers/google-gemini-cli.ts` | `pkg/ai/providers/google_gemini_cli.go` | ✅ |
 | `ai/src/providers/google.ts` | `pkg/ai/providers/google.go` | ✅ |
 | `ai/src/providers/amazon-bedrock.ts` | `pkg/ai/providers/bedrock.go` | ✅ |
 | `ai/src/providers/register-builtins.ts` | `pkg/ai/providers/register_builtins.go` | ✅ |
@@ -35,13 +39,14 @@ Master mapping of TypeScript source files to their Go ports.
 
 | TS Source | Go File | Status |
 |---|---|---|
-| `ai/src/utils/oauth/types.ts` | `pkg/ai/oauth/types.go` | ☐ |
-| `ai/src/utils/oauth/pkce.ts` | `pkg/ai/oauth/pkce.go` | ☐ |
-| `ai/src/utils/oauth/anthropic.ts` | `pkg/ai/oauth/anthropic.go` | ☐ |
-| `ai/src/utils/oauth/github-copilot.ts` | `pkg/ai/oauth/github_copilot.go` | ☐ |
-| `ai/src/utils/oauth/google-antigravity.ts` | `pkg/ai/oauth/google_antigravity.go` | ☐ |
-| `ai/src/utils/oauth/google-gemini-cli.ts` | `pkg/ai/oauth/google_gemini_cli.go` | ☐ |
-| `ai/src/utils/oauth/openai-codex.ts` | `pkg/ai/oauth/openai_codex.go` | ☐ |
+| `ai/src/utils/oauth/types.ts` | `pkg/ai/oauth/types.go` | ✅ |
+| `ai/src/utils/oauth/pkce.ts` | `pkg/ai/oauth/pkce.go` | ✅ |
+| `ai/src/utils/oauth/anthropic.ts` | `pkg/ai/oauth/anthropic.go` | ✅ |
+| `ai/src/utils/oauth/github-copilot.ts` | `pkg/ai/oauth/github_copilot.go` | ✅ |
+| `ai/src/utils/oauth/google-antigravity.ts` | `pkg/ai/oauth/google_antigravity.go` | ✅ |
+| `ai/src/utils/oauth/google-gemini-cli.ts` | `pkg/ai/oauth/google_gemini_cli.go` | ✅ |
+| `ai/src/utils/oauth/openai-codex.ts` | `pkg/ai/oauth/openai_codex.go` | ✅ |
+| `ai/src/utils/oauth/index.ts` | `pkg/ai/oauth/registry.go` | ✅ |
 
 ## Agent Layer (`pkg/agent/`)
 

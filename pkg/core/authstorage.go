@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/pi-go/pkg/ai/oauth"
 )
 
 // CredentialType identifies the kind of stored credential.
@@ -187,40 +189,49 @@ func (s *AuthStorage) HasAuth(provider string) bool {
 // Priority:
 // 1. Runtime override (CLI --api-key)
 // 2. API key from auth.json
-// 3. Environment variable
-// 4. Fallback resolver (models.json custom providers)
-//
-// Note: OAuth token refresh is tracked in Phase 12 — see docs/plan/07-work-tracker.md.
+// 3. OAuth token from auth.json (auto-refreshed if expired)
+// 4. Environment variable
+// 5. Fallback resolver (models.json custom providers)
 func (s *AuthStorage) GetApiKey(provider string) string {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	// Runtime override takes highest priority
 	if key, ok := s.runtimeOverrides[provider]; ok {
+		s.mu.RUnlock()
 		return key
 	}
 
 	// Check auth.json
 	if cred, ok := s.data[provider]; ok {
 		if cred.Type == CredentialTypeAPIKey && cred.Key != "" {
+			s.mu.RUnlock()
 			return cred.Key
 		}
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
-			// For Google providers, return JSON with token + projectId
-			if cred.ProjectID != "" {
-				data, err := json.Marshal(map[string]string{
-					"token":     cred.Access,
-					"projectId": cred.ProjectID,
-				})
-				if err == nil {
-					return string(data)
-				}
+			oauthProvider := oauth.GetProvider(provider)
+			if oauthProvider == nil {
+				// Unknown OAuth provider — return access token as-is
+				s.mu.RUnlock()
+				return cred.Access
 			}
-			// For other OAuth providers (e.g. Anthropic), return access token directly
-			return cred.Access
-			// TODO(Phase 12): OAuth token refresh with file locking — see docs/plan/07-work-tracker.md
+
+			// Check if token needs refresh
+			needsRefresh := cred.Expires > 0 && time.Now().UnixMilli() >= cred.Expires
+
+			if needsRefresh {
+				s.mu.RUnlock()
+				// Upgrade to write lock for refresh
+				return s.refreshOAuthToken(provider, oauthProvider)
+			}
+
+			// Token not expired — return via provider's GetAPIKey
+			oauthCreds := authCredToOAuthCreds(&cred)
+			key := oauthProvider.GetAPIKey(oauthCreds)
+			s.mu.RUnlock()
+			return key
 		}
 	}
+	s.mu.RUnlock()
 
 	// Environment variable
 	if key := ai.GetEnvApiKey(provider); key != "" {
@@ -237,6 +248,69 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 	return ""
 }
 
+// refreshOAuthToken handles token refresh under a write lock.
+// It re-checks the token after acquiring the lock in case another
+// goroutine already refreshed it.
+func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Provider) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Re-read from disk to check if another process refreshed
+	s.reload()
+
+	cred, ok := s.data[provider]
+	if !ok || cred.Type != CredentialTypeOAuth {
+		return ""
+	}
+
+	// Check if still expired (another goroutine/process may have refreshed)
+	if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
+		oauthCreds := authCredToOAuthCreds(&cred)
+		return oauthProvider.GetAPIKey(oauthCreds)
+	}
+
+	// Perform the refresh
+	oauthCreds := authCredToOAuthCreds(&cred)
+	newCreds, err := oauthProvider.RefreshToken(oauthCreds)
+	if err != nil {
+		// Refresh failed — return empty (user can /login to re-auth)
+		return ""
+	}
+
+	// Save the refreshed credentials
+	s.data[provider] = oauthCredsToAuthCred(newCreds)
+	_ = s.save()
+
+	return oauthProvider.GetAPIKey(newCreds)
+}
+
+// authCredToOAuthCreds converts an AuthCredential to an oauth.Credentials.
+func authCredToOAuthCreds(cred *AuthCredential) *oauth.Credentials {
+	c := &oauth.Credentials{
+		Access:  cred.Access,
+		Refresh: cred.Refresh,
+		Expires: cred.Expires,
+	}
+	if cred.ProjectID != "" {
+		c.Extra = map[string]any{"projectId": cred.ProjectID}
+	}
+	return c
+}
+
+// oauthCredsToAuthCred converts oauth.Credentials to an AuthCredential.
+func oauthCredsToAuthCred(creds *oauth.Credentials) AuthCredential {
+	ac := AuthCredential{
+		Type:    CredentialTypeOAuth,
+		Access:  creds.Access,
+		Refresh: creds.Refresh,
+		Expires: creds.Expires,
+	}
+	if projectID, ok := creds.Extra["projectId"].(string); ok {
+		ac.ProjectID = projectID
+	}
+	return ac
+}
+
 // GetAll returns a copy of all stored credentials.
 func (s *AuthStorage) GetAll() AuthStorageData {
 	s.mu.RLock()
@@ -248,7 +322,27 @@ func (s *AuthStorage) GetAll() AuthStorageData {
 	return result
 }
 
+// Login performs OAuth login for the given provider and stores credentials.
+func (s *AuthStorage) Login(providerID string, callbacks oauth.LoginCallbacks) error {
+	provider := oauth.GetProvider(providerID)
+	if provider == nil {
+		return fmt.Errorf("unknown OAuth provider: %s", providerID)
+	}
+
+	creds, err := provider.Login(callbacks)
+	if err != nil {
+		return err
+	}
+
+	return s.Set(providerID, oauthCredsToAuthCred(creds))
+}
+
 // Logout removes credentials for a provider.
 func (s *AuthStorage) Logout(provider string) error {
 	return s.Remove(provider)
+}
+
+// GetOAuthProviders returns all registered OAuth providers.
+func (s *AuthStorage) GetOAuthProviders() []oauth.Provider {
+	return oauth.GetProviders()
 }

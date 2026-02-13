@@ -341,29 +341,90 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 		"modelId": model.ID,
 	}
 
+	retention := resolveCacheRetention("")
+	if options != nil {
+		retention = resolveCacheRetention(options.CacheRetention)
+	}
+	canCache := supportsBedrockPromptCaching(model) && retention != ai.CacheNone
+
 	// System prompt
 	if ctx.SystemPrompt != "" {
-		body["system"] = []map[string]any{
+		sysBlocks := []map[string]any{
 			{"text": ctx.SystemPrompt},
 		}
+		if canCache {
+			cp := map[string]any{"type": "default"}
+			if retention == ai.CacheLong {
+				cp["ttl"] = "ONE_HOUR"
+			}
+			sysBlocks = append(sysBlocks, map[string]any{"cachePoint": cp})
+		}
+		body["system"] = sysBlocks
 	}
 
 	// Messages
 	var messages []map[string]any
-	transformed := TransformMessages(ctx.Messages, model, nil)
-	for _, msg := range transformed {
-		if msg.AsUser() != nil {
-			um := msg.AsUser()
-			if s, ok := um.Content.(string); ok && strings.TrimSpace(s) != "" {
-				messages = append(messages, map[string]any{
-					"role":    "user",
-					"content": []map[string]any{{"text": s}},
-				})
+	normalizeID := func(id string, _ *ai.Model, _ *ai.AssistantMessage) string {
+		var b strings.Builder
+		b.Grow(min(len(id), 64))
+		for _, c := range id {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+				b.WriteRune(c)
+			} else {
+				b.WriteByte('_')
 			}
-		} else if msg.AsAssistant() != nil {
-			am := msg.AsAssistant()
+			if b.Len() >= 64 {
+				break
+			}
+		}
+		return b.String()
+	}
+	transformed := TransformMessages(ctx.Messages, model, normalizeID)
+	for i := 0; i < len(transformed); i++ {
+		msg := &transformed[i]
+
+		if u := msg.AsUser(); u != nil {
+			switch content := u.Content.(type) {
+			case string:
+				if strings.TrimSpace(content) != "" {
+					messages = append(messages, map[string]any{
+						"role":    "user",
+						"content": []map[string]any{{"text": content}},
+					})
+				}
+			case []any:
+				var blocks []map[string]any
+				for _, item := range content {
+					if m, ok := item.(map[string]any); ok {
+						switch m["type"] {
+						case "text":
+							if text, ok := m["text"].(string); ok {
+								blocks = append(blocks, map[string]any{"text": text})
+							}
+						case "image":
+							if model.SupportsImages() {
+								data, _ := m["data"].(string)
+								mime, _ := m["mimeType"].(string)
+								blocks = append(blocks, map[string]any{
+									"image": map[string]any{
+										"format": bedrockImageFormat(mime),
+										"source": map[string]any{"bytes": data},
+									},
+								})
+							}
+						}
+					}
+				}
+				if len(blocks) > 0 {
+					messages = append(messages, map[string]any{
+						"role":    "user",
+						"content": blocks,
+					})
+				}
+			}
+		} else if a := msg.AsAssistant(); a != nil {
 			var contentBlocks []map[string]any
-			for _, block := range am.Content {
+			for _, block := range a.Content {
 				switch {
 				case block.IsText():
 					if strings.TrimSpace(block.Text.Text) != "" {
@@ -380,12 +441,16 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 					})
 				case block.IsThinking():
 					if strings.TrimSpace(block.Thinking.Thinking) != "" {
+						reasoning := map[string]any{
+							"text": block.Thinking.Thinking,
+						}
+						// Only include signature for Anthropic Claude models
+						if supportsBedrockThinkingSignature(model) {
+							reasoning["signature"] = block.Thinking.ThinkingSignature
+						}
 						contentBlocks = append(contentBlocks, map[string]any{
 							"reasoningContent": map[string]any{
-								"reasoningText": map[string]any{
-									"text":      block.Thinking.Thinking,
-									"signature": block.Thinking.ThinkingSignature,
-								},
+								"reasoningText": reasoning,
 							},
 						})
 					}
@@ -397,35 +462,68 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 					"content": contentBlocks,
 				})
 			}
-		} else if msg.AsToolResult() != nil {
-			tr := msg.AsToolResult()
-			var content []map[string]any
-			for _, c := range tr.Content {
-				if c.IsText() {
-					content = append(content, map[string]any{"text": c.Text})
+		} else if tr := msg.AsToolResult(); tr != nil {
+			// Collect consecutive tool results into a single user message
+			var toolResults []map[string]any
+			for {
+				tr := transformed[i].AsToolResult()
+				if tr == nil {
+					break
+				}
+				var content []map[string]any
+				for _, c := range tr.Content {
+					if c.IsText() {
+						content = append(content, map[string]any{"text": c.Text})
+					} else if c.IsImage() && model.SupportsImages() {
+						content = append(content, map[string]any{
+							"image": map[string]any{
+								"format": bedrockImageFormat(c.MimeType),
+								"source": map[string]any{"bytes": c.Data},
+							},
+						})
+					}
+				}
+				if len(content) == 0 {
+					content = []map[string]any{{"text": ""}}
+				}
+				status := "success"
+				if tr.IsError {
+					status = "error"
+				}
+				toolResults = append(toolResults, map[string]any{
+					"toolResult": map[string]any{
+						"toolUseId": tr.ToolCallID,
+						"content":   content,
+						"status":    status,
+					},
+				})
+				if i+1 < len(transformed) && transformed[i+1].Role() == ai.RoleToolResult {
+					i++
+				} else {
+					break
 				}
 			}
-			if len(content) == 0 {
-				content = []map[string]any{{"text": ""}}
-			}
-			status := "success"
-			if tr.IsError {
-				status = "error"
-			}
 			messages = append(messages, map[string]any{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"toolResult": map[string]any{
-							"toolUseId": tr.ToolCallID,
-							"content":   content,
-							"status":    status,
-						},
-					},
-				},
+				"role":    "user",
+				"content": toolResults,
 			})
 		}
 	}
+
+	// Add cache point to last user message
+	if canCache && len(messages) > 0 {
+		last := messages[len(messages)-1]
+		if role, _ := last["role"].(string); role == "user" {
+			if content, ok := last["content"].([]map[string]any); ok {
+				cp := map[string]any{"type": "default"}
+				if retention == ai.CacheLong {
+					cp["ttl"] = "ONE_HOUR"
+				}
+				last["content"] = append(content, map[string]any{"cachePoint": cp})
+			}
+		}
+	}
+
 	body["messages"] = messages
 
 	// Inference config
@@ -440,8 +538,12 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 		body["inferenceConfig"] = inferenceConfig
 	}
 
-	// Tools
-	if len(ctx.Tools) > 0 {
+	// Tools with tool choice
+	toolChoice := ""
+	if options != nil {
+		toolChoice = options.ToolChoice
+	}
+	if len(ctx.Tools) > 0 && toolChoice != "none" {
 		var tools []map[string]any
 		for _, tool := range ctx.Tools {
 			tools = append(tools, map[string]any{
@@ -452,18 +554,128 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 				},
 			})
 		}
-		body["toolConfig"] = map[string]any{
-			"tools": tools,
+		toolConfig := map[string]any{"tools": tools}
+		switch toolChoice {
+		case "auto":
+			toolConfig["toolChoice"] = map[string]any{"auto": map[string]any{}}
+		case "any":
+			toolConfig["toolChoice"] = map[string]any{"any": map[string]any{}}
+		case "":
+			// No explicit tool choice
+		default:
+			// Specific tool name
+			toolConfig["toolChoice"] = map[string]any{"tool": map[string]any{"name": toolChoice}}
+		}
+		body["toolConfig"] = toolConfig
+	}
+
+	// Thinking/reasoning config (via headers from StreamSimple)
+	if options != nil && options.Headers != nil {
+		if reasoning := options.Headers["x-bedrock-reasoning"]; reasoning != "" {
+			if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
+				additionalFields := map[string]any{}
+				if supportsBedrockAdaptiveThinking(model.ID) {
+					additionalFields["thinking"] = map[string]any{"type": "adaptive"}
+					additionalFields["output_config"] = map[string]any{
+						"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning)),
+					}
+				} else {
+					budget := 1024
+					if b := options.Headers["x-bedrock-thinking-budget"]; b != "" {
+						fmt.Sscanf(b, "%d", &budget)
+					}
+					additionalFields["thinking"] = map[string]any{
+						"type":          "enabled",
+						"budget_tokens": budget,
+					}
+					if options.Headers["x-bedrock-interleaved-thinking"] == "true" {
+						additionalFields["anthropic_beta"] = []string{"interleaved-thinking-2025-05-14"}
+					}
+				}
+				body["additionalModelRequestFields"] = additionalFields
+			}
 		}
 	}
 
 	return json.Marshal(body)
 }
 
+// supportsBedrockPromptCaching checks if the model supports prompt caching.
+func supportsBedrockPromptCaching(model *ai.Model) bool {
+	if model.Cost.CacheRead > 0 || model.Cost.CacheWrite > 0 {
+		return true
+	}
+	id := strings.ToLower(model.ID)
+	if strings.Contains(id, "claude") && (strings.Contains(id, "-4-") || strings.Contains(id, "-4.")) {
+		return true
+	}
+	if strings.Contains(id, "claude-3-7-sonnet") {
+		return true
+	}
+	if strings.Contains(id, "claude-3-5-haiku") {
+		return true
+	}
+	return false
+}
+
+// supportsBedrockThinkingSignature checks if the model supports thinking signatures.
+// Only Anthropic Claude models support the signature field in reasoningContent.
+func supportsBedrockThinkingSignature(model *ai.Model) bool {
+	id := strings.ToLower(model.ID)
+	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
+}
+
+// supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking.
+func supportsBedrockAdaptiveThinking(modelID string) bool {
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
+}
+
+// bedrockImageFormat maps MIME types to Bedrock image format strings.
+func bedrockImageFormat(mimeType string) string {
+	switch mimeType {
+	case "image/png":
+		return "png"
+	case "image/gif":
+		return "gif"
+	case "image/webp":
+		return "webp"
+	default:
+		return "jpeg"
+	}
+}
+
 // --- StreamSimple wrapper ---
 
 func StreamSimpleBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 	base := BuildBaseOptions(model, options, "")
+
+	if options == nil || options.Reasoning == "" {
+		return StreamBedrock(ctx, model, prompt, base)
+	}
+
+	if base.Headers == nil {
+		base.Headers = map[string]string{}
+	}
+
+	effort := ClampReasoning(options.Reasoning)
+
+	if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
+		if supportsBedrockAdaptiveThinking(model.ID) {
+			base.Headers["x-bedrock-reasoning"] = string(effort)
+		} else {
+			maxTokens := 0
+			if base.MaxTokens != nil {
+				maxTokens = *base.MaxTokens
+			}
+			adjustedMax, thinkingBudget := AdjustMaxTokensForThinking(
+				maxTokens, model.MaxTokens, effort, options.ThinkingBudgets)
+			base.MaxTokens = &adjustedMax
+			base.Headers["x-bedrock-reasoning"] = string(effort)
+			base.Headers["x-bedrock-thinking-budget"] = fmt.Sprintf("%d", thinkingBudget)
+			base.Headers["x-bedrock-interleaved-thinking"] = "true"
+		}
+	}
+
 	return StreamBedrock(ctx, model, prompt, base)
 }
 
