@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/sdk.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package core
 
 import (
@@ -200,6 +200,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		SessionID:    sessionManager.GetSessionID(),
 		SteeringMode: settingsManager.GetSteeringMode(),
 		FollowUpMode: settingsManager.GetFollowUpMode(),
+		Transport:    ai.Transport(settingsManager.GetTransport()),
 		GetApiKey: func(provider string) (string, error) {
 			resolvedProvider := provider
 			if resolvedProvider == "" && model != nil {

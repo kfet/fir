@@ -300,3 +300,51 @@ OAuth authentication for all providers. **Not deferred** — required for Anthro
 | [x] | `/login` + `/logout` slash commands | `pkg/modes/interactive/mode.go` | Select list for provider, login via callbacks, logout removes credentials |
 | [x] | OAuth provider registration | `pkg/ai/oauth/registry.go` | All 5 providers auto-registered at init; `GetProvider`/`GetProviders` available |
 | [x] | **🎯 MILESTONE: `/login` and `/logout` work for all providers** | | |
+
+## Phase 13: Extension System (`pkg/extension/`, `pkg/extensions/`)
+
+Compiled-in extension system allowing Go packages to register event handlers, custom tools, commands, flags, and shortcuts.
+
+### Core framework
+
+| Status | Go file + test | TS source | Notes |
+|---|---|---|---|
+| [x] | `pkg/extension/types.go` | `coding-agent/src/core/extensions/types.ts` | Event types, API interface, Context, UIContext |
+| [x] | `pkg/extension/registry.go` | `coding-agent/src/core/extensions/loader.ts` | Global factory registry via init() |
+| [x] | `pkg/extension/runner.go` | `coding-agent/src/core/extensions/runner.ts` | Event dispatch, context impl, noop UI |
+| [x] | `pkg/extension/integration.go` | — | Wires runner into AgentSession with hooks |
+| [x] | `pkg/extension/extension_test.go` | — | 16 tests: registry, events, tools, flags, commands, panics |
+| [x] | `pkg/extension/integration_test.go` | — | 3 tests: session setup, no-ext, tool wrapping |
+
+### AgentSession hooks
+
+| Status | Task | Go file | Notes |
+|---|---|---|---|
+| [x] | `ToolCallInterceptor` / `ToolResultInterceptor` types | `pkg/core/agentsession.go` | Block tool calls, modify results |
+| [x] | `SetHooks` / `Hooks` / `WrapToolsWithHooks` methods | `pkg/core/agentsession.go` | Wrap Execute funcs with hook interception |
+| [x] | `GetSystemPrompt` / `GetCwd` accessors | `pkg/core/agentsession.go` | Needed by extension Context |
+
+### Interactive mode integration
+
+| Status | Task | Go file | Notes |
+|---|---|---|---|
+| [x] | `SetExtensionRunner` method | `pkg/modes/interactive/mode.go` | Stores runner on InteractiveMode |
+| [x] | Extension commands in `handleSlashCommand` | `pkg/modes/interactive/mode.go` | Falls through to runner.ExecuteCommand |
+| [x] | Extension commands in autocomplete | `pkg/modes/interactive/mode.go` | Added to slash command list |
+| [x] | Extension commands in `isBuiltinSlashCommand` | `pkg/modes/interactive/mode.go` | Recognized as known commands |
+
+### CLI integration
+
+| Status | Task | Go file | Notes |
+|---|---|---|---|
+| [x] | Extension setup in print/RPC mode | `cmd/pi/app.go` | Setup + session_start/shutdown events |
+| [x] | Extension setup in interactive mode | `cmd/pi/app.go` | Setup + runner wired to InteractiveMode |
+| [x] | Extension flag parsing from CLI | `cmd/pi/app.go` | UnknownFlags matched to extension flags |
+
+### Built-in extensions
+
+| Status | Go file + test | TS source | Notes |
+|---|---|---|---|
+| [x] | `pkg/extensions/notify/notify.go` + test | `examples/extensions/notify.ts` | Terminal notifications on agent_end |
+| [x] | `pkg/extensions/sandbox/sandbox.go` + test | `examples/extensions/sandbox/index.ts` | Tool call blocking, config, flag, command |
+| [x] | **🎯 MILESTONE: Extensions work (notify + sandbox)** | | |

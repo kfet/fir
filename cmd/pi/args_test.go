@@ -333,10 +333,18 @@ func TestParseArgs_ExtensionFlags(t *testing.T) {
 	}
 }
 
-func TestParseArgs_UnknownFlagsIgnored(t *testing.T) {
+func TestParseArgs_UnknownFlagsCaptured(t *testing.T) {
+	// Unknown flags are captured even without extensionFlags, so extensions
+	// can be set up after parsing and still receive their flag values.
 	args := ParseArgs([]string{"--unknown-flag", "value"}, nil)
-	if len(args.UnknownFlags) != 0 {
-		t.Errorf("expected no unknown flags when no extension flags defined, got %v", args.UnknownFlags)
+	if v, ok := args.UnknownFlags["unknown-flag"]; !ok || v != "value" {
+		t.Errorf("expected unknown-flag=value, got %v", args.UnknownFlags)
+	}
+
+	// Boolean-style unknown flag (no value arg follows)
+	args = ParseArgs([]string{"--no-sandbox"}, nil)
+	if v, ok := args.UnknownFlags["no-sandbox"]; !ok || v != true {
+		t.Errorf("expected no-sandbox=true, got %v", args.UnknownFlags)
 	}
 }
 

@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/settings-manager.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package core
 
 import (
@@ -60,6 +60,7 @@ type Settings struct {
 	DefaultProvider       string                   `json:"defaultProvider,omitempty"`
 	DefaultModel          string                   `json:"defaultModel,omitempty"`
 	DefaultThinkingLevel  string                   `json:"defaultThinkingLevel,omitempty"`
+	Transport             string                   `json:"transport,omitempty"`
 	SteeringMode          string                   `json:"steeringMode,omitempty"`
 	FollowUpMode          string                   `json:"followUpMode,omitempty"`
 	Theme                 string                   `json:"theme,omitempty"`
@@ -99,6 +100,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeStr(&r.DefaultProvider, overrides.DefaultProvider)
 	mergeStr(&r.DefaultModel, overrides.DefaultModel)
 	mergeStr(&r.DefaultThinkingLevel, overrides.DefaultThinkingLevel)
+	mergeStr(&r.Transport, overrides.Transport)
 	mergeStr(&r.SteeringMode, overrides.SteeringMode)
 	mergeStr(&r.FollowUpMode, overrides.FollowUpMode)
 	mergeStr(&r.Theme, overrides.Theme)
@@ -312,7 +314,9 @@ func loadSettingsFile(path string) Settings {
 }
 
 func migrateSettings(s Settings) Settings {
-	// Migration: queueMode -> steeringMode handled at JSON level if needed
+	// Note: legacy "websockets" boolean from upstream TS is silently ignored
+	// by json.Unmarshal (unknown field). Transport defaults to "sse" via
+	// GetTransport() if unset, so no explicit migration is needed.
 	return s
 }
 
@@ -489,6 +493,23 @@ func (sm *SettingsManager) SetFollowUpMode(mode string) {
 	defer sm.mu.Unlock()
 	sm.globalSettings.FollowUpMode = mode
 	sm.markModified("followUpMode")
+	sm.save()
+}
+
+func (sm *SettingsManager) GetTransport() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Transport != "" {
+		return sm.settings.Transport
+	}
+	return "sse"
+}
+
+func (sm *SettingsManager) SetTransport(transport string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.Transport = transport
+	sm.markModified("transport")
 	sm.save()
 }
 

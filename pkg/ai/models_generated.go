@@ -940,6 +940,32 @@ func init() {
 		Headers:       nil,
 	})
 	RegisterModel(&Model{
+		ID:            "writer.palmyra-x4-v1:0",
+		Name:          "Palmyra X4",
+		Api:           "bedrock-converse-stream",
+		Provider:      "amazon-bedrock",
+		BaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 2.5, Output: 10, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 122880,
+		MaxTokens:     8192,
+		Headers:       nil,
+	})
+	RegisterModel(&Model{
+		ID:            "writer.palmyra-x5-v1:0",
+		Name:          "Palmyra X5",
+		Api:           "bedrock-converse-stream",
+		Provider:      "amazon-bedrock",
+		BaseURL:       "https://bedrock-runtime.us-east-1.amazonaws.com",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 0.6, Output: 6, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 1040000,
+		MaxTokens:     8192,
+		Headers:       nil,
+	})
+	RegisterModel(&Model{
 		ID:            "claude-3-5-haiku-20241022",
 		Name:          "Claude Haiku 3.5",
 		Api:           "anthropic-messages",
@@ -2968,6 +2994,19 @@ func init() {
 		Headers:       nil,
 	})
 	RegisterModel(&Model{
+		ID:            "MiniMax-M2.5",
+		Name:          "MiniMax-M2.5",
+		Api:           "anthropic-messages",
+		Provider:      "minimax",
+		BaseURL:       "https://api.minimax.io/anthropic",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 0.3, Output: 1.2, CacheRead: 0.03, CacheWrite: 0.375},
+		ContextWindow: 204800,
+		MaxTokens:     131072,
+		Headers:       nil,
+	})
+	RegisterModel(&Model{
 		ID:            "MiniMax-M2",
 		Name:          "MiniMax-M2",
 		Api:           "anthropic-messages",
@@ -2989,6 +3028,19 @@ func init() {
 		Reasoning:     true,
 		Input:         []string{"text"},
 		Cost:          ModelCost{Input: 0.3, Output: 1.2, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 204800,
+		MaxTokens:     131072,
+		Headers:       nil,
+	})
+	RegisterModel(&Model{
+		ID:            "MiniMax-M2.5",
+		Name:          "MiniMax-M2.5",
+		Api:           "anthropic-messages",
+		Provider:      "minimax-cn",
+		BaseURL:       "https://api.minimaxi.com/anthropic",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 0.3, Output: 1.2, CacheRead: 0.03, CacheWrite: 0.375},
 		ContextWindow: 204800,
 		MaxTokens:     131072,
 		Headers:       nil,
@@ -6511,9 +6563,9 @@ func init() {
 		BaseURL:       "https://openrouter.ai/api/v1",
 		Reasoning:     true,
 		Input:         []string{"text"},
-		Cost:          ModelCost{Input: 0.19999999999999998, Output: 0.6, CacheRead: 0, CacheWrite: 0},
+		Cost:          ModelCost{Input: 0.3, Output: 1.2, CacheRead: 0.15, CacheWrite: 0},
 		ContextWindow: 40960,
-		MaxTokens:     4096,
+		MaxTokens:     40960,
 		Headers:       nil,
 	})
 	RegisterModel(&Model{
@@ -6537,9 +6589,9 @@ func init() {
 		BaseURL:       "https://openrouter.ai/api/v1",
 		Reasoning:     true,
 		Input:         []string{"text"},
-		Cost:          ModelCost{Input: 0.11, Output: 0.6, CacheRead: 0.055, CacheWrite: 0},
-		ContextWindow: 262144,
-		MaxTokens:     262144,
+		Cost:          ModelCost{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 131072,
+		MaxTokens:     4096,
 		Headers:       nil,
 	})
 	RegisterModel(&Model{
@@ -6592,6 +6644,19 @@ func init() {
 		Cost:          ModelCost{Input: 0.08, Output: 0.24, CacheRead: 0.04, CacheWrite: 0},
 		ContextWindow: 40960,
 		MaxTokens:     40960,
+		Headers:       nil,
+	})
+	RegisterModel(&Model{
+		ID:            "qwen/qwen3-4b",
+		Name:          "Qwen: Qwen3 4B",
+		Api:           "openai-completions",
+		Provider:      "openrouter",
+		BaseURL:       "https://openrouter.ai/api/v1",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 0.0715, Output: 0.273, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 131072,
+		MaxTokens:     8192,
 		Headers:       nil,
 	})
 	RegisterModel(&Model{
@@ -6967,19 +7032,6 @@ func init() {
 		Reasoning:     true,
 		Input:         []string{"text"},
 		Cost:          ModelCost{Input: 0.25, Output: 0.85, CacheRead: 0.125, CacheWrite: 0},
-		ContextWindow: 163840,
-		MaxTokens:     65536,
-		Headers:       nil,
-	})
-	RegisterModel(&Model{
-		ID:            "tngtech/tng-r1t-chimera:free",
-		Name:          "TNG: R1T Chimera (free)",
-		Api:           "openai-completions",
-		Provider:      "openrouter",
-		BaseURL:       "https://openrouter.ai/api/v1",
-		Reasoning:     true,
-		Input:         []string{"text"},
-		Cost:          ModelCost{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
 		ContextWindow: 163840,
 		MaxTokens:     65536,
 		Headers:       nil,

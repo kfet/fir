@@ -1,5 +1,5 @@
 // Ported from: packages/tui/src/terminal.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package tui
 
 import (
@@ -87,6 +87,12 @@ func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
 	if err == nil {
 		t.oldState = oldState
 	}
+
+	// On Windows, enable ENABLE_VIRTUAL_TERMINAL_INPUT so the console sends
+	// VT escape sequences (e.g. \x1b[Z for Shift+Tab) instead of raw console
+	// events that lose modifier information. Must run AFTER MakeRaw since
+	// that resets console mode flags.
+	enableWindowsVTInput()
 
 	// Enable bracketed paste mode
 	os.Stdout.WriteString("\x1b[?2004h")

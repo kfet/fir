@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/kfet/pi-go/pkg/core/tools"
 	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
@@ -36,6 +37,7 @@ const (
 // BashExecutionComponent displays bash command execution with streaming output.
 type BashExecutionComponent struct {
 	tui.Container
+	mu               sync.Mutex // protects all mutable fields below
 	command          string
 	outputLines      []string
 	status           BashStatus
@@ -103,18 +105,26 @@ func NewBashExecutionComponent(command string, ui *tui.TUI, excludeFromContext b
 
 // SetExpanded sets whether the output is expanded or collapsed.
 func (bc *BashExecutionComponent) SetExpanded(expanded bool) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.expanded = expanded
 	bc.updateDisplay()
 }
 
 // Invalidate invalidates and rebuilds display.
 func (bc *BashExecutionComponent) Invalidate() {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	bc.Container.Invalidate()
 	bc.updateDisplay()
 }
 
 // AppendOutput adds streaming output to the display.
+// Safe to call from any goroutine.
 func (bc *BashExecutionComponent) AppendOutput(chunk string) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
 	// Strip ANSI codes and normalize line endings
 	clean := bashStripAnsi(chunk)
 	clean = strings.ReplaceAll(clean, "\r\n", "\n")
@@ -133,7 +143,11 @@ func (bc *BashExecutionComponent) AppendOutput(chunk string) {
 }
 
 // SetComplete marks the command as finished.
+// Safe to call from any goroutine.
 func (bc *BashExecutionComponent) SetComplete(exitCode *int, cancelled bool, truncResult *tools.TruncationResult, fullOutputPath string) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
 	bc.exitCode = exitCode
 	if cancelled {
 		bc.status = BashCancelled
@@ -244,12 +258,23 @@ func (bc *BashExecutionComponent) updateDisplay() {
 
 // GetOutput returns the raw output text.
 func (bc *BashExecutionComponent) GetOutput() string {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	return strings.Join(bc.outputLines, "\n")
 }
 
 // GetCommand returns the command that was executed.
 func (bc *BashExecutionComponent) GetCommand() string {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 	return bc.command
+}
+
+// Render renders the component. Safe to call from the TUI thread.
+func (bc *BashExecutionComponent) Render(width int) []string {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.Container.Render(width)
 }
 
 // tuiRenderRequester adapts *tui.TUI to RenderRequester interface.

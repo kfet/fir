@@ -86,22 +86,35 @@ func TestFooterComponent_WithGitBranch(t *testing.T) {
 func TestFooterComponent_ContextWarning(t *testing.T) {
 	f := NewFooterComponent(func() FooterData {
 		return FooterData{
-			Pwd:           "/p",
-			ModelID:       "model",
-			TotalInput:    90000,
-			ContextWindow: 100000,
+			Pwd:            "/p",
+			ModelID:        "model",
+			TotalInput:     90000,
+			ContextWindow:  100000,
+			ContextPercent: 95.0, // >90% triggers error coloring
+			ContextTokens:  95000,
 		}
 	})
 
 	lines := f.Render(80)
-	// Should have error coloring for >90% context
+	// Should contain the percentage string
 	found := false
 	for _, line := range lines {
-		if strings.Contains(line, "\x1b[") {
+		if strings.Contains(line, "95.0%") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected ANSI escapes for warning/error context")
+		t.Error("expected 95.0% in output")
+	}
+
+	// Should have ANSI coloring for >90% context
+	hasANSI := false
+	for _, line := range lines {
+		if strings.Contains(line, "\x1b[") {
+			hasANSI = true
+		}
+	}
+	if !hasANSI {
+		t.Error("expected ANSI escapes for error context coloring")
 	}
 }

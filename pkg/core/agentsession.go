@@ -93,6 +93,34 @@ type PromptOptions struct {
 }
 
 // AgentSessionOptions configures a new AgentSession.
+// ToolCallInterceptor is called before a tool executes.
+// Return non-nil to block the tool call.
+type ToolCallInterceptor func(toolCallID, toolName string, input map[string]any) *ToolCallBlock
+
+// ToolCallBlock indicates a tool call was blocked.
+type ToolCallBlock struct {
+	Reason string
+}
+
+// ToolResultInterceptor is called after a tool executes.
+// Return non-nil to modify the result.
+type ToolResultInterceptor func(toolCallID, toolName string, input map[string]any, content []ai.ToolResultContent, details any, isError bool) *ToolResultModification
+
+// ToolResultModification modifies a tool result.
+type ToolResultModification struct {
+	Content []ai.ToolResultContent
+	Details any
+	IsError *bool
+}
+
+// AgentSessionHooks provides optional hooks for external systems (e.g., extensions).
+type AgentSessionHooks struct {
+	// OnToolCall is called before each tool execution. Return non-nil to block.
+	OnToolCall ToolCallInterceptor
+	// OnToolResult is called after each tool execution. Return non-nil to modify result.
+	OnToolResult ToolResultInterceptor
+}
+
 type AgentSessionOptions struct {
 	Agent            *agent.Agent
 	SessionManager   *SessionManager
@@ -102,6 +130,7 @@ type AgentSessionOptions struct {
 	CompactionRunner CompactionRunner
 	Cwd              string
 	ScopedModels     []ScopedModel
+	Hooks            *AgentSessionHooks
 }
 
 // ============================================================================
@@ -132,6 +161,12 @@ type AgentSession struct {
 	// Bash execution
 	bashCancel   context.CancelFunc
 	bashCancelMu sync.Mutex
+
+	// Auto-compaction: tracks the last assistant message for checking on agent_end
+	lastAssistantMessage *ai.AssistantMessage
+
+	// Extension hooks
+	hooks *AgentSessionHooks
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -145,6 +180,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		compactionRunner: opts.CompactionRunner,
 		cwd:              opts.Cwd,
 		scopedModels:     opts.ScopedModels,
+		hooks:            opts.Hooks,
 	}
 
 	// Subscribe to agent events for internal handling
@@ -238,11 +274,20 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 	// Session persistence on message_end
 	if event.Type == agent.EventMessageEnd && event.Message != nil {
 		s.persistMessage(*event.Message)
+
+		// Track last assistant message for auto-compaction (checked on agent_end)
+		if event.Message.Role() == "assistant" {
+			s.lastAssistantMessage = event.Message.AsAssistant()
+		}
 	}
 
 	// Auto-compaction check on agent_end
 	if event.Type == agent.EventAgentEnd {
-		s.checkAutoCompaction()
+		if s.lastAssistantMessage != nil {
+			msg := s.lastAssistantMessage
+			s.lastAssistantMessage = nil
+			s.checkAutoCompaction(msg)
+		}
 	}
 }
 
@@ -283,8 +328,33 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	}
 
 	ts := time.Now().UnixMilli()
-	userMsg := agent.NewAgentMessage(ai.NewUserMsg(content, ts))
 
+	// Check for images in options
+	var images []ai.ImageContent
+	if len(opts) > 0 && opts[0] != nil {
+		images = opts[0].Images
+	}
+
+	var userMsgContent any
+	if len(images) > 0 {
+		// Build content as array of content blocks (text + images)
+		blocks := make([]any, 0, 1+len(images))
+		if content != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": content})
+		}
+		for _, img := range images {
+			blocks = append(blocks, map[string]any{
+				"type":     "image",
+				"data":     img.Data,
+				"mimeType": img.MimeType,
+			})
+		}
+		userMsgContent = blocks
+	} else {
+		userMsgContent = content
+	}
+
+	userMsg := agent.NewAgentMessage(ai.NewUserMsg(userMsgContent, ts))
 	msgs := []agent.AgentMessage{userMsg}
 
 	// Send to agent
@@ -377,29 +447,13 @@ func (s *AgentSession) expandSkillCommand(text string) string {
 // Compaction
 // ============================================================================
 
-func (s *AgentSession) checkAutoCompaction() {
+func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage) {
 	if s.compactionRunner == nil {
 		return
 	}
 
-	state := s.State()
-	if len(state.Messages) == 0 {
-		return
-	}
-
-	// Get the last assistant message and calculate total context tokens
-	var lastAssistant *ai.AssistantMessage
-	totalContextTokens := 0
-	for i := len(state.Messages) - 1; i >= 0; i-- {
-		if a := state.Messages[i].Message.AsAssistant(); a != nil {
-			if lastAssistant == nil {
-				lastAssistant = a
-			}
-			// Accumulate tokens from all assistant messages
-			totalContextTokens += calculateContextTokensFromUsage(a.Usage)
-		}
-	}
-	if lastAssistant == nil {
+	// Skip if message was aborted (user cancelled)
+	if assistantMessage.StopReason == ai.StopReasonAborted {
 		return
 	}
 
@@ -407,22 +461,50 @@ func (s *AgentSession) checkAutoCompaction() {
 	if model == nil {
 		return
 	}
+	contextWindow := model.ContextWindow
 
-	// Check if context overflowed
-	isOverflow := ai.IsContextOverflow(lastAssistant, model.ContextWindow)
+	// Skip overflow check if the message came from a different model than currently selected.
+	// This handles switching from a smaller-context model to a larger-context model —
+	// the overflow from the old model shouldn't trigger compaction for the new model.
+	sameModel := assistantMessage.Provider == model.Provider && assistantMessage.Model == model.ID
 
-	// Check token-based threshold
-	shouldCompactNow := s.compactionRunner.ShouldCompact(totalContextTokens, model.ContextWindow)
+	// Skip overflow check if the error is from before a compaction in the current path.
+	// This handles the case where an error was kept after compaction (in the "kept" region).
+	errorIsFromBeforeCompaction := false
+	compactionEntry := GetLatestCompactionEntry(s.SessionManager.GetBranch(""))
+	if compactionEntry != nil {
+		if ts, err := time.Parse(time.RFC3339Nano, compactionEntry.Timestamp); err == nil {
+			errorIsFromBeforeCompaction = assistantMessage.Timestamp < ts.UnixMilli()
+		}
+	}
 
-	if !isOverflow && !shouldCompactNow {
+	// Case 1: Overflow — LLM returned context overflow error
+	if sameModel && !errorIsFromBeforeCompaction && ai.IsContextOverflow(assistantMessage, contextWindow) {
+		// Remove the error message from agent state before compaction
+		// (it IS saved to session for history, but we don't want it in context for the retry)
+		state := s.State()
+		msgs := state.Messages
+		if len(msgs) > 0 && msgs[len(msgs)-1].Role() == "assistant" {
+			s.Agent.ReplaceMessages(msgs[:len(msgs)-1])
+		}
+		s.runAutoCompaction("overflow", true)
 		return
 	}
 
-	reason := "threshold"
-	if isOverflow {
-		reason = "overflow"
+	// Case 2: Threshold — turn succeeded but context is getting large.
+	// Skip if this was an error (non-overflow errors don't have valid usage data).
+	if assistantMessage.StopReason == ai.StopReasonError {
+		return
 	}
 
+	contextTokens := calculateContextTokens(assistantMessage.Usage)
+	if s.compactionRunner.ShouldCompact(contextTokens, contextWindow) {
+		s.runAutoCompaction("threshold", false)
+	}
+}
+
+// runAutoCompaction runs auto-compaction and emits the appropriate events.
+func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 	s.emit(AgentSessionEvent{Type: "auto_compaction_start", CompactionReason: reason})
 
 	result, err := s.compactionRunner.RunCompaction(s)
@@ -431,7 +513,7 @@ func (s *AgentSession) checkAutoCompaction() {
 			Type:         "auto_compaction_end",
 			ErrorMessage: err.Error(),
 			Aborted:      false,
-			WillRetry:    isOverflow,
+			WillRetry:    willRetry,
 		})
 		return
 	}
@@ -439,11 +521,12 @@ func (s *AgentSession) checkAutoCompaction() {
 	s.emit(AgentSessionEvent{
 		Type:             "auto_compaction_end",
 		CompactionResult: result,
-		WillRetry:        isOverflow,
+		WillRetry:        willRetry,
 	})
 
 	// If overflow, retry the prompt with last user message
-	if isOverflow && result != nil {
+	if willRetry && result != nil {
+		state := s.State()
 		var lastUserText string
 		for i := len(state.Messages) - 1; i >= 0; i-- {
 			if u := state.Messages[i].Message.AsUser(); u != nil {
@@ -459,12 +542,24 @@ func (s *AgentSession) checkAutoCompaction() {
 	}
 }
 
-// calculateContextTokensFromUsage is a simple token calculation for compaction checks.
-func calculateContextTokensFromUsage(usage ai.Usage) int {
+// calculateContextTokens returns the total context tokens from a usage report.
+// The last assistant message's usage.input represents the total context that was sent to the model.
+func calculateContextTokens(usage ai.Usage) int {
 	if usage.TotalTokens > 0 {
 		return usage.TotalTokens
 	}
 	return usage.Input + usage.Output + usage.CacheRead + usage.CacheWrite
+}
+
+// GetLatestCompactionEntry returns the most recent compaction entry in a session branch,
+// or nil if none exists.
+func GetLatestCompactionEntry(entries []*SessionEntry) *SessionEntry {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == "compaction" {
+			return entries[i]
+		}
+	}
+	return nil
 }
 
 // RunCompaction runs manual compaction via the CompactionRunner.
@@ -514,6 +609,90 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 // ScopedModelsRef returns the scoped models for this session.
 func (s *AgentSession) ScopedModelsRef() []ScopedModel {
 	return s.scopedModels
+}
+
+// SetHooks sets the extension hooks and wraps the agent's tools with hook interception.
+// Can be called after creation. When hooks include OnToolCall or OnToolResult,
+// the agent's current tools are automatically wrapped so the hooks fire during execution.
+func (s *AgentSession) SetHooks(hooks *AgentSessionHooks) {
+	s.hooks = hooks
+	if hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
+		state := s.Agent.State()
+		wrapped := s.WrapToolsWithHooks(state.Tools)
+		s.Agent.SetTools(wrapped)
+	}
+}
+
+// Hooks returns the current hooks (may be nil).
+func (s *AgentSession) Hooks() *AgentSessionHooks {
+	return s.hooks
+}
+
+// GetSystemPrompt returns the current base system prompt.
+func (s *AgentSession) GetSystemPrompt() string {
+	return s.baseSystemPrompt
+}
+
+// GetCwd returns the working directory.
+func (s *AgentSession) GetCwd() string {
+	return s.cwd
+}
+
+// WrapToolsWithHooks wraps the given tools with hook interception.
+// Tool calls go through OnToolCall (which can block) and OnToolResult (which can modify results).
+func (s *AgentSession) WrapToolsWithHooks(tools []agent.AgentTool) []agent.AgentTool {
+	if s.hooks == nil {
+		return tools
+	}
+
+	wrapped := make([]agent.AgentTool, len(tools))
+	for i, t := range tools {
+		wrapped[i] = s.wrapTool(t)
+	}
+	return wrapped
+}
+
+func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
+	origExecute := t.Execute
+	if origExecute == nil {
+		return t
+	}
+
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		// Pre-execution hook: tool_call interception
+		if s.hooks != nil && s.hooks.OnToolCall != nil {
+			block := s.hooks.OnToolCall(toolCallID, t.Name, params)
+			if block != nil {
+				reason := block.Reason
+				if reason == "" {
+					reason = "Blocked by extension"
+				}
+				return agent.AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: reason}},
+				}, nil
+			}
+		}
+
+		// Execute the original tool
+		result, err := origExecute(ctx, toolCallID, params, onUpdate)
+
+		// Post-execution hook: tool_result interception
+		if err == nil && s.hooks != nil && s.hooks.OnToolResult != nil {
+			mod := s.hooks.OnToolResult(toolCallID, t.Name, params, result.Content, result.Details, false)
+			if mod != nil {
+				if mod.Content != nil {
+					result.Content = mod.Content
+				}
+				if mod.Details != nil {
+					result.Details = mod.Details
+				}
+			}
+		}
+
+		return result, err
+	}
+
+	return t
 }
 
 // SetSessionName sets the display name for the current session.
@@ -754,6 +933,153 @@ func (s *AgentSession) IsBashRunning() bool {
 	s.bashCancelMu.Lock()
 	defer s.bashCancelMu.Unlock()
 	return s.bashCancel != nil
+}
+
+// ContextUsage holds the current context usage information.
+type ContextUsage struct {
+	// Tokens is the estimated context tokens, or -1 if unknown (e.g. right after compaction).
+	Tokens int
+	// ContextWindow is the model's context window size.
+	ContextWindow int
+	// Percent is the usage percentage (0-100+), or -1 if unknown.
+	Percent float64
+}
+
+// GetContextUsage returns the current context usage estimate.
+// Returns nil if no model is selected.
+func (s *AgentSession) GetContextUsage() *ContextUsage {
+	model := s.Model()
+	if model == nil {
+		return nil
+	}
+
+	contextWindow := model.ContextWindow
+	if contextWindow <= 0 {
+		return nil
+	}
+
+	// After compaction, the last assistant usage reflects pre-compaction context size.
+	// We can only trust usage from an assistant that responded after the latest compaction.
+	// If no such assistant exists, context token count is unknown until the next LLM response.
+	branchEntries := s.SessionManager.GetBranch("")
+	latestCompaction := GetLatestCompactionEntry(branchEntries)
+
+	if latestCompaction != nil {
+		hasPostCompactionUsage := false
+
+		// Find compaction index in branch entries
+		compactionIndex := -1
+		for i := len(branchEntries) - 1; i >= 0; i-- {
+			if branchEntries[i] == latestCompaction {
+				compactionIndex = i
+				break
+			}
+		}
+
+		// Look for a valid assistant usage after the compaction entry
+		for i := len(branchEntries) - 1; i > compactionIndex; i-- {
+			entry := branchEntries[i]
+			if entry.Type == "message" && len(entry.RawMessage) > 0 {
+				var probe struct {
+					Role       string   `json:"role"`
+					StopReason string   `json:"stopReason"`
+					Usage      ai.Usage `json:"usage"`
+				}
+				if json.Unmarshal(entry.RawMessage, &probe) == nil && probe.Role == "assistant" {
+					if probe.StopReason != string(ai.StopReasonAborted) && probe.StopReason != string(ai.StopReasonError) {
+						if calculateContextTokens(probe.Usage) > 0 {
+							hasPostCompactionUsage = true
+						}
+					}
+					break
+				}
+			}
+		}
+
+		if !hasPostCompactionUsage {
+			return &ContextUsage{Tokens: -1, ContextWindow: contextWindow, Percent: -1}
+		}
+	}
+
+	state := s.State()
+	tokens := estimateContextTokensFromMessages(state.Messages)
+	percent := float64(tokens) / float64(contextWindow) * 100
+
+	return &ContextUsage{
+		Tokens:        tokens,
+		ContextWindow: contextWindow,
+		Percent:       percent,
+	}
+}
+
+// estimateContextTokensFromMessages estimates the total context tokens from messages.
+// Uses the last valid assistant message's usage data plus trailing message estimates.
+// This matches the TS estimateContextTokens function.
+func estimateContextTokensFromMessages(messages []agent.AgentMessage) int {
+	// Find last assistant message with valid usage
+	var lastUsage *ai.Usage
+	lastIndex := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role() == "assistant" {
+			a := messages[i].Message.AsAssistant()
+			if a != nil && a.StopReason != ai.StopReasonAborted && a.StopReason != ai.StopReasonError {
+				lastUsage = &a.Usage
+				lastIndex = i
+				break
+			}
+		}
+	}
+
+	if lastUsage == nil {
+		// No valid assistant usage — estimate all messages via chars/4
+		total := 0
+		for _, msg := range messages {
+			total += estimateMessageTokens(msg)
+		}
+		return total
+	}
+
+	usageTokens := calculateContextTokens(*lastUsage)
+	trailingTokens := 0
+	for i := lastIndex + 1; i < len(messages); i++ {
+		trailingTokens += estimateMessageTokens(messages[i])
+	}
+	return usageTokens + trailingTokens
+}
+
+// estimateMessageTokens estimates token count for a single message using chars/4 heuristic.
+func estimateMessageTokens(msg agent.AgentMessage) int {
+	chars := 0
+	switch {
+	case msg.Message.AsUser() != nil:
+		u := msg.Message.AsUser()
+		if s, ok := u.Content.(string); ok {
+			chars = len(s)
+		}
+	case msg.Message.AsAssistant() != nil:
+		a := msg.Message.AsAssistant()
+		for _, c := range a.Content {
+			if c.Text != nil {
+				chars += len(c.Text.Text)
+			}
+			if c.Thinking != nil {
+				chars += len(c.Thinking.Thinking)
+			}
+			if c.ToolCall != nil {
+				// Estimate by serializing arguments
+				if argBytes, err := json.Marshal(c.ToolCall.Arguments); err == nil {
+					chars += len(argBytes)
+				}
+				chars += len(c.ToolCall.Name)
+			}
+		}
+	case msg.Message.AsToolResult() != nil:
+		tr := msg.Message.AsToolResult()
+		for _, c := range tr.Content {
+			chars += len(c.Text)
+		}
+	}
+	return (chars + 3) / 4 // chars/4, rounded up
 }
 
 // SessionStats holds statistics about the current session.

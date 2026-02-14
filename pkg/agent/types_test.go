@@ -6,7 +6,7 @@ import (
 	"github.com/kfet/pi-go/pkg/ai"
 )
 
-func TestThinkingLevel_ToAIThinkingLevel(t *testing.T) {
+func TestToAIThinkingLevel(t *testing.T) {
 	tests := []struct {
 		level ThinkingLevel
 		want  ai.ThinkingLevel
@@ -20,7 +20,7 @@ func TestThinkingLevel_ToAIThinkingLevel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.level), func(t *testing.T) {
-			got := tt.level.ToAIThinkingLevel()
+			got := ToAIThinkingLevel(tt.level)
 			if got != tt.want {
 				t.Errorf("ToAIThinkingLevel(%s) = %q, want %q", tt.level, got, tt.want)
 			}
@@ -115,7 +115,7 @@ func TestThinkingLevel_Off(t *testing.T) {
 	if level != "off" {
 		t.Errorf("ThinkingOff = %q, want off", level)
 	}
-	aiLevel := level.ToAIThinkingLevel()
+	aiLevel := ToAIThinkingLevel(level)
 	if aiLevel != "" {
 		t.Errorf("ToAIThinkingLevel(off) = %q, want empty", aiLevel)
 	}

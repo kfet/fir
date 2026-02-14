@@ -109,7 +109,7 @@ func TestShortenPath_Session(t *testing.T) {
 
 func TestSessionSelectorComponent_Render(t *testing.T) {
 	comp := NewSessionSelectorComponent(
-		testSessions(), SessionScopeCurrent,
+		testSessions(), SessionScopeCurrent, nil,
 		func(path string) {}, func() {},
 	)
 	lines := comp.Render(80)
@@ -150,9 +150,60 @@ func TestSessionList_Filter(t *testing.T) {
 	}
 }
 
+func TestSessionSelectorComponent_ToggleScope(t *testing.T) {
+	currentSessions := testSessions()[:2] // s1, s2 (current folder)
+	allSessions := testSessions()         // s1, s2, s3 (all)
+
+	loaderCalled := false
+	comp := NewSessionSelectorComponent(
+		currentSessions, SessionScopeCurrent,
+		func() ([]core.SessionListInfo, error) {
+			loaderCalled = true
+			return allSessions, nil
+		},
+		func(path string) {}, func() {},
+	)
+
+	// Initially current scope with 2 sessions
+	if comp.scope != SessionScopeCurrent {
+		t.Errorf("expected scope=current, got %s", comp.scope)
+	}
+	sl := comp.getSessionList()
+	if len(sl.filteredSessions) != 2 {
+		t.Errorf("expected 2 sessions in current scope, got %d", len(sl.filteredSessions))
+	}
+
+	// Toggle scope via Tab
+	comp.HandleInput("\t")
+
+	if !loaderCalled {
+		t.Error("expected allSessionsLoader to be called on first Tab")
+	}
+	if comp.scope != SessionScopeAll {
+		t.Errorf("expected scope=all after Tab, got %s", comp.scope)
+	}
+	if len(sl.filteredSessions) != 3 {
+		t.Errorf("expected 3 sessions in all scope, got %d", len(sl.filteredSessions))
+	}
+
+	// Toggle back
+	loaderCalled = false
+	comp.HandleInput("\t")
+
+	if loaderCalled {
+		t.Error("expected loader NOT called on second toggle (cached)")
+	}
+	if comp.scope != SessionScopeCurrent {
+		t.Errorf("expected scope=current after second Tab, got %s", comp.scope)
+	}
+	if len(sl.filteredSessions) != 2 {
+		t.Errorf("expected 2 sessions back in current scope, got %d", len(sl.filteredSessions))
+	}
+}
+
 func TestSessionSelectorComponent_SelectPath(t *testing.T) {
 	comp := NewSessionSelectorComponent(
-		testSessions(), SessionScopeAll,
+		testSessions(), SessionScopeAll, nil,
 		func(path string) {}, func() {},
 	)
 	path := comp.SelectedPath()

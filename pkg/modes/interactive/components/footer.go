@@ -31,6 +31,11 @@ type FooterData struct {
 	AutoCompact      bool
 	MultipleProviders bool
 	ExtensionStatuses map[string]string
+	// ContextPercent is the estimated context usage percentage from GetContextUsage.
+	// A negative value means unknown (e.g. right after compaction).
+	ContextPercent float64
+	// ContextTokens is the estimated context tokens. Negative means unknown.
+	ContextTokens  int
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -101,19 +106,22 @@ func (f *FooterComponent) Render(width int) []string {
 		statsParts = append(statsParts, costStr)
 	}
 
-	// Context percentage
-	contextTokens := data.TotalInput + data.TotalOutput + data.TotalCacheRead + data.TotalCacheWrite
-	contextWindow := data.ContextWindow
-	var contextPercentValue float64
-	if contextWindow > 0 {
-		contextPercentValue = float64(contextTokens) / float64(contextWindow) * 100
-	}
-
+	// Context percentage — use estimated context usage (not accumulated totals)
 	autoIndicator := ""
 	if data.AutoCompact {
 		autoIndicator = " (auto)"
 	}
-	contextDisplay := fmt.Sprintf("%.1f%%/%s%s", contextPercentValue, formatTokens(contextWindow), autoIndicator)
+
+	contextWindow := data.ContextWindow
+	contextPercentValue := data.ContextPercent
+
+	var contextDisplay string
+	if contextPercentValue < 0 {
+		// Unknown (e.g. right after compaction, before next LLM response)
+		contextDisplay = fmt.Sprintf("?%%/%s%s", formatTokens(contextWindow), autoIndicator)
+	} else {
+		contextDisplay = fmt.Sprintf("%.1f%%/%s%s", contextPercentValue, formatTokens(contextWindow), autoIndicator)
+	}
 
 	var contextPercentStr string
 	if contextPercentValue > 90 {

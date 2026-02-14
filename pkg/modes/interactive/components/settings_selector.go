@@ -30,6 +30,7 @@ type SettingsConfig struct {
 	EnableSkillCommands    bool
 	SteeringMode           string // "all" or "one-at-a-time"
 	FollowUpMode           string // "all" or "one-at-a-time"
+	Transport              string // "sse", "websocket", or "auto"
 	ThinkingLevel          string
 	AvailableThinkingLevels []string
 	CurrentTheme           string
@@ -53,6 +54,7 @@ type SettingsCallbacks struct {
 	OnEnableSkillCommandsChange    func(bool)
 	OnSteeringModeChange           func(string)
 	OnFollowUpModeChange           func(string)
+	OnTransportChange              func(string)
 	OnThinkingLevelChange          func(string)
 	OnThemeChange                  func(string)
 	OnThemePreview                 func(string)
@@ -115,6 +117,7 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "skill-commands", Label: "Skill commands", Description: "Register skills as /skill:name commands", CurrentValue: boolStr(config.EnableSkillCommands), Values: []string{"true", "false"}},
 		{ID: "steering-mode", Label: "Steering mode", Description: "Steering message delivery mode", CurrentValue: config.SteeringMode, Values: []string{"one-at-a-time", "all"}},
 		{ID: "follow-up-mode", Label: "Follow-up mode", Description: "Follow-up message delivery mode", CurrentValue: config.FollowUpMode, Values: []string{"one-at-a-time", "all"}},
+		{ID: "transport", Label: "Transport", Description: "Preferred transport for providers that support multiple transports", CurrentValue: config.Transport, Values: []string{"sse", "websocket", "auto"}},
 		{ID: "hide-thinking", Label: "Hide thinking", Description: "Hide thinking blocks in assistant responses", CurrentValue: boolStr(config.HideThinkingBlock), Values: []string{"true", "false"}},
 		{ID: "collapse-changelog", Label: "Collapse changelog", Description: "Show condensed changelog after updates", CurrentValue: boolStr(config.CollapseChangelog), Values: []string{"true", "false"}},
 		{ID: "quiet-startup", Label: "Quiet startup", Description: "Disable verbose printing at startup", CurrentValue: boolStr(config.QuietStartup), Values: []string{"true", "false"}},
@@ -258,6 +261,10 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "follow-up-mode":
 		if cb.OnFollowUpModeChange != nil {
 			cb.OnFollowUpModeChange(value)
+		}
+	case "transport":
+		if cb.OnTransportChange != nil {
+			cb.OnTransportChange(value)
 		}
 	case "hide-thinking":
 		if cb.OnHideThinkingBlockChange != nil {

@@ -359,22 +359,251 @@ func TestAgentSession_RunCompaction_WithRunner(t *testing.T) {
 }
 
 // ============================================================================
-// calculateContextTokensFromUsage
+// calculateContextTokens
 // ============================================================================
 
-func TestCalculateContextTokensFromUsage_WithTotal(t *testing.T) {
+func TestCalculateContextTokens_WithTotal(t *testing.T) {
 	usage := ai.Usage{TotalTokens: 500, Input: 100, Output: 50}
-	result := calculateContextTokensFromUsage(usage)
+	result := calculateContextTokens(usage)
 	if result != 500 {
 		t.Errorf("expected 500, got %d", result)
 	}
 }
 
-func TestCalculateContextTokensFromUsage_SumOfParts(t *testing.T) {
+func TestCalculateContextTokens_SumOfParts(t *testing.T) {
 	usage := ai.Usage{Input: 100, Output: 50, CacheRead: 20, CacheWrite: 10}
-	result := calculateContextTokensFromUsage(usage)
+	result := calculateContextTokens(usage)
 	if result != 180 {
 		t.Errorf("expected 180, got %d", result)
+	}
+}
+
+// ============================================================================
+// GetLatestCompactionEntry
+// ============================================================================
+
+func TestGetLatestCompactionEntry_NilWhenEmpty(t *testing.T) {
+	result := GetLatestCompactionEntry(nil)
+	if result != nil {
+		t.Error("expected nil for empty entries")
+	}
+}
+
+func TestGetLatestCompactionEntry_NilWhenNoCompaction(t *testing.T) {
+	entries := []*SessionEntry{
+		{Type: "message", ID: "1"},
+		{Type: "message", ID: "2"},
+	}
+	result := GetLatestCompactionEntry(entries)
+	if result != nil {
+		t.Error("expected nil when no compaction entries")
+	}
+}
+
+func TestGetLatestCompactionEntry_ReturnsLatest(t *testing.T) {
+	entries := []*SessionEntry{
+		{Type: "compaction", ID: "c1"},
+		{Type: "message", ID: "m1"},
+		{Type: "compaction", ID: "c2"},
+		{Type: "message", ID: "m2"},
+	}
+	result := GetLatestCompactionEntry(entries)
+	if result == nil || result.ID != "c2" {
+		t.Errorf("expected compaction c2, got %v", result)
+	}
+}
+
+func TestGetLatestCompactionEntry_SingleCompaction(t *testing.T) {
+	entries := []*SessionEntry{
+		{Type: "message", ID: "m1"},
+		{Type: "compaction", ID: "c1"},
+	}
+	result := GetLatestCompactionEntry(entries)
+	if result == nil || result.ID != "c1" {
+		t.Errorf("expected compaction c1, got %v", result)
+	}
+}
+
+// ============================================================================
+// estimateMessageTokens
+// ============================================================================
+
+func TestEstimateMessageTokens_UserString(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewUserMsg("hello world", 0)) // 11 chars -> (11+3)/4 = 3
+	got := estimateMessageTokens(msg)
+	if got != 3 {
+		t.Errorf("expected 3, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokens_EmptyUser(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewUserMsg("", 0))
+	got := estimateMessageTokens(msg)
+	if got != 0 {
+		t.Errorf("expected 0, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokens_AssistantText(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			{Text: &ai.TextContent{Text: "abcdefghijklmnop"}}, // 16 chars -> (16+3)/4 = 4
+		},
+	}))
+	got := estimateMessageTokens(msg)
+	if got != 4 {
+		t.Errorf("expected 4, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokens_AssistantThinking(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			{Text: &ai.TextContent{Text: "ab"}},              // 2 chars
+			{Thinking: &ai.ThinkingContent{Thinking: "cdef"}}, // 4 chars -> total 6 -> (6+3)/4 = 2
+		},
+	}))
+	got := estimateMessageTokens(msg)
+	if got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokens_AssistantToolCall(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			{ToolCall: &ai.ToolCall{Name: "read", Arguments: map[string]any{"path": "/tmp/x"}}},
+		},
+	}))
+	got := estimateMessageTokens(msg)
+	// Name "read" = 4 chars, arguments marshaled {"path":"/tmp/x"} = 16 chars -> total 20 -> (20+3)/4 = 5
+	// (exact depends on JSON marshaling; just check it's positive)
+	if got <= 0 {
+		t.Errorf("expected positive token count for tool call, got %d", got)
+	}
+}
+
+func TestEstimateMessageTokens_ToolResult(t *testing.T) {
+	msg := agent.NewAgentMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+		Content: []ai.ToolResultContent{
+			{Type: "text", Text: "result text here"}, // 16 chars -> (16+3)/4 = 4
+		},
+	}))
+	got := estimateMessageTokens(msg)
+	if got != 4 {
+		t.Errorf("expected 4, got %d", got)
+	}
+}
+
+// ============================================================================
+// estimateContextTokensFromMessages
+// ============================================================================
+
+func TestEstimateContextTokensFromMessages_NoMessages(t *testing.T) {
+	got := estimateContextTokensFromMessages(nil)
+	if got != 0 {
+		t.Errorf("expected 0, got %d", got)
+	}
+}
+
+func TestEstimateContextTokensFromMessages_NoAssistant(t *testing.T) {
+	// With no assistant messages, falls back to per-message char/4 estimates
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)), // 5 chars -> (5+3)/4 = 2
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	if got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+}
+
+func TestEstimateContextTokensFromMessages_UsesLastAssistantUsage(t *testing.T) {
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "hi"}}},
+			Usage:      ai.Usage{TotalTokens: 1000},
+			StopReason: ai.StopReasonStop,
+		})),
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	if got != 1000 {
+		t.Errorf("expected 1000, got %d", got)
+	}
+}
+
+func TestEstimateContextTokensFromMessages_UsageWithTrailingMessages(t *testing.T) {
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("first", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "reply"}}},
+			Usage:      ai.Usage{TotalTokens: 500},
+			StopReason: ai.StopReasonStop,
+		})),
+		agent.NewAgentMessage(ai.NewUserMsg("abcdefgh", 0)), // 8 chars -> (8+3)/4 = 2
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	if got != 502 {
+		t.Errorf("expected 502, got %d", got)
+	}
+}
+
+func TestEstimateContextTokensFromMessages_SkipsAbortedAssistant(t *testing.T) {
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "partial"}}},
+			Usage:      ai.Usage{TotalTokens: 9999},
+			StopReason: ai.StopReasonAborted,
+		})),
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	// Aborted assistant is skipped — falls back to per-message estimates
+	if got == 9999 {
+		t.Error("should not use aborted assistant's usage")
+	}
+	if got <= 0 {
+		t.Errorf("expected positive token count, got %d", got)
+	}
+}
+
+func TestEstimateContextTokensFromMessages_SkipsErrorAssistant(t *testing.T) {
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hi", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "err"}}},
+			Usage:      ai.Usage{TotalTokens: 8000},
+			StopReason: ai.StopReasonError,
+		})),
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	if got == 8000 {
+		t.Error("should not use error assistant's usage")
+	}
+}
+
+func TestEstimateContextTokensFromMessages_UsesValidAssistantBeforeAborted(t *testing.T) {
+	msgs := []agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("q", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "good"}}},
+			Usage:      ai.Usage{TotalTokens: 200},
+			StopReason: ai.StopReasonStop,
+		})),
+		agent.NewAgentMessage(ai.NewUserMsg("more", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "bad"}}},
+			Usage:      ai.Usage{TotalTokens: 9999},
+			StopReason: ai.StopReasonAborted,
+		})),
+	}
+	got := estimateContextTokensFromMessages(msgs)
+	// Should use the valid assistant (200) + trailing messages after it (user "more" = 1, aborted assistant)
+	if got <= 200 {
+		t.Errorf("expected > 200 (valid assistant + trailing), got %d", got)
+	}
+	if got == 9999 {
+		t.Error("should not use aborted assistant's usage")
 	}
 }
 
@@ -740,21 +969,11 @@ func TestAgentSession_CheckAutoCompaction_NoRunner(t *testing.T) {
 	defer session.Close()
 
 	// Should not panic when compaction runner is nil
-	session.checkAutoCompaction()
-}
-
-func TestAgentSession_CheckAutoCompaction_NoMessages(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
-
-	runner := &mockCompactionRunner{shouldCompactResult: true}
-	session.compactionRunner = runner
-
-	// Should return early — no messages
-	session.checkAutoCompaction()
-	if runner.runCalled {
-		t.Error("should not run compaction with no messages")
-	}
+	session.checkAutoCompaction(&ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+	})
 }
 
 func TestAgentSession_CheckAutoCompaction_NoModel(t *testing.T) {
@@ -764,17 +983,15 @@ func TestAgentSession_CheckAutoCompaction_NoModel(t *testing.T) {
 	runner := &mockCompactionRunner{shouldCompactResult: true}
 	session.compactionRunner = runner
 
-	// Add messages but no model
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{ai.NewTextContent("world")},
-			StopReason: ai.StopReasonStop,
-			Usage:      ai.Usage{Input: 100, Output: 50},
-		})),
-	})
+	msg := &ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 100, Output: 50},
+	}
 
-	session.checkAutoCompaction()
+	// No model set — should return early
+	session.checkAutoCompaction(msg)
 	if runner.runCalled {
 		t.Error("should not run compaction without model")
 	}
@@ -794,16 +1011,15 @@ func TestAgentSession_CheckAutoCompaction_BelowThreshold(t *testing.T) {
 	runner := &mockCompactionRunner{shouldCompactResult: false}
 	session.compactionRunner = runner
 
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{ai.NewTextContent("world")},
-			StopReason: ai.StopReasonStop,
-			Usage:      ai.Usage{Input: 100, Output: 50},
-		})),
-	})
+	msg := &ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		Content:    []ai.AssistantContent{ai.NewTextContent("world")},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 100, Output: 50},
+	}
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(msg)
 	if runner.runCalled {
 		t.Error("should not run compaction below threshold")
 	}
@@ -838,16 +1054,15 @@ func TestAgentSession_CheckAutoCompaction_Triggers(t *testing.T) {
 		events = append(events, event)
 	})
 
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{ai.NewTextContent("world")},
-			StopReason: ai.StopReasonStop,
-			Usage:      ai.Usage{Input: 100, Output: 50},
-		})),
-	})
+	msg := &ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		Content:    []ai.AssistantContent{ai.NewTextContent("world")},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 90000, Output: 5000},
+	}
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(msg)
 
 	if !runner.runCalled {
 		t.Error("expected compaction to run")
@@ -905,16 +1120,15 @@ func TestAgentSession_CheckAutoCompaction_Error(t *testing.T) {
 		events = append(events, event)
 	})
 
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{ai.NewTextContent("world")},
-			StopReason: ai.StopReasonStop,
-			Usage:      ai.Usage{Input: 100, Output: 50},
-		})),
-	})
+	msg := &ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		Content:    []ai.AssistantContent{ai.NewTextContent("world")},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 90000, Output: 5000},
+	}
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(msg)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -943,20 +1157,77 @@ func TestAgentSession_CheckAutoCompaction_SkipsAbortedMessages(t *testing.T) {
 	runner := &mockCompactionRunner{shouldCompactResult: true}
 	session.compactionRunner = runner
 
-	// Only aborted assistant messages — should not trigger compaction
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{},
-			StopReason: ai.StopReasonAborted,
-			Usage:      ai.Usage{Input: 999, Output: 999},
-		})),
-	})
+	// Aborted assistant message — should not trigger compaction
+	msg := &ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		Content:    []ai.AssistantContent{},
+		StopReason: ai.StopReasonAborted,
+		Usage:      ai.Usage{Input: 999, Output: 999},
+	}
 
-	session.checkAutoCompaction()
-	// lastAssistant should be nil since aborted messages are skipped
-	// ... actually checkAutoCompaction uses AsAssistant() which doesn't filter by stop reason.
-	// It will find the assistant message regardless. The test verifies behavior, not skip.
+	session.checkAutoCompaction(msg)
+	if runner.runCalled {
+		t.Error("should not run compaction for aborted messages")
+	}
+}
+
+func TestAgentSession_CheckAutoCompaction_SkipsErrorWithoutOverflow(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{
+		Provider:      "test",
+		ID:            "test-model",
+		ContextWindow: 100000,
+	}
+	session.SetModel(model)
+
+	runner := &mockCompactionRunner{shouldCompactResult: true}
+	session.compactionRunner = runner
+
+	// Error message that is NOT an overflow — should not trigger threshold compaction
+	msg := &ai.AssistantMessage{
+		Provider:     "test",
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "rate limit exceeded",
+		Usage:        ai.Usage{Input: 90000, Output: 0},
+	}
+
+	session.checkAutoCompaction(msg)
+	if runner.runCalled {
+		t.Error("should not run compaction for non-overflow errors")
+	}
+}
+
+func TestAgentSession_CheckAutoCompaction_SkipsDifferentModel(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{
+		Provider:      "test",
+		ID:            "test-model",
+		ContextWindow: 100000,
+	}
+	session.SetModel(model)
+
+	runner := &mockCompactionRunner{shouldCompactResult: false}
+	session.compactionRunner = runner
+
+	// Overflow from a different model — should not trigger overflow compaction
+	msg := &ai.AssistantMessage{
+		Provider:     "other-provider",
+		Model:        "other-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "prompt is too long: 200000 tokens > 50000 maximum",
+		Usage:        ai.Usage{Input: 200000, Output: 0},
+	}
+
+	session.checkAutoCompaction(msg)
+	if runner.runCalled {
+		t.Error("should not run compaction for overflow from different model")
+	}
 }
 
 // ============================================================================
@@ -1116,46 +1387,29 @@ func TestCheckAutoCompaction_NilRunner(t *testing.T) {
 	session := newTestAgentSessionWithModel(t, nil)
 	defer session.Close()
 
-	// Add messages including an assistant message
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
-			Usage:      ai.Usage{Input: 50000, Output: 1000},
-			StopReason: ai.StopReasonStop,
-		})),
-	})
-
 	// Should not panic with nil runner
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&ai.AssistantMessage{
+		Provider:   "test-provider",
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 50000, Output: 1000},
+	})
 }
 
-func TestCheckAutoCompaction_NoMessages(t *testing.T) {
+func TestCheckAutoCompaction_AbortedMessage(t *testing.T) {
 	runner := &mockCompactionRunner{shouldCompactResult: true}
 	session := newTestAgentSessionWithModel(t, runner)
 	defer session.Close()
 
-	// No messages — should be a no-op
-	session.checkAutoCompaction()
-
-	if runner.runCalled {
-		t.Error("RunCompaction should not be called when there are no messages")
-	}
-}
-
-func TestCheckAutoCompaction_NoAssistantMessage(t *testing.T) {
-	runner := &mockCompactionRunner{shouldCompactResult: true}
-	session := newTestAgentSessionWithModel(t, runner)
-	defer session.Close()
-
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
+	// Aborted message — should be a no-op
+	session.checkAutoCompaction(&ai.AssistantMessage{
+		Provider:   "test-provider",
+		Model:      "test-model",
+		StopReason: ai.StopReasonAborted,
 	})
 
-	session.checkAutoCompaction()
-
 	if runner.runCalled {
-		t.Error("RunCompaction should not be called when there is no assistant message")
+		t.Error("RunCompaction should not be called for aborted messages")
 	}
 }
 
@@ -1164,16 +1418,20 @@ func TestCheckAutoCompaction_BelowThreshold(t *testing.T) {
 	session := newTestAgentSessionWithModel(t, runner)
 	defer session.Close()
 
+	assistantMsg := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
+		Usage:      ai.Usage{Input: 1000, Output: 100},
+		StopReason: ai.StopReasonStop,
+		Provider:   "test-provider",
+		Model:      "test-model",
+	}
+
 	session.Agent.ReplaceMessages([]agent.AgentMessage{
 		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
-			Usage:      ai.Usage{Input: 1000, Output: 100},
-			StopReason: ai.StopReasonStop,
-		})),
+		agent.NewAgentMessage(ai.NewAssistantMsg(assistantMsg)),
 	})
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&assistantMsg)
 
 	if runner.runCalled {
 		t.Error("RunCompaction should not be called when below threshold and no overflow")
@@ -1200,16 +1458,20 @@ func TestCheckAutoCompaction_ThresholdTrigger(t *testing.T) {
 		events = append(events, e)
 	})
 
+	thresholdMsg := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
+		Usage:      ai.Usage{Input: 80000, Output: 5000},
+		StopReason: ai.StopReasonStop,
+		Provider:   "test-provider",
+		Model:      "test-model",
+	}
+
 	session.Agent.ReplaceMessages([]agent.AgentMessage{
 		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
-			Usage:      ai.Usage{Input: 80000, Output: 5000},
-			StopReason: ai.StopReasonStop,
-		})),
+		agent.NewAgentMessage(ai.NewAssistantMsg(thresholdMsg)),
 	})
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&thresholdMsg)
 
 	if !runner.runCalled {
 		t.Fatal("expected RunCompaction to be called")
@@ -1271,17 +1533,21 @@ func TestCheckAutoCompaction_OverflowTrigger(t *testing.T) {
 	})
 
 	// Create an overflow scenario: assistant has an error with overflow pattern
+	overflowMsg := ai.AssistantMessage{
+		Content:      []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: ""}}},
+		Usage:        ai.Usage{Input: 120000, Output: 0},
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "prompt is too long: max 100000 tokens",
+		Provider:     "test-provider",
+		Model:        "test-model",
+	}
+
 	session.Agent.ReplaceMessages([]agent.AgentMessage{
 		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:      []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: ""}}},
-			Usage:        ai.Usage{Input: 120000, Output: 0},
-			StopReason:   ai.StopReasonError,
-			ErrorMessage: "prompt is too long: max 100000 tokens",
-		})),
+		agent.NewAgentMessage(ai.NewAssistantMsg(overflowMsg)),
 	})
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&overflowMsg)
 
 	if !runner.runCalled {
 		t.Fatal("expected RunCompaction to be called for overflow")
@@ -1321,16 +1587,20 @@ func TestCheckAutoCompaction_RunnerError(t *testing.T) {
 		events = append(events, e)
 	})
 
+	errorMsg := ai.AssistantMessage{
+		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
+		Usage:      ai.Usage{Input: 80000, Output: 5000},
+		StopReason: ai.StopReasonStop,
+		Provider:   "test-provider",
+		Model:      "test-model",
+	}
+
 	session.Agent.ReplaceMessages([]agent.AgentMessage{
 		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
-			Usage:      ai.Usage{Input: 80000, Output: 5000},
-			StopReason: ai.StopReasonStop,
-		})),
+		agent.NewAgentMessage(ai.NewAssistantMsg(errorMsg)),
 	})
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&errorMsg)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1370,17 +1640,21 @@ func TestCheckAutoCompaction_OverflowError_WillRetry(t *testing.T) {
 	})
 
 	// Overflow scenario
+	overflowErrMsg := ai.AssistantMessage{
+		Content:      []ai.AssistantContent{},
+		Usage:        ai.Usage{Input: 120000, Output: 0},
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "prompt is too long",
+		Provider:     "test-provider",
+		Model:        "test-model",
+	}
+
 	session.Agent.ReplaceMessages([]agent.AgentMessage{
 		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:      []ai.AssistantContent{},
-			Usage:        ai.Usage{Input: 120000, Output: 0},
-			StopReason:   ai.StopReasonError,
-			ErrorMessage: "prompt is too long",
-		})),
+		agent.NewAgentMessage(ai.NewAssistantMsg(overflowErrMsg)),
 	})
 
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&overflowErrMsg)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1429,17 +1703,13 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 	})
 	defer session.Close()
 
-	session.Agent.ReplaceMessages([]agent.AgentMessage{
-		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
-		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-			Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "hi"}}},
-			Usage:      ai.Usage{Input: 80000, Output: 5000},
-			StopReason: ai.StopReasonStop,
-		})),
-	})
-
 	// Should not panic or call runner with nil model
-	session.checkAutoCompaction()
+	session.checkAutoCompaction(&ai.AssistantMessage{
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 80000, Output: 5000},
+	})
 
 	if runner.runCalled {
 		t.Error("RunCompaction should not be called when model is nil")

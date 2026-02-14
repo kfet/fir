@@ -143,9 +143,10 @@ type sessionList struct {
 	sortMode         SortMode
 	maxVisible       int
 
-	OnSelect func(path string)
-	OnCancel func()
-	OnDelete func(path string)
+	OnSelect      func(path string)
+	OnCancel      func()
+	OnDelete      func(path string)
+	OnToggleScope func()
 }
 
 func newSessionList() *sessionList {
@@ -316,14 +317,10 @@ func (sl *sessionList) HandleInput(data string) {
 			sl.OnCancel()
 		}
 	} else if data == "\t" {
-		// Toggle sort mode
-		switch sl.sortMode {
-		case SortThreaded:
-			sl.sortMode = SortRecent
-		case SortRecent:
-			sl.sortMode = SortThreaded
+		// Toggle scope (current folder ↔ all sessions)
+		if sl.OnToggleScope != nil {
+			sl.OnToggleScope()
 		}
-		sl.applyFilter(sl.searchInput.GetValue())
 	} else {
 		sl.searchInput.HandleInput(data)
 		sl.applyFilter(sl.searchInput.GetValue())
@@ -333,42 +330,96 @@ func (sl *sessionList) HandleInput(data string) {
 // SessionSelectorComponent renders a session selector with search and tree view.
 type SessionSelectorComponent struct {
 	tui.Container
-	sessionList *sessionList
-	scope       SessionScope
+	sessionList       *sessionList
+	scope             SessionScope
+	titleText         *tuicomp.Text
+	hintText          *tuicomp.Text
+	currentSessions   []core.SessionListInfo
+	allSessions       []core.SessionListInfo
+	allSessionsLoaded bool
+	allSessionsLoader func() ([]core.SessionListInfo, error)
 }
 
 // NewSessionSelectorComponent creates a new session selector.
+// allSessionsLoader is called lazily on first Tab press to load sessions from all folders.
+// It may be nil if scope toggling is not needed.
 func NewSessionSelectorComponent(
 	sessions []core.SessionListInfo,
 	scope SessionScope,
+	allSessionsLoader func() ([]core.SessionListInfo, error),
 	onSelect func(path string),
 	onCancel func(),
 ) *SessionSelectorComponent {
 	t := theme.GetTheme()
 	c := &SessionSelectorComponent{
-		scope: scope,
+		scope:             scope,
+		currentSessions:   sessions,
+		allSessionsLoader: allSessionsLoader,
 	}
 
 	c.AddChild(NewDynamicBorder(nil))
 	c.AddChild(tuicomp.NewSpacer(1))
 
-	title := "Resume Session (Current Folder)"
-	if scope == SessionScopeAll {
-		title = "Resume Session (All)"
-	}
-	c.AddChild(tuicomp.NewText(t.Bold(title), 0, 0, nil))
+	title := c.titleForScope()
+	c.titleText = tuicomp.NewText(t.Bold(title), 0, 0, nil)
+	c.AddChild(c.titleText)
+
+	hint := c.hintForScope()
+	c.hintText = tuicomp.NewText(t.Fg("dim", hint), 0, 0, nil)
+	c.AddChild(c.hintText)
 	c.AddChild(tuicomp.NewSpacer(1))
 
 	c.sessionList = newSessionList()
+	c.sessionList.showPath = (scope == SessionScopeAll)
 	c.sessionList.SetSessions(sessions)
 	c.sessionList.OnSelect = onSelect
 	c.sessionList.OnCancel = onCancel
+	c.sessionList.OnToggleScope = func() {
+		c.toggleScope()
+	}
 	c.AddChild(c.sessionList)
 
 	c.AddChild(tuicomp.NewSpacer(1))
 	c.AddChild(NewDynamicBorder(nil))
 
 	return c
+}
+
+func (c *SessionSelectorComponent) titleForScope() string {
+	if c.scope == SessionScopeAll {
+		return "Resume Session (All)"
+	}
+	return "Resume Session (Current Folder)"
+}
+
+func (c *SessionSelectorComponent) hintForScope() string {
+	if c.scope == SessionScopeAll {
+		return "  Tab: show current folder"
+	}
+	return "  Tab: show all sessions"
+}
+
+func (c *SessionSelectorComponent) toggleScope() {
+	t := theme.GetTheme()
+	if c.scope == SessionScopeCurrent {
+		c.scope = SessionScopeAll
+		c.sessionList.showPath = true
+		// Lazily load all sessions on first toggle
+		if !c.allSessionsLoaded && c.allSessionsLoader != nil {
+			loaded, err := c.allSessionsLoader()
+			if err == nil {
+				c.allSessions = loaded
+			}
+			c.allSessionsLoaded = true
+		}
+		c.sessionList.SetSessions(c.allSessions)
+	} else {
+		c.scope = SessionScopeCurrent
+		c.sessionList.showPath = false
+		c.sessionList.SetSessions(c.currentSessions)
+	}
+	c.titleText.SetText(t.Bold(c.titleForScope()))
+	c.hintText.SetText(t.Fg("dim", c.hintForScope()))
 }
 
 // HandleInput processes keyboard input.
@@ -381,8 +432,8 @@ func (c *SessionSelectorComponent) SetSessions(sessions []core.SessionListInfo) 
 	c.sessionList.SetSessions(sessions)
 }
 
-// GetSessionList returns the internal session list.
-func (c *SessionSelectorComponent) GetSessionList() *sessionList {
+// getSessionList returns the internal session list (for testing).
+func (c *SessionSelectorComponent) getSessionList() *sessionList {
 	return c.sessionList
 }
 

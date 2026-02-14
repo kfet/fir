@@ -34,6 +34,7 @@ func TestNewInMemorySettingsManager_Defaults(t *testing.T) {
 	assert.Equal(t, 0, sm.GetEditorPaddingX())
 	assert.Equal(t, 5, sm.GetAutocompleteMaxVisible())
 	assert.Equal(t, "  ", sm.GetCodeBlockIndent())
+	assert.Equal(t, "sse", sm.GetTransport())
 }
 
 func TestInMemorySettingsManager_SettersAndGetters(t *testing.T) {
@@ -69,6 +70,9 @@ func TestInMemorySettingsManager_SettersAndGetters(t *testing.T) {
 
 	sm.SetShowImages(false)
 	assert.False(t, sm.GetShowImages())
+
+	sm.SetTransport("streamingJson")
+	assert.Equal(t, "streamingJson", sm.GetTransport())
 }
 
 func TestInMemorySettingsManager_CompactionSettings(t *testing.T) {

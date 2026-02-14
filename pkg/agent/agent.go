@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package agent
 
 import (
@@ -53,6 +53,9 @@ type AgentOptions struct {
 	// ThinkingBudgets sets custom token budgets for thinking levels.
 	ThinkingBudgets *ai.ThinkingBudgets
 
+	// Transport is the preferred transport for providers that support multiple transports.
+	Transport ai.Transport
+
 	// MaxRetryDelayMs caps how long to wait for server-requested retries.
 	MaxRetryDelayMs *int
 }
@@ -76,6 +79,7 @@ type Agent struct {
 	sessionID       string
 	getApiKey       func(string) (string, error)
 	thinkingBudgets *ai.ThinkingBudgets
+	transport       ai.Transport
 	maxRetryDelayMs *int
 
 	// idleCh is closed when the agent finishes processing.
@@ -145,6 +149,11 @@ func NewAgent(opts AgentOptions) *Agent {
 	if opts.ThinkingBudgets != nil {
 		a.thinkingBudgets = opts.ThinkingBudgets
 	}
+	if opts.Transport != "" {
+		a.transport = opts.Transport
+	} else {
+		a.transport = ai.TransportSSE
+	}
 	if opts.MaxRetryDelayMs != nil {
 		a.maxRetryDelayMs = opts.MaxRetryDelayMs
 	}
@@ -185,6 +194,20 @@ func (a *Agent) SetThinkingBudgets(tb *ai.ThinkingBudgets) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.thinkingBudgets = tb
+}
+
+// GetTransport returns the current preferred transport.
+func (a *Agent) GetTransport() ai.Transport {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.transport
+}
+
+// SetTransport sets the preferred transport.
+func (a *Agent) SetTransport(t ai.Transport) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.transport = t
 }
 
 // GetMaxRetryDelayMs returns the current max retry delay.
@@ -483,7 +506,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 
 	var reasoning ai.ThinkingLevel
 	if a.state.ThinkingLevel != ThinkingOff {
-		reasoning = a.state.ThinkingLevel.ToAIThinkingLevel()
+		reasoning = ToAIThinkingLevel(a.state.ThinkingLevel)
 	}
 
 	agentCtx := &AgentContext{
@@ -506,6 +529,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 		Model:            model,
 		Reasoning:        reasoning,
 		SessionID:        a.sessionID,
+		Transport:        a.transport,
 		ThinkingBudgets:  a.thinkingBudgets,
 		MaxRetryDelayMs:  a.maxRetryDelayMs,
 		ConvertToLLM:     a.convertToLLM,

@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/types.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package agent
 
 import (
@@ -45,38 +45,33 @@ type AgentLoopConfig struct {
 	// ThinkingBudgets specifies token budgets for thinking.
 	ThinkingBudgets *ai.ThinkingBudgets
 
+	// Transport is the preferred transport for providers that support multiple transports.
+	Transport ai.Transport
+
 	// MaxRetryDelayMs is the maximum delay between retries in milliseconds.
 	MaxRetryDelayMs *int
 }
 
-// ThinkingLevel controls reasoning depth. Mirrors ai.ThinkingLevel but adds "off".
-type ThinkingLevel string
+// ThinkingLevel is an alias for ai.ThinkingLevel so all packages use the same type.
+type ThinkingLevel = ai.ThinkingLevel
 
+// Re-export ai.ThinkingLevel constants for convenience.
 const (
-	ThinkingOff     ThinkingLevel = "off"
-	ThinkingMinimal ThinkingLevel = "minimal"
-	ThinkingLow     ThinkingLevel = "low"
-	ThinkingMedium  ThinkingLevel = "medium"
-	ThinkingHigh    ThinkingLevel = "high"
-	ThinkingXHigh   ThinkingLevel = "xhigh"
+	ThinkingOff     = ai.ThinkingOff
+	ThinkingMinimal = ai.ThinkingMinimal
+	ThinkingLow     = ai.ThinkingLow
+	ThinkingMedium  = ai.ThinkingMedium
+	ThinkingHigh    = ai.ThinkingHigh
+	ThinkingXHigh   = ai.ThinkingXHigh
 )
 
-// ToAIThinkingLevel converts to ai.ThinkingLevel. Returns empty string for "off".
-func (t ThinkingLevel) ToAIThinkingLevel() ai.ThinkingLevel {
-	switch t {
-	case ThinkingMinimal:
-		return ai.ThinkingMinimal
-	case ThinkingLow:
-		return ai.ThinkingLow
-	case ThinkingMedium:
-		return ai.ThinkingMedium
-	case ThinkingHigh:
-		return ai.ThinkingHigh
-	case ThinkingXHigh:
-		return ai.ThinkingXHigh
-	default:
+// ToAIThinkingLevel converts a ThinkingLevel to the ai-layer value.
+// Returns empty string for "off" (off means no thinking).
+func ToAIThinkingLevel(t ThinkingLevel) ai.ThinkingLevel {
+	if t == ThinkingOff {
 		return ""
 	}
+	return t
 }
 
 // AgentMessage is a message in the agent's conversation.

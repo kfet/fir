@@ -165,7 +165,40 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 
 		headers := buildCodexHeaders(model.Headers, options, accountID, apiKey)
 
-		// Retry loop for transient errors
+		// Determine transport preference
+		transport := ai.TransportSSE
+		if options != nil && options.Transport != "" {
+			transport = options.Transport
+		}
+
+		// Try WebSocket transport if requested
+		if transport != ai.TransportSSE {
+			wsURL := resolveCodexWebSocketURL(model.BaseURL)
+			wsStarted, wsErr := processWebSocketStream(ctx, wsURL, body, headers, output, stream, model, options)
+			if wsStarted || transport == ai.TransportWebSocket {
+				if wsErr != nil {
+					output.StopReason = ai.StopReasonError
+					output.ErrorMessage = wsErr.Error()
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+					return
+				}
+				if ctx.Err() != nil {
+					output.StopReason = ai.StopReasonAborted
+					output.ErrorMessage = "Request was aborted"
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonAborted, Error: output})
+					return
+				}
+				stream.Push(ai.AssistantMessageEvent{
+					Type:    ai.EventDone,
+					Reason:  output.StopReason,
+					Message: output,
+				})
+				return
+			}
+			// transport == "auto" and WS failed before start: fall through to SSE
+		}
+
+		// Retry loop for transient errors (SSE path)
 		var sseEvents <-chan SSEEvent
 		var sseErr <-chan error
 		var lastErr error

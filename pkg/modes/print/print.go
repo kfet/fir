@@ -46,7 +46,11 @@ func Run(session *core.AgentSession, opts Options) error {
 
 	// Send initial message
 	if opts.InitialMessage != "" {
-		if err := session.Prompt(opts.InitialMessage); err != nil {
+		promptOpts := &core.PromptOptions{}
+		if len(opts.InitialImages) > 0 {
+			promptOpts.Images = opts.InitialImages
+		}
+		if err := session.Prompt(opts.InitialMessage, promptOpts); err != nil {
 			return fmt.Errorf("initial prompt failed: %w", err)
 		}
 	}

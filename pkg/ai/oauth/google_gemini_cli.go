@@ -8,12 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kfet/pi-go/pkg/ai"
@@ -83,54 +81,7 @@ func (p *GeminiCLIProvider) ModifyModels(models []*ai.Model, _ *Credentials) []*
 
 // startGeminiCallbackServer starts a local HTTP server on port 8085 for the OAuth callback.
 func startGeminiCallbackServer(ctx context.Context) (server *http.Server, resultCh <-chan *callbackResult, err error) {
-	ch := make(chan *callbackResult, 1)
-	var once sync.Once
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
-		errParam := r.URL.Query().Get("error")
-		if errParam != "" {
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(400)
-			fmt.Fprintf(w, "<html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>", errParam)
-			return
-		}
-
-		code := r.URL.Query().Get("code")
-		state := r.URL.Query().Get("state")
-		if code != "" && state != "" {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<html><body><h1>Authentication Successful</h1><p>You can close this window and return to the terminal.</p></body></html>")
-			once.Do(func() {
-				ch <- &callbackResult{Code: code, State: state}
-			})
-		} else {
-			w.Header().Set("Content-Type", "text/html")
-			w.WriteHeader(400)
-			fmt.Fprint(w, "<html><body><h1>Authentication Failed</h1><p>Missing code or state parameter.</p></body></html>")
-		}
-	})
-
-	srv := &http.Server{Handler: mux}
-
-	ln, err := net.Listen("tcp", "127.0.0.1:8085")
-	if err != nil {
-		return nil, nil, fmt.Errorf("starting callback server: %w", err)
-	}
-
-	go func() {
-		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			once.Do(func() { close(ch) })
-		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		srv.Close()
-		once.Do(func() { close(ch) })
-	}()
-
-	return srv, ch, nil
+	return startOAuthCallbackServer(ctx, "/oauth2callback", "127.0.0.1:8085")
 }
 
 func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {

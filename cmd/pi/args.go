@@ -52,7 +52,7 @@ type Args struct {
 	Verbose            bool
 	Messages           []string
 	FileArgs           []string
-	UnknownFlags       map[string]interface{} // bool or string values
+	UnknownFlags       map[string]interface{} // bool or string values; includes extension flags
 }
 
 // ValidThinkingLevels lists all valid thinking level values.
@@ -220,17 +220,27 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 		case strings.HasPrefix(arg, "@"):
 			result.FileArgs = append(result.FileArgs, arg[1:]) // Remove @ prefix
 
-		case strings.HasPrefix(arg, "--") && extensionFlags != nil:
+		case strings.HasPrefix(arg, "--"):
 			flagName := arg[2:]
-			if def, ok := extensionFlags[flagName]; ok {
-				if def.Type == "boolean" {
-					result.UnknownFlags[flagName] = true
-				} else if def.Type == "string" && i+1 < len(args) {
-					i++
-					result.UnknownFlags[flagName] = args[i]
+			if extensionFlags != nil {
+				if def, ok := extensionFlags[flagName]; ok {
+					if def.Type == "boolean" {
+						result.UnknownFlags[flagName] = true
+					} else if def.Type == "string" && i+1 < len(args) {
+						i++
+						result.UnknownFlags[flagName] = args[i]
+					}
+					break
 				}
 			}
-			// Unknown flags without extensionFlags def are silently ignored
+			// No extension flag definition — heuristically capture unknown flags.
+			// If the next arg looks like a value (not a flag or file arg), consume it.
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "@") {
+				i++
+				result.UnknownFlags[flagName] = args[i]
+			} else {
+				result.UnknownFlags[flagName] = true
+			}
 
 		default:
 			if !strings.HasPrefix(arg, "-") {

@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent-loop.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 package agent
 
 import (
@@ -239,6 +239,7 @@ func streamAssistantResponse(
 	opts := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
 			ApiKey:          apiKey,
+			Transport:       config.Transport,
 			CacheRetention:  config.CacheRetention,
 			SessionID:       config.SessionID,
 			Headers:         config.Headers,

@@ -10,13 +10,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kfet/pi-go/pkg/agent"
 	"github.com/kfet/pi-go/pkg/ai"
 	"github.com/kfet/pi-go/pkg/ai/providers"
 	"github.com/kfet/pi-go/pkg/core"
 	"github.com/kfet/pi-go/pkg/core/compaction"
+	"github.com/kfet/pi-go/pkg/core/tools"
+	"github.com/kfet/pi-go/pkg/extension"
 	interactive "github.com/kfet/pi-go/pkg/modes/interactive"
 	printmode "github.com/kfet/pi-go/pkg/modes/print"
 	rpcmode "github.com/kfet/pi-go/pkg/modes/rpc"
+
+	// Import built-in extensions (registered via init())
+	_ "github.com/kfet/pi-go/pkg/extensions/notify"
 )
 
 // run is the main application logic.
@@ -143,6 +149,11 @@ func run() error {
 		},
 	}
 
+	// Apply CLI tool flags
+	if cliTools := resolveTools(args, cwd); cliTools != nil {
+		sessionOpts.Tools = cliTools
+	}
+
 	if args.Thinking != "" {
 		sessionOpts.ThinkingLevel = string(args.Thinking)
 	}
@@ -153,6 +164,21 @@ func run() error {
 		return fmt.Errorf("create session: %w", err)
 	}
 	defer result.Session.Close()
+
+	// Set up extensions
+	extSetup, err := extension.Setup(result.Session, core.NewEventBus())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
+	}
+
+	// Apply extension flags from CLI args (unknown flags may be extension flags)
+	if extSetup != nil && extSetup.Runner != nil {
+		for name := range extSetup.Runner.GetFlags() {
+			if val, ok := args.UnknownFlags[name]; ok {
+				extSetup.Runner.SetFlagValue(name, val)
+			}
+		}
+	}
 
 	// Warn about model fallback
 	if result.ModelFallbackMessage != "" {
@@ -180,16 +206,40 @@ func run() error {
 		}
 	}
 
+	// Emit session_start to extensions
+	if extSetup != nil && extSetup.Runner != nil {
+		_ = extSetup.Runner.EmitSessionStart()
+	}
+	defer func() {
+		if extSetup != nil && extSetup.Runner != nil {
+			_ = extSetup.Runner.EmitSessionShutdown()
+		}
+	}()
+
 	// Run RPC mode
 	if isRPCMode {
 		server := rpcmode.NewServer(result.Session)
 		return server.Run()
 	}
 
-	// Determine initial message and remaining messages
+	// Process @file arguments
 	var initialMessage string
+	var initialImages []ai.ImageContent
 	var remainingMessages []string
-	if len(args.Messages) > 0 {
+
+	if len(args.FileArgs) > 0 {
+		processed, err := ProcessFileArguments(args.FileArgs, cwd)
+		if err != nil {
+			return err
+		}
+		if len(args.Messages) > 0 {
+			initialMessage = processed.Text + args.Messages[0]
+			remainingMessages = args.Messages[1:]
+		} else {
+			initialMessage = processed.Text
+		}
+		initialImages = processed.Images
+	} else if len(args.Messages) > 0 {
 		initialMessage = args.Messages[0]
 		remainingMessages = args.Messages[1:]
 	}
@@ -203,6 +253,7 @@ func run() error {
 	return printmode.Run(result.Session, printmode.Options{
 		Mode:           outputMode,
 		InitialMessage: initialMessage,
+		InitialImages:  initialImages,
 		Messages:       remainingMessages,
 	})
 }
@@ -285,6 +336,41 @@ func readPipedStdin() string {
 	return strings.TrimSpace(sb.String())
 }
 
+// resolveTools builds the tool list based on CLI --tools/--no-tools flags.
+// Returns nil if no flags are set (use defaults).
+func resolveTools(args *Args, cwd string) []agent.AgentTool {
+	allToolMap := map[string]func(string) agent.AgentTool{
+		"read":  tools.NewReadTool,
+		"bash":  tools.NewBashTool,
+		"edit":  tools.NewEditTool,
+		"write": tools.NewWriteTool,
+		"grep":  tools.NewGrepTool,
+		"find":  tools.NewFindTool,
+		"ls":    tools.NewLsTool,
+	}
+
+	if args.NoTools && len(args.Tools) == 0 {
+		// --no-tools only: no tools at all
+		return []agent.AgentTool{}
+	}
+
+	if len(args.Tools) > 0 {
+		// --tools (with or without --no-tools): only include specified tools
+		result := make([]agent.AgentTool, 0, len(args.Tools))
+		for _, name := range args.Tools {
+			if fn, ok := allToolMap[name]; ok {
+				result = append(result, fn(cwd))
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: unknown tool %q (available: read, bash, edit, write, grep, find, ls)\n", name)
+			}
+		}
+		return result
+	}
+
+	// No flags: use defaults (nil triggers defaults in SDK)
+	return nil
+}
+
 // runInteractiveMode runs the full interactive TUI mode.
 func runInteractiveMode(args *Args) error {
 	cwd, err := os.Getwd()
@@ -363,6 +449,11 @@ func runInteractiveMode(args *Args) error {
 		},
 	}
 
+	// Apply CLI tool flags
+	if cliTools := resolveTools(args, cwd); cliTools != nil {
+		sessionOpts.Tools = cliTools
+	}
+
 	if args.Thinking != "" {
 		sessionOpts.ThinkingLevel = string(args.Thinking)
 	}
@@ -372,6 +463,21 @@ func runInteractiveMode(args *Args) error {
 		return fmt.Errorf("create session: %w", err)
 	}
 	defer result.Session.Close()
+
+	// Set up extensions for interactive mode
+	extSetupI, err := extension.Setup(result.Session, core.NewEventBus())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
+	}
+	if extSetupI != nil && extSetupI.Runner != nil {
+		for name := range extSetupI.Runner.GetFlags() {
+			if val, ok := args.UnknownFlags[name]; ok {
+				extSetupI.Runner.SetFlagValue(name, val)
+			}
+		}
+		_ = extSetupI.Runner.EmitSessionStart()
+		defer func() { _ = extSetupI.Runner.EmitSessionShutdown() }()
+	}
 
 	if result.Session.Model() == nil {
 		fmt.Fprintln(os.Stderr, "No models available.")
@@ -383,9 +489,19 @@ func runInteractiveMode(args *Args) error {
 	// Load keybindings
 	keybindings := core.NewKeybindingsManager(agentDir)
 
-	// Create interactive mode
+	// Process @file arguments and build initial prompt
 	var initialPrompt string
-	if len(args.Messages) > 0 {
+	if len(args.FileArgs) > 0 {
+		processed, err := ProcessFileArguments(args.FileArgs, cwd)
+		if err != nil {
+			return err
+		}
+		initialPrompt = processed.Text
+		if len(args.Messages) > 0 {
+			initialPrompt += strings.Join(args.Messages, "\n")
+		}
+		// Note: images in interactive mode are not yet supported
+	} else if len(args.Messages) > 0 {
 		initialPrompt = strings.Join(args.Messages, "\n")
 	}
 
@@ -398,6 +514,11 @@ func runInteractiveMode(args *Args) error {
 			ThemeName:     "dark",
 		},
 	)
+
+	// Wire extension runner into interactive mode
+	if extSetupI != nil && extSetupI.Runner != nil {
+		mode.SetExtensionRunner(extSetupI.Runner)
+	}
 
 	if err := mode.Init(); err != nil {
 		return fmt.Errorf("init interactive mode: %w", err)

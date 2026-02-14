@@ -185,6 +185,22 @@ Master mapping of TypeScript source files to their Go ports.
 | `coding-agent/src/modes/rpc/rpc-mode.ts` | `pkg/modes/rpc/server.go` | ✅ |
 | `coding-agent/src/modes/rpc/rpc-types.ts` | `pkg/modes/rpc/types.go` | ✅ |
 
+## Extension System (`pkg/extension/`)
+
+| TS Source | Go File | Status |
+|---|---|---|
+| `coding-agent/src/core/extensions/types.ts` | `pkg/extension/types.go` | ✅ |
+| `coding-agent/src/core/extensions/loader.ts` | `pkg/extension/registry.go` | ✅ |
+| `coding-agent/src/core/extensions/runner.ts` | `pkg/extension/runner.go` | ✅ |
+| (integration helper) | `pkg/extension/integration.go` | ✅ |
+
+## Built-in Extensions (`pkg/extensions/`)
+
+| TS Source | Go File | Status |
+|---|---|---|
+| `examples/extensions/notify.ts` | `pkg/extensions/notify/notify.go` | ✅ |
+| `examples/extensions/sandbox/index.ts` | `pkg/extensions/sandbox/sandbox.go` | ✅ |
+
 ## CLI Entry Point (`cmd/pi/`)
 
 | TS Source | Go File | Status |
@@ -192,3 +208,4 @@ Master mapping of TypeScript source files to their Go ports.
 | `coding-agent/src/cli.ts` | `cmd/pi/main.go` | ✅ |
 | `coding-agent/src/main.ts` | `cmd/pi/app.go` | ✅ |
 | `coding-agent/src/cli/args.ts` | `cmd/pi/args.go` | ✅ |
+| `coding-agent/src/cli/file-processor.ts` | `cmd/pi/fileprocessor.go` | ✅ |

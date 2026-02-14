@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/modes/interactive/interactive-mode.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 9e22d391
 //
 // This is the main interactive mode for the coding agent TUI.
 // It manages the TUI lifecycle, renders messages, handles user input,
@@ -25,6 +25,7 @@ import (
 	"github.com/kfet/pi-go/pkg/core"
 	"github.com/kfet/pi-go/pkg/core/tools"
 	"github.com/kfet/pi-go/pkg/modes/interactive/components"
+	"github.com/kfet/pi-go/pkg/extension"
 	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
 	"github.com/kfet/pi-go/pkg/tui"
 	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
@@ -78,6 +79,9 @@ type InteractiveMode struct {
 
 	// Event subscription
 	unsubscribe func()
+
+	// Extension runner (optional)
+	extensionRunner *extension.Runner
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -119,11 +123,28 @@ func NewInteractiveMode(
 	return m
 }
 
+// SetExtensionRunner sets the extension runner for command/event handling.
+func (m *InteractiveMode) SetExtensionRunner(runner *extension.Runner) {
+	m.extensionRunner = runner
+}
+
 // Init initializes the TUI and components.
 func (m *InteractiveMode) Init() error {
 	// Create terminal and TUI
 	term := tui.NewProcessTerminal()
 	m.ui = tui.NewTUI(term, false)
+
+	// Create header with keybinding hints
+	t := itheme.GetTheme()
+	hints := t.Fg("dim", fmt.Sprintf(
+		"  %s submit  %s new line  %s interrupt  /help for commands",
+		components.EditorKey(tuicomp.ActSubmit),
+		components.EditorKey(tuicomp.ActNewLine),
+		components.EditorKey(tuicomp.ActSelectCancel),
+	))
+	headerText := tuicomp.NewText(hints, 0, 0, nil)
+	m.ui.AddChild(headerText)
+	m.ui.AddChild(tuicomp.NewSpacer(1))
 
 	// Create message container
 	m.messageContainer = &tui.Container{}
@@ -481,6 +502,16 @@ func (m *InteractiveMode) setupAutocomplete() {
 		}
 	}
 
+	// Add extension commands
+	if m.extensionRunner != nil {
+		for name, cmd := range m.extensionRunner.GetCommands() {
+			commands = append(commands, SlashCommand{
+				Name:        name,
+				Description: cmd.Description,
+			})
+		}
+	}
+
 	basePath, _ := os.Getwd()
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
 	m.editor.SetAutocompleteProvider(provider)
@@ -506,6 +537,13 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 		"/export", "/share", "/copy", "/name", "/changelog",
 		"/reload", "/quit", "/exit":
 		return true
+	}
+	// Check extension commands
+	if m.extensionRunner != nil {
+		extCmd := cmd[1:] // strip "/"
+		if m.extensionRunner.GetCommand(extCmd) != nil {
+			return true
+		}
 	}
 	return false
 }
@@ -573,6 +611,22 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/quit", "/exit":
 		m.Shutdown()
 	default:
+		// Try extension commands (strip leading /)
+		extCmd := cmd[1:] // remove "/"
+		extArgs := ""
+		if len(parts) > 1 {
+			extArgs = strings.Join(parts[1:], " ")
+		}
+		if m.extensionRunner != nil {
+			if found, err := m.extensionRunner.ExecuteCommand(extCmd, extArgs); found {
+				if err != nil {
+					m.showWarning(fmt.Sprintf("Extension command error: %v", err))
+				}
+				return
+			}
+		}
+		// Fall through: not a builtin and not an extension command.
+		// Check if it's a skill or prompt template command before declaring unknown.
 		m.showWarning(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd))
 	}
 }
@@ -708,8 +762,9 @@ func (m *InteractiveMode) showSettingsSelector() {
 			AvailableThinkingLevels: []string{"off", "minimal", "low", "medium", "high"},
 			CurrentTheme:            "dark",
 			AvailableThemes:         []string{"dark", "light"},
-			SteeringMode:            "one-at-a-time",
-			FollowUpMode:            "one-at-a-time",
+			SteeringMode:            m.settings.GetSteeringMode(),
+			FollowUpMode:            m.settings.GetFollowUpMode(),
+			Transport:               m.settings.GetTransport(),
 			DoubleEscapeAction:      "tree",
 			AutocompleteMaxVisible:  10,
 		}
@@ -719,6 +774,10 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetCompactionEnabled(v)
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
+			OnTransportChange: func(transport string) {
+				m.settings.SetTransport(transport)
+				m.session.Agent.SetTransport(ai.Transport(transport))
+			},
 			OnCancel:                  func() { done() },
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
@@ -732,10 +791,18 @@ func (m *InteractiveMode) showSettingsSelector() {
 
 func (m *InteractiveMode) showSessionSelector() {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		sessions, _ := core.ListSessions("", "")
+		var cwd, sessionDir string
+		if m.session != nil && m.session.SessionManager != nil {
+			cwd = m.session.SessionManager.GetCwd()
+			sessionDir = m.session.SessionManager.GetSessionDir()
+		}
+		sessions, _ := core.ListSessions(cwd, sessionDir)
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
+			func() ([]core.SessionListInfo, error) {
+				return core.ListAllSessions(core.DefaultAgentDir())
+			},
 			func(sessionPath string) {
 				done()
 				go m.handleResumeSession(sessionPath)
@@ -968,7 +1035,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 			if p := oauth.GetProvider(id); p != nil {
 				name = p.Name()
 			}
-			selectItems[i] = tuicomp.SelectItem{Label: name, Value: id}
+			selectItems[i] = tuicomp.SelectItem{Label: name, Value: id, Description: "logged in"}
 		}
 
 		m.showSelector(func(done func()) (tui.Component, tui.Component) {
@@ -1001,7 +1068,11 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 
 	selectItems := make([]tuicomp.SelectItem, len(oauthProviders))
 	for i, p := range oauthProviders {
-		selectItems[i] = tuicomp.SelectItem{Label: p.Name(), Value: p.ID()}
+		desc := ""
+		if cred := authStorage.Get(p.ID()); cred != nil && cred.Type == core.CredentialTypeOAuth {
+			desc = "logged in"
+		}
+		selectItems[i] = tuicomp.SelectItem{Label: p.Name(), Value: p.ID(), Description: desc}
 	}
 
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
@@ -1051,10 +1122,56 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			m.showStatus(msg)
 		},
 		OnPrompt: func(prompt oauth.Prompt) (string, error) {
-			// For now, show a status message — full prompt input requires
-			// a dialog component which is not yet implemented.
-			m.showWarning(fmt.Sprintf("Login requires input: %s (use browser flow)", prompt.Message))
-			return "", fmt.Errorf("interactive prompt not yet implemented")
+			type promptResult struct {
+				value string
+				err   error
+			}
+			ch := make(chan promptResult, 1)
+
+			// Show an input dialog in the editor container.
+			// This must run on the "UI" path (modify TUI state then request render).
+			done := func() {
+				m.editorContainer.Clear()
+				m.editorContainer.AddChild(m.editor)
+				m.ui.SetFocus(m.editor)
+				m.ui.RequestRender(false)
+			}
+
+			t := itheme.GetTheme()
+			container := &tui.Container{}
+			container.AddChild(components.NewDynamicBorder(nil))
+			container.AddChild(tuicomp.NewText(t.Fg("warning", prompt.Message), 1, 0, nil))
+			if prompt.Placeholder != "" {
+				container.AddChild(tuicomp.NewText(t.Fg("muted", "(e.g. "+prompt.Placeholder+")"), 1, 0, nil))
+			}
+			if prompt.AllowEmpty {
+				container.AddChild(tuicomp.NewText(t.Fg("muted", "Press Enter to skip"), 1, 0, nil))
+			}
+
+			input := tuicomp.NewInput()
+			input.OnSubmit = func(value string) {
+				if !prompt.AllowEmpty && strings.TrimSpace(value) == "" {
+					return // don't accept empty when not allowed
+				}
+				done()
+				ch <- promptResult{value: value}
+			}
+			input.OnEscape = func() {
+				done()
+				ch <- promptResult{err: fmt.Errorf("Login cancelled")}
+			}
+			container.AddChild(input)
+			container.AddChild(tuicomp.NewSpacer(1))
+			container.AddChild(components.NewDynamicBorder(nil))
+
+			m.editorContainer.Clear()
+			m.editorContainer.AddChild(container)
+			m.ui.SetFocus(input)
+			m.ui.RequestRender(true)
+
+			// Block until user submits or cancels.
+			result := <-ch
+			return result.value, result.err
 		},
 		OnProgress: func(message string) {
 			m.showStatus(message)
@@ -1438,10 +1555,10 @@ func (m *InteractiveMode) cycleModel(direction string) {
 
 func (m *InteractiveMode) toggleToolOutputExpansion() {
 	m.toolOutputExpanded = !m.toolOutputExpanded
-	// Update all tool components in the message container
+	// Update all expandable components in the message container
 	for _, child := range m.messageContainer.ChildrenSnapshot() {
-		if tc, ok := child.(*components.ToolExecutionComponent); ok {
-			tc.SetExpanded(m.toolOutputExpanded)
+		if ec, ok := child.(components.Expandable); ok {
+			ec.SetExpanded(m.toolOutputExpanded)
 		}
 	}
 	m.ui.RequestRender(false)
@@ -1587,6 +1704,12 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 	data.TotalCacheRead = stats.Tokens.CacheRead
 	data.TotalCacheWrite = stats.Tokens.CacheWrite
 	data.TotalCost = stats.Cost
+
+	// Context usage estimate (uses last assistant message's usage, not accumulated totals)
+	if cu := m.session.GetContextUsage(); cu != nil {
+		data.ContextPercent = cu.Percent
+		data.ContextTokens = cu.Tokens
+	}
 
 	// Git branch from footer data provider
 	if m.footerDataProvider != nil {

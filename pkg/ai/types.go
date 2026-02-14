@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: bd040072
+// Upstream hash: 9e22d391
 package ai
 
 import (
@@ -78,6 +78,7 @@ const (
 type ThinkingLevel string
 
 const (
+	ThinkingOff     ThinkingLevel = "off" // disable thinking entirely (agent-layer concept)
 	ThinkingMinimal ThinkingLevel = "minimal"
 	ThinkingLow     ThinkingLevel = "low"
 	ThinkingMedium  ThinkingLevel = "medium"
@@ -117,6 +118,17 @@ func (tb *ThinkingBudgets) BudgetForLevel(level ThinkingLevel) int {
 	return *p
 }
 
+// --- Transport ---
+
+// Transport specifies the preferred transport for providers that support multiple transports.
+type Transport string
+
+const (
+	TransportSSE       Transport = "sse"
+	TransportWebSocket Transport = "websocket"
+	TransportAuto      Transport = "auto"
+)
+
 // --- Cache ---
 
 // CacheRetention specifies prompt cache retention preference.
@@ -135,6 +147,7 @@ type StreamOptions struct {
 	Temperature     *float64          `json:"temperature,omitempty"`
 	MaxTokens       *int              `json:"maxTokens,omitempty"`
 	ApiKey          string            `json:"apiKey,omitempty"`
+	Transport       Transport         `json:"transport,omitempty"`
 	CacheRetention  CacheRetention    `json:"cacheRetention,omitempty"`
 	SessionID       string            `json:"sessionId,omitempty"`
 	Headers         map[string]string `json:"headers,omitempty"`
