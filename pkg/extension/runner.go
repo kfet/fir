@@ -55,6 +55,10 @@ type Runner struct {
 	// UI context — set by the mode
 	uiContext UIContext
 
+	// Status/widget keys set by extensions, tracked for cleanup on reload.
+	statusKeys map[string]bool
+	widgetKeys map[string]bool
+
 	// Error listener
 	onError func(ext string, event string, err error)
 }
@@ -91,6 +95,8 @@ func NewRunner(eventBus core.EventBus) *Runner {
 		allShortcuts: make(map[string]*ShortcutHandler),
 		allHandlers:  make(map[string][]Handler),
 		flagValues:   make(map[string]any),
+		statusKeys:   make(map[string]bool),
+		widgetKeys:   make(map[string]bool),
 	}
 	return r
 }
@@ -101,6 +107,19 @@ func NewRunner(eventBus core.EventBus) *Runner {
 func (r *Runner) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Clear status and widget entries set by old extensions.
+	if r.uiContext != nil {
+		for key := range r.statusKeys {
+			r.uiContext.SetStatus(key, "")
+		}
+		for key := range r.widgetKeys {
+			r.uiContext.ClearWidget(key)
+		}
+	}
+	r.statusKeys = make(map[string]bool)
+	r.widgetKeys = make(map[string]bool)
+
 	r.extensions = nil
 	r.allTools = make(map[string]*ToolDefinition)
 	r.allCommands = make(map[string]*Command)
@@ -117,7 +136,7 @@ func (r *Runner) LoadAll() error {
 
 // LoadEnabled initializes only the extension factories whose names appear in
 // the enabled list. Names are matched case-sensitively. Unknown names are
-// silently ignored (the factory may not be compiled in).
+// logged as warnings (the factory may not be compiled in).
 func (r *Runner) LoadEnabled(names []string) error {
 	if len(names) == 0 {
 		return nil
@@ -131,7 +150,11 @@ func (r *Runner) LoadEnabled(names []string) error {
 	for _, rf := range all {
 		if nameSet[rf.Name] {
 			filtered = append(filtered, rf)
+			delete(nameSet, rf.Name)
 		}
+	}
+	for name := range nameSet {
+		log.Printf("extension %q requested but not registered (not compiled in?)", name)
 	}
 	return r.loadFactories(filtered)
 }
@@ -313,9 +336,15 @@ func (r *Runner) createContext() Context {
 	ui := r.uiContext
 	r.mu.RUnlock()
 
+	// Wrap UI so status/widget keys are tracked for cleanup on reload.
+	var trackedUI UIContext
+	if ui != nil {
+		trackedUI = &trackingUIContext{inner: ui, runner: r}
+	}
+
 	return &runnerContext{
 		actions: actions,
-		ui:      ui,
+		ui:      trackedUI,
 	}
 }
 
@@ -326,10 +355,15 @@ func (r *Runner) createCommandContext() CommandContext {
 	ui := r.uiContext
 	r.mu.RUnlock()
 
+	var trackedUI UIContext
+	if ui != nil {
+		trackedUI = &trackingUIContext{inner: ui, runner: r}
+	}
+
 	return &runnerCommandContext{
 		runnerContext: runnerContext{
 			actions: actions,
-			ui:      ui,
+			ui:      trackedUI,
 		},
 	}
 }
@@ -730,6 +764,46 @@ func (n *noopUIContext) Notify(string, string)                   {}
 func (n *noopUIContext) SetStatus(string, string)                {}
 func (n *noopUIContext) SetWidget(string, []string)              {}
 func (n *noopUIContext) ClearWidget(string)                      {}
+
+// trackingUIContext wraps a UIContext and records which status/widget keys
+// are set so the Runner can clear them on Reset/reload.
+type trackingUIContext struct {
+	inner  UIContext
+	runner *Runner
+}
+
+func (t *trackingUIContext) Select(title string, opts []string) (string, error) {
+	return t.inner.Select(title, opts)
+}
+func (t *trackingUIContext) Confirm(title, msg string) (bool, error) {
+	return t.inner.Confirm(title, msg)
+}
+func (t *trackingUIContext) Input(title, placeholder string) (string, error) {
+	return t.inner.Input(title, placeholder)
+}
+func (t *trackingUIContext) Notify(msg, level string) { t.inner.Notify(msg, level) }
+func (t *trackingUIContext) SetStatus(key, text string) {
+	t.runner.mu.Lock()
+	if text != "" {
+		t.runner.statusKeys[key] = true
+	} else {
+		delete(t.runner.statusKeys, key)
+	}
+	t.runner.mu.Unlock()
+	t.inner.SetStatus(key, text)
+}
+func (t *trackingUIContext) SetWidget(key string, lines []string) {
+	t.runner.mu.Lock()
+	t.runner.widgetKeys[key] = true
+	t.runner.mu.Unlock()
+	t.inner.SetWidget(key, lines)
+}
+func (t *trackingUIContext) ClearWidget(key string) {
+	t.runner.mu.Lock()
+	delete(t.runner.widgetKeys, key)
+	t.runner.mu.Unlock()
+	t.inner.ClearWidget(key)
+}
 
 // ============================================================================
 // extensionAPI — the per-extension API implementation

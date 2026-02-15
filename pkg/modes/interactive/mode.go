@@ -732,6 +732,7 @@ func (m *InteractiveMode) showThinkingSelector() {
 			levels,
 			func(level agent.ThinkingLevel) {
 				m.session.SetThinkingLevel(string(level))
+				m.settings.SetDefaultThinkingLevel(string(level))
 				m.footerComponent.Invalidate()
 				done()
 				m.showStatus(fmt.Sprintf("Thinking: %s", level))
@@ -786,11 +787,18 @@ func (m *InteractiveMode) showThemeSelector() {
 
 func (m *InteractiveMode) showSettingsSelector() {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		// Build available thinking levels from session
+		availLevels := m.session.GetAvailableThinkingLevels()
+		levelStrs := make([]string, len(availLevels))
+		for i, l := range availLevels {
+			levelStrs[i] = string(l)
+		}
+
 		config := components.SettingsConfig{
 			AutoCompact:             m.autoCompact,
 			HideThinkingBlock:       m.hideThinking,
-			ThinkingLevel:           "medium",
-			AvailableThinkingLevels: []string{"off", "minimal", "low", "medium", "high"},
+			ThinkingLevel:           m.session.ThinkingLevel(),
+			AvailableThinkingLevels: levelStrs,
 			CurrentTheme:            "dark",
 			AvailableThemes:         []string{"dark", "light"},
 			SteeringMode:            m.settings.GetSteeringMode(),
@@ -805,6 +813,17 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetCompactionEnabled(v)
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
+			OnThinkingLevelChange: func(level string) {
+				m.session.SetThinkingLevel(level)
+				m.settings.SetDefaultThinkingLevel(level)
+				m.footerComponent.Invalidate()
+			},
+			OnSteeringModeChange: func(mode string) {
+				m.settings.SetSteeringMode(mode)
+			},
+			OnFollowUpModeChange: func(mode string) {
+				m.settings.SetFollowUpMode(mode)
+			},
 			OnTransportChange: func(transport string) {
 				m.settings.SetTransport(transport)
 				m.session.Agent.SetTransport(ai.Transport(transport))
@@ -1643,6 +1662,7 @@ func (m *InteractiveMode) cycleThinkingLevel() {
 	}
 	next := levels[(idx+1)%len(levels)]
 	m.session.SetThinkingLevel(string(next))
+	m.settings.SetDefaultThinkingLevel(string(next))
 	m.footerComponent.Invalidate()
 	m.showStatus(fmt.Sprintf("Thinking: %s", next))
 }

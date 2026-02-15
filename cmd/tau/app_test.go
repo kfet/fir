@@ -179,8 +179,9 @@ func TestResolveEnabledExtensions_Default(t *testing.T) {
 
 	args := &Args{}
 	result := resolveEnabledExtensions(args, sm)
+	// No extensions enabled by default unless configured in settings or CLI
 	if len(result) != 0 {
-		t.Errorf("expected 0 extensions by default, got %d: %v", len(result), result)
+		t.Errorf("expected [] by default, got %v", result)
 	}
 }
 
@@ -195,11 +196,12 @@ func TestResolveEnabledExtensions_FromSettings(t *testing.T) {
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{}
 	result := resolveEnabledExtensions(args, sm)
+	// notify + sandbox from settings
 	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions from settings, got %d: %v", len(result), result)
+		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
 	}
 	if result[0] != "notify" || result[1] != "sandbox" {
-		t.Errorf("unexpected extensions: %v", result)
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 
@@ -210,8 +212,12 @@ func TestResolveEnabledExtensions_FromCLI(t *testing.T) {
 
 	args := &Args{Extensions: []string{"notify", "sandbox"}}
 	result := resolveEnabledExtensions(args, sm)
+	// Only CLI extensions, no implicit defaults
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions from CLI, got %d: %v", len(result), result)
+	}
+	if result[0] != "notify" || result[1] != "sandbox" {
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 
@@ -226,8 +232,12 @@ func TestResolveEnabledExtensions_MergedDeduped(t *testing.T) {
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{Extensions: []string{"notify", "sandbox"}}
 	result := resolveEnabledExtensions(args, sm)
+	// notify from settings + sandbox from CLI; notify deduplicated
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
+	}
+	if result[0] != "notify" || result[1] != "sandbox" {
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 

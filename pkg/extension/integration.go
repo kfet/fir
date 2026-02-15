@@ -1,6 +1,8 @@
 package extension
 
 import (
+	"context"
+
 	"github.com/kfet/tau/pkg/agent"
 	"github.com/kfet/tau/pkg/ai"
 	"github.com/kfet/tau/pkg/core"
@@ -30,6 +32,9 @@ func (r *SetupResult) Reload(enabledNames []string) error {
 	// Notify old extensions of shutdown.
 	_ = r.Runner.EmitSessionShutdown()
 
+	// Remove previously-added extension tools from the agent.
+	removeExtensionTools(r.session, r.Runner)
+
 	// Clear all loaded extensions and merged state.
 	r.Runner.Reset()
 
@@ -39,6 +44,9 @@ func (r *SetupResult) Reload(enabledNames []string) error {
 			return err
 		}
 	}
+
+	// Add newly registered extension tools to the agent.
+	addExtensionTools(r.session, r.Runner)
 
 	// Notify new extensions of start.
 	_ = r.Runner.EmitSessionStart()
@@ -148,10 +156,74 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 	// to whatever handlers are currently loaded after a reload.
 	bridgeSessionEvents(session, runner)
 
+	// Add extension-registered tools to the agent's tool list so the LLM
+	// can call them. Each ToolDefinition is converted to an agent.AgentTool.
+	addExtensionTools(session, runner)
+
 	return &SetupResult{
 		Runner:  runner,
 		session: session,
 	}, nil
+}
+
+// addExtensionTools converts extension-registered ToolDefinitions to
+// agent.AgentTools and appends them to the session's agent tool list.
+// This makes extension tools callable by the LLM.
+func addExtensionTools(session *core.AgentSession, runner *Runner) {
+	extTools := runner.GetTools()
+	if len(extTools) == 0 {
+		return
+	}
+
+	state := session.Agent.State()
+	tools := make([]agent.AgentTool, len(state.Tools))
+	copy(tools, state.Tools)
+
+	for _, td := range extTools {
+		at := extensionToolToAgentTool(td, runner)
+		tools = append(tools, at)
+	}
+
+	session.Agent.SetTools(session.WrapToolsWithHooks(tools))
+}
+
+// removeExtensionTools removes any tools that were added by extensions
+// (identified by matching names in the runner's tool registry).
+func removeExtensionTools(session *core.AgentSession, runner *Runner) {
+	extTools := runner.GetTools()
+	if len(extTools) == 0 {
+		return
+	}
+
+	state := session.Agent.State()
+	filtered := make([]agent.AgentTool, 0, len(state.Tools))
+	for _, t := range state.Tools {
+		if _, isExt := extTools[t.Name]; !isExt {
+			filtered = append(filtered, t)
+		}
+	}
+
+	session.Agent.SetTools(filtered)
+}
+
+// extensionToolToAgentTool converts an extension ToolDefinition to an agent.AgentTool.
+func extensionToolToAgentTool(td *ToolDefinition, runner *Runner) agent.AgentTool {
+	return agent.AgentTool{
+		Tool: ai.Tool{
+			Name:        td.Name,
+			Description: td.Description,
+			Parameters:  td.Parameters,
+		},
+		Label: td.Label,
+		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+			return td.Execute(ToolContext{
+				ToolCallID: toolCallID,
+				Params:     params,
+				Ctx:        runner.createContext(),
+				OnUpdate:   onUpdate,
+			})
+		},
+	}
 }
 
 // bridgeSessionEvents subscribes to the AgentSession event stream and

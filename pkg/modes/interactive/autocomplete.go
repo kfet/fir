@@ -298,6 +298,16 @@ func expandHomePath(path string) string {
 	return path
 }
 
+// cleanSlashes collapses runs of consecutive forward slashes into a single
+// slash (e.g. "a//b///c" → "a/b/c"). This prevents double-slash artifacts
+// when path segments are concatenated with "/".
+func cleanSlashes(s string) string {
+	for strings.Contains(s, "//") {
+		s = strings.ReplaceAll(s, "//", "/")
+	}
+	return s
+}
+
 func (p *combinedAutocompleteProvider) getFileSuggestions(prefix string) []tuicomp.SelectItem {
 	rawPrefix, isAtPrefix := parsePathPrefix(prefix)
 	expandedPrefix := rawPrefix
@@ -384,6 +394,7 @@ func (p *combinedAutocompleteProvider) getFileSuggestions(prefix string) []tuico
 				relativePath = name
 			}
 		}
+		relativePath = cleanSlashes(relativePath)
 
 		pathValue := relativePath
 		if isDirectory {
@@ -419,44 +430,106 @@ func (p *combinedAutocompleteProvider) getFileSuggestions(prefix string) []tuico
 	return suggestions
 }
 
+// maxWalkFiles caps the number of files collected during recursive walk to
+// keep autocomplete responsive.
+const maxWalkFiles = 10000
+
+// skipDirs contains directory names that are skipped during recursive walk.
+var skipDirs = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	".hg":          true,
+	".svn":         true,
+	"__pycache__":  true,
+	".tox":         true,
+	".venv":        true,
+	"vendor":       true,
+}
+
+// collectFiles recursively collects files under root, returning paths
+// relative to root. Hidden directories (starting with ".") other than "."
+// itself are skipped, as are common noise directories.
+func collectFiles(root string) []fileEntry {
+	var items []fileEntry
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(items) >= maxWalkFiles {
+			return filepath.SkipAll
+		}
+
+		name := d.Name()
+
+		// Skip noisy / hidden directories (but not the root itself).
+		if d.IsDir() && path != root {
+			if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
+				return filepath.SkipDir
+			}
+		}
+
+		// Skip the root entry itself.
+		if path == root {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		// Normalise to forward-slash separators for display / matching.
+		rel = filepath.ToSlash(rel)
+
+		items = append(items, fileEntry{name: rel, isDir: d.IsDir()})
+		return nil
+	})
+	return items
+}
+
+type fileEntry struct {
+	name  string // relative path (forward-slash separated)
+	isDir bool
+}
+
 func (p *combinedAutocompleteProvider) getFuzzyFileSuggestions(rawPrefix string) []tuicomp.SelectItem {
-	// For @ completions, use fuzzy matching on files
+	// For @ completions, use fuzzy matching across the entire file tree.
 	expandedPrefix := rawPrefix
 	if strings.HasPrefix(expandedPrefix, "~") {
 		expandedPrefix = expandHomePath(expandedPrefix)
 	}
 
-	dir := filepath.Dir(expandedPrefix)
-	base := filepath.Base(expandedPrefix)
-	if expandedPrefix == "" || strings.HasSuffix(expandedPrefix, "/") {
-		dir = expandedPrefix
-		base = ""
+	// If the prefix explicitly names a directory (ends with "/"), list that
+	// directory's direct contents — no recursive walk needed.
+	if strings.HasSuffix(expandedPrefix, "/") {
+		return p.getFuzzyFileSuggestionsDir(expandedPrefix)
 	}
 
-	searchDir := dir
-	if !filepath.IsAbs(searchDir) {
-		searchDir = filepath.Join(p.basePath, searchDir)
+	// Determine the root to walk and the query to fuzzy-match against.
+	walkRoot := p.basePath
+	query := expandedPrefix
+
+	// If prefix contains a "/" we anchor the walk one level deeper and
+	// fuzzy-match only the remainder, but still walk recursively from there.
+	if strings.Contains(expandedPrefix, "/") {
+		dir := filepath.Dir(expandedPrefix)
+		if filepath.IsAbs(dir) || strings.HasPrefix(rawPrefix, "~") {
+			walkRoot = dir
+		} else {
+			walkRoot = filepath.Join(p.basePath, dir)
+		}
+		query = filepath.Base(expandedPrefix)
 	}
 
-	entries, err := os.ReadDir(searchDir)
-	if err != nil {
-		return nil
+	items := collectFiles(walkRoot)
+
+	if query != "" {
+		items = tui.FuzzyFilter(items, query, func(f fileEntry) string { return f.name })
 	}
 
-	type fileEntry struct {
-		name  string
-		isDir bool
-	}
-
-	var items []fileEntry
-	for _, entry := range entries {
-		items = append(items, fileEntry{name: entry.Name(), isDir: entry.IsDir()})
-	}
-
-	if base != "" {
-		items = tui.FuzzyFilter(items, base, func(f fileEntry) string { return f.name })
-	}
-
+	// Build suggestion list.
 	var suggestions []tuicomp.SelectItem
 	for _, item := range items {
 		label := item.name
@@ -464,11 +537,14 @@ func (p *combinedAutocompleteProvider) getFuzzyFileSuggestions(rawPrefix string)
 			label += "/"
 		}
 
+		// Compute the relative path shown in the value (includes any
+		// directory prefix the user already typed).
 		var relPath string
-		if dir == "" || dir == "." {
-			relPath = item.name
+		if strings.Contains(expandedPrefix, "/") {
+			dir := filepath.Dir(expandedPrefix)
+			relPath = cleanSlashes(dir + "/" + item.name)
 		} else {
-			relPath = dir + "/" + item.name
+			relPath = item.name
 		}
 		if item.isDir {
 			relPath += "/"
@@ -480,6 +556,54 @@ func (p *combinedAutocompleteProvider) getFuzzyFileSuggestions(rawPrefix string)
 			Label: label,
 		})
 	}
+
+	return suggestions
+}
+
+// getFuzzyFileSuggestionsDir lists the direct contents of a single directory
+// (used when the prefix explicitly ends with "/").
+func (p *combinedAutocompleteProvider) getFuzzyFileSuggestionsDir(expandedPrefix string) []tuicomp.SelectItem {
+	searchDir := expandedPrefix
+	if !filepath.IsAbs(searchDir) {
+		searchDir = filepath.Join(p.basePath, searchDir)
+	}
+
+	entries, err := os.ReadDir(searchDir)
+	if err != nil {
+		return nil
+	}
+
+	var suggestions []tuicomp.SelectItem
+	for _, entry := range entries {
+		name := entry.Name()
+		isDir := entry.IsDir()
+
+		label := name
+		if isDir {
+			label += "/"
+		}
+
+		relPath := cleanSlashes(expandedPrefix + name)
+		if isDir {
+			relPath += "/"
+		}
+		value := "@" + relPath
+
+		suggestions = append(suggestions, tuicomp.SelectItem{
+			Value: value,
+			Label: label,
+		})
+	}
+
+	// Sort: directories first, then alphabetically.
+	sort.Slice(suggestions, func(i, j int) bool {
+		iDir := strings.HasSuffix(suggestions[i].Value, "/")
+		jDir := strings.HasSuffix(suggestions[j].Value, "/")
+		if iDir != jDir {
+			return iDir
+		}
+		return suggestions[i].Label < suggestions[j].Label
+	})
 
 	return suggestions
 }

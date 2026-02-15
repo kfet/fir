@@ -24,6 +24,7 @@ import (
 	// Import built-in extensions (registered via init())
 	_ "github.com/kfet/tau/pkg/extensions/claudeusage"
 	_ "github.com/kfet/tau/pkg/extensions/notify"
+	_ "github.com/kfet/tau/pkg/extensions/sandbox"
 	_ "github.com/kfet/tau/pkg/extensions/tmuxspinner"
 )
 
@@ -390,7 +391,7 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 }
 
 // resolveEnabledExtensions computes the list of extension names to activate.
-// Extensions are off by default. They are enabled by:
+// Extensions are enabled via:
 //   - settings.json "extensions" array (global or project)
 //   - CLI --extension / -e flags
 //
@@ -400,20 +401,22 @@ func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
 		return nil
 	}
 
-	// Start with settings
-	names := sm.GetEnabledExtensions()
+	seen := make(map[string]bool)
+	var names []string
 
-	// Add CLI --extension flags (deduplicate)
-	if len(args.Extensions) > 0 {
-		seen := make(map[string]bool, len(names))
-		for _, n := range names {
+	// Add settings
+	for _, n := range sm.GetEnabledExtensions() {
+		if !seen[n] {
+			names = append(names, n)
 			seen[n] = true
 		}
-		for _, n := range args.Extensions {
-			if !seen[n] {
-				names = append(names, n)
-				seen[n] = true
-			}
+	}
+
+	// Add CLI --extension flags
+	for _, n := range args.Extensions {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
 		}
 	}
 
