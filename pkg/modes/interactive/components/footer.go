@@ -147,7 +147,7 @@ func (f *FooterComponent) Render(width int) []string {
 			rightSide += " • " + data.ThinkingLevel
 		}
 	}
-	if data.MultipleProviders && data.ModelProvider != "" {
+	if data.ModelProvider != "" {
 		full := fmt.Sprintf("(%s) %s", data.ModelProvider, rightSide)
 		if tui.VisibleWidth(statsLeft)+2+tui.VisibleWidth(full) <= width {
 			rightSide = full

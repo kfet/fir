@@ -118,3 +118,26 @@ func TestFooterComponent_ContextWarning(t *testing.T) {
 		t.Error("expected ANSI escapes for error context coloring")
 	}
 }
+
+func TestFooterComponent_WithProvider(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/project",
+			ModelID:       "claude-3.5-sonnet",
+			ModelProvider: "anthropic",
+			ContextWindow: 200000,
+		}
+	})
+
+	lines := f.Render(120)
+	// Provider should be displayed even when MultipleProviders is false
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "anthropic") && strings.Contains(line, "claude-3.5-sonnet") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected provider and model in output, got:", lines)
+	}
+}
