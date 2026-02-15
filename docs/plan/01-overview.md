@@ -1,4 +1,4 @@
-# pi-go: Overview
+# tau: Overview
 
 Go port of the [pi coding agent](../pi-mono/packages/coding-agent/).
 
@@ -14,7 +14,7 @@ Go port of the [pi coding agent](../pi-mono/packages/coding-agent/).
 | `packages/ai` | 22,062 | `pkg/ai/` | LLM providers, streaming, models |
 | `packages/agent` | 1,495 | `pkg/agent/` | Core agent loop |
 | `packages/tui` | 9,751 | `pkg/tui/` | Terminal UI framework |
-| `packages/coding-agent` | 37,026 | `pkg/core/`, `pkg/modes/`, `cmd/pi/` | CLI app, tools, sessions |
+| `packages/coding-agent` | 37,026 | `pkg/core/`, `pkg/modes/`, `cmd/tau/` | CLI app, tools, sessions |
 | **Total** | **~70,334** | | |
 
 ## Build Targets
@@ -30,7 +30,7 @@ Go port of the [pi coding agent](../pi-mono/packages/coding-agent/).
 ## Module
 
 ```
-github.com/kfet/pi-go
+github.com/kfet/tau
 ```
 
 ## Upstream Reference

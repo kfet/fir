@@ -5,7 +5,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func TestRegisterBuiltInApiProviders(t *testing.T) {

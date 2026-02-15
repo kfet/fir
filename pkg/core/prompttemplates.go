@@ -11,7 +11,7 @@ import (
 )
 
 // ConfigDirName is the project-local configuration directory name.
-const ConfigDirName = ".pi"
+const ConfigDirName = ".tau"
 
 // PromptTemplate represents a prompt template loaded from a markdown file.
 type PromptTemplate struct {
@@ -218,10 +218,17 @@ func LoadPromptTemplates(opts LoadPromptTemplatesOptions) []PromptTemplate {
 			templates = append(templates, loadTemplatesFromDir(globalDir, "user", "(user)")...)
 		}
 
-		// Project templates from cwd/.pi/prompts/
+		// Project templates from cwd/.tau/prompts/
 		projectDir := filepath.Join(cwd, ConfigDirName, "prompts")
 		templates = append(templates, loadTemplatesFromDir(projectDir, "project", "(project)")...)
 	}
+
+	// Compute known dirs for source inference when explicit paths overlap defaults
+	userPromptsDir := ""
+	if opts.AgentDir != "" {
+		userPromptsDir = filepath.Join(opts.AgentDir, "prompts")
+	}
+	projectPromptsDir := filepath.Join(cwd, ConfigDirName, "prompts")
 
 	// Explicit prompt paths
 	for _, rawPath := range opts.PromptPaths {
@@ -231,8 +238,8 @@ func LoadPromptTemplates(opts LoadPromptTemplatesOptions) []PromptTemplate {
 			continue
 		}
 
-		source := "path"
-		label := "(path:" + strings.TrimSuffix(filepath.Base(resolvedPath), ".md") + ")"
+		// Infer source from path location (matches upstream behavior)
+		source, label := inferPromptSource(resolvedPath, userPromptsDir, projectPromptsDir)
 
 		if info.IsDir() {
 			templates = append(templates, loadTemplatesFromDir(resolvedPath, source, label)...)
@@ -261,6 +268,30 @@ func resolvePromptPath(p, cwd string) string {
 		return p
 	}
 	return filepath.Join(cwd, p)
+}
+
+// inferPromptSource determines the source and label for a prompt path
+// based on whether it falls under the user or project prompts directory.
+func inferPromptSource(resolvedPath, userPromptsDir, projectPromptsDir string) (source, label string) {
+	if userPromptsDir != "" && isPathUnder(resolvedPath, userPromptsDir) {
+		return "user", "(user)"
+	}
+	if projectPromptsDir != "" && isPathUnder(resolvedPath, projectPromptsDir) {
+		return "project", "(project)"
+	}
+	return "path", "(path:" + strings.TrimSuffix(filepath.Base(resolvedPath), ".md") + ")"
+}
+
+// isPathUnder checks if target is equal to or under root.
+func isPathUnder(target, root string) bool {
+	if target == root {
+		return true
+	}
+	prefix := root
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+	return strings.HasPrefix(target, prefix)
 }
 
 // ExpandPromptTemplate expands a prompt template if the text matches a template name.

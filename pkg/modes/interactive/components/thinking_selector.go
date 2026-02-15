@@ -3,10 +3,10 @@
 package components
 
 import (
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // levelDescriptions maps thinking levels to human-readable descriptions.

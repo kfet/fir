@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // --- Test models ---

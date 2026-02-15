@@ -2,8 +2,8 @@
 package modes
 
 import (
-	"github.com/kfet/pi-go/pkg/core"
-	printmode "github.com/kfet/pi-go/pkg/modes/print"
+	"github.com/kfet/tau/pkg/core"
+	printmode "github.com/kfet/tau/pkg/modes/print"
 )
 
 // PrintModeOptions configures print (single-shot) mode.

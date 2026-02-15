@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // claudeCodeVersion mimics Claude Code's version for OAuth stealth mode.
@@ -56,7 +56,7 @@ func resolveCacheRetention(cr ai.CacheRetention) ai.CacheRetention {
 	if cr != "" {
 		return cr
 	}
-	if os.Getenv("PI_CACHE_RETENTION") == "long" {
+	if os.Getenv("TAU_CACHE_RETENTION") == "long" {
 		return ai.CacheLong
 	}
 	return ai.CacheShort

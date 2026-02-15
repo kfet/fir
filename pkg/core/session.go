@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // CurrentSessionVersion is the latest session file format version.
@@ -1231,27 +1231,42 @@ func SessionsDir(agentDir string) string {
 }
 
 // ListAllSessions lists sessions across all project directories, sorted by modified time.
-func ListAllSessions(agentDir string) ([]SessionListInfo, error) {
-	sessionsDir := SessionsDir(agentDir)
-	dirEntries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
+// Additional agent dirs (e.g. ~/.pi/agent) can be passed to merge sessions from multiple sources.
+func ListAllSessions(agentDir string, extraAgentDirs ...string) ([]SessionListInfo, error) {
+	dirs := append([]string{agentDir}, extraAgentDirs...)
+	seen := make(map[string]bool)
 	var all []SessionListInfo
-	for _, de := range dirEntries {
-		if !de.IsDir() {
-			continue
-		}
-		subDir := filepath.Join(sessionsDir, de.Name())
-		sessions, err := ListSessions("", subDir)
+
+	for _, dir := range dirs {
+		sessionsDir := SessionsDir(dir)
+		dirEntries, err := os.ReadDir(sessionsDir)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			continue // skip dirs we can't read
 		}
-		all = append(all, sessions...)
+
+		for _, de := range dirEntries {
+			if !de.IsDir() {
+				continue
+			}
+			subDir := filepath.Join(sessionsDir, de.Name())
+			sessions, err := ListSessions("", subDir)
+			if err != nil {
+				continue
+			}
+			for _, s := range sessions {
+				key := s.Path
+				if resolved, err := filepath.EvalSymlinks(key); err == nil {
+					key = resolved
+				}
+				if !seen[key] {
+					seen[key] = true
+					all = append(all, s)
+				}
+			}
+		}
 	}
 
 	sort.Slice(all, func(i, j int) bool {

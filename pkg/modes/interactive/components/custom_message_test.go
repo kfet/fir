@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 func TestCustomMessageComponent_DefaultRendering(t *testing.T) {

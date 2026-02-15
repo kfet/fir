@@ -3,7 +3,7 @@ package agent
 import (
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // testModel creates a test model for agent tests.

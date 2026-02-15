@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // TestAutoCompaction_E2E_ThresholdTriggered simulates a full agent loop
@@ -394,5 +394,209 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 
 	if accumulatedPercent <= cu.Percent {
 		t.Error("accumulated total should always be >= actual context usage")
+	}
+}
+
+// TestAutoCompaction_E2E_ContextUsageAfterCompaction verifies that GetContextUsage
+// returns -1 (unknown) right after compaction, since the old usage data is stale.
+func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := InMemorySessionManager(cwd)
+	settingsManager := NewSettingsManager(cwd, agentDir)
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      "test-provider",
+		Api:           "openai-completions",
+		ContextWindow: 100000,
+		MaxTokens:     4096,
+	}
+
+	fakeStreamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			output := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{ai.NewTextContent("High usage response")},
+				Api:        m.Api,
+				Provider:   m.Provider,
+				Model:      m.ID,
+				StopReason: ai.StopReasonStop,
+				Timestamp:  time.Now().UnixMilli(),
+				Usage:      ai.Usage{Input: 90000, Output: 5000, TotalTokens: 95000},
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: output})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return fakeStreamFn(m, ctx, opts)
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return ConvertToLLM(msgs)
+		},
+	})
+
+	runner := &mockCompactionRunner{
+		shouldCompactResult: true,
+		runResult: &CompactionResultInfo{
+			Summary:          "Compacted session",
+			FirstKeptEntryID: "entry-1",
+			TokensBefore:     90000,
+		},
+	}
+
+	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	_ = rl.Reload()
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:            a,
+		SessionManager:   sm,
+		SettingsManager:  settingsManager,
+		ResourceLoader:   rl,
+		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		CompactionRunner: runner,
+		Cwd:              cwd,
+	})
+	defer session.Close()
+
+	err := session.Prompt("Hello")
+	if err != nil {
+		t.Fatalf("Prompt failed: %v", err)
+	}
+	a.WaitForIdle()
+	time.Sleep(100 * time.Millisecond)
+
+	if !runner.runCalled {
+		t.Fatal("compaction was not triggered")
+	}
+
+	// Manually add a compaction entry (mock runner doesn't do this)
+	sm.AppendCompaction("Compacted session", "", 90000, nil, false)
+
+	// After compaction, context usage should be unknown (-1) because
+	// there's no post-compaction assistant message with valid usage yet
+	cu := session.GetContextUsage()
+	if cu == nil {
+		t.Fatal("GetContextUsage returned nil")
+	}
+	t.Logf("Context usage after compaction: tokens=%d percent=%.1f%%", cu.Tokens, cu.Percent)
+
+	if cu.Tokens != -1 {
+		t.Errorf("expected tokens=-1 after compaction (no post-compaction usage), got %d", cu.Tokens)
+	}
+	if cu.Percent != -1 {
+		t.Errorf("expected percent=-1 after compaction, got %.1f", cu.Percent)
+	}
+}
+
+// TestAutoCompaction_E2E_CompactionDisabled verifies that compaction does NOT trigger
+// when disabled in settings, even with high usage.
+func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := InMemorySessionManager(cwd)
+	enabled := false
+	settingsManager := NewInMemorySettingsManager(Settings{
+		Compaction: &CompactionSettings{
+			Enabled: &enabled,
+		},
+	})
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      "test-provider",
+		Api:           "openai-completions",
+		ContextWindow: 100000,
+		MaxTokens:     4096,
+	}
+
+	fakeStreamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			output := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{ai.NewTextContent("Big response")},
+				Api:        m.Api,
+				Provider:   m.Provider,
+				Model:      m.ID,
+				StopReason: ai.StopReasonStop,
+				Timestamp:  time.Now().UnixMilli(),
+				Usage:      ai.Usage{Input: 95000, Output: 5000, TotalTokens: 100000},
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: output})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return fakeStreamFn(m, ctx, opts)
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return ConvertToLLM(msgs)
+		},
+	})
+
+	runner := &mockCompactionRunner{
+		shouldCompactResult: false, // disabled won't even reach here, but just in case
+	}
+
+	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	_ = rl.Reload()
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:            a,
+		SessionManager:   sm,
+		SettingsManager:  settingsManager,
+		ResourceLoader:   rl,
+		ModelRegistry:    NewModelRegistry(NewAuthStorage(""), ""),
+		CompactionRunner: runner,
+		Cwd:              cwd,
+	})
+	defer session.Close()
+
+	var events []AgentSessionEvent
+	var mu sync.Mutex
+	session.Subscribe(func(e AgentSessionEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	})
+
+	err := session.Prompt("Hello")
+	if err != nil {
+		t.Fatalf("Prompt failed: %v", err)
+	}
+	a.WaitForIdle()
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, e := range events {
+		if e.Type == "auto_compaction_start" {
+			t.Error("compaction should NOT trigger when disabled")
+		}
+	}
+	if runner.runCalled {
+		t.Error("CompactionRunner.RunCompaction should NOT have been called when disabled")
 	}
 }

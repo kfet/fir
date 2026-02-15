@@ -38,15 +38,15 @@ func IsFocusable(c Component) bool {
 type OverlayAnchor string
 
 const (
-	AnchorCenter      OverlayAnchor = "center"
-	AnchorTopLeft     OverlayAnchor = "top-left"
-	AnchorTopRight    OverlayAnchor = "top-right"
-	AnchorBottomLeft  OverlayAnchor = "bottom-left"
-	AnchorBottomRight OverlayAnchor = "bottom-right"
-	AnchorTopCenter   OverlayAnchor = "top-center"
+	AnchorCenter       OverlayAnchor = "center"
+	AnchorTopLeft      OverlayAnchor = "top-left"
+	AnchorTopRight     OverlayAnchor = "top-right"
+	AnchorBottomLeft   OverlayAnchor = "bottom-left"
+	AnchorBottomRight  OverlayAnchor = "bottom-right"
+	AnchorTopCenter    OverlayAnchor = "top-center"
 	AnchorBottomCenter OverlayAnchor = "bottom-center"
-	AnchorLeftCenter  OverlayAnchor = "left-center"
-	AnchorRightCenter OverlayAnchor = "right-center"
+	AnchorLeftCenter   OverlayAnchor = "left-center"
+	AnchorRightCenter  OverlayAnchor = "right-center"
 )
 
 // OverlayMargin defines margins for overlays.
@@ -56,9 +56,9 @@ type OverlayMargin struct {
 
 // SizeValue is either an absolute number or a percentage string like "50%".
 type SizeValue struct {
-	Absolute   int
-	Percent    float64
-	IsPercent  bool
+	Absolute  int
+	Percent   float64
+	IsPercent bool
 }
 
 // NewAbsoluteSize creates an absolute SizeValue.
@@ -184,7 +184,7 @@ func (c *Container) Render(width int) []string {
 // CursorMarker is a zero-width APC sequence for hardware cursor positioning.
 // Components emit this at the cursor position when focused.
 // TUI finds and strips this marker, then positions the hardware cursor there.
-const CursorMarker = "\x1b_pi:c\x07"
+const CursorMarker = "\x1b_tau:c\x07"
 
 // segmentReset resets all ANSI styles and hyperlinks.
 const segmentReset = "\x1b[0m\x1b]8;;\x07"
@@ -192,30 +192,30 @@ const segmentReset = "\x1b[0m\x1b]8;;\x07"
 // TUI manages terminal UI with differential rendering.
 type TUI struct {
 	Container
-	Terminal           Terminal
-	OnDebug            func()
+	Terminal Terminal
+	OnDebug  func()
 
 	// renderMu serializes input handling, rendering, and stop so component
 	// state is never accessed concurrently.  This is separate from the
 	// embedded Container.mu which only protects the children slice.
-	renderMu           sync.Mutex
-	previousLines      []string
-	previousWidth      int
-	focusedComponent   Component
-	renderRequested    bool
-	cursorRow          int
-	hardwareCursorRow  int
-	showHardwareCursor bool
-	clearOnShrink      bool
-	maxLinesRendered   int
+	renderMu            sync.Mutex
+	previousLines       []string
+	previousWidth       int
+	focusedComponent    Component
+	renderRequested     bool
+	cursorRow           int
+	hardwareCursorRow   int
+	showHardwareCursor  bool
+	clearOnShrink       bool
+	maxLinesRendered    int
 	previousViewportTop int
-	fullRedrawCount    int
-	stopped            atomic.Bool
-	forceRedraw        atomic.Bool
-	overlayStack       []*overlayEntry
-	renderCh           chan struct{}
-	doneCh             chan struct{} // closed by Stop to unblock render loop
-	stopOnce           sync.Once
+	fullRedrawCount     int
+	stopped             atomic.Bool
+	forceRedraw         atomic.Bool
+	overlayStack        []*overlayEntry
+	renderCh            chan struct{}
+	doneCh              chan struct{} // closed by Stop to unblock render loop
+	stopOnce            sync.Once
 }
 
 // NewTUI creates a new TUI with the given terminal.

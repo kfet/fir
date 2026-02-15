@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // FooterData provides the data needed to render the footer.

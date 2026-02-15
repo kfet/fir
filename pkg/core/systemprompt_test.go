@@ -93,7 +93,7 @@ func TestBuildSystemPrompt_WithSkills(t *testing.T) {
 func TestBuildSystemPrompt_WithContextFiles(t *testing.T) {
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
 		ContextFiles: []ContextFile{
-			{Path: ".pi/prompts/context.md", Content: "Project-specific info"},
+			{Path: ".tau/prompts/context.md", Content: "Project-specific info"},
 		},
 		Cwd: "/test",
 	})

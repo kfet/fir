@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // SelectItem represents a selectable item in the list.

@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // BashToolParams are the parameters for the bash tool.
@@ -105,7 +105,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	var fullOutputPath string
 	if truncResult.Truncated {
 		// Write full output to temp file
-		tmpFile, tmpErr := os.CreateTemp("", "pi-bash-*.log")
+		tmpFile, tmpErr := os.CreateTemp("", "tau-bash-*.log")
 		if tmpErr == nil {
 			tmpFile.WriteString(output)
 			tmpFile.Close()
@@ -162,4 +162,3 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 		Details: details,
 	}, nil
 }
-

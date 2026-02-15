@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // SSEEvent represents a single Server-Sent Event.

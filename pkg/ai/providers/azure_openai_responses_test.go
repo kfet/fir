@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func azureTestModel() *ai.Model {

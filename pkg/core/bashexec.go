@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/pi-go/pkg/core/tools"
+	"github.com/kfet/tau/pkg/core/tools"
 )
 
 // BashExecutorOptions configures bash execution.
@@ -115,7 +115,7 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		if totalBytes > tools.DefaultMaxBytes && tempFile == nil {
 			id := make([]byte, 8)
 			rand.Read(id)
-			tempFilePath = filepath.Join(os.TempDir(), "pi-bash-"+hex.EncodeToString(id)+".log")
+			tempFilePath = filepath.Join(os.TempDir(), "tau-bash-"+hex.EncodeToString(id)+".log")
 			f, err := os.Create(tempFilePath)
 			if err == nil {
 				tempFile = f

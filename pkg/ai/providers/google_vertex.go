@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // --- Vertex AI configuration ---

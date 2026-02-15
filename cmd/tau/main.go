@@ -1,4 +1,4 @@
-// pi-go — Go port of the pi coding agent CLI
+// tau — Go implementation of the tau coding agent CLI
 package main
 
 import (

@@ -5,7 +5,7 @@ package oauth
 import (
 	"context"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // Credentials holds OAuth tokens for a provider.

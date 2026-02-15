@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // setupTestModelRegistry creates a ModelRegistry with a temp auth file.
@@ -775,8 +775,8 @@ func TestModelRegistry_CompatOverride(t *testing.T) {
 }
 
 func TestModelRegistry_DefaultModelsJsonPath(t *testing.T) {
-	path := DefaultModelsJsonPath("/home/user/.config/pi")
-	expected := filepath.Join("/home/user/.config/pi", "models.json")
+	path := DefaultModelsJsonPath("/home/user/.config/tau")
+	expected := filepath.Join("/home/user/.config/tau", "models.json")
 	if path != expected {
 		t.Errorf("expected %q, got %q", expected, path)
 	}

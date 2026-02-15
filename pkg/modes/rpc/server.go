@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // Server is the RPC mode server.
@@ -344,7 +344,37 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	// =================================================================
 
 	case CmdGetCommands:
-		return NewSuccessResponse(id, CmdGetCommands, GetCommandsData{Commands: nil})
+		var commands []RpcSlashCommand
+
+		// Add prompt templates
+		if rl := s.session.ResourceLoader(); rl != nil {
+			if prompts, _ := rl.GetPrompts(); len(prompts) > 0 {
+				for _, p := range prompts {
+					commands = append(commands, RpcSlashCommand{
+						Name:        p.Name,
+						Description: p.Description,
+						Source:      "prompt",
+						Location:    p.Source,
+						Path:        p.FilePath,
+					})
+				}
+			}
+
+			// Add skill commands
+			if skills, _ := rl.GetSkills(); len(skills) > 0 {
+				for _, sk := range skills {
+					commands = append(commands, RpcSlashCommand{
+						Name:        "skill:" + sk.Name,
+						Description: sk.Description,
+						Source:      "skill",
+						Location:    sk.Source,
+						Path:        sk.FilePath,
+					})
+				}
+			}
+		}
+
+		return NewSuccessResponse(id, CmdGetCommands, GetCommandsData{Commands: commands})
 
 	default:
 		return NewErrorResponse(id, cmd.Type, fmt.Sprintf("Unknown command: %s", cmd.Type))

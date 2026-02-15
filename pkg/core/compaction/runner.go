@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // DefaultRunner implements core.CompactionRunner using the compaction package.

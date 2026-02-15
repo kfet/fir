@@ -10,20 +10,179 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/ai/providers"
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/core/compaction"
-	"github.com/kfet/pi-go/pkg/core/tools"
-	"github.com/kfet/pi-go/pkg/extension"
-	interactive "github.com/kfet/pi-go/pkg/modes/interactive"
-	printmode "github.com/kfet/pi-go/pkg/modes/print"
-	rpcmode "github.com/kfet/pi-go/pkg/modes/rpc"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/ai/providers"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/core/compaction"
+	"github.com/kfet/tau/pkg/core/tools"
+	"github.com/kfet/tau/pkg/extension"
+	interactive "github.com/kfet/tau/pkg/modes/interactive"
+	printmode "github.com/kfet/tau/pkg/modes/print"
+	rpcmode "github.com/kfet/tau/pkg/modes/rpc"
 
 	// Import built-in extensions (registered via init())
-	_ "github.com/kfet/pi-go/pkg/extensions/notify"
+	_ "github.com/kfet/tau/pkg/extensions/claudeusage"
+	_ "github.com/kfet/tau/pkg/extensions/notify"
+	_ "github.com/kfet/tau/pkg/extensions/tmuxspinner"
 )
+
+// sessionSetup holds common setup results shared between run modes.
+type sessionSetup struct {
+	cwd             string
+	agentDir        string
+	result          *core.CreateAgentSessionResult
+	settingsManager *core.SettingsManager
+	extSetup        *extension.SetupResult
+}
+
+// setupSession performs the initialization shared by all run modes:
+// working directory, auth, model resolution, session creation, and extensions.
+//
+// When skipScopedOnContinue is true (print/RPC modes), the scoped-model
+// default is skipped on --continue/--resume so the continued session keeps
+// its original model.
+func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("get working directory: %w", err)
+	}
+
+	agentDir := core.DefaultAgentDir()
+	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+		agentDir = dir
+	}
+
+	// Auth and model registry
+	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+
+	if args.ApiKey != "" {
+		if args.Provider == "" {
+			return nil, fmt.Errorf("--api-key requires --provider to be specified")
+		}
+		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+	}
+
+	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	sessionManager := createSessionManager(args, cwd, agentDir)
+
+	// Resource loader
+	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+		Cwd:                           cwd,
+		AgentDir:                      agentDir,
+		SettingsManager:               settingsManager,
+		SystemPrompt:                  args.SystemPrompt,
+		AppendSystemPrompt:            args.AppendSystemPrompt,
+		NoSkills:                      args.NoSkills,
+		AdditionalSkillPaths:          args.Skills,
+		AdditionalPromptTemplatePaths: args.PromptTemplates,
+		NoPromptTemplates:             args.NoPromptTemplates,
+	})
+	if err := rl.Reload(); err != nil {
+		return nil, fmt.Errorf("reload resources: %w", err)
+	}
+
+	// Resolve scoped models
+	var scopedModels []core.ScopedModel
+	modelPatterns := args.Models
+	if len(modelPatterns) == 0 {
+		modelPatterns = settingsManager.GetEnabledModels()
+	}
+	if len(modelPatterns) > 0 {
+		scopedModels = core.ResolveModelScope(modelPatterns, modelRegistry)
+	}
+
+	// Resolve model from CLI flags
+	var model *ai.Model
+	if args.Provider != "" && args.Model != "" {
+		model = modelRegistry.Find(args.Provider, args.Model)
+		if model == nil {
+			return nil, fmt.Errorf("model %s/%s not found", args.Provider, args.Model)
+		}
+	} else if len(scopedModels) > 0 {
+		if !skipScopedOnContinue || (!args.Continue && !args.Resume) {
+			model = scopedModels[0].Model
+		}
+	}
+
+	// Build session options
+	sessionOpts := core.CreateAgentSessionOptions{
+		Cwd:             cwd,
+		AgentDir:        agentDir,
+		AuthStorage:     authStorage,
+		ModelRegistry:   modelRegistry,
+		Model:           model,
+		SessionManager:  sessionManager,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ScopedModels:    scopedModels,
+		CompactionRunner: &compaction.DefaultRunner{
+			SettingsManager: settingsManager,
+			ModelRegistry:   modelRegistry,
+		},
+	}
+
+	if cliTools := resolveTools(args, cwd); cliTools != nil {
+		sessionOpts.Tools = cliTools
+	}
+
+	if args.Thinking != "" {
+		sessionOpts.ThinkingLevel = string(args.Thinking)
+	}
+
+	result, err := core.CreateAgentSession(context.Background(), sessionOpts)
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	// Extensions
+	extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
+		EnabledNames: resolveEnabledExtensions(args, settingsManager),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
+	}
+
+	if extSetup != nil && extSetup.Runner != nil {
+		for name := range extSetup.Runner.GetFlags() {
+			if val, ok := args.UnknownFlags[name]; ok {
+				extSetup.Runner.SetFlagValue(name, val)
+			}
+		}
+	}
+
+	// Warn about model fallback
+	if result.ModelFallbackMessage != "" {
+		fmt.Fprintln(os.Stderr, result.ModelFallbackMessage)
+	}
+
+	// Check model is available
+	if result.Session.Model() == nil {
+		return nil, fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+	}
+
+	// Clamp thinking level to model capabilities
+	if args.Thinking != "" {
+		effectiveThinking := string(args.Thinking)
+		if !result.Session.Model().Reasoning {
+			effectiveThinking = "off"
+		} else if effectiveThinking == "xhigh" && !ai.SupportsXhigh(result.Session.Model()) {
+			effectiveThinking = "high"
+		}
+		if effectiveThinking != result.Session.ThinkingLevel() {
+			result.Session.SetThinkingLevel(effectiveThinking)
+		}
+	}
+
+	return &sessionSetup{
+		cwd:             cwd,
+		agentDir:        agentDir,
+		result:          result,
+		settingsManager: settingsManager,
+		extSetup:        extSetup,
+	}, nil
+}
 
 // run is the main application logic.
 func run() error {
@@ -38,7 +197,7 @@ func run() error {
 	}
 
 	if args.Version {
-		fmt.Println("pi-go " + version)
+		fmt.Println("tau " + version)
 		return nil
 	}
 
@@ -59,166 +218,25 @@ func run() error {
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
 	isRPCMode := args.OutputMode == ModeRPC
 
-	_ = interactive.InteractiveModeOptions{} // ensure import is used
-
 	if !isPrintMode && !isRPCMode {
 		return runInteractiveMode(args)
 	}
 
-	// Resolve working directory
-	cwd, err := os.Getwd()
+	setup, err := setupSession(args, true)
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		return err
 	}
+	defer setup.result.Session.Close()
 
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("PI_AGENT_DIR"); dir != "" {
-		agentDir = dir
+	// Extension lifecycle for non-interactive modes
+	if setup.extSetup != nil && setup.extSetup.Runner != nil {
+		_ = setup.extSetup.Runner.EmitSessionStart()
+		defer func() { _ = setup.extSetup.Runner.EmitSessionShutdown() }()
 	}
-
-	// Create auth storage and model registry
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
-
-	// Handle CLI --api-key as runtime override
-	if args.ApiKey != "" {
-		provider := args.Provider
-		if provider == "" {
-			return fmt.Errorf("--api-key requires --provider to be specified")
-		}
-		authStorage.SetRuntimeApiKey(provider, args.ApiKey)
-	}
-
-	// Create settings manager
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
-
-	// Create session manager
-	sessionManager := createSessionManager(args, cwd, agentDir)
-
-	// Create resource loader
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
-		Cwd:                           cwd,
-		AgentDir:                      agentDir,
-		SettingsManager:               settingsManager,
-		SystemPrompt:                  args.SystemPrompt,
-		AppendSystemPrompt:            args.AppendSystemPrompt,
-		NoSkills:                      args.NoSkills,
-		AdditionalSkillPaths:          args.Skills,
-		AdditionalPromptTemplatePaths: args.PromptTemplates,
-		NoPromptTemplates:             args.NoPromptTemplates,
-	})
-	if err := rl.Reload(); err != nil {
-		return fmt.Errorf("reload resources: %w", err)
-	}
-
-	// Resolve scoped models
-	var scopedModels []core.ScopedModel
-	modelPatterns := args.Models
-	if len(modelPatterns) == 0 {
-		modelPatterns = settingsManager.GetEnabledModels()
-	}
-	if len(modelPatterns) > 0 {
-		scopedModels = core.ResolveModelScope(modelPatterns, modelRegistry)
-	}
-
-	// Resolve model from CLI flags
-	var model *ai.Model
-	if args.Provider != "" && args.Model != "" {
-		model = modelRegistry.Find(args.Provider, args.Model)
-		if model == nil {
-			return fmt.Errorf("model %s/%s not found", args.Provider, args.Model)
-		}
-	} else if len(scopedModels) > 0 && !args.Continue && !args.Resume {
-		model = scopedModels[0].Model
-	}
-
-	// Build session options
-	sessionOpts := core.CreateAgentSessionOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		AuthStorage:     authStorage,
-		ModelRegistry:   modelRegistry,
-		Model:           model,
-		SessionManager:  sessionManager,
-		SettingsManager: settingsManager,
-		ResourceLoader:  rl,
-		ScopedModels:    scopedModels,
-		CompactionRunner: &compaction.DefaultRunner{
-			SettingsManager: settingsManager,
-			ModelRegistry:   modelRegistry,
-		},
-	}
-
-	// Apply CLI tool flags
-	if cliTools := resolveTools(args, cwd); cliTools != nil {
-		sessionOpts.Tools = cliTools
-	}
-
-	if args.Thinking != "" {
-		sessionOpts.ThinkingLevel = string(args.Thinking)
-	}
-
-	// Create the agent session
-	result, err := core.CreateAgentSession(context.Background(), sessionOpts)
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-	defer result.Session.Close()
-
-	// Set up extensions
-	extSetup, err := extension.Setup(result.Session, core.NewEventBus())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
-	}
-
-	// Apply extension flags from CLI args (unknown flags may be extension flags)
-	if extSetup != nil && extSetup.Runner != nil {
-		for name := range extSetup.Runner.GetFlags() {
-			if val, ok := args.UnknownFlags[name]; ok {
-				extSetup.Runner.SetFlagValue(name, val)
-			}
-		}
-	}
-
-	// Warn about model fallback
-	if result.ModelFallbackMessage != "" {
-		fmt.Fprintln(os.Stderr, result.ModelFallbackMessage)
-	}
-
-	// Check model is available
-	if result.Session.Model() == nil {
-		fmt.Fprintln(os.Stderr, "No models available.")
-		fmt.Fprintln(os.Stderr, "\nSet an API key environment variable:")
-		fmt.Fprintln(os.Stderr, "  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
-		os.Exit(1)
-	}
-
-	// Clamp thinking level to model capabilities
-	if result.Session.Model() != nil && args.Thinking != "" {
-		effectiveThinking := string(args.Thinking)
-		if !result.Session.Model().Reasoning {
-			effectiveThinking = "off"
-		} else if effectiveThinking == "xhigh" && !ai.SupportsXhigh(result.Session.Model()) {
-			effectiveThinking = "high"
-		}
-		if effectiveThinking != result.Session.ThinkingLevel() {
-			result.Session.SetThinkingLevel(effectiveThinking)
-		}
-	}
-
-	// Emit session_start to extensions
-	if extSetup != nil && extSetup.Runner != nil {
-		_ = extSetup.Runner.EmitSessionStart()
-	}
-	defer func() {
-		if extSetup != nil && extSetup.Runner != nil {
-			_ = extSetup.Runner.EmitSessionShutdown()
-		}
-	}()
 
 	// Run RPC mode
 	if isRPCMode {
-		server := rpcmode.NewServer(result.Session)
+		server := rpcmode.NewServer(setup.result.Session)
 		return server.Run()
 	}
 
@@ -228,7 +246,7 @@ func run() error {
 	var remainingMessages []string
 
 	if len(args.FileArgs) > 0 {
-		processed, err := ProcessFileArguments(args.FileArgs, cwd)
+		processed, err := ProcessFileArguments(args.FileArgs, setup.cwd)
 		if err != nil {
 			return err
 		}
@@ -250,7 +268,7 @@ func run() error {
 		outputMode = printmode.ModeJSON
 	}
 
-	return printmode.Run(result.Session, printmode.Options{
+	return printmode.Run(setup.result.Session, printmode.Options{
 		Mode:           outputMode,
 		InitialMessage: initialMessage,
 		InitialImages:  initialImages,
@@ -261,7 +279,7 @@ func run() error {
 // runListModels lists available models and exits.
 func runListModels(args *Args) error {
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("PI_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 
@@ -371,128 +389,57 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 	return nil
 }
 
-// runInteractiveMode runs the full interactive TUI mode.
-func runInteractiveMode(args *Args) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+// resolveEnabledExtensions computes the list of extension names to activate.
+// Extensions are off by default. They are enabled by:
+//   - settings.json "extensions" array (global or project)
+//   - CLI --extension / -e flags
+//
+// --no-extensions disables all extensions regardless of config.
+func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
+	if args.NoExtensions {
+		return nil
 	}
 
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("PI_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	// Start with settings
+	names := sm.GetEnabledExtensions()
 
-	// Setup auth, models, settings
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
-
-	if args.ApiKey != "" {
-		if args.Provider == "" {
-			return fmt.Errorf("--api-key requires --provider")
+	// Add CLI --extension flags (deduplicate)
+	if len(args.Extensions) > 0 {
+		seen := make(map[string]bool, len(names))
+		for _, n := range names {
+			seen[n] = true
 		}
-		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
-	}
-
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
-	sessionManager := createSessionManager(args, cwd, agentDir)
-
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
-		Cwd:                           cwd,
-		AgentDir:                      agentDir,
-		SettingsManager:               settingsManager,
-		SystemPrompt:                  args.SystemPrompt,
-		AppendSystemPrompt:            args.AppendSystemPrompt,
-		NoSkills:                      args.NoSkills,
-		AdditionalSkillPaths:          args.Skills,
-		AdditionalPromptTemplatePaths: args.PromptTemplates,
-		NoPromptTemplates:             args.NoPromptTemplates,
-	})
-	if err := rl.Reload(); err != nil {
-		return fmt.Errorf("reload resources: %w", err)
-	}
-
-	// Resolve model
-	var scopedModels []core.ScopedModel
-	modelPatterns := args.Models
-	if len(modelPatterns) == 0 {
-		modelPatterns = settingsManager.GetEnabledModels()
-	}
-	if len(modelPatterns) > 0 {
-		scopedModels = core.ResolveModelScope(modelPatterns, modelRegistry)
-	}
-
-	var model *ai.Model
-	if args.Provider != "" && args.Model != "" {
-		model = modelRegistry.Find(args.Provider, args.Model)
-		if model == nil {
-			return fmt.Errorf("model %s/%s not found", args.Provider, args.Model)
-		}
-	} else if len(scopedModels) > 0 {
-		model = scopedModels[0].Model
-	}
-
-	// Create session
-	sessionOpts := core.CreateAgentSessionOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		AuthStorage:     authStorage,
-		ModelRegistry:   modelRegistry,
-		Model:           model,
-		SessionManager:  sessionManager,
-		SettingsManager: settingsManager,
-		ResourceLoader:  rl,
-		ScopedModels:    scopedModels,
-		CompactionRunner: &compaction.DefaultRunner{
-			SettingsManager: settingsManager,
-			ModelRegistry:   modelRegistry,
-		},
-	}
-
-	// Apply CLI tool flags
-	if cliTools := resolveTools(args, cwd); cliTools != nil {
-		sessionOpts.Tools = cliTools
-	}
-
-	if args.Thinking != "" {
-		sessionOpts.ThinkingLevel = string(args.Thinking)
-	}
-
-	result, err := core.CreateAgentSession(context.Background(), sessionOpts)
-	if err != nil {
-		return fmt.Errorf("create session: %w", err)
-	}
-	defer result.Session.Close()
-
-	// Set up extensions for interactive mode
-	extSetupI, err := extension.Setup(result.Session, core.NewEventBus())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
-	}
-	if extSetupI != nil && extSetupI.Runner != nil {
-		for name := range extSetupI.Runner.GetFlags() {
-			if val, ok := args.UnknownFlags[name]; ok {
-				extSetupI.Runner.SetFlagValue(name, val)
+		for _, n := range args.Extensions {
+			if !seen[n] {
+				names = append(names, n)
+				seen[n] = true
 			}
 		}
-		_ = extSetupI.Runner.EmitSessionStart()
-		defer func() { _ = extSetupI.Runner.EmitSessionShutdown() }()
 	}
 
-	if result.Session.Model() == nil {
-		fmt.Fprintln(os.Stderr, "No models available.")
-		fmt.Fprintln(os.Stderr, "\nSet an API key environment variable:")
-		fmt.Fprintln(os.Stderr, "  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
-		os.Exit(1)
+	return names
+}
+
+// runInteractiveMode runs the full interactive TUI mode.
+func runInteractiveMode(args *Args) error {
+	setup, err := setupSession(args, false)
+	if err != nil {
+		return err
+	}
+	defer setup.result.Session.Close()
+
+	// Extension lifecycle: shutdown deferred, start happens after UI wiring
+	if setup.extSetup != nil && setup.extSetup.Runner != nil {
+		defer func() { _ = setup.extSetup.Runner.EmitSessionShutdown() }()
 	}
 
 	// Load keybindings
-	keybindings := core.NewKeybindingsManager(agentDir)
+	keybindings := core.NewKeybindingsManager(setup.agentDir)
 
 	// Process @file arguments and build initial prompt
 	var initialPrompt string
 	if len(args.FileArgs) > 0 {
-		processed, err := ProcessFileArguments(args.FileArgs, cwd)
+		processed, err := ProcessFileArguments(args.FileArgs, setup.cwd)
 		if err != nil {
 			return err
 		}
@@ -506,18 +453,25 @@ func runInteractiveMode(args *Args) error {
 	}
 
 	mode := interactive.NewInteractiveMode(
-		result.Session,
+		setup.result.Session,
 		keybindings,
-		settingsManager,
+		setup.settingsManager,
 		interactive.InteractiveModeOptions{
 			InitialPrompt: initialPrompt,
 			ThemeName:     "dark",
 		},
 	)
 
-	// Wire extension runner into interactive mode
-	if extSetupI != nil && extSetupI.Runner != nil {
-		mode.SetExtensionRunner(extSetupI.Runner)
+	// Wire extension setup into interactive mode (enables /reload for extensions).
+	// This also sets the UIContext on the runner so that extensions can update
+	// the footer status and show notifications.
+	if setup.extSetup != nil {
+		mode.SetExtensionSetup(setup.extSetup, args.Extensions)
+		// Emit session_start after the UI context is wired so that extension
+		// handlers (e.g. claude-usage) can call SetStatus successfully.
+		if setup.extSetup.Runner != nil {
+			_ = setup.extSetup.Runner.EmitSessionStart()
+		}
 	}
 
 	if err := mode.Init(); err != nil {

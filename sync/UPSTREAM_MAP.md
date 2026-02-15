@@ -201,11 +201,11 @@ Master mapping of TypeScript source files to their Go ports.
 | `examples/extensions/notify.ts` | `pkg/extensions/notify/notify.go` | ✅ |
 | `examples/extensions/sandbox/index.ts` | `pkg/extensions/sandbox/sandbox.go` | ✅ |
 
-## CLI Entry Point (`cmd/pi/`)
+## CLI Entry Point (`cmd/tau/`)
 
 | TS Source | Go File | Status |
 |---|---|---|
-| `coding-agent/src/cli.ts` | `cmd/pi/main.go` | ✅ |
-| `coding-agent/src/main.ts` | `cmd/pi/app.go` | ✅ |
-| `coding-agent/src/cli/args.ts` | `cmd/pi/args.go` | ✅ |
-| `coding-agent/src/cli/file-processor.ts` | `cmd/pi/fileprocessor.go` | ✅ |
+| `coding-agent/src/cli.ts` | `cmd/tau/main.go` | ✅ |
+| `coding-agent/src/main.ts` | `cmd/tau/app.go` | ✅ |
+| `coding-agent/src/cli/args.ts` | `cmd/tau/args.go` | ✅ |
+| `coding-agent/src/cli/file-processor.ts` | `cmd/tau/fileprocessor.go` | ✅ |

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func makeDummyModels() []*ai.Model {

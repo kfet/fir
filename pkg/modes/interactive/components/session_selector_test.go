@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/core"
 )
 
 func testSessions() []core.SessionListInfo {
@@ -209,5 +209,54 @@ func TestSessionSelectorComponent_SelectPath(t *testing.T) {
 	path := comp.SelectedPath()
 	if path == "" {
 		t.Error("expected a selected path")
+	}
+}
+
+func TestSessionSelectorComponent_FixedHeight(t *testing.T) {
+	now := time.Now()
+	currentSessions := make([]core.SessionListInfo, 5)
+	for i := range currentSessions {
+		currentSessions[i] = core.SessionListInfo{
+			Path: "/sessions/s" + string(rune('0'+i)) + ".jsonl", ID: "s",
+			Cwd: "/home/user/project", Name: "Session",
+			Modified: now.Add(-time.Duration(i) * time.Hour), MessageCount: 1,
+		}
+	}
+	allSessions := make([]core.SessionListInfo, 20)
+	for i := range allSessions {
+		allSessions[i] = core.SessionListInfo{
+			Path: "/sessions/a" + string(rune('0'+i)) + ".jsonl", ID: "a",
+			Cwd: "/home/user/project", Name: "All Session",
+			Modified: now.Add(-time.Duration(i) * time.Hour), MessageCount: 1,
+		}
+	}
+
+	comp := NewSessionSelectorComponent(
+		currentSessions, SessionScopeCurrent,
+		func() ([]core.SessionListInfo, error) { return allSessions, nil },
+		func(path string) {}, func() {},
+	)
+
+	width := 80
+	baseHeight := len(comp.Render(width))
+
+	// Toggle to all sessions (more items, showPath=true)
+	comp.HandleInput("\t")
+	if h := len(comp.Render(width)); h != baseHeight {
+		t.Errorf("height changed after Tab to all scope: %d → %d", baseHeight, h)
+	}
+
+	// Scroll down past visible window
+	for i := 0; i < 10; i++ {
+		comp.HandleInput("\x1b[B")
+	}
+	if h := len(comp.Render(width)); h != baseHeight {
+		t.Errorf("height changed after scrolling: %d → %d", baseHeight, h)
+	}
+
+	// Toggle back to current scope (fewer sessions, showPath=false)
+	comp.HandleInput("\t")
+	if h := len(comp.Render(width)); h != baseHeight {
+		t.Errorf("height changed after Tab back to current: %d → %d", baseHeight, h)
 	}
 }

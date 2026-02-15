@@ -3,9 +3,9 @@ package extension
 import (
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 func TestRegistry(t *testing.T) {
@@ -94,6 +94,101 @@ func TestRunnerLoadAll(t *testing.T) {
 	}
 	if !gotAgentEnd {
 		t.Error("agent_end handler was not called")
+	}
+}
+
+func TestRunnerLoadEnabled(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var ext1Called, ext2Called, ext3Called bool
+
+	Register("ext1", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			ext1Called = true
+			return nil, nil
+		})
+	})
+	Register("ext2", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			ext2Called = true
+			return nil, nil
+		})
+	})
+	Register("ext3", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			ext3Called = true
+			return nil, nil
+		})
+	})
+
+	runner := NewRunner(core.NewEventBus())
+	if err := runner.LoadEnabled([]string{"ext1", "ext3"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runner.Extensions()) != 2 {
+		t.Fatalf("expected 2 extensions, got %d", len(runner.Extensions()))
+	}
+
+	_ = runner.EmitSessionStart()
+
+	if !ext1Called {
+		t.Error("expected ext1 to be called")
+	}
+	if ext2Called {
+		t.Error("expected ext2 NOT to be called")
+	}
+	if !ext3Called {
+		t.Error("expected ext3 to be called")
+	}
+}
+
+func TestRunnerLoadEnabledEmpty(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("ext1", func(api API) {})
+
+	runner := NewRunner(core.NewEventBus())
+	if err := runner.LoadEnabled(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runner.Extensions()) != 0 {
+		t.Fatalf("expected 0 extensions when enabled list is empty, got %d", len(runner.Extensions()))
+	}
+}
+
+func TestRunnerLoadEnabledUnknownName(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("ext1", func(api API) {})
+
+	runner := NewRunner(core.NewEventBus())
+	if err := runner.LoadEnabled([]string{"nonexistent"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(runner.Extensions()) != 0 {
+		t.Fatalf("expected 0 extensions for unknown name, got %d", len(runner.Extensions()))
+	}
+}
+
+func TestRegisteredNames(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("alpha", func(api API) {})
+	Register("beta", func(api API) {})
+
+	names := RegisteredNames()
+	if len(names) != 2 {
+		t.Fatalf("expected 2 names, got %d", len(names))
+	}
+	if names[0] != "alpha" || names[1] != "beta" {
+		t.Errorf("unexpected names: %v", names)
 	}
 }
 

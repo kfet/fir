@@ -3,9 +3,9 @@
 package components
 
 import (
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // CustomEditor wraps the Editor with app-level keybinding support.
@@ -43,7 +43,7 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Check paste image
-	if ce.keybindings.Matches(data, "pasteImage") {
+	if ce.keybindings.Matches(data, core.ActionPasteImage) {
 		if ce.OnPasteImage != nil {
 			ce.OnPasteImage()
 		}
@@ -51,11 +51,11 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Escape/interrupt — only if autocomplete is NOT active
-	if ce.keybindings.Matches(data, "interrupt") {
+	if ce.keybindings.Matches(data, core.ActionInterrupt) {
 		if !ce.IsShowingAutocomplete() {
 			handler := ce.OnEscape
 			if handler == nil {
-				handler = ce.actionHandlers["interrupt"]
+				handler = ce.actionHandlers[core.ActionInterrupt]
 			}
 			if handler != nil {
 				handler()
@@ -68,11 +68,11 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Exit (Ctrl+D) — only when editor is empty
-	if ce.keybindings.Matches(data, "exit") {
+	if ce.keybindings.Matches(data, core.ActionExit) {
 		if ce.GetText() == "" {
 			handler := ce.OnCtrlD
 			if handler == nil {
-				handler = ce.actionHandlers["exit"]
+				handler = ce.actionHandlers[core.ActionExit]
 			}
 			if handler != nil {
 				handler()
@@ -84,7 +84,7 @@ func (ce *CustomEditor) HandleInput(data string) {
 
 	// Check all other app actions
 	for action, handler := range ce.actionHandlers {
-		if action != "interrupt" && action != "exit" && ce.keybindings.Matches(data, action) {
+		if action != core.ActionInterrupt && action != core.ActionExit && ce.keybindings.Matches(data, action) {
 			handler()
 			return
 		}

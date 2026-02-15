@@ -30,6 +30,17 @@ func RegisteredFactories() []RegisteredFactory {
 	return result
 }
 
+// RegisteredNames returns the names of all registered extension factories.
+func RegisteredNames() []string {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	names := make([]string, len(factories))
+	for i, f := range factories {
+		names[i] = f.Name
+	}
+	return names
+}
+
 // ClearRegistry removes all registered factories. Used for testing.
 func ClearRegistry() {
 	registryMu.Lock()

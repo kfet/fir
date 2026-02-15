@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
+	"github.com/kfet/tau/pkg/agent"
 )
 
 func execGrep(t *testing.T, tool agent.AgentTool, params map[string]any) (agent.AgentToolResult, error) {

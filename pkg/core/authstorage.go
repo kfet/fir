@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/ai/oauth"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/ai/oauth"
 )
 
 // CredentialType identifies the kind of stored credential.

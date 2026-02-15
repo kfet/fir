@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/core"
 )
 
 func TestBranchSummaryMessage_Collapsed(t *testing.T) {

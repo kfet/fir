@@ -2,7 +2,7 @@
 // Upstream hash: 1caadb2e
 package core
 
-import "github.com/kfet/pi-go/pkg/ai"
+import "github.com/kfet/tau/pkg/ai"
 
 // DefaultThinkingLevel is the default reasoning level for agent sessions.
 const DefaultThinkingLevel ai.ThinkingLevel = ai.ThinkingMedium

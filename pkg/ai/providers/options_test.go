@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 	"github.com/stretchr/testify/assert"
 )
 

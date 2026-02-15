@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // --- OpenAI Responses API SSE event types ---

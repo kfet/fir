@@ -4,7 +4,7 @@
 
 ```
 ┌──────────────────────────────────────────────┐
-│  cmd/pi/main.go                               │  CLI entry, arg parsing
+│  cmd/tau/main.go                               │  CLI entry, arg parsing
 ├──────────────────────────────────────────────┤
 │  pkg/modes/ (interactive | print | rpc)       │  UI layer
 ├──────────────────────────────────────────────┤

@@ -298,3 +298,84 @@ func TestExpandPromptTemplate_AllArgs(t *testing.T) {
 		t.Errorf("got %q", result)
 	}
 }
+
+// --- inferPromptSource ---
+
+func TestInferPromptSource_User(t *testing.T) {
+	source, label := inferPromptSource("/home/user/.tau/agent/prompts/fix.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	if source != "user" {
+		t.Errorf("source = %q, want user", source)
+	}
+	if label != "(user)" {
+		t.Errorf("label = %q, want (user)", label)
+	}
+}
+
+func TestInferPromptSource_Project(t *testing.T) {
+	source, label := inferPromptSource("/project/.tau/prompts/review.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	if source != "project" {
+		t.Errorf("source = %q, want project", source)
+	}
+	if label != "(project)" {
+		t.Errorf("label = %q, want (project)", label)
+	}
+}
+
+func TestInferPromptSource_Path(t *testing.T) {
+	source, label := inferPromptSource("/custom/dir/something.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	if source != "path" {
+		t.Errorf("source = %q, want path", source)
+	}
+	if label != "(path:something)" {
+		t.Errorf("label = %q, want (path:something)", label)
+	}
+}
+
+func TestInferPromptSource_DirMatch(t *testing.T) {
+	source, _ := inferPromptSource("/home/user/.tau/agent/prompts", "/home/user/.tau/agent/prompts", "")
+	if source != "user" {
+		t.Errorf("source = %q, want user (exact dir match)", source)
+	}
+}
+
+func TestLoadPromptTemplates_ExplicitUserDir(t *testing.T) {
+	// When an explicit path matches the agentDir/prompts, source should be "user"
+	dir := t.TempDir()
+	promptsDir := filepath.Join(dir, "prompts")
+	os.MkdirAll(promptsDir, 0755)
+	os.WriteFile(filepath.Join(promptsDir, "fix.md"), []byte("Fix it!"), 0644)
+
+	templates := LoadPromptTemplates(LoadPromptTemplatesOptions{
+		AgentDir:        dir,
+		PromptPaths:     []string{promptsDir},
+		IncludeDefaults: false,
+	})
+
+	if len(templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(templates))
+	}
+	if templates[0].Source != "user" {
+		t.Errorf("source = %q, want user", templates[0].Source)
+	}
+}
+
+func TestLoadPromptTemplates_ExplicitProjectDir(t *testing.T) {
+	// When an explicit path matches the cwd/.tau/prompts, source should be "project"
+	cwd := t.TempDir()
+	promptsDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	os.MkdirAll(promptsDir, 0755)
+	os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("Review it!"), 0644)
+
+	templates := LoadPromptTemplates(LoadPromptTemplatesOptions{
+		Cwd:             cwd,
+		PromptPaths:     []string{promptsDir},
+		IncludeDefaults: false,
+	})
+
+	if len(templates) != 1 {
+		t.Fatalf("expected 1 template, got %d", len(templates))
+	}
+	if templates[0].Source != "project" {
+		t.Errorf("source = %q, want project", templates[0].Source)
+	}
+}

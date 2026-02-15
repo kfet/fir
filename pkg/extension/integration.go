@@ -1,30 +1,76 @@
 package extension
 
 import (
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // SetupResult holds the results of setting up extensions for a session.
+// It keeps internal references needed to reload extensions at runtime.
 type SetupResult struct {
 	Runner *Runner
+
+	// Internal state for reload support.
+	session *core.AgentSession
+}
+
+// Reload tears down the current extensions and loads a new set.
+// It emits session_shutdown to old extensions, resets the runner,
+// loads the new extensions, and emits session_start to them.
+//
+// Because the tool hooks and event bridge closures reference the Runner
+// (not individual extensions), they automatically dispatch to the newly
+// loaded handlers after reload — no re-wiring is needed.
+func (r *SetupResult) Reload(enabledNames []string) error {
+	if r.Runner == nil {
+		return nil
+	}
+
+	// Notify old extensions of shutdown.
+	_ = r.Runner.EmitSessionShutdown()
+
+	// Clear all loaded extensions and merged state.
+	r.Runner.Reset()
+
+	// Load new extensions.
+	if len(enabledNames) > 0 {
+		if err := r.Runner.LoadEnabled(enabledNames); err != nil {
+			return err
+		}
+	}
+
+	// Notify new extensions of start.
+	_ = r.Runner.EmitSessionStart()
+
+	return nil
+}
+
+// SetupOptions configures which extensions to load.
+type SetupOptions struct {
+	// EnabledNames lists the extension names to activate. If nil or empty,
+	// no extensions are loaded (extensions are off by default).
+	EnabledNames []string
 }
 
 // Setup creates and configures an extension runner for the given session.
-// It loads all registered extensions, binds actions, and sets up tool hooks.
-func Setup(session *core.AgentSession, eventBus core.EventBus) (*SetupResult, error) {
+// It loads only the extensions named in opts.EnabledNames, binds actions,
+// sets up tool hooks, and bridges agent session events to the extension runner.
+//
+// Tool hooks and the event bridge are always wired (even when no extensions are
+// initially loaded) so that a subsequent call to SetupResult.Reload can activate
+// extensions without needing to re-wrap tools or re-subscribe events.
+func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions) (*SetupResult, error) {
 	runner := NewRunner(eventBus)
 
-	if err := runner.LoadAll(); err != nil {
-		return nil, err
+	if len(opts.EnabledNames) > 0 {
+		if err := runner.LoadEnabled(opts.EnabledNames); err != nil {
+			return nil, err
+		}
 	}
 
-	// No extensions registered — skip binding
-	if len(runner.Extensions()) == 0 {
-		return &SetupResult{Runner: runner}, nil
-	}
-
-	// Bind actions
+	// Bind actions — these closures reference the session and remain valid
+	// across extension reloads since the session doesn't change.
 	runner.BindActions(&Actions{
 		GetModel: func() *ai.Model {
 			return session.Model()
@@ -61,21 +107,19 @@ func Setup(session *core.AgentSession, eventBus core.EventBus) (*SetupResult, er
 		},
 	})
 
-	// Set up tool hooks on the session
-	hooks := &core.AgentSessionHooks{}
-
-	if runner.HasHandlers("tool_call") {
-		hooks.OnToolCall = func(toolCallID, toolName string, input map[string]any) *core.ToolCallBlock {
+	// Set up tool hooks on the session.
+	// These are always wired so that extensions loaded via Reload() work
+	// without re-wrapping tools. When no handlers are registered, the
+	// runner's emit methods return nil and the hooks are no-ops.
+	hooks := &core.AgentSessionHooks{
+		OnToolCall: func(toolCallID, toolName string, input map[string]any) *core.ToolCallBlock {
 			result := runner.EmitToolCall(toolCallID, toolName, input)
 			if result != nil && result.Block {
 				return &core.ToolCallBlock{Reason: result.Reason}
 			}
 			return nil
-		}
-	}
-
-	if runner.HasHandlers("tool_result") {
-		hooks.OnToolResult = func(toolCallID, toolName string, input map[string]any, content []ai.ToolResultContent, details any, isError bool) *core.ToolResultModification {
+		},
+		OnToolResult: func(toolCallID, toolName string, input map[string]any, content []ai.ToolResultContent, details any, isError bool) *core.ToolResultModification {
 			event := &ToolResultEvent{
 				ToolCallID: toolCallID,
 				ToolName:   toolName,
@@ -93,12 +137,98 @@ func Setup(session *core.AgentSession, eventBus core.EventBus) (*SetupResult, er
 				}
 			}
 			return nil
+		},
+	}
+	session.SetHooks(hooks)
+
+	// Bridge agent session events to the extension runner so that extensions
+	// subscribing to agent_start, agent_end, turn_start, turn_end, etc.
+	// receive those events without each mode having to forward them manually.
+	// The bridge closure references the runner, so it automatically dispatches
+	// to whatever handlers are currently loaded after a reload.
+	bridgeSessionEvents(session, runner)
+
+	return &SetupResult{
+		Runner:  runner,
+		session: session,
+	}, nil
+}
+
+// bridgeSessionEvents subscribes to the AgentSession event stream and
+// forwards relevant agent lifecycle events to the extension Runner.
+func bridgeSessionEvents(session *core.AgentSession, runner *Runner) {
+	session.Subscribe(func(event core.AgentSessionEvent) {
+		ae := event.AgentEvent
+		if ae == nil {
+			return
 		}
-	}
 
-	if hooks.OnToolCall != nil || hooks.OnToolResult != nil {
-		session.SetHooks(hooks)
-	}
+		switch ae.Type {
+		case agent.EventAgentStart:
+			_ = runner.EmitAgentStart()
 
-	return &SetupResult{Runner: runner}, nil
+		case agent.EventAgentEnd:
+			_ = runner.EmitAgentEnd(ae.Messages)
+
+		case agent.EventTurnStart:
+			_ = runner.Emit(&Event{
+				Type:      "turn_start",
+				TurnStart: &TurnStartEvent{},
+			})
+
+		case agent.EventTurnEnd:
+			var toolResults []ai.ToolResultMessage
+			if ae.ToolResults != nil {
+				toolResults = ae.ToolResults
+			}
+			var turnMsg agent.AgentMessage
+			if ae.TurnMessage != nil {
+				turnMsg = *ae.TurnMessage
+			}
+			_ = runner.Emit(&Event{
+				Type: "turn_end",
+				TurnEnd: &TurnEndEvent{
+					Message:     turnMsg,
+					ToolResults: toolResults,
+				},
+			})
+
+		case agent.EventMessageStart:
+			if ae.Message != nil {
+				_ = runner.Emit(&Event{
+					Type:         "message_start",
+					MessageStart: &MessageStartEvent{Message: *ae.Message},
+				})
+			}
+
+		case agent.EventMessageEnd:
+			if ae.Message != nil {
+				_ = runner.Emit(&Event{
+					Type:       "message_end",
+					MessageEnd: &MessageEndEvent{Message: *ae.Message},
+				})
+			}
+
+		case agent.EventToolExecutionStart:
+			_ = runner.Emit(&Event{
+				Type: "tool_execution_start",
+				ToolExecutionStart: &ToolExecutionStartEvent{
+					ToolCallID: ae.ToolCallID,
+					ToolName:   ae.ToolName,
+					Args:       ae.Args,
+				},
+			})
+
+		case agent.EventToolExecutionEnd:
+			_ = runner.Emit(&Event{
+				Type: "tool_execution_end",
+				ToolExecutionEnd: &ToolExecutionEndEvent{
+					ToolCallID: ae.ToolCallID,
+					ToolName:   ae.ToolName,
+					Result:     ae.Result,
+					IsError:    ae.IsError,
+				},
+			})
+		}
+	})
 }

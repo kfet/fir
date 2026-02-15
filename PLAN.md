@@ -1,4 +1,4 @@
-# pi-go Planning Documents
+# tau Planning Documents
 
 Go port of the pi coding agent. Target: Raspberry Pi Zero W/W2.
 

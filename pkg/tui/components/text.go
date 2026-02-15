@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // Text displays multi-line text with word wrapping.

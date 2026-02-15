@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
+	"github.com/kfet/tau/pkg/agent"
 )
 
 // ============================================================================
@@ -16,7 +16,7 @@ import (
 func TestDefaultAgentDir(t *testing.T) {
 	dir := DefaultAgentDir()
 	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".pi", "agent")
+	expected := filepath.Join(home, ".tau", "agent")
 	if dir != expected {
 		t.Errorf("expected %s, got %s", expected, dir)
 	}

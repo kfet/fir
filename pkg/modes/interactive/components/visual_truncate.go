@@ -3,7 +3,7 @@
 package components
 
 import (
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // VisualTruncateResult holds the result of truncating text to visual lines.

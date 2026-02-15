@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func TestExtractRetryDelay_Headers(t *testing.T) {
@@ -149,8 +149,8 @@ func TestBuildGeminiCLIRequest(t *testing.T) {
 	if req.Request.ToolConfig == nil {
 		t.Fatal("expected tool config")
 	}
-	if req.UserAgent != "pi-coding-agent" {
-		t.Errorf("expected user agent 'pi-coding-agent', got %q", req.UserAgent)
+	if req.UserAgent != "tau-coding-agent" {
+		t.Errorf("expected user agent 'tau-coding-agent', got %q", req.UserAgent)
 	}
 }
 

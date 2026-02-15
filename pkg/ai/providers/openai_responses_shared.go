@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // responsesSSEProcessor processes SSE events for the OpenAI Responses API format.

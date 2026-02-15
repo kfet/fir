@@ -102,7 +102,7 @@ Tell the user what you fixed:
 Sleep and wait for the reviewer to find more work, and start the next cycle with fresh instructions in the context:
 
 ```bash
-sleep 30 && echo "=== FIX CYCLE REMINDER === Re-read .pi/skills/fix/SKILL.md and follow its instructions to start the next cycle. Check docs/review/URGENT.md and docs/review/BACKLOG.md for new items."
+sleep 30 && echo "=== FIX CYCLE REMINDER === Re-read .tau/skills/fix/SKILL.md and follow its instructions to start the next cycle. Check docs/review/URGENT.md and docs/review/BACKLOG.md for new items."
 ```
 
 Use timeout 40 on the bash call. Then loop back to step 1.

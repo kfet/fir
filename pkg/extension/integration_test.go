@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // stubResourceLoader implements core.ResourceLoader for testing.
@@ -79,7 +79,9 @@ func TestSetupWithSession(t *testing.T) {
 	session := newTestSession(t, cwd)
 	defer session.Close()
 
-	result, err := Setup(session, core.NewEventBus())
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"test-integration"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,19 +138,25 @@ func TestSetupNoExtensions(t *testing.T) {
 	session := newTestSession(t, cwd)
 	defer session.Close()
 
-	result, err := Setup(session, core.NewEventBus())
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Hooks should not be set when no extensions exist
-	if session.Hooks() != nil {
-		t.Error("expected no hooks when no extensions registered")
+	// Hooks are always set (even with no extensions) to support runtime reload.
+	// When no handlers are registered, the hooks are no-ops.
+	if session.Hooks() == nil {
+		t.Error("expected hooks to be set (for reload support)")
 	}
 
 	// Runner should still exist
 	if result == nil || result.Runner == nil {
 		t.Fatal("expected non-nil runner even with no extensions")
+	}
+
+	// No extensions should be loaded
+	if len(result.Runner.Extensions()) != 0 {
+		t.Error("expected no extensions loaded")
 	}
 }
 
@@ -172,7 +180,9 @@ func TestWrapToolsWithHooks(t *testing.T) {
 	session := newTestSession(t, cwd)
 	defer session.Close()
 
-	_, err := Setup(session, core.NewEventBus())
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"blocker"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,5 +228,606 @@ func TestWrapToolsWithHooks(t *testing.T) {
 	}
 	if len(result.Content) == 0 || result.Content[0].Text != "output" {
 		t.Error("expected original output")
+	}
+}
+
+func TestRunnerReset(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var called bool
+	Register("resettable", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			called = true
+			return nil, nil
+		})
+		api.RegisterCommand("test", Command{Description: "test cmd"})
+		api.RegisterFlag("myflag", Flag{Type: "boolean", Default: true})
+	})
+
+	runner := NewRunner(core.NewEventBus())
+	if err := runner.LoadEnabled([]string{"resettable"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify loaded
+	if len(runner.Extensions()) != 1 {
+		t.Fatalf("expected 1 extension, got %d", len(runner.Extensions()))
+	}
+	if len(runner.GetCommands()) != 1 {
+		t.Error("expected 1 command")
+	}
+	if !runner.HasHandlers("session_start") {
+		t.Error("expected session_start handlers")
+	}
+
+	// Reset
+	runner.Reset()
+
+	if len(runner.Extensions()) != 0 {
+		t.Error("expected 0 extensions after reset")
+	}
+	if len(runner.GetCommands()) != 0 {
+		t.Error("expected 0 commands after reset")
+	}
+	if runner.HasHandlers("session_start") {
+		t.Error("expected no session_start handlers after reset")
+	}
+
+	// Emit should be a no-op now
+	called = false
+	_ = runner.EmitSessionStart()
+	if called {
+		t.Error("handler should not fire after reset")
+	}
+}
+
+func TestSetupResultReload(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var (
+		extAStarted  bool
+		extAShutdown bool
+		extBStarted  bool
+	)
+
+	Register("ext-a", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			extAStarted = true
+			return nil, nil
+		})
+		api.On("session_shutdown", func(event *Event, ctx Context) (any, error) {
+			extAShutdown = true
+			return nil, nil
+		})
+		api.RegisterCommand("cmd-a", Command{Description: "from ext-a"})
+	})
+
+	Register("ext-b", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			extBStarted = true
+			return nil, nil
+		})
+		api.RegisterCommand("cmd-b", Command{Description: "from ext-b"})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	// Initial setup with ext-a
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"ext-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+	if !extAStarted {
+		t.Error("ext-a should have received session_start")
+	}
+	if cmds := result.Runner.GetCommands(); len(cmds) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(cmds))
+	} else if cmds["cmd-a"] == nil {
+		t.Error("expected cmd-a")
+	}
+
+	// Reload with ext-b instead
+	extAStarted = false
+	extBStarted = false
+	if err := result.Reload([]string{"ext-b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ext-a should have received shutdown
+	if !extAShutdown {
+		t.Error("ext-a should have received session_shutdown during reload")
+	}
+
+	// ext-b should have received start
+	if !extBStarted {
+		t.Error("ext-b should have received session_start after reload")
+	}
+
+	// ext-a should NOT have received start again
+	if extAStarted {
+		t.Error("ext-a should not have received session_start after reload")
+	}
+
+	// Commands should now be from ext-b only
+	cmds := result.Runner.GetCommands()
+	if len(cmds) != 1 {
+		t.Fatalf("expected 1 command after reload, got %d", len(cmds))
+	}
+	if cmds["cmd-b"] == nil {
+		t.Error("expected cmd-b after reload")
+	}
+	if cmds["cmd-a"] != nil {
+		t.Error("expected cmd-a to be gone after reload")
+	}
+}
+
+func TestSetupResultReloadToEmpty(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var shutdownCalled bool
+	Register("ext-temp", func(api API) {
+		api.On("session_shutdown", func(event *Event, ctx Context) (any, error) {
+			shutdownCalled = true
+			return nil, nil
+		})
+		api.On("tool_call", func(event *Event, ctx Context) (any, error) {
+			return &ToolCallResult{Block: true, Reason: "blocked by ext"}, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"ext-temp"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify hook blocks
+	hooks := session.Hooks()
+	if hooks == nil || hooks.OnToolCall == nil {
+		t.Fatal("expected hooks")
+	}
+	block := hooks.OnToolCall("tc1", "bash", map[string]any{})
+	if block == nil {
+		t.Fatal("expected block before reload")
+	}
+
+	// Reload to empty (disable all extensions)
+	if err := result.Reload(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !shutdownCalled {
+		t.Error("expected shutdown on reload to empty")
+	}
+
+	// Hooks still exist but should be no-ops (no handlers registered)
+	block = hooks.OnToolCall("tc2", "bash", map[string]any{})
+	if block != nil {
+		t.Error("expected no block after reload to empty (no handlers)")
+	}
+}
+
+func TestSetupResultReloadFromEmpty(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var extStarted bool
+	Register("ext-late", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			extStarted = true
+			return nil, nil
+		})
+		api.On("tool_call", func(event *Event, ctx Context) (any, error) {
+			if event.ToolCall != nil && event.ToolCall.ToolName == "blocked" {
+				return &ToolCallResult{Block: true, Reason: "late blocker"}, nil
+			}
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	// Start with no extensions
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hooks exist but are no-ops
+	hooks := session.Hooks()
+	if hooks == nil || hooks.OnToolCall == nil {
+		t.Fatal("hooks should always be set for reload support")
+	}
+	block := hooks.OnToolCall("tc1", "blocked", map[string]any{})
+	if block != nil {
+		t.Error("expected no block with no extensions")
+	}
+
+	// Reload to add an extension
+	if err := result.Reload([]string{"ext-late"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !extStarted {
+		t.Error("ext-late should have received session_start")
+	}
+
+	// Now hook should block
+	block = hooks.OnToolCall("tc2", "blocked", map[string]any{})
+	if block == nil {
+		t.Error("expected block after reload with ext-late")
+	}
+	if block != nil && block.Reason != "late blocker" {
+		t.Errorf("expected reason 'late blocker', got %q", block.Reason)
+	}
+}
+
+// ============================================================================
+// bridgeSessionEvents — all event type mappings
+// ============================================================================
+
+func TestBridgeSessionEvents_TurnStart(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *TurnStartEvent
+	Register("turn-start-ext", func(api API) {
+		api.On("turn_start", func(event *Event, ctx Context) (any, error) {
+			got = event.TurnStart
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"turn-start-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{Type: agent.EventTurnStart},
+	})
+
+	if got == nil {
+		t.Fatal("expected turn_start event to be bridged to extension")
+	}
+}
+
+func TestBridgeSessionEvents_TurnEnd(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *TurnEndEvent
+	Register("turn-end-ext", func(api API) {
+		api.On("turn_end", func(event *Event, ctx Context) (any, error) {
+			got = event.TurnEnd
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"turn-end-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	turnMsg := agent.AgentMessage{Message: ai.NewUserMsg("hello", 0)}
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:        agent.EventTurnEnd,
+			TurnMessage: &turnMsg,
+			ToolResults: []ai.ToolResultMessage{
+				{ToolCallID: "tc1"},
+			},
+		},
+	})
+
+	if got == nil {
+		t.Fatal("expected turn_end event to be bridged to extension")
+	}
+	if len(got.ToolResults) != 1 {
+		t.Errorf("expected 1 tool result, got %d", len(got.ToolResults))
+	}
+}
+
+func TestBridgeSessionEvents_TurnEndNilFields(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *TurnEndEvent
+	Register("turn-end-nil-ext", func(api API) {
+		api.On("turn_end", func(event *Event, ctx Context) (any, error) {
+			got = event.TurnEnd
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"turn-end-nil-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// turn_end with nil TurnMessage and ToolResults
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{Type: agent.EventTurnEnd},
+	})
+
+	if got == nil {
+		t.Fatal("expected turn_end event")
+	}
+	if got.ToolResults != nil {
+		t.Errorf("expected nil tool results, got %v", got.ToolResults)
+	}
+}
+
+func TestBridgeSessionEvents_MessageStart(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *MessageStartEvent
+	Register("msg-start-ext", func(api API) {
+		api.On("message_start", func(event *Event, ctx Context) (any, error) {
+			got = event.MessageStart
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"msg-start-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := agent.AgentMessage{Message: ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("hi")},
+	})}
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageStart,
+			Message: &msg,
+		},
+	})
+
+	if got == nil {
+		t.Fatal("expected message_start event to be bridged")
+	}
+}
+
+func TestBridgeSessionEvents_MessageEnd(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *MessageEndEvent
+	Register("msg-end-ext", func(api API) {
+		api.On("message_end", func(event *Event, ctx Context) (any, error) {
+			got = event.MessageEnd
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"msg-end-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := agent.AgentMessage{Message: ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("done")},
+	})}
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageEnd,
+			Message: &msg,
+		},
+	})
+
+	if got == nil {
+		t.Fatal("expected message_end event to be bridged")
+	}
+}
+
+func TestBridgeSessionEvents_MessageStartNilMessage(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var called bool
+	Register("msg-start-nil-ext", func(api API) {
+		api.On("message_start", func(event *Event, ctx Context) (any, error) {
+			called = true
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"msg-start-nil-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// message_start with nil Message should not emit
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageStart,
+			Message: nil,
+		},
+	})
+
+	if called {
+		t.Error("expected message_start with nil message NOT to be emitted")
+	}
+}
+
+func TestBridgeSessionEvents_ToolExecutionStart(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *ToolExecutionStartEvent
+	Register("tool-exec-start-ext", func(api API) {
+		api.On("tool_execution_start", func(event *Event, ctx Context) (any, error) {
+			got = event.ToolExecutionStart
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"tool-exec-start-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionStart,
+			ToolCallID: "tc-123",
+			ToolName:   "bash",
+			Args:       map[string]any{"command": "ls"},
+		},
+	})
+
+	if got == nil {
+		t.Fatal("expected tool_execution_start event to be bridged")
+	}
+	if got.ToolCallID != "tc-123" {
+		t.Errorf("expected tool call ID 'tc-123', got %q", got.ToolCallID)
+	}
+	if got.ToolName != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", got.ToolName)
+	}
+	if args, ok := got.Args.(map[string]any); !ok || args["command"] != "ls" {
+		t.Errorf("expected args with command=ls, got %v", got.Args)
+	}
+}
+
+func TestBridgeSessionEvents_ToolExecutionEnd(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var got *ToolExecutionEndEvent
+	Register("tool-exec-end-ext", func(api API) {
+		api.On("tool_execution_end", func(event *Event, ctx Context) (any, error) {
+			got = event.ToolExecutionEnd
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"tool-exec-end-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session.PublishEvent(core.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:       agent.EventToolExecutionEnd,
+			ToolCallID: "tc-456",
+			ToolName:   "read",
+			Result:     "file contents",
+			IsError:    true,
+		},
+	})
+
+	if got == nil {
+		t.Fatal("expected tool_execution_end event to be bridged")
+	}
+	if got.ToolCallID != "tc-456" {
+		t.Errorf("expected tool call ID 'tc-456', got %q", got.ToolCallID)
+	}
+	if got.ToolName != "read" {
+		t.Errorf("expected tool name 'read', got %q", got.ToolName)
+	}
+	if got.Result != "file contents" {
+		t.Errorf("expected result 'file contents', got %v", got.Result)
+	}
+	if !got.IsError {
+		t.Error("expected IsError=true")
+	}
+}
+
+func TestBridgeSessionEvents_NonAgentEventIgnored(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var called bool
+	Register("all-events-ext", func(api API) {
+		api.On("agent_start", func(event *Event, ctx Context) (any, error) {
+			called = true
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"all-events-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Session-only event (no AgentEvent) should be silently ignored
+	session.PublishEvent(core.AgentSessionEvent{
+		Type: "auto_compaction_start",
+	})
+
+	if called {
+		t.Error("expected non-agent events to be ignored by bridge")
 	}
 }

@@ -124,7 +124,7 @@ func handleCompletions(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(upper, "WRITE_FILE") && availableTools["write"]:
 		parts := strings.Fields(userText)
 		path := "output.txt"
-		content := "WRITTEN_BY_PI"
+		content := "WRITTEN_BY_TAU"
 		if len(parts) >= 2 {
 			path = parts[1]
 		}
@@ -267,9 +267,9 @@ type sseResponse struct {
 }
 
 type sseChoice struct {
-	Index        int            `json:"index"`
-	Delta        sseDelta       `json:"delta"`
-	FinishReason *string        `json:"finish_reason"`
+	Index        int      `json:"index"`
+	Delta        sseDelta `json:"delta"`
+	FinishReason *string  `json:"finish_reason"`
 }
 
 type sseDelta struct {

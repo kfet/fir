@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // CountdownTimer is a reusable countdown timer for dialog components.

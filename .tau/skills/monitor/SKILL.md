@@ -5,7 +5,7 @@ description: Continually monitor the project for updates
 
 # Monitor Skill
 
-Continually monitor the pi-go project for progress updates and report changes to the user.
+Continually monitor the tau project for progress updates and report changes to the user.
 
 > **`PROJECT_ROOT`** refers to the repository root (the directory containing `go.mod`). Set it at the start of every shell session:
 > ```bash
@@ -27,7 +27,7 @@ Each monitoring cycle has two steps:
 This command sleeps for 2 minutes, then collects the snapshot, then prints a prompt that tells you to re-read this skill file and continue the loop:
 
 ```bash
-sleep 30 && cd "$PROJECT_ROOT" && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15 && echo "" && echo ">>> Re-read .pi/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
+sleep 30 && cd "$PROJECT_ROOT" && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15 && echo "" && echo ">>> Re-read .tau/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
 ```
 
 Use timeout 40 on the bash call.
@@ -36,7 +36,7 @@ Use timeout 40 on the bash call.
 
 After the command completes:
 1. Analyze the snapshot output and report changes to the user (see **Reporting Style** below).
-2. Immediately re-read this skill file (`.pi/skills/monitor/SKILL.md`) and execute **Step 1** again.
+2. Immediately re-read this skill file (`.tau/skills/monitor/SKILL.md`) and execute **Step 1** again.
 
 This creates a self-sustaining loop: sleep → snapshot → report → re-read skill → sleep → …
 

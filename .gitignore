@@ -1,10 +1,6 @@
-# Compiled binaries
-pi-go
-pi-go-*
-pi
-*.test
-*.out
-mock-e2e-server
+# Build outputs
+bin/
+cover.out
 
 # IDE
 .idea/

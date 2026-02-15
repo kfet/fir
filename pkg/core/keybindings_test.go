@@ -24,6 +24,11 @@ func TestKeybindingsManager_Defaults(t *testing.T) {
 	if len(keys) != 0 {
 		t.Errorf("newSession keys = %v, want []", keys)
 	}
+
+	keys = m.GetKeys(ActionSelectThinking)
+	if len(keys) != 0 {
+		t.Errorf("selectThinking keys = %v, want []", keys)
+	}
 }
 
 func TestKeybindingsManager_Override(t *testing.T) {
@@ -69,9 +74,45 @@ func TestKeybindingsManager_FromFile(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "keybindings.json"), data, 0644)
 
 	m := NewKeybindingsManager(dir)
+
 	keys := m.GetKeys(ActionInterrupt)
 	if len(keys) != 1 || keys[0] != "ctrl+c" {
 		t.Errorf("interrupt keys = %v, want [ctrl+c]", keys)
+	}
+
+	// Verify array override from file was loaded
+	keys = m.GetKeys(ActionExit)
+	if len(keys) != 2 {
+		t.Fatalf("exit keys = %v, want 2 keys", keys)
+	}
+	if keys[0] != "ctrl+d" || keys[1] != "ctrl+q" {
+		t.Errorf("exit keys = %v, want [ctrl+d ctrl+q]", keys)
+	}
+}
+
+func TestKeybindingsManager_FromFile_Matches(t *testing.T) {
+	dir := t.TempDir()
+	config := map[string]any{
+		"exit": []string{"ctrl+d", "ctrl+q"},
+	}
+	data, _ := json.Marshal(config)
+	os.WriteFile(filepath.Join(dir, "keybindings.json"), data, 0644)
+
+	m := NewKeybindingsManager(dir)
+
+	// ctrl+d should match exit (byte 0x04)
+	if !m.Matches("\x04", ActionExit) {
+		t.Error("expected ctrl+d to match exit")
+	}
+
+	// ctrl+q should match exit (byte 0x11)
+	if !m.Matches("\x11", ActionExit) {
+		t.Error("expected ctrl+q to match exit")
+	}
+
+	// ctrl+c should NOT match exit
+	if m.Matches("\x03", ActionExit) {
+		t.Error("expected ctrl+c to NOT match exit")
 	}
 }
 
@@ -93,5 +134,80 @@ func TestKeybindingsManager_UnknownAction(t *testing.T) {
 	keys := m.GetKeys(AppAction("unknownAction"))
 	if len(keys) != 0 {
 		t.Errorf("unknown action keys = %v, want []", keys)
+	}
+}
+
+func TestKeybindingsManager_EmptyArrayOverride(t *testing.T) {
+	// Overriding with empty array should remove all default bindings
+	config := KeybindingsConfig{
+		"interrupt": []any{},
+	}
+	m := NewKeybindingsManagerInMemory(config)
+
+	keys := m.GetKeys(ActionInterrupt)
+	if len(keys) != 0 {
+		t.Errorf("interrupt keys = %v, want []", keys)
+	}
+
+	// Matches should return false for the now-removed default
+	if m.Matches("\x1b", ActionInterrupt) {
+		t.Error("expected escape to NOT match interrupt after empty override")
+	}
+}
+
+func TestKeybindingsManager_SelectThinkingConfigurable(t *testing.T) {
+	// selectThinking has no default keybinding but should be configurable
+	config := KeybindingsConfig{
+		"selectThinking": "ctrl+t",
+	}
+	m := NewKeybindingsManagerInMemory(config)
+
+	keys := m.GetKeys(ActionSelectThinking)
+	if len(keys) != 1 || keys[0] != "ctrl+t" {
+		t.Errorf("selectThinking keys = %v, want [ctrl+t]", keys)
+	}
+}
+
+func TestKeybindingsManager_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "keybindings.json"), []byte("{invalid json}"), 0644)
+
+	m := NewKeybindingsManager(dir)
+	// Should fall back to defaults
+	keys := m.GetKeys(ActionInterrupt)
+	if len(keys) != 1 || keys[0] != "escape" {
+		t.Errorf("interrupt keys = %v, want [escape]", keys)
+	}
+}
+
+func TestKeybindingsManager_AllDefaultActionsRegistered(t *testing.T) {
+	// Verify that every AppAction constant is in DefaultAppKeybindings
+	allActions := []AppAction{
+		ActionInterrupt,
+		ActionClear,
+		ActionExit,
+		ActionSuspend,
+		ActionCycleThinkingLevel,
+		ActionCycleModelForward,
+		ActionCycleModelBackward,
+		ActionSelectModel,
+		ActionExpandTools,
+		ActionToggleThinking,
+		ActionToggleSessionNamedFilter,
+		ActionExternalEditor,
+		ActionFollowUp,
+		ActionDequeue,
+		ActionPasteImage,
+		ActionNewSession,
+		ActionSelectThinking,
+		ActionTree,
+		ActionFork,
+		ActionResume,
+	}
+
+	for _, action := range allActions {
+		if !isAppAction(action) {
+			t.Errorf("action %q not in DefaultAppKeybindings", action)
+		}
 	}
 }

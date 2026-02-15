@@ -127,7 +127,7 @@ After truncate + pathutils, remaining tools are independent — parallelizable.
 | [x] | `compaction/utils.go` `compaction/utils_test.go` | `coding-agent/src/core/compaction/utils.ts` | 154 | `pkg-core-compaction-utils` | messages |
 | [x] | `sdk.go` `sdk_test.go` | `coding-agent/src/core/sdk.ts` | 365 | `pkg-core-sdk` | all above |
 | [x] | `agentsession.go` `agentsession_test.go` | `coding-agent/src/core/agent-session.ts` | 2785 | `pkg-core-agentsession` | all above |
-| [x] | **🎯 MILESTONE: `echo "Hello" \| pi-go -p` works** | | | | |
+| [x] | **🎯 MILESTONE: `echo "Hello" \| tau -p` works** | | | | |
 | | Go file | TS source | Lines | Depends on |
 |---|---|---|---|---|
 | [x] | `session.go` | `coding-agent/src/core/session-manager.ts` | 1401 | agent/types, ai/types |
@@ -154,7 +154,7 @@ After truncate + pathutils, remaining tools are independent — parallelizable.
 | [x] | `compaction/utils.go` | `coding-agent/src/core/compaction/utils.ts` | 154 | messages |
 | [x] | `sdk.go` | `coding-agent/src/core/sdk.ts` | 365 | all above |
 | [x] | `agentsession.go` | `coding-agent/src/core/agent-session.ts` | 2785 | all above |
-| [x] | 🎯 **MILESTONE: `echo "Hello" \| pi-go -p` works** | | | |
+| [x] | 🎯 **MILESTONE: `echo "Hello" \| tau -p` works** | | | |
 
 ## Phase 6: TUI (`pkg/tui/`)
 
@@ -220,9 +220,9 @@ keys, utils, fuzzy, image are independent — parallelizable.
 |
 | | Go file | TS source | Lines | Depends on |
 |---|---|---|---|---|
-| [x] | `cmd/pi/main.go` || `coding-agent/src/cli.ts` | | 12 | `cmd| app ||pi-main` | app |
-| [x] | `cmd/pi/app.go` `cmd/pi/app_test.go` || `coding-agent/src/main.ts` | | 726 | `cmd| everything ||pi-app` | everything |
-| [x] | `cmd/pi/args.go` `cmd/pi/args_test.go` | `coding-agent/src/cli/args.ts` | 304 | `cmd-pi-args` | none |
+| [x] | `cmd/tau/main.go` || `coding-agent/src/cli.ts` | | 12 | `cmd| app ||pi-main` | app |
+| [x] | `cmd/tau/app.go` `cmd/tau/app_test.go` || `coding-agent/src/main.ts` | | 726 | `cmd| everything ||pi-app` | everything |
+| [x] | `cmd/tau/args.go` `cmd/tau/args_test.go` | `coding-agent/src/cli/args.ts` | 304 | `cmd-pi-args` | none |
 
 ## Phase 10: Skills Integration (TUI)
 
@@ -337,9 +337,9 @@ Compiled-in extension system allowing Go packages to register event handlers, cu
 
 | Status | Task | Go file | Notes |
 |---|---|---|---|
-| [x] | Extension setup in print/RPC mode | `cmd/pi/app.go` | Setup + session_start/shutdown events |
-| [x] | Extension setup in interactive mode | `cmd/pi/app.go` | Setup + runner wired to InteractiveMode |
-| [x] | Extension flag parsing from CLI | `cmd/pi/app.go` | UnknownFlags matched to extension flags |
+| [x] | Extension setup in print/RPC mode | `cmd/tau/app.go` | Setup + session_start/shutdown events |
+| [x] | Extension setup in interactive mode | `cmd/tau/app.go` | Setup + runner wired to InteractiveMode |
+| [x] | Extension flag parsing from CLI | `cmd/tau/app.go` | UnknownFlags matched to extension flags |
 
 ### Built-in extensions
 
@@ -347,4 +347,5 @@ Compiled-in extension system allowing Go packages to register event handlers, cu
 |---|---|---|---|
 | [x] | `pkg/extensions/notify/notify.go` + test | `examples/extensions/notify.ts` | Terminal notifications on agent_end |
 | [x] | `pkg/extensions/sandbox/sandbox.go` + test | `examples/extensions/sandbox/index.ts` | Tool call blocking, config, flag, command |
+| [x] | `pkg/extensions/claudeusage/` + tests | — | Claude rate limit usage display, OAuth login, footer status |
 | [x] | **🎯 MILESTONE: Extensions work (notify + sandbox)** | | |

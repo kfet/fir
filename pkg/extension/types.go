@@ -1,4 +1,4 @@
-// Package extension provides the extension system for pi-go.
+// Package extension provides the extension system for tau.
 //
 // Extensions are Go packages that register themselves via Register() or init().
 // They can subscribe to lifecycle events, register custom tools, commands,
@@ -9,9 +9,9 @@
 package extension
 
 import (
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // Factory is the entry point for an extension.

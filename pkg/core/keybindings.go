@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // AppAction is an application-level action.
@@ -29,6 +29,7 @@ const (
 	ActionFollowUp                 AppAction = "followUp"
 	ActionDequeue                  AppAction = "dequeue"
 	ActionPasteImage               AppAction = "pasteImage"
+	ActionSelectThinking           AppAction = "selectThinking"
 	ActionNewSession               AppAction = "newSession"
 	ActionTree                     AppAction = "tree"
 	ActionFork                     AppAction = "fork"
@@ -53,6 +54,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionDequeue:                  {"alt+up"},
 	ActionPasteImage:               {"ctrl+v"},
 	ActionNewSession:               {},
+	ActionSelectThinking:           {},
 	ActionTree:                     {},
 	ActionFork:                     {},
 	ActionResume:                   {},

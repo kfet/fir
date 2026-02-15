@@ -3,9 +3,9 @@
 package components
 
 import (
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // SkillInvocationMessageComponent renders a skill invocation message with collapsed/expanded state.

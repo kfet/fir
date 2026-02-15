@@ -5,7 +5,7 @@ package core
 import (
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func TestDefaultThinkingLevel(t *testing.T) {

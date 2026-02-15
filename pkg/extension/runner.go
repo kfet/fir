@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // ============================================================================
@@ -95,9 +95,49 @@ func NewRunner(eventBus core.EventBus) *Runner {
 	return r
 }
 
+// Reset clears all loaded extensions and merged registrations.
+// It preserves the event bus, actions, UI context, error listener, and flag values
+// so that the runner can be reloaded with a new set of extensions.
+func (r *Runner) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.extensions = nil
+	r.allTools = make(map[string]*ToolDefinition)
+	r.allCommands = make(map[string]*Command)
+	r.allFlags = make(map[string]*Flag)
+	r.allShortcuts = make(map[string]*ShortcutHandler)
+	r.allHandlers = make(map[string][]Handler)
+	// Keep: eventBus, actions, uiContext, onError, flagValues
+}
+
 // LoadAll initializes all registered extension factories.
 func (r *Runner) LoadAll() error {
-	registered := RegisteredFactories()
+	return r.loadFactories(RegisteredFactories())
+}
+
+// LoadEnabled initializes only the extension factories whose names appear in
+// the enabled list. Names are matched case-sensitively. Unknown names are
+// silently ignored (the factory may not be compiled in).
+func (r *Runner) LoadEnabled(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+	all := RegisteredFactories()
+	filtered := make([]RegisteredFactory, 0, len(names))
+	for _, rf := range all {
+		if nameSet[rf.Name] {
+			filtered = append(filtered, rf)
+		}
+	}
+	return r.loadFactories(filtered)
+}
+
+// loadFactories initializes the given extension factories.
+func (r *Runner) loadFactories(registered []RegisteredFactory) error {
 	for _, rf := range registered {
 		ext := &Extension{
 			Name:      rf.Name,

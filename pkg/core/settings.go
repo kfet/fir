@@ -372,7 +372,8 @@ func (sm *SettingsManager) save() {
 		}
 	}
 
-	resultJSON, _ := json.Marshal(currentMap)
+	resultJSON, _ := json.MarshalIndent(currentMap, "", "  ")
+	resultJSON = append(resultJSON, '\n')
 	json.Unmarshal(resultJSON, &sm.globalSettings)
 
 	dir := filepath.Dir(sm.settingsPath)
@@ -698,7 +699,7 @@ func (sm *SettingsManager) GetCollapseChangelog() bool {
 	return boolDefault(sm.settings.CollapseChangelog, false)
 }
 
-func (sm *SettingsManager) GetExtensionPaths() []string {
+func (sm *SettingsManager) GetEnabledExtensions() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	out := make([]string, len(sm.settings.Extensions))
@@ -768,7 +769,7 @@ func (sm *SettingsManager) GetClearOnShrink() bool {
 	if sm.settings.Terminal != nil && sm.settings.Terminal.ClearOnShrink != nil {
 		return *sm.settings.Terminal.ClearOnShrink
 	}
-	return os.Getenv("PI_CLEAR_ON_SHRINK") == "1"
+	return os.Getenv("TAU_CLEAR_ON_SHRINK") == "1"
 }
 
 func (sm *SettingsManager) GetImageAutoResize() bool {
@@ -839,7 +840,7 @@ func (sm *SettingsManager) GetShowHardwareCursor() bool {
 	if sm.settings.ShowHardwareCursor != nil {
 		return *sm.settings.ShowHardwareCursor
 	}
-	return os.Getenv("PI_HARDWARE_CURSOR") == "1"
+	return os.Getenv("TAU_HARDWARE_CURSOR") == "1"
 }
 
 // GetGlobalSettings returns a copy of global settings.

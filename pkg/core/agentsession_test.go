@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // ============================================================================
@@ -1289,8 +1289,8 @@ func TestExpandSkillCommand_ValidSkill(t *testing.T) {
 	session, cwd := newTestAgentSession(t)
 	defer session.Close()
 
-	// Create a skill file in the project's .pi/skills directory
-	skillDir := filepath.Join(cwd, ".pi", "skills", "review")
+	// Create a skill file in the project's .tau/skills directory
+	skillDir := filepath.Join(cwd, ".tau", "skills", "review")
 	os.MkdirAll(skillDir, 0755)
 	skillContent := `---
 name: review
@@ -1318,7 +1318,7 @@ func TestExpandSkillCommand_NoArgs(t *testing.T) {
 	session, cwd := newTestAgentSession(t)
 	defer session.Close()
 
-	skillDir := filepath.Join(cwd, ".pi", "skills", "deploy")
+	skillDir := filepath.Join(cwd, ".tau", "skills", "deploy")
 	os.MkdirAll(skillDir, 0755)
 	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
 name: deploy

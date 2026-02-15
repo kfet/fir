@@ -104,7 +104,7 @@ After completing a review cycle:
 1. **Summarize to the user**: "Reviewed N files. Found X urgent, Y backlog items. Build status: passing/failing."
 2. **Refresh your instructions.** Every cycle, before sleeping, re-read this skill file to keep your instructions in context:
    ```
-   .pi/skills/review/SKILL.md
+   .tau/skills/review/SKILL.md
    ```
    This is not optional. Long-running agents drift. Re-reading your instructions every cycle prevents you from forgetting the process, changing your output format, or skipping steps. Do this even if you think you remember — your context window is finite and old instructions get pushed out.
 3. **Self-remind and repeat.** After every review, run a sleep command that echoes a reminder when it finishes. This is how you keep the loop alive — the reminder output triggers you to start the next cycle:
@@ -112,7 +112,7 @@ After completing a review cycle:
    sleep 30 && echo "=== REVIEW CYCLE REMINDER === Time to re-read SKILL.md and run the next review cycle. Check: git diff --cached --name-only -- '*.go' && git diff --name-only -- '*.go' && find pkg/ cmd/ -name '*.go' -mmin -10 2>/dev/null | sort"
    ```
    Use timeout 40 on the bash call. When you see the reminder output, **immediately**:
-   a. Re-read this skill file (`.pi/skills/review/SKILL.md`)
+   a. Re-read this skill file (`.tau/skills/review/SKILL.md`)
    b. Run the "Before Each Review Cycle" steps
    c. Review any new/changed files
    d. Update `URGENT.md` and `BACKLOG.md`

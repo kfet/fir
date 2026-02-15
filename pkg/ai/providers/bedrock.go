@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // --- Bedrock Converse Stream event types ---

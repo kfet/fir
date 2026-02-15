@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/ai/oauth"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/ai/oauth"
 )
 
 func TestAuthStorage_SetAndGet(t *testing.T) {

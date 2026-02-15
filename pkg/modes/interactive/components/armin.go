@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // XBM image constants for the Armin easter egg.

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // DefaultConvertToLLM keeps only LLM-compatible messages.

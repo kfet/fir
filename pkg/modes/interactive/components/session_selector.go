@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // SessionScope controls which sessions are shown.
@@ -216,8 +216,18 @@ func (sl *sessionList) Render(width int) []string {
 	lines := sl.searchInput.Render(width)
 	lines = append(lines, "")
 
+	// Fixed height = search(1) + empty(1) + maxVisible items + path(1) + indicator(1).
+	// Always pad to this height so the total component size stays constant
+	// when toggling scope (showPath, different session counts). Without this,
+	// height changes cause the TUI differential renderer to scroll the
+	// terminal, pushing the top of the component off-screen.
+	targetHeight := len(lines) + sl.maxVisible + 2
+
 	if len(sl.filteredSessions) == 0 {
 		lines = append(lines, t.Fg("muted", "  No sessions found"))
+		for len(lines) < targetHeight {
+			lines = append(lines, "")
+		}
 		return lines
 	}
 
@@ -293,6 +303,11 @@ func (sl *sessionList) Render(width int) []string {
 		lines = append(lines, t.Fg("dim", fmt.Sprintf("  (%d/%d)", sl.selectedIndex+1, len(sl.filteredSessions))))
 	}
 
+	// Pad to fixed height
+	for len(lines) < targetHeight {
+		lines = append(lines, "")
+	}
+
 	return lines
 }
 
@@ -338,6 +353,10 @@ type SessionSelectorComponent struct {
 	allSessions       []core.SessionListInfo
 	allSessionsLoaded bool
 	allSessionsLoader func() ([]core.SessionListInfo, error)
+
+	// OnRequestRedraw is called when the component needs a full redraw
+	// (e.g., after scope toggle which changes content dramatically).
+	OnRequestRedraw func()
 }
 
 // NewSessionSelectorComponent creates a new session selector.
@@ -420,6 +439,9 @@ func (c *SessionSelectorComponent) toggleScope() {
 	}
 	c.titleText.SetText(t.Bold(c.titleForScope()))
 	c.hintText.SetText(t.Fg("dim", c.hintForScope()))
+	if c.OnRequestRedraw != nil {
+		c.OnRequestRedraw()
+	}
 }
 
 // HandleInput processes keyboard input.

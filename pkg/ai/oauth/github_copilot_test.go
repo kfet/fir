@@ -3,7 +3,7 @@ package oauth
 import (
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func TestGitHubCopilotProvider_IDAndName(t *testing.T) {

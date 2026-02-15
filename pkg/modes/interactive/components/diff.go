@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
 )
 
 var diffLineRe = regexp.MustCompile(`^([+ -])(\s*\d*)\s(.*)$`)

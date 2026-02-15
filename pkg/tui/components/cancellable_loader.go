@@ -5,7 +5,7 @@ package components
 import (
 	"sync"
 
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // CancellableLoader is a Loader that can be cancelled with Escape.

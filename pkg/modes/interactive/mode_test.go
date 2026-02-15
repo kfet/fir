@@ -1,17 +1,20 @@
 package interactive
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/modes/interactive/components"
-	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/tau/pkg/modes/interactive/components"
+	itheme "github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 func TestNewInteractiveMode(t *testing.T) {
@@ -1188,5 +1191,276 @@ func TestInteractiveMode_SlashReloadWithSession(t *testing.T) {
 	output := tm.renderedOutput()
 	if strings.Contains(output, "failed") {
 		t.Error("reload should succeed")
+	}
+}
+
+func TestInteractiveMode_SlashSessionWithExtensions(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Register a test extension
+	extension.ClearRegistry()
+	extension.Register("test-ext", func(api extension.API) {
+		api.RegisterTool(extension.ToolDefinition{
+			Name:        "my_tool",
+			Label:       "My Tool",
+			Description: "A test tool",
+		})
+		api.RegisterCommand("mycommand", extension.Command{
+			Description: "A test command",
+		})
+	})
+	t.Cleanup(func() { extension.ClearRegistry() })
+
+	// Create and load the runner
+	runner := extension.NewRunner(core.NewEventBus())
+	if err := runner.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	tm.mode.SetExtensionRunner(runner)
+
+	tm.mode.handleSlashCommand("/session")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+
+	// Should show session info
+	if !strings.Contains(output, "Session Info") {
+		t.Error("expected 'Session Info' in output")
+	}
+
+	// Should show extension name
+	if !strings.Contains(output, "test-ext") {
+		t.Errorf("expected extension name 'test-ext' in output, got:\n%s", output)
+	}
+
+	// Should show extension tools section
+	if !strings.Contains(output, "Extension Tools") {
+		t.Errorf("expected 'Extension Tools' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "my_tool") {
+		t.Errorf("expected tool 'my_tool' in output, got:\n%s", output)
+	}
+
+	// Should show extension commands section
+	if !strings.Contains(output, "Extension Commands") {
+		t.Errorf("expected 'Extension Commands' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "mycommand") {
+		t.Errorf("expected command 'mycommand' in output, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// modeUIContext tests
+// ---------------------------------------------------------------------------
+
+func TestModeUIContext_SelectReturnsEmpty(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	ctx := &modeUIContext{mode: m}
+
+	result, err := ctx.Select("title", []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestModeUIContext_ConfirmReturnsFalse(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	ctx := &modeUIContext{mode: m}
+
+	result, err := ctx.Confirm("title", "are you sure?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result {
+		t.Error("expected false")
+	}
+}
+
+func TestModeUIContext_InputReturnsEmpty(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	ctx := &modeUIContext{mode: m}
+
+	result, err := ctx.Input("title", "placeholder")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestModeUIContext_NotifyError(t *testing.T) {
+	tm := newTestMode(t)
+	ctx := &modeUIContext{mode: tm.mode}
+
+	ctx.Notify("something broke", "error")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "something broke") {
+		t.Error("expected error notification to appear in output")
+	}
+}
+
+func TestModeUIContext_NotifyWarning(t *testing.T) {
+	tm := newTestMode(t)
+	ctx := &modeUIContext{mode: tm.mode}
+
+	ctx.Notify("careful!", "warning")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "careful!") {
+		t.Error("expected warning notification to appear in output")
+	}
+}
+
+func TestModeUIContext_NotifyInfo(t *testing.T) {
+	tm := newTestMode(t)
+	ctx := &modeUIContext{mode: tm.mode}
+
+	ctx.Notify("all good", "info")
+	tm.waitRender()
+
+	// Info notifications use showMessage which adds to messageContainer
+	if tm.messageCount() == 0 {
+		t.Error("expected info notification to add a message")
+	}
+}
+
+func TestModeUIContext_SetStatus(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	ctx := &modeUIContext{mode: tm.mode}
+
+	// Set status — should not panic even if footerDataProvider is set
+	ctx.SetStatus("myext", "running")
+	tm.waitRender()
+
+	// Verify through footer data provider
+	if tm.mode.footerDataProvider != nil {
+		statuses := tm.mode.footerDataProvider.GetExtensionStatuses()
+		if statuses["myext"] != "running" {
+			t.Errorf("expected status 'running', got %q", statuses["myext"])
+		}
+	}
+}
+
+func TestModeUIContext_SetStatusClear(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	ctx := &modeUIContext{mode: tm.mode}
+
+	ctx.SetStatus("myext", "active")
+	ctx.SetStatus("myext", "")
+
+	if tm.mode.footerDataProvider != nil {
+		statuses := tm.mode.footerDataProvider.GetExtensionStatuses()
+		if statuses["myext"] != "" {
+			t.Errorf("expected cleared status, got %q", statuses["myext"])
+		}
+	}
+}
+
+func TestModeUIContext_SetStatusNoProvider(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	m.footerDataProvider = nil
+	ctx := &modeUIContext{mode: m}
+
+	// Should not panic when footerDataProvider is nil
+	ctx.SetStatus("key", "value")
+}
+
+func TestModeUIContext_SetWidgetNoop(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	ctx := &modeUIContext{mode: m}
+
+	// Should not panic (widget not implemented)
+	ctx.SetWidget("key", []string{"line1", "line2"})
+}
+
+func TestModeUIContext_ClearWidgetNoop(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	ctx := &modeUIContext{mode: m}
+
+	// Should not panic (widget not implemented)
+	ctx.ClearWidget("key")
+}
+
+// ---------------------------------------------------------------------------
+// resolveEnabledExtensions tests
+// ---------------------------------------------------------------------------
+
+func TestResolveEnabledExtensions_NoSettings(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sm := core.NewSettingsManager(cwd, agentDir)
+
+	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
+	result := m.resolveEnabledExtensions()
+	if len(result) != 0 {
+		t.Errorf("expected 0 extensions, got %d: %v", len(result), result)
+	}
+}
+
+func TestResolveEnabledExtensions_SettingsOnly(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "settings.json"),
+		[]byte(`{"extensions":["notify","sandbox"]}`), 0o600)
+
+	sm := core.NewSettingsManager(cwd, agentDir)
+	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
+
+	result := m.resolveEnabledExtensions()
+	if len(result) != 2 {
+		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
+	}
+	if result[0] != "notify" || result[1] != "sandbox" {
+		t.Errorf("unexpected extensions: %v", result)
+	}
+}
+
+func TestResolveEnabledExtensions_CLIOnly(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sm := core.NewSettingsManager(cwd, agentDir)
+
+	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
+	m.cliExtensionNames = []string{"notify", "sandbox"}
+
+	result := m.resolveEnabledExtensions()
+	if len(result) != 2 {
+		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
+	}
+}
+
+func TestResolveEnabledExtensions_MergedDeduplicated(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	os.MkdirAll(agentDir, 0o755)
+	os.WriteFile(filepath.Join(agentDir, "settings.json"),
+		[]byte(`{"extensions":["notify"]}`), 0o600)
+
+	sm := core.NewSettingsManager(cwd, agentDir)
+	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
+	m.cliExtensionNames = []string{"notify", "sandbox"}
+
+	result := m.resolveEnabledExtensions()
+	if len(result) != 2 {
+		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
+	}
+	// "notify" from settings + "sandbox" from CLI (notify not duplicated)
+	found := map[string]bool{}
+	for _, n := range result {
+		found[n] = true
+	}
+	if !found["notify"] || !found["sandbox"] {
+		t.Errorf("expected notify and sandbox, got %v", result)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func toolCallResponse(toolName, toolID string, args map[string]any) *ai.AssistantMessage {

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/pi-go/pkg/core/tools"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/core/tools"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // PreviewLines is the line limit when not expanded (matches tool execution behavior).

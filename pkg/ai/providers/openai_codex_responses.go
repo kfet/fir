@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/ai/oauth"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/ai/oauth"
 )
 
 // --- Codex configuration ---
@@ -400,8 +400,8 @@ func buildCodexHeaders(modelHeaders map[string]string, options *ai.StreamOptions
 	headers["Authorization"] = "Bearer " + apiKey
 	headers["chatgpt-account-id"] = accountID
 	headers["OpenAI-Beta"] = "responses=experimental"
-	headers["originator"] = "pi"
-	headers["User-Agent"] = fmt.Sprintf("pi (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
+	headers["originator"] = "tau"
+	headers["User-Agent"] = fmt.Sprintf("tau (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
 	headers["accept"] = "text/event-stream"
 	headers["content-type"] = "application/json"
 

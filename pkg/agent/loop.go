@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // AgentLoop starts an agent loop with new prompt messages.

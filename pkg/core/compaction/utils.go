@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // ============================================================================

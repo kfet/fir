@@ -13,22 +13,23 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/ai/oauth"
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/core/tools"
-	"github.com/kfet/pi-go/pkg/modes/interactive/components"
-	"github.com/kfet/pi-go/pkg/extension"
-	itheme "github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/ai/oauth"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/core/tools"
+	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/tau/pkg/modes/interactive/components"
+	itheme "github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // InteractiveMode manages the interactive TUI session.
@@ -82,6 +83,10 @@ type InteractiveMode struct {
 
 	// Extension runner (optional)
 	extensionRunner *extension.Runner
+
+	// Extension reload support
+	extSetup          *extension.SetupResult
+	cliExtensionNames []string // extension names from CLI args (merged with settings on reload)
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -126,6 +131,24 @@ func NewInteractiveMode(
 // SetExtensionRunner sets the extension runner for command/event handling.
 func (m *InteractiveMode) SetExtensionRunner(runner *extension.Runner) {
 	m.extensionRunner = runner
+	if runner != nil {
+		runner.SetUIContext(&modeUIContext{mode: m})
+	}
+}
+
+// SetExtensionSetup stores the full extension setup result and CLI extension
+// names so that /reload can tear down and rebuild extensions based on updated
+// settings.json while preserving CLI-provided extension names.
+func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult, cliExtNames []string) {
+	m.extSetup = setup
+	m.cliExtensionNames = cliExtNames
+	if setup != nil {
+		m.extensionRunner = setup.Runner
+		// Wire the UI context so extensions can set footer statuses and
+		// show notifications. Without this, all UI calls go to the noop
+		// context and are silently discarded.
+		setup.Runner.SetUIContext(&modeUIContext{mode: m})
+	}
 }
 
 // Init initializes the TUI and components.
@@ -426,37 +449,37 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	}
 
 	// Register app action handlers
-	m.editor.OnAction("selectModel", func() {
+	m.editor.OnAction(core.ActionSelectModel, func() {
 		m.showModelSelector("")
 	})
-	m.editor.OnAction("selectThinking", func() {
+	m.editor.OnAction(core.ActionSelectThinking, func() {
 		m.showThinkingSelector()
 	})
-	m.editor.OnAction("expandTools", func() {
+	m.editor.OnAction(core.ActionExpandTools, func() {
 		m.toggleToolOutputExpansion()
 	})
-	m.editor.OnAction("toggleThinking", func() {
+	m.editor.OnAction(core.ActionToggleThinking, func() {
 		m.toggleThinkingBlockVisibility()
 	})
-	m.editor.OnAction("cycleThinkingLevel", func() {
+	m.editor.OnAction(core.ActionCycleThinkingLevel, func() {
 		m.cycleThinkingLevel()
 	})
-	m.editor.OnAction("cycleModelForward", func() {
+	m.editor.OnAction(core.ActionCycleModelForward, func() {
 		m.cycleModel("forward")
 	})
-	m.editor.OnAction("cycleModelBackward", func() {
+	m.editor.OnAction(core.ActionCycleModelBackward, func() {
 		m.cycleModel("backward")
 	})
-	m.editor.OnAction("newSession", func() {
+	m.editor.OnAction(core.ActionNewSession, func() {
 		go m.handleClearCommand()
 	})
-	m.editor.OnAction("resume", func() {
+	m.editor.OnAction(core.ActionResume, func() {
 		m.showSessionSelector()
 	})
-	m.editor.OnAction("clear", func() {
+	m.editor.OnAction(core.ActionClear, func() {
 		m.handleCtrlC()
 	})
-	m.editor.OnAction("suspend", func() {
+	m.editor.OnAction(core.ActionSuspend, func() {
 		m.handleCtrlZ()
 	})
 
@@ -487,7 +510,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 		})
 	}
 
-	// Add skill commands (skill:<name>) from the resource loader
+	// Add skill commands and prompt templates from the resource loader
 	if m.session != nil {
 		rl := m.session.ResourceLoader()
 		if rl != nil {
@@ -496,6 +519,14 @@ func (m *InteractiveMode) setupAutocomplete() {
 					commands = append(commands, SlashCommand{
 						Name:        "skill:" + skill.Name,
 						Description: skill.Description,
+					})
+				}
+			}
+			if prompts, _ := rl.GetPrompts(); len(prompts) > 0 {
+				for _, prompt := range prompts {
+					commands = append(commands, SlashCommand{
+						Name:        prompt.Name,
+						Description: prompt.Description,
 					})
 				}
 			}
@@ -769,8 +800,8 @@ func (m *InteractiveMode) showSettingsSelector() {
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
-			OnAutoCompactChange:       func(v bool) { 
-				m.autoCompact = v 
+			OnAutoCompactChange: func(v bool) {
+				m.autoCompact = v
 				m.settings.SetCompactionEnabled(v)
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
@@ -778,7 +809,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetTransport(transport)
 				m.session.Agent.SetTransport(ai.Transport(transport))
 			},
-			OnCancel:                  func() { done() },
+			OnCancel: func() { done() },
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
 		return selector, selector
@@ -801,7 +832,7 @@ func (m *InteractiveMode) showSessionSelector() {
 			sessions,
 			components.SessionScopeCurrent,
 			func() ([]core.SessionListInfo, error) {
-				return core.ListAllSessions(core.DefaultAgentDir())
+				return core.ListAllSessions(core.DefaultAgentDir(), core.PiAgentDir())
 			},
 			func(sessionPath string) {
 				done()
@@ -811,6 +842,11 @@ func (m *InteractiveMode) showSessionSelector() {
 				done()
 			},
 		)
+		// Force a full redraw on scope toggle to prevent differential
+		// rendering artifacts when content changes dramatically.
+		selector.OnRequestRedraw = func() {
+			m.ui.RequestRender(true)
+		}
 		return selector, selector
 	})
 }
@@ -1449,7 +1485,62 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, fmt.Sprintf("%s %.4f", t.Fg("dim", "Total:"), stats.Cost))
 	}
 
+	// Extensions section
+	if m.extensionRunner != nil {
+		exts := m.extensionRunner.Extensions()
+		if len(exts) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, t.Bold("Extensions"))
+			for _, ext := range exts {
+				lines = append(lines, fmt.Sprintf("  %s", ext.Name))
+			}
+		}
+		tools := m.extensionRunner.GetTools()
+		if len(tools) > 0 {
+			items := make(map[string]string, len(tools))
+			for name, td := range tools {
+				items[name] = td.Label
+			}
+			lines = append(lines, formatSortedSection(t, "Extension Tools", "", items)...)
+		}
+		cmds := m.extensionRunner.GetCommands()
+		if len(cmds) > 0 {
+			items := make(map[string]string, len(cmds))
+			for name, cmd := range cmds {
+				items[name] = cmd.Description
+			}
+			lines = append(lines, formatSortedSection(t, "Extension Commands", "/", items)...)
+		}
+		shortcuts := m.extensionRunner.GetShortcuts()
+		if len(shortcuts) > 0 {
+			items := make(map[string]string, len(shortcuts))
+			for key, sh := range shortcuts {
+				items[key] = sh.Description
+			}
+			lines = append(lines, formatSortedSection(t, "Extension Shortcuts", "", items)...)
+		}
+	}
+
 	m.showMessage(strings.Join(lines, "\n"))
+}
+
+// formatSortedSection formats a titled section with sorted key-description pairs.
+// The prefix is prepended to each key (e.g. "/" for commands).
+func formatSortedSection(t *itheme.Theme, title, prefix string, items map[string]string) []string {
+	lines := []string{"", t.Bold(title)}
+	keys := make([]string, 0, len(items))
+	for k := range items {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if desc := items[k]; desc != "" {
+			lines = append(lines, fmt.Sprintf("  %s %s", t.Fg("dim", prefix+k), desc))
+		} else {
+			lines = append(lines, fmt.Sprintf("  %s", prefix+k))
+		}
+	}
+	return lines
 }
 
 func (m *InteractiveMode) handleChangelogCommand() {
@@ -1491,12 +1582,46 @@ func (m *InteractiveMode) handleReloadCommand() {
 	}
 
 	m.showStatus("Reloading extensions, skills, prompts, and themes...")
+
+	// Reload session (re-reads settings.json, skills, prompts, system prompt).
 	if err := m.session.Reload(); err != nil {
 		m.showWarning(fmt.Sprintf("Reload failed: %v", err))
 		return
 	}
+
+	// Reload extensions if setup is available.
+	if m.extSetup != nil {
+		enabledNames := m.resolveEnabledExtensions()
+		if err := m.extSetup.Reload(enabledNames); err != nil {
+			m.showWarning(fmt.Sprintf("Extension reload failed: %v", err))
+			// Continue — skills/prompts were already reloaded successfully.
+		}
+	}
+
+	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
 	m.showStatus("Reloaded extensions, skills, prompts, themes")
+}
+
+// resolveEnabledExtensions merges extension names from the (freshly reloaded)
+// settings with the CLI-provided extension names.
+func (m *InteractiveMode) resolveEnabledExtensions() []string {
+	names := m.settings.GetEnabledExtensions()
+
+	if len(m.cliExtensionNames) > 0 {
+		seen := make(map[string]bool, len(names))
+		for _, n := range names {
+			seen[n] = true
+		}
+		for _, n := range m.cliExtensionNames {
+			if !seen[n] {
+				names = append(names, n)
+				seen[n] = true
+			}
+		}
+	}
+
+	return names
 }
 
 // ============================================================================
@@ -1653,7 +1778,7 @@ func (m *InteractiveMode) showHelp() {
   /copy           - Copy last agent message to clipboard
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
-  /quit           - Quit pi
+  /quit           - Quit tau
 
 Keyboard shortcuts:
   Enter           - Send message
@@ -1961,4 +2086,60 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)
+}
+
+// ============================================================================
+// Extension UIContext bridge
+// ============================================================================
+
+// modeUIContext bridges the extension.UIContext interface to the interactive
+// mode's TUI and FooterDataProvider. Without this bridge, extensions fall
+// back to the noop UI context and their SetStatus/Notify calls are silently
+// discarded.
+type modeUIContext struct {
+	mode *InteractiveMode
+}
+
+var _ extension.UIContext = (*modeUIContext)(nil)
+
+func (u *modeUIContext) Select(title string, options []string) (string, error) {
+	// Not implemented for extension UI context — extensions shouldn't block
+	// with interactive selectors during event handlers.
+	return "", nil
+}
+
+func (u *modeUIContext) Confirm(title string, message string) (bool, error) {
+	return false, nil
+}
+
+func (u *modeUIContext) Input(title string, placeholder string) (string, error) {
+	return "", nil
+}
+
+func (u *modeUIContext) Notify(message string, level string) {
+	switch level {
+	case "error":
+		u.mode.showWarning(message)
+	case "warning":
+		u.mode.showWarning(message)
+	default:
+		u.mode.showMessage(message)
+	}
+}
+
+func (u *modeUIContext) SetStatus(key string, text string) {
+	if u.mode.footerDataProvider != nil {
+		u.mode.footerDataProvider.SetExtensionStatus(key, text)
+		if u.mode.ui != nil {
+			u.mode.ui.RequestRender(false)
+		}
+	}
+}
+
+func (u *modeUIContext) SetWidget(key string, lines []string) {
+	// Widget support not yet implemented for interactive mode extensions.
+}
+
+func (u *modeUIContext) ClearWidget(key string) {
+	// Widget support not yet implemented for interactive mode extensions.
 }

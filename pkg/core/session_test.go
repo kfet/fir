@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 func TestSessionManagerNewSession(t *testing.T) {
@@ -871,5 +871,148 @@ func TestListAllSessions_Empty(t *testing.T) {
 	}
 	if len(sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_MultipleDirs(t *testing.T) {
+	agentDir1 := t.TempDir()
+	agentDir2 := t.TempDir()
+
+	// Create a session in each agent dir
+	project1Dir := filepath.Join(agentDir1, "sessions", "project1")
+	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
+	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
+	}))
+
+	project2Dir := filepath.Join(agentDir2, "sessions", "project2")
+	sm2 := NewSessionManager("/proj2", project2Dir)
+	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
+	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
+	}))
+
+	// List from both dirs
+	sessions, err := ListAllSessions(agentDir1, agentDir2)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("expected 2 sessions from both dirs, got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_ExtraDirMissing(t *testing.T) {
+	agentDir := t.TempDir()
+
+	// Create a session in the main dir
+	projectDir := filepath.Join(agentDir, "sessions", "project1")
+	sm := NewSessionManager("/proj1", projectDir)
+	sm.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
+	}))
+
+	// Pass a nonexistent extra dir — should not error, just skip it
+	sessions, err := ListAllSessions(agentDir, "/nonexistent/agent/dir")
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 session, got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_DeduplicatesOverlappingPaths(t *testing.T) {
+	// Both agent dirs share the same sessions subdirectory via symlink,
+	// so the same session files appear from both sources.
+	agentDir1 := t.TempDir()
+	agentDir2 := t.TempDir()
+
+	// Create a session directory under agentDir1
+	projectDir := filepath.Join(agentDir1, "sessions", "project1")
+	sm := NewSessionManager("/proj1", projectDir)
+	sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply")},
+	}))
+
+	sessionFile := sm.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("session file not written")
+	}
+
+	// Create a symlink so agentDir2/sessions points to the same dir
+	os.MkdirAll(agentDir2, 0o755)
+	err := os.Symlink(
+		filepath.Join(agentDir1, "sessions"),
+		filepath.Join(agentDir2, "sessions"),
+	)
+	if err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Both dirs see the same file — ListAllSessions should deduplicate
+	sessions, err := ListAllSessions(agentDir1, agentDir2)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 session (deduped), got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_DeduplicatesCopiedFiles(t *testing.T) {
+	// Simulate two agent dirs that have an identical session file copied
+	// to the same subpath (e.g. backup scenario). Since paths differ,
+	// both should appear (dedup is by Path, not content).
+	agentDir1 := t.TempDir()
+	agentDir2 := t.TempDir()
+
+	// Session in agentDir1
+	project1Dir := filepath.Join(agentDir1, "sessions", "project1")
+	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
+	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
+	}))
+
+	// Different session in agentDir2 under the same project name
+	project2Dir := filepath.Join(agentDir2, "sessions", "project1")
+	sm2 := NewSessionManager("/proj1", project2Dir)
+	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
+	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
+	}))
+
+	sessions, err := ListAllSessions(agentDir1, agentDir2)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+
+	// Different paths → no dedup → 2 sessions
+	if len(sessions) != 2 {
+		t.Errorf("expected 2 sessions (different paths), got %d", len(sessions))
+	}
+}
+
+func TestListAllSessions_SameAgentDirPassedTwice(t *testing.T) {
+	agentDir := t.TempDir()
+
+	projectDir := filepath.Join(agentDir, "sessions", "project1")
+	sm := NewSessionManager("/proj1", projectDir)
+	sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("reply")},
+	}))
+
+	// Pass the same agent dir twice — should deduplicate
+	sessions, err := ListAllSessions(agentDir, agentDir)
+	if err != nil {
+		t.Fatalf("ListAllSessions failed: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 session (same dir passed twice, deduped by path), got %d", len(sessions))
 	}
 }

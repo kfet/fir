@@ -228,7 +228,7 @@ func TestSettingsManager_ClearOnShrink_EnvVar(t *testing.T) {
 	sm := NewInMemorySettingsManager(Settings{})
 	assert.False(t, sm.GetClearOnShrink())
 
-	t.Setenv("PI_CLEAR_ON_SHRINK", "1")
+	t.Setenv("TAU_CLEAR_ON_SHRINK", "1")
 	assert.True(t, sm.GetClearOnShrink())
 }
 
@@ -236,7 +236,7 @@ func TestSettingsManager_ShowHardwareCursor_EnvVar(t *testing.T) {
 	sm := NewInMemorySettingsManager(Settings{})
 	assert.False(t, sm.GetShowHardwareCursor())
 
-	t.Setenv("PI_HARDWARE_CURSOR", "1")
+	t.Setenv("TAU_HARDWARE_CURSOR", "1")
 	assert.True(t, sm.GetShowHardwareCursor())
 }
 

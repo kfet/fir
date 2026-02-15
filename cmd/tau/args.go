@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/agent"
+	"github.com/kfet/tau/pkg/agent"
 )
 
-// Mode is the output mode for pi.
+// Mode is the output mode for tau.
 type Mode string
 
 const (
@@ -254,9 +254,9 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 
 // PrintHelp prints the CLI usage information.
 func PrintHelp() {
-	appName := "pi"
-	configDir := ".pi"
-	envAgentDir := "PI_AGENT_DIR"
+	appName := "tau"
+	configDir := ".tau"
+	envAgentDir := "TAU_AGENT_DIR"
 
 	fmt.Printf(`%s - AI coding assistant with read, bash, edit, write tools
 
@@ -281,8 +281,8 @@ Options:
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
-  --extension, -e <path>         Load an extension file (can be used multiple times)
-  --no-extensions                Disable extension discovery
+  --extension, -e <name>         Enable an extension by name (can be used multiple times)
+  --no-extensions                Disable all extensions (overrides config)
   --skill <path>                 Load a skill file or directory
   --no-skills                    Disable skills
   --prompt-template <path>       Load a prompt template file or directory

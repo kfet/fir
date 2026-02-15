@@ -1,4 +1,4 @@
-module github.com/kfet/pi-go
+module github.com/kfet/tau
 
 go 1.24.0
 

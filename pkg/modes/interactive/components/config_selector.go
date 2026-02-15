@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/modes/interactive/theme"
-	"github.com/kfet/pi-go/pkg/tui"
-	tuicomp "github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/tau/pkg/tui"
+	tuicomp "github.com/kfet/tau/pkg/tui/components"
 )
 
 // ResourceType classifies config resources.
@@ -79,9 +79,9 @@ func getGroupLabel(metadata core.PathMetadata) string {
 	}
 	if metadata.Source == "auto" {
 		if metadata.Scope == "user" {
-			return "User (~/.pi/agent/)"
+			return "User (~/.tau/agent/)"
 		}
-		return "Project (.pi/)"
+		return "Project (.tau/)"
 	}
 	if metadata.Scope == "user" {
 		return "User settings"

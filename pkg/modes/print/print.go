@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // Mode specifies the output format for print mode.

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // ============================================================================
@@ -257,6 +257,12 @@ func (s *AgentSession) emit(event AgentSessionEvent) {
 			l(event)
 		}
 	}
+}
+
+// PublishEvent emits an event to all subscribers. This is intended for
+// testing and for internal components that need to inject synthetic events.
+func (s *AgentSession) PublishEvent(event AgentSessionEvent) {
+	s.emit(event)
 }
 
 // ============================================================================
@@ -852,6 +858,12 @@ func extractUserMessageText(raw json.RawMessage) string {
 
 // Reload reloads resources and rebuilds the system prompt.
 func (s *AgentSession) Reload() error {
+	// Re-read settings from disk first so that resource loader and
+	// callers see updated values (e.g., changed extension lists).
+	if s.SettingsManager != nil {
+		s.SettingsManager.Reload()
+	}
+
 	if err := s.resourceLoader.Reload(); err != nil {
 		return err
 	}

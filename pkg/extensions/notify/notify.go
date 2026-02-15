@@ -4,22 +4,39 @@
 //   - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
 //   - OSC 99: Kitty
 //
+// When inside tmux, wraps sequences in DCS passthrough format.
+//
 // Import this package to enable the extension:
 //
-//	import _ "github.com/kfet/pi-go/pkg/extensions/notify"
+//	import _ "github.com/kfet/tau/pkg/extensions/notify"
 package notify
 
 import (
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/kfet/pi-go/pkg/extension"
+	"github.com/kfet/tau/pkg/extension"
 )
+
+// output is the writer for notification escape sequences.
+// Defaults to stderr to avoid interfering with the TUI's stdout rendering.
+var output io.Writer = os.Stderr
+
+// inTmux reports whether the process is running inside tmux.
+var inTmux = func() bool {
+	return os.Getenv("TMUX") != ""
+}
+
+// inKitty reports whether the process is running inside Kitty.
+var inKitty = func() bool {
+	return os.Getenv("KITTY_WINDOW_ID") != ""
+}
 
 func init() {
 	extension.Register("notify", func(api extension.API) {
 		api.On("agent_end", func(event *extension.Event, ctx extension.Context) (any, error) {
-			notifyTerminal("Pi", "Ready for input")
+			notifyTerminal("Tau", "Ready for input")
 			return nil, nil
 		})
 	})
@@ -27,7 +44,7 @@ func init() {
 
 // notifyTerminal sends a native terminal notification.
 func notifyTerminal(title, body string) {
-	if os.Getenv("KITTY_WINDOW_ID") != "" {
+	if inKitty() {
 		notifyOSC99(title, body)
 	} else {
 		notifyOSC777(title, body)
@@ -35,14 +52,25 @@ func notifyTerminal(title, body string) {
 }
 
 // notifyOSC777 sends an OSC 777 notification (Ghostty, iTerm2, WezTerm, rxvt-unicode).
-// Writes to stderr to avoid interfering with the TUI's stdout rendering.
+// When inside tmux, wraps the sequence in DCS passthrough format.
 func notifyOSC777(title, body string) {
-	fmt.Fprintf(os.Stderr, "\x1b]777;notify;%s;%s\x07", title, body)
+	if inTmux() {
+		// DCS passthrough: wrap for tmux (every ESC becomes ESC ESC)
+		// Format: ESC P tmux; ESC ESC ] 777;notify;title;body ESC ESC \ ESC \.
+		fmt.Fprintf(output, "\x1bPtmux;\x1b\x1b]777;notify;%s;%s\x1b\x1b\\\x1b\\", title, body)
+	} else {
+		fmt.Fprintf(output, "\x1b]777;notify;%s;%s\x1b\\", title, body)
+	}
 }
 
 // notifyOSC99 sends a Kitty OSC 99 notification.
-// Writes to stderr to avoid interfering with the TUI's stdout rendering.
+// When inside tmux, wraps the sequences in DCS passthrough format.
 func notifyOSC99(title, body string) {
-	fmt.Fprintf(os.Stderr, "\x1b]99;i=1:d=0;%s\x1b\\", title)
-	fmt.Fprintf(os.Stderr, "\x1b]99;i=1:p=body;%s\x1b\\", body)
+	if inTmux() {
+		fmt.Fprintf(output, "\x1bPtmux;\x1b\x1b]99;i=1:d=0;%s\x1b\x1b\\\x1b\\", title)
+		fmt.Fprintf(output, "\x1bPtmux;\x1b\x1b]99;i=1:p=body;%s\x1b\x1b\\\x1b\\", body)
+	} else {
+		fmt.Fprintf(output, "\x1b]99;i=1:d=0;%s\x1b\\", title)
+		fmt.Fprintf(output, "\x1b]99;i=1:p=body;%s\x1b\\", body)
+	}
 }

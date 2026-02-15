@@ -1,8 +1,8 @@
 # Directory Structure
 
 ```
-pi-go/
-├── cmd/pi/
+tau/
+├── cmd/tau/
 │   ├── main.go                  # Entry point
 │   └── app.go                   # Arg parsing, mode dispatch
 ├── pkg/

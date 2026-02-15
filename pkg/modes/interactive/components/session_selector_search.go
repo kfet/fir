@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kfet/pi-go/pkg/core"
-	"github.com/kfet/pi-go/pkg/tui"
+	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/tui"
 )
 
 // SortMode controls how sessions are sorted.

@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/kfet/pi-go/pkg/agent"
-	"github.com/kfet/pi-go/pkg/ai"
-	"github.com/kfet/pi-go/pkg/core"
+	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/tau/pkg/core"
 )
 
 // testSession creates a minimal AgentSession for testing RPC command dispatch.
@@ -39,6 +39,25 @@ func (r *noopResourceLoader) GetAppendSystemPrompt() []string       { return nil
 func (r *noopResourceLoader) GetPathMetadata() map[string]core.PathMetadata { return nil }
 func (r *noopResourceLoader) ExtendResources(core.ResourceExtensionPaths)   {}
 func (r *noopResourceLoader) Reload() error                                 { return nil }
+
+// mockResourceLoader implements core.ResourceLoader with configurable prompts and skills.
+type mockResourceLoader struct {
+	prompts []core.PromptTemplate
+	skills  []core.Skill
+}
+
+func (r *mockResourceLoader) GetSkills() ([]core.Skill, []core.ResourceDiagnostic) {
+	return r.skills, nil
+}
+func (r *mockResourceLoader) GetPrompts() ([]core.PromptTemplate, []core.ResourceDiagnostic) {
+	return r.prompts, nil
+}
+func (r *mockResourceLoader) GetAgentsFiles() []core.AgentsFile     { return nil }
+func (r *mockResourceLoader) GetSystemPrompt() string               { return "" }
+func (r *mockResourceLoader) GetAppendSystemPrompt() []string       { return nil }
+func (r *mockResourceLoader) GetPathMetadata() map[string]core.PathMetadata { return nil }
+func (r *mockResourceLoader) ExtendResources(core.ResourceExtensionPaths)   {}
+func (r *mockResourceLoader) Reload() error                                 { return nil }
 
 // ---------------------------------------------------------------------------
 // handleCommand tests — state/info commands
@@ -282,6 +301,54 @@ func TestHandleCommand_GetCommands(t *testing.T) {
 	resp := s.handleCommand(RpcCommand{ID: "23", Type: CmdGetCommands})
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+}
+
+func TestHandleCommand_GetCommands_WithPromptsAndSkills(t *testing.T) {
+	sm := core.InMemorySessionManager("/tmp/rpc-test")
+	a := agent.NewAgent(agent.AgentOptions{})
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:          a,
+		SessionManager: sm,
+		ResourceLoader: &mockResourceLoader{
+			prompts: []core.PromptTemplate{
+				{Name: "fix", Description: "Fix a bug (user)", Source: "user", FilePath: "/home/.tau/agent/prompts/fix.md"},
+				{Name: "review", Description: "Code review (project)", Source: "project", FilePath: "/project/.tau/prompts/review.md"},
+			},
+			skills: []core.Skill{
+				{Name: "debug", Description: "Debug a problem", Source: "user", FilePath: "/home/.tau/agent/skills/debug/SKILL.md"},
+			},
+		},
+		Cwd: "/tmp/rpc-test",
+	})
+	s := &Server{session: session}
+
+	resp := s.handleCommand(RpcCommand{ID: "42", Type: CmdGetCommands})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+
+	data, _ := json.Marshal(resp.Data)
+	var result GetCommandsData
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(result.Commands) != 3 {
+		t.Fatalf("expected 3 commands, got %d", len(result.Commands))
+	}
+
+	// Prompt templates
+	if result.Commands[0].Name != "fix" || result.Commands[0].Source != "prompt" {
+		t.Errorf("expected prompt 'fix', got %+v", result.Commands[0])
+	}
+	if result.Commands[1].Name != "review" || result.Commands[1].Source != "prompt" {
+		t.Errorf("expected prompt 'review', got %+v", result.Commands[1])
+	}
+
+	// Skills
+	if result.Commands[2].Name != "skill:debug" || result.Commands[2].Source != "skill" {
+		t.Errorf("expected skill 'skill:debug', got %+v", result.Commands[2])
 	}
 }
 

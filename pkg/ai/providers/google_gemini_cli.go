@@ -18,21 +18,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kfet/pi-go/pkg/ai"
+	"github.com/kfet/tau/pkg/ai"
 )
 
 // --- Constants ---
 
 const (
-	geminiCLIDefaultEndpoint    = "https://cloudcode-pa.googleapis.com"
-	antigravityDailyEndpoint    = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion   = "1.15.8"
-	claudeThinkingBetaHeader    = "interleaved-thinking-2025-05-14"
-	geminiCLIMaxRetries         = 3
-	geminiCLIBaseDelayMs        = 1000
-	geminiCLIMaxEmptyRetries    = 2
-	geminiCLIEmptyBaseDelayMs   = 500
-	geminiCLIDefaultMaxDelayMs  = 60000
+	geminiCLIDefaultEndpoint   = "https://cloudcode-pa.googleapis.com"
+	antigravityDailyEndpoint   = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+	defaultAntigravityVersion  = "1.15.8"
+	claudeThinkingBetaHeader   = "interleaved-thinking-2025-05-14"
+	geminiCLIMaxRetries        = 3
+	geminiCLIBaseDelayMs       = 1000
+	geminiCLIMaxEmptyRetries   = 2
+	geminiCLIEmptyBaseDelayMs  = 500
+	geminiCLIDefaultMaxDelayMs = 60000
 )
 
 // toolCallCounter generates unique tool call IDs.
@@ -45,28 +45,28 @@ type GoogleThinkingLevel string
 
 const (
 	ThinkingLevelUnspecified GoogleThinkingLevel = "THINKING_LEVEL_UNSPECIFIED"
-	ThinkingLevelMinimal    GoogleThinkingLevel = "MINIMAL"
-	ThinkingLevelLow        GoogleThinkingLevel = "LOW"
-	ThinkingLevelMedium     GoogleThinkingLevel = "MEDIUM"
-	ThinkingLevelHigh       GoogleThinkingLevel = "HIGH"
+	ThinkingLevelMinimal     GoogleThinkingLevel = "MINIMAL"
+	ThinkingLevelLow         GoogleThinkingLevel = "LOW"
+	ThinkingLevelMedium      GoogleThinkingLevel = "MEDIUM"
+	ThinkingLevelHigh        GoogleThinkingLevel = "HIGH"
 )
 
 // --- Headers ---
 
 func geminiCLIHeaders() map[string]string {
 	return map[string]string{
-		"User-Agent":      "google-cloud-sdk vscode_cloudshelleditor/0.1",
+		"User-Agent":        "google-cloud-sdk vscode_cloudshelleditor/0.1",
 		"X-Goog-Api-Client": "gl-node/22.17.0",
-		"Client-Metadata": `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
+		"Client-Metadata":   `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
 	}
 }
 
 func antigravityHeaders() map[string]string {
 	version := defaultAntigravityVersion
 	return map[string]string{
-		"User-Agent":       fmt.Sprintf("antigravity/%s %s/%s", version, runtime.GOOS, runtime.GOARCH),
+		"User-Agent":        fmt.Sprintf("antigravity/%s %s/%s", version, runtime.GOOS, runtime.GOARCH),
 		"X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-		"Client-Metadata":  `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
+		"Client-Metadata":   `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
 	}
 }
 
@@ -78,21 +78,21 @@ const antigravitySystemInstruction = "You are Antigravity, a powerful agentic AI
 // --- Request types ---
 
 type cloudCodeAssistRequest struct {
-	Project     string                     `json:"project"`
-	Model       string                     `json:"model"`
-	Request     cloudCodeAssistInnerReq    `json:"request"`
-	RequestType string                     `json:"requestType,omitempty"`
-	UserAgent   string                     `json:"userAgent,omitempty"`
-	RequestID   string                     `json:"requestId,omitempty"`
+	Project     string                  `json:"project"`
+	Model       string                  `json:"model"`
+	Request     cloudCodeAssistInnerReq `json:"request"`
+	RequestType string                  `json:"requestType,omitempty"`
+	UserAgent   string                  `json:"userAgent,omitempty"`
+	RequestID   string                  `json:"requestId,omitempty"`
 }
 
 type cloudCodeAssistInnerReq struct {
-	Contents          []GoogleContent     `json:"contents"`
-	SessionID         string              `json:"sessionId,omitempty"`
-	SystemInstruction *googleSysInstr     `json:"systemInstruction,omitempty"`
-	GenerationConfig  map[string]any      `json:"generationConfig,omitempty"`
-	Tools             []map[string]any    `json:"tools,omitempty"`
-	ToolConfig        *googleToolConfig   `json:"toolConfig,omitempty"`
+	Contents          []GoogleContent   `json:"contents"`
+	SessionID         string            `json:"sessionId,omitempty"`
+	SystemInstruction *googleSysInstr   `json:"systemInstruction,omitempty"`
+	GenerationConfig  map[string]any    `json:"generationConfig,omitempty"`
+	Tools             []map[string]any  `json:"tools,omitempty"`
+	ToolConfig        *googleToolConfig `json:"toolConfig,omitempty"`
 }
 
 type googleSysInstr struct {
@@ -117,7 +117,7 @@ type cloudCodeAssistChunk struct {
 }
 
 type cloudCodeAssistResp struct {
-	Candidates   []cloudCodeAssistCandidate `json:"candidates,omitempty"`
+	Candidates    []cloudCodeAssistCandidate `json:"candidates,omitempty"`
 	UsageMetadata *geminiCLIUsageMetadata    `json:"usageMetadata,omitempty"`
 }
 
@@ -127,15 +127,15 @@ type cloudCodeAssistCandidate struct {
 }
 
 type cloudCodeAssistContent struct {
-	Role  string                   `json:"role"`
-	Parts []cloudCodeAssistPart    `json:"parts,omitempty"`
+	Role  string                `json:"role"`
+	Parts []cloudCodeAssistPart `json:"parts,omitempty"`
 }
 
 type cloudCodeAssistPart struct {
-	Text             string                     `json:"text,omitempty"`
-	Thought          *bool                      `json:"thought,omitempty"`
-	ThoughtSignature string                     `json:"thoughtSignature,omitempty"`
-	FunctionCall     *cloudCodeAssistFuncCall   `json:"functionCall,omitempty"`
+	Text             string                   `json:"text,omitempty"`
+	Thought          *bool                    `json:"thought,omitempty"`
+	ThoughtSignature string                   `json:"thoughtSignature,omitempty"`
+	FunctionCall     *cloudCodeAssistFuncCall `json:"functionCall,omitempty"`
 }
 
 type cloudCodeAssistFuncCall struct {
@@ -350,7 +350,7 @@ func buildGeminiCLIRequest(
 	}
 
 	reqType := ""
-	userAgent := "pi-coding-agent"
+	userAgent := "tau-coding-agent"
 	if isAntigravity {
 		reqType = "agent"
 		userAgent = "antigravity"

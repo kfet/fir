@@ -188,7 +188,7 @@ end if
 -- Convert to PNG via NSBitmapImageRep
 set bitmapRep to current application's NSBitmapImageRep's imageRepWithData:imgData
 set pngData to bitmapRep's representationUsingType:(current application's NSBitmapImageFileTypePNG) properties:(missing value)
-set tmpPath to (do shell script "mktemp /tmp/pi-clipboard-XXXXXX.png")
+set tmpPath to (do shell script "mktemp /tmp/tau-clipboard-XXXXXX.png")
 pngData's writeToFile:tmpPath atomically:true
 return tmpPath`
 

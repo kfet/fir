@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/pi-go/pkg/tui/components"
+	"github.com/kfet/tau/pkg/tui/components"
 )
 
 // ============================================================================
