@@ -10,7 +10,7 @@ build:
 	@mkdir -p $(BINDIR)
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/tau/
 
-all: test-race pgo
+all: test-race pgo build-all
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/tau/

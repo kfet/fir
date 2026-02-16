@@ -158,23 +158,14 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		fmt.Fprintln(os.Stderr, result.ModelFallbackMessage)
 	}
 
-	// Check model is available
-	if result.Session.Model() == nil {
-		return nil, fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+	// Check model is available — in non-interactive modes we must fail early,
+	// but in TUI mode we allow starting without a model so the user can /login.
+	if err := checkModelAvailable(result.Session.Model(), args); err != nil {
+		return nil, err
 	}
 
 	// Clamp thinking level to model capabilities
-	if args.Thinking != "" {
-		effectiveThinking := string(args.Thinking)
-		if !result.Session.Model().Reasoning {
-			effectiveThinking = "off"
-		} else if effectiveThinking == "xhigh" && !ai.SupportsXhigh(result.Session.Model()) {
-			effectiveThinking = "high"
-		}
-		if effectiveThinking != result.Session.ThinkingLevel() {
-			result.Session.SetThinkingLevel(effectiveThinking)
-		}
-	}
+	clampThinkingLevel(result.Session, args.Thinking)
 
 	return &sessionSetup{
 		cwd:             cwd,
@@ -183,6 +174,43 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		settingsManager: settingsManager,
 		extSetup:        extSetup,
 	}, nil
+}
+
+// checkModelAvailable returns an error if no model is available and the mode
+// requires one (print, JSON, RPC). Interactive TUI mode is allowed to start
+// without a model so the user can /login.
+func checkModelAvailable(model *ai.Model, args *Args) error {
+	if model != nil {
+		return nil
+	}
+	if args.Print || args.OutputMode == ModeJSON || args.OutputMode == ModeRPC {
+		return fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+	}
+	return nil
+}
+
+// thinkingLevelSetter is the interface needed by clampThinkingLevel.
+type thinkingLevelSetter interface {
+	Model() *ai.Model
+	ThinkingLevel() string
+	SetThinkingLevel(string)
+}
+
+// clampThinkingLevel adjusts the session's thinking level to match model
+// capabilities. It is a no-op if thinking is empty or model is nil.
+func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
+	if thinking == "" || s.Model() == nil {
+		return
+	}
+	effective := string(thinking)
+	if !s.Model().Reasoning {
+		effective = "off"
+	} else if effective == "xhigh" && !ai.SupportsXhigh(s.Model()) {
+		effective = "high"
+	}
+	if effective != s.ThinkingLevel() {
+		s.SetThinkingLevel(effective)
+	}
 }
 
 // run is the main application logic.
