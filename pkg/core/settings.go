@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/settings-manager.ts
-// Upstream hash: 9e22d391
+// Upstream hash: 4ba3e5be
 package core
 
 import (
@@ -243,74 +243,194 @@ func mergeStrPtr(dst **string, src *string) {
 	}
 }
 
-// SettingsManager manages global and project settings with file persistence.
+// SettingsScope identifies which settings file (global or project) is being operated on.
+type SettingsScope = string
+
+const (
+	ScopeGlobal  SettingsScope = "global"
+	ScopeProject SettingsScope = "project"
+)
+
+// SettingsError records an error that occurred in a specific settings scope.
+type SettingsError struct {
+	Scope SettingsScope
+	Err   error
+}
+
+func (e *SettingsError) Error() string {
+	return e.Scope + ": " + e.Err.Error()
+}
+
+// SettingsStorage abstracts the storage and locking mechanism for settings.
+// fn receives the current JSON content (nil/empty if not found) and returns
+// new content to write (nil/empty to skip write).
+// WithLock returns an error if the storage backend cannot persist the updated content.
+type SettingsStorage interface {
+	WithLock(scope SettingsScope, fn func(current string) string) error
+}
+
+// FileSettingsStorage stores settings in JSON files on disk.
+type FileSettingsStorage struct {
+	mu                  sync.Mutex
+	globalSettingsPath  string
+	projectSettingsPath string
+}
+
+// NewFileSettingsStorage creates a file-backed storage for settings.
+func NewFileSettingsStorage(cwd, agentDir string) *FileSettingsStorage {
+	return &FileSettingsStorage{
+		globalSettingsPath:  filepath.Join(agentDir, "settings.json"),
+		projectSettingsPath: filepath.Join(cwd, ConfigDirName, "settings.json"),
+	}
+}
+
+func (s *FileSettingsStorage) pathForScope(scope SettingsScope) string {
+	if scope == ScopeGlobal {
+		return s.globalSettingsPath
+	}
+	return s.projectSettingsPath
+}
+
+func (s *FileSettingsStorage) WithLock(scope SettingsScope, fn func(current string) string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.pathForScope(scope)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	var current string
+	if data, err := os.ReadFile(path); err == nil {
+		current = string(data)
+	}
+
+	next := fn(current)
+	if next != "" {
+		if err := os.WriteFile(path, []byte(next), 0600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InMemorySettingsStorage stores settings in memory (no file I/O).
+type InMemorySettingsStorage struct {
+	mu      sync.Mutex
+	global  string
+	project string
+}
+
+func (s *InMemorySettingsStorage) WithLock(scope SettingsScope, fn func(current string) string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var current string
+	if scope == ScopeGlobal {
+		current = s.global
+	} else {
+		current = s.project
+	}
+
+	next := fn(current)
+	if next != "" {
+		if scope == ScopeGlobal {
+			s.global = next
+		} else {
+			s.project = next
+		}
+	}
+	return nil
+}
+
+// SettingsManager manages global and project settings with storage persistence.
 type SettingsManager struct {
 	mu sync.RWMutex
 
-	settingsPath        string
-	projectSettingsPath string
-	globalSettings      Settings
-	inMemoryProject     Settings
-	settings            Settings
-	persist             bool
-	modifiedFields      map[string]bool
-	modifiedNested      map[string]map[string]bool
-	loadError           error
+	storage               SettingsStorage
+	globalSettings        Settings
+	projectSettings       Settings
+	settings              Settings
+	modifiedFields        map[string]bool
+	modifiedNested        map[string]map[string]bool
+	modifiedProjectFields map[string]bool
+	modifiedProjectNested map[string]map[string]bool
+	globalLoadError       error
+	projectLoadError      error
+	errors                []SettingsError
 }
 
 // NewSettingsManager creates a SettingsManager that loads from files.
 func NewSettingsManager(cwd, agentDir string) *SettingsManager {
-	settingsPath := filepath.Join(agentDir, "settings.json")
-	projectSettingsPath := filepath.Join(cwd, ConfigDirName, "settings.json")
+	storage := NewFileSettingsStorage(cwd, agentDir)
+	return newSettingsManagerFromStorage(storage)
+}
 
-	globalSettings := Settings{}
-	var loadError error
-
-	data, err := os.ReadFile(settingsPath)
-	if err == nil {
-		if err := json.Unmarshal(data, &globalSettings); err != nil {
-			loadError = err
-		} else {
-			globalSettings = migrateSettings(globalSettings)
-		}
-	}
-
-	projectSettings := loadSettingsFile(projectSettingsPath)
-	merged := deepMergeSettings(globalSettings, projectSettings)
-
-	return &SettingsManager{
-		settingsPath:        settingsPath,
-		projectSettingsPath: projectSettingsPath,
-		globalSettings:      globalSettings,
-		settings:            merged,
-		persist:             true,
-		modifiedFields:      map[string]bool{},
-		modifiedNested:      map[string]map[string]bool{},
-		loadError:           loadError,
-	}
+// NewSettingsManagerFromStorage creates a SettingsManager backed by the given storage.
+func NewSettingsManagerFromStorage(storage SettingsStorage) *SettingsManager {
+	return newSettingsManagerFromStorage(storage)
 }
 
 // NewInMemorySettingsManager creates a SettingsManager with no file I/O.
 func NewInMemorySettingsManager(initial Settings) *SettingsManager {
-	return &SettingsManager{
-		globalSettings: initial,
-		settings:       initial,
-		persist:        false,
-		modifiedFields: map[string]bool{},
-		modifiedNested: map[string]map[string]bool{},
+	storage := &InMemorySettingsStorage{}
+	sm := &SettingsManager{
+		storage:               storage,
+		globalSettings:        initial,
+		projectSettings:       Settings{},
+		modifiedFields:        map[string]bool{},
+		modifiedNested:        map[string]map[string]bool{},
+		modifiedProjectFields: map[string]bool{},
+		modifiedProjectNested: map[string]map[string]bool{},
 	}
+	sm.settings = deepMergeSettings(sm.globalSettings, sm.projectSettings)
+	return sm
 }
 
-func loadSettingsFile(path string) Settings {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Settings{}
+func newSettingsManagerFromStorage(storage SettingsStorage) *SettingsManager {
+	sm := &SettingsManager{
+		storage:               storage,
+		modifiedFields:        map[string]bool{},
+		modifiedNested:        map[string]map[string]bool{},
+		modifiedProjectFields: map[string]bool{},
+		modifiedProjectNested: map[string]map[string]bool{},
 	}
-	var s Settings
-	if err := json.Unmarshal(data, &s); err != nil {
-		return Settings{}
+
+	globalSettings, globalErr := loadSettingsFromStorage(storage, ScopeGlobal)
+	sm.globalSettings = globalSettings
+	if globalErr != nil {
+		sm.globalLoadError = globalErr
+		sm.recordError(ScopeGlobal, globalErr)
 	}
-	return migrateSettings(s)
+
+	projectSettings, projectErr := loadSettingsFromStorage(storage, ScopeProject)
+	sm.projectSettings = projectSettings
+	if projectErr != nil {
+		sm.projectLoadError = projectErr
+		sm.recordError(ScopeProject, projectErr)
+	}
+
+	sm.settings = deepMergeSettings(sm.globalSettings, sm.projectSettings)
+	return sm
+}
+
+func loadSettingsFromStorage(storage SettingsStorage, scope SettingsScope) (Settings, error) {
+	var result Settings
+	var parseErr error
+	storage.WithLock(scope, func(current string) string { //nolint:errcheck // read-only: fn returns ""
+		if current == "" {
+			return ""
+		}
+		var s Settings
+		if err := json.Unmarshal([]byte(current), &s); err != nil {
+			parseErr = err
+			return ""
+		}
+		result = migrateSettings(s)
+		return ""
+	})
+	return result, parseErr
 }
 
 func migrateSettings(s Settings) Settings {
@@ -319,6 +439,26 @@ func migrateSettings(s Settings) Settings {
 	// GetTransport() if unset, so no explicit migration is needed.
 	return s
 }
+
+func (sm *SettingsManager) recordError(scope SettingsScope, err error) {
+	if err != nil {
+		sm.errors = append(sm.errors, SettingsError{Scope: scope, Err: err})
+	}
+}
+
+// DrainErrors returns and clears all accumulated settings errors.
+func (sm *SettingsManager) DrainErrors() []SettingsError {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	drained := make([]SettingsError, len(sm.errors))
+	copy(drained, sm.errors)
+	sm.errors = sm.errors[:0]
+	return drained
+}
+
+// Flush waits for any pending writes. In this synchronous implementation, writes
+// complete immediately so Flush is a no-op.
+func (sm *SettingsManager) Flush() {}
 
 func (sm *SettingsManager) markModified(field string, nestedKeys ...string) {
 	sm.modifiedFields[field] = true
@@ -330,89 +470,151 @@ func (sm *SettingsManager) markModified(field string, nestedKeys ...string) {
 	}
 }
 
-func (sm *SettingsManager) save() {
-	if !sm.persist || sm.settingsPath == "" {
-		sm.remerge()
-		return
-	}
-
-	if sm.loadError != nil {
-		sm.remerge()
-		return
-	}
-
-	// Read current file for latest external changes
-	current := loadSettingsFile(sm.settingsPath)
-
-	// Merge modified fields from globalSettings onto current
-	currentJSON, _ := json.Marshal(current)
-	globalJSON, _ := json.Marshal(sm.globalSettings)
-	var currentMap, globalMap map[string]any
-	json.Unmarshal(currentJSON, &currentMap)
-	json.Unmarshal(globalJSON, &globalMap)
-	if currentMap == nil {
-		currentMap = map[string]any{}
-	}
-
-	for field := range sm.modifiedFields {
-		if nestedKeys, hasNested := sm.modifiedNested[field]; hasNested {
-			baseNested, _ := currentMap[field].(map[string]any)
-			if baseNested == nil {
-				baseNested = map[string]any{}
-			}
-			inMemNested, _ := globalMap[field].(map[string]any)
-			for nk := range nestedKeys {
-				if inMemNested != nil {
-					baseNested[nk] = inMemNested[nk]
-				}
-			}
-			currentMap[field] = baseNested
-		} else {
-			currentMap[field] = globalMap[field]
+func (sm *SettingsManager) markProjectModified(field string, nestedKeys ...string) {
+	sm.modifiedProjectFields[field] = true
+	for _, nk := range nestedKeys {
+		if sm.modifiedProjectNested[field] == nil {
+			sm.modifiedProjectNested[field] = map[string]bool{}
 		}
+		sm.modifiedProjectNested[field][nk] = true
+	}
+}
+
+func (sm *SettingsManager) persistScopedSettings(
+	scope SettingsScope,
+	snapshotSettings Settings,
+	modifiedFields map[string]bool,
+	modifiedNested map[string]map[string]bool,
+) {
+	err := sm.storage.WithLock(scope, func(current string) string {
+		var currentFileSettings Settings
+		if current != "" {
+			json.Unmarshal([]byte(current), &currentFileSettings) //nolint:errcheck
+			currentFileSettings = migrateSettings(currentFileSettings)
+		}
+
+		// Merge modified fields from snapshot onto current file settings
+		currentJSON, _ := json.Marshal(currentFileSettings)
+		snapshotJSON, _ := json.Marshal(snapshotSettings)
+		var currentMap, snapshotMap map[string]any
+		json.Unmarshal(currentJSON, &currentMap)   //nolint:errcheck
+		json.Unmarshal(snapshotJSON, &snapshotMap) //nolint:errcheck
+		if currentMap == nil {
+			currentMap = map[string]any{}
+		}
+
+		for field := range modifiedFields {
+			if nestedKeys, hasNested := modifiedNested[field]; hasNested {
+				baseNested, _ := currentMap[field].(map[string]any)
+				if baseNested == nil {
+					baseNested = map[string]any{}
+				}
+				inMemNested, _ := snapshotMap[field].(map[string]any)
+				for nk := range nestedKeys {
+					if inMemNested != nil {
+						baseNested[nk] = inMemNested[nk]
+					}
+				}
+				currentMap[field] = baseNested
+			} else {
+				currentMap[field] = snapshotMap[field]
+			}
+		}
+
+		result, _ := json.MarshalIndent(currentMap, "", "  ")
+		return string(result)
+	})
+	sm.recordError(scope, err)
+}
+
+func (sm *SettingsManager) save() {
+	sm.settings = deepMergeSettings(sm.globalSettings, sm.projectSettings)
+
+	if sm.globalLoadError != nil {
+		return
 	}
 
-	resultJSON, _ := json.MarshalIndent(currentMap, "", "  ")
-	resultJSON = append(resultJSON, '\n')
-	json.Unmarshal(resultJSON, &sm.globalSettings)
+	snapshotGlobal := deepCopySettings(sm.globalSettings)
+	modifiedFields := copyStringBoolMap(sm.modifiedFields)
+	modifiedNested := copyNestedMap(sm.modifiedNested)
 
-	dir := filepath.Dir(sm.settingsPath)
-	os.MkdirAll(dir, 0755)
-	os.WriteFile(sm.settingsPath, resultJSON, 0600)
+	sm.persistScopedSettings(ScopeGlobal, snapshotGlobal, modifiedFields, modifiedNested)
+}
 
-	sm.remerge()
+func (sm *SettingsManager) saveProjectSettings(settings Settings) {
+	sm.projectSettings = deepCopySettings(settings)
+	sm.settings = deepMergeSettings(sm.globalSettings, sm.projectSettings)
+
+	if sm.projectLoadError != nil {
+		return
+	}
+
+	snapshotProject := deepCopySettings(sm.projectSettings)
+	modifiedFields := copyStringBoolMap(sm.modifiedProjectFields)
+	modifiedNested := copyNestedMap(sm.modifiedProjectNested)
+
+	sm.persistScopedSettings(ScopeProject, snapshotProject, modifiedFields, modifiedNested)
 }
 
 func (sm *SettingsManager) remerge() {
-	project := Settings{}
-	if sm.persist {
-		project = loadSettingsFile(sm.projectSettingsPath)
-	} else {
-		project = sm.inMemoryProject
-	}
-	sm.settings = deepMergeSettings(sm.globalSettings, project)
+	sm.settings = deepMergeSettings(sm.globalSettings, sm.projectSettings)
 }
 
-// Reload re-reads settings from disk.
+// deepCopySettings makes a deep copy of settings via JSON round-trip.
+func deepCopySettings(s Settings) Settings {
+	data, _ := json.Marshal(s)
+	var result Settings
+	json.Unmarshal(data, &result) //nolint:errcheck
+	return result
+}
+
+func copyStringBoolMap(m map[string]bool) map[string]bool {
+	result := make(map[string]bool, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
+}
+
+func copyNestedMap(m map[string]map[string]bool) map[string]map[string]bool {
+	result := make(map[string]map[string]bool, len(m))
+	for k, v := range m {
+		inner := make(map[string]bool, len(v))
+		for ik, iv := range v {
+			inner[ik] = iv
+		}
+		result[k] = inner
+	}
+	return result
+}
+
+// Reload re-reads settings from storage.
 func (sm *SettingsManager) Reload() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	if sm.persist && sm.settingsPath != "" {
-		data, err := os.ReadFile(sm.settingsPath)
-		if err == nil {
-			var gs Settings
-			if err := json.Unmarshal(data, &gs); err == nil {
-				sm.globalSettings = migrateSettings(gs)
-				sm.loadError = nil
-			} else {
-				sm.loadError = err
-			}
-		}
+	globalSettings, globalErr := loadSettingsFromStorage(sm.storage, ScopeGlobal)
+	if globalErr == nil {
+		sm.globalSettings = globalSettings
+		sm.globalLoadError = nil
+	} else {
+		sm.globalLoadError = globalErr
+		sm.recordError(ScopeGlobal, globalErr)
+	}
+
+	projectSettings, projectErr := loadSettingsFromStorage(sm.storage, ScopeProject)
+	if projectErr == nil {
+		sm.projectSettings = projectSettings
+		sm.projectLoadError = nil
+	} else {
+		sm.projectLoadError = projectErr
+		sm.recordError(ScopeProject, projectErr)
 	}
 
 	sm.modifiedFields = map[string]bool{}
 	sm.modifiedNested = map[string]map[string]bool{}
+	sm.modifiedProjectFields = map[string]bool{}
+	sm.modifiedProjectNested = map[string]map[string]bool{}
 	sm.remerge()
 }
 
@@ -847,22 +1049,62 @@ func (sm *SettingsManager) GetShowHardwareCursor() bool {
 func (sm *SettingsManager) GetGlobalSettings() Settings {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	// Deep copy via JSON
-	data, _ := json.Marshal(sm.globalSettings)
-	var copy Settings
-	json.Unmarshal(data, &copy)
-	return copy
+	return deepCopySettings(sm.globalSettings)
 }
 
 // GetProjectSettings returns a copy of project settings.
 func (sm *SettingsManager) GetProjectSettings() Settings {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	if sm.persist {
-		return loadSettingsFile(sm.projectSettingsPath)
-	}
-	data, _ := json.Marshal(sm.inMemoryProject)
-	var copy Settings
-	json.Unmarshal(data, &copy)
-	return copy
+	return deepCopySettings(sm.projectSettings)
+}
+
+// SetProjectPackages sets the packages setting in the project settings file.
+func (sm *SettingsManager) SetProjectPackages(packages []any) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.Packages = packages
+	sm.markProjectModified("packages")
+	sm.saveProjectSettings(projectSettings)
+}
+
+// SetProjectExtensionPaths sets the extensions setting in the project settings file.
+func (sm *SettingsManager) SetProjectExtensionPaths(paths []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.Extensions = paths
+	sm.markProjectModified("extensions")
+	sm.saveProjectSettings(projectSettings)
+}
+
+// SetProjectSkillPaths sets the skills setting in the project settings file.
+func (sm *SettingsManager) SetProjectSkillPaths(paths []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.Skills = paths
+	sm.markProjectModified("skills")
+	sm.saveProjectSettings(projectSettings)
+}
+
+// SetProjectPromptTemplatePaths sets the prompts setting in the project settings file.
+func (sm *SettingsManager) SetProjectPromptTemplatePaths(paths []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.Prompts = paths
+	sm.markProjectModified("prompts")
+	sm.saveProjectSettings(projectSettings)
+}
+
+// SetProjectThemePaths sets the themes setting in the project settings file.
+func (sm *SettingsManager) SetProjectThemePaths(paths []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.Themes = paths
+	sm.markProjectModified("themes")
+	sm.saveProjectSettings(projectSettings)
 }

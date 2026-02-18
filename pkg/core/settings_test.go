@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -238,6 +239,88 @@ func TestSettingsManager_ShowHardwareCursor_EnvVar(t *testing.T) {
 
 	t.Setenv("TAU_HARDWARE_CURSOR", "1")
 	assert.True(t, sm.GetShowHardwareCursor())
+}
+
+func TestSettingsManager_DrainErrors_NoErrors(t *testing.T) {
+	sm := NewInMemorySettingsManager(Settings{})
+	errs := sm.DrainErrors()
+	assert.Empty(t, errs)
+}
+
+// failingSettingsStorage is a mock SettingsStorage whose WithLock always returns an error.
+type failingSettingsStorage struct {
+	err error
+}
+
+func (f *failingSettingsStorage) WithLock(_ SettingsScope, fn func(string) string) error {
+	fn("") // still call fn so the SettingsManager can compute the result
+	return f.err
+}
+
+func TestSettingsManager_DrainErrors_WriteError(t *testing.T) {
+	writeErr := fmt.Errorf("disk full")
+	storage := &failingSettingsStorage{err: writeErr}
+	sm := NewSettingsManagerFromStorage(storage)
+
+	// Any setter that calls save() triggers persistScopedSettings → WithLock → error.
+	sm.SetDefaultProvider("openai")
+
+	errs := sm.DrainErrors()
+	require.Len(t, errs, 1)
+	assert.ErrorIs(t, errs[0].Err, writeErr)
+	assert.Equal(t, ScopeGlobal, errs[0].Scope)
+}
+
+func TestSettingsManager_DrainErrors_ClearsAfterDrain(t *testing.T) {
+	writeErr := fmt.Errorf("disk full")
+	storage := &failingSettingsStorage{err: writeErr}
+	sm := NewSettingsManagerFromStorage(storage)
+
+	sm.SetDefaultProvider("openai")
+	_ = sm.DrainErrors() // drain once
+	errs := sm.DrainErrors()
+	assert.Empty(t, errs, "errors should be cleared after first drain")
+}
+
+func TestSettingsManager_Flush_IsNoop(t *testing.T) {
+	sm := NewInMemorySettingsManager(Settings{})
+	// Should not panic or block
+	sm.Flush()
+}
+
+func TestSettingsManager_ProjectSetters(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sm := NewSettingsManager(cwd, agentDir)
+
+	sm.SetProjectExtensionPaths([]string{"/ext/a", "/ext/b"})
+	assert.Equal(t, []string{"/ext/a", "/ext/b"}, sm.GetEnabledExtensions())
+
+	sm.SetProjectSkillPaths([]string{"/skills/a"})
+	assert.Equal(t, []string{"/skills/a"}, sm.GetSkillPaths())
+
+	sm.SetProjectPromptTemplatePaths([]string{"/prompts/a"})
+	assert.Equal(t, []string{"/prompts/a"}, sm.GetPromptTemplatePaths())
+
+	sm.SetProjectThemePaths([]string{"/themes/a"})
+	assert.Equal(t, []string{"/themes/a"}, sm.GetThemePaths())
+
+	proj := sm.GetProjectSettings()
+	assert.Equal(t, []string{"/ext/a", "/ext/b"}, proj.Extensions)
+	assert.Equal(t, []string{"/skills/a"}, proj.Skills)
+	assert.Equal(t, []string{"/prompts/a"}, proj.Prompts)
+	assert.Equal(t, []string{"/themes/a"}, proj.Themes)
+}
+
+func TestSettingsManager_InMemoryStorage(t *testing.T) {
+	storage := &InMemorySettingsStorage{}
+	sm := NewSettingsManagerFromStorage(storage)
+
+	sm.SetDefaultProvider("openai")
+	sm.SetDefaultModel("gpt-4o")
+
+	assert.Equal(t, "openai", sm.GetDefaultProvider())
+	assert.Equal(t, "gpt-4o", sm.GetDefaultModel())
 }
 
 func boolPtr(b bool) *bool { return &b }

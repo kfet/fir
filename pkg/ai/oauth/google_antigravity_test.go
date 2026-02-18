@@ -1,7 +1,9 @@
 package oauth
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -89,6 +91,8 @@ func TestParseRedirectURL(t *testing.T) {
 		{"", "", ""},
 		{"not-a-url", "", ""},
 		{"  http://localhost:51121/oauth-callback?code=test&state=st  ", "test", "st"},
+		// Shell-escaped URL (backslashes from terminal copy-paste)
+		{`http://localhost:51121/oauth-callback\?code\=4/abc\&state\=verifier123`, "4/abc", "verifier123"},
 	}
 	for _, tt := range tests {
 		code, state := parseRedirectURL(tt.input)
@@ -109,3 +113,46 @@ func TestAntigravityScopes(t *testing.T) {
 
 // Verify AntigravityProvider implements the Provider interface.
 var _ Provider = (*AntigravityProvider)(nil)
+
+func TestManualCodeInput(t *testing.T) {
+	code, err := manualCodeInput(func() (string, error) {
+		return `http://localhost:51121/oauth-callback\?code\=4/abc\&state\=v123`, nil
+	}, "v123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "4/abc" {
+		t.Errorf("got code %q, want %q", code, "4/abc")
+	}
+}
+
+func TestManualCodeInput_StateMismatch(t *testing.T) {
+	_, err := manualCodeInput(func() (string, error) {
+		return "http://localhost:51121/oauth-callback?code=x&state=wrong", nil
+	}, "expected")
+	if err == nil || err.Error() != "OAuth state mismatch - possible CSRF attack" {
+		t.Errorf("expected state mismatch error, got %v", err)
+	}
+}
+
+func TestManualCodeInput_Error(t *testing.T) {
+	_, err := manualCodeInput(func() (string, error) {
+		return "", fmt.Errorf("cancelled")
+	}, "v")
+	if err == nil || err.Error() != "cancelled" {
+		t.Errorf("expected cancelled error, got %v", err)
+	}
+}
+
+func TestRaceCallbackAndManual_NilChannel(t *testing.T) {
+	ctx := context.Background()
+	code, err := raceCallbackAndManual(ctx, nil, func() (string, error) {
+		return "http://localhost:51121/oauth-callback?code=manual_code&state=v1", nil
+	}, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "manual_code" {
+		t.Errorf("got code %q, want %q", code, "manual_code")
+	}
+}

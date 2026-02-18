@@ -1,42 +1,35 @@
-# Review Backlog — 2026-02-14
+# Review Backlog — 2026-02-17
 
-**Last reviewed:** Review cycle 3, 2026-02-14 11:40 PST
-**Build status:** ✅ PASSING (`go vet ./...` clean, all tests pass)
-**Test status:** ✅ ALL PASSING (21 packages, including new tmuxspinner + usage)
+**Last reviewed:** Review cycle 11, 2026-02-17 18:40 PST
+**Build status:** ✅ BUILD PASSING (`go build ./...`, `go vet ./...` clean)
+**Test status:** ✅ ALL PASSING (21 packages)
 
-**Files reviewed this cycle:** All unstaged `.go` diffs (~160 files), focus on recently modified:
-- `pkg/extensions/usage/{usage,auth,client}.go` + tests (new extension)
-- `pkg/extension/integration.go` + test (reload mechanism)
-- `pkg/extension/runner.go` (Reset method)
-- `pkg/core/keybindings.go` + test (ActionSelectThinking, constants)
-- `pkg/core/prompttemplates.go` + test (inferPromptSource, ConfigDirName → `.tau`)
-- `pkg/modes/interactive/mode.go` + test (extension reload, prompt autocomplete, session info)
-- `pkg/modes/rpc/server.go` + test (GetCommands returns prompts + skills)
-- `pkg/ai/providers/google_gemini_cli.go` + test (formatting, user-agent rename)
-- `pkg/modes/interactive/components/custom_editor.go` (keybinding constants)
-- `cmd/tau/app.go` (module rename)
+**Files reviewed this cycle:**
+
+Unstaged (in-progress):
+- `pkg/core/settings_test.go` — `failingSettingsStorage` mock + DrainErrors error path tests added
 
 ---
 
-## Simplification
-
-_(no new issues found)_
-
 ## Security
 
-_(no new issues found)_
+_(no open items)_
+
+## Simplification
+
+_(no new issues)_
 
 ## Test Coverage
 
-_(no new gaps found — all new code has corresponding tests)_
+_(no open items — DrainErrors write-error path now tested with mock storage)_
 
 ## Correctness
 
-_(no new issues found)_
+_(no open items)_
 
 ## Hygiene
 
-_(no new issues found)_
+_(no new issues)_
 
 ---
 
@@ -50,3 +43,8 @@ _(no new issues found)_
 - Notify/sandbox test coverage — FIXED
 - Sandbox command checking docs — FIXED
 - `GetSessionList` export scope — FIXED
+- Google OAuth User-Agent impersonation (antigravity + gemini-cli + github_copilot) — NOTE comments added ✅
+- `bash.go` cmd.Cancel process-group kill — correct implementation, no issues ✅
+- `tmuxspinner_test.go` ClearRegistry without cleanup — `defer ClearRegistry()` added ✅
+- `settings.go` write-error suppression — `SettingsStorage.WithLock` now returns error; recorded via `recordError` ✅
+- `settings_test.go` DrainErrors error path untested — `failingSettingsStorage` mock + test added ✅

@@ -93,6 +93,8 @@ func parseRedirectURL(input string) (code, state string) {
 	if input == "" {
 		return "", ""
 	}
+	// Strip shell-escape backslashes (common when pasting from terminal output).
+	input = strings.ReplaceAll(input, "\\", "")
 	u, err := url.Parse(input)
 	if err != nil {
 		return "", ""
@@ -115,9 +117,12 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 	progress(callbacks, "Starting local server for OAuth callback...")
 	srv, resultCh, err := startCallbackServer(ctx)
 	if err != nil {
-		return nil, err
+		// Server failed — fall back to manual paste only
+		resultCh = nil
 	}
-	defer srv.Close()
+	if srv != nil {
+		defer srv.Close()
+	}
 
 	// Build authorization URL
 	params := url.Values{
@@ -145,9 +150,9 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 
 	var code string
 	if callbacks.OnManualCodeInput != nil {
-		// Race between browser callback and manual input
+		// Race between browser callback (if available) and manual input
 		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, pkce.Verifier)
-	} else {
+	} else if resultCh != nil {
 		// Just wait for browser callback
 		select {
 		case result, ok := <-resultCh:
@@ -203,7 +208,12 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 }
 
 // raceCallbackAndManual waits for either the browser callback or manual code input.
+// If resultCh is nil (no callback server), it falls back to manual input only.
 func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult, manualInput func() (string, error), verifier string) (string, error) {
+	if resultCh == nil {
+		return manualCodeInput(manualInput, verifier)
+	}
+
 	type manualResult struct {
 		input string
 		err   error
@@ -246,6 +256,19 @@ func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult,
 	case <-ctx.Done():
 		return "", fmt.Errorf("login cancelled")
 	}
+}
+
+// manualCodeInput prompts for manual input and parses the redirect URL.
+func manualCodeInput(manualInput func() (string, error), verifier string) (string, error) {
+	input, err := manualInput()
+	if err != nil {
+		return "", err
+	}
+	code, state := parseRedirectURL(input)
+	if state != "" && state != verifier {
+		return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
+	}
+	return code, nil
 }
 
 type antigravityTokenData struct {
@@ -351,6 +374,11 @@ func getUserEmail(accessToken string) string {
 func discoverProject(accessToken string, callbacks LoginCallbacks) string {
 	progress(callbacks, "Checking for existing project...")
 
+	// NOTE: The User-Agent and X-Goog-Api-Client headers intentionally impersonate
+	// Google's Node.js client and VS Code Cloud Shell Editor. These values are ported
+	// directly from the upstream TypeScript source and are required by the Cloud Code
+	// Assist API to accept requests. Changing them breaks authentication. This is a
+	// known ToS risk inherited from the original client implementation.
 	headers := map[string]string{
 		"Authorization":   "Bearer " + accessToken,
 		"Content-Type":    "application/json",

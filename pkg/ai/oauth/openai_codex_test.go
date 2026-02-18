@@ -70,6 +70,11 @@ func TestParseAuthorizationInput(t *testing.T) {
 		// Empty
 		{"", "", ""},
 		{"  ", "", ""},
+		// Shell-escaped URL (backslashes from terminal copy-paste)
+		{
+			`http://localhost:1455/auth/callback\?code\=ac_abc\&state\=xyz`,
+			"ac_abc", "xyz",
+		},
 	}
 	for _, tt := range tests {
 		code, state := parseAuthorizationInput(tt.input)

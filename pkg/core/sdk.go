@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/sdk.ts
-// Upstream hash: 9e22d391
+// Upstream hash: 4ba3e5be
 package core
 
 import (
@@ -84,7 +84,11 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Auth & model registry
 	authStorage := opts.AuthStorage
 	if authStorage == nil {
-		authStorage = NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+		authPath := ""
+		if opts.AgentDir != "" {
+			authPath = filepath.Join(agentDir, "auth.json")
+		}
+		authStorage = NewAuthStorage(authPath)
 	}
 
 	modelRegistry := opts.ModelRegistry

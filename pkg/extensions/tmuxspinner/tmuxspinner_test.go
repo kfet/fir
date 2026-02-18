@@ -1,6 +1,7 @@
 package tmuxspinner
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,6 +102,7 @@ func TestNoopWhenNotInTmux(t *testing.T) {
 
 	// Re-register to pick up isTmux=false
 	extension.ClearRegistry()
+	defer extension.ClearRegistry()
 	extension.Register("tmuxspinner", factory)
 
 	runner := extension.NewRunner(core.NewEventBus())
@@ -267,6 +269,95 @@ func TestNoopWhenPaneIDEmpty(t *testing.T) {
 	names := rec.get()
 	if len(names) != 0 {
 		t.Errorf("expected no rename calls when pane ID is empty, got %v", names)
+	}
+}
+
+// TestSpinnerPicksUpUserRename verifies that if the user renames the tmux tab
+// while the spinner is running, the spinner adopts the new name for subsequent
+// frames and restores that new name on Stop.
+func TestSpinnerPicksUpUserRename(t *testing.T) {
+	origIsTmux := isTmux
+	origReadPaneID := readPaneID
+	origReadWindowName := readWindowName
+	origRenameWindow := renameWindow
+	origDisableAutoRename := disableAutoRename
+	defer func() {
+		isTmux = origIsTmux
+		readPaneID = origReadPaneID
+		readWindowName = origReadWindowName
+		renameWindow = origRenameWindow
+		disableAutoRename = origDisableAutoRename
+	}()
+
+	isTmux = func() bool { return true }
+	readPaneID = func() string { return "%0" }
+	disableAutoRename = func(_ string) {}
+
+	// currentWindow simulates the tmux window name as seen externally.
+	// It starts as "original" and reflects whatever we last set via renameWindow,
+	// until the user explicitly calls setWin to simulate a manual rename.
+	var winMu sync.Mutex
+	winName := "original"
+	getWin := func() string {
+		winMu.Lock()
+		defer winMu.Unlock()
+		return winName
+	}
+	setWin := func(n string) {
+		winMu.Lock()
+		winName = n
+		winMu.Unlock()
+	}
+
+	// readWindowName reflects the current simulated window name.
+	readWindowName = func(_ string) string { return getWin() }
+
+	rec := &recorder{}
+	// renameWindow records the call and updates the simulated window name,
+	// just as real tmux would after a rename-window command.
+	renameWindow = func(_ string, n string) {
+		setWin(n)
+		rec.record(n)
+	}
+
+	s := &spinner{}
+	s.Start()
+
+	// Let a few frames spin under "original".
+	time.Sleep(400 * time.Millisecond)
+
+	// User renames the tab directly (bypassing the spinner).
+	setWin("renamed")
+
+	// Let a few more frames spin so the spinner detects and adopts the rename.
+	time.Sleep(500 * time.Millisecond)
+
+	s.Stop()
+
+	names := rec.get()
+	if len(names) == 0 {
+		t.Fatal("expected rename calls, got none")
+	}
+
+	// Verify frames switch from "original ..." to "renamed ..." and never go back.
+	seenRenamed := false
+	for _, n := range names {
+		if strings.HasPrefix(n, "renamed") {
+			seenRenamed = true
+		}
+		if seenRenamed && strings.HasPrefix(n, "original") {
+			t.Errorf("saw 'original' frame after 'renamed' started; all names: %v", names)
+			break
+		}
+	}
+	if !seenRenamed {
+		t.Errorf("expected frames with 'renamed' prefix, got: %v", names)
+	}
+
+	// Stop must restore the user's chosen name, not the original.
+	last := names[len(names)-1]
+	if last != "renamed" {
+		t.Errorf("expected Stop to restore %q, got %q", "renamed", last)
 	}
 }
 

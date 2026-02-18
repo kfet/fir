@@ -82,8 +82,24 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	cmd.Dir = cwd
 	cmd.Env = os.Environ()
 
-	// Use process group for cleanup
+	// Run bash in its own process group so we can kill the entire group
+	// (bash + any child processes it spawns) on cancellation. Without
+	// this, child processes inherit the stdout/stderr pipe write-end and
+	// keep it open after bash is killed, causing cmd.Wait() to hang.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Override the default Cancel (which only kills the bash process) to
+	// kill the entire process group. This ensures child processes
+	// (e.g. "sleep" spawned by bash) are also killed when the context is
+	// cancelled (e.g. user presses Esc), closing the pipe and unblocking
+	// cmd.Wait().
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		// Negative PID targets the process group.
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	// Capture output
 	var buf bytes.Buffer

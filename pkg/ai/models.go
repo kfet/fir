@@ -94,3 +94,6 @@ func ModelsAreEqual(a, b *Model) bool {
 	}
 	return a.ID == b.ID && a.Provider == b.Provider
 }
+
+// boolRef returns a pointer to b. Used in model registration for Compat fields.
+func boolRef(b bool) *bool { return &b }

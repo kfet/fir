@@ -466,3 +466,60 @@ func TestAuthStorage_GetOAuthProviders(t *testing.T) {
 		t.Errorf("GetOAuthProviders() returned %d, want at least 5", len(providers))
 	}
 }
+
+func TestAuthStorage_DrainErrors_NoErrors(t *testing.T) {
+	dir := t.TempDir()
+	s := NewAuthStorage(filepath.Join(dir, "auth.json"))
+	errs := s.DrainErrors()
+	if len(errs) != 0 {
+		t.Errorf("DrainErrors() = %v, want empty", errs)
+	}
+}
+
+func TestAuthStorage_DrainErrors_ClearsAfterDrain(t *testing.T) {
+	dir := t.TempDir()
+	s := NewAuthStorage(filepath.Join(dir, "auth.json"))
+	s.DrainErrors()
+	errs := s.DrainErrors()
+	if len(errs) != 0 {
+		t.Errorf("second DrainErrors() = %v, want empty", errs)
+	}
+}
+
+func TestNewInMemoryAuthStorage_Empty(t *testing.T) {
+	s := NewInMemoryAuthStorage(nil)
+	cred := s.Get("anthropic")
+	if cred != nil {
+		t.Errorf("expected nil credential for empty storage")
+	}
+}
+
+func TestNewInMemoryAuthStorage_WithData(t *testing.T) {
+	data := AuthStorageData{
+		"anthropic": {Type: CredentialTypeAPIKey, Key: "sk-test"},
+	}
+	s := NewInMemoryAuthStorage(data)
+	cred := s.Get("anthropic")
+	if cred == nil {
+		t.Fatal("expected credential")
+	}
+	if cred.Key != "sk-test" {
+		t.Errorf("Key = %q, want sk-test", cred.Key)
+	}
+}
+
+func TestInMemoryAuthStorage_SetAndGet(t *testing.T) {
+	s := NewInMemoryAuthStorage(nil)
+	err := s.Set("openai", AuthCredential{Type: CredentialTypeAPIKey, Key: "sk-openai"})
+	if err != nil {
+		t.Fatalf("Set() error: %v", err)
+	}
+
+	cred := s.Get("openai")
+	if cred == nil {
+		t.Fatal("expected credential")
+	}
+	if cred.Key != "sk-openai" {
+		t.Errorf("Key = %q, want sk-openai", cred.Key)
+	}
+}

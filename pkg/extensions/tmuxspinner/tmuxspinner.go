@@ -169,16 +169,36 @@ func (s *spinner) loop(ctx context.Context, done chan struct{}) {
 	defer ticker.Stop()
 
 	i := 0
+	// lastSet tracks the window name we most recently wrote. On each tick we
+	// read the actual tmux window name and compare: if it differs from lastSet
+	// the user renamed the tab, so we adopt the new name as our base.
+	lastSet := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.mu.Lock()
-			name := fmt.Sprintf("%s %c", s.baseName, frames[i%len(frames)])
 			target := s.paneID
 			s.mu.Unlock()
+
+			// Detect user-initiated renames between ticks.
+			if lastSet != "" {
+				current := readWindowName(target)
+				if current != lastSet && current != "" {
+					s.mu.Lock()
+					s.baseName = current
+					s.mu.Unlock()
+				}
+			}
+
+			s.mu.Lock()
+			base := s.baseName
+			s.mu.Unlock()
+
+			name := fmt.Sprintf("%s %c", base, frames[i%len(frames)])
 			renameWindow(target, name)
+			lastSet = name
 			i++
 		}
 	}

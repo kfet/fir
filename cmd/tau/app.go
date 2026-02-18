@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/main.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 4ba3e5be
 package main
 
 import (
@@ -66,6 +66,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	reportSettingsErrors(settingsManager, "startup")
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
 	// Resource loader
@@ -210,6 +211,13 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 	}
 	if effective != s.ThinkingLevel() {
 		s.SetThinkingLevel(effective)
+	}
+}
+
+// reportSettingsErrors reports any settings load errors to stderr.
+func reportSettingsErrors(settingsManager *core.SettingsManager, context string) {
+	for _, se := range settingsManager.DrainErrors() {
+		fmt.Fprintf(os.Stderr, "Warning (%s, %s settings): %v\n", context, se.Scope, se.Err)
 	}
 }
 
