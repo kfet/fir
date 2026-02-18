@@ -653,3 +653,113 @@ func TestRunnerEventBus(t *testing.T) {
 		t.Error("expected custom event to be received via event bus")
 	}
 }
+
+// mockUIForStatus tracks SetStatus/ClearWidget calls.
+type mockUIForStatus struct {
+	noopUIContext
+	statuses map[string]string
+	widgets  map[string][]string
+}
+
+func newMockUI() *mockUIForStatus {
+	return &mockUIForStatus{
+		statuses: make(map[string]string),
+		widgets:  make(map[string][]string),
+	}
+}
+
+func (m *mockUIForStatus) SetStatus(key, text string) {
+	if text == "" {
+		delete(m.statuses, key)
+	} else {
+		m.statuses[key] = text
+	}
+}
+
+func (m *mockUIForStatus) SetWidget(key string, lines []string) {
+	m.widgets[key] = lines
+}
+
+func (m *mockUIForStatus) ClearWidget(key string) {
+	delete(m.widgets, key)
+}
+
+func TestResetClearsExtensionStatus(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("status-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			ctx.UI().SetStatus("mykey", "hello")
+			ctx.UI().SetWidget("mywidget", []string{"line1"})
+			return nil, nil
+		})
+	})
+
+	ui := newMockUI()
+	runner := NewRunner(core.NewEventBus())
+	runner.SetUIContext(ui)
+	if err := runner.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = runner.EmitSessionStart()
+
+	if ui.statuses["mykey"] != "hello" {
+		t.Fatalf("expected status 'hello', got %q", ui.statuses["mykey"])
+	}
+	if len(ui.widgets["mywidget"]) != 1 {
+		t.Fatalf("expected widget set, got %v", ui.widgets["mywidget"])
+	}
+
+	// Reset should clear the status and widget.
+	runner.Reset()
+
+	if _, ok := ui.statuses["mykey"]; ok {
+		t.Error("expected status 'mykey' to be cleared after Reset")
+	}
+	if _, ok := ui.widgets["mywidget"]; ok {
+		t.Error("expected widget 'mywidget' to be cleared after Reset")
+	}
+}
+
+func TestResetDoesNotClearManuallyClearedStatus(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("clear-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			ctx.UI().SetStatus("tempkey", "temporary")
+			return nil, nil
+		})
+		api.On("session_shutdown", func(event *Event, ctx Context) (any, error) {
+			// Extension cleans up its own status before Reset.
+			ctx.UI().SetStatus("tempkey", "")
+			return nil, nil
+		})
+	})
+
+	ui := newMockUI()
+	runner := NewRunner(core.NewEventBus())
+	runner.SetUIContext(ui)
+	if err := runner.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = runner.EmitSessionStart()
+	if ui.statuses["tempkey"] != "temporary" {
+		t.Fatal("expected status to be set")
+	}
+
+	// Emit shutdown (as Reload does), then reset.
+	_ = runner.EmitSessionShutdown()
+	if _, ok := ui.statuses["tempkey"]; ok {
+		t.Error("expected extension to clear its own status in shutdown")
+	}
+
+	// Reset should be a no-op for already-cleared keys.
+	runner.Reset()
+	if _, ok := ui.statuses["tempkey"]; ok {
+		t.Error("expected no leftover status after Reset")
+	}
+}

@@ -75,6 +75,9 @@ func parseAuthorizationInput(input string) (code, state string) {
 		return "", ""
 	}
 
+	// Strip shell-escape backslashes (common when pasting from terminal output).
+	value = strings.ReplaceAll(value, "\\", "")
+
 	// Try URL
 	if u, err := url.Parse(value); err == nil && u.Scheme != "" {
 		return u.Query().Get("code"), u.Query().Get("state")

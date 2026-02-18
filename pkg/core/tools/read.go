@@ -117,82 +117,7 @@ func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, e
 		return agent.AgentToolResult{}, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 
-	textContent := string(data)
-	allLines := strings.Split(textContent, "\n")
-	totalFileLines := len(allLines)
-
-	// Apply offset (1-indexed to 0-indexed)
-	startLine := 0
-	if offset != nil {
-		startLine = *offset - 1
-		if startLine < 0 {
-			startLine = 0
-		}
-	}
-	startLineDisplay := startLine + 1
-
-	if startLine >= len(allLines) {
-		return agent.AgentToolResult{}, fmt.Errorf("offset %d is beyond end of file (%d lines total)", *offset, len(allLines))
-	}
-
-	// Apply limit
-	var selectedContent string
-	var userLimitedLines *int
-	if limit != nil {
-		endLine := startLine + *limit
-		if endLine > len(allLines) {
-			endLine = len(allLines)
-		}
-		selectedContent = strings.Join(allLines[startLine:endLine], "\n")
-		n := endLine - startLine
-		userLimitedLines = &n
-	} else {
-		selectedContent = strings.Join(allLines[startLine:], "\n")
-	}
-
-	// Apply truncation
-	truncation := TruncateHead(selectedContent, TruncationOptions{})
-
-	var outputText string
-	var details *ReadToolDetails
-
-	if truncation.FirstLineExceedsLimit {
-		// First line at offset exceeds limit
-		firstLineSize := FormatSize(len(allLines[startLine]))
-		outputText = fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
-			startLineDisplay, firstLineSize, FormatSize(DefaultMaxBytes), startLineDisplay, path, DefaultMaxBytes)
-		details = &ReadToolDetails{Truncation: &truncation}
-	} else if truncation.Truncated {
-		endLineDisplay := startLineDisplay + truncation.OutputLines - 1
-		nextOffset := endLineDisplay + 1
-		outputText = truncation.Content
-
-		if truncation.TruncatedBy == "lines" {
-			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]",
-				startLineDisplay, endLineDisplay, totalFileLines, nextOffset)
-		} else {
-			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
-				startLineDisplay, endLineDisplay, totalFileLines, FormatSize(DefaultMaxBytes), nextOffset)
-		}
-		details = &ReadToolDetails{Truncation: &truncation}
-	} else if userLimitedLines != nil && startLine+*userLimitedLines < len(allLines) {
-		remaining := len(allLines) - (startLine + *userLimitedLines)
-		nextOffset := startLine + *userLimitedLines + 1
-		outputText = truncation.Content
-		outputText += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
-	} else {
-		outputText = truncation.Content
-	}
-
-	result := agent.AgentToolResult{
-		Content: []ai.ToolResultContent{
-			{Type: "text", Text: outputText},
-		},
-	}
-	if details != nil {
-		result.Details = details
-	}
-	return result, nil
+	return applyReadFilters(path, string(data), offset, limit)
 }
 
 // readImage reads an image file, resizes if needed, and returns it as base64.
@@ -230,4 +155,117 @@ func getExtension(path string) string {
 		}
 	}
 	return ""
+}
+
+// ReadFileFn is a function that reads a file and returns its text content.
+// Used for ACP client delegation.
+type ReadFileFn func(ctx context.Context, path string) (string, error)
+
+// applyReadFilters applies offset, limit, and truncation to already-loaded text content.
+// This is the text-processing core of executeRead, extracted for reuse.
+func applyReadFilters(path, textContent string, offset, limit *int) (agent.AgentToolResult, error) {
+	allLines := strings.Split(textContent, "\n")
+	totalFileLines := len(allLines)
+
+	startLine := 0
+	if offset != nil {
+		startLine = *offset - 1
+		if startLine < 0 {
+			startLine = 0
+		}
+	}
+	startLineDisplay := startLine + 1
+
+	if startLine >= len(allLines) {
+		return agent.AgentToolResult{}, fmt.Errorf("offset %d is beyond end of file (%d lines total)", *offset, len(allLines))
+	}
+
+	var selectedContent string
+	var userLimitedLines *int
+	if limit != nil {
+		endLine := startLine + *limit
+		if endLine > len(allLines) {
+			endLine = len(allLines)
+		}
+		selectedContent = strings.Join(allLines[startLine:endLine], "\n")
+		n := endLine - startLine
+		userLimitedLines = &n
+	} else {
+		selectedContent = strings.Join(allLines[startLine:], "\n")
+	}
+
+	truncation := TruncateHead(selectedContent, TruncationOptions{})
+
+	var outputText string
+	var details *ReadToolDetails
+
+	if truncation.FirstLineExceedsLimit {
+		firstLineSize := FormatSize(len(allLines[startLine]))
+		outputText = fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
+			startLineDisplay, firstLineSize, FormatSize(DefaultMaxBytes), startLineDisplay, path, DefaultMaxBytes)
+		details = &ReadToolDetails{Truncation: &truncation}
+	} else if truncation.Truncated {
+		endLineDisplay := startLineDisplay + truncation.OutputLines - 1
+		nextOffset := endLineDisplay + 1
+		outputText = truncation.Content
+		if truncation.TruncatedBy == "lines" {
+			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]",
+				startLineDisplay, endLineDisplay, totalFileLines, nextOffset)
+		} else {
+			outputText += fmt.Sprintf("\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
+				startLineDisplay, endLineDisplay, totalFileLines, FormatSize(DefaultMaxBytes), nextOffset)
+		}
+		details = &ReadToolDetails{Truncation: &truncation}
+	} else if userLimitedLines != nil && startLine+*userLimitedLines < len(allLines) {
+		remaining := len(allLines) - (startLine + *userLimitedLines)
+		nextOffset := startLine + *userLimitedLines + 1
+		outputText = truncation.Content
+		outputText += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
+	} else {
+		outputText = truncation.Content
+	}
+
+	result := agent.AgentToolResult{
+		Content: []ai.ToolResultContent{{Type: "text", Text: outputText}},
+	}
+	if details != nil {
+		result.Details = details
+	}
+	return result, nil
+}
+
+// NewReadToolWithReader creates a read tool that delegates text file reads to readFn.
+// Image files are still read locally (ACP clients don't expose binary file reading).
+func NewReadToolWithReader(cwd string, readFn ReadFileFn) agent.AgentTool {
+	t := NewReadTool(cwd)
+	orig := t.Execute
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		path, _ := params["path"].(string)
+		if path == "" {
+			return agent.AgentToolResult{}, fmt.Errorf("path is required")
+		}
+		absolutePath := ResolveReadPath(path, cwd)
+		// Delegate images to original (ACP has no binary read).
+		ext := strings.ToLower(getExtension(absolutePath))
+		if _, isImage := SupportedImageExtensions[ext]; isImage {
+			return orig(ctx, toolCallID, params, onUpdate)
+		}
+		// Delegate text reads to the provided function.
+		content, err := readFn(ctx, absolutePath)
+		if err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("failed to read %s: %w", path, err)
+		}
+		var offset *int
+		if v, ok := params["offset"].(float64); ok {
+			i := int(v)
+			offset = &i
+		}
+		var limit *int
+		if v, ok := params["limit"].(float64); ok {
+			i := int(v)
+			limit = &i
+		}
+		return applyReadFilters(path, content, offset, limit)
+	}
+	return t
 }

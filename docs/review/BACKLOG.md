@@ -1,47 +1,56 @@
-# Review Backlog — 2026-02-14
+# Review Backlog — 2026-02-18
 
-**Last reviewed:** Review cycle 3, 2026-02-14 11:40 PST
-**Build status:** ✅ PASSING (`go vet ./...` clean, all tests pass)
-**Test status:** ✅ ALL PASSING (21 packages, including new tmuxspinner + usage)
+**Last reviewed:** Review cycle 11, 2026-02-17 18:40 PST (tau upstream) / cycle 3 ACP, 2026-02-17 18:30 PST
+**Build status:** ✅ BUILD PASSING (`go build ./...`, `go vet ./...` clean)
+**Test status:** ✅ ALL PASSING
 
-**Files reviewed this cycle:** All unstaged `.go` diffs (~160 files), focus on recently modified:
-- `pkg/extensions/usage/{usage,auth,client}.go` + tests (new extension)
-- `pkg/extension/integration.go` + test (reload mechanism)
-- `pkg/extension/runner.go` (Reset method)
-- `pkg/core/keybindings.go` + test (ActionSelectThinking, constants)
-- `pkg/core/prompttemplates.go` + test (inferPromptSource, ConfigDirName → `.tau`)
-- `pkg/modes/interactive/mode.go` + test (extension reload, prompt autocomplete, session info)
-- `pkg/modes/rpc/server.go` + test (GetCommands returns prompts + skills)
-- `pkg/ai/providers/google_gemini_cli.go` + test (formatting, user-agent rename)
-- `pkg/modes/interactive/components/custom_editor.go` (keybinding constants)
-- `cmd/tau/app.go` (module rename)
+**Files reviewed this cycle (tau upstream):**
+
+Unstaged (in-progress):
+- `pkg/core/settings_test.go` — `failingSettingsStorage` mock + DrainErrors error path tests added
+
+**Files reviewed this cycle (ACP):**
+- `pkg/modes/acp/types.go` — dead code removed ✅
+- `pkg/modes/acp/terminal.go` — pendingBashTerminals cleanup fixed ✅, constants unexported ✅
+- `pkg/modes/acp/acp.go` — redundant sort removed, /login stub removed ✅
+- `pkg/modes/acp/acp_test.go` — updated (no new tests for the fix paths)
+- `pkg/modes/acp/helpers_test.go` — TestBuildModelState added ✅
+- `go.mod` — acp-go-sdk indirect annotation removed ✅
+- `pkg/extensions/claudeusage/client.go` — threshold comment mismatch found
 
 ---
 
-## Simplification
-
-_(no new issues found)_
-
 ## Security
 
-_(no new issues found)_
+_(no open items)_
+
+## Simplification
+
+_(no new issues)_
 
 ## Test Coverage
 
-_(no new gaps found — all new code has corresponding tests)_
+_(no open items — DrainErrors write-error path now tested with mock storage)_
 
-## Correctness
+## Documentation
 
-_(no new issues found)_
+_(no open items)_
 
 ## Hygiene
 
-_(no new issues found)_
+_(no new issues)_
 
 ---
 
 ## Previously Resolved (all ✅)
 
+- Stale `pendingBashTerminals` on WaitForTerminalExit error — ✅ FIXED (terminal.go, cycle 3)
+- Dead code in `types.go` (unused types + constants) — ✅ FIXED (types.go, cycle 3)
+- Redundant `sort.Slice` in `/continue` handler — ✅ FIXED (acp.go, cycle 3)
+- `handleLogin` stub advertising unsupported `/login` command — ✅ FIXED (removed from builtInCommands, cycle 3)
+- `acp-go-sdk` `// indirect` annotation — ✅ FIXED (go mod tidy, cycle 3)
+- `MaxBackgroundTerminals`/`DefaultMaxBytes` exported unnecessarily — ✅ FIXED (unexported, cycle 3)
+- `BuildModelState` has no test — ✅ FIXED (TestBuildModelState added to helpers_test.go, cycle 3)
 - `resolveTools` unknown tool warning — FIXED
 - `UnknownFlags` never populated — FIXED
 - `SendMessage`/`SendUserMessage` stubbed — FIXED
@@ -50,3 +59,12 @@ _(no new issues found)_
 - Notify/sandbox test coverage — FIXED
 - Sandbox command checking docs — FIXED
 - `GetSessionList` export scope — FIXED
+- Google OAuth User-Agent impersonation (antigravity + gemini-cli + github_copilot) — NOTE comments added ✅
+- `bash.go` cmd.Cancel process-group kill — correct implementation, no issues ✅
+- `tmuxspinner_test.go` ClearRegistry without cleanup — `defer ClearRegistry()` added ✅
+- `settings.go` write-error suppression — `SettingsStorage.WithLock` now returns error; recorded via `recordError` ✅
+- `settings_test.go` DrainErrors error path untested — `failingSettingsStorage` mock + test added ✅
+- Non-zero exit code error return — FIXED
+- Session cleanup on exit — FIXED
+- `acpConn` interface extraction — DONE (enables mocking)
+- Event handling and tool execution end tests — DONE (13 tests in acp_test.go)

@@ -3,6 +3,7 @@ module github.com/kfet/tau
 go 1.24.0
 
 require (
+	github.com/coder/acp-go-sdk v0.6.3
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-runewidth v0.0.19
 	github.com/rivo/uniseg v0.4.7

@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/auth-storage.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 4ba3e5be
 package core
 
 import (
@@ -39,19 +39,146 @@ type AuthCredential struct {
 // AuthStorageData is the on-disk format: provider → credential.
 type AuthStorageData map[string]AuthCredential
 
-// AuthStorage manages credential storage backed by a JSON file.
+// AuthStorageBackend abstracts the storage and locking mechanism for AuthStorage.
+// fn receives the current JSON content (nil if not found) and returns
+// new content to write (nil to skip write), plus an arbitrary result value.
+type AuthStorageBackend interface {
+	// WithLock atomically reads, optionally writes, and returns a result.
+	WithLock(fn func(current []byte) (result any, next []byte)) (any, error)
+	// WithLockAsync is like WithLock but the callback is async.
+	WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error)
+}
+
+// FileAuthStorageBackend stores credentials in a JSON file.
+type FileAuthStorageBackend struct {
+	mu       sync.Mutex
+	authPath string
+}
+
+// NewFileAuthStorageBackend creates a backend backed by the given file path.
+func NewFileAuthStorageBackend(authPath string) *FileAuthStorageBackend {
+	return &FileAuthStorageBackend{authPath: authPath}
+}
+
+func (b *FileAuthStorageBackend) ensureParentDir() error {
+	dir := filepath.Dir(b.authPath)
+	return os.MkdirAll(dir, 0700)
+}
+
+func (b *FileAuthStorageBackend) readCurrent() []byte {
+	data, err := os.ReadFile(b.authPath)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (b *FileAuthStorageBackend) writeNext(data []byte) error {
+	if err := b.ensureParentDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(b.authPath, data, 0600)
+}
+
+func (b *FileAuthStorageBackend) WithLock(fn func(current []byte) (result any, next []byte)) (any, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.ensureParentDir(); err != nil {
+		return nil, err
+	}
+	current := b.readCurrent()
+	result, next := fn(current)
+	if next != nil {
+		if err := b.writeNext(next); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (b *FileAuthStorageBackend) WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.ensureParentDir(); err != nil {
+		return nil, err
+	}
+	current := b.readCurrent()
+	result, next, err := fn(current)
+	if err != nil {
+		return nil, err
+	}
+	if next != nil {
+		if err := b.writeNext(next); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+// InMemoryAuthStorageBackend stores credentials in memory (no file I/O).
+type InMemoryAuthStorageBackend struct {
+	mu    sync.Mutex
+	value []byte
+}
+
+func (b *InMemoryAuthStorageBackend) WithLock(fn func(current []byte) (result any, next []byte)) (any, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	result, next := fn(b.value)
+	if next != nil {
+		b.value = next
+	}
+	return result, nil
+}
+
+func (b *InMemoryAuthStorageBackend) WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	result, next, err := fn(b.value)
+	if err != nil {
+		return nil, err
+	}
+	if next != nil {
+		b.value = next
+	}
+	return result, nil
+}
+
+// AuthStorage manages credential storage.
 type AuthStorage struct {
 	mu               sync.RWMutex
-	authPath         string
+	storage          AuthStorageBackend
 	data             AuthStorageData
 	runtimeOverrides map[string]string
 	fallbackResolver func(provider string) string
+	loadError        error
+	errors           []error
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
+// This is the primary constructor for file-based storage.
 func NewAuthStorage(authPath string) *AuthStorage {
+	if authPath == "" {
+		authPath = filepath.Join(DefaultAgentDir(), "auth.json")
+	}
+	return newAuthStorage(NewFileAuthStorageBackend(authPath))
+}
+
+// NewInMemoryAuthStorage creates an AuthStorage backed by in-memory storage.
+// Useful for tests.
+func NewInMemoryAuthStorage(data AuthStorageData) *AuthStorage {
+	backend := &InMemoryAuthStorageBackend{}
+	if len(data) > 0 {
+		b, _ := json.MarshalIndent(data, "", "  ")
+		backend.value = b
+	}
+	return newAuthStorage(backend)
+}
+
+// newAuthStorage creates an AuthStorage backed by the given storage backend.
+func newAuthStorage(storage AuthStorageBackend) *AuthStorage {
 	s := &AuthStorage{
-		authPath:         authPath,
+		storage:          storage,
 		data:             make(AuthStorageData),
 		runtimeOverrides: make(map[string]string),
 	}
@@ -60,7 +187,6 @@ func NewAuthStorage(authPath string) *AuthStorage {
 }
 
 // SetRuntimeApiKey sets a runtime API key override (not persisted to disk).
-// Used for CLI --api-key flag.
 func (s *AuthStorage) SetRuntimeApiKey(provider, apiKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,47 +201,62 @@ func (s *AuthStorage) RemoveRuntimeApiKey(provider string) {
 }
 
 // SetFallbackResolver sets a fallback resolver for API keys not found elsewhere.
-// Used for custom provider keys from models.json.
 func (s *AuthStorage) SetFallbackResolver(resolver func(provider string) string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fallbackResolver = resolver
 }
 
-// Reload re-reads credentials from disk.
+func (s *AuthStorage) recordError(err error) {
+	if err != nil {
+		s.errors = append(s.errors, err)
+	}
+}
+
+func (s *AuthStorage) parseStorageData(content []byte) AuthStorageData {
+	if len(content) == 0 {
+		return make(AuthStorageData)
+	}
+	var parsed AuthStorageData
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		return make(AuthStorageData)
+	}
+	return parsed
+}
+
+// Reload re-reads credentials from storage.
 func (s *AuthStorage) Reload() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reload()
+	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
+		s.data = s.parseStorageData(current)
+		return nil, nil
+	})
+	if err != nil {
+		s.loadError = err
+		s.recordError(err)
+	} else {
+		s.loadError = nil
+	}
 }
 
-func (s *AuthStorage) reload() {
-	data, err := os.ReadFile(s.authPath)
-	if err != nil {
-		s.data = make(AuthStorageData)
+func (s *AuthStorage) persistProviderChange(provider string, cred *AuthCredential) {
+	if s.loadError != nil {
 		return
 	}
-	var parsed AuthStorageData
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		s.data = make(AuthStorageData)
-		return
-	}
-	s.data = parsed
-}
-
-func (s *AuthStorage) save() error {
-	dir := filepath.Dir(s.authPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("create auth dir: %w", err)
-	}
-	data, err := json.MarshalIndent(s.data, "", "  ")
+	_, err := s.storage.WithLock(func(current []byte) (any, []byte) {
+		currentData := s.parseStorageData(current)
+		if cred != nil {
+			currentData[provider] = *cred
+		} else {
+			delete(currentData, provider)
+		}
+		b, _ := json.MarshalIndent(currentData, "", "  ")
+		return nil, b
+	})
 	if err != nil {
-		return fmt.Errorf("marshal auth data: %w", err)
+		s.recordError(err)
 	}
-	if err := os.WriteFile(s.authPath, data, 0600); err != nil {
-		return fmt.Errorf("write auth file: %w", err)
-	}
-	return nil
 }
 
 // Get returns the credential for a provider, or nil if not found.
@@ -134,7 +275,8 @@ func (s *AuthStorage) Set(provider string, cred AuthCredential) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[provider] = cred
-	return s.save()
+	s.persistProviderChange(provider, &cred)
+	return nil
 }
 
 // Remove deletes a credential for a provider.
@@ -142,7 +284,8 @@ func (s *AuthStorage) Remove(provider string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, provider)
-	return s.save()
+	s.persistProviderChange(provider, nil)
+	return nil
 }
 
 // List returns all providers with stored credentials.
@@ -156,7 +299,7 @@ func (s *AuthStorage) List() []string {
 	return result
 }
 
-// Has returns whether credentials exist for a provider in auth.json.
+// Has returns whether credentials exist for a provider.
 func (s *AuthStorage) Has(provider string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -165,7 +308,6 @@ func (s *AuthStorage) Has(provider string) bool {
 }
 
 // HasAuth checks if any form of auth is configured for a provider.
-// Unlike GetApiKey, this doesn't refresh OAuth tokens.
 func (s *AuthStorage) HasAuth(provider string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -185,11 +327,21 @@ func (s *AuthStorage) HasAuth(provider string) bool {
 	return false
 }
 
+// DrainErrors returns and clears all accumulated errors.
+func (s *AuthStorage) DrainErrors() []error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	drained := make([]error, len(s.errors))
+	copy(drained, s.errors)
+	s.errors = s.errors[:0]
+	return drained
+}
+
 // GetApiKey resolves the API key for a provider.
 // Priority:
 // 1. Runtime override (CLI --api-key)
-// 2. API key from auth.json
-// 3. OAuth token from auth.json (auto-refreshed if expired)
+// 2. API key from auth storage
+// 3. OAuth token from auth storage (auto-refreshed if expired)
 // 4. Environment variable
 // 5. Fallback resolver (models.json custom providers)
 func (s *AuthStorage) GetApiKey(provider string) string {
@@ -201,7 +353,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 		return key
 	}
 
-	// Check auth.json
+	// Check auth storage
 	if cred, ok := s.data[provider]; ok {
 		if cred.Type == CredentialTypeAPIKey && cred.Key != "" {
 			s.mu.RUnlock()
@@ -210,7 +362,6 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
 			oauthProvider := oauth.GetProvider(provider)
 			if oauthProvider == nil {
-				// Unknown OAuth provider — return access token as-is
 				s.mu.RUnlock()
 				return cred.Access
 			}
@@ -220,11 +371,9 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 
 			if needsRefresh {
 				s.mu.RUnlock()
-				// Upgrade to write lock for refresh
 				return s.refreshOAuthToken(provider, oauthProvider)
 			}
 
-			// Token not expired — return via provider's GetAPIKey
 			oauthCreds := authCredToOAuthCreds(&cred)
 			key := oauthProvider.GetAPIKey(oauthCreds)
 			s.mu.RUnlock()
@@ -248,40 +397,63 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 	return ""
 }
 
-// refreshOAuthToken handles token refresh under a write lock.
-// It re-checks the token after acquiring the lock in case another
-// goroutine already refreshed it.
+// refreshOAuthToken handles token refresh using the storage backend lock.
 func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Provider) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Re-read from disk to check if another process refreshed
-	s.reload()
-
-	cred, ok := s.data[provider]
-	if !ok || cred.Type != CredentialTypeOAuth {
-		return ""
+	type refreshResult struct {
+		apiKey      string
+		updatedData AuthStorageData
 	}
 
-	// Check if still expired (another goroutine/process may have refreshed)
-	if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
+	result, err := s.storage.WithLockAsync(func(current []byte) (any, []byte, error) {
+		currentData := s.parseStorageData(current)
+
+		cred, ok := currentData[provider]
+		if !ok || cred.Type != CredentialTypeOAuth {
+			return refreshResult{updatedData: currentData}, nil, nil
+		}
+
+		// Check if another process already refreshed
+		if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
+			oauthCreds := authCredToOAuthCreds(&cred)
+			return refreshResult{apiKey: oauthProvider.GetAPIKey(oauthCreds), updatedData: currentData}, nil, nil
+		}
+
+		// Perform the refresh
 		oauthCreds := authCredToOAuthCreds(&cred)
-		return oauthProvider.GetAPIKey(oauthCreds)
-	}
+		newCreds, err := oauthProvider.RefreshToken(oauthCreds)
+		if err != nil {
+			return refreshResult{updatedData: currentData}, nil, nil
+		}
 
-	// Perform the refresh
-	oauthCreds := authCredToOAuthCreds(&cred)
-	newCreds, err := oauthProvider.RefreshToken(oauthCreds)
+		currentData[provider] = oauthCredsToAuthCred(newCreds)
+		b, _ := json.MarshalIndent(currentData, "", "  ")
+		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData}, b, nil
+	})
+	// Update in-memory state now that the backend lock is released.
+	if r, ok := result.(refreshResult); ok {
+		s.mu.Lock()
+		s.data = r.updatedData
+		s.loadError = nil
+		s.mu.Unlock()
+		if err == nil {
+			return r.apiKey
+		}
+	}
 	if err != nil {
-		// Refresh failed — return empty (user can /login to re-auth)
-		return ""
+		s.mu.Lock()
+		s.recordError(err)
+		s.mu.Unlock()
+		// Refresh failed — re-read to check if another process succeeded.
+		s.Reload()
+		s.mu.RLock()
+		cred, ok := s.data[provider]
+		s.mu.RUnlock()
+		if ok && cred.Type == CredentialTypeOAuth {
+			oauthCreds := authCredToOAuthCreds(&cred)
+			return oauthProvider.GetAPIKey(oauthCreds)
+		}
 	}
-
-	// Save the refreshed credentials
-	s.data[provider] = oauthCredsToAuthCred(newCreds)
-	_ = s.save()
-
-	return oauthProvider.GetAPIKey(newCreds)
+	return ""
 }
 
 // authCredToOAuthCreds converts an AuthCredential to an oauth.Credentials.

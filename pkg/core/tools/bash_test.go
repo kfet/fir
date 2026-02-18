@@ -80,6 +80,38 @@ func TestBashTool_Abort(t *testing.T) {
 	}
 }
 
+// TestBashTool_AbortWithChildren verifies that cancelling the context kills the
+// entire process group, not just the bash process.  Without the process-group
+// fix, bash child processes keep the stdout/stderr pipe open after bash is
+// killed, causing cmd.Wait() (and therefore Execute) to block until all
+// children exit naturally.
+func TestBashTool_AbortWithChildren(t *testing.T) {
+	tool := NewBashTool(t.TempDir())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	// "sleep 30 & sleep 30" forces bash to fork children rather than exec()
+	// into sleep, so without the process-group kill the pipe would stay open
+	// for ~30 s after bash is killed.
+	_, err := tool.Execute(ctx, "call-1", map[string]any{
+		"command": "sleep 30 & sleep 30",
+	}, nil)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error for abort")
+	}
+	// Should return well within a second; 5 s is a generous upper bound.
+	if elapsed > 5*time.Second {
+		t.Errorf("Execute took %v after cancel — child processes not killed (pipe held open)", elapsed)
+	}
+}
+
 func TestBashTool_NoOutput(t *testing.T) {
 	tool := NewBashTool(t.TempDir())
 	result, err := tool.Execute(context.Background(), "call-1", map[string]any{

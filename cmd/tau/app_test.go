@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kfet/tau/pkg/ai"
 	"github.com/kfet/tau/pkg/ai/providers"
 	"github.com/kfet/tau/pkg/core"
 )
@@ -179,8 +180,9 @@ func TestResolveEnabledExtensions_Default(t *testing.T) {
 
 	args := &Args{}
 	result := resolveEnabledExtensions(args, sm)
+	// No extensions enabled by default unless configured in settings or CLI
 	if len(result) != 0 {
-		t.Errorf("expected 0 extensions by default, got %d: %v", len(result), result)
+		t.Errorf("expected [] by default, got %v", result)
 	}
 }
 
@@ -195,11 +197,12 @@ func TestResolveEnabledExtensions_FromSettings(t *testing.T) {
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{}
 	result := resolveEnabledExtensions(args, sm)
+	// notify + sandbox from settings
 	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions from settings, got %d: %v", len(result), result)
+		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
 	}
 	if result[0] != "notify" || result[1] != "sandbox" {
-		t.Errorf("unexpected extensions: %v", result)
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 
@@ -210,8 +213,12 @@ func TestResolveEnabledExtensions_FromCLI(t *testing.T) {
 
 	args := &Args{Extensions: []string{"notify", "sandbox"}}
 	result := resolveEnabledExtensions(args, sm)
+	// Only CLI extensions, no implicit defaults
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions from CLI, got %d: %v", len(result), result)
+	}
+	if result[0] != "notify" || result[1] != "sandbox" {
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 
@@ -226,8 +233,12 @@ func TestResolveEnabledExtensions_MergedDeduped(t *testing.T) {
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{Extensions: []string{"notify", "sandbox"}}
 	result := resolveEnabledExtensions(args, sm)
+	// notify from settings + sandbox from CLI; notify deduplicated
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
+	}
+	if result[0] != "notify" || result[1] != "sandbox" {
+		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
 	}
 }
 
@@ -336,5 +347,92 @@ func TestRunListModels_WithPattern(t *testing.T) {
 	err := runListModels(args)
 	if err != nil {
 		t.Fatalf("runListModels returned error: %v", err)
+	}
+}
+
+// ============================================================================
+// checkModelAvailable
+// ============================================================================
+
+func TestCheckModelAvailable_WithModel(t *testing.T) {
+	model := &ai.Model{ID: "test", Provider: "test"}
+	for _, args := range []*Args{
+		{},
+		{Print: true},
+		{OutputMode: ModeJSON},
+		{OutputMode: ModeRPC},
+	} {
+		if err := checkModelAvailable(model, args); err != nil {
+			t.Errorf("expected no error with model present, got %v (args: %+v)", err, args)
+		}
+	}
+}
+
+func TestCheckModelAvailable_NilModel_Interactive(t *testing.T) {
+	if err := checkModelAvailable(nil, &Args{}); err != nil {
+		t.Errorf("expected nil model allowed in interactive mode, got %v", err)
+	}
+}
+
+func TestCheckModelAvailable_NilModel_NonInteractive(t *testing.T) {
+	cases := []struct {
+		name string
+		args *Args
+	}{
+		{"print", &Args{Print: true}},
+		{"json", &Args{OutputMode: ModeJSON}},
+		{"rpc", &Args{OutputMode: ModeRPC}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkModelAvailable(nil, tc.args); err == nil {
+				t.Error("expected error for nil model in non-interactive mode")
+			}
+		})
+	}
+}
+
+// ============================================================================
+// clampThinkingLevel
+// ============================================================================
+
+type mockThinkingSetter struct {
+	model    *ai.Model
+	thinking string
+}
+
+func (m *mockThinkingSetter) Model() *ai.Model         { return m.model }
+func (m *mockThinkingSetter) ThinkingLevel() string     { return m.thinking }
+func (m *mockThinkingSetter) SetThinkingLevel(l string) { m.thinking = l }
+
+func TestClampThinkingLevel_NilModel(t *testing.T) {
+	s := &mockThinkingSetter{model: nil, thinking: ""}
+	clampThinkingLevel(s, "high")
+	if s.thinking != "" {
+		t.Errorf("expected thinking unchanged with nil model, got %q", s.thinking)
+	}
+}
+
+func TestClampThinkingLevel_EmptyThinking(t *testing.T) {
+	s := &mockThinkingSetter{model: &ai.Model{Reasoning: true}, thinking: "high"}
+	clampThinkingLevel(s, "")
+	if s.thinking != "high" {
+		t.Errorf("expected thinking unchanged with empty level, got %q", s.thinking)
+	}
+}
+
+func TestClampThinkingLevel_NoReasoning(t *testing.T) {
+	s := &mockThinkingSetter{model: &ai.Model{Reasoning: false}, thinking: ""}
+	clampThinkingLevel(s, "high")
+	if s.thinking != "off" {
+		t.Errorf("expected thinking clamped to off, got %q", s.thinking)
+	}
+}
+
+func TestClampThinkingLevel_WithReasoning(t *testing.T) {
+	s := &mockThinkingSetter{model: &ai.Model{Reasoning: true}, thinking: ""}
+	clampThinkingLevel(s, "high")
+	if s.thinking != "high" {
+		t.Errorf("expected thinking set to high, got %q", s.thinking)
 	}
 }

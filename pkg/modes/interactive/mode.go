@@ -732,6 +732,7 @@ func (m *InteractiveMode) showThinkingSelector() {
 			levels,
 			func(level agent.ThinkingLevel) {
 				m.session.SetThinkingLevel(string(level))
+				m.settings.SetDefaultThinkingLevel(string(level))
 				m.footerComponent.Invalidate()
 				done()
 				m.showStatus(fmt.Sprintf("Thinking: %s", level))
@@ -786,11 +787,18 @@ func (m *InteractiveMode) showThemeSelector() {
 
 func (m *InteractiveMode) showSettingsSelector() {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		// Build available thinking levels from session
+		availLevels := m.session.GetAvailableThinkingLevels()
+		levelStrs := make([]string, len(availLevels))
+		for i, l := range availLevels {
+			levelStrs[i] = string(l)
+		}
+
 		config := components.SettingsConfig{
 			AutoCompact:             m.autoCompact,
 			HideThinkingBlock:       m.hideThinking,
-			ThinkingLevel:           "medium",
-			AvailableThinkingLevels: []string{"off", "minimal", "low", "medium", "high"},
+			ThinkingLevel:           m.session.ThinkingLevel(),
+			AvailableThinkingLevels: levelStrs,
 			CurrentTheme:            "dark",
 			AvailableThemes:         []string{"dark", "light"},
 			SteeringMode:            m.settings.GetSteeringMode(),
@@ -805,6 +813,17 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetCompactionEnabled(v)
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
+			OnThinkingLevelChange: func(level string) {
+				m.session.SetThinkingLevel(level)
+				m.settings.SetDefaultThinkingLevel(level)
+				m.footerComponent.Invalidate()
+			},
+			OnSteeringModeChange: func(mode string) {
+				m.settings.SetSteeringMode(mode)
+			},
+			OnFollowUpModeChange: func(mode string) {
+				m.settings.SetFollowUpMode(mode)
+			},
 			OnTransportChange: func(transport string) {
 				m.settings.SetTransport(transport)
 				m.session.Agent.SetTransport(ai.Transport(transport))
@@ -1139,6 +1158,59 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		return
 	}
 
+	promptUser := func(prompt oauth.Prompt) (string, error) {
+		type promptResult struct {
+			value string
+			err   error
+		}
+		ch := make(chan promptResult, 1)
+
+		// Show an input dialog in the editor container.
+		// This must run on the "UI" path (modify TUI state then request render).
+		done := func() {
+			m.editorContainer.Clear()
+			m.editorContainer.AddChild(m.editor)
+			m.ui.SetFocus(m.editor)
+			m.ui.RequestRender(false)
+		}
+
+		t := itheme.GetTheme()
+		container := &tui.Container{}
+		container.AddChild(components.NewDynamicBorder(nil))
+		container.AddChild(tuicomp.NewText(t.Fg("warning", prompt.Message), 1, 0, nil))
+		if prompt.Placeholder != "" {
+			container.AddChild(tuicomp.NewText(t.Fg("muted", "(e.g. "+prompt.Placeholder+")"), 1, 0, nil))
+		}
+		if prompt.AllowEmpty {
+			container.AddChild(tuicomp.NewText(t.Fg("muted", "Press Enter to skip"), 1, 0, nil))
+		}
+
+		input := tuicomp.NewInput()
+		input.OnSubmit = func(value string) {
+			if !prompt.AllowEmpty && strings.TrimSpace(value) == "" {
+				return // don't accept empty when not allowed
+			}
+			done()
+			ch <- promptResult{value: value}
+		}
+		input.OnEscape = func() {
+			done()
+			ch <- promptResult{err: fmt.Errorf("Login cancelled")}
+		}
+		container.AddChild(input)
+		container.AddChild(tuicomp.NewSpacer(1))
+		container.AddChild(components.NewDynamicBorder(nil))
+
+		m.editorContainer.Clear()
+		m.editorContainer.AddChild(container)
+		m.ui.SetFocus(input)
+		m.ui.RequestRender(true)
+
+		// Block until user submits or cancels.
+		result := <-ch
+		return result.value, result.err
+	}
+
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
 			// Try to auto-open the browser.
@@ -1155,59 +1227,14 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			if info.Instructions != "" {
 				msg += "\n" + info.Instructions
 			}
+			m.showMessage(msg)
 			m.showStatus(msg)
 		},
-		OnPrompt: func(prompt oauth.Prompt) (string, error) {
-			type promptResult struct {
-				value string
-				err   error
-			}
-			ch := make(chan promptResult, 1)
-
-			// Show an input dialog in the editor container.
-			// This must run on the "UI" path (modify TUI state then request render).
-			done := func() {
-				m.editorContainer.Clear()
-				m.editorContainer.AddChild(m.editor)
-				m.ui.SetFocus(m.editor)
-				m.ui.RequestRender(false)
-			}
-
-			t := itheme.GetTheme()
-			container := &tui.Container{}
-			container.AddChild(components.NewDynamicBorder(nil))
-			container.AddChild(tuicomp.NewText(t.Fg("warning", prompt.Message), 1, 0, nil))
-			if prompt.Placeholder != "" {
-				container.AddChild(tuicomp.NewText(t.Fg("muted", "(e.g. "+prompt.Placeholder+")"), 1, 0, nil))
-			}
-			if prompt.AllowEmpty {
-				container.AddChild(tuicomp.NewText(t.Fg("muted", "Press Enter to skip"), 1, 0, nil))
-			}
-
-			input := tuicomp.NewInput()
-			input.OnSubmit = func(value string) {
-				if !prompt.AllowEmpty && strings.TrimSpace(value) == "" {
-					return // don't accept empty when not allowed
-				}
-				done()
-				ch <- promptResult{value: value}
-			}
-			input.OnEscape = func() {
-				done()
-				ch <- promptResult{err: fmt.Errorf("Login cancelled")}
-			}
-			container.AddChild(input)
-			container.AddChild(tuicomp.NewSpacer(1))
-			container.AddChild(components.NewDynamicBorder(nil))
-
-			m.editorContainer.Clear()
-			m.editorContainer.AddChild(container)
-			m.ui.SetFocus(input)
-			m.ui.RequestRender(true)
-
-			// Block until user submits or cancels.
-			result := <-ch
-			return result.value, result.err
+		OnPrompt: promptUser,
+		OnManualCodeInput: func() (string, error) {
+			return promptUser(oauth.Prompt{
+				Message: "Paste the redirect URL or authorization code from your browser:",
+			})
 		},
 		OnProgress: func(message string) {
 			m.showStatus(message)
@@ -1643,6 +1670,7 @@ func (m *InteractiveMode) cycleThinkingLevel() {
 	}
 	next := levels[(idx+1)%len(levels)]
 	m.session.SetThinkingLevel(string(next))
+	m.settings.SetDefaultThinkingLevel(string(next))
 	m.footerComponent.Invalidate()
 	m.showStatus(fmt.Sprintf("Thinking: %s", next))
 }

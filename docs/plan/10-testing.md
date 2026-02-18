@@ -102,18 +102,6 @@ pkg/ai/providers/testdata/
 
 Each `.sse` file is a raw recorded HTTP response body (the SSE event stream).
 
-**Recording fixtures:** Use `PI_RECORD_FIXTURES=1 go test -run TestLive...`
-to hit the real API and save the response. These live tests are gated:
-
-```go
-func TestLiveAnthropic_SimpleResponse(t *testing.T) {
-    if os.Getenv("PI_TEST_LIVE") != "1" {
-        t.Skip("set PI_TEST_LIVE=1 to run live API tests")
-    }
-    // Hit real API, optionally record to testdata/
-}
-```
-
 ### 5. Agent Loop Integration Tests (mock LLM)
 
 Test the full agent loop with a mock provider that returns canned responses:
@@ -279,7 +267,6 @@ pkg/tui/testutil_test.go         # component render helpers
 ## Coverage Target
 
 - **Unit + mock tests:** 90%+ line coverage per package
-- **Live integration tests:** not counted in CI coverage, run manually
 
 ```bash
 make test                  # All unit/mock tests
@@ -299,9 +286,6 @@ test-cover:
 
 test-race:
 	go test -race ./...
-
-test-live:
-	PI_TEST_LIVE=1 go test ./pkg/ai/providers/... -run TestLive
 ```
 
 ## Rule: No Test, No Done

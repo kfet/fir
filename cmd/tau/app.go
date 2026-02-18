@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/main.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 4ba3e5be
 package main
 
 import (
@@ -18,12 +18,14 @@ import (
 	"github.com/kfet/tau/pkg/core/tools"
 	"github.com/kfet/tau/pkg/extension"
 	interactive "github.com/kfet/tau/pkg/modes/interactive"
+	acpmode "github.com/kfet/tau/pkg/modes/acp"
 	printmode "github.com/kfet/tau/pkg/modes/print"
 	rpcmode "github.com/kfet/tau/pkg/modes/rpc"
 
 	// Import built-in extensions (registered via init())
 	_ "github.com/kfet/tau/pkg/extensions/claudeusage"
 	_ "github.com/kfet/tau/pkg/extensions/notify"
+	_ "github.com/kfet/tau/pkg/extensions/sandbox"
 	_ "github.com/kfet/tau/pkg/extensions/tmuxspinner"
 )
 
@@ -65,6 +67,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	reportSettingsErrors(settingsManager, "startup")
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
 	// Resource loader
@@ -157,23 +160,14 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		fmt.Fprintln(os.Stderr, result.ModelFallbackMessage)
 	}
 
-	// Check model is available
-	if result.Session.Model() == nil {
-		return nil, fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+	// Check model is available — in non-interactive modes we must fail early,
+	// but in TUI mode we allow starting without a model so the user can /login.
+	if err := checkModelAvailable(result.Session.Model(), args); err != nil {
+		return nil, err
 	}
 
 	// Clamp thinking level to model capabilities
-	if args.Thinking != "" {
-		effectiveThinking := string(args.Thinking)
-		if !result.Session.Model().Reasoning {
-			effectiveThinking = "off"
-		} else if effectiveThinking == "xhigh" && !ai.SupportsXhigh(result.Session.Model()) {
-			effectiveThinking = "high"
-		}
-		if effectiveThinking != result.Session.ThinkingLevel() {
-			result.Session.SetThinkingLevel(effectiveThinking)
-		}
-	}
+	clampThinkingLevel(result.Session, args.Thinking)
 
 	return &sessionSetup{
 		cwd:             cwd,
@@ -182,6 +176,50 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		settingsManager: settingsManager,
 		extSetup:        extSetup,
 	}, nil
+}
+
+// checkModelAvailable returns an error if no model is available and the mode
+// requires one (print, JSON, RPC). Interactive TUI mode is allowed to start
+// without a model so the user can /login.
+func checkModelAvailable(model *ai.Model, args *Args) error {
+	if model != nil {
+		return nil
+	}
+	if args.Print || args.OutputMode == ModeJSON || args.OutputMode == ModeRPC {
+		return fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
+	}
+	return nil
+}
+
+// thinkingLevelSetter is the interface needed by clampThinkingLevel.
+type thinkingLevelSetter interface {
+	Model() *ai.Model
+	ThinkingLevel() string
+	SetThinkingLevel(string)
+}
+
+// clampThinkingLevel adjusts the session's thinking level to match model
+// capabilities. It is a no-op if thinking is empty or model is nil.
+func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
+	if thinking == "" || s.Model() == nil {
+		return
+	}
+	effective := string(thinking)
+	if !s.Model().Reasoning {
+		effective = "off"
+	} else if effective == "xhigh" && !ai.SupportsXhigh(s.Model()) {
+		effective = "high"
+	}
+	if effective != s.ThinkingLevel() {
+		s.SetThinkingLevel(effective)
+	}
+}
+
+// reportSettingsErrors reports any settings load errors to stderr.
+func reportSettingsErrors(settingsManager *core.SettingsManager, context string) {
+	for _, se := range settingsManager.DrainErrors() {
+		fmt.Fprintf(os.Stderr, "Warning (%s, %s settings): %v\n", context, se.Scope, se.Err)
+	}
 }
 
 // run is the main application logic.
@@ -205,8 +243,8 @@ func run() error {
 		return runListModels(args)
 	}
 
-	// Read piped stdin (if not a TTY) — skip for RPC mode which reads stdin directly
-	if args.OutputMode != ModeRPC {
+	// Read piped stdin (if not a TTY) — skip for RPC and ACP modes which read stdin directly
+	if args.OutputMode != ModeRPC && args.OutputMode != ModeACP {
 		stdinContent := readPipedStdin()
 		if stdinContent != "" {
 			args.Print = true
@@ -217,6 +255,12 @@ func run() error {
 	// Determine mode
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
 	isRPCMode := args.OutputMode == ModeRPC
+	isACPMode := args.OutputMode == ModeACP
+
+	// ACP mode creates sessions on demand, so dispatch before setupSession.
+	if isACPMode {
+		return runAcpMode(args)
+	}
 
 	if !isPrintMode && !isRPCMode {
 		return runInteractiveMode(args)
@@ -390,7 +434,7 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 }
 
 // resolveEnabledExtensions computes the list of extension names to activate.
-// Extensions are off by default. They are enabled by:
+// Extensions are enabled via:
 //   - settings.json "extensions" array (global or project)
 //   - CLI --extension / -e flags
 //
@@ -400,24 +444,39 @@ func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
 		return nil
 	}
 
-	// Start with settings
-	names := sm.GetEnabledExtensions()
+	seen := make(map[string]bool)
+	var names []string
 
-	// Add CLI --extension flags (deduplicate)
-	if len(args.Extensions) > 0 {
-		seen := make(map[string]bool, len(names))
-		for _, n := range names {
+	// Add settings
+	for _, n := range sm.GetEnabledExtensions() {
+		if !seen[n] {
+			names = append(names, n)
 			seen[n] = true
 		}
-		for _, n := range args.Extensions {
-			if !seen[n] {
-				names = append(names, n)
-				seen[n] = true
-			}
+	}
+
+	// Add CLI --extension flags
+	for _, n := range args.Extensions {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
 		}
 	}
 
 	return names
+}
+
+// runAcpMode runs ACP mode over stdin/stdout.
+func runAcpMode(args *Args) error {
+	acpmode.SetVersion(version)
+	return acpmode.RunAcpMode(acpmode.Options{
+		AdditionalSkillPaths:          args.Skills,
+		AdditionalPromptTemplatePaths: args.PromptTemplates,
+		NoSkills:                      args.NoSkills,
+		NoPromptTemplates:             args.NoPromptTemplates,
+		NoExtensions:                  args.NoExtensions,
+		EnabledExtensions:             args.Extensions,
+	})
 }
 
 // runInteractiveMode runs the full interactive TUI mode.

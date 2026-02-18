@@ -26,6 +26,11 @@ var (
 	proxyEPRegexp  = regexp.MustCompile(`proxy-ep=([^;]+)`)
 )
 
+// NOTE: The following headers intentionally impersonate the GitHub Copilot Chat
+// VS Code extension. These values are ported directly from the upstream TypeScript
+// source and are required by GitHub's OAuth and API endpoints to accept requests.
+// Changing them breaks authentication. This is a known ToS risk inherited from the
+// original client implementation.
 var copilotHeaders = map[string]string{
 	"User-Agent":             "GitHubCopilotChat/0.35.0",
 	"Editor-Version":         "vscode/1.107.0",
@@ -223,7 +228,7 @@ func startGitHubDeviceFlow(domain string) (*deviceCodeResponse, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -268,7 +273,7 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0")
+		req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

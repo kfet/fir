@@ -87,7 +87,7 @@ func TestRunCompaction_NoModel(t *testing.T) {
 	sm := core.NewInMemorySettingsManager(core.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(""), ""),
+		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(session)
 	if err == nil {
@@ -107,7 +107,7 @@ func TestRunCompaction_NoApiKey(t *testing.T) {
 	sm := core.NewInMemorySettingsManager(core.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(""), ""),
+		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(session)
 	if err == nil {
@@ -126,11 +126,9 @@ func TestRunCompaction_NothingToCompact(t *testing.T) {
 	session := makeTestSession(t, model)
 	sm := core.NewInMemorySettingsManager(core.Settings{})
 
-	// Create a registry with a pre-set API key
-	authStorage := core.NewAuthStorage("")
-	authStorage.Set("test-provider", core.AuthCredential{
-		Type: core.CredentialTypeAPIKey,
-		Key:  "test-key-123",
+	// Create a registry with a pre-seeded API key (in-memory, no disk I/O).
+	authStorage := core.NewInMemoryAuthStorage(core.AuthStorageData{
+		"test-provider": {Type: core.CredentialTypeAPIKey, Key: "test-key-123"},
 	})
 	registry := core.NewModelRegistry(authStorage, "")
 

@@ -98,9 +98,12 @@ func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {
 	progress(callbacks, "Starting local server for OAuth callback...")
 	srv, resultCh, err := startGeminiCallbackServer(ctx)
 	if err != nil {
-		return nil, err
+		// Server failed — fall back to manual paste only
+		resultCh = nil
 	}
-	defer srv.Close()
+	if srv != nil {
+		defer srv.Close()
+	}
 
 	// Build authorization URL
 	params := url.Values{
@@ -127,8 +130,9 @@ func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {
 
 	var code string
 	if callbacks.OnManualCodeInput != nil {
+		// Race between browser callback (if available) and manual input
 		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, pkce.Verifier)
-	} else {
+	} else if resultCh != nil {
 		select {
 		case result, ok := <-resultCh:
 			if !ok || result == nil {
@@ -292,6 +296,10 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 		envProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT_ID")
 	}
 
+	// NOTE: The User-Agent header intentionally impersonates Google's Node.js client.
+	// This value is ported directly from the upstream TypeScript source and is required
+	// by the Cloud Code Assist API to accept requests. Changing it breaks authentication.
+	// This is a known ToS risk inherited from the original client implementation.
 	headers := map[string]string{
 		"Authorization":      "Bearer " + accessToken,
 		"Content-Type":       "application/json",

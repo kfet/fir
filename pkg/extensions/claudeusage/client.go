@@ -168,7 +168,7 @@ func formatWindowStatus(label string, w *windowData) string {
 
 // formatStatusLine builds a compact status line for the footer.
 // It always shows both 5-hour and 7-day windows. Color icons appear only
-// for warn (🟡 ≥50%) or urgent (🔴 ≥80%) utilization levels.
+// for warn (⚠️ ≥85%) or urgent (‼️ ≥95%) utilization levels.
 func formatStatusLine(data *usageData) string {
 	fiveHour := formatWindowStatus("5h", data.FiveHour)
 	sevenDay := formatWindowStatus("7d", data.SevenDay)

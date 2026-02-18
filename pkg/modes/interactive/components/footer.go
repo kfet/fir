@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kfet/tau/pkg/modes/interactive/theme"
@@ -180,11 +181,16 @@ func (f *FooterComponent) Render(width int) []string {
 
 	lines := []string{dimPwd, dimStatsLeft + dimRemainder}
 
-	// Extension statuses
+	// Extension statuses (sort keys for stable ordering to avoid flicker)
 	if len(data.ExtensionStatuses) > 0 {
+		keys := make([]string, 0, len(data.ExtensionStatuses))
+		for k := range data.ExtensionStatuses {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
 		var parts []string
-		for _, text := range data.ExtensionStatuses {
-			parts = append(parts, sanitizeStatusText(text))
+		for _, k := range keys {
+			parts = append(parts, sanitizeStatusText(data.ExtensionStatuses[k]))
 		}
 		statusLine := strings.Join(parts, " ")
 		if tui.VisibleWidth(statusLine) > width {

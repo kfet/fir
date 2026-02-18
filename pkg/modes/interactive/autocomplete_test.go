@@ -180,3 +180,279 @@ func TestAutocomplete_DirectorySortedFirst(t *testing.T) {
 		t.Errorf("expected directory first, got label %q", result.Items[0].Label)
 	}
 }
+
+func TestAutocomplete_AtFuzzySubdirectory(t *testing.T) {
+	dir := t.TempDir()
+	// Create nested structure:
+	//   src/
+	//     main.go
+	//     utils/
+	//       helpers.go
+	//   docs/
+	//     readme.md
+	os.MkdirAll(filepath.Join(dir, "src", "utils"), 0755)
+	os.MkdirAll(filepath.Join(dir, "docs"), 0755)
+	os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("package main"), 0644)
+	os.WriteFile(filepath.Join(dir, "src", "utils", "helpers.go"), []byte("package utils"), 0644)
+	os.WriteFile(filepath.Join(dir, "docs", "readme.md"), []byte("# readme"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@helpers" should find src/utils/helpers.go
+	result := p.GetSuggestions([]string{"@helpers"}, 0, 8)
+	if result == nil {
+		t.Fatal("expected suggestions for @helpers")
+	}
+	found := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "src/utils/helpers.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected src/utils/helpers.go in suggestions, got %v", result.Items)
+	}
+}
+
+func TestAutocomplete_AtFuzzyMatchesFilename(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "pkg", "core"), 0755)
+	os.WriteFile(filepath.Join(dir, "pkg", "core", "config.go"), []byte("package core"), 0644)
+	os.WriteFile(filepath.Join(dir, "pkg", "core", "config_test.go"), []byte("package core"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@config" should find both config files
+	result := p.GetSuggestions([]string{"@config"}, 0, 7)
+	if result == nil {
+		t.Fatal("expected suggestions for @config")
+	}
+	configCount := 0
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "config") {
+			configCount++
+		}
+	}
+	if configCount < 2 {
+		t.Errorf("expected at least 2 config matches, got %d: %v", configCount, result.Items)
+	}
+}
+
+func TestAutocomplete_AtFuzzyPathSegments(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "pkg", "modes", "interactive"), 0755)
+	os.WriteFile(filepath.Join(dir, "pkg", "modes", "interactive", "autocomplete.go"), []byte("package interactive"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@auto" should fuzzy-match autocomplete.go deep in the tree
+	result := p.GetSuggestions([]string{"@auto"}, 0, 5)
+	if result == nil {
+		t.Fatal("expected suggestions for @auto")
+	}
+	found := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "autocomplete.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected autocomplete.go in suggestions, got %v", result.Items)
+	}
+}
+
+func TestAutocomplete_AtFuzzySkipsHiddenDirs(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".git", "objects"), 0755)
+	os.WriteFile(filepath.Join(dir, ".git", "objects", "secret.go"), []byte("hidden"), 0644)
+	os.WriteFile(filepath.Join(dir, "visible.go"), []byte("package main"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@secret" should NOT find .git/objects/secret.go
+	result := p.GetSuggestions([]string{"@secret"}, 0, 7)
+	if result != nil {
+		for _, item := range result.Items {
+			if strings.Contains(item.Value, ".git") {
+				t.Errorf("should not suggest files inside .git: %q", item.Value)
+			}
+		}
+	}
+
+	// "@visible" should still work
+	result = p.GetSuggestions([]string{"@visible"}, 0, 8)
+	if result == nil {
+		t.Fatal("expected suggestions for @visible")
+	}
+	found := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "visible.go") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected visible.go in suggestions")
+	}
+}
+
+func TestAutocomplete_AtFuzzySkipsNodeModules(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "node_modules", "lodash"), 0755)
+	os.WriteFile(filepath.Join(dir, "node_modules", "lodash", "index.js"), []byte("module.exports"), 0644)
+	os.WriteFile(filepath.Join(dir, "index.ts"), []byte("import"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@index" should find index.ts but not node_modules/lodash/index.js
+	result := p.GetSuggestions([]string{"@index"}, 0, 6)
+	if result == nil {
+		t.Fatal("expected suggestions for @index")
+	}
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "node_modules") {
+			t.Errorf("should not suggest files inside node_modules: %q", item.Value)
+		}
+	}
+	found := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "index.ts") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected index.ts in suggestions")
+	}
+}
+
+func TestAutocomplete_AtDirectoryListsDirect(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "src"), 0755)
+	os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("a"), 0644)
+	os.WriteFile(filepath.Join(dir, "src", "b.go"), []byte("b"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@src/" should list direct children only (not recursive)
+	result := p.GetSuggestions([]string{"@src/"}, 0, 5)
+	if result == nil {
+		t.Fatal("expected suggestions for @src/")
+	}
+	if len(result.Items) != 2 {
+		t.Errorf("expected 2 items for @src/, got %d: %v", len(result.Items), result.Items)
+	}
+}
+
+func TestAutocomplete_AtEmptyListsAll(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
+	os.WriteFile(filepath.Join(dir, "root.txt"), []byte("r"), 0644)
+	os.WriteFile(filepath.Join(dir, "sub", "deep.txt"), []byte("d"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// "@" alone should list all files recursively
+	result := p.GetSuggestions([]string{"@"}, 0, 1)
+	if result == nil {
+		t.Fatal("expected suggestions for @")
+	}
+	foundRoot := false
+	foundDeep := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "root.txt") {
+			foundRoot = true
+		}
+		if strings.Contains(item.Value, "sub/deep.txt") {
+			foundDeep = true
+		}
+	}
+	if !foundRoot {
+		t.Error("expected root.txt in @ suggestions")
+	}
+	if !foundDeep {
+		t.Error("expected sub/deep.txt in @ suggestions")
+	}
+}
+
+func TestAutocomplete_NoDoubleSlashes(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0755)
+	os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("package main"), 0644)
+	os.WriteFile(filepath.Join(dir, "src", "app.go"), []byte("package src"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// Test various prefix patterns that could produce "//"
+	tests := []struct {
+		input     string
+		cursorCol int
+	}{
+		{"@src/", 5},       // trailing slash in prefix
+		{"@src/p", 6},      // prefix with dir + partial name
+		{"@src/pkg/", 9},   // deeply nested trailing slash
+		{"@src/pkg/m", 10}, // deeply nested partial
+		{"@main", 5},       // plain fuzzy across subdirs
+	}
+
+	for _, tc := range tests {
+		result := p.GetSuggestions([]string{tc.input}, 0, tc.cursorCol)
+		if result == nil {
+			continue
+		}
+		for _, item := range result.Items {
+			if strings.Contains(item.Value, "//") {
+				t.Errorf("double slash found in value for input %q: %q", tc.input, item.Value)
+			}
+			if strings.Contains(item.Label, "//") {
+				t.Errorf("double slash found in label for input %q: %q", tc.input, item.Label)
+			}
+		}
+	}
+}
+
+func TestAutocomplete_NoDoubleSlashesAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
+	os.WriteFile(filepath.Join(dir, "sub", "file.go"), []byte("package sub"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+
+	// Absolute path ending with "/" that could produce "//" when name appended
+	absPrefix := dir + "/sub/"
+	result := p.GetSuggestions([]string{absPrefix}, 0, len(absPrefix))
+	if result == nil {
+		return // No suggestions from absolute-path code path is fine
+	}
+	for _, item := range result.Items {
+		if strings.Contains(item.Value, "//") {
+			t.Errorf("double slash in absolute path suggestion: %q", item.Value)
+		}
+	}
+}
+
+func TestCleanSlashes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"a/b/c", "a/b/c"},
+		{"a//b/c", "a/b/c"},
+		{"a///b///c", "a/b/c"},
+		{"/a/b", "/a/b"},
+		{"//a//b", "/a/b"},
+		{"src//pkg//main.go", "src/pkg/main.go"},
+		{"", ""},
+		{"/", "/"},
+		{"//", "/"},
+	}
+	for _, tc := range tests {
+		// Access cleanSlashes via the package (it's unexported but same package in test)
+		got := cleanSlashes(tc.input)
+		if got != tc.want {
+			t.Errorf("cleanSlashes(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

@@ -1,5 +1,13 @@
 # Sync Log
 
+## 2026-02-17 — Sync to commit 4ba3e5be
+
+- `auth-storage.ts` → `pkg/core/authstorage.go`: Major refactor — added `AuthStorageBackend` interface with `FileAuthStorageBackend` and `InMemoryAuthStorageBackend` implementations; changed `AuthStorage` to use factory methods (`NewAuthStorage`, `NewInMemoryAuthStorage`); added `DrainErrors()` for error accumulation; persistence now goes through backend
+- `settings-manager.ts` → `pkg/core/settings.go`: Major refactor — added `SettingsStorage` interface with `FileSettingsStorage` and `InMemorySettingsStorage` implementations; added `SettingsScope` / `SettingsError` types; `SettingsManager` now uses storage backend abstraction; added `DrainErrors()`, `Flush()` (no-op in sync Go implementation), `markProjectModified()`, project setter methods (`SetProjectPackages`, `SetProjectExtensionPaths`, `SetProjectSkillPaths`, `SetProjectPromptTemplatePaths`, `SetProjectThemePaths`); project settings cached in-memory as `projectSettings` field
+- `sdk.ts` → `pkg/core/sdk.go`: Updated `AuthStorage` creation to use `NewAuthStorage` factory
+- `main.ts` → `cmd/tau/app.go`: Added `reportSettingsErrors()` helper and calls at startup for settings load error reporting
+- `models.generated.ts` → `pkg/ai/models_generated.go`: Added 34 new models (deepseek.v3.2-v1:0 bedrock, claude-sonnet-4-6 anthropic, MiniMaxAI/MiniMax-M2.5 huggingface, Qwen3-Coder-Next huggingface, Qwen3.5-397B-A17B huggingface, MiniMax-M2.5-highspeed minimax/minimax-cn, glm-5/glm-5-free/minimax-m2.5/minimax-m2.5-free opencode, anthropic/claude-sonnet-4.6 openrouter/vercel-ai-gateway, qwen3.5-397b-a17b/qwen3.5-plus-02-15/z-ai/glm-5/openrouter/aurora-alpha/stepfun openrouter, alibaba/qwen3.5-plus/minimax/minimax-m2.5/zai/glm-5 vercel-ai-gateway, gpt-5.3-codex-spark azure/openai/openai-codex, llama3.1-8b cerebras, minimax.minimax-m2.1/moonshotai.kimi-k2.5/zai.glm-4.7/zai.glm-4.7-flash/deepseek.v3.2-v1:0 bedrock, zai-org/GLM-5 huggingface, glm-5 zai); updated pricing for deepseek/deepseek-v3.2, moonshotai/kimi-k2-0905, moonshotai/kimi-k2.5, qwen/qwen3-coder-next, z-ai/glm-4.6, z-ai/glm-4.7, zai-glm-4.7 (cerebras); added `boolRef()` helper to `pkg/ai/models.go`
+
 ## 2026-02-13 — Sync to commit 9e22d391
 
 - `ai/types.ts` → `pkg/ai/types.go`: Added `Transport` type ("sse", "websocket", "auto") and `Transport` field to `StreamOptions`

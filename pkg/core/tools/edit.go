@@ -136,6 +136,71 @@ func NewEditTool(cwd string) agent.AgentTool {
 	}
 }
 
+// EditReadFn reads a file and returns its text content. Used for ACP client delegation.
+type EditReadFn func(ctx context.Context, path string) (string, error)
+
+// NewEditToolWithReadWriter creates an edit tool that uses readFn/writeFn for file I/O.
+// This enables ACP client file delegation (Zed's "Reject All"/"Keep All" review UI).
+func NewEditToolWithReadWriter(cwd string, readFn EditReadFn, writeFn WriteFileFn) agent.AgentTool {
+	t := NewEditTool(cwd)
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		path, _ := params["path"].(string)
+		oldText, _ := params["oldText"].(string)
+		newText, _ := params["newText"].(string)
+		if path == "" {
+			return agent.AgentToolResult{}, fmt.Errorf("path is required")
+		}
+		absolutePath := ResolveToCwd(path, cwd)
+		if ctx.Err() != nil {
+			return agent.AgentToolResult{}, ctx.Err()
+		}
+		// Read via delegated function
+		rawContent, err := readFn(ctx, absolutePath)
+		if err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("File not found: %s", path)
+		}
+		// Apply same logic as NewEditTool
+		content := rawContent
+		bom := ""
+		if strings.HasPrefix(content, "\uFEFF") {
+			bom = "\uFEFF"
+			content = content[len("\uFEFF"):]
+		}
+		originalEnding := detectLineEnding(content)
+		normalizedContent := normalizeToLF(content)
+		normalizedOldText := normalizeToLF(oldText)
+		normalizedNewText := normalizeToLF(newText)
+
+		matchResult := fuzzyFindText(normalizedContent, normalizedOldText)
+		if !matchResult.found {
+			return agent.AgentToolResult{}, fmt.Errorf("Could not find the exact text in %s. The old text must match exactly including all whitespace and newlines.", path)
+		}
+		if matchResult.occurrences > 1 {
+			return agent.AgentToolResult{}, fmt.Errorf("Found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.", matchResult.occurrences, path)
+		}
+		baseContent := matchResult.contentForReplacement
+		newContent := baseContent[:matchResult.index] + normalizedNewText + baseContent[matchResult.index+matchResult.matchLength:]
+		if baseContent == newContent {
+			return agent.AgentToolResult{}, fmt.Errorf("No changes made to %s. The replacement produced identical content.", path)
+		}
+		finalContent := bom + restoreLineEndings(newContent, originalEnding)
+		if err := writeFn(ctx, absolutePath, finalContent); err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
+		}
+		diffResult := GenerateDiffString(baseContent, newContent, 4)
+		return agent.AgentToolResult{
+			Content: []ai.ToolResultContent{
+				{Type: "text", Text: fmt.Sprintf("Successfully replaced text in %s.", path)},
+			},
+			Details: &EditToolDetails{
+				Diff:             diffResult.Diff,
+				FirstChangedLine: diffResult.FirstChangedLine,
+			},
+		}, nil
+	}
+	return t
+}
+
 // --- edit-diff helpers ---
 
 // detectLineEnding returns the dominant line ending in the content.

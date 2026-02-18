@@ -831,3 +831,140 @@ func TestBridgeSessionEvents_NonAgentEventIgnored(t *testing.T) {
 		t.Error("expected non-agent events to be ignored by bridge")
 	}
 }
+
+func TestSetupAddsExtensionToolsToAgent(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var toolExecuted bool
+	Register("tool-ext", func(api API) {
+		api.RegisterTool(ToolDefinition{
+			Name:        "my_ext_tool",
+			Label:       "My Extension Tool",
+			Description: "A test extension tool",
+			Parameters:  map[string]any{"type": "object"},
+			Execute: func(ctx ToolContext) (agent.AgentToolResult, error) {
+				toolExecuted = true
+				return agent.AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: "ext tool result"}},
+				}, nil
+			},
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"tool-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the extension tool was added to the agent's tool list
+	state := session.Agent.State()
+	var found bool
+	for _, tool := range state.Tools {
+		if tool.Name == "my_ext_tool" {
+			found = true
+			// Execute it to verify wiring
+			result, err := tool.Execute(context.Background(), "tc1", map[string]any{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !toolExecuted {
+				t.Error("expected extension tool to be executed")
+			}
+			if len(result.Content) != 1 || result.Content[0].Text != "ext tool result" {
+				t.Errorf("unexpected result: %v", result)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected extension tool 'my_ext_tool' in agent's tool list")
+	}
+}
+
+func TestReloadRemovesAndAddsExtensionTools(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("ext-with-tool-a", func(api API) {
+		api.RegisterTool(ToolDefinition{
+			Name:        "tool_a",
+			Label:       "Tool A",
+			Description: "Tool from ext A",
+			Parameters:  map[string]any{"type": "object"},
+			Execute: func(ctx ToolContext) (agent.AgentToolResult, error) {
+				return agent.AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: "a"}},
+				}, nil
+			},
+		})
+	})
+
+	Register("ext-with-tool-b", func(api API) {
+		api.RegisterTool(ToolDefinition{
+			Name:        "tool_b",
+			Label:       "Tool B",
+			Description: "Tool from ext B",
+			Parameters:  map[string]any{"type": "object"},
+			Execute: func(ctx ToolContext) (agent.AgentToolResult, error) {
+				return agent.AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: "b"}},
+				}, nil
+			},
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	// Setup with ext-a
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"ext-with-tool-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify tool_a is present
+	state := session.Agent.State()
+	hasToolA := false
+	for _, tool := range state.Tools {
+		if tool.Name == "tool_a" {
+			hasToolA = true
+		}
+	}
+	if !hasToolA {
+		t.Error("expected tool_a after initial setup")
+	}
+
+	// Reload with ext-b
+	if err := result.Reload([]string{"ext-with-tool-b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify tool_a is gone and tool_b is present
+	state = session.Agent.State()
+	hasToolA = false
+	hasToolB := false
+	for _, tool := range state.Tools {
+		if tool.Name == "tool_a" {
+			hasToolA = true
+		}
+		if tool.Name == "tool_b" {
+			hasToolB = true
+		}
+	}
+	if hasToolA {
+		t.Error("expected tool_a to be removed after reload")
+	}
+	if !hasToolB {
+		t.Error("expected tool_b after reload with ext-b")
+	}
+}

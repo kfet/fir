@@ -3,11 +3,14 @@
 # Output directory for all build artifacts
 BINDIR  := bin
 BINARY  := $(BINDIR)/tau
+BINARY_PGO  := $(BINDIR)/tau.pgo
 LDFLAGS := -s -w
 
 build:
 	@mkdir -p $(BINDIR)
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/tau/
+
+all: test-race pgo build-all
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/tau/
@@ -32,16 +35,14 @@ test-cover:
 test-race:
 	go test -race ./...
 
-test-live:
-	TAU_TEST_LIVE=1 go test ./pkg/ai/providers/... -run TestLive
-
 vet:
 	go vet ./...
 
 pgo:
 	@mkdir -p $(BINDIR)
-	go test -cpuprofile=$(BINDIR)/default.pgo ./cmd/tau/
-	go build -pgo=$(BINDIR)/default.pgo -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/tau/
+	go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/tau/
+	rm $(BINARY_PGO)
+	@make build
 
 clean:
 	rm -rf $(BINDIR)
