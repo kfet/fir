@@ -20,6 +20,7 @@ These constraints were discovered during testing and MUST be followed:
 - **Use `$TMPDIR` not `/tmp`:** The sandbox redirects temp writes to `$TMPDIR` (e.g. `/tmp/claude/`). Never hardcode `/tmp/` — always use `$TMPDIR`.
 - **No `timeout` command:** macOS does not have `timeout` or `gtimeout`. Instead, use the **bash tool's `timeout` parameter** on every call. Never use `timeout` as a shell command.
 - **`env -u` requires `bash -c` wrapping:** To properly unset env vars for a subprocess, use: `env -u VAR bash -c 'command'`
+- **Background processes must use `nohup` + `disown`:** Plain `&` causes the bash tool to block waiting for child processes. Always use `nohup ./cmd > logfile 2>&1 & disown $!` when starting long-running background processes.
 - **Always append `; echo "EXIT:$?"` to commands** so you can verify the exit code in the output.
 - **Always include `2>&1`** to capture both stdout and stderr (unless you specifically need to separate them).
 
@@ -61,13 +62,21 @@ Use `timeout: 30`.
 
 Start the mock server in the background:
 
+**Important:** Use `nohup` + `disown` to truly detach the process. A plain `&` causes the bash tool to block waiting for child processes.
+
 ```bash
-cd "$PROJECT_ROOT" && PORTFILE="$TMPDIR/mock-e2e-port" && rm -f "$PORTFILE" && ./bin/mock-e2e-server &
+cd "$PROJECT_ROOT"
+PORTFILE="$TMPDIR/mock-e2e-port"
+LOGFILE="$TMPDIR/mock-e2e-server.log"
+rm -f "$PORTFILE"
+nohup ./bin/mock-e2e-server > "$LOGFILE" 2>&1 &
 MOCK_PID=$!
+disown $MOCK_PID
 sleep 1
 MOCK_PORT=$(cat "$PORTFILE" 2>/dev/null)
 if [ -z "$MOCK_PORT" ]; then
   echo "MOCK_UNAVAILABLE=1"
+  echo "Server log: $(cat $LOGFILE 2>/dev/null)"
   kill $MOCK_PID 2>/dev/null
   MOCK_PID=""
 else
@@ -229,15 +238,17 @@ Use `timeout: 15` on the bash tool call.
 
 #### 2b. RPC: prompt → events → response (mock)
 
+**Important:** The `prompt` command launches a goroutine (fire-and-forget). Stdin must stay open long enough for the agent to complete before EOF causes the server to exit. Use `{ printf ...; sleep 5; }` to hold stdin open.
+
 ```bash
-cd "$PROJECT_ROOT" && printf '{"id":"1","type":"prompt","message":"Say exactly: RPC_TEST_OK"}\n{"id":"2","type":"get_state"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Say exactly: RPC_TEST_OK"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
 **Verify:**
 - Multiple JSON lines appear (streaming events + response)
 - At least one line contains `"type":"agent_start"` or `"type":"message_start"` (from the event subscription)
-- Eventually a line with `"command":"get_state"` and `"success":true`
+- A line with `"type":"agent_end"` appears after the agent completes
 - No panic in stderr
 
 #### 2c. RPC: get_available_models (mock)
@@ -286,13 +297,14 @@ Use `timeout: 10` on the bash tool call.
 #### 2g. RPC: abort (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && printf '{"id":"1","type":"prompt","message":"Write a very long essay about the history of mathematics"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Write a very long essay about the history of mathematics"}\n'; sleep 3; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
-Use `timeout: 10` on the bash tool call (short timeout to test abort behavior).
+Use `timeout: 10` on the bash tool call.
 
 **Verify:**
-- Process exits cleanly when stdin closes (timeout or EOF)
+- Process exits cleanly when stdin closes (after sleep expires)
 - Exit code is 0
+- At least `"type":"agent_start"` appears (agent started and completed)
 
 ### 3. CLI Flag Tests
 
@@ -337,23 +349,27 @@ These tests use the mock server. The mock server detects keywords in the prompt 
 
 The mock server returns a `read` tool call when it sees `READ_FILE` in the prompt. The file path is `testfile.txt`.
 
+**Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
+
 ```bash
-TMPDIR=$(mktemp -d) && echo "E2E_TEST_CONTENT_12345" > "$TMPDIR/testfile.txt" && cd "$TMPDIR" && printf '{"id":"1","type":"prompt","message":"READ_FILE testfile.txt"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPDIR"
+TMPTEST=$(mktemp -d) && echo "E2E_TEST_CONTENT_12345" > "$TMPTEST/testfile.txt" && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"READ_FILE testfile.txt"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
 ```
-Use `timeout: 30` on the bash tool call.
+Use `timeout: 15` on the bash tool call.
 
 **Verify:**
-- Events include tool execution (tool_execution_start with tool_name "read")
+- Events include tool execution (`"Type":"tool_execution_start"` with `"ToolName":"write"`)
 - A tool result event contains "E2E_TEST_CONTENT_12345"
 
 #### 4b. Write tool (mock)
 
 The mock server returns a `write` tool call when it sees `WRITE_FILE` in the prompt.
 
+**Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
+
 ```bash
-TMPDIR=$(mktemp -d) && cd "$TMPDIR" && printf '{"id":"1","type":"prompt","message":"WRITE_FILE output.txt WRITTEN_BY_TAU"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; cat "$TMPDIR/output.txt" 2>/dev/null; echo "---"; rm -rf "$TMPDIR"
+TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"WRITE_FILE output.txt WRITTEN_BY_TAU"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; cat "$TMPTEST/output.txt" 2>/dev/null; echo "---"; rm -rf "$TMPTEST"
 ```
-Use `timeout: 30` on the bash tool call.
+Use `timeout: 15` on the bash tool call.
 
 **Verify:**
 - `output.txt` exists and contains "WRITTEN_BY_TAU"
@@ -362,13 +378,15 @@ Use `timeout: 30` on the bash tool call.
 
 The mock server returns a `bash` tool call when it sees `RUN_BASH` in the prompt.
 
+**Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
+
 ```bash
-TMPDIR=$(mktemp -d) && cd "$TMPDIR" && printf '{"id":"1","type":"prompt","message":"RUN_BASH echo BASH_E2E_OK"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPDIR"
+TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"RUN_BASH echo BASH_E2E_OK"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
 ```
-Use `timeout: 30` on the bash tool call.
+Use `timeout: 15` on the bash tool call.
 
 **Verify:**
-- Events include tool execution for "bash"
+- Events include tool execution for "bash" (`"ToolName":"bash"`)
 - A tool result contains "BASH_E2E_OK"
 
 ## Test Cycle
@@ -391,13 +409,21 @@ cd "$PROJECT_ROOT" && mkdir -p bin && go build -o ./bin/mock-e2e-server ./.tau/s
 ```
 Use `timeout: 30`.
 
+**Important:** Use `nohup` + `disown` — plain `&` causes the bash tool to block.
+
 ```bash
-cd "$PROJECT_ROOT" && PORTFILE="$TMPDIR/mock-e2e-port" && rm -f "$PORTFILE" && ./bin/mock-e2e-server &
+PORTFILE="$TMPDIR/mock-e2e-port"
+LOGFILE="$TMPDIR/mock-e2e-server.log"
+rm -f "$PORTFILE"
+cd "$PROJECT_ROOT"
+nohup ./bin/mock-e2e-server > "$LOGFILE" 2>&1 &
 MOCK_PID=$!
+disown $MOCK_PID
 sleep 1
 MOCK_PORT=$(cat "$PORTFILE" 2>/dev/null)
 if [ -z "$MOCK_PORT" ]; then
   echo "WARN: mock server did not start (network restricted?)"
+  echo "Server log: $(cat $LOGFILE 2>/dev/null)"
   kill $MOCK_PID 2>/dev/null
   MOCK_PID=""
   MOCK_UNAVAILABLE=1
@@ -526,6 +552,15 @@ Track known bugs here so you don't re-file them every cycle:
 
 ### ~~RPC stdin consumption~~ (FIXED — 2026-02-10)
 `readPipedStdin()` was consuming all stdin before RPC server started. Fixed by guarding with `args.OutputMode != ModeRPC`. All RPC tests 2a–2g now pass.
+
+### RPC Server: prompt goroutine killed on EOF (OPEN — 2026-02-18)
+When a `prompt` command is sent and stdin closes immediately (EOF), the RPC server's scanner loop exits and `Run()` returns — killing the prompt goroutine before it completes. This means no streaming events appear and tools don't execute.
+
+**Root cause:** `server.go` `Run()` method returns when the scanner hits EOF without waiting for pending agent goroutines.
+
+**Workaround for E2E tests:** Use `{ printf '...'; sleep 5; }` to keep stdin open long enough for the agent to complete. All tool tests (4a-4c) and test 2b use this pattern.
+
+**Fix needed:** Add a `sync.WaitGroup` in the server to track pending `prompt` goroutines and wait for them before `Run()` returns.
 
 ## Rules
 

@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -164,7 +165,7 @@ func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {
 		"code_verifier": {pkce.Verifier},
 	}
 
-	resp, err := http.PostForm(geminiCLITokenURL, form)
+	resp, err := oauthHTTPClient.PostForm(geminiCLITokenURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -221,7 +222,7 @@ func refreshGeminiCLIToken(refreshToken, projectID string) (*Credentials, error)
 		"grant_type":    {"refresh_token"},
 	}
 
-	resp, err := http.PostForm(geminiCLITokenURL, form)
+	resp, err := oauthHTTPClient.PostForm(geminiCLITokenURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("token refresh: %w", err)
 	}
@@ -319,7 +320,7 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 		},
 	})
 
-	req, err := http.NewRequest("POST", geminiCLICodeAssistEndpoint+"/v1internal:loadCodeAssist", strings.NewReader(string(reqBody)))
+	req, err := http.NewRequest("POST", geminiCLICodeAssistEndpoint+"/v1internal:loadCodeAssist", bytes.NewReader(reqBody))
 	if err != nil {
 		return "", err
 	}
@@ -327,7 +328,7 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("loadCodeAssist: %w", err)
 	}
@@ -393,7 +394,7 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 	}
 
 	onboardReqBody, _ := json.Marshal(onboardBody)
-	req, err = http.NewRequest("POST", geminiCLICodeAssistEndpoint+"/v1internal:onboardUser", strings.NewReader(string(onboardReqBody)))
+	req, err = http.NewRequest("POST", geminiCLICodeAssistEndpoint+"/v1internal:onboardUser", bytes.NewReader(onboardReqBody))
 	if err != nil {
 		return "", err
 	}
@@ -401,7 +402,7 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 		req.Header.Set(k, v)
 	}
 
-	resp, err = http.DefaultClient.Do(req)
+	resp, err = oauthHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("onboardUser: %w", err)
 	}
@@ -462,7 +463,7 @@ func pollGeminiOperation(opName string, headers map[string]string, callbacks Log
 			req.Header.Set(k, v)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := oauthHTTPClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("poll operation: %w", err)
 		}

@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -141,7 +142,7 @@ func doAnthropicTokenRequest(body map[string]string) (*Credentials, error) {
 		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
-	resp, err := http.Post(anthropicTokenURL, "application/json", strings.NewReader(string(payload)))
+	resp, err := oauthHTTPClient.Post(anthropicTokenURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}

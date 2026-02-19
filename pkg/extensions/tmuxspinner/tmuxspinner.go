@@ -65,6 +65,24 @@ var disableAutoRename = func(target string) {
 	_ = exec.Command("tmux", "set-window-option", "-t", target, "automatic-rename", "off").Run()
 }
 
+// stripSpinnerSuffix removes any trailing " <braille>" suffix that a previous
+// spinner instance may have left on the window name after an unclean exit
+// (e.g. if the process was killed before Stop() could restore the name).
+// It strips repeatedly so that multiple accumulated suffixes are all removed.
+func stripSpinnerSuffix(name string) string {
+	for {
+		runes := []rune(name)
+		// A spinner suffix is space + one braille rune (U+2800–U+28FF).
+		if len(runes) >= 2 &&
+			runes[len(runes)-1] >= 0x2800 && runes[len(runes)-1] <= 0x28FF &&
+			runes[len(runes)-2] == ' ' {
+			name = string(runes[:len(runes)-2])
+			continue
+		}
+		return name
+	}
+}
+
 func init() {
 	extension.Register("tmuxspinner", factory)
 }
@@ -122,6 +140,8 @@ func (s *spinner) Start() {
 		s.baseName = readWindowName(s.paneID)
 		if s.baseName == "" {
 			s.baseName = "tau"
+		} else {
+			s.baseName = stripSpinnerSuffix(s.baseName)
 		}
 		disableAutoRename(s.paneID)
 	}
@@ -187,7 +207,7 @@ func (s *spinner) loop(ctx context.Context, done chan struct{}) {
 				current := readWindowName(target)
 				if current != lastSet && current != "" {
 					s.mu.Lock()
-					s.baseName = current
+					s.baseName = stripSpinnerSuffix(current)
 					s.mu.Unlock()
 				}
 			}

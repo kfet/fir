@@ -1,7 +1,13 @@
 package oauth
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kfet/tau/pkg/ai"
 )
@@ -146,6 +152,310 @@ func TestGitHubURLs(t *testing.T) {
 	if ct2 != "https://api.company.ghe.com/copilot_internal/v2/token" {
 		t.Errorf("enterprise copilotTokenURL = %q", ct2)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// pollForGitHubAccessToken tests
+// ---------------------------------------------------------------------------
+
+// TestPollForGitHubAccessToken_Success verifies the happy path: server returns
+// an access_token on the first poll.
+func TestPollForGitHubAccessToken_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"ghu_test123"}`)
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/login/oauth/access_token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	token, err := pollForGitHubAccessToken(context.Background(), "github.com", "device123", 5, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token != "ghu_test123" {
+		t.Errorf("token = %q, want %q", token, "ghu_test123")
+	}
+}
+
+// TestPollForGitHubAccessToken_AuthorizationPending verifies that the poller
+// retries on authorization_pending and succeeds when the server eventually
+// returns an access_token.
+func TestPollForGitHubAccessToken_AuthorizationPending(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount < 3 {
+			fmt.Fprint(w, `{"error":"authorization_pending"}`)
+		} else {
+			fmt.Fprint(w, `{"access_token":"ghu_pending_ok"}`)
+		}
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	token, err := pollForGitHubAccessToken(context.Background(), "github.com", "dev456", 1, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token != "ghu_pending_ok" {
+		t.Errorf("token = %q, want %q", token, "ghu_pending_ok")
+	}
+	if callCount < 3 {
+		t.Errorf("expected at least 3 calls, got %d", callCount)
+	}
+}
+
+// TestPollForGitHubAccessToken_SlowDown verifies that slow_down increases the
+// polling interval and the poller eventually succeeds.
+func TestPollForGitHubAccessToken_SlowDown(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			fmt.Fprint(w, `{"error":"slow_down"}`)
+		} else {
+			fmt.Fprint(w, `{"access_token":"ghu_slow_ok"}`)
+		}
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	token, err := pollForGitHubAccessToken(context.Background(), "github.com", "dev789", 1, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token != "ghu_slow_ok" {
+		t.Errorf("token = %q, want %q", token, "ghu_slow_ok")
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 server calls (slow_down + success), got %d", callCount)
+	}
+}
+
+// TestPollForGitHubAccessToken_Timeout verifies that the poller returns an
+// error when expiresIn has already passed.
+func TestPollForGitHubAccessToken_Timeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"error":"authorization_pending"}`)
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	_, err := pollForGitHubAccessToken(context.Background(), "github.com", "devXXX", 1, 0)
+	if err == nil {
+		t.Error("expected timeout error, got nil")
+	}
+}
+
+// TestPollForGitHubAccessToken_Cancellation verifies that cancelling the context
+// stops the poller.
+func TestPollForGitHubAccessToken_Cancellation(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"error":"authorization_pending"}`)
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := pollForGitHubAccessToken(ctx, "github.com", "devCTX", 1, 60)
+	if err == nil {
+		t.Error("expected cancellation error, got nil")
+	}
+}
+
+// TestPollForGitHubAccessToken_FatalError verifies that an unrecognized error
+// code (e.g. "expired_token") stops the poller immediately.
+func TestPollForGitHubAccessToken_FatalError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"error":"expired_token"}`)
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	_, err := pollForGitHubAccessToken(context.Background(), "github.com", "devFATAL", 1, 60)
+	if err == nil {
+		t.Error("expected error for expired_token, got nil")
+	}
+	if !strings.Contains(err.Error(), "expired_token") {
+		t.Errorf("error should mention expired_token, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// refreshGitHubCopilotToken tests
+// ---------------------------------------------------------------------------
+
+func TestRefreshGitHubCopilotToken_Success(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).Unix()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_refresh_token" {
+			http.Error(w, "bad auth", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token":"copilot_api_token","expires_at":%d}`, expiresAt)
+	}))
+	defer ts.Close()
+
+	origURL := githubCopilotTokenURLOverride
+	githubCopilotTokenURLOverride = ts.URL + "/copilot/token"
+	defer func() { githubCopilotTokenURLOverride = origURL }()
+
+	creds, err := refreshGitHubCopilotToken("ghu_refresh_token", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creds.Access != "copilot_api_token" {
+		t.Errorf("Access = %q, want %q", creds.Access, "copilot_api_token")
+	}
+	if creds.Refresh != "ghu_refresh_token" {
+		t.Errorf("Refresh = %q, want %q", creds.Refresh, "ghu_refresh_token")
+	}
+}
+
+func TestRefreshGitHubCopilotToken_Error(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	origURL := githubCopilotTokenURLOverride
+	githubCopilotTokenURLOverride = ts.URL + "/copilot/token"
+	defer func() { githubCopilotTokenURLOverride = origURL }()
+
+	_, err := refreshGitHubCopilotToken("bad_token", "")
+	if err == nil {
+		t.Error("expected error for HTTP 401, got nil")
+	}
+}
+
+func TestRefreshGitHubCopilotToken_MissingToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"expires_at":9999}`) // no "token" field
+	}))
+	defer ts.Close()
+
+	origURL := githubCopilotTokenURLOverride
+	githubCopilotTokenURLOverride = ts.URL + "/copilot/token"
+	defer func() { githubCopilotTokenURLOverride = origURL }()
+
+	_, err := refreshGitHubCopilotToken("ghu_token", "")
+	if err == nil {
+		t.Error("expected error when token field missing, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// enableCopilotModel / enableAllCopilotModels tests
+// ---------------------------------------------------------------------------
+
+func TestEnableCopilotModel_Success(t *testing.T) {
+	var receivedPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	origBase := githubCopilotBaseURLOverride
+	githubCopilotBaseURLOverride = ts.URL
+	defer func() { githubCopilotBaseURLOverride = origBase }()
+
+	ok := enableCopilotModel("api_token", "gpt-4o", "")
+	if !ok {
+		t.Error("expected true for 200 OK")
+	}
+	if receivedPath != "/models/gpt-4o/policy" {
+		t.Errorf("path = %q, want %q", receivedPath, "/models/gpt-4o/policy")
+	}
+}
+
+func TestEnableCopilotModel_Failure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	origBase := githubCopilotBaseURLOverride
+	githubCopilotBaseURLOverride = ts.URL
+	defer func() { githubCopilotBaseURLOverride = origBase }()
+
+	ok := enableCopilotModel("api_token", "gpt-4o", "")
+	if ok {
+		t.Error("expected false for HTTP 403")
+	}
+}
+
+func TestEnableAllCopilotModels_DoesNotPanic(t *testing.T) {
+	// enableAllCopilotModels iterates over known models and fires best-effort
+	// requests; it should never panic even when all requests fail.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	origBase := githubCopilotBaseURLOverride
+	githubCopilotBaseURLOverride = ts.URL
+	defer func() { githubCopilotBaseURLOverride = origBase }()
+
+	// Should complete without panicking.
+	enableAllCopilotModels("test_token", "")
 }
 
 // Verify GitHubCopilotProvider implements the Provider interface.

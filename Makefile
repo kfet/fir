@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-cover test-race test-live vet clean pgo
+.PHONY: build build-all install test test-cover test-race test-live vet clean pgo generate-models
 
 # Output directory for all build artifacts
 BINDIR  := bin
@@ -43,6 +43,11 @@ pgo:
 	go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/tau/
 	rm $(BINARY_PGO)
 	@make build
+
+generate-models:
+	@mkdir -p $(BINDIR)
+	go build -o $(BINDIR)/generate-models ./cmd/generate-models/
+	$(BINDIR)/generate-models
 
 clean:
 	rm -rf $(BINDIR)

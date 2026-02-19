@@ -1,3 +1,5 @@
+// Ported from: packages/coding-agent/src/utils/image-resize.ts
+// Upstream hash: 1caadb2e
 package tools
 
 import (
@@ -6,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -83,6 +86,39 @@ func TestResizeImage_InvalidBase64(t *testing.T) {
 	}
 }
 
+func TestResizeImage_LastResortFallback(t *testing.T) {
+	// A 110×110 image with MaxBytes=1 forces the scale loop to exit early:
+	//   scale=1.0 → 110×110 ≥ 100 but encoded size > 1 byte → no return
+	//   scale=0.75 → 83×83 < 100 → break
+	// The last-resort code then resizes to 25% of targetW/H and returns whatever it gets.
+	b64 := createTestImage(110, 110)
+	result := ResizeImage(b64, "image/png", &ResizeImageOptions{
+		MaxBytes: 1, // impossibly small — guarantees last-resort path
+	})
+
+	if !result.WasResized {
+		t.Error("expected WasResized=true on last-resort path")
+	}
+	if result.OriginalWidth != 110 || result.OriginalHeight != 110 {
+		t.Errorf("expected original 110×110, got %dx%d", result.OriginalWidth, result.OriginalHeight)
+	}
+	// Last resort scales to 0.25 of target: round(110*0.25)=28
+	if result.Width != 28 || result.Height != 28 {
+		t.Errorf("expected last-resort size 28×28, got %dx%d", result.Width, result.Height)
+	}
+	if result.Data == "" {
+		t.Error("expected non-empty data from last-resort path")
+	}
+	// Should be decodable base64
+	raw, err := base64.StdEncoding.DecodeString(result.Data)
+	if err != nil {
+		t.Fatalf("last-resort data is not valid base64: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Error("expected non-empty decoded bytes from last-resort path")
+	}
+}
+
 func TestFormatDimensionNote(t *testing.T) {
 	// Not resized
 	r := ResizedImage{WasResized: false}
@@ -102,20 +138,8 @@ func TestFormatDimensionNote(t *testing.T) {
 	if note == "" {
 		t.Error("expected non-empty note for resized image")
 	}
-	if !contains(note, "3000x2000") || !contains(note, "1500x1000") {
+	if !strings.Contains(note, "3000x2000") || !strings.Contains(note, "1500x1000") {
 		t.Errorf("note missing dimensions: %s", note)
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
-}
-
-func containsAt(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

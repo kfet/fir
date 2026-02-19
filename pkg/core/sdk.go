@@ -24,7 +24,7 @@ type CreateAgentSessionOptions struct {
 	// AgentDir is the global config directory. Default: ~/.tau/agent
 	AgentDir string
 
-	// AuthStorage for credentials. Default: new AuthStorage(agentDir/auth.json)
+	// AuthStorage for credentials. Default: NewAuthStorage(agentDir/auth.json)
 	AuthStorage *AuthStorage
 	// ModelRegistry for model lookup/key resolution. Default: created from AuthStorage.
 	ModelRegistry *ModelRegistry

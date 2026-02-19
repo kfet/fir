@@ -713,11 +713,8 @@ func (tl *TreeList) Render(width int) []string {
 		return lines
 	}
 
-	startIndex := int(math.Max(0, math.Min(
-		float64(tl.selectedIndex-tl.maxVisibleLines/2),
-		float64(len(tl.filteredNodes)-tl.maxVisibleLines),
-	)))
-	endIndex := int(math.Min(float64(startIndex+tl.maxVisibleLines), float64(len(tl.filteredNodes))))
+	startIndex := max(0, min(tl.selectedIndex-tl.maxVisibleLines/2, len(tl.filteredNodes)-tl.maxVisibleLines))
+	endIndex := min(startIndex+tl.maxVisibleLines, len(tl.filteredNodes))
 
 	for i := startIndex; i < endIndex; i++ {
 		fn := &tl.filteredNodes[i]
@@ -749,32 +746,6 @@ func (tl *TreeList) Render(width int) []string {
 		}
 
 		totalChars := displayIndent * 3
-		prefixChars := make([]byte, totalChars)
-		for c := range prefixChars {
-			prefixChars[c] = ' '
-		}
-		for c := 0; c < totalChars; c++ {
-			level := c / 3
-			posInLevel := c % 3
-
-			// Check gutters
-			foundGutter := false
-			for _, g := range fn.gutters {
-				if g.position == level {
-					foundGutter = true
-					if posInLevel == 0 {
-						if g.show {
-							// Write "│" as UTF-8 bytes
-							utf8 := "│"
-							// Replace single byte with multi-byte char — we'll build with strings instead
-							_ = utf8
-						}
-					}
-					break
-				}
-			}
-			_ = foundGutter
-		}
 
 		// Build prefix using strings for proper UTF-8 handling
 		var prefix strings.Builder

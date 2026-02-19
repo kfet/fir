@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/kfet/tau/pkg/agent"
@@ -252,6 +253,89 @@ func TestHandleCommand_SetAutoCompaction(t *testing.T) {
 	}
 }
 
+func TestHandleCommand_SetAutoCompaction_UpdatesSetting(t *testing.T) {
+	sm := core.InMemorySessionManager("/tmp/rpc-test")
+	a := agent.NewAgent(agent.AgentOptions{})
+	settings := core.NewInMemorySettingsManager(core.Settings{})
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		ResourceLoader:  &noopResourceLoader{},
+		Cwd:             "/tmp/rpc-test",
+		SettingsManager: settings,
+	})
+	srv := &Server{session: session}
+
+	// compaction is enabled by default
+	if !settings.GetCompactionEnabled() {
+		t.Fatal("expected compaction enabled by default")
+	}
+
+	enabled := false
+	resp := srv.handleCommand(RpcCommand{ID: "x", Type: CmdSetAutoCompaction, Enabled: &enabled})
+	if !resp.Success {
+		t.Fatalf("expected success: %s", resp.Error)
+	}
+	if settings.GetCompactionEnabled() {
+		t.Error("expected compaction disabled after set_auto_compaction false")
+	}
+
+	enabled = true
+	resp = srv.handleCommand(RpcCommand{ID: "y", Type: CmdSetAutoCompaction, Enabled: &enabled})
+	if !resp.Success {
+		t.Fatalf("expected success: %s", resp.Error)
+	}
+	if !settings.GetCompactionEnabled() {
+		t.Error("expected compaction re-enabled after set_auto_compaction true")
+	}
+}
+
+func TestHandleCommand_GetState_AutoCompactionReflectsSetting(t *testing.T) {
+	sm := core.InMemorySessionManager("/tmp/rpc-test-state")
+	a := agent.NewAgent(agent.AgentOptions{})
+	settings := core.NewInMemorySettingsManager(core.Settings{})
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		ResourceLoader:  &noopResourceLoader{},
+		Cwd:             "/tmp/rpc-test-state",
+		SettingsManager: settings,
+	})
+	srv := &Server{session: session}
+
+	getAutoCompaction := func() bool {
+		resp := srv.handleCommand(RpcCommand{ID: "s", Type: CmdGetState})
+		if !resp.Success {
+			t.Fatalf("CmdGetState failed: %s", resp.Error)
+		}
+		data, _ := json.Marshal(resp.Data)
+		var state RpcSessionState
+		if err := json.Unmarshal(data, &state); err != nil {
+			t.Fatalf("unmarshal state: %v", err)
+		}
+		return state.AutoCompactionEnabled
+	}
+
+	// Default: enabled
+	if !getAutoCompaction() {
+		t.Error("expected AutoCompactionEnabled=true by default")
+	}
+
+	// Disable via CmdSetAutoCompaction
+	disabled := false
+	srv.handleCommand(RpcCommand{ID: "d", Type: CmdSetAutoCompaction, Enabled: &disabled})
+	if getAutoCompaction() {
+		t.Error("expected AutoCompactionEnabled=false after disable")
+	}
+
+	// Re-enable
+	enabled := true
+	srv.handleCommand(RpcCommand{ID: "e", Type: CmdSetAutoCompaction, Enabled: &enabled})
+	if !getAutoCompaction() {
+		t.Error("expected AutoCompactionEnabled=true after re-enable")
+	}
+}
+
 func TestHandleCommand_SetAutoRetry(t *testing.T) {
 	s := testServer()
 	resp := s.handleCommand(RpcCommand{ID: "18", Type: CmdSetAutoRetry})
@@ -283,9 +367,19 @@ func TestHandleCommand_Bash_NoCommand(t *testing.T) {
 func TestHandleCommand_ExportHTML(t *testing.T) {
 	s := testServer()
 	resp := s.handleCommand(RpcCommand{ID: "21", Type: CmdExportHTML})
-	if resp.Success {
-		t.Error("expected error for unimplemented export")
+	if !resp.Success {
+		t.Fatalf("expected export to succeed, got error: %s", resp.Error)
 	}
+	data, _ := json.Marshal(resp.Data)
+	var exportData ExportHTMLData
+	if err := json.Unmarshal(data, &exportData); err != nil {
+		t.Fatalf("failed to unmarshal export data: %v", err)
+	}
+	if exportData.Path == "" {
+		t.Error("expected a file path in export response")
+	}
+	// Clean up the temp file
+	_ = os.Remove(exportData.Path)
 }
 
 func TestHandleCommand_SwitchSession_NoPath(t *testing.T) {
@@ -365,6 +459,19 @@ func TestHandleCommand_Unknown(t *testing.T) {
 	resp := s.handleCommand(RpcCommand{ID: "25", Type: "unknown_command"})
 	if resp.Success {
 		t.Error("expected error for unknown command")
+	}
+}
+
+func TestHandleCommand_Abort(t *testing.T) {
+	s := testServer()
+	resp := s.handleCommand(RpcCommand{ID: "26a", Type: CmdAbort})
+	if !resp.Success {
+		t.Fatalf("expected success, got error: %s", resp.Error)
+	}
+	// Abort must not kill the session; a subsequent GetState should still work.
+	resp2 := s.handleCommand(RpcCommand{ID: "26b", Type: CmdGetState})
+	if !resp2.Success {
+		t.Errorf("session unusable after Abort: %s", resp2.Error)
 	}
 }
 

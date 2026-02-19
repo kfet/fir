@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -311,24 +312,29 @@ func TestAgentSession_RunCompaction_NilRunner(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	_, err := session.RunCompaction()
+	_, err := session.RunCompaction(context.Background(), "")
 	if err == nil {
 		t.Error("expected error when compaction runner is nil")
 	}
 }
 
 type mockCompactionRunner struct {
+	isEnabled           bool
 	shouldCompactResult bool
 	runResult           *CompactionResultInfo
 	runError            error
 	runCalled           bool
 }
 
+func (m *mockCompactionRunner) IsEnabled() bool {
+	return m.isEnabled
+}
+
 func (m *mockCompactionRunner) ShouldCompact(contextTokens, contextWindow int) bool {
 	return m.shouldCompactResult
 }
 
-func (m *mockCompactionRunner) RunCompaction(session *AgentSession) (*CompactionResultInfo, error) {
+func (m *mockCompactionRunner) RunCompaction(_ context.Context, session *AgentSession, _ string) (*CompactionResultInfo, error) {
 	m.runCalled = true
 	return m.runResult, m.runError
 }
@@ -346,7 +352,7 @@ func TestAgentSession_RunCompaction_WithRunner(t *testing.T) {
 	}
 	session.compactionRunner = runner
 
-	result, err := session.RunCompaction()
+	result, err := session.RunCompaction(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1514,6 +1520,7 @@ func TestCheckAutoCompaction_ThresholdTrigger(t *testing.T) {
 
 func TestCheckAutoCompaction_OverflowTrigger(t *testing.T) {
 	runner := &mockCompactionRunner{
+		isEnabled:           true,
 		shouldCompactResult: false, // not threshold-triggered
 		runResult: &CompactionResultInfo{
 			Summary:          "overflow compacted",
@@ -1625,6 +1632,7 @@ func TestCheckAutoCompaction_RunnerError(t *testing.T) {
 
 func TestCheckAutoCompaction_OverflowError_WillRetry(t *testing.T) {
 	runner := &mockCompactionRunner{
+		isEnabled:           true,
 		shouldCompactResult: false,
 		runError:            fmt.Errorf("compaction failed on overflow"),
 	}
@@ -1671,6 +1679,38 @@ func TestCheckAutoCompaction_OverflowError_WillRetry(t *testing.T) {
 	}
 	if !endEvents[0].WillRetry {
 		t.Error("overflow-triggered error should set WillRetry=true")
+	}
+}
+
+func TestCheckAutoCompaction_OverflowSkippedWhenDisabled(t *testing.T) {
+	runner := &mockCompactionRunner{
+		isEnabled:           false, // compaction disabled
+		shouldCompactResult: false,
+		runResult: &CompactionResultInfo{
+			Summary:      "should not be called",
+			TokensBefore: 120000,
+		},
+	}
+	session := newTestAgentSessionWithModel(t, runner)
+	defer session.Close()
+
+	overflowMsg := ai.AssistantMessage{
+		Content:      []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: ""}}},
+		Usage:        ai.Usage{Input: 120000, Output: 0},
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "prompt is too long: max 100000 tokens",
+		Provider:     "test-provider",
+		Model:        "test-model",
+	}
+	session.Agent.ReplaceMessages([]agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(overflowMsg)),
+	})
+
+	session.checkAutoCompaction(&overflowMsg)
+
+	if runner.runCalled {
+		t.Error("RunCompaction should NOT be called when compaction is disabled")
 	}
 }
 

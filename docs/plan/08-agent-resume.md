@@ -57,6 +57,26 @@ make build
 **Re-read `07-work-tracker.md` first** (another agent may have updated it).
 Then change `[ ]` to `[x]` for your task. Pick the next one.
 
+## Syncing Upstream Changes
+
+When `sync-check.sh` reports a changed TS file, look it up in `sync/UPSTREAM_MAP.md`.
+There are two kinds of Go counterparts:
+
+### Normal ports (most files)
+Apply equivalent logic changes to the Go file. Update the `// Upstream hash:` comment.
+Run `go test` and `make build` to verify.
+
+### Generator files (listed in the Generators table in UPSTREAM_MAP.md)
+These TS files produce *other* files rather than being directly ported 1-to-1.
+When the upstream generator script changes:
+1. Apply equivalent logic changes to the Go generator (e.g. `cmd/generate-models/main.go`)
+2. Run the generator: `make generate-models`
+3. Verify the output compiles: `go build ./... && go test ./pkg/ai/...`
+4. Update the `// Upstream hash:` in the Go generator and the hash in `sync/.baseline-hashes`
+
+**Do not just re-run the generator without checking for logic changes** — if the TS
+script added a new provider or override, the Go generator needs the same addition first.
+
 ## Key TS Reference Files
 
 | Need to understand... | Read |

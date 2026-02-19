@@ -19,3 +19,6 @@ _(none — build passing, all tests pass)_
 - ~~`pkg/modes/acp/helpers.go` — URI/Resource regressions~~ — ✅ FIXED
 - ~~`pkg/modes/acp/terminal.go` — Build broken~~ — ✅ FIXED
 - ~~`pkg/extension/integration_test.go:145,175` — Tests panic~~ — ✅ FIXED
+- ~~`RunCompaction` signature change break (runner_test.go, agentsession_test.go, mode.go, rpc/server.go)~~ — ✅ FIXED 2026-02-18
+- ~~`pkg/modes/rpc/server.go:193-194` — `CmdSetAutoCompaction` no-op~~ — ✅ FIXED 2026-02-18
+- ~~`pkg/core/agentsession.go:488` — Overflow auto-compaction bypassed `Enabled` setting~~ — ✅ FIXED 2026-02-18

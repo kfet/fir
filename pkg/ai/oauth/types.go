@@ -4,15 +4,22 @@ package oauth
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/kfet/tau/pkg/ai"
 )
+
+// oauthHTTPClient is used for all OAuth HTTP requests.
+// It has a 30-second timeout so login flows don't hang indefinitely.
+// Tests may swap it for a client pointed at an httptest.Server.
+var oauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // Credentials holds OAuth tokens for a provider.
 type Credentials struct {
 	Refresh string         `json:"refresh"`
 	Access  string         `json:"access"`
-	Expires int64          `json:"expires"` // Unix timestamp in seconds
+	Expires int64          `json:"expires"` // Unix timestamp in milliseconds
 	Extra   map[string]any `json:"extra,omitempty"`
 }
 

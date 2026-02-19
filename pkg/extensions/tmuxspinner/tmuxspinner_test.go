@@ -415,3 +415,94 @@ func TestRenameTargetsCorrectPane(t *testing.T) {
 		t.Error("expected some tmux calls")
 	}
 }
+
+func TestStripSpinnerSuffix(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"e2e", "e2e"},
+		{"e2e ⠋", "e2e"},
+		{"e2e ⠹", "e2e"},
+		{"e2e ⠋ ⠹", "e2e"},                      // multiple accumulated suffixes
+		{"e2e ⠋ ⠋ ⠸ ⠙ ⠼ ⠹", "e2e"},             // long chain
+		{"tau", "tau"},
+		{"", ""},
+		{"⠋", "⠋"},   // bare braille with no leading space — not a suffix
+		{" ⠋", ""},   // space + braille with nothing before it → strip to empty
+	}
+	for _, tt := range tests {
+		got := stripSpinnerSuffix(tt.in)
+		if got != tt.want {
+			t.Errorf("stripSpinnerSuffix(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestSpinnerStripsLeftoverSuffix verifies that if a previous spinner process
+// left the window name as "e2e ⠋" (unclean exit), a new spinner instance
+// captures "e2e" as baseName and does NOT append further frames.
+func TestSpinnerStripsLeftoverSuffix(t *testing.T) {
+	origIsTmux := isTmux
+	origReadPaneID := readPaneID
+	origReadWindowName := readWindowName
+	origRenameWindow := renameWindow
+	origDisableAutoRename := disableAutoRename
+	defer func() {
+		isTmux = origIsTmux
+		readPaneID = origReadPaneID
+		readWindowName = origReadWindowName
+		renameWindow = origRenameWindow
+		disableAutoRename = origDisableAutoRename
+	}()
+
+	isTmux = func() bool { return true }
+	readPaneID = func() string { return "%0" }
+	disableAutoRename = func(_ string) {}
+
+	// Window name already has a leftover spinner frame from a previous run.
+	currentWin := "e2e ⠋"
+	var winMu sync.Mutex
+	readWindowName = func(_ string) string {
+		winMu.Lock()
+		defer winMu.Unlock()
+		return currentWin
+	}
+
+	rec := &recorder{}
+	renameWindow = func(_ string, n string) {
+		winMu.Lock()
+		currentWin = n
+		winMu.Unlock()
+		rec.record(n)
+	}
+
+	s := &spinner{}
+	s.Start()
+	time.Sleep(400 * time.Millisecond)
+	s.Stop()
+
+	names := rec.get()
+	if len(names) == 0 {
+		t.Fatal("expected rename calls, got none")
+	}
+
+	// No frame should contain two consecutive braille characters (i.e. no appending).
+	for _, n := range names {
+		runes := []rune(n)
+		for i := 1; i < len(runes); i++ {
+			if runes[i] >= 0x2800 && runes[i] <= 0x28FF &&
+				runes[i-1] >= 0x2800 && runes[i-1] <= 0x28FF {
+				t.Errorf("frame %q contains consecutive braille runes (appending bug)", n)
+				break
+			}
+		}
+	}
+
+	// Final restore must be "e2e", not "e2e ⠋".
+	last := names[len(names)-1]
+	if last != "e2e" {
+		t.Errorf("expected Stop to restore %q, got %q", "e2e", last)
+	}
+}
+
