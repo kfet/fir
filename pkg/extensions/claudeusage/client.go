@@ -36,6 +36,10 @@ type usageData struct {
 	SevenDay *windowData `json:"seven_day"`
 }
 
+// httpClient is used for usage API requests. The 10-second timeout prevents
+// stalled goroutines if the Anthropic API hangs.
+var httpClient = &http.Client{Timeout: 10 * time.Second}
+
 // errUnauthorized indicates a 401 response from the API.
 var errUnauthorized = fmt.Errorf("unauthorized (401)")
 
@@ -51,7 +55,7 @@ func fetchUsage(token string) (*usageData, error) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching usage: %w", err)
 	}
@@ -82,13 +86,7 @@ func fetchUsage(token string) (*usageData, error) {
 
 // progressBar renders a text-based progress bar of the given width.
 func progressBar(pct float64, width int) string {
-	filled := int(math.Round(pct / 100.0 * float64(width)))
-	if filled > width {
-		filled = width
-	}
-	if filled < 0 {
-		filled = 0
-	}
+	filled := max(0, min(width, int(math.Round(pct/100.0*float64(width)))))
 	return strings.Repeat("▰", filled) + strings.Repeat("▱", width-filled)
 }
 

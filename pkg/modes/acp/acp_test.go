@@ -2,14 +2,17 @@ package acp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/tau/pkg/agent"
 	"github.com/kfet/tau/pkg/ai"
 	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/tau/pkg/extension"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -462,5 +465,249 @@ func TestRawConnMethodHandler_UnknownMethod(t *testing.T) {
 	}
 	if reqErr == nil {
 		t.Error("expected MethodNotFound error for unknown method")
+	}
+}
+
+func TestHandleSlashCommand_ExtensionExecuteCommand(t *testing.T) {
+	// Register a temporary extension command, then verify handleSlashCommand
+	// calls ExecuteCommand (not session.Prompt) for it.
+	extension.ClearRegistry()
+	defer extension.ClearRegistry()
+
+	var capturedArgs string
+	extension.Register("acp-ext-test", func(api extension.API) {
+		api.RegisterCommand("myextcmd", extension.Command{
+			Description: "test command",
+			Handler: func(args string, ctx extension.CommandContext) error {
+				capturedArgs = args
+				return nil
+			},
+		})
+	})
+
+	runner := extension.NewRunner(core.NewEventBus())
+	if err := runner.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	entry := &piSession{
+		termState:       newTerminalState(),
+		extensionRunner: runner,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "myextcmd", "hello world")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for extension command")
+	}
+	if capturedArgs != "hello world" {
+		t.Errorf("ExecuteCommand args = %q, want %q", capturedArgs, "hello world")
+	}
+	// Should NOT have sent any agent message (command was handled by extension, not AI)
+	if len(mc.getUpdates()) != 0 {
+		t.Errorf("expected no agent updates for successful extension command, got %d", len(mc.getUpdates()))
+	}
+}
+
+func TestHandleSlashCommand_ExtensionExecuteCommand_Error(t *testing.T) {
+	extension.ClearRegistry()
+	defer extension.ClearRegistry()
+
+	extension.Register("acp-ext-err-test", func(api extension.API) {
+		api.RegisterCommand("failcmd", extension.Command{
+			Description: "failing command",
+			Handler: func(args string, ctx extension.CommandContext) error {
+				return fmt.Errorf("intentional error")
+			},
+		})
+	})
+
+	runner := extension.NewRunner(core.NewEventBus())
+	if err := runner.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	entry := &piSession{
+		termState:       newTerminalState(),
+		extensionRunner: runner,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "failcmd", "")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for registered extension command")
+	}
+	// Should have sent an error message to the agent
+	updates := mc.getUpdates()
+	if len(updates) == 0 {
+		t.Fatal("expected at least one agent message for extension command error")
+	}
+	if updates[0].Update.AgentMessageChunk == nil {
+		t.Error("expected AgentMessageChunk for error update")
+	}
+}
+
+// newMinimalSession creates a minimal AgentSession with SessionManager and Agent,
+// for use in slash command tests that don't need a real LLM provider.
+func newMinimalSession(t *testing.T) *core.AgentSession {
+	t.Helper()
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sm := core.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	a := agent.NewAgent(agent.AgentOptions{})
+	return core.NewAgentSession(core.AgentSessionOptions{
+		Agent:          a,
+		SessionManager: sm,
+		ResourceLoader: rl,
+		Cwd:            cwd,
+	})
+}
+
+func TestHandleSlashCommand_Name_WithArgs(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &piSession{termState: newTerminalState(), session: sess}
+
+	found := pa.handleSlashCommand("s1", entry, "name", "my-session")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for /name")
+	}
+	updates := mc.getUpdates()
+	if len(updates) == 0 {
+		t.Fatal("expected at least one update")
+	}
+	chunk := updates[0].Update.AgentMessageChunk
+	if chunk == nil {
+		t.Fatal("expected AgentMessageChunk")
+	}
+	if chunk.Content.Text == nil {
+		t.Fatal("expected text content block")
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "my-session") {
+		t.Errorf("expected confirmation message to contain session name, got: %q", chunk.Content.Text.Text)
+	}
+}
+
+func TestHandleSlashCommand_Session(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &piSession{termState: newTerminalState(), session: sess}
+
+	found := pa.handleSlashCommand("s1", entry, "session", "")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for /session")
+	}
+	updates := mc.getUpdates()
+	if len(updates) == 0 {
+		t.Fatal("expected at least one update")
+	}
+	chunk := updates[0].Update.AgentMessageChunk
+	if chunk == nil {
+		t.Fatal("expected AgentMessageChunk")
+	}
+	if chunk.Content.Text == nil {
+		t.Fatal("expected text content block")
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "Session Info") {
+		t.Errorf("expected session info content, got: %q", chunk.Content.Text.Text)
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "Messages") || !strings.Contains(chunk.Content.Text.Text, "Tokens") {
+		t.Errorf("expected Messages and Tokens sections in session info, got: %q", chunk.Content.Text.Text)
+	}
+}
+
+// getLastAgentMessage returns the text from the last AgentMessageChunk update.
+func getLastAgentMessage(updates []acpsdk.SessionNotification) string {
+	for i := len(updates) - 1; i >= 0; i-- {
+		if c := updates[i].Update.AgentMessageChunk; c != nil && c.Content.Text != nil {
+			return c.Content.Text.Text
+		}
+	}
+	return ""
+}
+
+func TestHandleResumeArg_InvalidNumber_NoList(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	entry := &piSession{termState: newTerminalState(), agentDir: t.TempDir()}
+
+	pa.handleResumeArg("s1", entry, "5")
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Run /resume first") {
+		t.Errorf("expected 'Run /resume first' hint, got: %q", msg)
+	}
+}
+
+func TestHandleResumeArg_InvalidNumber_WithList(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	agentDir := t.TempDir()
+	entry := &piSession{
+		termState: newTerminalState(),
+		agentDir:  agentDir,
+		lastResumeList: []core.SessionListInfo{
+			{Path: filepath.Join(agentDir, "sessions", "a.json")},
+		},
+	}
+
+	pa.handleResumeArg("s1", entry, "9")
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Pick 1-1") {
+		t.Errorf("expected 'Pick 1-1' hint, got: %q", msg)
+	}
+}
+
+func TestHandleResumeArg_PathOutsideSessionsDir(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	entry := &piSession{termState: newTerminalState(), agentDir: t.TempDir()}
+
+	// Absolute path outside sessions dir
+	pa.handleResumeArg("s1", entry, "/etc/passwd")
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Invalid session path") {
+		t.Errorf("expected 'Invalid session path' error, got: %q", msg)
+	}
+}
+
+func TestHandleResumeArg_ValidNumberFromList(t *testing.T) {
+	mc := newMockConn()
+	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	agentDir := t.TempDir()
+	// Put the session path inside the sessions dir
+	sessPath := filepath.Join(agentDir, "sessions", "sess.json")
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &piSession{
+		termState: newTerminalState(),
+		agentDir:  agentDir,
+		session:   sess,
+		lastResumeList: []core.SessionListInfo{
+			{Path: sessPath},
+		},
+	}
+
+	// Attempting resume by number — SwitchSession will fail (no real session file),
+	// but we verify path was resolved and error message was sent (not "Invalid number" message).
+	pa.handleResumeArg("s1", entry, "1")
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	// Should NOT be "Invalid session number" or "Run /resume first"
+	if strings.Contains(msg, "Invalid session number") || strings.Contains(msg, "Run /resume") {
+		t.Errorf("expected a session-switch attempt, got: %q", msg)
+	}
+	// Should be "Failed to resume session" or "Resumed session" (depending on file existence)
+	if !strings.Contains(msg, "session") {
+		t.Errorf("expected session-related message, got: %q", msg)
 	}
 }

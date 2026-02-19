@@ -1,14 +1,13 @@
 # Review Backlog — 2026-02-18
 
-**Last reviewed:** Review cycle 33, 2026-02-18 16:53 PST
+**Last reviewed:** Review cycle 39 (e2e+fix), 2026-02-18 22:58 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean)
 **Test status:** ✅ ALL PASSING (22 packages)
-**Work tracker:** All phases complete (0→13). No active porting work.
+**Work tracker:** All phases complete (0→14). ACP mode now fully tested.
 
 **Files reviewed this cycle:**
-- `pkg/modes/rpc/server.go` — `CmdAbort` fix confirmed ✅
-- `pkg/modes/rpc/server_handlecommand_test.go` — `TestHandleCommand_Abort` added ✅
-- `pkg/core/tools/imageresize_test.go` — `contains`/`containsAt` helpers replaced with `strings.Contains` ✅
+- `pkg/modes/acp/acp_test.go` — Type error fix confirmed ✅; handleResumeArg tests added ✅
+- All test coverage items resolved ✅
 
 ---
 
@@ -36,6 +35,8 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/extensions/claudeusage/client.go:80-84` — `progressBar` manual clamping → `max`/`min` builtins — ✅ FIXED 2026-02-18
+- `pkg/extensions/claudeusage/client.go:44` — `http.DefaultClient` → `httpClient` with 10s timeout — ✅ FIXED 2026-02-18
 - `pkg/modes/acp/acp.go:ResumeSession` — duplicate session/resume leaked resources — ✅ FIXED (closes old session before creating new one; test added)
 - `pkg/core/tools/read.go:148` — `getExtension` reimplements `filepath.Ext` — ✅ FIXED (replaced with `filepath.Ext`, function removed)
 - `EditReadFn` / `ReadFileFn` duplicate type — ✅ FIXED (dropped `EditReadFn`, `NewEditToolWithReadWriter` now uses `ReadFileFn`)
@@ -69,4 +70,8 @@ _(no open items)_
 - `pkg/modes/interactive/components/tree_selector.go:716-720` — `math.Max`/`math.Min` float64 for integer clamping — ✅ FIXED (2026-02-18) via `max`/`min` builtins
 - `pkg/core/tools/imageresize.go:148` — last-resort fallback path untested — ✅ FIXED (2026-02-18) via `TestResizeImage_LastResortFallback`
 - `pkg/core/tools/imageresize_test.go:145-155` — Custom `contains`/`containsAt` helpers duplicating `strings.Contains` — ✅ FIXED (2026-02-18)
-- `pkg/modes/rpc/server.go:154` — `CmdAbort` called `s.session.Close()` instead of `s.session.Agent.Abort()` — ✅ FIXED (2026-02-18) via `TestHandleCommand_Abort`
+- `pkg/modes/acp/acp.go:929-937` — Extension commands dispatched via `Prompt()` instead of `ExecuteCommand()` — ✅ FIXED 2026-02-18
+- `pkg/modes/acp/acp_test.go:586,610` — `chunk.Content` used as string (type `ContentBlock`) — ✅ FIXED 2026-02-18
+- `pkg/tui/components/editor.go:713,740` — `math.Max` used instead of builtin `max()` — ✅ FIXED 2026-02-18
+- `pkg/modes/acp/acp.go:1162` — `parseInt` reimplemented instead of using `strconv.Atoi` — ✅ FIXED 2026-02-18
+- ACP slash commands `/session`, `/name`, `handleResumeArg` untested — ✅ FIXED 2026-02-18

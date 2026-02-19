@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ type piSession struct {
 	agentDir        string
 	termState       *terminalState
 	pendingArgs     sync.Map // toolCallID → map[string]any
+	resumeMu        sync.Mutex
 	lastResumeList  []core.SessionListInfo
 }
 
@@ -792,7 +794,7 @@ func (pa *piAgent) handleEvent(sessionID string, entry *piSession, event core.Ag
 func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, command, args string) bool {
 	switch command {
 	case "compact":
-		if _, err := entry.session.RunCompaction(); err != nil {
+		if _, err := entry.session.RunCompaction(context.Background(), args); err != nil {
 			pa.sendAgentMessage(sessionID, fmt.Sprintf("Compaction failed: %v", err))
 		} else {
 			pa.sendAgentMessage(sessionID, "Session compacted successfully.")
@@ -806,7 +808,9 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 			if len(sessions) > 10 {
 				sessions = sessions[:10]
 			}
+			entry.resumeMu.Lock()
 			entry.lastResumeList = sessions
+			entry.resumeMu.Unlock()
 			var lines []string
 			for i, s := range sessions {
 				name := s.Name
@@ -909,6 +913,16 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		return true
 
 	default:
+		// Check extension commands first (matches interactive/mode.go ordering)
+		if entry.extensionRunner != nil {
+			if found, err := entry.extensionRunner.ExecuteCommand(command, args); found {
+				if err != nil {
+					pa.sendAgentMessage(sessionID, fmt.Sprintf("Extension command error: %v", err))
+				}
+				return true
+			}
+		}
+
 		// Check prompt templates
 		templates, _ := entry.session.ResourceLoader().GetPrompts()
 		for _, t := range templates {
@@ -937,34 +951,26 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 			}
 		}
 
-		// Check extension commands
-		if entry.extensionRunner != nil {
-			cmds := entry.extensionRunner.GetCommands()
-			if _, ok := cmds[command]; ok {
-				fullCmd := "/" + command
-				if args != "" {
-					fullCmd += " " + args
-				}
-				_ = entry.session.Prompt(fullCmd)
-				return true
-			}
-		}
-
 		return false
 	}
 }
 
 func (pa *piAgent) handleResumeArg(sessionID string, entry *piSession, args string) {
 	var sessionPath string
-	if n := parseInt(args); n > 0 && n <= len(entry.lastResumeList) {
-		sessionPath = entry.lastResumeList[n-1].Path
-	} else if n > 0 {
-		hint := "Run /resume first to see available sessions."
-		if len(entry.lastResumeList) > 0 {
-			hint = fmt.Sprintf("Pick 1-%d, or run /resume to refresh the list.", len(entry.lastResumeList))
+	if n := parseInt(args); n > 0 {
+		entry.resumeMu.Lock()
+		list := entry.lastResumeList
+		entry.resumeMu.Unlock()
+		if n <= len(list) {
+			sessionPath = list[n-1].Path
+		} else {
+			hint := "Run /resume first to see available sessions."
+			if len(list) > 0 {
+				hint = fmt.Sprintf("Pick 1-%d, or run /resume to refresh the list.", len(list))
+			}
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Invalid session number: %s. %s", args, hint))
+			return
 		}
-		pa.sendAgentMessage(sessionID, fmt.Sprintf("Invalid session number: %s. %s", args, hint))
-		return
 	} else {
 		sessionPath, _ = filepath.Abs(args)
 	}
@@ -1159,17 +1165,12 @@ func (pa *piAgent) sendAvailableCommands(sessionID string) {
 	})
 }
 
+// parseInt parses a non-negative integer from s (trimming whitespace).
+// Returns 0 for empty, non-numeric, or negative input — callers use n > 0 as a validity check.
 func parseInt(s string) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
 		return 0
-	}
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int(c-'0')
 	}
 	return n
 }
