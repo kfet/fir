@@ -172,9 +172,10 @@ type AgentSession struct {
 	scopedModels     []ScopedModel
 
 	// Event subscription
-	mu         sync.RWMutex
-	listeners  []AgentSessionEventListener
-	unsubAgent func()
+	mu             sync.RWMutex
+	listeners      map[int]AgentSessionEventListener
+	nextListenerID int
+	unsubAgent     func()
 
 	// System prompt
 	baseSystemPrompt string
@@ -260,18 +261,16 @@ func (s *AgentSession) ModelRegistryRef() *ModelRegistry {
 func (s *AgentSession) Subscribe(fn AgentSessionEventListener) func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.listeners = append(s.listeners, fn)
-	idx := len(s.listeners) - 1
+	if s.listeners == nil {
+		s.listeners = make(map[int]AgentSessionEventListener)
+	}
+	id := s.nextListenerID
+	s.nextListenerID++
+	s.listeners[id] = fn
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if idx < len(s.listeners) {
-			s.listeners[idx] = nil
-		}
-		// Compact: remove trailing nil entries
-		for len(s.listeners) > 0 && s.listeners[len(s.listeners)-1] == nil {
-			s.listeners = s.listeners[:len(s.listeners)-1]
-		}
+		delete(s.listeners, id)
 	}
 }
 
@@ -279,9 +278,7 @@ func (s *AgentSession) emit(event AgentSessionEvent) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, l := range s.listeners {
-		if l != nil {
-			l(event)
-		}
+		l(event)
 	}
 }
 

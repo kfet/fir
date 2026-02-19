@@ -922,7 +922,7 @@ func StreamSimpleGoogleGeminiCLI(
 	}
 
 	effort := ClampReasoning(options.Reasoning)
-	if strings.Contains(model.ID, "3-pro") || strings.Contains(model.ID, "3-flash") {
+	if strings.Contains(model.ID, "3-pro") || strings.Contains(model.ID, "3.1-pro") || strings.Contains(model.ID, "3-flash") {
 		level := getGeminiCLIThinkingLevel(effort, model.ID)
 		base.Headers = mergeHeaders(base.Headers, map[string]string{
 			"x-gemini-thinking-enabled": "true",
@@ -942,7 +942,7 @@ func StreamSimpleGoogleGeminiCLI(
 }
 
 func getGeminiCLIThinkingLevel(effort ai.ThinkingLevel, modelID string) GoogleThinkingLevel {
-	if strings.Contains(modelID, "3-pro") {
+	if strings.Contains(modelID, "3-pro") || strings.Contains(modelID, "3.1-pro") {
 		switch effort {
 		case ai.ThinkingMinimal, ai.ThinkingLow:
 			return ThinkingLevelLow
