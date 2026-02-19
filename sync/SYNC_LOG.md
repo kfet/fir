@@ -32,3 +32,9 @@
 
 - Phase 0: Scaffolding (go.mod, Makefile, directory structure)
 - Phase 1: AI layer core types, event stream, models, registry, providers/options, providers/transform
+
+## 2026-02-19 — Sync to commit 3a3e37d3
+
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: Added claude-opus-4-6-thinking (Antigravity) and gemini-3.1-pro-preview (Vertex) models.
+- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated with 2 new models.
+- `coding-agent/src/core/package-manager.ts`: Skipped — not in scope for Go port.

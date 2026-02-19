@@ -1,5 +1,5 @@
 // Ported from: packages/ai/scripts/generate-models.ts
-// Upstream hash: 0245b524
+// Upstream hash: 3a3e37d3
 //
 // Command generate-models fetches model data from external APIs and generates
 // pkg/ai/models_generated.go. It is a Go port of scripts/generate-models.ts.
@@ -992,6 +992,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
 			ContextWindow: 200000, MaxTokens: 64000},
+		{ID: "claude-opus-4-6-thinking", Name: "Claude Opus 4.6 Thinking (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
+			ContextWindow: 200000, MaxTokens: 128000},
 		{ID: "gpt-oss-120b-medium", Name: "GPT-OSS 120B Medium (Antigravity)", API: "google-gemini-cli",
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: false,
 			Input: []string{"text"}, CostInput: 0.09, CostOutput: 0.36, CostCacheRead: 0, CostCacheWrite: 0,
@@ -1006,6 +1010,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
 			ContextWindow: 1000000, MaxTokens: 64000},
+		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview (Vertex)", API: "google-vertex",
+			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 65536},
 		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview (Vertex)", API: "google-vertex",
 			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 0.5, CostOutput: 3, CostCacheRead: 0.05, CostCacheWrite: 0,

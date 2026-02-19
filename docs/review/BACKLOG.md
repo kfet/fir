@@ -1,20 +1,13 @@
 # Review Backlog — 2026-02-19
 
-**Last reviewed:** Review cycle 46, 2026-02-19 10:28 PST → updated 2026-02-19 (fixer)
+**Last reviewed:** Review cycle 47, 2026-02-19 15:36 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean)
 **Test status:** ✅ ALL PASSING (22 packages)
-**Work tracker:** All phases complete (0→13). No active porting work.
+**Work tracker:** All phases complete (0→13). Upstream sync in progress.
 
 **Files reviewed this cycle:**
-- `pkg/extension/integration.go` — double-wrap, new findings
-- `pkg/extension/integration_test.go` — SendMessage/SendUserMessage delivery routing tests added ✅
-- `pkg/extension/runner.go` — no new issues
-- `pkg/core/compaction/compaction.go` — no new issues
-- `pkg/core/compaction/runner.go` — no new issues
-- `pkg/core/compaction/compaction_test.go` — thorough coverage, no gaps
-- `pkg/core/compaction/runner_test.go` — good coverage
-- `pkg/core/agentsession.go` — IsError never applied, new finding
-- `pkg/modes/interactive/mode.go` — no new issues
+- `cmd/generate-models/main.go` — 2 new model entries (claude-opus-4-6-thinking, gemini-3.1-pro-preview), upstream hash updated. Clean.
+- `pkg/ai/models_generated.go` — regenerated output, new models present. Clean.
 
 ---
 
