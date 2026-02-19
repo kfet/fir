@@ -1,10 +1,14 @@
 .PHONY: build build-all install test test-cover test-race test-live vet clean pgo generate-models
 
 # Output directory for all build artifacts
-BINDIR  := bin
-BINARY  := $(BINDIR)/tau
-BINARY_PGO  := $(BINDIR)/tau.pgo
-LDFLAGS := -s -w
+BINDIR    := bin
+BINARY    := $(BINDIR)/tau
+BINARY_PGO := $(BINDIR)/tau.pgo
+LDFLAGS   := -s -w
+
+# Stamp file records the Go source-tree hash for which default.pgo was last generated.
+# Only regenerate when .go files have changed (or the stamp is missing).
+PGO_STAMP := default.pgo.stamp
 
 build:
 	@mkdir -p $(BINDIR)
@@ -40,9 +44,16 @@ vet:
 
 pgo:
 	@mkdir -p $(BINDIR)
-	go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/tau/
-	rm $(BINARY_PGO)
-	@make build
+	@SOURCE_HASH=$$(git ls-tree -r HEAD 2>/dev/null | grep '\.go$$' | git hash-object --stdin 2>/dev/null || echo "no-git"); \
+	if [ -f $(PGO_STAMP) ] && [ "$$(cat $(PGO_STAMP))" = "$$SOURCE_HASH" ]; then \
+		echo "PGO profile up to date (source hash $$SOURCE_HASH), skipping regeneration."; \
+	else \
+		echo "Generating PGO profile (source hash $$SOURCE_HASH)..."; \
+		go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/tau/ && \
+		rm -f $(BINARY_PGO) && \
+		echo "$$SOURCE_HASH" > $(PGO_STAMP) && \
+		$(MAKE) build; \
+	fi
 
 generate-models:
 	@mkdir -p $(BINDIR)
