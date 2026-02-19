@@ -5,6 +5,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -762,7 +763,9 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) string {
 			data, _ := json.Marshal(e)
 			lines = append(lines, string(data))
 		}
-		_ = os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600)
+		if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+			log.Printf("session: failed to write branched session file %s: %v", newSessionFile, err)
+		}
 
 		sm.header = header
 		sm.sessionID = newSessionID

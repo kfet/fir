@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -72,9 +74,15 @@ func TestAnthropicLogin_AuthURLFormat(t *testing.T) {
 		},
 	}
 
-	// Override token URL to a non-routable address so it fails fast
+	// Use a test server that returns an error immediately so the token exchange
+	// fails fast without any real network I/O.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "test server", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
 	origURL := anthropicTokenURL
-	setAnthropicTokenURL("http://192.0.2.1:1/token") // RFC 5737 TEST-NET
+	setAnthropicTokenURL(ts.URL + "/token")
 	defer setAnthropicTokenURL(origURL)
 
 	// Login will fail at the token exchange, but OnAuth should still be called
@@ -158,14 +166,19 @@ func TestAnthropicLogin_CodeWithoutState(t *testing.T) {
 		},
 	}
 
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "test server", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
 	origURL := anthropicTokenURL
-	setAnthropicTokenURL("http://192.0.2.1:1/token")
+	setAnthropicTokenURL(ts.URL + "/token")
 	defer setAnthropicTokenURL(origURL)
 
 	// Will fail at HTTP request, but parsing should handle the code-only case
 	_, err := loginAnthropic(callbacks)
 	if err == nil {
-		t.Skip("expected error from non-routable address")
+		t.Skip("expected error from test server")
 	}
 	// Error should be about the HTTP request, not about code parsing
 	if strings.Contains(err.Error(), "index out of range") {

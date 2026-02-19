@@ -78,6 +78,9 @@ type InteractiveMode struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// Compaction cancellation
+	compactCancel context.CancelFunc
+
 	// Event subscription
 	unsubscribe func()
 
@@ -113,11 +116,16 @@ func NewInteractiveMode(
 
 	cwd, _ := os.Getwd()
 
+	autoCompact := true
+	if settings != nil {
+		autoCompact = settings.GetCompactionEnabled()
+	}
+
 	m := &InteractiveMode{
 		session:            session,
 		keybindings:        keybindings,
 		settings:           settings,
-		autoCompact:        true,
+		autoCompact:        autoCompact,
 		footerDataProvider: core.NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -214,10 +222,8 @@ func (m *InteractiveMode) showLoadedResources() {
 	t := itheme.GetTheme()
 
 	// Show skill diagnostics
-	skills, skillDiags := m.session.ResourceLoader().GetSkills()
-	prompts, promptDiags := m.session.ResourceLoader().GetPrompts()
-	_ = skills
-	_ = prompts
+	_, skillDiags := m.session.ResourceLoader().GetSkills()
+	_, promptDiags := m.session.ResourceLoader().GetPrompts()
 
 	if len(skillDiags) > 0 {
 		lines := formatDiagnostics(t, "Skill conflicts", skillDiags)
@@ -406,6 +412,15 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 	// Escape handler with double-escape support
 	m.editor.OnEscape = func() {
+		// If compaction is in progress, cancel it
+		m.mu.Lock()
+		compactCancel := m.compactCancel
+		m.mu.Unlock()
+		if compactCancel != nil {
+			compactCancel()
+			return
+		}
+
 		// If streaming, interrupt/abort
 		if m.session != nil && m.session.IsStreaming() {
 			m.session.Agent.Abort()
@@ -911,33 +926,51 @@ func (m *InteractiveMode) handleCompactCommand(customInstructions string) {
 		return
 	}
 
-	m.executeCompaction(customInstructions, false)
+	m.executeCompaction(customInstructions)
 }
 
-func (m *InteractiveMode) executeCompaction(customInstructions string, isAuto bool) {
+func (m *InteractiveMode) executeCompaction(customInstructions string) {
 	t := itheme.GetTheme()
 
-	// Clear status and show compacting indicator
-	m.statusContainer.Clear()
-	label := "Compacting context..."
-	if isAuto {
-		label = "Auto-compacting context..."
+	// Notify extensions (e.g. tmuxspinner) that work is starting.
+	if m.extensionRunner != nil {
+		_ = m.extensionRunner.EmitAgentStart()
+		defer func() { _ = m.extensionRunner.EmitAgentEnd(nil) }()
 	}
+
+	// Set up a cancellable context so ESC can abort the in-flight LLM call.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.compactCancel = cancel
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.compactCancel = nil
+		m.mu.Unlock()
+		cancel()
+	}()
+
+	// Clear status and show compacting indicator.
+	m.statusContainer.Clear()
 	loader := tuicomp.NewLoader(
 		m.ui.AsRenderRequester(),
 		func(spinner string) string { return t.Fg("accent", spinner) },
 		func(text string) string { return t.Fg("muted", text) },
-		label,
+		"Compacting context... (Esc to cancel)",
 	)
 	m.statusContainer.AddChild(loader)
 	m.ui.RequestRender(false)
 
-	result, err := m.session.RunCompaction()
+	result, err := m.session.RunCompaction(ctx, customInstructions)
 	loader.Stop()
 	m.statusContainer.Clear()
 
 	if err != nil {
-		m.showWarning(fmt.Sprintf("Compaction failed: %s", err))
+		if ctx.Err() != nil {
+			m.showStatus("Compaction cancelled")
+		} else {
+			m.showWarning(fmt.Sprintf("Compaction failed: %s", err))
+		}
 		m.ui.RequestRender(false)
 		return
 	}
@@ -1949,12 +1982,23 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 		// Handle session-level events
 		switch event.Type {
 		case "auto_compaction_start":
-			m.showStatus("Compacting context...")
+			m.showStatus("Auto-compacting context...")
+			if m.extensionRunner != nil {
+				_ = m.extensionRunner.EmitAgentStart()
+			}
 		case "auto_compaction_end":
+			if m.extensionRunner != nil {
+				_ = m.extensionRunner.EmitAgentEnd(nil)
+			}
 			if event.ErrorMessage != "" {
 				m.showWarning("Compaction failed: " + event.ErrorMessage)
 			} else {
-				m.statusContainer.Clear()
+				m.rebuildChatFromMessages()
+				if event.CompactionResult != nil {
+					m.showStatus(fmt.Sprintf("Auto-compacted: %d tokens", event.CompactionResult.TokensBefore))
+				} else {
+					m.statusContainer.Clear()
+				}
 				m.ui.RequestRender(false)
 			}
 		}

@@ -4,6 +4,7 @@ package rpc
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,7 +26,8 @@ type Server struct {
 	input   io.Reader
 	output  io.Writer
 
-	mu sync.Mutex // protects writes to output
+	mu sync.Mutex    // protects writes to output
+	wg sync.WaitGroup // tracks in-flight prompt goroutines
 }
 
 // NewServer creates a new RPC server.
@@ -108,6 +110,10 @@ func (s *Server) Run() error {
 		return fmt.Errorf("stdin read error: %w", err)
 	}
 
+	// Wait for any in-flight prompt goroutines to finish before returning,
+	// so the server doesn't exit while the agent is still processing.
+	s.wg.Wait()
+
 	return nil
 }
 
@@ -121,8 +127,11 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	// =================================================================
 
 	case CmdPrompt:
-		// Fire and forget - events will stream via subscription
+		// Fire and forget - events will stream via subscription.
+		// Track with wg so Run() waits for the goroutine before exiting.
+		s.wg.Add(1)
 		go func() {
+			defer s.wg.Done()
 			if err := s.session.Prompt(cmd.Message); err != nil {
 				s.outputJSON(NewErrorResponse(id, CmdPrompt, err.Error()))
 			}
@@ -142,7 +151,7 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdFollowUp, nil)
 
 	case CmdAbort:
-		s.session.Close()
+		s.session.Agent.Abort()
 		return NewSuccessResponse(id, CmdAbort, nil)
 
 	case CmdNewSession:
@@ -158,6 +167,10 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 
 	case CmdGetState:
 		model := s.session.Model()
+		autoCompactionEnabled := true
+		if s.session.SettingsManager != nil {
+			autoCompactionEnabled = s.session.SettingsManager.GetCompactionEnabled()
+		}
 		state := RpcSessionState{
 			Model:                 model,
 			ThinkingLevel:        ai.ThinkingLevel(s.session.ThinkingLevel()),
@@ -165,7 +178,7 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 			SteeringMode:        "all",
 			FollowUpMode:        "all",
 			SessionID:           "default",
-			AutoCompactionEnabled: true,
+			AutoCompactionEnabled: autoCompactionEnabled,
 			MessageCount:        len(s.session.State().Messages),
 		}
 		return NewSuccessResponse(id, CmdGetState, state)
@@ -194,8 +207,29 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdSetModel, found)
 
 	case CmdCycleModel:
-		// Not yet fully implemented - return null
-		return NewSuccessResponse(id, CmdCycleModel, nil)
+		registry := s.session.ModelRegistryRef()
+		if registry == nil {
+			return NewSuccessResponse(id, CmdCycleModel, nil)
+		}
+		models := registry.GetAvailable()
+		if len(models) == 0 {
+			return NewSuccessResponse(id, CmdCycleModel, nil)
+		}
+		current := s.session.Model()
+		nextIdx := 0
+		for i, m := range models {
+			if current != nil && m.Provider == current.Provider && m.ID == current.ID {
+				nextIdx = (i + 1) % len(models)
+				break
+			}
+		}
+		next := models[nextIdx]
+		s.session.SetModel(next)
+		return NewSuccessResponse(id, CmdCycleModel, CycleModelData{
+			Model:         *next,
+			ThinkingLevel: ai.ThinkingLevel(s.session.ThinkingLevel()),
+			IsScoped:      false,
+		})
 
 	case CmdGetAvailableModels:
 		registry := s.session.ModelRegistryRef()
@@ -219,8 +253,25 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdSetThinkingLevel, nil)
 
 	case CmdCycleThinkingLevel:
-		// Not yet fully implemented - return null
-		return NewSuccessResponse(id, CmdCycleThinkingLevel, nil)
+		levels := []ai.ThinkingLevel{
+			ai.ThinkingOff,
+			ai.ThinkingMinimal,
+			ai.ThinkingLow,
+			ai.ThinkingMedium,
+			ai.ThinkingHigh,
+			ai.ThinkingXHigh,
+		}
+		current := ai.ThinkingLevel(s.session.ThinkingLevel())
+		nextIdx := 0
+		for i, l := range levels {
+			if l == current {
+				nextIdx = (i + 1) % len(levels)
+				break
+			}
+		}
+		next := levels[nextIdx]
+		s.session.SetThinkingLevel(string(next))
+		return NewSuccessResponse(id, CmdCycleThinkingLevel, CycleThinkingLevelData{Level: next})
 
 	// =================================================================
 	// Queue Modes
@@ -237,13 +288,16 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	// =================================================================
 
 	case CmdCompact:
-		result, err := s.session.RunCompaction()
+		result, err := s.session.RunCompaction(context.Background(), cmd.CustomInstructions)
 		if err != nil {
 			return NewErrorResponse(id, CmdCompact, err.Error())
 		}
 		return NewSuccessResponse(id, CmdCompact, result)
 
 	case CmdSetAutoCompaction:
+		if cmd.Enabled != nil && s.session.SettingsManager != nil {
+			s.session.SettingsManager.SetCompactionEnabled(*cmd.Enabled)
+		}
 		return NewSuccessResponse(id, CmdSetAutoCompaction, nil)
 
 	// =================================================================
@@ -289,7 +343,22 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdGetSessionStats, stats)
 
 	case CmdExportHTML:
-		return NewErrorResponse(id, CmdExportHTML, "HTML export not yet implemented")
+		entries := s.session.SessionManager.GetBranch("")
+		f, err := os.CreateTemp("", "tau-session-*.html")
+		if err != nil {
+			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("creating export file: %v", err))
+		}
+		exportPath := f.Name()
+		if err := writeConversationHTML(f, entries, s.session.GetSessionStats().SessionID); err != nil {
+			f.Close()
+			os.Remove(exportPath)
+			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("writing HTML: %v", err))
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(exportPath)
+			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("closing export file: %v", err))
+		}
+		return NewSuccessResponse(id, CmdExportHTML, ExportHTMLData{Path: exportPath})
 
 	case CmdSwitchSession:
 		if cmd.SessionPath == "" {

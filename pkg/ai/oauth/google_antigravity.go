@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -287,7 +288,7 @@ func exchangeAntigravityCode(code, verifier string) (*antigravityTokenData, erro
 		"code_verifier": {verifier},
 	}
 
-	resp, err := http.PostForm(antigravityTokenURL, form)
+	resp, err := oauthHTTPClient.PostForm(antigravityTokenURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
@@ -313,7 +314,7 @@ func refreshAntigravityToken(refreshToken, projectID string) (*Credentials, erro
 		"grant_type":    {"refresh_token"},
 	}
 
-	resp, err := http.PostForm(antigravityTokenURL, form)
+	resp, err := oauthHTTPClient.PostForm(antigravityTokenURL, form)
 	if err != nil {
 		return nil, fmt.Errorf("token refresh: %w", err)
 	}
@@ -353,7 +354,7 @@ func getUserEmail(accessToken string) string {
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return ""
 	}
@@ -407,7 +408,7 @@ func discoverProject(accessToken string, callbacks LoginCallbacks) string {
 	})
 
 	for _, endpoint := range endpoints {
-		req, err := http.NewRequest("POST", endpoint+"/v1internal:loadCodeAssist", strings.NewReader(string(reqBody)))
+		req, err := http.NewRequest("POST", endpoint+"/v1internal:loadCodeAssist", bytes.NewReader(reqBody))
 		if err != nil {
 			continue
 		}
@@ -415,7 +416,7 @@ func discoverProject(accessToken string, callbacks LoginCallbacks) string {
 			req.Header.Set(k, v)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := oauthHTTPClient.Do(req)
 		if err != nil {
 			continue
 		}

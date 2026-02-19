@@ -350,7 +350,7 @@ func (tc *ToolExecutionComponent) formatReadTruncation(t *theme.Theme) string {
 	return "\n" + t.Fg("warning", fmt.Sprintf("[Truncated: %d lines shown (%s limit)]", outLines, formatSize(maxBytes)))
 }
 
-func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, invalidArg string) string {
+func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, _ string) string {
 	path := strArgAlt(tc.args, "file_path", "path")
 	content := strArg(tc.args, "content")
 
@@ -361,7 +361,6 @@ func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, invalidArg string)
 		pathDisplay = t.Fg("accent", shortenPath(path))
 	}
 	text := t.Fg("toolTitle", t.Bold("write")) + " " + pathDisplay
-	_ = invalidArg
 
 	if content != "" {
 		lines := strings.Split(replaceTabs(content), "\n")
@@ -427,13 +426,12 @@ func (tc *ToolExecutionComponent) formatEdit(t *theme.Theme, _ string) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, invalidArg string) string {
+func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, _ string) string {
 	path := strArg(tc.args, "path")
 	if path == "" {
 		path = "."
 	}
 	limit, _ := tc.args["limit"].(float64)
-	_ = invalidArg
 
 	text := t.Fg("toolTitle", t.Bold("ls")) + " " + t.Fg("accent", shortenPath(path))
 	if limit > 0 {
@@ -468,14 +466,13 @@ func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, invalidArg string) st
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, invalidArg string) string {
+func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, _ string) string {
 	pattern := strArg(tc.args, "pattern")
 	path := strArg(tc.args, "path")
 	if path == "" {
 		path = "."
 	}
 	limit, _ := tc.args["limit"].(float64)
-	_ = invalidArg
 
 	text := t.Fg("toolTitle", t.Bold("find")) + " " + t.Fg("accent", pattern) +
 		t.Fg("toolOutput", " in "+shortenPath(path))
@@ -511,7 +508,7 @@ func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, invalidArg string) 
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, invalidArg string) string {
+func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, _ string) string {
 	pattern := strArg(tc.args, "pattern")
 	path := strArg(tc.args, "path")
 	if path == "" {
@@ -519,8 +516,6 @@ func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, invalidArg string) 
 	}
 	glob := strArg(tc.args, "glob")
 	limit, _ := tc.args["limit"].(float64)
-	_ = invalidArg
-
 	text := t.Fg("toolTitle", t.Bold("grep")) + " " + t.Fg("accent", "/"+pattern+"/") +
 		t.Fg("toolOutput", " in "+shortenPath(path))
 	if glob != "" {

@@ -15,6 +15,11 @@ type DefaultRunner struct {
 	ModelRegistry   *core.ModelRegistry
 }
 
+// IsEnabled reports whether auto-compaction is enabled in settings.
+func (r *DefaultRunner) IsEnabled() bool {
+	return r.compactionSettings().Enabled
+}
+
 // ShouldCompact checks if compaction should trigger based on token counts.
 func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int) bool {
 	settings := r.compactionSettings()
@@ -22,7 +27,7 @@ func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int) bool {
 }
 
 // RunCompaction performs compaction using the compaction package.
-func (r *DefaultRunner) RunCompaction(session *core.AgentSession) (*core.CompactionResultInfo, error) {
+func (r *DefaultRunner) RunCompaction(ctx context.Context, session *core.AgentSession, customInstructions string) (*core.CompactionResultInfo, error) {
 	model := session.Model()
 	if model == nil {
 		return nil, fmt.Errorf("no model selected")
@@ -46,12 +51,12 @@ func (r *DefaultRunner) RunCompaction(session *core.AgentSession) (*core.Compact
 	}
 
 	result, err := Compact(
-		context.Background(),
+		ctx,
 		ai.DefaultRegistry,
 		preparation,
 		model,
 		apiKey,
-		"",
+		customInstructions,
 	)
 	if err != nil {
 		return nil, err
@@ -71,8 +76,8 @@ func (r *DefaultRunner) RunCompaction(session *core.AgentSession) (*core.Compact
 	)
 
 	// Rebuild messages from compacted session
-	ctx := session.SessionManager.BuildSessionContext()
-	session.Agent.ReplaceMessages(ctx.Messages)
+	sessionCtx := session.SessionManager.BuildSessionContext()
+	session.Agent.ReplaceMessages(sessionCtx.Messages)
 
 	return &core.CompactionResultInfo{
 		Summary:          result.Summary,

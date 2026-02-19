@@ -1,6 +1,7 @@
 package compaction
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,39 @@ import (
 	"github.com/kfet/tau/pkg/ai"
 	"github.com/kfet/tau/pkg/core"
 )
+
+func TestDefaultRunner_IsEnabled(t *testing.T) {
+	// Default settings (nil Compaction block) → enabled=true
+	sm := core.NewInMemorySettingsManager(core.Settings{})
+	runner := &DefaultRunner{SettingsManager: sm}
+	if !runner.IsEnabled() {
+		t.Error("expected IsEnabled()=true with default settings")
+	}
+
+	// Explicitly disabled
+	disabled := false
+	smOff := core.NewInMemorySettingsManager(core.Settings{
+		Compaction: &core.CompactionSettings{
+			Enabled: &disabled,
+		},
+	})
+	runnerOff := &DefaultRunner{SettingsManager: smOff}
+	if runnerOff.IsEnabled() {
+		t.Error("expected IsEnabled()=false when Enabled=false")
+	}
+
+	// Explicitly enabled
+	enabled := true
+	smOn := core.NewInMemorySettingsManager(core.Settings{
+		Compaction: &core.CompactionSettings{
+			Enabled: &enabled,
+		},
+	})
+	runnerOn := &DefaultRunner{SettingsManager: smOn}
+	if !runnerOn.IsEnabled() {
+		t.Error("expected IsEnabled()=true when Enabled=true")
+	}
+}
 
 func TestDefaultRunner_ShouldCompact(t *testing.T) {
 	sm := core.NewInMemorySettingsManager(core.Settings{})
@@ -89,7 +123,7 @@ func TestRunCompaction_NoModel(t *testing.T) {
 		SettingsManager: sm,
 		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
 	}
-	_, err := runner.RunCompaction(session)
+	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
 		t.Fatal("expected error when no model")
 	}
@@ -109,7 +143,7 @@ func TestRunCompaction_NoApiKey(t *testing.T) {
 		SettingsManager: sm,
 		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
 	}
-	_, err := runner.RunCompaction(session)
+	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
 		t.Fatal("expected error when no API key")
 	}
@@ -136,7 +170,7 @@ func TestRunCompaction_NothingToCompact(t *testing.T) {
 		SettingsManager: sm,
 		ModelRegistry:   registry,
 	}
-	_, err := runner.RunCompaction(session)
+	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
 		t.Fatal("expected error when nothing to compact")
 	}

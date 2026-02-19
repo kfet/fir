@@ -106,23 +106,10 @@ func decodeJWTPayload(token string) (map[string]any, error) {
 		return nil, fmt.Errorf("invalid JWT: expected 3 parts, got %d", len(parts))
 	}
 
-	// JWT uses base64url without padding
-	payload := parts[1]
-	// Add padding if needed
-	switch len(payload) % 4 {
-	case 2:
-		payload += "=="
-	case 3:
-		payload += "="
-	}
-
-	decoded, err := base64.URLEncoding.DecodeString(payload)
+	// JWTs use the base64url alphabet with no padding (RFC 4648 §5).
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		// Try standard base64
-		decoded, err = base64.StdEncoding.DecodeString(parts[1])
-		if err != nil {
-			return nil, fmt.Errorf("decoding JWT payload: %w", err)
-		}
+		return nil, fmt.Errorf("decoding JWT payload: %w", err)
 	}
 
 	var result map[string]any
@@ -347,7 +334,7 @@ func exchangeOpenAICodexCode(code, verifier string) (*Credentials, error) {
 		"redirect_uri":  {openAICodexRedirectURI},
 	}
 
-	resp, err := http.PostForm(openAICodexTokenURL, data)
+	resp, err := oauthHTTPClient.PostForm(openAICodexTokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
 	}
@@ -392,7 +379,7 @@ func refreshOpenAICodexToken(refreshToken string) (*Credentials, error) {
 		"client_id":     {openAICodexClientID},
 	}
 
-	resp, err := http.PostForm(openAICodexTokenURL, data)
+	resp, err := oauthHTTPClient.PostForm(openAICodexTokenURL, data)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}

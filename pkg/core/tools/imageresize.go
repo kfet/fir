@@ -126,7 +126,10 @@ func ResizeImage(b64Data, mimeType string, options *ResizeImageOptions) ResizedI
 		for _, quality := range qualitySteps {
 			resized := resizeToFit(img, w, h)
 
-			bestData, bestMime := encodeBest(resized, quality)
+			bestData, bestMime, err := encodeBest(resized, quality)
+			if err != nil {
+				continue
+			}
 			if len(bestData) <= opts.MaxBytes {
 				return ResizedImage{
 					Data:           base64.StdEncoding.EncodeToString(bestData),
@@ -143,7 +146,7 @@ func ResizeImage(b64Data, mimeType string, options *ResizeImageOptions) ResizedI
 
 	// Last resort: return whatever we got at smallest size
 	resized := resizeToFit(img, int(math.Round(float64(targetW)*0.25)), int(math.Round(float64(targetH)*0.25)))
-	bestData, bestMime := encodeBest(resized, 40)
+	bestData, bestMime, _ := encodeBest(resized, 40)
 	finalW := resized.Bounds().Dx()
 	finalH := resized.Bounds().Dy()
 
@@ -176,15 +179,19 @@ func resizeToFit(src image.Image, w, h int) image.Image {
 }
 
 // encodeBest encodes in both PNG and JPEG and returns the smaller result.
-func encodeBest(img image.Image, jpegQuality int) ([]byte, string) {
+func encodeBest(img image.Image, jpegQuality int) ([]byte, string, error) {
 	var pngBuf bytes.Buffer
-	_ = png.Encode(&pngBuf, img)
+	if err := png.Encode(&pngBuf, img); err != nil {
+		return nil, "", fmt.Errorf("png encode: %w", err)
+	}
 
 	var jpegBuf bytes.Buffer
-	_ = jpeg.Encode(&jpegBuf, img, &jpeg.Options{Quality: jpegQuality})
+	if err := jpeg.Encode(&jpegBuf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+		return nil, "", fmt.Errorf("jpeg encode: %w", err)
+	}
 
 	if pngBuf.Len() <= jpegBuf.Len() {
-		return pngBuf.Bytes(), "image/png"
+		return pngBuf.Bytes(), "image/png", nil
 	}
-	return jpegBuf.Bytes(), "image/jpeg"
+	return jpegBuf.Bytes(), "image/jpeg", nil
 }

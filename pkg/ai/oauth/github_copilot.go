@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -24,6 +25,14 @@ const (
 var (
 	githubClientID string
 	proxyEPRegexp  = regexp.MustCompile(`proxy-ep=([^;]+)`)
+
+	// pollIntervalUnit is the time unit for poll intervals. Overridable in tests.
+	pollIntervalUnit = time.Second
+
+	// Test-override URLs (empty = use production URLs derived from domain).
+	githubAccessTokenURLOverride  string
+	githubCopilotTokenURLOverride string
+	githubCopilotBaseURLOverride  string
 )
 
 // NOTE: The following headers intentionally impersonate the GitHub Copilot Chat
@@ -222,7 +231,7 @@ func startGitHubDeviceFlow(domain string) (*deviceCodeResponse, error) {
 		"scope":     "read:user",
 	})
 
-	req, err := http.NewRequest("POST", deviceCodeURL, strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST", deviceCodeURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +239,7 @@ func startGitHubDeviceFlow(domain string) (*deviceCodeResponse, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -253,8 +262,11 @@ func startGitHubDeviceFlow(domain string) (*deviceCodeResponse, error) {
 
 func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, intervalSec, expiresIn int) (string, error) {
 	_, accessTokenURL, _ := githubURLs(domain)
+	if githubAccessTokenURLOverride != "" {
+		accessTokenURL = githubAccessTokenURLOverride
+	}
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	interval := time.Duration(max(1, intervalSec)) * time.Second
+	interval := time.Duration(max(1, intervalSec)) * pollIntervalUnit
 
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
@@ -267,7 +279,7 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
 		})
 
-		req, err := http.NewRequestWithContext(ctx, "POST", accessTokenURL, strings.NewReader(string(body)))
+		req, err := http.NewRequestWithContext(ctx, "POST", accessTokenURL, bytes.NewReader(body))
 		if err != nil {
 			return "", err
 		}
@@ -275,7 +287,7 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := oauthHTTPClient.Do(req)
 		if err != nil {
 			return "", err
 		}
@@ -303,7 +315,7 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 			case "authorization_pending":
 				// Keep polling
 			case "slow_down":
-				interval += 5 * time.Second
+				interval += 5 * pollIntervalUnit
 			default:
 				return "", fmt.Errorf("device flow failed: %s", errStr)
 			}
@@ -326,6 +338,9 @@ func refreshGitHubCopilotToken(refreshToken, enterpriseDomain string) (*Credenti
 		domain = enterpriseDomain
 	}
 	_, _, copilotTokenURL := githubURLs(domain)
+	if githubCopilotTokenURLOverride != "" {
+		copilotTokenURL = githubCopilotTokenURLOverride
+	}
 
 	req, err := http.NewRequest("GET", copilotTokenURL, nil)
 	if err != nil {
@@ -337,7 +352,7 @@ func refreshGitHubCopilotToken(refreshToken, enterpriseDomain string) (*Credenti
 		req.Header.Set(k, v)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -385,10 +400,13 @@ func enableAllCopilotModels(token, enterpriseDomain string) {
 
 func enableCopilotModel(token, modelID, enterpriseDomain string) bool {
 	baseURL := GetGitHubCopilotBaseURL(token, enterpriseDomain)
+	if githubCopilotBaseURLOverride != "" {
+		baseURL = githubCopilotBaseURLOverride
+	}
 	policyURL := fmt.Sprintf("%s/models/%s/policy", baseURL, modelID)
 
 	body, _ := json.Marshal(map[string]string{"state": "enabled"})
-	req, err := http.NewRequest("POST", policyURL, strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST", policyURL, bytes.NewReader(body))
 	if err != nil {
 		return false
 	}
@@ -400,7 +418,7 @@ func enableCopilotModel(token, modelID, enterpriseDomain string) bool {
 	req.Header.Set("openai-intent", "chat-policy")
 	req.Header.Set("x-interaction-type", "chat-policy")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return false
 	}

@@ -59,10 +59,14 @@ type CompactionResultInfo struct {
 
 // CompactionRunner handles compaction logic. This decouples agentsession from the compaction package.
 type CompactionRunner interface {
+	// IsEnabled reports whether auto-compaction is turned on in settings.
+	IsEnabled() bool
 	// ShouldCompact checks if compaction should trigger.
 	ShouldCompact(contextTokens, contextWindow int) bool
 	// RunCompaction performs compaction and returns the result.
-	RunCompaction(session *AgentSession) (*CompactionResultInfo, error)
+	// customInstructions overrides the compaction prompt; pass "" to use settings default.
+	// ctx may be cancelled to abort the compaction (e.g. when the user presses Escape).
+	RunCompaction(ctx context.Context, session *AgentSession, customInstructions string) (*CompactionResultInfo, error)
 }
 
 // AgentSessionEvent is an event emitted by the AgentSession.
@@ -486,6 +490,10 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 
 	// Case 1: Overflow — LLM returned context overflow error
 	if sameModel && !errorIsFromBeforeCompaction && ai.IsContextOverflow(assistantMessage, contextWindow) {
+		// Respect the Enabled setting even for overflow-triggered compaction.
+		if !s.compactionRunner.IsEnabled() {
+			return
+		}
 		// Remove the error message from agent state before compaction
 		// (it IS saved to session for history, but we don't want it in context for the retry)
 		state := s.State()
@@ -513,7 +521,7 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 	s.emit(AgentSessionEvent{Type: "auto_compaction_start", CompactionReason: reason})
 
-	result, err := s.compactionRunner.RunCompaction(s)
+	result, err := s.compactionRunner.RunCompaction(context.Background(), s, "")
 	if err != nil {
 		s.emit(AgentSessionEvent{
 			Type:         "auto_compaction_end",
@@ -569,11 +577,12 @@ func GetLatestCompactionEntry(entries []*SessionEntry) *SessionEntry {
 }
 
 // RunCompaction runs manual compaction via the CompactionRunner.
-func (s *AgentSession) RunCompaction() (*CompactionResultInfo, error) {
+// ctx may be cancelled to abort the in-flight LLM summarization request.
+func (s *AgentSession) RunCompaction(ctx context.Context, customInstructions string) (*CompactionResultInfo, error) {
 	if s.compactionRunner == nil {
 		return nil, fmt.Errorf("compaction not configured")
 	}
-	return s.compactionRunner.RunCompaction(s)
+	return s.compactionRunner.RunCompaction(ctx, s, customInstructions)
 }
 
 // ============================================================================
