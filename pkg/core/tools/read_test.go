@@ -4,6 +4,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,21 +204,128 @@ func TestReadTool_OffsetAndLimit(t *testing.T) {
 	}
 }
 
-func TestGetExtension(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"file.txt", ".txt"},
-		{"file.tar.gz", ".gz"},
-		{"/path/to/file.jpg", ".jpg"},
-		{"noext", ""},
-		{".hidden", ".hidden"},
+func TestReadToolWithReader_DelegatesTextRead(t *testing.T) {
+	dir := t.TempDir()
+	called := false
+	readFn := ReadFileFn(func(_ context.Context, path string) (string, error) {
+		called = true
+		return "delegated content", nil
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": filepath.Join(dir, "file.txt"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, tt := range tests {
-		got := getExtension(tt.path)
-		if got != tt.want {
-			t.Errorf("getExtension(%q) = %q, want %q", tt.path, got, tt.want)
+	if !called {
+		t.Error("readFn was not called")
+	}
+	if !strings.Contains(result.Content[0].Text, "delegated content") {
+		t.Errorf("unexpected content: %q", result.Content[0].Text)
+	}
+}
+
+func TestReadToolWithReader_ImageFallsBackToLocal(t *testing.T) {
+	dir := t.TempDir()
+	// Write a tiny valid 1x1 PNG
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, // IDAT chunk
+		0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00,
+		0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+		0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, // IEND chunk
+		0x44, 0xAE, 0x42, 0x60, 0x82,
+	}
+	imgPath := filepath.Join(dir, "img.png")
+	if err := os.WriteFile(imgPath, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	delegateCalled := false
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		delegateCalled = true
+		return "", nil
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": imgPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error reading image: %v", err)
+	}
+	if delegateCalled {
+		t.Error("readFn should not be called for image files")
+	}
+	// Result should have image content type somewhere in the content
+	hasImage := false
+	for _, c := range result.Content {
+		if c.Type == "image" {
+			hasImage = true
+			break
 		}
+	}
+	if !hasImage {
+		t.Errorf("expected image content, got %+v", result.Content)
+	}
+}
+
+func TestReadToolWithReader_OffsetLimitPassedThrough(t *testing.T) {
+	dir := t.TempDir()
+	var receivedPath string
+	readFn := ReadFileFn(func(_ context.Context, path string) (string, error) {
+		receivedPath = path
+		return "line1\nline2\nline3\nline4\nline5\n", nil
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	offset := 2
+	limit := 2
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path":   filepath.Join(dir, "file.txt"),
+		"offset": float64(offset),
+		"limit":  float64(limit),
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedPath == "" {
+		t.Error("readFn was not called")
+	}
+	text := result.Content[0].Text
+	if strings.Contains(text, "line1") {
+		t.Error("line1 should be skipped by offset=2")
+	}
+	if !strings.Contains(text, "line2") {
+		t.Errorf("expected line2 in output: %q", text)
+	}
+}
+
+func TestReadToolWithReader_EmptyPathReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "", nil
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": "",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestReadToolWithReader_ReadFnError(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("delegate read failed")
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": filepath.Join(dir, "file.txt"),
+	}, nil)
+	if err == nil {
+		t.Error("expected error when readFn returns error")
 	}
 }

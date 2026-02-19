@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kfet/tau/pkg/agent"
@@ -106,7 +107,7 @@ func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, e
 	}
 
 	// Check if it's an image by extension
-	ext := strings.ToLower(getExtension(absolutePath))
+	ext := strings.ToLower(filepath.Ext(absolutePath))
 	if mimeType, ok := SupportedImageExtensions[ext]; ok {
 		return readImage(absolutePath, path, mimeType)
 	}
@@ -142,19 +143,6 @@ func readImage(absolutePath, displayPath, mimeType string) (agent.AgentToolResul
 			{Type: "image", Data: resized.Data, MimeType: resized.MimeType},
 		},
 	}, nil
-}
-
-// getExtension returns the file extension including the dot.
-func getExtension(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-		if path[i] == '/' || path[i] == '\\' {
-			break
-		}
-	}
-	return ""
 }
 
 // ReadFileFn is a function that reads a file and returns its text content.
@@ -246,7 +234,7 @@ func NewReadToolWithReader(cwd string, readFn ReadFileFn) agent.AgentTool {
 		}
 		absolutePath := ResolveReadPath(path, cwd)
 		// Delegate images to original (ACP has no binary read).
-		ext := strings.ToLower(getExtension(absolutePath))
+		ext := strings.ToLower(filepath.Ext(absolutePath))
 		if _, isImage := SupportedImageExtensions[ext]; isImage {
 			return orig(ctx, toolCallID, params, onUpdate)
 		}

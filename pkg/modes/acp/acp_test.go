@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -338,6 +340,59 @@ func TestResumeSession_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
+	// Set TAU_AGENT_DIR so ResumeSession resolves the sessions directory
+	// to a temp directory we control.
+	agentDir := t.TempDir()
+	sessionsDir := filepath.Join(agentDir, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAU_AGENT_DIR", agentDir)
+
+	// Create a fake session file inside the sessions dir.
+	sessionPath := filepath.Join(sessionsDir, "my-session.json")
+	if err := os.WriteFile(sessionPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Track whether the old session's unsubscribe was called.
+	unsubscribeCalled := false
+	oldSession := &piSession{
+		session:   &core.AgentSession{},
+		termState: newTerminalState(),
+		unsubscribe: func() {
+			unsubscribeCalled = true
+		},
+	}
+
+	mc := newMockConn()
+	pa := &piAgent{
+		conn:     mc,
+		sessions: make(map[string]*piSession),
+	}
+	pa.sessions[sessionPath] = oldSession
+
+	// ResumeSession with the same ID should clean up oldSession before
+	// attempting to create a new one. createSession will fail (no real LLM),
+	// but cleanup must still have happened.
+	_, _ = pa.ResumeSession(context.Background(), ResumeSessionRequest{
+		SessionId: sessionPath,
+	})
+
+	if !unsubscribeCalled {
+		t.Error("existing session's unsubscribe was not called on duplicate resume")
+	}
+	// The old session should no longer be in the map regardless of whether
+	// createSession succeeded.
+	pa.mu.Lock()
+	_, stillPresent := pa.sessions[sessionPath]
+	pa.mu.Unlock()
+	if stillPresent && pa.sessions[sessionPath] == oldSession {
+		t.Error("old session was not replaced in sessions map")
+	}
+}
+
 func TestHandleSlashCommand_Changelog(t *testing.T) {
 	mc := newMockConn()
 	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
@@ -355,7 +410,7 @@ func TestHandleSlashCommand_Changelog(t *testing.T) {
 func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 	mc := newMockConn()
 	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	auth := core.NewAuthStorage("")
+	auth := core.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
 	entry := &piSession{
 		termState:     newTerminalState(),
@@ -374,7 +429,7 @@ func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 	mc := newMockConn()
 	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	auth := core.NewAuthStorage("")
+	auth := core.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
 	// Set up a fake logged-in provider
 	auth.SetRuntimeApiKey("anthropic", "test-key")

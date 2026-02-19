@@ -1,56 +1,51 @@
 # Review Backlog — 2026-02-18
 
-**Last reviewed:** Review cycle 11, 2026-02-17 18:40 PST (tau upstream) / cycle 3 ACP, 2026-02-17 18:30 PST
-**Build status:** ✅ BUILD PASSING (`go build ./...`, `go vet ./...` clean)
-**Test status:** ✅ ALL PASSING
+**Last reviewed:** Review cycle 8, 2026-02-18 11:14 PST
+**Build status:** ✅ PASSING (`go vet ./...` clean, all tests pass)
+**Test status:** ✅ ALL PASSING (22 packages)
 
-**Files reviewed this cycle (tau upstream):**
-
-Unstaged (in-progress):
-- `pkg/core/settings_test.go` — `failingSettingsStorage` mock + DrainErrors error path tests added
-
-**Files reviewed this cycle (ACP):**
-- `pkg/modes/acp/types.go` — dead code removed ✅
-- `pkg/modes/acp/terminal.go` — pendingBashTerminals cleanup fixed ✅, constants unexported ✅
-- `pkg/modes/acp/acp.go` — redundant sort removed, /login stub removed ✅
-- `pkg/modes/acp/acp_test.go` — updated (no new tests for the fix paths)
-- `pkg/modes/acp/helpers_test.go` — TestBuildModelState added ✅
-- `go.mod` — acp-go-sdk indirect annotation removed ✅
-- `pkg/extensions/claudeusage/client.go` — threshold comment mismatch found
+**Files reviewed this cycle:**
+- `cmd/tau/app_test.go` — `TestCheckModelAvailable_NilModel_ACP` added ✅
+- `pkg/core/tools/edit_test.go` — 6 tests for `NewEditToolWithReadWriter` added ✅
+- `pkg/core/tools/write_test.go` — 4 tests for `NewWriteToolWithWriter` added ✅
+- `pkg/core/authstorage.go` — `WithLockAsync` → `WithLockFallible` (confirmed in working tree)
 
 ---
 
-## Security
+## Correctness
 
-_(no open items)_
+_(no open correctness issues)_
 
 ## Simplification
 
-_(no new issues)_
+_(none)_
+
+## Security
+
+_(no new issues found)_
 
 ## Test Coverage
 
-_(no open items — DrainErrors write-error path now tested with mock storage)_
-
-## Documentation
-
-_(no open items)_
+_(no open test coverage items)_
 
 ## Hygiene
 
-_(no new issues)_
+_(no new issues found)_
 
 ---
 
 ## Previously Resolved (all ✅)
 
-- Stale `pendingBashTerminals` on WaitForTerminalExit error — ✅ FIXED (terminal.go, cycle 3)
-- Dead code in `types.go` (unused types + constants) — ✅ FIXED (types.go, cycle 3)
-- Redundant `sort.Slice` in `/continue` handler — ✅ FIXED (acp.go, cycle 3)
-- `handleLogin` stub advertising unsupported `/login` command — ✅ FIXED (removed from builtInCommands, cycle 3)
-- `acp-go-sdk` `// indirect` annotation — ✅ FIXED (go mod tidy, cycle 3)
-- `MaxBackgroundTerminals`/`DefaultMaxBytes` exported unnecessarily — ✅ FIXED (unexported, cycle 3)
-- `BuildModelState` has no test — ✅ FIXED (TestBuildModelState added to helpers_test.go, cycle 3)
+- `pkg/modes/acp/acp.go:ResumeSession` — duplicate session/resume leaked resources — ✅ FIXED (closes old session before creating new one; test added)
+- `pkg/core/tools/read.go:148` — `getExtension` reimplements `filepath.Ext` — ✅ FIXED (replaced with `filepath.Ext`, function removed)
+- `EditReadFn` / `ReadFileFn` duplicate type — ✅ FIXED (dropped `EditReadFn`, `NewEditToolWithReadWriter` now uses `ReadFileFn`)
+- `NewEditToolWithReadWriter` duplicated edit algorithm — ✅ FIXED (extracted `applyEditLogic` helper; 6 tests added)
+- `WithLockAsync` misleading name — ✅ FIXED (renamed to `WithLockFallible`)
+- `NewBashToolWithPrefix` no test — ✅ FIXED (3 tests: prefix prepended, empty passthrough, non-string fallthrough)
+- `NewReadToolWithReader` no test — ✅ FIXED (5 tests: delegate, image fallback, offset/limit, empty path, readFn error)
+- `NewWriteToolWithWriter` no test — ✅ FIXED (4 tests: absolute path, empty path, ctx cancel, bytes message)
+- `NewEditToolWithReadWriter` no test — ✅ FIXED (6 tests: round-trip, not-found, multiple occurrences, empty path, cancel, readFn error)
+- `ModeACP` not tested in `checkModelAvailable` — ✅ FIXED (`TestCheckModelAvailable_NilModel_ACP` added)
 - `resolveTools` unknown tool warning — FIXED
 - `UnknownFlags` never populated — FIXED
 - `SendMessage`/`SendUserMessage` stubbed — FIXED
@@ -59,12 +54,3 @@ _(no new issues)_
 - Notify/sandbox test coverage — FIXED
 - Sandbox command checking docs — FIXED
 - `GetSessionList` export scope — FIXED
-- Google OAuth User-Agent impersonation (antigravity + gemini-cli + github_copilot) — NOTE comments added ✅
-- `bash.go` cmd.Cancel process-group kill — correct implementation, no issues ✅
-- `tmuxspinner_test.go` ClearRegistry without cleanup — `defer ClearRegistry()` added ✅
-- `settings.go` write-error suppression — `SettingsStorage.WithLock` now returns error; recorded via `recordError` ✅
-- `settings_test.go` DrainErrors error path untested — `failingSettingsStorage` mock + test added ✅
-- Non-zero exit code error return — FIXED
-- Session cleanup on exit — FIXED
-- `acpConn` interface extraction — DONE (enables mocking)
-- Event handling and tool execution end tests — DONE (13 tests in acp_test.go)

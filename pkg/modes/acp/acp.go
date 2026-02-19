@@ -303,6 +303,22 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 	// Use params.SessionId as the new session's ID so the client can reference it.
 	sessionID := params.SessionId
 
+	// Close any existing session with the same ID before creating a new one.
+	// Without this, a client retry would overwrite the old session's unsubscribe,
+	// extensionRunner, and agent goroutine, leaking all three.
+	pa.mu.Lock()
+	if existing, ok := pa.sessions[sessionID]; ok {
+		delete(pa.sessions, sessionID)
+		pa.mu.Unlock()
+		CleanupBackgroundTerminals(ctx, pa.conn, existing.termState, sessionID)
+		if existing.unsubscribe != nil {
+			existing.unsubscribe()
+		}
+		existing.session.Close()
+	} else {
+		pa.mu.Unlock()
+	}
+
 	entry, err := pa.createSession(ctx, sessionID, cwd)
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
@@ -505,7 +521,7 @@ func (pa *piAgent) createAcpWriteTool(cwd, sessionID string) agent.AgentTool {
 // createAcpEditTool creates an edit tool delegating file I/O to the ACP client.
 func (pa *piAgent) createAcpEditTool(cwd, sessionID string) agent.AgentTool {
 	return tools.NewEditToolWithReadWriter(cwd,
-		tools.EditReadFn(pa.createAcpReadFn(sessionID)),
+		pa.createAcpReadFn(sessionID),
 		pa.createAcpWriteFn(sessionID),
 	)
 }

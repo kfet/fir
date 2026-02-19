@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -164,5 +165,74 @@ func TestWriteTool_ByteCount(t *testing.T) {
 	expected := "Successfully wrote 11 bytes to count.txt"
 	if result.Content[0].Text != expected {
 		t.Errorf("result text = %q, want %q", result.Content[0].Text, expected)
+	}
+}
+
+func TestWriteToolWithWriter_DelegatesAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	var gotPath, gotContent string
+	writeFn := WriteFileFn(func(_ context.Context, path, content string) error {
+		gotPath = path
+		gotContent = content
+		return nil
+	})
+	tool := NewWriteToolWithWriter(dir, writeFn)
+	absFile := filepath.Join(dir, "out.txt")
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path":    absFile,
+		"content": "hello world",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != absFile {
+		t.Errorf("writeFn got path %q, want %q", gotPath, absFile)
+	}
+	if gotContent != "hello world" {
+		t.Errorf("writeFn got content %q, want %q", gotContent, "hello world")
+	}
+	if !strings.Contains(result.Content[0].Text, "bytes to") {
+		t.Errorf("unexpected result text: %q", result.Content[0].Text)
+	}
+}
+
+func TestWriteToolWithWriter_EmptyPathReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+	tool := NewWriteToolWithWriter(dir, writeFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": "", "content": "data",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestWriteToolWithWriter_ContextCancellation(t *testing.T) {
+	dir := t.TempDir()
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+	tool := NewWriteToolWithWriter(dir, writeFn)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+	_, err := tool.Execute(ctx, "c1", map[string]any{
+		"path": filepath.Join(dir, "f.txt"), "content": "x",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for cancelled context")
+	}
+}
+
+func TestWriteToolWithWriter_BytesWrittenMessage(t *testing.T) {
+	dir := t.TempDir()
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+	tool := NewWriteToolWithWriter(dir, writeFn)
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": filepath.Join(dir, "f.txt"), "content": "hello",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Content[0].Text, "5 bytes") {
+		t.Errorf("expected '5 bytes' in message, got %q", result.Content[0].Text)
 	}
 }
