@@ -1464,3 +1464,60 @@ func TestResolveEnabledExtensions_MergedDeduplicated(t *testing.T) {
 		t.Errorf("expected notify and sandbox, got %v", result)
 	}
 }
+
+func TestCompactionFormatTokens(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1.0k"},
+		{1500, "1.5k"},
+		{9999, "10.0k"},
+		{10000, "10k"},
+		{10001, "10k"},
+		{95000, "95k"},
+		{999999, "999k"},
+		{1_000_000, "1.0M"},
+		{1_500_000, "1.5M"},
+	}
+	for _, tc := range tests {
+		got := compactionFormatTokens(tc.n)
+		if got != tc.want {
+			t.Errorf("compactionFormatTokens(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestCompactionLoaderLabel(t *testing.T) {
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+
+	// nil info, no suffix → bare message
+	label := m.compactionLoaderLabel(nil, "")
+	if label != "Compacting context..." {
+		t.Errorf("unexpected label: %q", label)
+	}
+
+	// nil info, with suffix
+	label = m.compactionLoaderLabel(nil, "(Esc to cancel)")
+	if !strings.Contains(label, "(Esc to cancel)") {
+		t.Errorf("expected suffix in label: %q", label)
+	}
+
+	// non-nil info, no suffix
+	info := &core.CompactionInfo{MessagesToSummarize: 42, TokensBefore: 95000}
+	label = m.compactionLoaderLabel(info, "")
+	if !strings.Contains(label, "42") {
+		t.Errorf("expected message count in label: %q", label)
+	}
+	if !strings.Contains(label, "95k") {
+		t.Errorf("expected token count in label: %q", label)
+	}
+
+	// non-nil info, with suffix
+	label = m.compactionLoaderLabel(info, "(Esc to cancel)")
+	if !strings.Contains(label, "(Esc to cancel)") {
+		t.Errorf("expected suffix in label: %q", label)
+	}
+}

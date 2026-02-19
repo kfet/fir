@@ -334,6 +334,10 @@ func (m *mockCompactionRunner) ShouldCompact(contextTokens, contextWindow int) b
 	return m.shouldCompactResult
 }
 
+func (m *mockCompactionRunner) GetStats(_ *AgentSession) *CompactionInfo {
+	return nil
+}
+
 func (m *mockCompactionRunner) RunCompaction(_ context.Context, session *AgentSession, _ string) (*CompactionResultInfo, error) {
 	m.runCalled = true
 	return m.runResult, m.runError
@@ -361,6 +365,62 @@ func TestAgentSession_RunCompaction_WithRunner(t *testing.T) {
 	}
 	if result.Summary != "test summary" {
 		t.Errorf("expected test summary, got %s", result.Summary)
+	}
+}
+
+func TestAgentSession_GetCompactionStats_NilRunner(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// No runner configured: GetCompactionStats returns nil gracefully.
+	stats := session.GetCompactionStats()
+	if stats != nil {
+		t.Errorf("expected nil stats with no runner, got %+v", stats)
+	}
+}
+
+func TestAgentSession_GetCompactionStats_WithRunner(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	runner := &mockCompactionRunner{}
+	session.compactionRunner = runner
+
+	// mockCompactionRunner.GetStats returns nil — result should be nil.
+	stats := session.GetCompactionStats()
+	if stats != nil {
+		t.Errorf("expected nil from mock GetStats, got %+v", stats)
+	}
+}
+
+func TestAgentSession_SetAutoCompactionProgress(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	var called bool
+	fn := CompactionProgressFunc(func(phase, delta string) { called = true })
+
+	session.SetAutoCompactionProgress(fn)
+
+	session.autoCompactProgressMu.Lock()
+	stored := session.autoCompactProgress
+	session.autoCompactProgressMu.Unlock()
+
+	if stored == nil {
+		t.Fatal("expected progress function to be stored")
+	}
+	stored("phase", "delta")
+	if !called {
+		t.Error("expected stored progress function to be callable")
+	}
+
+	// Clearing also works.
+	session.SetAutoCompactionProgress(nil)
+	session.autoCompactProgressMu.Lock()
+	cleared := session.autoCompactProgress
+	session.autoCompactProgressMu.Unlock()
+	if cleared != nil {
+		t.Error("expected progress function to be cleared")
 	}
 }
 

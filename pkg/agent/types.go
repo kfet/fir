@@ -107,6 +107,10 @@ type AgentToolResult struct {
 	Content []ai.ToolResultContent
 	// Details for UI display or logging.
 	Details any
+	// IsError signals that the tool result represents an error,
+	// even when Execute returns a nil error. Used by extension hooks
+	// to mark a modified result as an error.
+	IsError bool
 }
 
 // AgentToolUpdateCallback is called during streaming tool execution.

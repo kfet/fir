@@ -2,6 +2,7 @@ package extension
 
 import (
 	"context"
+	"time"
 
 	"github.com/kfet/tau/pkg/agent"
 	"github.com/kfet/tau/pkg/ai"
@@ -175,16 +176,19 @@ func addExtensionTools(session *core.AgentSession, runner *Runner) {
 		return
 	}
 
+	// Base tools already in state are wrapped with hooks (applied by SetHooks).
+	// Only wrap the newly-created extension tools to avoid double-wrapping.
 	state := session.Agent.State()
 	tools := make([]agent.AgentTool, len(state.Tools))
 	copy(tools, state.Tools)
 
 	for _, td := range extTools {
 		at := extensionToolToAgentTool(td, runner)
-		tools = append(tools, at)
+		wrapped := session.WrapToolsWithHooks([]agent.AgentTool{at})
+		tools = append(tools, wrapped[0])
 	}
 
-	session.Agent.SetTools(session.WrapToolsWithHooks(tools))
+	session.Agent.SetTools(tools)
 }
 
 // removeExtensionTools removes any tools that were added by extensions
@@ -229,6 +233,8 @@ func extensionToolToAgentTool(td *ToolDefinition, runner *Runner) agent.AgentToo
 // bridgeSessionEvents subscribes to the AgentSession event stream and
 // forwards relevant agent lifecycle events to the extension Runner.
 func bridgeSessionEvents(session *core.AgentSession, runner *Runner) {
+	var turnCounter int
+	var currentTurnIdx int
 	session.Subscribe(func(event core.AgentSessionEvent) {
 		ae := event.AgentEvent
 		if ae == nil {
@@ -243,9 +249,14 @@ func bridgeSessionEvents(session *core.AgentSession, runner *Runner) {
 			_ = runner.EmitAgentEnd(ae.Messages)
 
 		case agent.EventTurnStart:
+			currentTurnIdx = turnCounter
+			turnCounter++
 			_ = runner.Emit(&Event{
-				Type:      "turn_start",
-				TurnStart: &TurnStartEvent{},
+				Type: "turn_start",
+				TurnStart: &TurnStartEvent{
+					TurnIndex: currentTurnIdx,
+					Timestamp: time.Now().UnixMilli(),
+				},
 			})
 
 		case agent.EventTurnEnd:
@@ -260,6 +271,7 @@ func bridgeSessionEvents(session *core.AgentSession, runner *Runner) {
 			_ = runner.Emit(&Event{
 				Type: "turn_end",
 				TurnEnd: &TurnEndEvent{
+					TurnIndex:   currentTurnIdx,
 					Message:     turnMsg,
 					ToolResults: toolResults,
 				},

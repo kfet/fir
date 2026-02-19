@@ -57,15 +57,28 @@ type CompactionResultInfo struct {
 	TokensBefore     int
 }
 
+// CompactionInfo contains pre-run statistics about what a compaction will process.
+// It is returned by GetStats and included in auto_compaction_start events.
+type CompactionInfo struct {
+	// MessagesToSummarize is the number of messages that will be sent to the LLM.
+	MessagesToSummarize int
+	// TokensBefore is the estimated context token count before compaction.
+	TokensBefore int
+}
+
 // CompactionRunner handles compaction logic. This decouples agentsession from the compaction package.
 type CompactionRunner interface {
 	// IsEnabled reports whether auto-compaction is turned on in settings.
 	IsEnabled() bool
 	// ShouldCompact checks if compaction should trigger.
 	ShouldCompact(contextTokens, contextWindow int) bool
+	// GetStats returns pre-run information about what a compaction would process
+	// without running any LLM calls. Returns nil if there is nothing to compact.
+	GetStats(session *AgentSession) *CompactionInfo
 	// RunCompaction performs compaction and returns the result.
 	// customInstructions overrides the compaction prompt; pass "" to use settings default.
 	// ctx may be cancelled to abort the compaction (e.g. when the user presses Escape).
+	// Attach a CompactionProgressFunc via WithCompactionProgress to receive streaming updates.
 	RunCompaction(ctx context.Context, session *AgentSession, customInstructions string) (*CompactionResultInfo, error)
 }
 
@@ -84,6 +97,10 @@ type AgentSessionEvent struct {
 	Aborted          bool
 	WillRetry        bool
 	ErrorMessage     string
+
+	// CompactionInfo is set on auto_compaction_start to give the UI
+	// upfront visibility into what will be compacted.
+	CompactionInfo *CompactionInfo
 }
 
 // AgentSessionEventListener receives session events.
@@ -168,6 +185,11 @@ type AgentSession struct {
 
 	// Auto-compaction: tracks the last assistant message for checking on agent_end
 	lastAssistantMessage *ai.AssistantMessage
+
+	// autoCompactProgressMu guards autoCompactProgress independently of mu
+	// so that event listeners can set it without deadlocking inside emit().
+	autoCompactProgressMu sync.Mutex
+	autoCompactProgress   CompactionProgressFunc
 
 	// Extension hooks
 	hooks *AgentSessionHooks
@@ -517,11 +539,37 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 	}
 }
 
+// SetAutoCompactionProgress sets a progress callback that will be used during
+// the next auto-compaction run. It is safe to call from inside an event
+// listener (uses a separate mutex from the listener list). Pass nil to clear.
+func (s *AgentSession) SetAutoCompactionProgress(fn CompactionProgressFunc) {
+	s.autoCompactProgressMu.Lock()
+	s.autoCompactProgress = fn
+	s.autoCompactProgressMu.Unlock()
+}
+
 // runAutoCompaction runs auto-compaction and emits the appropriate events.
 func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
-	s.emit(AgentSessionEvent{Type: "auto_compaction_start", CompactionReason: reason})
+	info := s.compactionRunner.GetStats(s)
 
-	result, err := s.compactionRunner.RunCompaction(context.Background(), s, "")
+	s.emit(AgentSessionEvent{
+		Type:             "auto_compaction_start",
+		CompactionReason: reason,
+		CompactionInfo:   info,
+	})
+
+	// Pick up any progress function set by the auto_compaction_start listener.
+	s.autoCompactProgressMu.Lock()
+	progressFn := s.autoCompactProgress
+	s.autoCompactProgress = nil
+	s.autoCompactProgressMu.Unlock()
+
+	ctx := context.Background()
+	if progressFn != nil {
+		ctx = WithCompactionProgress(ctx, progressFn)
+	}
+
+	result, err := s.compactionRunner.RunCompaction(ctx, s, "")
 	if err != nil {
 		s.emit(AgentSessionEvent{
 			Type:         "auto_compaction_end",
@@ -583,6 +631,16 @@ func (s *AgentSession) RunCompaction(ctx context.Context, customInstructions str
 		return nil, fmt.Errorf("compaction not configured")
 	}
 	return s.compactionRunner.RunCompaction(ctx, s, customInstructions)
+}
+
+// GetCompactionStats returns pre-run statistics about what a compaction would
+// process, without making any LLM calls. Returns nil if compaction is not
+// configured or there is nothing to compact.
+func (s *AgentSession) GetCompactionStats() *CompactionInfo {
+	if s.compactionRunner == nil {
+		return nil
+	}
+	return s.compactionRunner.GetStats(s)
 }
 
 // ============================================================================
@@ -693,13 +751,16 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 
 		// Post-execution hook: tool_result interception
 		if err == nil && s.hooks != nil && s.hooks.OnToolResult != nil {
-			mod := s.hooks.OnToolResult(toolCallID, t.Name, params, result.Content, result.Details, false)
+			mod := s.hooks.OnToolResult(toolCallID, t.Name, params, result.Content, result.Details, result.IsError)
 			if mod != nil {
 				if mod.Content != nil {
 					result.Content = mod.Content
 				}
 				if mod.Details != nil {
 					result.Details = mod.Details
+				}
+				if mod.IsError != nil {
+					result.IsError = *mod.IsError
 				}
 			}
 		}

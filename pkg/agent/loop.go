@@ -373,8 +373,11 @@ func executeToolCalls(
 			if err != nil {
 				result = AgentToolResult{
 					Content: []ai.ToolResultContent{{Type: "text", Text: err.Error()}},
+					IsError: true,
 				}
 				isError = true
+			} else {
+				isError = result.IsError
 			}
 		}
 

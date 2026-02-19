@@ -1,6 +1,7 @@
 package compaction
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -636,5 +637,92 @@ func TestBuildSummarizationPrompt_Update(t *testing.T) {
 	prompt := BuildSummarizationPrompt("convo", "old", "")
 	if !strings.Contains(prompt, "<previous-summary>") {
 		t.Error("expected <previous-summary>")
+	}
+}
+
+// TestGenerateSummary_ProgressCallback verifies that the CompactionProgressFunc
+// attached to the context is called with text deltas during streaming.
+func TestGenerateSummary_ProgressCallback(t *testing.T) {
+	const apiName = "test-generate-summary-progress"
+	const part1 = "## Goal\n"
+	const part2 = "summarize things"
+
+	// Register a fake provider that emits two text-delta events.
+	registry := ai.NewRegistry()
+	registry.RegisterApiProvider(&ai.ApiProvider{
+		Api: ai.Api(apiName),
+		StreamSimple: func(ctx context.Context, model *ai.Model, prompt ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			stream := ai.NewAssistantMessageEventStream()
+			go func() {
+				// partial after first delta
+				partial1 := &ai.AssistantMessage{
+					Role:    ai.RoleAssistant,
+					Content: []ai.AssistantContent{ai.NewTextContent(part1)},
+					Api:     model.Api, Provider: model.Provider, Model: model.ID,
+				}
+				// partial after second delta (accumulated text)
+				partial2 := &ai.AssistantMessage{
+					Role:    ai.RoleAssistant,
+					Content: []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
+					Api:     model.Api, Provider: model.Provider, Model: model.ID,
+				}
+				final := &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					Content:    []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
+					Api:        model.Api, Provider: model.Provider, Model: model.ID,
+					StopReason: ai.StopReasonStop,
+				}
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: partial1})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, Partial: partial1})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, Partial: partial2})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: final})
+				stream.End(nil)
+			}()
+			return stream
+		},
+		Stream: func(ctx context.Context, model *ai.Model, prompt ai.Context, opts *ai.StreamOptions) *ai.AssistantMessageEventStream {
+			s := ai.NewAssistantMessageEventStream()
+			go func() { s.End(nil) }()
+			return s
+		},
+	}, "test-progress-owner")
+	defer registry.UnregisterApiProviders("test-progress-owner")
+
+	model := &ai.Model{ID: "test", Provider: "test", Api: ai.Api(apiName)}
+
+	var phases []string
+	var deltas []string
+	progressFn := core.CompactionProgressFunc(func(phase, delta string) {
+		phases = append(phases, phase)
+		deltas = append(deltas, delta)
+	})
+	ctx := core.WithCompactionProgress(context.Background(), progressFn)
+
+	result, err := GenerateSummary(ctx, registry, nil, model, 4096, "key", "", "")
+	if err != nil {
+		t.Fatalf("GenerateSummary: %v", err)
+	}
+	if result != part1+part2 {
+		t.Errorf("expected %q, got %q", part1+part2, result)
+	}
+
+	// The first call should be the "summarizing history" phase signal with empty delta.
+	if len(phases) == 0 {
+		t.Fatal("expected at least one progress call")
+	}
+	if phases[0] != "summarizing history" {
+		t.Errorf("expected first phase %q, got %q", "summarizing history", phases[0])
+	}
+	if deltas[0] != "" {
+		t.Errorf("expected first delta to be empty phase signal, got %q", deltas[0])
+	}
+
+	// Subsequent calls carry the incremental text.
+	var accumulated string
+	for i := 1; i < len(deltas); i++ {
+		accumulated += deltas[i]
+	}
+	if accumulated != part1+part2 {
+		t.Errorf("expected accumulated deltas %q, got %q", part1+part2, accumulated)
 	}
 }

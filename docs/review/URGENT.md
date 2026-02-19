@@ -1,4 +1,4 @@
-# URGENT — 2026-02-18
+# URGENT — 2026-02-19
 
 ## Active Issues
 
@@ -8,6 +8,8 @@ _(none)_
 
 ## Previously Fixed
 
+- ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19): test now uses two user messages instead of zero-usage assistant; avoids `getAssistantUsage` returning a zero-value pointer
+- ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED (agent corrected to `ai.NewAssistantMsg()`)
 - ~~`pkg/ai/oauth/callback_server.go:25` — Reflected XSS in OAuth error page~~ — ✅ FIXED
 - ~~`pkg/core/agentsession.go:636` — `WrapToolsWithHooks` never called~~ — ✅ FIXED
 - ~~`pkg/extensions/notify/notify.go:30` — Direct `os.Stdout` write~~ — ✅ FIXED

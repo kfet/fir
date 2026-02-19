@@ -26,6 +26,21 @@ func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int) bool {
 	return ShouldCompact(contextTokens, contextWindow, settings)
 }
 
+// GetStats returns pre-run information about what a compaction would process
+// without running any LLM calls. Returns nil if there is nothing to compact.
+func (r *DefaultRunner) GetStats(session *core.AgentSession) *core.CompactionInfo {
+	settings := r.compactionSettings()
+	pathEntries := session.SessionManager.GetBranch("")
+	prep := PrepareCompaction(pathEntries, settings)
+	if prep == nil {
+		return nil
+	}
+	return &core.CompactionInfo{
+		MessagesToSummarize: len(prep.MessagesToSummarize),
+		TokensBefore:        prep.TokensBefore,
+	}
+}
+
 // RunCompaction performs compaction using the compaction package.
 func (r *DefaultRunner) RunCompaction(ctx context.Context, session *core.AgentSession, customInstructions string) (*core.CompactionResultInfo, error) {
 	model := session.Model()

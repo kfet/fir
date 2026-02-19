@@ -122,7 +122,12 @@ func getAssistantUsage(msg agent.AgentMessage) *ai.Usage {
 	if a.StopReason == ai.StopReasonAborted || a.StopReason == ai.StopReasonError {
 		return nil
 	}
-	return &a.Usage
+	// Treat all-zero usage as "no data" so the character-count fallback fires.
+	u := &a.Usage
+	if u.TotalTokens == 0 && u.Input == 0 && u.Output == 0 && u.CacheRead == 0 && u.CacheWrite == 0 {
+		return nil
+	}
+	return u
 }
 
 // EstimateContextTokens estimates context tokens from messages.
@@ -164,8 +169,19 @@ func EstimateContextTokens(messages []agent.AgentMessage) ContextUsageEstimate {
 }
 
 // ShouldCompact checks if compaction should trigger.
+// It fires only when the context is at least minFillRatio full AND the
+// remaining headroom is less than ReserveTokens. The fill-ratio floor
+// prevents compaction from firing on models whose context window is so
+// large that the reserve threshold is crossed at a low fill percentage.
 func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings) bool {
 	if !settings.Enabled {
+		return false
+	}
+	if contextWindow <= 0 {
+		return false
+	}
+	const minFillRatio = 0.90
+	if contextWindow > 0 && float64(contextTokens)/float64(contextWindow) < minFillRatio {
 		return false
 	}
 	return contextTokens > contextWindow-settings.ReserveTokens
@@ -641,6 +657,8 @@ func BuildSummarizationPrompt(conversationText, previousSummary, customInstructi
 // ============================================================================
 
 // GenerateSummary generates a summary of the conversation using the LLM.
+// If the context carries a CompactionProgressFunc (via core.WithCompactionProgress),
+// it is called with phase="summarizing history" and each text delta as the LLM streams.
 func GenerateSummary(
 	ctx context.Context,
 	registry *ai.Registry,
@@ -660,7 +678,12 @@ func GenerateSummary(
 	conversationText := SerializeConversation(llmMessages)
 	promptText := BuildSummarizationPrompt(conversationText, previousSummary, customInstructions)
 
-	response := ai.CompleteSimple(ctx, registry, model, ai.Context{
+	progress := core.CompactionProgressFromCtx(ctx)
+	if progress != nil {
+		progress("summarizing history", "")
+	}
+
+	stream := ai.StreamSimple(ctx, registry, model, ai.Context{
 		SystemPrompt: SummarizationSystemPrompt,
 		Messages:     []ai.Message{ai.NewUserMsg(promptText, time.Now().UnixMilli())},
 	}, &ai.SimpleStreamOptions{
@@ -671,6 +694,18 @@ func GenerateSummary(
 		Reasoning: ai.ThinkingHigh,
 	})
 
+	var prevTextLen int
+	for event := range stream.Events {
+		if event.Type == ai.EventTextDelta && event.Partial != nil && progress != nil {
+			current := extractTextFromResponse(event.Partial)
+			if len(current) > prevTextLen {
+				progress("summarizing history", current[prevTextLen:])
+				prevTextLen = len(current)
+			}
+		}
+	}
+
+	response := stream.Result()
 	if response == nil {
 		return "", fmt.Errorf("no response from summarization")
 	}
@@ -698,7 +733,12 @@ func generateTurnPrefixSummary(
 	conversationText := SerializeConversation(llmMessages)
 	promptText := "<conversation>\n" + conversationText + "\n</conversation>\n\n" + turnPrefixSummarizationPromptText
 
-	response := ai.CompleteSimple(ctx, registry, model, ai.Context{
+	progress := core.CompactionProgressFromCtx(ctx)
+	if progress != nil {
+		progress("summarizing turn context", "")
+	}
+
+	stream := ai.StreamSimple(ctx, registry, model, ai.Context{
 		SystemPrompt: SummarizationSystemPrompt,
 		Messages:     []ai.Message{ai.NewUserMsg(promptText, time.Now().UnixMilli())},
 	}, &ai.SimpleStreamOptions{
@@ -708,6 +748,18 @@ func generateTurnPrefixSummary(
 		},
 	})
 
+	var prevTextLen int
+	for event := range stream.Events {
+		if event.Type == ai.EventTextDelta && event.Partial != nil && progress != nil {
+			current := extractTextFromResponse(event.Partial)
+			if len(current) > prevTextLen {
+				progress("summarizing turn context", current[prevTextLen:])
+				prevTextLen = len(current)
+			}
+		}
+	}
+
+	response := stream.Result()
 	if response == nil {
 		return "", fmt.Errorf("no response from turn prefix summarization")
 	}

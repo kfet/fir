@@ -950,16 +950,29 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 		cancel()
 	}()
 
-	// Clear status and show compacting indicator.
+	// Fetch pre-run stats so we can show message/token counts immediately.
+	info := m.session.GetCompactionStats()
+
+	// Clear status and show initial compacting indicator with stats.
 	m.statusContainer.Clear()
 	loader := tuicomp.NewLoader(
 		m.ui.AsRenderRequester(),
 		func(spinner string) string { return t.Fg("accent", spinner) },
 		func(text string) string { return t.Fg("muted", text) },
-		"Compacting context... (Esc to cancel)",
+		m.compactionLoaderLabel(info, "(Esc to cancel)"),
 	)
 	m.statusContainer.AddChild(loader)
 	m.ui.RequestRender(false)
+
+	// Attach a streaming progress callback that updates the label as the LLM writes.
+	var writtenChars int
+	progressFn := func(phase, delta string) {
+		writtenChars += len(delta)
+		tokensWritten := writtenChars / 4
+		label := m.compactionLoaderLabel(info, fmt.Sprintf("%s... %d tokens written (Esc to cancel)", phase, tokensWritten))
+		loader.SetMessage(label)
+	}
+	ctx = core.WithCompactionProgress(ctx, progressFn)
 
 	result, err := m.session.RunCompaction(ctx, customInstructions)
 	loader.Stop()
@@ -977,13 +990,44 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 
 	if result != nil {
 		m.rebuildChatFromMessages()
-
-		// Show compaction summary
-		summary := fmt.Sprintf("Compacted: %d tokens", result.TokensBefore)
-		m.showStatus(summary)
+		m.showStatus(fmt.Sprintf("Compacted: %d tokens", result.TokensBefore))
 	}
 
 	m.ui.RequestRender(false)
+}
+
+// compactionLoaderLabel builds the loader message string shown during compaction.
+// info may be nil (no stats known yet). suffix is appended after the stats.
+func (m *InteractiveMode) compactionLoaderLabel(info *core.CompactionInfo, suffix string) string {
+	if info == nil {
+		if suffix != "" {
+			return "Compacting context... " + suffix
+		}
+		return "Compacting context..."
+	}
+	t := itheme.GetTheme()
+	stats := fmt.Sprintf("%s msgs, ~%s tokens",
+		t.Fg("accent", fmt.Sprintf("%d", info.MessagesToSummarize)),
+		t.Fg("accent", compactionFormatTokens(info.TokensBefore)),
+	)
+	if suffix != "" {
+		return fmt.Sprintf("Compacting %s — %s", stats, suffix)
+	}
+	return fmt.Sprintf("Compacting %s", stats)
+}
+
+// compactionFormatTokens formats a token count for display (e.g. "95k").
+func compactionFormatTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 10000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	if n < 1_000_000 {
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 }
 
 // ============================================================================
@@ -1982,11 +2026,38 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 		// Handle session-level events
 		switch event.Type {
 		case "auto_compaction_start":
-			m.showStatus("Auto-compacting context...")
 			if m.extensionRunner != nil {
 				_ = m.extensionRunner.EmitAgentStart()
 			}
+			t := itheme.GetTheme()
+			// Build an initial label that shows message/token counts if available.
+			initialLabel := m.compactionLoaderLabel(event.CompactionInfo, "(auto)")
+			loader := tuicomp.NewLoader(
+				m.ui.AsRenderRequester(),
+				func(spinner string) string { return t.Fg("accent", spinner) },
+				func(text string) string { return t.Fg("muted", text) },
+				initialLabel,
+			)
+			m.statusContainer.Clear()
+			m.statusContainer.AddChild(loader)
+			m.loadingAnimation = loader
+			m.ui.RequestRender(false)
+
+			// Provide a progress callback so the loader text updates during streaming.
+			var writtenChars int
+			m.session.SetAutoCompactionProgress(func(phase, delta string) {
+				writtenChars += len(delta)
+				tokensWritten := writtenChars / 4
+				label := m.compactionLoaderLabel(event.CompactionInfo,
+					fmt.Sprintf("%s... %d tokens written (auto)", phase, tokensWritten))
+				loader.SetMessage(label)
+			})
+
 		case "auto_compaction_end":
+			if m.loadingAnimation != nil {
+				m.loadingAnimation.Stop()
+				m.loadingAnimation = nil
+			}
 			if m.extensionRunner != nil {
 				_ = m.extensionRunner.EmitAgentEnd(nil)
 			}

@@ -3,6 +3,7 @@ package extension
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kfet/tau/pkg/agent"
 	"github.com/kfet/tau/pkg/ai"
@@ -966,5 +967,279 @@ func TestReloadRemovesAndAddsExtensionTools(t *testing.T) {
 	}
 	if !hasToolB {
 		t.Error("expected tool_b after reload with ext-b")
+	}
+}
+
+// ============================================================================
+// SendMessage / SendUserMessage delivery routing
+// ============================================================================
+
+// TestSendMessage_DeliverAs_Steer verifies that SendMessage with DeliverAs:"steer"
+// enqueues the message via agent.Steer().
+func TestSendMessage_DeliverAs_Steer(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("steer-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			api.SendMessage(CustomMessageSpec{
+				CustomType: "test",
+				Content:    "steer-me",
+			}, &SendMessageOptions{DeliverAs: "steer"})
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"steer-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+
+	if !session.Agent.HasQueuedMessages() {
+		t.Error("expected agent.Steer() to have queued a message (HasQueuedMessages should be true)")
+	}
+}
+
+// TestSendMessage_DeliverAs_FollowUp verifies that SendMessage with DeliverAs:"followUp"
+// enqueues the message via agent.FollowUp().
+func TestSendMessage_DeliverAs_FollowUp(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("followup-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			api.SendMessage(CustomMessageSpec{
+				CustomType: "test",
+				Content:    "follow-me",
+			}, &SendMessageOptions{DeliverAs: "followUp"})
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"followup-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+
+	if !session.Agent.HasQueuedMessages() {
+		t.Error("expected agent.FollowUp() to have queued a message (HasQueuedMessages should be true)")
+	}
+}
+
+// TestSendMessage_TriggerTurn verifies that SendMessage with TriggerTurn:true
+// calls agent.Continue(), which starts the agent loop (emitting EventAgentStart).
+func TestSendMessage_TriggerTurn(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("trigger-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			api.SendMessage(CustomMessageSpec{
+				CustomType: "test",
+				Content:    "trigger",
+			}, &SendMessageOptions{TriggerTurn: true})
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	// Pre-seed a user message so Continue() doesn't return early with "no messages".
+	session.Agent.AppendMessage(agent.AgentMessage{
+		Message: ai.NewUserMsg("seed", 0),
+	})
+
+	// Subscribe to detect EventAgentStart, which is emitted inside the goroutine
+	// spawned by Continue() before any API calls are made.
+	started := make(chan struct{}, 1)
+	session.Agent.Subscribe(func(e agent.AgentEvent) {
+		if e.Type == agent.EventAgentStart {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"trigger-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+
+	select {
+	case <-started:
+		// agent.Continue() was called and the loop started — pass.
+	case <-time.After(2 * time.Second):
+		t.Error("expected agent.Continue() to be called (TriggerTurn=true), but EventAgentStart was never received")
+	}
+}
+
+// TestSendUserMessage_DeliverAs_Steer verifies that SendUserMessage with DeliverAs:"steer"
+// enqueues the message via agent.Steer().
+func TestSendUserMessage_DeliverAs_Steer(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("user-steer-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			api.SendUserMessage("steer user msg", &SendUserMessageOptions{DeliverAs: "steer"})
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"user-steer-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+
+	if !session.Agent.HasQueuedMessages() {
+		t.Error("expected agent.Steer() to have queued a message for SendUserMessage with DeliverAs:steer")
+	}
+}
+
+// TestSendUserMessage_DeliverAs_FollowUp verifies that SendUserMessage with DeliverAs:"followUp"
+// enqueues the message via agent.FollowUp().
+func TestSendUserMessage_DeliverAs_FollowUp(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	Register("user-followup-ext", func(api API) {
+		api.On("session_start", func(event *Event, ctx Context) (any, error) {
+			api.SendUserMessage("followup user msg", &SendUserMessageOptions{DeliverAs: "followUp"})
+			return nil, nil
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	result, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"user-followup-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = result.Runner.EmitSessionStart()
+
+	if !session.Agent.HasQueuedMessages() {
+		t.Error("expected agent.FollowUp() to have queued a message for SendUserMessage with DeliverAs:followUp")
+	}
+}
+
+// TestHookFiresExactlyOnceWithPreExistingTools is a regression test for the
+// double-wrapping bug. When a session has pre-existing tools AND extension tools
+// are registered, SetHooks wraps the pre-existing tools once. addExtensionTools
+// must NOT re-wrap those tools — only the new extension tools should be wrapped.
+//
+// Before the fix, the OnToolCall hook fired twice per execution for pre-existing
+// tools when any extension tool was also registered.
+func TestHookFiresExactlyOnceWithPreExistingTools(t *testing.T) {
+	ClearRegistry()
+	defer ClearRegistry()
+
+	var hookCalls int
+
+	Register("counter-ext", func(api API) {
+		// Event handler that counts tool_call interceptions for "base_tool".
+		api.On("tool_call", func(event *Event, ctx Context) (any, error) {
+			if event.ToolCall != nil && event.ToolCall.ToolName == "base_tool" {
+				hookCalls++
+			}
+			return nil, nil
+		})
+		// Registering an extension tool triggers addExtensionTools to run,
+		// which is where the double-wrap bug manifested.
+		api.RegisterTool(ToolDefinition{
+			Name:        "ext_tool",
+			Label:       "Extension Tool",
+			Description: "A tool registered by the extension",
+			Parameters:  map[string]any{"type": "object"},
+			Execute: func(ctx ToolContext) (agent.AgentToolResult, error) {
+				return agent.AgentToolResult{
+					Content: []ai.ToolResultContent{{Type: "text", Text: "ext done"}},
+				}, nil
+			},
+		})
+	})
+
+	cwd := t.TempDir()
+	session := newTestSession(t, cwd)
+	defer session.Close()
+
+	// Pre-load a tool onto the agent BEFORE Setup, simulating production where
+	// DefaultCodingTools (bash, read, etc.) are set before extensions are loaded.
+	var executeCount int
+	baseTool := agent.AgentTool{
+		Tool: ai.Tool{Name: "base_tool"},
+		Execute: func(ctx context.Context, id string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+			executeCount++
+			return agent.AgentToolResult{
+				Content: []ai.ToolResultContent{{Type: "text", Text: "base done"}},
+			}, nil
+		},
+	}
+	session.Agent.SetTools([]agent.AgentTool{baseTool})
+
+	_, err := Setup(session, core.NewEventBus(), SetupOptions{
+		EnabledNames: []string{"counter-ext"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Find and execute the pre-existing base_tool through the agent's (wrapped) tool list.
+	state := session.Agent.State()
+	var found *agent.AgentTool
+	for i := range state.Tools {
+		if state.Tools[i].Name == "base_tool" {
+			found = &state.Tools[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected base_tool in agent state after Setup")
+	}
+
+	if _, err := found.Execute(context.Background(), "tc1", map[string]any{}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if executeCount != 1 {
+		t.Errorf("expected base_tool.Execute to be called exactly once, got %d", executeCount)
+	}
+	if hookCalls != 1 {
+		t.Errorf("expected OnToolCall hook to fire exactly once, got %d (double-wrap bug?)", hookCalls)
 	}
 }

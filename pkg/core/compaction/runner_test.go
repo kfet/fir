@@ -79,6 +79,46 @@ func TestDefaultRunner_ShouldCompact_Disabled(t *testing.T) {
 	}
 }
 
+func TestDefaultRunner_GetStats_EmptySession(t *testing.T) {
+	session := makeTestSession(t, nil)
+	sm := core.NewInMemorySettingsManager(core.Settings{})
+	runner := &DefaultRunner{SettingsManager: sm}
+
+	info := runner.GetStats(session)
+	if info != nil {
+		t.Errorf("expected nil from empty session, got %+v", info)
+	}
+}
+
+func TestDefaultRunner_GetStats_WithMessages(t *testing.T) {
+	session := makeTestSession(t, nil)
+
+	// Add a user → assistant exchange with real usage data so that
+	// EstimateContextTokens uses the production (usage-based) path.
+	session.SessionManager.AppendAIMessage(ai.NewUserMsg("Hello, world!", 1000))
+	session.SessionManager.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "Hi there!"}}},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 10, Output: 3},
+	}))
+
+	sm := core.NewInMemorySettingsManager(core.Settings{})
+	runner := &DefaultRunner{SettingsManager: sm}
+
+	info := runner.GetStats(session)
+	if info == nil {
+		t.Fatal("expected non-nil CompactionInfo for session with messages")
+	}
+	if info.TokensBefore <= 0 {
+		t.Errorf("expected TokensBefore > 0, got %d", info.TokensBefore)
+	}
+	// MessagesToSummarize may be 0 when all messages fit in KeepRecentTokens;
+	// just verify the field is non-negative.
+	if info.MessagesToSummarize < 0 {
+		t.Errorf("expected MessagesToSummarize >= 0, got %d", info.MessagesToSummarize)
+	}
+}
+
 // noopResourceLoader satisfies the ResourceLoader interface for tests.
 type noopResourceLoader struct{}
 

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kfet/tau/pkg/agent"
 	"github.com/kfet/tau/pkg/ai"
@@ -553,11 +554,21 @@ func (r *Runner) EmitInput(text string, images []ai.ImageContent, source string)
 		event.Input.Text = currentText
 		event.Input.Images = currentImages
 
-		result, err := func() (any, error) {
-			defer func() { recover() }()
+		result, err := func() (res any, err error) {
+			defer func() {
+				if rv := recover(); rv != nil {
+					err = fmt.Errorf("handler panicked: %v", rv)
+				}
+			}()
 			return h(event, ctx)
 		}()
 		if err != nil {
+			r.mu.RLock()
+			onErr := r.onError
+			r.mu.RUnlock()
+			if onErr != nil {
+				onErr("", "input", err)
+			}
 			continue
 		}
 		if result == nil {
@@ -845,12 +856,36 @@ func (a *extensionAPI) SendMessage(msg CustomMessageSpec, opts *SendMessageOptio
 	if session == nil {
 		return
 	}
-	// Persist custom entry in session
+	// Persist custom entry in session.
 	raw, err := json.Marshal(msg.Content)
 	if err != nil {
 		return
 	}
 	session.SessionManager.AppendCustomEntry(msg.CustomType, raw)
+
+	// Route message to agent based on DeliverAs.
+	if opts != nil && opts.DeliverAs != "" {
+		cm := &core.CustomMessage{
+			Role:       "custom",
+			CustomType: msg.CustomType,
+			Content:    msg.Content,
+			Display:    msg.Display,
+			Details:    msg.Details,
+			Timestamp:  time.Now().UnixMilli(),
+		}
+		agentMsg := agent.AgentMessage{Custom: cm}
+		switch opts.DeliverAs {
+		case "steer":
+			session.Agent.Steer(agentMsg)
+		case "followUp":
+			session.Agent.FollowUp(agentMsg)
+		}
+	}
+
+	// Trigger a new agent turn if requested.
+	if opts != nil && opts.TriggerTurn {
+		go func() { _ = session.Agent.Continue() }()
+	}
 }
 
 func (a *extensionAPI) SendUserMessage(content string, opts *SendUserMessageOptions) {
@@ -864,8 +899,26 @@ func (a *extensionAPI) SendUserMessage(content string, opts *SendUserMessageOpti
 	if session == nil {
 		return
 	}
-	// Run prompt in a goroutine to avoid blocking the event handler
-	go func() { _ = session.Prompt(content) }()
+	// Route based on DeliverAs.
+	deliverAs := ""
+	if opts != nil {
+		deliverAs = opts.DeliverAs
+	}
+	switch deliverAs {
+	case "steer":
+		userMsg := agent.AgentMessage{
+			Message: ai.NewUserMsg(content, time.Now().UnixMilli()),
+		}
+		session.Agent.Steer(userMsg)
+	case "followUp":
+		userMsg := agent.AgentMessage{
+			Message: ai.NewUserMsg(content, time.Now().UnixMilli()),
+		}
+		session.Agent.FollowUp(userMsg)
+	default:
+		// Run prompt in a goroutine to avoid blocking the event handler.
+		go func() { _ = session.Prompt(content) }()
+	}
 }
 
 func (a *extensionAPI) AppendEntry(customType string, data any) {
