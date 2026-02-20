@@ -171,3 +171,46 @@ func TestBashTool_Pwd(t *testing.T) {
 		t.Errorf("pwd output = %q, doesn't look like temp dir", result.Content[0].Text)
 	}
 }
+
+func TestBashToolWithPrefix_PrependedCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	tool := NewBashToolWithPrefix(dir, "export MY_PREFIX_VAR=hello")
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "echo $MY_PREFIX_VAR",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Content[0].Text, "hello") {
+		t.Errorf("prefix not applied: output = %q", result.Content[0].Text)
+	}
+}
+
+func TestBashToolWithPrefix_EmptyPrefixReturnsOriginal(t *testing.T) {
+	dir := t.TempDir()
+	orig := NewBashTool(dir)
+	withPrefix := NewBashToolWithPrefix(dir, "")
+	// Both should produce the same output for the same command.
+	cmd := map[string]any{"command": "echo same"}
+	r1, _ := orig.Execute(context.Background(), "c1", cmd, nil)
+	r2, _ := withPrefix.Execute(context.Background(), "c2", cmd, nil)
+	if len(r1.Content) == 0 || len(r2.Content) == 0 {
+		t.Fatal("expected content in both results")
+	}
+	if r1.Content[0].Text != r2.Content[0].Text {
+		t.Errorf("empty prefix changed output: orig=%q, prefixed=%q", r1.Content[0].Text, r2.Content[0].Text)
+	}
+}
+
+func TestBashToolWithPrefix_NonStringCommandFallsThrough(t *testing.T) {
+	dir := t.TempDir()
+	tool := NewBashToolWithPrefix(dir, "echo PREFIX")
+	// Non-string command param: the original executor returns an error.
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"command": 42, // not a string
+	}, nil)
+	// The original bash tool returns an error for empty command.
+	if err == nil {
+		t.Error("expected error for non-string command param")
+	}
+}

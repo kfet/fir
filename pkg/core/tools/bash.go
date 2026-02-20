@@ -63,6 +63,28 @@ func NewBashTool(cwd string) agent.AgentTool {
 	}
 }
 
+// NewBashToolWithPrefix creates a bash tool that prepends a shell command prefix
+// (e.g., "source /etc/profile") before each command.
+func NewBashToolWithPrefix(cwd, commandPrefix string) agent.AgentTool {
+	t := NewBashTool(cwd)
+	if commandPrefix == "" {
+		return t
+	}
+	orig := t.Execute
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		if cmd, ok := params["command"].(string); ok {
+			p := make(map[string]any, len(params))
+			for k, v := range params {
+				p[k] = v
+			}
+			p["command"] = commandPrefix + "\n" + cmd
+			return orig(ctx, toolCallID, p, onUpdate)
+		}
+		return orig(ctx, toolCallID, params, onUpdate)
+	}
+	return t
+}
+
 // executeBash runs a bash command and returns the result.
 func executeBash(ctx context.Context, command, cwd string, timeout time.Duration) (agent.AgentToolResult, error) {
 	// Verify cwd exists

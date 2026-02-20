@@ -285,6 +285,17 @@ func DefaultCodingTools(cwd string) []agent.AgentTool {
 	}
 }
 
+// DefaultCodingToolsWithPrefix creates the standard set of coding tools
+// with a shell command prefix prepended to every bash command.
+func DefaultCodingToolsWithPrefix(cwd, prefix string) []agent.AgentTool {
+	return []agent.AgentTool{
+		tools.NewReadTool(cwd),
+		tools.NewBashToolWithPrefix(cwd, prefix),
+		tools.NewEditTool(cwd),
+		tools.NewWriteTool(cwd),
+	}
+}
+
 // AllTools creates all available tools for a cwd.
 func AllTools(cwd string) []agent.AgentTool {
 	return []agent.AgentTool{

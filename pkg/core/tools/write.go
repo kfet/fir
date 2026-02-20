@@ -79,3 +79,32 @@ func NewWriteTool(cwd string) agent.AgentTool {
 		},
 	}
 }
+
+// WriteFileFn is a function that writes content to a file path.
+// Used for ACP client delegation.
+type WriteFileFn func(ctx context.Context, path, content string) error
+
+// NewWriteToolWithWriter creates a write tool that delegates file writes to writeFn.
+func NewWriteToolWithWriter(cwd string, writeFn WriteFileFn) agent.AgentTool {
+	t := NewWriteTool(cwd)
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		path, _ := params["path"].(string)
+		content, _ := params["content"].(string)
+		if path == "" {
+			return agent.AgentToolResult{}, fmt.Errorf("path is required")
+		}
+		absolutePath := ResolveToCwd(path, cwd)
+		if ctx.Err() != nil {
+			return agent.AgentToolResult{}, ctx.Err()
+		}
+		if err := writeFn(ctx, absolutePath, content); err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("failed to write file %s: %w", path, err)
+		}
+		return agent.AgentToolResult{
+			Content: []ai.ToolResultContent{
+				{Type: "text", Text: fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)},
+			},
+		}, nil
+	}
+	return t
+}

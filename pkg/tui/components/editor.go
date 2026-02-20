@@ -710,7 +710,7 @@ func (e *Editor) Render(width int) []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	maxPadding := int(math.Max(0, math.Floor(float64(width-1)/2.0)))
+	maxPadding := max(0, int(math.Floor(float64(width-1)/2.0)))
 	paddingX := e.paddingX
 	if paddingX > maxPadding {
 		paddingX = maxPadding
@@ -737,7 +737,7 @@ func (e *Editor) Render(width int) []string {
 	if e.tuiRef != nil {
 		termRows = e.tuiRef.Terminal.Rows()
 	}
-	maxVisibleLines := int(math.Max(5, math.Floor(float64(termRows)*0.3)))
+	maxVisibleLines := max(5, int(math.Floor(float64(termRows)*0.3)))
 
 	cursorLineIndex := 0
 	for i, ll := range layoutLines {

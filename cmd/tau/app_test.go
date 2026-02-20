@@ -374,6 +374,13 @@ func TestCheckModelAvailable_NilModel_Interactive(t *testing.T) {
 	}
 }
 
+func TestCheckModelAvailable_NilModel_ACP(t *testing.T) {
+	// ACP mode creates sessions on demand — no model at startup is fine.
+	if err := checkModelAvailable(nil, &Args{OutputMode: ModeACP}); err != nil {
+		t.Errorf("expected nil model allowed in ACP mode, got %v", err)
+	}
+}
+
 func TestCheckModelAvailable_NilModel_NonInteractive(t *testing.T) {
 	cases := []struct {
 		name string

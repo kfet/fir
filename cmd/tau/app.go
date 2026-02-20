@@ -19,6 +19,7 @@ import (
 	"github.com/kfet/tau/pkg/core/tools"
 	"github.com/kfet/tau/pkg/extension"
 	interactive "github.com/kfet/tau/pkg/modes/interactive"
+	acpmode "github.com/kfet/tau/pkg/modes/acp"
 	printmode "github.com/kfet/tau/pkg/modes/print"
 	rpcmode "github.com/kfet/tau/pkg/modes/rpc"
 
@@ -246,8 +247,8 @@ func run() error {
 		return runListModels(args)
 	}
 
-	// Read piped stdin (if not a TTY) — skip for RPC mode which reads stdin directly
-	if args.OutputMode != ModeRPC {
+	// Read piped stdin (if not a TTY) — skip for RPC and ACP modes which read stdin directly
+	if args.OutputMode != ModeRPC && args.OutputMode != ModeACP {
 		stdinContent := readPipedStdin()
 		if stdinContent != "" {
 			args.Print = true
@@ -258,6 +259,12 @@ func run() error {
 	// Determine mode
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
 	isRPCMode := args.OutputMode == ModeRPC
+	isACPMode := args.OutputMode == ModeACP
+
+	// ACP mode creates sessions on demand, so dispatch before setupSession.
+	if isACPMode {
+		return runAcpMode(args)
+	}
 
 	if !isPrintMode && !isRPCMode {
 		return runInteractiveMode(args)
@@ -461,6 +468,19 @@ func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
 	}
 
 	return names
+}
+
+// runAcpMode runs ACP mode over stdin/stdout.
+func runAcpMode(args *Args) error {
+	acpmode.SetVersion(version)
+	return acpmode.RunAcpMode(acpmode.Options{
+		AdditionalSkillPaths:          args.Skills,
+		AdditionalPromptTemplatePaths: args.PromptTemplates,
+		NoSkills:                      args.NoSkills,
+		NoPromptTemplates:             args.NoPromptTemplates,
+		NoExtensions:                  args.NoExtensions,
+		EnabledExtensions:             args.Extensions,
+	})
 }
 
 // runInteractiveMode runs the full interactive TUI mode.

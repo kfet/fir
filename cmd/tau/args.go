@@ -17,6 +17,7 @@ const (
 	ModeText Mode = "text"
 	ModeJSON Mode = "json"
 	ModeRPC  Mode = "rpc"
+	ModeACP  Mode = "acp"
 )
 
 // Args holds parsed CLI arguments.
@@ -94,7 +95,7 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 		case arg == "--mode" && i+1 < len(args):
 			i++
 			mode := args[i]
-			if mode == "text" || mode == "json" || mode == "rpc" {
+			if mode == "text" || mode == "json" || mode == "rpc" || mode == "acp" {
 				result.OutputMode = Mode(mode)
 			}
 
@@ -269,7 +270,7 @@ Options:
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt
-  --mode <mode>                  Output mode: text (default), json, or rpc
+  --mode <mode>                  Output mode: text (default), json, rpc, or acp
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume

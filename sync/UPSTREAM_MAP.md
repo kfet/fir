@@ -217,3 +217,17 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | `coding-agent/src/main.ts` | `cmd/tau/app.go` | ✅ |
 | `coding-agent/src/cli/args.ts` | `cmd/tau/args.go` | ✅ |
 | `coding-agent/src/cli/file-processor.ts` | `cmd/tau/fileprocessor.go` | ✅ |
+
+## ACP Mode (`pkg/modes/acp/`)
+
+TS source is on the `pi-mono-acp` branch at `../pi-mono-acp/packages/coding-agent/src/modes/acp/`.
+Uses `github.com/coder/acp-go-sdk` (schema 0.10.7) for stable types + JSON-RPC transport.
+Unstable types (session/list, session/resume, session/set_model) defined locally.
+
+| TS Source | Go File | Status |
+|---|---|---|
+| ACP SDK types (stable) | `github.com/coder/acp-go-sdk` (dependency) | ⬜ |
+| ACP SDK unstable types (0.14.1 only) | `pkg/modes/acp/types.go` | ⬜ |
+| `coding-agent/src/modes/acp/acp-mode.ts` (helpers) | `pkg/modes/acp/helpers.go` | ⬜ |
+| `coding-agent/src/modes/acp/acp-terminal.ts` | `pkg/modes/acp/terminal.go` | ⬜ |
+| `coding-agent/src/modes/acp/acp-mode.ts` (PiAgent) | `pkg/modes/acp/acp.go` | ⬜ |

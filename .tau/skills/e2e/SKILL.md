@@ -553,14 +553,8 @@ Track known bugs here so you don't re-file them every cycle:
 ### ~~RPC stdin consumption~~ (FIXED — 2026-02-10)
 `readPipedStdin()` was consuming all stdin before RPC server started. Fixed by guarding with `args.OutputMode != ModeRPC`. All RPC tests 2a–2g now pass.
 
-### RPC Server: prompt goroutine killed on EOF (OPEN — 2026-02-18)
-When a `prompt` command is sent and stdin closes immediately (EOF), the RPC server's scanner loop exits and `Run()` returns — killing the prompt goroutine before it completes. This means no streaming events appear and tools don't execute.
-
-**Root cause:** `server.go` `Run()` method returns when the scanner hits EOF without waiting for pending agent goroutines.
-
-**Workaround for E2E tests:** Use `{ printf '...'; sleep 5; }` to keep stdin open long enough for the agent to complete. All tool tests (4a-4c) and test 2b use this pattern.
-
-**Fix needed:** Add a `sync.WaitGroup` in the server to track pending `prompt` goroutines and wait for them before `Run()` returns.
+### ~~RPC Server: prompt goroutine killed on EOF~~ (FIXED — 2026-02-18)
+`server.go` `Run()` now uses a `sync.WaitGroup` to wait for pending agent goroutines before returning. Tests 2b, 2g, 4a-4c all pass. The `{ printf ...; sleep 5; }` pattern is retained in tests for stability but is no longer strictly required.
 
 ## Rules
 

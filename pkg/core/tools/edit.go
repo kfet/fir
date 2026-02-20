@@ -20,6 +20,50 @@ type EditToolParams struct {
 	NewText string `json:"newText"`
 }
 
+// editResult holds the output of applyEditLogic.
+type editResult struct {
+	finalContent string
+	diff         string
+	firstLine    *int
+}
+
+// applyEditLogic applies BOM handling, line-ending normalization, fuzzy match, and
+// replacement to the given content. It is the shared core of both NewEditTool and
+// NewEditToolWithReadWriter.
+func applyEditLogic(content, oldText, newText, path string) (editResult, error) {
+	bom := ""
+	if strings.HasPrefix(content, "\uFEFF") {
+		bom = "\uFEFF"
+		content = content[len("\uFEFF"):]
+	}
+	originalEnding := detectLineEnding(content)
+	normalizedContent := normalizeToLF(content)
+	normalizedOldText := normalizeToLF(oldText)
+	normalizedNewText := normalizeToLF(newText)
+
+	matchResult := fuzzyFindText(normalizedContent, normalizedOldText)
+	if !matchResult.found {
+		return editResult{}, fmt.Errorf("Could not find the exact text in %s. The old text must match exactly including all whitespace and newlines.", path)
+	}
+	if matchResult.occurrences > 1 {
+		return editResult{}, fmt.Errorf("Found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.", matchResult.occurrences, path)
+	}
+
+	baseContent := matchResult.contentForReplacement
+	newContent := baseContent[:matchResult.index] + normalizedNewText + baseContent[matchResult.index+matchResult.matchLength:]
+	if baseContent == newContent {
+		return editResult{}, fmt.Errorf("No changes made to %s. The replacement produced identical content.", path)
+	}
+
+	finalContent := bom + restoreLineEndings(newContent, originalEnding)
+	diffResult := GenerateDiffString(baseContent, newContent, 4)
+	return editResult{
+		finalContent: finalContent,
+		diff:         diffResult.Diff,
+		firstLine:    diffResult.FirstChangedLine,
+	}, nil
+}
+
 // NewEditTool creates the edit (find-and-replace) tool.
 func NewEditTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
@@ -77,63 +121,73 @@ func NewEditTool(cwd string) agent.AgentTool {
 				return agent.AgentToolResult{}, ctx.Err()
 			}
 
-			// Strip BOM
-			content := string(rawContent)
-			bom := ""
-			if strings.HasPrefix(content, "\uFEFF") {
-				bom = "\uFEFF"
-				content = content[len("\uFEFF"):]
-			}
-
-			// Detect and normalize line endings
-			originalEnding := detectLineEnding(content)
-			normalizedContent := normalizeToLF(content)
-			normalizedOldText := normalizeToLF(oldText)
-			normalizedNewText := normalizeToLF(newText)
-
-			// Try exact match first, then fuzzy match
-			matchResult := fuzzyFindText(normalizedContent, normalizedOldText)
-			if !matchResult.found {
-				return agent.AgentToolResult{}, fmt.Errorf("Could not find the exact text in %s. The old text must match exactly including all whitespace and newlines.", path)
-			}
-
-			// Check uniqueness using the count from fuzzyFindText
-			if matchResult.occurrences > 1 {
-				return agent.AgentToolResult{}, fmt.Errorf("Found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique.", matchResult.occurrences, path)
+			// Strip BOM, normalize, fuzzy-match, replace — shared with NewEditToolWithReadWriter.
+			result, err := applyEditLogic(string(rawContent), oldText, newText, path)
+			if err != nil {
+				return agent.AgentToolResult{}, err
 			}
 
 			if ctx.Err() != nil {
 				return agent.AgentToolResult{}, ctx.Err()
 			}
 
-			// Perform replacement
-			baseContent := matchResult.contentForReplacement
-			newContent := baseContent[:matchResult.index] + normalizedNewText + baseContent[matchResult.index+matchResult.matchLength:]
-
-			if baseContent == newContent {
-				return agent.AgentToolResult{}, fmt.Errorf("No changes made to %s. The replacement produced identical content.", path)
-			}
-
-			// Restore line endings and BOM, then write
-			finalContent := bom + restoreLineEndings(newContent, originalEnding)
-			if err := os.WriteFile(absolutePath, []byte(finalContent), 0644); err != nil {
+			// Write the result
+			if err := os.WriteFile(absolutePath, []byte(result.finalContent), 0644); err != nil {
 				return agent.AgentToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 			}
-
-			// Generate diff for details
-			diffResult := GenerateDiffString(baseContent, newContent, 4)
 
 			return agent.AgentToolResult{
 				Content: []ai.ToolResultContent{
 					{Type: "text", Text: fmt.Sprintf("Successfully replaced text in %s.", path)},
 				},
 				Details: &EditToolDetails{
-					Diff:             diffResult.Diff,
-					FirstChangedLine: diffResult.FirstChangedLine,
+					Diff:             result.diff,
+					FirstChangedLine: result.firstLine,
 				},
 			}, nil
 		},
 	}
+}
+
+// NewEditToolWithReadWriter creates an edit tool that uses readFn/writeFn for file I/O.
+// This enables ACP client file delegation (Zed's "Reject All"/"Keep All" review UI).
+func NewEditToolWithReadWriter(cwd string, readFn ReadFileFn, writeFn WriteFileFn) agent.AgentTool {
+	t := NewEditTool(cwd)
+	t.Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+		path, _ := params["path"].(string)
+		oldText, _ := params["oldText"].(string)
+		newText, _ := params["newText"].(string)
+		if path == "" {
+			return agent.AgentToolResult{}, fmt.Errorf("path is required")
+		}
+		absolutePath := ResolveToCwd(path, cwd)
+		if ctx.Err() != nil {
+			return agent.AgentToolResult{}, ctx.Err()
+		}
+		// Read via delegated function
+		rawContent, err := readFn(ctx, absolutePath)
+		if err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("File not found: %s", path)
+		}
+		// Apply shared edit logic (BOM, normalization, fuzzy match, replacement).
+		result, err := applyEditLogic(rawContent, oldText, newText, path)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		if err := writeFn(ctx, absolutePath, result.finalContent); err != nil {
+			return agent.AgentToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
+		}
+		return agent.AgentToolResult{
+			Content: []ai.ToolResultContent{
+				{Type: "text", Text: fmt.Sprintf("Successfully replaced text in %s.", path)},
+			},
+			Details: &EditToolDetails{
+				Diff:             result.diff,
+				FirstChangedLine: result.firstLine,
+			},
+		}, nil
+	}
+	return t
 }
 
 // --- edit-diff helpers ---

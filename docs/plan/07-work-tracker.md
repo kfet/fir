@@ -349,3 +349,88 @@ Compiled-in extension system allowing Go packages to register event handlers, cu
 | [x] | `pkg/extensions/sandbox/sandbox.go` + test | `examples/extensions/sandbox/index.ts` | Tool call blocking, config, flag, command |
 | [x] | `pkg/extensions/claudeusage/` + tests | — | Claude rate limit usage display, OAuth login, footer status |
 | [x] | **🎯 MILESTONE: Extensions work (notify + sandbox)** | | |
+
+## Phase 14: ACP Mode (`pkg/modes/acp/`)
+
+ACP (Agent Client Protocol) mode exposes tau as an ACP-compliant agent over stdio.
+ACP clients (e.g., Zed) spawn tau with `--mode acp` and communicate via newline-delimited JSON-RPC 2.0.
+
+**TS Source:** `../pi-mono-acp/packages/coding-agent/src/modes/acp/` (~1,770 lines)
+**TS Tests:** `../pi-mono-acp/packages/coding-agent/test/acp-mode.test.ts` (826 lines) + `acp-terminal.test.ts` (422 lines)
+
+### Go ACP SDK assessment
+
+[`github.com/coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk) provides generated types, JSON-RPC 2.0 connection, `Agent` interface, `AgentSideConnection` with outbound helpers (`SessionUpdate`, `ReadTextFile`, `WriteTextFile`, `CreateTerminal`, etc.), and builder helpers (`StartToolCall`, `UpdateToolCall`, etc.).
+
+**What it covers (eliminates `types.go` + `jsonrpc.go` from our plan):**
+- All stable ACP protocol types (120 structs, generated from schema 0.10.7)
+- JSON-RPC 2.0 ndjson transport (`Connection` over `io.Reader`/`io.Writer`)
+- `AgentSideConnection`: method routing, request/response correlation, cancel context per session
+- `Agent` interface: `Initialize`, `Authenticate`, `Cancel`, `NewSession`, `Prompt`, `SetSessionMode`
+- Outbound helpers: `SessionUpdate`, `ReadTextFile`, `WriteTextFile`, `CreateTerminal`, `TerminalOutput`, `WaitForTerminalExit`, `KillTerminalCommand`, `ReleaseTerminal`, `RequestPermission`
+- Extension methods (`_`-prefixed) via `ExtensionMethodHandler` interface
+- Builder helpers: `TextBlock`, `ImageBlock`, `ToolContent`, `ToolDiffContent`, `ToolTerminalRef`, `StartToolCall`, `UpdateToolCall`, `StartReadToolCall`, `StartEditToolCall`, `Ptr`
+
+**What it's missing (schema 0.10.7 vs TS SDK 0.14.1 — "unstable" features pi-mono-acp uses):**
+
+| Missing type/method | Used by pi-mono-acp | Workaround |
+|---|---|---|
+| `session/set_model` + `SetSessionModelRequest/Response` + `SessionModelState` + `ModelInfo` + `ModelId` | `unstable_setSessionModel`, `buildModelState` in `newSession`/`resumeSession` | Handle in `ExtensionMethodHandler`? **No** — only `_`-prefixed methods route there. Must define types ourselves and handle via raw connection. |
+| `session/list` + `ListSessionsRequest/Response` + `SessionInfo` | `unstable_listSessions` | Same — not routable via extension handler. |
+| `session/resume` + `ResumeSessionRequest/Response` | `unstable_resumeSession` | Same. |
+| `session/set_config_option` + types | Not used by pi-mono-acp | Not needed. |
+| `session/fork` + types | Not used by pi-mono-acp | Not needed. |
+| `SessionInfoUpdate` | Not used by pi-mono-acp | Not needed. |
+| `Usage`, `UsageUpdate`, `Cost` | Not used by pi-mono-acp | Not needed. |
+| `SessionListCapabilities`, `SessionResumeCapabilities` | Used in `initialize` response `sessionCapabilities` | Define locally. |
+| `CancelRequestNotification` | Not used | Not needed. |
+
+**The routing problem:** The Go SDK's `agent_gen.go` has a hardcoded switch for known methods. Unknown methods (including `session/set_model`, `session/list`, `session/resume`) get `MethodNotFound`. The `ExtensionMethodHandler` only handles `_`-prefixed methods. The `conn` field and `handleWithExtensions` are unexported, so we can't intercept the dispatch.
+
+**Options:**
+1. **Fork the SDK and regenerate from TS SDK 0.14.1 schema** — the SDK has a code generator (`cmd/generate/`) that reads `schema.json`. We could copy the 0.14.1 schema, regenerate, and get all types + routing. But then we maintain a fork.
+2. **Use the SDK for stable features, handle unstable methods at the `Connection` level** — Use `acp.NewConnection` directly instead of `acp.NewAgentSideConnection`. This gives us the raw `MethodHandler` callback where we can handle ALL methods ourselves (stable + unstable), while still using the SDK's types and outbound helpers. This is clean and doesn't require a fork.
+3. **Don't use the SDK** — Implement everything ourselves. More code (~500 lines for types + transport), but no dependency and no version mismatch issues.
+
+**Recommendation: Option 2.** Use `acp.NewConnection` directly with our own method handler. We get free: all stable types, JSON-RPC transport, outbound helpers (`SessionUpdate`, `CreateTerminal`, etc.), builder helpers. We define ~10 unstable types ourselves and handle routing in a single switch. This saves ~1000 lines vs option 3 and avoids fork maintenance vs option 1.
+
+### Architecture notes
+
+- This is a standalone mode (like print/rpc), NOT an extension — even though tau uses compiled-in Go extensions rather than pi-mono's runtime-loaded JS extensions. The five architectural gaps (no transport control, no multi-session, no base tool replacement, no event serialization control, no capability negotiation) apply equally to both extension systems. See `AGENTS.md` for the full analysis.
+- ACP manages multiple sessions via `session/new`, unlike print/interactive which use a single session.
+- When the ACP client advertises capabilities (`fs.readTextFile`, `fs.writeTextFile`, `terminal`), tool implementations are swapped with client-delegating versions via `BaseToolsOverride`.
+- The upstream diff touches 4 existing files minimally: `sdk.ts` (+3 lines for `baseToolsOverride`), `bash.ts` (+1 line export), `args.ts` (+3 lines for "acp" mode), `main.ts` (+18 lines early exit).
+
+### Core framework — port in order
+
+| Status | Go file + test | Source | Deps | Notes |
+|---|---|---|---|---|
+| [x] | `types.go` | Define locally | `acp-go-sdk` | Unstable types for session/list, session/resume. SDK already has SessionModelState, SetSessionModelRequest, ModelInfo, ModelId. Plus Options config struct. |
+| [x] | `helpers.go` `helpers_test.go` | `coding-agent/src/modes/acp/acp-mode.ts` (helper fns) | `acp-go-sdk`, types.go | Pure functions: `ParseModelID`, `ExtractPromptContent`, `MapToolKind`, `BuildToolLocations`, `BuildToolInitialContent`, `BuildToolTitle`, `BuildToolCallContent`, `ParseDiffForAcp`, `MarkdownEscape`, `IsPathWithinDirectory`, `BuildModelState`. `BuildModelState` uses `GetAvailable()` not `GetAll()`. |
+| [x] | `terminal.go` | `coding-agent/src/modes/acp/acp-terminal.ts` | `acp-go-sdk`, types.go | ACP terminal operations via AgentSideConnection: foreground exec, background command lifecycle. |
+| [x] | `conn.go` | — | `acp-go-sdk` | `acpConn` interface + `rawConn` + `rawMethodHandler` that routes ALL methods including session/list and session/resume. Replaces `AgentSideConnection`. |
+| [x] | `acp.go` `acp_test.go` | `coding-agent/src/modes/acp/acp-mode.ts` (PiAgent class) | all above, core/* | Uses `newRawConn` for full method routing. `/login`, `/changelog`, extension commands, FS delegation all implemented. `session/list`, `session/resume`, `session/set_model` all work. `initialize` response includes `sessionCapabilities`. |
+
+### Core changes to existing code
+
+| Status | Task | Go file | Notes |
+|---|---|---|---|
+| [x] | Add `"acp"` to Mode enum + parsing | `cmd/tau/args.go` | Added ModeACP, validated in parser, documented in help. |
+| [x] | Add ACP mode early-exit dispatch | `cmd/tau/app.go` | `runAcpMode()` dispatched before setupSession. ACP creates sessions on demand. |
+| [x] | Add `github.com/coder/acp-go-sdk` dependency | `go.mod` | v0.6.3 |
+
+### Slash commands (implemented inside `acp.go`)
+
+The following slash commands are handled inside ACP mode's `handleSlashCommand`:
+`/compact`, `/resume`, `/continue`, `/export`, `/share`, `/name`, `/session`, `/changelog`, `/login`, `/logout`, `/reload` + prompt template expansion + skill invocation + extension command dispatch.
+
+### Milestones
+
+| Status | Milestone |
+|---|---|
+| [x] | **🎯 `tau --mode acp` starts and responds to `initialize`** |
+| [x] | **🎯 `session/new` + `session/prompt` work end-to-end** |
+| [x] | **🎯 Tool calls stream with titles, locations, diffs** |
+| [x] | **🎯 All slash commands work** |
+| [x] | **🎯 ACP terminal delegation works (when client supports it)** |
+| [ ] | **🎯 MILESTONE: Full ACP mode works with Zed** |

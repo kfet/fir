@@ -89,11 +89,20 @@ script added a new provider or override, the Go generator needs the same additio
 | How it wires together | `packages/coding-agent/src/core/sdk.ts` |
 | Main entry point | `packages/coding-agent/src/main.ts` |
 | OAuth types & flows | `packages/ai/src/utils/oauth/types.ts` + provider files |
+| ACP mode (protocol adapter) | `../pi-mono-acp/packages/coding-agent/src/modes/acp/acp-mode.ts` |
+| ACP terminal ops | `../pi-mono-acp/packages/coding-agent/src/modes/acp/acp-terminal.ts` |
+| ACP Go SDK (stable types + transport) | `github.com/coder/acp-go-sdk` — [source](https://github.com/coder/acp-go-sdk) |
+| ACP TS SDK types (for unstable features) | `../pi-mono-acp/node_modules/@agentclientprotocol/sdk/dist/schema/types.gen.d.ts` |
+| ACP SDK version gap analysis | `docs/plan/07-work-tracker.md` → Phase 14 "Go ACP SDK assessment" |
+| ACP analysis | `../pi-mono-acp/ACP-ANALYSIS.md` |
 | Testing patterns | `docs/plan/10-testing.md` |
 
 ## TS Source Location
 
-`../pi-mono/` relative to repo root. If missing:
+`../pi-mono/` relative to repo root (main branch). For ACP mode, use `../pi-mono-acp/` (acp branch).
+
+If missing:
 ```bash
 cd .. && git clone https://github.com/badlogic/pi-mono.git
+cd pi-mono && git worktree add ../pi-mono-acp pi-mono-acp  # or appropriate branch name
 ```

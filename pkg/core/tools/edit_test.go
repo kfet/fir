@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"os"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -537,5 +538,117 @@ func TestEditTool_PathRequired(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestEditToolWithReadWriter_SuccessfulRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	initial := "hello world"
+	current := initial
+
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return current, nil
+	})
+	writeFn := WriteFileFn(func(_ context.Context, _ string, content string) error {
+		current = content
+		return nil
+	})
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path":    filepath.Join(dir, "file.txt"),
+		"oldText": "world",
+		"newText": "Go",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Content[0].Text, "Successfully replaced") {
+		t.Errorf("unexpected result: %q", result.Content[0].Text)
+	}
+	if current != "hello Go" {
+		t.Errorf("file content = %q, want %q", current, "hello Go")
+	}
+}
+
+func TestEditToolWithReadWriter_TextNotFound(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "hello world", nil
+	})
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path":    filepath.Join(dir, "file.txt"),
+		"oldText": "not present",
+		"newText": "x",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "Could not find") {
+		t.Errorf("expected text-not-found error, got %v", err)
+	}
+}
+
+func TestEditToolWithReadWriter_MultipleOccurrences(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "ab ab ab", nil
+	})
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path":    filepath.Join(dir, "file.txt"),
+		"oldText": "ab",
+		"newText": "x",
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "occurrences") {
+		t.Errorf("expected multiple-occurrences error, got %v", err)
+	}
+}
+
+func TestEditToolWithReadWriter_EmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) { return "", nil })
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": "", "oldText": "x", "newText": "y",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+func TestEditToolWithReadWriter_ContextCancellation(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) { return "ab", nil })
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := tool.Execute(ctx, "c1", map[string]any{
+		"path": filepath.Join(dir, "f.txt"), "oldText": "ab", "newText": "cd",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for cancelled context")
+	}
+}
+
+func TestEditToolWithReadWriter_ReadFnError(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("read failed")
+	})
+	writeFn := WriteFileFn(func(_ context.Context, _, _ string) error { return nil })
+
+	tool := NewEditToolWithReadWriter(dir, readFn, writeFn)
+	_, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"path": filepath.Join(dir, "f.txt"), "oldText": "x", "newText": "y",
+	}, nil)
+	if err == nil {
+		t.Error("expected error when readFn fails")
 	}
 }

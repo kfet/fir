@@ -45,8 +45,9 @@ type AuthStorageData map[string]AuthCredential
 type AuthStorageBackend interface {
 	// WithLock atomically reads, optionally writes, and returns a result.
 	WithLock(fn func(current []byte) (result any, next []byte)) (any, error)
-	// WithLockAsync is like WithLock but the callback is async.
-	WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error)
+	// WithLockFallible is like WithLock but the callback can return an error
+	// (used for OAuth token refresh which does synchronous network I/O).
+	WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error)
 }
 
 // FileAuthStorageBackend stores credentials in a JSON file.
@@ -96,7 +97,7 @@ func (b *FileAuthStorageBackend) WithLock(fn func(current []byte) (result any, n
 	return result, nil
 }
 
-func (b *FileAuthStorageBackend) WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
+func (b *FileAuthStorageBackend) WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := b.ensureParentDir(); err != nil {
@@ -131,7 +132,7 @@ func (b *InMemoryAuthStorageBackend) WithLock(fn func(current []byte) (result an
 	return result, nil
 }
 
-func (b *InMemoryAuthStorageBackend) WithLockAsync(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
+func (b *InMemoryAuthStorageBackend) WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	result, next, err := fn(b.value)
@@ -404,7 +405,7 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 		updatedData AuthStorageData
 	}
 
-	result, err := s.storage.WithLockAsync(func(current []byte) (any, []byte, error) {
+	result, err := s.storage.WithLockFallible(func(current []byte) (any, []byte, error) {
 		currentData := s.parseStorageData(current)
 
 		cred, ok := currentData[provider]
