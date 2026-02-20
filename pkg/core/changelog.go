@@ -26,14 +26,18 @@ func (e ChangelogEntry) Version() string {
 var versionHeaderRe = regexp.MustCompile(`##\s+\[?(\d+)\.(\d+)\.(\d+)\]?`)
 
 // ParseChangelog parses changelog entries from a CHANGELOG.md file.
-// Scans for ## lines with version numbers and collects content until the next ## or EOF.
 func ParseChangelog(changelogPath string) []ChangelogEntry {
 	data, err := os.ReadFile(changelogPath)
 	if err != nil {
 		return nil
 	}
+	return ParseChangelogContent(string(data))
+}
 
-	lines := strings.Split(string(data), "\n")
+// ParseChangelogContent parses changelog entries from raw markdown content.
+// Scans for ## lines with version numbers and collects content until the next ## or EOF.
+func ParseChangelogContent(content string) []ChangelogEntry {
+	lines := strings.Split(content, "\n")
 	var entries []ChangelogEntry
 	var currentLines []string
 	var currentVersion *ChangelogEntry

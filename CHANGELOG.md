@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/changelog` command now uses embedded changelog content instead of looking for a file next to the binary.
+
 ## [0.1.0] - 2026-02-19
 
 ### Added

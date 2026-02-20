@@ -1,6 +1,7 @@
 # Build outputs
 bin/
 cover.out
+cmd/tau/CHANGELOG.md
 
 # IDE
 .idea/

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,6 +89,9 @@ type InteractiveMode struct {
 	// Extension reload support
 	extSetup          *extension.SetupResult
 	cliExtensionNames []string // extension names from CLI args (merged with settings on reload)
+
+	// Changelog content (embedded at build time)
+	changelogContent string
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -100,6 +102,8 @@ type InteractiveModeOptions struct {
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
 	ThemeSearchDirs []string
+	// ChangelogContent is the raw CHANGELOG.md content embedded at build time.
+	ChangelogContent string
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -126,6 +130,7 @@ func NewInteractiveMode(
 		keybindings:        keybindings,
 		settings:           settings,
 		autoCompact:        autoCompact,
+		changelogContent:   opts.ChangelogContent,
 		footerDataProvider: core.NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -1648,14 +1653,7 @@ func formatSortedSection(t *itheme.Theme, title, prefix string, items map[string
 }
 
 func (m *InteractiveMode) handleChangelogCommand() {
-	// Look for CHANGELOG.md next to the binary
-	execPath, err := os.Executable()
-	if err != nil {
-		m.showWarning("Could not determine executable path")
-		return
-	}
-	changelogPath := filepath.Join(filepath.Dir(execPath), "CHANGELOG.md")
-	entries := core.ParseChangelog(changelogPath)
+	entries := core.ParseChangelogContent(m.changelogContent)
 	if len(entries) == 0 {
 		m.showMessage("No changelog entries found.")
 		return
