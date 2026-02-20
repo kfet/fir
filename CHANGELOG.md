@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- ACP (Agent Client Protocol) mode over stdio JSON-RPC 2.0 for IDE integration.
+
 ### Changed
 
 - `/changelog` command now uses embedded changelog content instead of looking for a file next to the binary.
