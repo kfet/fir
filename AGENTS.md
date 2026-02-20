@@ -22,6 +22,8 @@ If you add a new extension package under `pkg/extensions/`, always add the corre
 
 When making user-visible changes, add an entry under `## [Unreleased]` in `CHANGELOG.md` using the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, `### Removed`). Keep entries concise — one line per change. Do not bump `VERSION`; that happens during release.
 
+**Order:** The changelog is kept in reverse-chronological order — the most recent version section is always at the top, directly below the `## [Unreleased]` section. Older versions appear further down. When adding entries within `## [Unreleased]`, prepend new items at the top of their subsection so the most recent change stays first.
+
 ## ACP Mode Port (Current Phase)
 
 ACP TS source lives at `../pi-mono-acp/packages/coding-agent/src/modes/acp/`.

@@ -867,6 +867,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		stats := entry.session.GetSessionStats()
 		name := entry.session.SessionManager.GetSessionName()
 		info := "**Session Info**\n\n"
+		info += fmt.Sprintf("**Version:** %s\n", version)
 		if name != "" {
 			info += fmt.Sprintf("**Name:** %s\n", name)
 		}
@@ -886,6 +887,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		if len(entries) == 0 {
 			pa.sendAgentMessage(sessionID, "No changelog entries found.")
 		} else {
+			// Display oldest-first so newest appears at the bottom (most visible).
 			var texts []string
 			for i := len(entries) - 1; i >= 0; i-- {
 				texts = append(texts, entries[i].Content)

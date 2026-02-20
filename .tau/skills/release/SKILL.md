@@ -23,7 +23,7 @@ If the user provides a version, use it. Otherwise, auto-determine the version by
 2. **E2E tests** — run the e2e skill and confirm all scenarios pass. Use the e2e skill at `.tau/skills/e2e/SKILL.md`.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user whether to proceed or abort.
 4. **Determine version** — follow the version determination rules above if the user didn't specify one. State the version and proceed.
-5. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it.
+5. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it. The changelog is kept in reverse-chronological order: `[Unreleased]` is always first, followed by the newest released version, with older versions further down. Do not reorder existing version sections.
 6. **Update VERSION** — write the new version to the `VERSION` file (no trailing newline beyond one).
 7. **Commit** — stage **all** uncommitted changes (not just VERSION/CHANGELOG) with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first to make sure nothing unexpected is staged.
 8. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid git opening an editor like vim, which breaks in non-interactive environments).

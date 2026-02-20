@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/changelog` command now displays newest version last (at the bottom of the terminal) so it's most visible in both TUI and ACP modes.
+
+### Added
+
+- Include agent version in `/session` slash command output (ACP and TUI modes).
+
 ## [0.2.0] - 2026-02-19
 
 ### Added

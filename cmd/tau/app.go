@@ -525,6 +525,7 @@ func runInteractiveMode(args *Args) error {
 			ChangelogContent: changelogContent,
 		},
 	)
+	interactive.SetVersion(version)
 
 	// Wire extension setup into interactive mode (enables /reload for extensions).
 	// This also sets the UIContext on the runner so that extensions can update
