@@ -5,19 +5,30 @@ description: Release a new version of tau. Confirms reviews and tests pass, upda
 
 # Release Skill
 
-Release a new version of tau. The user provides the new version number (e.g. `0.2.0`).
+Release a new version of tau.
+
+## Version determination
+
+If the user provides a version, use it. Otherwise, auto-determine the version by reading `CHANGELOG.md`:
+
+1. Read the current version from `VERSION`.
+2. Look at the entries under `## [Unreleased]` in `CHANGELOG.md`.
+3. If there are `### Added` or `### Removed` entries → **minor** bump (e.g. 0.1.0 → 0.2.0).
+4. If there are only `### Fixed` or `### Changed` entries → **patch** bump (e.g. 0.1.0 → 0.1.1).
+5. If the section is empty → ask the user whether to proceed or abort.
 
 ## Steps
 
 1. **Full build & test** — execute `make all` (runs test-race, PGO, cross-compile) and confirm everything passes.
 2. **E2E tests** — run the e2e skill and confirm all scenarios pass. Use the e2e skill at `.tau/skills/e2e/SKILL.md`.
 3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user whether to proceed or abort.
-4. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it.
-5. **Update VERSION** — write the new version to the `VERSION` file (no trailing newline beyond one).
-6. **Commit** — stage **all** uncommitted changes (not just VERSION/CHANGELOG) with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first to make sure nothing unexpected is staged.
-7. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid git opening an editor like vim, which breaks in non-interactive environments).
-8. **Install** — `make install` to install the new version.
-9. **Verify** — run `tau --version` and confirm it prints the new version.
+4. **Determine version** — follow the version determination rules above if the user didn't specify one. State the version and proceed.
+5. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it.
+6. **Update VERSION** — write the new version to the `VERSION` file (no trailing newline beyond one).
+7. **Commit** — stage **all** uncommitted changes (not just VERSION/CHANGELOG) with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first to make sure nothing unexpected is staged.
+8. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid git opening an editor like vim, which breaks in non-interactive environments).
+9. **Install** — `make install` to install the new version.
+10. **Verify** — run `tau --version` and confirm it prints the new version.
 
 ## Important notes
 

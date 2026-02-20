@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-19
+
 ### Added
 
 - ACP (Agent Client Protocol) mode over stdio JSON-RPC 2.0 for IDE integration.
