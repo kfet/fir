@@ -4,7 +4,8 @@
 BINDIR    := bin
 BINARY    := $(BINDIR)/tau
 BINARY_PGO := $(BINDIR)/tau.pgo
-LDFLAGS   := -s -w
+VERSION   := $(shell cat VERSION 2>/dev/null || echo dev)
+LDFLAGS   := -s -w -X main.version=$(VERSION)
 
 # Stamp file records the Go source-tree hash for which default.pgo was last generated.
 # Only regenerate when .go files have changed (or the stamp is missing).
