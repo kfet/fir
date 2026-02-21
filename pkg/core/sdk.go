@@ -84,11 +84,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Auth & model registry
 	authStorage := opts.AuthStorage
 	if authStorage == nil {
-		authPath := ""
-		if opts.AgentDir != "" {
-			authPath = filepath.Join(agentDir, "auth.json")
-		}
-		authStorage = NewAuthStorage(authPath)
+		authStorage = NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	}
 
 	modelRegistry := opts.ModelRegistry

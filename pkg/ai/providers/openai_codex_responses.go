@@ -282,42 +282,7 @@ func mapCodexEvent(data string) string {
 	if err := json.Unmarshal([]byte(data), &raw); err != nil {
 		return ""
 	}
-
-	eventType, _ := raw["type"].(string)
-	if eventType == "" {
-		return ""
-	}
-
-	switch eventType {
-	case "error":
-		// Pass through — processor handles it
-		return data
-
-	case "response.failed":
-		// Extract error message from response.error.message
-		if resp, ok := raw["response"].(map[string]any); ok {
-			if errObj, ok := resp["error"].(map[string]any); ok {
-				if msg, ok := errObj["message"].(string); ok && msg != "" {
-					return fmt.Sprintf(`{"type":"error","code":"response_failed","message":%q}`, msg)
-				}
-			}
-		}
-		return `{"type":"error","code":"response_failed","message":"Codex response failed"}`
-
-	case "response.done", "response.completed":
-		// Normalize status and map to response.completed
-		if resp, ok := raw["response"].(map[string]any); ok {
-			if status, ok := resp["status"].(string); ok {
-				resp["status"] = normalizeCodexStatus(status)
-			}
-		}
-		raw["type"] = "response.completed"
-		result, _ := json.Marshal(raw)
-		return string(result)
-
-	default:
-		return data
-	}
+	return mapCodexEventFromMap(raw)
 }
 
 // normalizeCodexStatus normalizes a Codex response status.

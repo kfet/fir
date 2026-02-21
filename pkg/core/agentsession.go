@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -276,8 +277,12 @@ func (s *AgentSession) Subscribe(fn AgentSessionEventListener) func() {
 
 func (s *AgentSession) emit(event AgentSessionEvent) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	listeners := make([]func(AgentSessionEvent), 0, len(s.listeners))
 	for _, l := range s.listeners {
+		listeners = append(listeners, l)
+	}
+	s.mu.RUnlock()
+	for _, l := range listeners {
 		l(event)
 	}
 }
@@ -839,7 +844,10 @@ func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool
 	if entry.ParentID == "" {
 		s.SessionManager.NewSession(&NewSessionOptions{ParentSession: previousSessionFile})
 	} else {
-		s.SessionManager.CreateBranchedSession(entry.ParentID)
+		if _, err := s.SessionManager.CreateBranchedSession(entry.ParentID); err != nil {
+			log.Printf("agentsession: branch failed for entry %s: %v", entry.ParentID, err)
+			s.SessionManager.NewSession(&NewSessionOptions{ParentSession: previousSessionFile})
+		}
 	}
 	s.Agent.SetSessionID(s.SessionManager.GetSessionID())
 

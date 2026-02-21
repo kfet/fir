@@ -1,31 +1,31 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"nhooyr.io/websocket"
 )
 
 func TestResetWSCache(t *testing.T) {
-	// Verify resetWSCache doesn't panic on empty cache
+	// Verify resetWSCache doesn't panic on empty cache.
 	resetWSCache()
 
-	// Manually add a fake entry (no real conn, just test cleanup)
+	// Add a nil-conn entry and let resetWSCache handle it (guards against
+	// calling conn.Close on nil, which would panic).
 	wsSessionCacheMu.Lock()
-	wsSessionCache["test-session"] = &cachedWSConn{
-		conn: nil, // nil conn is safe; resetWSCache handles it
+	wsSessionCache["nil-conn-session"] = &cachedWSConn{
+		conn: nil,
 		busy: false,
 	}
 	wsSessionCacheMu.Unlock()
 
-	// resetWSCache should clear without panic even with nil conn
-	// (conn.Close on nil would panic, so we handle nil)
-	// Actually the code calls conn.Close which would panic on nil.
-	// Let's just verify empty cache behavior.
-	wsSessionCacheMu.Lock()
-	delete(wsSessionCache, "test-session")
-	wsSessionCacheMu.Unlock()
-
-	resetWSCache()
+	resetWSCache() // must not panic despite nil conn
 
 	wsSessionCacheMu.Lock()
 	count := len(wsSessionCache)
@@ -232,5 +232,84 @@ func TestMapCodexEventFromMap_StatusNormalization(t *testing.T) {
 	}
 	if resp2["status"] != "" {
 		t.Errorf("expected empty status for unknown input, got %v", resp2["status"])
+	}
+}
+
+// TestAcquireWebSocket_InflightCoalescing verifies that two goroutines racing to
+// acquire a WebSocket connection for the same sessionID coalesce: at most one
+// dial is in progress at any moment during the inflight window.
+func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
+	const delay = 40 * time.Millisecond // server-side hold time ensures goroutines race
+
+	var (
+		connCount        atomic.Int32 // total connections received by server
+		activeConns      atomic.Int32 // currently connected clients
+		maxConcurrentConns atomic.Int32 // peak concurrent connections during dial window
+	)
+
+	// Create a WebSocket test server.
+	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		connCount.Add(1)
+		active := activeConns.Add(1)
+		// Track peak concurrency.
+		for {
+			cur := maxConcurrentConns.Load()
+			if active <= cur || maxConcurrentConns.CompareAndSwap(cur, active) {
+				break
+			}
+		}
+
+		// Hold the connection long enough that concurrent dials overlap.
+		time.Sleep(delay)
+
+		activeConns.Add(-1)
+		c.Close(websocket.StatusNormalClosure, "done")
+	}))
+	defer srv.Close()
+
+	// Convert http:// → ws:// for WebSocket dial.
+	wsURL := "ws" + srv.URL[4:]
+
+	resetWSCache()
+	defer resetWSCache()
+
+	sessionID := "coalesce-test-" + t.Name()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	const numGoroutines = 2
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
+			if err == nil && conn != nil {
+				release(false)
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	total := connCount.Load()
+	peak := maxConcurrentConns.Load()
+
+	if total == 0 {
+		t.Fatal("expected at least one connection to be established")
+	}
+	// The coalescing path ensures at most one connection is in progress at a time
+	// during the inflight window. Verify peak concurrent connections never exceeded 1.
+	if peak > 1 {
+		t.Errorf("coalescing failed: peak concurrent connections = %d, want ≤ 1", peak)
 	}
 }

@@ -676,7 +676,9 @@ func TestSessionManagerCreateBranchedSession_InMemory(t *testing.T) {
 
 	_ = id2
 	originalID := sm.GetSessionID()
-	sm.CreateBranchedSession(id1)
+	if _, err := sm.CreateBranchedSession(id1); err != nil {
+		t.Fatalf("CreateBranchedSession: %v", err)
+	}
 
 	// Should have a new session ID
 	if sm.GetSessionID() == originalID {
@@ -705,7 +707,10 @@ func TestSessionManagerCreateBranchedSession_Persisted(t *testing.T) {
 	}))
 
 	oldFile := sm.GetSessionFile()
-	newFile := sm.CreateBranchedSession(id1)
+	newFile, err := sm.CreateBranchedSession(id1)
+	if err != nil {
+		t.Fatalf("CreateBranchedSession: %v", err)
+	}
 
 	if newFile == "" {
 		t.Fatal("expected new session file path")
@@ -738,7 +743,9 @@ func TestSessionManagerCreateBranchedSession_WithLabels(t *testing.T) {
 	// Add a label to id1
 	sm.AppendLabelChange(id1, "important")
 
-	sm.CreateBranchedSession(id1)
+	if _, err := sm.CreateBranchedSession(id1); err != nil {
+		t.Fatalf("CreateBranchedSession: %v", err)
+	}
 
 	// Label should be preserved
 	label := sm.GetLabel(id1)

@@ -26,7 +26,7 @@ import (
 const (
 	geminiCLIDefaultEndpoint   = "https://cloudcode-pa.googleapis.com"
 	antigravityDailyEndpoint   = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion  = "1.15.8"
+	defaultAntigravityVersion  = "1.18.3"
 	claudeThinkingBetaHeader   = "interleaved-thinking-2025-05-14"
 	geminiCLIMaxRetries        = 3
 	geminiCLIBaseDelayMs       = 1000
@@ -964,13 +964,14 @@ func getGeminiCLIThinkingLevel(effort ai.ThinkingLevel, modelID string) GoogleTh
 }
 
 func mergeHeaders(base, extra map[string]string) map[string]string {
-	if base == nil {
-		return extra
+	result := make(map[string]string, len(base)+len(extra))
+	for k, v := range base {
+		result[k] = v
 	}
 	for k, v := range extra {
-		base[k] = v
+		result[k] = v
 	}
-	return base
+	return result
 }
 
 func derefInt(p *int, def int) int {

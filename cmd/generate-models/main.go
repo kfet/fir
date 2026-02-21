@@ -976,6 +976,22 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	}
 	all = append(all, cloudCodeAssistModels...)
 
+	// Gemini 3.1 Pro Preview Custom Tools — variant of the google provider model that
+	// enables custom tool definitions (not returned by models.dev).
+	if !hasModel(all, "google", "gemini-3.1-pro-preview-customtools") {
+		all = append(all, modelSpec{
+			ID:            "gemini-3.1-pro-preview-customtools",
+			Name:          "Gemini 3.1 Pro Preview Custom Tools",
+			API:           "google-generative-ai",
+			Provider:      "google",
+			BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+			Reasoning:     true,
+			Input:         []string{"text", "image"},
+			CostInput:     2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 65536,
+		})
+	}
+
 	// Antigravity models
 	const antigravityEndpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
 	antigravityModels := []modelSpec{
@@ -984,6 +1000,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
 			ContextWindow: 1048576, MaxTokens: 65535},
 		{ID: "gemini-3-pro-low", Name: "Gemini 3 Pro Low (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
+			ContextWindow: 1048576, MaxTokens: 65535},
+		{ID: "gemini-3.1-pro-high", Name: "Gemini 3.1 Pro High (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
+			ContextWindow: 1048576, MaxTokens: 65535},
+		{ID: "gemini-3.1-pro-low", Name: "Gemini 3.1 Pro Low (Antigravity)", API: "google-gemini-cli",
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
 			ContextWindow: 1048576, MaxTokens: 65535},

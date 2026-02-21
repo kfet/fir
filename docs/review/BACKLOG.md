@@ -1,13 +1,9 @@
-# Review Backlog — 2026-02-19
+# Review Backlog — 2026-02-20
 
-**Last reviewed:** Review cycle 47, 2026-02-19 15:36 PST
+**Last reviewed:** Review cycle 56, 2026-02-20 09:46 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean)
 **Test status:** ✅ ALL PASSING (22 packages)
-**Work tracker:** All phases complete (0→14). ACP mode fully tested. Upstream sync in progress.
-
-**Files reviewed this cycle:**
-- `cmd/generate-models/main.go` — 2 new model entries (claude-opus-4-6-thinking, gemini-3.1-pro-preview), upstream hash updated. Clean.
-- `pkg/ai/models_generated.go` — regenerated output, new models present. Clean.
+**Work tracker:** All phases 0–13 complete. No new work in progress.
 
 ---
 
@@ -35,6 +31,13 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/core/agentsession.go:255-261` — `emit` RLock held during callbacks (deadlock risk) — FIXED 2026-02-20
+- `pkg/modes/print/print.go:87-91` — `os.Exit(1)` inside library function — FIXED 2026-02-20
+- `pkg/core/session.go:687` — `panic` in `CreateBranchedSession` — FIXED 2026-02-20
+- `pkg/core/modelregistry.go:779-815` — Four `panic` calls in `applyProviderConfig` — FIXED 2026-02-20
+- `pkg/modes/print/print_test.go` — `Run` function had zero coverage — FIXED 2026-02-20
+- `pkg/ai/providers/codex_websocket.go:138-169` — `wsInflight` coalescing path untested — FIXED 2026-02-20
+- `pkg/core/sdk.go:81-87` — Unnecessary auth-path complexity — FIXED 2026-02-20
 - `pkg/extensions/claudeusage/client.go:80-84` — `progressBar` manual clamping → `max`/`min` builtins — ✅ FIXED 2026-02-18
 - `pkg/extensions/claudeusage/client.go:44` — `http.DefaultClient` → `httpClient` with 10s timeout — ✅ FIXED 2026-02-18
 - `pkg/modes/acp/acp.go:ResumeSession` — duplicate session/resume leaked resources — ✅ FIXED (closes old session before creating new one; test added)
@@ -91,3 +94,6 @@ _(no open items)_
 - `pkg/tui/components/editor.go:713,740` — `math.Max` used instead of builtin `max()` — ✅ FIXED 2026-02-18
 - `pkg/modes/acp/acp.go:1162` — `parseInt` reimplemented instead of using `strconv.Atoi` — ✅ FIXED 2026-02-18
 - ACP slash commands `/session`, `/name`, `handleResumeArg` untested — ✅ FIXED 2026-02-18
+- `pkg/ai/providers/codex_websocket.go` — mapCodexEvent duplication, TOCTOU race — FIXED 2026-02-20
+- `pkg/ai/providers/google_gemini_cli.go` — mergeHeaders mutated in-place — FIXED 2026-02-20
+- `pkg/ai/models_test.go` — Missing gemini-3.1-pro test cases — FIXED 2026-02-20
