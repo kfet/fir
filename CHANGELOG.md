@@ -2,9 +2,22 @@
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- Renamed project from "tau" to "fir": module path, binary, config directory (.tau → .fir), all references.
+- E2E test coverage for 27 new scenarios: gemini-2.5-pro model lookup, all previously-untested RPC commands (set_model, cycle_model, cycle_thinking_level, bash, get_session_stats, get_messages, get_commands, get_last_assistant_text, set_session_name, get_fork_messages, new_session, set_auto_compaction, set_steering_mode, set_follow_up_mode, abort_bash, abort_retry, export_html) and their error paths, plus ErrAgentAborted non-zero exit and bad-provider-config no-panic regression tests.
+- `/export [path]` command exports the current session to an HTML file (temp file if no path given).
+- `/share` command creates a secret GitHub gist from the exported session (requires `gh` CLI).
+- `/scoped-models` command now opens the interactive scoped-model selector (was "not yet implemented").
+- `Ctrl+G` (`externalEditor` action) opens `$VISUAL` or `$EDITOR` to edit the current input.
+- `ActionFollowUp` queues the current editor text as a follow-up message delivered after the ongoing agent turn.
+- `ActionDequeue` restores any queued follow-up messages back to the editor.
+- `SetScopedModels()` on `AgentSession` — session-level scoped model override used by `/scoped-models`.
+- `AgentSession.ExportToHTML(path)` and `core.WriteConversationHTML` shared by interactive and RPC modes.
+- `TreeSelectorComponent.SetOnLabelEdit()` and `SetInitialSelection()` for label editing and pre-selection.
+- `Agent.GetAndClearFollowUpQueue()` for atomic queue inspection+clear.
+- `AgentSession.ClearFollowUpQueue()` returns and drains queued follow-up message texts.
+- Clipboard image paste (`handleClipboardImagePaste`) now wired via `editor.OnPasteImage` — writes image to temp file and inserts the path at cursor.
+- Include agent version in `/session` slash command output (ACP and TUI modes).
 
 ### Fixed
 
@@ -12,10 +25,15 @@
 - `/resume` session selector: strip ASCII control characters (newlines, carriage returns, etc.) and Unicode line/paragraph separators (U+2028, U+2029) from session names AND working-directory paths before rendering; a session whose name or `cwd` contained an embedded newline caused each such session in the visible window to write an extra terminal row, shifting all subsequent rows down — the "items 73-83 (or 83+) shift down one line" visual glitch. Also sanitize DEL (0x7F) and C1 control codes (U+0080–U+009F).
 - `/resume` session selector: increased visible window from 12 to 20 sessions (scroll pane is taller, easier to navigate large session lists).
 - `/changelog` command now displays newest version last (at the bottom of the terminal) so it's most visible in both TUI and ACP modes.
-
-### Added
-
-- Include agent version in `/session` slash command output (ACP and TUI modes).
+- `/tree` command now shows the full interactive `TreeSelectorComponent` overlay instead of a static text dump — users can navigate, switch branches, and edit labels.
+- `/fork` command now shows the interactive `UserMessageSelectorComponent` overlay instead of a static text list — users can navigate and select a message to branch from.
+- Double-escape action now respects the `doubleEscapeAction` setting (`"tree"`, `"fork"`, or `"none"`); previously always opened the session selector.
+- `ActionTree` and `ActionFork` keybindings now correctly call `showTreeSelector` and `showUserMessageSelector` (were not wired to any handler).
+- `cycleModel` (Ctrl+P) now cycles only within the configured scoped model set when one is active; falls back to all available models otherwise.
+- `Prompt()` with `StreamingBehavior = "followUp"` now correctly enqueues the message via `Agent.FollowUp()` instead of returning an error.
+- Settings selector now reads `DoubleEscapeAction` from settings instead of hardcoding `"tree"`.
+- RPC `export_html` now delegates to `AgentSession.ExportToHTML()` (eliminates code duplication).
+- `OnPasteImage` (Ctrl+V) now wired in interactive mode — reads image from clipboard, writes to temp file, inserts path in editor.
 
 ## [0.2.0] - 2026-02-19
 

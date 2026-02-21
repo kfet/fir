@@ -389,6 +389,268 @@ Use `timeout: 15` on the bash tool call.
 - Events include tool execution for "bash" (`"ToolName":"bash"`)
 - A tool result contains "BASH_E2E_OK"
 
+### 5. Extended CLI Flag Tests
+
+#### 5a. --list-models includes gemini-2.5-pro (new model added in recent merge)
+
+```bash
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --list-models 2>&1 | grep -E "^google/gemini-2.5-pro$"; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- `google/gemini-2.5-pro` appears in the output (exact line match)
+- Exit code 0
+
+### 6. Additional RPC Command Tests (mock)
+
+These tests cover RPC commands that weren't previously in the test suite, added as part of the server refactor.
+
+#### 6a. RPC: set_model
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_model","provider":"mock","modelId":"mock-model-2"}\n{"id":"2","type":"get_state"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 15` on the bash tool call. (Requires `MOCK_AGENT_DIR` to have two models: `mock-model` and `mock-model-2`.)
+
+**Verify:**
+- First response: `"command":"set_model"`, `"success":true`, data contains `"id":"mock-model-2"`
+- Second response: `get_state` shows `"id":"mock-model-2"` in the model field
+
+#### 6b. RPC: cycle_model
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"cycle_model"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 15` on the bash tool call. (Requires two models in `MOCK_AGENT_DIR`.)
+
+**Verify:**
+- Response has `"command":"cycle_model"`, `"success":true`
+- `data.model` contains the next model's `id`
+- `data.thinkingLevel` and `data.isScoped` fields are present
+
+#### 6c. RPC: cycle_thinking_level
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"cycle_thinking_level"}\n{"id":"2","type":"get_state"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 15` on the bash tool call.
+
+**Verify:**
+- First response: `"command":"cycle_thinking_level"`, `"success":true`, `data.level` is `"minimal"` (cycles from default `"off"`)
+- Second response: `get_state` shows `"thinkingLevel":"minimal"`
+
+#### 6d. RPC: bash (direct execution, not agent tool)
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"bash","command":"echo RPC_BASH_DIRECT_OK"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 15` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"bash"`, `"success":true`
+- `data.Output` contains `"RPC_BASH_DIRECT_OK"`
+- `data.ExitCode` is `0`
+
+#### 6e. RPC: bash with empty command (error)
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"bash","command":""}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"bash"`, `"success":false`, `"error"` contains "command is required"
+
+#### 6f. RPC: get_session_stats
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"get_session_stats"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 15` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"get_session_stats"`, `"success":true`
+- `data` contains `totalMessages`, `userMessages`, `assistantMessages`, `tokens`, `cost` fields
+
+#### 6g. RPC: get_messages
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"get_messages"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"get_messages"`, `"success":true`
+- `data.messages` is an array (empty for a new session)
+
+#### 6h. RPC: get_commands
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"get_commands"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"get_commands"`, `"success":true`
+- `data.commands` is an array (may be empty or contain skill entries)
+- Each command has `name` and `source` fields
+
+#### 6i. RPC: get_last_assistant_text
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"get_last_assistant_text"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"get_last_assistant_text"`, `"success":true`
+- `data.text` is `null` for a fresh session (no assistant messages yet)
+
+#### 6j. RPC: set_session_name
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_session_name","name":"my-test-session"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"set_session_name"`, `"success":true`
+
+#### 6k. RPC: set_session_name with empty name (error)
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_session_name","name":""}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"set_session_name"`, `"success":false`, `"error"` contains "cannot be empty"
+
+#### 6l. RPC: get_fork_messages
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"get_fork_messages"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"get_fork_messages"`, `"success":true`
+- `data.messages` is an array (empty for a fresh session)
+
+#### 6m. RPC: new_session
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"new_session"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"new_session"`, `"success":true`
+- `data.cancelled` is `false`
+
+#### 6n. RPC: set_auto_compaction persists to get_state
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_auto_compaction","enabled":false}\n{"id":"2","type":"get_state"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- First response: `"command":"set_auto_compaction"`, `"success":true`
+- Second response: `get_state` shows `"autoCompactionEnabled":false`
+
+#### 6o. RPC: set_steering_mode and set_follow_up_mode
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_steering_mode","mode":"one-at-a-time"}\n{"id":"2","type":"set_follow_up_mode","mode":"one-at-a-time"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Both responses: `"success":true`
+
+#### 6p. RPC: abort_bash and abort_retry
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"abort_bash"}\n{"id":"2","type":"abort_retry"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Both responses: `"success":true` (no-ops when nothing is running, but should not error)
+
+#### 6q. RPC: export_html
+
+```bash
+TMPTEST=$(mktemp -d) && cd "$TMPTEST" && printf '{"id":"1","type":"export_html"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
+```
+Use `timeout: 15` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"export_html"`, `"success":true`
+- `data.path` is a non-empty file path
+- The file at `data.path` exists and begins with `<!doctype html` or `<html`
+
+#### 6r. RPC: set_model with non-existent model (error)
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_model","provider":"mock","modelId":"nonexistent"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"set_model"`, `"success":false`, `"error"` contains "Model not found"
+
+#### 6s. RPC: switch_session with empty path (error)
+
+```bash
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"switch_session","sessionPath":""}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response: `"command":"switch_session"`, `"success":false`, `"error"` contains "session path is required"
+
+### 7. Print Mode Error Handling (ErrAgentAborted)
+
+These tests verify the `ErrAgentAborted` refactor: `print.Run` now returns an error instead of calling `os.Exit(1)` directly. The binary must still exit with code 1 without leaking a double error message.
+
+#### 7a. Print mode exits non-zero on API failure
+
+```bash
+cd "$PROJECT_ROOT"
+DEAD_AGENT_DIR=$(mktemp -d)
+cat > "$DEAD_AGENT_DIR/models.json" << 'EOF'
+{"providers":{"dead":{"baseUrl":"http://127.0.0.1:1","apiKey":"bad","api":"openai-completions","models":[{"id":"dead-model","name":"Dead","contextWindow":128000,"maxTokens":4096}]}}}
+EOF
+FIR_AGENT_DIR="$DEAD_AGENT_DIR" ./bin/fir-e2e --provider dead --model dead-model --no-session -p "say hello" 2>&1; echo "EXIT:$?"
+rm -rf "$DEAD_AGENT_DIR"
+```
+Use `timeout: 15` on the bash tool call.
+
+**Verify:**
+- Exit code is non-zero (1)
+- No panic/stack trace
+- Output does NOT contain `"Error: agent aborted"` (ErrAgentAborted is handled silently by main — print mode already wrote the error)
+
+#### 7b. Bad provider config does not panic
+
+```bash
+cd "$PROJECT_ROOT"
+BAD_AGENT_DIR=$(mktemp -d)
+cat > "$BAD_AGENT_DIR/models.json" << 'EOF'
+{"providers":{"bad":{"baseUrl":"http://localhost:9999","apiKey":"key","models":[{"id":"m","name":"M","contextWindow":128000,"maxTokens":4096}]}}}
+EOF
+FIR_AGENT_DIR="$BAD_AGENT_DIR" ./bin/fir-e2e --list-models 2>&1; echo "EXIT:$?"
+rm -rf "$BAD_AGENT_DIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- No `panic:` in output (previously would panic; now logs an error gracefully)
+- Exit code 0 (other built-in models still list fine)
+
 ## Test Cycle
 
 Each cycle:
@@ -453,6 +715,12 @@ if [ "$MOCK_UNAVAILABLE" = "0" ]; then
           "name": "Mock Model",
           "contextWindow": 128000,
           "maxTokens": 4096
+        },
+        {
+          "id": "mock-model-2",
+          "name": "Mock Model 2",
+          "contextWindow": 128000,
+          "maxTokens": 4096
         }
       ]
     }
@@ -470,9 +738,11 @@ If mock server fails and no API keys are available → skip LLM tests, run only 
 
 Run these tests that don't require any provider. **Run independent tests in parallel** (multiple bash tool calls in the same block):
 - `--help`, `--version`, `--list-models` (3a, 3b, 3c)
+- `--list-models` includes `google/gemini-2.5-pro` (5a)
 - RPC unknown command (2e)
 - RPC malformed JSON (2f)
 - Print mode with no API keys (1d)
+- Bad provider config does not panic (7b)
 
 ### Step 4: Run LLM tests (mock or real fallback)
 
@@ -487,8 +757,10 @@ Run these tests that don't require any provider. **Run independent tests in para
 - RPC set_thinking_level (2d)
 - RPC abort (2g)
 - Tool execution tests (4a, 4b, 4c)
+- Additional RPC tests (6a–6s): set_model, cycle_model, cycle_thinking_level, bash, get_session_stats, get_messages, get_commands, get_last_assistant_text, set_session_name, get_fork_messages, new_session, set_auto_compaction, set_steering_mode, set_follow_up_mode, abort_bash, abort_retry, export_html, and error paths
+- Print mode ErrAgentAborted (7a)
 
-**If mock is unavailable** but a real API key exists, run the same tests using the real provider (remove `FIR_AGENT_DIR`, `--provider mock`, `--model mock-model`). Use `timeout: 30` for real provider tests. Tool tests (4a-4c) should be **skipped** with real providers since they depend on the mock server's keyword-based tool call dispatch.
+**If mock is unavailable** but a real API key exists, run the same tests using the real provider (remove `FIR_AGENT_DIR`, `--provider mock`, `--model mock-model`). Use `timeout: 30` for real provider tests. Tool tests (4a-4c) and additional RPC model tests (6a-6b) should be **skipped** with real providers since they depend on the mock server's keyword-based tool call dispatch.
 
 **If neither mock nor real keys**, skip all LLM tests and report: "LLM tests skipped — no mock server or API keys available."
 
