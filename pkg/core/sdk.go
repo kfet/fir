@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core/tools"
 )
 
 // ============================================================================
@@ -21,7 +21,7 @@ import (
 type CreateAgentSessionOptions struct {
 	// Cwd is the working directory. Default: os.Getwd().
 	Cwd string
-	// AgentDir is the global config directory. Default: ~/.tau/agent
+	// AgentDir is the global config directory. Default: ~/.fir/agent
 	AgentDir string
 
 	// AuthStorage for credentials. Default: NewAuthStorage(agentDir/auth.json)
@@ -262,10 +262,10 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 // Helpers
 // ============================================================================
 
-// DefaultAgentDir returns the default global config directory (~/.tau/agent).
+// DefaultAgentDir returns the default global config directory (~/.fir/agent).
 func DefaultAgentDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".tau", "agent")
+	return filepath.Join(home, ".fir", "agent")
 }
 
 // PiAgentDir returns the pi agent directory (~/.pi/agent) for picking up

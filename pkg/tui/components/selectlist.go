@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // SelectItem represents a selectable item in the list.

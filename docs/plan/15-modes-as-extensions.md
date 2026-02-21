@@ -1,11 +1,11 @@
 # Could Modes Be Extensions?
 
-Analysis of the minimal changes to tau's extension system that would allow
+Analysis of the minimal changes to fir's extension system that would allow
 ACP mode (and potentially RPC/print modes) to be implemented on top of it.
 
 ## What a mode actually is
 
-Every mode in tau follows the same pattern:
+Every mode in fir follows the same pattern:
 
 1. Receive (or create) an `AgentSession`
 2. Own a transport (stdin/stdout text, JSON lines, JSON-RPC, TUI)
@@ -235,9 +235,9 @@ existing modes since modes only use what they need.
 
 ### Arguments against
 
-- **It's a registry for 4 things.** tau is a compiled binary. A switch statement over
+- **It's a registry for 4 things.** fir is a compiled binary. A switch statement over
   4 known modes is simpler than a registry + factory pattern. The registry only pays off
-  if third parties add modes, which requires a plugin system tau doesn't have.
+  if third parties add modes, which requires a plugin system fir doesn't have.
 - **Interactive mode is awkward.** It needs keybindings, themes, extension UI wiring —
   things no other mode needs. Either `ModeContext` grows to accommodate it, or
   interactive mode reaches outside the context. Neither is clean.

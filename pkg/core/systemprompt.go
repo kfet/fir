@@ -138,7 +138,7 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, dateTime, appendSection s
 	}
 	guidelinesStr := strings.Join(guidelineLines, "\n")
 
-	prompt := fmt.Sprintf(`You are an expert coding assistant operating inside tau, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	prompt := fmt.Sprintf(`You are an expert coding assistant operating inside fir, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
 Available tools:
 %s

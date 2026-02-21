@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // RenderRequester is the interface for requesting a re-render.

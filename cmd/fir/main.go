@@ -1,4 +1,4 @@
-// tau — Go implementation of the tau coding agent CLI
+// fir — Go implementation of the fir coding agent CLI
 package main
 
 import (

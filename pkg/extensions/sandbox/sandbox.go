@@ -4,10 +4,10 @@
 // restrictions using sandbox-exec (macOS) or bubblewrap (Linux).
 //
 // Config files (merged, project takes precedence):
-//   - ~/.tau/agent/sandbox.json (global)
-//   - <cwd>/.tau/sandbox.json (project-local)
+//   - ~/.fir/agent/sandbox.json (global)
+//   - <cwd>/.fir/sandbox.json (project-local)
 //
-// Example .tau/sandbox.json:
+// Example .fir/sandbox.json:
 //
 //	{
 //	  "enabled": true,
@@ -23,8 +23,8 @@
 //	}
 //
 // Usage:
-//   - Import to enable: import _ "github.com/kfet/tau/pkg/extensions/sandbox"
-//   - Disable via flag: tau --no-sandbox
+//   - Import to enable: import _ "github.com/kfet/fir/pkg/extensions/sandbox"
+//   - Disable via flag: fir --no-sandbox
 //   - Show config: /sandbox command
 //
 // Note: This is a framework. The actual sandboxing integration (sandbox-exec,
@@ -38,7 +38,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 // SandboxConfig defines the sandbox configuration.
@@ -212,8 +212,8 @@ func init() {
 // loadConfig loads and merges sandbox configuration.
 func loadConfig(cwd string) SandboxConfig {
 	home, _ := os.UserHomeDir()
-	globalPath := filepath.Join(home, ".tau", "agent", "sandbox.json")
-	projectPath := filepath.Join(cwd, ".tau", "sandbox.json")
+	globalPath := filepath.Join(home, ".fir", "agent", "sandbox.json")
+	projectPath := filepath.Join(cwd, ".fir", "sandbox.json")
 
 	result := defaultConfig
 

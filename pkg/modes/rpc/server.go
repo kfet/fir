@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // Server is the RPC mode server.
@@ -344,7 +344,7 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 
 	case CmdExportHTML:
 		entries := s.session.SessionManager.GetBranch("")
-		f, err := os.CreateTemp("", "tau-session-*.html")
+		f, err := os.CreateTemp("", "fir-session-*.html")
 		if err != nil {
 			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("creating export file: %v", err))
 		}

@@ -5,7 +5,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestRegisterBuiltInApiProviders(t *testing.T) {

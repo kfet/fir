@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // SortMode controls how sessions are sorted.

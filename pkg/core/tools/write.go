@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // WriteToolParams are the parameters for the write tool.

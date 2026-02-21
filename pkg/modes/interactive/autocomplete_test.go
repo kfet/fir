@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 func testCommands() []SlashCommand {
@@ -15,7 +15,7 @@ func testCommands() []SlashCommand {
 		{Name: "hotkeys", Description: "Show keyboard shortcuts"},
 		{Name: "model", Description: "Select model"},
 		{Name: "thinking", Description: "Select thinking level"},
-		{Name: "quit", Description: "Quit tau"},
+		{Name: "quit", Description: "Quit fir"},
 		{Name: "login", Description: "Login with OAuth"},
 		{Name: "logout", Description: "Logout from OAuth"},
 		{Name: "clear", Description: "Start new session"},

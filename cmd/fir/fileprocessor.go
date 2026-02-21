@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core/tools"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core/tools"
 )
 
 // ProcessedFiles holds the result of processing @file arguments.

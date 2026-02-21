@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestNotifyExtensionRegisters(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/core"
 )
 
 func TestSkillInvocationMessage_Collapsed(t *testing.T) {

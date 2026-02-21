@@ -2,7 +2,7 @@
 // Upstream hash: 1caadb2e
 package providers
 
-import "github.com/kfet/tau/pkg/ai"
+import "github.com/kfet/fir/pkg/ai"
 
 // RegisterBuiltInApiProviders registers all built-in API providers in the given registry.
 func RegisterBuiltInApiProviders(r *ai.Registry) {

@@ -55,5 +55,5 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "compact", Description: "Manually compact the session context"},
 	{Name: "resume", Description: "Resume a different session"},
 	{Name: "reload", Description: "Reload extensions, skills, prompts, and themes"},
-	{Name: "quit", Description: "Quit tau"},
+	{Name: "quit", Description: "Quit fir"},
 }

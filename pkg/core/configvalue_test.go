@@ -21,10 +21,10 @@ func TestResolveConfigValue_Empty(t *testing.T) {
 }
 
 func TestResolveConfigValue_EnvVar(t *testing.T) {
-	os.Setenv("TAU_TEST_CONFIG_VALUE", "my-secret-key")
-	defer os.Unsetenv("TAU_TEST_CONFIG_VALUE")
+	os.Setenv("FIR_TEST_CONFIG_VALUE", "my-secret-key")
+	defer os.Unsetenv("FIR_TEST_CONFIG_VALUE")
 
-	result := ResolveConfigValue("TAU_TEST_CONFIG_VALUE")
+	result := ResolveConfigValue("FIR_TEST_CONFIG_VALUE")
 	if result != "my-secret-key" {
 		t.Errorf("expected env var value 'my-secret-key', got %q", result)
 	}
@@ -64,12 +64,12 @@ func TestResolveConfigValue_CommandFailure(t *testing.T) {
 }
 
 func TestResolveHeaders(t *testing.T) {
-	os.Setenv("TAU_TEST_HEADER_VAL", "resolved-header")
-	defer os.Unsetenv("TAU_TEST_HEADER_VAL")
+	os.Setenv("FIR_TEST_HEADER_VAL", "resolved-header")
+	defer os.Unsetenv("FIR_TEST_HEADER_VAL")
 
 	headers := map[string]string{
 		"X-Custom":  "literal-value",
-		"X-FromEnv": "TAU_TEST_HEADER_VAL",
+		"X-FromEnv": "FIR_TEST_HEADER_VAL",
 	}
 
 	resolved := ResolveHeaders(headers)

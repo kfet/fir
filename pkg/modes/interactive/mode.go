@@ -19,17 +19,23 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/ai/oauth"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/core/tools"
-	"github.com/kfet/tau/pkg/extension"
-	"github.com/kfet/tau/pkg/modes/interactive/components"
-	itheme "github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/modes/interactive/components"
+	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
+
+// version is set via SetVersion before Run.
+var version = "dev"
+
+// SetVersion sets the version string shown by /session.
+func SetVersion(v string) { version = v }
 
 // InteractiveMode manages the interactive TUI session.
 type InteractiveMode struct {
@@ -1560,6 +1566,7 @@ func (m *InteractiveMode) handleSessionCommand() {
 	var lines []string
 	lines = append(lines, t.Bold("Session Info"))
 	lines = append(lines, "")
+	lines = append(lines, t.Fg("dim", "Version: ")+version)
 	if sessionName != "" {
 		lines = append(lines, t.Fg("dim", "Name: ")+sessionName)
 	}
@@ -1659,7 +1666,9 @@ func (m *InteractiveMode) handleChangelogCommand() {
 		return
 	}
 
-	// Show newest first
+	// Entries come newest-first from the changelog file.
+	// Display oldest-first so the newest version appears at the bottom of the terminal
+	// where the user's eyes are.
 	t := itheme.GetTheme()
 	var lines []string
 	lines = append(lines, t.Bold(t.Fg("accent", "What's New")))
@@ -1881,7 +1890,7 @@ func (m *InteractiveMode) showHelp() {
   /copy           - Copy last agent message to clipboard
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
-  /quit           - Quit tau
+  /quit           - Quit fir
 
 Keyboard shortcuts:
   Enter           - Send message

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // NormalizeToolCallIDFunc normalizes tool call IDs for cross-provider compatibility.

@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // ---------------------------------------------------------------------------

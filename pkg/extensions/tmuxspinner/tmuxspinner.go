@@ -8,7 +8,7 @@
 //
 // Import this package to enable the extension:
 //
-//	import _ "github.com/kfet/tau/pkg/extensions/tmuxspinner"
+//	import _ "github.com/kfet/fir/pkg/extensions/tmuxspinner"
 package tmuxspinner
 
 import (
@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 // Spinner frames (braille dots).
@@ -139,7 +139,7 @@ func (s *spinner) Start() {
 		}
 		s.baseName = readWindowName(s.paneID)
 		if s.baseName == "" {
-			s.baseName = "tau"
+			s.baseName = "fir"
 		} else {
 			s.baseName = stripSpinnerSuffix(s.baseName)
 		}

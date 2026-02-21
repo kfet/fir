@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 // recorder collects rename calls thread-safely.
@@ -240,16 +240,16 @@ func TestDefaultBaseName(t *testing.T) {
 	s.Stop()
 
 	names := rec.get()
-	// Should fall back to "tau" as base name
+	// Should fall back to "fir" as base name
 	found := false
 	for _, n := range names {
-		if len(n) >= 3 && n[:3] == "tau" {
+		if len(n) >= 2 && n[:3] == "fir" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected fallback base name 'tau' in renames, got: %v", names)
+		t.Errorf("expected fallback base name 'fir' in renames, got: %v", names)
 	}
 }
 
@@ -426,7 +426,7 @@ func TestStripSpinnerSuffix(t *testing.T) {
 		{"e2e ⠹", "e2e"},
 		{"e2e ⠋ ⠹", "e2e"},                      // multiple accumulated suffixes
 		{"e2e ⠋ ⠋ ⠸ ⠙ ⠼ ⠹", "e2e"},             // long chain
-		{"tau", "tau"},
+		{"fir", "fir"},
 		{"", ""},
 		{"⠋", "⠋"},   // bare braille with no leading space — not a suffix
 		{" ⠋", ""},   // space + braille with nothing before it → strip to empty

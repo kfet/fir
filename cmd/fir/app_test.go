@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/ai/providers"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/providers"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // ============================================================================
@@ -326,7 +326,7 @@ func TestReadPipedStdin_WhitespaceOnly(t *testing.T) {
 
 func TestRunListModels_AllModels(t *testing.T) {
 	agentDir := t.TempDir()
-	t.Setenv("TAU_AGENT_DIR", agentDir)
+	t.Setenv("FIR_AGENT_DIR", agentDir)
 
 	providers.RegisterDefaultProviders()
 
@@ -339,7 +339,7 @@ func TestRunListModels_AllModels(t *testing.T) {
 
 func TestRunListModels_WithPattern(t *testing.T) {
 	agentDir := t.TempDir()
-	t.Setenv("TAU_AGENT_DIR", agentDir)
+	t.Setenv("FIR_AGENT_DIR", agentDir)
 
 	providers.RegisterDefaultProviders()
 

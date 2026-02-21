@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---

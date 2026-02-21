@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // DefaultRunner implements core.CompactionRunner using the compaction package.

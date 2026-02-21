@@ -11,23 +11,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/ai/providers"
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/core/compaction"
-	"github.com/kfet/tau/pkg/core/tools"
-	"github.com/kfet/tau/pkg/extension"
-	interactive "github.com/kfet/tau/pkg/modes/interactive"
-	acpmode "github.com/kfet/tau/pkg/modes/acp"
-	printmode "github.com/kfet/tau/pkg/modes/print"
-	rpcmode "github.com/kfet/tau/pkg/modes/rpc"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/providers"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/core/compaction"
+	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/extension"
+	interactive "github.com/kfet/fir/pkg/modes/interactive"
+	acpmode "github.com/kfet/fir/pkg/modes/acp"
+	printmode "github.com/kfet/fir/pkg/modes/print"
+	rpcmode "github.com/kfet/fir/pkg/modes/rpc"
 
 	// Import built-in extensions (registered via init())
-	_ "github.com/kfet/tau/pkg/extensions/claudeusage"
-	_ "github.com/kfet/tau/pkg/extensions/notify"
-	_ "github.com/kfet/tau/pkg/extensions/sandbox"
-	_ "github.com/kfet/tau/pkg/extensions/tmuxspinner"
+	_ "github.com/kfet/fir/pkg/extensions/claudeusage"
+	_ "github.com/kfet/fir/pkg/extensions/notify"
+	_ "github.com/kfet/fir/pkg/extensions/sandbox"
+	_ "github.com/kfet/fir/pkg/extensions/tmuxspinner"
 )
 
 //go:embed CHANGELOG.md
@@ -55,7 +55,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 
@@ -239,7 +239,7 @@ func run() error {
 	}
 
 	if args.Version {
-		fmt.Println("tau " + version)
+		fmt.Println("fir " + version)
 		return nil
 	}
 
@@ -327,7 +327,7 @@ func run() error {
 // runListModels lists available models and exits.
 func runListModels(args *Args) error {
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 
@@ -525,6 +525,7 @@ func runInteractiveMode(args *Args) error {
 			ChangelogContent: changelogContent,
 		},
 	)
+	interactive.SetVersion(version)
 
 	// Wire extension setup into interactive mode (enables /reload for extensions).
 	// This also sets the UIContext on the runner so that extensions can update

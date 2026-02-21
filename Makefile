@@ -2,8 +2,8 @@
 
 # Output directory for all build artifacts
 BINDIR    := bin
-BINARY    := $(BINDIR)/tau
-BINARY_PGO := $(BINDIR)/tau.pgo
+BINARY    := $(BINDIR)/fir
+BINARY_PGO := $(BINDIR)/fir.pgo
 VERSION   := $(shell cat VERSION 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 
@@ -13,24 +13,24 @@ PGO_STAMP := default.pgo.stamp
 
 build:
 	@mkdir -p $(BINDIR)
-	@cp CHANGELOG.md cmd/tau/CHANGELOG.md
-	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/tau/
+	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
 all: test-race pgo build-all
 
 install:
-	@cp CHANGELOG.md cmd/tau/CHANGELOG.md
-	go install -ldflags="$(LDFLAGS)" ./cmd/tau/
+	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
+	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
 
 # Cross-compile for all targets
 build-all:
 	@mkdir -p $(BINDIR)
-	@cp CHANGELOG.md cmd/tau/CHANGELOG.md
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/tau/
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/tau/
-	GOOS=linux GOARCH=arm GOARM=6 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm6 ./cmd/tau/
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/tau/
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/tau/
+	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/
+	GOOS=linux GOARCH=arm GOARM=6 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm6 ./cmd/fir/
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/fir/
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/fir/
 
 test:
 	go test ./...
@@ -53,7 +53,7 @@ pgo:
 		echo "PGO profile up to date (source hash $$SOURCE_HASH), skipping regeneration."; \
 	else \
 		echo "Generating PGO profile (source hash $$SOURCE_HASH)..."; \
-		go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/tau/ && \
+		go test -cpuprofile=default.pgo -o $(BINARY_PGO) ./cmd/fir/ && \
 		rm -f $(BINARY_PGO) && \
 		echo "$$SOURCE_HASH" > $(PGO_STAMP) && \
 		$(MAKE) build; \

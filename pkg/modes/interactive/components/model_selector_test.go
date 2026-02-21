@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 func TestModelSelectorComponent_Render(t *testing.T) {

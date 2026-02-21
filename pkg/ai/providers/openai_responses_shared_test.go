@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestResponsesSSEProcessor_TextStream(t *testing.T) {

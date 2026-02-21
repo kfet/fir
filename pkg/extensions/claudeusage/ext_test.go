@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestClaudeUsageExtensionRegisters(t *testing.T) {

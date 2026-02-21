@@ -209,14 +209,14 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | `examples/extensions/notify.ts` | `pkg/extensions/notify/notify.go` | ✅ |
 | `examples/extensions/sandbox/index.ts` | `pkg/extensions/sandbox/sandbox.go` | ✅ |
 
-## CLI Entry Point (`cmd/tau/`)
+## CLI Entry Point (`cmd/fir/`)
 
 | TS Source | Go File | Status |
 |---|---|---|
-| `coding-agent/src/cli.ts` | `cmd/tau/main.go` | ✅ |
-| `coding-agent/src/main.ts` | `cmd/tau/app.go` | ✅ |
-| `coding-agent/src/cli/args.ts` | `cmd/tau/args.go` | ✅ |
-| `coding-agent/src/cli/file-processor.ts` | `cmd/tau/fileprocessor.go` | ✅ |
+| `coding-agent/src/cli.ts` | `cmd/fir/main.go` | ✅ |
+| `coding-agent/src/main.ts` | `cmd/fir/app.go` | ✅ |
+| `coding-agent/src/cli/args.ts` | `cmd/fir/args.go` | ✅ |
+| `coding-agent/src/cli/file-processor.ts` | `cmd/fir/fileprocessor.go` | ✅ |
 
 ## ACP Mode (`pkg/modes/acp/`)
 

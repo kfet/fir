@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // testSession creates a minimal AgentSession for testing RPC command dispatch.
@@ -406,11 +406,11 @@ func TestHandleCommand_GetCommands_WithPromptsAndSkills(t *testing.T) {
 		SessionManager: sm,
 		ResourceLoader: &mockResourceLoader{
 			prompts: []core.PromptTemplate{
-				{Name: "fix", Description: "Fix a bug (user)", Source: "user", FilePath: "/home/.tau/agent/prompts/fix.md"},
-				{Name: "review", Description: "Code review (project)", Source: "project", FilePath: "/project/.tau/prompts/review.md"},
+				{Name: "fix", Description: "Fix a bug (user)", Source: "user", FilePath: "/home/.fir/agent/prompts/fix.md"},
+				{Name: "review", Description: "Code review (project)", Source: "project", FilePath: "/project/.fir/prompts/review.md"},
 			},
 			skills: []core.Skill{
-				{Name: "debug", Description: "Debug a problem", Source: "user", FilePath: "/home/.tau/agent/skills/debug/SKILL.md"},
+				{Name: "debug", Description: "Debug a problem", Source: "user", FilePath: "/home/.fir/agent/skills/debug/SKILL.md"},
 			},
 		},
 		Cwd: "/tmp/rpc-test",

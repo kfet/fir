@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // testProvider is a minimal Provider implementation for testing.

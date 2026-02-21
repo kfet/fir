@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
 )
 
 // DynamicBorder renders a horizontal border line that adjusts to viewport width.

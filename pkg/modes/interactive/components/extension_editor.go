@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 // ExtensionEditorComponent is a multi-line editor component for extensions.
@@ -106,7 +106,7 @@ func (c *ExtensionEditorComponent) openExternalEditor() {
 	}
 
 	currentText := c.editor.GetText()
-	tmpFile := filepath.Join(os.TempDir(), "tau-extension-editor-"+strconv.FormatInt(time.Now().UnixMilli(), 10)+".md")
+	tmpFile := filepath.Join(os.TempDir(), "fir-extension-editor-"+strconv.FormatInt(time.Now().UnixMilli(), 10)+".md")
 
 	if err := os.WriteFile(tmpFile, []byte(currentText), 0o644); err != nil {
 		return

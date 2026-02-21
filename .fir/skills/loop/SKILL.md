@@ -40,7 +40,7 @@ Briefly summarize what happened this cycle:
 Run a sleep command that echoes a reminder when it finishes. This is the mechanism that keeps the loop alive:
 
 ```bash
-sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .tau/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
+sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .fir/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
 ```
 
 Use a timeout of `<N + 10>` seconds on the bash call.
@@ -48,7 +48,7 @@ Use a timeout of `<N + 10>` seconds on the bash call.
 ### 5. Re-read this skill file and repeat
 
 When you see the reminder output, **immediately**:
-1. Re-read `.tau/skills/loop/SKILL.md`
+1. Re-read `.fir/skills/loop/SKILL.md`
 2. Go back to step 1 of this cycle
 
 This re-read is mandatory — it prevents instruction drift over long-running sessions.

@@ -127,7 +127,7 @@ After truncate + pathutils, remaining tools are independent — parallelizable.
 | [x] | `compaction/utils.go` `compaction/utils_test.go` | `coding-agent/src/core/compaction/utils.ts` | 154 | `pkg-core-compaction-utils` | messages |
 | [x] | `sdk.go` `sdk_test.go` | `coding-agent/src/core/sdk.ts` | 365 | `pkg-core-sdk` | all above |
 | [x] | `agentsession.go` `agentsession_test.go` | `coding-agent/src/core/agent-session.ts` | 2785 | `pkg-core-agentsession` | all above |
-| [x] | **🎯 MILESTONE: `echo "Hello" \| tau -p` works** | | | | |
+| [x] | **🎯 MILESTONE: `echo "Hello" \| fir -p` works** | | | | |
 | | Go file | TS source | Lines | Depends on |
 |---|---|---|---|---|
 | [x] | `session.go` | `coding-agent/src/core/session-manager.ts` | 1401 | agent/types, ai/types |
@@ -154,7 +154,7 @@ After truncate + pathutils, remaining tools are independent — parallelizable.
 | [x] | `compaction/utils.go` | `coding-agent/src/core/compaction/utils.ts` | 154 | messages |
 | [x] | `sdk.go` | `coding-agent/src/core/sdk.ts` | 365 | all above |
 | [x] | `agentsession.go` | `coding-agent/src/core/agent-session.ts` | 2785 | all above |
-| [x] | 🎯 **MILESTONE: `echo "Hello" \| tau -p` works** | | | |
+| [x] | 🎯 **MILESTONE: `echo "Hello" \| fir -p` works** | | | |
 
 ## Phase 6: TUI (`pkg/tui/`)
 
@@ -220,9 +220,9 @@ keys, utils, fuzzy, image are independent — parallelizable.
 |
 | | Go file | TS source | Lines | Depends on |
 |---|---|---|---|---|
-| [x] | `cmd/tau/main.go` || `coding-agent/src/cli.ts` | | 12 | `cmd| app ||pi-main` | app |
-| [x] | `cmd/tau/app.go` `cmd/tau/app_test.go` || `coding-agent/src/main.ts` | | 726 | `cmd| everything ||pi-app` | everything |
-| [x] | `cmd/tau/args.go` `cmd/tau/args_test.go` | `coding-agent/src/cli/args.ts` | 304 | `cmd-pi-args` | none |
+| [x] | `cmd/fir/main.go` || `coding-agent/src/cli.ts` | | 12 | `cmd| app ||pi-main` | app |
+| [x] | `cmd/fir/app.go` `cmd/fir/app_test.go` || `coding-agent/src/main.ts` | | 726 | `cmd| everything ||pi-app` | everything |
+| [x] | `cmd/fir/args.go` `cmd/fir/args_test.go` | `coding-agent/src/cli/args.ts` | 304 | `cmd-pi-args` | none |
 
 ## Phase 10: Skills Integration (TUI)
 
@@ -337,9 +337,9 @@ Compiled-in extension system allowing Go packages to register event handlers, cu
 
 | Status | Task | Go file | Notes |
 |---|---|---|---|
-| [x] | Extension setup in print/RPC mode | `cmd/tau/app.go` | Setup + session_start/shutdown events |
-| [x] | Extension setup in interactive mode | `cmd/tau/app.go` | Setup + runner wired to InteractiveMode |
-| [x] | Extension flag parsing from CLI | `cmd/tau/app.go` | UnknownFlags matched to extension flags |
+| [x] | Extension setup in print/RPC mode | `cmd/fir/app.go` | Setup + session_start/shutdown events |
+| [x] | Extension setup in interactive mode | `cmd/fir/app.go` | Setup + runner wired to InteractiveMode |
+| [x] | Extension flag parsing from CLI | `cmd/fir/app.go` | UnknownFlags matched to extension flags |
 
 ### Built-in extensions
 
@@ -352,8 +352,8 @@ Compiled-in extension system allowing Go packages to register event handlers, cu
 
 ## Phase 14: ACP Mode (`pkg/modes/acp/`)
 
-ACP (Agent Client Protocol) mode exposes tau as an ACP-compliant agent over stdio.
-ACP clients (e.g., Zed) spawn tau with `--mode acp` and communicate via newline-delimited JSON-RPC 2.0.
+ACP (Agent Client Protocol) mode exposes fir as an ACP-compliant agent over stdio.
+ACP clients (e.g., Zed) spawn fir with `--mode acp` and communicate via newline-delimited JSON-RPC 2.0.
 
 **TS Source:** `../pi-mono-acp/packages/coding-agent/src/modes/acp/` (~1,770 lines)
 **TS Tests:** `../pi-mono-acp/packages/coding-agent/test/acp-mode.test.ts` (826 lines) + `acp-terminal.test.ts` (422 lines)
@@ -396,7 +396,7 @@ ACP clients (e.g., Zed) spawn tau with `--mode acp` and communicate via newline-
 
 ### Architecture notes
 
-- This is a standalone mode (like print/rpc), NOT an extension — even though tau uses compiled-in Go extensions rather than pi-mono's runtime-loaded JS extensions. The five architectural gaps (no transport control, no multi-session, no base tool replacement, no event serialization control, no capability negotiation) apply equally to both extension systems. See `AGENTS.md` for the full analysis.
+- This is a standalone mode (like print/rpc), NOT an extension — even though fir uses compiled-in Go extensions rather than pi-mono's runtime-loaded JS extensions. The five architectural gaps (no transport control, no multi-session, no base tool replacement, no event serialization control, no capability negotiation) apply equally to both extension systems. See `AGENTS.md` for the full analysis.
 - ACP manages multiple sessions via `session/new`, unlike print/interactive which use a single session.
 - When the ACP client advertises capabilities (`fs.readTextFile`, `fs.writeTextFile`, `terminal`), tool implementations are swapped with client-delegating versions via `BaseToolsOverride`.
 - The upstream diff touches 4 existing files minimally: `sdk.ts` (+3 lines for `baseToolsOverride`), `bash.ts` (+1 line export), `args.ts` (+3 lines for "acp" mode), `main.ts` (+18 lines early exit).
@@ -415,8 +415,8 @@ ACP clients (e.g., Zed) spawn tau with `--mode acp` and communicate via newline-
 
 | Status | Task | Go file | Notes |
 |---|---|---|---|
-| [x] | Add `"acp"` to Mode enum + parsing | `cmd/tau/args.go` | Added ModeACP, validated in parser, documented in help. |
-| [x] | Add ACP mode early-exit dispatch | `cmd/tau/app.go` | `runAcpMode()` dispatched before setupSession. ACP creates sessions on demand. |
+| [x] | Add `"acp"` to Mode enum + parsing | `cmd/fir/args.go` | Added ModeACP, validated in parser, documented in help. |
+| [x] | Add ACP mode early-exit dispatch | `cmd/fir/app.go` | `runAcpMode()` dispatched before setupSession. ACP creates sessions on demand. |
 | [x] | Add `github.com/coder/acp-go-sdk` dependency | `go.mod` | v0.6.3 |
 
 ### Slash commands (implemented inside `acp.go`)
@@ -428,7 +428,7 @@ The following slash commands are handled inside ACP mode's `handleSlashCommand`:
 
 | Status | Milestone |
 |---|---|
-| [x] | **🎯 `tau --mode acp` starts and responds to `initialize`** |
+| [x] | **🎯 `fir --mode acp` starts and responds to `initialize`** |
 | [x] | **🎯 `session/new` + `session/prompt` work end-to-end** |
 | [x] | **🎯 Tool calls stream with titles, locations, diffs** |
 | [x] | **🎯 All slash commands work** |

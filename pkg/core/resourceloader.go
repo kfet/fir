@@ -110,7 +110,7 @@ func NewResourceLoader(opts ResourceLoaderOptions) *DefaultResourceLoader {
 	agentDir := opts.AgentDir
 	if agentDir == "" {
 		home, _ := os.UserHomeDir()
-		agentDir = filepath.Join(home, ".tau", "agent")
+		agentDir = filepath.Join(home, ".fir", "agent")
 	}
 
 	sm := opts.SettingsManager

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestInput_InitialEmpty(t *testing.T) {

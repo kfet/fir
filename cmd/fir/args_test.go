@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/fir/pkg/agent"
 )
 
 func TestParseArgs_Empty(t *testing.T) {

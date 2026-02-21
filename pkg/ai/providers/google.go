@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // --- Google Gemini API types ---

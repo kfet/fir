@@ -3,8 +3,8 @@ package components
 import (
 	"testing"
 
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 type loaderRenderRequester struct{}

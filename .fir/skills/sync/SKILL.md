@@ -9,7 +9,7 @@ Sync the Go port with the latest upstream TypeScript changes from `../pi-mono`.
 
 ## Quick reference
 
-- Upstream repo: `../pi-mono` (relative to tau root)
+- Upstream repo: `../pi-mono` (relative to fi root)
 - Baseline: `sync/.baseline-hashes`
 - File map: `sync/UPSTREAM_MAP.md`
 - Log: `sync/SYNC_LOG.md`

@@ -1212,7 +1212,7 @@ func generateGoSource(models []modelSpec) string {
 	return sb.String()
 }
 
-// repoRoot returns the root of the tau repository (parent of cmd/generate-models).
+// repoRoot returns the root of the fir repository (parent of cmd/generate-models).
 func repoRoot() string {
 	_, filename, _, _ := runtime.Caller(0)
 	// filename is .../cmd/generate-models/main.go

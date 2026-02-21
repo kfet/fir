@@ -11,7 +11,7 @@ import (
 )
 
 // ConfigDirName is the project-local configuration directory name.
-const ConfigDirName = ".tau"
+const ConfigDirName = ".fir"
 
 // PromptTemplate represents a prompt template loaded from a markdown file.
 type PromptTemplate struct {
@@ -218,7 +218,7 @@ func LoadPromptTemplates(opts LoadPromptTemplatesOptions) []PromptTemplate {
 			templates = append(templates, loadTemplatesFromDir(globalDir, "user", "(user)")...)
 		}
 
-		// Project templates from cwd/.tau/prompts/
+		// Project templates from cwd/.fir/prompts/
 		projectDir := filepath.Join(cwd, ConfigDirName, "prompts")
 		templates = append(templates, loadTemplatesFromDir(projectDir, "project", "(project)")...)
 	}

@@ -5,7 +5,7 @@ package agent
 import (
 	"context"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // StreamFn is the function that creates an LLM streaming call.

@@ -5,10 +5,10 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 // AssistantMessageComponent renders a complete assistant message.

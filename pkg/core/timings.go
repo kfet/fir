@@ -23,12 +23,12 @@ var (
 )
 
 func init() {
-	timingsEnabled = os.Getenv("TAU_TIMING") == "1"
+	timingsEnabled = os.Getenv("FIR_TIMING") == "1"
 	lastTime = time.Now()
 }
 
 // RecordTiming records a timing measurement.
-// Only active when TAU_TIMING=1 is set.
+// Only active when FIR_TIMING=1 is set.
 func RecordTiming(label string) {
 	if !timingsEnabled {
 		return
@@ -41,7 +41,7 @@ func RecordTiming(label string) {
 }
 
 // PrintTimings outputs all recorded timings to stderr.
-// Only active when TAU_TIMING=1 is set.
+// Only active when FIR_TIMING=1 is set.
 func PrintTimings() {
 	if !timingsEnabled {
 		return

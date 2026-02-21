@@ -47,8 +47,8 @@ This must ALWAYS be printed right after a session was started and once again at 
 
 ## Finding sessions
 
-- List sessions on your active socket with metadata: `./.tau/skills/tmux/scripts/find-sessions.sh -S "$SOCKET"`; add `-q partial-name` to filter.
-- Scan all sockets under the shared directory: `./.tau/skills/tmux/scripts/find-sessions.sh --all` (uses `CLAUDE_TMUX_SOCKET_DIR` or `${TMPDIR:-/tmp}/claude-tmux-sockets`).
+- List sessions on your active socket with metadata: `./.fir/skills/tmux/scripts/find-sessions.sh -S "$SOCKET"`; add `-q partial-name` to filter.
+- Scan all sockets under the shared directory: `./.fir/skills/tmux/scripts/find-sessions.sh --all` (uses `CLAUDE_TMUX_SOCKET_DIR` or `${TMPDIR:-/tmp}/claude-tmux-sockets`).
 
 ## Sending input safely
 
@@ -74,7 +74,7 @@ Some special rules for processes:
 
 - Use timed polling to avoid races with interactive tools. Example: wait for a Python prompt before sending code:
   ```bash
-  ./.tau/skills/tmux/scripts/wait-for-text.sh -t "$SESSION":0.0 -p '^>>>' -T 15 -l 4000
+  ./.fir/skills/tmux/scripts/wait-for-text.sh -t "$SESSION":0.0 -p '^>>>' -T 15 -l 4000
   ```
 - For long-running commands, poll for completion text (`"Type quit to exit"`, `"Program exited"`, etc.) before proceeding.
 
@@ -92,14 +92,14 @@ Some special rules for processes:
 
 ## Helper scripts
 
-The `.tau/skills/tmux/scripts/` directory contains helper tools:
+The `.fir/skills/tmux/scripts/` directory contains helper tools:
 
 ### wait-for-text.sh
 
-`./.tau/skills/tmux/scripts/wait-for-text.sh` polls a pane for a regex (or fixed string) with a timeout. Works on Linux/macOS with bash + tmux + grep.
+`./.fir/skills/tmux/scripts/wait-for-text.sh` polls a pane for a regex (or fixed string) with a timeout. Works on Linux/macOS with bash + tmux + grep.
 
 ```bash
-./.tau/skills/tmux/scripts/wait-for-text.sh -t session:0.0 -p 'pattern' [-F] [-T 20] [-i 0.5] [-l 2000]
+./.fir/skills/tmux/scripts/wait-for-text.sh -t session:0.0 -p 'pattern' [-F] [-T 20] [-i 0.5] [-l 2000]
 ```
 
 - `-t`/`--target` pane target (required)
@@ -111,10 +111,10 @@ The `.tau/skills/tmux/scripts/` directory contains helper tools:
 
 ### find-sessions.sh
 
-`./.tau/skills/tmux/scripts/find-sessions.sh` lists tmux sessions on a socket with metadata.
+`./.fir/skills/tmux/scripts/find-sessions.sh` lists tmux sessions on a socket with metadata.
 
 ```bash
-./.tau/skills/tmux/scripts/find-sessions.sh [-L socket-name|-S socket-path|-A] [-q pattern]
+./.fir/skills/tmux/scripts/find-sessions.sh [-L socket-name|-S socket-path|-A] [-q pattern]
 ```
 
 - `-L`/`--socket` tmux socket name (passed to tmux -L)

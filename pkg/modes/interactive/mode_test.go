@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
-	"github.com/kfet/tau/pkg/modes/interactive/components"
-	itheme "github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/modes/interactive/components"
+	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestNewInteractiveMode(t *testing.T) {

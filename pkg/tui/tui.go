@@ -184,7 +184,7 @@ func (c *Container) Render(width int) []string {
 // CursorMarker is a zero-width APC sequence for hardware cursor positioning.
 // Components emit this at the cursor position when focused.
 // TUI finds and strips this marker, then positions the hardware cursor there.
-const CursorMarker = "\x1b_tau:c\x07"
+const CursorMarker = "\x1b_fir:c\x07"
 
 // segmentReset resets all ANSI styles and hyperlinks.
 const segmentReset = "\x1b[0m\x1b]8;;\x07"

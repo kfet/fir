@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 func TestParseModelID(t *testing.T) {

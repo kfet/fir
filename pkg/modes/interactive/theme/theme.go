@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/tau/pkg/tui/components"
+	"github.com/kfet/fir/pkg/tui/components"
 )
 
 // ============================================================================

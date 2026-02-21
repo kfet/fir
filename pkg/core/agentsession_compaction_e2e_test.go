@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // TestAutoCompaction_E2E_ThresholdTriggered simulates a full agent loop

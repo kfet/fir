@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tuicomp "github.com/kfet/tau/pkg/tui/components"
+	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 func TestFormatKeys_Empty(t *testing.T) {

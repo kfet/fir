@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func anthropicModel(serverURL string) *ai.Model {
@@ -700,13 +700,13 @@ func TestAnthropic_ResolveCacheRetention(t *testing.T) {
 	}
 
 	// Default with no env var
-	t.Setenv("TAU_CACHE_RETENTION", "")
+	t.Setenv("FIR_CACHE_RETENTION", "")
 	if got := resolveCacheRetention(""); got != ai.CacheShort {
 		t.Errorf("expected CacheShort default, got %v", got)
 	}
 
 	// Env var override
-	t.Setenv("TAU_CACHE_RETENTION", "long")
+	t.Setenv("FIR_CACHE_RETENTION", "long")
 	if got := resolveCacheRetention(""); got != ai.CacheLong {
 		t.Errorf("expected CacheLong from env, got %v", got)
 	}

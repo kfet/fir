@@ -5,9 +5,9 @@ package rpc
 import (
 	"encoding/json"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core/compaction"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core/compaction"
 )
 
 // ============================================================================

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/core"
 )
 
 func TestBuildGroups_Empty(t *testing.T) {
@@ -18,7 +18,7 @@ func TestBuildGroups_SingleItem(t *testing.T) {
 	resolved := ResolvedPaths{
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/user/.tau/agent/skills/test/SKILL.md",
+				Path:    "/home/user/.fir/agent/skills/test/SKILL.md",
 				Enabled: true,
 				Metadata: core.PathMetadata{
 					Source: "auto",
@@ -55,14 +55,14 @@ func TestBuildGroups_Sorting(t *testing.T) {
 	resolved := ResolvedPaths{
 		Extensions: []ResolvedResource{
 			{
-				Path:    "/project/.tau/extensions/foo.ts",
+				Path:    "/project/.fir/extensions/foo.ts",
 				Enabled: true,
 				Metadata: core.PathMetadata{Source: "auto", Scope: "project", Origin: "top-level"},
 			},
 		},
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/.tau/agent/skills/bar/SKILL.md",
+				Path:    "/home/.fir/agent/skills/bar/SKILL.md",
 				Enabled: true,
 				Metadata: core.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
@@ -85,7 +85,7 @@ func TestConfigSelectorComponent_Render(t *testing.T) {
 	resolved := ResolvedPaths{
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/.tau/agent/skills/test/SKILL.md",
+				Path:    "/home/.fir/agent/skills/test/SKILL.md",
 				Enabled: true,
 				Metadata: core.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},

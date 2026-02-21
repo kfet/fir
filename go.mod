@@ -1,4 +1,4 @@
-module github.com/kfet/tau
+module github.com/kfet/fir
 
 go 1.24.0
 

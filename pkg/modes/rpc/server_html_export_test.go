@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // makeMessageEntry builds a SessionEntry of type "message" with the given role and content.

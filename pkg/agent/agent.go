@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // DefaultConvertToLLM keeps only LLM-compatible messages.

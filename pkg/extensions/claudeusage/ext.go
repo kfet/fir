@@ -6,14 +6,14 @@
 //
 // Import this package to enable the extension:
 //
-//	import _ "github.com/kfet/tau/pkg/extensions/claudeusage"
+//	import _ "github.com/kfet/fir/pkg/extensions/claudeusage"
 package claudeusage
 
 import (
 	"strings"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 const (

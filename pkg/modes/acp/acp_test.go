@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -28,8 +28,8 @@ func TestPiAgent_Initialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initialize error: %v", err)
 	}
-	if resp.AgentInfo == nil || resp.AgentInfo.Name != "tau" {
-		t.Errorf("agent name = %v, want tau", resp.AgentInfo)
+	if resp.AgentInfo == nil || resp.AgentInfo.Name != "fir" {
+		t.Errorf("agent name = %v, want fir", resp.AgentInfo)
 	}
 	if resp.ProtocolVersion != acpsdk.ProtocolVersionNumber {
 		t.Errorf("protocol version = %d, want %d", resp.ProtocolVersion, acpsdk.ProtocolVersionNumber)
@@ -344,14 +344,14 @@ func TestResumeSession_InvalidPath(t *testing.T) {
 }
 
 func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
-	// Set TAU_AGENT_DIR so ResumeSession resolves the sessions directory
+	// Set FIR_AGENT_DIR so ResumeSession resolves the sessions directory
 	// to a temp directory we control.
 	agentDir := t.TempDir()
 	sessionsDir := filepath.Join(agentDir, "sessions")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TAU_AGENT_DIR", agentDir)
+	t.Setenv("FIR_AGENT_DIR", agentDir)
 
 	// Create a fake session file inside the sessions dir.
 	sessionPath := filepath.Join(sessionsDir, "my-session.json")

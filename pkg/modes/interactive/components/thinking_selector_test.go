@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/fir/pkg/agent"
 )
 
 func TestThinkingSelectorComponent_Render(t *testing.T) {

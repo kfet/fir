@@ -1,4 +1,4 @@
-// ACP mode: expose tau as an ACP-compliant agent over stdio.
+// ACP mode: expose firr as an ACP-compliant agent over stdio.
 // Ported from: packages/coding-agent/src/modes/acp/acp-mode.ts
 package acp
 
@@ -18,13 +18,13 @@ import (
 	"github.com/google/uuid"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/ai/oauth"
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/core/compaction"
-	"github.com/kfet/tau/pkg/core/tools"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/core/compaction"
+	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 // version is set via SetVersion before RunAcpMode.
@@ -120,7 +120,7 @@ func (pa *piAgent) Initialize(_ context.Context, params acpsdk.InitializeRequest
 	pa.mu.Unlock()
 	return acpsdk.InitializeResponse{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
-		AgentInfo:       &acpsdk.Implementation{Name: "tau", Version: version},
+		AgentInfo:       &acpsdk.Implementation{Name: "fir", Version: version},
 		AgentCapabilities: acpsdk.AgentCapabilities{
 			PromptCapabilities: acpsdk.PromptCapabilities{
 				Image:           true,
@@ -253,7 +253,7 @@ func (pa *piAgent) ListSessions(_ context.Context, params ListSessionsRequest) (
 	}
 
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 	sessionDir := core.DefaultSessionDir(agentDir, cwd)
@@ -293,7 +293,7 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 
 	// Validate session path is within the sessions directory to prevent traversal.
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 	sessionsDir := core.SessionsDir(agentDir)
@@ -349,7 +349,7 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 
 func (pa *piAgent) createSession(_ context.Context, sessionID, cwd string) (*piSession, error) {
 	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("TAU_AGENT_DIR"); dir != "" {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
 
@@ -867,6 +867,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		stats := entry.session.GetSessionStats()
 		name := entry.session.SessionManager.GetSessionName()
 		info := "**Session Info**\n\n"
+		info += fmt.Sprintf("**Version:** %s\n", version)
 		if name != "" {
 			info += fmt.Sprintf("**Name:** %s\n", name)
 		}
@@ -886,6 +887,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		if len(entries) == 0 {
 			pa.sendAgentMessage(sessionID, "No changelog entries found.")
 		} else {
+			// Display oldest-first so newest appears at the bottom (most visible).
 			var texts []string
 			for i := len(entries) - 1; i >= 0; i-- {
 				texts = append(texts, entries[i].Content)

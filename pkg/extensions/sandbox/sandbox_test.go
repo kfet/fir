@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestSandboxExtensionRegisters(t *testing.T) {
@@ -130,7 +130,7 @@ func TestSandboxDisabledViaFlag(t *testing.T) {
 func TestLoadConfig(t *testing.T) {
 	// Create temp directory with sandbox config
 	tmpDir := t.TempDir()
-	piDir := filepath.Join(tmpDir, ".tau")
+	piDir := filepath.Join(tmpDir, ".fir")
 	if err := os.MkdirAll(piDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

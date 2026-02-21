@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // writeConversationHTML writes the conversation history as a minimal HTML document.
@@ -18,7 +18,7 @@ func writeConversationHTML(w io.Writer, entries []*core.SessionEntry, sessionID 
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>tau session %s</title>
+<title>fir session %s</title>
 <style>
 body{font-family:sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;color:#222}
 .msg{margin:1rem 0;padding:.75rem 1rem;border-radius:6px;white-space:pre-wrap;word-break:break-word}

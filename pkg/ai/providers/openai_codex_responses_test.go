@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func codexTestModel() *ai.Model {
@@ -265,8 +265,8 @@ func TestBuildCodexHeaders(t *testing.T) {
 	if headers["OpenAI-Beta"] != "responses=experimental" {
 		t.Errorf("expected beta header, got %q", headers["OpenAI-Beta"])
 	}
-	if headers["originator"] != "tau" {
-		t.Errorf("expected originator 'tau', got %q", headers["originator"])
+	if headers["originator"] != "fir" {
+		t.Errorf("expected originator 'fir', got %q", headers["originator"])
 	}
 	if headers["session_id"] != "sess-123" {
 		t.Errorf("expected session_id, got %q", headers["session_id"])

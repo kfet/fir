@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 const (
@@ -229,7 +229,7 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 		"state":                {state},
 		"id_token_add_organizations": {"true"},
 		"codex_cli_simplified_flow":  {"true"},
-		"originator":           {"tau"},
+		"originator":           {"fir"},
 	}
 	authURL := openAICodexAuthorizeURL + "?" + params.Encode()
 

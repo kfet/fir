@@ -971,7 +971,7 @@ func (sm *SettingsManager) GetClearOnShrink() bool {
 	if sm.settings.Terminal != nil && sm.settings.Terminal.ClearOnShrink != nil {
 		return *sm.settings.Terminal.ClearOnShrink
 	}
-	return os.Getenv("TAU_CLEAR_ON_SHRINK") == "1"
+	return os.Getenv("FIR_CLEAR_ON_SHRINK") == "1"
 }
 
 func (sm *SettingsManager) GetImageAutoResize() bool {
@@ -1042,7 +1042,7 @@ func (sm *SettingsManager) GetShowHardwareCursor() bool {
 	if sm.settings.ShowHardwareCursor != nil {
 		return *sm.settings.ShowHardwareCursor
 	}
-	return os.Getenv("TAU_HARDWARE_CURSOR") == "1"
+	return os.Getenv("FIR_HARDWARE_CURSOR") == "1"
 }
 
 // GetGlobalSettings returns a copy of global settings.

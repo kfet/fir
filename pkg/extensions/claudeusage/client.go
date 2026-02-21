@@ -14,7 +14,7 @@ const (
 	barWidth        = 20
 	yellowThreshold = 85.0
 	redThreshold    = 95.0
-	userAgent       = "tau-claude-usage/0.1.0"
+	userAgent       = "fir-claude-usage/0.1.0"
 	maxErrorBodyLen = 200
 )
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestBashExecutionToText_Basic(t *testing.T) {

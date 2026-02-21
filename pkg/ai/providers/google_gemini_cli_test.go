@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestExtractRetryDelay_Headers(t *testing.T) {
@@ -149,8 +149,8 @@ func TestBuildGeminiCLIRequest(t *testing.T) {
 	if req.Request.ToolConfig == nil {
 		t.Fatal("expected tool config")
 	}
-	if req.UserAgent != "tau-coding-agent" {
-		t.Errorf("expected user agent 'tau-coding-agent', got %q", req.UserAgent)
+	if req.UserAgent != "fir-coding-agent" {
+		t.Errorf("expected user agent 'fir-coding-agent', got %q", req.UserAgent)
 	}
 }
 

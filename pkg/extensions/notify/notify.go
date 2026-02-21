@@ -8,7 +8,7 @@
 //
 // Import this package to enable the extension:
 //
-//	import _ "github.com/kfet/tau/pkg/extensions/notify"
+//	import _ "github.com/kfet/fir/pkg/extensions/notify"
 package notify
 
 import (
@@ -16,7 +16,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kfet/tau/pkg/extension"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 // output is the writer for notification escape sequences.
@@ -36,7 +36,7 @@ var inKitty = func() bool {
 func init() {
 	extension.Register("notify", func(api extension.API) {
 		api.On("agent_end", func(event *extension.Event, ctx extension.Context) (any, error) {
-			notifyTerminal("Tau", "Ready for input")
+			notifyTerminal("Fi", "Ready for input")
 			return nil, nil
 		})
 	})

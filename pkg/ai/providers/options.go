@@ -3,7 +3,7 @@
 package providers
 
 import (
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // BuildBaseOptions constructs base StreamOptions from SimpleStreamOptions.

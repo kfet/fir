@@ -302,7 +302,7 @@ func TestExpandPromptTemplate_AllArgs(t *testing.T) {
 // --- inferPromptSource ---
 
 func TestInferPromptSource_User(t *testing.T) {
-	source, label := inferPromptSource("/home/user/.tau/agent/prompts/fix.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	source, label := inferPromptSource("/home/user/.fir/agent/prompts/fix.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
 	if source != "user" {
 		t.Errorf("source = %q, want user", source)
 	}
@@ -312,7 +312,7 @@ func TestInferPromptSource_User(t *testing.T) {
 }
 
 func TestInferPromptSource_Project(t *testing.T) {
-	source, label := inferPromptSource("/project/.tau/prompts/review.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	source, label := inferPromptSource("/project/.fir/prompts/review.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
 	if source != "project" {
 		t.Errorf("source = %q, want project", source)
 	}
@@ -322,7 +322,7 @@ func TestInferPromptSource_Project(t *testing.T) {
 }
 
 func TestInferPromptSource_Path(t *testing.T) {
-	source, label := inferPromptSource("/custom/dir/something.md", "/home/user/.tau/agent/prompts", "/project/.tau/prompts")
+	source, label := inferPromptSource("/custom/dir/something.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
 	if source != "path" {
 		t.Errorf("source = %q, want path", source)
 	}
@@ -332,7 +332,7 @@ func TestInferPromptSource_Path(t *testing.T) {
 }
 
 func TestInferPromptSource_DirMatch(t *testing.T) {
-	source, _ := inferPromptSource("/home/user/.tau/agent/prompts", "/home/user/.tau/agent/prompts", "")
+	source, _ := inferPromptSource("/home/user/.fir/agent/prompts", "/home/user/.fir/agent/prompts", "")
 	if source != "user" {
 		t.Errorf("source = %q, want user (exact dir match)", source)
 	}
@@ -360,7 +360,7 @@ func TestLoadPromptTemplates_ExplicitUserDir(t *testing.T) {
 }
 
 func TestLoadPromptTemplates_ExplicitProjectDir(t *testing.T) {
-	// When an explicit path matches the cwd/.tau/prompts, source should be "project"
+	// When an explicit path matches the cwd/.fir/prompts, source should be "project"
 	cwd := t.TempDir()
 	promptsDir := filepath.Join(cwd, ConfigDirName, "prompts")
 	os.MkdirAll(promptsDir, 0755)

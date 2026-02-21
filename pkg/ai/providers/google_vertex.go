@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // --- Vertex AI configuration ---

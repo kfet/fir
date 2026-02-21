@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // FooterData provides the data needed to render the footer.

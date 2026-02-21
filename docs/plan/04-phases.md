@@ -2,7 +2,7 @@
 
 ## Phase 0: Scaffolding
 
-- `go mod init github.com/kfet/tau`
+- `go mod init github.com/kfet/fir`
 - Makefile with cross-compilation targets
 - Directory structure
 - `sync/UPSTREAM_MAP.md` — the master TS↔Go file map
@@ -68,7 +68,7 @@ Port in dependency order:
 ### 🎯 Milestone: Print Mode Works (after Phase 5)
 
 ```bash
-echo "Hello" | tau -p
+echo "Hello" | fir -p
 ```
 
 Validates the entire pipeline without TUI.
@@ -91,7 +91,7 @@ The 4362-line monster. Wires TUI + AgentSession + slash commands + overlays.
 - `modes/print.go` — streaming stdout output (124 lines TS)
 - `modes/rpc/` — JSON-RPC over stdin/stdout
 
-## Phase 9: CLI Entry Point (`cmd/tau/`)
+## Phase 9: CLI Entry Point (`cmd/fir/`)
 
 Arg parsing, mode dispatch, package management commands.
 

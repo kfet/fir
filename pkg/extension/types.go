@@ -1,4 +1,4 @@
-// Package extension provides the extension system for tau.
+// Package extension provides the extension system for fir.
 //
 // Extensions are Go packages that register themselves via Register() or init().
 // They can subscribe to lifecycle events, register custom tools, commands,
@@ -9,9 +9,9 @@
 package extension
 
 import (
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // Factory is the entry point for an extension.

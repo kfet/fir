@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/fir/pkg/agent"
 )
 
-// Mode is the output mode for tau.
+// Mode is the output mode for fir.
 type Mode string
 
 const (
@@ -255,9 +255,9 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 
 // PrintHelp prints the CLI usage information.
 func PrintHelp() {
-	appName := "tau"
-	configDir := ".tau"
-	envAgentDir := "TAU_AGENT_DIR"
+	appName := "fir"
+	configDir := ".fir"
+	envAgentDir := "FIR_AGENT_DIR"
 
 	fmt.Printf(`%s - AI coding assistant with read, bash, edit, write tools
 

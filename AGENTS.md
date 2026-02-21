@@ -10,17 +10,19 @@ Do not leave incomplete or stubbed code. Ensure all code is functional and teste
 
 ## Extensions
 
-Extensions register via `init()` using `extension.Register(...)`. For an extension to be available at runtime, it **must** be blank-imported in `cmd/tau/app.go`:
+Extensions register via `init()` using `extension.Register(...)`. For an extension to be available at runtime, it **must** be blank-imported in `cmd/fir/app.go`:
 
 ```go
-_ "github.com/kfet/tau/pkg/extensions/sandbox"
+_ "github.com/kfet/fir/pkg/extensions/sandbox"
 ```
 
-If you add a new extension package under `pkg/extensions/`, always add the corresponding blank import to `cmd/tau/app.go` — otherwise its `init()` never runs and the extension silently does not load.
+If you add a new extension package under `pkg/extensions/`, always add the corresponding blank import to `cmd/fir/app.go` — otherwise its `init()` never runs and the extension silently does not load.
 
 ## Changelog
 
 When making user-visible changes, add an entry under `## [Unreleased]` in `CHANGELOG.md` using the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, `### Removed`). Keep entries concise — one line per change. Do not bump `VERSION`; that happens during release.
+
+**Order:** The changelog is kept in reverse-chronological order — the most recent version section is always at the top, directly below the `## [Unreleased]` section. Older versions appear further down. When adding entries within `## [Unreleased]`, prepend new items at the top of their subsection so the most recent change stays first.
 
 ## ACP Mode Port (Current Phase)
 
@@ -30,11 +32,11 @@ ACP SDK types live at `../pi-mono-acp/node_modules/@agentclientprotocol/sdk/dist
 ### Why ACP is a mode, not an extension
 
 The upstream analysis (`../pi-mono-acp/ACP-ANALYSIS.md`) concludes ACP cannot be an extension.
-That analysis was written against pi-mono's **runtime-loaded JS extensions**. tau uses
+That analysis was written against pi-mono's **runtime-loaded JS extensions**. fir uses
 **compiled-in Go extensions** which are more powerful in some ways (full Go access, can
 import any package) but equally limited in the ways that matter for ACP:
 
-1. **No transport control.** tau extensions (like TS ones) run *within* a mode. Neither can
+1. **No transport control.** fir extensions (like TS ones) run *within* a mode. Neither can
    say "listen on stdin for ACP JSON-RPC." The `RunAcpMode()` entry point that sets up
    ndjson JSON-RPC 2.0 over stdio is outside extension scope in both systems.
 
@@ -43,7 +45,7 @@ import any package) but equally limited in the ways that matter for ACP:
    creating sessions on demand via `session/new`.
 
 3. **No base tool replacement.** The upstream analysis says TS extensions "can *add* tools
-   via `registerTool()` but cannot *replace* built-in tools." In tau, `RegisterTool` has a
+   via `registerTool()` but cannot *replace* built-in tools." In fir, `RegisterTool` has a
    comment claiming "If name matches a built-in tool, it overrides it" — but this is **not
    actually implemented**: extension tools are stored in `runner.allTools` but never injected
    into `Agent.Tools`. Even if it were implemented, ACP needs to swap tool implementations
@@ -60,7 +62,7 @@ import any package) but equally limited in the ways that matter for ACP:
    `fs.writeTextFile`, `terminal`) during `initialize`. No hook exists in either extension
    system for "the client supports X, so modify behavior Y."
 
-**Bottom line:** The compiled-in nature of tau extensions gives them access to Go internals,
+**Bottom line:** The compiled-in nature of fir extensions gives them access to Go internals,
 but the extension API surface is deliberately limited to the same operations as TS extensions.
 The five architectural gaps above apply equally. ACP must be a standalone mode.
 

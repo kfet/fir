@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestToAIThinkingLevel(t *testing.T) {

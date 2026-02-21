@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // testdataDir returns the path to the testdata directory.
@@ -125,7 +125,7 @@ func collectEvents(t *testing.T, stream *ai.AssistantMessageEventStream) []ai.As
 
 // --- Fixture files ---
 // Fixtures are stored in testdata/ as raw SSE event streams.
-// To record new fixtures, use TAU_RECORD_FIXTURES=1 with live tests.
+// To record new fixtures, use FIR_RECORD_FIXTURES=1 with live tests.
 
 func TestTestdataDirExists(t *testing.T) {
 	dir := testdataDir()

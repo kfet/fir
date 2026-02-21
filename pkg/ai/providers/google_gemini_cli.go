@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kfet/tau/pkg/ai"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // --- Constants ---
@@ -350,7 +350,7 @@ func buildGeminiCLIRequest(
 	}
 
 	reqType := ""
-	userAgent := "tau-coding-agent"
+	userAgent := "fir-coding-agent"
 	if isAntigravity {
 		reqType = "agent"
 		userAgent = "antigravity"

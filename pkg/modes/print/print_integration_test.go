@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/tau/pkg/agent"
-	"github.com/kfet/tau/pkg/ai"
-	"github.com/kfet/tau/pkg/core"
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 )
 
 // mockStreamFn returns a StreamFn that produces a canned response.
@@ -37,7 +37,7 @@ func mockStreamFn(text string) agent.StreamFn {
 }
 
 // TestPrintMode_EndToEnd tests the full pipeline: prompt → agent → mock stream → output.
-// This is the integration test for the "echo Hello | tau -p" milestone.
+// This is the integration test for the "echo Hello | fir -p" milestone.
 func TestPrintMode_EndToEnd(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",

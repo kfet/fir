@@ -1,8 +1,8 @@
-# tau
+# fir
 
 A fast, portable AI coding agent. Single binary, no runtime dependencies.
 
-tau is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
+fir is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
 [Mario Zechner](https://github.com/badlogic) and closely tracks it upstream.
 All credit for the original design — the agent loop, tool system, TUI,
 multi-provider architecture, and extension framework — belongs to that project.
@@ -10,7 +10,7 @@ The motivation for this port is size and portability, specifically I was aiming
 for an efficient minimal agent running on a Raspberry Pi Zero W.
 
 ```
-tau -p "refactor the auth module to use JWT"
+fir -p "refactor the auth module to use JWT"
 ```
 
 ## Features
@@ -27,14 +27,14 @@ tau -p "refactor the auth module to use JWT"
 Requires [Go 1.24+](https://go.dev/dl/).
 
 ```bash
-go install github.com/kfet/tau/cmd/tau@latest
+go install github.com/kfet/fir/cmd/fir@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/kfet/tau.git
-cd tau
+git clone https://github.com/kfet/fir.git
+cd fir
 make install    # installs to $GOPATH/bin
 ```
 
@@ -42,25 +42,25 @@ make install    # installs to $GOPATH/bin
 
 ```bash
 # Interactive mode
-tau
+fir
 
 # Non-interactive (process and exit)
-tau -p "List all Go files in pkg/"
+fir -p "List all Go files in pkg/"
 
 # Include files as context
-tau @README.md @main.go "Summarize this project"
+fir @README.md @main.go "Summarize this project"
 
 # Continue previous session
-tau -c "What were we working on?"
+fir -c "What were we working on?"
 
 # Pick a provider and model
-tau --provider anthropic --model claude-sonnet-4-20250514
+fir --provider anthropic --model claude-sonnet-4-20250514
 
 # Set thinking level
-tau --thinking high "Design a distributed cache"
+fir --thinking high "Design a distributed cache"
 
 # List available models
-tau --list-models gemini
+fir --list-models gemini
 ```
 
 ## Configuration
@@ -80,9 +80,9 @@ export MISTRAL_API_KEY="..."
 export AWS_PROFILE="..."           # for Bedrock
 ```
 
-### Global config (`~/.tau/agent/`)
+### Global config (`~/.fir/agent/`)
 
-The global config directory (override with `TAU_AGENT_DIR`) holds:
+The global config directory (override with `FIR_AGENT_DIR`) holds:
 
 | File | Purpose |
 |---|---|
@@ -90,19 +90,19 @@ The global config directory (override with `TAU_AGENT_DIR`) holds:
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 
-### Project config (`.tau/` in your project root)
+### Project config (`.fir/` in your project root)
 
-Per-project settings live in a `.tau/` directory at the root of your repo:
+Per-project settings live in a `.fir/` directory at the root of your repo:
 
 | Path | Purpose |
 |---|---|
-| `.tau/settings.json` | Project-level overrides (merged on top of global settings) |
-| `.tau/skills/` | Project-specific skills (auto-discovered) |
-| `.tau/prompts/` | Project-specific prompt templates |
+| `.fir/settings.json` | Project-level overrides (merged on top of global settings) |
+| `.fir/skills/` | Project-specific skills (auto-discovered) |
+| `.fir/prompts/` | Project-specific prompt templates |
 
 ### Project context files
 
-tau reads `AGENTS.md` (or `CLAUDE.md`) files from the working directory and
+fir reads `AGENTS.md` (or `CLAUDE.md`) files from the working directory and
 its ancestors, automatically including them in the system prompt as project
 context.
 
@@ -123,13 +123,13 @@ or project):
 **Enable via CLI** — use `--extension` / `-e` (merges with config, deduplicated):
 
 ```bash
-tau -e notify -e sandbox "do something"
+fir -e notify -e sandbox "do something"
 ```
 
 **Disable all** — `--no-extensions` overrides everything:
 
 ```bash
-tau --no-extensions "do something"
+fir --no-extensions "do something"
 ```
 
 #### Built-in extensions
@@ -137,7 +137,7 @@ tau --no-extensions "do something"
 | Name | Description |
 |---|---|
 | `notify` | Sends a native terminal notification (OSC 777/99) when the agent finishes. Works in Ghostty, iTerm2, WezTerm, Kitty. |
-| `sandbox` | Wraps bash commands with OS-level filesystem and network restrictions. Configured via `~/.tau/agent/sandbox.json` (global) or `.tau/sandbox.json` (project). |
+| `sandbox` | Wraps bash commands with OS-level filesystem and network restrictions. Configured via `~/.fir/agent/sandbox.json` (global) or `.fir/sandbox.json` (project). |
 
 #### Writing custom extensions
 
@@ -146,7 +146,7 @@ Extensions are Go packages that register themselves at build time via `init()`:
 ```go
 package myext
 
-import "github.com/kfet/tau/pkg/extension"
+import "github.com/kfet/fir/pkg/extension"
 
 func init() {
     extension.Register("myext", func(api extension.API) {
@@ -158,10 +158,10 @@ func init() {
 }
 ```
 
-Add a blank import in `cmd/tau/app.go` and rebuild:
+Add a blank import in `cmd/fir/app.go` and rebuild:
 
 ```go
-import _ "github.com/kfet/tau/pkg/extensions/myext"
+import _ "github.com/kfet/fir/pkg/extensions/myext"
 ```
 
 Extensions can subscribe to lifecycle events (`session_start`, `agent_start`,
@@ -172,7 +172,7 @@ keyboard shortcuts. See `pkg/extension/types.go` for the full API.
 ## Build
 
 ```bash
-make build          # build to ./bin/tau
+make build          # build to ./bin/fir
 make install        # install to $GOPATH/bin
 make build-all      # cross-compile for all targets
 make test           # run tests
@@ -195,7 +195,7 @@ make clean          # remove build artifacts
 ## Project structure
 
 ```
-cmd/tau/          CLI entry point
+cmd/fir/          CLI entry point
 pkg/
   agent/         Core agent loop
   ai/            LLM providers, streaming, model registry
@@ -206,9 +206,9 @@ pkg/
   tui/           Terminal UI (markdown rendering, themes)
 ```
 
-## Built with pi and tau
+## Built with pi and fir
 
 The initial port was built using the original
 [pi](https://github.com/badlogic/pi-mono) coding agent. Once enough of the
-codebase was functional, development switched to self-hosting: tau now
+codebase was functional, development switched to self-hosting: fir now
 continues its own development.

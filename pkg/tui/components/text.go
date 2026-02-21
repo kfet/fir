@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 // Text displays multi-line text with word wrapping.

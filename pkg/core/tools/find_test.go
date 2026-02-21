@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/agent"
+	"github.com/kfet/fir/pkg/agent"
 )
 
 func execFind(t *testing.T, tool agent.AgentTool, params map[string]any) (agent.AgentToolResult, error) {

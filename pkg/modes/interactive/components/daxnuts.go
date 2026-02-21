@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 const daxWidth = 32

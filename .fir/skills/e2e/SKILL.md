@@ -1,6 +1,6 @@
 ---
 name: e2e
-description: Continuously test the tau binary end-to-end by running it in print and RPC modes over stdio, verifying tool execution, streaming, and error handling against a real or mock LLM.
+description: Continuously test the fir binary end-to-end by running it in print and RPC modes over stdio, verifying tool execution, streaming, and error handling against a real or mock LLM.
 ---
 
 # End-to-End Testing via stdio
@@ -10,13 +10,13 @@ description: Continuously test the tau binary end-to-end by running it in print 
 > PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 > ```
 
-You are the E2E testing agent. Your job is to build the `tau` binary, run it in print mode and RPC mode, pipe commands and responses over stdio, and verify correct behavior. You report failures to `docs/review/URGENT.md` and `docs/review/BACKLOG.md` so the fix agent can pick them up.
+You are the E2E testing agent. Your job is to build the `fi` binary, run it in print mode and RPC mode, pipe commands and responses over stdio, and verify correct behavior. You report failures to `docs/review/URGENT.md` and `docs/review/BACKLOG.md` so the fix agent can pick them up.
 
 ## Environment Notes
 
 These constraints were discovered during testing and MUST be followed:
 
-- **Build output path:** `/tmp/` root is NOT writable in this sandbox (only `$TMPDIR` aka `/tmp/claude/` is). Always build to `./bin/tau-e2e` inside the project directory.
+- **Build output path:** `/tmp/` root is NOT writable in this sandbox (only `$TMPDIR` aka `/tmp/claude/` is). Always build to `./bin/fir-e2e` inside the project directory.
 - **Use `$TMPDIR` not `/tmp`:** The sandbox redirects temp writes to `$TMPDIR` (e.g. `/tmp/claude/`). Never hardcode `/tmp/` — always use `$TMPDIR`.
 - **No `timeout` command:** macOS does not have `timeout` or `gtimeout`. Instead, use the **bash tool's `timeout` parameter** on every call. Never use `timeout` as a shell command.
 - **`env -u` requires `bash -c` wrapping:** To properly unset env vars for a subprocess, use: `env -u VAR bash -c 'command'`
@@ -29,7 +29,7 @@ These constraints were discovered during testing and MUST be followed:
 Before each test cycle, ensure the binary builds:
 
 ```bash
-cd "$PROJECT_ROOT" && mkdir -p bin && go build -ldflags="-s -w" -o ./bin/tau-e2e ./cmd/tau/ 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && mkdir -p bin && go build -ldflags="-s -w" -o ./bin/fir-e2e ./cmd/fir/ 2>&1; echo "EXIT:$?"
 ```
 
 Use `timeout: 60` on the bash tool call. If the build fails, write the error to `docs/review/URGENT.md` as a build break and sleep until the next cycle.
@@ -38,7 +38,7 @@ Use `timeout: 60` on the bash tool call. If the build fails, write the error to 
 
 **All LLM-dependent tests use a local mock server** so no real API keys are needed.
 
-The mock server is a small Go program at `.tau/skills/e2e/mockserver/main.go` that implements the OpenAI Chat Completions SSE protocol. It:
+The mock server is a small Go program at `.fir/skills/e2e/mockserver/main.go` that implements the OpenAI Chat Completions SSE protocol. It:
 - Listens on a random TCP port (or `MOCK_PORT` env var) and prints `MOCK_PORT=<port>` to stdout
 - Writes the port number to `$TMPDIR/mock-e2e-port` for the test harness to read
 - Returns canned streaming responses
@@ -56,7 +56,7 @@ The mock server needs to bind a TCP port on `127.0.0.1`. If the environment bloc
 ### Step 0: Build and start the mock server
 
 ```bash
-cd "$PROJECT_ROOT" && mkdir -p bin && go build -o ./bin/mock-e2e-server ./.tau/skills/e2e/mockserver/ 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && mkdir -p bin && go build -o ./bin/mock-e2e-server ./.fir/skills/e2e/mockserver/ 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 30`.
 
@@ -122,7 +122,7 @@ echo "MOCK_AGENT_DIR=$MOCK_AGENT_DIR"
 All LLM-dependent commands use this pattern:
 
 ```bash
-TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model [other flags] 2>&1; echo "EXIT:$?"
+FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model [other flags] 2>&1; echo "EXIT:$?"
 ```
 
 ### Teardown
@@ -143,10 +143,10 @@ If the mock server cannot start (network restricted), check for real API keys:
 [ -n "$GEMINI_API_KEY" ] && echo "GEMINI" || true
 ```
 
-If any key is available, run LLM tests using the real provider (omit `--provider mock --model mock-model` and `TAU_AGENT_DIR` overrides). The real-provider variants are the same commands but without the mock env vars, e.g.:
+If any key is available, run LLM tests using the real provider (omit `--provider mock --model mock-model` and `FIR_AGENT_DIR` overrides). The real-provider variants are the same commands but without the mock env vars, e.g.:
 
 ```bash
-cd "$PROJECT_ROOT" && echo "What is 2+2?" | ./bin/tau-e2e --no-session -p 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo "What is 2+2?" | ./bin/fir-e2e --no-session -p 2>&1; echo "EXIT:$?"
 ```
 
 Use `timeout: 30` for real-provider tests (they are slower). Verify the same conditions — just note that response text will be from the real LLM, not "MOCK_RESPONSE".
@@ -164,7 +164,7 @@ Print mode sends a prompt and exits. Test it by piping input and checking stdout
 #### 1a. Print mode with piped stdin (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && echo "What is 2+2?" | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --no-session -p 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo "What is 2+2?" | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --no-session -p 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -176,7 +176,7 @@ Use `timeout: 15` on the bash tool call.
 #### 1b. Print mode with message argument (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --no-session -p "Say exactly: HELLO_E2E_TEST" 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --no-session -p "Say exactly: HELLO_E2E_TEST" 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -188,7 +188,7 @@ Use `timeout: 15` on the bash tool call.
 #### 1c. Print mode with `--no-session` (ephemeral, mock)
 
 ```bash
-cd "$PROJECT_ROOT" && echo "Say OK" | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --no-session -p 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo "Say OK" | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --no-session -p 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -199,7 +199,7 @@ Use `timeout: 15` on the bash tool call.
 #### 1d. Print mode error handling (no API key)
 
 ```bash
-cd "$PROJECT_ROOT" && env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u GEMINI_API_KEY -u GROQ_API_KEY -u XAI_API_KEY -u OPENROUTER_API_KEY -u MISTRAL_API_KEY -u AWS_PROFILE bash -c 'echo "test" | ./bin/tau-e2e -p 2>&1'; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u GEMINI_API_KEY -u GROQ_API_KEY -u XAI_API_KEY -u OPENROUTER_API_KEY -u MISTRAL_API_KEY -u AWS_PROFILE bash -c 'echo "test" | ./bin/fir-e2e -p 2>&1'; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -210,7 +210,7 @@ Use `timeout: 15` on the bash tool call.
 #### 1e. Print mode JSON output (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && echo "Say hello" | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --no-session --mode json 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo "Say hello" | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --no-session --mode json 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -227,7 +227,7 @@ RPC mode reads JSON commands from stdin and writes JSON responses/events to stdo
 #### 2a. Basic RPC: get_state
 
 ```bash
-cd "$PROJECT_ROOT" && echo '{"id":"1","type":"get_state"}' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo '{"id":"1","type":"get_state"}' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -241,7 +241,7 @@ Use `timeout: 15` on the bash tool call.
 **Important:** The `prompt` command launches a goroutine (fire-and-forget). Stdin must stay open long enough for the agent to complete before EOF causes the server to exit. Use `{ printf ...; sleep 5; }` to hold stdin open.
 
 ```bash
-cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Say exactly: RPC_TEST_OK"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Say exactly: RPC_TEST_OK"}\n'; sleep 5; } | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -254,7 +254,7 @@ Use `timeout: 15` on the bash tool call.
 #### 2c. RPC: get_available_models (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && echo '{"id":"1","type":"get_available_models"}' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo '{"id":"1","type":"get_available_models"}' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -265,7 +265,7 @@ Use `timeout: 15` on the bash tool call.
 #### 2d. RPC: set_thinking_level (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_thinking_level","level":"high"}\n{"id":"2","type":"get_state"}\n' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && printf '{"id":"1","type":"set_thinking_level","level":"high"}\n{"id":"2","type":"get_state"}\n' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -276,7 +276,7 @@ Use `timeout: 15` on the bash tool call.
 #### 2e. RPC: unknown command
 
 ```bash
-cd "$PROJECT_ROOT" && echo '{"id":"1","type":"bogus_command"}' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo '{"id":"1","type":"bogus_command"}' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
@@ -286,7 +286,7 @@ Use `timeout: 10` on the bash tool call.
 #### 2f. RPC: malformed JSON
 
 ```bash
-cd "$PROJECT_ROOT" && echo 'this is not json' | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && echo 'this is not json' | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
@@ -297,7 +297,7 @@ Use `timeout: 10` on the bash tool call.
 #### 2g. RPC: abort (mock)
 
 ```bash
-cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Write a very long essay about the history of mathematics"}\n'; sleep 3; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && { printf '{"id":"1","type":"prompt","message":"Write a very long essay about the history of mathematics"}\n'; sleep 3; } | FIR_AGENT_DIR="$MOCK_AGENT_DIR" ./bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
@@ -311,7 +311,7 @@ Use `timeout: 10` on the bash tool call.
 #### 3a. --help
 
 ```bash
-cd "$PROJECT_ROOT" && ./bin/tau-e2e --help 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --help 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
@@ -322,18 +322,18 @@ Use `timeout: 10` on the bash tool call.
 #### 3b. --version
 
 ```bash
-cd "$PROJECT_ROOT" && ./bin/tau-e2e --version 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --version 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
 **Verify:**
 - Exit code 0
-- Stdout contains "tau"
+- Stdout contains "fir"
 
 #### 3c. --list-models
 
 ```bash
-cd "$PROJECT_ROOT" && ./bin/tau-e2e --list-models 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --list-models 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 10` on the bash tool call.
 
@@ -352,7 +352,7 @@ The mock server returns a `read` tool call when it sees `READ_FILE` in the promp
 **Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
 
 ```bash
-TMPTEST=$(mktemp -d) && echo "E2E_TEST_CONTENT_12345" > "$TMPTEST/testfile.txt" && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"READ_FILE testfile.txt"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
+TMPTEST=$(mktemp -d) && echo "E2E_TEST_CONTENT_12345" > "$TMPTEST/testfile.txt" && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"READ_FILE testfile.txt"}\n'; sleep 5; } | FIR_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -367,12 +367,12 @@ The mock server returns a `write` tool call when it sees `WRITE_FILE` in the pro
 **Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
 
 ```bash
-TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"WRITE_FILE output.txt WRITTEN_BY_TAU"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; cat "$TMPTEST/output.txt" 2>/dev/null; echo "---"; rm -rf "$TMPTEST"
+TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"WRITE_FILE output.txt WRITTEN_BY_FIR"}\n'; sleep 5; } | FIR_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; cat "$TMPTEST/output.txt" 2>/dev/null; echo "---"; rm -rf "$TMPTEST"
 ```
 Use `timeout: 15` on the bash tool call.
 
 **Verify:**
-- `output.txt` exists and contains "WRITTEN_BY_TAU"
+- `output.txt` exists and contains "WRITTEN_BY_FIR"
 
 #### 4c. Bash tool (mock)
 
@@ -381,7 +381,7 @@ The mock server returns a `bash` tool call when it sees `RUN_BASH` in the prompt
 **Important:** Use `{ printf ...; sleep 5; }` to keep stdin open so the agent goroutine has time to complete and execute tools.
 
 ```bash
-TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"RUN_BASH echo BASH_E2E_OK"}\n'; sleep 5; } | TAU_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/tau-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
+TMPTEST=$(mktemp -d) && cd "$TMPTEST" && { printf '{"id":"1","type":"prompt","message":"RUN_BASH echo BASH_E2E_OK"}\n'; sleep 5; } | FIR_AGENT_DIR="$MOCK_AGENT_DIR" "$PROJECT_ROOT"/bin/fir-e2e --provider mock --model mock-model --mode rpc --no-session 2>&1; echo "EXIT:$?"; rm -rf "$TMPTEST"
 ```
 Use `timeout: 15` on the bash tool call.
 
@@ -396,7 +396,7 @@ Each cycle:
 ### Step 1: Build
 
 ```bash
-cd "$PROJECT_ROOT" && mkdir -p bin && go build -ldflags="-s -w" -o ./bin/tau-e2e ./cmd/tau/ 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && mkdir -p bin && go build -ldflags="-s -w" -o ./bin/fir-e2e ./cmd/fir/ 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 60` on the bash tool call.
 
@@ -405,7 +405,7 @@ If build fails → write to `docs/review/URGENT.md`, skip to sleep.
 ### Step 2: Build and start mock server
 
 ```bash
-cd "$PROJECT_ROOT" && mkdir -p bin && go build -o ./bin/mock-e2e-server ./.tau/skills/e2e/mockserver/ 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && mkdir -p bin && go build -o ./bin/mock-e2e-server ./.fir/skills/e2e/mockserver/ 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 30`.
 
@@ -488,7 +488,7 @@ Run these tests that don't require any provider. **Run independent tests in para
 - RPC abort (2g)
 - Tool execution tests (4a, 4b, 4c)
 
-**If mock is unavailable** but a real API key exists, run the same tests using the real provider (remove `TAU_AGENT_DIR`, `--provider mock`, `--model mock-model`). Use `timeout: 30` for real provider tests. Tool tests (4a-4c) should be **skipped** with real providers since they depend on the mock server's keyword-based tool call dispatch.
+**If mock is unavailable** but a real API key exists, run the same tests using the real provider (remove `FIR_AGENT_DIR`, `--provider mock`, `--model mock-model`). Use `timeout: 30` for real provider tests. Tool tests (4a-4c) should be **skipped** with real providers since they depend on the mock server's keyword-based tool call dispatch.
 
 **If neither mock nor real keys**, skip all LLM tests and report: "LLM tests skipped — no mock server or API keys available."
 
@@ -534,12 +534,12 @@ For items that were previously failing but now pass, remove them from the backlo
 
 **Re-read this skill file** to keep instructions in context:
 ```
-.tau/skills/e2e/SKILL.md
+.fir/skills/e2e/SKILL.md
 ```
 
 Sleep and loop:
 ```bash
-sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read .tau/skills/e2e/SKILL.md and start the next test cycle. Build: go build -o ./bin/tau-e2e ./cmd/tau/"
+sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read .fir/skills/e2e/SKILL.md and start the next test cycle. Build: go build -o ./bin/fir-e2e ./cmd/fir/"
 ```
 
 Use `timeout: 40` on the bash call. When you see the reminder, immediately:
@@ -569,5 +569,5 @@ Track known bugs here so you don't re-file them every cycle:
 - **Verify JSON output.** When testing RPC or JSON mode, validate that each line parses as JSON. A line that isn't valid JSON is a bug.
 - **Don't re-file known issues.** Check the Known Issues section above before writing to review files.
 - **Always `cd "$PROJECT_ROOT"`** at the start of commands. Don't assume the working directory.
-- **Use absolute path to binary** when running from temp directories (e.g., `"$PROJECT_ROOT"/bin/tau-e2e`).
+- **Use absolute path to binary** when running from temp directories (e.g., `"$PROJECT_ROOT"/bin/fir-e2e`).
 - **Always clean up the mock server** (`kill $MOCK_PID`) even if tests fail.

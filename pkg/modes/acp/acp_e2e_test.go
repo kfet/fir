@@ -1,18 +1,18 @@
 // ACP mode end-to-end tests.
-// These tests spawn the compiled tau binary with --mode acp and communicate
+// These tests spawn the compiled fir binary with --mode acp and communicate
 // with it via the ACP protocol using the ACP SDK's ClientSideConnection.
 //
 // Prerequisites:
-//   TAU_TEST_BINARY   path to the compiled tau binary (required)
-//   TAU_E2E_AGENT_DIR path to an agent dir with a model configured (optional;
+//   FIR_TEST_BINARY   path to the compiled fir binary (required)
+//   FIR_E2E_AGENT_DIR path to an agent dir with a model configured (optional;
 //                     required for session/prompt tests)
 //
 // Example:
-//   go build -o /tmp/tau-e2e ./cmd/tau/
-//   TAU_TEST_BINARY=/tmp/tau-e2e go test ./pkg/modes/acp/ -run TestACP_E2E -v
+//   go build -o /tmp/fir-e2e ./cmd/fir/
+//   FIR_TEST_BINARY=/tmp/fir-e2e go test ./pkg/modes/acp/ -run TestACP_E2E -v
 //
 // To also run prompt tests, point at a mock or real LLM:
-//   TAU_TEST_BINARY=/tmp/tau-e2e TAU_E2E_AGENT_DIR=/tmp/mock-agent \
+//   FIR_TEST_BINARY=/tmp/fir-e2e FIR_E2E_AGENT_DIR=/tmp/mock-agent \
 //     go test ./pkg/modes/acp/ -run TestACP_E2E -v -timeout 30s
 package acp_test
 
@@ -90,22 +90,22 @@ func (c *e2eClient) getNotifications() []acpsdk.SessionNotification {
 // Test helpers
 // ============================================================================
 
-// tauBinary returns the path to the tau binary under test.
-// The test is skipped if TAU_TEST_BINARY is not set.
-func tauBinary(t *testing.T) string {
+// firBinary returns the path to the fir binary under test.
+// The test is skipped if FIR_TEST_BINARY is not set.
+func firBinary(t *testing.T) string {
 	t.Helper()
-	b := os.Getenv("TAU_TEST_BINARY")
+	b := os.Getenv("FIR_TEST_BINARY")
 	if b == "" {
-		t.Skip("TAU_TEST_BINARY not set — build with: go build -o /tmp/tau-e2e ./cmd/tau/ && set TAU_TEST_BINARY=/tmp/tau-e2e")
+		t.Skip("FIR_TEST_BINARY not set — build with: go build -o /tmp/fir-e2e ./cmd/fir/ && set FIR_TEST_BINARY=/tmp/fir-e2e")
 	}
 	return b
 }
 
-// spawnACP starts the tau binary in ACP mode and returns a connected
+// spawnACP starts the fir binary in ACP mode and returns a connected
 // ClientSideConnection plus a cleanup function.
 func spawnACP(t *testing.T, extraEnv ...string) (*acpsdk.ClientSideConnection, *e2eClient, func()) {
 	t.Helper()
-	binary := tauBinary(t)
+	binary := firBinary(t)
 
 	cmd := exec.Command(binary,
 		"--mode", "acp",
@@ -118,8 +118,8 @@ func spawnACP(t *testing.T, extraEnv ...string) (*acpsdk.ClientSideConnection, *
 
 	// Build environment: inherit, then apply overrides.
 	env := os.Environ()
-	if agentDir := os.Getenv("TAU_E2E_AGENT_DIR"); agentDir != "" {
-		env = append(env, "TAU_AGENT_DIR="+agentDir)
+	if agentDir := os.Getenv("FIR_E2E_AGENT_DIR"); agentDir != "" {
+		env = append(env, "FIR_AGENT_DIR="+agentDir)
 	}
 	env = append(env, extraEnv...)
 	cmd.Env = env
@@ -135,14 +135,14 @@ func spawnACP(t *testing.T, extraEnv ...string) (*acpsdk.ClientSideConnection, *
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		t.Fatal("start tau:", err)
+		t.Fatal("start fir:", err)
 	}
 
 	client := &e2eClient{}
 	conn := acpsdk.NewClientSideConnection(client, stdin, stdout)
 
 	cleanup := func() {
-		stdin.Close() // cause EOF → tau exits
+		stdin.Close() // cause EOF → fir exits
 		select {
 		case <-conn.Done():
 		case <-time.After(5 * time.Second):
@@ -153,12 +153,12 @@ func spawnACP(t *testing.T, extraEnv ...string) (*acpsdk.ClientSideConnection, *
 	return conn, client, cleanup
 }
 
-// requireModelEnv skips the test if TAU_E2E_AGENT_DIR is not set
+// requireModelEnv skips the test if FIR_E2E_AGENT_DIR is not set
 // (which means no model is available for LLM calls).
 func requireModelEnv(t *testing.T) {
 	t.Helper()
-	if os.Getenv("TAU_E2E_AGENT_DIR") == "" {
-		t.Skip("TAU_E2E_AGENT_DIR not set — needed for LLM tests")
+	if os.Getenv("FIR_E2E_AGENT_DIR") == "" {
+		t.Skip("FIR_E2E_AGENT_DIR not set — needed for LLM tests")
 	}
 }
 
@@ -189,8 +189,8 @@ func TestACP_E2E_Initialize(t *testing.T) {
 	if resp.AgentInfo == nil {
 		t.Fatal("agentInfo is nil")
 	}
-	if resp.AgentInfo.Name != "tau" {
-		t.Errorf("agentInfo.name = %q, want %q", resp.AgentInfo.Name, "tau")
+	if resp.AgentInfo.Name != "fir" {
+		t.Errorf("agentInfo.name = %q, want %q", resp.AgentInfo.Name, "fir")
 	}
 	if resp.AgentInfo.Version == "" {
 		t.Error("agentInfo.version is empty")
@@ -311,7 +311,7 @@ func TestACP_E2E_CancelNonexistent(t *testing.T) {
 
 // TestACP_E2E_Prompt sends a text prompt and verifies session/update notifications
 // arrive and the prompt returns StopReasonEndTurn.
-// Requires TAU_E2E_AGENT_DIR with a configured model.
+// Requires FIR_E2E_AGENT_DIR with a configured model.
 func TestACP_E2E_Prompt(t *testing.T) {
 	requireModelEnv(t)
 
@@ -367,7 +367,7 @@ func TestACP_E2E_Prompt(t *testing.T) {
 }
 
 // TestACP_E2E_PromptSlashCompact verifies /compact doesn't error and returns EndTurn.
-// Requires TAU_E2E_AGENT_DIR.
+// Requires FIR_E2E_AGENT_DIR.
 func TestACP_E2E_PromptSlashCompact(t *testing.T) {
 	requireModelEnv(t)
 
@@ -452,7 +452,7 @@ func TestACP_E2E_SetSessionModelNotFound(t *testing.T) {
 
 // TestACP_E2E_PromptWithToolUse verifies that tool execution works end-to-end.
 // The mock LLM server returns a "read" tool call when it sees READ_FILE in the prompt.
-// Requires TAU_E2E_AGENT_DIR.
+// Requires FIR_E2E_AGENT_DIR.
 func TestACP_E2E_PromptWithToolUse(t *testing.T) {
 	requireModelEnv(t)
 
@@ -530,7 +530,7 @@ func TestACP_E2E_PromptWithToolUse(t *testing.T) {
 	_ = gotContent
 }
 
-// TestACP_E2E_SetMode verifies set_mode doesn't error (it's a no-op in tau).
+// TestACP_E2E_SetMode verifies set_mode doesn't error (it's a no-op in fi).
 func TestACP_E2E_SetMode(t *testing.T) {
 	conn, _, cleanup := spawnACP(t)
 	defer cleanup()

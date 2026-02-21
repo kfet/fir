@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed project from "tau" to "fir": module path, binary, config directory (.tau → .fir), all references.
+
+### Fixed
+
+- `/changelog` command now displays newest version last (at the bottom of the terminal) so it's most visible in both TUI and ACP modes.
+
+### Added
+
+- Include agent version in `/session` slash command output (ACP and TUI modes).
+
 ## [0.2.0] - 2026-02-19
 
 ### Added
@@ -16,7 +28,7 @@
 
 ### Added
 
-- Initial release of tau, a Go port of the pi-mono coding agent.
+- Initial release of fir, a Go port of the pi-mono coding agent.
 - Full agent loop with streaming LLM support (Anthropic, OpenAI, Google, Poe).
 - TUI with fuzzy autocomplete, `/`-menus, and model picker.
 - RPC mode over stdio for programmatic integration.

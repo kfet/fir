@@ -1,6 +1,6 @@
-// Package acp implements ACP (Agent Client Protocol) mode for tau.
+// Package acp implements ACP (Agent Client Protocol) mode for fir.
 //
-// ACP clients (e.g., Zed) spawn tau with `--mode acp` and communicate
+// ACP clients (e.g., Zed) spawn fir with `--mode acp` and communicate
 // via newline-delimited JSON-RPC 2.0 on stdin/stdout.
 //
 // Ported from: packages/coding-agent/src/modes/acp/acp-mode.ts

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/tau/pkg/core"
-	"github.com/kfet/tau/pkg/modes/interactive/theme"
-	"github.com/kfet/tau/pkg/tui"
+	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestCustomMessageComponent_DefaultRendering(t *testing.T) {
