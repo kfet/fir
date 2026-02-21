@@ -49,11 +49,11 @@ type Args struct {
 	NoPromptTemplates  bool
 	Themes             []string
 	NoThemes           bool
-	ListModels         interface{} // true (bool) or string (search pattern)
+	ListModels         any // true (bool) or string (search pattern)
 	Verbose            bool
 	Messages           []string
 	FileArgs           []string
-	UnknownFlags       map[string]interface{} // bool or string values; includes extension flags
+	UnknownFlags       map[string]any // bool or string values; includes extension flags
 }
 
 // ValidThinkingLevels lists all valid thinking level values.
@@ -79,7 +79,7 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 	result := &Args{
 		Messages:     []string{},
 		FileArgs:     []string{},
-		UnknownFlags: make(map[string]interface{}),
+		UnknownFlags: make(map[string]any),
 	}
 
 	for i := 0; i < len(args); i++ {

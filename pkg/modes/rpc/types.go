@@ -180,11 +180,11 @@ type RpcResponse struct {
 	Command RpcCommandType `json:"command"`
 	Success bool           `json:"success"`
 	Error   string         `json:"error,omitempty"`
-	Data    interface{}    `json:"data,omitempty"`
+	Data    any            `json:"data,omitempty"`
 }
 
 // NewSuccessResponse creates a success response with optional data.
-func NewSuccessResponse(id string, command RpcCommandType, data interface{}) RpcResponse {
+func NewSuccessResponse(id string, command RpcCommandType, data any) RpcResponse {
 	return RpcResponse{
 		ID:      id,
 		Type:    "response",

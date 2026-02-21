@@ -134,8 +134,16 @@ func TestIsRetryableCodexError(t *testing.T) {
 func TestMapCodexEvent_Error(t *testing.T) {
 	data := `{"type":"error","code":"rate_limit","message":"Too many requests"}`
 	result := mapCodexEvent(data)
-	if result != data {
-		t.Errorf("expected error to pass through, got %q", result)
+	// Compare structurally (re-marshaling may reorder keys).
+	var got, want map[string]any
+	if err := json.Unmarshal([]byte(result), &got); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	if err := json.Unmarshal([]byte(data), &want); err != nil {
+		t.Fatalf("input is not valid JSON: %v", err)
+	}
+	if got["type"] != want["type"] || got["code"] != want["code"] || got["message"] != want["message"] {
+		t.Errorf("error event fields changed: got %v, want %v", got, want)
 	}
 }
 
@@ -162,8 +170,16 @@ func TestMapCodexEvent_ResponseDone(t *testing.T) {
 func TestMapCodexEvent_PassThrough(t *testing.T) {
 	data := `{"type":"response.output_text.delta","delta":"hello"}`
 	result := mapCodexEvent(data)
-	if result != data {
-		t.Errorf("expected pass-through, got %q", result)
+	// Compare structurally (re-marshaling may reorder keys).
+	var got, want map[string]any
+	if err := json.Unmarshal([]byte(result), &got); err != nil {
+		t.Fatalf("result is not valid JSON: %v", err)
+	}
+	if err := json.Unmarshal([]byte(data), &want); err != nil {
+		t.Fatalf("input is not valid JSON: %v", err)
+	}
+	if got["type"] != want["type"] || got["delta"] != want["delta"] {
+		t.Errorf("passthrough fields changed: got %v, want %v", got, want)
 	}
 }
 

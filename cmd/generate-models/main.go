@@ -944,6 +944,11 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		})
 	}
 
+	// Gemini 3.1 Pro — announced 2026-02-19, still in preview on all Google endpoints.
+	// https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/
+	// The model ID is gemini-3.1-pro-preview. The google and google-vertex providers are
+	// already supplied by models.dev; we only need to add Cloud Code Assist and Antigravity.
+
 	// Google Cloud Code Assist models (Gemini CLI)
 	const cloudCodeAssistEndpoint = "https://cloudcode-pa.googleapis.com"
 	cloudCodeAssistModels := []modelSpec{
@@ -962,8 +967,30 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview (Cloud Code Assist)", API: "google-gemini-cli",
 			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
 			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
+		// Gemini 3.1 Pro Preview is deployed on Cloud Code Assist but gated behind the
+		// GEMINI_3_1_PRO_LAUNCHED experiment flag (45760185). Users will see a 404 until
+		// the flag rolls out to their account.
+		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview (Cloud Code Assist)", API: "google-gemini-cli",
+			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
 	}
 	all = append(all, cloudCodeAssistModels...)
+
+	// Gemini 3.1 Pro Preview Custom Tools — variant of the google provider model that
+	// enables custom tool definitions (not returned by models.dev).
+	if !hasModel(all, "google", "gemini-3.1-pro-preview-customtools") {
+		all = append(all, modelSpec{
+			ID:            "gemini-3.1-pro-preview-customtools",
+			Name:          "Gemini 3.1 Pro Preview Custom Tools",
+			API:           "google-generative-ai",
+			Provider:      "google",
+			BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
+			Reasoning:     true,
+			Input:         []string{"text", "image"},
+			CostInput:     2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 65536,
+		})
+	}
 
 	// Antigravity models
 	const antigravityEndpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
@@ -973,6 +1000,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
 			ContextWindow: 1048576, MaxTokens: 65535},
 		{ID: "gemini-3-pro-low", Name: "Gemini 3 Pro Low (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
+			ContextWindow: 1048576, MaxTokens: 65535},
+		{ID: "gemini-3.1-pro-high", Name: "Gemini 3.1 Pro High (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
+			ContextWindow: 1048576, MaxTokens: 65535},
+		{ID: "gemini-3.1-pro-low", Name: "Gemini 3.1 Pro Low (Antigravity)", API: "google-gemini-cli",
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
 			ContextWindow: 1048576, MaxTokens: 65535},
@@ -1017,6 +1052,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview (Vertex)", API: "google-vertex",
 			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 0.5, CostOutput: 3, CostCacheRead: 0.05, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 65536},
+		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview (Vertex)", API: "google-vertex",
+			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: 65536},
 		{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash (Vertex)", API: "google-vertex",
 			Provider: "google-vertex", BaseURL: vertexBaseURL, Reasoning: false,

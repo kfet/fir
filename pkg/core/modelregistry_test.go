@@ -404,7 +404,7 @@ func TestModelRegistry_ValidationErrors(t *testing.T) {
 func TestModelRegistry_RegisterProvider(t *testing.T) {
 	registry, _ := setupTestModelRegistry(t, "")
 
-	registry.RegisterProvider("my-ext-provider", &ProviderConfigInput{
+	if err := registry.RegisterProvider("my-ext-provider", &ProviderConfigInput{
 		BaseURL: "https://ext.example.com",
 		ApiKey:  "ext-key",
 		Api:     ai.ApiOpenAICompletions,
@@ -419,7 +419,9 @@ func TestModelRegistry_RegisterProvider(t *testing.T) {
 				MaxTokens:     8192,
 			},
 		},
-	})
+	}); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
+	}
 
 	m := registry.Find("my-ext-provider", "ext-model-1")
 	if m == nil {
@@ -449,9 +451,11 @@ func TestModelRegistry_RegisterProvider_OverrideOnly(t *testing.T) {
 	registry, _ := setupTestModelRegistry(t, "")
 
 	// Register override-only (no models, just baseUrl change).
-	registry.RegisterProvider("test-provider-proxy", &ProviderConfigInput{
+	if err := registry.RegisterProvider("test-provider-proxy", &ProviderConfigInput{
 		BaseURL: "https://proxy.example.com",
-	})
+	}); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
+	}
 
 	m := registry.Find("test-provider-proxy", "proxy-target")
 	if m == nil {

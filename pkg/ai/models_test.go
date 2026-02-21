@@ -180,6 +180,75 @@ func TestModelsAreEqual_Nil(t *testing.T) {
 	}
 }
 
+func TestGetModel_NewGemini31Models(t *testing.T) {
+	tests := []struct {
+		provider      Provider
+		id            string
+		wantAPI       Api
+		wantCtxWindow int
+		wantReasoning bool
+	}{
+		{
+			provider:      ProviderGoogle,
+			id:            "gemini-3.1-pro-preview-customtools",
+			wantAPI:       ApiGoogleGenerativeAI,
+			wantCtxWindow: 1048576,
+			wantReasoning: true,
+		},
+		{
+			provider:      ProviderGoogleAntigravity,
+			id:            "gemini-3.1-pro-high",
+			wantAPI:       ApiGoogleGeminiCLI,
+			wantCtxWindow: 1048576,
+			wantReasoning: true,
+		},
+		{
+			provider:      ProviderGoogleAntigravity,
+			id:            "gemini-3.1-pro-low",
+			wantAPI:       ApiGoogleGeminiCLI,
+			wantCtxWindow: 1048576,
+			wantReasoning: true,
+		},
+		{
+			provider:      ProviderGoogleGeminiCLI,
+			id:            "gemini-3.1-pro-preview",
+			wantAPI:       ApiGoogleGeminiCLI,
+			wantCtxWindow: 1048576,
+			wantReasoning: true,
+		},
+		{
+			provider:      ProviderGoogleVertex,
+			id:            "gemini-3.1-pro-preview",
+			wantAPI:       ApiGoogleVertex,
+			wantCtxWindow: 1048576,
+			wantReasoning: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider+"/"+tc.id, func(t *testing.T) {
+			m := GetModel(tc.provider, tc.id)
+			if m == nil {
+				t.Fatalf("expected model %q/%q to be registered, got nil", tc.provider, tc.id)
+			}
+			if m.ID != tc.id {
+				t.Errorf("ID: expected %q, got %q", tc.id, m.ID)
+			}
+			if m.Provider != tc.provider {
+				t.Errorf("Provider: expected %q, got %q", tc.provider, m.Provider)
+			}
+			if m.Api != tc.wantAPI {
+				t.Errorf("Api: expected %q, got %q", tc.wantAPI, m.Api)
+			}
+			if m.ContextWindow != tc.wantCtxWindow {
+				t.Errorf("ContextWindow: expected %d, got %d", tc.wantCtxWindow, m.ContextWindow)
+			}
+			if m.Reasoning != tc.wantReasoning {
+				t.Errorf("Reasoning: expected %v, got %v", tc.wantReasoning, m.Reasoning)
+			}
+		})
+	}
+}
+
 func TestGeneratedModelsRegistered(t *testing.T) {
 	// Verify the init() from models_generated.go registered models
 	providers := GetProviders()

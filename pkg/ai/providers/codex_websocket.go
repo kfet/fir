@@ -32,6 +32,7 @@ type cachedWSConn struct {
 var (
 	wsSessionCache   = make(map[string]*cachedWSConn)
 	wsSessionCacheMu sync.Mutex
+	wsInflight       = make(map[string]chan struct{}) // coalesces concurrent dials for the same sessionID
 )
 
 // resetWSCache clears the global WebSocket session cache. For testing only.
@@ -48,6 +49,10 @@ func resetWSCache() {
 			}
 		}
 		delete(wsSessionCache, id)
+	}
+	// Clear any stale inflight markers (e.g., if a test is reset mid-dial).
+	for id := range wsInflight {
+		delete(wsInflight, id)
 	}
 }
 
@@ -133,15 +138,33 @@ func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 		}, nil
 	}
 
+	// Check for an inflight dial from a concurrent goroutine.
+	if waitCh, ok := wsInflight[sessionID]; ok {
+		wsSessionCacheMu.Unlock()
+		select {
+		case <-waitCh:
+			// Dial completed; retry to pick up the cached entry.
+			return acquireWebSocket(ctx, wsURL, headers, sessionID)
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
+
+	// We are the first goroutine for this sessionID — register inflight.
+	ready := make(chan struct{})
+	wsInflight[sessionID] = ready
 	wsSessionCacheMu.Unlock()
 
 	// No cached connection — connect and cache
-	c, err := connectWebSocket(ctx, wsURL, headers)
-	if err != nil {
-		return nil, nil, err
-	}
+	c, dialErr := connectWebSocket(ctx, wsURL, headers)
 
 	wsSessionCacheMu.Lock()
+	delete(wsInflight, sessionID)
+	close(ready) // wake any waiters (they will retry and find the entry or fail)
+	if dialErr != nil {
+		wsSessionCacheMu.Unlock()
+		return nil, nil, dialErr
+	}
 	entry := &cachedWSConn{conn: c, busy: true}
 	wsSessionCache[sessionID] = entry
 	wsSessionCacheMu.Unlock()

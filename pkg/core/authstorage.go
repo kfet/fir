@@ -81,39 +81,57 @@ func (b *FileAuthStorageBackend) writeNext(data []byte) error {
 	return os.WriteFile(b.authPath, data, 0600)
 }
 
+func (b *FileAuthStorageBackend) withFileLock(fn func() (any, error)) (any, error) {
+	lockPath := b.authPath + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("open auth lock file: %w", err)
+	}
+	defer f.Close()
+	if err := flockExclusive(int(f.Fd())); err != nil {
+		return nil, fmt.Errorf("acquire auth file lock: %w", err)
+	}
+	defer flockUnlock(int(f.Fd())) //nolint:errcheck
+	return fn()
+}
+
 func (b *FileAuthStorageBackend) WithLock(fn func(current []byte) (result any, next []byte)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := b.ensureParentDir(); err != nil {
-		return nil, err
-	}
-	current := b.readCurrent()
-	result, next := fn(current)
-	if next != nil {
-		if err := b.writeNext(next); err != nil {
+	return b.withFileLock(func() (any, error) {
+		if err := b.ensureParentDir(); err != nil {
 			return nil, err
 		}
-	}
-	return result, nil
+		current := b.readCurrent()
+		result, next := fn(current)
+		if next != nil {
+			if err := b.writeNext(next); err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
+	})
 }
 
 func (b *FileAuthStorageBackend) WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err := b.ensureParentDir(); err != nil {
-		return nil, err
-	}
-	current := b.readCurrent()
-	result, next, err := fn(current)
-	if err != nil {
-		return nil, err
-	}
-	if next != nil {
-		if err := b.writeNext(next); err != nil {
+	return b.withFileLock(func() (any, error) {
+		if err := b.ensureParentDir(); err != nil {
 			return nil, err
 		}
-	}
-	return result, nil
+		current := b.readCurrent()
+		result, next, err := fn(current)
+		if err != nil {
+			return nil, err
+		}
+		if next != nil {
+			if err := b.writeNext(next); err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
+	})
 }
 
 // InMemoryAuthStorageBackend stores credentials in memory (no file I/O).

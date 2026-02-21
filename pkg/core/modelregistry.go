@@ -5,6 +5,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -371,7 +372,9 @@ func (r *ModelRegistry) Refresh() {
 	r.loadModels()
 
 	for providerName, config := range r.registeredProviders {
-		r.applyProviderConfig(providerName, config)
+		if err := r.applyProviderConfig(providerName, config); err != nil {
+			log.Printf("modelregistry: provider %q config error: %v", providerName, err)
+		}
 	}
 }
 
@@ -765,18 +768,19 @@ func (r *ModelRegistry) AuthStorage() *AuthStorage {
 }
 
 // RegisterProvider registers a provider dynamically (from extensions).
-func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderConfigInput) {
+// Returns an error if the provider configuration is invalid.
+func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderConfigInput) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.registeredProviders[providerName] = config
-	r.applyProviderConfig(providerName, config)
+	return r.applyProviderConfig(providerName, config)
 }
 
-func (r *ModelRegistry) applyProviderConfig(providerName string, config *ProviderConfigInput) {
+func (r *ModelRegistry) applyProviderConfig(providerName string, config *ProviderConfigInput) error {
 	// Register streamSimple if provided
 	if config.StreamSimple != nil {
 		if config.Api == "" {
-			panic(fmt.Sprintf("Provider %s: \"api\" is required when registering streamSimple", providerName))
+			return fmt.Errorf("provider %s: \"api\" is required when registering streamSimple", providerName)
 		}
 		ai.DefaultRegistry.RegisterApiProvider(&ai.ApiProvider{
 			Api:          config.Api,
@@ -800,10 +804,10 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 		r.models = filtered
 
 		if config.BaseURL == "" {
-			panic(fmt.Sprintf("Provider %s: \"baseUrl\" is required when defining models", providerName))
+			return fmt.Errorf("provider %s: \"baseUrl\" is required when defining models", providerName)
 		}
 		if config.ApiKey == "" && config.OAuth == nil {
-			panic(fmt.Sprintf("Provider %s: \"apiKey\" or \"oauth\" is required when defining models", providerName))
+			return fmt.Errorf("provider %s: \"apiKey\" or \"oauth\" is required when defining models", providerName)
 		}
 
 		for _, modelDef := range config.Models {
@@ -812,7 +816,7 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 				api = config.Api
 			}
 			if api == "" {
-				panic(fmt.Sprintf("Provider %s, model %s: no \"api\" specified", providerName, modelDef.ID))
+				return fmt.Errorf("provider %s, model %s: no \"api\" specified", providerName, modelDef.ID)
 			}
 
 			// Merge headers
@@ -885,6 +889,7 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 			r.models[i] = &copy
 		}
 	}
+	return nil
 }
 
 // DefaultModelsJsonPath returns the default path for models.json.

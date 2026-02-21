@@ -26,10 +26,11 @@ When making user-visible changes, add an entry under `## [Unreleased]` in `CHANG
 
 ## ACP Mode Port (Current Phase)
 
-ACP TS source lives at `../pi-mono-acp/packages/coding-agent/src/modes/acp/`.
-ACP SDK types live at `../pi-mono-acp/node_modules/@agentclientprotocol/sdk/dist/`.
+## Models
 
-### Why ACP is a mode, not an extension
+`pkg/ai/models_generated.go` is a generated file — **never edit it directly**. It is completely overwritten by `make generate-models`. Any manual edits will be lost.
+
+To add or fix a model so it survives regeneration, add it to `applyOverridesAndAdditions()` in `cmd/generate-models/main.go`. Use a `!hasModel(all, provider, id)` guard so it doesn't create duplicates if the upstream API starts returning it.
 
 The upstream analysis (`../pi-mono-acp/ACP-ANALYSIS.md`) concludes ACP cannot be an extension.
 That analysis was written against pi-mono's **runtime-loaded JS extensions**. fir uses

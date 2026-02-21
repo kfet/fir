@@ -49,7 +49,7 @@ func NewServerWithIO(session *core.AgentSession, input io.Reader, output io.Writ
 }
 
 // outputJSON writes a JSON object as a single line to stdout.
-func (s *Server) outputJSON(obj interface{}) {
+func (s *Server) outputJSON(obj any) {
 	data, err := json.Marshal(obj)
 	if err != nil {
 		return

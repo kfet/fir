@@ -4,12 +4,17 @@ package print
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
 )
+
+// ErrAgentAborted is returned when the agent stops with an error or aborted
+// stop reason. The caller should exit with a non-zero status code.
+var ErrAgentAborted = errors.New("agent aborted")
 
 // Mode specifies the output format for print mode.
 type Mode string
@@ -83,7 +88,7 @@ func Run(session *core.AgentSession, opts Options) error {
 				errMsg = fmt.Sprintf("Request %s", assistant.StopReason)
 			}
 			fmt.Fprintln(os.Stderr, errMsg)
-			os.Exit(1)
+			return ErrAgentAborted
 		}
 
 		// Output text content

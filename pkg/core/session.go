@@ -676,15 +676,15 @@ func (sm *SessionManager) BranchWithSummary(branchFromID string, summary string,
 }
 
 // CreateBranchedSession creates a new session file by copying the branch from root to leafId.
-// Returns the new session file path (empty if in-memory).
-func (sm *SessionManager) CreateBranchedSession(leafId string) string {
+// Returns the new session file path (empty if in-memory) and any error.
+func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	previousSessionFile := sm.sessionFile
 	path := sm.getBranchUnlocked(leafId)
 	if len(path) == 0 {
-		panic(fmt.Sprintf("Entry %s not found", leafId))
+		return "", fmt.Errorf("entry %s not found", leafId)
 	}
 
 	// Filter out label entries - we'll recreate them
@@ -773,7 +773,7 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) string {
 		sm.entries = append(pathWithoutLabels, labelEntries...)
 		sm.flushed = true
 		sm.buildIndex()
-		return newSessionFile
+		return newSessionFile, nil
 	}
 
 	// In-memory mode
@@ -781,7 +781,7 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) string {
 	sm.sessionID = newSessionID
 	sm.entries = append(pathWithoutLabels, labelEntries...)
 	sm.buildIndex()
-	return ""
+	return "", nil
 }
 
 // getBranchUnlocked is the non-locking version of GetBranch for internal use.
