@@ -8,7 +8,7 @@
 - `ResolveCliModel` for sophisticated CLI model resolution: supports `--model provider/model`, fuzzy matching, thinking-level suffix (`--model claude:high`), and OpenRouter-style IDs.
 
 ### Fixed
-- `settings.go`: `.pi` directory is no longer created unconditionally on startup — only created when settings actually need to be written.
+- `settings.go`: `~/.fir/agent` is no longer created unconditionally on startup — only created when settings actually need to be written.
 - Tool execution UI now shows `[invalid arg]` instead of `...` when the LLM sends a non-string value for a tool argument (path, pattern, content, etc.).
 - `models_generated.go`: Updated MaxTokens and pricing for several models (openrouter, gemini).
 
