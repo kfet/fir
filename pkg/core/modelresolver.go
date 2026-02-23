@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 380236a0
 package core
 
 import (
@@ -155,7 +155,21 @@ func tryMatchModel(pattern string, available []*ai.Model) *ai.Model {
 
 // ParseModelPattern parses a pattern to extract model and thinking level.
 // Handles models with colons in their IDs (e.g., OpenRouter's :exacto suffix).
+// When an invalid thinking-level suffix is encountered, this falls back to
+// matching the prefix and emits a warning. For strict CLI parsing without
+// fallback use parseModelPatternStrict.
 func ParseModelPattern(pattern string, available []*ai.Model) ParsedModelResult {
+	return parseModelPatternInner(pattern, available, true)
+}
+
+// parseModelPatternStrict is like ParseModelPattern but returns an empty result
+// (model not found) if an invalid thinking-level suffix is encountered, rather
+// than falling back to the prefix match. Used by ResolveCliModel.
+func parseModelPatternStrict(pattern string, available []*ai.Model) ParsedModelResult {
+	return parseModelPatternInner(pattern, available, false)
+}
+
+func parseModelPatternInner(pattern string, available []*ai.Model, allowFallback bool) ParsedModelResult {
 	// Try exact match first
 	if m := tryMatchModel(pattern, available); m != nil {
 		return ParsedModelResult{Model: m}
@@ -171,7 +185,7 @@ func ParseModelPattern(pattern string, available []*ai.Model) ParsedModelResult 
 	suffix := pattern[lastColon+1:]
 
 	if isValidThinkingLevel(suffix) {
-		result := ParseModelPattern(prefix, available)
+		result := parseModelPatternInner(prefix, available, allowFallback)
 		if result.Model != nil {
 			if result.Warning == "" {
 				result.ThinkingLevel = strings.ToLower(suffix)
@@ -181,8 +195,14 @@ func ParseModelPattern(pattern string, available []*ai.Model) ParsedModelResult 
 		return result
 	}
 
-	// Invalid suffix - recurse on prefix and warn
-	result := ParseModelPattern(prefix, available)
+	if !allowFallback {
+		// Strict mode: treat the suffix as part of the model ID and fail.
+		// This avoids accidentally resolving to a different model.
+		return ParsedModelResult{}
+	}
+
+	// Fallback mode: recurse on prefix and warn.
+	result := parseModelPatternInner(prefix, available, allowFallback)
 	if result.Model != nil {
 		return ParsedModelResult{
 			Model:   result.Model,
@@ -190,6 +210,151 @@ func ParseModelPattern(pattern string, available []*ai.Model) ParsedModelResult 
 		}
 	}
 	return result
+}
+
+// ResolveCliModelResult is the result of ResolveCliModel.
+type ResolveCliModelResult struct {
+	Model         *ai.Model
+	ThinkingLevel string
+	Warning       string
+	// Error is set (and Model is nil) when the model could not be found.
+	Error string
+}
+
+// ResolveCliModelOptions configures ResolveCliModel.
+type ResolveCliModelOptions struct {
+	CLIProvider   string
+	CLIModel      string
+	ModelRegistry *ModelRegistry
+}
+
+// ResolveCliModel resolves a single model from CLI flags.
+//
+// Supports:
+//   - --provider <provider> --model <pattern>
+//   - --model <provider>/<pattern>
+//   - Fuzzy matching (exact id, then partial id/name)
+//
+// Returns an empty result (no error) when CLIModel is not set.
+func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
+	if opts.CLIModel == "" {
+		return ResolveCliModelResult{}
+	}
+
+	// Use all models — not just those with pre-configured auth — so that
+	// --api-key can be used for first-time setup.
+	allModels := opts.ModelRegistry.GetAll()
+	if len(allModels) == 0 {
+		return ResolveCliModelResult{
+			Error: "No models available. Check your installation or add models to models.json.",
+		}
+	}
+
+	// Build case-insensitive provider lookup.
+	providerMap := make(map[string]string)
+	for _, m := range allModels {
+		providerMap[strings.ToLower(m.Provider)] = m.Provider
+	}
+
+	var provider string
+	if opts.CLIProvider != "" {
+		p, ok := providerMap[strings.ToLower(opts.CLIProvider)]
+		if !ok {
+			return ResolveCliModelResult{
+				Error: fmt.Sprintf("Unknown provider %q. Use --list-models to see available providers/models.", opts.CLIProvider),
+			}
+		}
+		provider = p
+	}
+
+	pattern := opts.CLIModel
+	inferredProvider := false
+
+	// If no explicit --provider, try to interpret "provider/model" format first.
+	// When the prefix before the first slash matches a known provider, prefer that
+	// interpretation over matching models whose IDs literally contain slashes
+	// (e.g. "zai/glm-5" → provider=zai, model=glm-5, not a gateway model with id "zai/glm-5").
+	if provider == "" {
+		if idx := strings.Index(opts.CLIModel, "/"); idx != -1 {
+			maybeProvider := opts.CLIModel[:idx]
+			if canonical, ok := providerMap[strings.ToLower(maybeProvider)]; ok {
+				provider = canonical
+				pattern = opts.CLIModel[idx+1:]
+				inferredProvider = true
+			}
+		}
+	}
+
+	// If no provider was inferred from the slash, try exact matches without provider inference.
+	// This handles models whose IDs naturally contain slashes (e.g. OpenRouter-style IDs).
+	if provider == "" {
+		lower := strings.ToLower(opts.CLIModel)
+		for _, m := range allModels {
+			if strings.ToLower(m.ID) == lower || strings.ToLower(m.Provider+"/"+m.ID) == lower {
+				return ResolveCliModelResult{Model: m}
+			}
+		}
+	}
+
+	if opts.CLIProvider != "" && provider != "" {
+		// If both --provider and --model were given, tolerate --model <provider>/<pattern>
+		// by stripping the provider prefix.
+		prefix := provider + "/"
+		if strings.EqualFold(opts.CLIModel[:min(len(opts.CLIModel), len(prefix))], prefix) {
+			pattern = opts.CLIModel[len(prefix):]
+		}
+	}
+
+	var candidates []*ai.Model
+	if provider != "" {
+		for _, m := range allModels {
+			if m.Provider == provider {
+				candidates = append(candidates, m)
+			}
+		}
+	} else {
+		candidates = allModels
+	}
+
+	res := parseModelPatternStrict(pattern, candidates)
+	if res.Model != nil {
+		return ResolveCliModelResult{
+			Model:         res.Model,
+			ThinkingLevel: res.ThinkingLevel,
+			Warning:       res.Warning,
+		}
+	}
+
+	// If we inferred a provider from the slash but found no match within that provider,
+	// fall back to matching the full input as a raw model id across all models.
+	// This handles OpenRouter-style IDs like "openai/gpt-4o:extended" where "openai"
+	// looks like a provider but the full string is actually a model id on openrouter.
+	if inferredProvider {
+		lower := strings.ToLower(opts.CLIModel)
+		for _, m := range allModels {
+			if strings.ToLower(m.ID) == lower || strings.ToLower(m.Provider+"/"+m.ID) == lower {
+				return ResolveCliModelResult{Model: m}
+			}
+		}
+		// Also try parseModelPattern on the full input against all models.
+		fallback := parseModelPatternStrict(opts.CLIModel, allModels)
+		if fallback.Model != nil {
+			return ResolveCliModelResult{
+				Model:         fallback.Model,
+				ThinkingLevel: fallback.ThinkingLevel,
+				Warning:       fallback.Warning,
+			}
+		}
+	}
+
+	display := opts.CLIModel
+	if provider != "" {
+		display = provider + "/" + pattern
+	}
+	return ResolveCliModelResult{
+		Warning: res.Warning,
+		Error:   fmt.Sprintf("Model %q not found. Use --list-models to see available models.", display),
+	}
 }
 
 // ResolveModelScope resolves model patterns to ScopedModels.

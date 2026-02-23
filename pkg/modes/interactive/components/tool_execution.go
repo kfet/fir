@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/modes/interactive/components/tool-execution.ts
-// Upstream hash: 3b1f8e5d
+// Upstream hash: 380236a0
 package components
 
 import (
@@ -139,10 +139,15 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 
 func (tc *ToolExecutionComponent) renderBashContent() {
 	t := theme.GetTheme()
-	command := strArg(tc.args, "command")
+	command, commandOK := strArgChecked(tc.args, "command")
 
-	commandDisplay := command
-	if command == "" {
+	var commandDisplay string
+	switch {
+	case !commandOK:
+		commandDisplay = t.Fg("error", "[invalid arg]")
+	case command != "":
+		commandDisplay = command
+	default:
 		commandDisplay = t.Fg("toolOutput", "...")
 	}
 
@@ -267,15 +272,18 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 }
 
 func (tc *ToolExecutionComponent) formatRead(t *theme.Theme, invalidArg string) string {
-	path := strArgAlt(tc.args, "file_path", "path")
+	rawPath, pathOK := strArgChecked(tc.args, "file_path", "path")
 	offset, _ := tc.args["offset"].(float64)
 	limit, _ := tc.args["limit"].(float64)
 
 	var pathDisplay string
-	if path == "" {
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	case rawPath != "":
+		pathDisplay = t.Fg("accent", shortenPath(rawPath))
+	default:
 		pathDisplay = t.Fg("toolOutput", "...")
-	} else {
-		pathDisplay = t.Fg("accent", shortenPath(path))
 	}
 	if offset > 0 || limit > 0 {
 		startLine := int(offset)
@@ -350,19 +358,24 @@ func (tc *ToolExecutionComponent) formatReadTruncation(t *theme.Theme) string {
 	return "\n" + t.Fg("warning", fmt.Sprintf("[Truncated: %d lines shown (%s limit)]", outLines, formatSize(maxBytes)))
 }
 
-func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, _ string) string {
-	path := strArgAlt(tc.args, "file_path", "path")
-	content := strArg(tc.args, "content")
+func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, invalidArg string) string {
+	rawPath, pathOK := strArgChecked(tc.args, "file_path", "path")
+	content, contentOK := strArgChecked(tc.args, "content")
 
 	var pathDisplay string
-	if path == "" {
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	case rawPath != "":
+		pathDisplay = t.Fg("accent", shortenPath(rawPath))
+	default:
 		pathDisplay = t.Fg("toolOutput", "...")
-	} else {
-		pathDisplay = t.Fg("accent", shortenPath(path))
 	}
 	text := t.Fg("toolTitle", t.Bold("write")) + " " + pathDisplay
 
-	if content != "" {
+	if !contentOK {
+		text += "\n\n" + t.Fg("error", "[invalid content arg - expected string]")
+	} else if content != "" {
 		lines := strings.Split(replaceTabs(content), "\n")
 		maxLines := 10
 		if tc.expanded {
@@ -394,14 +407,17 @@ func (tc *ToolExecutionComponent) formatWrite(t *theme.Theme, _ string) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatEdit(t *theme.Theme, _ string) string {
-	path := strArgAlt(tc.args, "file_path", "path")
+func (tc *ToolExecutionComponent) formatEdit(t *theme.Theme, invalidArg string) string {
+	rawPath, pathOK := strArgChecked(tc.args, "file_path", "path")
 
 	var pathDisplay string
-	if path == "" {
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	case rawPath != "":
+		pathDisplay = t.Fg("accent", shortenPath(rawPath))
+	default:
 		pathDisplay = t.Fg("toolOutput", "...")
-	} else {
-		pathDisplay = t.Fg("accent", shortenPath(path))
 	}
 
 	// Line number hint from result
@@ -426,14 +442,23 @@ func (tc *ToolExecutionComponent) formatEdit(t *theme.Theme, _ string) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, _ string) string {
-	path := strArg(tc.args, "path")
-	if path == "" {
-		path = "."
-	}
+func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, invalidArg string) string {
+	rawPath, pathOK := strArgChecked(tc.args, "path")
 	limit, _ := tc.args["limit"].(float64)
 
-	text := t.Fg("toolTitle", t.Bold("ls")) + " " + t.Fg("accent", shortenPath(path))
+	var pathDisplay string
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	default:
+		p := rawPath
+		if p == "" {
+			p = "."
+		}
+		pathDisplay = t.Fg("accent", shortenPath(p))
+	}
+
+	text := t.Fg("toolTitle", t.Bold("ls")) + " " + pathDisplay
 	if limit > 0 {
 		text += t.Fg("toolOutput", fmt.Sprintf(" (limit %.0f)", limit))
 	}
@@ -466,16 +491,30 @@ func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, _ string) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, _ string) string {
-	pattern := strArg(tc.args, "pattern")
-	path := strArg(tc.args, "path")
-	if path == "" {
-		path = "."
-	}
+func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, invalidArg string) string {
+	pattern, patternOK := strArgChecked(tc.args, "pattern")
+	rawPath, pathOK := strArgChecked(tc.args, "path")
 	limit, _ := tc.args["limit"].(float64)
 
-	text := t.Fg("toolTitle", t.Bold("find")) + " " + t.Fg("accent", pattern) +
-		t.Fg("toolOutput", " in "+shortenPath(path))
+	patternDisplay := t.Fg("accent", pattern)
+	if !patternOK {
+		patternDisplay = invalidArg
+	}
+
+	var pathDisplay string
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	default:
+		p := rawPath
+		if p == "" {
+			p = "."
+		}
+		pathDisplay = shortenPath(p)
+	}
+
+	text := t.Fg("toolTitle", t.Bold("find")) + " " + patternDisplay +
+		t.Fg("toolOutput", " in "+pathDisplay)
 	if limit > 0 {
 		text += t.Fg("toolOutput", fmt.Sprintf(" (limit %.0f)", limit))
 	}
@@ -508,18 +547,35 @@ func (tc *ToolExecutionComponent) formatFind(t *theme.Theme, _ string) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, _ string) string {
-	pattern := strArg(tc.args, "pattern")
-	path := strArg(tc.args, "path")
-	if path == "" {
-		path = "."
-	}
-	glob := strArg(tc.args, "glob")
+func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, invalidArg string) string {
+	pattern, patternOK := strArgChecked(tc.args, "pattern")
+	rawPath, pathOK := strArgChecked(tc.args, "path")
+	glob, globOK := strArgChecked(tc.args, "glob")
 	limit, _ := tc.args["limit"].(float64)
-	text := t.Fg("toolTitle", t.Bold("grep")) + " " + t.Fg("accent", "/"+pattern+"/") +
-		t.Fg("toolOutput", " in "+shortenPath(path))
-	if glob != "" {
+
+	patternDisplay := t.Fg("accent", "/"+pattern+"/")
+	if !patternOK {
+		patternDisplay = invalidArg
+	}
+
+	var pathDisplay string
+	switch {
+	case !pathOK:
+		pathDisplay = invalidArg
+	default:
+		p := rawPath
+		if p == "" {
+			p = "."
+		}
+		pathDisplay = shortenPath(p)
+	}
+
+	text := t.Fg("toolTitle", t.Bold("grep")) + " " + patternDisplay +
+		t.Fg("toolOutput", " in "+pathDisplay)
+	if globOK && glob != "" {
 		text += t.Fg("toolOutput", " ("+glob+")")
+	} else if !globOK {
+		text += " " + invalidArg
 	}
 	if limit > 0 {
 		text += t.Fg("toolOutput", fmt.Sprintf(" limit %.0f", limit))
@@ -564,8 +620,7 @@ func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {
 	return text
 }
 
-// --- helpers ---
-
+// strArg returns the string value of args[key], or "" if missing or wrong type.
 func strArg(args map[string]any, key string) string {
 	if args == nil {
 		return ""
@@ -574,12 +629,35 @@ func strArg(args map[string]any, key string) string {
 	return v
 }
 
+// strArgAlt returns the string value of args[key1], falling back to args[key2].
 func strArgAlt(args map[string]any, key1, key2 string) string {
 	v := strArg(args, key1)
 	if v == "" {
 		v = strArg(args, key2)
 	}
 	return v
+}
+
+// strArgChecked returns (value, valid) where valid=false means the arg exists
+// but is not a string type (invalid type from LLM). If the key is missing or
+// nil, valid=true and value="".
+// Accepts multiple keys; returns the first key that is present (even if "").
+func strArgChecked(args map[string]any, keys ...string) (string, bool) {
+	if args == nil {
+		return "", true
+	}
+	for _, key := range keys {
+		v, exists := args[key]
+		if !exists || v == nil {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			return "", false // key exists but is wrong type
+		}
+		return s, true
+	}
+	return "", true // no key found — treat as empty
 }
 
 func intFromAny(v any) int {

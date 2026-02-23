@@ -1,12 +1,14 @@
 # Review Backlog — 2026-02-22
 
-**Last reviewed:** Review cycle 107 (6th cycle), 2026-02-22 21:30 PST
+**Last reviewed:** Review cycle 110, 2026-02-22 23:10 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 22 packages pass)
 **Files reviewed this cycle:**
-- `pkg/core/agentsession.go` — `emit`, `Prompt`, `Fork`, `GetUserMessagesForForking` (all correct)
-- `pkg/core/modelresolver.go` — `ResolveModelScope` (non-deterministic order in applyToSession but not a real issue)
-- `pkg/modes/acp/conn.go`, `cmd/fir/changelog_init.go`, `Makefile`, `pkg/modes/interactive/mode_test.go` — still unstaged from fix agent, verified correct
-**Open items: 0** (all sections clean)
+- `pkg/core/modelresolver_test.go` — 8 new `TestResolveCliModel_*` tests + `TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback` added. Backlog items from cycle 109 resolved.
+- `pkg/modes/interactive/components/tool_execution.go` — new `strArgChecked` helper distinguishes absent vs wrong-type args; all display functions updated.
+- `pkg/ai/models_generated.go` — regenerated with corrected MaxTokens and pricing. Generated file, no action needed.
+- `cmd/fir/app.go` — upstream hash bump only (no behavior changes from what was reviewed in cycle 109).
+- `pkg/tui/terminal.go`, `pkg/modes/interactive/mode.go` — upstream hash bumps only, no code changes.
+**Open items: 0** (all backlog resolved by current agent work)
 
 ---
 
@@ -34,9 +36,11 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
-- `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake — ✅ FIXED 2026-02-22: propagate errors with early-return to `resp` struct.
-- `pkg/modes/interactive/mode.go` — `cycleModel`/`handleFork`/`handleForkByNumber` no tests — ✅ FIXED 2026-02-22: `TestCycleModel_Forward/Backward/WithScopedModels`, `TestHandleFork_Success/Error/NonUserMessage`, `TestHandleForkByNumber_Valid/InvalidNumber/Zero/OutOfRange`
-- `pkg/core/export.go` — `ExportToHTML` duplicate create/write/close branches — ✅ FIXED (cycle 97): `var f *os.File` pattern
+- `pkg/core/modelresolver.go:223` — `ResolveCliModel` has no unit tests — ✅ FIXED cycle 110 (8 tests added: Empty, ExactID, ProviderSlashModel, ExplicitProvider, UnknownProvider, ModelNotFound, OpenRouterSlashID, ThinkingLevel)
+- `pkg/core/modelresolver.go:175` — `parseModelPatternStrict` (allowFallback=false) untested — ✅ FIXED cycle 110 (`TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback`)
+- `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake response — ✅ FIXED 2026-02-22
+- `pkg/modes/interactive/mode.go` — `cycleModel`/`handleFork`/`handleForkByNumber` no tests — ✅ FIXED 2026-02-22
+- `pkg/core/export.go` — `ExportToHTML` duplicate create/write/close branches — ✅ FIXED (cycle 97)
 - `pkg/modes/interactive/mode.go:1156` — `append(queued, current)` slice capacity footgun — ✅ FIXED (cycle 97): `make+copy`
 - `pkg/modes/interactive/mode.go:1806` — `proc` data race in `performShare` — ✅ FIXED (cycle 96): `atomic.Pointer[exec.Cmd]`
 - `pkg/core/changelog.go:cmpInt` — reimplements `cmp.Compare` — ✅ FIXED (ce07547)

@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/settings-manager.ts
-// Upstream hash: 4ba3e5be
+// Upstream hash: 380236a0
 package core
 
 import (
@@ -296,10 +296,6 @@ func (s *FileSettingsStorage) WithLock(scope SettingsScope, fn func(current stri
 	defer s.mu.Unlock()
 
 	path := s.pathForScope(scope)
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
 
 	var current string
 	if data, err := os.ReadFile(path); err == nil {
@@ -308,6 +304,10 @@ func (s *FileSettingsStorage) WithLock(scope SettingsScope, fn func(current stri
 
 	next := fn(current)
 	if next != "" {
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
 		if err := os.WriteFile(path, []byte(next), 0600); err != nil {
 			return err
 		}

@@ -1,5 +1,5 @@
 // Ported from: packages/tui/src/terminal.ts
-// Upstream hash: 9e22d391
+// Upstream hash: 380236a0
 package tui
 
 import (

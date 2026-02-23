@@ -206,6 +206,18 @@ func TestParseModelPattern_InvalidThinkingLevel(t *testing.T) {
 	}
 }
 
+func TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback(t *testing.T) {
+	// In strict mode, invalid thinking level suffix should NOT fall back to prefix match.
+	models := testModels()
+	result := parseModelPatternStrict("claude-opus-4-6:invalid", models)
+	if result.Model != nil {
+		t.Errorf("strict mode: expected no match for invalid suffix, got %v", result.Model)
+	}
+	if result.Warning != "" {
+		t.Errorf("strict mode: expected no warning, got %q", result.Warning)
+	}
+}
+
 func TestParseModelPattern_NoMatch(t *testing.T) {
 	models := testModels()
 	result := ParseModelPattern("nonexistent", models)
@@ -481,5 +493,118 @@ func TestRestoreModelFromSession_NotFound_NoCurrent(t *testing.T) {
 	}
 	if fallback == "" {
 		t.Error("expected fallback message")
+	}
+}
+
+// --- ResolveCliModel ---
+
+func TestResolveCliModel_Empty(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{ModelRegistry: registry})
+	if result.Model != nil || result.Error != "" {
+		t.Errorf("expected empty result, got %+v", result)
+	}
+}
+
+func TestResolveCliModel_ExactID(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIModel:      "claude-opus-4-6",
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Model == nil || result.Model.ID != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %v", result.Model)
+	}
+}
+
+func TestResolveCliModel_ProviderSlashModel(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIModel:      "anthropic/claude-opus-4-6",
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Model == nil || result.Model.ID != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %v", result.Model)
+	}
+}
+
+func TestResolveCliModel_ExplicitProvider(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIProvider:   "anthropic",
+		CLIModel:      "opus",
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Model == nil || result.Model.Provider != "anthropic" {
+		t.Errorf("expected anthropic model, got %v", result.Model)
+	}
+}
+
+func TestResolveCliModel_UnknownProvider(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIProvider:   "nonexistent-provider",
+		CLIModel:      "some-model",
+		ModelRegistry: registry,
+	})
+	if result.Error == "" {
+		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestResolveCliModel_ModelNotFound(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIModel:      "nonexistent-model-xyz",
+		ModelRegistry: registry,
+	})
+	if result.Error == "" {
+		t.Error("expected error for unknown model")
+	}
+	if result.Model != nil {
+		t.Errorf("expected nil model, got %v", result.Model)
+	}
+}
+
+func TestResolveCliModel_OpenRouterSlashID(t *testing.T) {
+	// "openai/gpt-5.1-codex" is a model ID on openrouter (not provider=openai, model=gpt-5.1-codex)
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIModel:      "openai/gpt-5.1-codex",
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	// Should prefer openai/gpt-5.1-codex on OpenRouter, OR the OpenAI model —
+	// either is acceptable since both exist. The key is no error.
+	if result.Model == nil {
+		t.Error("expected a model match")
+	}
+}
+
+func TestResolveCliModel_ThinkingLevel(t *testing.T) {
+	registry := newTestRegistry(t, testModels())
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIModel:      "claude-opus-4-6:high",
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Model == nil || result.Model.ID != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %v", result.Model)
+	}
+	if result.ThinkingLevel != "high" {
+		t.Errorf("expected thinking level 'high', got %q", result.ThinkingLevel)
 	}
 }

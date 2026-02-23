@@ -2,7 +2,7 @@
 
 ## Active Issues
 
-_(none — cycle 105: build clean, all 22 packages pass, backlog empty)
+_(none — cycle 108: build clean, all 22 packages pass with -race, backlog empty)
 
 ---
 

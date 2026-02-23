@@ -98,10 +98,22 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 
 	// Resolve model from CLI flags
 	var model *ai.Model
-	if args.Provider != "" && args.Model != "" {
-		model = modelRegistry.Find(args.Provider, args.Model)
-		if model == nil {
-			return nil, fmt.Errorf("model %s/%s not found", args.Provider, args.Model)
+	if args.Model != "" {
+		resolved := core.ResolveCliModel(core.ResolveCliModelOptions{
+			CLIProvider:   args.Provider,
+			CLIModel:      args.Model,
+			ModelRegistry: modelRegistry,
+		})
+		if resolved.Warning != "" {
+			fmt.Fprintf(os.Stderr, "Warning: %s\n", resolved.Warning)
+		}
+		if resolved.Error != "" {
+			return nil, fmt.Errorf("%s", resolved.Error)
+		}
+		model = resolved.Model
+		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
+		if args.Thinking == "" && resolved.ThinkingLevel != "" {
+			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
 		}
 	} else if len(scopedModels) > 0 {
 		if !skipScopedOnContinue || (!args.Continue && !args.Resume) {

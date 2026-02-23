@@ -1,5 +1,14 @@
 # Sync Log
 
+## 2026-02-22 — Sync to commit 380236a0
+
+- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated — updated MaxTokens for some models, pricing update for openrouter model.
+- `coding-agent/src/core/model-resolver.ts` → `pkg/core/modelresolver.go`: Added `ResolveCliModel` with provider/model slash inference, fuzzy matching, strict thinking-level parsing, and OpenRouter-style ID fallback; added strict `parseModelPatternStrict`; updated `cmd/fir/app.go` to use it.
+- `coding-agent/src/core/settings-manager.ts` → `pkg/core/settings.go`: Lazy directory creation — only `MkdirAll` when actually writing (fixes #1588).
+- `coding-agent/src/modes/interactive/components/tool-execution.ts` → `pkg/modes/interactive/components/tool_execution.go`: Added `strArgChecked` helper; updated all tool formatters to show `[invalid arg]` for wrong-type args; incremental write highlight cache N/A (no syntax highlighting in Go).
+- `coding-agent/src/modes/interactive/interactive-mode.ts` → `pkg/modes/interactive/mode.go`: Extension `setTheme` persistence N/A (no extension setTheme API in Go); hash updated to 380236a0.
+- `packages/tui/src/terminal.ts` → `pkg/tui/terminal.go`: Koffi dynamic require N/A (Go already uses platform-specific build tags); hash updated to 380236a0.
+
 ## 2026-02-17 — Sync to commit 4ba3e5be
 
 - `auth-storage.ts` → `pkg/core/authstorage.go`: Major refactor — added `AuthStorageBackend` interface with `FileAuthStorageBackend` and `InMemoryAuthStorageBackend` implementations; changed `AuthStorage` to use factory methods (`NewAuthStorage`, `NewInMemoryAuthStorage`); added `DrainErrors()` for error accumulation; persistence now goes through backend
