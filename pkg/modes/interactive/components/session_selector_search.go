@@ -158,11 +158,7 @@ func ParseSearchQuery(query string) ParsedSearchQuery {
 		return ParsedSearchQuery{Mode: "tokens", Tokens: tokens}
 	}
 
-	if inQuote {
-		flush(TokenPhrase)
-	} else {
-		flush(TokenFuzzy)
-	}
+	flush(TokenFuzzy)
 
 	return ParsedSearchQuery{Mode: "tokens", Tokens: tokens}
 }

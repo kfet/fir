@@ -152,7 +152,7 @@ type sessionList struct {
 func newSessionList() *sessionList {
 	sl := &sessionList{
 		sortMode:   SortThreaded,
-		maxVisible: 12,
+		maxVisible: 20,
 	}
 	sl.searchInput = tuicomp.NewInput()
 	return sl
@@ -165,30 +165,37 @@ func (sl *sessionList) SetSessions(sessions []core.SessionListInfo) {
 }
 
 func (sl *sessionList) applyFilter(query string) {
-	var sessions []core.SessionListInfo
-	if query == "" {
-		sessions = sl.allSessions
-	} else {
-		lower := strings.ToLower(query)
-		for _, s := range sl.allSessions {
-			if strings.Contains(strings.ToLower(s.Name), lower) ||
-				strings.Contains(strings.ToLower(s.FirstMessage), lower) ||
-				strings.Contains(strings.ToLower(s.Cwd), lower) {
-				sessions = append(sessions, s)
-			}
-		}
+	// Convert to pointers for FilterAndSortSessions.
+	ptrs := make([]*core.SessionListInfo, len(sl.allSessions))
+	for i := range sl.allSessions {
+		ptrs[i] = &sl.allSessions[i]
 	}
 
 	switch sl.sortMode {
-	case SortRecent:
-		sort.Slice(sessions, func(i, j int) bool {
-			return sessions[i].Modified.After(sessions[j].Modified)
-		})
-		sl.filteredSessions = nil
-		for _, s := range sessions {
-			sl.filteredSessions = append(sl.filteredSessions, flatSessionNode{session: s})
+	case SortRelevance:
+		matched := FilterAndSortSessions(ptrs, query, SortRelevance, NameFilterAll)
+		sl.filteredSessions = make([]flatSessionNode, len(matched))
+		for i, s := range matched {
+			sl.filteredSessions[i] = flatSessionNode{session: *s}
 		}
-	default: // threaded
+	case SortRecent:
+		// Filter via rich search engine, then sort by modified time.
+		matched := FilterAndSortSessions(ptrs, query, SortRecent, NameFilterAll)
+		sort.Slice(matched, func(i, j int) bool {
+			return matched[i].Modified.After(matched[j].Modified)
+		})
+		sl.filteredSessions = make([]flatSessionNode, len(matched))
+		for i, s := range matched {
+			sl.filteredSessions[i] = flatSessionNode{session: *s}
+		}
+	default: // SortThreaded
+		// Filter via rich search engine (SortRecent mode = filter only, no extra
+		// sort), then build the thread tree which sorts internally by modified.
+		matched := FilterAndSortSessions(ptrs, query, SortRecent, NameFilterAll)
+		sessions := make([]core.SessionListInfo, len(matched))
+		for i, s := range matched {
+			sessions[i] = *s
+		}
 		tree := buildSessionTree(sessions)
 		sl.filteredSessions = flattenSessionTree(tree)
 	}
@@ -231,17 +238,21 @@ func (sl *sessionList) Render(width int) []string {
 		return lines
 	}
 
-	// Visible range
-	start := sl.selectedIndex - sl.maxVisible/2
-	if start > len(sl.filteredSessions)-sl.maxVisible {
-		start = len(sl.filteredSessions) - sl.maxVisible
-	}
-	if start < 0 {
-		start = 0
-	}
-	end := start + sl.maxVisible
-	if end > len(sl.filteredSessions) {
-		end = len(sl.filteredSessions)
+	// Visible range: center the window on selectedIndex, clamped to valid
+	// bounds. maxStart is the largest valid start that still fills the window.
+	// Using min/max avoids wrong intermediate values when len < maxVisible.
+	maxStart := max(0, len(sl.filteredSessions)-sl.maxVisible)
+	start := max(0, min(sl.selectedIndex-sl.maxVisible/2, maxStart))
+	end := min(start+sl.maxVisible, len(sl.filteredSessions))
+
+	// sanitizeForTUI replaces any rune that would corrupt single-line rendering
+	// (ASCII control chars, DEL, C1 control codes, Unicode line/paragraph separators)
+	// with a space, ensuring each item always occupies exactly one terminal line.
+	sanitizeForTUI := func(r rune) rune {
+		if r < 0x20 || r == 0x7F || (r >= 0x80 && r <= 0x9F) || r == 0x2028 || r == 0x2029 {
+			return ' '
+		}
+		return r
 	}
 
 	for i := start; i < end; i++ {
@@ -281,6 +292,10 @@ func (sl *sessionList) Render(width int) []string {
 		if name == "" {
 			name = "(empty)"
 		}
+		// Sanitize control characters (newlines, carriage returns, Unicode line/paragraph
+		// separators, C1 codes, DEL, etc.) that would corrupt the terminal: each item
+		// must render as exactly one line.
+		name = strings.Map(sanitizeForTUI, name)
 		if isSelected {
 			name = t.Bold(name)
 		}
@@ -293,7 +308,7 @@ func (sl *sessionList) Render(width int) []string {
 
 		// Show path on selected
 		if isSelected && sl.showPath {
-			pathLine := "    " + t.Fg("muted", shortenPath(s.Cwd))
+			pathLine := "    " + t.Fg("muted", strings.Map(sanitizeForTUI, shortenPath(s.Cwd)))
 			lines = append(lines, tui.TruncateToWidth(pathLine, width, "…", false))
 		}
 	}

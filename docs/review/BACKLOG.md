@@ -1,9 +1,11 @@
-# Review Backlog — 2026-02-20
+# Review Backlog — 2026-02-22
 
-**Last reviewed:** Review cycle 56, 2026-02-20 09:46 PST
+**Last reviewed:** Review cycle 72, 2026-02-22 18:55 PST
+**Race detector:** ✅ CLEAN (`go test -race ./...` — all 22 packages pass, no races)
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean)
 **Test status:** ✅ ALL PASSING (22 packages)
-**Work tracker:** All phases 0–13 complete. No new work in progress.
+**Work tracker:** All phases 0–14 complete.
+**Files reviewed this cycle:** No new files (cycle 70 fix for `SortRelevance`/`FilterAndSortSessions` confirmed fixed by another agent)
 
 ---
 
@@ -31,6 +33,9 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/modes/interactive/components/session_selector.go:applyFilter` — `SortRelevance` case missing; `FilterAndSortSessions` never called; all modes now use the rich search engine (fuzzy/phrase/regex) — FIXED 2026-02-22
+- `pkg/extensions/tmuxspinner/tmuxspinner_test.go:87-92` — `TestNoopWhenNotInTmux` removed unnecessary `ClearRegistry()` + re-`Register()` calls; factory evaluates `isTmux()` at load time so `testSetup` override suffices — FIXED 2026-02-21
+- `pkg/modes/interactive/components/session_selector_search.go:161` — Dead `if inQuote { flush(TokenPhrase) }` branch (inQuote can only be false at that point) — FIXED 2026-02-21: simplified to `flush(TokenFuzzy)` unconditionally
 - `pkg/core/agentsession.go:255-261` — `emit` RLock held during callbacks (deadlock risk) — FIXED 2026-02-20
 - `pkg/modes/print/print.go:87-91` — `os.Exit(1)` inside library function — FIXED 2026-02-20
 - `pkg/core/session.go:687` — `panic` in `CreateBranchedSession` — FIXED 2026-02-20
@@ -38,6 +43,7 @@ _(no open items)_
 - `pkg/modes/print/print_test.go` — `Run` function had zero coverage — FIXED 2026-02-20
 - `pkg/ai/providers/codex_websocket.go:138-169` — `wsInflight` coalescing path untested — FIXED 2026-02-20
 - `pkg/core/sdk.go:81-87` — Unnecessary auth-path complexity — FIXED 2026-02-20
+- `pkg/modes/interactive/components/session_selector.go` — Visible-window centering wrong when count < maxVisible; refactored to min/max builtins; scroll regression tests added — FIXED 2026-02-21
 - `pkg/extensions/claudeusage/client.go:80-84` — `progressBar` manual clamping → `max`/`min` builtins — ✅ FIXED 2026-02-18
 - `pkg/extensions/claudeusage/client.go:44` — `http.DefaultClient` → `httpClient` with 10s timeout — ✅ FIXED 2026-02-18
 - `pkg/modes/acp/acp.go:ResumeSession` — duplicate session/resume leaked resources — ✅ FIXED (closes old session before creating new one; test added)
@@ -85,10 +91,10 @@ _(no open items)_
 - `pkg/modes/interactive/mode.go:compactionFormatTokens/compactionLoaderLabel` — No unit tests — ✅ FIXED (2026-02-19)
 - `pkg/core/compaction/runner_test.go:99` — `ai.Message{Role:...}` unknown field — ✅ FIXED (2026-02-19)
 - `pkg/core/compaction/runner_test.go:110` — TokensBefore always 0 — ✅ FIXED (2026-02-19)
-- `pkg/extension/integration.go:173-189` — Double-wrapping of tools (hooks firing twice) — ✅ FIXED (2026-02-19): `addExtensionTools` now only wraps new extension tools, not pre-existing tools
-- `pkg/extension/integration_test.go` — No hook-fires-exactly-once test — ✅ FIXED (2026-02-19): `TestHookFiresExactlyOnceWithPreExistingTools` added
-- `pkg/core/agentsession.go:wrapTool` — `ToolResultModification.IsError` dead code — ✅ FIXED (2026-02-19): added `IsError bool` to `AgentToolResult`, loop uses it, hook receives correct isError, mod.IsError applied
-- `pkg/extension/integration.go:bridgeSessionEvents` — `turnCounter int64` needlessly wide — ✅ FIXED (2026-02-19): changed to `int`, dropped `int()` cast
+- `pkg/extension/integration.go:173-189` — Double-wrapping of tools (hooks firing twice) — ✅ FIXED (2026-02-19)
+- `pkg/extension/integration_test.go` — No hook-fires-exactly-once test — ✅ FIXED (2026-02-19)
+- `pkg/core/agentsession.go:wrapTool` — `ToolResultModification.IsError` dead code — ✅ FIXED (2026-02-19)
+- `pkg/extension/integration.go:bridgeSessionEvents` — `turnCounter int64` needlessly wide — ✅ FIXED (2026-02-19)
 - `pkg/modes/acp/acp.go:929-937` — Extension commands dispatched via `Prompt()` instead of `ExecuteCommand()` — ✅ FIXED 2026-02-18
 - `pkg/modes/acp/acp_test.go:586,610` — `chunk.Content` used as string (type `ContentBlock`) — ✅ FIXED 2026-02-18
 - `pkg/tui/components/editor.go:713,740` — `math.Max` used instead of builtin `max()` — ✅ FIXED 2026-02-18

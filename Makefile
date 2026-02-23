@@ -16,7 +16,7 @@ build:
 	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
-all: test-race pgo build-all
+all: test-race pgo build build-all
 
 install:
 	@cp CHANGELOG.md cmd/fir/CHANGELOG.md

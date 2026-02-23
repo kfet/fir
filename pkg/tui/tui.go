@@ -237,6 +237,14 @@ func (t *TUI) FullRedraws() int {
 	return t.fullRedrawCount
 }
 
+// HardwareCursorRow returns the current tracked hardware cursor row.
+// Used by tests to get the initial cursor position for verifying differential renders.
+func (t *TUI) HardwareCursorRow() int {
+	t.renderMu.Lock()
+	defer t.renderMu.Unlock()
+	return t.hardwareCursorRow
+}
+
 func (t *TUI) GetShowHardwareCursor() bool {
 	return t.showHardwareCursor
 }

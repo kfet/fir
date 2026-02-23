@@ -1,14 +1,15 @@
-# URGENT — 2026-02-20
+# URGENT — 2026-02-21
 
 ## Active Issues
 
-_(none — cycle 49: codex_websocket TOCTOU fixed; build clean, all tests pass)_
+_(none — cycle 70: session selector newline-fix + tmuxspinner tests merged; build clean, all 22 packages pass)_
 
 ---
 
 ## Recently Fixed ✅
 
-- ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19): test now uses two user messages instead of zero-usage assistant; avoids `getAssistantUsage` returning a zero-value pointer
+- ~~`pkg/modes/interactive/components/session_selector.go` — Visible-window centering wrong when count < maxVisible~~ — ✅ FIXED 2026-02-21 (refactored to min/max builtins; scroll regression tests added)
+- ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19)
 - ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED (agent corrected to `ai.NewAssistantMsg()`)
 - ~~`pkg/modes/acp/acp_test.go:586,610` — `chunk.Content` used as string (type `ContentBlock`)~~ — ✅ FIXED 2026-02-18
 - ~~`pkg/modes/acp/acp.go:929-937` — Extension commands dispatched via `Prompt()` instead of `ExecuteCommand()`~~ — ✅ FIXED 2026-02-18
@@ -21,10 +22,3 @@ _(none — cycle 49: codex_websocket TOCTOU fixed; build clean, all tests pass)_
 - ~~`pkg/core/compaction/runner_test.go:101` — Test failure + real auth.json mutation~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:381` — Non-zero exit code not returned as error~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:82` — No session cleanup on exit~~ — ✅ FIXED
-- ~~`pkg/modes/acp/acp_test.go` — Out of sync~~ — ✅ FIXED
-- ~~`pkg/modes/acp/helpers.go` — URI/Resource regressions~~ — ✅ FIXED
-- ~~`pkg/modes/acp/terminal.go` — Build broken~~ — ✅ FIXED
-- ~~`pkg/extension/integration_test.go:145,175` — Tests panic~~ — ✅ FIXED
-- ~~`RunCompaction` signature change break (runner_test.go, agentsession_test.go, mode.go, rpc/server.go)~~ — ✅ FIXED 2026-02-18
-- ~~`pkg/modes/rpc/server.go:193-194` — `CmdSetAutoCompaction` no-op~~ — ✅ FIXED 2026-02-18
-- ~~`pkg/core/agentsession.go:488` — Overflow auto-compaction bypassed `Enabled` setting~~ — ✅ FIXED 2026-02-18

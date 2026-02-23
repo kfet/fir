@@ -100,11 +100,6 @@ func TestNoopWhenNotInTmux(t *testing.T) {
 	_, cleanup := testSetup(false, "", "")
 	defer cleanup()
 
-	// Re-register to pick up isTmux=false
-	extension.ClearRegistry()
-	defer extension.ClearRegistry()
-	extension.Register("tmuxspinner", factory)
-
 	runner := extension.NewRunner(core.NewEventBus())
 	if err := runner.LoadAll(); err != nil {
 		t.Fatal(err)
