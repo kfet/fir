@@ -613,20 +613,27 @@ func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 		WillRetry:        willRetry,
 	})
 
-	// If overflow, retry the prompt with last user message
+	// If overflow, continue the agent loop with the compacted context.
+	// RunCompaction rebuilds agent messages from the session, which includes the
+	// persisted overflow error message. Strip it so the agent retries cleanly
+	// from the last user message — without duplicating it.
 	if willRetry && result != nil {
 		state := s.State()
-		var lastUserText string
-		for i := len(state.Messages) - 1; i >= 0; i-- {
-			if u := state.Messages[i].Message.AsUser(); u != nil {
-				if txt, ok := u.Content.(string); ok {
-					lastUserText = txt
+		msgs := state.Messages
+		for len(msgs) > 0 {
+			last := msgs[len(msgs)-1]
+			if last.Role() == "assistant" {
+				if a := last.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+					msgs = msgs[:len(msgs)-1]
+					continue
 				}
-				break
 			}
+			break
 		}
-		if lastUserText != "" {
-			go func() { _ = s.Prompt(lastUserText) }()
+		// Only retry when a user message is waiting for a response.
+		if len(msgs) > 0 && msgs[len(msgs)-1].Role() != "assistant" {
+			s.Agent.ReplaceMessages(msgs)
+			go func() { _ = s.Agent.Continue() }()
 		}
 	}
 }

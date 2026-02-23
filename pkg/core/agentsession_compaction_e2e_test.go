@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+	"encoding/json"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -598,5 +600,232 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 	}
 	if runner.runCalled {
 		t.Error("CompactionRunner.RunCompaction should NOT have been called when disabled")
+	}
+}
+
+// rebuildingMockCompactionRunner simulates the real DefaultRunner: it appends a
+// compaction entry to the session and rebuilds agent messages from the session
+// context (which will include the persisted overflow error message).
+// This is what the fix must correctly handle — stripping the error before retry.
+type rebuildingMockCompactionRunner struct {
+	runResult *CompactionResultInfo
+	runError  error
+	runCalled bool
+}
+
+func (r *rebuildingMockCompactionRunner) IsEnabled() bool { return true }
+func (r *rebuildingMockCompactionRunner) ShouldCompact(_, _ int) bool { return false }
+func (r *rebuildingMockCompactionRunner) GetStats(_ *AgentSession) *CompactionInfo { return nil }
+func (r *rebuildingMockCompactionRunner) RunCompaction(_ context.Context, session *AgentSession, _ string) (*CompactionResultInfo, error) {
+	r.runCalled = true
+	if r.runError != nil {
+		return nil, r.runError
+	}
+	// Simulate what DefaultRunner does: persist the compaction, then rebuild.
+	// Use the most recent user message entry as FirstKeptEntryID so that
+	// BuildSessionContext includes the user message in the rebuilt context —
+	// this is what the real compaction runner does (recent messages are kept).
+	firstKeptEntryID := ""
+	for _, e := range session.SessionManager.GetBranch("") {
+		if e.Type == "message" {
+			var probe struct {
+				Role string `json:"role"`
+			}
+			if json.Unmarshal(e.RawMessage, &probe) == nil && probe.Role == "user" {
+				firstKeptEntryID = e.ID
+			}
+		}
+	}
+	session.SessionManager.AppendCompaction(
+		r.runResult.Summary,
+		firstKeptEntryID,
+		r.runResult.TokensBefore,
+		nil,
+		false,
+	)
+	sessionCtx := session.SessionManager.BuildSessionContext()
+	session.Agent.ReplaceMessages(sessionCtx.Messages)
+	return &CompactionResultInfo{
+		Summary:          r.runResult.Summary,
+		FirstKeptEntryID: firstKeptEntryID,
+		TokensBefore:     r.runResult.TokensBefore,
+	}, nil
+}
+
+// TestAutoCompaction_E2E_OverflowRetry verifies that after an overflow-triggered
+// compaction the agent retries the original user message exactly once and does
+// not duplicate the user message or carry the error assistant message into the
+// retry context.
+func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := InMemorySessionManager(cwd)
+	settingsManager := NewSettingsManager(cwd, agentDir)
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      "test-provider",
+		Api:           "openai-completions",
+		ContextWindow: 100000,
+		MaxTokens:     4096,
+	}
+
+	var streamMu sync.Mutex
+	callCount := 0
+
+	fakeStreamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		streamMu.Lock()
+		call := callCount
+		callCount++
+		streamMu.Unlock()
+
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			var output *ai.AssistantMessage
+			if call == 0 {
+				// First call: return a context-overflow error.
+				output = &ai.AssistantMessage{
+					Role:         ai.RoleAssistant,
+					Content:      []ai.AssistantContent{},
+					Api:          m.Api,
+					Provider:     m.Provider,
+					Model:        m.ID,
+					StopReason:   ai.StopReasonError,
+					ErrorMessage: "prompt is too long: 201943 tokens > 200000 maximum",
+					Timestamp:    time.Now().UnixMilli(),
+				}
+			} else {
+				// Second call (retry after compaction): succeed.
+				output = &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					Content:    []ai.AssistantContent{ai.NewTextContent("Response after compaction")},
+					Api:        m.Api,
+					Provider:   m.Provider,
+					Model:      m.ID,
+					StopReason: ai.StopReasonStop,
+					Timestamp:  time.Now().UnixMilli(),
+					Usage:      ai.Usage{Input: 5000, Output: 100, TotalTokens: 5100},
+				}
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: output})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: fakeStreamFn,
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return ConvertToLLM(msgs)
+		},
+	})
+
+	runner := &rebuildingMockCompactionRunner{
+		runResult: &CompactionResultInfo{
+			Summary:      "compacted on overflow",
+			TokensBefore: 120000,
+		},
+	}
+
+	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	_ = rl.Reload()
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:            a,
+		SessionManager:   sm,
+		SettingsManager:  settingsManager,
+		ResourceLoader:   rl,
+		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		CompactionRunner: runner,
+		Cwd:              cwd,
+	})
+	defer session.Close()
+
+	var events []AgentSessionEvent
+	var evMu sync.Mutex
+	session.Subscribe(func(e AgentSessionEvent) {
+		evMu.Lock()
+		defer evMu.Unlock()
+		events = append(events, e)
+	})
+
+	// Send the prompt (blocks until the first loop finishes; the retry
+	// runs asynchronously in a goroutine).
+	err := session.Prompt("Hello after overflow")
+	if err != nil {
+		t.Fatalf("Prompt failed: %v", err)
+	}
+
+	// Wait for the retry goroutine to start and finish.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		streamMu.Lock()
+		calls := callCount
+		streamMu.Unlock()
+		if calls >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	a.WaitForIdle()
+	time.Sleep(50 * time.Millisecond)
+
+	// --- Assertions ---
+
+	if !runner.runCalled {
+		t.Fatal("expected compaction to run on overflow")
+	}
+
+	streamMu.Lock()
+	finalCalls := callCount
+	streamMu.Unlock()
+	if finalCalls != 2 {
+		t.Errorf("expected 2 stream calls (overflow + retry), got %d", finalCalls)
+	}
+
+	// After retry the context must have exactly one user message and no error
+	// assistant messages — the fix strips the error before continuing.
+	state := session.State()
+	userMsgCount := 0
+	errorMsgCount := 0
+	for _, msg := range state.Messages {
+		if msg.Role() == "user" {
+			userMsgCount++
+		}
+		if a := msg.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+			errorMsgCount++
+		}
+	}
+	if userMsgCount != 1 {
+		t.Errorf("expected exactly 1 user message after retry, got %d (duplicate messages indicate the bug is back)", userMsgCount)
+	}
+	if errorMsgCount != 0 {
+		t.Errorf("expected no error assistant messages in retry context, got %d", errorMsgCount)
+	}
+
+	// Compaction events should have been emitted with the right metadata.
+	evMu.Lock()
+	defer evMu.Unlock()
+	compactionStarted := false
+	compactionEnded := false
+	for _, e := range events {
+		if e.Type == "auto_compaction_start" && e.CompactionReason == "overflow" {
+			compactionStarted = true
+		}
+		if e.Type == "auto_compaction_end" && e.WillRetry {
+			compactionEnded = true
+		}
+	}
+	if !compactionStarted {
+		t.Error("expected auto_compaction_start event with reason=overflow")
+	}
+	if !compactionEnded {
+		t.Error("expected auto_compaction_end event with WillRetry=true")
 	}
 }
