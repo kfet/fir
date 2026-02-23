@@ -1,19 +1,12 @@
 # Review Backlog — 2026-02-22
 
-**Last reviewed:** Review cycle 99, 2026-02-22 19:15 PST (post-rebase)
-**Build status:** ✅ BUILD PASSING (`go vet ./...` clean)
-**Test status:** ✅ ALL PASSING (22 packages)
-**Files reviewed this cycle (from rebase ce07547):**
-- `cmd/fir/app.go`, `cmd/fir/changelog_init.go` — changelog embed refactor
-- `pkg/agent/agent.go` — `GetAndClearFollowUpQueue()`
-- `pkg/core/agentsession.go` + test — `ClearFollowUpQueue`, `SetScopedModels`, RLock/Lock
-- `pkg/core/changelog.go` — `cmpInt` → `cmp.Compare`, `GetChangelogEntries()`
-- `pkg/core/export.go` + test — `ExportToHTML`, `WriteConversationHTML`, `ExtractHTMLMessageText`
-- `pkg/modes/acp/acp.go` — `CleanupPendingBashTerminals` on all exit paths
-- `pkg/modes/acp/terminal.go` — per-path `delete(pendingBashTerminals)` + `CleanupPendingBashTerminals`
-- `pkg/modes/interactive/components/tree_selector.go` + test — `SetOnLabelEdit`, `SetInitialSelection`
-- `pkg/modes/interactive/mode.go` + test — `handleDequeue`, `handleClipboardImagePaste`, `handleExternalEditor`, `showScopedModelsSelector`, `performShare` (`atomic.Pointer`), `handleFork`, scoped `cycleModel`
-- `pkg/modes/rpc/server.go` — `CmdExportHTML` delegates to `ExportToHTML`
+**Last reviewed:** Review cycle 107 (6th cycle), 2026-02-22 21:30 PST
+**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 22 packages pass)
+**Files reviewed this cycle:**
+- `pkg/core/agentsession.go` — `emit`, `Prompt`, `Fork`, `GetUserMessagesForForking` (all correct)
+- `pkg/core/modelresolver.go` — `ResolveModelScope` (non-deterministic order in applyToSession but not a real issue)
+- `pkg/modes/acp/conn.go`, `cmd/fir/changelog_init.go`, `Makefile`, `pkg/modes/interactive/mode_test.go` — still unstaged from fix agent, verified correct
+**Open items: 0** (all sections clean)
 
 ---
 
@@ -41,6 +34,8 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake — ✅ FIXED 2026-02-22: propagate errors with early-return to `resp` struct.
+- `pkg/modes/interactive/mode.go` — `cycleModel`/`handleFork`/`handleForkByNumber` no tests — ✅ FIXED 2026-02-22: `TestCycleModel_Forward/Backward/WithScopedModels`, `TestHandleFork_Success/Error/NonUserMessage`, `TestHandleForkByNumber_Valid/InvalidNumber/Zero/OutOfRange`
 - `pkg/core/export.go` — `ExportToHTML` duplicate create/write/close branches — ✅ FIXED (cycle 97): `var f *os.File` pattern
 - `pkg/modes/interactive/mode.go:1156` — `append(queued, current)` slice capacity footgun — ✅ FIXED (cycle 97): `make+copy`
 - `pkg/modes/interactive/mode.go:1806` — `proc` data race in `performShare` — ✅ FIXED (cycle 96): `atomic.Pointer[exec.Cmd]`

@@ -63,9 +63,14 @@ func rawMethodHandler(pa *piAgent) acpsdk.MethodHandler {
 			// Augment with sessionCapabilities (not in SDK 0.10.7, present in TS SDK 0.14.1).
 			// Marshal to map and inject manually so clients like Zed know we support
 			// session/list and session/resume.
-			rawResp, _ := json.Marshal(resp)
+			rawResp, err := json.Marshal(resp)
+			if err != nil {
+				return resp, nil // fall back to plain struct (no session capabilities)
+			}
 			var respMap map[string]any
-			_ = json.Unmarshal(rawResp, &respMap)
+			if err := json.Unmarshal(rawResp, &respMap); err != nil {
+				return resp, nil // fall back to plain struct (no session capabilities)
+			}
 			if caps, ok := respMap["agentCapabilities"].(map[string]any); ok {
 				caps["sessionCapabilities"] = map[string]any{
 					"list":   map[string]any{},

@@ -1702,3 +1702,227 @@ func TestPerformShare_NoBinary(t *testing.T) {
 		t.Errorf("expected gh-related warning when gh is unavailable/unauthenticated, got:\n%s", output)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// cycleModel tests
+// ---------------------------------------------------------------------------
+
+// setupAvailableModels adds a runtime API key for "anthropic" so that the
+// built-in anthropic models appear in ModelRegistry.GetAvailable().
+// Returns the list of available models (at least 2 guaranteed or test is skipped).
+func setupAvailableModels(t *testing.T, tm *testMode) []*ai.Model {
+	t.Helper()
+	tm.mode.session.ModelRegistryRef().AuthStorage().SetRuntimeApiKey("anthropic", "test-key")
+	available := tm.mode.session.ModelRegistryRef().GetAvailable()
+	if len(available) < 2 {
+		t.Skip("fewer than 2 models available for cycling test")
+	}
+	return available
+}
+
+func TestCycleModel_Forward(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	available := setupAvailableModels(t, tm)
+
+	first := available[0]
+	second := available[1]
+	tm.mode.session.SetModel(first)
+
+	tm.mode.cycleModel("forward")
+
+	got := tm.mode.session.Model()
+	if !ai.ModelsAreEqual(got, second) {
+		t.Errorf("forward cycle: expected model %q, got %q", second.ID, got.ID)
+	}
+}
+
+func TestCycleModel_Backward(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	available := setupAvailableModels(t, tm)
+
+	first := available[0]
+	second := available[1]
+	tm.mode.session.SetModel(second)
+
+	tm.mode.cycleModel("backward")
+
+	got := tm.mode.session.Model()
+	if !ai.ModelsAreEqual(got, first) {
+		t.Errorf("backward cycle: expected model %q, got %q", first.ID, got.ID)
+	}
+}
+
+func TestCycleModel_WithScopedModels(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	available := setupAvailableModels(t, tm)
+
+	// Restrict cycling to the first two available models via scoped models.
+	first := available[0]
+	second := available[1]
+	tm.mode.session.SetScopedModels([]core.ScopedModel{
+		{Model: first},
+		{Model: second},
+	})
+	tm.mode.session.SetModel(first)
+
+	tm.mode.cycleModel("forward")
+
+	got := tm.mode.session.Model()
+	if !ai.ModelsAreEqual(got, second) {
+		t.Errorf("scoped forward cycle: expected model %q, got %q", second.ID, got.ID)
+	}
+}
+
+func TestCycleModel_WithScopedModels_Backward(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	available := setupAvailableModels(t, tm)
+
+	first := available[0]
+	second := available[1]
+	tm.mode.session.SetScopedModels([]core.ScopedModel{
+		{Model: first},
+		{Model: second},
+	})
+	tm.mode.session.SetModel(second)
+
+	tm.mode.cycleModel("backward")
+
+	got := tm.mode.session.Model()
+	if !ai.ModelsAreEqual(got, first) {
+		t.Errorf("scoped backward cycle: expected model %q, got %q", first.ID, got.ID)
+	}
+}
+
+func TestCycleModel_ShowsModelName(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	available := setupAvailableModels(t, tm)
+
+	tm.mode.session.SetModel(available[0])
+	tm.mode.cycleModel("forward")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Model:") {
+		t.Errorf("expected 'Model:' status after cycling, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleFork tests
+// ---------------------------------------------------------------------------
+
+func TestHandleFork_Error(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Empty entryID causes Fork to return an error.
+	tm.mode.handleFork("")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Fork failed") {
+		t.Errorf("expected 'Fork failed' warning, got:\n%s", output)
+	}
+}
+
+func TestHandleFork_Success(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Add a user message entry to the session.
+	entryID := tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("hello from fork", 0))
+	if entryID == "" {
+		t.Fatal("expected non-empty entry ID")
+	}
+
+	tm.mode.handleFork(entryID)
+	tm.waitRender()
+
+	// Should show success status.
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Branched") {
+		t.Errorf("expected 'Branched' status after fork, got:\n%s", output)
+	}
+
+	// Editor should contain the forked message text.
+	if got := tm.editorText(); !strings.Contains(got, "hello from fork") {
+		t.Errorf("expected forked text in editor, got %q", got)
+	}
+}
+
+func TestHandleFork_NonUserMessage(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Add an assistant message — Fork should reject it because role != "user".
+	entryID := tm.mode.session.SessionManager.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{}))
+	if entryID == "" {
+		t.Fatal("expected non-empty entry ID")
+	}
+
+	tm.mode.handleFork(entryID)
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Fork failed") {
+		t.Errorf("expected 'Fork failed' warning for non-user message, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleForkByNumber tests
+// ---------------------------------------------------------------------------
+
+func TestHandleForkByNumber_InvalidNumber(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	tm.mode.handleForkByNumber("abc")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Usage") {
+		t.Errorf("expected usage warning for invalid number, got:\n%s", output)
+	}
+}
+
+func TestHandleForkByNumber_Zero(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// n < 1 is treated the same as invalid.
+	tm.mode.handleForkByNumber("0")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Usage") {
+		t.Errorf("expected usage warning for n=0, got:\n%s", output)
+	}
+}
+
+func TestHandleForkByNumber_OutOfRange(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	// No user messages in session, so n=1 is out of range.
+
+	tm.mode.handleForkByNumber("1")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "not found") && !strings.Contains(output, "0 user") {
+		t.Errorf("expected 'not found' warning, got:\n%s", output)
+	}
+}
+
+func TestHandleForkByNumber_Valid(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Add a user message to fork from.
+	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("numbered fork message", 0))
+
+	tm.mode.handleForkByNumber("1")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Branched") {
+		t.Errorf("expected 'Branched' status, got:\n%s", output)
+	}
+
+	if got := tm.editorText(); !strings.Contains(got, "numbered fork message") {
+		t.Errorf("expected forked text in editor, got %q", got)
+	}
+}
