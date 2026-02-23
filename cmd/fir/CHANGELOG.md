@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-02-22
+
+### Fixed
+
+- Auto-compaction now retries the original user message instead of attempting a retry with the compacted history, which could cause the message to be lost in certain overflow scenarios.
+
 ## [0.3.0] - 2026-02-22
 
 ### Added
