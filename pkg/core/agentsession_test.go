@@ -2179,3 +2179,66 @@ func TestAgentSession_NavigateTree(t *testing.T) {
 		t.Error("expected neither cancelled nor aborted")
 	}
 }
+
+// ============================================================================
+// SetScopedModels / ScopedModelsRef
+// ============================================================================
+
+func TestAgentSession_SetAndGetScopedModels(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Initially nil.
+	if got := session.ScopedModelsRef(); got != nil {
+		t.Errorf("expected nil scoped models, got %v", got)
+	}
+
+	// Set a slice and read it back.
+	models := []ScopedModel{{Model: nil, ThinkingLevel: "high"}}
+	session.SetScopedModels(models)
+	got := session.ScopedModelsRef()
+	if len(got) != 1 || got[0].ThinkingLevel != "high" {
+		t.Errorf("expected [{nil high}], got %v", got)
+	}
+
+	// Clear by setting nil.
+	session.SetScopedModels(nil)
+	if got := session.ScopedModelsRef(); got != nil {
+		t.Errorf("expected nil after clear, got %v", got)
+	}
+}
+
+// ============================================================================
+// ClearFollowUpQueue
+// ============================================================================
+
+func TestAgentSession_ClearFollowUpQueue_Empty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// With no queued messages, ClearFollowUpQueue returns an empty slice.
+	got := session.ClearFollowUpQueue()
+	if len(got) != 0 {
+		t.Errorf("expected empty queue, got %v", got)
+	}
+}
+
+func TestAgentSession_Prompt_FollowUpQueuesWhenStreaming(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Manually queue a follow-up via the agent directly (simulates the
+	// Prompt(..., followUp) path without needing a real streaming session).
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("queued message", 0)))
+
+	got := session.ClearFollowUpQueue()
+	if len(got) != 1 || got[0] != "queued message" {
+		t.Errorf("expected [queued message], got %v", got)
+	}
+
+	// After clearing, queue should be empty.
+	got2 := session.ClearFollowUpQueue()
+	if len(got2) != 0 {
+		t.Errorf("expected empty after clear, got %v", got2)
+	}
+}

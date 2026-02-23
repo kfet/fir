@@ -1159,6 +1159,23 @@ func (c *TreeSelectorComponent) SelectedNodeID() string {
 	return c.treeList.SelectedNodeID()
 }
 
+// SetOnLabelEdit sets the callback invoked when the user presses Shift+L to
+// edit the label of the currently selected entry. The callback receives the
+// entry ID and the current label value.
+func (c *TreeSelectorComponent) SetOnLabelEdit(fn func(entryID, currentLabel string)) {
+	c.treeList.OnLabelEdit = fn
+}
+
+// SetInitialSelection overrides the initially-selected entry. Useful when
+// re-opening the selector after an action (e.g. cancelled summarization) so
+// focus returns to the entry the user was looking at.
+func (c *TreeSelectorComponent) SetInitialSelection(entryID string) {
+	c.treeList.selectedIndex = c.treeList.findNearestVisibleIndex(entryID)
+	if len(c.treeList.filteredNodes) > 0 && c.treeList.selectedIndex < len(c.treeList.filteredNodes) {
+		c.treeList.lastSelectedID = c.treeList.filteredNodes[c.treeList.selectedIndex].node.Entry.ID
+	}
+}
+
 // HandleInput delegates input to the tree list.
 func (c *TreeSelectorComponent) HandleInput(data string) {
 	c.treeList.HandleInput(data)

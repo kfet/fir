@@ -344,6 +344,15 @@ func (a *Agent) ClearFollowUpQueue() {
 	a.followUpQueue = nil
 }
 
+// GetAndClearFollowUpQueue atomically returns and clears the follow-up queue.
+func (a *Agent) GetAndClearFollowUpQueue() []AgentMessage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	q := a.followUpQueue
+	a.followUpQueue = nil
+	return q
+}
+
 // ClearAllQueues clears both steering and follow-up queues.
 func (a *Agent) ClearAllQueues() {
 	a.mu.Lock()

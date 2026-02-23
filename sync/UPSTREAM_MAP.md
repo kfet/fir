@@ -191,6 +191,7 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | `coding-agent/src/modes/print-mode.ts` | `pkg/modes/print/print.go` | ✅ |
 | (shared mode types) | `pkg/modes/modes.go` | ✅ |
 | `coding-agent/src/modes/rpc/rpc-mode.ts` | `pkg/modes/rpc/server.go` | ✅ |
+| `coding-agent/src/modes/rpc/rpc-mode.ts` (exportToHtml) | `pkg/core/export.go` | ✅ |
 | `coding-agent/src/modes/rpc/rpc-types.ts` | `pkg/modes/rpc/types.go` | ✅ |
 
 ## Extension System (`pkg/extension/`)

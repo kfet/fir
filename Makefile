@@ -13,19 +13,15 @@ PGO_STAMP := default.pgo.stamp
 
 build:
 	@mkdir -p $(BINDIR)
-	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
 all: test-race pgo build build-all
 
 install:
-	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
 
 # Cross-compile for all targets
-build-all:
-	@mkdir -p $(BINDIR)
-	@cp CHANGELOG.md cmd/fir/CHANGELOG.md
+build-all: build
 	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/
 	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/
 	GOOS=linux GOARCH=arm GOARM=6 go build -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm6 ./cmd/fir/

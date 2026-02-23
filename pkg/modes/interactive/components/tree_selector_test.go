@@ -133,3 +133,47 @@ func TestTreeList_Callbacks(t *testing.T) {
 		t.Error("expected cancel callback")
 	}
 }
+
+func TestTreeSelectorComponent_SetOnLabelEdit(t *testing.T) {
+	roots := testSessionTree()
+	comp := NewTreeSelectorComponent(roots, "root-001", func(string) {}, func() {})
+
+	// Initially no callback.
+	if comp.treeList.OnLabelEdit != nil {
+		t.Error("expected nil OnLabelEdit before SetOnLabelEdit")
+	}
+
+	called := false
+	var gotID, gotLabel string
+	comp.SetOnLabelEdit(func(entryID, currentLabel string) {
+		called = true
+		gotID = entryID
+		gotLabel = currentLabel
+	})
+
+	if comp.treeList.OnLabelEdit == nil {
+		t.Fatal("expected OnLabelEdit to be set after SetOnLabelEdit")
+	}
+
+	// Invoke it directly to confirm the callback wires through.
+	comp.treeList.OnLabelEdit("root-001", "Initial prompt")
+	if !called || gotID != "root-001" || gotLabel != "Initial prompt" {
+		t.Errorf("callback not invoked correctly: called=%v id=%q label=%q", called, gotID, gotLabel)
+	}
+}
+
+func TestTreeSelectorComponent_SetInitialSelection(t *testing.T) {
+	roots := testSessionTree()
+	comp := NewTreeSelectorComponent(roots, "root-001", func(string) {}, func() {})
+
+	// Starts at root-001.
+	if comp.treeList.SelectedNodeID() != "root-001" {
+		t.Fatalf("expected initial selection root-001, got %q", comp.treeList.SelectedNodeID())
+	}
+
+	// Move to child-002.
+	comp.SetInitialSelection("child-002")
+	if comp.treeList.SelectedNodeID() != "child-002" {
+		t.Errorf("expected child-002 after SetInitialSelection, got %q", comp.treeList.SelectedNodeID())
+	}
+}

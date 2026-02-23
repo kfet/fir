@@ -1521,3 +1521,184 @@ func TestCompactionLoaderLabel(t *testing.T) {
 		t.Errorf("expected suffix in label: %q", label)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// handleDequeue tests
+// ---------------------------------------------------------------------------
+
+func TestHandleDequeue_NilSession(t *testing.T) {
+	tm := newTestMode(t) // session is nil by default
+	// Should return early without panic or side effects.
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	// No status shown — nothing written to status container.
+	if got := len(tm.mode.statusContainer.Children); got != 0 {
+		t.Errorf("expected no status for nil session, got %d children", got)
+	}
+}
+
+func TestHandleDequeue_EmptyQueue(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	// Queue is empty — handleDequeue should show a "No queued" status.
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No queued") {
+		t.Errorf("expected 'No queued' status for empty queue, got:\n%s", output)
+	}
+}
+
+func TestHandleDequeue_NonEmptyQueue(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	// Queue two follow-up messages.
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("first queued", 0)))
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("second queued", 0)))
+
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	edText := tm.editorText()
+	if !strings.Contains(edText, "first queued") {
+		t.Errorf("expected 'first queued' in editor, got %q", edText)
+	}
+	if !strings.Contains(edText, "second queued") {
+		t.Errorf("expected 'second queued' in editor, got %q", edText)
+	}
+
+	// Status should mention the count.
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "2") {
+		t.Errorf("expected count '2' in status, got:\n%s", output)
+	}
+}
+
+func TestHandleDequeue_MergesWithExistingEditorText(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.editor.SetText("existing text")
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("queued msg", 0)))
+
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	edText := tm.editorText()
+	if !strings.Contains(edText, "queued msg") {
+		t.Errorf("expected queued msg in editor, got %q", edText)
+	}
+	if !strings.Contains(edText, "existing text") {
+		t.Errorf("expected existing text preserved in editor, got %q", edText)
+	}
+}
+
+func TestHandleDequeue_ClearsQueueAfterDequeue(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("msg1", 0)))
+
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	// Second dequeue on now-empty queue should show "No queued".
+	tm.mode.editor.SetText("") // clear editor to avoid merge confusion
+	tm.mode.handleDequeue()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No queued") {
+		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleExternalEditor tests
+// ---------------------------------------------------------------------------
+
+func TestHandleExternalEditor_NoEditorConfigured(t *testing.T) {
+	tm := newTestMode(t)
+
+	// Ensure neither VISUAL nor EDITOR is set.
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+
+	tm.mode.handleExternalEditor()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No editor configured") {
+		t.Errorf("expected 'No editor configured' warning, got:\n%s", output)
+	}
+}
+
+func TestHandleExternalEditor_EditorUsedWhenVisualUnset(t *testing.T) {
+	tm := newTestMode(t)
+
+	// VISUAL is unset; EDITOR is set to a no-op command that exits 0.
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "true") // unix `true` command exits 0 immediately
+
+	tm.mode.editor.SetText("original text")
+	// This calls ui.Stop + sh -c + ui.Start; since TUI is a mock this may not
+	// block. The key assertion is no panic and no "No editor configured" warning.
+	tm.mode.handleExternalEditor()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if strings.Contains(output, "No editor configured") {
+		t.Errorf("should not show 'No editor configured' when EDITOR is set")
+	}
+}
+
+func TestHandleExternalEditor_VisualTakesPrecedenceOverEditor(t *testing.T) {
+	tm := newTestMode(t)
+
+	// Both set — VISUAL takes precedence; we use `true` for both since we only
+	// care that the code path doesn't show the "no editor" warning.
+	t.Setenv("VISUAL", "true")
+	t.Setenv("EDITOR", "echo should-not-be-used")
+
+	tm.mode.handleExternalEditor()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if strings.Contains(output, "No editor configured") {
+		t.Errorf("should not show 'No editor configured' when VISUAL is set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleClipboardImagePaste tests
+// ---------------------------------------------------------------------------
+
+func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
+	tm := newTestMode(t)
+	initial := tm.editorText()
+
+	// In test environments clipboard is unavailable → ReadClipboardImage returns nil.
+	// The function should silently ignore this and leave the editor unchanged.
+	tm.mode.handleClipboardImagePaste()
+	tm.waitRender()
+
+	if got := tm.editorText(); got != initial {
+		t.Errorf("expected editor unchanged (no image), got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// performShare tests
+// ---------------------------------------------------------------------------
+
+func TestPerformShare_NoBinary(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Override PATH so that `gh` cannot be found, guaranteeing the
+	// "not logged in" warning path is exercised.
+	t.Setenv("PATH", t.TempDir())
+
+	tm.mode.performShare()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "GitHub CLI") && !strings.Contains(output, "gh auth") {
+		t.Errorf("expected gh-related warning when gh is unavailable/unauthenticated, got:\n%s", output)
+	}
+}

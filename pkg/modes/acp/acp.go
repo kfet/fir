@@ -100,6 +100,7 @@ func RunAcpMode(opts Options) error {
 	pa.mu.Unlock()
 
 	for sid, entry := range sessions {
+		CleanupPendingBashTerminals(context.Background(), conn, entry.termState, sid)
 		CleanupBackgroundTerminals(context.Background(), conn, entry.termState, sid)
 		if entry.unsubscribe != nil {
 			entry.unsubscribe()
@@ -206,6 +207,7 @@ func (pa *piAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) e
 		return nil
 	}
 	entry.session.Agent.Abort()
+	CleanupPendingBashTerminals(context.Background(), pa.conn, entry.termState, string(params.SessionId))
 	CleanupBackgroundTerminals(context.Background(), pa.conn, entry.termState, string(params.SessionId))
 	return nil
 }
@@ -312,6 +314,7 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 	if existing, ok := pa.sessions[sessionID]; ok {
 		delete(pa.sessions, sessionID)
 		pa.mu.Unlock()
+		CleanupPendingBashTerminals(ctx, pa.conn, existing.termState, sessionID)
 		CleanupBackgroundTerminals(ctx, pa.conn, existing.termState, sessionID)
 		if existing.unsubscribe != nil {
 			existing.unsubscribe()
@@ -347,7 +350,7 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 // Session creation
 // ============================================================================
 
-func (pa *piAgent) createSession(_ context.Context, sessionID, cwd string) (*piSession, error) {
+func (pa *piAgent) createSession(ctx context.Context, sessionID, cwd string) (*piSession, error) {
 	agentDir := core.DefaultAgentDir()
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
@@ -392,7 +395,7 @@ func (pa *piAgent) createSession(_ context.Context, sessionID, cwd string) (*piS
 		}
 	}
 
-	result, err := core.CreateAgentSession(context.Background(), core.CreateAgentSessionOptions{
+	result, err := core.CreateAgentSession(ctx, core.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
 		AuthStorage:     authStorage,
@@ -883,7 +886,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		return true
 
 	case "changelog":
-		entries := core.ParseChangelog(filepath.Join(core.DefaultAgentDir(), "CHANGELOG.md"))
+		entries := core.GetChangelogEntries()
 		if len(entries) == 0 {
 			pa.sendAgentMessage(sessionID, "No changelog entries found.")
 		} else {
@@ -903,7 +906,6 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 	case "logout":
 		pa.handleLogout(sessionID, entry, args)
 		return true
-
 
 	case "reload":
 		if err := entry.session.Reload(); err != nil {

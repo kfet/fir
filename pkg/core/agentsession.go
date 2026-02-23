@@ -363,10 +363,11 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 
 	ts := time.Now().UnixMilli()
 
-	// Check for images in options
+	var streamingBehavior string
 	var images []ai.ImageContent
 	if len(opts) > 0 && opts[0] != nil {
 		images = opts[0].Images
+		streamingBehavior = opts[0].StreamingBehavior
 	}
 
 	var userMsgContent any
@@ -389,6 +390,15 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	}
 
 	userMsg := agent.NewAgentMessage(ai.NewUserMsg(userMsgContent, ts))
+
+	// If streaming and the caller wants to queue as a follow-up, enqueue
+	// the message and return immediately. The agent drains the queue
+	// automatically when the current turn ends.
+	if s.IsStreaming() && streamingBehavior == "followUp" {
+		s.Agent.FollowUp(userMsg)
+		return nil
+	}
+
 	msgs := []agent.AgentMessage{userMsg}
 
 	// Send to agent
@@ -399,6 +409,21 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// Wait for the agent loop to complete (it runs in a goroutine)
 	s.Agent.WaitForIdle()
 	return nil
+}
+
+// ClearFollowUpQueue clears and returns all queued follow-up message texts.
+// Used by the /dequeue command to restore queued messages to the editor.
+func (s *AgentSession) ClearFollowUpQueue() []string {
+	queued := s.Agent.GetAndClearFollowUpQueue()
+	texts := make([]string, 0, len(queued))
+	for _, msg := range queued {
+		if u := msg.Message.AsUser(); u != nil {
+			if t, ok := u.Content.(string); ok && t != "" {
+				texts = append(texts, t)
+			}
+		}
+	}
+	return texts
 }
 
 // ============================================================================
@@ -683,7 +708,17 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 
 // ScopedModelsRef returns the scoped models for this session.
 func (s *AgentSession) ScopedModelsRef() []ScopedModel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.scopedModels
+}
+
+// SetScopedModels updates the session-only scoped model list used for Ctrl+P
+// cycling. A nil or empty slice clears the filter (all available models cycle).
+func (s *AgentSession) SetScopedModels(models []ScopedModel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scopedModels = models
 }
 
 // SetHooks sets the extension hooks and wraps the agent's tools with hook interception.

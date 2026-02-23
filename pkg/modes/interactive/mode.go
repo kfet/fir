@@ -11,11 +11,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -96,8 +98,6 @@ type InteractiveMode struct {
 	extSetup          *extension.SetupResult
 	cliExtensionNames []string // extension names from CLI args (merged with settings on reload)
 
-	// Changelog content (embedded at build time)
-	changelogContent string
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -108,8 +108,6 @@ type InteractiveModeOptions struct {
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
 	ThemeSearchDirs []string
-	// ChangelogContent is the raw CHANGELOG.md content embedded at build time.
-	ChangelogContent string
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -136,7 +134,6 @@ func NewInteractiveMode(
 		keybindings:        keybindings,
 		settings:           settings,
 		autoCompact:        autoCompact,
-		changelogContent:   opts.ChangelogContent,
 		footerDataProvider: core.NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -459,12 +456,22 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 		// Double-escape with empty editor
 		if strings.TrimSpace(m.editor.GetText()) == "" {
-			now := time.Now()
-			if now.Sub(m.lastEscapeTime) < 500*time.Millisecond {
-				m.showSessionSelector()
-				m.lastEscapeTime = time.Time{}
-			} else {
-				m.lastEscapeTime = now
+			action := "tree"
+			if m.settings != nil {
+				action = m.settings.GetDoubleEscapeAction()
+			}
+			if action != "none" {
+				now := time.Now()
+				if now.Sub(m.lastEscapeTime) < 500*time.Millisecond {
+					if action == "tree" {
+						m.showTreeSelector()
+					} else {
+						m.showUserMessageSelector()
+					}
+					m.lastEscapeTime = time.Time{}
+				} else {
+					m.lastEscapeTime = now
+				}
 			}
 		}
 	}
@@ -499,6 +506,12 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	m.editor.OnAction(core.ActionNewSession, func() {
 		go m.handleClearCommand()
 	})
+	m.editor.OnAction(core.ActionTree, func() {
+		m.showTreeSelector()
+	})
+	m.editor.OnAction(core.ActionFork, func() {
+		m.showUserMessageSelector()
+	})
 	m.editor.OnAction(core.ActionResume, func() {
 		m.showSessionSelector()
 	})
@@ -507,6 +520,30 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	})
 	m.editor.OnAction(core.ActionSuspend, func() {
 		m.handleCtrlZ()
+	})
+	m.editor.OnAction(core.ActionExternalEditor, func() {
+		m.handleExternalEditor()
+	})
+
+	// Clipboard image paste (Ctrl+V inserts the image path into editor)
+	m.editor.OnPasteImage = func() {
+		go m.handleClipboardImagePaste()
+	}
+	m.editor.OnAction(core.ActionFollowUp, func() {
+		text := strings.TrimSpace(m.editor.GetText())
+		if text == "" {
+			return
+		}
+		m.editor.AddToHistory(text)
+		m.editor.SetText("")
+		if m.session != nil {
+			go func() {
+				_ = m.session.Prompt(text, &core.PromptOptions{StreamingBehavior: "followUp"})
+			}()
+		}
+	})
+	m.editor.OnAction(core.ActionDequeue, func() {
+		m.handleDequeue()
 	})
 
 	// Track bash mode on text change
@@ -830,7 +867,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 			SteeringMode:            m.settings.GetSteeringMode(),
 			FollowUpMode:            m.settings.GetFollowUpMode(),
 			Transport:               m.settings.GetTransport(),
-			DoubleEscapeAction:      "tree",
+			DoubleEscapeAction:      m.settings.GetDoubleEscapeAction(),
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
@@ -1105,6 +1142,31 @@ func (m *InteractiveMode) handleCtrlC() {
 	m.ui.RequestRender(false)
 }
 
+// handleDequeue restores any queued follow-up messages to the editor.
+func (m *InteractiveMode) handleDequeue() {
+	if m.session == nil {
+		return
+	}
+	queued := m.session.ClearFollowUpQueue()
+	if len(queued) == 0 {
+		m.showStatus("No queued messages to restore")
+		return
+	}
+	current := strings.TrimSpace(m.editor.GetText())
+	parts := make([]string, len(queued)+1)
+	copy(parts, queued)
+	parts[len(queued)] = current
+	var nonEmpty []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	m.editor.SetText(strings.Join(nonEmpty, "\n\n"))
+	m.ui.RequestRender(false)
+	m.showStatus(fmt.Sprintf("Restored %d queued message(s) to editor", len(queued)))
+}
+
 func (m *InteractiveMode) handleCtrlZ() {
 	// Send SIGTSTP to self (suspend)
 	// On most systems, this suspends the process
@@ -1112,6 +1174,86 @@ func (m *InteractiveMode) handleCtrlZ() {
 	if err == nil {
 		_ = p.Signal(suspendSignal())
 	}
+}
+
+func (m *InteractiveMode) handleClipboardImagePaste() {
+	img := core.ReadClipboardImage()
+	if img == nil {
+		return // no image on clipboard, silently ignore
+	}
+
+	ext := core.ExtensionForImageMimeType(img.MimeType)
+	if ext == "" {
+		ext = "png"
+	}
+	tmpFile, err := os.CreateTemp("", "fir-clipboard-*."+ext)
+	if err != nil {
+		return // silently ignore clipboard errors
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(img.Bytes); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return
+	}
+	tmpFile.Close()
+
+	m.editor.InsertTextAtCursor(tmpPath)
+	m.ui.RequestRender(false)
+}
+
+func (m *InteractiveMode) handleExternalEditor() {
+	editorCmd := os.Getenv("VISUAL")
+	if editorCmd == "" {
+		editorCmd = os.Getenv("EDITOR")
+	}
+	if editorCmd == "" {
+		m.showWarning("No editor configured. Set $VISUAL or $EDITOR environment variable.")
+		return
+	}
+
+	currentText := m.editor.GetText()
+
+	tmpFile, err := os.CreateTemp("", "fir-editor-*.md")
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Failed to create temp file: %s", err))
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.WriteString(currentText); err != nil {
+		tmpFile.Close()
+		m.showWarning(fmt.Sprintf("Failed to write temp file: %s", err))
+		return
+	}
+	tmpFile.Close()
+
+	// Stop TUI to release the terminal for the external editor.
+	m.ui.Stop()
+
+	// Use the shell to launch the editor so that paths with spaces and
+	// shell metacharacters in $VISUAL/$EDITOR work correctly.
+	// "sh -c 'editorCmd "$1"' -- path" passes the path as $1 without
+	// any word-splitting or glob expansion on the path itself.
+	cmd := exec.Command("sh", "-c", editorCmd+` "$1"`, "--", tmpPath) //nolint:gosec
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	exitErr := cmd.Run()
+
+	// Restart TUI regardless of exit code.
+	m.ui.Start()
+	m.ui.RequestRender(true)
+
+	if exitErr == nil {
+		newContent, err := os.ReadFile(tmpPath)
+		if err == nil {
+			// Trim trailing newline to match editor convention.
+			m.editor.SetText(strings.TrimRight(string(newContent), "\n"))
+		}
+	}
+	// On non-zero exit keep the original text (no-op).
 }
 
 func (m *InteractiveMode) handleClearCommand() {
@@ -1351,7 +1493,127 @@ func (m *InteractiveMode) showScopedModelsSelector() {
 		m.showWarning("No session available")
 		return
 	}
-	m.showWarning("/scoped-models is not yet implemented")
+	registry := m.session.ModelRegistryRef()
+	if registry == nil {
+		m.showWarning("Model registry not available")
+		return
+	}
+	allModels := registry.GetAvailable()
+	if len(allModels) == 0 {
+		m.showStatus("No models available")
+		return
+	}
+
+	// Build initial enabled-model set from session scoped models or settings.
+	enabledModelIDs := make(map[string]bool)
+	hasFilter := false
+	sessionScopedModels := m.session.ScopedModelsRef()
+	if len(sessionScopedModels) > 0 {
+		for _, sm := range sessionScopedModels {
+			enabledModelIDs[sm.Model.Provider+"/"+sm.Model.ID] = true
+		}
+		hasFilter = true
+	} else if patterns := m.settings.GetEnabledModels(); len(patterns) > 0 {
+		hasFilter = true
+		for _, sm := range core.ResolveModelScope(patterns, registry) {
+			enabledModelIDs[sm.Model.Provider+"/"+sm.Model.ID] = true
+		}
+	}
+
+	// Working copies mutated by callbacks while the selector is open.
+	currentEnabledIDs := make(map[string]bool, len(enabledModelIDs))
+	for k := range enabledModelIDs {
+		currentEnabledIDs[k] = true
+	}
+	currentHasFilter := hasFilter
+
+	// applyToSession converts currentEnabledIDs back to scoped-model objects
+	// and updates the live session (session-only, not persisted).
+	applyToSession := func() {
+		if !currentHasFilter || len(currentEnabledIDs) == 0 || len(currentEnabledIDs) >= len(allModels) {
+			m.session.SetScopedModels(nil)
+			m.ui.RequestRender(false)
+			return
+		}
+		patterns := make([]string, 0, len(currentEnabledIDs))
+		for id := range currentEnabledIDs {
+			patterns = append(patterns, id)
+		}
+		resolved := core.ResolveModelScope(patterns, registry)
+		currentThinkingLevel := m.session.ThinkingLevel()
+		scoped := make([]core.ScopedModel, len(resolved))
+		for i, sm := range resolved {
+			level := sm.ThinkingLevel
+			if level == "" {
+				level = currentThinkingLevel
+			}
+			scoped[i] = core.ScopedModel{Model: sm.Model, ThinkingLevel: level}
+		}
+		m.session.SetScopedModels(scoped)
+		m.ui.RequestRender(false)
+	}
+
+	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		selector := components.NewScopedModelsSelectorComponent(
+			components.ScopedModelsConfig{
+				AllModels:              allModels,
+				EnabledModelIDs:        currentEnabledIDs,
+				HasEnabledModelsFilter: currentHasFilter,
+			},
+			components.ScopedModelsCallbacks{
+				OnModelToggle: func(modelID string, enabled bool) {
+					if enabled {
+						currentEnabledIDs[modelID] = true
+					} else {
+						delete(currentEnabledIDs, modelID)
+					}
+					currentHasFilter = true
+					applyToSession()
+				},
+				OnEnableAll: func(allModelIDs []string) {
+					for k := range currentEnabledIDs {
+						delete(currentEnabledIDs, k)
+					}
+					for _, id := range allModelIDs {
+						currentEnabledIDs[id] = true
+					}
+					currentHasFilter = false
+					applyToSession()
+				},
+				OnClearAll: func() {
+					for k := range currentEnabledIDs {
+						delete(currentEnabledIDs, k)
+					}
+					currentHasFilter = true
+					applyToSession()
+				},
+				OnToggleProvider: func(_ string, modelIDs []string, enabled bool) {
+					for _, id := range modelIDs {
+						if enabled {
+							currentEnabledIDs[id] = true
+						} else {
+							delete(currentEnabledIDs, id)
+						}
+					}
+					currentHasFilter = true
+					applyToSession()
+				},
+				OnPersist: func(enabledIDs []string) {
+					if len(enabledIDs) >= len(allModels) {
+						m.settings.SetEnabledModels(nil) // all enabled = clear filter
+					} else {
+						m.settings.SetEnabledModels(enabledIDs)
+					}
+					m.showStatus("Model selection saved to settings")
+				},
+				OnCancel: func() {
+					done()
+					m.ui.RequestRender(false)
+				},
+			},
+		)
+		return selector, selector
+	})
 }
 
 // ============================================================================
@@ -1359,6 +1621,12 @@ func (m *InteractiveMode) showScopedModelsSelector() {
 // ============================================================================
 
 func (m *InteractiveMode) showTreeSelector() {
+	m.showTreeSelectorAt("")
+}
+
+// showTreeSelectorAt shows the interactive session-tree selector, optionally
+// pre-selecting a specific entry (used when re-opening after an action).
+func (m *InteractiveMode) showTreeSelectorAt(initialSelectedID string) {
 	if m.session == nil {
 		m.showWarning("No session available")
 		return
@@ -1371,40 +1639,49 @@ func (m *InteractiveMode) showTreeSelector() {
 
 	leafID := m.session.SessionManager.GetLeafID()
 
-	// Build a text-based tree display
-	t := itheme.GetTheme()
-	var lines []string
-	lines = append(lines, t.Bold("Session Tree"))
-	lines = append(lines, "")
-	var renderNodes func(nodes []*core.SessionTreeNode, depth int)
-	renderNodes = func(nodes []*core.SessionTreeNode, depth int) {
-		for _, node := range nodes {
-			prefix := strings.Repeat("  ", depth)
-			label := node.Entry.Type
-			if node.Entry.Type == "message" {
-				text := extractEntryText(node.Entry)
-				if len(text) > 60 {
-					text = text[:60] + "..."
+	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		selector := components.NewTreeSelectorComponent(
+			tree,
+			leafID,
+			func(entryID string) {
+				done()
+				if entryID == leafID {
+					m.showStatus("Already at this point")
+					return
 				}
-				label = text
+				go m.handleTreeNavigation(entryID)
+			},
+			func() { done() },
+		)
+		selector.SetOnLabelEdit(func(entryID, label string) {
+			if m.session != nil {
+				m.session.SessionManager.AppendLabelChange(entryID, label)
+				m.ui.RequestRender(false)
 			}
-			marker := "  "
-			if node.Entry.ID == leafID {
-				marker = t.Fg("accent", "▸ ")
-			}
-			sessionLabel := ""
-			if node.Label != "" {
-				sessionLabel = t.Fg("dim", " ["+node.Label+"]")
-			}
-			lines = append(lines, prefix+marker+label+sessionLabel)
-			if len(node.Children) > 0 {
-				renderNodes(node.Children, depth+1)
-			}
+		})
+		if initialSelectedID != "" {
+			selector.SetInitialSelection(initialSelectedID)
 		}
-	}
-	renderNodes(tree, 0)
+		return selector, selector
+	})
+}
 
-	m.showMessage(strings.Join(lines, "\n"))
+// handleTreeNavigation navigates to entryID and refreshes the chat display.
+func (m *InteractiveMode) handleTreeNavigation(entryID string) {
+	result, err := m.session.NavigateTree(entryID, false, "")
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Navigation failed: %s", err))
+		return
+	}
+	if result.Cancelled {
+		m.showStatus("Navigation cancelled")
+		return
+	}
+	m.rebuildChatFromMessages()
+	if m.editor != nil && result.EditorText != "" && strings.TrimSpace(m.editor.GetText()) == "" {
+		m.editor.SetText(result.EditorText)
+	}
+	m.showStatus("Navigated to selected point")
 }
 
 func (m *InteractiveMode) showUserMessageSelector() {
@@ -1418,24 +1695,42 @@ func (m *InteractiveMode) showUserMessageSelector() {
 		return
 	}
 
-	// Build a list of user messages for selection
-	t := itheme.GetTheme()
-	var lines []string
-	lines = append(lines, t.Bold("Select a message to fork from:"))
-	lines = append(lines, "")
+	items := make([]components.UserMessageItem, len(userMsgs))
 	for i, msg := range userMsgs {
-		text := msg.Text
-		if len(text) > 80 {
-			text = text[:80] + "..."
+		items[i] = components.UserMessageItem{
+			ID:   msg.EntryID,
+			Text: msg.Text,
 		}
-		// Replace newlines for display
-		text = strings.ReplaceAll(text, "\n", " ")
-		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, text))
 	}
-	lines = append(lines, "")
-	lines = append(lines, t.Fg("dim", "Use /fork <number> to fork from a specific message"))
 
-	m.showMessage(strings.Join(lines, "\n"))
+	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		selector := components.NewUserMessageSelectorComponent(
+			items,
+			func(entryID string) {
+				done()
+				go m.handleFork(entryID)
+			},
+			func() { done() },
+		)
+		return selector, selector.GetMessageList()
+	})
+}
+
+// handleFork creates a fork from entryID and refreshes the chat display.
+func (m *InteractiveMode) handleFork(entryID string) {
+	selectedText, cancelled, err := m.session.Fork(entryID)
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Fork failed: %s", err))
+		return
+	}
+	if cancelled {
+		return
+	}
+	m.rebuildChatFromMessages()
+	if m.editor != nil && selectedText != "" {
+		m.editor.SetText(selectedText)
+	}
+	m.showStatus("Branched to new session")
 }
 
 // ============================================================================
@@ -1478,11 +1773,98 @@ func extractEntryText(entry *core.SessionEntry) string {
 }
 
 func (m *InteractiveMode) handleExportCommand(text string) {
-	m.showWarning("/export is not yet implemented")
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	// Parse optional output path: /export [path]
+	var outputPath string
+	parts := strings.Fields(text)
+	if len(parts) >= 2 {
+		outputPath = parts[1]
+	}
+	go func() {
+		filePath, err := m.session.ExportToHTML(outputPath)
+		if err != nil {
+			m.showWarning(fmt.Sprintf("Failed to export session: %s", err))
+			return
+		}
+		m.showStatus(fmt.Sprintf("Session exported to: %s", filePath))
+	}()
 }
 
 func (m *InteractiveMode) handleShareCommand() {
-	m.showWarning("/share is not yet implemented")
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	go m.performShare()
+}
+
+func (m *InteractiveMode) performShare() {
+	// Check that gh CLI is available and authenticated.
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		m.showWarning("GitHub CLI is not logged in. Run 'gh auth login' first.")
+		return
+	}
+
+	// Export to a temp file.
+	tmpPath, err := m.session.ExportToHTML("")
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Failed to export session: %s", err))
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	// Show a loader in the editor container while the gist is being created.
+	t := itheme.GetTheme()
+	loader := components.NewBorderedLoader(
+		m.ui.AsRenderRequester(),
+		t,
+		"Creating gist...",
+		nil,
+	)
+
+	var procPtr atomic.Pointer[exec.Cmd]
+	loader.SetOnAbort(func() {
+		if p := procPtr.Load(); p != nil && p.Process != nil {
+			_ = p.Process.Kill()
+		}
+		m.editorContainer.Clear()
+		m.editorContainer.AddChild(m.editor)
+		m.ui.SetFocus(m.editor)
+		m.ui.RequestRender(false)
+		m.showStatus("Share cancelled")
+	})
+
+	m.editorContainer.Clear()
+	m.editorContainer.AddChild(loader)
+	m.ui.SetFocus(loader)
+	m.ui.RequestRender(true)
+
+	restoreEditor := func() {
+		loader.Dispose()
+		m.editorContainer.Clear()
+		m.editorContainer.AddChild(m.editor)
+		m.ui.SetFocus(m.editor)
+		m.ui.RequestRender(false)
+	}
+
+	cmd := exec.Command("gh", "gist", "create", "--public=false", tmpPath)
+	procPtr.Store(cmd)
+	out, err := cmd.Output()
+	restoreEditor()
+	if err != nil {
+		m.showWarning("Failed to create gist. Check that 'gh' is installed and authenticated.")
+		return
+	}
+	gistURL := strings.TrimSpace(string(out))
+	if gistURL == "" {
+		m.showWarning("Gist created but no URL returned")
+		return
+	}
+	link := core.Hyperlink(gistURL, gistURL)
+	m.showStatus(fmt.Sprintf("Session shared: %s", link))
 }
 
 func (m *InteractiveMode) handleForkByNumber(numStr string) {
@@ -1660,7 +2042,7 @@ func formatSortedSection(t *itheme.Theme, title, prefix string, items map[string
 }
 
 func (m *InteractiveMode) handleChangelogCommand() {
-	entries := core.ParseChangelogContent(m.changelogContent)
+	entries := core.GetChangelogEntries()
 	if len(entries) == 0 {
 		m.showMessage("No changelog entries found.")
 		return
@@ -1760,6 +2142,47 @@ func (m *InteractiveMode) cycleThinkingLevel() {
 }
 
 func (m *InteractiveMode) cycleModel(direction string) {
+	// When scoped models are configured, cycle only within that set.
+	scopedModels := m.session.ScopedModelsRef()
+	if len(scopedModels) > 0 {
+		registry := m.session.ModelRegistryRef()
+		// Filter to models that have API keys available.
+		availableSet := make(map[string]bool)
+		for _, model := range registry.GetAvailable() {
+			availableSet[model.Provider+"/"+model.ID] = true
+		}
+		var available []*ai.Model
+		for _, sm := range scopedModels {
+			if availableSet[sm.Model.Provider+"/"+sm.Model.ID] {
+				available = append(available, sm.Model)
+			}
+		}
+		if len(available) <= 1 {
+			m.showStatus("Only one model in scope")
+			return
+		}
+		current := m.session.Model()
+		idx := 0
+		for i, model := range available {
+			if ai.ModelsAreEqual(current, model) {
+				idx = i
+				break
+			}
+		}
+		var nextIdx int
+		if direction == "forward" {
+			nextIdx = (idx + 1) % len(available)
+		} else {
+			nextIdx = (idx - 1 + len(available)) % len(available)
+		}
+		m.session.SetModel(available[nextIdx])
+		m.footerComponent.Invalidate()
+		m.updateEditorBorderColor()
+		m.showStatus(fmt.Sprintf("Model: %s", available[nextIdx].ID))
+		return
+	}
+
+	// Default: cycle through all available models.
 	registry := m.session.ModelRegistryRef()
 	registry.Refresh()
 	available := registry.GetAvailable()

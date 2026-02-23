@@ -1,19 +1,52 @@
-// Ported from: packages/coding-agent/src/modes/rpc/rpc-mode.ts
+// Ported from: packages/coding-agent/src/modes/rpc/rpc-mode.ts (exportToHtml)
 // Upstream hash: 1caadb2e
-package rpc
+package core
 
 import (
 	"encoding/json"
 	"fmt"
 	"html"
 	"io"
+	"os"
 	"strings"
-
-	"github.com/kfet/fir/pkg/core"
 )
 
-// writeConversationHTML writes the conversation history as a minimal HTML document.
-func writeConversationHTML(w io.Writer, entries []*core.SessionEntry, sessionID string) error {
+// ExportToHTML exports the current session branch to an HTML file.
+// If path is empty a temp file is created and its path returned.
+func (s *AgentSession) ExportToHTML(path string) (string, error) {
+	entries := s.SessionManager.GetBranch("")
+	sessionID := s.GetSessionStats().SessionID
+
+	var f *os.File
+	var err error
+	if path == "" {
+		f, err = os.CreateTemp("", "fir-session-*.html")
+		if err != nil {
+			return "", fmt.Errorf("creating export file: %w", err)
+		}
+		path = f.Name()
+	} else {
+		f, err = os.Create(path)
+		if err != nil {
+			return "", fmt.Errorf("creating export file: %w", err)
+		}
+	}
+
+	if err := WriteConversationHTML(f, entries, sessionID); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("writing HTML: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("closing export file: %w", err)
+	}
+	return path, nil
+}
+
+// WriteConversationHTML writes the conversation history as a minimal HTML document.
+// This is shared between interactive (/export) and RPC (export_html) modes.
+func WriteConversationHTML(w io.Writer, entries []*SessionEntry, sessionID string) error {
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
 <head>
@@ -46,7 +79,7 @@ body{font-family:sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;colo
 			continue
 		}
 
-		text := extractHTMLMessageText(msg.Content)
+		text := ExtractHTMLMessageText(msg.Content)
 		if text == "" {
 			continue
 		}
@@ -62,8 +95,9 @@ body{font-family:sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;colo
 	return nil
 }
 
-// extractHTMLMessageText extracts plain text from a message content value.
-func extractHTMLMessageText(raw json.RawMessage) string {
+// ExtractHTMLMessageText extracts plain text from a message content JSON value.
+// It handles both string content and arrays of content blocks.
+func ExtractHTMLMessageText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}

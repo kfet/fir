@@ -343,20 +343,9 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		return NewSuccessResponse(id, CmdGetSessionStats, stats)
 
 	case CmdExportHTML:
-		entries := s.session.SessionManager.GetBranch("")
-		f, err := os.CreateTemp("", "fir-session-*.html")
+		exportPath, err := s.session.ExportToHTML("")
 		if err != nil {
-			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("creating export file: %v", err))
-		}
-		exportPath := f.Name()
-		if err := writeConversationHTML(f, entries, s.session.GetSessionStats().SessionID); err != nil {
-			f.Close()
-			os.Remove(exportPath)
-			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("writing HTML: %v", err))
-		}
-		if err := f.Close(); err != nil {
-			os.Remove(exportPath)
-			return NewErrorResponse(id, CmdExportHTML, fmt.Sprintf("closing export file: %v", err))
+			return NewErrorResponse(id, CmdExportHTML, err.Error())
 		}
 		return NewSuccessResponse(id, CmdExportHTML, ExportHTMLData{Path: exportPath})
 

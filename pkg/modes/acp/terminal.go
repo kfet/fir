@@ -83,6 +83,9 @@ func AcpBashExec(
 	sid := acpsdk.SessionId(sessionID)
 
 	if ctx.Err() != nil {
+		ts.mu.Lock()
+		delete(ts.pendingBashTerminals, toolCallID)
+		ts.mu.Unlock()
 		conn.KillTerminalCommand(context.Background(), acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
 		conn.ReleaseTerminal(context.Background(), acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
 		return nil, fmt.Errorf("aborted")
@@ -110,6 +113,9 @@ func AcpBashExec(
 
 	output, _ := conn.TerminalOutput(context.Background(), acpsdk.TerminalOutputRequest{SessionId: sid, TerminalId: termID})
 	conn.ReleaseTerminal(context.Background(), acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
+	ts.mu.Lock()
+	delete(ts.pendingBashTerminals, toolCallID)
+	ts.mu.Unlock()
 
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("aborted")
@@ -209,6 +215,25 @@ func KillBackgroundCommand(
 		exitCode = result.ExitStatus.ExitCode
 	}
 	return result.Output, exitCode, nil
+}
+
+// CleanupPendingBashTerminals kills and releases all foreground bash terminals
+// that are still pending (not yet acknowledged by a tool-end event). This handles
+// the case where a session is cancelled before EventToolExecutionEnd arrives.
+func CleanupPendingBashTerminals(ctx context.Context, conn acpConn, ts *terminalState, sessionID string) {
+	ts.mu.Lock()
+	pending := make(map[string]string, len(ts.pendingBashTerminals))
+	for k, v := range ts.pendingBashTerminals {
+		pending[k] = v
+	}
+	ts.pendingBashTerminals = make(map[string]string)
+	ts.mu.Unlock()
+
+	sid := acpsdk.SessionId(sessionID)
+	for _, termID := range pending {
+		conn.KillTerminalCommand(ctx, acpsdk.KillTerminalCommandRequest{SessionId: sid, TerminalId: termID})
+		conn.ReleaseTerminal(ctx, acpsdk.ReleaseTerminalRequest{SessionId: sid, TerminalId: termID})
+	}
 }
 
 // CleanupBackgroundTerminals kills and releases all background terminals.

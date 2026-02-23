@@ -3,12 +3,34 @@
 package core
 
 import (
+	"cmp"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// embeddedChangelogContent holds the CHANGELOG.md content baked in at build time.
+// Set by cmd/fir/changelog_init.go via SetEmbeddedChangelog using //go:embed.
+var embeddedChangelogContent string
+
+// SetEmbeddedChangelog stores the changelog content embedded in the binary.
+// Called once at init time from cmd/fir before any mode is started.
+func SetEmbeddedChangelog(content string) {
+	embeddedChangelogContent = content
+}
+
+// GetChangelogEntries returns changelog entries. It prefers content baked in at
+// build time (via SetEmbeddedChangelog) and falls back to reading the file from
+// DefaultAgentDir so that plain `go run` from the repo root still works.
+func GetChangelogEntries() []ChangelogEntry {
+	if embeddedChangelogContent != "" {
+		return ParseChangelogContent(embeddedChangelogContent)
+	}
+	return ParseChangelog(filepath.Join(DefaultAgentDir(), "CHANGELOG.md"))
+}
 
 // ChangelogEntry represents a version entry in a CHANGELOG.md file.
 type ChangelogEntry struct {
@@ -80,22 +102,12 @@ func ParseChangelogContent(content string) []ChangelogEntry {
 // Returns -1 if a < b, 0 if equal, 1 if a > b.
 func CompareVersions(a, b ChangelogEntry) int {
 	if a.Major != b.Major {
-		return cmpInt(a.Major, b.Major)
+		return cmp.Compare(a.Major, b.Major)
 	}
 	if a.Minor != b.Minor {
-		return cmpInt(a.Minor, b.Minor)
+		return cmp.Compare(a.Minor, b.Minor)
 	}
-	return cmpInt(a.Patch, b.Patch)
-}
-
-func cmpInt(a, b int) int {
-	if a < b {
-		return -1
-	}
-	if a > b {
-		return 1
-	}
-	return 0
+	return cmp.Compare(a.Patch, b.Patch)
 }
 
 // GetNewEntries returns entries newer than the given version string (e.g. "1.2.3").

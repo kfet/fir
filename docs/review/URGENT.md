@@ -1,16 +1,16 @@
-# URGENT — 2026-02-21
+# URGENT — 2026-02-22
 
 ## Active Issues
 
-_(none — cycle 70: session selector newline-fix + tmuxspinner tests merged; build clean, all 22 packages pass)_
+_(none — cycle 99: post-rebase, all tests pass, build clean, backlog empty)_
 
 ---
 
 ## Recently Fixed ✅
 
-- ~~`pkg/modes/interactive/components/session_selector.go` — Visible-window centering wrong when count < maxVisible~~ — ✅ FIXED 2026-02-21 (refactored to min/max builtins; scroll regression tests added)
+- ~~`cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break~~ — ✅ FIXED (cycle 58 / rebase ce07547): embed moved to `cmd/fir/changelog_init.go`; `GetChangelogEntries()` prefers embedded, falls back to file.
 - ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19)
-- ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED (agent corrected to `ai.NewAssistantMsg()`)
+- ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp_test.go:586,610` — `chunk.Content` used as string (type `ContentBlock`)~~ — ✅ FIXED 2026-02-18
 - ~~`pkg/modes/acp/acp.go:929-937` — Extension commands dispatched via `Prompt()` instead of `ExecuteCommand()`~~ — ✅ FIXED 2026-02-18
 - ~~`pkg/modes/acp/acp.go:795` — `RunCompaction()` called with wrong signature (no args)~~ — ✅ FIXED 2026-02-18
@@ -19,6 +19,8 @@ _(none — cycle 70: session selector newline-fix + tmuxspinner tests merged; bu
 - ~~`pkg/core/agentsession.go:636` — `WrapToolsWithHooks` never called~~ — ✅ FIXED
 - ~~`pkg/extensions/notify/notify.go:30` — Direct `os.Stdout` write~~ — ✅ FIXED
 - ~~`pkg/core/authstorage.go:401-446` — Deadlock in `refreshOAuthToken`~~ — ✅ FIXED
-- ~~`pkg/core/compaction/runner_test.go:101` — Test failure + real auth.json mutation~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:381` — Non-zero exit code not returned as error~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:82` — No session cleanup on exit~~ — ✅ FIXED
+- ~~`pkg/modes/interactive/mode.go:1806` — `proc *exec.Cmd` data race in `performShare`~~ — ✅ FIXED (cycle 96): `atomic.Pointer[exec.Cmd]`
+- ~~`pkg/core/agentsession.go:686` — `ScopedModelsRef()`/`SetScopedModels()` no mutex guards~~ — ✅ FIXED (ce07547): RLock/Lock added
+- ~~`pkg/modes/acp/terminal.go` — `pendingBashTerminals` leak on abort~~ — ✅ FIXED (ce07547): `CleanupPendingBashTerminals` + per-path deletes

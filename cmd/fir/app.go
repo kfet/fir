@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,9 +28,6 @@ import (
 	_ "github.com/kfet/fir/pkg/extensions/sandbox"
 	_ "github.com/kfet/fir/pkg/extensions/tmuxspinner"
 )
-
-//go:embed CHANGELOG.md
-var changelogContent string
 
 // sessionSetup holds common setup results shared between run modes.
 type sessionSetup struct {
@@ -522,7 +518,6 @@ func runInteractiveMode(args *Args) error {
 		interactive.InteractiveModeOptions{
 			InitialPrompt:   initialPrompt,
 			ThemeName:       "dark",
-			ChangelogContent: changelogContent,
 		},
 	)
 	interactive.SetVersion(version)
