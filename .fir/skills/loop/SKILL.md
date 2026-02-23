@@ -18,40 +18,43 @@ Once you have both answers, begin the loop immediately.
 
 ## Loop Cycle
 
-Repeat this sequence forever until the user tells you to stop:
+Each cycle follows this exact order:
 
-### 1. Note your task and interval
+### 0. Print the next reminder command
 
-At the start of every cycle, confirm to yourself:
+Before doing anything else, output this as a plain code block so it's visible in the chat even if the session times out:
+
+```
+Next reminder command:
+sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .fir/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
+```
+
+### 1. Re-read this skill file
+
+Re-read `.fir/skills/loop/SKILL.md` to keep instructions in context. Long-running agents drift — this is mandatory.
+
+### 2. Note your task and interval
+
+Confirm to yourself:
 - **Task:** `<the prompt the user gave you>`
 - **Interval:** `<N>` seconds
 
-### 2. Execute the task
+### 3. Execute the task
 
 Carry out the user's prompt fully. Do whatever it asks — read files, run commands, write output, analyze results. Do not truncate or skip steps.
 
-### 3. Report
+### 4. Report
 
 Briefly summarize what happened this cycle:
 > Cycle N complete: <one-line summary of what you did or found>
 
-### 4. Sleep and self-remind
-
-Run a sleep command that echoes a reminder when it finishes. This is the mechanism that keeps the loop alive:
+### 5. Run the reminder command
 
 ```bash
 sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .fir/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
 ```
 
-Use a timeout of `<N + 10>` seconds on the bash call.
-
-### 5. Re-read this skill file and repeat
-
-When you see the reminder output, **immediately**:
-1. Re-read `.fir/skills/loop/SKILL.md`
-2. Go back to step 1 of this cycle
-
-This re-read is mandatory — it prevents instruction drift over long-running sessions.
+Use a timeout of `<N + 10>` seconds on the bash call. When you see the reminder output, immediately go back to step 0.
 
 ## Rules
 

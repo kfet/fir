@@ -20,25 +20,42 @@ Continually monitor the fir project for progress updates and report changes to t
 
 ## Monitoring Loop
 
-Each monitoring cycle has two steps:
+Each cycle follows this exact order:
 
-### Step 1: Run the snapshot command
+### 0. Print the next reminder command
 
-This command sleeps for 2 minutes, then collects the snapshot, then prints a prompt that tells you to re-read this skill file and continue the loop:
+Before doing any work, output this as a plain code block so it's visible in the chat even if the session times out or the context window fills:
 
-```bash
-sleep 30 && cd "$PROJECT_ROOT" && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15 && echo "" && echo ">>> Re-read .fir/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
+```
+Next reminder command:
+sleep 30 && echo "=== MONITOR CYCLE REMINDER === Re-read .fir/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
 ```
 
-Use timeout 40 on the bash call.
+### 1. Re-read this skill file
 
-### Step 2: Report and loop
+Re-read `.fir/skills/monitor/SKILL.md` to keep instructions in context. Long-running agents drift — this is not optional.
 
-After the command completes:
-1. Analyze the snapshot output and report changes to the user (see **Reporting Style** below).
-2. Immediately re-read this skill file (`.fir/skills/monitor/SKILL.md`) and execute **Step 1** again.
+### 2. Run the snapshot command
 
-This creates a self-sustaining loop: sleep → snapshot → report → re-read skill → sleep → …
+Collect the current state of the project:
+
+```bash
+cd "$PROJECT_ROOT" && echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ===" && echo "--- Modified (last 3 min) ---" && find pkg/ cmd/ -name "*.go" -mmin -3 2>/dev/null | sort && echo "--- Total Go files: $(find pkg/ cmd/ -name '*.go' | wc -l | tr -d ' ') ---" && echo "--- Tests ---" && go test ./... 2>&1 | tail -15
+```
+
+Use timeout 40 on the bash tool call.
+
+### 3. Report to the user
+
+Analyze the snapshot output and report changes (see **Reporting Style** below).
+
+### 4. Run the reminder command
+
+```bash
+sleep 30 && echo "=== MONITOR CYCLE REMINDER === Re-read .fir/skills/monitor/SKILL.md and follow the monitoring loop instructions for the next cycle."
+```
+
+Use timeout 40 on the bash call. When you see the reminder output, immediately go back to step 0.
 
 ## When to Re-read the Work Tracker
 

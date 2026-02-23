@@ -9,16 +9,29 @@ You are the fixer agent. The review agent writes issues to `docs/review/URGENT.m
 
 ## Fix Loop
 
-Repeat this cycle:
+Each cycle follows this exact order:
 
-### 1. Read the review queue
+### 0. Print the next reminder command
+
+Before doing any work, output this as a plain code block so it's visible in the chat even if the session times out or the context window fills:
+
+```
+Next reminder command:
+sleep 30 && echo "=== FIX CYCLE REMINDER === Re-read .fir/skills/fix/SKILL.md and follow its instructions to start the next cycle. Check docs/review/URGENT.md and docs/review/BACKLOG.md for new items."
+```
+
+### 1. Re-read this skill file
+
+Re-read `.fir/skills/fix/SKILL.md` to keep instructions in context. Long-running agents drift — this is not optional.
+
+### 2. Read the review queue
 
 ```bash
 cat docs/review/URGENT.md 2>/dev/null
 cat docs/review/BACKLOG.md 2>/dev/null
 ```
 
-### 2. Pick ONE item
+### 3. Pick ONE item
 
 Priority order:
 1. **URGENT.md** — build breaks, security, data loss. Always fix these first.
@@ -29,7 +42,7 @@ Priority order:
 
 Pick the single highest-priority item that you haven't already attempted this cycle.
 
-### 3. Check the file isn't being actively edited
+### 4. Check the file isn't being actively edited
 
 ```bash
 find pkg/ cmd/ -name "*.go" -mmin -5 2>/dev/null | sort
@@ -37,11 +50,11 @@ find pkg/ cmd/ -name "*.go" -mmin -5 2>/dev/null | sort
 
 If the target file was modified in the last 5 minutes, **skip it** — another agent is likely working on it. Pick the next item instead.
 
-### 4. Read the file and understand the context
+### 5. Read the file and understand the context
 
 Always read the full file before editing. For items that reference a specific line, read the surrounding context too. If the item references a TS upstream source (in the file's header comment), consider reading that for comparison.
 
-### 5. Fix it
+### 6. Fix it
 
 Follow the project conventions:
 - **Idiomatic Go.** Keep it simple.
@@ -67,7 +80,7 @@ rg 'functionName' pkg/ cmd/ --type go
 
 **Correctness:** Fix the bug. Read the TS source for reference. Add a regression test.
 
-### 6. Verify
+### 7. Verify
 
 After every fix, run:
 
@@ -79,7 +92,7 @@ go test ./... 2>&1 | tail -30
 If tests fail **in the package you edited**, your fix is wrong. Undo and retry.
 If tests fail **in a different package**, that's not your problem — note it and continue.
 
-### 7. Mark the item done
+### 8. Mark the item done
 
 Re-read the review file (another agent may have edited it), then remove the fixed item:
 
@@ -92,20 +105,18 @@ Edit the file to remove the line/section you fixed. If you fixed the last item i
 
 If the item turned out to be invalid (code was already fixed, or the review was wrong), remove it anyway and note why in your summary.
 
-### 8. Report and loop
+### 9. Report to the user
 
 Tell the user what you fixed:
 > Fixed: `pkg/core/tools/editdiff.go` — replaced `maxOf` with builtin `max()`. Tests pass.
 
-**Refresh your instructions.**
-
-Sleep and wait for the reviewer to find more work, and start the next cycle with fresh instructions in the context:
+### 10. Run the reminder command
 
 ```bash
 sleep 30 && echo "=== FIX CYCLE REMINDER === Re-read .fir/skills/fix/SKILL.md and follow its instructions to start the next cycle. Check docs/review/URGENT.md and docs/review/BACKLOG.md for new items."
 ```
 
-Use timeout 40 on the bash call. Then loop back to step 1.
+Use timeout 40 on the bash call. When you see the reminder output, immediately go back to step 0.
 
 ## Rules
 

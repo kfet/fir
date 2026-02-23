@@ -653,7 +653,20 @@ Use `timeout: 10` on the bash tool call.
 
 ## Test Cycle
 
-Each cycle:
+Each cycle follows this exact order:
+
+### Step 0: Print the next reminder command
+
+Before doing any work, output this as a plain code block so it's visible in the chat even if the session times out or the context window fills:
+
+```
+Next reminder command:
+sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read .fir/skills/e2e/SKILL.md and start the next test cycle. Build: go build -o ./bin/fir-e2e ./cmd/fir/"
+```
+
+### Step 0b: Re-read this skill file
+
+Re-read `.fir/skills/e2e/SKILL.md` to keep instructions in context. Long-running agents drift — this is not optional.
 
 ### Step 1: Build
 
@@ -802,21 +815,13 @@ Expected: [what should have happened]
 
 For items that were previously failing but now pass, remove them from the backlog.
 
-### Step 7: Refresh and loop
+### Step 7: Run the reminder command
 
-**Re-read this skill file** to keep instructions in context:
-```
-.fir/skills/e2e/SKILL.md
-```
-
-Sleep and loop:
 ```bash
 sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read .fir/skills/e2e/SKILL.md and start the next test cycle. Build: go build -o ./bin/fir-e2e ./cmd/fir/"
 ```
 
-Use `timeout: 40` on the bash call. When you see the reminder, immediately:
-1. Re-read this skill file
-2. Start from Step 1
+Use `timeout: 40` on the bash call. When you see the reminder output, immediately go back to Step 0.
 
 ## Known Issues
 
