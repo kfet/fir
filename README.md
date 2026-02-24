@@ -23,19 +23,7 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 
 ## Install
 
-### Homebrew (macOS and Linux)
-
-```bash
-brew install kfet/fir/fir
-```
-
-For private repos, tap with SSH:
-```bash
-brew tap kfet/fir git@github.com:kfet/homebrew-fir.git
-brew install fir
-```
-
-### Install script (Linux, Raspberry Pi)
+### Install script (macOS, Linux, Raspberry Pi)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
@@ -75,10 +63,6 @@ make install    # installs to $GOPATH/bin
 ### Update
 
 ```bash
-# macOS (Homebrew)
-brew upgrade fir
-
-# Linux / Raspberry Pi
 fir update
 ```
 
