@@ -363,11 +363,9 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 
 	ts := time.Now().UnixMilli()
 
-	var streamingBehavior string
 	var images []ai.ImageContent
 	if len(opts) > 0 && opts[0] != nil {
 		images = opts[0].Images
-		streamingBehavior = opts[0].StreamingBehavior
 	}
 
 	var userMsgContent any
@@ -391,10 +389,11 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 
 	userMsg := agent.NewAgentMessage(ai.NewUserMsg(userMsgContent, ts))
 
-	// If streaming and the caller wants to queue as a follow-up, enqueue
-	// the message and return immediately. The agent drains the queue
-	// automatically when the current turn ends.
-	if s.IsStreaming() && streamingBehavior == "followUp" {
+	// If streaming, queue the message as a follow-up. The agent drains the
+	// queue automatically when the current turn ends. This applies both to
+	// explicit follow-up requests (Alt+Enter) and normal submissions (Enter)
+	// — without this, normal submissions would be silently dropped.
+	if s.IsStreaming() {
 		s.Agent.FollowUp(userMsg)
 		return nil
 	}

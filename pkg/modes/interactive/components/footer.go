@@ -37,6 +37,8 @@ type FooterData struct {
 	ContextPercent float64
 	// ContextTokens is the estimated context tokens. Negative means unknown.
 	ContextTokens  int
+	// QueuedMessages is the number of follow-up messages waiting in the queue.
+	QueuedMessages int
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -133,6 +135,12 @@ func (f *FooterComponent) Render(width int) []string {
 		contextPercentStr = contextDisplay
 	}
 	statsParts = append(statsParts, contextPercentStr)
+
+	// Queued follow-up messages
+	if data.QueuedMessages > 0 {
+		queueStr := fmt.Sprintf("📬 %d queued", data.QueuedMessages)
+		statsParts = append(statsParts, t.Fg("warning", queueStr))
+	}
 
 	statsLeft := strings.Join(statsParts, " ")
 

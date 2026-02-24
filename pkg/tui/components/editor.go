@@ -430,6 +430,9 @@ type Editor struct {
 	OnSubmit      func(text string)
 	OnChange      func(text string)
 	DisableSubmit bool
+
+	// Prompt is a string displayed before the first line of the editor (e.g. "⟩ ").
+	Prompt string
 }
 
 // NewEditor creates a new Editor.
@@ -724,6 +727,10 @@ func (e *Editor) Render(width int) []string {
 	if paddingX == 0 {
 		layoutWidth = contentWidth - 1
 	}
+	// Account for prompt width in layout
+	if e.Prompt != "" {
+		layoutWidth -= tui.VisibleWidth(e.Prompt)
+	}
 	if layoutWidth < 1 {
 		layoutWidth = 1
 	}
@@ -789,10 +796,25 @@ func (e *Editor) Render(width int) []string {
 
 	emitCursorMarker := e.Focused && e.autocompleteState == ""
 
-	for _, ll := range visibleLines {
+	promptWidth := tui.VisibleWidth(e.Prompt)
+
+	for lineIdx, ll := range visibleLines {
 		displayText := ll.text
 		lineVisWidth := tui.VisibleWidth(ll.text)
 		cursorInPadding := false
+
+		// Determine if this is the absolute first line (scrollOffset == 0 && first visible)
+		isFirstLine := e.scrollOffset == 0 && lineIdx == 0
+		linePrompt := ""
+		linePromptPad := ""
+		if e.Prompt != "" {
+			if isFirstLine {
+				linePrompt = e.Prompt
+			} else {
+				linePromptPad = strings.Repeat(" ", promptWidth)
+			}
+			lineVisWidth += promptWidth
+		}
 
 		if ll.hasCursor {
 			// Clamp cursorPos to displayText length to avoid slice bounds panic
@@ -833,7 +855,11 @@ func (e *Editor) Render(width int) []string {
 		if cursorInPadding && len(rp) > 0 {
 			rp = rp[1:]
 		}
-		result = append(result, leftPadding+displayText+padding+rp)
+		prefix := linePrompt
+		if prefix == "" {
+			prefix = linePromptPad
+		}
+		result = append(result, leftPadding+prefix+displayText+padding+rp)
 	}
 
 	// Bottom border

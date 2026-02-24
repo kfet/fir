@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,7 +79,9 @@ type InteractiveMode struct {
 	// Theme
 	themeSearchDirs []string
 
-	// Double-escape tracking
+	// Reexec state (set by /reexec, checked after Run returns)
+	reexecBinary string
+	reexecArgs   []string
 	lastEscapeTime time.Time
 
 	// Loading animation
@@ -227,6 +230,7 @@ func (m *InteractiveMode) Init() error {
 	m.editorContainer = &tui.Container{}
 	editorTheme := itheme.GetEditorTheme()
 	m.editor = components.NewCustomEditor(m.ui, editorTheme, m.keybindings)
+	m.editor.Prompt = "⟩ "
 	m.setupEditorHandlers()
 	m.editorContainer.AddChild(m.editor)
 	m.ui.AddChild(m.editorContainer)
@@ -465,7 +469,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		// Send message
 		if m.session != nil {
 			go func() {
-				_ = m.session.Prompt(text)
+				if err := m.session.Prompt(text); err != nil {
+					m.showWarning(fmt.Sprintf("Failed to send message: %v", err))
+				}
 			}()
 		}
 	}
@@ -756,6 +762,8 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handleChangelogCommand()
 	case "/reload":
 		m.handleReloadCommand()
+	case "/reexec":
+		m.handleReexecCommand()
 	case "/quit", "/exit":
 		m.Shutdown()
 	default:
@@ -2107,16 +2115,61 @@ func (m *InteractiveMode) handleChangelogCommand() {
 	// Display oldest-first so the newest version appears at the bottom of the terminal
 	// where the user's eyes are.
 	t := itheme.GetTheme()
+	border := t.Fg("dim", "───")
 	var lines []string
-	lines = append(lines, t.Bold(t.Fg("accent", "What's New")))
+	lines = append(lines, border+" "+t.Fg("muted", "Changelog")+" "+border)
 	lines = append(lines, "")
 	for i := len(entries) - 1; i >= 0; i-- {
-		lines = append(lines, entries[i].Content)
+		lines = append(lines, formatChangelogEntry(t, entries[i])...)
 		if i > 0 {
 			lines = append(lines, "")
 		}
 	}
+	lines = append(lines, "")
+	lines = append(lines, border+"────────"+border)
 	m.showMessage(strings.Join(lines, "\n"))
+}
+
+// formatChangelogEntry renders a single changelog entry with theme colors.
+func formatChangelogEntry(t *itheme.Theme, entry core.ChangelogEntry) []string {
+	var out []string
+	for _, line := range strings.Split(entry.Content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "## "):
+			// Version header: e.g. "## [0.5.0] - 2026-02-24"
+			// Extract just "v0.5.0" and optional date
+			header := strings.TrimPrefix(trimmed, "## ")
+			out = append(out, t.Bold(t.Fg("mdHeading", "  "+header)))
+		case strings.HasPrefix(trimmed, "### "):
+			// Subsection: Added, Fixed, Changed, Removed
+			section := strings.TrimPrefix(trimmed, "### ")
+			var color string
+			switch section {
+			case "Added":
+				color = "success"
+			case "Fixed":
+				color = "accent"
+			case "Changed":
+				color = "warning"
+			case "Removed":
+				color = "error"
+			default:
+				color = "muted"
+			}
+			out = append(out, "    "+t.Bold(t.Fg(color, section)))
+		case strings.HasPrefix(trimmed, "- "):
+			// Bullet item
+			bullet := t.Fg("mdListBullet", "•")
+			text := strings.TrimPrefix(trimmed, "- ")
+			out = append(out, "      "+bullet+" "+text)
+		case trimmed == "":
+			// skip blank lines between sections
+		default:
+			out = append(out, "      "+trimmed)
+		}
+	}
+	return out
 }
 
 func (m *InteractiveMode) handleReloadCommand() {
@@ -2149,6 +2202,49 @@ func (m *InteractiveMode) handleReloadCommand() {
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
 	m.showStatus("Reloaded extensions, skills, prompts, themes")
+}
+
+func (m *InteractiveMode) handleReexecCommand() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	if m.session.IsStreaming() {
+		m.showWarning("Wait for the current response to finish.")
+		return
+	}
+
+	binary, err := os.Executable()
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Cannot determine executable path: %v", err))
+		return
+	}
+
+	sessionFile := m.session.SessionManager.GetSessionFile()
+	sessionDir := m.session.SessionManager.GetSessionDir()
+	if sessionFile == "" {
+		m.showWarning("No persisted session to resume after reexec")
+		return
+	}
+
+	sessionBase := filepath.Base(sessionFile)
+
+	// Store reexec intent — the actual exec happens after Run() returns.
+	m.reexecBinary = binary
+	m.reexecArgs = []string{binary, "--session-dir", sessionDir, "--session", sessionBase}
+	m.Shutdown()
+}
+
+// ReexecIfRequested performs the syscall.Exec if /reexec was invoked.
+// Call this after Run() returns. It never returns on success.
+func (m *InteractiveMode) ReexecIfRequested() {
+	if m.reexecBinary == "" {
+		return
+	}
+	if err := syscall.Exec(m.reexecBinary, m.reexecArgs, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "reexec failed: exec %s: %v\n", m.reexecBinary, err)
+		os.Exit(1)
+	}
 }
 
 // resolveEnabledExtensions merges extension names from the (freshly reloaded)
@@ -2368,6 +2464,7 @@ func (m *InteractiveMode) showHelp() {
   /copy           - Copy last agent message to clipboard
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
+  /reexec        - Re-exec into the current binary, preserving the session
   /quit           - Quit fir
 
 Keyboard shortcuts:
@@ -2435,6 +2532,9 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 
 	// Session name
 	data.SessionName = m.session.SessionManager.GetSessionName()
+
+	// Queued follow-up messages
+	data.QueuedMessages = m.session.Agent.FollowUpQueueLen()
 
 	return data
 }

@@ -61,6 +61,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "login", Description: "Login with OAuth provider"},
 	{Name: "logout", Description: "Logout from OAuth provider"},
 	{Name: "reload", Description: "Reload extensions, skills, prompts, and themes"},
+	{Name: "reexec", Description: "Re-exec into the current binary, preserving the session"},
 	{Name: "quit", Description: "Quit fir"},
 }
 

@@ -2,7 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- `/reexec` slash command: re-execs into the current binary preserving the active session, useful for picking up a rebuilt binary or testing a different branch.
+- Queue indicator in footer: shows `📬 N queued` when follow-up messages are waiting while the agent is streaming.
+- Line prompt `⟩ ` displayed at the start of the editor input box.
+- `/changelog` output now uses theme colors: version headers in `mdHeading`, section names colored by type (Added=success, Fixed=accent, Changed=warning, Removed=error), styled `•` bullets, and dim rule borders at start/end.
+
 ### Fixed
+- Messages submitted (Enter) while the agent is streaming are now queued as follow-ups instead of being silently dropped.
 - `fir update` now self-updates on macOS (previously printed a "use `brew upgrade fir`" stub and exited).
 - Update notice no longer suggests `brew upgrade fir` on macOS; shows `fir update` on all platforms.
 

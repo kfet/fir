@@ -330,6 +330,13 @@ func (a *Agent) FollowUp(m AgentMessage) {
 	a.followUpQueue = append(a.followUpQueue, m)
 }
 
+// FollowUpQueueLen returns the number of queued follow-up messages.
+func (a *Agent) FollowUpQueueLen() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.followUpQueue)
+}
+
 // ClearSteeringQueue clears the steering queue.
 func (a *Agent) ClearSteeringQueue() {
 	a.mu.Lock()

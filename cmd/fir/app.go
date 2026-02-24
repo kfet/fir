@@ -680,7 +680,9 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		return fmt.Errorf("init interactive mode: %w", err)
 	}
 
-	return mode.Run(interactive.InteractiveModeOptions{
+	err = mode.Run(interactive.InteractiveModeOptions{
 		InitialPrompt: initialPrompt,
 	})
+	mode.ReexecIfRequested() // never returns if /reexec was used
+	return err
 }
