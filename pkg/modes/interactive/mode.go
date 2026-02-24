@@ -101,6 +101,9 @@ type InteractiveMode struct {
 	extSetup          *extension.SetupResult
 	cliExtensionNames []string // extension names from CLI args (merged with settings on reload)
 
+	// updateCh receives a single update notice string (or "") when the
+	// background version check completes. Shown in the TUI at startup.
+	updateCh <-chan string
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -171,6 +174,29 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult, cliExt
 	}
 }
 
+// SetUpdateChannel supplies a channel that delivers a single update notice
+// string (or "") once the background version check completes.  When the
+// notice is non-empty it is shown in the TUI message area at startup.
+func (m *InteractiveMode) SetUpdateChannel(ch <-chan string) {
+	m.updateCh = ch
+}
+
+// startUpdateNoticeWatcher spawns a goroutine that waits for the version
+// check result on m.updateCh and shows a notice if available. The goroutine
+// exits silently when the mode context is cancelled.
+func (m *InteractiveMode) startUpdateNoticeWatcher() {
+	go func() {
+		select {
+		case <-m.ctx.Done():
+			return
+		case notice := <-m.updateCh:
+			if notice != "" {
+				m.showMessage(notice)
+			}
+		}
+	}()
+}
+
 // Init initializes the TUI and components.
 func (m *InteractiveMode) Init() error {
 	// Create terminal and TUI
@@ -231,6 +257,13 @@ func (m *InteractiveMode) Init() error {
 
 	// Show loaded resources and any diagnostics at startup
 	m.showLoadedResources()
+
+	// When a version check channel is available, show the update notice in the
+	// TUI as soon as the background check completes.  The goroutine exits early
+	// if the mode's context is cancelled (user quits before check finishes).
+	if m.updateCh != nil {
+		m.startUpdateNoticeWatcher()
+	}
 
 	return nil
 }

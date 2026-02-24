@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -482,3 +485,101 @@ func TestClampThinkingLevel_WithReasoning(t *testing.T) {
 		t.Errorf("expected thinking set to high, got %q", s.thinking)
 	}
 }
+
+// ============================================================================
+// resolveAgentDir
+// ============================================================================
+
+func TestResolveAgentDir_Default(t *testing.T) {
+	t.Setenv("FIR_AGENT_DIR", "")
+	got := resolveAgentDir()
+	if got == "" {
+		t.Error("expected non-empty default agent dir")
+	}
+}
+
+func TestResolveAgentDir_EnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+	got := resolveAgentDir()
+	if got != dir {
+		t.Errorf("expected %q, got %q", dir, got)
+	}
+}
+
+// ============================================================================
+// drainUpdateNotice
+// ============================================================================
+
+func TestDrainUpdateNotice_WithNotice(t *testing.T) {
+	ch := make(chan string, 1)
+	ch <- "› fir v1.0.0 available"
+	// drainUpdateNotice should not block and should consume the message
+	drainUpdateNotice(ch)
+	if len(ch) != 0 {
+		t.Error("expected channel to be drained")
+	}
+}
+
+func TestDrainUpdateNotice_EmptyNotice(t *testing.T) {
+	ch := make(chan string, 1)
+	ch <- "" // empty — no notice to print
+	drainUpdateNotice(ch)
+	if len(ch) != 0 {
+		t.Error("expected channel to be drained even for empty notice")
+	}
+}
+
+func TestDrainUpdateNotice_NoValue_NonBlocking(t *testing.T) {
+	ch := make(chan string, 1)
+	// Channel is empty — drainUpdateNotice must not block.
+	done := make(chan struct{})
+	go func() {
+		drainUpdateNotice(ch)
+		close(done)
+	}()
+	select {
+	case <-done:
+		// OK — returned immediately
+	case <-time.After(time.Second):
+		t.Error("drainUpdateNotice blocked on empty channel")
+	}
+}
+
+// ============================================================================
+// runUpdate
+// ============================================================================
+
+func TestRunUpdate_MacOS_ReturnNil(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-specific path")
+	}
+	// On macOS, runUpdate instructs user to use brew and returns nil.
+	err := runUpdate()
+	if err != nil {
+		t.Errorf("runUpdate() on macOS should return nil, got %v", err)
+	}
+}
+
+// roundTripFunc is a minimal http.RoundTripper for testing.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestRunUpdate_Linux_FetchFails(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific path")
+	}
+	// Replace the default HTTP transport so FetchLatest fails immediately.
+	orig := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("mock network error")
+	})
+	defer func() { http.DefaultTransport = orig }()
+
+	err := runUpdate()
+	if err == nil {
+		t.Error("expected error when FetchLatest fails, got nil")
+	}
+}
+

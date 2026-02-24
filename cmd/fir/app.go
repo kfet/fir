@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
@@ -17,10 +19,11 @@ import (
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
-	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
+	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	rpcmode "github.com/kfet/fir/pkg/modes/rpc"
+	"github.com/kfet/fir/pkg/update"
 
 	// Import built-in extensions (registered via init())
 	_ "github.com/kfet/fir/pkg/extensions/claudeusage"
@@ -50,10 +53,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
 
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 
 	// Auth and model registry
 	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
@@ -236,6 +236,11 @@ func reportSettingsErrors(settingsManager *core.SettingsManager, context string)
 
 // run is the main application logic.
 func run() error {
+	// "fir update" is a standalone subcommand — handle it before normal parsing.
+	if len(os.Args) >= 2 && os.Args[1] == "update" {
+		return runUpdate()
+	}
+
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
 
@@ -259,6 +264,35 @@ func run() error {
 		return runExport(args)
 	}
 
+	// Resolve agentDir early so the version check can use the cache.
+	agentDir := resolveAgentDir()
+
+	// Start async version check for interactive and print modes.
+	// Skipped for machine-to-machine modes (RPC, ACP).
+	// The channel always receives exactly one value (notice text or "").
+	noticeCh := make(chan string, 1)
+	wantUpdateCheck := args.OutputMode != ModeRPC && args.OutputMode != ModeACP
+	if wantUpdateCheck {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			rel, _ := update.CheckLatest(ctx, version, agentDir)
+			if rel != nil {
+				noticeCh <- update.UpdateNotice(rel.Version)
+			} else {
+				noticeCh <- ""
+			}
+		}()
+	} else {
+		noticeCh <- ""
+	}
+
+	// printUpdateNotice prints the update notice to stderr (non-blocking).
+	// Used for print mode — interactive mode shows it inside the TUI instead.
+	printUpdateNotice := func() {
+		drainUpdateNotice(noticeCh)
+	}
+
 	// Read piped stdin (if not a TTY) — skip for RPC and ACP modes which read stdin directly
 	if args.OutputMode != ModeRPC && args.OutputMode != ModeACP {
 		stdinContent := readPipedStdin()
@@ -279,7 +313,7 @@ func run() error {
 	}
 
 	if !isPrintMode && !isRPCMode {
-		return runInteractiveMode(args)
+		return runInteractiveMode(args, noticeCh)
 	}
 
 	setup, err := setupSession(args, true)
@@ -328,20 +362,53 @@ func run() error {
 		outputMode = printmode.ModeJSON
 	}
 
-	return printmode.Run(setup.result.Session, printmode.Options{
+	runErr := printmode.Run(setup.result.Session, printmode.Options{
 		Mode:           outputMode,
 		InitialMessage: initialMessage,
 		InitialImages:  initialImages,
 		Messages:       remainingMessages,
 	})
+	printUpdateNotice()
+	return runErr
+}
+
+// runUpdate implements the "fir update" subcommand.
+// On macOS it instructs the user to use Homebrew; on Linux it downloads and
+// replaces the running binary from the latest GitHub release.
+func runUpdate() error {
+	if runtime.GOOS == "darwin" {
+		fmt.Fprintln(os.Stderr, "fir update is not supported on macOS.")
+		fmt.Fprintln(os.Stderr, "Use Homebrew to update:  brew upgrade fir")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	fmt.Fprintln(os.Stderr, "Checking for updates...")
+
+	rel, err := update.FetchLatestOrGH(ctx)
+	if err != nil {
+		return fmt.Errorf("check for updates: %w", err)
+	}
+
+	if !update.IsNewer(rel.Version, version) {
+		fmt.Fprintf(os.Stderr, "fir %s is already up to date.\n", version)
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "Updating fir %s → %s...\n", version, rel.Version)
+	if err := update.SelfUpdate(ctx, rel); err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Successfully updated to fir %s.\n", rel.Version)
+	return nil
 }
 
 // runListModels lists available models and exits.
 func runListModels(args *Args) error {
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 
 	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
@@ -408,6 +475,27 @@ func createSessionManager(args *Args, cwd, agentDir string) *core.SessionManager
 		return core.ContinueRecentSession(cwd, sessionDir)
 	}
 	return core.NewSessionManager(cwd, sessionDir)
+}
+
+// resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.
+func resolveAgentDir() string {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
+		return dir
+	}
+	return core.DefaultAgentDir()
+}
+
+// drainUpdateNotice non-blockingly reads a notice from noticeCh and prints
+// it to stderr if non-empty. Used by print mode after the run completes.
+func drainUpdateNotice(noticeCh <-chan string) {
+	select {
+	case notice := <-noticeCh:
+		if notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+		}
+	default:
+		// Check still in flight — skip rather than block.
+	}
 }
 
 // readPipedStdin reads all content from piped stdin.
@@ -516,7 +604,7 @@ func runAcpMode(args *Args) error {
 }
 
 // runInteractiveMode runs the full interactive TUI mode.
-func runInteractiveMode(args *Args) error {
+func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	setup, err := setupSession(args, false)
 	if err != nil {
 		return err
@@ -591,6 +679,9 @@ func runInteractiveMode(args *Args) error {
 			_ = setup.extSetup.Runner.EmitSessionStart()
 		}
 	}
+
+	// Wire the update notice channel so the TUI shows it at startup.
+	mode.SetUpdateChannel(noticeCh)
 
 	if err := mode.Init(); err != nil {
 		return fmt.Errorf("init interactive mode: %w", err)

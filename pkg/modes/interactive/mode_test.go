@@ -2023,3 +2023,70 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 		t.Errorf("expected ≥2 children in messageContainer after Init() with pre-existing messages, got %d", len(children))
 	}
 }
+
+// ============================================================================
+// SetUpdateChannel / startUpdateNoticeWatcher
+// ============================================================================
+
+func TestSetUpdateChannel_StoresChannel(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string, 1)
+	tm.mode.SetUpdateChannel(ch)
+	if tm.mode.updateCh == nil {
+		t.Error("expected updateCh to be set after SetUpdateChannel")
+	}
+}
+
+func TestStartUpdateNoticeWatcher_ShowsNotice(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string, 1)
+	ch <- "fir v1.0.0 available"
+	tm.mode.updateCh = ch
+
+	before := tm.messageCount()
+	tm.mode.startUpdateNoticeWatcher()
+	tm.waitRender()
+
+	if tm.messageCount() <= before {
+		t.Error("expected message to be added when notice is non-empty")
+	}
+}
+
+func TestStartUpdateNoticeWatcher_EmptyNotice(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string, 1)
+	ch <- "" // empty — no notice
+	tm.mode.updateCh = ch
+
+	before := tm.messageCount()
+	tm.mode.startUpdateNoticeWatcher()
+	tm.waitRender()
+
+	if tm.messageCount() != before {
+		t.Error("expected no message when notice is empty")
+	}
+}
+
+func TestStartUpdateNoticeWatcher_ContextCancel(t *testing.T) {
+	tm := newTestMode(t)
+	ch := make(chan string) // unbuffered — will not send until cancelled
+	tm.mode.updateCh = ch
+
+	// Cancel the mode context immediately; goroutine should exit cleanly.
+	tm.mode.cancel()
+	tm.mode.startUpdateNoticeWatcher()
+
+	// Give the goroutine a moment to exit.
+	done := make(chan struct{})
+	go func() {
+		tm.waitRender()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// OK — goroutine exited promptly
+	case <-time.After(2 * time.Second):
+		t.Error("goroutine did not exit promptly after context cancellation")
+	}
+}
