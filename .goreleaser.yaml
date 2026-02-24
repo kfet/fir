@@ -22,7 +22,7 @@ builds:
         goarch: arm   # no darwin/arm (32-bit); darwin/arm64 is Apple Silicon
 
 archives:
-  - format: binary
+  - formats: [binary]
     name_template: "fir-{{ .Os }}-{{ .Arch }}{{ if .Arm }}{{ .Arm }}{{ end }}"
 
 checksum:
@@ -36,20 +36,16 @@ release:
   prerelease: auto
   name_template: "fir {{.Version}}"
 
-brews:
+homebrew_casks:
   - repository:
       owner: kfet
       name: homebrew-fir
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/kfet/fir
     description: "Fast, portable AI coding agent. Single binary, no runtime dependencies."
     license: MIT
-    install: |
-      bin.install "fir"
-    test: |
-      system bin/"fir", "--version"
 
 changelog:
   use: github-native
