@@ -1,0 +1,54 @@
+version: 2
+project_name: fir
+
+builds:
+  - main: ./cmd/fir/
+    binary: fir
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "6"
+    ignore:
+      - goos: darwin
+        goarch: arm   # no darwin/arm (32-bit); darwin/arm64 is Apple Silicon
+
+archives:
+  - format: binary
+    name_template: "fir-{{ .Os }}-{{ .Arch }}{{ if .Arm }}{{ .Arm }}{{ end }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: kfet
+    name: fir
+  prerelease: auto
+  name_template: "fir {{.Version}}"
+
+brews:
+  - repository:
+      owner: kfet
+      name: homebrew-fir
+      branch: main
+    directory: Formula
+    homepage: https://github.com/kfet/fir
+    description: "Fast, portable AI coding agent. Single binary, no runtime dependencies."
+    license: MIT
+    install: |
+      bin.install "fir"
+    test: |
+      system bin/"fir", "--version"
+
+changelog:
+  use: github-native

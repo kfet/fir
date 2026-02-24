@@ -263,6 +263,7 @@ func PrintHelp() {
 
 Usage:
   %s [options] [@files...] [messages...]
+  %s update                      Self-update to the latest release
 
 Options:
   --provider <name>              Provider name (default: google)
@@ -315,6 +316,9 @@ Examples:
   # Start with a specific thinking level
   %s --thinking high "Solve this complex problem"
 
+  # Update to the latest release
+  %s update
+
 Environment Variables:
   ANTHROPIC_API_KEY                - Anthropic Claude API key
   OPENAI_API_KEY                   - OpenAI GPT API key
@@ -334,5 +338,5 @@ Available Tools (default: read, bash, edit, write):
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)
-`, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
 }

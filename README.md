@@ -23,19 +23,67 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew install kfet/fir/fir
+```
+
+For private repos, tap with SSH:
+```bash
+brew tap kfet/fir git@github.com:kfet/homebrew-fir.git
+brew install fir
+```
+
+### Install script (Linux, Raspberry Pi)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+```
+
+For private repos, the script uses `gh` if installed, or `GITHUB_TOKEN`:
+```bash
+# Option 1: gh CLI (handles auth automatically)
+gh auth login
+curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+
+# Option 2: token
+GITHUB_TOKEN=ghp_... curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+```
+
+### Go install
+
 Requires [Go 1.24+](https://go.dev/dl/).
 
 ```bash
 go install github.com/kfet/fir/cmd/fir@latest
 ```
 
-Or build from source:
+For private repos, set `GOPRIVATE` and use SSH:
+```bash
+GOPRIVATE=github.com/kfet/fir go install github.com/kfet/fir/cmd/fir@latest
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/kfet/fir.git
 cd fir
 make install    # installs to $GOPATH/bin
 ```
+
+### Update
+
+```bash
+# macOS (Homebrew)
+brew upgrade fir
+
+# Linux / Raspberry Pi
+fir update
+```
+
+`fir` checks for updates automatically and shows a notice when a new version
+is available.
 
 ## Usage
 
