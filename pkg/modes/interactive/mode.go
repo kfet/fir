@@ -216,6 +216,15 @@ func (m *InteractiveMode) Init() error {
 	// Subscribe to agent events
 	m.subscribeToAgent()
 
+	// Render existing session history (e.g. when --continue or --resume loads
+	// a previous session). This must come after subscribeToAgent so that any
+	// events emitted later are also handled.
+	if m.session != nil {
+		if state := m.session.State(); len(state.Messages) > 0 {
+			m.rebuildChatFromMessages()
+		}
+	}
+
 	// Show loaded resources and any diagnostics at startup
 	m.showLoadedResources()
 

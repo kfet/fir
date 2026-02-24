@@ -1926,3 +1926,71 @@ func TestHandleForkByNumber_Valid(t *testing.T) {
 		t.Errorf("expected forked text in editor, got %q", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Init() pre-population tests
+// ---------------------------------------------------------------------------
+
+// TestInteractiveMode_Init_PrePopulatesHistoryFromSession verifies that Init()
+// calls rebuildChatFromMessages() when the session already has messages (the
+// --continue / --resume code path added in cycle 119).
+func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
+	settingsManager := core.NewSettingsManager(cwd, agentDir)
+
+	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+		Cwd:      cwd,
+		AgentDir: agentDir,
+	})
+	rl.Reload()
+
+	// Build an agent with one user and one assistant message already in state.
+	userMsg := agent.NewAgentMessage(ai.NewUserMsg("hello from history", 0))
+	assistantMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Content: []ai.AssistantContent{
+			{Text: &ai.TextContent{Type: ai.ContentTypeText, Text: "hello back"}},
+		},
+	}))
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			ThinkingLevel: ai.ThinkingOff,
+			Messages:      []agent.AgentMessage{userMsg, assistantMsg},
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return core.ConvertToLLM(msgs)
+		},
+	})
+
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(agentDir+"/auth.json"), ""),
+		Cwd:             cwd,
+	})
+	t.Cleanup(func() { session.Close() })
+
+	keybindings := core.NewKeybindingsManager("")
+	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
+	m.session = session
+	t.Cleanup(func() { m.Shutdown() })
+
+	// Init() should detect state.Messages is non-empty and call rebuildChatFromMessages().
+	if err := m.Init(); err != nil {
+		t.Fatalf("Init() returned error: %v", err)
+	}
+
+	// The message container must have ≥ 2 children (one per pre-existing message).
+	children := m.messageContainer.ChildrenSnapshot()
+	if len(children) < 2 {
+		t.Errorf("expected ≥2 children in messageContainer after Init() with pre-existing messages, got %d", len(children))
+	}
+}

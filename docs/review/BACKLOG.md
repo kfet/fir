@@ -1,14 +1,9 @@
 # Review Backlog — 2026-02-23
 
-**Last reviewed:** Review cycle 118, 2026-02-23 18:55 PST
+**Last reviewed:** Review cycle 123, 2026-02-23 22:02 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 23 packages pass)
 **Files reviewed this cycle:**
-- `pkg/tui/keys.go` — `SplitKeySequences` added; correct CSI/SS3/APC/OSC/paste/UTF-8 grammar; fast-path for single-byte input; 12 unit tests added.
-- `pkg/tui/keys_test.go` — `TestSplitKeySequences_*` suite: empty, single byte, multiple backspaces, mixed control+printable, CSI arrows, alt+backspace, bracketed paste, paste+key, multi-byte UTF-8, Kitty sequences all covered.
-- `pkg/tui/tui.go` (indirectly) — `handleInput` calls `SplitKeySequences` then dispatches each sub-sequence individually; `TestTUI_HandleInput_BufferedBackspaces` confirms three buffered backspaces produce three separate calls.
-- `pkg/tui/tui_test.go` — `TestTUI_HandleInput_BufferedBackspaces` regression test added; `trackingInputHandler` helper.
-- `pkg/tui/components/input.go` — `UndoStack.Push` zeroes evicted slot; `handleBackspace`/`handleForwardDelete` batch consecutive presses into one undo entry; `Render()` uses `VisibleWidth`/`SliceByColumn` (display columns) instead of byte offsets.
-- `pkg/tui/components/input_test.go` — `TestInput_ScrollingRenderMultiByte`, `TestInput_BackspaceBatching`, `TestInput_BackspaceUndoCountIsOne` added.
+- `pkg/modes/interactive/mode_test.go` — `TestInteractiveMode_Init_PrePopulatesHistoryFromSession` added; correctly verifies cycle-119 `Init()` pre-population path. Test passes.
 **Open items: 0**
 
 ---
@@ -37,6 +32,7 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/modes/interactive/mode.go:Init()` — No test for `Init()` with pre-existing session messages — ✅ FIXED 2026-02-23 (`TestInteractiveMode_Init_PrePopulatesHistoryFromSession` added)
 - `pkg/tui/keys.go` + `pkg/tui/tui.go` — Buffered keystrokes silently dropped when renders block stdin reader — ✅ FIXED 2026-02-23 (`SplitKeySequences` splits raw stdin reads into individual sequences before dispatch; `TestTUI_HandleInput_BufferedBackspaces` + 11 unit tests added)
 - `pkg/tui/components/input.go:534-559` — `Render()` scrolling mixed byte offsets with display-column widths — ✅ FIXED 2026-02-23 (scroll logic now uses `tui.VisibleWidth`/`tui.SliceByColumn`; `TestInput_ScrollingRenderMultiByte` regression test added)
 - `pkg/tui/components/input.go` — `handleBackspace`/`handleForwardDelete` push undo on every keystroke — ✅ FIXED 2026-02-23 (consecutive presses batched into one undo entry per run, matching `insertCharacter`'s word-boundary logic)
