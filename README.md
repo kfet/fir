@@ -6,15 +6,11 @@ A fast, portable AI coding agent. Single binary, no runtime dependencies.
 [Mario Zechner](https://github.com/badlogic) and closely tracks it upstream.
 All credit for the original design — the agent loop, tool system, TUI,
 multi-provider architecture, and TS extension framework goes to that project.
+
 The motivation for this port is size and portability, specifically I was aiming
 for an efficient minimal agent running on a Raspberry Pi Zero W.
 
-Additional features include:
-* native ACP mode - 
-
-```
-fir -p "refactor the auth module to use JWT"
-```
+One additional feature is the native ACP mode: run fir as an [Agent Client Protocol](https://github.com/coder/acp-go-sdk) server (`--mode acp`) for coding editor integrations such as Zed; communicates via newline-delimited JSON-RPC 2.0 over stdio.
 
 ## Features
 
@@ -140,7 +136,7 @@ fir --no-extensions "do something"
 | Name | Description |
 |---|---|
 | `notify` | Sends a native terminal notification (OSC 777/99) when the agent finishes. Works in Ghostty, iTerm2, WezTerm, Kitty. |
-| `sandbox` | Wraps bash commands with OS-level filesystem and network restrictions. Configured via `~/.fir/agent/sandbox.json` (global) or `.fir/sandbox.json` (project). |
+| `sandbox` | (TBD) Wraps bash commands with OS-level filesystem and network restrictions. Configured via `~/.fir/agent/sandbox.json` (global) or `.fir/sandbox.json` (project). |
 
 #### Writing custom extensions
 
