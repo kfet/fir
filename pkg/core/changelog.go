@@ -72,13 +72,17 @@ func ParseChangelogContent(content string) []ChangelogEntry {
 				entries = append(entries, *currentVersion)
 			}
 
-			// Try to parse version
+			// Try to parse version, or detect [Unreleased]
 			m := versionHeaderRe.FindStringSubmatch(line)
 			if m != nil {
 				major, _ := strconv.Atoi(m[1])
 				minor, _ := strconv.Atoi(m[2])
 				patch, _ := strconv.Atoi(m[3])
 				currentVersion = &ChangelogEntry{Major: major, Minor: minor, Patch: patch}
+				currentLines = []string{line}
+			} else if strings.Contains(strings.ToLower(line), "unreleased") {
+				// Unreleased section: use max version so it sorts after all releases.
+				currentVersion = &ChangelogEntry{Major: 999, Minor: 999, Patch: 999}
 				currentLines = []string{line}
 			} else {
 				currentVersion = nil

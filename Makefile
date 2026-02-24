@@ -5,6 +5,18 @@ BINDIR    := bin
 BINARY    := $(BINDIR)/fir
 BINARY_PGO := $(BINDIR)/fir.pgo
 VERSION   := $(shell cat VERSION 2>/dev/null || echo dev)
+
+# Compute a rich version: if HEAD is the exact release tag, use VERSION as-is.
+# Otherwise append -dev+<commit>[.dirty] so non-release builds are obvious.
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_TAG    := $(shell git describe --exact-match --tags HEAD 2>/dev/null)
+GIT_DIRTY  := $(shell git diff --quiet 2>/dev/null || echo .dirty)
+ifneq ($(GIT_TAG),v$(VERSION))
+  ifneq ($(GIT_COMMIT),)
+    VERSION := $(VERSION)-dev+$(GIT_COMMIT)$(GIT_DIRTY)
+  endif
+endif
+
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 
 # Stamp file records the Go source-tree hash for which default.pgo was last generated.

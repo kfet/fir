@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -158,5 +159,32 @@ func TestChangelogEntry_Version(t *testing.T) {
 	e := ChangelogEntry{Major: 1, Minor: 2, Patch: 3}
 	if e.Version() != "1.2.3" {
 		t.Errorf("expected '1.2.3', got %q", e.Version())
+	}
+}
+
+func TestParseChangelog_Unreleased(t *testing.T) {
+	content := `## [Unreleased]
+
+### Added
+- New feature
+
+## [1.0.0] - 2026-01-01
+
+### Fixed
+- Bug fix
+`
+	entries := ParseChangelogContent(content)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+	// Unreleased should sort after versioned entries (highest version number).
+	if entries[0].Major != 999 {
+		t.Errorf("expected unreleased entry first (newest-first), got %s", entries[0].Version())
+	}
+	if !strings.Contains(entries[0].Content, "New feature") {
+		t.Error("unreleased entry should contain 'New feature'")
+	}
+	if entries[1].Version() != "1.0.0" {
+		t.Errorf("expected 1.0.0, got %s", entries[1].Version())
 	}
 }

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `/changelog` now includes unreleased changes at the bottom.
 - `/reexec` slash command: re-execs into the current binary preserving the active session, useful for picking up a rebuilt binary or testing a different branch.
 - Queue indicator in footer: shows `📬 N queued` when follow-up messages are waiting while the agent is streaming.
 - Line prompt `⟩ ` displayed at the start of the editor input box.
