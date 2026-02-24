@@ -41,6 +41,7 @@ brews:
       owner: kfet
       name: homebrew-fir
       branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/kfet/fir
     description: "Fast, portable AI coding agent. Single binary, no runtime dependencies."
