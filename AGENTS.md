@@ -8,6 +8,15 @@ Do not ignore any issues, address them promptly, even if preexisting. Do not pos
 
 Do not leave incomplete or stubbed code. Ensure all code is functional and tested.
 
+## Git
+
+Git commands that require an editor (e.g. `git rebase --continue`, `git commit`, `git merge --continue`) will open vim non-interactively and hang. Always prefix such commands with `GIT_EDITOR=true` to accept the default message without opening an editor:
+
+```bash
+GIT_EDITOR=true git rebase --continue
+GIT_EDITOR=true git commit
+```
+
 ## Testing
 
 Run `make test` to verify your changes. Always finish every task with `make all` to confirm the full build and test suite passes.

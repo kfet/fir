@@ -460,17 +460,46 @@ func TestInteractiveMode_SlashExit(t *testing.T) {
 func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 
-	builtins := []string{
-		"/help", "/hotkeys", "/clear", "/new", "/compact", "/model",
-		"/thinking", "/theme", "/settings", "/session", "/resume",
-		"/login", "/logout", "/quit", "/exit",
-	}
-	for _, cmd := range builtins {
-		if !m.isBuiltinSlashCommand(cmd) {
-			t.Errorf("expected %q to be a builtin command", cmd)
+	// Every entry in core.BuiltinSlashCommands must be recognised.
+	for _, cmd := range core.BuiltinSlashCommands {
+		full := "/" + cmd.Name
+		if !m.isBuiltinSlashCommand(full) {
+			t.Errorf("core.BuiltinSlashCommands entry %q not recognised by isBuiltinSlashCommand", full)
 		}
 	}
 
+	// Every case handled by handleSlashCommand must also be recognised.
+	// If you add a new case to that switch, add it here AND to
+	// core.BuiltinSlashCommands (or builtinAliases for hidden aliases).
+	handleCases := []string{
+		"/help", "/hotkeys",
+		"/clear", "/new",
+		"/compact",
+		"/model",
+		"/thinking",
+		"/theme",
+		"/settings",
+		"/session",
+		"/resume",
+		"/login", "/logout",
+		"/scoped-models",
+		"/tree",
+		"/fork",
+		"/export",
+		"/share",
+		"/copy",
+		"/name",
+		"/changelog",
+		"/reload",
+		"/quit", "/exit",
+	}
+	for _, cmd := range handleCases {
+		if !m.isBuiltinSlashCommand(cmd) {
+			t.Errorf("handleSlashCommand case %q not recognised; add it to core.BuiltinSlashCommands or builtinAliases", cmd)
+		}
+	}
+
+	// Non-builtins must NOT be recognised.
 	nonBuiltins := []string{
 		"/skill:review", "/skill:deploy do it", "/mytemplate", "/nonexistent",
 	}

@@ -141,6 +141,12 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | TS Source | Go File | Status |
 |---|---|---|
 | `coding-agent/src/modes/interactive/theme/theme.ts` | `pkg/modes/interactive/theme/theme.go` | ✅ |
+| `coding-agent/src/modes/interactive/theme/dark.json` | `pkg/modes/interactive/theme/themes/dark.json` | ✅ |
+| `coding-agent/src/modes/interactive/theme/light.json` | `pkg/modes/interactive/theme/themes/light.json` | ✅ |
+| (fir addition) | `pkg/modes/interactive/theme/themes/dracula.json` | ✅ |
+| (fir addition) | `pkg/modes/interactive/theme/themes/gruvbox.json` | ✅ |
+| (fir addition) | `pkg/modes/interactive/theme/themes/nord.json` | ✅ |
+| (fir addition) | `pkg/modes/interactive/theme/themes/catppuccin-mocha.json` | ✅ |
 | `coding-agent/src/modes/interactive/interactive-mode.ts` | `pkg/modes/interactive/mode.go` | ✅ |
 | `tui/src/autocomplete.ts` | `pkg/modes/interactive/autocomplete.go` | ✅ |
 | (platform signals) | `pkg/modes/interactive/signal_unix.go` + `signal_windows.go` | ✅ |

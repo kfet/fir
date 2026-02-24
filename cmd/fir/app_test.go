@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -347,6 +348,44 @@ func TestRunListModels_WithPattern(t *testing.T) {
 	err := runListModels(args)
 	if err != nil {
 		t.Fatalf("runListModels returned error: %v", err)
+	}
+}
+
+// ============================================================================
+// runExport
+// ============================================================================
+
+func TestRunExport_RequiresSession(t *testing.T) {
+	providers.RegisterDefaultProviders()
+	args := &Args{Export: filepath.Join(t.TempDir(), "out.html")}
+	err := runExport(args)
+	if err == nil {
+		t.Fatal("expected error when --session not provided")
+	}
+	if !strings.Contains(err.Error(), "--export requires --session") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunExport_ExportsToFile(t *testing.T) {
+	providers.RegisterDefaultProviders()
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	outFile := filepath.Join(t.TempDir(), "export.html")
+	args := &Args{
+		Session: "test.jsonl",
+		Export:  outFile,
+	}
+	if err := runExport(args); err != nil {
+		t.Fatalf("runExport error: %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("expected export file at %s: %v", outFile, err)
+	}
+	if !strings.Contains(string(data), "<html") {
+		t.Error("expected exported file to contain HTML")
 	}
 }
 

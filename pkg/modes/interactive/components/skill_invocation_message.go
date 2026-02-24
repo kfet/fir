@@ -41,6 +41,7 @@ func (s *SkillInvocationMessageComponent) SetExpanded(expanded bool) {
 
 // Invalidate rebuilds the display.
 func (s *SkillInvocationMessageComponent) Invalidate() {
+	s.markdownThm = theme.GetMarkdownTheme()
 	s.Box.Invalidate()
 	s.updateDisplay()
 }

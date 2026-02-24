@@ -42,6 +42,7 @@ func (c *CompactionSummaryMessageComponent) SetExpanded(expanded bool) {
 
 // Invalidate rebuilds the display.
 func (c *CompactionSummaryMessageComponent) Invalidate() {
+	c.markdownThm = theme.GetMarkdownTheme()
 	c.Box.Invalidate()
 	c.updateDisplay()
 }

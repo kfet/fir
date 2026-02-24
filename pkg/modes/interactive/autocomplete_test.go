@@ -13,14 +13,35 @@ func testCommands() []SlashCommand {
 	return []SlashCommand{
 		{Name: "help", Description: "Show help"},
 		{Name: "hotkeys", Description: "Show keyboard shortcuts"},
-		{Name: "model", Description: "Select model"},
+		{Name: "theme", Description: "Select color theme"},
 		{Name: "thinking", Description: "Select thinking level"},
+		{Name: "model", Description: "Select model"},
 		{Name: "quit", Description: "Quit fir"},
 		{Name: "login", Description: "Login with OAuth"},
 		{Name: "logout", Description: "Logout from OAuth"},
 		{Name: "clear", Description: "Start new session"},
 		{Name: "compact", Description: "Compact session"},
 		{Name: "settings", Description: "Open settings"},
+	}
+}
+
+func TestAutocomplete_ThemeCommandSuggested(t *testing.T) {
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+
+	// "/th" should match both "theme" and "thinking"
+	result := p.GetSuggestions([]string{"/th"}, 0, 3)
+	if result == nil {
+		t.Fatal("expected suggestions for /th")
+	}
+	foundTheme := false
+	for _, item := range result.Items {
+		if item.Value == "theme" {
+			foundTheme = true
+			break
+		}
+	}
+	if !foundTheme {
+		t.Errorf("expected 'theme' in suggestions for /th, got %v", result.Items)
 	}
 }
 

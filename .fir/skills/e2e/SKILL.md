@@ -1,6 +1,6 @@
 ---
 name: e2e
-description: Continuously test the fir binary end-to-end by running it in print and RPC modes over stdio, verifying tool execution, streaming, and error handling against a real or mock LLM.
+description: Continuously test the fir binary end-to-end by running it in print, RPC, and ACP modes over stdio, verifying tool execution, streaming, model resolution, theme flags, and error handling against a real or mock LLM.
 ---
 
 # End-to-End Testing via stdio
@@ -651,6 +651,184 @@ Use `timeout: 10` on the bash tool call.
 - No `panic:` in output (previously would panic; now logs an error gracefully)
 - Exit code 0 (other built-in models still list fine)
 
+### 8. ACP Mode Tests (`--mode acp`)
+
+ACP mode speaks JSON-RPC 2.0 over stdin/stdout. These are fast tests (no LLM needed for basic protocol checks).
+
+**Note:** ACP mode reads stdin directly (no `readPipedStdin` consumption). Use `{ printf ...; sleep N; }` to keep stdin open for the server to respond.
+
+#### 8a. ACP initialize — agentInfo.name is "fir"
+
+```bash
+cd "$PROJECT_ROOT" && { printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":10,"clientCapabilities":{}}}\n'; sleep 2; } | FIR_AGENT_DIR="$(mktemp -d)" ./bin/fir-e2e --mode acp --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response line is valid JSON with `"id":1` and `"result"` (not `"error"`)
+- `result.agentInfo.name` is `"fir"`
+- `result.protocolVersion` is a number (≥ 1)
+- `result.agentCapabilities.sessionCapabilities` contains `list` and `resume`
+- Exit code 0
+
+#### 8b. ACP `session/new` — creates session, returns sessionId
+
+```bash
+cd "$PROJECT_ROOT" && { printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":10,"clientCapabilities":{}}}\n{"jsonrpc":"2.0","id":2,"method":"session/new","params":{}}\n'; sleep 2; } | FIR_AGENT_DIR="$(mktemp -d)" ./bin/fir-e2e --mode acp --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Two response lines appear
+- The `session/new` response (`"id":2`) has a non-empty `result.sessionId` UUID string
+- A `session/update` notification (`"method":"session/update"`) is emitted with `update.sessionUpdate = "available_commands_update"`
+- Exit code 0
+
+#### 8c. ACP `session/update` notification includes `/share` and `/export` commands
+
+(Reuse output from 8b.)
+
+**Verify:**
+- The `session/update` notification's `update.availableCommands` array contains entries with `"name":"share"` and `"name":"export"`
+
+#### 8d. ACP unknown method returns method-not-found error
+
+```bash
+cd "$PROJECT_ROOT" && { printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":10,"clientCapabilities":{}}}\n{"jsonrpc":"2.0","id":2,"method":"agent/bogus","params":{}}\n'; sleep 1; } | FIR_AGENT_DIR="$(mktemp -d)" ./bin/fir-e2e --mode acp --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response for `"id":2` has `"error"` (not `"result"`)
+- `error.code` is `-32601` (Method not found)
+- Process does NOT crash
+
+#### 8e. ACP malformed JSON does not crash
+
+```bash
+cd "$PROJECT_ROOT" && { printf 'this is not json\n'; sleep 1; } | FIR_AGENT_DIR="$(mktemp -d)" ./bin/fir-e2e --mode acp --no-session 2>&1; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- No `panic:` in output
+- Process exits cleanly (exit code 0 or 1, but not a crash)
+
+### 9. `--theme` Flag Tests (fast, no LLM needed)
+
+These tests verify that the `--theme` flag is now actually wired through (it was previously parsed but silently ignored).
+
+#### 9a. `--theme <valid-dir>` does not crash; `--list-models` still works
+
+```bash
+cd "$PROJECT_ROOT" && THEMEDIR=$(mktemp -d) && ./bin/fir-e2e --theme "$THEMEDIR" --list-models 2>&1 | head -5; echo "EXIT:$?"; rm -rf "$THEMEDIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Exit code 0
+- Output contains model names in `provider/model` format (theme dir doesn't break model listing)
+- No `panic:` in output
+
+#### 9b. `--theme <nonexistent-path>` does not crash
+
+```bash
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --theme /nonexistent/path/that/does/not/exist --list-models 2>&1 | head -5; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Exit code 0 (graceful degradation — missing theme dirs are ignored)
+- No `panic:` in output
+- Model listing still works
+
+#### 9c. `--no-themes` flag is accepted without crash
+
+```bash
+cd "$PROJECT_ROOT" && ./bin/fir-e2e --no-themes --list-models 2>&1 | head -5; echo "EXIT:$?"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Exit code 0
+- No `panic:` in output
+
+#### 9d. Custom theme file in `--theme <dir>` is discovered
+
+```bash
+cd "$PROJECT_ROOT"
+THEMEDIR=$(mktemp -d)
+cat > "$THEMEDIR/myTheme.json" << 'EOF'
+{"name":"myTheme","description":"Custom test theme"}
+EOF
+./bin/fir-e2e --theme "$THEMEDIR" --list-models 2>&1 | head -3; echo "EXIT:$?"; rm -rf "$THEMEDIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Exit code 0
+- No crash (theme file loaded without error even if minimal/incomplete)
+
+### 10. `ResolveCliModel` Tests (mock)
+
+These tests verify the `ResolveCliModel` feature added in v0.4.0: sophisticated CLI model resolution with prefix/fuzzy matching and thinking-level suffix (`:high`, `:low`, etc.).
+
+#### 10a. `--model <prefix>` fuzzy/prefix match selects correct model
+
+This test uses a dedicated agent dir to avoid ambiguity from multiple models.
+
+```bash
+cd "$PROJECT_ROOT"
+PREFIX_AGENT_DIR=$(mktemp -d)
+cat > "$PREFIX_AGENT_DIR/models.json" << 'EOF'
+{"providers":{"mock":{"baseUrl":"http://localhost:1","apiKey":"mock-key","api":"openai-completions","models":[{"id":"special-match-model","name":"Special Match Model","contextWindow":128000,"maxTokens":4096}]}}}
+EOF
+printf '{"id":"1","type":"get_state"}\n' | FIR_AGENT_DIR="$PREFIX_AGENT_DIR" ./bin/fir-e2e --provider mock --model "special-match" --mode rpc --no-session 2>&1; echo "EXIT:$?"
+rm -rf "$PREFIX_AGENT_DIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response has `"command":"get_state"`, `"success":true`
+- `data.model.id` is `"special-match-model"` (prefix "special-match" resolved to the unique matching model)
+
+#### 10b. `--model provider/model` notation selects correct model
+
+```bash
+cd "$PROJECT_ROOT"
+PNM_AGENT_DIR=$(mktemp -d)
+cat > "$PNM_AGENT_DIR/models.json" << 'EOF'
+{"providers":{"mock":{"baseUrl":"http://localhost:1","apiKey":"mock-key","api":"openai-completions","models":[{"id":"mock-model","name":"Mock Model","contextWindow":128000,"maxTokens":4096}]}}}
+EOF
+printf '{"id":"1","type":"get_state"}\n' | FIR_AGENT_DIR="$PNM_AGENT_DIR" ./bin/fir-e2e --model "mock/mock-model" --mode rpc --no-session 2>&1; echo "EXIT:$?"
+rm -rf "$PNM_AGENT_DIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response has `"command":"get_state"`, `"success":true`
+- `data.model.id` is `"mock-model"` and `data.model.provider` is `"mock"`
+
+#### 10c. `--model <id>:<thinking-level>` suffix sets thinkingLevel (reasoning model)
+
+This requires a mock model with `"reasoning":true`. Create a dedicated agent dir:
+
+```bash
+cd "$PROJECT_ROOT"
+REASONING_AGENT_DIR=$(mktemp -d)
+cat > "$REASONING_AGENT_DIR/models.json" << 'EOF'
+{"providers":{"mock":{"baseUrl":"http://localhost:1","apiKey":"mock-key","api":"openai-completions","models":[{"id":"think-model","name":"Think Model","contextWindow":128000,"maxTokens":4096,"reasoning":true}]}}}
+EOF
+printf '{"id":"1","type":"get_state"}\n' | FIR_AGENT_DIR="$REASONING_AGENT_DIR" ./bin/fir-e2e --model "think-model:high" --mode rpc --no-session 2>&1; echo "EXIT:$?"
+rm -rf "$REASONING_AGENT_DIR"
+```
+Use `timeout: 10` on the bash tool call.
+
+**Verify:**
+- Response has `"command":"get_state"`, `"success":true`
+- `data.model.id` is `"think-model"` (`:high` suffix stripped before model lookup)
+- `data.thinkingLevel` is `"high"` (thinking level extracted from suffix and applied)
+
 ## Test Cycle
 
 Each cycle follows this exact order:
@@ -756,6 +934,9 @@ Run these tests that don't require any provider. **Run independent tests in para
 - RPC malformed JSON (2f)
 - Print mode with no API keys (1d)
 - Bad provider config does not panic (7b)
+- ACP initialize (8a), session/new (8b/8c), unknown method (8d), malformed JSON (8e)
+- `--theme` flag tests: valid dir (9a), nonexistent path (9b), `--no-themes` (9c), custom theme file (9d)
+- ResolveCliModel tests (10a, 10b, 10c): these use `get_state` only — no live LLM calls needed
 
 ### Step 4: Run LLM tests (mock or real fallback)
 

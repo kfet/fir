@@ -3,8 +3,10 @@
 package theme
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -16,6 +18,8 @@ import (
 	"github.com/kfet/fir/pkg/tui/components"
 )
 
+//go:embed themes/*.json
+var embeddedThemesFS embed.FS
 // ============================================================================
 // Types
 // ============================================================================
@@ -506,9 +510,8 @@ func createLightTheme(mode ColorMode) *Theme {
 // ============================================================================
 
 var (
-	globalTheme     *Theme
-	globalThemeMu   sync.RWMutex
-	onThemeChangeCb func()
+	globalTheme   *Theme
+	globalThemeMu sync.RWMutex
 )
 
 // GetTheme returns the current global theme. Lazily initializes to dark if nil.
@@ -532,14 +535,6 @@ func SetThemeInstance(t *Theme) {
 	globalThemeMu.Lock()
 	globalTheme = t
 	globalThemeMu.Unlock()
-	if onThemeChangeCb != nil {
-		onThemeChangeCb()
-	}
-}
-
-// OnThemeChange registers a callback when the theme changes.
-func OnThemeChange(cb func()) {
-	onThemeChangeCb = cb
 }
 
 // DetectTerminalBackground guesses whether the terminal has a dark or light background.
@@ -558,6 +553,35 @@ func DetectTerminalBackground() string {
 		}
 	}
 	return "dark"
+}
+
+// loadEmbeddedTheme loads a bundled theme by name from the embedded FS.
+// Returns nil if no such theme exists.
+func loadEmbeddedTheme(name string, mode ColorMode) *Theme {
+	data, err := embeddedThemesFS.ReadFile("themes/" + name + ".json")
+	if err != nil {
+		return nil
+	}
+	var tj ThemeJSON
+	if err := json.Unmarshal(data, &tj); err != nil {
+		return nil
+	}
+	return CreateThemeFromJSON(&tj, mode, "embedded:"+name)
+}
+
+// embeddedThemeNames returns the names of all bundled themes.
+func embeddedThemeNames() []string {
+	entries, err := fs.ReadDir(embeddedThemesFS, "themes")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".json"))
+		}
+	}
+	return names
 }
 
 // InitTheme initializes the global theme by name.
@@ -592,6 +616,11 @@ func InitTheme(name string, searchDirs []string) error {
 		}
 	}
 
+	if t := loadEmbeddedTheme(name, mode); t != nil {
+		SetThemeInstance(t)
+		return nil
+	}
+
 	if _, err := os.Stat(name); err == nil {
 		t, err := LoadThemeFromPath(name, mode)
 		if err != nil {
@@ -608,7 +637,10 @@ func InitTheme(name string, searchDirs []string) error {
 
 // GetAvailableThemes returns names of available themes.
 func GetAvailableThemes(searchDirs []string) []string {
-	themes := map[string]bool{"dark": true, "light": true}
+	themes := make(map[string]bool)
+	for _, name := range embeddedThemeNames() {
+		themes[name] = true
+	}
 	for _, dir := range searchDirs {
 		if entries, err := os.ReadDir(dir); err == nil {
 			for _, e := range entries {

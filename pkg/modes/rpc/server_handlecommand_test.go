@@ -101,6 +101,15 @@ func TestHandleCommand_GetMessages(t *testing.T) {
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
 	}
+	// Fresh session must return [] not null so JSON clients can call .length safely.
+	data, _ := json.Marshal(resp.Data)
+	var result GetMessagesData
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal GetMessagesData: %v", err)
+	}
+	if result.Messages == nil {
+		t.Error("expected empty slice [], got null")
+	}
 }
 
 func TestHandleCommand_GetLastAssistantText_Empty(t *testing.T) {

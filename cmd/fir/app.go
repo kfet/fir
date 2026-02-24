@@ -255,6 +255,10 @@ func run() error {
 		return runListModels(args)
 	}
 
+	if args.Export != "" {
+		return runExport(args)
+	}
+
 	// Read piped stdin (if not a TTY) — skip for RPC and ACP modes which read stdin directly
 	if args.OutputMode != ModeRPC && args.OutputMode != ModeACP {
 		stdinContent := readPipedStdin()
@@ -364,6 +368,26 @@ func runListModels(args *Args) error {
 		fmt.Printf("%s/%s\n", m.Provider, m.ID)
 	}
 
+	return nil
+}
+
+// runExport exports a session to HTML and exits.
+// --session is required so there is an existing session to export.
+func runExport(args *Args) error {
+	if args.Session == "" {
+		return fmt.Errorf("--export requires --session <id> to identify the session to export")
+	}
+	setup, err := setupSession(args, true)
+	if err != nil {
+		return err
+	}
+	defer setup.result.Session.Close()
+
+	path, err := setup.result.Session.ExportToHTML(args.Export)
+	if err != nil {
+		return fmt.Errorf("export: %w", err)
+	}
+	fmt.Println(path)
 	return nil
 }
 
@@ -523,13 +547,35 @@ func runInteractiveMode(args *Args) error {
 		initialPrompt = strings.Join(args.Messages, "\n")
 	}
 
+	// Build theme search dirs: the user's global themes folder, any paths
+	// from project/global settings.json, and any paths supplied via
+	// --theme flags. A --theme flag may point to a .json file (use its
+	// parent dir) or directly to a directory.
+	// --no-themes disables all discovery; only the built-in dark/light themes remain.
+	var themeSearchDirs []string
+	if !args.NoThemes {
+		themeSearchDirs = []string{filepath.Join(setup.agentDir, "themes")}
+		themeSearchDirs = append(themeSearchDirs, setup.settingsManager.GetThemePaths()...)
+		for _, p := range args.Themes {
+			info, err := os.Stat(p)
+			if err == nil && info.IsDir() {
+				themeSearchDirs = append(themeSearchDirs, p)
+			} else if err == nil && strings.HasSuffix(p, ".json") {
+				themeSearchDirs = append(themeSearchDirs, filepath.Dir(p))
+			}
+		}
+	}
+
+	themeName := setup.settingsManager.GetTheme()
+
 	mode := interactive.NewInteractiveMode(
 		setup.result.Session,
 		keybindings,
 		setup.settingsManager,
 		interactive.InteractiveModeOptions{
 			InitialPrompt:   initialPrompt,
-			ThemeName:       "dark",
+			ThemeName:       themeName,
+			ThemeSearchDirs: themeSearchDirs,
 		},
 	)
 	interactive.SetVersion(version)

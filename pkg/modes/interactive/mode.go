@@ -75,6 +75,9 @@ type InteractiveMode struct {
 	autoCompact     bool
 	isBashMode      bool
 
+	// Theme
+	themeSearchDirs []string
+
 	// Double-escape tracking
 	lastEscapeTime time.Time
 
@@ -137,6 +140,7 @@ func NewInteractiveMode(
 		footerDataProvider: core.NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
+		themeSearchDirs:    opts.ThemeSearchDirs,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -285,7 +289,13 @@ func formatDiagnostics(t *itheme.Theme, header string, diags []core.ResourceDiag
 		}
 	}
 
-	for _, g := range groups {
+	groupNames := make([]string, 0, len(groups))
+	for name := range groups {
+		groupNames = append(groupNames, name)
+	}
+	sort.Strings(groupNames)
+	for _, name := range groupNames {
+		g := groups[name]
 		lines = append(lines, t.Fg("warning", fmt.Sprintf("  \"%s\" collision:", g.name)))
 		lines = append(lines, t.Fg("dim", fmt.Sprintf("    %s %s", t.Fg("success", "✓"), g.winner)))
 		for _, loser := range g.losers {
@@ -633,12 +643,10 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 		return false
 	}
 	cmd := parts[0]
-	switch cmd {
-	case "/help", "/hotkeys", "/clear", "/new", "/compact", "/model",
-		"/thinking", "/theme", "/settings", "/session", "/resume",
-		"/login", "/logout", "/scoped-models", "/tree", "/fork",
-		"/export", "/share", "/copy", "/name", "/changelog",
-		"/reload", "/quit", "/exit":
+	if !strings.HasPrefix(cmd, "/") {
+		return false
+	}
+	if core.IsBuiltinSlashCommandName(cmd[1:]) {
 		return true
 	}
 	// Check extension commands
@@ -651,6 +659,10 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 	return false
 }
 
+// handleSlashCommand dispatches a builtin slash command.
+// Every case in the switch below must have a corresponding entry in
+// core.BuiltinSlashCommands (or builtinAliases for hidden aliases);
+// TestInteractiveMode_IsBuiltinSlashCommand enforces this.
 func (m *InteractiveMode) handleSlashCommand(text string) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -830,9 +842,9 @@ func (m *InteractiveMode) showThemeSelector() {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
 		selector := components.NewThemeSelectorComponent(
 			currentTheme,
-			nil, // use default search dirs
+			m.themeSearchDirs,
 			func(themeName string) {
-				_ = itheme.InitTheme(themeName, nil)
+				_ = itheme.InitTheme(themeName, m.themeSearchDirs)
 				m.settings.SetTheme(themeName)
 				m.markdownTheme = itheme.GetMarkdownTheme()
 				m.footerComponent.Invalidate()
@@ -844,8 +856,9 @@ func (m *InteractiveMode) showThemeSelector() {
 			},
 			func(themeName string) {
 				// Live preview
-				_ = itheme.InitTheme(themeName, nil)
+				_ = itheme.InitTheme(themeName, m.themeSearchDirs)
 				m.markdownTheme = itheme.GetMarkdownTheme()
+				m.messageContainer.Invalidate()
 				m.ui.RequestRender(true)
 			},
 		)
@@ -871,8 +884,8 @@ func (m *InteractiveMode) showSettingsSelector() {
 			HideThinkingBlock:       m.hideThinking,
 			ThinkingLevel:           m.session.ThinkingLevel(),
 			AvailableThinkingLevels: levelStrs,
-			CurrentTheme:            "dark",
-			AvailableThemes:         []string{"dark", "light"},
+			CurrentTheme:            itheme.GetTheme().Name,
+			AvailableThemes:         itheme.GetAvailableThemes(m.themeSearchDirs),
 			SteeringMode:            m.settings.GetSteeringMode(),
 			FollowUpMode:            m.settings.GetFollowUpMode(),
 			Transport:               m.settings.GetTransport(),

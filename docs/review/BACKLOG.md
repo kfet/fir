@@ -37,6 +37,15 @@ _(no open items)_
 - `pkg/tui/components/input.go:534-559` — `Render()` scrolling mixed byte offsets with display-column widths — ✅ FIXED 2026-02-23 (scroll logic now uses `tui.VisibleWidth`/`tui.SliceByColumn`; `TestInput_ScrollingRenderMultiByte` regression test added)
 - `pkg/tui/components/input.go` — `handleBackspace`/`handleForwardDelete` push undo on every keystroke — ✅ FIXED 2026-02-23 (consecutive presses batched into one undo entry per run, matching `insertCharacter`'s word-boundary logic)
 - `pkg/tui/components/input.go:88-92` — `UndoStack.Push` doesn't zero the evicted slot — ✅ FIXED 2026-02-23 (`u.items[0] = zero` before re-slice so strings are promptly released)
+- `pkg/modes/interactive/theme/theme.go:555-590` — `loadEmbeddedTheme`/`embeddedThemeNames`/`GetAvailableThemes`/`InitTheme` tests added — ✅ FIXED 2026-02-23 (`TestEmbeddedThemeNames`, `TestLoadEmbeddedTheme_Valid/Invalid`, `TestGetAvailableThemes_IncludesEmbedded`, `TestInitTheme_EmbeddedTheme`)
+- `pkg/modes/interactive/mode.go:265-283` — `formatDiagnostics` non-deterministic map iteration — ✅ FIXED 2026-02-23: sort group names before iterating
+- `pkg/modes/interactive/theme/theme.go:544-546` — `OnThemeChange`/`onThemeChangeCb` dead code removed — ✅ FIXED 2026-02-23
+- `pkg/modes/interactive/theme/theme_test.go:92-94` — `TestGetTheme_LazyInit` direct global mutation without mutex — ✅ FIXED 2026-02-23
+- `cmd/fir/app.go:374` — `runExport` had no unit test; added `TestRunExport_RequiresSession` and `TestRunExport_ExportsToFile` — ✅ FIXED 2026-02-23
+- `cmd/fir/app.go:551-563` — `--no-themes` only suppressed CLI `--theme` paths; now disables all theme discovery (option a) — ✅ FIXED 2026-02-23
+- `pkg/modes/rpc/server.go` — `get_messages` returned `null` instead of `[]` for empty sessions — ✅ FIXED 2026-02-23
+- `cmd/fir/app.go` — `--export <file>` CLI flag never handled; now implemented via `runExport()` — ✅ FIXED 2026-02-23
+- `cmd/fir/app.go:529` — `settingsManager.GetThemePaths()` not included in `themeSearchDirs` — ✅ FIXED 2026-02-23
 - `pkg/core/modelresolver.go:223` — `ResolveCliModel` has no unit tests — ✅ FIXED cycle 110 (8 tests added: Empty, ExactID, ProviderSlashModel, ExplicitProvider, UnknownProvider, ModelNotFound, OpenRouterSlashID, ThinkingLevel)
 - `pkg/core/modelresolver.go:175` — `parseModelPatternStrict` (allowFallback=false) untested — ✅ FIXED cycle 110 (`TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback`)
 - `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake response — ✅ FIXED 2026-02-22

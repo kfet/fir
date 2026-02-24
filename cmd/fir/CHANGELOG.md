@@ -11,6 +11,28 @@
 ### Added
 - ACP mode: `/share` command creates a secret GitHub Gist and returns both the raw gist URL and a `https://gistpreview.github.io/?{id}` preview link.
 - ACP mode: `/export` command exports the session to an HTML file (usage: `/export [path]`).
+- Built-in Dracula theme (`--theme dracula` or `/theme` → dracula), using the canonical Dracula palette.
+- Built-in Gruvbox theme (`gruvbox`): retro earthy dark — warm yellows, greens, orange on charcoal.
+- Built-in Nord theme (`nord`): arctic minimal — cool blue-grays from Polar Night through Frost.
+- Built-in Catppuccin Mocha theme (`catppuccin-mocha`): modern pastel dark — soft mauve, sky, green on deep navy.
+- Bundled themes (`dark.json`, `light.json`, `dracula.json`) are now embedded in the binary via `//go:embed`; `GetAvailableThemes` discovers them automatically without needing files on disk.
+
+### Fixed
+- `formatDiagnostics` in interactive mode now outputs collision groups in deterministic (sorted) order.
+- `TestGetTheme_LazyInit` now correctly saves/restores `globalTheme` under `globalThemeMu` to avoid data races under `-race`.
+- Removed dead `OnThemeChange`/`onThemeChangeCb` code from the theme package (was exported but never called).
+- Added tests for embedded theme functions: `TestEmbeddedThemeNames`, `TestLoadEmbeddedTheme_Valid/Invalid`, `TestGetAvailableThemes_IncludesEmbedded`, `TestInitTheme_EmbeddedTheme`.
+- `/theme` (and `/thinking`, `/help`, `/clear`) now appear in autocomplete; they were missing from `BuiltinSlashCommands` despite being valid commands.
+- `--no-themes` now disables all theme discovery (was only suppressing `--theme` CLI flag paths; `agentDir/themes` and settings paths were still searched).
+- `get_messages` RPC command now returns `[]` instead of `null` for a fresh session.
+- `--export <file>` CLI flag now exports the session to HTML and exits (was silently ignored, starting the TUI instead).
+- Theme directories from `settings.json` (`themes` field) are now included in the theme search path (were previously silently ignored).
+- Theme name is now read from settings (`GetTheme()`) instead of being hardcoded to `"dark"`.
+- `~/.fir/agent/themes/` is now automatically searched for custom theme JSON files.
+- `--theme <file|dir>` CLI flag is now wired through to the theme search dirs (was parsed but silently ignored).
+- `/theme` selector and settings selector now show all discovered custom themes, not just `dark`/`light`.
+- `/theme` live-preview now repaints the full TUI (messages, tool output, markdown) as you navigate, not just the selector panel itself.
+- Dracula `dim` colour changed from `currentLine` (`#44475a`, contrast 1.56:1) to `comment` (`#6272a4`, contrast 3.03:1) — the status line was unreadable.
 
 ## [0.4.0] - 2026-02-22
 

@@ -36,24 +36,54 @@ type BuiltinSlashCommand struct {
 }
 
 // BuiltinSlashCommands is the list of all built-in slash commands.
+// This is the single source of truth: both autocomplete and command dispatch
+// are derived from it via IsBuiltinSlashCommandName.
 var BuiltinSlashCommands = []BuiltinSlashCommand{
-	{Name: "settings", Description: "Open settings menu"},
+	{Name: "help", Description: "Show help"},
+	{Name: "hotkeys", Description: "Show all keyboard shortcuts"},
+	{Name: "theme", Description: "Select color theme"},
+	{Name: "thinking", Description: "Select thinking level"},
 	{Name: "model", Description: "Select model (opens selector UI)"},
 	{Name: "scoped-models", Description: "Enable/disable models for Ctrl+P cycling"},
+	{Name: "settings", Description: "Open settings menu"},
+	{Name: "session", Description: "Show session info and stats"},
+	{Name: "new", Description: "Start a new session"},
+	{Name: "clear", Description: "Start a new session"},
+	{Name: "compact", Description: "Manually compact the session context"},
+	{Name: "resume", Description: "Resume a different session"},
+	{Name: "fork", Description: "Create a new fork from a previous message"},
+	{Name: "tree", Description: "Navigate session tree (switch branches)"},
 	{Name: "export", Description: "Export session to HTML file"},
 	{Name: "share", Description: "Share session as a secret GitHub gist"},
 	{Name: "copy", Description: "Copy last agent message to clipboard"},
 	{Name: "name", Description: "Set session display name"},
-	{Name: "session", Description: "Show session info and stats"},
 	{Name: "changelog", Description: "Show changelog entries"},
-	{Name: "hotkeys", Description: "Show all keyboard shortcuts"},
-	{Name: "fork", Description: "Create a new fork from a previous message"},
-	{Name: "tree", Description: "Navigate session tree (switch branches)"},
 	{Name: "login", Description: "Login with OAuth provider"},
 	{Name: "logout", Description: "Logout from OAuth provider"},
-	{Name: "new", Description: "Start a new session"},
-	{Name: "compact", Description: "Manually compact the session context"},
-	{Name: "resume", Description: "Resume a different session"},
 	{Name: "reload", Description: "Reload extensions, skills, prompts, and themes"},
 	{Name: "quit", Description: "Quit fir"},
+}
+
+// builtinAliases are command names that are recognized as builtins but are not
+// surfaced in autocomplete (they are undocumented aliases for listed commands).
+var builtinAliases = map[string]bool{
+	"exit": true, // alias for /quit
+}
+
+// builtinSlashCommandSet is the full lookup set: all listed commands + aliases.
+var builtinSlashCommandSet = func() map[string]bool {
+	m := make(map[string]bool, len(BuiltinSlashCommands)+len(builtinAliases))
+	for _, cmd := range BuiltinSlashCommands {
+		m[cmd.Name] = true
+	}
+	for name := range builtinAliases {
+		m[name] = true
+	}
+	return m
+}()
+
+// IsBuiltinSlashCommandName reports whether name (without leading "/") is a
+// recognized builtin slash command or alias.
+func IsBuiltinSlashCommandName(name string) bool {
+	return builtinSlashCommandSet[name]
 }

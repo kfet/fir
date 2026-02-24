@@ -395,7 +395,11 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 
 	case CmdGetMessages:
 		state := s.session.State()
-		return NewSuccessResponse(id, CmdGetMessages, GetMessagesData{Messages: state.Messages})
+		msgs := state.Messages
+		if msgs == nil {
+			msgs = []agent.AgentMessage{}
+		}
+		return NewSuccessResponse(id, CmdGetMessages, GetMessagesData{Messages: msgs})
 
 	// =================================================================
 	// Commands

@@ -41,6 +41,7 @@ func NewAssistantMessageComponent(message *ai.AssistantMessage, hideThinking boo
 
 // Invalidate rebuilds using the last message.
 func (a *AssistantMessageComponent) Invalidate() {
+	a.markdownThm = theme.GetMarkdownTheme()
 	a.Container.Invalidate()
 	if a.lastMessage != nil {
 		a.UpdateContent(a.lastMessage)

@@ -104,9 +104,13 @@ func TestBgAnsi_Empty(t *testing.T) {
 }
 
 func TestGetTheme_LazyInit(t *testing.T) {
+	// Save and clear under the mutex to avoid data race with concurrent GetTheme callers.
+	globalThemeMu.Lock()
 	old := globalTheme
-	defer func() { globalTheme = old }()
 	globalTheme = nil
+	globalThemeMu.Unlock()
+	defer SetThemeInstance(old)
+
 	if GetTheme() == nil {
 		t.Fatal("GetTheme returned nil")
 	}
@@ -235,5 +239,84 @@ func TestColorDistance(t *testing.T) {
 	}
 	if colorDistance(0, 0, 0, 255, 255, 255) <= 0 {
 		t.Error("expected positive")
+	}
+}
+
+func TestEmbeddedThemeNames(t *testing.T) {
+	names := embeddedThemeNames()
+	if len(names) == 0 {
+		t.Fatal("expected embedded theme names, got none")
+	}
+	want := []string{"dark", "light", "dracula", "gruvbox", "catppuccin-mocha", "nord"}
+	byName := make(map[string]bool, len(names))
+	for _, n := range names {
+		byName[n] = true
+	}
+	for _, w := range want {
+		if !byName[w] {
+			t.Errorf("embedded theme %q not found; got %v", w, names)
+		}
+	}
+}
+
+func TestLoadEmbeddedTheme_Valid(t *testing.T) {
+	th := loadEmbeddedTheme("dark", ColorModeTruecolor)
+	if th == nil {
+		t.Fatal("expected non-nil theme for 'dark'")
+	}
+	if th.Name != "dark" {
+		t.Errorf("expected name 'dark', got %q", th.Name)
+	}
+	if th.SourcePath != "embedded:dark" {
+		t.Errorf("expected source path 'embedded:dark', got %q", th.SourcePath)
+	}
+}
+
+func TestLoadEmbeddedTheme_Invalid(t *testing.T) {
+	th := loadEmbeddedTheme("nonexistent-theme-xyz", ColorModeTruecolor)
+	if th != nil {
+		t.Error("expected nil for unknown embedded theme")
+	}
+}
+
+func TestGetAvailableThemes_IncludesEmbedded(t *testing.T) {
+	themes := GetAvailableThemes(nil)
+	if len(themes) == 0 {
+		t.Fatal("expected at least one available theme")
+	}
+	byName := make(map[string]bool, len(themes))
+	for _, n := range themes {
+		byName[n] = true
+	}
+	for _, w := range []string{"dark", "light", "dracula"} {
+		if !byName[w] {
+			t.Errorf("GetAvailableThemes missing embedded theme %q; got %v", w, themes)
+		}
+	}
+	// Result must be sorted.
+	for i := 1; i < len(themes); i++ {
+		if themes[i] < themes[i-1] {
+			t.Errorf("themes not sorted: %v", themes)
+			break
+		}
+	}
+}
+
+func TestInitTheme_EmbeddedTheme(t *testing.T) {
+	// Save and restore global theme around this test.
+	globalThemeMu.Lock()
+	old := globalTheme
+	globalThemeMu.Unlock()
+	defer SetThemeInstance(old)
+
+	if err := InitTheme("catppuccin-mocha", nil); err != nil {
+		t.Fatalf("InitTheme('catppuccin-mocha') error: %v", err)
+	}
+	th := GetTheme()
+	if th == nil {
+		t.Fatal("GetTheme returned nil after InitTheme")
+	}
+	if th.Name != "catppuccin-mocha" {
+		t.Errorf("expected theme name 'catppuccin-mocha', got %q", th.Name)
 	}
 }

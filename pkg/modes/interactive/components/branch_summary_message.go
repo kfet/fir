@@ -40,6 +40,7 @@ func (b *BranchSummaryMessageComponent) SetExpanded(expanded bool) {
 
 // Invalidate rebuilds the display.
 func (b *BranchSummaryMessageComponent) Invalidate() {
+	b.markdownThm = theme.GetMarkdownTheme()
 	b.Box.Invalidate()
 	b.updateDisplay()
 }
