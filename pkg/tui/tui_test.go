@@ -315,3 +315,38 @@ func TestCompositeLineAt(t *testing.T) {
 		t.Errorf("expected 'hello ' prefix, got %q", result)
 	}
 }
+
+func TestTUI_HandleInput_BufferedBackspaces(t *testing.T) {
+	// Regression test: when renderMu is held during a render, the OS stdin
+	// buffer can accumulate multiple backspaces.  The next Read returns all of
+	// them as one string (e.g. "\x7f\x7f\x7f").  Before the SplitKeySequences
+	// fix, MatchesKey required an exact single-sequence match and silently
+	// dropped all but the first backspace, causing visible "lag".
+	term := NewMockTerminal(80, 24)
+	ui := NewTUI(term)
+
+	received := []string{}
+	comp := &trackingInputHandler{received: &received}
+	ui.SetFocus(comp)
+
+	// Simulate three backspaces arriving as one buffered read.
+	ui.handleInput("\x7f\x7f\x7f")
+
+	if len(received) != 3 {
+		t.Fatalf("expected 3 separate HandleInput calls, got %d: %v", len(received), received)
+	}
+	for i, s := range received {
+		if s != "\x7f" {
+			t.Errorf("call[%d]: expected backspace (\\x7f), got %q", i, s)
+		}
+	}
+}
+
+// trackingInputHandler records every HandleInput call.
+type trackingInputHandler struct {
+	received *[]string
+}
+
+func (h *trackingInputHandler) Render(width int) []string { return []string{""} }
+func (h *trackingInputHandler) Invalidate()               {}
+func (h *trackingInputHandler) HandleInput(data string)   { *h.received = append(*h.received, data) }

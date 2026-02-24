@@ -88,6 +88,8 @@ func NewUndoStack[T any]() *UndoStack[T] {
 func (u *UndoStack[T]) Push(state T) {
 	u.items = append(u.items, state)
 	if len(u.items) > u.maxSize {
+		var zero T
+		u.items[0] = zero // release any pointers held by the evicted slot
 		u.items = u.items[1:]
 	}
 }
@@ -306,21 +308,29 @@ func (inp *Input) insertCharacter(ch string) {
 }
 
 func (inp *Input) handleBackspace() {
-	inp.lastAction = ""
 	if inp.cursor > 0 {
-		inp.pushUndo()
+		if inp.lastAction != "backspace" {
+			inp.pushUndo()
+		}
+		inp.lastAction = "backspace"
 		_, size := utf8.DecodeLastRuneInString(inp.value[:inp.cursor])
 		inp.value = inp.value[:inp.cursor-size] + inp.value[inp.cursor:]
 		inp.cursor -= size
+	} else {
+		inp.lastAction = ""
 	}
 }
 
 func (inp *Input) handleForwardDelete() {
-	inp.lastAction = ""
 	if inp.cursor < len(inp.value) {
-		inp.pushUndo()
+		if inp.lastAction != "delete" {
+			inp.pushUndo()
+		}
+		inp.lastAction = "delete"
 		_, size := utf8.DecodeRuneInString(inp.value[inp.cursor:])
 		inp.value = inp.value[:inp.cursor] + inp.value[inp.cursor+size:]
+	} else {
+		inp.lastAction = ""
 	}
 }
 
@@ -517,10 +527,15 @@ func (inp *Input) Render(width int) []string {
 		return []string{prompt}
 	}
 
-	var visibleText string
-	cursorDisplay := inp.cursor
+	// All comparisons use display columns, not byte offsets, so that multi-byte
+	// characters (emoji, CJK) are handled correctly.
+	totalCols := tui.VisibleWidth(inp.value)
+	cursorCols := tui.VisibleWidth(inp.value[:inp.cursor])
 
-	if len(inp.value) < availableWidth {
+	var visibleText string
+	cursorDisplay := cursorCols // column offset of cursor within visibleText
+
+	if totalCols < availableWidth {
 		visibleText = inp.value
 	} else {
 		scrollWidth := availableWidth
@@ -529,39 +544,33 @@ func (inp *Input) Render(width int) []string {
 		}
 		halfWidth := scrollWidth / 2
 
-		if inp.cursor < halfWidth {
-			end := scrollWidth
-			if end > len(inp.value) {
-				end = len(inp.value)
+		var startCol int
+		if cursorCols < halfWidth {
+			startCol = 0
+			cursorDisplay = cursorCols
+		} else if cursorCols > totalCols-halfWidth {
+			startCol = totalCols - scrollWidth
+			if startCol < 0 {
+				startCol = 0
 			}
-			visibleText = inp.value[:end]
-			cursorDisplay = inp.cursor
-		} else if inp.cursor > len(inp.value)-halfWidth {
-			start := len(inp.value) - scrollWidth
-			if start < 0 {
-				start = 0
-			}
-			visibleText = inp.value[start:]
-			cursorDisplay = inp.cursor - start
+			cursorDisplay = cursorCols - startCol
 		} else {
-			start := inp.cursor - halfWidth
-			end := start + scrollWidth
-			if end > len(inp.value) {
-				end = len(inp.value)
-			}
-			visibleText = inp.value[start:end]
+			startCol = cursorCols - halfWidth
 			cursorDisplay = halfWidth
 		}
+		visibleText = tui.SliceByColumn(inp.value, startCol, scrollWidth, false)
 	}
 
-	// Build cursor display
-	beforeCursor := visibleText[:cursorDisplay]
+	// Build cursor display: split visibleText at cursorDisplay columns.
+	beforeCursor := tui.SliceByColumn(visibleText, 0, cursorDisplay, false)
 	atCursor := " "
 	afterCursor := ""
-	if cursorDisplay < len(visibleText) {
-		_, size := utf8.DecodeRuneInString(visibleText[cursorDisplay:])
-		atCursor = visibleText[cursorDisplay : cursorDisplay+size]
-		afterCursor = visibleText[cursorDisplay+size:]
+	visibleCols := tui.VisibleWidth(visibleText)
+	if cursorDisplay < visibleCols {
+		restText := tui.SliceByColumn(visibleText, cursorDisplay, visibleCols-cursorDisplay, false)
+		_, size := utf8.DecodeRuneInString(restText)
+		atCursor = restText[:size]
+		afterCursor = restText[size:]
 	}
 
 	marker := ""

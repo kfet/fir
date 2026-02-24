@@ -451,10 +451,17 @@ func (t *TUI) handleInput(data string) {
 	}
 
 	if handler, ok := t.focusedComponent.(InputHandler); ok {
-		if IsKeyRelease(data) {
-			return
+		// Split the raw buffer into individual key sequences.  When DoRender
+		// holds renderMu the stdin reader blocks; the OS buffers multiple
+		// keystrokes and the next Read returns them all at once.  Without
+		// splitting, MatchesKey (which requires exact single-sequence strings)
+		// silently drops every keystroke beyond the first.
+		for _, seq := range SplitKeySequences(data) {
+			if IsKeyRelease(seq) {
+				continue
+			}
+			handler.HandleInput(seq)
 		}
-		handler.HandleInput(data)
 		t.signalRender()
 	}
 }

@@ -3,6 +3,7 @@ package components
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -265,6 +266,37 @@ func TestInput_ScrollingRender(t *testing.T) {
 	}
 }
 
+// TestInput_ScrollingRenderMultiByte verifies that Render does not slice in the
+// middle of a multi-byte character when scrolling an emoji-heavy value that
+// exceeds the terminal width.  Before the fix, byte offsets were used for scroll
+// boundaries, producing invalid UTF-8 output for non-ASCII input.
+func TestInput_ScrollingRenderMultiByte(t *testing.T) {
+	// Build a value of 50 emoji (each 4 bytes, 2 display columns → 100 cols total).
+	emoji := "🎉"
+	value := strings.Repeat(emoji, 50)
+	inp := NewInput()
+	inp.SetValue(value)
+
+	// Place cursor in the middle (at the 25th emoji boundary).
+	inp.cursor = 25 * len(emoji)
+
+	// Render into a narrow terminal (only room for ~10 emoji display-cols).
+	lines := inp.Render(12) // 12 cols total → ">" + " " → 10 cols available
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+	line := lines[0]
+
+	// Strip ANSI escape codes for UTF-8 validity check.
+	stripped := tui.StripAnsi(line)
+	if !utf8.ValidString(stripped) {
+		t.Errorf("Render output contains invalid UTF-8: %q", stripped)
+	}
+	if !strings.HasPrefix(line, "> ") {
+		t.Errorf("expected '> ' prefix, got %q", line)
+	}
+}
+
 func TestKillRing_Basic(t *testing.T) {
 	kr := NewKillRing()
 	kr.Push("hello", false, false)
@@ -301,6 +333,58 @@ func TestKillRing_Rotate(t *testing.T) {
 	kr.Rotate()
 	if kr.Peek() != "first" {
 		t.Errorf("expected 'first' after rotate, got %q", kr.Peek())
+	}
+}
+
+func TestInput_BackspaceBatching(t *testing.T) {
+	inp := NewInput()
+
+	// Type a word, then delete it character by character.
+	// All consecutive backspaces should collapse into one undo entry.
+	for _, ch := range "hello" {
+		inp.HandleInput(string(ch))
+	}
+	// Undo stack now has one entry: the empty state before "h" was typed.
+
+	// Delete all 5 characters with repeated backspace.
+	for i := 0; i < 5; i++ {
+		inp.HandleInput("\x7f")
+	}
+	if inp.GetValue() != "" {
+		t.Fatalf("expected empty after backspacing, got %q", inp.GetValue())
+	}
+
+	// One undo should restore the full word (the batched backspace run is a single step).
+	inp.HandleInput("\x1a") // ctrl+z
+	if inp.GetValue() != "hello" {
+		t.Errorf("expected undo to restore 'hello', got %q", inp.GetValue())
+	}
+}
+
+func TestInput_BackspaceUndoCountIsOne(t *testing.T) {
+	inp := NewInput()
+	inp.SetValue("abcde")
+	inp.cursor = 5
+
+	// Verify the undo stack starts at a known depth (empty).
+	// Press backspace 5 times — should push exactly 1 undo entry.
+	for i := 0; i < 5; i++ {
+		inp.HandleInput("\x7f")
+	}
+	if inp.GetValue() != "" {
+		t.Fatalf("expected empty value, got %q", inp.GetValue())
+	}
+
+	// First undo should restore the full "abcde".
+	inp.HandleInput("\x1a")
+	if inp.GetValue() != "abcde" {
+		t.Errorf("first undo: expected 'abcde', got %q", inp.GetValue())
+	}
+
+	// Second undo should be a no-op (stack was empty before the backspace run).
+	inp.HandleInput("\x1a")
+	if inp.GetValue() != "abcde" {
+		t.Errorf("second undo: expected no change, got %q", inp.GetValue())
 	}
 }
 

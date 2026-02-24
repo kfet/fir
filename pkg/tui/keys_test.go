@@ -490,3 +490,115 @@ func TestParseKey_KittyHomeEnd(t *testing.T) {
 		t.Errorf("expected shift+end, got %q", result)
 	}
 }
+
+func TestSplitKeySequences_Empty(t *testing.T) {
+	if seqs := SplitKeySequences(""); len(seqs) != 0 {
+		t.Errorf("expected nil, got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_SingleByte(t *testing.T) {
+	seqs := SplitKeySequences("\x7f")
+	if len(seqs) != 1 || seqs[0] != "\x7f" {
+		t.Errorf("expected [\\x7f], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_MultipleBackspaces(t *testing.T) {
+	// Three backspaces buffered during a slow render — must NOT be dropped.
+	seqs := SplitKeySequences("\x7f\x7f\x7f")
+	if len(seqs) != 3 {
+		t.Fatalf("expected 3 sequences, got %d: %v", len(seqs), seqs)
+	}
+	for i, s := range seqs {
+		if s != "\x7f" {
+			t.Errorf("seq[%d]: expected \\x7f, got %q", i, s)
+		}
+	}
+}
+
+func TestSplitKeySequences_MixedControlAndPrintable(t *testing.T) {
+	// ctrl+a followed by 'b'
+	seqs := SplitKeySequences("\x01b")
+	if len(seqs) != 2 || seqs[0] != "\x01" || seqs[1] != "b" {
+		t.Errorf("expected [\\x01, b], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_CSIArrow(t *testing.T) {
+	seqs := SplitKeySequences("\x1b[A")
+	if len(seqs) != 1 || seqs[0] != "\x1b[A" {
+		t.Errorf("expected [\\x1b[A], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_TwoArrows(t *testing.T) {
+	seqs := SplitKeySequences("\x1b[A\x1b[B")
+	if len(seqs) != 2 || seqs[0] != "\x1b[A" || seqs[1] != "\x1b[B" {
+		t.Errorf("expected [up, down], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_AltBackspace(t *testing.T) {
+	// alt+backspace = ESC + 0x7f
+	seqs := SplitKeySequences("\x1b\x7f")
+	if len(seqs) != 1 || seqs[0] != "\x1b\x7f" {
+		t.Errorf("expected [\\x1b\\x7f], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_BackspaceAfterArrow(t *testing.T) {
+	// up-arrow then backspace
+	seqs := SplitKeySequences("\x1b[A\x7f")
+	if len(seqs) != 2 || seqs[0] != "\x1b[A" || seqs[1] != "\x7f" {
+		t.Errorf("expected [up, backspace], got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_BracketedPaste(t *testing.T) {
+	paste := "\x1b[200~hello\x1b[201~"
+	seqs := SplitKeySequences(paste)
+	if len(seqs) != 1 || seqs[0] != paste {
+		t.Errorf("expected paste as single seq, got %v", seqs)
+	}
+}
+
+func TestSplitKeySequences_PasteThenBackspace(t *testing.T) {
+	data := "\x1b[200~hi\x1b[201~\x7f"
+	seqs := SplitKeySequences(data)
+	if len(seqs) != 2 {
+		t.Fatalf("expected 2 seqs, got %d: %v", len(seqs), seqs)
+	}
+	if seqs[0] != "\x1b[200~hi\x1b[201~" {
+		t.Errorf("seq[0]: expected paste, got %q", seqs[0])
+	}
+	if seqs[1] != "\x7f" {
+		t.Errorf("seq[1]: expected backspace, got %q", seqs[1])
+	}
+}
+
+func TestSplitKeySequences_MultibyteUTF8(t *testing.T) {
+	// Two emoji characters buffered together
+	seqs := SplitKeySequences("😀😀")
+	if len(seqs) != 2 {
+		t.Fatalf("expected 2 seqs, got %d: %v", len(seqs), seqs)
+	}
+	for i, s := range seqs {
+		if s != "😀" {
+			t.Errorf("seq[%d]: expected 😀, got %q", i, s)
+		}
+	}
+}
+
+func TestSplitKeySequences_KittySequence(t *testing.T) {
+	// Kitty protocol: \x1b[127;1u (backspace) — two such seqs buffered
+	seqs := SplitKeySequences("\x1b[127;1u\x1b[127;1u")
+	if len(seqs) != 2 {
+		t.Fatalf("expected 2 seqs, got %d: %v", len(seqs), seqs)
+	}
+	for i, s := range seqs {
+		if s != "\x1b[127;1u" {
+			t.Errorf("seq[%d]: expected kitty backspace, got %q", i, s)
+		}
+	}
+}

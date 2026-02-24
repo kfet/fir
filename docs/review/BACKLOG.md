@@ -1,14 +1,15 @@
-# Review Backlog — 2026-02-22
+# Review Backlog — 2026-02-23
 
-**Last reviewed:** Review cycle 110, 2026-02-22 23:10 PST
-**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 22 packages pass)
+**Last reviewed:** Review cycle 118, 2026-02-23 18:55 PST
+**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 23 packages pass)
 **Files reviewed this cycle:**
-- `pkg/core/modelresolver_test.go` — 8 new `TestResolveCliModel_*` tests + `TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback` added. Backlog items from cycle 109 resolved.
-- `pkg/modes/interactive/components/tool_execution.go` — new `strArgChecked` helper distinguishes absent vs wrong-type args; all display functions updated.
-- `pkg/ai/models_generated.go` — regenerated with corrected MaxTokens and pricing. Generated file, no action needed.
-- `cmd/fir/app.go` — upstream hash bump only (no behavior changes from what was reviewed in cycle 109).
-- `pkg/tui/terminal.go`, `pkg/modes/interactive/mode.go` — upstream hash bumps only, no code changes.
-**Open items: 0** (all backlog resolved by current agent work)
+- `pkg/tui/keys.go` — `SplitKeySequences` added; correct CSI/SS3/APC/OSC/paste/UTF-8 grammar; fast-path for single-byte input; 12 unit tests added.
+- `pkg/tui/keys_test.go` — `TestSplitKeySequences_*` suite: empty, single byte, multiple backspaces, mixed control+printable, CSI arrows, alt+backspace, bracketed paste, paste+key, multi-byte UTF-8, Kitty sequences all covered.
+- `pkg/tui/tui.go` (indirectly) — `handleInput` calls `SplitKeySequences` then dispatches each sub-sequence individually; `TestTUI_HandleInput_BufferedBackspaces` confirms three buffered backspaces produce three separate calls.
+- `pkg/tui/tui_test.go` — `TestTUI_HandleInput_BufferedBackspaces` regression test added; `trackingInputHandler` helper.
+- `pkg/tui/components/input.go` — `UndoStack.Push` zeroes evicted slot; `handleBackspace`/`handleForwardDelete` batch consecutive presses into one undo entry; `Render()` uses `VisibleWidth`/`SliceByColumn` (display columns) instead of byte offsets.
+- `pkg/tui/components/input_test.go` — `TestInput_ScrollingRenderMultiByte`, `TestInput_BackspaceBatching`, `TestInput_BackspaceUndoCountIsOne` added.
+**Open items: 0**
 
 ---
 
@@ -36,6 +37,10 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
+- `pkg/tui/keys.go` + `pkg/tui/tui.go` — Buffered keystrokes silently dropped when renders block stdin reader — ✅ FIXED 2026-02-23 (`SplitKeySequences` splits raw stdin reads into individual sequences before dispatch; `TestTUI_HandleInput_BufferedBackspaces` + 11 unit tests added)
+- `pkg/tui/components/input.go:534-559` — `Render()` scrolling mixed byte offsets with display-column widths — ✅ FIXED 2026-02-23 (scroll logic now uses `tui.VisibleWidth`/`tui.SliceByColumn`; `TestInput_ScrollingRenderMultiByte` regression test added)
+- `pkg/tui/components/input.go` — `handleBackspace`/`handleForwardDelete` push undo on every keystroke — ✅ FIXED 2026-02-23 (consecutive presses batched into one undo entry per run, matching `insertCharacter`'s word-boundary logic)
+- `pkg/tui/components/input.go:88-92` — `UndoStack.Push` doesn't zero the evicted slot — ✅ FIXED 2026-02-23 (`u.items[0] = zero` before re-slice so strings are promptly released)
 - `pkg/core/modelresolver.go:223` — `ResolveCliModel` has no unit tests — ✅ FIXED cycle 110 (8 tests added: Empty, ExactID, ProviderSlashModel, ExplicitProvider, UnknownProvider, ModelNotFound, OpenRouterSlashID, ThinkingLevel)
 - `pkg/core/modelresolver.go:175` — `parseModelPatternStrict` (allowFallback=false) untested — ✅ FIXED cycle 110 (`TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback`)
 - `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake response — ✅ FIXED 2026-02-22

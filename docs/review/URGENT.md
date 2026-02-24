@@ -1,13 +1,14 @@
-# URGENT — 2026-02-22
+# URGENT — 2026-02-23
 
 ## Active Issues
 
-_(none — cycle 108: build clean, all 22 packages pass with -race, backlog empty)
+_(none — cycle 118: build clean, all 23 packages pass, no urgent issues)_
 
 ---
 
 ## Recently Fixed ✅
 
+- ~~`pkg/tui/components/input.go` — `handleBackspace` pushes undo on every keystroke, `UndoStack.Push` leaks evicted strings~~ — ✅ FIXED 2026-02-23
 - ~~`cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break~~ — ✅ FIXED (cycle 58 / rebase ce07547): embed moved to `cmd/fir/changelog_init.go`; `GetChangelogEntries()` prefers embedded, falls back to file.
 - ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19)
 - ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED

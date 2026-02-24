@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // KeyID is a typed key identifier string (e.g. "ctrl+c", "escape", "shift+enter").
@@ -942,3 +943,126 @@ func ParseKey(data string) string {
 
 	return ""
 }
+
+// SplitKeySequences splits raw terminal input into individual key sequences.
+//
+// When DoRender holds renderMu the stdin reader goroutine blocks, causing the OS
+// to buffer multiple keystrokes.  The next Read call then returns all buffered
+// bytes as a single string (e.g. "\x7f\x7f\x7f" for three rapid backspaces).
+// MatchesKey requires exact single-sequence strings, so multi-char data silently
+// drops all keystrokes.  This function restores correct behaviour by splitting
+// the raw buffer into its constituent sequences before dispatch.
+//
+// Sequence grammar (simplified):
+//   - Bracketed paste: ESC [ 2 0 0 ~ … ESC [ 2 0 1 ~  (one sequence)
+//   - CSI:             ESC [ params final          (final ∈ 0x40–0x7e)
+//   - SS3:             ESC O final                 (one letter)
+//   - APC:             ESC _ … BEL
+//   - OSC:             ESC ] … BEL
+//   - ESC+char:        ESC + any single byte       (alt-key)
+//   - Lone ESC:        ESC                         (if nothing follows)
+//   - UTF-8:           multi-byte rune
+//   - ASCII:           any single byte
+func SplitKeySequences(data string) []string {
+	if len(data) <= 1 {
+		// Fast path: empty or single byte — no splitting needed.
+		if len(data) == 0 {
+			return nil
+		}
+		return []string{data}
+	}
+
+	var seqs []string
+	i := 0
+	for i < len(data) {
+		b := data[i]
+
+		if b == 0x1b { // ESC
+			if i+1 >= len(data) {
+				// Lone ESC at end of buffer.
+				seqs = append(seqs, data[i:i+1])
+				i++
+				continue
+			}
+			next := data[i+1]
+
+			switch next {
+			case '[': // CSI
+				// Bracketed paste start?
+				if strings.HasPrefix(data[i:], "\x1b[200~") {
+					end := strings.Index(data[i:], "\x1b[201~")
+					if end >= 0 {
+						seqs = append(seqs, data[i:i+end+len("\x1b[201~")])
+						i += end + len("\x1b[201~")
+					} else {
+						// Unterminated paste — treat remainder as one sequence.
+						seqs = append(seqs, data[i:])
+						i = len(data)
+					}
+					continue
+				}
+				// Regular CSI: consume until final byte (0x40–0x7e).
+				j := i + 2
+				for j < len(data) && (data[j] < 0x40 || data[j] > 0x7e) {
+					j++
+				}
+				if j < len(data) {
+					j++ // include final byte
+				}
+				seqs = append(seqs, data[i:j])
+				i = j
+
+			case 'O': // SS3
+				if i+2 < len(data) {
+					seqs = append(seqs, data[i:i+3])
+					i += 3
+				} else {
+					seqs = append(seqs, data[i:i+2])
+					i += 2
+				}
+
+			case '_': // APC — ESC _ … BEL
+				j := i + 2
+				for j < len(data) && data[j] != '\x07' {
+					j++
+				}
+				if j < len(data) {
+					j++ // include BEL
+				}
+				seqs = append(seqs, data[i:j])
+				i = j
+
+			case ']': // OSC — ESC ] … BEL
+				j := i + 2
+				for j < len(data) && data[j] != '\x07' {
+					j++
+				}
+				if j < len(data) {
+					j++ // include BEL
+				}
+				seqs = append(seqs, data[i:j])
+				i = j
+
+			default:
+				// ESC + single char: alt-key combos, alt+backspace (\x1b\x7f), etc.
+				seqs = append(seqs, data[i:i+2])
+				i += 2
+			}
+			continue
+		}
+
+		if b >= 0x80 {
+			// Multi-byte UTF-8 character.
+			_, size := utf8.DecodeRuneInString(data[i:])
+			seqs = append(seqs, data[i:i+size])
+			i += size
+			continue
+		}
+
+		// Plain ASCII byte (printable or control).
+		seqs = append(seqs, data[i:i+1])
+		i++
+	}
+	return seqs
+}
+
