@@ -36,16 +36,5 @@ release:
   prerelease: auto
   name_template: "fir {{.Version}}"
 
-homebrew_casks:
-  - repository:
-      owner: kfet
-      name: homebrew-fir
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
-    homepage: https://github.com/kfet/fir
-    description: "Fast, portable AI coding agent. Single binary, no runtime dependencies."
-    license: MIT
-
 changelog:
   use: github-native
