@@ -34,7 +34,7 @@ var _ acpConn = (*acpsdk.AgentSideConnection)(nil)
 // Unfortunately, AgentSideConnection.handle is unexported, so we can't chain
 // to it. Instead, we build our own complete dispatch table. This keeps the code
 // in one place and avoids any SDK forking.
-func rawMethodHandler(pa *piAgent) acpsdk.MethodHandler {
+func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 	mu := sync.Mutex{}
 	sessionCancels := map[string]func(){}
 
@@ -225,7 +225,7 @@ func toReqErr(err error) *acpsdk.RequestError {
 // newRawConn creates a raw connection that handles ALL inbound methods
 // (including unstable session/list and session/resume) and returns
 // an acpConn for outbound calls plus a done channel.
-func newRawConn(pa *piAgent, stdout io.Writer, stdin io.Reader) (acpConn, <-chan struct{}) {
+func newRawConn(pa *firAgent, stdout io.Writer, stdin io.Reader) (acpConn, <-chan struct{}) {
 	handler := rawMethodHandler(pa)
 	conn := acpsdk.NewConnection(handler, stdout, stdin)
 	return &rawConn{conn: conn}, conn.Done()

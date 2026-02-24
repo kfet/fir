@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
@@ -16,8 +18,8 @@ import (
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
-	pa := &piAgent{
-		sessions: make(map[string]*piSession),
+	pa := &firAgent{
+		sessions: make(map[string]*firSession),
 	}
 
 	resp, err := pa.Initialize(context.Background(), acpsdk.InitializeRequest{
@@ -42,8 +44,8 @@ func TestPiAgent_Initialize(t *testing.T) {
 }
 
 func TestPiAgent_SetSessionModel_NotFound(t *testing.T) {
-	pa := &piAgent{
-		sessions: make(map[string]*piSession),
+	pa := &firAgent{
+		sessions: make(map[string]*firSession),
 	}
 
 	_, err := pa.SetSessionModel(context.Background(), acpsdk.SetSessionModelRequest{
@@ -56,8 +58,8 @@ func TestPiAgent_SetSessionModel_NotFound(t *testing.T) {
 }
 
 func TestPiAgent_Cancel_NonexistentSession(t *testing.T) {
-	pa := &piAgent{
-		sessions: make(map[string]*piSession),
+	pa := &firAgent{
+		sessions: make(map[string]*firSession),
 	}
 	// Should not panic
 	err := pa.Cancel(context.Background(), acpsdk.CancelNotification{
@@ -98,7 +100,7 @@ func TestBuiltInCommands(t *testing.T) {
 
 func TestCreateAcpTools(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	// useClientTerminal=true, useClientFs=false → 9 tools (with bash_output + bash_kill)
 	toolList := pa.createAcpTools("/tmp/test", "session-1", true, false, "")
 
@@ -133,8 +135,8 @@ func TestCreateAcpTools(t *testing.T) {
 
 func TestHandleEvent_TextDelta(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	pa.handleEvent("s1", entry, core.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
@@ -157,8 +159,8 @@ func TestHandleEvent_TextDelta(t *testing.T) {
 
 func TestHandleEvent_ThinkingDelta(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	pa.handleEvent("s1", entry, core.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
@@ -177,8 +179,8 @@ func TestHandleEvent_ThinkingDelta(t *testing.T) {
 
 func TestHandleEvent_NilAgentEvent(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	// Should not panic
 	pa.handleEvent("s1", entry, core.AgentSessionEvent{AgentEvent: nil})
@@ -189,8 +191,8 @@ func TestHandleEvent_NilAgentEvent(t *testing.T) {
 
 func TestHandleEvent_ToolExecutionStart(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	pa.handleEvent("s1", entry, core.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
@@ -219,8 +221,8 @@ func TestHandleEvent_ToolExecutionStart(t *testing.T) {
 
 func TestHandleEvent_ToolExecutionEnd(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	// Store pending args first
 	entry.pendingArgs.Store("tc1", map[string]any{"path": "foo.go"})
@@ -252,8 +254,8 @@ func TestHandleEvent_ToolExecutionEnd(t *testing.T) {
 
 func TestHandleEvent_ToolExecutionEnd_WithAcpTerminal(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	// Simulate a pending ACP terminal
 	entry.termState.pendingBashTerminals["tc1"] = "term-1"
@@ -279,8 +281,8 @@ func TestHandleEvent_ToolExecutionEnd_WithAcpTerminal(t *testing.T) {
 
 func TestHandleEvent_ToolExecutionEnd_Error(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	pa.handleEvent("s1", entry, core.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
@@ -299,8 +301,8 @@ func TestHandleEvent_ToolExecutionEnd_Error(t *testing.T) {
 
 func TestHandleSlashCommand_NameEmpty(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
 
 	// /name with no args should send usage message
 	if !pa.handleSlashCommand("s1", entry, "name", "") {
@@ -326,7 +328,7 @@ func TestBuiltInCommands_IncludesLoginChangelog(t *testing.T) {
 }
 
 func TestListSessions_EmptyCwd(t *testing.T) {
-	pa := &piAgent{sessions: make(map[string]*piSession)}
+	pa := &firAgent{sessions: make(map[string]*firSession)}
 	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
 	// Should not panic; may return empty or error depending on env.
 	_ = resp
@@ -334,7 +336,7 @@ func TestListSessions_EmptyCwd(t *testing.T) {
 }
 
 func TestResumeSession_InvalidPath(t *testing.T) {
-	pa := &piAgent{sessions: make(map[string]*piSession)}
+	pa := &firAgent{sessions: make(map[string]*firSession)}
 	_, err := pa.ResumeSession(context.Background(), ResumeSessionRequest{
 		SessionId: "/tmp/../../../etc/passwd",
 	})
@@ -361,7 +363,7 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 
 	// Track whether the old session's unsubscribe was called.
 	unsubscribeCalled := false
-	oldSession := &piSession{
+	oldSession := &firSession{
 		session:   &core.AgentSession{},
 		termState: newTerminalState(),
 		unsubscribe: func() {
@@ -370,9 +372,9 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 	}
 
 	mc := newMockConn()
-	pa := &piAgent{
+	pa := &firAgent{
 		conn:     mc,
-		sessions: make(map[string]*piSession),
+		sessions: make(map[string]*firSession),
 	}
 	pa.sessions[sessionPath] = oldSession
 
@@ -398,8 +400,8 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 
 func TestHandleSlashCommand_Changelog(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState(), session: &core.AgentSession{}}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState(), session: &core.AgentSession{}}
 	// Should return true and send a message (even if changelog is empty).
 	result := pa.handleSlashCommand("s1", entry, "changelog", "")
 	if !result {
@@ -412,10 +414,10 @@ func TestHandleSlashCommand_Changelog(t *testing.T) {
 
 func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	auth := core.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
-	entry := &piSession{
+	entry := &firSession{
 		termState:     newTerminalState(),
 		modelRegistry: mr,
 	}
@@ -431,12 +433,12 @@ func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 
 func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	auth := core.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
 	// Set up a fake logged-in provider
 	auth.SetRuntimeApiKey("anthropic", "test-key")
-	entry := &piSession{
+	entry := &firSession{
 		termState:     newTerminalState(),
 		modelRegistry: mr,
 	}
@@ -457,7 +459,7 @@ func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 }
 
 func TestRawConnMethodHandler_UnknownMethod(t *testing.T) {
-	pa := &piAgent{sessions: make(map[string]*piSession)}
+	pa := &firAgent{sessions: make(map[string]*firSession)}
 	handler := rawMethodHandler(pa)
 	result, reqErr := handler(context.Background(), "unknown/method", []byte("{}"))
 	if result != nil {
@@ -491,8 +493,8 @@ func TestHandleSlashCommand_ExtensionExecuteCommand(t *testing.T) {
 	}
 
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{
 		termState:       newTerminalState(),
 		extensionRunner: runner,
 	}
@@ -529,8 +531,8 @@ func TestHandleSlashCommand_ExtensionExecuteCommand_Error(t *testing.T) {
 	}
 
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{
 		termState:       newTerminalState(),
 		extensionRunner: runner,
 	}
@@ -568,10 +570,10 @@ func newMinimalSession(t *testing.T) *core.AgentSession {
 
 func TestHandleSlashCommand_Name_WithArgs(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	sess := newMinimalSession(t)
 	defer sess.Close()
-	entry := &piSession{termState: newTerminalState(), session: sess}
+	entry := &firSession{termState: newTerminalState(), session: sess}
 
 	found := pa.handleSlashCommand("s1", entry, "name", "my-session")
 	if !found {
@@ -595,10 +597,10 @@ func TestHandleSlashCommand_Name_WithArgs(t *testing.T) {
 
 func TestHandleSlashCommand_Session(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	sess := newMinimalSession(t)
 	defer sess.Close()
-	entry := &piSession{termState: newTerminalState(), session: sess}
+	entry := &firSession{termState: newTerminalState(), session: sess}
 
 	found := pa.handleSlashCommand("s1", entry, "session", "")
 	if !found {
@@ -635,8 +637,8 @@ func getLastAgentMessage(updates []acpsdk.SessionNotification) string {
 
 func TestHandleResumeArg_InvalidNumber_NoList(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState(), agentDir: t.TempDir()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState(), agentDir: t.TempDir()}
 
 	pa.handleResumeArg("s1", entry, "5")
 
@@ -648,9 +650,9 @@ func TestHandleResumeArg_InvalidNumber_NoList(t *testing.T) {
 
 func TestHandleResumeArg_InvalidNumber_WithList(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	agentDir := t.TempDir()
-	entry := &piSession{
+	entry := &firSession{
 		termState: newTerminalState(),
 		agentDir:  agentDir,
 		lastResumeList: []core.SessionListInfo{
@@ -668,8 +670,8 @@ func TestHandleResumeArg_InvalidNumber_WithList(t *testing.T) {
 
 func TestHandleResumeArg_PathOutsideSessionsDir(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
-	entry := &piSession{termState: newTerminalState(), agentDir: t.TempDir()}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState(), agentDir: t.TempDir()}
 
 	// Absolute path outside sessions dir
 	pa.handleResumeArg("s1", entry, "/etc/passwd")
@@ -682,13 +684,13 @@ func TestHandleResumeArg_PathOutsideSessionsDir(t *testing.T) {
 
 func TestHandleResumeArg_ValidNumberFromList(t *testing.T) {
 	mc := newMockConn()
-	pa := &piAgent{conn: mc, sessions: make(map[string]*piSession)}
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	agentDir := t.TempDir()
 	// Put the session path inside the sessions dir
 	sessPath := filepath.Join(agentDir, "sessions", "sess.json")
 	sess := newMinimalSession(t)
 	defer sess.Close()
-	entry := &piSession{
+	entry := &firSession{
 		termState: newTerminalState(),
 		agentDir:  agentDir,
 		session:   sess,
@@ -709,5 +711,180 @@ func TestHandleResumeArg_ValidNumberFromList(t *testing.T) {
 	// Should be "Failed to resume session" or "Resumed session" (depending on file existence)
 	if !strings.Contains(msg, "session") {
 		t.Errorf("expected session-related message, got: %q", msg)
+	}
+}
+
+// ============================================================================
+// /share and /expose tests
+// ============================================================================
+
+func TestBuiltInCommands_IncludesShareAndExpose(t *testing.T) {
+	cmds := builtInCommands()
+	names := make(map[string]bool)
+	for _, cmd := range cmds {
+		names[cmd.Name] = true
+	}
+	for _, required := range []string{"share", "export"} {
+		if !names[required] {
+			t.Errorf("missing required command: %q", required)
+		}
+	}
+}
+
+func TestHandleSlashCommand_Share_Recognized(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess}
+
+	// /share is always recognized (returns true) even if gh is unavailable.
+	// We can't synchronously observe the goroutine result, but we can verify
+	// it doesn't return false (unhandled).
+	result := pa.handleSlashCommand("s1", entry, "share", "")
+	if !result {
+		t.Error("expected handleSlashCommand to return true for /share")
+	}
+}
+
+func TestHandleSlashCommand_Export_Recognized(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess}
+
+	result := pa.handleSlashCommand("s1", entry, "export", "")
+	if !result {
+		t.Error("expected handleSlashCommand to return true for /export")
+	}
+}
+
+func TestHandleSlashCommand_Export_WritesFile(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "out.html")
+
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess}
+
+	// /export with an explicit output path — the goroutine is short-lived;
+	// wait up to 2 seconds for the message to arrive.
+	result := pa.handleSlashCommand("s1", entry, "export", outPath)
+	if !result {
+		t.Error("expected handleSlashCommand to return true for /export")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		msg := getLastAgentMessage(mc.getUpdates())
+		if strings.Contains(msg, "exported to") {
+			// File should exist.
+			if _, err := os.Stat(outPath); err != nil {
+				t.Errorf("expected output file to exist at %s: %v", outPath, err)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("timed out waiting for export message; last msg: %q", getLastAgentMessage(mc.getUpdates()))
+}
+
+func TestGistIDRegex(t *testing.T) {
+	valid := []string{
+		"d168778e8e62f65886000f3f314d63e3",
+		"AABBCCDDEEFF00112233445566778899",
+		"abcdef0123456789abcdef0123456789",
+	}
+	invalid := []string{
+		"",
+		"short",
+		"not-hex-string!!!!!!!!",
+		"d168778e8e62f6588600", // exactly 20 chars — valid
+	}
+	for _, s := range valid {
+		if !gistIDRegex.MatchString(s) {
+			t.Errorf("gistIDRegex should match %q", s)
+		}
+	}
+	// The 19-char case is invalid (< 20).
+	if gistIDRegex.MatchString("d168778e8e62f658860") {
+		t.Error("gistIDRegex should NOT match a 19-char hex string")
+	}
+	for _, s := range invalid[:3] {
+		if gistIDRegex.MatchString(s) {
+			t.Errorf("gistIDRegex should NOT match %q", s)
+		}
+	}
+}
+
+func TestIsNotFound_ExitError(t *testing.T) {
+	// An ExitError (non-zero exit) means the command exists but failed — NOT "not found".
+	// Simulate this by running a command that exits non-zero.
+	cmd := exec.Command("false")
+	err := cmd.Run()
+	if err == nil {
+		t.Skip("'false' command succeeded unexpectedly")
+	}
+	if isNotFound(err) {
+		t.Error("isNotFound should return false for *exec.ExitError (command exists but failed)")
+	}
+}
+
+func TestIsNotFound_CommandNotFound(t *testing.T) {
+	// A command that doesn't exist at all returns a non-ExitError.
+	cmd := exec.Command("this-command-does-not-exist-fir-test-12345")
+	err := cmd.Run()
+	if err == nil {
+		t.Skip("unexpected success")
+	}
+	if !isNotFound(err) {
+		t.Error("isNotFound should return true when command is not on PATH")
+	}
+}
+
+func TestPerformShare_GhNotAuthenticated_SendsError(t *testing.T) {
+	// Only run when gh is installed but we can override PATH to simulate failure.
+	// We simulate "gh auth status" failing by running performShare against a fake
+	// gh that exits 1 (not found = false, auth failure = true).
+	// We do this by putting a wrapper script first on PATH.
+	fakeGhDir := t.TempDir()
+	fakeGhScript := filepath.Join(fakeGhDir, "gh")
+	if err := os.WriteFile(fakeGhScript, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", fakeGhDir+":"+origPath)
+
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess}
+
+	pa.performShare("s1", entry)
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "not logged in") && !strings.Contains(msg, "not installed") {
+		t.Errorf("expected gh auth error message, got: %q", msg)
+	}
+}
+
+func TestPerformShare_GhNotInstalled_SendsError(t *testing.T) {
+	// Override PATH so gh is not found at all.
+	t.Setenv("PATH", t.TempDir())
+
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess}
+
+	pa.performShare("s1", entry)
+
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "not installed") && !strings.Contains(msg, "not logged in") {
+		t.Errorf("expected 'not installed' error message, got: %q", msg)
 	}
 }

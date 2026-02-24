@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- ACP mode: `/share` command creates a secret GitHub Gist and returns both the raw gist URL and a `https://gistpreview.github.io/?{id}` preview link.
+- ACP mode: `/export` command exports the session to an HTML file (usage: `/export [path]`).
+
 ## [0.4.0] - 2026-02-22
 
 ### Added

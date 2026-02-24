@@ -2,12 +2,15 @@
 
 A fast, portable AI coding agent. Single binary, no runtime dependencies.
 
-fir is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
+`fir` is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
 [Mario Zechner](https://github.com/badlogic) and closely tracks it upstream.
 All credit for the original design — the agent loop, tool system, TUI,
-multi-provider architecture, and extension framework — belongs to that project.
+multi-provider architecture, and TS extension framework goes to that project.
 The motivation for this port is size and portability, specifically I was aiming
 for an efficient minimal agent running on a Raspberry Pi Zero W.
+
+Additional features include:
+* native ACP mode - 
 
 ```
 fir -p "refactor the auth module to use JWT"
@@ -184,13 +187,13 @@ make clean          # remove build artifacts
 
 ### Cross-compilation targets
 
-| Target              | GOOS    | GOARCH | Notes                      |
-|---------------------|---------|--------|----------------------------|
-| macOS Apple Silicon | darwin  | arm64  | M1/M2/M3/M4               |
-| macOS Intel         | darwin  | amd64  |                            |
-| Raspberry Pi Zero W | linux   | arm    | ARMv6                      |
-| Raspberry Pi Zero 2 | linux   | arm64  | ARMv8 quad-core            |
-| Linux x86_64        | linux   | amd64  |                            |
+| Target               | GOOS    | GOARCH | Notes                      |
+|----------------------|---------|--------|----------------------------|
+| macOS Apple Silicon  | darwin  | arm64  | M1/M2/M3/M4               |
+| macOS Intel          | darwin  | amd64  |                            |
+| Raspberry Pi Zero W  | linux   | arm    | ARMv6                      |
+| Raspberry Pi Zero 2W | linux   | arm64  | ARMv8 quad-core            |
+| Linux x86_64         | linux   | amd64  |                            |
 
 ## Project structure
 

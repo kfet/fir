@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -33,8 +34,8 @@ var version = "dev"
 // SetVersion sets the version string for ACP mode responses.
 func SetVersion(v string) { version = v }
 
-// piSession holds per-session state.
-type piSession struct {
+// firSession holds per-session state.
+type firSession struct {
 	session         *core.AgentSession
 	modelRegistry   *core.ModelRegistry
 	extensionRunner *extension.Runner
@@ -47,19 +48,19 @@ type piSession struct {
 	lastResumeList  []core.SessionListInfo
 }
 
-// piAgent implements the ACP Agent interface.
-type piAgent struct {
+// firAgent implements the ACP Agent interface.
+type firAgent struct {
 	conn    acpConn
 	options Options
 
 	mu         sync.Mutex
-	sessions   map[string]*piSession
+	sessions   map[string]*firSession
 	clientCaps acpsdk.ClientCapabilities
 }
 
 // Compile-time interface check: piAgent must implement Agent for backward compat.
 // AgentExperimental is no longer needed since we use rawMethodHandler directly.
-var _ acpsdk.Agent = (*piAgent)(nil)
+var _ acpsdk.Agent = (*firAgent)(nil)
 
 // builtInCommands returns the slash commands available in ACP mode.
 func builtInCommands() []acpsdk.AvailableCommand {
@@ -70,6 +71,8 @@ func builtInCommands() []acpsdk.AvailableCommand {
 		{Name: "name", Description: "Rename the current session (usage: /name <new name>)"},
 		{Name: "session", Description: "Show session statistics"},
 		{Name: "changelog", Description: "Show changelog"},
+		{Name: "share", Description: "Share session as a secret GitHub Gist with a preview link"},
+		{Name: "export", Description: "Export session to an HTML file (usage: /export [path])"},
 		{Name: "login", Description: "Login with OAuth provider (usage: /login [provider-id])"},
 		{Name: "logout", Description: "Log out from provider (usage: /logout [provider-id|all])"},
 		{Name: "reload", Description: "Reload extensions, skills, prompts"},
@@ -78,9 +81,9 @@ func builtInCommands() []acpsdk.AvailableCommand {
 
 // RunAcpMode is the entry point for ACP mode over stdin/stdout.
 func RunAcpMode(opts Options) error {
-	pa := &piAgent{
+	pa := &firAgent{
 		options:  opts,
-		sessions: make(map[string]*piSession),
+		sessions: make(map[string]*firSession),
 	}
 
 	// Use newRawConn instead of AgentSideConnection so that session/list and
@@ -93,7 +96,7 @@ func RunAcpMode(opts Options) error {
 
 	// Clean up all sessions
 	pa.mu.Lock()
-	sessions := make(map[string]*piSession, len(pa.sessions))
+	sessions := make(map[string]*firSession, len(pa.sessions))
 	for k, v := range pa.sessions {
 		sessions[k] = v
 	}
@@ -115,7 +118,7 @@ func RunAcpMode(opts Options) error {
 // Agent interface implementation
 // ============================================================================
 
-func (pa *piAgent) Initialize(_ context.Context, params acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
 	pa.mu.Lock()
 	pa.clientCaps = params.ClientCapabilities
 	pa.mu.Unlock()
@@ -131,11 +134,11 @@ func (pa *piAgent) Initialize(_ context.Context, params acpsdk.InitializeRequest
 	}, nil
 }
 
-func (pa *piAgent) Authenticate(_ context.Context, _ acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
+func (pa *firAgent) Authenticate(_ context.Context, _ acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
 	return acpsdk.AuthenticateResponse{}, nil
 }
 
-func (pa *piAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	sessionID := uuid.New().String()
 	cwd := os.Getenv("PWD")
 	if cwd == "" {
@@ -164,7 +167,7 @@ func (pa *piAgent) NewSession(ctx context.Context, params acpsdk.NewSessionReque
 	}, nil
 }
 
-func (pa *piAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
+func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acpsdk.PromptResponse, error) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
@@ -199,7 +202,7 @@ func (pa *piAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acp
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
 
-func (pa *piAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) error {
+func (pa *firAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) error {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
@@ -212,7 +215,7 @@ func (pa *piAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) e
 	return nil
 }
 
-func (pa *piAgent) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+func (pa *firAgent) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
 	return acpsdk.SetSessionModeResponse{}, nil
 }
 
@@ -222,7 +225,7 @@ func (pa *piAgent) SetSessionMode(_ context.Context, _ acpsdk.SetSessionModeRequ
 // These are handled by rawMethodHandler in conn.go, which calls these methods.
 // ============================================================================
 
-func (pa *piAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionModelRequest) (acpsdk.SetSessionModelResponse, error) {
+func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionModelRequest) (acpsdk.SetSessionModelResponse, error) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
@@ -245,7 +248,7 @@ func (pa *piAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionMo
 
 // ListSessions handles the session/list method.
 // It returns sessions from the caller's working directory.
-func (pa *piAgent) ListSessions(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
+func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
 	cwd := params.Cwd
 	if cwd == "" {
 		cwd = os.Getenv("PWD")
@@ -284,7 +287,7 @@ func (pa *piAgent) ListSessions(_ context.Context, params ListSessionsRequest) (
 
 // ResumeSession handles the session/resume method.
 // It creates a new AgentSession and switches it to the requested session file.
-func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionRequest) (ResumeSessionResponse, error) {
+func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionRequest) (ResumeSessionResponse, error) {
 	cwd := params.Cwd
 	if cwd == "" {
 		cwd = os.Getenv("PWD")
@@ -350,7 +353,7 @@ func (pa *piAgent) ResumeSession(ctx context.Context, params ResumeSessionReques
 // Session creation
 // ============================================================================
 
-func (pa *piAgent) createSession(ctx context.Context, sessionID, cwd string) (*piSession, error) {
+func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string) (*firSession, error) {
 	agentDir := core.DefaultAgentDir()
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
@@ -413,7 +416,7 @@ func (pa *piAgent) createSession(ctx context.Context, sessionID, cwd string) (*p
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	entry := &piSession{
+	entry := &firSession{
 		session:       result.Session,
 		modelRegistry: modelRegistry,
 		cwd:           cwd,
@@ -448,7 +451,7 @@ func (pa *piAgent) createSession(ctx context.Context, sessionID, cwd string) (*p
 // useClientTerminal: route bash execution through ACP client terminal.
 // useClientFs: route read/write/edit file I/O through ACP client fs methods.
 // shellCommandPrefix: optional prefix prepended to every bash command.
-func (pa *piAgent) createAcpTools(cwd, sessionID string, useClientTerminal, useClientFs bool, shellCommandPrefix string) []agent.AgentTool {
+func (pa *firAgent) createAcpTools(cwd, sessionID string, useClientTerminal, useClientFs bool, shellCommandPrefix string) []agent.AgentTool {
 	var readTool agent.AgentTool
 	var editTool agent.AgentTool
 	var writeTool agent.AgentTool
@@ -488,7 +491,7 @@ func (pa *piAgent) createAcpTools(cwd, sessionID string, useClientTerminal, useC
 }
 
 // createAcpReadFn returns a ReadFileFn that delegates to the ACP client.
-func (pa *piAgent) createAcpReadFn(sessionID string) tools.ReadFileFn {
+func (pa *firAgent) createAcpReadFn(sessionID string) tools.ReadFileFn {
 	return func(ctx context.Context, path string) (string, error) {
 		resp, err := pa.conn.ReadTextFile(ctx, acpsdk.ReadTextFileRequest{
 			SessionId: acpsdk.SessionId(sessionID),
@@ -502,7 +505,7 @@ func (pa *piAgent) createAcpReadFn(sessionID string) tools.ReadFileFn {
 }
 
 // createAcpWriteFn returns a WriteFileFn that delegates to the ACP client.
-func (pa *piAgent) createAcpWriteFn(sessionID string) tools.WriteFileFn {
+func (pa *firAgent) createAcpWriteFn(sessionID string) tools.WriteFileFn {
 	return func(ctx context.Context, path, content string) error {
 		_, err := pa.conn.WriteTextFile(ctx, acpsdk.WriteTextFileRequest{
 			SessionId: acpsdk.SessionId(sessionID),
@@ -514,24 +517,24 @@ func (pa *piAgent) createAcpWriteFn(sessionID string) tools.WriteFileFn {
 }
 
 // createAcpReadTool creates a read tool delegating to the ACP client.
-func (pa *piAgent) createAcpReadTool(cwd, sessionID string) agent.AgentTool {
+func (pa *firAgent) createAcpReadTool(cwd, sessionID string) agent.AgentTool {
 	return tools.NewReadToolWithReader(cwd, pa.createAcpReadFn(sessionID))
 }
 
 // createAcpWriteTool creates a write tool delegating to the ACP client.
-func (pa *piAgent) createAcpWriteTool(cwd, sessionID string) agent.AgentTool {
+func (pa *firAgent) createAcpWriteTool(cwd, sessionID string) agent.AgentTool {
 	return tools.NewWriteToolWithWriter(cwd, pa.createAcpWriteFn(sessionID))
 }
 
 // createAcpEditTool creates an edit tool delegating file I/O to the ACP client.
-func (pa *piAgent) createAcpEditTool(cwd, sessionID string) agent.AgentTool {
+func (pa *firAgent) createAcpEditTool(cwd, sessionID string) agent.AgentTool {
 	return tools.NewEditToolWithReadWriter(cwd,
 		pa.createAcpReadFn(sessionID),
 		pa.createAcpWriteFn(sessionID),
 	)
 }
 
-func (pa *piAgent) createAcpBashTool(cwd, sessionID, shellCommandPrefix string) agent.AgentTool {
+func (pa *firAgent) createAcpBashTool(cwd, sessionID, shellCommandPrefix string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name: "bash",
@@ -598,7 +601,7 @@ func (pa *piAgent) createAcpBashTool(cwd, sessionID, shellCommandPrefix string) 
 	}
 }
 
-func (pa *piAgent) createBashOutputTool(sessionID string) agent.AgentTool {
+func (pa *firAgent) createBashOutputTool(sessionID string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name:        "bash_output",
@@ -651,7 +654,7 @@ func (pa *piAgent) createBashOutputTool(sessionID string) agent.AgentTool {
 	}
 }
 
-func (pa *piAgent) createBashKillTool(sessionID string) agent.AgentTool {
+func (pa *firAgent) createBashKillTool(sessionID string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name:        "bash_kill",
@@ -698,7 +701,7 @@ func (pa *piAgent) createBashKillTool(sessionID string) agent.AgentTool {
 // Event handling
 // ============================================================================
 
-func (pa *piAgent) handleEvent(sessionID string, entry *piSession, event core.AgentSessionEvent) {
+func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event core.AgentSessionEvent) {
 	if event.AgentEvent == nil {
 		return
 	}
@@ -794,7 +797,7 @@ func (pa *piAgent) handleEvent(sessionID string, entry *piSession, event core.Ag
 // Slash commands
 // ============================================================================
 
-func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, command, args string) bool {
+func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, command, args string) bool {
 	switch command {
 	case "compact":
 		if _, err := entry.session.RunCompaction(context.Background(), args); err != nil {
@@ -899,6 +902,21 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 		}
 		return true
 
+	case "share":
+		go pa.performShare(sessionID, entry)
+		return true
+
+	case "export":
+		go func() {
+			filePath, err := entry.session.ExportToHTML(args)
+			if err != nil {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to export session: %v", err))
+				return
+			}
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Session exported to: %s", filePath))
+		}()
+		return true
+
 	case "login":
 		pa.handleLogin(sessionID, entry, args)
 		return true
@@ -959,7 +977,7 @@ func (pa *piAgent) handleSlashCommand(sessionID string, entry *piSession, comman
 	}
 }
 
-func (pa *piAgent) handleResumeArg(sessionID string, entry *piSession, args string) {
+func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args string) {
 	var sessionPath string
 	if n := parseInt(args); n > 0 {
 		entry.resumeMu.Lock()
@@ -992,7 +1010,64 @@ func (pa *piAgent) handleResumeArg(sessionID string, entry *piSession, args stri
 	}
 }
 
-func (pa *piAgent) handleLogout(sessionID string, entry *piSession, args string) {
+// performShare creates a secret GitHub Gist from the session HTML export and
+// sends back both the raw gist URL and a gistpreview.github.io preview link.
+func (pa *firAgent) performShare(sessionID string, entry *firSession) {
+	// Verify gh CLI is installed and authenticated.
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		if isNotFound(err) {
+			pa.sendAgentMessage(sessionID, "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/")
+		} else {
+			pa.sendAgentMessage(sessionID, "GitHub CLI is not logged in. Run 'gh auth login' first.")
+		}
+		return
+	}
+
+	// Export session to a temp HTML file.
+	tmpPath, err := entry.session.ExportToHTML("")
+	if err != nil {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to export session: %v", err))
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	out, err := exec.Command("gh", "gist", "create", "--public=false", tmpPath).Output()
+	if err != nil {
+		pa.sendAgentMessage(sessionID, "Failed to create gist. Check that 'gh' is installed and authenticated.")
+		return
+	}
+
+	gistURL := strings.TrimSpace(string(out))
+	if gistURL == "" {
+		pa.sendAgentMessage(sessionID, "Gist created but no URL returned.")
+		return
+	}
+
+	// Extract the gist ID — last path component of the URL.
+	// gh prints something like: https://gist.github.com/username/d168778e8e62f65886000f3f314d63e3
+	gistID := gistURL[strings.LastIndex(gistURL, "/")+1:]
+	if !gistIDRegex.MatchString(gistID) {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Gist created but could not parse ID from URL: %s", gistURL))
+		return
+	}
+
+	previewURL := "https://gistpreview.github.io/?" + gistID
+	pa.sendAgentMessage(sessionID, fmt.Sprintf("Session shared (secret gist):\nGist: %s\nPreview: %s", gistURL, previewURL))
+}
+
+// gistIDRegex matches a valid GitHub Gist ID (hex string of at least 20 characters).
+var gistIDRegex = regexp.MustCompile(`^[a-fA-F0-9]{20,}$`)
+
+// isNotFound reports whether an exec error is "command not found".
+func isNotFound(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false
+	}
+	return true // LookupError / exec.ErrNotFound etc.
+}
+
+func (pa *firAgent) handleLogout(sessionID string, entry *firSession, args string) {
 	authStorage := entry.modelRegistry.AuthStorage()
 	creds := authStorage.GetAll()
 	loggedIn := make([]string, 0, len(creds))
@@ -1043,7 +1118,7 @@ func (pa *piAgent) handleLogout(sessionID string, entry *piSession, args string)
 // providerIDRegex validates provider IDs (alphanumeric with hyphens).
 var providerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
-func (pa *piAgent) handleLogin(sessionID string, entry *piSession, args string) {
+func (pa *firAgent) handleLogin(sessionID string, entry *firSession, args string) {
 	authStorage := entry.modelRegistry.AuthStorage()
 	providers := authStorage.GetOAuthProviders()
 	if len(providers) == 0 {
@@ -1110,19 +1185,18 @@ func (pa *piAgent) handleLogin(sessionID string, entry *piSession, args string) 
 	pa.sendAgentMessage(sessionID, fmt.Sprintf("Successfully logged in to %s.", args))
 }
 
-
 // ============================================================================
 // Helpers
 // ============================================================================
 
-func (pa *piAgent) sendAgentMessage(sessionID, text string) {
+func (pa *firAgent) sendAgentMessage(sessionID, text string) {
 	_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: acpsdk.SessionId(sessionID),
 		Update:    acpsdk.UpdateAgentMessageText(text),
 	})
 }
 
-func (pa *piAgent) sendAvailableCommands(sessionID string) {
+func (pa *firAgent) sendAvailableCommands(sessionID string) {
 	pa.mu.Lock()
 	entry, ok := pa.sessions[sessionID]
 	pa.mu.Unlock()
