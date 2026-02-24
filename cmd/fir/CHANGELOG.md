@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-24
+
 ### Added
+- Dev version tagging: non-release builds now show `0.5.0-dev+abc1234.dirty` instead of bare version, making it easy to identify exact commit and dirty state.
 - `/changelog` now includes unreleased changes at the bottom.
 - `/reexec` slash command: re-execs into the current binary preserving the active session, useful for picking up a rebuilt binary or testing a different branch.
 - Queue indicator in footer: shows `📬 N queued` when follow-up messages are waiting while the agent is streaming.
