@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -373,14 +372,8 @@ func run() error {
 }
 
 // runUpdate implements the "fir update" subcommand.
-// On macOS it instructs the user to use Homebrew; on Linux it downloads and
-// replaces the running binary from the latest GitHub release.
+// Downloads and replaces the running binary from the latest GitHub release.
 func runUpdate() error {
-	if runtime.GOOS == "darwin" {
-		fmt.Fprintln(os.Stderr, "fir update is not supported on macOS.")
-		fmt.Fprintln(os.Stderr, "Use Homebrew to update:  brew upgrade fir")
-		return nil
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

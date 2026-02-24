@@ -141,23 +141,13 @@ func TestUpdateNotice_ContainsVersion(t *testing.T) {
 	}
 }
 
-func TestUpdateNotice_MacOS_SuggestsBrew(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("macOS-specific test")
-	}
-	notice := UpdateNotice("v0.5.0")
-	if !strings.Contains(notice, "brew upgrade fir") {
-		t.Errorf("macOS notice should suggest brew, got: %q", notice)
-	}
-}
-
-func TestUpdateNotice_Linux_SuggestsFirUpdate(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("Linux-specific test")
-	}
+func TestUpdateNotice_SuggestsFirUpdate(t *testing.T) {
 	notice := UpdateNotice("v0.5.0")
 	if !strings.Contains(notice, "fir update") {
-		t.Errorf("Linux notice should suggest fir update, got: %q", notice)
+		t.Errorf("notice should suggest fir update, got: %q", notice)
+	}
+	if strings.Contains(notice, "brew") {
+		t.Errorf("notice should not mention brew, got: %q", notice)
 	}
 }
 

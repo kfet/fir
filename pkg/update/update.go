@@ -207,12 +207,8 @@ func CurrentPlatform() string {
 }
 
 // UpdateNotice returns a one-line message to print when a newer version is
-// available.  On macOS the message suggests "brew upgrade fir"; on all other
-// platforms it suggests "fir update".
+// available, suggesting "fir update".
 func UpdateNotice(newVersion string) string {
-	if runtime.GOOS == "darwin" {
-		return fmt.Sprintf("› fir %s available — run: brew upgrade fir", newVersion)
-	}
 	return fmt.Sprintf("› fir %s available — run: fir update", newVersion)
 }
 

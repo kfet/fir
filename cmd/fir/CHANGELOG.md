@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- `fir update` now self-updates on macOS (previously printed a "use `brew upgrade fir`" stub and exited).
+- Update notice no longer suggests `brew upgrade fir` on macOS; shows `fir update` on all platforms.
+
 ## [0.5.0] - 2026-02-24
 
 ### Added
