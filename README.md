@@ -69,6 +69,16 @@ fir update
 `fir` checks for updates automatically and shows a notice when a new version
 is available.
 
+### macOS Gatekeeper Note
+
+If you download the pre-compiled binary on macOS (via the install script or GitHub Releases), macOS may block it with the error: *"Apple could not verify 'fir-darwin-arm64' is free of malware"*.
+
+To fix this, remove the quarantine attribute from the downloaded binary:
+
+```bash
+xattr -d com.apple.quarantine $(which fir)
+```
+
 ## Usage
 
 ```bash
