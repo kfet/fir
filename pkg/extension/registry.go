@@ -1,3 +1,5 @@
+// Ported from: packages/coding-agent/src/core/extensions/loader.ts
+// Upstream hash: 5c0ec26c
 package extension
 
 import "sync"

@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/resource-loader.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: 5c0ec26c
 package core
 
 import (

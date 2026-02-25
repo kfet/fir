@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- Extension conflict resolution: tools, commands, and flags now use first-registration-wins (project-local extensions take precedence over global ones).
+- Duplicate extension commands now log a warning and are skipped instead of silently overwriting the previous registration.
+
 ### Added
 - New skill - overseer - shepherds a fleet of agents to perform a task
 

@@ -1,5 +1,14 @@
 # Sync Log
 
+## 2026-02-25 — Sync to commit 5c0ec26c
+
+- `coding-agent/src/core/extensions/loader.ts` → `pkg/extension/registry.go`: Discovery order flipped — project-local extensions now load before global ones (first registration wins). Flag defaults no longer overwrite CLI-set values.
+- `coding-agent/src/core/extensions/runner.ts` → `pkg/extension/runner.go`: Conflict resolution changed from "last wins" to "first wins" for tools, commands, and flags. Duplicate command registration now logs a warning and skips instead of silently overwriting.
+- `coding-agent/src/core/resource-loader.ts` → `pkg/core/resourceloader.go`: Conflict handling for extensions changed — conflicting extensions are now kept loaded; conflicts reported as diagnostics only (not removed). Hash updated.
+- `coding-agent/src/modes/interactive/interactive-mode.ts` → `pkg/modes/interactive/mode.go`: Scope group display order changed to `[project, user, path]` (was `[user, project, path]`). Hash updated.
+- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated — 752 total models.
+- `coding-agent/src/core/package-manager.ts` → not ported (TS/npm-specific); added to UPSTREAM_MAP.md as ❌.
+
 ## 2026-02-22 — Sync to commit 380236a0
 
 - `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated — updated MaxTokens for some models, pricing update for openrouter model.

@@ -1,3 +1,5 @@
+// Ported from: packages/coding-agent/src/core/extensions/runner.ts
+// Upstream hash: 5c0ec26c
 package extension
 
 import (
@@ -196,22 +198,32 @@ func (r *Runner) loadFactories(registered []RegisteredFactory) error {
 			r.allHandlers[event] = append(r.allHandlers[event], handlers...)
 		}
 
-		// Merge tools (last registration wins)
+		// Merge tools (first registration wins)
 		for name, tool := range ext.tools {
-			r.allTools[name] = tool
+			if _, exists := r.allTools[name]; !exists {
+				r.allTools[name] = tool
+			}
 		}
 
-		// Merge commands (last registration wins)
+		// Merge commands (first registration wins)
 		for name, cmd := range ext.commands {
-			r.allCommands[name] = cmd
+			if _, exists := r.allCommands[name]; !exists {
+				r.allCommands[name] = cmd
+			} else {
+				log.Printf("Warning: extension command %q from %q conflicts with existing command. Skipping.", name, ext.Name)
+			}
 		}
 
-		// Merge flags
+		// Merge flags (first registration wins)
 		for name, flag := range ext.flags {
-			r.allFlags[name] = flag
-			// Set default value
+			if _, exists := r.allFlags[name]; !exists {
+				r.allFlags[name] = flag
+			}
+			// Set default value only if not already set by CLI/user or previous extension
 			if flag.Default != nil {
-				r.flagValues[name] = flag.Default
+				if _, hasValue := r.flagValues[name]; !hasValue {
+					r.flagValues[name] = flag.Default
+				}
 			}
 		}
 

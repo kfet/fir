@@ -1,7 +1,4 @@
-// Ported from: packages/coding-agent/src/modes/interactive/interactive-mode.ts
-// Upstream hash: 380236a0
-//
-// This is the main interactive mode for the coding agent TUI.
+
 // It manages the TUI lifecycle, renders messages, handles user input,
 // and delegates business logic to AgentSession.
 package interactive

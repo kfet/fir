@@ -238,3 +238,4 @@ Unstable types (session/list, session/resume, session/set_model) defined locally
 | `coding-agent/src/modes/acp/acp-mode.ts` (helpers) | `pkg/modes/acp/helpers.go` | ⬜ |
 | `coding-agent/src/modes/acp/acp-terminal.ts` | `pkg/modes/acp/terminal.go` | ⬜ |
 | `coding-agent/src/modes/acp/acp-mode.ts` (PiAgent) | `pkg/modes/acp/acp.go` | ⬜ |
+| `coding-agent/src/core/package-manager.ts` | Not ported (TS/npm specific) | ❌ |
