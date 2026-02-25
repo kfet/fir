@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- New skill - overseer - shepherds a fleet of agents to perform a task
+
 ## [0.6.0] - 2026-02-24
 
 ### Added
