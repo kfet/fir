@@ -30,7 +30,7 @@ This gives you a live dashboard at a glance.
 
 **Idle agent** — Give it the next thing. Check `docs/review/URGENT.md` first, then `BACKLOG.md`, then invent a task from SPEC.md.
 
-**Bloated context (>30%)** — Prefer `/compact` over `/new`: it summarises history into a short prefix so the agent retains what it was doing but frees ~60–70% of tokens. Reserve `/new` for when the agent is going in circles and you *want* it to forget.
+**Bloated context (>50%)** — Prefer `/compact` over `/new`: it summarises history into a short prefix so the agent retains what it was doing but frees ~60–70% of tokens. Reserve `/new` for when the agent is going in circles and you *want* it to forget.
 
 ```bash
 # Compact (preferred — retains summarised history)
@@ -50,8 +50,9 @@ sleep 2
 ```
 
 Rough guide:
-- **30–40%**: `/compact` — retain continuity, free tokens
-- **>40% or looping**: `/new` — full reset, give a fresh precise task
+- **30–50%**: Let it work — `/compact` only if it gets stuck or feels slow.
+- **>50%**: `/compact` — frees tokens while retaining continuity.
+- **>70% or looping**: `/new` — full reset, give a fresh precise task.
 
 **Two agents touching the same file** — One of them loses. Redirect the one with less progress to something else.
 
@@ -61,9 +62,9 @@ Rough guide:
 
 **Agent going in circles** — Repeating itself, re-reading the same files, not committing. Kill it. Give it a smaller, more concrete task.
 
-## Resetting a bloated agent
+## Resetting a bloated agent (>50%)
 
-**Prefer `/compact`** — summarises history, frees tokens, agent retains context. Only use `/new` or a new session when the agent is truly stuck or looping.
+**Prefer `/compact`** — summarises history, frees tokens, agent retains context. Only use `/new` or a new session when the agent is truly stuck or looping (>70%).
 
 ```bash
 tmux -S "$SOCKET" send-keys -t NAME:0.0 Escape   # stop current generation
