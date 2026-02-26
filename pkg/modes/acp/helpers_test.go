@@ -70,9 +70,9 @@ func TestMapToolKind(t *testing.T) {
 
 func TestBuildToolTitle(t *testing.T) {
 	tests := []struct {
-		tool  string
-		args  map[string]any
-		want  string
+		tool string
+		args map[string]any
+		want string
 	}{
 		{"bash", map[string]any{"command": "ls -la"}, "`ls -la`"},
 		{"read", map[string]any{"path": "/tmp/foo"}, "Read /tmp/foo"},
@@ -213,6 +213,11 @@ func TestParseIntHelpers(t *testing.T) {
 }
 
 func TestBuildModelState(t *testing.T) {
+	// Isolate from any real API keys set in the environment.
+	for _, key := range ai.KnownApiKeyEnvVars() {
+		t.Setenv(key, "")
+	}
+
 	auth := core.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
@@ -233,8 +238,7 @@ func TestBuildModelState(t *testing.T) {
 		if state.CurrentModelId != wantCurrentID {
 			t.Errorf("CurrentModelId = %q, want %q", state.CurrentModelId, wantCurrentID)
 		}
-		// No auth configured → no available models. GetAvailable() only returns models
-		// whose provider has auth (API key or OAuth token) configured.
+		// No auth configured → no available models.
 		if len(state.AvailableModels) != 0 {
 			t.Errorf("AvailableModels should be empty with no auth, got %d models", len(state.AvailableModels))
 		}
@@ -252,7 +256,6 @@ func TestBuildModelState(t *testing.T) {
 		if len(state.AvailableModels) == 0 {
 			t.Error("AvailableModels is empty; expected anthropic models since auth is set")
 		}
-		// Each model entry must have a non-empty ModelId and Name.
 		for _, m := range state.AvailableModels {
 			if m.ModelId == "" {
 				t.Errorf("AvailableModels entry has empty ModelId: %+v", m)
@@ -260,12 +263,8 @@ func TestBuildModelState(t *testing.T) {
 			if m.Name == "" {
 				t.Errorf("AvailableModels entry has empty Name: %+v", m)
 			}
-		}
-		// All returned models should be from providers with auth (anthropic in this case).
-		for _, m := range state.AvailableModels {
-			modelID := string(m.ModelId)
-			if !strings.HasPrefix(modelID, "anthropic/") {
-				t.Errorf("got model from provider without auth: %s", modelID)
+			if !strings.HasPrefix(string(m.ModelId), "anthropic/") {
+				t.Errorf("got model from provider without auth: %s", m.ModelId)
 			}
 		}
 	})

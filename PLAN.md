@@ -29,6 +29,10 @@ See `docs/plan/07-work-tracker.md` → Phase 14 for the full task breakdown.
 - TS source: `../pi-mono-acp/packages/coding-agent/src/modes/acp/` (~1,770 lines + 1,248 lines tests)
 - Core changes to existing code are minimal (session factory refactoring + ~25 lines in `args.go`, `app.go`)
 
+## Maintenance TODOs
+
+- [ ] Review all Go dependencies for license compatibility with the project license
+
 ## Quick Start for Agents
 
 ```

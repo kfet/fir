@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -886,5 +887,123 @@ func TestPerformShare_GhNotInstalled_SendsError(t *testing.T) {
 	msg := getLastAgentMessage(mc.getUpdates())
 	if !strings.Contains(msg, "not installed") && !strings.Contains(msg, "not logged in") {
 		t.Errorf("expected 'not installed' error message, got: %q", msg)
+	}
+}
+
+// ============================================================================
+// Task 6: ACP injection — NewSessionRequestExt / mcpServers tests
+// ============================================================================
+
+func TestNewSessionRequestExt_JSONUnmarshal(t *testing.T) {
+	const raw = `{
+		"cwd": "/tmp/proj",
+		"mcpServers": [
+			{
+				"name": "myserver",
+				"command": "npx",
+				"args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+				"env": [
+					{"name": "NODE_PATH", "value": "/usr/local/lib/node_modules"}
+				]
+			}
+		]
+	}`
+
+	var ext acpsdk.NewSessionRequest
+	if err := json.Unmarshal([]byte(raw), &ext); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if ext.Cwd != "/tmp/proj" {
+		t.Errorf("Cwd = %q, want /tmp/proj", ext.Cwd)
+	}
+	if len(ext.McpServers) != 1 {
+		t.Fatalf("McpServers len = %d, want 1", len(ext.McpServers))
+	}
+	srv := ext.McpServers[0]
+	if srv.Stdio.Command != "npx" {
+		t.Errorf("Command = %q, want npx", srv.Stdio.Command)
+	}
+	if len(srv.Stdio.Args) != 3 || srv.Stdio.Args[0] != "-y" {
+		t.Errorf("Args = %v, want [-y ...]", srv.Stdio.Args)
+	}
+	if srv.Stdio.Env[0].Name != "NODE_PATH" || srv.Stdio.Env[0].Value != "/usr/local/lib/node_modules" {
+		t.Errorf("Env[0] = %q", srv.Stdio.Env[0])
+	}
+}
+
+func TestNewSessionRequestExt_EmptyMcpServers(t *testing.T) {
+	const raw = `{"cwd": "/tmp"}`
+	var ext acpsdk.NewSessionRequest
+	if err := json.Unmarshal([]byte(raw), &ext); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(ext.McpServers) != 0 {
+		t.Errorf("expected empty McpServers, got %d entries", len(ext.McpServers))
+	}
+}
+
+// TestRawConnMethodHandler_SessionNew_AcceptsMcpServers verifies that the
+// "session/new" handler correctly parses a payload that includes mcpServers
+// without a JSON parse error (createSession will fail due to no model or a
+// fast-exiting MCP server, but the error must NOT be an InvalidParams/-32602).
+func TestRawConnMethodHandler_SessionNew_AcceptsMcpServers(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+
+	handler := rawMethodHandler(pa)
+
+	// Use "false" (exits immediately) as the MCP server command.  This keeps
+	// the test fast: the MCP handshake fails with EOF right away instead of
+	// waiting on a real external process.  We only care that the JSON parses
+	// correctly (not that an MCP server actually starts).
+	payload := `{
+		"cwd": "/tmp",
+		"mcpServers": [
+			{
+				"name": "dummy",
+				"command": "false",
+				"args": [],
+				"env": []
+			}
+		]
+	}`
+
+	// A short timeout prevents any SDK-level retry from hanging the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, reqErr := handler(ctx, "session/new", []byte(payload))
+	// InvalidParams (-32602) means JSON was rejected — that's the failure mode.
+	// Any other outcome (nil error or a different error code) is acceptable.
+	if reqErr != nil && reqErr.Code == -32602 {
+		t.Errorf("unexpected InvalidParams error (JSON parse rejected mcpServers?): %+v", reqErr)
+	}
+}
+
+// TestRawConnMethodHandler_SessionNew_NonStdioMCPServerSkipped verifies that
+// an HTTP-transport MCP server entry in mcpServers does not panic (nil Stdio
+// dereference) and is silently skipped.
+func TestRawConnMethodHandler_SessionNew_NonStdioMCPServerSkipped(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	handler := rawMethodHandler(pa)
+
+	// HTTP-transport server — Stdio will be nil after SDK unmarshal.
+	// The "type":"http" discriminator is required for the SDK to pick the Http variant.
+	payload := `{
+		"cwd": "/tmp",
+		"mcpServers": [
+			{"type":"http","name":"remote-srv","url":"http://localhost:9999","headers":[]}
+		]
+	}`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Must not panic. Any non-InvalidParams outcome is fine.
+	_, reqErr := handler(ctx, "session/new", []byte(payload))
+	if reqErr != nil && reqErr.Code == -32602 {
+		t.Errorf("unexpected InvalidParams: %+v", reqErr)
 	}
 }

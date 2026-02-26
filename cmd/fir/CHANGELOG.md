@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- MCP client support: configure external MCP servers in `.fir/mcp.json`; tools appear alongside built-in tools; ACP mode accepts `mcpServers` in `session/new`
+
 ## [0.7.0] - 2026-02-25
 
 ### Fixed

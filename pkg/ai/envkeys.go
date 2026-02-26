@@ -5,6 +5,7 @@ package ai
 import (
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // providerEnvMap maps provider names to their API key environment variables.
@@ -24,6 +25,50 @@ var providerEnvMap = map[string]string{
 	string(ProviderHuggingface):         "HF_TOKEN",
 	string(ProviderOpenCode):            "OPENCODE_API_KEY",
 	string(ProviderKimiCoding):          "KIMI_API_KEY",
+}
+
+// additionalAuthEnvVars lists env vars used by providers whose auth logic can't
+// be expressed as a single key→envvar mapping (multi-var checks, special cases).
+var additionalAuthEnvVars = []string{
+	// anthropic
+	"ANTHROPIC_OAUTH_TOKEN",
+	"ANTHROPIC_API_KEY",
+	// github-copilot
+	"COPILOT_GITHUB_TOKEN",
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	// amazon-bedrock
+	"AWS_PROFILE",
+	"AWS_ACCESS_KEY_ID",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_BEARER_TOKEN_BEDROCK",
+	"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+	"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+	"AWS_WEB_IDENTITY_TOKEN_FILE",
+	// google-vertex
+	"GOOGLE_CLOUD_PROJECT",
+	"GCLOUD_PROJECT",
+	"GOOGLE_CLOUD_LOCATION",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+}
+
+// KnownApiKeyEnvVars returns the sorted list of all environment variable names
+// that GetEnvApiKey (or HasAuth) inspects to determine provider authentication.
+// Useful for tests that need a hermetic environment.
+func KnownApiKeyEnvVars() []string {
+	seen := make(map[string]struct{}, len(providerEnvMap)+len(additionalAuthEnvVars))
+	for _, v := range providerEnvMap {
+		seen[v] = struct{}{}
+	}
+	for _, v := range additionalAuthEnvVars {
+		seen[v] = struct{}{}
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // GetEnvApiKey returns the API key for a provider from known environment variables.

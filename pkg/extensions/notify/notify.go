@@ -36,7 +36,7 @@ var inKitty = func() bool {
 func init() {
 	extension.Register("notify", func(api extension.API) {
 		api.On("agent_end", func(event *extension.Event, ctx extension.Context) (any, error) {
-			notifyTerminal("Fi", "Ready for input")
+			notifyTerminal("fir", "Ready for input")
 			return nil, nil
 		})
 	})

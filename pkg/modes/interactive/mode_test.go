@@ -1736,11 +1736,16 @@ func TestPerformShare_NoBinary(t *testing.T) {
 // cycleModel tests
 // ---------------------------------------------------------------------------
 
-// setupAvailableModels adds a runtime API key for "anthropic" so that the
+// setupAvailableModels clears all provider auth env vars (so only the explicitly
+// registered key applies), adds a runtime API key for "anthropic" so that the
 // built-in anthropic models appear in ModelRegistry.GetAvailable().
 // Returns the list of available models (at least 2 guaranteed or test is skipped).
 func setupAvailableModels(t *testing.T, tm *testMode) []*ai.Model {
 	t.Helper()
+	// Isolate test from any API keys in the developer's environment.
+	for _, key := range ai.KnownApiKeyEnvVars() {
+		t.Setenv(key, "")
+	}
 	tm.mode.session.ModelRegistryRef().AuthStorage().SetRuntimeApiKey("anthropic", "test-key")
 	available := tm.mode.session.ModelRegistryRef().GetAvailable()
 	if len(available) < 2 {

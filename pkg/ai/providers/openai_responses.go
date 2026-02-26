@@ -16,21 +16,21 @@ import (
 // --- OpenAI Responses API SSE event types ---
 
 type responsesItem struct {
-	Type     string         `json:"type"`
-	ID       string         `json:"id"`
-	Role     string         `json:"role"`
-	CallID   string         `json:"call_id"`
-	Name     string         `json:"name"`
-	Args     string         `json:"arguments"`
-	Content  []responsesPart `json:"content"`
-	Status   string         `json:"status"`
-	Summary  []responsesSummaryPart `json:"summary"`
+	Type    string                 `json:"type"`
+	ID      string                 `json:"id"`
+	Role    string                 `json:"role"`
+	CallID  string                 `json:"call_id"`
+	Name    string                 `json:"name"`
+	Args    string                 `json:"arguments"`
+	Content []responsesPart        `json:"content"`
+	Status  string                 `json:"status"`
+	Summary []responsesSummaryPart `json:"summary"`
 }
 
 type responsesPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	Refusal  string `json:"refusal"`
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Refusal string `json:"refusal"`
 }
 
 type responsesSummaryPart struct {
@@ -98,11 +98,7 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			return
 		}
 
-		baseURL := model.BaseURL
-		if baseURL == "" {
-			baseURL = "https://api.openai.com"
-		}
-		url := strings.TrimRight(baseURL, "/") + "/v1/responses"
+		url := openAIResponsesURL(model.BaseURL)
 
 		headers := map[string]string{
 			"Authorization": "Bearer " + apiKey,

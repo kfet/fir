@@ -26,6 +26,7 @@ import (
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 // version is set via SetVersion before RunAcpMode.
@@ -46,6 +47,7 @@ type firSession struct {
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
 	lastResumeList  []core.SessionListInfo
+	mcpManager      *mcp.Manager // nil if no MCP servers configured
 }
 
 // firAgent implements the ACP Agent interface.
@@ -109,6 +111,9 @@ func RunAcpMode(opts Options) error {
 			entry.unsubscribe()
 		}
 		entry.session.Close()
+		if entry.mcpManager != nil {
+			_ = entry.mcpManager.Close()
+		}
 	}
 
 	return nil
@@ -148,7 +153,38 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 		cwd = params.Cwd
 	}
 
-	entry, err := pa.createSession(ctx, sessionID, cwd)
+	// Merge project-level configs with request-level configs.
+	// Request-level entries take precedence over project-level ones.
+	// Only stdio transport is supported; non-stdio entries are logged and skipped.
+	mcpConfigs := loadProjectMCPConfigs(cwd)
+	if mcpConfigs == nil && len(params.McpServers) > 0 {
+		mcpConfigs = make(map[string]mcp.ServerConfig)
+	}
+	for _, mcpServer := range params.McpServers {
+		if mcpServer.Stdio == nil {
+			// Identify the server by whichever transport the SDK parsed.
+			var serverName string
+			switch {
+			case mcpServer.Http != nil:
+				serverName = mcpServer.Http.Name
+			case mcpServer.Sse != nil:
+				serverName = mcpServer.Sse.Name
+			}
+			fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q uses unsupported transport (only stdio is supported); skipping\n", serverName)
+			continue
+		}
+		envs := map[string]string{}
+		for _, v := range mcpServer.Stdio.Env {
+			envs[v.Name] = v.Value
+		}
+		mcpConfigs[mcpServer.Stdio.Name] = mcp.ServerConfig{
+			Command: mcpServer.Stdio.Command,
+			Args:    mcpServer.Stdio.Args,
+			Env:     envs,
+		}
+	}
+
+	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
 	if err != nil {
 		return acpsdk.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
@@ -327,7 +363,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		pa.mu.Unlock()
 	}
 
-	entry, err := pa.createSession(ctx, sessionID, cwd)
+	entry, err := pa.createSession(ctx, sessionID, cwd, loadProjectMCPConfigs(cwd))
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
@@ -353,7 +389,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 // Session creation
 // ============================================================================
 
-func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string) (*firSession, error) {
+func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
 	agentDir := core.DefaultAgentDir()
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
@@ -398,6 +434,17 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string) (*
 		}
 	}
 
+	// Start MCP servers and append their tools.
+	var mcpMgr *mcp.Manager
+	if len(mcpConfigs) > 0 {
+		mcpMgr = mcp.NewManager(mcpConfigs)
+		mcpTools, err := mcpMgr.Start(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("start MCP servers: %w", err)
+		}
+		toolList = append(toolList, mcpTools...)
+	}
+
 	result, err := core.CreateAgentSession(ctx, core.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
@@ -422,6 +469,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string) (*
 		cwd:           cwd,
 		agentDir:      agentDir,
 		termState:     newTerminalState(),
+		mcpManager:    mcpMgr,
 	}
 
 	unsub := result.Session.Subscribe(func(event core.AgentSessionEvent) {
@@ -445,6 +493,22 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string) (*
 	pa.mu.Unlock()
 
 	return entry, nil
+}
+
+// loadProjectMCPConfigs reads `.fir/mcp.json` from the working directory and
+// returns any MCP server configurations found. Returns nil if the file does
+// not exist. Logs a warning to stderr if the file exists but cannot be read
+// or parsed, so the user knows why no MCP servers were started.
+func loadProjectMCPConfigs(cwd string) map[string]mcp.ServerConfig {
+	cfg, err := mcp.LoadConfigFile(filepath.Join(cwd, ".fir", "mcp.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fir: warning: %v — no MCP servers will be started\n", err)
+		return nil
+	}
+	if cfg == nil {
+		return nil
+	}
+	return cfg.MCPServers
 }
 
 // createAcpTools creates tools with ACP delegation based on client capabilities.

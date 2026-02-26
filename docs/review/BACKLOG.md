@@ -1,112 +1,60 @@
-# Review Backlog — 2026-02-25
+# Review Backlog — 2026-02-26
 
-**Last reviewed:** Review cycle 126, 2026-02-25 14:44 PST
-**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 23 packages pass)
-**Files reviewed this cycle:**
-- `pkg/tui/keys.go` — Added `matchesModifyOtherKeys` calls in single-letter/symbol section
-- `pkg/tui/keys_test.go` — Added 6 modifyOtherKeys tests for shift/ctrl/alt combos
-- `pkg/tui/terminal.go` — Added `isKittyCompatibleTerminal()`, modifyOtherKeys enable/disable on Start/Stop
-- `pkg/tui/components/editor_test.go` — Added `keyShiftEnterModOther` constant and `TestEditor_NewLine_ModifyOtherKeys`
+**Last reviewed:** MCP watch cycle 3, 2026-02-26 04:23 PST
+**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 24 packages pass)
+**Commit reviewed this cycle:** `2988bbe` test(mcp): comprehensive e2e tests with real stdio subprocess
 
 ---
 
-## Simplification
+## Open Issues
 
-_(no open items)_
+### Simplification
 
-## Security
+- **[STYLE]** `pkg/modes/acp/acp.go:NewSession` merge loop — nil-map init was
+  previously inside the loop; fixed in `2a0f1e6`. Current code is clear. ✅
 
-_(no open items)_
+### Test Coverage
 
-## Test Coverage
+- **[WEAK ASSERTION]** `TestACP_E2E_MCP_ToolsAppearInSession` tool-call check
+  (only when `FIR_E2E_AGENT_DIR` is set): the `ToolCallUpdate != nil` branch
+  sets `gotMCPTool = true` for *any* tool-call update, not just
+  `mcp__echo-srv__echo`. False positive possible if another tool fires first.
+  Impact: low (test only logs on failure, doesn't call `t.Error`). Worth tightening.
 
-_(no open items)_
+---
 
-## Correctness
+## Resolved This Cycle ✅
 
-_(no open items)_
+- **✅ FIXED 616f1b5** `TestRawConnMethodHandler_SessionNew_AcceptsMcpServers` hung 70 s:
+  used `context.Background()` with a real `npx` command.  
+  Fixed: `false` command + 5 s context timeout. Test: 70.4 s → 0.00 s.
 
-## Hygiene
+- **✅ FIXED 616f1b5** `acp.go:NewSession` nil dereference on non-stdio MCP servers:
+  `mcpServer.Stdio` was accessed unconditionally; nil for HTTP/SSE entries.  
+  Fixed: skip with stderr warning + `TestRawConnMethodHandler_SessionNew_NonStdioMCPServerSkipped`.
 
-_(no open items)_
+- **✅ FIXED a646bc6** `acp_mcp_e2e_test.go` wrong `mcpServers` JSON format:
+  all three tests sent `{name: {...}}` (JSON object) but SDK expects `[{...}]` (array).
+  `ToolsAppearInSession` also sent `env` as `map[string]string` instead of
+  `[{name,value}]`. Fixed to correct array format throughout.
 
 ---
 
 ## Previously Resolved (all ✅)
 
-- `pkg/tui/keys.go:373` + `editor.go:1163` — `funcCodes` missing `13: cpEnter`; editor had hardcoded `\x1b[13;2~` workaround — ✅ FIXED 2026-02-25 (added `13: cpEnter` to funcCodes; removed editor special-case; added `TestMatchesKey_CSITilde_ShiftEnter`)
-- `pkg/tui/components/editor.go:1163` — `data == "\x1b[13;2~"` hardcoded special case — ✅ FIXED 2026-02-25 (subsumed by funcCodes fix above)
-- `pkg/tui/terminal.go:DrainInput` — `lastData`/`maxMs` dead code; loop always exits after first idleMs sleep — ✅ FIXED 2026-02-25 (simplified to a single `time.Sleep(idleMs)`)
-- `pkg/tui/terminal.go:isKittyCompatibleTerminal` — unexported, untested — ✅ FIXED 2026-02-25 (6 tests added covering KITTY_WINDOW_ID, Ghostty, WezTerm, xterm-kitty, case-insensitivity, unknown)
-- `pkg/tui/keys_test.go:TestMatchesKey_CtrlBracket` — no-op test (empty `if` body, no `t.Error`) — ✅ FIXED 2026-02-25 (added `t.Error` call)
-- `pkg/tui/keys.go` + `pkg/tui/tui.go` — Buffered keystrokes silently dropped when renders block stdin reader — ✅ FIXED 2026-02-23 (`SplitKeySequences` splits raw stdin reads into individual sequences before dispatch; `TestTUI_HandleInput_BufferedBackspaces` + 11 unit tests added)
-- `pkg/tui/components/input.go:534-559` — `Render()` scrolling mixed byte offsets with display-column widths — ✅ FIXED 2026-02-23 (scroll logic now uses `tui.VisibleWidth`/`tui.SliceByColumn`; `TestInput_ScrollingRenderMultiByte` regression test added)
-- `pkg/tui/components/input.go` — `handleBackspace`/`handleForwardDelete` push undo on every keystroke — ✅ FIXED 2026-02-23 (consecutive presses batched into one undo entry per run, matching `insertCharacter`'s word-boundary logic)
-- `pkg/tui/components/input.go:88-92` — `UndoStack.Push` doesn't zero the evicted slot — ✅ FIXED 2026-02-23 (`u.items[0] = zero` before re-slice so strings are promptly released)
-- `pkg/modes/interactive/theme/theme.go:555-590` — `loadEmbeddedTheme`/`embeddedThemeNames`/`GetAvailableThemes`/`InitTheme` tests added — ✅ FIXED 2026-02-23 (`TestEmbeddedThemeNames`, `TestLoadEmbeddedTheme_Valid/Invalid`, `TestGetAvailableThemes_IncludesEmbedded`, `TestInitTheme_EmbeddedTheme`)
-- `pkg/modes/interactive/mode.go:265-283` — `formatDiagnostics` non-deterministic map iteration — ✅ FIXED 2026-02-23: sort group names before iterating
-- `pkg/modes/interactive/theme/theme.go:544-546` — `OnThemeChange`/`onThemeChangeCb` dead code removed — ✅ FIXED 2026-02-23
-- `pkg/modes/interactive/theme/theme_test.go:92-94` — `TestGetTheme_LazyInit` direct global mutation without mutex — ✅ FIXED 2026-02-23
-- `cmd/fir/app.go:374` — `runExport` had no unit test; added `TestRunExport_RequiresSession` and `TestRunExport_ExportsToFile` — ✅ FIXED 2026-02-23
-- `cmd/fir/app.go:551-563` — `--no-themes` only suppressed CLI `--theme` paths; now disables all theme discovery (option a) — ✅ FIXED 2026-02-23
-- `pkg/modes/rpc/server.go` — `get_messages` returned `null` instead of `[]` for empty sessions — ✅ FIXED 2026-02-23
-- `cmd/fir/app.go` — `--export <file>` CLI flag never handled; now implemented via `runExport()` — ✅ FIXED 2026-02-23
-- `cmd/fir/app.go:529` — `settingsManager.GetThemePaths()` not included in `themeSearchDirs` — ✅ FIXED 2026-02-23
-- `pkg/core/modelresolver.go:223` — `ResolveCliModel` has no unit tests — ✅ FIXED cycle 110 (8 tests added: Empty, ExactID, ProviderSlashModel, ExplicitProvider, UnknownProvider, ModelNotFound, OpenRouterSlashID, ThinkingLevel)
-- `pkg/core/modelresolver.go:175` — `parseModelPatternStrict` (allowFallback=false) untested — ✅ FIXED cycle 110 (`TestParseModelPatternStrict_InvalidThinkingLevel_NoFallback`)
-- `pkg/modes/acp/conn.go:67-75` — marshal/unmarshal errors silently swallowed in `initialize` → null ACP handshake response — ✅ FIXED 2026-02-22
-- `pkg/modes/interactive/mode.go` — `cycleModel`/`handleFork`/`handleForkByNumber` no tests — ✅ FIXED 2026-02-22
-- `pkg/core/export.go` — `ExportToHTML` duplicate create/write/close branches — ✅ FIXED (cycle 97)
-- `pkg/modes/interactive/mode.go:1156` — `append(queued, current)` slice capacity footgun — ✅ FIXED (cycle 97): `make+copy`
-- `pkg/modes/interactive/mode.go:1806` — `proc` data race in `performShare` — ✅ FIXED (cycle 96): `atomic.Pointer[exec.Cmd]`
-- `pkg/core/changelog.go:cmpInt` — reimplements `cmp.Compare` — ✅ FIXED (ce07547)
-- `pkg/modes/interactive/mode.go` — `handleDequeue`/`handleExternalEditor`/`handleClipboardImagePaste`/`performShare` untested — ✅ FIXED (ce07547)
-- `pkg/modes/interactive/mode.go` — `showScopedModelsSelector` stub — ✅ FIXED (ce07547)
-- `pkg/modes/acp/terminal.go` — `pendingBashTerminals` leak on cancel/resume/shutdown — ✅ FIXED (ce07547)
-- `pkg/core/agentsession.go` — `SetScopedModels`/`ScopedModelsRef` no mutex — ✅ FIXED (ce07547)
-- `pkg/core/export.go` — `ExportToHTML` no unit test — ✅ FIXED (ce07547)
-- `pkg/modes/interactive/components/tree_selector.go` — `SetOnLabelEdit`/`SetInitialSelection` no tests — ✅ FIXED (ce07547)
-- `pkg/modes/interactive/components/session_selector.go` — `SortRelevance` case missing; `FilterAndSortSessions` never called — ✅ FIXED 2026-02-22
-- `pkg/extensions/tmuxspinner/tmuxspinner_test.go:87-92` — unnecessary `ClearRegistry` calls — ✅ FIXED 2026-02-21
-- `pkg/modes/interactive/components/session_selector_search.go:161` — Dead `if inQuote { flush(TokenPhrase) }` branch — ✅ FIXED 2026-02-21
-- `pkg/core/agentsession.go:255-261` — `emit` RLock held during callbacks (deadlock risk) — ✅ FIXED 2026-02-20
-- `pkg/modes/print/print.go:87-91` — `os.Exit(1)` inside library function — ✅ FIXED 2026-02-20
-- `pkg/core/session.go:687` — `panic` in `CreateBranchedSession` — ✅ FIXED 2026-02-20
-- `pkg/core/modelregistry.go:779-815` — Four `panic` calls in `applyProviderConfig` — ✅ FIXED 2026-02-20
-- `pkg/modes/print/print_test.go` — `Run` function had zero coverage — ✅ FIXED 2026-02-20
-- `pkg/ai/providers/codex_websocket.go:138-169` — `wsInflight` coalescing path untested — ✅ FIXED 2026-02-20
-- `pkg/core/sdk.go:81-87` — Unnecessary auth-path complexity — ✅ FIXED 2026-02-20
-- `pkg/extensions/claudeusage/client.go:80-84` — `progressBar` manual clamping → `max`/`min` builtins — ✅ FIXED 2026-02-18
-- `pkg/extensions/claudeusage/client.go:44` — `http.DefaultClient` → `httpClient` with 10s timeout — ✅ FIXED 2026-02-18
-- `pkg/modes/acp/acp.go:ResumeSession` — duplicate session/resume leaked resources — ✅ FIXED
-- `pkg/core/tools/read.go:148` — `getExtension` reimplements `filepath.Ext` — ✅ FIXED
-- `EditReadFn` / `ReadFileFn` duplicate type — ✅ FIXED
-- `NewEditToolWithReadWriter` duplicated edit algorithm — ✅ FIXED
-- `WithLockAsync` misleading name — ✅ FIXED
-- `NewBashToolWithPrefix` no test — ✅ FIXED
-- `NewReadToolWithReader` no test — ✅ FIXED
-- `NewWriteToolWithWriter` no test — ✅ FIXED
-- `NewEditToolWithReadWriter` no test — ✅ FIXED
-- `ModeACP` not tested in `checkModelAvailable` — ✅ FIXED
-- `resolveTools` unknown tool warning — ✅ FIXED
-- `UnknownFlags` never populated — ✅ FIXED
-- `SendMessage`/`SendUserMessage` stubbed — ✅ FIXED
-- `TurnStartEvent.TurnIndex/Timestamp always zero` — ✅ FIXED (2026-02-19)
-- `TurnEndEvent.TurnIndex always zero` — ✅ FIXED (2026-02-19)
-- `ShouldCompact contextWindow==0 triggers compaction` — ✅ FIXED (2026-02-19)
-- `pkg/modes/interactive/components/session_selector.go` — Visible-window centering wrong — ✅ FIXED 2026-02-21
-- `pkg/extension/runner.go:EmitInput` — Panics silently discarded — ✅ FIXED 2026-02-19
-- `pkg/core/compaction/runner.go:GetStats` — No unit tests — ✅ FIXED 2026-02-19
-- `pkg/extension/integration.go:173-189` — Double-wrapping of tools — ✅ FIXED 2026-02-19
-- `pkg/modes/interactive/mode.go:compactionFormatTokens/compactionLoaderLabel` — No unit tests — ✅ FIXED 2026-02-19
-- `pkg/modes/rpc/server.go:168` — `AutoCompactionEnabled: true` hardcoded — ✅ FIXED 2026-02-18
-- `pkg/modes/rpc/server.go` — `Run()` exits before prompt goroutine completes — ✅ FIXED 2026-02-18
-- `pkg/ai/oauth/github_copilot.go` — Various functions untested — ✅ FIXED 2026-02-18
-- `pkg/modes/rpc/server_html_export.go` — No unit tests — ✅ FIXED 2026-02-18 (moved to `pkg/core/export.go`)
-- `pkg/modes/interactive/components/tree_selector.go:716-720` — `math.Max`/`math.Min` — ✅ FIXED 2026-02-18
-- `pkg/modes/rpc/server.go:154` — `CmdAbort` called `Close()` instead of `Abort()` — ✅ FIXED 2026-02-18
-- `pkg/core/tools/imageresize.go:148` — last-resort fallback path untested — ✅ FIXED 2026-02-18
-- `pkg/tui/components/editor.go:713,740` — `math.Max` used instead of builtin `max()` — ✅ FIXED 2026-02-18
-- `pkg/modes/acp/acp.go:1162` — `parseInt` reimplemented instead of `strconv.Atoi` — ✅ FIXED 2026-02-18
-- `pkg/ai/providers/codex_websocket.go` — mapCodexEvent duplication, TOCTOU race — ✅ FIXED 2026-02-20
-- `pkg/ai/providers/google_gemini_cli.go` — mergeHeaders mutated in-place — ✅ FIXED 2026-02-20
+### Cycle 1–2
+
+- **✅ FIXED ef4f139** `pkg/mcp/client.go:commandTransport` — `cmd.Env` not seeded
+  with `os.Environ()`. Tests: `TestCommandTransport_EnvInheritsParent` +
+  `TestCommandTransport_EmptyCommand`.
+- **✅ FIXED 329d5c9** `pkg/mcp/tool_adapter_test.go` — `convertResult` default
+  branch untested. Added `TestConvertResult_UnknownContentType`.
+- **✅ NOTED** `docs/plan/16-mcp-support.md` described non-existent SDK fields.
+  Fixed upstream in `504e9f5`.
+- **✅ FIXED 2a44062** `loadProjectMCPConfigs` — silent nil on parse error; now
+  warns to stderr.
+
+### Earlier (pre-MCP)
+
+*(full list retained in git history)*
+

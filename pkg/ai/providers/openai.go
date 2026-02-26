@@ -52,9 +52,9 @@ type openaiToolCallFunc struct {
 }
 
 type openaiUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
 	PromptTokensDetails *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
@@ -281,11 +281,7 @@ func streamOpenAIHTTP(
 		return fmt.Errorf("building request: %w", err)
 	}
 
-	baseURL := model.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
-	}
-	url := strings.TrimRight(baseURL, "/") + "/v1/chat/completions"
+	url := openAIChatCompletionsURL(model.BaseURL)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {

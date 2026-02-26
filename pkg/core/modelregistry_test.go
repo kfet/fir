@@ -779,8 +779,8 @@ func TestModelRegistry_CompatOverride(t *testing.T) {
 }
 
 func TestModelRegistry_DefaultModelsJsonPath(t *testing.T) {
-	path := DefaultModelsJsonPath("/home/user/.config/fi")
-	expected := filepath.Join("/home/user/.config/fi", "models.json")
+	path := DefaultModelsJsonPath("/home/user/.config/fir")
+	expected := filepath.Join("/home/user/.config/fir", "models.json")
 	if path != expected {
 		t.Errorf("expected %q, got %q", expected, path)
 	}

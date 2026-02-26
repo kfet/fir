@@ -1,8 +1,18 @@
-# URGENT — 2026-02-23
+# URGENT — 2026-02-25
 
 ## Active Issues
 
-_(none — cycle 126: build clean, all packages pass, no urgent issues)_
+_(none — MCP watch cycle 1: env bug fixed, build green, all packages pass)_
+
+---
+
+## Recently Fixed ✅
+
+### `pkg/mcp/client.go:commandTransport` — subprocess env drops `os.Environ()` ✅ FIXED ef4f139
+- When cfg.Env was non-empty, `cmd.Env` became a non-nil slice with only the listed vars,
+  stripping PATH, HOME, and the entire parent environment from the subprocess.
+- Fixed by adding `cmd.Env = os.Environ()` before the loop.
+- Tests: `TestCommandTransport_EnvInheritsParent`, `TestCommandTransport_EmptyCommand`
 
 ---
 
