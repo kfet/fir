@@ -1,10 +1,12 @@
-# Review Backlog — 2026-02-23
+# Review Backlog — 2026-02-25
 
-**Last reviewed:** Review cycle 123, 2026-02-23 22:02 PST
+**Last reviewed:** Review cycle 126, 2026-02-25 14:44 PST
 **Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 23 packages pass)
 **Files reviewed this cycle:**
-- `pkg/modes/interactive/mode_test.go` — `TestInteractiveMode_Init_PrePopulatesHistoryFromSession` added; correctly verifies cycle-119 `Init()` pre-population path. Test passes.
-**Open items: 0**
+- `pkg/tui/keys.go` — Added `matchesModifyOtherKeys` calls in single-letter/symbol section
+- `pkg/tui/keys_test.go` — Added 6 modifyOtherKeys tests for shift/ctrl/alt combos
+- `pkg/tui/terminal.go` — Added `isKittyCompatibleTerminal()`, modifyOtherKeys enable/disable on Start/Stop
+- `pkg/tui/components/editor_test.go` — Added `keyShiftEnterModOther` constant and `TestEditor_NewLine_ModifyOtherKeys`
 
 ---
 
@@ -32,7 +34,11 @@ _(no open items)_
 
 ## Previously Resolved (all ✅)
 
-- `pkg/modes/interactive/mode.go:Init()` — No test for `Init()` with pre-existing session messages — ✅ FIXED 2026-02-23 (`TestInteractiveMode_Init_PrePopulatesHistoryFromSession` added)
+- `pkg/tui/keys.go:373` + `editor.go:1163` — `funcCodes` missing `13: cpEnter`; editor had hardcoded `\x1b[13;2~` workaround — ✅ FIXED 2026-02-25 (added `13: cpEnter` to funcCodes; removed editor special-case; added `TestMatchesKey_CSITilde_ShiftEnter`)
+- `pkg/tui/components/editor.go:1163` — `data == "\x1b[13;2~"` hardcoded special case — ✅ FIXED 2026-02-25 (subsumed by funcCodes fix above)
+- `pkg/tui/terminal.go:DrainInput` — `lastData`/`maxMs` dead code; loop always exits after first idleMs sleep — ✅ FIXED 2026-02-25 (simplified to a single `time.Sleep(idleMs)`)
+- `pkg/tui/terminal.go:isKittyCompatibleTerminal` — unexported, untested — ✅ FIXED 2026-02-25 (6 tests added covering KITTY_WINDOW_ID, Ghostty, WezTerm, xterm-kitty, case-insensitivity, unknown)
+- `pkg/tui/keys_test.go:TestMatchesKey_CtrlBracket` — no-op test (empty `if` body, no `t.Error`) — ✅ FIXED 2026-02-25 (added `t.Error` call)
 - `pkg/tui/keys.go` + `pkg/tui/tui.go` — Buffered keystrokes silently dropped when renders block stdin reader — ✅ FIXED 2026-02-23 (`SplitKeySequences` splits raw stdin reads into individual sequences before dispatch; `TestTUI_HandleInput_BufferedBackspaces` + 11 unit tests added)
 - `pkg/tui/components/input.go:534-559` — `Render()` scrolling mixed byte offsets with display-column widths — ✅ FIXED 2026-02-23 (scroll logic now uses `tui.VisibleWidth`/`tui.SliceByColumn`; `TestInput_ScrollingRenderMultiByte` regression test added)
 - `pkg/tui/components/input.go` — `handleBackspace`/`handleForwardDelete` push undo on every keystroke — ✅ FIXED 2026-02-23 (consecutive presses batched into one undo entry per run, matching `insertCharacter`'s word-boundary logic)

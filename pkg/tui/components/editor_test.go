@@ -30,7 +30,8 @@ const (
 	keyCtrlY     = "\x19"
 	keyCtrlMinus = "\x1f"
 	keyCtrlRBrk  = "\x1d"
-	keyShiftEnter = "\x1b[13;2~"
+	keyShiftEnter          = "\x1b[13;2~"
+	keyShiftEnterModOther  = "\x1b[27;2;13~"
 )
 
 // ---------------------------------------------------------------------------
@@ -265,6 +266,23 @@ func TestEditor_NewLine(t *testing.T) {
 	e := newTestEditor()
 	e.SetText("hello")
 	e.HandleInput(keyShiftEnter)
+	if e.GetText() != "hello\n" {
+		t.Errorf("expected 'hello\\n', got %q", e.GetText())
+	}
+	line, col := e.GetCursor()
+	if line != 1 || col != 0 {
+		t.Errorf("cursor should be at (1,0), got (%d,%d)", line, col)
+	}
+}
+
+// TestEditor_NewLine_ModifyOtherKeys verifies that the modifyOtherKeys level-2
+// Shift+Enter sequence (\x1b[27;2;13~) correctly inserts a newline.  This is
+// the sequence emitted by xterm/iTerm2 when the terminal is put into
+// modifyOtherKeys mode (which fir now enables on startup).
+func TestEditor_NewLine_ModifyOtherKeys(t *testing.T) {
+	e := newTestEditor()
+	e.SetText("hello")
+	e.HandleInput(keyShiftEnterModOther)
 	if e.GetText() != "hello\n" {
 		t.Errorf("expected 'hello\\n', got %q", e.GetText())
 	}

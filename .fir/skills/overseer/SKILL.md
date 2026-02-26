@@ -7,6 +7,30 @@ description: "Shepherd a fleet of coding agents in tmux. Keep them productive, u
 
 You run the outer loop. You don't write code — you make sure the agents who do are effective.
 
+## API Rate-Limit Guard (check every cycle)
+
+At the start of every cycle, check the **Five Hour** (daily) utilisation:
+
+```bash
+TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
+SCRIPT=/Users/kfet/dev/ai/fir/.fir/skills/claude-usage/scripts/usage.sh
+TOKEN="$TOKEN" bash "$SCRIPT"
+```
+
+Extract the Five Hour percentage:
+```bash
+FIVE_HR=$(TOKEN="$TOKEN" bash "$SCRIPT" | awk '/Five Hour/ {gsub(/%/,"",$3); print int($3)}')
+```
+
+**If `FIVE_HR >= 65`:**
+1. Escape all agents (`send-keys Escape`) — stop any generation.
+2. Run `go build ./... && go test -count=1 ./...` — ensure project is clean and buildable.
+3. Commit any uncommitted tracked changes: `git add -u && git commit -m "chore: checkpoint before rate-limit pause"` (only if dirty).
+4. Print a clear notice and **stop the loop** — do NOT send any more tasks to agents.
+5. Notify the user via a visible terminal bell / message.
+
+Check usage every **5 cycles** (not every cycle) to avoid adding overhead.
+
 ## Rhythm
 
 Poll every 10 seconds. Each cycle is three questions:

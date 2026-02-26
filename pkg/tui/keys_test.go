@@ -244,6 +244,83 @@ func TestMatchesKey_KittyCSI_ShiftEnter(t *testing.T) {
 	}
 }
 
+// TestMatchesKey_CSITilde_ShiftEnter verifies that the CSI-tilde variant
+// \x1b[13;2~ (used by some terminals) is correctly parsed via funcCodes[13]=cpEnter.
+func TestMatchesKey_CSITilde_ShiftEnter(t *testing.T) {
+	if !MatchesKey("\x1b[13;2~", "shift+enter") {
+		t.Error("expected \\x1b[13;2~ to match shift+enter")
+	}
+	// Must not match alt+enter
+	if MatchesKey("\x1b[13;2~", "alt+enter") {
+		t.Error("\\x1b[13;2~ must not match alt+enter")
+	}
+}
+
+func TestMatchesKey_ModifyOtherKeys_ShiftEnter(t *testing.T) {
+	// modifyOtherKeys level 2: \x1b[27;2;13~ = Shift+Enter
+	// This is the sequence sent by xterm/iTerm2 with \x1b[>4;2m enabled.
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	if !MatchesKey("\x1b[27;2;13~", "shift+enter") {
+		t.Error("expected modifyOtherKeys shift+enter")
+	}
+}
+
+func TestMatchesKey_ModifyOtherKeys_AltEnter(t *testing.T) {
+	// modifyOtherKeys level 2: \x1b[27;3;13~ = Alt+Enter
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	if !MatchesKey("\x1b[27;3;13~", "alt+enter") {
+		t.Error("expected modifyOtherKeys alt+enter")
+	}
+}
+
+// TestMatchesKey_ModifyOtherKeys_ShiftEnter_NotAltEnter ensures that with
+// modifyOtherKeys the Shift+Enter sequence is NOT treated as alt+enter (which
+// would trigger ActionFollowUp instead of newline insertion).
+func TestMatchesKey_ModifyOtherKeys_ShiftEnter_NotAltEnter(t *testing.T) {
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	if MatchesKey("\x1b[27;2;13~", "alt+enter") {
+		t.Error("shift+enter modifyOtherKeys sequence must NOT match alt+enter")
+	}
+}
+
+// TestMatchesKey_ModifyOtherKeys_CtrlC verifies that tmux's xterm extended-key
+// format (\x1b[27;5;99~) for Ctrl+C is recognised correctly.
+func TestMatchesKey_ModifyOtherKeys_CtrlC(t *testing.T) {
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	if !MatchesKey("\x1b[27;5;99~", "ctrl+c") {
+		t.Error("expected \\x1b[27;5;99~ to match ctrl+c (tmux modifyOtherKeys format)")
+	}
+	// Must not fire as an unrelated key
+	if MatchesKey("\x1b[27;5;99~", "ctrl+d") {
+		t.Error("ctrl+c sequence must not match ctrl+d")
+	}
+}
+
+// TestMatchesKey_ModifyOtherKeys_CtrlD verifies that tmux's xterm extended-key
+// format (\x1b[27;5;100~) for Ctrl+D is recognised correctly.
+func TestMatchesKey_ModifyOtherKeys_CtrlD(t *testing.T) {
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	if !MatchesKey("\x1b[27;5;100~", "ctrl+d") {
+		t.Error("expected \\x1b[27;5;100~ to match ctrl+d (tmux modifyOtherKeys format)")
+	}
+}
+
+// TestMatchesKey_ModifyOtherKeys_CtrlShift verifies ctrl+shift combinations
+// in modifyOtherKeys format.
+func TestMatchesKey_ModifyOtherKeys_CtrlShift(t *testing.T) {
+	SetKittyProtocolActive(false)
+	defer SetKittyProtocolActive(false)
+	// modifier = shift(1) + ctrl(4) + 1 = 6 → \x1b[27;6;99~
+	if !MatchesKey("\x1b[27;6;99~", "ctrl+shift+c") {
+		t.Error("expected \\x1b[27;6;99~ to match ctrl+shift+c")
+	}
+}
+
 func TestMatchesKey_KittyArrow(t *testing.T) {
 	// \x1b[1;5A = ctrl+up
 	if !MatchesKey("\x1b[1;5A", "ctrl+up") {
@@ -440,10 +517,9 @@ func TestSetKittyProtocolActive(t *testing.T) {
 }
 
 func TestMatchesKey_CtrlBracket(t *testing.T) {
-	// ctrl+[ is ESC (0x1b)
+	// ctrl+[ sends ESC (0x1b) — rawCtrlChar('[') = 0x1b
 	if !MatchesKey("\x1b", "ctrl+[") {
-		// In legacy mode, ctrl+[ = ESC = \x1b
-		// Note: rawCtrlChar('[') = 0x1b
+		t.Error("expected \\x1b to match ctrl+[")
 	}
 }
 

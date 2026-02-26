@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -66,6 +67,36 @@ type ProcessTerminal struct {
 	stopped        bool
 }
 
+// isKittyCompatibleTerminal reports whether the current terminal natively
+// supports the Kitty keyboard protocol (i.e. will honour \x1b[>1u and send
+// unambiguous CSI-u sequences such as \x1b[13;2u for Shift+Enter).
+//
+// We use well-known environment variables rather than a synchronous
+// terminal query to avoid complicating startup with a read timeout.
+func isKittyCompatibleTerminal() bool {
+	// Kitty terminal itself
+	if os.Getenv("KITTY_WINDOW_ID") != "" {
+		return true
+	}
+	switch strings.ToLower(os.Getenv("TERM_PROGRAM")) {
+	case "ghostty", "wezterm":
+		return true
+	}
+	if strings.ToLower(os.Getenv("TERM")) == "xterm-kitty" {
+		return true
+	}
+	// Detect Kitty-compatible terminals through tmux/screen.
+	// When running inside tmux, TERM_PROGRAM is "tmux" but the outer
+	// terminal's env vars are still available.
+	if os.Getenv("GHOSTTY_BIN_DIR") != "" {
+		return true
+	}
+	if os.Getenv("WEZTERM_EXECUTABLE") != "" {
+		return true
+	}
+	return false
+}
+
 // NewProcessTerminal creates a new ProcessTerminal.
 func NewProcessTerminal() *ProcessTerminal {
 	return &ProcessTerminal{}
@@ -96,6 +127,34 @@ func (t *ProcessTerminal) Start(onInput func(data string), onResize func()) {
 
 	// Enable bracketed paste mode
 	os.Stdout.WriteString("\x1b[?2004h")
+
+	// Determine if we're inside tmux and whether the outer terminal supports
+	// the Kitty keyboard protocol.
+	inTmux := os.Getenv("TMUX") != ""
+	kittyCompat := isKittyCompatibleTerminal()
+
+	// Enable modifyOtherKeys level 2 so that modifier+key combos (e.g.
+	// Shift+Enter → \x1b[27;2;13~, Alt+Enter → \x1b[27;3;13~) are reported
+	// as unambiguous escape sequences rather than the legacy \x1b\r which
+	// collides with both alt+enter and shift+enter depending on the terminal.
+	//
+	// Skip this inside tmux when the outer terminal supports Kitty protocol:
+	// tmux's modifyOtherKeys implementation mangles shift+enter into ctrl+j
+	// (\x1b[27;5;106~) and takes precedence over the Kitty protocol when
+	// both are active. With Kitty-only, shift+enter correctly produces \n.
+	if !(inTmux && kittyCompat) {
+		os.Stdout.WriteString("\x1b[>4;2m")
+	}
+
+	// For terminals that implement the Kitty keyboard protocol (Ghostty,
+	// WezTerm, Kitty itself) also send the protocol activation escape.
+	// Flag 1 = "disambiguate escape codes" — the minimum needed to get
+	// unambiguous sequences like \x1b[13;2u for Shift+Enter.
+	// This is a no-op on terminals that don't support it.
+	if kittyCompat {
+		os.Stdout.WriteString("\x1b[>1u")
+		SetKittyProtocolActive(true)
+	}
 
 	// Set up SIGWINCH handler for resize
 	t.sigwinchCh = make(chan os.Signal, 1)
@@ -158,6 +217,15 @@ func (t *ProcessTerminal) Stop() {
 	// Disable bracketed paste mode
 	os.Stdout.WriteString("\x1b[?2004l")
 
+	// Disable modifyOtherKeys (safe even if we didn't enable it)
+	os.Stdout.WriteString("\x1b[>4m")
+
+	// Disable Kitty keyboard protocol if we enabled it
+	if IsKittyProtocolActive() {
+		os.Stdout.WriteString("\x1b[<u")
+		SetKittyProtocolActive(false)
+	}
+
 	// Signal goroutines to stop
 	close(t.stopCh)
 
@@ -177,32 +245,24 @@ func (t *ProcessTerminal) Stop() {
 }
 
 // DrainInput drains buffered stdin to prevent leaked escape sequences.
+// It suppresses the input handler for idleMs milliseconds, which is enough
+// time for any in-flight read to complete. maxMs is kept for interface
+// compatibility but is not used (since we cannot observe actual data arrival
+// while the handler is nil).
 func (t *ProcessTerminal) DrainInput(maxMs, idleMs int) {
-	if maxMs <= 0 {
-		maxMs = 1000
-	}
 	if idleMs <= 0 {
 		idleMs = 50
 	}
 
-	// Temporarily suppress input handling
+	// Temporarily suppress input handling while draining.
 	t.mu.Lock()
 	prevHandler := t.inputHandler
 	t.inputHandler = nil
 	t.mu.Unlock()
 
-	deadline := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
-	lastData := time.Now()
+	time.Sleep(time.Duration(idleMs) * time.Millisecond)
 
-	// Drain by sleeping in small intervals
-	for time.Now().Before(deadline) {
-		if time.Since(lastData) >= time.Duration(idleMs)*time.Millisecond {
-			break
-		}
-		time.Sleep(time.Duration(idleMs) * time.Millisecond)
-	}
-
-	// Restore handler
+	// Restore handler.
 	t.mu.Lock()
 	t.inputHandler = prevHandler
 	t.mu.Unlock()

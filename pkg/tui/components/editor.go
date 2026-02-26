@@ -1160,7 +1160,6 @@ func (e *Editor) HandleInput(data string) {
 	if kb.matches(data, ActNewLine) ||
 		(data[0] == 10 && len(data) > 1) ||
 		data == "\x1b\r" ||
-		data == "\x1b[13;2~" ||
 		(len(data) > 1 && strings.Contains(data, "\x1b") && strings.Contains(data, "\r")) ||
 		(data == "\n" && len(data) == 1) {
 		if e.shouldSubmitOnBackslashEnter(data, kb) {

@@ -2,7 +2,7 @@
 
 ## Active Issues
 
-_(none — cycle 125: build clean, all packages pass, no urgent issues)_
+_(none — cycle 126: build clean, all packages pass, no urgent issues)_
 
 ---
 

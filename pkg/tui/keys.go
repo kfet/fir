@@ -370,7 +370,7 @@ func parseKittySequence(data string) *parsedKittySequence {
 			modVal, _ = strconv.Atoi(m[2])
 		}
 		et := parseEventType(m[3])
-		funcCodes := map[int]int{2: cpInsert, 3: cpDelete, 5: cpPageUp, 6: cpPageDown, 7: cpHome, 8: cpEnd}
+		funcCodes := map[int]int{2: cpInsert, 3: cpDelete, 5: cpPageUp, 6: cpPageDown, 7: cpHome, 8: cpEnd, 13: cpEnter}
 		if cp, ok := funcCodes[keyNum]; ok {
 			return &parsedKittySequence{codepoint: cp, modifier: modVal - 1, eventType: et}
 		}
@@ -740,18 +740,30 @@ func MatchesKey(data string, keyID KeyID) bool {
 				if rc != "" && data == rc {
 					return true
 				}
+				if matchesModifyOtherKeys(data, codepoint, modCtrl) {
+					return true
+				}
 				return matchesKittySequence(data, codepoint, modCtrl)
 			}
 			if ctrl && shift && !alt {
+				if matchesModifyOtherKeys(data, codepoint, modShift+modCtrl) {
+					return true
+				}
 				return matchesKittySequence(data, codepoint, modShift+modCtrl)
 			}
 			if shift && !ctrl && !alt {
 				if data == strings.ToUpper(key) {
 					return true
 				}
+				if matchesModifyOtherKeys(data, codepoint, modShift) {
+					return true
+				}
 				return matchesKittySequence(data, codepoint, modShift)
 			}
 			if modifier != 0 {
+				if matchesModifyOtherKeys(data, codepoint, modifier) {
+					return true
+				}
 				return matchesKittySequence(data, codepoint, modifier)
 			}
 			return data == key || matchesKittySequence(data, codepoint, 0)

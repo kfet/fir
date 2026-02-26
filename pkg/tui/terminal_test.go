@@ -129,3 +129,81 @@ func TestProcessTerminal_Implements(t *testing.T) {
 	var _ Terminal = &ProcessTerminal{}
 	var _ Terminal = &MockTerminal{}
 }
+
+func TestIsKittyCompatibleTerminal_KittyWindowID(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "42")
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("TERM", "")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true when KITTY_WINDOW_ID is set")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_Ghostty(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "Ghostty")
+	t.Setenv("TERM", "")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for TERM_PROGRAM=Ghostty")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_GhosttyLowercase(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "ghostty")
+	t.Setenv("TERM", "")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for TERM_PROGRAM=ghostty (case-insensitive)")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_WezTerm(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "WezTerm")
+	t.Setenv("TERM", "")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for TERM_PROGRAM=WezTerm")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_XtermKitty(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "")
+	t.Setenv("TERM", "xterm-kitty")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for TERM=xterm-kitty")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_Unknown(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "iTerm.app")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("GHOSTTY_BIN_DIR", "")
+	t.Setenv("WEZTERM_EXECUTABLE", "")
+	if isKittyCompatibleTerminal() {
+		t.Error("expected false for an ordinary terminal")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_GhosttyViaTmux(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "tmux")
+	t.Setenv("TERM", "screen-256color")
+	t.Setenv("GHOSTTY_BIN_DIR", "/Applications/Ghostty.app/Contents/MacOS")
+	t.Setenv("WEZTERM_EXECUTABLE", "")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for Ghostty detected via GHOSTTY_BIN_DIR inside tmux")
+	}
+}
+
+func TestIsKittyCompatibleTerminal_WezTermViaTmux(t *testing.T) {
+	t.Setenv("KITTY_WINDOW_ID", "")
+	t.Setenv("TERM_PROGRAM", "tmux")
+	t.Setenv("TERM", "screen-256color")
+	t.Setenv("GHOSTTY_BIN_DIR", "")
+	t.Setenv("WEZTERM_EXECUTABLE", "/usr/bin/wezterm")
+	if !isKittyCompatibleTerminal() {
+		t.Error("expected true for WezTerm detected via WEZTERM_EXECUTABLE inside tmux")
+	}
+}

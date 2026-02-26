@@ -82,6 +82,21 @@ func (ce *CustomEditor) HandleInput(data string) {
 		// Fall through to editor handling for delete-char-forward when not empty
 	}
 
+	// \x1b\r is ambiguous in legacy (non-Kitty) terminals: it means "alt+enter"
+	// in MatchesKey, but legacy terminals that don't support modifyOtherKeys or
+	// the Kitty protocol also send it for shift+enter. Prefer shift+enter
+	// (newline insertion) over alt+enter (follow-up) for this sequence because:
+	//   1. fir always enables modifyOtherKeys (\x1b[>4;2m); terminals that
+	//      support it will send \x1b[27;3;13~ for alt+enter, so \x1b\r only
+	//      arrives from truly legacy terminals where shift+enter is expected.
+	//   2. The editor's built-in newline handler recognises \x1b\r explicitly.
+	// In Kitty mode \x1b\r is unambiguously shift+enter and is handled
+	// correctly already (alt+enter won't match it there).
+	if data == "\x1b\r" {
+		ce.Editor.HandleInput(data)
+		return
+	}
+
 	// Check all other app actions
 	for action, handler := range ce.actionHandlers {
 		if action != core.ActionInterrupt && action != core.ActionExit && ce.keybindings.Matches(data, action) {
