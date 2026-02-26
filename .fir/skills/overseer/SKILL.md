@@ -9,7 +9,7 @@ You run the outer loop. You don't write code — you make sure the agents who do
 
 ## API Rate-Limit Guard (check every cycle)
 
-At the start of every cycle, check the **Five Hour** (daily) utilisation:
+At the start of every cycle, check rate-limit utilisation:
 
 ```bash
 TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
@@ -17,14 +17,16 @@ SCRIPT=/Users/kfet/dev/ai/fir/.fir/skills/claude-usage/scripts/usage.sh
 TOKEN="$TOKEN" bash "$SCRIPT"
 ```
 
-Extract the Five Hour percentage and reset time:
+Extract both Five Hour and Seven Day percentages and reset times:
 ```bash
 USAGE_OUT=$(TOKEN="$TOKEN" bash "$SCRIPT")
 FIVE_HR=$(echo "$USAGE_OUT" | awk '/Five Hour/ {gsub(/%/,"",$3); print int($3)}')
-RESET_TIME=$(echo "$USAGE_OUT" | awk '/Five Hour/ {print $NF}')   # e.g. "11:00 PM PST"
+FIVE_HR_RESET=$(echo "$USAGE_OUT" | awk '/Five Hour/ {print $NF}')   # e.g. "11:00 PM PST"
+SEVEN_DAY=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {gsub(/%/,"",$3); print int($3)}')
+SEVEN_DAY_RESET=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {print $NF}')   # e.g. "10:00 PM PST"
 ```
 
-**If `FIVE_HR >= 85`:**
+**If `FIVE_HR >= 85` or `SEVEN_DAY >= 95`:**
 1. Escape all agents (`send-keys Escape`) — stop any generation.
 2. Run `go build ./... && go test -count=1 ./...` — ensure project is clean and buildable.
 3. Commit any uncommitted tracked changes: `git add -u && git commit -m "chore: checkpoint before rate-limit pause"` (only if dirty).
@@ -34,21 +36,35 @@ RESET_TIME=$(echo "$USAGE_OUT" | awk '/Five Hour/ {print $NF}')   # e.g. "11:00 
    - Build health (all green / any failures)
    - URGENT and BACKLOG open item counts
    - Which agents were active and what they were doing
-5. Print a clear notice with the reset time:
+5. Print a clear notice with the reset time(s):
    ```
-   ⛔ Rate limit at ${FIVE_HR}% — pausing all agents.
-   📅 Five Hour window resets at ${RESET_TIME}.
-   ⏰ Will resume 2 minutes after reset.
+   ⛔ Rate limit at FIVE_HR=${FIVE_HR}%, SEVEN_DAY=${SEVEN_DAY}% — pausing all agents.
+   📅 Five Hour window resets at ${FIVE_HR_RESET}.
+   📅 Seven Day window resets at ${SEVEN_DAY_RESET}.
+   ⏰ Will resume 2 minutes after the next window reset.
    ```
-6. Compute seconds until reset + 2 minutes and sleep:
+6. Compute seconds until the next reset + 2 minutes and sleep (use whichever window resets sooner):
    ```bash
-   # Parse reset time and sleep until reset + 2 min
-   RESET_EPOCH=$(date -j -f "%I:%M %p" "$RESET_CLOCK" "+%s" 2>/dev/null \
-     || date -d "$RESET_CLOCK" "+%s")   # macOS vs Linux
+   # Parse reset times and determine which one comes first
+   FIVE_HR_EPOCH=$(date -j -f "%I:%M %p" "$FIVE_HR_RESET" "+%s" 2>/dev/null \
+     || date -d "$FIVE_HR_RESET" "+%s")   # macOS vs Linux
+   SEVEN_DAY_EPOCH=$(date -j -f "%I:%M %p" "$SEVEN_DAY_RESET" "+%s" 2>/dev/null \
+     || date -d "$SEVEN_DAY_RESET" "+%s")
    NOW=$(date +%s)
-   WAIT=$(( RESET_EPOCH - NOW + 120 ))
-   [ "$WAIT" -lt 0 ] && WAIT=$(( WAIT + 86400 ))  # next day if already past
-   echo "Sleeping ${WAIT}s (~$((WAIT/60)) min) until ${RESET_TIME} + 2 min..."
+   FIVE_HR_WAIT=$(( FIVE_HR_EPOCH - NOW + 120 ))
+   SEVEN_DAY_WAIT=$(( SEVEN_DAY_EPOCH - NOW + 120 ))
+   [ "$FIVE_HR_WAIT" -lt 0 ] && FIVE_HR_WAIT=$(( FIVE_HR_WAIT + 86400 ))  # next day if already past
+   [ "$SEVEN_DAY_WAIT" -lt 0 ] && SEVEN_DAY_WAIT=$(( SEVEN_DAY_WAIT + 604800 ))  # next week if already past
+   
+   # Use whichever window resets sooner
+   if [ "$FIVE_HR_WAIT" -le "$SEVEN_DAY_WAIT" ]; then
+     WAIT=$FIVE_HR_WAIT
+     RESET_AT="$FIVE_HR_RESET"
+   else
+     WAIT=$SEVEN_DAY_WAIT
+     RESET_AT="$SEVEN_DAY_RESET"
+   fi
+   echo "Sleeping ${WAIT}s (~$((WAIT/60)) min) until ${RESET_AT} + 2 min..."
    sleep "$WAIT"
    ```
 7. After waking, verify usage has dropped, then **resume the loop** — re-send tasks to any idle agents and continue monitoring.

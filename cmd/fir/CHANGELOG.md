@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Overseer skill now watches for both hourly and daily limits
+
 ## [0.8.0] - 2026-02-26
 
 ### Added
