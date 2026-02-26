@@ -59,7 +59,7 @@ Check usage every **5 cycles** (not every cycle) to avoid adding overhead.
 
 **Each project gets its own dedicated agents. Never redirect, reset, or repurpose agents from another project.**
 
-### Use a single tmux session with one window per agent
+### Use a single tmux session, with many windows - one window per agent
 
 The preferred layout is **one session named after the project, with one window per agent**:
 
