@@ -17,19 +17,121 @@ SCRIPT=/Users/kfet/dev/ai/fir/.fir/skills/claude-usage/scripts/usage.sh
 TOKEN="$TOKEN" bash "$SCRIPT"
 ```
 
-Extract the Five Hour percentage:
+Extract the Five Hour percentage and reset time:
 ```bash
-FIVE_HR=$(TOKEN="$TOKEN" bash "$SCRIPT" | awk '/Five Hour/ {gsub(/%/,"",$3); print int($3)}')
+USAGE_OUT=$(TOKEN="$TOKEN" bash "$SCRIPT")
+FIVE_HR=$(echo "$USAGE_OUT" | awk '/Five Hour/ {gsub(/%/,"",$3); print int($3)}')
+RESET_TIME=$(echo "$USAGE_OUT" | awk '/Five Hour/ {print $NF}')   # e.g. "11:00 PM PST"
 ```
 
-**If `FIVE_HR >= 65`:**
+**If `FIVE_HR >= 85`:**
 1. Escape all agents (`send-keys Escape`) — stop any generation.
 2. Run `go build ./... && go test -count=1 ./...` — ensure project is clean and buildable.
 3. Commit any uncommitted tracked changes: `git add -u && git commit -m "chore: checkpoint before rate-limit pause"` (only if dirty).
-4. Print a clear notice and **stop the loop** — do NOT send any more tasks to agents.
-5. Notify the user via a visible terminal bell / message.
+4. **Print a short progress report** before sleeping so the user knows where things stand:
+   - Phases complete vs. in-progress (from PLAN.md status line)
+   - Last 5 commits (`git log --oneline -5`)
+   - Build health (all green / any failures)
+   - URGENT and BACKLOG open item counts
+   - Which agents were active and what they were doing
+5. Print a clear notice with the reset time:
+   ```
+   ⛔ Rate limit at ${FIVE_HR}% — pausing all agents.
+   📅 Five Hour window resets at ${RESET_TIME}.
+   ⏰ Will resume 2 minutes after reset.
+   ```
+6. Compute seconds until reset + 2 minutes and sleep:
+   ```bash
+   # Parse reset time and sleep until reset + 2 min
+   RESET_EPOCH=$(date -j -f "%I:%M %p" "$RESET_CLOCK" "+%s" 2>/dev/null \
+     || date -d "$RESET_CLOCK" "+%s")   # macOS vs Linux
+   NOW=$(date +%s)
+   WAIT=$(( RESET_EPOCH - NOW + 120 ))
+   [ "$WAIT" -lt 0 ] && WAIT=$(( WAIT + 86400 ))  # next day if already past
+   echo "Sleeping ${WAIT}s (~$((WAIT/60)) min) until ${RESET_TIME} + 2 min..."
+   sleep "$WAIT"
+   ```
+7. After waking, verify usage has dropped, then **resume the loop** — re-send tasks to any idle agents and continue monitoring.
 
 Check usage every **5 cycles** (not every cycle) to avoid adding overhead.
+
+## One Fleet Per Project — Never Repurpose
+
+**Each project gets its own dedicated agents. Never redirect, reset, or repurpose agents from another project.**
+
+### Use a single tmux session with one window per agent
+
+The preferred layout is **one session named after the project, with one window per agent**:
+
+```bash
+# Create the session (first window becomes the reviewer)
+tmux -S "$SOCKET" new -d -s acp-claw -n reviewer -c /path/to/project
+
+# Add worker windows
+tmux -S "$SOCKET" new-window -t acp-claw -n worker-core  -c /path/to/project
+tmux -S "$SOCKET" new-window -t acp-claw -n worker-acp   -c /path/to/project
+tmux -S "$SOCKET" new-window -t acp-claw -n worker-telegram -c /path/to/project
+
+# Turn off auto-rename globally
+tmux -S "$SOCKET" set-option -t acp-claw -g automatic-rename off
+```
+
+Address agents as `SESSION:WINDOW` (e.g. `acp-claw:reviewer`, `acp-claw:worker-core`).
+
+To move an existing window from another session into the fleet session:
+
+```bash
+tmux -S "$SOCKET" move-window -s other-session:0 -t acp-claw
+tmux -S "$SOCKET" rename-window -t acp-claw:N new-name
+```
+
+**Why single session:** easier to attach (`tmux attach -t acp-claw`), all agents visible at once, no stray orphan sessions.
+
+### Never repurpose agents from another project
+
+Before spawning any agent, list all existing sessions and check which project they belong to:
+
+```bash
+tmux -S "$SOCKET" list-sessions
+# then for any session whose project isn't obvious:
+tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -5 | grep "~/"
+```
+
+If a session is working in a different project directory — **leave it alone**. Do not send it Escape, `/new`, `/compact`, or any task. It is not yours to manage.
+
+Spawn fresh sessions with project-scoped names to avoid confusion:
+
+```bash
+# Good — name encodes the project
+tmux -S "$SOCKET" new -d -s fir-researcher   -c /path/to/fir
+tmux -S "$SOCKET" new -d -s fir-worker-mcp   -c /path/to/fir
+tmux -S "$SOCKET" new -d -s acp-worker-core  -c /path/to/acp-claw
+
+# Bad — generic names that look reusable
+tmux -S "$SOCKET" new -d -s worker
+tmux -S "$SOCKET" new -d -s reviewer
+```
+
+**Why:** Sending `/new` to an agent mid-task wipes its entire conversation context — it forgets everything it was doing. There is no benefit to reusing agents across projects; the only bookkeeping value is having an overseer agent track which sessions belong to which project.
+
+## Research First, Code Later
+
+If a feature needs design work — a new package, a new protocol, a non-trivial integration — **launch a researcher first and wait for the plan before spawning implementation agents.**
+
+Implementation agents given a vague task waste tokens reading the same files the researcher already read, make inconsistent design decisions, and often have to be redirected. A finished plan pays for itself immediately.
+
+The sequence:
+
+1. **Start only the researcher.** Give it a clear goal: produce a plan doc and a task breakdown. Do not start workers yet.
+2. **Wait for the plan to land** — poll `git log` for the commit, or watch for the plan file:
+   ```bash
+   # poll until plan appears
+   until ls /path/to/project/docs/plan/NN-feature.md 2>/dev/null; do sleep 15; done
+   ```
+3. **Read the plan yourself** before dispatching workers. Verify it answers: which files, which interfaces, which order.
+4. **Then spawn workers**, each with a concrete task drawn directly from the plan's task breakdown. One task per agent, one commit's worth each.
+
+**Do not** pre-load workers with "read code and wait for the plan" tasks — that burns tokens on redundant reading. Cold workers start faster and cheaper once the plan is ready.
 
 ## Rhythm
 
@@ -41,14 +143,27 @@ Poll every 10 seconds. Each cycle is three questions:
 
 Act on what you find. If everything's fine, move on.
 
-After checking each agent, **rename its tmux window** to reflect what it's currently doing:
+**After checking each agent, rename its tmux window** to reflect what it's currently doing. This is mandatory every cycle — it gives you a live dashboard at a glance.
+
+Derive the label from the last visible line of the agent's output:
 
 ```bash
-tmux -S "$SOCKET" rename-window -t NAME:0 "NAME: what it's doing"
+# Using raw tmux:
+DOING=$(tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -5 \
+  | grep -v '^$\|^─\|^⟩\|%/200k' | tail -1 | cut -c1-40)
+tmux -S "$SOCKET" rename-window -t NAME:0 "NAME: ${DOING:-idle}"
+
+# Using tmux-driver helpers (tm-renamewin renames by old→new name):
+DOING=$(tm-capture SESSION:WINDOW 5 \
+  | grep -v '^$\|^─\|^⟩\|%/200k' | tail -1 | cut -c1-40)
+tmux -S "$SOCKET" rename-window -t "SESSION:WINDOW" "WINDOW: ${DOING:-idle}"
 ```
 
-Examples: `worker-core: stdio bridge`, `reviewer: inspecting WAL fix`, `worker-acp: OnReconnect hook`.
-This gives you a live dashboard at a glance.
+Examples of good window names:
+- `worker-mcp: writing client.go`
+- `reviewer: inspecting tool_adapter`
+- `worker-acp: waiting for plan`
+- `researcher: idle`
 
 ## When to intervene
 
