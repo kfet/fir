@@ -1,0 +1,165 @@
+package mcp
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// TestWatchConfig verifies that WatchConfig calls the callback when the
+// watched file is overwritten.
+func TestWatchConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+
+	initial := `{"mcpServers":{"srv":{"command":"echo"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
+
+	got := make(chan *ConfigFile, 1)
+	stop, err := WatchConfig(path, func(cfg *ConfigFile) {
+		select {
+		case got <- cfg:
+		default:
+		}
+	})
+	require.NoError(t, err)
+	defer stop()
+
+	updated := `{"mcpServers":{"srv":{"command":"cat"},"new":{"command":"ls"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(updated), 0o600))
+
+	select {
+	case cfg := <-got:
+		assert.Contains(t, cfg.MCPServers, "srv")
+		assert.Contains(t, cfg.MCPServers, "new")
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for WatchConfig callback")
+	}
+}
+
+// TestWatchConfig_StopCancels verifies that calling stop terminates the watcher.
+func TestWatchConfig_StopCancels(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600))
+
+	got := make(chan struct{}, 1)
+	stop, err := WatchConfig(path, func(_ *ConfigFile) {
+		got <- struct{}{}
+	})
+	require.NoError(t, err)
+
+	// Stop the watcher before any write — callback must not fire after stop.
+	stop()
+
+	// Give the watcher goroutine time to exit.
+	time.Sleep(50 * time.Millisecond)
+
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers":{"x":{}}}`), 0o600))
+
+	select {
+	case <-got:
+		t.Error("callback fired after stop()")
+	case <-time.After(500 * time.Millisecond):
+		// Good — no spurious callback.
+	}
+}
+
+// TestManager_Reload_RemoveServer verifies that Reload stops a server that
+// was removed from the new config.
+func TestManager_Reload_RemoveServer(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "myTool", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{
+		"srv1": {},
+		"srv2": {},
+	}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+	// Two servers × (1 tool + 4 resource/prompt tools) = 10
+	require.Len(t, tools, 10)
+
+	// Reload with srv2 removed.
+	remaining, err := mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
+	require.NoError(t, err)
+	// Only srv1's tools remain (1 + 4 = 5).
+	assert.Len(t, remaining, 5)
+
+	mgr.mu.Lock()
+	_, srv2Exists := mgr.sessions["srv2"]
+	mgr.mu.Unlock()
+	assert.False(t, srv2Exists, "srv2 session should be closed after Reload")
+}
+
+// TestManager_Reload_AddServer verifies that Reload starts a new server that
+// was not in the original config.
+func TestManager_Reload_AddServer(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "myTool", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+	// 1 server × 5 tools = 5
+	require.Len(t, tools, 5)
+
+	// Reload with srv2 added.
+	all, err := mgr.Reload(context.Background(), map[string]ServerConfig{
+		"srv1": {},
+		"srv2": {},
+	})
+	require.NoError(t, err)
+	// Both servers contribute tools (5 each = 10).
+	assert.Len(t, all, 10)
+
+	mgr.mu.Lock()
+	_, srv2Exists := mgr.sessions["srv2"]
+	mgr.mu.Unlock()
+	assert.True(t, srv2Exists, "srv2 session should exist after Reload")
+}
+
+// TestManager_Reload_Unchanged verifies that an unchanged server is not reconnected.
+func TestManager_Reload_Unchanged(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "myTool", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	connectCount := 0
+	realDial := inMemoryDial(t, server)
+	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
+	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+		connectCount++
+		return realDial(cfg)
+	}
+
+	_, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+	require.Equal(t, 1, connectCount)
+
+	// Reload with identical config — srv1 must NOT be reconnected.
+	_, err = mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, connectCount, "unchanged server should not be reconnected")
+}

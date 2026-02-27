@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -208,7 +209,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		},
 		// Re-enumerate tools when the server's tool list changes.
 		ToolListChangedHandler: func(_ context.Context, req *sdk.ToolListChangedRequest) {
-			if m.OnToolsChanged == nil || req.Session == nil {
+			if req.Session == nil {
 				return
 			}
 			// Re-list tools for this server in a background goroutine.
@@ -232,10 +233,22 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					getPromptTool(session, serverName),
 				)
 				m.mu.Lock()
+				// Guard against stale updates: only overwrite m.tools if this
+				// session is still the active session for this server. A reload
+				// may have closed the session and removed it from m.sessions
+				// between when the notification arrived and now.
+				current, stillActive := m.sessions[serverName]
+				if !stillActive || current != session {
+					m.mu.Unlock()
+					return
+				}
 				m.tools[serverName] = updated
 				all := m.allTools()
+				notify := m.OnToolsChanged
 				m.mu.Unlock()
-				m.OnToolsChanged(all)
+				if notify != nil {
+					notify(all)
+				}
 			}()
 		},
 		// Forward progress notifications to the registered update callback.
@@ -339,6 +352,90 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	return tools, nil
 }
 
+// Reload performs a live reconfiguration of the Manager with newConfigs.
+// Servers that were removed are stopped, new servers are started, and servers
+// whose config changed are stopped and restarted. Unchanged servers keep their
+// existing sessions. Returns the updated aggregate tool list.
+//
+// Reload is safe to call concurrently with tool executions in progress on
+// unchanged servers.
+func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig) ([]agent.AgentTool, error) {
+	// Determine which servers to stop (removed or changed) and which to start
+	// (new or changed). We compare configs by JSON serialisation to avoid a
+	// custom equality function.
+	m.mu.Lock()
+	oldConfigs := m.configs
+	m.mu.Unlock()
+
+	toStop := make(map[string]*sdk.ClientSession) // sessions to close
+	toStart := make(map[string]ServerConfig)      // configs to connect
+
+	for name, oldCfg := range oldConfigs {
+		if newCfg, exists := newConfigs[name]; !exists {
+			// Server removed.
+			m.mu.Lock()
+			if sess, ok := m.sessions[name]; ok {
+				toStop[name] = sess
+			}
+			m.mu.Unlock()
+		} else if !configsEqual(oldCfg, newCfg) {
+			// Server config changed — reconnect.
+			m.mu.Lock()
+			if sess, ok := m.sessions[name]; ok {
+				toStop[name] = sess
+			}
+			m.mu.Unlock()
+			toStart[name] = newCfg
+		}
+	}
+	for name, cfg := range newConfigs {
+		if _, exists := oldConfigs[name]; !exists {
+			toStart[name] = cfg
+		}
+	}
+
+	// Stop removed/changed sessions (outside the lock — Close may block).
+	for name, sess := range toStop {
+		if err := sess.Close(); err != nil {
+			slog.Warn("MCP Reload: error closing session", "server", name, "err", err)
+		}
+		m.mu.Lock()
+		delete(m.sessions, name)
+		delete(m.tools, name)
+		delete(m.serverErrors, name)
+		m.mu.Unlock()
+	}
+
+	// Update the config map.
+	m.mu.Lock()
+	m.configs = newConfigs
+	m.mu.Unlock()
+
+	// Start new/changed servers.
+	for name, cfg := range toStart {
+		_, err := m.startServer(ctx, name, cfg)
+		if err != nil {
+			m.mu.Lock()
+			m.serverErrors[name] = err
+			m.mu.Unlock()
+			slog.Warn("MCP Reload: failed to start server", "server", name, "err", err)
+		}
+	}
+
+	m.mu.Lock()
+	all := m.allTools()
+	m.mu.Unlock()
+	return all, nil
+}
+
+// configsEqual reports whether two ServerConfigs are functionally identical
+// by comparing their JSON representations.
+func configsEqual(a, b ServerConfig) bool {
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	return string(ja) == string(jb)
+}
+
 // Close closes all active MCP sessions. Returns the first error encountered,
 // but always attempts to close every session.
 func (m *Manager) Close() error {
@@ -390,4 +487,29 @@ func (m *Manager) Status() []ServerStatus {
 		return strings.Compare(a.Name, b.Name)
 	})
 	return out
+}
+
+// WatchAndReload watches path for changes to the MCP config file and
+// incrementally applies the diff:
+//   - New servers are started.
+//   - Removed servers are stopped.
+//   - Changed servers are stopped then restarted.
+//   - Unchanged servers are left alone.
+//
+// ctx is used when connecting to newly added or changed servers.
+// Returns a stop function that terminates the file watcher.
+func (m *Manager) WatchAndReload(ctx context.Context, path string) (stop func(), err error) {
+	return WatchConfig(path, func(newCfg *ConfigFile) {
+		tools, reloadErr := m.Reload(ctx, newCfg.MCPServers)
+		if reloadErr != nil {
+			slog.Warn("mcp: config reload failed", "path", path, "err", reloadErr)
+			return
+		}
+		m.mu.Lock()
+		notify := m.OnToolsChanged
+		m.mu.Unlock()
+		if notify != nil {
+			notify(tools)
+		}
+	})
 }

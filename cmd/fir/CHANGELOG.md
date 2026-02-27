@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- MCP: hot reload — `WatchAndReload` watches `mcp.json` for changes and incrementally starts/stops servers; new servers connected, removed servers closed, changed servers restarted, unchanged left alone
+- MCP: `NewToolServer` exposes fir `agent.AgentTool` values as an MCP server, enabling external MCP clients to call fir's tools
+- MCP: `CompletePromptArg` and `CompleteResourceURI` helpers expose MCP argument completions for interactive use
+- MCP: handle `AudioContent`, `ResourceLink`, and `EmbeddedResource` content types from MCP tool results (rendered as structured text)
+- MCP: debug wire-level transport logging when `verbose=true` (`LoggingTransport` wraps all transports)
+- MCP: `Manager.Status()` reports per-server connection health (connected/disconnected/error)
+- MCP: keepalive ping every 30 s to detect dead server connections automatically
+- MCP: `MergeConfigs`, `LoadDefaultConfigs`, `DefaultConfigPaths` — load and merge user (`~/.fir/mcp.json`) and project (`.fir/mcp.json`) configs with project taking precedence
+- MCP: implement elicitation support; set `Manager.ElicitationFn` to handle `elicitation/create` requests; defaults to graceful decline for headless sessions
+- MCP: implement `sampling/createMessage` support; set `Manager.SamplingFn` (or use `NewSamplingFn`) to let MCP servers request LLM calls through fir
+- MCP: expose MCP prompt templates as `list_prompts` and `get_prompt` tools per server (text, image, embedded resource content)
 - MCP: subscribe to resources on servers that support it; `OnResourceUpdated` callback fires when a subscribed resource changes
 - MCP: expose MCP resources as `list_resources` and `read_resource` tools per server (text + blob content supported)
 - MCP: support SSE (`"sse"`) and streamable HTTP (`"streamable"`) transports via `transport` and `url` fields in `mcp.json`
@@ -12,6 +23,9 @@
 - MCP: handle dynamic tool list changes (`ToolListChangedHandler`) and forward progress notifications to tool callbacks
 
 ### Fixed
+- MCP: `ToolListChangedHandler` no longer races on `m.OnToolsChanged`; stale-session guard prevents old sessions from overwriting tools after a hot reload
+- MCP: removed duplicate `serverConfigEqual` helper; `Reload` and `WatchAndReload` share a single `configsEqual` function
+- MCP: `CompletePromptArg`/`CompleteResourceURI` docs now accurately state that errors are propagated (not silently converted to empty slices)
 - MCP: progress notifications no longer silently dropped when the SDK's `handleAsync` goroutine dispatches after `CallTool` returns
 - MCP: `ImageContent` with non-image MIME types (e.g. `application/pdf`) no longer tagged as `ContentTypeImage`, preventing API errors on strict providers
 - MCP: resource blob content with non-image MIME types returned as base64 text rather than `ContentTypeImage`
