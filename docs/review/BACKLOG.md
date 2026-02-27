@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 25, 2026-02-27 ~02:26 PST
-**Build status:** ✅ all 24 packages pass with -race (-count=10). URGENT cleared — race fix in unstaged client.go.
-**Commits reviewed this cycle:** No new commits; confirmed race fix applied in working tree (stale-session guard + OnToolsChanged read under lock).
+**Last reviewed:** MCP watch cycle 26, 2026-02-27 ~02:30 PST
+**Build status:** ✅ all 24 packages pass with -race. 0 URGENT, 3 open BACKLOG.
+**Commits reviewed this cycle:** No new commits; `completions.go` doc fixed (errors-propagated comment); `client.go` race fix still pending commit.
 
 ---
 
@@ -34,13 +34,7 @@
 
 ### Test Coverage
 
-- **[MISSING TEST / DOC MISMATCH]** `pkg/mcp/completions.go` — `CompletePromptArg` and
-  `CompleteResourceURI` both say "Returns an empty slice (not an error) when the server does not
-  support completions." But the implementation passes through any error from `session.Complete`.
-  If the server doesn't support the `completion/complete` method, callers get a JSON-RPC error
-  rather than an empty slice. Either: (a) update the comment to say errors are propagated, or
-  (b) add error-type detection to convert "method not found" into an empty result.
-  **Files:** `pkg/mcp/completions.go:12,29`
+*(none)*
 
 ### Simplification
 
@@ -53,7 +47,7 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (client.go unstaged)** Data race on `m.OnToolsChanged` — stale-session guard + reads moved inside `m.mu`; `-race -count=10` passes..
+- **✅ FIXED (completions.go)** Doc mismatch fixed — comments now accurately say errors are propagated (not "empty slice on unsupported")..
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
