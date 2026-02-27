@@ -22,11 +22,11 @@
 
 ### Test Coverage
 
-- **[MISSING TEST]** `pkg/mcp/resources.go` — new file with no corresponding `resources_test.go`.
-  Should test: `listResourcesTool` (empty server → "No resources available"; server with resources →
-  correct formatted listing), `readResourceTool` (missing uri param → error result; valid uri →
-  text content returned; blob content returned), `convertResourceResult` (text content, blob content,
-  empty content), `formatResource`, `formatResourceTemplate`, `resourceErrResult`.
+- **[WEAK TEST]** `pkg/mcp/resources_test.go:TestConvertResourceResult/blob` — the blob test
+  uses `MIMEType: "image/png"`, which is a valid image. The URGENT bug (non-image blobs
+  tagged as `ContentTypeImage`) is **not caught** by this test. Add a test with
+  `MIMEType: "application/pdf"` asserting `Type == ContentTypeText` once the fix lands.
+  **Files:** `pkg/mcp/resources_test.go`
 
 - **[MISSING TEST]** `pkg/core/agentsession.go:HasPendingWork` — no direct unit test.
   Should cover: empty messages → false; last role "user" → true; last role "toolResult" → true;
@@ -45,7 +45,11 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (unstaged)** `pkg/mcp/client.go` — URI encoding bug: `"file://" + cwd` replaced with
+- **✅ ADDED** `pkg/mcp/resources_test.go` — resource tools tests added (`TestManager_Resources_ListAndRead`,
+  `TestManager_Resources_EmptyServer`, `TestManager_Resources_ReadMissingURI`,
+  `TestManager_ResourceListChanged`, `TestConvertResourceResult`). Note: blob case only tests
+  image/png; non-image MIME type coverage still needed (see WEAK TEST above).
+- **✅ FIXED (unstaged→committed)** `pkg/mcp/client.go` — URI encoding bug: `"file://" + cwd` replaced with
   `(&url.URL{Scheme: "file", Path: cwd}).String()`.
 - **✅ FIXED (unstaged)** `pkg/mcp/client.go:createTransport` — unknown transport strings now return
   an error instead of silently falling through to stdio.
