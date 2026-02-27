@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 12, 2026-02-27 ~01:32 PST
-**Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
-**Commits reviewed this cycle:** unstaged `pkg/mcp/prompts.go` (updated: null→[] fix, small-blob base64), `pkg/mcp/prompts_test.go` (comprehensive test suite), `client.go` (prompt tools injected)
+**Last reviewed:** MCP watch cycle 13, 2026-02-27 ~01:37 PST
+**Build status:** ❌ `go build ./...` FAILS — `pkg/mcp/sampling.go` 5 compile errors (see URGENT.md).
+**Commits reviewed this cycle:** `4b1970e` (prompts feature); unstaged: `sampling.go` (new, broken), `client.go` (SamplingFn + CreateMessageHandler wiring)
 
 ---
 
@@ -21,6 +21,14 @@
   **Fix:** Call the subscription loop inside `ToolListChangedHandler`, comparing against the
   already-subscribed URIs to avoid duplicate subscriptions.
   **Files:** `pkg/mcp/client.go`
+
+### Test Coverage
+
+- **[MISSING TEST]** `pkg/mcp/sampling.go` — no `sampling_test.go`. Should cover:
+  `NewSamplingFn` (text+image messages, max tokens, temperature, nil result, error result),
+  `samplingMessagesToAI` (user text, user image, assistant text, unsupported role),
+  `assistantToCreateMessageResult` (text, stop reasons), `samplingStopReason` (all cases).
+  **Files:** `pkg/mcp/sampling_test.go` (to be created)
 
 ---
 
