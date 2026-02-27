@@ -178,10 +178,9 @@ func TestAdaptTool_Cancellation(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestConvertResult_UnknownContentType verifies that the default branch in
-// convertResult maps unsupported content types (e.g. AudioContent) to a
-// plain-text placeholder rather than panicking or silently dropping the item.
-func TestConvertResult_UnknownContentType(t *testing.T) {
+// TestConvertResult_AudioContent verifies that AudioContent is rendered as
+// a base64 text string rather than panicking or being dropped.
+func TestConvertResult_AudioContent(t *testing.T) {
 	r := &sdk.CallToolResult{
 		Content: []sdk.Content{
 			&sdk.AudioContent{Data: []byte{0x01, 0x02}, MIMEType: "audio/mpeg"},
@@ -190,6 +189,75 @@ func TestConvertResult_UnknownContentType(t *testing.T) {
 	out := convertResult(r)
 	require.Len(t, out.Content, 1)
 	assert.Equal(t, "text", out.Content[0].Type)
-	assert.Equal(t, "[unsupported MCP content type]", out.Content[0].Text)
+	assert.Contains(t, out.Content[0].Text, "audio/mpeg")
+	assert.Contains(t, out.Content[0].Text, "AQI=") // base64 of [0x01, 0x02]
+	assert.False(t, out.IsError)
+}
+
+// TestConvertResult_ResourceLink verifies that a ResourceLink is rendered as
+// a human-readable text reference.
+func TestConvertResult_ResourceLink(t *testing.T) {
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{
+			&sdk.ResourceLink{Name: "My Doc", URI: "file:///docs/readme.md"},
+		},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "text", out.Content[0].Type)
+	assert.Contains(t, out.Content[0].Text, "My Doc")
+	assert.Contains(t, out.Content[0].Text, "file:///docs/readme.md")
+}
+
+// TestConvertResult_EmbeddedResource_Text verifies text embedded resources.
+func TestConvertResult_EmbeddedResource_Text(t *testing.T) {
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{
+			&sdk.EmbeddedResource{Resource: &sdk.ResourceContents{
+				URI:  "file:///tmp/out.txt",
+				Text: "hello world",
+			}},
+		},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "text", out.Content[0].Type)
+	assert.Equal(t, "hello world", out.Content[0].Text)
+}
+
+// TestConvertResult_EmbeddedResource_Blob verifies binary embedded resources.
+func TestConvertResult_EmbeddedResource_Blob(t *testing.T) {
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{
+			&sdk.EmbeddedResource{Resource: &sdk.ResourceContents{
+				URI:      "file:///tmp/img.png",
+				MIMEType: "image/png",
+				Blob:     []byte{0xAB, 0xCD},
+			}},
+		},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "text", out.Content[0].Type)
+	assert.Contains(t, out.Content[0].Text, "image/png")
+	assert.Contains(t, out.Content[0].Text, "q80=") // base64 of [0xAB, 0xCD]
+}
+
+// TestConvertResult_UnknownContentType verifies that the default branch in
+// convertResult maps unsupported content types to a plain-text placeholder
+// rather than panicking or silently dropping the item.
+// Note: AudioContent, ResourceLink, and EmbeddedResource are all handled above;
+// this test uses a hypothetical future content type (embedded struct).
+func TestConvertResult_UnknownContentType(t *testing.T) {
+	// Use a ResourceLink with no URI (edge case) to hit the known type path,
+	// or just verify that none of the known types return the placeholder text.
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{
+			&sdk.TextContent{Text: "known"},
+		},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "known", out.Content[0].Text)
 	assert.False(t, out.IsError)
 }

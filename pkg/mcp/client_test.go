@@ -646,3 +646,29 @@ func TestManager_Status_ConnectError(t *testing.T) {
 	assert.False(t, statuses[0].Connected)
 	assert.Error(t, statuses[0].Error)
 }
+
+func TestManager_VerboseLoggingTransport(t *testing.T) {
+	// When verbose=true the transport is wrapped with a LoggingTransport.
+	// Verify that verbose mode doesn't break normal operation.
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{Name: "hi", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{
+				Content: []sdk.Content{&sdk.TextContent{Text: "hey"}},
+			}, nil
+		},
+	)
+
+	mgr := NewManager(map[string]ServerConfig{"verbose-srv": {}}, true /* verbose */)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	require.Len(t, tools, 5)
+	result, err := tools[0].Execute(context.Background(), "c1", nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "hey", result.Content[0].Text)
+}

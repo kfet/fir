@@ -73,8 +73,9 @@ func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, re
 }
 
 // convertResult maps an *sdk.CallToolResult to an agent.AgentToolResult.
-// Text content is mapped directly; image content is base64-encoded. Unknown
-// content types are represented as a plain text placeholder.
+// Text content is mapped directly; image content is base64-encoded; audio
+// content, resource links, and embedded resources are converted to text.
+// Unknown content types are represented as a plain text placeholder.
 func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 	content := make([]ai.ToolResultContent, 0, len(result.Content))
 	for _, c := range result.Content {
@@ -102,6 +103,49 @@ func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 				content = append(content, ai.ToolResultContent{
 					Type: ai.ContentTypeText,
 					Text: fmt.Sprintf("[base64 %s] %s", mime, base64.StdEncoding.EncodeToString(v.Data)),
+				})
+			}
+		case *sdk.AudioContent:
+			// Render audio as base64 text since most LLM providers don't support
+			// audio tool-result content directly.
+			mime := v.MIMEType
+			if mime == "" {
+				mime = "audio/mpeg"
+			}
+			content = append(content, ai.ToolResultContent{
+				Type: ai.ContentTypeText,
+				Text: fmt.Sprintf("[audio/%s] %s", mime, base64.StdEncoding.EncodeToString(v.Data)),
+			})
+		case *sdk.ResourceLink:
+			// Render a resource link as a plain-text URI reference.
+			label := v.Name
+			if label == "" {
+				label = v.URI
+			}
+			content = append(content, ai.ToolResultContent{
+				Type: ai.ContentTypeText,
+				Text: fmt.Sprintf("[resource] %s <%s>", label, v.URI),
+			})
+		case *sdk.EmbeddedResource:
+			// Prefer text; fall back to base64 for binary blobs.
+			if v.Resource == nil {
+				content = append(content, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: "[embedded resource: no content]",
+				})
+			} else if v.Resource.Text != "" {
+				content = append(content, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: v.Resource.Text,
+				})
+			} else {
+				mime := v.Resource.MIMEType
+				if mime == "" {
+					mime = "application/octet-stream"
+				}
+				content = append(content, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: fmt.Sprintf("[base64 %s] %s", mime, base64.StdEncoding.EncodeToString(v.Resource.Blob)),
 				})
 			}
 		default:

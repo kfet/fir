@@ -180,6 +180,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if err != nil {
 		return nil, fmt.Errorf("create transport: %w", err)
 	}
+	// When verbose, wrap the transport to log all JSON-RPC wire messages to
+	// stderr. This is useful for debugging MCP server communication.
+	if m.verbose {
+		transport = &sdk.LoggingTransport{Transport: transport, Writer: os.Stderr}
+	}
 
 	// Route MCP server log messages to the process slog logger.
 	serverName := name
