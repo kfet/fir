@@ -49,7 +49,7 @@ if onChanged != nil {
 
 **Files:** `pkg/mcp/client.go:211-238`, `pkg/mcp/client.go:~541`
 
-**Severity:** High — data race can corrupt the tool list after a hot-reload. `go test -race` fails.
+**Severity:** Medium-High — data race is intermittent (not consistently reproducible) but was confirmed by `-race` detector. The incorrect-tools result during hot-reload is a real correctness risk.
 
 ---
 

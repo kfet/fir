@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 22, 2026-02-27 ~02:14 PST
-**Build status:** ✅ `go build ./...` passes. ❌ `go test -race ./pkg/mcp/...` FAILS — data race on `m.OnToolsChanged` + `TestWatchAndReload_SwapServer` (see URGENT.md).
-**Commits reviewed this cycle:** unstaged `config_watch.go` (WatchConfig v2 committed), `config_watch_test.go` (new), `reload_test.go` (new), `client.go` (Reload + applyConfigDiff + serverConfigEqual)
+**Last reviewed:** MCP watch cycle 23, 2026-02-27 ~02:18 PST
+**Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 pkgs) — race intermittent, not consistently reproducible but confirmed by detector. URGENT still open.
+**Commits reviewed this cycle:** No new commits; unstaged: `client.go` (applyConfigDiff `changed` bool optimization, Reload method, serverConfigEqual), `config_watch.go`/`config_watch_test.go`/`reload_test.go` untracked new files
 
 ---
 
