@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 7, 2026-02-27 ~01:15 PST
+**Last reviewed:** MCP watch cycle 8, 2026-02-27 ~01:20 PST
 **Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes.
-**Commits reviewed this cycle:** `6ddadcd` (progress-callback race fix), unstaged: `resources.go` (MCP resources as tools), `client.go` (URI fix + transport validation)
+**Commits reviewed this cycle:** `5e9235d` (MCP resources as tools), unstaged fixes: blob MIME gate, `TestCreateTransport_UnknownType`
 
 ---
 
@@ -11,31 +11,24 @@
 ### Correctness
 
 - **[BACKLOG/CORRECTNESS]** `pkg/core/agentsession.go:runAutoCompaction` — inconsistency with
-  `HasPendingWork()`. `runAutoCompaction` resumes only on message role (`"user"` / `"toolResult"`),
+  `HasPendingWork()`. `runAutoCompaction` resumes based only on message role (`"user"` / `"toolResult"`),
   not on `PendingToolCalls`. `HasPendingWork()` checks both. Low probability edge case (threshold
-  compaction firing while a tool is mid-execution), but removes an inconsistency.
+  compaction during active tool execution), but the inconsistency is easy to remove.
   **Fix:** Replace the inline role check in `runAutoCompaction` with `s.HasPendingWork()`.
 
 ### Simplification / Design
 
-*(none currently — unknown transport validation and URI encoding fixes were applied in the unstaged diff)*
+- **[BACKLOG/SIMPLIFICATION]** `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` always maps
+  to `ContentTypeImage` with no MIME-type guard. Acceptable because MCP's `ImageContent` is spec'd
+  to carry image data, but adding `strings.HasPrefix(v.MIMEType, "image/")` would be consistent
+  with the fix applied to `resources.go`. Low priority.
 
 ### Test Coverage
-
-- **[WEAK TEST]** `pkg/mcp/resources_test.go:TestConvertResourceResult/blob` — the blob test
-  uses `MIMEType: "image/png"`, which is a valid image. The URGENT bug (non-image blobs
-  tagged as `ContentTypeImage`) is **not caught** by this test. Add a test with
-  `MIMEType: "application/pdf"` asserting `Type == ContentTypeText` once the fix lands.
-  **Files:** `pkg/mcp/resources_test.go`
 
 - **[MISSING TEST]** `pkg/core/agentsession.go:HasPendingWork` — no direct unit test.
   Should cover: empty messages → false; last role "user" → true; last role "toolResult" → true;
   last role "assistant" → false; `PendingToolCalls` non-empty → true.
   **Files:** `pkg/core/agentsession_test.go`
-
-- **[MISSING TEST]** `pkg/mcp/client.go:createTransport` — no test for unknown transport strings
-  (e.g., `Transport: "ftp"`). Now that the guard returns an error, this behaviour should be tested.
-  **Files:** `pkg/mcp/client_test.go`
 
 - **[WEAK ASSERTION]** `TestACP_E2E_MCP_ToolsAppearInSession` — `ToolCallUpdate != nil` fires for
   *any* tool call, not just `mcp__echo-srv__echo`. False positive if another tool fires first.
@@ -45,22 +38,21 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ ADDED** `pkg/mcp/resources_test.go` — resource tools tests added (`TestManager_Resources_ListAndRead`,
-  `TestManager_Resources_EmptyServer`, `TestManager_Resources_ReadMissingURI`,
-  `TestManager_ResourceListChanged`, `TestConvertResourceResult`). Note: blob case only tests
-  image/png; non-image MIME type coverage still needed (see WEAK TEST above).
-- **✅ FIXED (unstaged→committed)** `pkg/mcp/client.go` — URI encoding bug: `"file://" + cwd` replaced with
-  `(&url.URL{Scheme: "file", Path: cwd}).String()`.
-- **✅ FIXED (unstaged)** `pkg/mcp/client.go:createTransport` — unknown transport strings now return
-  an error instead of silently falling through to stdio.
-- **✅ FIXED 6ddadcd** `pkg/mcp/tool_adapter.go` — `defer registry.unregister` races with SDK
-  notification goroutine (formally committed).
+- **✅ FIXED (resources.go)** `convertResourceResult` blob → `ContentTypeImage` for non-image blobs.
+  Now gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs returned as `[base64 mime/type] …` text.
+  Tests added: `TestConvertResourceResult/non-image blob`, `TestConvertResourceResult/blob no mime`.
+- **✅ FIXED (client_test.go)** `TestCreateTransport_UnknownType` added — verifies `Transport: "ftp"`
+  returns an error.
+- **✅ ADDED** `pkg/mcp/resources_test.go` — full coverage: list, read, missing URI, resource-list-changed, conversion.
 
 ---
 
 ## Previously Resolved (all ✅)
 
-- **✅ FIXED 215890d** `pkg/mcp/client_test.go` — Missing tests for `createTransport` SSE/streamable paths added.
+- **✅ FIXED 6ddadcd** `pkg/mcp/tool_adapter.go` — `defer registry.unregister` progress-callback race.
+- **✅ FIXED 215890d** `pkg/mcp/client_test.go` — `createTransport` SSE/streamable tests added.
+- **✅ FIXED 5e9235d** `pkg/mcp/client.go` — URI encoding: `"file://" + cwd` → `(&url.URL{Scheme:"file",Path:cwd}).String()`.
+- **✅ FIXED 5e9235d** `pkg/mcp/client.go:createTransport` — unknown transport now returns an error.
 - **✅ FIXED ef4f139** `pkg/mcp/client.go:commandTransport` — `cmd.Env` not seeded with `os.Environ()`.
 - **✅ FIXED 329d5c9** `pkg/mcp/tool_adapter_test.go` — `convertResult` default branch untested.
 - **✅ FIXED 2a44062** `loadProjectMCPConfigs` — silent nil on parse error.
