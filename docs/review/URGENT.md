@@ -2,7 +2,24 @@
 
 ## Active Issues
 
-*(none)*
+### `pkg/mcp/config_watch.go` + `pkg/mcp/config.go` — Build break: `WatchConfig` redeclared in two files
+
+**Filed:** 2026-02-27 ~02:11 PST
+
+**Error:**
+```
+pkg/mcp/config_watch.go:22:6: WatchConfig redeclared in this block
+    pkg/mcp/config.go:128:6: other declaration of WatchConfig
+```
+
+**Root cause:** Two implementations were written simultaneously:
+- `config_watch.go` — `func WatchConfig(path string, onChange func(*ConfigFile)) (stop func(), err error)` — non-blocking, directory watch (atomic-rename safe), 200ms debounce.
+- `config.go` (unstaged) — `func WatchConfig(ctx context.Context, path string, onReload func(*ConfigFile)) error` — blocking, direct file watch (misses atomic renames), no debounce.
+
+**Recommendation:** Keep `config_watch.go` (better design — directory watch, debounce, stop function).
+Remove the `WatchConfig` function and its new imports (`context`, `fsnotify`, `log/slog`) from `config.go`.
+
+**Files to change:** `pkg/mcp/config.go` (remove the new WatchConfig block and unused imports)
 
 ---
 
