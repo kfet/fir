@@ -2,52 +2,16 @@
 
 ## Active Issues
 
-### `pkg/mcp/sampling.go` — Build break: 5 compile errors
-
-**Filed:** 2026-02-27 ~01:35 PST
-
-**Errors:**
-```
-sampling.go:31:7: no new variables on left side of :=
-sampling.go:31:10: cannot use ai.Context{…} as context.Context
-sampling.go:44:53: cannot use ctx (context.Context) as ai.Context
-sampling.go:119:10: undefined: ai.StopReasonEndTurn
-sampling.go:121:10: undefined: ai.StopReasonMaxTokens
-```
-
-**Root causes:**
-
-1. **Variable shadowing / type mismatch (lines 30–44):**
-   `ctx := ai.Context{...}` shadows the `ctx context.Context` parameter.
-   `ai.Context` is the fir prompt context (not `context.Context`).
-   The call `ai.CompleteSimple(ctx, registry, model, ctx, opts)` then passes the same variable for both the `context.Context` arg and the `ai.Context` arg.
-   **Fix:** Rename the AI context variable:
-   ```go
-   prompt := ai.Context{
-       SystemPrompt: p.SystemPrompt,
-       Messages:     msgs,
-   }
-   result := ai.CompleteSimple(ctx, registry, model, prompt, opts)
-   ```
-
-2. **Undefined constants (lines 119, 121):**
-   `ai.StopReasonEndTurn` and `ai.StopReasonMaxTokens` do not exist in `pkg/ai/types.go`.
-   The correct constants are `ai.StopReasonStop` and `ai.StopReasonLength`.
-   **Fix:**
-   ```go
-   case ai.StopReasonStop:
-       return "endTurn"
-   case ai.StopReasonLength:
-       return "maxTokens"
-   ```
-
-**Files:** `pkg/mcp/sampling.go:30–44`, `pkg/mcp/sampling.go:119,121`
+*(none)*
 
 ---
 
 ## Recently Fixed ✅
 
-### `pkg/mcp/resources.go` — blob resources unconditionally tagged `ContentTypeImage` ✅ FIXED `5e9235d`
+### `pkg/mcp/sampling.go` — Build break: 5 compile errors ✅ FIXED (2026-02-27)
+- Variable shadowing (`ctx := ai.Context{...}`) fixed: renamed to `prompt`
+- `ai.StopReasonEndTurn` → `ai.StopReasonStop`, `ai.StopReasonMaxTokens` → `ai.StopReasonLength`
+- `sampling_test.go` added with unit + integration tests.
 Gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs returned as base64 text.
 Tests: `TestConvertResourceResult/non-image blob`, `TestConvertResourceResult/blob no mime`.
 

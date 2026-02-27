@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 13, 2026-02-27 ~01:37 PST
-**Build status:** ❌ `go build ./...` FAILS — `pkg/mcp/sampling.go` 5 compile errors (see URGENT.md).
-**Commits reviewed this cycle:** `4b1970e` (prompts feature); unstaged: `sampling.go` (new, broken), `client.go` (SamplingFn + CreateMessageHandler wiring)
+**Last reviewed:** MCP watch cycle 14, 2026-02-27 ~01:40 PST
+**Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
+**Commits reviewed this cycle:** unstaged `sampling.go` (URGENT fixed: prompt rename + stop reason constants), `sampling_test.go` (new: unit + integration)
 
 ---
 
@@ -24,17 +24,14 @@
 
 ### Test Coverage
 
-- **[MISSING TEST]** `pkg/mcp/sampling.go` — no `sampling_test.go`. Should cover:
-  `NewSamplingFn` (text+image messages, max tokens, temperature, nil result, error result),
-  `samplingMessagesToAI` (user text, user image, assistant text, unsupported role),
-  `assistantToCreateMessageResult` (text, stop reasons), `samplingStopReason` (all cases).
-  **Files:** `pkg/mcp/sampling_test.go` (to be created)
+*(none — sampling_test.go added and covers all cases)*
 
 ---
 
 ## Resolved This Cycle ✅
 
-- **✅ SELF-FIXED prompts.go** `pkg/mcp/prompts.go` — null→`[]` fix applied (`if prompts == nil { prompts = []promptInfo{} }`); small blobs (≤4096 bytes) now inline as base64 in `formatEmbeddedResourceContent`.
+- **✅ FIXED (sampling.go)** Build break: `prompt := ai.Context{...}` (was `ctx :=` — variable shadow); stop reason constants fixed (`StopReasonStop`/`StopReasonLength` not EndTurn/MaxTokens). `sampling_test.go` added with unit+integration coverage.
+- **✅ SELF-FIXED prompts.go** `pkg/mcp/prompts.go` — null→`[]` fix applied; small blobs inline as base64.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
