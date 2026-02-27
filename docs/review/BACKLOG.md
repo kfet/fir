@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 10, 2026-02-27 ~01:28 PST
+**Last reviewed:** MCP watch cycle 11, 2026-02-27 ~01:30 PST
 **Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
-**Commits reviewed this cycle:** `b76bd20` (resource subscription + `OnResourceUpdated`); `92e6174` (ImageContent MIME guard); `f6c7931`, `7e102e0`, `19f0c28`, `262e314` (previously resolved backlog items)
+**Commits reviewed this cycle:** `0374569` (CHANGELOG sync), unstaged: `pkg/mcp/prompts.go` (MCP prompt tools), `client.go` (inject prompt tools)
 
 ---
 
@@ -21,6 +21,19 @@
   **Fix:** Call the subscription loop inside `ToolListChangedHandler`, comparing against the
   already-subscribed URIs to avoid duplicate subscriptions.
   **Files:** `pkg/mcp/client.go`
+
+- **[BACKLOG/CORRECTNESS]** `pkg/mcp/prompts.go:listPromptsTool` — when no prompts are returned by
+  the server, `json.MarshalIndent(prompts, ...)` marshals a nil slice as `"null"` instead of `"[]"`.
+  LLMs may struggle with `"null"` as a list response.
+  **Fix:** Initialize `prompts := make([]promptInfo, 0)` or check `if prompts == nil { prompts = []promptInfo{} }`.
+  **Files:** `pkg/mcp/prompts.go`
+
+### Test Coverage
+
+- **[MISSING TEST]** `pkg/mcp/prompts.go` — no `prompts_test.go`. Should cover: `listPromptsTool`
+  (non-empty, empty, error), `getPromptTool` (missing name, valid render with args), `convertPromptResult`
+  (text/image/embedded-resource/default content types), `formatEmbeddedResource`.
+  **Files:** `pkg/mcp/prompts_test.go` (to be created)
 
 ---
 
