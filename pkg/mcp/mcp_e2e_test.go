@@ -41,7 +41,7 @@ func mcpServerConfig(extraEnv ...string) ServerConfig {
 func TestMCP_E2E_ListTools(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"myserver": mcpServerConfig(),
-	})
+	}, false)
 	defer mgr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -67,7 +67,7 @@ func TestMCP_E2E_ListTools(t *testing.T) {
 func TestMCP_E2E_CallTool(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"srv": mcpServerConfig(),
-	})
+	}, false)
 	defer mgr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -107,7 +107,7 @@ func TestMCP_E2E_ToolNamePrefixing(t *testing.T) {
 
 	mgr := NewManager(map[string]ServerConfig{
 		serverName: mcpServerConfig(),
-	})
+	}, false)
 	defer mgr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -140,7 +140,7 @@ func TestMCP_E2E_MultipleServers(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"alpha": mcpServerConfig(),
 		"beta":  mcpServerConfig(),
-	})
+	}, false)
 	defer mgr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -180,7 +180,7 @@ func TestMCP_E2E_MultipleServers(t *testing.T) {
 func TestMCP_E2E_ServerExit(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"gone": mcpServerConfig("MCP_TEST_SERVER_MODE", "exit_immediately"),
-	})
+	}, false)
 	defer mgr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -198,7 +198,7 @@ func TestMCP_E2E_ServerExit(t *testing.T) {
 func TestMCP_E2E_ContextCancellation(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"srv": mcpServerConfig(),
-	})
+	}, false)
 	defer mgr.Close()
 
 	startCtx, startCancel := context.WithTimeout(context.Background(), 15*time.Second)

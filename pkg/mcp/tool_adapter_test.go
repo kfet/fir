@@ -44,7 +44,7 @@ func TestAdaptTool_NamePrefixing(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Tools, 1)
 
-	adapted := AdaptTool(session, "myserver", result.Tools[0])
+	adapted := AdaptTool(session, "myserver", result.Tools[0], nil)
 	assert.Equal(t, "mcp__myserver__mytool", adapted.Name)
 	assert.Equal(t, "A tool", adapted.Description)
 }
@@ -58,7 +58,7 @@ func TestAdaptTool_LabelFallback(t *testing.T) {
 	})
 	result, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	adapted := AdaptTool(session, "srv", result.Tools[0])
+	adapted := AdaptTool(session, "srv", result.Tools[0], nil)
 	// No Title set — falls back to "<name> (via <server>)".
 	assert.Equal(t, "calc (via srv)", adapted.Label)
 }
@@ -72,7 +72,7 @@ func TestAdaptTool_LabelFromTitle(t *testing.T) {
 	})
 	result, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	adapted := AdaptTool(session, "srv", result.Tools[0])
+	adapted := AdaptTool(session, "srv", result.Tools[0], nil)
 	assert.Equal(t, "Calculator", adapted.Label)
 }
 
@@ -94,7 +94,7 @@ func TestAdaptTool_ParameterPassThrough(t *testing.T) {
 	})
 	result, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	adapted := AdaptTool(session, "s", result.Tools[0])
+	adapted := AdaptTool(session, "s", result.Tools[0], nil)
 
 	params := map[string]any{"msg": "hello"}
 	toolResult, err := adapted.Execute(context.Background(), "id1", params, nil)
@@ -149,7 +149,7 @@ func TestAdaptTool_Cancellation(t *testing.T) {
 	})
 	result, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	adapted := AdaptTool(session, "s", result.Tools[0])
+	adapted := AdaptTool(session, "s", result.Tools[0], nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

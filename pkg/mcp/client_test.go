@@ -3,12 +3,16 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/kfet/fir/pkg/agent"
 )
 
 // inMemoryDial returns a dialFn that connects to a pre-built MCP server via
@@ -41,7 +45,7 @@ func TestManager_StartAndListTools(t *testing.T) {
 		},
 	)
 
-	mgr := NewManager(map[string]ServerConfig{"myserver": {}})
+	mgr := NewManager(map[string]ServerConfig{"myserver": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	tools, err := mgr.Start(context.Background())
@@ -73,7 +77,7 @@ func TestManager_ToolCallable(t *testing.T) {
 		},
 	)
 
-	mgr := NewManager(map[string]ServerConfig{"calc": {}})
+	mgr := NewManager(map[string]ServerConfig{"calc": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	tools, err := mgr.Start(context.Background())
@@ -102,7 +106,7 @@ func TestManager_MultipleServers(t *testing.T) {
 	serverB := makeServer("toolB")
 
 	configs := map[string]ServerConfig{"srvA": {}, "srvB": {}}
-	mgr := NewManager(configs)
+	mgr := NewManager(configs, false)
 
 	dialCalls := 0
 	serverMap := map[string]*sdk.Server{"srvA": serverA, "srvB": serverB}
@@ -135,7 +139,7 @@ func TestManager_Close(t *testing.T) {
 		},
 	)
 
-	mgr := NewManager(map[string]ServerConfig{"s": {}})
+	mgr := NewManager(map[string]ServerConfig{"s": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	_, err := mgr.Start(context.Background())
@@ -150,7 +154,7 @@ func TestManager_Close(t *testing.T) {
 }
 
 func TestManager_EmptyConfigs(t *testing.T) {
-	mgr := NewManager(nil)
+	mgr := NewManager(nil, false)
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, tools)
@@ -180,7 +184,7 @@ func TestManager_PaginatedToolList(t *testing.T) {
 		)
 	}
 
-	mgr := NewManager(map[string]ServerConfig{"paged": {}})
+	mgr := NewManager(map[string]ServerConfig{"paged": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	tools, err := mgr.Start(context.Background())
@@ -211,7 +215,7 @@ func TestManager_RootsAdvertised(t *testing.T) {
 
 	const wantURI = "file:///testroot"
 	cfg := ServerConfig{Roots: []string{wantURI}}
-	mgr := NewManager(map[string]ServerConfig{"s": cfg})
+	mgr := NewManager(map[string]ServerConfig{"s": cfg}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
@@ -245,7 +249,7 @@ func TestManager_RootsDefaultToCWD(t *testing.T) {
 	)
 
 	// No roots in config → Manager should default to CWD.
-	mgr := NewManager(map[string]ServerConfig{"s": {}})
+	mgr := NewManager(map[string]ServerConfig{"s": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
@@ -299,4 +303,169 @@ func TestCommandTransport_EmptyCommand(t *testing.T) {
 	_, err := commandTransport(ServerConfig{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "command is required")
+}
+
+// TestManager_ToolListChanged verifies that when the MCP server adds a tool
+// after the session is established, the OnToolsChanged callback is invoked
+// with the updated aggregate tool list.
+func TestManager_ToolListChanged(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	// Server starts with no tools.
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	changed := make(chan []agent.AgentTool, 1)
+	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
+		changed <- tools
+	}
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, tools) // server has no tools yet
+
+	// Adding a tool after connection sends a tool-list-changed notification.
+	server.AddTool(
+		&sdk.Tool{Name: "new_tool", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "new"}}}, nil
+		},
+	)
+
+	select {
+	case newTools := <-changed:
+		require.Len(t, newTools, 1)
+		assert.Equal(t, "mcp__srv__new_tool", newTools[0].Name)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for tool list change notification")
+	}
+}
+
+// TestManager_ProgressNotification verifies that progress notifications sent
+// by the MCP server during a tool call are forwarded to the onUpdate callback.
+func TestManager_ProgressNotification(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{Name: "slow", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			if token := req.Params.GetProgressToken(); token != nil {
+				_ = req.Session.NotifyProgress(ctx, &sdk.ProgressNotificationParams{
+					ProgressToken: token,
+					Message:       "halfway there",
+					Progress:      50,
+					Total:         100,
+				})
+			}
+			return &sdk.CallToolResult{
+				Content: []sdk.Content{&sdk.TextContent{Text: "done"}},
+			}, nil
+		},
+	)
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+
+	updates := make(chan string, 10)
+	onUpdate := func(result agent.AgentToolResult) {
+		if len(result.Content) > 0 {
+			updates <- result.Content[0].Text
+		}
+	}
+
+	result, err := tools[0].Execute(context.Background(), "call-id-1", nil, onUpdate)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "done", result.Content[0].Text)
+
+	close(updates)
+	var msgs []string
+	for msg := range updates {
+		msgs = append(msgs, msg)
+	}
+	assert.Equal(t, []string{"halfway there"}, msgs)
+}
+
+// chanHandler is a slog.Handler that sends each Record to a buffered channel.
+type chanHandler struct {
+	ch chan slog.Record
+}
+
+func (h *chanHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *chanHandler) Handle(_ context.Context, r slog.Record) error {
+	select {
+	case h.ch <- r:
+	default:
+	}
+	return nil
+}
+func (h *chanHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *chanHandler) WithGroup(string) slog.Handler      { return h }
+
+// TestManager_LoggingHandler verifies that log messages emitted by an MCP
+// server are routed through slog at the correct level. We temporarily replace
+// the default slog logger with a chanHandler, start the manager with
+// verbose=true, then send a warning log from the server session and assert
+// that it arrives in slog with slog.LevelWarn.
+func TestManager_LoggingHandler(t *testing.T) {
+	// Capture slog records via a buffered channel.
+	ch := make(chan slog.Record, 10)
+	origLogger := slog.Default()
+	slog.SetDefault(slog.New(&chanHandler{ch: ch}))
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
+
+	server := sdk.NewServer(&sdk.Implementation{Name: "log-test", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
+		},
+	)
+
+	// verbose=true → client requests "debug" log level from server.
+	mgr := NewManager(map[string]ServerConfig{"s": {}}, true)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	// Get the server-side session and send a warning log notification to the client.
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss, "server must have an active session")
+
+	require.NoError(t, ss.Log(ctx, &sdk.LoggingMessageParams{
+		Level:  "warning",
+		Logger: "test-logger",
+		Data:   "hello from server",
+	}))
+
+	// Wait for the log notification to arrive in slog.
+	var rec slog.Record
+	select {
+	case rec = <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for MCP server log message in slog")
+	}
+
+	assert.Equal(t, slog.LevelWarn, rec.Level, "MCP 'warning' must map to slog.LevelWarn")
+	assert.Equal(t, "MCP server log", rec.Message)
+}
+
+// TestManager_LoggingLevelVerbose verifies that loggingLevel() returns "debug"
+// when verbose=true and "warning" otherwise.
+func TestManager_LoggingLevelVerbose(t *testing.T) {
+	mgr := NewManager(nil, true)
+	assert.Equal(t, sdk.LoggingLevel("debug"), mgr.loggingLevel())
+
+	mgr2 := NewManager(nil, false)
+	assert.Equal(t, sdk.LoggingLevel("warning"), mgr2.loggingLevel())
 }

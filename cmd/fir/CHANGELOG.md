@@ -2,7 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- MCP: receive and route server log messages through slog at the appropriate level; request `debug` level when verbose, `warning` otherwise
+- MCP: advertise filesystem roots to MCP servers via `roots` field in `mcp.json`; defaults to process working directory
+- MCP: handle paginated tool lists via the SDK iterator (fixes silent tool truncation on servers with many tools)
+- MCP: handle dynamic tool list changes (`ToolListChangedHandler`) and forward progress notifications to tool callbacks
+
 ### Changed
+- Overseer skill: auto-resume mid-task agents after `/compact` or rate-limit pause with `"Continue."`
+- Overseer skill: recommend cheap model (Haiku) since it doesn't write code
+- Overseer skill: adaptive poll frequency — slows down at 60%+ usage to conserve tokens
+- Overseer skill: snapshot each agent before rate-limit escape for clean resume on wakeup
 - Overseer skill now watches for both hourly and daily limits
 
 ## [0.8.0] - 2026-02-26

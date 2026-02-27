@@ -437,7 +437,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	// Start MCP servers and append their tools.
 	var mcpMgr *mcp.Manager
 	if len(mcpConfigs) > 0 {
-		mcpMgr = mcp.NewManager(mcpConfigs)
+		mcpMgr = mcp.NewManager(mcpConfigs, false)
 		mcpTools, err := mcpMgr.Start(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("start MCP servers: %w", err)
