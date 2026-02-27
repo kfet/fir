@@ -3,12 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- MCP: subscribe to resources on servers that support it; `OnResourceUpdated` callback fires when a subscribed resource changes
 - MCP: expose MCP resources as `list_resources` and `read_resource` tools per server (text + blob content supported)
 - MCP: support SSE (`"sse"`) and streamable HTTP (`"streamable"`) transports via `transport` and `url` fields in `mcp.json`
 - MCP: receive and route server log messages through slog at the appropriate level; request `debug` level when verbose, `warning` otherwise
 - MCP: advertise filesystem roots to MCP servers via `roots` field in `mcp.json`; defaults to process working directory
 - MCP: handle paginated tool lists via the SDK iterator (fixes silent tool truncation on servers with many tools)
 - MCP: handle dynamic tool list changes (`ToolListChangedHandler`) and forward progress notifications to tool callbacks
+
+### Fixed
+- MCP: progress notifications no longer silently dropped when the SDK's `handleAsync` goroutine dispatches after `CallTool` returns
+- MCP: `ImageContent` with non-image MIME types (e.g. `application/pdf`) no longer tagged as `ContentTypeImage`, preventing API errors on strict providers
+- MCP: resource blob content with non-image MIME types returned as base64 text rather than `ContentTypeImage`
+- MCP: `file://` root URI now correctly percent-encodes paths with spaces or special characters
+- MCP: unknown `transport` values in `mcp.json` now return an error instead of silently falling through to stdio
+- Core: `runAutoCompaction` now resumes when `PendingToolCalls` are non-empty, matching `HasPendingWork()` logic
 
 ### Changed
 - Auto-resume agent after both `/compact` (manual) and auto-compaction when there is pending work (unanswered user message, unprocessed tool result, or pending tool executions). Shows "Working..." spinner and resumes seamlessly. Unified handling: if cancelled, show status and stop; if pending work, show "Working..." and resume; otherwise show completion status.
