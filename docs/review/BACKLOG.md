@@ -1,17 +1,22 @@
 # Review Backlog — 2026-02-26
 
-**Last reviewed:** MCP watch cycle 3, 2026-02-26 04:23 PST
-**Build status:** ✅ BUILD PASSING (`go vet ./...` clean, `go test ./...` all 24 packages pass)
-**Commit reviewed this cycle:** `2988bbe` test(mcp): comprehensive e2e tests with real stdio subprocess
+**Last reviewed:** MCP watch cycle 4, 2026-02-26 ~20:50 PST
+**Build status:** ✅ `go build ./...` passes. ⚠️ `go test -race ./pkg/mcp/...` FAILS (`TestManager_ProgressNotification` data race + assertion failure)
+**Commits reviewed this cycle:** `3b74aae` (roots), `fa2b102` (paginated iterator), plus in-progress unstaged work (progress notifications, tool-list-changed, verbose logging)
 
 ---
 
 ## Open Issues
 
-### Simplification
+### Correctness
 
-- **[STYLE]** `pkg/modes/acp/acp.go:NewSession` merge loop — nil-map init was
-  previously inside the loop; fixed in `2a0f1e6`. Current code is clear. ✅
+- **[BACKLOG/CORRECTNESS]** `pkg/mcp/client.go` (unstaged) — `defer registry.unregister(toolCallID)` in `AdaptTool.Execute` closure runs immediately when `CallTool` returns. If the in-memory (or real) transport delivers the progress notification in a separate goroutine *after* the call response arrives, `unregister` fires first and the notification is silently dropped. The URGENT issue (broken test) is related to this, but even after fixing the test, the core design needs attention: consider using a WaitGroup or draining notifications before unregistering.
+  Files: `pkg/mcp/tool_adapter.go:50-60`
+  Suggested fix: Add a brief drain window after `CallTool` returns before unregistering, or use a WaitGroup to track in-flight dispatches.
+
+- **[BACKLOG/CORRECTNESS]** `pkg/mcp/client.go:line with "file://" + cwd` — CWD path is concatenated into a `file://` URI without URL encoding. Paths with spaces or other characters requiring percent-encoding (valid on macOS/Linux) produce invalid RFC-3986 URIs like `file:///home/user/my project`.
+  Files: `pkg/mcp/client.go` (unstaged version, roots default-to-CWD block)
+  Suggested fix: `(&url.URL{Scheme: "file", Path: cwd}).String()` which produces correctly encoded `file:///home/user/my%20project`.
 
 ### Test Coverage
 
@@ -20,6 +25,10 @@
   sets `gotMCPTool = true` for *any* tool-call update, not just
   `mcp__echo-srv__echo`. False positive possible if another tool fires first.
   Impact: low (test only logs on failure, doesn't call `t.Error`). Worth tightening.
+
+- **[MISSING TEST]** `pkg/mcp/client.go` — `TestManager_VerboseLogging` is missing. The new `verbose bool` parameter to `NewManager` and the `SetLoggingLevel` call are not unit-tested. No test verifies that `verbose=true` requests `"debug"` level vs `verbose=false` requesting `"warning"`. Also the `LoggingMessageHandler` forwarding to slog is untested.
+  Files: `pkg/mcp/client_test.go`, `pkg/mcp/client.go`
+  Suggested fix: Add a test that creates a Manager with `verbose=true`, injects an in-memory server that sends a log message at "debug" level, and verifies the message appears in the slog output.
 
 ---
 
@@ -57,4 +66,3 @@
 ### Earlier (pre-MCP)
 
 *(full list retained in git history)*
-

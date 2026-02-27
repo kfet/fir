@@ -1,8 +1,32 @@
-# URGENT — 2026-02-25
+# URGENT — 2026-02-26
 
 ## Active Issues
 
-_(none — MCP watch cycle 1: env bug fixed, build green, all packages pass)_
+### `pkg/mcp/client_test.go:384-400` — `TestManager_ProgressNotification` is broken + data race
+**Commits:** unstaged work-in-progress on top of `3b74aae`
+**Severity:** BLOCKER — data race + test broken
+
+The test closes the `updates` channel and then immediately tries to read from it a second time via `select case got = <-updates:`.  A closed empty channel yields zero value immediately, so `got = ""` and the assertion always fails.  Additionally, closing the channel while the SDK's notification-dispatch goroutine may still be sending to it triggers a race detected by `go test -race`.
+
+The comment in the code even says "do not close the channel to avoid a race" — but the channel *is* closed two lines earlier. This is an incomplete edit where the old close+range pattern was not removed when the new select-timeout pattern was added.
+
+**Files:** `pkg/mcp/client_test.go:383-400`
+
+**Suggested fix:**
+Remove the `close(updates)` and `for msg := range updates` block entirely, keeping only the select-with-timeout approach:
+```go
+// Do NOT close updates — SDK notification dispatch goroutine may still
+// be sending to it. The notification is delivered before the tool result
+// (MCP message ordering), so it is buffered by the time Execute returns.
+var got string
+select {
+case got = <-updates:
+case <-time.After(2 * time.Second):
+    t.Fatal("timeout waiting for progress notification")
+}
+assert.Equal(t, "halfway there", got)
+```
+Also add a brief `time.Sleep` or synchronization after `Execute` if the in-memory transport delivers notifications asynchronously.
 
 ---
 
@@ -16,7 +40,7 @@ _(none — MCP watch cycle 1: env bug fixed, build green, all packages pass)_
 
 ---
 
-## Recently Fixed ✅
+## Previously Fixed ✅
 
 - ~~`pkg/tui/components/input.go` — `handleBackspace` pushes undo on every keystroke, `UndoStack.Push` leaks evicted strings~~ — ✅ FIXED 2026-02-23
 - ~~`cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break~~ — ✅ FIXED (cycle 58 / rebase ce07547): embed moved to `cmd/fir/changelog_init.go`; `GetChangelogEntries()` prefers embedded, falls back to file.
