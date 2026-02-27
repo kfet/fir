@@ -208,15 +208,37 @@ func TestConvertResourceResult(t *testing.T) {
 		assert.False(t, result.IsError)
 	})
 
-	t.Run("blob", func(t *testing.T) {
+	t.Run("image blob", func(t *testing.T) {
 		result := convertResourceResult(&sdk.ReadResourceResult{
 			Contents: []*sdk.ResourceContents{
 				{URI: "file:///img.png", Blob: []byte{1, 2, 3}, MIMEType: "image/png"},
 			},
 		})
 		require.Len(t, result.Content, 1)
-		assert.Equal(t, "AQID", result.Content[0].Data) // base64("001 002 003")
+		assert.Equal(t, "AQID", result.Content[0].Data) // base64 of [1,2,3]
 		assert.Equal(t, "image/png", result.Content[0].MimeType)
+	})
+
+	t.Run("non-image blob", func(t *testing.T) {
+		// A PDF blob must NOT be tagged ContentTypeImage; it should be text.
+		result := convertResourceResult(&sdk.ReadResourceResult{
+			Contents: []*sdk.ResourceContents{
+				{URI: "file:///doc.pdf", Blob: []byte{1, 2, 3}, MIMEType: "application/pdf"},
+			},
+		})
+		require.Len(t, result.Content, 1)
+		assert.Contains(t, result.Content[0].Text, "application/pdf")
+		assert.Contains(t, result.Content[0].Text, "AQID")
+	})
+
+	t.Run("blob no mime", func(t *testing.T) {
+		result := convertResourceResult(&sdk.ReadResourceResult{
+			Contents: []*sdk.ResourceContents{
+				{URI: "file:///data.bin", Blob: []byte{0xFF}},
+			},
+		})
+		require.Len(t, result.Content, 1)
+		assert.Contains(t, result.Content[0].Text, "octet-stream")
 	})
 
 	t.Run("empty", func(t *testing.T) {

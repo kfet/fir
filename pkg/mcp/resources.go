@@ -75,8 +75,10 @@ func readResourceTool(session *sdk.ClientSession, serverName string) agent.Agent
 }
 
 // convertResourceResult maps a *sdk.ReadResourceResult to an agent.AgentToolResult.
-// Text resources are returned as text; binary (blob) resources are base64-encoded
-// and returned as image content.
+// Text resources are returned as text content. Binary (blob) resources with an
+// image/* MIME type are returned as image content. Other blob resources are
+// returned as base64-encoded text with a MIME-type prefix so the LLM receives
+// the data rather than losing it silently.
 func convertResourceResult(result *sdk.ReadResourceResult) agent.AgentToolResult {
 	content := make([]ai.ToolResultContent, 0, len(result.Contents))
 	for _, c := range result.Contents {
@@ -87,11 +89,25 @@ func convertResourceResult(result *sdk.ReadResourceResult) agent.AgentToolResult
 				Text: c.Text,
 			})
 		case len(c.Blob) > 0:
-			content = append(content, ai.ToolResultContent{
-				Type:     ai.ContentTypeImage,
-				Data:     base64.StdEncoding.EncodeToString(c.Blob),
-				MimeType: c.MIMEType,
-			})
+			if strings.HasPrefix(c.MIMEType, "image/") {
+				content = append(content, ai.ToolResultContent{
+					Type:     ai.ContentTypeImage,
+					Data:     base64.StdEncoding.EncodeToString(c.Blob),
+					MimeType: c.MIMEType,
+				})
+			} else {
+				// Non-image binary (PDF, audio, etc.): encode as base64 text so
+				// the LLM sees the data rather than getting an API error or a
+				// silently dropped result.
+				prefix := c.MIMEType
+				if prefix == "" {
+					prefix = "application/octet-stream"
+				}
+				content = append(content, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: "[base64 " + prefix + "] " + base64.StdEncoding.EncodeToString(c.Blob),
+				})
+			}
 		}
 	}
 	return agent.AgentToolResult{Content: content}
