@@ -7,6 +7,24 @@ description: "Shepherd a fleet of coding agents in tmux. Keep them productive, u
 
 You run the outer loop. You don't write code — you make sure the agents who do are effective.
 
+## Socket — Always Use the tmux-ai Socket
+
+**Always use the shared tmux-ai socket**, not a custom one. This lets the user attach and monitor
+with `tmux-ai` (at `/Users/kfet/bin/tmux-ai`):
+
+```bash
+SOCKET="${CLAUDE_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/claude-tmux-sockets}/claude.sock"
+```
+
+Set this at the top of every shell block. Never use a custom socket like `/tmp/fir-overseer.sock`.
+The user monitors the fleet with:
+
+```bash
+tmux-ai ls                     # list sessions
+tmux-ai attach -t fir          # attach to the fleet session
+tmux-ai attach -t fir:worker-1 # jump to a specific window
+```
+
 ## API Rate-Limit Guard (check every cycle)
 
 At the start of every cycle, check rate-limit utilisation:
