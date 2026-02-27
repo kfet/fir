@@ -9,9 +9,11 @@
 ## Recently Fixed ✅
 
 ### `pkg/mcp/resources.go` — blob resources unconditionally tagged `ContentTypeImage` ✅ FIXED `5e9235d`
-`convertResourceResult` now gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs
-are returned as base64 text with a MIME-type prefix. Test coverage added in
-`TestConvertResourceResult/non-image blob` and `TestConvertResourceResult/blob no mime`.
+Gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs returned as base64 text.
+Tests: `TestConvertResourceResult/non-image blob`, `TestConvertResourceResult/blob no mime`.
+
+### `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` with non-image MIME unconditionally tagged `ContentTypeImage` ✅ FIXED (unstaged, `TestConvertResult_NonImageContent` added)
+Same guard applied: `strings.HasPrefix(v.MIMEType, "image/")`.
 
 ### `pkg/mcp/tool_adapter.go` — `defer registry.unregister` races with SDK notification goroutine ✅ FIXED `6ddadcd`
 Removed eager unregister; registry entries live for session lifetime.
