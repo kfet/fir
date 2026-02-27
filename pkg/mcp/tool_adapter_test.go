@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,16 +154,24 @@ func TestConvertResult_IsError(t *testing.T) {
 	assert.Equal(t, "something went wrong", out.Content[0].Text)
 }
 
+// TestAdaptTool_Cancellation verifies that cancelling the client context:
+//  1. causes Execute to return an error that wraps context.Canceled, and
+//  2. propagates a notifications/cancelled to the MCP server so the server's
+//     context is also cancelled (the server handler unblocks from ctx.Done()).
 func TestAdaptTool_Cancellation(t *testing.T) {
-	started := make(chan struct{})
+	started := make(chan struct{})        // closed when server handler begins
+	serverCancelled := make(chan struct{}) // closed when server ctx is cancelled
+
 	session := connectTestServer(t, func(s *sdk.Server) {
 		s.AddTool(&sdk.Tool{Name: "slow", InputSchema: emptySchema},
 			func(ctx context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 				close(started)
-				<-ctx.Done()
+				<-ctx.Done() // SDK cancellation handler unblocks this
+				close(serverCancelled)
 				return nil, ctx.Err()
 			})
 	})
+
 	result, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
 	adapted := AdaptTool(session, "s", result.Tools[0], nil)
@@ -172,10 +182,23 @@ func TestAdaptTool_Cancellation(t *testing.T) {
 		_, err := adapted.Execute(ctx, "id", nil, nil)
 		done <- err
 	}()
-	<-started
-	cancel()
-	err = <-done
-	assert.Error(t, err)
+
+	<-started // wait for the server handler to start
+	cancel()  // cancel client ctx → SDK sends notifications/cancelled
+
+	// 1. The call must return an error wrapping context.Canceled.
+	callErr := <-done
+	assert.True(t, errors.Is(callErr, context.Canceled),
+		"Execute error should wrap context.Canceled, got: %v", callErr)
+
+	// 2. The MCP server must have received the cancellation notification
+	//    (i.e. its handler context was cancelled by the SDK).
+	select {
+	case <-serverCancelled:
+		// good — cancellation notification was delivered to the server
+	case <-time.After(2 * time.Second):
+		t.Error("server context was not cancelled — notifications/cancelled not delivered")
+	}
 }
 
 // TestConvertResult_AudioContent verifies that AudioContent is rendered as
