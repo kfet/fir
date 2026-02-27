@@ -381,12 +381,16 @@ func TestManager_ProgressNotification(t *testing.T) {
 	require.Len(t, result.Content, 1)
 	assert.Equal(t, "done", result.Content[0].Text)
 
-	close(updates)
-	var msgs []string
-	for msg := range updates {
-		msgs = append(msgs, msg)
+	// The progress notification is sent by the server before returning the tool
+	// result, so it is already buffered in updates by the time Execute returns.
+	// Collect with a short timeout in case of any scheduler delay.
+	var got string
+	select {
+	case got = <-updates:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for progress notification")
 	}
-	assert.Equal(t, []string{"halfway there"}, msgs)
+	assert.Equal(t, "halfway there", got)
 }
 
 // chanHandler is a slog.Handler that sends each Record to a buffered channel.
