@@ -35,10 +35,6 @@ func (r *progressRegistry) register(token string, cb agent.AgentToolUpdateCallba
 	r.m.Store(token, cb)
 }
 
-func (r *progressRegistry) unregister(token string) {
-	r.m.Delete(token)
-}
-
 func (r *progressRegistry) dispatch(token string, result agent.AgentToolResult) {
 	if v, ok := r.m.Load(token); ok {
 		v.(agent.AgentToolUpdateCallback)(result)
