@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 16, 2026-02-27 ~01:53 PST
-**Build status:** ✅ `go build ./...` passes. ✅ `go vet ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
-**Commits reviewed this cycle:** `dee08d8` (elicitation feature + test, URGENT self-fixed); unstaged `client.go` (Status() + serverErrors field — no test)
+**Last reviewed:** MCP watch cycle 17, 2026-02-27 ~01:57 PST
+**Build status:** ✅ `go build ./...` passes. ❌ `go test ./pkg/mcp/...` FAILS — `TestConvertResult_UnknownContentType` (stale test + double MIME prefix bug in audio rendering — see URGENT.md).
+**Commits reviewed this cycle:** `facd0cb` (keepalive KeepAlive:30s, MergeConfigs, LoadDefaultConfigs + tests); unstaged `client.go` (Status() method)
 
 ---
 
@@ -21,13 +21,6 @@
   **Fix:** Call the subscription loop inside `ToolListChangedHandler`, comparing against the
   already-subscribed URIs to avoid duplicate subscriptions.
   **Files:** `pkg/mcp/client.go`
-
-- **[BACKLOG/DOC]** `pkg/mcp/elicitation.go:9` — The comment "If nil, all elicitation requests
-  are declined" (on `Manager.ElicitationFn`) is slightly misleading. When `ElicitationFn` is nil,
-  the SDK does NOT advertise the elicitation capability to the server, so well-behaved servers won't
-  try to elicit. Misbehaving servers may get an error response rather than a `"decline"` action.
-  Low priority — behavior is still safe/correct.
-  **Files:** `pkg/mcp/elicitation.go` / `pkg/mcp/client.go`
 
 - **[BACKLOG/COMPLETENESS]** `pkg/mcp/client.go:Manager.Status` — `serverErrors` is only populated
   on initial connection failure during `Start()`. If a server connects successfully but later
@@ -50,7 +43,7 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (elicitation_test.go)** `agent` import was present in the committed version (`dee08d8`); all 24 packages pass with -race.
+- **✅ RESOLVED (elicitation nil doc)** `elicitHandler()` wrapper in `elicitation.go:44` ensures nil `ElicitationFn` falls back to `DefaultElicitFn`, so comment "declined" is accurate.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).

@@ -2,7 +2,39 @@
 
 ## Active Issues
 
-*(none)*
+### `pkg/mcp/tool_adapter.go:117` + `pkg/mcp/tool_adapter_test.go:193` — Audio content: double MIME prefix + stale test
+
+**Filed:** 2026-02-27 ~01:57 PST
+
+**Test failure:**
+```
+--- FAIL: TestConvertResult_UnknownContentType
+    expected: "[unsupported MCP content type]"
+    actual  : "[audio/audio/mpeg] AQI="
+```
+
+**Root cause 1 — double prefix bug (correctness):**
+`tool_adapter.go:117` formats audio as `fmt.Sprintf("[audio/%s] %s", mime, ...)` where `mime`
+is already `"audio/mpeg"`. This produces `"[audio/audio/mpeg] ..."` — the `audio/` prefix is
+doubled. Fix: use `"[%s]"` instead of `"[audio/%s]"`:
+```go
+Text: fmt.Sprintf("[%s] %s", mime, base64.StdEncoding.EncodeToString(v.Data)),
+```
+
+**Root cause 2 — stale test:**
+`TestConvertResult_UnknownContentType` was written when `*sdk.AudioContent` fell through to the
+`default` case. Now that audio has an explicit case, the test hits that path instead. The test
+must be updated to:
+- Expect `"[audio/mpeg] AQI="` (once root cause 1 is fixed) for the audio case.
+- Rename the test or add a separate one covering the true `default` branch. Note: triggering
+  the `default` branch may require a mock content type not natively handled by the SDK.
+
+**Root cause 3 — stale comment:**
+`tool_adapter.go:151` still reads `// Audio, resource links, etc.` in the `default` branch, but
+audio and resource links are now explicitly handled above. Update to `// Catch-all for any future
+MCP content types not yet handled.` or similar.
+
+**Files:** `pkg/mcp/tool_adapter.go:117`, `pkg/mcp/tool_adapter.go:151`, `pkg/mcp/tool_adapter_test.go:193`
 
 ---
 
