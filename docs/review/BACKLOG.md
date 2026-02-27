@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 15, 2026-02-27 ~01:42 PST
-**Build status:** ✅ production builds. ❌ `go test ./pkg/mcp/...` FAILS — `elicitation_test.go` missing `agent` import (see URGENT.md).
-**Commits reviewed this cycle:** `6dc8dc8` (sampling feature committed); unstaged: `elicitation.go` (new), `elicitation_test.go` (new, broken), `client.go` (ElicitationFn field)
+**Last reviewed:** MCP watch cycle 16, 2026-02-27 ~01:53 PST
+**Build status:** ✅ `go build ./...` passes. ✅ `go vet ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
+**Commits reviewed this cycle:** `dee08d8` (elicitation feature + test, URGENT self-fixed); unstaged `client.go` (Status() + serverErrors field — no test)
 
 ---
 
@@ -29,15 +29,28 @@
   Low priority — behavior is still safe/correct.
   **Files:** `pkg/mcp/elicitation.go` / `pkg/mcp/client.go`
 
+- **[BACKLOG/COMPLETENESS]** `pkg/mcp/client.go:Manager.Status` — `serverErrors` is only populated
+  on initial connection failure during `Start()`. If a server connects successfully but later
+  disconnects with an error, `serverErrors[name]` stays nil and `Status()` incorrectly reports
+  no error for that server. The `sessions` map also wouldn't be cleaned up automatically on
+  disconnect.
+  **Impact:** Low today (callers only call `Status()` after startup, and disconnections are rare).
+  **Fix:** Hook into a disconnect/error callback if the SDK provides one, or clear `sessions[name]`
+  and set `serverErrors[name]` when a session terminates unexpectedly.
+  **Files:** `pkg/mcp/client.go`
+
 ### Test Coverage
 
-*(none — elicitation_test.go added once URGENT fix applied)*
+- **[MISSING TEST]** `pkg/mcp/client.go:Manager.Status` — no test for `Status()`. Should cover:
+  initial-connected state (all Connected=true, Error=nil), connection failure (Connected=false,
+  Error=non-nil), deterministic sort order by name.
+  **Files:** `pkg/mcp/client_test.go`
 
 ---
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (sampling.go)** Build break: `prompt := ai.Context{...}` (was `ctx :=` — variable shadow); stop reason constants fixed (`StopReasonStop`/`StopReasonLength` not EndTurn/MaxTokens). `sampling_test.go` added with unit+integration coverage.
+- **✅ FIXED (elicitation_test.go)** `agent` import was present in the committed version (`dee08d8`); all 24 packages pass with -race.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
