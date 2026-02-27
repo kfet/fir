@@ -612,25 +612,29 @@ func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 		WillRetry:        willRetry,
 	})
 
-	// If overflow, continue the agent loop with the compacted context.
-	// RunCompaction rebuilds agent messages from the session, which includes the
-	// persisted overflow error message. Strip it so the agent retries cleanly
-	// from the last user message — without duplicating it.
-	if willRetry && result != nil {
+	// Resume the agent if there's pending work.
+	// For overflow: the error message is stripped before retry.
+	// For threshold: just continue from where we left off.
+	if result != nil {
 		state := s.State()
 		msgs := state.Messages
-		for len(msgs) > 0 {
-			last := msgs[len(msgs)-1]
-			if last.Role() == "assistant" {
-				if a := last.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
-					msgs = msgs[:len(msgs)-1]
-					continue
+		
+		// If overflow, strip trailing error messages before retry
+		if willRetry {
+			for len(msgs) > 0 {
+				last := msgs[len(msgs)-1]
+				if last.Role() == "assistant" {
+					if a := last.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+						msgs = msgs[:len(msgs)-1]
+						continue
+					}
 				}
+				break
 			}
-			break
 		}
-		// Only retry when a user message is waiting for a response.
-		if len(msgs) > 0 && msgs[len(msgs)-1].Role() != "assistant" {
+		
+		// Resume if there's pending work (user message or tool result waiting for response)
+		if len(msgs) > 0 && (msgs[len(msgs)-1].Role() == "user" || msgs[len(msgs)-1].Role() == "toolResult") {
 			s.Agent.ReplaceMessages(msgs)
 			go func() { _ = s.Agent.Continue() }()
 		}
@@ -664,6 +668,35 @@ func (s *AgentSession) RunCompaction(ctx context.Context, customInstructions str
 		return nil, fmt.Errorf("compaction not configured")
 	}
 	return s.compactionRunner.RunCompaction(ctx, s, customInstructions)
+}
+
+// HasPendingWork reports whether the agent's current message list ends with
+// an unanswered user message or an unprocessed tool result, meaning the agent
+// was interrupted mid-task and can safely be resumed via Agent.Continue().
+//
+// The resumable cases are:
+//   - "user"       — Escape was pressed before the first LLM response of that turn.
+//   - "toolResult" — the agent had completed a tool call (persisted) but was then
+//     interrupted while generating the follow-up LLM response.
+//   - PendingToolCalls — the agent is executing tools and compaction happened mid-execution.
+//
+// "assistant" means the agent finished normally; "" means the last message is a
+// custom type such as a compaction summary — neither warrants auto-resume.
+func (s *AgentSession) HasPendingWork() bool {
+	state := s.State()
+	
+	// Check for pending tool executions (agent is waiting for tool results)
+	if len(state.PendingToolCalls) > 0 {
+		return true
+	}
+	
+	// Check for unanswered message waiting for response
+	msgs := state.Messages
+	if len(msgs) == 0 {
+		return false
+	}
+	role := msgs[len(msgs)-1].Role()
+	return role == "user" || role == "toolResult"
 }
 
 // GetCompactionStats returns pre-run statistics about what a compaction would

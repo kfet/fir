@@ -292,6 +292,10 @@ func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 		if err != nil {
 			return NewErrorResponse(id, CmdCompact, err.Error())
 		}
+		// Auto-resume if pending work (unanswered user message or tool result)
+		if s.session.HasPendingWork() {
+			go func() { _ = s.session.Agent.Continue() }()
+		}
 		return NewSuccessResponse(id, CmdCompact, result)
 
 	case CmdSetAutoCompaction:

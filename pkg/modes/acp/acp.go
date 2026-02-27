@@ -867,7 +867,17 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		if _, err := entry.session.RunCompaction(context.Background(), args); err != nil {
 			pa.sendAgentMessage(sessionID, fmt.Sprintf("Compaction failed: %v", err))
 		} else {
-			pa.sendAgentMessage(sessionID, "Session compacted successfully.")
+			// Auto-resume if pending work (unanswered user message or tool result)
+			if entry.session.HasPendingWork() {
+				// Notify extensions that work is resuming
+				if entry.extensionRunner != nil {
+					_ = entry.extensionRunner.EmitAgentStart()
+				}
+				go func() { _ = entry.session.Agent.Continue() }()
+				pa.sendAgentMessage(sessionID, "Session compacted successfully. Resuming.")
+			} else {
+				pa.sendAgentMessage(sessionID, "Session compacted successfully.")
+			}
 		}
 		return true
 

@@ -10,6 +10,7 @@
 - MCP: handle dynamic tool list changes (`ToolListChangedHandler`) and forward progress notifications to tool callbacks
 
 ### Changed
+- Auto-resume agent after both `/compact` (manual) and auto-compaction when there is pending work (unanswered user message, unprocessed tool result, or pending tool executions). Shows "Working..." spinner and resumes seamlessly. Unified handling: if cancelled, show status and stop; if pending work, show "Working..." and resume; otherwise show completion status.
 - Overseer skill: each fleet now gets its own git worktree + branch (`fleet/<session>`); all agents work inside it
 - Overseer skill: auto-resume mid-task agents after `/compact` or rate-limit pause with `"Continue."`
 - Overseer skill: recommend cheap model (Haiku) since it doesn't write code

@@ -1,4 +1,3 @@
-
 // It manages the TUI lifecycle, renders messages, handles user input,
 // and delegates business logic to AgentSession.
 package interactive
@@ -14,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -39,8 +37,6 @@ func SetVersion(v string) { version = v }
 
 // InteractiveMode manages the interactive TUI session.
 type InteractiveMode struct {
-	mu sync.Mutex
-
 	// Core dependencies
 	session     *core.AgentSession
 	keybindings *core.KeybindingsManager
@@ -64,21 +60,21 @@ type InteractiveMode struct {
 	toolOutputExpanded bool
 
 	// Bash execution state
-	bashComponent *components.BashExecutionComponent
+	bashComponent atomic.Pointer[components.BashExecutionComponent]
 
 	// Flags
 	running         bool
 	shutdownRequest bool
 	hideThinking    bool
 	autoCompact     bool
-	isBashMode      bool
+	isBashMode      atomic.Bool
 
 	// Theme
 	themeSearchDirs []string
 
 	// Reexec state (set by /reexec, checked after Run returns)
-	reexecBinary string
-	reexecArgs   []string
+	reexecBinary   string
+	reexecArgs     []string
 	lastEscapeTime time.Time
 
 	// Loading animation
@@ -89,7 +85,7 @@ type InteractiveMode struct {
 	cancel context.CancelFunc
 
 	// Compaction cancellation
-	compactCancel context.CancelFunc
+	compactCancel atomic.Pointer[context.CancelFunc]
 
 	// Event subscription
 	unsubscribe func()
@@ -393,9 +389,6 @@ func (m *InteractiveMode) Shutdown() {
 }
 
 func (m *InteractiveMode) shutdown() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if !m.running {
 		return
 	}
@@ -476,11 +469,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	// Escape handler with double-escape support
 	m.editor.OnEscape = func() {
 		// If compaction is in progress, cancel it
-		m.mu.Lock()
-		compactCancel := m.compactCancel
-		m.mu.Unlock()
+		compactCancel := m.compactCancel.Load()
 		if compactCancel != nil {
-			compactCancel()
+			(*compactCancel)()
 			return
 		}
 
@@ -497,14 +488,10 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		}
 
 		// If in bash mode, exit bash mode
-		m.mu.Lock()
-		inBash := m.isBashMode
-		m.mu.Unlock()
+		inBash := m.isBashMode.Load()
 		if inBash {
 			m.editor.SetText("")
-			m.mu.Lock()
-			m.isBashMode = false
-			m.mu.Unlock()
+			m.isBashMode.Store(false)
 			m.updateEditorBorderColor()
 			return
 		}
@@ -603,11 +590,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 	// Track bash mode on text change
 	m.editor.OnChange = func(text string) {
-		m.mu.Lock()
-		wasBashMode := m.isBashMode
-		m.isBashMode = strings.HasPrefix(strings.TrimLeft(text, " \t"), "!")
-		changed := wasBashMode != m.isBashMode
-		m.mu.Unlock()
+		inBashMode := strings.HasPrefix(strings.TrimLeft(text, " \t"), "!")
+		wasBashMode := m.isBashMode.Swap(inBashMode)
+		changed := wasBashMode != inBashMode
 		if changed {
 			m.updateEditorBorderColor()
 		}
@@ -1040,21 +1025,11 @@ func (m *InteractiveMode) handleCompactCommand(customInstructions string) {
 func (m *InteractiveMode) executeCompaction(customInstructions string) {
 	t := itheme.GetTheme()
 
-	// Notify extensions (e.g. tmuxspinner) that work is starting.
-	if m.extensionRunner != nil {
-		_ = m.extensionRunner.EmitAgentStart()
-		defer func() { _ = m.extensionRunner.EmitAgentEnd(nil) }()
-	}
-
 	// Set up a cancellable context so ESC can abort the in-flight LLM call.
 	ctx, cancel := context.WithCancel(context.Background())
-	m.mu.Lock()
-	m.compactCancel = cancel
-	m.mu.Unlock()
+	m.compactCancel.Store(&cancel)
 	defer func() {
-		m.mu.Lock()
-		m.compactCancel = nil
-		m.mu.Unlock()
+		m.compactCancel.Store(nil)
 		cancel()
 	}()
 
@@ -1086,18 +1061,35 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 	loader.Stop()
 	m.statusContainer.Clear()
 
-	if err != nil {
-		if ctx.Err() != nil {
-			m.showStatus("Compaction cancelled")
-		} else {
-			m.showWarning(fmt.Sprintf("Compaction failed: %s", err))
-		}
+	// If cancelled, just show it and stop
+	if err != nil && ctx.Err() != nil {
+		m.showStatus("Compaction cancelled")
 		m.ui.RequestRender(false)
 		return
 	}
 
-	if result != nil {
-		m.rebuildChatFromMessages()
+	// Show any error (but continue to check for pending work)
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Compaction failed: %s", err))
+	}
+
+	// Rebuild chat from compacted session (whether success or failure)
+	m.rebuildChatFromMessages()
+
+	// If pending work, resume it; otherwise show completion status
+	if m.session.HasPendingWork() {
+		// Show "Working..." spinner and resume
+		loader := tuicomp.NewLoader(
+			m.ui.AsRenderRequester(),
+			func(spinner string) string { return t.Fg("accent", spinner) },
+			func(text string) string { return t.Fg("muted", text) },
+			"Working...",
+		)
+		m.loadingAnimation = loader
+		m.statusContainer.AddChild(loader)
+		go func() { _ = m.session.Agent.Continue() }()
+	} else if result != nil {
+		// Compaction succeeded and no pending work - just show status
 		m.showStatus(fmt.Sprintf("Compacted: %d tokens", result.TokensBefore))
 	}
 
@@ -1145,26 +1137,20 @@ func compactionFormatTokens(n int) string {
 func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext bool) {
 	// Create UI component for display
 	bashComp := components.NewBashExecutionComponent(command, m.ui, excludeFromContext)
-	m.mu.Lock()
-	m.bashComponent = bashComp
-	m.mu.Unlock()
+	m.bashComponent.Store(bashComp)
 	m.messageContainer.AddChild(bashComp)
 	m.ui.RequestRender(false)
 
 	if m.session != nil {
 		result, err := m.session.ExecuteBashWithOptions(command, func(chunk string) {
-			m.mu.Lock()
-			bc := m.bashComponent
-			m.mu.Unlock()
+			bc := m.bashComponent.Load()
 			if bc != nil {
 				bc.AppendOutput(chunk)
 				m.ui.RequestRender(false)
 			}
 		}, excludeFromContext)
 
-		m.mu.Lock()
-		bc := m.bashComponent
-		m.mu.Unlock()
+		bc := m.bashComponent.Load()
 		if err != nil {
 			if bc != nil {
 				bc.SetComplete(nil, false, nil, "")
@@ -1180,10 +1166,8 @@ func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext b
 		}
 	}
 
-	m.mu.Lock()
-	m.bashComponent = nil
-	m.isBashMode = false
-	m.mu.Unlock()
+	m.bashComponent.Store(nil)
+	m.isBashMode.Store(false)
 	m.updateEditorBorderColor()
 	m.ui.RequestRender(false)
 }
@@ -2394,9 +2378,7 @@ func (m *InteractiveMode) updateEditorBorderColor() {
 
 // IsBashMode returns true if the editor is in bash mode (thread-safe).
 func (m *InteractiveMode) IsBashMode() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.isBashMode
+	return m.isBashMode.Load()
 }
 
 // ============================================================================
@@ -2608,9 +2590,6 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 		// Handle session-level events
 		switch event.Type {
 		case "auto_compaction_start":
-			if m.extensionRunner != nil {
-				_ = m.extensionRunner.EmitAgentStart()
-			}
 			t := itheme.GetTheme()
 			// Build an initial label that shows message/token counts if available.
 			initialLabel := m.compactionLoaderLabel(event.CompactionInfo, "(auto)")
@@ -2640,20 +2619,23 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 				m.loadingAnimation.Stop()
 				m.loadingAnimation = nil
 			}
-			if m.extensionRunner != nil {
-				_ = m.extensionRunner.EmitAgentEnd(nil)
-			}
+			// Show any error
 			if event.ErrorMessage != "" {
 				m.showWarning("Compaction failed: " + event.ErrorMessage)
-			} else {
-				m.rebuildChatFromMessages()
-				if event.CompactionResult != nil {
-					m.showStatus(fmt.Sprintf("Auto-compacted: %d tokens", event.CompactionResult.TokensBefore))
-				} else {
-					m.statusContainer.Clear()
-				}
-				m.ui.RequestRender(false)
 			}
+			// Rebuild chat from compacted session
+			m.rebuildChatFromMessages()
+
+			// If no pending work and successful, show completion status
+			if event.ErrorMessage == "" && event.CompactionResult != nil && !m.session.HasPendingWork() {
+				m.showStatus(fmt.Sprintf("Auto-compacted: %d tokens", event.CompactionResult.TokensBefore))
+				// Notify extensions that the auto-compaction phase is done
+				if m.extensionRunner != nil {
+					_ = m.extensionRunner.EmitAgentEnd(nil)
+				}
+			}
+			// If pending work, agent will resume naturally via EventAgentStart (no notification needed here)
+			m.ui.RequestRender(false)
 		}
 		return
 	}
@@ -2697,6 +2679,11 @@ func (m *InteractiveMode) onAgentStart() {
 	m.statusContainer.AddChild(loader)
 	m.streamingComponent = nil
 	m.ui.RequestRender(false)
+
+	// Notify extensions that work is starting
+	if m.extensionRunner != nil {
+		_ = m.extensionRunner.EmitAgentStart()
+	}
 }
 
 func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
@@ -2811,6 +2798,11 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)
+
+	// Notify extensions that agent work is ending
+	if m.extensionRunner != nil {
+		_ = m.extensionRunner.EmitAgentEnd(nil)
+	}
 }
 
 // ============================================================================

@@ -1,9 +1,11 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -251,6 +253,216 @@ func TestHandleCommand_Compact_NoRunner(t *testing.T) {
 	resp := s.handleCommand(RpcCommand{ID: "16", Type: CmdCompact})
 	if resp.Success {
 		t.Error("expected error when compaction runner is nil")
+	}
+}
+
+// rpcMockCompactionRunner is a minimal CompactionRunner for RPC-layer tests.
+type rpcMockCompactionRunner struct {
+	keepUserMsg bool // if true, rebuilt context ends with the original user message
+	runError    error
+}
+
+func (r *rpcMockCompactionRunner) IsEnabled() bool                              { return true }
+func (r *rpcMockCompactionRunner) ShouldCompact(_, _ int) bool                  { return false }
+func (r *rpcMockCompactionRunner) GetStats(_ *core.AgentSession) *core.CompactionInfo { return nil }
+func (r *rpcMockCompactionRunner) RunCompaction(_ context.Context, session *core.AgentSession, _ string) (*core.CompactionResultInfo, error) {
+	if r.runError != nil {
+		return nil, r.runError
+	}
+	// Find the most recent user message to use as firstKeptEntryID so
+	// BuildSessionContext keeps it in the rebuilt context.
+	firstKeptEntryID := ""
+	if r.keepUserMsg {
+		for _, e := range session.SessionManager.GetBranch("") {
+			if e.Type == "message" {
+				var probe struct {
+					Role string `json:"role"`
+				}
+				if json.Unmarshal(e.RawMessage, &probe) == nil && probe.Role == "user" {
+					firstKeptEntryID = e.ID
+				}
+			}
+		}
+	}
+	session.SessionManager.AppendCompaction("summary", firstKeptEntryID, 1000, nil, false)
+	ctx := session.SessionManager.BuildSessionContext()
+	session.Agent.ReplaceMessages(ctx.Messages)
+	return &core.CompactionResultInfo{Summary: "summary", TokensBefore: 1000}, nil
+}
+
+func TestHandleCommand_Compact_AutoResumesWhenPendingUserMessage(t *testing.T) {
+	cwd := t.TempDir()
+	sm := core.InMemorySessionManager(cwd)
+
+	// streamCalled is closed by the fake LLM stream when the agent calls it.
+	streamCalled := make(chan struct{})
+	streamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		close(streamCalled)
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			msg := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{ai.NewTextContent("resumed")},
+				StopReason: ai.StopReasonStop,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: msg})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	model := &ai.Model{ID: "m", Provider: "p", Api: "openai-completions", ContextWindow: 100000, MaxTokens: 4096}
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{Model: model},
+		StreamFn:     streamFn,
+	})
+
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:            a,
+		SessionManager:   sm,
+		ResourceLoader:   &noopResourceLoader{},
+		Cwd:              cwd,
+		CompactionRunner: &rpcMockCompactionRunner{keepUserMsg: true},
+	})
+
+	// Append a user message entry so the session has something to compact and resume from.
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("do the thing", 0)))
+
+	srv := &Server{session: session}
+	resp := srv.handleCommand(RpcCommand{ID: "c1", Type: CmdCompact})
+	if !resp.Success {
+		t.Fatalf("expected compact to succeed, got: %s", resp.Error)
+	}
+
+	// The goroutine that calls Agent.Continue() must fire within a short window.
+	select {
+	case <-streamCalled:
+		// good — agent was resumed
+	case <-time.After(2 * time.Second):
+		t.Error("agent was not resumed after compact with pending user message")
+	}
+}
+
+func TestHandleCommand_Compact_NoAutoResumeWhenNoUserMessage(t *testing.T) {
+	cwd := t.TempDir()
+	sm := core.InMemorySessionManager(cwd)
+
+	streamCalled := make(chan struct{}, 1)
+	streamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		streamCalled <- struct{}{}
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			msg := &ai.AssistantMessage{Role: ai.RoleAssistant, StopReason: ai.StopReasonStop}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: msg})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	model := &ai.Model{ID: "m", Provider: "p", Api: "openai-completions", ContextWindow: 100000, MaxTokens: 4096}
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{Model: model},
+		StreamFn:     streamFn,
+	})
+
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:          a,
+		SessionManager: sm,
+		ResourceLoader: &noopResourceLoader{},
+		Cwd:            cwd,
+		// keepUserMsg=false → rebuilt context has no trailing user message → no resume
+		CompactionRunner: &rpcMockCompactionRunner{keepUserMsg: false},
+	})
+
+	// Append both a user and an assistant entry so there's something to compact.
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("do the thing", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopReasonStop,
+		Content:    []ai.AssistantContent{ai.NewTextContent("done")},
+	})))
+
+	srv := &Server{session: session}
+	resp := srv.handleCommand(RpcCommand{ID: "c2", Type: CmdCompact})
+	if !resp.Success {
+		t.Fatalf("expected compact to succeed, got: %s", resp.Error)
+	}
+
+	// Give any spurious goroutine a moment to fire.
+	select {
+	case <-streamCalled:
+		t.Error("agent should NOT have been resumed when last message is assistant")
+	case <-time.After(200 * time.Millisecond):
+		// good — no resume
+	}
+}
+
+func TestHandleCommand_Compact_AutoResumesWhenPendingToolResult(t *testing.T) {
+	cwd := t.TempDir()
+	sm := core.InMemorySessionManager(cwd)
+
+	streamCalled := make(chan struct{})
+	streamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		close(streamCalled)
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			msg := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{ai.NewTextContent("response to tool")},
+				StopReason: ai.StopReasonStop,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: ai.StopReasonStop, Message: msg})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	model := &ai.Model{ID: "m", Provider: "p", Api: "openai-completions", ContextWindow: 100000, MaxTokens: 4096}
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{Model: model},
+		StreamFn:     streamFn,
+	})
+
+	session := core.NewAgentSession(core.AgentSessionOptions{
+		Agent:            a,
+		SessionManager:   sm,
+		ResourceLoader:   &noopResourceLoader{},
+		Cwd:              cwd,
+		CompactionRunner: &rpcMockCompactionRunner{keepUserMsg: true}, // keep the tool result
+	})
+
+	// Build a scenario: user msg → assistant tool call → tool result
+	// (tool result is the last entry, which is a resumable state)
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("use a tool", 0)))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopReasonToolUse,
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("call-1", "test_tool", map[string]any{"x": 1}),
+		},
+	})))
+	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+		ToolCallID: "call-1",
+		ToolName:   "test_tool",
+		Content: []ai.ToolResultContent{
+			{Type: "text", Text: "tool executed"},
+		},
+	})))
+
+	srv := &Server{session: session}
+	resp := srv.handleCommand(RpcCommand{ID: "c3", Type: CmdCompact})
+	if !resp.Success {
+		t.Fatalf("expected compact to succeed, got: %s", resp.Error)
+	}
+
+	// Agent should resume since there's a tool result waiting for processing.
+	select {
+	case <-streamCalled:
+		// good — agent was resumed
+	case <-time.After(2 * time.Second):
+		t.Error("agent should have been resumed after compact with pending tool result")
 	}
 }
 
