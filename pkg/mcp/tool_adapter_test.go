@@ -127,6 +127,21 @@ func TestConvertResult_Image(t *testing.T) {
 	assert.Equal(t, "image/png", out.Content[0].MimeType)
 }
 
+// TestConvertResult_NonImageContent verifies that an ImageContent with a
+// non-image MIME type is rendered as base64 text rather than ContentTypeImage
+// to avoid API errors on providers that validate image MIME types strictly.
+func TestConvertResult_NonImageContent(t *testing.T) {
+	pdfData := []byte{0x25, 0x50, 0x44, 0x46} // %PDF magic
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{&sdk.ImageContent{Data: pdfData, MIMEType: "application/pdf"}},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "text", out.Content[0].Type, "non-image blob must NOT be ContentTypeImage")
+	assert.Contains(t, out.Content[0].Text, "application/pdf")
+	assert.Contains(t, out.Content[0].Text, base64.StdEncoding.EncodeToString(pdfData))
+}
+
 func TestConvertResult_IsError(t *testing.T) {
 	r := &sdk.CallToolResult{
 		Content: []sdk.Content{&sdk.TextContent{Text: "something went wrong"}},

@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -83,11 +85,25 @@ func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 				Text: v.Text,
 			})
 		case *sdk.ImageContent:
-			content = append(content, ai.ToolResultContent{
-				Type:     ai.ContentTypeImage,
-				Data:     base64.StdEncoding.EncodeToString(v.Data),
-				MimeType: v.MIMEType,
-			})
+			// MCP's ImageContent is spec'd to carry image data, but guard on
+			// the MIME type so unexpected values don't cause API errors on
+			// providers that validate image types strictly.
+			if strings.HasPrefix(v.MIMEType, "image/") {
+				content = append(content, ai.ToolResultContent{
+					Type:     ai.ContentTypeImage,
+					Data:     base64.StdEncoding.EncodeToString(v.Data),
+					MimeType: v.MIMEType,
+				})
+			} else {
+				mime := v.MIMEType
+				if mime == "" {
+					mime = "application/octet-stream"
+				}
+				content = append(content, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: fmt.Sprintf("[base64 %s] %s", mime, base64.StdEncoding.EncodeToString(v.Data)),
+				})
+			}
 		default:
 			// Audio, resource links, etc. — render as a text placeholder.
 			content = append(content, ai.ToolResultContent{
