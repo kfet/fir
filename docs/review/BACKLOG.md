@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 14, 2026-02-27 ~01:40 PST
-**Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
-**Commits reviewed this cycle:** unstaged `sampling.go` (URGENT fixed: prompt rename + stop reason constants), `sampling_test.go` (new: unit + integration)
+**Last reviewed:** MCP watch cycle 15, 2026-02-27 ~01:42 PST
+**Build status:** ✅ production builds. ❌ `go test ./pkg/mcp/...` FAILS — `elicitation_test.go` missing `agent` import (see URGENT.md).
+**Commits reviewed this cycle:** `6dc8dc8` (sampling feature committed); unstaged: `elicitation.go` (new), `elicitation_test.go` (new, broken), `client.go` (ElicitationFn field)
 
 ---
 
@@ -22,16 +22,22 @@
   already-subscribed URIs to avoid duplicate subscriptions.
   **Files:** `pkg/mcp/client.go`
 
+- **[BACKLOG/DOC]** `pkg/mcp/elicitation.go:9` — The comment "If nil, all elicitation requests
+  are declined" (on `Manager.ElicitationFn`) is slightly misleading. When `ElicitationFn` is nil,
+  the SDK does NOT advertise the elicitation capability to the server, so well-behaved servers won't
+  try to elicit. Misbehaving servers may get an error response rather than a `"decline"` action.
+  Low priority — behavior is still safe/correct.
+  **Files:** `pkg/mcp/elicitation.go` / `pkg/mcp/client.go`
+
 ### Test Coverage
 
-*(none — sampling_test.go added and covers all cases)*
+*(none — elicitation_test.go added once URGENT fix applied)*
 
 ---
 
 ## Resolved This Cycle ✅
 
 - **✅ FIXED (sampling.go)** Build break: `prompt := ai.Context{...}` (was `ctx :=` — variable shadow); stop reason constants fixed (`StopReasonStop`/`StopReasonLength` not EndTurn/MaxTokens). `sampling_test.go` added with unit+integration coverage.
-- **✅ SELF-FIXED prompts.go** `pkg/mcp/prompts.go` — null→`[]` fix applied; small blobs inline as base64.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).

@@ -2,7 +2,29 @@
 
 ## Active Issues
 
-*(none)*
+### `pkg/mcp/elicitation_test.go` — Test build break: missing `agent` import
+
+**Filed:** 2026-02-27 ~01:42 PST
+
+**Errors:**
+```
+elicitation_test.go:101:12: undefined: agent
+elicitation_test.go:156:12: undefined: agent
+```
+
+**Root cause:** `elicitation_test.go` uses `*agent.AgentTool` (lines 101, 156) but does not import
+`"github.com/kfet/fir/pkg/agent"`.
+
+**Fix:** Add the missing import:
+```go
+import (
+    ...
+    "github.com/kfet/fir/pkg/agent"
+    ...
+)
+```
+
+**Files:** `pkg/mcp/elicitation_test.go`
 
 ---
 
