@@ -25,6 +25,39 @@ tmux-ai attach -t fir-mcp       # attach to the fleet session
 tmux-ai attach -t fir-mcp:worker-1  # jump to a specific window
 ```
 
+## Worktree — One Worktree Per Fleet
+
+**Every fleet works in a dedicated git worktree on its own branch.** This keeps the main checkout
+clean, lets multiple fleets run in parallel without stepping on each other, and makes it easy to
+review or discard the entire feature with a single `git worktree remove`.
+
+### Setup (do this once, before spawning any agent)
+
+```bash
+PROJECT=/path/to/repo          # e.g. /Users/kfet/dev/ai/fir
+SESSION=fir-mcp                # the fleet session name
+FEATURE=${SESSION#*-}          # extract feature part: "mcp"
+BRANCH="fleet/${SESSION}"      # e.g. fleet/fir-mcp
+WORKTREE="${PROJECT}-wt-${FEATURE}"   # sibling dir: /Users/kfet/dev/ai/fir-wt-mcp
+
+# Create the branch and worktree (branch off current HEAD of main repo)
+git -C "$PROJECT" worktree add "$WORKTREE" -b "$BRANCH"
+
+echo "Worktree ready: $WORKTREE  (branch: $BRANCH)"
+```
+
+Set `$WORKTREE` once and use it everywhere below — all tmux windows, all `git` commands, all
+build/test invocations must use this path. **Never send agents to `$PROJECT`.**
+
+### When the fleet is done
+
+```bash
+# Merge the branch back (or open a PR), then clean up
+git -C "$PROJECT" merge "$BRANCH"          # or: gh pr create --head "$BRANCH"
+git -C "$PROJECT" worktree remove "$WORKTREE"
+git -C "$PROJECT" branch -d "$BRANCH"
+```
+
 ## API Rate-Limit Guard (check every cycle)
 
 At the start of every cycle, check rate-limit utilisation:
@@ -45,9 +78,15 @@ SEVEN_DAY_RESET=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {print $NF}')   
 ```
 
 **If `FIVE_HR >= 85` or `SEVEN_DAY >= 95`:**
-1. Escape all agents (`send-keys Escape`) — stop any generation.
-2. Run `go build ./... && go test -count=1 ./...` — ensure project is clean and buildable.
-3. Commit any uncommitted tracked changes: `git add -u && git commit -m "chore: checkpoint before rate-limit pause"` (only if dirty).
+1. **Snapshot each agent's current work**, then escape them:
+   ```bash
+   # For each agent window NAME:
+   AGENT_SNAPSHOT["NAME"]=$(tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -30 \
+     | grep -v '^$\|^─\|^⟩\|%/200k' | tail -5)
+   tmux -S "$SOCKET" send-keys -t NAME:0.0 Escape
+   ```
+2. Run `go build ./... && go test -count=1 ./...` in `$WORKTREE` — ensure project is clean and buildable.
+3. Commit any uncommitted tracked changes in the worktree: `git -C "$WORKTREE" add -u && git -C "$WORKTREE" commit -m "chore: checkpoint before rate-limit pause"` (only if dirty).
 4. **Print a short progress report** before sleeping so the user knows where things stand:
    - Phases complete vs. in-progress (from PLAN.md status line)
    - Last 5 commits (`git log --oneline -5`)
@@ -85,7 +124,13 @@ SEVEN_DAY_RESET=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {print $NF}')   
    echo "Sleeping ${WAIT}s (~$((WAIT/60)) min) until ${RESET_AT} + 2 min..."
    sleep "$WAIT"
    ```
-7. After waking, verify usage has dropped, then **resume the loop** — re-send tasks to any idle agents and continue monitoring.
+7. After waking, verify usage has dropped, then **resume each agent with `"Continue."`** — the agent's own conversation history is intact, so it can pick up exactly where it left off without re-stating the task:
+   ```bash
+   # For each agent window NAME:
+   tmux -S "$SOCKET" send-keys -t NAME:0.0 -l 'Continue.'
+   tmux -S "$SOCKET" send-keys -t NAME:0.0 Enter
+   ```
+   Then resume the overseer loop.
 
 Check usage every **5 cycles** (not every cycle) to avoid adding overhead.
 
@@ -101,11 +146,11 @@ Name the session after both the project and the feature being worked on — e.g.
 
 ```bash
 # Create the session (first window becomes the researcher or first worker)
-tmux -S "$SOCKET" new -d -s fir-mcp -n worker-1 -c /path/to/project
+tmux -S "$SOCKET" new -d -s fir-mcp -n worker-1 -c "$WORKTREE"
 
 # Add more windows
-tmux -S "$SOCKET" new-window -t fir-mcp -n worker-2 -c /path/to/project
-tmux -S "$SOCKET" new-window -t fir-mcp -n reviewer -c /path/to/project
+tmux -S "$SOCKET" new-window -t fir-mcp -n worker-2 -c "$WORKTREE"
+tmux -S "$SOCKET" new-window -t fir-mcp -n reviewer -c "$WORKTREE"
 
 # Turn off auto-rename globally
 tmux -S "$SOCKET" set-option -t fir-mcp -g automatic-rename off
@@ -132,15 +177,15 @@ tmux -S "$SOCKET" list-sessions
 tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -5 | grep "~/"
 ```
 
-If a session is working in a different project directory — **leave it alone**. Do not send it Escape, `/new`, `/compact`, or any task. It is not yours to manage.
+If a session is working in a different project directory or worktree — **leave it alone**. Do not send it Escape, `/new`, `/compact`, or any task. It is not yours to manage. Worktree paths look like `/path/to/repo-wt-<feature>` — each fleet owns exactly one.
 
 Spawn fresh sessions with `<project>-<feature>` names to avoid confusion:
 
 ```bash
 # Good — name encodes project AND feature being worked on
-tmux -S "$SOCKET" new -d -s fir-mcp      -c /path/to/fir   # fir, MCP feature work
-tmux -S "$SOCKET" new -d -s fir-acp      -c /path/to/fir   # fir, ACP mode work
-tmux -S "$SOCKET" new -d -s claw-transport -c /path/to/acp-claw
+tmux -S "$SOCKET" new -d -s fir-mcp      -c "$WORKTREE"  # fir, MCP feature work
+tmux -S "$SOCKET" new -d -s fir-acp      -c "$WORKTREE"  # fir, ACP mode work
+tmux -S "$SOCKET" new -d -s claw-transport -c "$WORKTREE"
 
 # Bad — generic names that look reusable across projects
 tmux -S "$SOCKET" new -d -s worker
@@ -162,7 +207,7 @@ The sequence:
 2. **Wait for the plan to land** — poll `git log` for the commit, or watch for the plan file:
    ```bash
    # poll until plan appears
-   until ls /path/to/project/docs/plan/NN-feature.md 2>/dev/null; do sleep 15; done
+   until ls "$WORKTREE"/docs/plan/NN-feature.md 2>/dev/null; do sleep 15; done
    ```
 3. **Read the plan yourself** before dispatching workers. Verify it answers: which files, which interfaces, which order.
 4. **Then spawn workers**, each with a concrete task drawn directly from the plan's task breakdown. One task per agent, one commit's worth each.
@@ -173,7 +218,7 @@ The sequence:
 
 Poll every 10 seconds. Each cycle is three questions:
 
-1. **Did anything land?** — `git log --oneline -5`. Commits mean progress.
+1. **Did anything land?** — `git -C "$WORKTREE" log --oneline -5`. Commits mean progress.
 2. **Is anyone stuck?** — Check context % and spinner. No spinner = idle or dead.
 3. **Is the build green?** — `go test ./...` catches cross-agent breakage fast.
 
@@ -208,13 +253,31 @@ Examples of good window names:
 **Bloated context (>50%)** — Prefer `/compact` over `/new`: it summarises history into a short prefix so the agent retains what it was doing but frees ~60–70% of tokens. Reserve `/new` for when the agent is going in circles and you *want* it to forget.
 
 ```bash
-# Compact (preferred — retains summarised history)
-tmux -S "$SOCKET" send-keys -t NAME:0.0 Escape   # stop if generating
+# Compact with auto-resume (preferred — retains summarised history and continues mid-task work)
+
+# 1. Snapshot what the agent was doing before interrupting
+SNAPSHOT=$(tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -30 \
+  | grep -v '^$\|^─\|^⟩\|%/200k' | tail -5)
+
+# 2. Interrupt and compact
+tmux -S "$SOCKET" send-keys -t NAME:0.0 Escape
 sleep 1
 tmux -S "$SOCKET" send-keys -t NAME:0.0 -l '/compact'
 tmux -S "$SOCKET" send-keys -t NAME:0.0 Enter
-sleep 20   # compact takes ~15s
-# Then send the next task; first response will show the new (lower) ctx %
+
+# 3. Wait for compaction to finish — poll until the prompt returns (spinner gone)
+for i in $(seq 1 30); do
+  sleep 2
+  PANE=$(tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -3)
+  echo "$PANE" | grep -qE '^\s*>\s*$|waiting for input|\$' && break
+done
+
+# 4. Resume — /compact already summarised the context, so "Continue." is sufficient.
+#    The agent's summary includes what it was mid-doing; no need to restate the task.
+#    Only include $SNAPSHOT if the summary seems thin (agent says "I don't know what I was doing").
+tmux -S "$SOCKET" send-keys -t NAME:0.0 -l 'Continue.'
+tmux -S "$SOCKET" send-keys -t NAME:0.0 Enter
+# First response will show the new (lower) ctx %
 
 # /new (use when agent is looping or you want a blank slate)
 tmux -S "$SOCKET" send-keys -t NAME:0.0 Escape
@@ -254,7 +317,7 @@ tmux -S "$SOCKET" send-keys -t NAME:0.0 Enter
 Only create a new session if the agent process itself is dead or the window is gone:
 
 ```bash
-tmux -S "$SOCKET" new -d -s NAME -n NAME -c "$PROJECT"
+tmux -S "$SOCKET" new -d -s NAME -n NAME -c "$WORKTREE"
 tmux -S "$SOCKET" send-keys -t NAME:0.0 -l "fir --provider anthropic --model claude-sonnet-4-6"
 tmux -S "$SOCKET" send-keys -t NAME:0.0 Enter
 sleep 3

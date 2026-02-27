@@ -10,6 +10,7 @@
 - MCP: handle dynamic tool list changes (`ToolListChangedHandler`) and forward progress notifications to tool callbacks
 
 ### Changed
+- Overseer skill: each fleet now gets its own git worktree + branch (`fleet/<session>`); all agents work inside it
 - Overseer skill: auto-resume mid-task agents after `/compact` or rate-limit pause with `"Continue."`
 - Overseer skill: recommend cheap model (Haiku) since it doesn't write code
 - Overseer skill: adaptive poll frequency — slows down at 60%+ usage to conserve tokens
