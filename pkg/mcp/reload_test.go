@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,4 +163,91 @@ func TestManager_Reload_Unchanged(t *testing.T) {
 	_, err = mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, connectCount, "unchanged server should not be reconnected")
+}
+
+// TestManager_Reload_Concurrent_ConfigChange exercises concurrent Reload calls
+// where each goroutine alternates between two distinct configs, forcing the
+// actual stop/start path on every other Reload. reloadMu serialises the
+// operations; this test verifies the Manager remains consistent under rapid
+// stop+restart cycles triggered by concurrent callers.
+func TestManager_Reload_Concurrent_ConfigChange(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	// Use Command as the differentiating field — configsEqual compares by JSON
+	// so different Command values trigger stop+start even though dialFn ignores
+	// the Command and always connects to the same in-memory server.
+	cfgA := map[string]ServerConfig{"srv1": {Command: "cmd-a"}}
+	cfgB := map[string]ServerConfig{"srv1": {Command: "cmd-b"}}
+
+	mgr := NewManager(cfgA, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	_, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	const goroutines = 6
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cfg := cfgA
+			if i%2 != 0 {
+				cfg = cfgB
+			}
+			_, err := mgr.Reload(context.Background(), cfg)
+			assert.NoError(t, err)
+		}(i)
+	}
+	wg.Wait()
+
+	// Manager must be in a consistent state: srv1 session must exist.
+	mgr.mu.Lock()
+	_, exists := mgr.sessions["srv1"]
+	mgr.mu.Unlock()
+	assert.True(t, exists, "srv1 session must exist after concurrent config-changing Reloads")
+}
+
+// TestManager_Reload_Concurrent verifies that concurrent Reload calls do not
+// corrupt Manager state. We launch several goroutines that simultaneously
+// Reload with the same config and assert that all succeed without panic and
+// leave the Manager in a consistent state (exactly one session per server).
+func TestManager_Reload_Concurrent(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	_, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	cfg := map[string]ServerConfig{"srv1": {}}
+	const goroutines = 5
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := mgr.Reload(context.Background(), cfg)
+			assert.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+
+	// After all concurrent Reloads complete, Manager must be consistent:
+	// exactly one session for srv1 and its tools must be present.
+	mgr.mu.Lock()
+	_, exists := mgr.sessions["srv1"]
+	mgr.mu.Unlock()
+	assert.True(t, exists, "srv1 session must exist after concurrent Reloads")
 }

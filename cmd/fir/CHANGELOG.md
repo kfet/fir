@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- MCP: `Manager.Reload` is now safe for concurrent calls — serialised by an internal `reloadMu` mutex
+- MCP: `Manager.Status()` now reflects post-startup server disconnections — `Connected` becomes false and any error is recorded via a background `session.Wait()` goroutine
+- MCP: `Manager.Reload` now deletes servers from `m.subscribed` to prevent a minor memory leak when servers are removed from the config
+- MCP: `WatchConfig` stop semantics documented as best-effort in the function comment
+
 ### Added
 - MCP: hot reload — `WatchAndReload` watches `mcp.json` for changes and incrementally starts/stops servers; new servers connected, removed servers closed, changed servers restarted, unchanged left alone
 - MCP: `NewToolServer` exposes fir `agent.AgentTool` values as an MCP server, enabling external MCP clients to call fir's tools

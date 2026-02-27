@@ -53,6 +53,7 @@ type Manager struct {
 	verbose  bool
 
 	mu           sync.Mutex
+	reloadMu     sync.Mutex                   // serialises concurrent Reload calls
 	tools        map[string][]agent.AgentTool // per-server tools, guarded by mu
 	serverErrors map[string]error             // per-server connection errors, guarded by mu
 	subscribed   map[string]map[string]struct{} // per-server subscribed resource URIs, guarded by mu
@@ -385,6 +386,37 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	m.mu.Lock()
 	m.tools[name] = tools
 	m.mu.Unlock()
+
+	// Detect post-startup disconnections so Status() stays accurate.
+	// session.Wait() blocks until the underlying connection is closed (by
+	// either side). When it returns, if this session is still the active
+	// session for this server we clear it from m.sessions and record the
+	// error so callers see Connected:false. If the session was already
+	// replaced or removed (by Reload or Close) the stale-session check exits
+	// early without clobbering the new state.
+	go func() {
+		waitErr := session.Wait()
+		m.mu.Lock()
+		current, ok := m.sessions[name]
+		if !ok || current != session {
+			// Already replaced/removed — nothing to do.
+			m.mu.Unlock()
+			return
+		}
+		delete(m.sessions, name)
+		delete(m.tools, name)
+		delete(m.subscribed, name)
+		if waitErr != nil {
+			m.serverErrors[name] = fmt.Errorf("disconnected: %w", waitErr)
+		}
+		notify := m.OnToolsChanged
+		all := m.allTools()
+		m.mu.Unlock()
+		if notify != nil {
+			notify(all)
+		}
+	}()
+
 	return tools, nil
 }
 
@@ -394,8 +426,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 // existing sessions. Returns the updated aggregate tool list.
 //
 // Reload is safe to call concurrently with tool executions in progress on
-// unchanged servers.
+// unchanged servers, and is safe to call concurrently from multiple goroutines
+// — concurrent Reload calls are serialised by an internal mutex.
 func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig) ([]agent.AgentTool, error) {
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
 	// Determine which servers to stop (removed or changed) and which to start
 	// (new or changed). We compare configs by JSON serialisation to avoid a
 	// custom equality function.
@@ -432,14 +467,18 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 
 	// Stop removed/changed sessions (outside the lock — Close may block).
 	for name, sess := range toStop {
-		if err := sess.Close(); err != nil {
-			slog.Warn("MCP Reload: error closing session", "server", name, "err", err)
-		}
+		// Remove from m.sessions before closing so the Wait goroutine's
+		// stale-session check (current != session) fires correctly and does
+		// not overwrite the state that Reload is about to establish.
 		m.mu.Lock()
 		delete(m.sessions, name)
 		delete(m.tools, name)
 		delete(m.serverErrors, name)
+		delete(m.subscribed, name)
 		m.mu.Unlock()
+		if err := sess.Close(); err != nil {
+			slog.Warn("MCP Reload: error closing session", "server", name, "err", err)
+		}
 	}
 
 	// Update the config map.

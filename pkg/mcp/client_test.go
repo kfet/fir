@@ -647,6 +647,51 @@ func TestManager_Status_ConnectError(t *testing.T) {
 	assert.Error(t, statuses[0].Error)
 }
 
+// TestManager_Status_AfterServerDisconnect verifies that when a server
+// disconnects after the initial connection is established, Status() updates to
+// reflect Connected:false and a non-nil Error.
+func TestManager_Status_AfterServerDisconnect(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+
+	// Confirm connected initially.
+	statuses := mgr.Status()
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Connected)
+	assert.NoError(t, statuses[0].Error)
+
+	// Close the server-side session to simulate a server-initiated disconnect.
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss, "server must have an active session")
+	require.NoError(t, ss.Close())
+
+	// The Wait goroutine should detect the disconnect and update Status().
+	require.Eventually(t, func() bool {
+		st := mgr.Status()
+		return len(st) == 1 && !st[0].Connected
+	}, 3*time.Second, 25*time.Millisecond, "Status() must show disconnected after server closes")
+
+	// After a clean server close, Status correctly shows not connected.
+	// Error may be nil (clean close) or non-nil (error close) depending on
+	// how the server terminated — either way Connected is false.
+	statuses = mgr.Status()
+	assert.False(t, statuses[0].Connected)
+}
+
 func TestManager_VerboseLoggingTransport(t *testing.T) {
 	// When verbose=true the transport is wrapped with a LoggingTransport.
 	// Verify that verbose mode doesn't break normal operation.

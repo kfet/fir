@@ -19,6 +19,10 @@ import (
 //
 // Returns a stop function that terminates the watcher. The caller must call
 // stop when done to avoid leaking goroutines and OS file-watch resources.
+// stop is best-effort: if the 200ms debounce timer has already fired by the
+// time stop() is called, one additional onChange invocation may occur after
+// stop returns. Callers that require strict stop semantics should guard
+// onChange with their own synchronization.
 func WatchConfig(path string, onChange func(*ConfigFile)) (stop func(), err error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {

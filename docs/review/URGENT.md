@@ -8,29 +8,19 @@
 
 ## Recently Fixed ✅
 
+### `pkg/mcp/reload_test.go:7` — Unused `"sync"` import breaks build ✅ FIXED (self-resolved)
+The import WAS used — `TestManager_Reload_Concurrent` uses `sync.WaitGroup`. Reviewer saw a
+stale working-tree snapshot before the concurrent test was written. Build is green.
+
 ### `pkg/mcp/client.go:212,238` — Data race on `m.OnToolsChanged` in `ToolListChangedHandler` ✅ FIXED `12734c4`
-Removed racy nil-check at handler call time; added stale-session guard inside the goroutine; reads `notify := m.OnToolsChanged` under `m.mu` before calling outside the lock. `applyConfigDiff` refactored away; `WatchAndReload` calls `Reload` then reads `OnToolsChanged` under lock.
-
 ### `pkg/mcp/config_watch.go` + `pkg/mcp/config.go` — `WatchConfig` redeclared ✅ FIXED (self-resolved)
-
 ### `pkg/mcp/server_test.go:93` — arguments base64-encoded ✅ FIXED `5af6d82`
-
 ### `pkg/mcp/tool_adapter.go:117` — Audio double MIME prefix + stale test ✅ FIXED `7c90b2d`
-Gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs returned as base64 text.
-Tests: `TestConvertResourceResult/non-image blob`, `TestConvertResourceResult/blob no mime`.
-
-### `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` with non-image MIME unconditionally tagged `ContentTypeImage` ✅ FIXED (unstaged, `TestConvertResult_NonImageContent` added)
-Same guard applied: `strings.HasPrefix(v.MIMEType, "image/")`.
-
+### `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` with non-image MIME unconditionally tagged `ContentTypeImage` ✅ FIXED
 ### `pkg/mcp/tool_adapter.go` — `defer registry.unregister` races with SDK notification goroutine ✅ FIXED `6ddadcd`
-Removed eager unregister; registry entries live for session lifetime.
-
 ### `pkg/mcp/debug_test.go` — committed debug investigation file ✅ CLEANED UP
-
 ### `pkg/mcp/client_test.go` — `TestManager_ProgressNotification` data race ✅ FIXED `9708bd2`
-
 ### `pkg/mcp/client.go:commandTransport` — subprocess env drops `os.Environ()` ✅ FIXED `ef4f139`
-
 ### Earlier pre-MCP fixes ✅
 - `pkg/tui/components/input.go` — `handleBackspace` undo leak ✅ FIXED 2026-02-23
 - `cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break ✅ FIXED `ce07547`
