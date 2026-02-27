@@ -2,48 +2,78 @@
 
 ## Active Issues
 
-### `pkg/mcp/client_test.go:384-400` — `TestManager_ProgressNotification` is broken + data race
-**Commits:** unstaged work-in-progress on top of `3b74aae`
-**Severity:** BLOCKER — data race + test broken
+### `pkg/mcp/tool_adapter.go:50-60` — `defer registry.unregister` races with SDK notification goroutine
+**Commits:** introduced in `fa21bd2` (progress tracking feature), test failing now  
+**Severity:** BLOCKER — `go test -race ./pkg/mcp/...` FAILS with timeout every run
 
-The test closes the `updates` channel and then immediately tries to read from it a second time via `select case got = <-updates:`.  A closed empty channel yields zero value immediately, so `got = ""` and the assertion always fails.  Additionally, closing the channel while the SDK's notification-dispatch goroutine may still be sending to it triggers a race detected by `go test -race`.
+**Root cause:** The SDK's `jsonrpc2` layer processes incoming notifications via a `handleAsync` goroutine that runs *concurrently* with the response delivery to `CallTool`. The sequence is:
 
-The comment in the code even says "do not close the channel to avoid a race" — but the channel *is* closed two lines earlier. This is an incomplete edit where the old close+range pattern was not removed when the new select-timeout pattern was added.
+1. Server sends progress notification → queued in `handleAsync` goroutine  
+2. Server sends tool result → directly unblocks `session.CallTool` (response path is separate from notification path)  
+3. `CallTool` returns → `Execute` returns → **`defer registry.unregister(toolCallID)` fires** — removes callback
+4. `handleAsync` goroutine runs → calls `m.progressReg.dispatch(token, ...)` → callback is gone → notification silently lost
+5. Test times out waiting for notification in `updates` channel
 
-**Files:** `pkg/mcp/client_test.go:383-400`
+The comment in `TestManager_ProgressNotification` says "notification is delivered before the tool result (MCP message ordering), so it is already buffered by the time Execute returns" — but this is wrong. The notification is *received* by the client's reader goroutine before the response, but it's *dispatched* by a separate `handleAsync` goroutine that runs concurrently with `CallTool`'s return path.
 
-**Suggested fix:**
-Remove the `close(updates)` and `for msg := range updates` block entirely, keeping only the select-with-timeout approach:
+**Files:** `pkg/mcp/tool_adapter.go:50-60`
+
+**Suggested fix:**  
+Remove the `defer registry.unregister(toolCallID)` call entirely. Since each `toolCallID` is unique per invocation, registry entries won't collide. The entries are cleaned up naturally when `Manager.Close()` is called (the `Manager` and its `progressReg` are garbage collected). If memory pressure from accumulated entries is a concern, add cleanup to `Manager.Close()`:
+
 ```go
-// Do NOT close updates — SDK notification dispatch goroutine may still
-// be sending to it. The notification is delivered before the tool result
-// (MCP message ordering), so it is buffered by the time Execute returns.
-var got string
-select {
-case got = <-updates:
-case <-time.After(2 * time.Second):
-    t.Fatal("timeout waiting for progress notification")
-}
-assert.Equal(t, "halfway there", got)
+// In AdaptTool.Execute — remove the defer:
+// BEFORE (racy):
+//   registry.register(toolCallID, onUpdate)
+//   defer registry.unregister(toolCallID)
+
+// AFTER (correct):
+//   registry.register(toolCallID, onUpdate)
+//   // No defer unregister — the SDK dispatches notifications asynchronously
+//   // after CallTool returns. Cleanup happens in Manager.Close().
 ```
-Also add a brief `time.Sleep` or synchronization after `Execute` if the in-memory transport delivers notifications asynchronously.
+
+Alternatively, add an explicit drain in `Manager.Close()`:
+```go
+// In Manager.Close(), after closing sessions:
+m.progressReg.m.Range(func(k, v any) bool {
+    m.progressReg.m.Delete(k)
+    return true
+})
+```
+
+---
+
+### `pkg/mcp/debug_test.go` — committed debug investigation file should be removed
+**Commits:** untracked file added while investigating progress notification behavior  
+**Severity:** MINOR BLOCKER — `fmt.Printf` in test file writes directly to stdout (not via `t.Log`), polluting CI output; file is clearly not production-ready
+
+The `TestDebugProgressToken` test is a debugging artifact. It writes:
+```go
+fmt.Printf("token type: %T, value: %v\n", receivedToken, receivedToken)
+```
+This raw stdout write appears in test output even when tests pass. The test should either be deleted or converted to use `t.Logf` only.
+
+**Files:** `pkg/mcp/debug_test.go` (untracked, appears in test output)  
+**Suggested fix:** Delete `pkg/mcp/debug_test.go` — the debugging investigation is complete and `TestManager_ProgressNotification` covers the same scenario.
 
 ---
 
 ## Recently Fixed ✅
 
+### `pkg/mcp/client_test.go:384-400` — `TestManager_ProgressNotification` data race ✅ PARTIALLY FIXED `fa21bd2`
+The `close(updates) + range` pattern (which closed a channel that a notification goroutine might still be writing to) was replaced with a `select + timeout` pattern in the unstaged diff. However, the test still **fails with timeout** because the underlying `defer registry.unregister` removes the callback before the notification is dispatched. See new URGENT issue above.
+
+---
+
 ### `pkg/mcp/client.go:commandTransport` — subprocess env drops `os.Environ()` ✅ FIXED ef4f139
-- When cfg.Env was non-empty, `cmd.Env` became a non-nil slice with only the listed vars,
-  stripping PATH, HOME, and the entire parent environment from the subprocess.
-- Fixed by adding `cmd.Env = os.Environ()` before the loop.
-- Tests: `TestCommandTransport_EnvInheritsParent`, `TestCommandTransport_EmptyCommand`
 
 ---
 
 ## Previously Fixed ✅
 
 - ~~`pkg/tui/components/input.go` — `handleBackspace` pushes undo on every keystroke, `UndoStack.Push` leaks evicted strings~~ — ✅ FIXED 2026-02-23
-- ~~`cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break~~ — ✅ FIXED (cycle 58 / rebase ce07547): embed moved to `cmd/fir/changelog_init.go`; `GetChangelogEntries()` prefers embedded, falls back to file.
+- ~~`cmd/fir/app.go:33` — `//go:embed CHANGELOG.md` build break~~ — ✅ FIXED (cycle 58 / rebase ce07547)
 - ~~`pkg/core/compaction/runner_test.go:110` — `TestDefaultRunner_GetStats_WithMessages` fails: `TokensBefore` always 0~~ — ✅ FIXED (2026-02-19)
 - ~~`pkg/core/compaction/runner_test.go:99` — `ai.Message{Role: ...}` unknown struct field~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp_test.go:586,610` — `chunk.Content` used as string (type `ContentBlock`)~~ — ✅ FIXED 2026-02-18
@@ -56,6 +86,6 @@ Also add a brief `time.Sleep` or synchronization after `Execute` if the in-memor
 - ~~`pkg/core/authstorage.go:401-446` — Deadlock in `refreshOAuthToken`~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:381` — Non-zero exit code not returned as error~~ — ✅ FIXED
 - ~~`pkg/modes/acp/acp.go:82` — No session cleanup on exit~~ — ✅ FIXED
-- ~~`pkg/modes/interactive/mode.go:1806` — `proc *exec.Cmd` data race in `performShare`~~ — ✅ FIXED (cycle 96): `atomic.Pointer[exec.Cmd]`
-- ~~`pkg/core/agentsession.go:686` — `ScopedModelsRef()`/`SetScopedModels()` no mutex guards~~ — ✅ FIXED (ce07547): RLock/Lock added
-- ~~`pkg/modes/acp/terminal.go` — `pendingBashTerminals` leak on abort~~ — ✅ FIXED (ce07547): `CleanupPendingBashTerminals` + per-path deletes
+- ~~`pkg/modes/interactive/mode.go:1806` — `proc *exec.Cmd` data race in `performShare`~~ — ✅ FIXED (cycle 96)
+- ~~`pkg/core/agentsession.go:686` — `ScopedModelsRef()`/`SetScopedModels()` no mutex guards~~ — ✅ FIXED (ce07547)
+- ~~`pkg/modes/acp/terminal.go` — `pendingBashTerminals` leak on abort~~ — ✅ FIXED (ce07547)
