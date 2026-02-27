@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 17, 2026-02-27 ~01:57 PST
-**Build status:** ✅ `go build ./...` passes. ❌ `go test ./pkg/mcp/...` FAILS — `TestConvertResult_UnknownContentType` (stale test + double MIME prefix bug in audio rendering — see URGENT.md).
-**Commits reviewed this cycle:** `facd0cb` (keepalive KeepAlive:30s, MergeConfigs, LoadDefaultConfigs + tests); unstaged `client.go` (Status() method)
+**Last reviewed:** MCP watch cycle 18, 2026-02-27 ~02:00 PST
+**Build status:** ✅ all 24 packages pass with -race. URGENT cleared.
+**Commits reviewed this cycle:** `a7e7c01` (Status() + sessions race fix + Status tests); `7c90b2d` (audio/resource fix, verbose wire logging); unstaged: `completions.go` (new) + `completions_test.go` (new)
 
 ---
 
@@ -34,16 +34,21 @@
 
 ### Test Coverage
 
-- **[MISSING TEST]** `pkg/mcp/client.go:Manager.Status` — no test for `Status()`. Should cover:
-  initial-connected state (all Connected=true, Error=nil), connection failure (Connected=false,
-  Error=non-nil), deterministic sort order by name.
-  **Files:** `pkg/mcp/client_test.go`
+- **[MISSING TEST / DOC MISMATCH]** `pkg/mcp/completions.go` — `CompletePromptArg` and
+  `CompleteResourceURI` both say "Returns an empty slice (not an error) when the server does not
+  support completions." But the implementation passes through any error from `session.Complete`.
+  If the server doesn't support the `completion/complete` method, callers get a JSON-RPC error
+  rather than an empty slice. Either: (a) update the comment to say errors are propagated, or
+  (b) add error-type detection to convert "method not found" into an empty result.
+  **Files:** `pkg/mcp/completions.go:12,29`
 
 ---
 
 ## Resolved This Cycle ✅
 
-- **✅ RESOLVED (elicitation nil doc)** `elicitHandler()` wrapper in `elicitation.go:44` ensures nil `ElicitationFn` falls back to `DefaultElicitFn`, so comment "declined" is accurate.
+- **✅ FIXED (tool_adapter.go)** Audio double MIME prefix `[audio/audio/mpeg]` fixed in `7c90b2d`; stale test updated; all tests pass.
+- **✅ FIXED (client_test.go)** `TestManager_Status_*` tests added in `a7e7c01`; sessions map data race fixed.
+- **✅ RESOLVED (elicitation nil doc)** `elicitHandler()` wrapper ensures nil falls back to `DefaultElicitFn`.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
