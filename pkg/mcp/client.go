@@ -61,6 +61,11 @@ type Manager struct {
 	// May be nil.
 	OnResourceUpdated func(serverName, uri string)
 
+	// SamplingFn is called when an MCP server issues a sampling/createMessage
+	// request (asking fir to call an LLM). If nil, sampling requests are rejected.
+	// Use NewSamplingFn to create a standard implementation.
+	SamplingFn func(context.Context, *sdk.CreateMessageRequest) (*sdk.CreateMessageResult, error)
+
 	// progressReg routes progress notifications to active tool-call callbacks.
 	progressReg progressRegistry
 
@@ -240,6 +245,8 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		PromptListChangedHandler: func(_ context.Context, _ *sdk.PromptListChangedRequest) {
 			slog.Debug("MCP prompt list changed", "server", serverName)
 		},
+		// Forward sampling/createMessage requests to the configured handler.
+		CreateMessageHandler: m.SamplingFn,
 	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
