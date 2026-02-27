@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"sync"
@@ -93,6 +94,9 @@ func createTransport(cfg ServerConfig) (sdk.Transport, error) {
 		}
 		return &sdk.StreamableClientTransport{Endpoint: cfg.URL}, nil
 	default: // "stdio" or ""
+		if cfg.Transport != "" && cfg.Transport != "stdio" {
+			return nil, fmt.Errorf("unsupported transport %q; valid values: stdio, sse, streamable", cfg.Transport)
+		}
 		return commandTransport(cfg)
 	}
 }
@@ -191,6 +195,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					}
 					updated = append(updated, AdaptTool(session, serverName, tool, &m.progressReg))
 				}
+				// Always include the resource tools for this server.
+				updated = append(updated,
+					listResourcesTool(session, serverName),
+					readResourceTool(session, serverName),
+				)
 				m.mu.Lock()
 				m.tools[serverName] = updated
 				all := m.allTools()
@@ -222,7 +231,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	rootURIs := cfg.Roots
 	if len(rootURIs) == 0 {
 		if cwd, err := os.Getwd(); err == nil {
-			rootURIs = []string{"file://" + cwd}
+			rootURIs = []string{(&url.URL{Scheme: "file", Path: cwd}).String()}
 		}
 	}
 	roots := make([]*sdk.Root, 0, len(rootURIs))
@@ -254,6 +263,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		}
 		tools = append(tools, AdaptTool(session, name, tool, &m.progressReg))
 	}
+	// Expose MCP resources as additional tools.
+	tools = append(tools,
+		listResourcesTool(session, name),
+		readResourceTool(session, name),
+	)
 	m.mu.Lock()
 	m.tools[name] = tools
 	m.mu.Unlock()

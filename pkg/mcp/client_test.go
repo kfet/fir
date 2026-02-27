@@ -52,7 +52,7 @@ func TestManager_StartAndListTools(t *testing.T) {
 
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
-	require.Len(t, tools, 1)
+	require.Len(t, tools, 3) // 1 MCP tool + 2 resource tools
 
 	assert.Equal(t, "mcp__myserver__greet", tools[0].Name)
 	assert.Equal(t, "Greet someone", tools[0].Description)
@@ -84,7 +84,7 @@ func TestManager_ToolCallable(t *testing.T) {
 
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
-	require.Len(t, tools, 1)
+	require.Len(t, tools, 3) // 1 MCP tool + 2 resource tools
 
 	result, err := tools[0].Execute(context.Background(), "id1", map[string]any{"a": 3.0, "b": 4.0}, nil)
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestManager_MultipleServers(t *testing.T) {
 
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, tools, 2)
+	assert.Len(t, tools, 6) // 1 MCP tool + 2 resource tools per server
 }
 
 func TestManager_Close(t *testing.T) {
@@ -192,7 +192,7 @@ func TestManager_PaginatedToolList(t *testing.T) {
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
 	// Both tools must be present despite the page size of 1.
-	require.Len(t, tools, 2)
+	require.Len(t, tools, 4) // 2 MCP tools + 2 resource tools
 
 	names := make(map[string]bool, len(tools))
 	for _, tool := range tools {
@@ -324,7 +324,8 @@ func TestManager_ToolListChanged(t *testing.T) {
 
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
-	assert.Empty(t, tools) // server has no tools yet
+	// Server has no MCP tools yet but resource tools are always present.
+	assert.Len(t, tools, 2, "expect only list_resources + read_resource before any tool is added")
 
 	// Adding a tool after connection sends a tool-list-changed notification.
 	server.AddTool(
@@ -336,7 +337,7 @@ func TestManager_ToolListChanged(t *testing.T) {
 
 	select {
 	case newTools := <-changed:
-		require.Len(t, newTools, 1)
+		require.Len(t, newTools, 3) // 1 MCP tool + 2 resource tools
 		assert.Equal(t, "mcp__srv__new_tool", newTools[0].Name)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for tool list change notification")
@@ -369,7 +370,7 @@ func TestManager_ProgressNotification(t *testing.T) {
 
 	tools, err := mgr.Start(context.Background())
 	require.NoError(t, err)
-	require.Len(t, tools, 1)
+	require.Len(t, tools, 3) // 1 MCP tool + 2 resource tools
 
 	updates := make(chan string, 10)
 	onUpdate := func(result agent.AgentToolResult) {
@@ -528,6 +529,15 @@ func TestCreateTransport_Streamable_MissingURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "url is required")
 }
 
+// TestCreateTransport_UnknownTransport verifies that an unrecognised transport
+// name returns an error rather than silently falling through to stdio.
+func TestCreateTransport_UnknownTransport(t *testing.T) {
+	_, err := createTransport(ServerConfig{Transport: "ftp", Command: "true"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported transport")
+	assert.Contains(t, err.Error(), "ftp")
+}
+
 // TestManager_StreamableTransport_Integration runs a real streamable HTTP MCP
 // server in-process using httptest.NewServer and verifies that Manager can
 // connect to it, list tools, and call a tool over the streamable transport.
@@ -560,7 +570,7 @@ func TestManager_StreamableTransport_Integration(t *testing.T) {
 	require.NoError(t, err)
 	defer mgr.Close()
 
-	require.Len(t, tools, 1)
+	require.Len(t, tools, 3) // 1 MCP tool + 2 resource tools
 	assert.Equal(t, "mcp__http-srv__ping", tools[0].Name)
 
 	result, err := tools[0].Execute(ctx, "call-1", nil, nil)

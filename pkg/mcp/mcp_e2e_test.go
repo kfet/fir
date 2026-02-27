@@ -50,8 +50,8 @@ func TestMCP_E2E_ListTools(t *testing.T) {
 	tools, err := mgr.Start(ctx)
 	require.NoError(t, err)
 
-	// The test server registers echo, add, and slow.
-	require.Len(t, tools, 3, "expected 3 tools from test server")
+	// The test server registers echo, add, and slow; plus list_resources and read_resource.
+	require.Len(t, tools, 5, "expected 3 MCP tools + 2 resource tools from test server")
 
 	names := make(map[string]bool, len(tools))
 	for _, tool := range tools {
@@ -149,8 +149,8 @@ func TestMCP_E2E_MultipleServers(t *testing.T) {
 	tools, err := mgr.Start(ctx)
 	require.NoError(t, err)
 
-	// Each server has 3 tools → 6 total.
-	require.Len(t, tools, 6, "expected 3 tools × 2 servers = 6")
+	// Each server has 3 MCP tools + 2 resource tools → 10 total.
+	require.Len(t, tools, 10, "expected 5 tools × 2 servers = 10")
 
 	names := make(map[string]bool, len(tools))
 	for _, tool := range tools {
