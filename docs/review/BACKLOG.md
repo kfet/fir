@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 19, 2026-02-27 ~02:04 PST
-**Build status:** ✅ `go build ./...` passes. ❌ `go test ./pkg/mcp/...` FAILS — `TestNewToolServer_CallTool` (arguments base64-encoded instead of JSON — see URGENT.md).
-**Commits reviewed this cycle:** `558fdf1` (completions API committed); unstaged `server.go` (new: NewToolServer), `server_test.go` (new, broken)
+**Last reviewed:** MCP watch cycle 20, 2026-02-27 ~02:08 PST
+**Build status:** ✅ all 24 packages pass with -race. URGENT cleared.
+**Commits reviewed this cycle:** `5af6d82` (server.go committed, arguments fix self-resolved); `4c602d5` (cancellation propagation test — comprehensive and correct)
 
 ---
 
@@ -46,8 +46,8 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (tool_adapter.go)** Audio double MIME prefix confirmed fixed in `7c90b2d`; all tests pass.
-- **✅ COMMITTED (completions.go)** Committed in `558fdf1` with 4 tests; doc mismatch (error propagation vs "empty slice") noted in BACKLOG.
+- **✅ FIXED (server_test.go)** `TestNewToolServer_CallTool` arguments base64 issue fixed in `5af6d82`; all tests pass.
+- **✅ ADDED (tool_adapter_test.go)** `TestAdaptTool_Cancellation` in `4c602d5` — verifies client ctx cancellation propagates `notifications/cancelled` to server.
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
