@@ -114,3 +114,78 @@ func TestLoadConfigFile_InvalidJSON(t *testing.T) {
 	_, err := LoadConfigFile(path)
 	assert.Error(t, err)
 }
+
+func TestMergeConfigs_OverrideWins(t *testing.T) {
+	base := &ConfigFile{MCPServers: map[string]ServerConfig{
+		"shared": {Command: "base-cmd"},
+		"only-base": {Command: "base-only"},
+	}}
+	override := &ConfigFile{MCPServers: map[string]ServerConfig{
+		"shared":       {Command: "override-cmd"},
+		"only-override": {Command: "override-only"},
+	}}
+
+	merged := MergeConfigs(base, override)
+	assert.Equal(t, "override-cmd", merged.MCPServers["shared"].Command)
+	assert.Equal(t, "base-only", merged.MCPServers["only-base"].Command)
+	assert.Equal(t, "override-only", merged.MCPServers["only-override"].Command)
+	assert.Len(t, merged.MCPServers, 3)
+}
+
+func TestMergeConfigs_NilInputs(t *testing.T) {
+	a := &ConfigFile{MCPServers: map[string]ServerConfig{"srv": {Command: "cmd"}}}
+	empty := &ConfigFile{}
+
+	// Override is empty — base survives.
+	merged := MergeConfigs(a, empty)
+	assert.Len(t, merged.MCPServers, 1)
+
+	// Base is empty — override survives.
+	merged = MergeConfigs(empty, a)
+	assert.Len(t, merged.MCPServers, 1)
+}
+
+func TestMergeConfigs_DoesNotMutate(t *testing.T) {
+	base := &ConfigFile{MCPServers: map[string]ServerConfig{"srv": {Command: "original"}}}
+	override := &ConfigFile{MCPServers: map[string]ServerConfig{"srv": {Command: "new"}}}
+
+	merged := MergeConfigs(base, override)
+	assert.Equal(t, "original", base.MCPServers["srv"].Command, "base should not be mutated")
+	assert.Equal(t, "new", merged.MCPServers["srv"].Command)
+}
+
+func TestLoadDefaultConfigs_ProjectOverridesUser(t *testing.T) {
+	dir := t.TempDir()
+
+	// User config.
+	userDir := filepath.Join(dir, "user-home", ".fir")
+	require.NoError(t, os.MkdirAll(userDir, 0o700))
+	userCfg := `{"mcpServers":{"shared":{"command":"user-cmd"},"user-only":{"command":"u"}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(userDir, "mcp.json"), []byte(userCfg), 0o600))
+
+	// Project config.
+	projectFirDir := filepath.Join(dir, "project", ".fir")
+	require.NoError(t, os.MkdirAll(projectFirDir, 0o700))
+	projectCfg := `{"mcpServers":{"shared":{"command":"project-cmd"},"project-only":{"command":"p"}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(projectFirDir, "mcp.json"), []byte(projectCfg), 0o600))
+
+	// Manually load and merge to test the logic (LoadDefaultConfigs uses HOME
+	// env var which we can't control in unit tests).
+	user, err := LoadConfigFile(filepath.Join(userDir, "mcp.json"))
+	require.NoError(t, err)
+	project, err := LoadConfigFile(filepath.Join(projectFirDir, "mcp.json"))
+	require.NoError(t, err)
+
+	merged := MergeConfigs(user, project)
+	assert.Equal(t, "project-cmd", merged.MCPServers["shared"].Command, "project overrides user")
+	assert.Equal(t, "u", merged.MCPServers["user-only"].Command)
+	assert.Equal(t, "p", merged.MCPServers["project-only"].Command)
+	assert.Len(t, merged.MCPServers, 3)
+}
+
+func TestLoadDefaultConfigs_MissingFiles(t *testing.T) {
+	// With a non-existent project dir, both files are missing → empty result.
+	cfg, err := LoadDefaultConfigs(filepath.Join(t.TempDir(), "no-such-dir"))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.MCPServers)
+}

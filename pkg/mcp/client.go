@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -257,6 +258,8 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		// Fall back to DefaultElicitFn so the server always gets a proper
 		// decline response rather than a JSON-RPC "not supported" error.
 		ElicitationHandler: elicitHandler(m.ElicitationFn),
+		// Ping the server periodically to detect dead connections.
+		KeepAlive: 30 * time.Second,
 	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
