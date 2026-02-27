@@ -196,6 +196,76 @@ func TestManager_PaginatedToolList(t *testing.T) {
 	assert.True(t, names["mcp__paged__tool_b"], "tool_b missing")
 }
 
+// TestManager_RootsAdvertised verifies that filesystem roots configured on a
+// ServerConfig are advertised to the MCP server. After Manager.Start() the
+// server-side session can call ListRoots back to the client and must receive
+// the configured URI.
+func TestManager_RootsAdvertised(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "roots-test", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
+		},
+	)
+
+	const wantURI = "file:///testroot"
+	cfg := ServerConfig{Roots: []string{wantURI}}
+	mgr := NewManager(map[string]ServerConfig{"s": cfg})
+	mgr.dialFn = inMemoryDial(t, server)
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	// Retrieve the active server-side session and ask the client for its roots.
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss, "server must have an active session")
+
+	result, err := ss.ListRoots(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, result.Roots, 1, "expected exactly one root")
+	assert.Equal(t, wantURI, result.Roots[0].URI)
+}
+
+// TestManager_RootsDefaultToCWD verifies that when no roots are configured,
+// the process working directory is used as the default root.
+func TestManager_RootsDefaultToCWD(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "roots-default", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: ""}}}, nil
+		},
+	)
+
+	// No roots in config → Manager should default to CWD.
+	mgr := NewManager(map[string]ServerConfig{"s": {}})
+	mgr.dialFn = inMemoryDial(t, server)
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss)
+
+	result, err := ss.ListRoots(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, result.Roots, 1, "expected exactly one default root")
+	assert.True(t, strings.HasPrefix(result.Roots[0].URI, "file:///"), "root URI must be a file:// URI")
+}
+
 // TestCommandTransport_EnvInheritsParent verifies that commandTransport merges
 // cfg.Env on top of the current process environment (os.Environ), not replacing
 // it. If os.Environ() were dropped, PATH would be missing and real subprocesses

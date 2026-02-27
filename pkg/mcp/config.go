@@ -13,6 +13,10 @@ type ServerConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Roots is an optional list of file:// URIs that fir will advertise to the
+	// MCP server as filesystem roots. When empty, the process working directory
+	// is used as the single default root.
+	Roots []string `json:"roots,omitempty"`
 }
 
 // ConfigFile is the top-level structure of .fir/mcp.json.

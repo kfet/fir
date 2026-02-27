@@ -68,6 +68,24 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, nil)
+
+	// Advertise filesystem roots. Use the configured roots when present;
+	// fall back to the process working directory so the server always knows
+	// its operating scope.
+	rootURIs := cfg.Roots
+	if len(rootURIs) == 0 {
+		if cwd, err := os.Getwd(); err == nil {
+			rootURIs = []string{"file://" + cwd}
+		}
+	}
+	roots := make([]*sdk.Root, 0, len(rootURIs))
+	for _, uri := range rootURIs {
+		roots = append(roots, &sdk.Root{URI: uri})
+	}
+	if len(roots) > 0 {
+		client.AddRoots(roots...)
+	}
+
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
