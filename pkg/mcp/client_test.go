@@ -477,6 +477,15 @@ func TestManager_LoggingLevelVerbose(t *testing.T) {
 	assert.Equal(t, sdk.LoggingLevel("warning"), mgr2.loggingLevel())
 }
 
+// TestCreateTransport_UnknownType verifies that an unsupported Transport value
+// returns an error rather than silently falling back to stdio.
+func TestCreateTransport_UnknownType(t *testing.T) {
+	_, err := createTransport(ServerConfig{Transport: "ftp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported transport")
+	assert.Contains(t, err.Error(), "ftp")
+}
+
 // TestCreateTransport_Stdio verifies that the default transport (no Transport
 // field set) produces a *sdk.CommandTransport with the correct command.
 func TestCreateTransport_Stdio(t *testing.T) {

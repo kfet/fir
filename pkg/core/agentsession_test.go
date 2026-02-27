@@ -2242,3 +2242,62 @@ func TestAgentSession_Prompt_FollowUpQueuesWhenStreaming(t *testing.T) {
 		t.Errorf("expected empty after clear, got %v", got2)
 	}
 }
+
+// ============================================================================
+// HasPendingWork
+// ============================================================================
+
+func TestAgentSession_HasPendingWork_Empty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// No messages → no pending work.
+	if session.HasPendingWork() {
+		t.Error("HasPendingWork should be false with no messages")
+	}
+}
+
+func TestAgentSession_HasPendingWork_UserLast(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.ReplaceMessages([]agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hello", 0)),
+	})
+	if !session.HasPendingWork() {
+		t.Error("HasPendingWork should be true when last message is user")
+	}
+}
+
+func TestAgentSession_HasPendingWork_ToolResultLast(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.ReplaceMessages([]agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+			Role:       "toolResult",
+			ToolCallID: "tc1",
+			ToolName:   "bash",
+			Content:    []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: "ok"}},
+		})),
+	})
+	if !session.HasPendingWork() {
+		t.Error("HasPendingWork should be true when last message is toolResult")
+	}
+}
+
+func TestAgentSession_HasPendingWork_AssistantLast(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.ReplaceMessages([]agent.AgentMessage{
+		agent.NewAgentMessage(ai.NewUserMsg("hi", 0)),
+		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+			Role:    "assistant",
+			Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "hello"}}},
+		})),
+	})
+	if session.HasPendingWork() {
+		t.Error("HasPendingWork should be false when last message is assistant")
+	}
+}

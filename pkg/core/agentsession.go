@@ -633,8 +633,9 @@ func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 			}
 		}
 		
-		// Resume if there's pending work (user message or tool result waiting for response)
-		if len(msgs) > 0 && (msgs[len(msgs)-1].Role() == "user" || msgs[len(msgs)-1].Role() == "toolResult") {
+		// Resume if there's pending work (user message or tool result waiting for response,
+		// or pending tool calls that were in flight when compaction triggered).
+		if len(state.PendingToolCalls) > 0 || (len(msgs) > 0 && (msgs[len(msgs)-1].Role() == "user" || msgs[len(msgs)-1].Role() == "toolResult")) {
 			s.Agent.ReplaceMessages(msgs)
 			go func() { _ = s.Agent.Continue() }()
 		}
