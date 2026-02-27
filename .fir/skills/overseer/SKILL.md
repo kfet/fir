@@ -20,9 +20,9 @@ Set this at the top of every shell block. Never use a custom socket like `/tmp/f
 The user monitors the fleet with:
 
 ```bash
-tmux-ai ls                     # list sessions
-tmux-ai attach -t fir          # attach to the fleet session
-tmux-ai attach -t fir:worker-1 # jump to a specific window
+tmux-ai ls                      # list sessions
+tmux-ai attach -t fir-mcp       # attach to the fleet session
+tmux-ai attach -t fir-mcp:worker-1  # jump to a specific window
 ```
 
 ## API Rate-Limit Guard (check every cycle)
@@ -95,22 +95,23 @@ Check usage every **5 cycles** (not every cycle) to avoid adding overhead.
 
 ### Use a single tmux session, with many windows - one window per agent
 
-The preferred layout is **one session named after the project, with one window per agent**:
+The preferred layout is **one session named `<project>-<feature>`, with one window per agent**:
+
+Name the session after both the project and the feature being worked on — e.g. `fir-mcp`, `fir-acp`, `acp-claw-transport`. This makes the fleet immediately identifiable in `tmux-ai ls` without having to inspect windows.
 
 ```bash
-# Create the session (first window becomes the reviewer)
-tmux -S "$SOCKET" new -d -s acp-claw -n reviewer -c /path/to/project
+# Create the session (first window becomes the researcher or first worker)
+tmux -S "$SOCKET" new -d -s fir-mcp -n worker-1 -c /path/to/project
 
-# Add worker windows
-tmux -S "$SOCKET" new-window -t acp-claw -n worker-core  -c /path/to/project
-tmux -S "$SOCKET" new-window -t acp-claw -n worker-acp   -c /path/to/project
-tmux -S "$SOCKET" new-window -t acp-claw -n worker-telegram -c /path/to/project
+# Add more windows
+tmux -S "$SOCKET" new-window -t fir-mcp -n worker-2 -c /path/to/project
+tmux -S "$SOCKET" new-window -t fir-mcp -n reviewer -c /path/to/project
 
 # Turn off auto-rename globally
-tmux -S "$SOCKET" set-option -t acp-claw -g automatic-rename off
+tmux -S "$SOCKET" set-option -t fir-mcp -g automatic-rename off
 ```
 
-Address agents as `SESSION:WINDOW` (e.g. `acp-claw:reviewer`, `acp-claw:worker-core`).
+Address agents as `SESSION:WINDOW` (e.g. `fir-mcp:worker-1`, `fir-mcp:reviewer`).
 
 To move an existing window from another session into the fleet session:
 
@@ -133,16 +134,17 @@ tmux -S "$SOCKET" capture-pane -p -J -t NAME:0.0 -S -5 | grep "~/"
 
 If a session is working in a different project directory — **leave it alone**. Do not send it Escape, `/new`, `/compact`, or any task. It is not yours to manage.
 
-Spawn fresh sessions with project-scoped names to avoid confusion:
+Spawn fresh sessions with `<project>-<feature>` names to avoid confusion:
 
 ```bash
-# Good — name encodes the project
-tmux -S "$SOCKET" new -d -s fir-researcher   -c /path/to/fir
-tmux -S "$SOCKET" new -d -s fir-worker-mcp   -c /path/to/fir
-tmux -S "$SOCKET" new -d -s acp-worker-core  -c /path/to/acp-claw
+# Good — name encodes project AND feature being worked on
+tmux -S "$SOCKET" new -d -s fir-mcp      -c /path/to/fir   # fir, MCP feature work
+tmux -S "$SOCKET" new -d -s fir-acp      -c /path/to/fir   # fir, ACP mode work
+tmux -S "$SOCKET" new -d -s claw-transport -c /path/to/acp-claw
 
-# Bad — generic names that look reusable
+# Bad — generic names that look reusable across projects
 tmux -S "$SOCKET" new -d -s worker
+tmux -S "$SOCKET" new -d -s fir           # too vague — which fir feature?
 tmux -S "$SOCKET" new -d -s reviewer
 ```
 
