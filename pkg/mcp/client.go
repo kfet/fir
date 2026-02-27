@@ -74,13 +74,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 	m.sessions[name] = session
 
-	result, err := session.ListTools(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("list tools: %w", err)
-	}
-
-	tools := make([]agent.AgentTool, 0, len(result.Tools))
-	for _, tool := range result.Tools {
+	var tools []agent.AgentTool
+	for tool, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return nil, fmt.Errorf("list tools: %w", err)
+		}
 		tools = append(tools, AdaptTool(session, name, tool))
 	}
 	return tools, nil

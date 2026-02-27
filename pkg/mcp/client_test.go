@@ -157,6 +157,45 @@ func TestManager_EmptyConfigs(t *testing.T) {
 	require.NoError(t, mgr.Close())
 }
 
+// TestManager_PaginatedToolList verifies that Manager correctly collects all
+// tools even when the MCP server returns them across multiple pages. We
+// configure the server with PageSize=1 and register 2 tools so that two
+// tools/list requests are required to enumerate them all.
+func TestManager_PaginatedToolList(t *testing.T) {
+	server := sdk.NewServer(
+		&sdk.Implementation{Name: "paged", Version: "0"},
+		&sdk.ServerOptions{PageSize: 1},
+	)
+	for _, name := range []string{"tool_a", "tool_b"} {
+		server.AddTool(
+			&sdk.Tool{
+				Name:        name,
+				InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+			func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{
+					Content: []sdk.Content{&sdk.TextContent{Text: name}},
+				}, nil
+			},
+		)
+	}
+
+	mgr := NewManager(map[string]ServerConfig{"paged": {}})
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools, err := mgr.Start(context.Background())
+	require.NoError(t, err)
+	// Both tools must be present despite the page size of 1.
+	require.Len(t, tools, 2)
+
+	names := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		names[tool.Name] = true
+	}
+	assert.True(t, names["mcp__paged__tool_a"], "tool_a missing")
+	assert.True(t, names["mcp__paged__tool_b"], "tool_b missing")
+}
+
 // TestCommandTransport_EnvInheritsParent verifies that commandTransport merges
 // cfg.Env on top of the current process environment (os.Environ), not replacing
 // it. If os.Environ() were dropped, PATH would be missing and real subprocesses
