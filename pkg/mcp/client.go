@@ -200,10 +200,12 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					}
 					updated = append(updated, AdaptTool(session, serverName, tool, &m.progressReg))
 				}
-				// Always include the resource tools for this server.
+				// Always include the resource and prompt tools for this server.
 				updated = append(updated,
 					listResourcesTool(session, serverName),
 					readResourceTool(session, serverName),
+					listPromptsTool(session, serverName),
+					getPromptTool(session, serverName),
 				)
 				m.mu.Lock()
 				m.tools[serverName] = updated
@@ -232,6 +234,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 				return
 			}
 			m.OnResourceUpdated(serverName, req.Params.URI)
+		},
+		// Log prompt-list change notifications (our prompt tools use live queries
+		// so no re-enumeration is needed).
+		PromptListChangedHandler: func(_ context.Context, _ *sdk.PromptListChangedRequest) {
+			slog.Debug("MCP prompt list changed", "server", serverName)
 		},
 	}
 
@@ -275,10 +282,12 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		}
 		tools = append(tools, AdaptTool(session, name, tool, &m.progressReg))
 	}
-	// Expose MCP resources as additional tools.
+	// Expose MCP resources and prompts as additional tools.
 	tools = append(tools,
 		listResourcesTool(session, name),
 		readResourceTool(session, name),
+		listPromptsTool(session, name),
+		getPromptTool(session, name),
 	)
 
 	// Subscribe to each resource for push update notifications. Best-effort:
