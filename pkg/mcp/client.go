@@ -77,7 +77,27 @@ func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
 		sessions: make(map[string]*sdk.ClientSession),
 		verbose:  verbose,
 		tools:    make(map[string][]agent.AgentTool),
-		dialFn:   commandTransport,
+		dialFn:   createTransport,
+	}
+}
+
+// createTransport builds a Transport from a ServerConfig based on the
+// Transport field. Supported values: "stdio" (default when empty), "sse",
+// "streamable".
+func createTransport(cfg ServerConfig) (sdk.Transport, error) {
+	switch cfg.Transport {
+	case "sse":
+		if cfg.URL == "" {
+			return nil, fmt.Errorf("url is required for sse transport")
+		}
+		return &sdk.SSEClientTransport{Endpoint: cfg.URL}, nil
+	case "streamable":
+		if cfg.URL == "" {
+			return nil, fmt.Errorf("url is required for streamable transport")
+		}
+		return &sdk.StreamableClientTransport{Endpoint: cfg.URL}, nil
+	default: // "stdio" or ""
+		return commandTransport(cfg)
 	}
 }
 

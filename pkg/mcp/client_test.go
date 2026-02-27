@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -472,4 +474,97 @@ func TestManager_LoggingLevelVerbose(t *testing.T) {
 
 	mgr2 := NewManager(nil, false)
 	assert.Equal(t, sdk.LoggingLevel("warning"), mgr2.loggingLevel())
+}
+
+// TestCreateTransport_Stdio verifies that the default transport (no Transport
+// field set) produces a *sdk.CommandTransport with the correct command.
+func TestCreateTransport_Stdio(t *testing.T) {
+	cfg := ServerConfig{
+		Command: "true",
+		Env:     map[string]string{"CUSTOM": "value"},
+	}
+	tr, err := createTransport(cfg)
+	require.NoError(t, err)
+	ct, ok := tr.(*sdk.CommandTransport)
+	require.True(t, ok, "expected *sdk.CommandTransport for stdio transport")
+	assert.Equal(t, "true", ct.Command.Args[0])
+}
+
+// TestCreateTransport_SSE verifies that transport="sse" produces an
+// *sdk.SSEClientTransport pointing at the configured URL.
+func TestCreateTransport_SSE(t *testing.T) {
+	cfg := ServerConfig{Transport: "sse", URL: "http://example.com/sse"}
+	tr, err := createTransport(cfg)
+	require.NoError(t, err)
+	st, ok := tr.(*sdk.SSEClientTransport)
+	require.True(t, ok, "expected *sdk.SSEClientTransport for sse transport")
+	assert.Equal(t, "http://example.com/sse", st.Endpoint)
+}
+
+// TestCreateTransport_SSE_MissingURL verifies that transport="sse" without a
+// URL returns an error.
+func TestCreateTransport_SSE_MissingURL(t *testing.T) {
+	_, err := createTransport(ServerConfig{Transport: "sse"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "url is required")
+}
+
+// TestCreateTransport_Streamable verifies that transport="streamable" produces
+// an *sdk.StreamableClientTransport pointing at the configured URL.
+func TestCreateTransport_Streamable(t *testing.T) {
+	cfg := ServerConfig{Transport: "streamable", URL: "http://example.com/mcp"}
+	tr, err := createTransport(cfg)
+	require.NoError(t, err)
+	st, ok := tr.(*sdk.StreamableClientTransport)
+	require.True(t, ok, "expected *sdk.StreamableClientTransport for streamable transport")
+	assert.Equal(t, "http://example.com/mcp", st.Endpoint)
+}
+
+// TestCreateTransport_Streamable_MissingURL verifies that transport="streamable"
+// without a URL returns an error.
+func TestCreateTransport_Streamable_MissingURL(t *testing.T) {
+	_, err := createTransport(ServerConfig{Transport: "streamable"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "url is required")
+}
+
+// TestManager_StreamableTransport_Integration runs a real streamable HTTP MCP
+// server in-process using httptest.NewServer and verifies that Manager can
+// connect to it, list tools, and call a tool over the streamable transport.
+func TestManager_StreamableTransport_Integration(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "streamable-test", Version: "0"}, nil)
+	server.AddTool(
+		&sdk.Tool{
+			Name:        "ping",
+			Description: "Return pong",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{
+				Content: []sdk.Content{&sdk.TextContent{Text: "pong"}},
+			}, nil
+		},
+	)
+
+	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, nil)
+	httpSrv := httptest.NewServer(handler)
+	t.Cleanup(httpSrv.Close)
+
+	cfg := ServerConfig{Transport: "streamable", URL: httpSrv.URL}
+	mgr := NewManager(map[string]ServerConfig{"http-srv": cfg}, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	tools, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	require.Len(t, tools, 1)
+	assert.Equal(t, "mcp__http-srv__ping", tools[0].Name)
+
+	result, err := tools[0].Execute(ctx, "call-1", nil, nil)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "pong", result.Content[0].Text)
 }

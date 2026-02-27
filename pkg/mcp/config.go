@@ -8,8 +8,14 @@ import (
 	"os"
 )
 
-// ServerConfig describes a single MCP server to launch as a stdio subprocess.
+// ServerConfig describes a single MCP server to connect to.
 type ServerConfig struct {
+	// Transport specifies the protocol used to connect to the server.
+	// Valid values: "stdio" (default when empty), "sse", "streamable".
+	Transport string `json:"transport,omitempty"`
+	// URL is the endpoint for SSE or streamable transports.
+	// Required when Transport is "sse" or "streamable".
+	URL     string            `json:"url,omitempty"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`

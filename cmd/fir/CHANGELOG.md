@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- MCP: support SSE (`"sse"`) and streamable HTTP (`"streamable"`) transports via `transport` and `url` fields in `mcp.json`
 - MCP: receive and route server log messages through slog at the appropriate level; request `debug` level when verbose, `warning` otherwise
 - MCP: advertise filesystem roots to MCP servers via `roots` field in `mcp.json`; defaults to process working directory
 - MCP: handle paginated tool lists via the SDK iterator (fixes silent tool truncation on servers with many tools)

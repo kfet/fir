@@ -26,6 +26,24 @@ func TestServerConfig_JSONRoundTrip(t *testing.T) {
 	assert.Equal(t, cfg, cfg2)
 }
 
+func TestServerConfig_TransportFields(t *testing.T) {
+	// SSE transport round-trips correctly.
+	sse := ServerConfig{Transport: "sse", URL: "http://localhost:8080/sse"}
+	data, err := json.Marshal(sse)
+	require.NoError(t, err)
+	var sse2 ServerConfig
+	require.NoError(t, json.Unmarshal(data, &sse2))
+	assert.Equal(t, sse, sse2)
+
+	// Streamable transport round-trips correctly.
+	sh := ServerConfig{Transport: "streamable", URL: "http://localhost:8080/mcp"}
+	data, err = json.Marshal(sh)
+	require.NoError(t, err)
+	var sh2 ServerConfig
+	require.NoError(t, json.Unmarshal(data, &sh2))
+	assert.Equal(t, sh, sh2)
+}
+
 func TestServerConfig_RootsOmitEmpty(t *testing.T) {
 	// Roots is omitempty — absent when nil.
 	cfg := ServerConfig{Command: "/usr/bin/my-mcp-server"}
