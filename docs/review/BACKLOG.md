@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 21, 2026-02-27 ~02:11 PST
-**Build status:** ❌ `go build ./...` FAILS — `WatchConfig` redeclared in `config_watch.go` and `config.go` (see URGENT.md).
-**Commits reviewed this cycle:** unstaged `config_watch.go` (new: WatchConfig v2), `config.go` (WatchConfig v1 — conflicts), `client.go` (changes), `tool_adapter_test.go` (changes)
+**Last reviewed:** MCP watch cycle 22, 2026-02-27 ~02:14 PST
+**Build status:** ✅ `go build ./...` passes. ❌ `go test -race ./pkg/mcp/...` FAILS — data race on `m.OnToolsChanged` + `TestWatchAndReload_SwapServer` (see URGENT.md).
+**Commits reviewed this cycle:** unstaged `config_watch.go` (WatchConfig v2 committed), `config_watch_test.go` (new), `reload_test.go` (new), `client.go` (Reload + applyConfigDiff + serverConfigEqual)
 
 ---
 
@@ -42,16 +42,19 @@
   (b) add error-type detection to convert "method not found" into an empty result.
   **Files:** `pkg/mcp/completions.go:12,29`
 
-- **[MISSING TEST]** `pkg/mcp/config_watch.go` — no `config_watch_test.go`. Should cover:
-  file-change detection, debouncing (rapid writes produce single callback), atomic-rename detection
-  (write via temp file + rename), stop function terminates watcher.
-  **Files:** `pkg/mcp/config_watch_test.go` (to be created)
+### Simplification
+
+- **[DUPLICATE FUNCTION]** `pkg/mcp/client.go` — `configsEqual` (line 421) and `serverConfigEqual`
+  (line 547) are identical: both JSON-marshal both args and compare strings. One should be
+  removed; `Reload` and `applyConfigDiff` should share a single helper.
+  **Files:** `pkg/mcp/client.go:421,547`
 
 ---
 
 ## Resolved This Cycle ✅
 
-- *(none this cycle — new URGENT filed)*
+- **✅ COMMITTED (config_watch.go)** `WatchConfig` dual-implementation conflict self-resolved; `config_watch_test.go` and `reload_test.go` added with comprehensive coverage.
+- **✅ COMMITTED (client.go)** `Reload` + `applyConfigDiff` hot-reload methods added; `serverConfigEqual` added (duplicate of `configsEqual` — filed in Simplification).
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).

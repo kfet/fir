@@ -2,30 +2,62 @@
 
 ## Active Issues
 
-### `pkg/mcp/config_watch.go` + `pkg/mcp/config.go` — Build break: `WatchConfig` redeclared in two files
+### `pkg/mcp/client.go:212,238` — Data race on `m.OnToolsChanged` in `ToolListChangedHandler`
 
-**Filed:** 2026-02-27 ~02:11 PST
+**Filed:** 2026-02-27 ~02:14 PST
 
-**Error:**
+**Race detector output:**
 ```
-pkg/mcp/config_watch.go:22:6: WatchConfig redeclared in this block
-    pkg/mcp/config.go:128:6: other declaration of WatchConfig
+WARNING: DATA RACE
+Read at ... by goroutine N:
+  github.com/kfet/fir/pkg/mcp.(*Manager).startServer.func2()
+      client.go:212
 ```
 
-**Root cause:** Two implementations were written simultaneously:
-- `config_watch.go` — `func WatchConfig(path string, onChange func(*ConfigFile)) (stop func(), err error)` — non-blocking, directory watch (atomic-rename safe), 200ms debounce.
-- `config.go` (unstaged) — `func WatchConfig(ctx context.Context, path string, onReload func(*ConfigFile)) error` — blocking, direct file watch (misses atomic renames), no debounce.
+**Root cause:** `ToolListChangedHandler` (the closure registered during `startServer`) reads
+`m.OnToolsChanged` at line 212 (nil check) and calls it at line 238 — BOTH without holding
+`m.mu`. The field can be written concurrently by any goroutine that sets `mgr.OnToolsChanged`.
 
-**Recommendation:** Keep `config_watch.go` (better design — directory watch, debounce, stop function).
-Remove the `WatchConfig` function and its new imports (`context`, `fsnotify`, `log/slog`) from `config.go`.
+Additionally, `applyConfigDiff` also calls `m.OnToolsChanged(all)` at line ~541 outside the
+lock. And the handler goroutine from a closed (old) session can run after the server is replaced,
+overwriting `m.tools[serverName]` with stale tools from the old session.
 
-**Files to change:** `pkg/mcp/config.go` (remove the new WatchConfig block and unused imports)
+**Test failure:** `TestWatchAndReload_SwapServer` fails because a `ToolListChangedHandler`
+goroutine spawned by serverA's session races with `applyConfigDiff`'s tool update, causing
+`OnToolsChanged` to be called with `tool-a` instead of `tool-b`.
+
+**Fix options:**
+1. Use a mutex-protected accessor for `OnToolsChanged`: read it under `m.mu`, then call outside.
+2. In `ToolListChangedHandler`, compare `serverName` against the active session before writing.
+   Guard: if `m.sessions[serverName] != req.Session`, the session is stale — skip the update.
+
+Concrete change for (2) in the goroutine:
+```go
+m.mu.Lock()
+if m.sessions[serverName] != req.Session {
+    m.mu.Unlock()
+    return // stale session — skip
+}
+m.tools[serverName] = updated
+all := m.allTools()
+onChanged := m.OnToolsChanged
+m.mu.Unlock()
+if onChanged != nil {
+    onChanged(all)
+}
+```
+
+**Files:** `pkg/mcp/client.go:211-238`, `pkg/mcp/client.go:~541`
+
+**Severity:** High — data race can corrupt the tool list after a hot-reload. `go test -race` fails.
 
 ---
 
 ## Recently Fixed ✅
 
-### `pkg/mcp/server_test.go:93` — `TestNewToolServer_CallTool` fails: arguments base64-encoded ✅ FIXED `5af6d82`
+### `pkg/mcp/config_watch.go` + `pkg/mcp/config.go` — `WatchConfig` redeclared ✅ FIXED (self-resolved)
+
+### `pkg/mcp/server_test.go:93` — arguments base64-encoded ✅ FIXED `5af6d82`
 
 ### `pkg/mcp/tool_adapter.go:117` — Audio double MIME prefix + stale test ✅ FIXED `7c90b2d`
 Gates on `strings.HasPrefix(c.MIMEType, "image/")`. Non-image blobs returned as base64 text.
