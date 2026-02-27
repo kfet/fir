@@ -66,6 +66,12 @@ type Manager struct {
 	// Use NewSamplingFn to create a standard implementation.
 	SamplingFn func(context.Context, *sdk.CreateMessageRequest) (*sdk.CreateMessageResult, error)
 
+	// ElicitationFn is called when an MCP server requests user input via
+	// elicitation/create. If nil, all elicitation requests are declined.
+	// Use DefaultElicitFn for headless sessions or provide an interactive
+	// implementation for UI-enabled sessions.
+	ElicitationFn func(context.Context, *sdk.ElicitRequest) (*sdk.ElicitResult, error)
+
 	// progressReg routes progress notifications to active tool-call callbacks.
 	progressReg progressRegistry
 
@@ -247,6 +253,10 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		},
 		// Forward sampling/createMessage requests to the configured handler.
 		CreateMessageHandler: m.SamplingFn,
+		// Forward elicitation/create requests to the configured handler.
+		// Fall back to DefaultElicitFn so the server always gets a proper
+		// decline response rather than a JSON-RPC "not supported" error.
+		ElicitationHandler: elicitHandler(m.ElicitationFn),
 	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
