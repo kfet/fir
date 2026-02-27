@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,8 +51,9 @@ type Manager struct {
 	sessions map[string]*sdk.ClientSession
 	verbose  bool
 
-	mu    sync.Mutex
-	tools map[string][]agent.AgentTool // per-server tools, guarded by mu
+	mu           sync.Mutex
+	tools        map[string][]agent.AgentTool // per-server tools, guarded by mu
+	serverErrors map[string]error             // per-server connection errors, guarded by mu
 
 	// OnToolsChanged is called (from a background goroutine) whenever any
 	// server's tool list changes. The argument is the new complete tool list
@@ -87,11 +90,12 @@ type Manager struct {
 // warnings and above are requested.
 func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
 	return &Manager{
-		configs:  configs,
-		sessions: make(map[string]*sdk.ClientSession),
-		verbose:  verbose,
-		tools:    make(map[string][]agent.AgentTool),
-		dialFn:   createTransport,
+		configs:      configs,
+		sessions:     make(map[string]*sdk.ClientSession),
+		verbose:      verbose,
+		tools:        make(map[string][]agent.AgentTool),
+		serverErrors: make(map[string]error),
+		dialFn:       createTransport,
 	}
 }
 
@@ -141,6 +145,9 @@ func (m *Manager) Start(ctx context.Context) ([]agent.AgentTool, error) {
 	for name, cfg := range m.configs {
 		sessionTools, err := m.startServer(ctx, name, cfg)
 		if err != nil {
+			m.mu.Lock()
+			m.serverErrors[name] = err
+			m.mu.Unlock()
 			_ = m.Close()
 			return nil, fmt.Errorf("MCP server %q: %w", name, err)
 		}
@@ -285,7 +292,9 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
+	m.mu.Lock()
 	m.sessions[name] = session
+	m.mu.Unlock()
 
 	// Request the server to send log messages at the appropriate level.
 	// Best-effort: ignore errors (e.g. server may not support logging).
@@ -328,12 +337,52 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 // Close closes all active MCP sessions. Returns the first error encountered,
 // but always attempts to close every session.
 func (m *Manager) Close() error {
+	m.mu.Lock()
+	sessions := make(map[string]*sdk.ClientSession, len(m.sessions))
+	for k, v := range m.sessions {
+		sessions[k] = v
+		delete(m.sessions, k)
+	}
+	m.mu.Unlock()
+
 	var firstErr error
-	for name, session := range m.sessions {
+	for _, session := range sessions {
 		if err := session.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
-		delete(m.sessions, name)
 	}
 	return firstErr
+}
+
+// ServerStatus reports the connection state of a single MCP server.
+type ServerStatus struct {
+	// Name is the key used in the Manager's config map.
+	Name string
+	// Connected is true when the session is currently active.
+	Connected bool
+	// Error is non-nil when the server failed to connect or has disconnected
+	// with an error.
+	Error error
+}
+
+// Status returns a snapshot of the health of each configured server.
+// The slice is ordered by server name for deterministic output.
+func (m *Manager) Status() []ServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]ServerStatus, 0, len(m.configs))
+	for name := range m.configs {
+		_, connected := m.sessions[name]
+		out = append(out, ServerStatus{
+			Name:      name,
+			Connected: connected,
+			Error:     m.serverErrors[name],
+		})
+	}
+	// Sort by name for deterministic output.
+	slices.SortFunc(out, func(a, b ServerStatus) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return out
 }

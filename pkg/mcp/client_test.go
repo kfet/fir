@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -577,4 +578,71 @@ func TestManager_StreamableTransport_Integration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Content, 1)
 	assert.Equal(t, "pong", result.Content[0].Text)
+}
+
+func TestManager_Status_Connected(t *testing.T) {
+	makeServer := func() *sdk.Server {
+		s := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+		s.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+			func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+			})
+		return s
+	}
+	mgr := NewManager(map[string]ServerConfig{
+		"alpha": {},
+		"beta":  {},
+	}, false)
+	mgr.dialFn = inMemoryDial(t, makeServer())
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	statuses := mgr.Status()
+	require.Len(t, statuses, 2)
+	// Sorted by name.
+	assert.Equal(t, "alpha", statuses[0].Name)
+	assert.True(t, statuses[0].Connected)
+	assert.NoError(t, statuses[0].Error)
+	assert.Equal(t, "beta", statuses[1].Name)
+	assert.True(t, statuses[1].Connected)
+}
+
+func TestManager_Status_AfterClose(t *testing.T) {
+	s := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	s.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{}, nil
+		})
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, s)
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+
+	// Close the manager — sessions map cleared.
+	require.NoError(t, mgr.Close())
+
+	statuses := mgr.Status()
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].Connected)
+}
+
+func TestManager_Status_ConnectError(t *testing.T) {
+	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
+	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+		return nil, errors.New("no such binary")
+	}
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.Error(t, err)
+
+	statuses := mgr.Status()
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].Connected)
+	assert.Error(t, statuses[0].Error)
 }
