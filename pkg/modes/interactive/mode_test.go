@@ -491,6 +491,9 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 		"/name",
 		"/changelog",
 		"/reload",
+		"/reexec",
+		"/queue",
+		"/dequeue",
 		"/quit", "/exit",
 	}
 	for _, cmd := range handleCases {
@@ -1635,6 +1638,148 @@ func TestHandleDequeue_ClearsQueueAfterDequeue(t *testing.T) {
 	output := tm.renderedOutput()
 	if !strings.Contains(output, "No queued") {
 		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleQueueCommand tests
+// ---------------------------------------------------------------------------
+
+func TestHandleQueueCommand_NilSession(t *testing.T) {
+	tm := newTestMode(t)
+	tm.mode.handleQueueCommand() // must not panic
+	tm.waitRender()
+}
+
+func TestHandleQueueCommand_EmptyQueue(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.handleQueueCommand()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "empty") {
+		t.Errorf("expected 'empty' in status, got:\n%s", output)
+	}
+}
+
+func TestHandleQueueCommand_ShowsQueuedMessages(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("hello world", 0)))
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("second message", 0)))
+
+	tm.mode.handleQueueCommand()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "hello world") {
+		t.Errorf("expected 'hello world' in queue listing, got:\n%s", output)
+	}
+	if !strings.Contains(output, "second message") {
+		t.Errorf("expected 'second message' in queue listing, got:\n%s", output)
+	}
+	// Queue must be preserved.
+	if tm.mode.session.Agent.FollowUpQueueLen() != 2 {
+		t.Errorf("handleQueueCommand must not consume the queue")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// handleDequeueCommand tests
+// ---------------------------------------------------------------------------
+
+func TestHandleDequeueCommand_NilSession(t *testing.T) {
+	tm := newTestMode(t)
+	// With no arg — delegates to handleDequeue which guards nil.
+	tm.mode.handleDequeueCommand("")
+	tm.waitRender()
+	// With a numeric arg — must not panic.
+	tm.mode.handleDequeueCommand("1")
+	tm.waitRender()
+}
+
+func TestHandleDequeueCommand_NoArg_BehavesLikeDequeue(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("msg a", 0)))
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("msg b", 0)))
+
+	tm.mode.handleDequeueCommand("")
+	tm.waitRender()
+
+	edText := tm.editorText()
+	if !strings.Contains(edText, "msg a") || !strings.Contains(edText, "msg b") {
+		t.Errorf("expected both messages in editor, got %q", edText)
+	}
+	if tm.mode.session.Agent.FollowUpQueueLen() != 0 {
+		t.Error("queue should be empty after dequeue all")
+	}
+}
+
+func TestHandleDequeueCommand_InvalidIndex(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("only", 0)))
+
+	tm.mode.handleDequeueCommand("not-a-number")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "invalid index") {
+		t.Errorf("expected 'invalid index' warning, got:\n%s", output)
+	}
+	// Queue untouched.
+	if tm.mode.session.Agent.FollowUpQueueLen() != 1 {
+		t.Error("queue should be unchanged after bad index")
+	}
+}
+
+func TestHandleDequeueCommand_OutOfRangeIndex(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("only", 0)))
+
+	tm.mode.handleDequeueCommand("5")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "no message at index") {
+		t.Errorf("expected 'no message at index' warning, got:\n%s", output)
+	}
+}
+
+func TestHandleDequeueCommand_SpecificIndex(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("first", 0)))
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("second", 0)))
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("third", 0)))
+
+	tm.mode.handleDequeueCommand("2")
+	tm.waitRender()
+
+	// Editor gets the removed item.
+	edText := tm.editorText()
+	if !strings.Contains(edText, "second") {
+		t.Errorf("expected 'second' in editor, got %q", edText)
+	}
+	if strings.Contains(edText, "first") || strings.Contains(edText, "third") {
+		t.Errorf("expected only the removed item in editor, got %q", edText)
+	}
+
+	// Remaining queue has first and third.
+	remaining := tm.mode.session.PeekFollowUpQueue()
+	if len(remaining) != 2 || remaining[0] != "first" || remaining[1] != "third" {
+		t.Errorf("unexpected remaining queue: %v", remaining)
+	}
+}
+
+func TestHandleDequeueCommand_MergesWithEditorText(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.editor.SetText("draft")
+	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("queued", 0)))
+
+	tm.mode.handleDequeueCommand("1")
+	tm.waitRender()
+
+	edText := tm.editorText()
+	if !strings.Contains(edText, "queued") || !strings.Contains(edText, "draft") {
+		t.Errorf("expected both queued and draft text in editor, got %q", edText)
 	}
 }
 

@@ -337,6 +337,28 @@ func (a *Agent) FollowUpQueueLen() int {
 	return len(a.followUpQueue)
 }
 
+// PeekFollowUpQueue returns a snapshot of the follow-up queue without modifying it.
+func (a *Agent) PeekFollowUpQueue() []AgentMessage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cp := make([]AgentMessage, len(a.followUpQueue))
+	copy(cp, a.followUpQueue)
+	return cp
+}
+
+// RemoveFollowUp removes and returns the message at the given 0-based index.
+// Returns the message and true if found, zero value and false otherwise.
+func (a *Agent) RemoveFollowUp(index int) (AgentMessage, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if index < 0 || index >= len(a.followUpQueue) {
+		return AgentMessage{}, false
+	}
+	msg := a.followUpQueue[index]
+	a.followUpQueue = append(a.followUpQueue[:index], a.followUpQueue[index+1:]...)
+	return msg, true
+}
+
 // ClearSteeringQueue clears the steering queue.
 func (a *Agent) ClearSteeringQueue() {
 	a.mu.Lock()

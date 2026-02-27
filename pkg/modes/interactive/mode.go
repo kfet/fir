@@ -746,6 +746,14 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handleReloadCommand()
 	case "/reexec":
 		m.handleReexecCommand()
+	case "/queue":
+		m.handleQueueCommand()
+	case "/dequeue":
+		var arg string
+		if len(parts) > 1 {
+			arg = parts[1]
+		}
+		m.handleDequeueCommand(arg)
 	case "/quit", "/exit":
 		m.Shutdown()
 	default:
@@ -1209,6 +1217,60 @@ func (m *InteractiveMode) handleDequeue() {
 	m.editor.SetText(strings.Join(nonEmpty, "\n\n"))
 	m.ui.RequestRender(false)
 	m.showStatus(fmt.Sprintf("Restored %d queued message(s) to editor", len(queued)))
+}
+
+// handleQueueCommand shows the current follow-up message queue as a status message.
+func (m *InteractiveMode) handleQueueCommand() {
+	if m.session == nil {
+		return
+	}
+	texts := m.session.PeekFollowUpQueue()
+	if len(texts) == 0 {
+		m.showStatus("Queue is empty")
+		return
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Queue (%d message(s)):\n", len(texts))
+	for i, t := range texts {
+		preview := strings.ReplaceAll(t, "\n", " ")
+		if runes := []rune(preview); len(runes) > 80 {
+			preview = string(runes[:77]) + "…"
+		}
+		fmt.Fprintf(&sb, "  %d. %s\n", i+1, preview)
+	}
+	m.showStatus(strings.TrimRight(sb.String(), "\n"))
+}
+
+// handleDequeueCommand is the slash-command version of handleDequeue.
+// With no arg it behaves identically to Alt+Up (dequeue all).
+// With a numeric arg it removes only that 1-based item and restores it to the editor.
+func (m *InteractiveMode) handleDequeueCommand(arg string) {
+	if m.session == nil {
+		return
+	}
+	if arg == "" {
+		m.handleDequeue()
+		return
+	}
+	n, err := strconv.Atoi(arg)
+	if err != nil || n < 1 {
+		m.showWarning(fmt.Sprintf("/dequeue: invalid index %q (must be a positive integer)", arg))
+		return
+	}
+	text, ok := m.session.RemoveFollowUp(n)
+	if !ok {
+		qlen := m.session.Agent.FollowUpQueueLen()
+		m.showWarning(fmt.Sprintf("/dequeue: no message at index %d (queue has %d message(s))", n, qlen))
+		return
+	}
+	current := strings.TrimSpace(m.editor.GetText())
+	if current != "" && text != "" {
+		m.editor.SetText(text + "\n\n" + current)
+	} else {
+		m.editor.SetText(text)
+	}
+	m.ui.RequestRender(false)
+	m.showStatus(fmt.Sprintf("Restored message %d to editor", n))
 }
 
 func (m *InteractiveMode) handleCtrlZ() {

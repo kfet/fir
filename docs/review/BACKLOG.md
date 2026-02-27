@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP advanced work, cycle 49, 2026-02-27 ~09:10 PST
-**Build status:** ✅ all 23 tested packages pass with -race. 0 URGENT, 0 open BACKLOG.
-**Files reviewed this cycle (staged):** `pkg/mcp/reload_test.go`, `cmd/fir/CHANGELOG.md`, `.fir/skills/overseer/SKILL.md`
+**Last reviewed:** 2026-02-27 ~12:30 PST
+**Build status:** ✅ all packages pass. 0 URGENT, 0 open BACKLOG.
+**Files reviewed this cycle:** pkg/agent/agent.go, pkg/agent/agent_test.go, pkg/core/agentsession.go, pkg/core/agentsession_test.go, pkg/core/slashcmds.go, pkg/modes/interactive/mode.go, pkg/modes/interactive/mode_test.go (staged changes for /queue and /dequeue slash commands)
 
 ---
 
@@ -12,27 +12,24 @@
 
 ---
 
-## Resolved This Cycle ✅
+## Recently Resolved ✅
 
-- **✅ FIXED (staged)** `pkg/mcp/reload_test.go:215` — truncated doc comment on
-  `TestManager_Reload_Concurrent` is now restored. The full first line
-  `// TestManager_Reload_Concurrent verifies that concurrent Reload calls do not` is present.
-  A blank line is also now present between the two test functions.
-
-- **✅ FIXED (staged)** `cmd/fir/CHANGELOG.md` — MCP fixes documented under `## [Unreleased] ### Fixed`:
-  concurrent Reload serialisation, post-startup disconnect detection, `m.subscribed` memory leak,
-  and WatchConfig stop semantics.
+- **✅ FIXED** `pkg/modes/interactive/mode.go:1241` — Byte-level UTF-8 truncation in `handleQueueCommand` preview. Changed `preview[:77]` to `string([]rune(preview)[:77])`.
+- **✅ FIXED** `pkg/core/agentsession.go:452` — `RemoveFollowUp` returned `("", true)` for non-string content (e.g. image blocks), which could silently clear the editor. Now returns `("", false)`. Test `TestAgentSession_RemoveFollowUp_NonStringContent` added.
+- **✅ FIXED** `pkg/modes/interactive/mode_test.go` — Missing nil-session test for `handleDequeueCommand` with a numeric arg. `TestHandleDequeueCommand_NilSession` added covering both the no-arg and numeric-arg paths.
+- **✅ FIXED (staged)** `pkg/mcp/reload_test.go:215` — truncated doc comment on `TestManager_Reload_Concurrent` restored.
+- **✅ FIXED (staged)** `cmd/fir/CHANGELOG.md` — MCP fixes documented under `## [Unreleased] ### Fixed`.
 
 ---
 
 ## Previously Resolved ✅
 
-- **✅ FIXED (working tree → staged)** `pkg/mcp/reload_test.go` — `TestManager_Reload_Concurrent_ConfigChange` added; alternates between `cmd-a` and `cmd-b` configs to exercise concurrent stop+restart path.
+- **✅ FIXED (working tree → staged)** `pkg/mcp/reload_test.go` — `TestManager_Reload_Concurrent_ConfigChange` added.
 - **✅ FIXED (working tree → staged)** `pkg/mcp/client.go:Reload` — `reloadMu sync.Mutex` added; concurrent Reload calls serialized.
 - **✅ FIXED (working tree → staged)** `pkg/mcp/client.go:Reload` — `delete(m.subscribed, name)` added.
-- **✅ FIXED (working tree → staged)** `pkg/mcp/client.go:Manager.Status` — `session.Wait()` goroutine detects disconnects; `TestManager_Status_AfterServerDisconnect` added.
+- **✅ FIXED (working tree → staged)** `pkg/mcp/client.go:Manager.Status` — `session.Wait()` goroutine detects disconnects.
 - **✅ FIXED (working tree → staged)** `pkg/mcp/config_watch.go:WatchConfig` — best-effort stop documented.
-- **✅ FIXED `e1c8c2f`** `pkg/mcp/client.go:ToolListChangedHandler` — subscription loop added; new post-startup resources subscribed to.
+- **✅ FIXED `e1c8c2f`** `pkg/mcp/client.go:ToolListChangedHandler` — subscription loop added.
 - **✅ FIXED `12734c4`** `pkg/mcp/client.go` — `ToolListChangedHandler` race fixed; stale-session guard added.
 - **✅ FIXED `12734c4`** `pkg/mcp/client.go` — `configsEqual` deduplicated.
 - **✅ FIXED `12734c4`** `pkg/mcp/completions.go` — doc/error mismatch fixed.

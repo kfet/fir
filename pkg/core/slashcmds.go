@@ -62,6 +62,8 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "logout", Description: "Logout from OAuth provider"},
 	{Name: "reload", Description: "Reload extensions, skills, prompts, and themes"},
 	{Name: "reexec", Description: "Re-exec into the current binary, preserving the session"},
+	{Name: "queue", Description: "Show the follow-up message queue"},
+	{Name: "dequeue", Description: "Restore queued messages to the editor (/dequeue [N] removes item N)"},
 	{Name: "quit", Description: "Quit fir"},
 }
 

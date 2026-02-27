@@ -102,6 +102,64 @@ func TestAgent_QueueOperations(t *testing.T) {
 	assert.False(t, a.HasQueuedMessages())
 }
 
+func TestAgent_PeekFollowUpQueue(t *testing.T) {
+	a := NewAgent(AgentOptions{})
+
+	// Empty queue returns empty slice.
+	assert.Empty(t, a.PeekFollowUpQueue())
+
+	m1 := NewAgentMessage(ai.NewUserMsg("first", 0))
+	m2 := NewAgentMessage(ai.NewUserMsg("second", 0))
+	a.FollowUp(m1)
+	a.FollowUp(m2)
+
+	snap := a.PeekFollowUpQueue()
+	assert.Len(t, snap, 2)
+
+	// Peek must not modify the queue.
+	assert.Equal(t, 2, a.FollowUpQueueLen())
+
+	// Mutating the returned slice must not affect the internal queue.
+	snap[0] = NewAgentMessage(ai.NewUserMsg("mutated", 0))
+	assert.Equal(t, 2, a.FollowUpQueueLen())
+	fresh := a.PeekFollowUpQueue()
+	assert.Equal(t, "first", fresh[0].Message.AsUser().Content)
+}
+
+func TestAgent_RemoveFollowUp(t *testing.T) {
+	a := NewAgent(AgentOptions{})
+
+	m1 := NewAgentMessage(ai.NewUserMsg("first", 0))
+	m2 := NewAgentMessage(ai.NewUserMsg("second", 0))
+	m3 := NewAgentMessage(ai.NewUserMsg("third", 0))
+	a.FollowUp(m1)
+	a.FollowUp(m2)
+	a.FollowUp(m3)
+
+	// Out-of-range indices return false.
+	_, ok := a.RemoveFollowUp(-1)
+	assert.False(t, ok)
+	_, ok = a.RemoveFollowUp(3)
+	assert.False(t, ok)
+
+	// Remove the middle item (0-based index 1).
+	removed, ok := a.RemoveFollowUp(1)
+	require.True(t, ok)
+	assert.Equal(t, "second", removed.Message.AsUser().Content)
+	assert.Equal(t, 2, a.FollowUpQueueLen())
+
+	// Remaining items preserve order.
+	remaining := a.PeekFollowUpQueue()
+	assert.Equal(t, "first", remaining[0].Message.AsUser().Content)
+	assert.Equal(t, "third", remaining[1].Message.AsUser().Content)
+
+	// Remove first item.
+	removed, ok = a.RemoveFollowUp(0)
+	require.True(t, ok)
+	assert.Equal(t, "first", removed.Message.AsUser().Content)
+	assert.Equal(t, 1, a.FollowUpQueueLen())
+}
+
 func TestAgent_Subscribe(t *testing.T) {
 	a := NewAgent(AgentOptions{})
 	var received []AgentEvent

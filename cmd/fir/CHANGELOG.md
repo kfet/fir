@@ -14,6 +14,7 @@
 - MCP: `WatchConfig` stop semantics documented as best-effort in the function comment
 
 ### Added
+- `/queue` slash command shows the follow-up message queue with 1-based numbered previews; `/dequeue [N]` removes a single item by index (existing Alt+Up restores all as before)
 - MCP: hot reload — `WatchAndReload` watches `mcp.json` for changes and incrementally starts/stops servers; new servers connected, removed servers closed, changed servers restarted, unchanged left alone
 - MCP: `NewToolServer` exposes fir `agent.AgentTool` values as an MCP server, enabling external MCP clients to call fir's tools
 - MCP: `CompletePromptArg` and `CompleteResourceURI` helpers expose MCP argument completions for interactive use

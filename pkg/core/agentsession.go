@@ -425,6 +425,38 @@ func (s *AgentSession) ClearFollowUpQueue() []string {
 	return texts
 }
 
+// PeekFollowUpQueue returns a snapshot of the queued follow-up message texts
+// without clearing the queue.
+func (s *AgentSession) PeekFollowUpQueue() []string {
+	queued := s.Agent.PeekFollowUpQueue()
+	texts := make([]string, 0, len(queued))
+	for _, msg := range queued {
+		if u := msg.Message.AsUser(); u != nil {
+			if t, ok := u.Content.(string); ok && t != "" {
+				texts = append(texts, t)
+			}
+		}
+	}
+	return texts
+}
+
+// RemoveFollowUp removes and returns the queued follow-up message at the given
+// 1-based position. Returns the text and true if found and the content is a
+// plain string; empty string and false if the index is out of range or the
+// message content is non-text (e.g. image blocks).
+func (s *AgentSession) RemoveFollowUp(oneBasedIndex int) (string, bool) {
+	msg, ok := s.Agent.RemoveFollowUp(oneBasedIndex - 1)
+	if !ok {
+		return "", false
+	}
+	if u := msg.Message.AsUser(); u != nil {
+		if t, ok2 := u.Content.(string); ok2 {
+			return t, true
+		}
+	}
+	return "", false
+}
+
 // ============================================================================
 // System prompt
 // ============================================================================

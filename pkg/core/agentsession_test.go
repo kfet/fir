@@ -2244,6 +2244,110 @@ func TestAgentSession_Prompt_FollowUpQueuesWhenStreaming(t *testing.T) {
 }
 
 // ============================================================================
+// PeekFollowUpQueue
+// ============================================================================
+
+func TestAgentSession_PeekFollowUpQueue_Empty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	got := session.PeekFollowUpQueue()
+	if len(got) != 0 {
+		t.Errorf("expected empty queue, got %v", got)
+	}
+}
+
+func TestAgentSession_PeekFollowUpQueue_NonDestructive(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("alpha", 0)))
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("beta", 0)))
+
+	first := session.PeekFollowUpQueue()
+	if len(first) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(first))
+	}
+	if first[0] != "alpha" || first[1] != "beta" {
+		t.Errorf("unexpected order: %v", first)
+	}
+
+	// Queue must be unchanged after peek.
+	second := session.PeekFollowUpQueue()
+	if len(second) != 2 {
+		t.Errorf("peek must not consume the queue; expected 2 items, got %d", len(second))
+	}
+}
+
+// ============================================================================
+// RemoveFollowUp
+// ============================================================================
+
+func TestAgentSession_RemoveFollowUp_OutOfRange(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("only", 0)))
+
+	_, ok := session.RemoveFollowUp(0) // 1-based: 0 is invalid
+	if ok {
+		t.Error("expected false for index 0 (1-based)")
+	}
+	_, ok = session.RemoveFollowUp(2) // beyond the end
+	if ok {
+		t.Error("expected false for out-of-range index 2")
+	}
+	// Queue must be untouched.
+	if session.Agent.FollowUpQueueLen() != 1 {
+		t.Errorf("queue should still have 1 item, got %d", session.Agent.FollowUpQueueLen())
+	}
+}
+
+func TestAgentSession_RemoveFollowUp_Middle(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("first", 0)))
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("second", 0)))
+	session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("third", 0)))
+
+	text, ok := session.RemoveFollowUp(2) // remove "second"
+	if !ok {
+		t.Fatal("expected ok=true for index 2")
+	}
+	if text != "second" {
+		t.Errorf("expected 'second', got %q", text)
+	}
+
+	remaining := session.PeekFollowUpQueue()
+	if len(remaining) != 2 || remaining[0] != "first" || remaining[1] != "third" {
+		t.Errorf("unexpected remaining: %v", remaining)
+	}
+}
+
+func TestAgentSession_RemoveFollowUp_NonStringContent(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Queue a message whose content is a slice of blocks (e.g. image), not a plain string.
+	imageMsg := agent.NewAgentMessage(ai.NewUserMsg([]any{
+		map[string]any{"type": "image", "data": "abc", "mimeType": "image/png"},
+	}, 0))
+	session.Agent.FollowUp(imageMsg)
+
+	// RemoveFollowUp must return false for non-string content — the item is
+	// still removed from the queue so the caller can decide what to do.
+	_, ok := session.RemoveFollowUp(1)
+	if ok {
+		t.Error("expected ok=false for non-string (image) content")
+	}
+	// Item was consumed from the queue.
+	if session.Agent.FollowUpQueueLen() != 0 {
+		t.Errorf("item should have been removed, queue len=%d", session.Agent.FollowUpQueueLen())
+	}
+}
+
+// ============================================================================
 // HasPendingWork
 // ============================================================================
 
