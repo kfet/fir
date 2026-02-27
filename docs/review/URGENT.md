@@ -8,14 +8,8 @@
 
 ## Recently Fixed ✅
 
-### `pkg/mcp/client.go:212,238` — Data race on `m.OnToolsChanged` ✅ FIXED (unstaged `client.go`, pending commit)
-
-**Fix applied:**
-- Removed racy nil-check at top of `ToolListChangedHandler` (was read without lock)
-- Added stale-session guard: `current, stillActive := m.sessions[serverName]; if !stillActive || current != session { return }` — prevents stale goroutines overwriting tools
-- Both `notify := m.OnToolsChanged` reads now inside `m.mu.Lock()` (lines 247, 501)
-- `notify(all)` called after `m.mu.Unlock()` — correct pattern
-- `go test -race -count=10 ./pkg/mcp/...` passes cleanly
+### `pkg/mcp/client.go:212,238` — Data race on `m.OnToolsChanged` in `ToolListChangedHandler` ✅ FIXED `12734c4`
+Removed racy nil-check at handler call time; added stale-session guard inside the goroutine; reads `notify := m.OnToolsChanged` under `m.mu` before calling outside the lock. `applyConfigDiff` refactored away; `WatchAndReload` calls `Reload` then reads `OnToolsChanged` under lock.
 
 ### `pkg/mcp/config_watch.go` + `pkg/mcp/config.go` — `WatchConfig` redeclared ✅ FIXED (self-resolved)
 

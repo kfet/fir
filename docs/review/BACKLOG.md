@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 26, 2026-02-27 ~02:30 PST
-**Build status:** ✅ all 24 packages pass with -race. 0 URGENT, 3 open BACKLOG.
-**Commits reviewed this cycle:** No new commits; `completions.go` doc fixed (errors-propagated comment); `client.go` race fix still pending commit.
+**Last reviewed:** MCP watch cycle 27, 2026-02-27 ~02:35 PST
+**Build status:** ✅ all 24 packages pass with -race. 0 URGENT, 2 open BACKLOG.
+**Commits reviewed this cycle:** `12734c4` — hot reload, race fix, configsEqual dedup, completions docs
 
 ---
 
@@ -32,42 +32,20 @@
   and set `serverErrors[name]` when a session terminates unexpectedly.
   **Files:** `pkg/mcp/client.go`
 
-### Test Coverage
-
-*(none)*
-
-### Simplification
-
-- **[DUPLICATE FUNCTION]** `pkg/mcp/client.go` — `configsEqual` (line 421) and `serverConfigEqual`
-  (line 547) are identical: both JSON-marshal both args and compare strings. One should be
-  removed; `Reload` and `applyConfigDiff` should share a single helper.
-  **Files:** `pkg/mcp/client.go:421,547`
-
 ---
 
 ## Resolved This Cycle ✅
 
-- **✅ FIXED (completions.go)** Doc mismatch fixed — comments now accurately say errors are propagated (not "empty slice on unsupported")..
-- **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
-- **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
-  + startup subscription loop (best-effort; ignores errors for servers without subscription support).
-  Test: `TestManager_ResourceSubscription` passes including `-race`.
-- **✅ FIXED 92e6174** `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` MIME guard added,
-  consistent with `resources.go`. Test: `TestConvertResult_NonImageContent`.
+- **✅ FIXED `12734c4`** `pkg/mcp/client.go` — `ToolListChangedHandler` race on `m.OnToolsChanged` fixed; stale-session guard added; `applyConfigDiff` removed; `WatchAndReload` calls `Reload` and reads `OnToolsChanged` under lock.
+- **✅ FIXED `12734c4`** `pkg/mcp/client.go` — `serverConfigEqual` duplicate removed; renamed to `configsEqual`; single canonical helper shared by `Reload` and `WatchAndReload`.
+- **✅ FIXED `12734c4`** `pkg/mcp/completions.go` — doc/error mismatch fixed: `CompletePromptArg`/`CompleteResourceURI` now say errors are propagated (not empty slices).
+- **✅ FIXED `12734c4`** `pkg/mcp/config_watch.go` + `config_watch_test.go` — `WatchConfig` (debounce 200ms, dir-watch for atomic renames) and `Manager.WatchAndReload` implemented with full tests.
+- **✅ FIXED `12734c4`** `pkg/mcp/reload_test.go` — `Manager.Reload` tests (remove/add/unchanged servers) all pass under `-race`.
+- **✅ FIXED (completions.go)** Doc mismatch fixed — comments now accurately say errors are propagated.
+- **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types.
+- **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler` + startup subscription loop. Test: `TestManager_ResourceSubscription` passes including `-race`.
+- **✅ FIXED 92e6174** `pkg/mcp/tool_adapter.go:87` — `*sdk.ImageContent` MIME guard added. Test: `TestConvertResult_NonImageContent`.
 - **✅ FIXED f6c7931** `pkg/core/agentsession.go:runAutoCompaction` — now checks `PendingToolCalls`.
 - **✅ FIXED f6c7931** `pkg/core/agentsession_test.go` — `HasPendingWork` unit tests added.
 - **✅ FIXED 7e102e0** `pkg/mcp/client_test.go` — duplicate unknown-transport test deduplicated.
 - **✅ FIXED 19f0c28** `pkg/modes/acp/acp_mcp_e2e_test.go` — assertion tightened to `echo-srv__echo`.
-
----
-
-## Previously Resolved (all ✅)
-
-- **✅ FIXED 5e9235d** `resources.go`: blob→ContentTypeImage MIME gate + URI encoding fix + unknown transport guard.
-- **✅ FIXED 6ddadcd** `tool_adapter.go`: progress-callback defer-unregister race.
-- **✅ FIXED 215890d** `client_test.go`: createTransport SSE/streamable tests.
-- **✅ FIXED ef4f139** `client.go:commandTransport`: `cmd.Env` missing `os.Environ()`.
-- **✅ FIXED 329d5c9** `tool_adapter_test.go`: `convertResult` default branch.
-- **✅ FIXED 2a44062** `loadProjectMCPConfigs`: silent nil on parse error.
-- **✅ FIXED 616f1b5** Hung test + nil dereference in ACP mode.
-- **✅ FIXED a646bc6** E2E test wrong JSON format.
