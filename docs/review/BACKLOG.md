@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 24, 2026-02-27 ~02:22 PST
-**Build status:** ✅ all 24 packages pass with -race (intermittent race still in URGENT).
-**Commits reviewed this cycle:** None new; no activity since cycle 23. Work tracker reviewed (ACP mode nearly complete per 07-work-tracker.md).
+**Last reviewed:** MCP watch cycle 25, 2026-02-27 ~02:26 PST
+**Build status:** ✅ all 24 packages pass with -race (-count=10). URGENT cleared — race fix in unstaged client.go.
+**Commits reviewed this cycle:** No new commits; confirmed race fix applied in working tree (stale-session guard + OnToolsChanged read under lock).
 
 ---
 
@@ -53,8 +53,7 @@
 
 ## Resolved This Cycle ✅
 
-- **✅ COMMITTED (config_watch.go)** `WatchConfig` dual-implementation conflict self-resolved; `config_watch_test.go` and `reload_test.go` added with comprehensive coverage.
-- **✅ COMMITTED (client.go)** `Reload` + `applyConfigDiff` hot-reload methods added; `serverConfigEqual` added (duplicate of `configsEqual` — filed in Simplification).
+- **✅ FIXED (client.go unstaged)** Data race on `m.OnToolsChanged` — stale-session guard + reads moved inside `m.mu`; `-race -count=10` passes..
 - **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
