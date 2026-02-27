@@ -56,6 +56,11 @@ type Manager struct {
 	// across all servers. May be nil.
 	OnToolsChanged func([]agent.AgentTool)
 
+	// OnResourceUpdated is called when a subscribed resource is updated on a
+	// server. serverName is the Manager key; uri is the resource that changed.
+	// May be nil.
+	OnResourceUpdated func(serverName, uri string)
+
 	// progressReg routes progress notifications to active tool-call callbacks.
 	progressReg progressRegistry
 
@@ -221,6 +226,13 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 			}
 			m.progressReg.dispatch(token, result)
 		},
+		// Notify caller when a subscribed resource is updated.
+		ResourceUpdatedHandler: func(_ context.Context, req *sdk.ResourceUpdatedNotificationRequest) {
+			if m.OnResourceUpdated == nil {
+				return
+			}
+			m.OnResourceUpdated(serverName, req.Params.URI)
+		},
 	}
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
@@ -268,6 +280,16 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		listResourcesTool(session, name),
 		readResourceTool(session, name),
 	)
+
+	// Subscribe to each resource for push update notifications. Best-effort:
+	// servers that don't support subscriptions return an error which we ignore.
+	for res, err := range session.Resources(ctx, nil) {
+		if err != nil {
+			break
+		}
+		_ = session.Subscribe(ctx, &sdk.SubscribeParams{URI: res.URI})
+	}
+
 	m.mu.Lock()
 	m.tools[name] = tools
 	m.mu.Unlock()

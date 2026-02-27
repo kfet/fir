@@ -248,6 +248,53 @@ func TestConvertResourceResult(t *testing.T) {
 	})
 }
 
+// TestManager_ResourceSubscription verifies that when a server pushes a
+// resources/updated notification the OnResourceUpdated callback is called
+// with the correct server name and URI.
+func TestManager_ResourceSubscription(t *testing.T) {
+	const resURI = "file:///watch.txt"
+
+	// The SDK requires both SubscribeHandler and UnsubscribeHandler to be set
+	// in order to process resources/subscribe requests. The no-op handlers
+	// allow the SDK's built-in session-tracking to run after them.
+	server := sdk.NewServer(&sdk.Implementation{Name: "sub-srv", Version: "0"}, &sdk.ServerOptions{
+		SubscribeHandler:   func(_ context.Context, _ *sdk.SubscribeRequest) error { return nil },
+		UnsubscribeHandler: func(_ context.Context, _ *sdk.UnsubscribeRequest) error { return nil },
+	})
+	server.AddResource(
+		&sdk.Resource{URI: resURI, Name: "watch", MIMEType: "text/plain"},
+		func(_ context.Context, req *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+			return &sdk.ReadResourceResult{
+				Contents: []*sdk.ResourceContents{{URI: req.Params.URI, Text: "v1"}},
+			}, nil
+		},
+	)
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	updated := make(chan string, 1)
+	mgr.OnResourceUpdated = func(_, uri string) {
+		updated <- uri
+	}
+
+	ctx := context.Background()
+	_, err := mgr.Start(ctx)
+	require.NoError(t, err)
+	defer mgr.Close()
+
+	// Trigger a resource update from the server side.
+	err = server.ResourceUpdated(ctx, &sdk.ResourceUpdatedNotificationParams{URI: resURI})
+	require.NoError(t, err)
+
+	select {
+	case uri := <-updated:
+		assert.Equal(t, resURI, uri)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for resource update notification")
+	}
+}
+
 // toolEntry is a helper to hold a pointer to an AgentTool without copying the
 // Execute closure repeatedly.
 type toolEntry struct {
