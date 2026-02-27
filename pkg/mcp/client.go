@@ -55,6 +55,7 @@ type Manager struct {
 	mu           sync.Mutex
 	tools        map[string][]agent.AgentTool // per-server tools, guarded by mu
 	serverErrors map[string]error             // per-server connection errors, guarded by mu
+	subscribed   map[string]map[string]struct{} // per-server subscribed resource URIs, guarded by mu
 
 	// OnToolsChanged is called (from a background goroutine) whenever any
 	// server's tool list changes. The argument is the new complete tool list
@@ -96,6 +97,7 @@ func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
 		verbose:      verbose,
 		tools:        make(map[string][]agent.AgentTool),
 		serverErrors: make(map[string]error),
+		subscribed:   make(map[string]map[string]struct{}),
 		dialFn:       createTransport,
 	}
 }
@@ -232,6 +234,33 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					listPromptsTool(session, serverName),
 					getPromptTool(session, serverName),
 				)
+
+				// Subscribe to any resources that appeared since startup.
+				// Use best-effort: ignore errors (server may not support subscriptions).
+				var newURIs []string
+				for res, err := range session.Resources(context.Background(), nil) {
+					if err != nil {
+						break
+					}
+					m.mu.Lock()
+					subs, ok := m.subscribed[serverName]
+					if !ok {
+						subs = make(map[string]struct{})
+						m.subscribed[serverName] = subs
+					}
+					_, alreadySubscribed := subs[res.URI]
+					if !alreadySubscribed {
+						subs[res.URI] = struct{}{}
+					}
+					m.mu.Unlock()
+					if !alreadySubscribed {
+						newURIs = append(newURIs, res.URI)
+					}
+				}
+				for _, uri := range newURIs {
+					_ = session.Subscribe(context.Background(), &sdk.SubscribeParams{URI: uri})
+				}
+
 				m.mu.Lock()
 				// Guard against stale updates: only overwrite m.tools if this
 				// session is still the active session for this server. A reload
@@ -339,10 +368,17 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 
 	// Subscribe to each resource for push update notifications. Best-effort:
 	// servers that don't support subscriptions return an error which we ignore.
+	m.mu.Lock()
+	subs := make(map[string]struct{})
+	m.subscribed[name] = subs
+	m.mu.Unlock()
 	for res, err := range session.Resources(ctx, nil) {
 		if err != nil {
 			break
 		}
+		m.mu.Lock()
+		subs[res.URI] = struct{}{}
+		m.mu.Unlock()
 		_ = session.Subscribe(ctx, &sdk.SubscribeParams{URI: res.URI})
 	}
 
