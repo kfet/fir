@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 23, 2026-02-27 ~02:18 PST
-**Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 pkgs) — race intermittent, not consistently reproducible but confirmed by detector. URGENT still open.
-**Commits reviewed this cycle:** No new commits; unstaged: `client.go` (applyConfigDiff `changed` bool optimization, Reload method, serverConfigEqual), `config_watch.go`/`config_watch_test.go`/`reload_test.go` untracked new files
+**Last reviewed:** MCP watch cycle 24, 2026-02-27 ~02:22 PST
+**Build status:** ✅ all 24 packages pass with -race (intermittent race still in URGENT).
+**Commits reviewed this cycle:** None new; no activity since cycle 23. Work tracker reviewed (ACP mode nearly complete per 07-work-tracker.md).
 
 ---
 
