@@ -1,8 +1,8 @@
 # Review Backlog — 2026-02-27
 
-**Last reviewed:** MCP watch cycle 11, 2026-02-27 ~01:30 PST
+**Last reviewed:** MCP watch cycle 12, 2026-02-27 ~01:32 PST
 **Build status:** ✅ `go build ./...` passes. ✅ `go test -race ./...` passes (all 24 packages).
-**Commits reviewed this cycle:** `0374569` (CHANGELOG sync), unstaged: `pkg/mcp/prompts.go` (MCP prompt tools), `client.go` (inject prompt tools)
+**Commits reviewed this cycle:** unstaged `pkg/mcp/prompts.go` (updated: null→[] fix, small-blob base64), `pkg/mcp/prompts_test.go` (comprehensive test suite), `client.go` (prompt tools injected)
 
 ---
 
@@ -22,23 +22,12 @@
   already-subscribed URIs to avoid duplicate subscriptions.
   **Files:** `pkg/mcp/client.go`
 
-- **[BACKLOG/CORRECTNESS]** `pkg/mcp/prompts.go:listPromptsTool` — when no prompts are returned by
-  the server, `json.MarshalIndent(prompts, ...)` marshals a nil slice as `"null"` instead of `"[]"`.
-  LLMs may struggle with `"null"` as a list response.
-  **Fix:** Initialize `prompts := make([]promptInfo, 0)` or check `if prompts == nil { prompts = []promptInfo{} }`.
-  **Files:** `pkg/mcp/prompts.go`
-
-### Test Coverage
-
-- **[MISSING TEST]** `pkg/mcp/prompts.go` — no `prompts_test.go`. Should cover: `listPromptsTool`
-  (non-empty, empty, error), `getPromptTool` (missing name, valid render with args), `convertPromptResult`
-  (text/image/embedded-resource/default content types), `formatEmbeddedResource`.
-  **Files:** `pkg/mcp/prompts_test.go` (to be created)
-
 ---
 
 ## Resolved This Cycle ✅
 
+- **✅ SELF-FIXED prompts.go** `pkg/mcp/prompts.go` — null→`[]` fix applied (`if prompts == nil { prompts = []promptInfo{} }`); small blobs (≤4096 bytes) now inline as base64 in `formatEmbeddedResourceContent`.
+- **✅ SELF-FIXED prompts_test.go** `pkg/mcp/prompts_test.go` created — covers list/get integration, missing-name error, `convertPromptResult` for all content types (text, image, embedded-text, embedded-blob, empty, no-description).
 - **✅ FIXED b76bd20** `pkg/mcp/client.go` — `OnResourceUpdated` callback + `ResourceUpdatedHandler`
   + startup subscription loop (best-effort; ignores errors for servers without subscription support).
   Test: `TestManager_ResourceSubscription` passes including `-race`.
