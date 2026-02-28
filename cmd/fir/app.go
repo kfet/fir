@@ -15,6 +15,7 @@ import (
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
@@ -244,6 +245,25 @@ func run() error {
 	providers.RegisterDefaultProviders()
 
 	args := ParseArgs(os.Args[1:], nil)
+
+	// Initialise debug logging (file-only, never stdout/stderr).
+	debugEnabled := args.Debug || os.Getenv("FIR_DEBUG") == "1"
+	debugPath := args.DebugLogFile
+	if debugPath == "" {
+		debugPath = os.Getenv("FIR_DEBUG_LOG")
+	}
+	if debugPath == "" {
+		debugPath = filepath.Join(resolveAgentDir(), "debug.log")
+	}
+	debugCleanup, err := firlog.Init(debugEnabled, debugPath)
+	if err != nil {
+		return fmt.Errorf("init debug log: %w", err)
+	}
+	defer debugCleanup()
+
+	if debugEnabled {
+		firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
+	}
 
 	if args.Help {
 		PrintHelp()

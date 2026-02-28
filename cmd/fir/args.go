@@ -51,6 +51,8 @@ type Args struct {
 	NoThemes           bool
 	ListModels         any // true (bool) or string (search pattern)
 	Verbose            bool
+	Debug              bool
+	DebugLogFile       string
 	Messages           []string
 	FileArgs           []string
 	UnknownFlags       map[string]any // bool or string values; includes extension flags
@@ -218,6 +220,13 @@ func ParseArgs(args []string, extensionFlags map[string]ExtensionFlagDef) *Args 
 		case arg == "--verbose":
 			result.Verbose = true
 
+		case arg == "--debug":
+			result.Debug = true
+
+		case arg == "--debug-log-file" && i+1 < len(args):
+			i++
+			result.DebugLogFile = args[i]
+
 		case strings.HasPrefix(arg, "@"):
 			result.FileArgs = append(result.FileArgs, arg[1:]) // Remove @ prefix
 
@@ -294,6 +303,8 @@ Options:
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup
+  --debug                        Enable debug logging to file
+  --debug-log-file <path>        Debug log path (default: ~/.fir/agent/debug.log)
   --help, -h                     Show this help
   --version, -v                  Show version number
 
@@ -328,6 +339,8 @@ Environment Variables:
   OPENROUTER_API_KEY               - OpenRouter API key
   MISTRAL_API_KEY                  - Mistral API key
   AWS_PROFILE                      - AWS profile for Amazon Bedrock
+  FIR_DEBUG                        - Enable debug logging (set to 1)
+  FIR_DEBUG_LOG                    - Debug log file path
   %-32s - Session storage directory (default: ~/%s/agent)
 
 Available Tools (default: read, bash, edit, write):
