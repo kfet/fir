@@ -49,7 +49,8 @@ type InteractiveMode struct {
 
 	// State
 	messageContainer   *tui.Container
-	statusContainer    *tui.Container
+	activityContainer      *tui.Container // spinners: "Working...", "Compacting..."
+	commandStatusContainer *tui.Container // transient command result messages
 	footerComponent    *components.FooterComponent
 	footerDataProvider *core.FooterDataProvider
 	markdownTheme      tuicomp.MarkdownTheme
@@ -215,9 +216,13 @@ func (m *InteractiveMode) Init() error {
 	m.messageContainer = &tui.Container{}
 	m.ui.AddChild(m.messageContainer)
 
-	// Create status container (for loading indicators, compaction status)
-	m.statusContainer = &tui.Container{}
-	m.ui.AddChild(m.statusContainer)
+	// Create activity container (for spinners: "Working...", "Compacting...")
+	m.activityContainer = &tui.Container{}
+	m.ui.AddChild(m.activityContainer)
+
+	// Create command status container (for transient command result messages)
+	m.commandStatusContainer = &tui.Container{}
+	m.ui.AddChild(m.commandStatusContainer)
 
 	// Create editor container (holds editor or selector overlays)
 	m.editorContainer = &tui.Container{}
@@ -992,7 +997,7 @@ func (m *InteractiveMode) handleResumeSession(sessionPath string) {
 		m.loadingAnimation.Stop()
 		m.loadingAnimation = nil
 	}
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
 
 	// Clear streaming state
 	m.streamingComponent = nil
@@ -1045,14 +1050,14 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 	info := m.session.GetCompactionStats()
 
 	// Clear status and show initial compacting indicator with stats.
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
 	loader := tuicomp.NewLoader(
 		m.ui.AsRenderRequester(),
 		func(spinner string) string { return t.Fg("accent", spinner) },
 		func(text string) string { return t.Fg("muted", text) },
 		m.compactionLoaderLabel(info, "(Esc to cancel)"),
 	)
-	m.statusContainer.AddChild(loader)
+	m.activityContainer.AddChild(loader)
 	m.ui.RequestRender(false)
 
 	// Attach a streaming progress callback that updates the label as the LLM writes.
@@ -1067,7 +1072,7 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 
 	result, err := m.session.RunCompaction(ctx, customInstructions)
 	loader.Stop()
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
 
 	// If cancelled, just show it and stop
 	if err != nil && ctx.Err() != nil {
@@ -1094,7 +1099,7 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 			"Working...",
 		)
 		m.loadingAnimation = loader
-		m.statusContainer.AddChild(loader)
+		m.activityContainer.AddChild(loader)
 		go func() { _ = m.session.Agent.Continue() }()
 	} else if result != nil {
 		// Compaction succeeded and no pending work - just show status
@@ -1373,8 +1378,11 @@ func (m *InteractiveMode) handleClearCommand() {
 	if m.messageContainer != nil {
 		m.messageContainer.Clear()
 	}
-	if m.statusContainer != nil {
-		m.statusContainer.Clear()
+	if m.activityContainer != nil {
+		m.activityContainer.Clear()
+	}
+	if m.commandStatusContainer != nil {
+		m.commandStatusContainer.Clear()
 	}
 	if m.footerComponent != nil {
 		m.footerComponent.Invalidate()
@@ -2460,24 +2468,24 @@ func (m *InteractiveMode) showMessage(text string) {
 }
 
 func (m *InteractiveMode) showStatus(message string) {
-	if m.statusContainer == nil {
+	if m.commandStatusContainer == nil {
 		return
 	}
 	t := itheme.GetTheme()
-	m.statusContainer.Clear()
-	m.statusContainer.AddChild(tuicomp.NewText(t.Fg("success", message), 1, 0, nil))
+	m.commandStatusContainer.Clear()
+	m.commandStatusContainer.AddChild(tuicomp.NewText(t.Fg("success", message), 1, 0, nil))
 	if m.ui != nil {
 		m.ui.RequestRender(false)
 	}
 }
 
 func (m *InteractiveMode) showWarning(message string) {
-	if m.statusContainer == nil {
+	if m.commandStatusContainer == nil {
 		return
 	}
 	t := itheme.GetTheme()
-	m.statusContainer.Clear()
-	m.statusContainer.AddChild(tuicomp.NewText(t.Fg("warning", message), 1, 0, nil))
+	m.commandStatusContainer.Clear()
+	m.commandStatusContainer.AddChild(tuicomp.NewText(t.Fg("warning", message), 1, 0, nil))
 	if m.ui != nil {
 		m.ui.RequestRender(false)
 	}
@@ -2615,7 +2623,8 @@ func (m *InteractiveMode) AddAssistantMessage(msg *ai.AssistantMessage) {
 
 func (m *InteractiveMode) rebuildChatFromMessages() {
 	m.messageContainer.Clear()
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
+	m.commandStatusContainer.Clear()
 
 	state := m.session.State()
 	for _, agentMsg := range state.Messages {
@@ -2661,8 +2670,8 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 				func(text string) string { return t.Fg("muted", text) },
 				initialLabel,
 			)
-			m.statusContainer.Clear()
-			m.statusContainer.AddChild(loader)
+			m.activityContainer.Clear()
+			m.activityContainer.AddChild(loader)
 			m.loadingAnimation = loader
 			m.ui.RequestRender(false)
 
@@ -2729,7 +2738,7 @@ func (m *InteractiveMode) onAgentStart() {
 		m.loadingAnimation.Stop()
 	}
 	// Clear status and show working indicator
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
 	t := itheme.GetTheme()
 	loader := tuicomp.NewLoader(
 		m.ui.AsRenderRequester(),
@@ -2738,7 +2747,7 @@ func (m *InteractiveMode) onAgentStart() {
 		"Working...",
 	)
 	m.loadingAnimation = loader
-	m.statusContainer.AddChild(loader)
+	m.activityContainer.AddChild(loader)
 	m.streamingComponent = nil
 	m.ui.RequestRender(false)
 
@@ -2794,7 +2803,7 @@ func (m *InteractiveMode) onMessageEnd(ae *agent.AgentEvent) {
 }
 
 func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
-	// Spinner keeps running in statusContainer (stopped at agent_end)
+	// Spinner keeps running in activityContainer (stopped at agent_end)
 	args := make(map[string]any)
 	if ae.Args != nil {
 		if argMap, ok := ae.Args.(map[string]any); ok {
@@ -2856,7 +2865,7 @@ func (m *InteractiveMode) onAgentEnd() {
 		m.loadingAnimation.Stop()
 		m.loadingAnimation = nil
 	}
-	m.statusContainer.Clear()
+	m.activityContainer.Clear()
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)

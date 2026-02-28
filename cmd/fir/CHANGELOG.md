@@ -8,6 +8,7 @@
 - Skills: fixed typo in work skill description
 
 ### Fixed
+- Interactive: split `statusContainer` into separate `activityContainer` (spinners) and `commandStatusContainer` (command results) so they no longer overwrite each other
 - MCP: `Manager.Reload` is now safe for concurrent calls — serialised by an internal `reloadMu` mutex
 - MCP: `Manager.Status()` now reflects post-startup server disconnections — `Connected` becomes false and any error is recorded via a background `session.Wait()` goroutine
 - MCP: `Manager.Reload` now deletes servers from `m.subscribed` to prevent a minor memory leak when servers are removed from the config

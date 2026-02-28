@@ -173,8 +173,10 @@ func newTestModeInternal(t *testing.T, session *core.AgentSession) *testMode {
 	m.messageContainer = &tui.Container{}
 	ui.AddChild(m.messageContainer)
 
-	m.statusContainer = &tui.Container{}
-	ui.AddChild(m.statusContainer)
+	m.activityContainer = &tui.Container{}
+	ui.AddChild(m.activityContainer)
+	m.commandStatusContainer = &tui.Container{}
+	ui.AddChild(m.commandStatusContainer)
 
 	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
 		return m.getFooterData()
@@ -837,7 +839,7 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		cmd          string
 		wantShutdown bool
 		wantMessage  bool // something added to messageContainer
-		wantWarning  bool // something added to statusContainer
+		wantWarning  bool // something added to commandStatusContainer
 	}{
 		{"/help", false, true, false},
 		{"/hotkeys", false, true, false},
@@ -863,7 +865,7 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		t.Run(tt.cmd, func(t *testing.T) {
 			m2 := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 			m2.messageContainer = &tui.Container{}
-			m2.statusContainer = &tui.Container{}
+			m2.commandStatusContainer = &tui.Container{}
 
 			m2.handleSlashCommand(tt.cmd)
 
@@ -878,7 +880,7 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 			if tt.wantMessage && len(m2.messageContainer.Children) == 0 {
 				t.Errorf("%s should add message", tt.cmd)
 			}
-			if tt.wantWarning && len(m2.statusContainer.Children) == 0 {
+			if tt.wantWarning && len(m2.commandStatusContainer.Children) == 0 {
 				t.Errorf("%s should show warning", tt.cmd)
 			}
 		})
@@ -1565,7 +1567,7 @@ func TestHandleDequeue_NilSession(t *testing.T) {
 	tm.waitRender()
 
 	// No status shown — nothing written to status container.
-	if got := len(tm.mode.statusContainer.Children); got != 0 {
+	if got := len(tm.mode.commandStatusContainer.Children); got != 0 {
 		t.Errorf("expected no status for nil session, got %d children", got)
 	}
 }
