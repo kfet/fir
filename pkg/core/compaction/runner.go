@@ -7,6 +7,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // DefaultRunner implements core.CompactionRunner using the compaction package.
@@ -55,6 +56,7 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, session *core.AgentSe
 
 	settings := r.compactionSettings()
 	pathEntries := session.SessionManager.GetBranch("")
+	firlog.Info("compaction starting", "entries", len(pathEntries), "model", model.ID)
 
 	preparation := PrepareCompaction(pathEntries, settings)
 	if preparation == nil {
@@ -93,6 +95,8 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, session *core.AgentSe
 	// Rebuild messages from compacted session
 	sessionCtx := session.SessionManager.BuildSessionContext()
 	session.Agent.ReplaceMessages(sessionCtx.Messages)
+
+	firlog.Info("compaction complete", "tokensBefore", result.TokensBefore)
 
 	return &core.CompactionResultInfo{
 		Summary:          result.Summary,

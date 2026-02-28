@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // CurrentSessionVersion is the latest session file format version.
@@ -221,6 +222,7 @@ func (sm *SessionManager) SetSessionFile(filePath string) {
 func (sm *SessionManager) setSessionFile(filePath string) {
 	absPath, _ := filepath.Abs(filePath)
 	sm.sessionFile = absPath
+	firlog.Debug("loading session file", "path", absPath)
 
 	if _, err := os.Stat(absPath); err == nil {
 		header, entries := loadEntriesFromFile(absPath)
@@ -240,6 +242,7 @@ func (sm *SessionManager) setSessionFile(filePath string) {
 		sm.entries = entries
 		sm.buildIndex()
 		sm.flushed = true
+		firlog.Debug("session loaded", "sessionID", header.ID, "entries", len(entries))
 	} else {
 		sm.newSession(nil)
 		sm.sessionFile = absPath
@@ -279,6 +282,7 @@ func (sm *SessionManager) newSession(opts *NewSessionOptions) string {
 		sm.sessionFile = filepath.Join(sm.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, sm.sessionID))
 	}
 
+	firlog.Debug("new session created", "sessionID", sm.sessionID, "file", sm.sessionFile)
 	return sm.sessionFile
 }
 
