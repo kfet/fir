@@ -99,10 +99,10 @@ tm-renamewin "$SESSION" "$WINDOW" "$WINDOW: ${DOING:-idle}"
 
 ### Rate Limits — Check Every 5 Cycles
 
-Use the `usage.sh` script from this skill's `scripts/` directory. Look for an auth token in `~/.fir/agent/auth.json` (key: `.anthropic.access`):
+Use the `usage.sh` script from this skill's `scripts/` directory. Look for an auth token in common credential locations:
 
 ```bash
-TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
+TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null || jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
 USAGE_OUT=$(TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh")
 FIVE_HR=$(echo "$USAGE_OUT" | awk '/Five Hour/ {gsub(/%/,"",$3); print int($3)}')
 SEVEN_DAY=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {gsub(/%/,"",$3); print int($3)}')

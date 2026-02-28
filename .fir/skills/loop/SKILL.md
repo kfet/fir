@@ -26,12 +26,12 @@ Before doing anything else, output this as a plain code block so it's visible in
 
 ```
 Next reminder command:
-sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .fir/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
+sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read this skill file and run the next cycle. Task: <the user's prompt>"
 ```
 
 ### 1. Re-read this skill file
 
-Re-read `.fir/skills/loop/SKILL.md` to keep instructions in context. Long-running agents drift — this is mandatory.
+Re-read `this skill file` to keep instructions in context. Long-running agents drift — this is mandatory.
 
 ### 2. Note your task and interval
 
@@ -51,7 +51,7 @@ Briefly summarize what happened this cycle:
 ### 5. Run the reminder command
 
 ```bash
-sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read .fir/skills/loop/SKILL.md and run the next cycle. Task: <the user's prompt>"
+sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read this skill file and run the next cycle. Task: <the user's prompt>"
 ```
 
 Use a timeout of `<N + 10>` seconds on the bash call. When you see the reminder output, immediately go back to step 0.

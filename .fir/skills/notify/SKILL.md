@@ -9,11 +9,17 @@ Send native OS-level terminal notifications to the user. Notifications appear ev
 
 ## How to send a notification
 
-Use the `bash` tool to write an escape sequence to `/dev/tty`. You **must** write to `/dev/tty` (not stdout or stderr) because the bash tool runs without a TTY attached.
+Use the script in this skill's `scripts/` directory:
+
+```bash
+bash "$SKILL_DIR/scripts/notify.sh" "TITLE" "BODY"
+```
+
+Or use the `bash` tool to write escape sequences directly to `/dev/tty`. You **must** write to `/dev/tty` (not stdout or stderr) because the bash tool runs without a TTY attached.
 
 **Always check `$TMUX` and `$KITTY_WINDOW_ID` first** — tmux requires DCS passthrough wrapping or the notification will be silently swallowed. Kitty handles notifications natively.
 
-### Example
+### Manual example
 
 ```bash
 if [ -n "$KITTY_WINDOW_ID" ]; then

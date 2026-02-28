@@ -5,59 +5,52 @@ description: Check Anthropic Claude API usage stats using a Claude Code OAuth to
 
 # Claude Usage Skill
 
-Query the Anthropic usage API to see rate-limit utilization (5-hour and 7-day windows) using the OAuth token stored locally by fir or Claude Code.
+Query the Anthropic usage API to see rate-limit utilization (5-hour and 7-day windows) using an OAuth token.
 
 ## Background
 
-The usage stats endpoint (`https://api.anthropic.com/api/oauth/usage`) requires an **OAuth Bearer token** — not a standard `sk-ant-...` API key. Both fir and Claude Code store OAuth tokens locally after login.
+The usage stats endpoint (`https://api.anthropic.com/api/oauth/usage`) requires an **OAuth Bearer token** — not a standard `sk-ant-...` API key. Tools like fir and Claude Code store OAuth tokens locally after login.
 
 Standard API keys will **not** work — the endpoint rejects them.
 
 ## Step 1 — Extract the Token
 
-### Primary: fir's auth storage (preferred)
-
-fir stores credentials in `~/.fir/agent/auth.json`. Extract the Anthropic access token in one step:
+Look for an OAuth token in common locations:
 
 ```bash
-TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json)
+# Try common credential files
+for f in ~/.fir/agent/auth.json ~/.claude/.credentials.json; do
+  [ -f "$f" ] && echo "Found: $f"
+done
 ```
 
-### Fallback: Claude Code credentials
+### Common locations
 
-If not logged in via fir, Claude Code stores credentials in `~/.claude/.credentials.json`:
+| Tool | File | Key |
+|------|------|-----|
+| fir | `~/.fir/agent/auth.json` | `.anthropic.access` |
+| Claude Code | `~/.claude/.credentials.json` | `"access_token"` or `"claudeAiOauthToken"` |
 
+Extract with jq:
 ```bash
-cat ~/.claude/.credentials.json
-```
-
-Look for a field like `"access_token"` or `"claudeAiOauthToken"`.
-
-If that file doesn't exist, search:
-
-```bash
-find ~/.claude -name "*.json" | xargs grep -l "token" 2>/dev/null
+TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
+# or
+TOKEN=$(jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
 ```
 
 ## Step 2 — Run the Script
 
-The script lives at `scripts/usage.sh` (relative to this skill). Pass the token
-from Step 1 via the `TOKEN` env var or as the first argument:
+The script lives at `scripts/usage.sh` (relative to this skill). Pass the token via the `TOKEN` env var or as the first argument:
 
 ```bash
-TOKEN=<bearer-token> /path/to/skill/scripts/usage.sh
+TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh"
 # or
-/path/to/skill/scripts/usage.sh <bearer-token>
+bash "$SKILL_DIR/scripts/usage.sh" "$TOKEN"
 ```
-
-The script accepts the token externally so the AI can resolve the correct source
-(fir, Claude Code, etc.) using Step 1 above and inject it at call time.
 
 ## Step 3 — Interpret the Response
 
-The script prints all non-null usage windows returned by the API (field names vary
-by plan), then `extra_usage` if overage billing is enabled. Labels are derived
-from the API field names (e.g. `seven_day_sonnet` → `Seven Day Sonnet`).
+The script prints all non-null usage windows returned by the API, then `extra_usage` if overage billing is enabled.
 
 Example output:
 

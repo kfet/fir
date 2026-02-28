@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Skills: all skills made project-independent — removed hardcoded paths, use `$PROJECT_ROOT` and `$SKILL_DIR` variables
+- Skills: extracted reusable bash snippets into `scripts/` directories (monitor/snapshot.sh, notify/notify.sh)
+- Skills: fixed typo in work skill description
+
 ### Fixed
 - MCP: `Manager.Reload` is now safe for concurrent calls — serialised by an internal `reloadMu` mutex
 - MCP: `Manager.Status()` now reflects post-startup server disconnections — `Connected` becomes false and any error is recorded via a background `session.Wait()` goroutine

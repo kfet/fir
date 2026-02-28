@@ -9,7 +9,7 @@ Drive interactive programs through tmux using a private socket. Works on Linux a
 
 ```bash
 # All commands use a wrapper that handles socket/session boilerplate:
-source ./scripts/tmux-helpers.sh
+source "$SKILL_DIR/scripts/tmux-helpers.sh"
 
 # Start a named session (one per project/task):
 tm-new myproject        # creates session "myproject" with window "shell"
