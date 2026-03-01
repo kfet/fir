@@ -78,6 +78,11 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 		if err := json.Unmarshal(*resp.Result, &result); err != nil {
 			return nil, fmt.Errorf("extproc: parse init result: %w", err)
 		}
+		validName, err := ValidateExtensionName(result.Name, proc.cfg.Name)
+		if err != nil {
+			return nil, err
+		}
+		result.Name = validName
 		return &result, nil
 	}
 }
