@@ -16,6 +16,9 @@
 ### Fixed
 - ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
 
+### Removed
+- `sandbox` extension (incomplete framework with no real OS-level enforcement)
+
 ## [0.9.0] - 2026-02-28
 
 ### Added

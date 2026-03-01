@@ -342,9 +342,9 @@ func TestParseArgs_UnknownFlagsCaptured(t *testing.T) {
 	}
 
 	// Boolean-style unknown flag (no value arg follows)
-	args = ParseArgs([]string{"--no-sandbox"}, nil)
-	if v, ok := args.UnknownFlags["no-sandbox"]; !ok || v != true {
-		t.Errorf("expected no-sandbox=true, got %v", args.UnknownFlags)
+	args = ParseArgs([]string{"--no-network"}, nil)
+	if v, ok := args.UnknownFlags["no-network"]; !ok || v != true {
+		t.Errorf("expected no-network=true, got %v", args.UnknownFlags)
 	}
 }
 

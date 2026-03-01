@@ -16,8 +16,8 @@ You are the E2E testing agent. Your job is to build the `fi` binary, run it in p
 
 These constraints were discovered during testing and MUST be followed:
 
-- **Build output path:** `/tmp/` root is NOT writable in this sandbox (only `$TMPDIR` aka `/tmp/claude/` is). Always build to `./bin/fir-e2e` inside the project directory.
-- **Use `$TMPDIR` not `/tmp`:** The sandbox redirects temp writes to `$TMPDIR` (e.g. `/tmp/claude/`). Never hardcode `/tmp/` — always use `$TMPDIR`.
+- **Build output path:** `/tmp/` root might not be writable if in a sandbox (only `$TMPDIR` aka `/tmp/claude/` is). Always build to `./bin/fir-e2e` inside the project directory.
+- **Use `$TMPDIR` not `/tmp`:** A sandbox could redirect temp writes to `$TMPDIR` (e.g. `/tmp/claude/`). Never hardcode `/tmp/` — always use `$TMPDIR`.
 - **No `timeout` command:** macOS does not have `timeout` or `gtimeout`. Instead, use the **bash tool's `timeout` parameter** on every call. Never use `timeout` as a shell command.
 - **`env -u` requires `bash -c` wrapping:** To properly unset env vars for a subprocess, use: `env -u VAR bash -c 'command'`
 - **Background processes must use `nohup` + `disown`:** Plain `&` causes the bash tool to block waiting for child processes. Always use `nohup ./cmd > logfile 2>&1 & disown $!` when starting long-running background processes.
@@ -50,8 +50,7 @@ The mock server is a small Go program at `.fir/skills/e2e/mockserver/main.go` th
 The mock server needs to bind a TCP port on `127.0.0.1`. If the environment blocks `bind()` (sandboxed CI, etc.), the mock approach will fail. In that case:
 
 1. **Skip LLM-dependent tests** (Steps 4 and tool tests) and only run fast tests (Step 3).
-2. **Check for real API keys** as a fallback: if any `*_API_KEY` env var is set, use that provider for LLM tests with the commands from the "Real Provider Fallback" section below.
-3. Log a warning: `"Mock server unavailable — network restricted. Running non-LLM tests only."`
+2. Log a warning: `"Mock server unavailable — network restricted. Running non-LLM tests only. Testing could not be completed in full!"`.
 
 ### Step 0: Build and start the mock server
 

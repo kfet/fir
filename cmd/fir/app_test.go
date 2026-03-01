@@ -196,17 +196,17 @@ func TestResolveEnabledExtensions_FromSettings(t *testing.T) {
 
 	os.MkdirAll(agentDir, 0o755)
 	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify","sandbox"]}`), 0o600)
+		[]byte(`{"extensions":["notify","tmuxspinner"]}`), 0o600)
 
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{}
 	result := resolveEnabledExtensions(args, sm)
-	// notify + sandbox from settings
+	// notify + tmuxspinner from settings
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
 	}
-	if result[0] != "notify" || result[1] != "sandbox" {
-		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
+	if result[0] != "notify" || result[1] != "tmuxspinner" {
+		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
 	}
 }
 
@@ -215,14 +215,14 @@ func TestResolveEnabledExtensions_FromCLI(t *testing.T) {
 	agentDir := t.TempDir()
 	sm := core.NewSettingsManager(cwd, agentDir)
 
-	args := &Args{Extensions: []string{"notify", "sandbox"}}
+	args := &Args{Extensions: []string{"notify", "tmuxspinner"}}
 	result := resolveEnabledExtensions(args, sm)
 	// Only CLI extensions, no implicit defaults
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions from CLI, got %d: %v", len(result), result)
 	}
-	if result[0] != "notify" || result[1] != "sandbox" {
-		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
+	if result[0] != "notify" || result[1] != "tmuxspinner" {
+		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
 	}
 }
 
@@ -235,14 +235,14 @@ func TestResolveEnabledExtensions_MergedDeduped(t *testing.T) {
 		[]byte(`{"extensions":["notify"]}`), 0o600)
 
 	sm := core.NewSettingsManager(cwd, agentDir)
-	args := &Args{Extensions: []string{"notify", "sandbox"}}
+	args := &Args{Extensions: []string{"notify", "tmuxspinner"}}
 	result := resolveEnabledExtensions(args, sm)
-	// notify from settings + sandbox from CLI; notify deduplicated
+	// notify from settings + tmuxspinner from CLI; notify deduplicated
 	if len(result) != 2 {
 		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
 	}
-	if result[0] != "notify" || result[1] != "sandbox" {
-		t.Errorf("unexpected extensions: %v (expected [notify sandbox])", result)
+	if result[0] != "notify" || result[1] != "tmuxspinner" {
+		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
 	}
 }
 
@@ -252,12 +252,12 @@ func TestResolveEnabledExtensions_NoExtensionsFlag(t *testing.T) {
 
 	os.MkdirAll(agentDir, 0o755)
 	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify","sandbox"]}`), 0o600)
+		[]byte(`{"extensions":["notify","tmuxspinner"]}`), 0o600)
 
 	sm := core.NewSettingsManager(cwd, agentDir)
 	args := &Args{
 		NoExtensions: true,
-		Extensions:   []string{"sandbox"},
+		Extensions:   []string{"tmuxspinner"},
 	}
 	result := resolveEnabledExtensions(args, sm)
 	if len(result) != 0 {
@@ -450,7 +450,7 @@ type mockThinkingSetter struct {
 	thinking string
 }
 
-func (m *mockThinkingSetter) Model() *ai.Model         { return m.model }
+func (m *mockThinkingSetter) Model() *ai.Model          { return m.model }
 func (m *mockThinkingSetter) ThinkingLevel() string     { return m.thinking }
 func (m *mockThinkingSetter) SetThinkingLevel(l string) { m.thinking = l }
 
@@ -582,4 +582,3 @@ func TestRunUpdate_Linux_FetchFails(t *testing.T) {
 		t.Error("expected error when FetchLatest fails, got nil")
 	}
 }
-

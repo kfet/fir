@@ -26,7 +26,7 @@ Run `make test` to verify your changes. Always finish every task with `make all`
 Extensions register via `init()` using `extension.Register(...)`. For an extension to be available at runtime, it **must** be blank-imported in `cmd/fir/app.go`:
 
 ```go
-_ "github.com/kfet/fir/pkg/extensions/sandbox"
+_ "github.com/kfet/fir/pkg/extensions/notify"
 ```
 
 If you add a new extension package under `pkg/extensions/`, always add the corresponding blank import to `cmd/fir/app.go` — otherwise its `init()` never runs and the extension silently does not load.

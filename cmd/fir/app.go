@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
-	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/core"
-	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
+	firlog "github.com/kfet/fir/pkg/log"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
@@ -28,7 +28,6 @@ import (
 	// Import built-in extensions (registered via init())
 	_ "github.com/kfet/fir/pkg/extensions/claudeusage"
 	_ "github.com/kfet/fir/pkg/extensions/notify"
-	_ "github.com/kfet/fir/pkg/extensions/sandbox"
 	_ "github.com/kfet/fir/pkg/extensions/tmuxspinner"
 )
 

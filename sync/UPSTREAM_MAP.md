@@ -214,7 +214,6 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | TS Source | Go File | Status |
 |---|---|---|
 | `examples/extensions/notify.ts` | `pkg/extensions/notify/notify.go` | ✅ |
-| `examples/extensions/sandbox/index.ts` | `pkg/extensions/sandbox/sandbox.go` | ✅ |
 
 ## CLI Entry Point (`cmd/fir/`)
 
