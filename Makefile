@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-cover test-race test-live vet clean pgo generate-models
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -42,6 +42,9 @@ build-all: build
 
 test:
 	go test ./...
+
+test-e2e:
+	go test -v -count=1 -tags=e2e -timeout 120s ./tests/e2e/
 
 # Build test binaries for end-to-end testing
 test-bins: 
