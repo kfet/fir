@@ -24,6 +24,16 @@
 
 ---
 
+## 🟡 In Progress
+
+### ACP Auth Methods (RFD)
+
+| Priority | Plan | Notes |
+|---|---|---|
+| ⭐ HIGH | [`docs/plan/17-acp-auth-methods.md`](17-acp-auth-methods.md) | Extend ACP auth with typed methods (agent/env_var/terminal) per [RFD](https://agentclientprotocol.com/rfds/auth-methods) |
+
+---
+
 ## 🟢 Available — Ready to Claim NOW
 
 ### Phase 4: Session Manager
