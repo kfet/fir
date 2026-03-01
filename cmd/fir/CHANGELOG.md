@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
+
 ## [0.9.0] - 2026-02-28
 
 ### Added

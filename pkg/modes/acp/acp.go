@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +80,7 @@ func builtInCommands() []acpsdk.AvailableCommand {
 		{Name: "login", Description: "Login with OAuth provider (usage: /login [provider-id])"},
 		{Name: "logout", Description: "Log out from provider (usage: /logout [provider-id|all])"},
 		{Name: "reload", Description: "Reload extensions, skills, prompts"},
+		{Name: "skills", Description: "List loaded skills (or /skills install <name>)"},
 	}
 }
 
@@ -1012,6 +1014,10 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		}
 		return true
 
+	case "skills":
+		pa.handleSkillsCommand(sessionID, entry, args)
+		return true
+
 	default:
 		// Check extension commands first (matches interactive/mode.go ordering)
 		if entry.extensionRunner != nil {
@@ -1195,6 +1201,119 @@ func (pa *firAgent) handleLogout(sessionID string, entry *firSession, args strin
 
 // providerIDRegex validates provider IDs (alphanumeric with hyphens).
 var providerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+
+func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, args string) {
+	parts := strings.Fields(args)
+	if len(parts) == 0 || parts[0] == "list" {
+		skills, _ := entry.session.ResourceLoader().GetSkills()
+		if len(skills) == 0 {
+			pa.sendAgentMessage(sessionID, "No skills loaded.")
+			return
+		}
+		sorted := make([]core.Skill, len(skills))
+		copy(sorted, skills)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+		nameW := 4
+		sourceW := 6
+		for _, s := range sorted {
+			if len(s.Name) > nameW {
+				nameW = len(s.Name)
+			}
+			if len(s.Source) > sourceW {
+				sourceW = len(s.Source)
+			}
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION"))
+		for _, s := range sorted {
+			desc := s.Description
+			if len(desc) > 50 {
+				desc = desc[:47] + "..."
+			}
+			sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, s.Source, desc))
+		}
+		pa.sendAgentMessage(sessionID, strings.TrimRight(sb.String(), "\n"))
+		return
+	}
+	if parts[0] == "install" {
+		if len(parts) < 2 {
+			pa.sendAgentMessage(sessionID, "Usage: /skills install <name> [--user] [--force]")
+			return
+		}
+		name := parts[1]
+		var toUser, force bool
+		for _, p := range parts[2:] {
+			switch p {
+			case "--user":
+				toUser = true
+			case "--force":
+				force = true
+			}
+		}
+
+		builtins := core.LoadBuiltinSkills()
+		var found bool
+		for _, s := range builtins.Skills {
+			if s.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			available := make([]string, 0, len(builtins.Skills))
+			for _, s := range builtins.Skills {
+				available = append(available, s.Name)
+			}
+			sort.Strings(available)
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Unknown builtin skill %q. Available: %s", name, strings.Join(available, ", ")))
+			return
+		}
+
+		var targetDir string
+		if toUser {
+			home, _ := os.UserHomeDir()
+			targetDir = filepath.Join(home, ".fir", "agent", "skills", name)
+		} else {
+			targetDir = filepath.Join(entry.cwd, ".fir", "skills", name)
+		}
+
+		if _, err := os.Stat(targetDir); err == nil && !force {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Skill %q already exists at %s. Use --force to overwrite.", name, targetDir))
+			return
+		}
+
+		prefix := "builtin_skills/" + name
+		err := fs.WalkDir(core.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			rel := strings.TrimPrefix(path, prefix)
+			if rel == "" {
+				return nil
+			}
+			dest := filepath.Join(targetDir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(dest, 0o755)
+			}
+			data, err := fs.ReadFile(core.BuiltinSkillsFS, path)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(dest, data, 0o644)
+		})
+		if err != nil {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to install skill: %v", err))
+			return
+		}
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Installed skill %q to %s", name, targetDir))
+		return
+	}
+	pa.sendAgentMessage(sessionID, fmt.Sprintf("Unknown skills subcommand: %s. Usage: /skills [list | install <name> [--user] [--force]]", parts[0]))
+}
 
 func (pa *firAgent) handleLogin(sessionID string, entry *firSession, args string) {
 	authStorage := entry.modelRegistry.AuthStorage()
