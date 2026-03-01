@@ -1214,24 +1214,12 @@ func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, arg
 		copy(sorted, skills)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
-		nameW := 4
-		sourceW := 6
-		for _, s := range sorted {
-			if len(s.Name) > nameW {
-				nameW = len(s.Name)
-			}
-			if len(s.Source) > sourceW {
-				sourceW = len(s.Source)
-			}
-		}
+		// Use a markdown table so ACP clients render it properly.
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION"))
+		sb.WriteString("| Name | Source | Description |\n")
+		sb.WriteString("|------|--------|-------------|\n")
 		for _, s := range sorted {
-			desc := s.Description
-			if len(desc) > 50 {
-				desc = desc[:47] + "..."
-			}
-			sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, s.Source, desc))
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", s.Name, s.Source, s.Description))
 		}
 		pa.sendAgentMessage(sessionID, strings.TrimRight(sb.String(), "\n"))
 		return

@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: overseer
 description: Shepherd a fleet of coding agents in tmux. Keep them productive, unstuck, and not stepping on each other.
 ---

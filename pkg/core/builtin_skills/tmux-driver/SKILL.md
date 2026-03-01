@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: tmux-driver
 description: Drive interactive CLIs (python, gdb, etc.) via tmux with named project sessions and multi-window support
 ---

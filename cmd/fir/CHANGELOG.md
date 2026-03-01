@@ -5,6 +5,12 @@
 ### Added
 - ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
 
+### Changed
+- Skills: added `builtin: true` frontmatter property to distinguish distributable builtin skills from project-only skills; only skills with this property are embedded in the binary
+
+### Fixed
+- ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
+
 ## [0.9.0] - 2026-02-28
 
 ### Added

@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: monitor
 description: Continually monitor the project for updates
 ---

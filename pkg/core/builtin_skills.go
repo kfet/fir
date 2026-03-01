@@ -91,7 +91,7 @@ func LoadBuiltinSkills() LoadSkillsResult {
 		}
 
 		fm := parseFrontmatterSimple(string(data))
-		if fm.Description == "" {
+		if fm.Description == "" || !fm.Builtin {
 			return nil
 		}
 

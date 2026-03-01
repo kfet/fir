@@ -54,6 +54,7 @@ type SkillFrontmatter struct {
 	Name                   string `yaml:"name"`
 	Description            string `yaml:"description"`
 	DisableModelInvocation bool   `yaml:"disable-model-invocation"`
+	Builtin                bool   `yaml:"builtin"`
 }
 
 // LoadSkillsFromDir loads skills from a directory.
@@ -241,6 +242,8 @@ func parseFrontmatterSimple(content string) SkillFrontmatter {
 			fm.Description = value
 		case "disable-model-invocation":
 			fm.DisableModelInvocation = value == "true"
+		case "builtin":
+			fm.Builtin = value == "true"
 		}
 	}
 

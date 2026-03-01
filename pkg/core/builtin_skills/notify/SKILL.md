@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: notify
 description: Send native terminal notifications to the user via bash escape sequences, useful for alerting on long-running task completion or important events.
 ---

@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: claude-usage
 description: Check Anthropic Claude API usage stats using a Claude Code OAuth token
 ---

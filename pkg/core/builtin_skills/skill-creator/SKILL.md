@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: skill-creator
 description: How to create and modify skills. Use this when adding, editing, or documenting a skill.
 ---

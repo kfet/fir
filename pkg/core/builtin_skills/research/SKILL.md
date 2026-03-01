@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: research
 description: Research a topic using web search and browsing. Does not write any code or edit files — only gathers information and presents findings.
 ---

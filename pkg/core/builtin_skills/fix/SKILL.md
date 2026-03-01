@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: fix
 description: Continuously pick up issues from the review agent's URGENT.md and BACKLOG.md and fix them. Handles build breaks, security issues, simplification, test gaps, and correctness bugs filed by the reviewer.
 ---
