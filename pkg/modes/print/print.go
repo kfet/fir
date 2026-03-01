@@ -10,6 +10,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // ErrAgentAborted is returned when the agent stops with an error or aborted
@@ -39,6 +40,7 @@ type Options struct {
 // Run executes print (single-shot) mode.
 // It sends prompts to the agent session and outputs results to stdout.
 func Run(session *core.AgentSession, opts Options) error {
+	firlog.Debug("print mode", "outputMode", opts.Mode)
 	if opts.Mode == ModeJSON {
 		// Subscribe early to capture all events as JSON
 		session.Subscribe(func(event core.AgentSessionEvent) {

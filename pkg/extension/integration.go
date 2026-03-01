@@ -7,6 +7,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // SetupResult holds the results of setting up extensions for a session.
@@ -29,6 +30,7 @@ func (r *SetupResult) Reload(enabledNames []string) error {
 	if r.Runner == nil {
 		return nil
 	}
+	firlog.Info("extensions reloading", "newNames", enabledNames)
 
 	// Notify old extensions of shutdown.
 	_ = r.Runner.EmitSessionShutdown()
@@ -70,6 +72,7 @@ type SetupOptions struct {
 // initially loaded) so that a subsequent call to SetupResult.Reload can activate
 // extensions without needing to re-wrap tools or re-subscribe events.
 func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions) (*SetupResult, error) {
+	firlog.Debug("extension setup", "enabledNames", opts.EnabledNames)
 	runner := NewRunner(eventBus)
 
 	if len(opts.EnabledNames) > 0 {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // AgentLoop starts an agent loop with new prompt messages.
@@ -91,6 +92,8 @@ func runLoop(
 			pendingMessages = nil
 		}
 	}
+
+	firlog.Debug("agent loop starting", "messages", len(currentCtx.Messages), "tools", len(currentCtx.Tools))
 
 	// Outer loop: continues when follow-up messages arrive
 	for {
@@ -251,6 +254,13 @@ func streamAssistantResponse(
 		ThinkingBudgets: config.ThinkingBudgets,
 	}
 
+	firlog.Debug("streaming request",
+		"provider", config.Model.Provider,
+		"model", config.Model.ID,
+		"messages", len(llmMessages),
+		"tools", len(llmTools),
+	)
+
 	stream := streamFn(config.Model, llmContext, opts)
 
 	var addedPartial bool
@@ -288,6 +298,11 @@ func streamAssistantResponse(
 			if finalMsg == nil {
 				finalMsg = errorAssistantMessage(config.Model, "stream ended without result")
 			}
+			firlog.Debug("stream complete",
+				"stopReason", finalMsg.StopReason,
+				"contentBlocks", len(finalMsg.Content),
+				"error", finalMsg.ErrorMessage,
+			)
 			if addedPartial {
 				agentCtx.Messages[len(agentCtx.Messages)-1] = NewAgentMessage(ai.NewAssistantMsg(*finalMsg))
 			} else {
@@ -330,6 +345,8 @@ func executeToolCalls(
 	var steeringMessages []AgentMessage
 
 	for i, tc := range toolCalls {
+		firlog.Debug("executing tool", "name", tc.Name, "id", tc.ID)
+
 		events <- AgentEvent{
 			Type:       EventToolExecutionStart,
 			ToolCallID: tc.ID,

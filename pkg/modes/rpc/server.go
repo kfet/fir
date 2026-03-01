@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // Server is the RPC mode server.
@@ -61,6 +62,7 @@ func (s *Server) outputJSON(obj any) {
 
 // Run starts the RPC server. It blocks until stdin is closed or an error occurs.
 func (s *Server) Run() error {
+	firlog.Info("rpc server starting")
 	// Subscribe to all agent session events and output them as JSON
 	if s.session != nil {
 		s.session.Subscribe(func(event core.AgentSessionEvent) {
@@ -120,6 +122,7 @@ func (s *Server) Run() error {
 // handleCommand dispatches a single RPC command and returns a response.
 func (s *Server) handleCommand(cmd RpcCommand) RpcResponse {
 	id := cmd.ID
+	firlog.Debug("rpc command", "method", cmd.Type, "id", id)
 
 	switch cmd.Type {
 	// =================================================================

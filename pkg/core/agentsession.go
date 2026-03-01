@@ -15,6 +15,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // ============================================================================
@@ -217,6 +218,11 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	// Build system prompt
 	s.buildSystemPrompt()
 
+	firlog.Debug("agent session created",
+		"sessionID", opts.SessionManager.GetSessionID(),
+		"hasCompaction", opts.CompactionRunner != nil,
+	)
+
 	return s
 }
 
@@ -327,6 +333,7 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 
 func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
 	role := msg.Role()
+	firlog.Debug("persisting message", "role", role)
 
 	switch role {
 	case "user", "assistant", "toolResult":
@@ -347,6 +354,8 @@ func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
 
 // Prompt sends a user message and waits for the agent to complete.
 func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
+	firlog.Debug("prompt received", "len", len(text))
+
 	if s.Model() == nil {
 		return fmt.Errorf("no model selected. Use /login or set an API key environment variable")
 	}
@@ -592,7 +601,13 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 	}
 
 	contextTokens := calculateContextTokens(assistantMessage.Usage)
-	if s.compactionRunner.ShouldCompact(contextTokens, contextWindow) {
+	shouldCompact := s.compactionRunner.ShouldCompact(contextTokens, contextWindow)
+	firlog.Debug("compaction check",
+		"contextTokens", contextTokens,
+		"contextWindow", contextWindow,
+		"shouldCompact", shouldCompact,
+	)
+	if shouldCompact {
 		s.runAutoCompaction("threshold", false)
 	}
 }
@@ -608,6 +623,7 @@ func (s *AgentSession) SetAutoCompactionProgress(fn CompactionProgressFunc) {
 
 // runAutoCompaction runs auto-compaction and emits the appropriate events.
 func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
+	firlog.Info("auto-compaction triggered", "reason", reason, "willRetry", willRetry)
 	info := s.compactionRunner.GetStats(s)
 
 	s.emit(AgentSessionEvent{

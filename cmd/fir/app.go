@@ -15,6 +15,7 @@ import (
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
@@ -66,6 +67,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
@@ -110,6 +112,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 			return nil, fmt.Errorf("%s", resolved.Error)
 		}
 		model = resolved.Model
+		firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "cli")
 		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
 		if args.Thinking == "" && resolved.ThinkingLevel != "" {
 			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
@@ -117,6 +120,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	} else if len(scopedModels) > 0 {
 		if !skipScopedOnContinue || (!args.Continue && !args.Resume) {
 			model = scopedModels[0].Model
+			firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "scoped")
 		}
 	}
 
@@ -149,6 +153,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	firlog.Debug("session created")
 
 	// Extensions
 	extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
@@ -222,6 +227,7 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 		effective = "high"
 	}
 	if effective != s.ThinkingLevel() {
+		firlog.Debug("thinking level", "requested", string(thinking), "clamped", effective)
 		s.SetThinkingLevel(effective)
 	}
 }
@@ -247,6 +253,26 @@ func run() error {
 	providers.RegisterDefaultProviders()
 
 	args := ParseArgs(os.Args[1:], nil)
+
+	// Initialise debug logging (file-only, never stdout/stderr).
+	debugEnabled := args.Debug || os.Getenv("FIR_DEBUG") == "1"
+	debugPath := args.DebugLogFile
+	if debugPath == "" {
+		debugPath = os.Getenv("FIR_DEBUG_LOG")
+	}
+	if debugPath == "" {
+		debugPath = filepath.Join(resolveAgentDir(), "debug.log")
+	}
+	debugCleanup, err := firlog.Init(debugEnabled, debugPath)
+	if err != nil {
+		return fmt.Errorf("init debug log: %w", err)
+	}
+	defer debugCleanup()
+
+	if debugEnabled {
+		firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
+		firlog.Debug("args parsed", "provider", args.Provider, "model", args.Model, "mode", args.OutputMode)
+	}
 
 	if args.Help {
 		PrintHelp()
@@ -311,10 +337,12 @@ func run() error {
 
 	// ACP mode creates sessions on demand, so dispatch before setupSession.
 	if isACPMode {
+		firlog.Debug("mode dispatch", "mode", "acp")
 		return runAcpMode(args)
 	}
 
 	if !isPrintMode && !isRPCMode {
+		firlog.Debug("mode dispatch", "mode", "interactive")
 		return runInteractiveMode(args, noticeCh)
 	}
 
@@ -332,6 +360,7 @@ func run() error {
 
 	// Run RPC mode
 	if isRPCMode {
+		firlog.Debug("mode dispatch", "mode", "rpc")
 		server := rpcmode.NewServer(setup.result.Session)
 		return server.Run()
 	}

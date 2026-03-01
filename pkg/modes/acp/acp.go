@@ -26,6 +26,7 @@ import (
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 )
 
@@ -83,6 +84,7 @@ func builtInCommands() []acpsdk.AvailableCommand {
 
 // RunAcpMode is the entry point for ACP mode over stdin/stdout.
 func RunAcpMode(opts Options) error {
+	firlog.Info("acp server starting")
 	pa := &firAgent{
 		options:  opts,
 		sessions: make(map[string]*firSession),
@@ -104,6 +106,7 @@ func RunAcpMode(opts Options) error {
 	}
 	pa.mu.Unlock()
 
+	firlog.Debug("acp shutting down", "sessions", len(sessions))
 	for sid, entry := range sessions {
 		CleanupPendingBashTerminals(context.Background(), conn, entry.termState, sid)
 		CleanupBackgroundTerminals(context.Background(), conn, entry.termState, sid)
@@ -145,6 +148,7 @@ func (pa *firAgent) Authenticate(_ context.Context, _ acpsdk.AuthenticateRequest
 
 func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	sessionID := uuid.New().String()
+	firlog.Info("acp new session", "sessionID", sessionID)
 	cwd := os.Getenv("PWD")
 	if cwd == "" {
 		cwd, _ = os.Getwd()

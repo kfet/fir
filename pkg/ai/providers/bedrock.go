@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- Bedrock Converse Stream event types ---
@@ -69,6 +70,8 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 			return
 		}
 		url := strings.TrimRight(baseURL, "/") + "/model/" + model.ID + "/converse-stream"
+
+		firlog.Debug("bedrock request", "model", model.ID, "messageCount", len(prompt.Messages))
 
 		headers := map[string]string{}
 		if apiKey != "" {
@@ -291,6 +294,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 			} {
 				if errObj, ok := raw[errKey].(map[string]any); ok {
 					errMsg, _ := errObj["message"].(string)
+					firlog.Warn("bedrock error", "type", errKey, "err", errMsg)
 					output.StopReason = ai.StopReasonError
 					output.ErrorMessage = fmt.Sprintf("%s: %s", errKey, errMsg)
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
@@ -303,6 +307,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		select {
 		case err := <-sseErr:
 			if err != nil {
+				firlog.Warn("bedrock SSE error", "err", err)
 				output.StopReason = ai.StopReasonError
 				output.ErrorMessage = err.Error()
 				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
@@ -311,6 +316,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		default:
 		}
 
+		firlog.Debug("bedrock response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,

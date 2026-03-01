@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- SSE types for OpenAI Chat Completions API ---
@@ -246,6 +247,7 @@ func StreamOpenAICompletions(ctx context.Context, model *ai.Model, prompt ai.Con
 			return
 		}
 
+		firlog.Debug("openai response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,
@@ -282,6 +284,8 @@ func streamOpenAIHTTP(
 	}
 
 	url := openAIChatCompletionsURL(model.BaseURL)
+
+	firlog.Debug("openai request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -339,12 +343,14 @@ func streamOpenAIHTTP(
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		firlog.Warn("openai HTTP error", "model", model.ID, "err", err)
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		firlog.Warn("openai error response", "model", model.ID, "status", resp.StatusCode)
 		return fmt.Errorf("%d: %s", resp.StatusCode, string(bodyBytes))
 	}
 

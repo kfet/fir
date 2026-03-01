@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // claudeCodeVersion mimics Claude Code's version for OAuth stealth mode.
@@ -165,6 +166,8 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		url := strings.TrimRight(model.BaseURL, "/") + "/v1/messages"
 		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options)
 
+		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
+
 		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(payload))
 
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
@@ -298,6 +301,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				if errMsg == "" {
 					errMsg = "unknown Anthropic API error"
 				}
+				firlog.Warn("anthropic error", "err", errMsg)
 				output.StopReason = ai.StopReasonError
 				output.ErrorMessage = errMsg
 				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
@@ -307,12 +311,14 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		// Check for SSE-level errors
 		if err := <-sseErr; err != nil {
+			firlog.Warn("anthropic SSE error", "err", err)
 			output.StopReason = ai.StopReasonError
 			output.ErrorMessage = err.Error()
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 			return
 		}
 
+		firlog.Debug("anthropic response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
 	}()
 
