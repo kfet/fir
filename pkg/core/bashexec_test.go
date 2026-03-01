@@ -85,6 +85,99 @@ func TestExecuteBash_OnChunk(t *testing.T) {
 	}
 }
 
+func TestExecuteBash_OnChunkPreservesANSI(t *testing.T) {
+	var chunks []string
+	opts := &BashExecutorOptions{
+		OnChunk: func(chunk string) {
+			chunks = append(chunks, chunk)
+		},
+	}
+
+	ctx := context.Background()
+	// printf emits raw ANSI regardless of pipe
+	result, err := ExecuteBash(ctx, `printf '\033[32mgreen\033[0m'`, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d", result.ExitCode)
+	}
+
+	combined := strings.Join(chunks, "")
+	if !strings.Contains(combined, "\x1b[32m") {
+		t.Errorf("OnChunk should preserve ANSI codes, got %q", combined)
+	}
+	if !strings.Contains(combined, "green") {
+		t.Errorf("OnChunk should contain text, got %q", combined)
+	}
+
+	// But the stored output (for LLM) should be stripped
+	if strings.Contains(result.Output, "\x1b") {
+		t.Errorf("BashResult.Output should be ANSI-stripped, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "green") {
+		t.Errorf("BashResult.Output should contain text, got %q", result.Output)
+	}
+}
+
+func TestExecuteBash_OnChunkInjectsColorEnv(t *testing.T) {
+	var chunks []string
+	opts := &BashExecutorOptions{
+		OnChunk: func(chunk string) {
+			chunks = append(chunks, chunk)
+		},
+	}
+
+	ctx := context.Background()
+	result, err := ExecuteBash(ctx, `echo "CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("exit code = %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "CLI=1") {
+		t.Errorf("expected CLICOLOR_FORCE=1 in output, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "FORCE=1") {
+		t.Errorf("expected FORCE_COLOR=1 in output, got %q", result.Output)
+	}
+}
+
+func TestExecuteBash_OnChunkRespectsExistingColorEnv(t *testing.T) {
+	t.Setenv("CLICOLOR_FORCE", "0")
+	t.Setenv("FORCE_COLOR", "0")
+
+	var chunks []string
+	opts := &BashExecutorOptions{
+		OnChunk: func(chunk string) {
+			chunks = append(chunks, chunk)
+		},
+	}
+
+	ctx := context.Background()
+	result, err := ExecuteBash(ctx, `echo "CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "CLI=0") {
+		t.Errorf("should respect existing CLICOLOR_FORCE=0, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "FORCE=0") {
+		t.Errorf("should respect existing FORCE_COLOR=0, got %q", result.Output)
+	}
+}
+
+func TestSanitizeBinaryOutput_PreservesESC(t *testing.T) {
+	// ESC (\x1b) should be preserved for ANSI sequences
+	input := "hello\x1b[32mgreen\x1b[0m\x01\x02world"
+	got := sanitizeBinaryOutput(input)
+	want := "hello\x1b[32mgreen\x1b[0m??world"
+	if got != want {
+		t.Errorf("sanitizeBinaryOutput(%q) = %q, want %q", input, got, want)
+	}
+}
+
 func TestExecuteBash_MultiLine(t *testing.T) {
 	ctx := context.Background()
 	result, err := ExecuteBash(ctx, "echo first && echo second && echo third", nil)

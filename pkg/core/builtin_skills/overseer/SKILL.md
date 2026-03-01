@@ -33,6 +33,8 @@ source "$SKILL_DIR/scripts/tmux-helpers.sh"   # gives tm-* commands
 
 ### Worktree — One Per Fleet
 
+Follow the [work skill](../work/SKILL.md) to create a worktree and branch. Use `fleet/` as the branch prefix instead of `work/`:
+
 ```bash
 PROJECT=$(git rev-parse --show-toplevel)
 SESSION="<project>-<feature>"        # e.g. myproject-auth
@@ -113,7 +115,7 @@ FIVE_HR=$(echo "$USAGE_OUT"  | awk '/Five Hour/      {gsub(/%/,"",$3); print int
 SEVEN_DAY=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {gsub(/%/,"",$3); print int($3)}')
 ```
 
-**If `FIVE_HR >= 85` or `SEVEN_DAY >= 95`:**
+**If `FIVE_HR >= 85` or `SEVEN_DAY >= 99`:**
 
 1. Stop all agents: `tm-sendraw "$SESSION:$WINDOW" Escape`
 2. Build and test in `$WORKTREE`. Commit dirty tracked files with a checkpoint message.
@@ -177,6 +179,10 @@ rm -f "$PROJECT/.git/worktrees/$(basename $WORKTREE)/index.lock"
 Then restart the crashed agent.
 
 Assign tasks that touch **completely different files** to minimize conflicts.
+
+## Close-Out — Before Declaring Done
+
+When all tasks appear complete and the build is green, do NOT stop. Run the reviewer one final time (or re-read REVIEW.md). Fix every finding. Then re-read the original task prompt and verify each stated requirement is met — not just compiling, but actually functional. Only stop the fleet when every requirement is checked off and every review finding is fixed.
 
 ## What Makes a Good Task
 

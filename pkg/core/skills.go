@@ -19,12 +19,11 @@ const (
 
 // Skill represents a loaded skill.
 type Skill struct {
-	Name                   string `json:"name"`
-	Description            string `json:"description"`
-	FilePath               string `json:"filePath"`
-	BaseDir                string `json:"baseDir"`
-	Source                 string `json:"source"` // "user", "project", or "path"
-	DisableModelInvocation bool   `json:"disableModelInvocation"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	FilePath    string `json:"filePath"`
+	BaseDir     string `json:"baseDir"`
+	Source      string `json:"source"` // "user", "project", or "path"
 }
 
 // ResourceCollision describes a name collision between resources.
@@ -51,10 +50,9 @@ type LoadSkillsResult struct {
 
 // SkillFrontmatter is the YAML frontmatter in a skill file.
 type SkillFrontmatter struct {
-	Name                   string `yaml:"name"`
-	Description            string `yaml:"description"`
-	DisableModelInvocation bool   `yaml:"disable-model-invocation"`
-	Builtin                bool   `yaml:"builtin"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Builtin     bool   `yaml:"builtin"`
 }
 
 // LoadSkillsFromDir loads skills from a directory.
@@ -171,12 +169,11 @@ func loadSkillFromFile(filePath, source string) skillLoadResult {
 
 	return skillLoadResult{
 		Skill: &Skill{
-			Name:                   name,
-			Description:            fm.Description,
-			FilePath:               filePath,
-			BaseDir:                skillDir,
-			Source:                 source,
-			DisableModelInvocation: fm.DisableModelInvocation,
+			Name:        name,
+			Description: fm.Description,
+			FilePath:    filePath,
+			BaseDir:     skillDir,
+			Source:      source,
 		},
 		Diagnostics: diagnostics,
 	}
@@ -240,8 +237,6 @@ func parseFrontmatterSimple(content string) SkillFrontmatter {
 			fm.Name = value
 		case "description":
 			fm.Description = value
-		case "disable-model-invocation":
-			fm.DisableModelInvocation = value == "true"
 		case "builtin":
 			fm.Builtin = value == "true"
 		}
@@ -252,14 +247,7 @@ func parseFrontmatterSimple(content string) SkillFrontmatter {
 
 // FormatSkillsForPrompt formats skills for inclusion in a system prompt.
 func FormatSkillsForPrompt(skills []Skill) string {
-	var visible []Skill
-	for _, s := range skills {
-		if !s.DisableModelInvocation {
-			visible = append(visible, s)
-		}
-	}
-
-	if len(visible) == 0 {
+	if len(skills) == 0 {
 		return ""
 	}
 
@@ -269,7 +257,7 @@ func FormatSkillsForPrompt(skills []Skill) string {
 	sb.WriteString("When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n")
 	sb.WriteString("\n<available_skills>\n")
 
-	for _, skill := range visible {
+	for _, skill := range skills {
 		sb.WriteString("  <skill>\n")
 		sb.WriteString("    <name>" + escapeXml(skill.Name) + "</name>\n")
 		sb.WriteString("    <description>" + escapeXml(skill.Description) + "</description>\n")

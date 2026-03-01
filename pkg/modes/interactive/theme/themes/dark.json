@@ -8,6 +8,7 @@
 		"red": "#cc6666",
 		"yellow": "#ffff00",
 		"gray": "#808080",
+		"lightGray": "#b0b0b0",
 		"dimGray": "#666666",
 		"darkGray": "#505050",
 		"accent": "#8abeb7",
@@ -41,7 +42,7 @@
 		"toolSuccessBg": "toolSuccessBg",
 		"toolErrorBg": "toolErrorBg",
 		"toolTitle": "",
-		"toolOutput": "gray",
+		"toolOutput": "lightGray",
 
 		"mdHeading": "#f0c674",
 		"mdLink": "#81a2be",

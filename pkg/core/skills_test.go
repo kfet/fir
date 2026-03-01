@@ -11,7 +11,6 @@ func TestParseFrontmatterSimple(t *testing.T) {
 	content := `---
 name: my-skill
 description: A test skill
-disable-model-invocation: true
 ---
 # Skill content here
 `
@@ -21,9 +20,6 @@ disable-model-invocation: true
 	}
 	if fm.Description != "A test skill" {
 		t.Errorf("description = %q", fm.Description)
-	}
-	if !fm.DisableModelInvocation {
-		t.Error("expected disableModelInvocation = true")
 	}
 }
 
@@ -111,20 +107,11 @@ func TestFormatSkillsForPrompt(t *testing.T) {
 			Description: "Coding best practices",
 			FilePath:    "/path/to/coding/SKILL.md",
 		},
-		{
-			Name:                   "hidden",
-			Description:            "Hidden skill",
-			FilePath:               "/path/to/hidden/SKILL.md",
-			DisableModelInvocation: true,
-		},
 	}
 
 	prompt := FormatSkillsForPrompt(skills)
 	if !strings.Contains(prompt, "coding") {
 		t.Error("should contain coding skill")
-	}
-	if strings.Contains(prompt, "hidden") {
-		t.Error("should not contain hidden skill")
 	}
 	if !strings.Contains(prompt, "<available_skills>") {
 		t.Error("should contain XML tags")
@@ -145,10 +132,10 @@ func TestValidateSkillName(t *testing.T) {
 		wantErrs  int
 	}{
 		{"my-skill", "my-skill", 0},
-		{"my-skill", "other-dir", 1}, // name mismatch
-		{"UPPER", "UPPER", 1},        // invalid chars
-		{"-start", "-start", 1},      // starts with hyphen
-		{"end-", "end-", 1},          // ends with hyphen
+		{"my-skill", "other-dir", 1},  // name mismatch
+		{"UPPER", "UPPER", 1},         // invalid chars
+		{"-start", "-start", 1},       // starts with hyphen
+		{"end-", "end-", 1},           // ends with hyphen
 		{"bad--name", "bad--name", 1}, // consecutive hyphens
 	}
 

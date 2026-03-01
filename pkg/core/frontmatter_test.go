@@ -69,11 +69,11 @@ func TestParseFrontmatter_CRLFNewlines(t *testing.T) {
 }
 
 func TestParseFrontmatter_BooleanValue(t *testing.T) {
-	content := "---\ndisable-model-invocation: true\n---\nBody"
+	content := "---\nbuiltin: true\n---\nBody"
 	result := ParseFrontmatter(content)
 
-	if result.Frontmatter["disable-model-invocation"] != true {
-		t.Errorf("disable-model-invocation = %v, want true", result.Frontmatter["disable-model-invocation"])
+	if result.Frontmatter["builtin"] != true {
+		t.Errorf("builtin = %v, want true", result.Frontmatter["builtin"])
 	}
 }
 

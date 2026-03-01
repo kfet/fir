@@ -8,13 +8,17 @@
 - External process extensions: `Manager.ConfirmFn` callback for interactive trust prompts on untrusted project-local extensions
 - External process extensions: `CallHook` now fans out concurrently across all bridges instead of sequentially
 - External process extensions: `ProjectDir` and `Cwd` fields passed through to `extproc.Manager` from all `extension.Setup` callers
+- E2E: proper Go test suite in `tests/e2e/` — 7 test files (1418 LOC) covering all 48 test cases with embedded mock OpenAI SSE server; `make test-e2e` target; `//go:build e2e` tag keeps them out of regular `make test`
 - ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
 
 ### Changed
-- Skills: added `builtin: true` frontmatter property to distinguish distributable builtin skills from project-only skills; only skills with this property are embedded in the binary
+- E2E: skill reduced from 1031 lines of manual test procedures to ~130 lines that run `make test-e2e` and report failures
+- Skills: added `builtin: true` frontmatter property to distinguish distributable builtin skills from project-only skills; only skills with this property are embedded in the binary; project-specific skills (e2e, release, sync, work) excluded from distribution
+- Refactor: `.fir/skills` is now a symlink to `pkg/core/builtin_skills` — single source of truth, eliminates duplicate copy; `go:embed` reads the real directory
 
 ### Fixed
 - ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
+- TUI: bash output now preserves original ANSI colors from commands (e.g. `git diff`, test runners, `ls --color`) — injects `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` so tools emit colors even through pipes, applies to both `!`/`!!` bash mode and AI-invoked bash tool calls
 
 ### Removed
 - `sandbox` extension (incomplete framework with no real OS-level enforcement)

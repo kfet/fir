@@ -176,7 +176,7 @@ func TestLoadThemeFromPath(t *testing.T) {
 			"userMessageText": "", "customMessageBg": "#2d2838",
 			"customMessageText": "", "customMessageLabel": "#9575cd",
 			"toolPendingBg": "#282832", "toolSuccessBg": "#283228",
-			"toolErrorBg": "#3c2828", "toolTitle": "", "toolOutput": "#808080",
+			"toolErrorBg": "#3c2828", "toolTitle": "", "toolOutput": "#b0b0b0",
 			"mdHeading": "#f0c674", "mdLink": "#81a2be", "mdLinkUrl": "#666666",
 			"mdCode": "#8abeb7", "mdCodeBlock": "#b5bd68", "mdCodeBlockBorder": "#808080",
 			"mdQuote": "#808080", "mdQuoteBorder": "#808080", "mdHr": "#808080",

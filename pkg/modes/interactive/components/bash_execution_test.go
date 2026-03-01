@@ -75,16 +75,16 @@ func TestBashExecutionComponent_GetCommand(t *testing.T) {
 	}
 }
 
-func TestBashExecutionComponent_StripAnsi(t *testing.T) {
+func TestBashExecutionComponent_PreserveAnsi(t *testing.T) {
 	comp := NewBashExecutionComponent("ls", nil, false)
 	defer comp.loader.Stop()
 
 	comp.AppendOutput("\x1b[32mcolored\x1b[0m text")
 	got := comp.GetOutput()
-	if strings.Contains(got, "\x1b") {
-		t.Errorf("output should not contain ANSI codes, got %q", got)
+	if !strings.Contains(got, "\x1b[32m") {
+		t.Errorf("output should preserve ANSI codes, got %q", got)
 	}
-	if !strings.Contains(got, "colored text") {
-		t.Errorf("output should contain stripped text, got %q", got)
+	if !strings.Contains(got, "colored") {
+		t.Errorf("output should contain text, got %q", got)
 	}
 }

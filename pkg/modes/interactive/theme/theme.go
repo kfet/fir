@@ -458,7 +458,7 @@ func createDarkTheme(mode ColorMode) *Theme {
 		"warning": "#ffff00", "muted": "#808080", "dim": "#666666",
 		"text": "", "thinkingText": "#808080",
 		"userMessageText": "", "customMessageText": "", "customMessageLabel": "#9575cd",
-		"toolTitle": "", "toolOutput": "#808080",
+		"toolTitle": "", "toolOutput": "#b0b0b0",
 		"mdHeading": "#f0c674", "mdLink": "#81a2be", "mdLinkUrl": "#666666",
 		"mdCode": "#8abeb7", "mdCodeBlock": "#b5bd68", "mdCodeBlockBorder": "#808080",
 		"mdQuote": "#808080", "mdQuoteBorder": "#808080", "mdHr": "#808080",

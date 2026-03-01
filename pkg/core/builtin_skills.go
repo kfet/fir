@@ -105,12 +105,11 @@ func LoadBuiltinSkills() LoadSkillsResult {
 
 		// Point FilePath and BaseDir at the extracted temp directory
 		skills = append(skills, Skill{
-			Name:                   name,
-			Description:            fm.Description,
-			FilePath:               filepath.Join(extractDir, rel),
-			BaseDir:                filepath.Join(extractDir, skillDir),
-			Source:                 "builtin",
-			DisableModelInvocation: fm.DisableModelInvocation,
+			Name:        name,
+			Description: fm.Description,
+			FilePath:    filepath.Join(extractDir, rel),
+			BaseDir:     filepath.Join(extractDir, skillDir),
+			Source:      "builtin",
 		})
 		return nil
 	})

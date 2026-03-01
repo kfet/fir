@@ -163,18 +163,15 @@ func (tc *ToolExecutionComponent) renderBashContent() {
 	if tc.result != nil {
 		output := strings.TrimSpace(tc.getTextOutput())
 		if output != "" {
-			styledLines := make([]string, 0)
-			for _, line := range strings.Split(output, "\n") {
-				styledLines = append(styledLines, t.Fg("toolOutput", line))
-			}
-			styledOutput := strings.Join(styledLines, "\n")
+			// Pass through raw output to preserve ANSI colors from commands
+			// (e.g. git diff, test runners, ls --color, grep --color).
 
 			if tc.expanded {
-				tc.contentBox.AddChild(tuicomp.NewText("\n"+styledOutput, 0, 0, nil))
+				tc.contentBox.AddChild(tuicomp.NewText("\n"+output, 0, 0, nil))
 			} else {
 				// Use visual line truncation when collapsed
 				tc.contentBox.AddChild(&bashTruncatedOutput{
-					styledOutput: styledOutput,
+					styledOutput: output,
 					maxLines:     bashPreviewLines,
 				})
 			}

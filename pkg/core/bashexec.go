@@ -21,7 +21,8 @@ import (
 
 // BashExecutorOptions configures bash execution.
 type BashExecutorOptions struct {
-	// OnChunk is called with sanitized output chunks during execution.
+	// OnChunk is called with raw output chunks (ANSI preserved) during execution,
+	// suitable for display. For LLM context the final BashResult.Output is stripped.
 	OnChunk func(chunk string)
 }
 
@@ -47,12 +48,13 @@ func stripAnsi(s string) string {
 	return ansiRegexp.ReplaceAllString(s, "")
 }
 
-// sanitizeBinaryOutput replaces non-printable characters (except common whitespace).
+// sanitizeBinaryOutput replaces non-printable characters (except common whitespace
+// and ESC which is used in ANSI escape sequences).
 func sanitizeBinaryOutput(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if r == '\n' || r == '\t' || r == '\r' || (r >= 32 && r < 127) || r >= 128 {
+		if r == '\n' || r == '\t' || r == '\r' || r == '\x1b' || (r >= 32 && r < 127) || r >= 128 {
 			b.WriteRune(r)
 		} else {
 			b.WriteRune('?')
@@ -63,11 +65,18 @@ func sanitizeBinaryOutput(s string) string {
 
 // ExecuteBash executes a bash command with optional streaming and cancellation.
 //
+// When OnChunk is set, environment variables (CLICOLOR_FORCE, FORCE_COLOR)
+// are injected so tools that check for TTY color support still emit ANSI
+// codes even though stdout is a pipe. The raw output (with colors) is
+// streamed via OnChunk for display, while BashResult.Output is ANSI-stripped
+// for LLM context.
+//
 // Features:
-//   - Streams sanitized output via OnChunk callback
+//   - Streams raw output (ANSI preserved) via OnChunk callback for display
+//   - Injects color-forcing env vars when streaming for display
 //   - Writes large output to temp file
 //   - Supports cancellation via context
-//   - Sanitizes output (strips ANSI, removes binary, normalizes newlines)
+//   - Sanitizes stored output (strips ANSI, removes binary, normalizes newlines)
 //   - Truncates output if exceeds default max bytes
 func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions) (BashResult, error) {
 	shell := os.Getenv("SHELL")
@@ -77,6 +86,12 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Env = os.Environ()
+
+	// When streaming for display, inject env vars that tell CLI tools to
+	// emit ANSI colors even when stdout is not a TTY.
+	if opts != nil && opts.OnChunk != nil {
+		cmd.Env = appendColorEnv(cmd.Env)
+	}
 
 	// Create pipes for stdout and stderr
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -107,9 +122,17 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 
 		totalBytes += len(data)
 
-		// Sanitize: strip ANSI, replace binary, normalize newlines
-		text := sanitizeBinaryOutput(stripAnsi(string(data)))
-		text = strings.ReplaceAll(text, "\r", "")
+		// Sanitize binary but preserve ANSI for display
+		rawText := sanitizeBinaryOutput(string(data))
+		rawText = strings.ReplaceAll(rawText, "\r", "")
+
+		// Stream raw (ANSI-preserved) output to display callback
+		if opts != nil && opts.OnChunk != nil {
+			opts.OnChunk(rawText)
+		}
+
+		// Strip ANSI for LLM context storage
+		text := stripAnsi(rawText)
 
 		// Start temp file if exceeds threshold
 		if totalBytes > tools.DefaultMaxBytes && tempFile == nil {
@@ -138,11 +161,6 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 			outputChunks = outputChunks[1:]
 			outputBytes -= len(removed)
 		}
-
-		// Stream to callback
-		if opts != nil && opts.OnChunk != nil {
-			opts.OnChunk(text)
-		}
 	}
 
 	// Read stdout and stderr concurrently
@@ -153,11 +171,11 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
-			n, err := r.Read(buf)
+			n, readErr := r.Read(buf)
 			if n > 0 {
 				handleData(buf[:n])
 			}
-			if err != nil {
+			if readErr != nil {
 				break
 			}
 		}
@@ -205,6 +223,31 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		Truncated:      truncationResult.Truncated,
 		FullOutputPath: tempFilePath,
 	}, nil
+}
+
+// appendColorEnv appends environment variables that force CLI tools to emit
+// ANSI color codes even when stdout is not a TTY. Covers:
+//   - CLICOLOR_FORCE=1 — BSD/macOS convention (ls, bat, fd, ripgrep, etc.)
+//   - FORCE_COLOR=1    — Node.js/chalk convention (jest, vitest, etc.)
+//
+// Existing values are not overwritten so the user can opt out.
+func appendColorEnv(env []string) []string {
+	hasCLI, hasForce := false, false
+	for _, e := range env {
+		if strings.HasPrefix(e, "CLICOLOR_FORCE=") {
+			hasCLI = true
+		}
+		if strings.HasPrefix(e, "FORCE_COLOR=") {
+			hasForce = true
+		}
+	}
+	if !hasCLI {
+		env = append(env, "CLICOLOR_FORCE=1")
+	}
+	if !hasForce {
+		env = append(env, "FORCE_COLOR=1")
+	}
+	return env
 }
 
 // ExecuteBashSimple runs a bash command and returns the output as a string.

@@ -4,7 +4,6 @@ package components
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -16,13 +15,6 @@ import (
 
 // PreviewLines is the line limit when not expanded (matches tool execution behavior).
 const PreviewLines = 20
-
-// bashAnsiRe strips ANSI escape codes.
-var bashAnsiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]`)
-
-func bashStripAnsi(s string) string {
-	return bashAnsiRe.ReplaceAllString(s, "")
-}
 
 // BashStatus represents the execution status of a bash command.
 type BashStatus string
@@ -125,9 +117,8 @@ func (bc *BashExecutionComponent) AppendOutput(chunk string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	// Strip ANSI codes and normalize line endings
-	clean := bashStripAnsi(chunk)
-	clean = strings.ReplaceAll(clean, "\r\n", "\n")
+	// Normalize line endings but preserve ANSI colors
+	clean := strings.ReplaceAll(chunk, "\r\n", "\n")
 	clean = strings.ReplaceAll(clean, "\r", "\n")
 
 	newLines := strings.Split(clean, "\n")
@@ -194,21 +185,13 @@ func (bc *BashExecutionComponent) updateDisplay() {
 	header := tuicomp.NewText(t.Fg(bc.borderColorKey, t.Bold("$ "+bc.command)), 1, 0, nil)
 	bc.contentContainer.AddChild(header)
 
-	// Output
+	// Output — pass through raw lines to preserve ANSI colors from commands
 	if len(availableLines) > 0 {
 		if bc.expanded {
-			styledLines := make([]string, len(availableLines))
-			for i, line := range availableLines {
-				styledLines[i] = t.Fg("muted", line)
-			}
-			displayText := strings.Join(styledLines, "\n")
+			displayText := strings.Join(availableLines, "\n")
 			bc.contentContainer.AddChild(tuicomp.NewText("\n"+displayText, 1, 0, nil))
 		} else {
-			styledLines := make([]string, len(previewLogicalLines))
-			for i, line := range previewLogicalLines {
-				styledLines[i] = t.Fg("muted", line)
-			}
-			styledOutput := strings.Join(styledLines, "\n")
+			styledOutput := strings.Join(previewLogicalLines, "\n")
 
 			width := 80
 			if bc.ui != nil {
