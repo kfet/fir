@@ -11,17 +11,20 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"sync"
+	"sync/atomic"
 )
 
-// logger is the global debug logger. It defaults to a discard handler so
-// calls before Init (or when debug is disabled) are no-ops.
-var logger = slog.New(discardHandler{})
+// logger is the global debug logger, accessed atomically. It defaults to a
+// discard handler so calls before Init (or when debug is disabled) are no-ops.
+var logger atomic.Pointer[slog.Logger]
 
-// mu guards Init and resetLogger (used in tests). After Init, logger is
-// read without locking because slog.Logger methods are safe for concurrent
-// use and we only assign logger once per process.
-var mu sync.Mutex
+func init() {
+	l := slog.New(discardHandler{})
+	logger.Store(l)
+}
+
+// getLogger returns the current logger. Safe for concurrent use.
+func getLogger() *slog.Logger { return logger.Load() }
 
 // Init configures the global debug logger.
 // When enabled is false, all log calls remain no-ops (zero allocation).
@@ -30,9 +33,6 @@ var mu sync.Mutex
 // so concurrent or successive fir processes share the same log safely.
 // Returns a cleanup function that flushes and closes the log file.
 func Init(enabled bool, path string) (cleanup func(), err error) {
-	mu.Lock()
-	defer mu.Unlock()
-
 	if !enabled {
 		return func() {}, nil
 	}
@@ -45,29 +45,29 @@ func Init(enabled bool, path string) (cleanup func(), err error) {
 	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
-	logger = slog.New(handler)
+	logger.Store(slog.New(handler))
 
 	return func() { f.Close() }, nil
 }
 
 // Debug logs at debug level. No-op when disabled.
 func Debug(msg string, args ...any) {
-	logger.Debug(msg, args...)
+	getLogger().Debug(msg, args...)
 }
 
 // Info logs at info level. No-op when disabled.
 func Info(msg string, args ...any) {
-	logger.Info(msg, args...)
+	getLogger().Info(msg, args...)
 }
 
 // Warn logs at warn level. No-op when disabled.
 func Warn(msg string, args ...any) {
-	logger.Warn(msg, args...)
+	getLogger().Warn(msg, args...)
 }
 
 // Error logs at error level. No-op when disabled.
 func Error(msg string, args ...any) {
-	logger.Error(msg, args...)
+	getLogger().Error(msg, args...)
 }
 
 // With returns a sub-logger with pre-set attributes.
@@ -76,7 +76,7 @@ func Error(msg string, args ...any) {
 //	toolLog := log.With("component", "bash")
 //	toolLog.Debug("exec", "cmd", cmd)
 func With(args ...any) *slog.Logger {
-	return logger.With(args...)
+	return getLogger().With(args...)
 }
 
 // discardHandler is an slog.Handler that discards everything.

@@ -48,7 +48,11 @@ func extractBuiltinSkills() (string, error) {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(target, data, 0o644)
+			perm := os.FileMode(0o644)
+			if strings.HasSuffix(path, ".sh") {
+				perm = 0o755
+			}
+			return os.WriteFile(target, data, perm)
 		})
 		if err != nil {
 			builtinExtractErr = fmt.Errorf("extract builtin skills: %w", err)

@@ -10,9 +10,8 @@ import (
 )
 
 func resetLogger() {
-	mu.Lock()
-	logger = slog.New(discardHandler{})
-	mu.Unlock()
+	l := slog.New(discardHandler{})
+	logger.Store(l)
 }
 
 func TestInit_Disabled(t *testing.T) {
@@ -157,4 +156,29 @@ func TestDefaultLogger_NoInit(t *testing.T) {
 	Error("no-init")
 	sub := With("x", "y")
 	sub.Debug("no-init")
+}
+
+// TestConcurrentLogDuringInit verifies no data race when Init and log calls
+// happen concurrently. Run with: go test -race ./pkg/log/...
+// Note: tests in this package are NOT parallel-safe (resetLogger mutates
+// the global logger), so none use t.Parallel().
+func TestConcurrentLogDuringInit(t *testing.T) {
+	resetLogger()
+	path := filepath.Join(t.TempDir(), "debug.log")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 100; i++ {
+			Debug("concurrent", "i", i)
+			Info("concurrent", "i", i)
+		}
+	}()
+
+	cleanup, err := Init(true, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	cleanup()
 }
