@@ -105,6 +105,46 @@ func NewRunner(eventBus core.EventBus) *Runner {
 	return r
 }
 
+// SharedAPI returns an API that registers tools and handlers directly into
+// the runner's merged maps. This is used by the extproc adapter to register
+// tools from external process extensions without going through the normal
+// extension load cycle.
+func (r *Runner) SharedAPI() API {
+	// Create a synthetic extension so extensionAPI methods work,
+	// but override registration to go directly to merged maps.
+	ext := &Extension{
+		Name:      "_extproc",
+		handlers:  make(map[string][]Handler),
+		tools:     make(map[string]*ToolDefinition),
+		commands:  make(map[string]*Command),
+		flags:     make(map[string]*Flag),
+		shortcuts: make(map[string]*ShortcutHandler),
+	}
+	return &sharedAPI{extensionAPI: extensionAPI{runner: r, extension: ext}}
+}
+
+// sharedAPI wraps extensionAPI but registers tools and handlers directly
+// into the runner's merged maps so they take effect immediately.
+type sharedAPI struct {
+	extensionAPI
+}
+
+func (a *sharedAPI) On(event string, handler Handler) {
+	a.extensionAPI.On(event, handler)
+	r := a.runner
+	r.mu.Lock()
+	r.allHandlers[event] = append(r.allHandlers[event], handler)
+	r.mu.Unlock()
+}
+
+func (a *sharedAPI) RegisterTool(def ToolDefinition) {
+	a.extensionAPI.RegisterTool(def)
+	r := a.runner
+	r.mu.Lock()
+	r.allTools[def.Name] = &def
+	r.mu.Unlock()
+}
+
 // Reset clears all loaded extensions and merged registrations.
 // It preserves the event bus, actions, UI context, error listener, and flag values
 // so that the runner can be reloaded with a new set of extensions.

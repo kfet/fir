@@ -7,6 +7,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extproc"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -15,8 +16,18 @@ import (
 type SetupResult struct {
 	Runner *Runner
 
+	// ExtProcManager manages external process extensions (may be nil).
+	ExtProcManager *extproc.Manager
+
 	// Internal state for reload support.
 	session *core.AgentSession
+}
+
+// Stop shuts down all external process extensions.
+func (r *SetupResult) Stop() {
+	if r.ExtProcManager != nil {
+		_ = r.ExtProcManager.Stop()
+	}
 }
 
 // Reload tears down the current extensions and loads a new set.
@@ -62,6 +73,13 @@ type SetupOptions struct {
 	// EnabledNames lists the extension names to activate. If nil or empty,
 	// no extensions are loaded (extensions are off by default).
 	EnabledNames []string
+
+	// ProjectDir is the project root for discovering external process extensions.
+	// If empty, external process extension discovery is skipped.
+	ProjectDir string
+
+	// Cwd is the current working directory passed to external process extensions.
+	Cwd string
 }
 
 // Setup creates and configures an extension runner for the given session.
@@ -164,10 +182,32 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 	// can call them. Each ToolDefinition is converted to an agent.AgentTool.
 	addExtensionTools(session, runner)
 
-	return &SetupResult{
+	result := &SetupResult{
 		Runner:  runner,
 		session: session,
-	}, nil
+	}
+
+	// Start external process extensions if a project directory is configured.
+	if opts.ProjectDir != "" {
+		logger := firlog.With("component", "extproc")
+		mgr := extproc.NewManager(logger)
+		adapter := &ExtProcAdapter{api: runner.SharedAPI()}
+		cwd := opts.Cwd
+		if cwd == "" {
+			cwd = opts.ProjectDir
+		}
+		if err := mgr.Start(context.Background(), opts.ProjectDir, cwd, adapter); err != nil {
+			firlog.Warn("extproc manager start failed", "err", err)
+		} else {
+			result.ExtProcManager = mgr
+			// Re-add tools in case extproc extensions registered new ones.
+			addExtensionTools(session, runner)
+			// Forward session events to external process extensions.
+			bridgeExtProcEvents(session, mgr)
+		}
+	}
+
+	return result, nil
 }
 
 // addExtensionTools converts extension-registered ToolDefinitions to
@@ -315,6 +355,43 @@ func bridgeSessionEvents(session *core.AgentSession, runner *Runner) {
 					Result:     ae.Result,
 					IsError:    ae.IsError,
 				},
+			})
+		}
+	})
+}
+
+// bridgeExtProcEvents forwards agent session events to external process
+// extensions via the extproc Manager.
+func bridgeExtProcEvents(session *core.AgentSession, mgr *extproc.Manager) {
+	session.Subscribe(func(event core.AgentSessionEvent) {
+		ae := event.AgentEvent
+		if ae == nil {
+			return
+		}
+
+		switch ae.Type {
+		case agent.EventAgentStart:
+			mgr.EmitEvent("agent_start", nil)
+		case agent.EventAgentEnd:
+			mgr.EmitEvent("agent_end", map[string]any{"messages": ae.Messages})
+		case agent.EventTurnStart:
+			mgr.EmitEvent("turn_start", nil)
+		case agent.EventTurnEnd:
+			mgr.EmitEvent("turn_end", nil)
+		case agent.EventMessageStart:
+			mgr.EmitEvent("message_start", nil)
+		case agent.EventMessageEnd:
+			mgr.EmitEvent("message_end", nil)
+		case agent.EventToolExecutionStart:
+			mgr.EmitEvent("tool_execution_start", map[string]any{
+				"tool_call_id": ae.ToolCallID,
+				"tool_name":    ae.ToolName,
+			})
+		case agent.EventToolExecutionEnd:
+			mgr.EmitEvent("tool_execution_end", map[string]any{
+				"tool_call_id": ae.ToolCallID,
+				"tool_name":    ae.ToolName,
+				"is_error":     ae.IsError,
 			})
 		}
 	})
