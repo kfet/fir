@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 const defaultAzureAPIVersion = "v1"
@@ -181,6 +182,7 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 			}
 		}
 
+		firlog.Debug("azure-openai request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))
 
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
@@ -194,6 +196,7 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 			return
 		}
 
+		firlog.Debug("azure-openai response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,

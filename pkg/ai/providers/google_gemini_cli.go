@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- Constants ---
@@ -399,6 +400,7 @@ func StreamGoogleGeminiCLI(
 			Timestamp:  time.Now().UnixMilli(),
 		}
 
+		firlog.Debug("gemini-cli request", "model", model.ID, "messageCount", len(prompt.Messages))
 		err := streamGeminiCLI(ctx, model, prompt, options, output, stream)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -416,6 +418,7 @@ func StreamGoogleGeminiCLI(
 			return
 		}
 
+		firlog.Debug("gemini-cli response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,

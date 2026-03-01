@@ -14,6 +14,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- Codex configuration ---
@@ -162,6 +163,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 		}
 
 		url := resolveCodexURL(model.BaseURL)
+		firlog.Debug("codex request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
 		headers := buildCodexHeaders(model.Headers, options, accountID, apiKey)
 
@@ -266,6 +268,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 			return
 		}
 
+		firlog.Debug("codex response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,

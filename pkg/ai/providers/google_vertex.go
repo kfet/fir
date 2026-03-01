@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- Vertex AI configuration ---
@@ -144,6 +145,7 @@ func StreamGoogleVertex(ctx context.Context, model *ai.Model, prompt ai.Context,
 			stream.End(nil)
 		}()
 
+		firlog.Debug("vertex request", "model", model.ID, "messageCount", len(prompt.Messages))
 		if err := streamVertexHTTP(ctx, model, prompt, options, output, stream); err != nil {
 			output.StopReason = ai.StopReasonError
 			output.ErrorMessage = err.Error()
@@ -151,6 +153,7 @@ func StreamGoogleVertex(ctx context.Context, model *ai.Model, prompt ai.Context,
 			return
 		}
 
+		firlog.Debug("vertex response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,
