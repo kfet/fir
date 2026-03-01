@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -23,26 +24,6 @@ var providerKeyLinks = map[string]string{
 	"cerebras":  "https://cloud.cerebras.ai/",
 }
 
-// providerEnvVarInfo maps provider IDs to their primary env var name.
-// Sourced from ai.providerEnvMap + special cases.
-var providerEnvVarInfo = map[string]string{
-	"openai":                  "OPENAI_API_KEY",
-	"azure-openai-responses":  "AZURE_OPENAI_API_KEY",
-	"google":                  "GEMINI_API_KEY",
-	"groq":                    "GROQ_API_KEY",
-	"cerebras":                "CEREBRAS_API_KEY",
-	"xai":                     "XAI_API_KEY",
-	"openrouter":              "OPENROUTER_API_KEY",
-	"vercel-ai-gateway":       "AI_GATEWAY_API_KEY",
-	"zai":                     "ZAI_API_KEY",
-	"mistral":                 "MISTRAL_API_KEY",
-	"minimax":                 "MINIMAX_API_KEY",
-	"minimax-cn":              "MINIMAX_CN_API_KEY",
-	"huggingface":             "HF_TOKEN",
-	"anthropic":               "ANTHROPIC_API_KEY",
-	"github-copilot":          "COPILOT_GITHUB_TOKEN",
-}
-
 // buildAuthMethods constructs the list of ExtendedAuthMethod for the initialize response.
 // It inspects the auth storage and model registry to determine which providers
 // are available and what auth methods each supports.
@@ -54,7 +35,7 @@ func buildAuthMethods(authStorage *core.AuthStorage, modelRegistry *core.ModelRe
 
 	// For each provider, add env_var auth methods.
 	for _, pid := range providers {
-		if envVar, ok := providerEnvVarInfo[pid]; ok {
+		if envVar := ai.ProviderEnvVar(pid); envVar != "" {
 			name := formatProviderName(pid) + " API Key"
 			m := ExtendedAuthMethod{
 				Id:          "env-" + pid,
@@ -84,7 +65,7 @@ func buildAuthMethods(authStorage *core.AuthStorage, modelRegistry *core.ModelRe
 	return methods
 }
 
-// collectProviders returns a deduplicated sorted list of provider IDs from the model registry.
+// collectProviders returns a deduplicated, sorted list of provider IDs from the model registry.
 func collectProviders(modelRegistry *core.ModelRegistry) []string {
 	allModels := modelRegistry.GetAll()
 	seen := make(map[string]bool, len(allModels))
@@ -96,6 +77,7 @@ func collectProviders(modelRegistry *core.ModelRegistry) []string {
 			providers = append(providers, pid)
 		}
 	}
+	sort.Strings(providers)
 	return providers
 }
 
@@ -218,24 +200,22 @@ func (pa *firAgent) authenticateOAuth(_ context.Context, method *ExtendedAuthMet
 	providerID := strings.TrimPrefix(method.Id, "oauth-")
 
 	pa.mu.Lock()
-	sessions := pa.sessions
+	authStorage := pa.authStorage
 	pa.mu.Unlock()
 
-	// Find any session's auth storage to perform login.
-	for _, entry := range sessions {
-		authStorage := entry.modelRegistry.AuthStorage()
-		err := authStorage.Login(providerID, oauth.LoginCallbacks{
-			OnAuth: func(info oauth.AuthInfo) {
-				firlog.Info("acp oauth auth url", "url", info.URL)
-			},
-		})
-		if err != nil {
-			return acpsdk.AuthenticateResponse{}, fmt.Errorf("oauth login failed for %s: %w", providerID, err)
-		}
-		return acpsdk.AuthenticateResponse{}, nil
+	if authStorage == nil {
+		return acpsdk.AuthenticateResponse{}, fmt.Errorf("auth storage not initialized")
 	}
 
-	return acpsdk.AuthenticateResponse{}, fmt.Errorf("no active session for oauth login")
+	err := authStorage.Login(providerID, oauth.LoginCallbacks{
+		OnAuth: func(info oauth.AuthInfo) {
+			firlog.Info("acp oauth auth url", "url", info.URL)
+		},
+	})
+	if err != nil {
+		return acpsdk.AuthenticateResponse{}, fmt.Errorf("oauth login failed for %s: %w", providerID, err)
+	}
+	return acpsdk.AuthenticateResponse{}, nil
 }
 
 // authenticateEnvVar checks that the expected env var is set.

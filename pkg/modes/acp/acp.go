@@ -61,6 +61,7 @@ type firAgent struct {
 	sessions    map[string]*firSession
 	clientCaps  acpsdk.ClientCapabilities
 	authMethods []ExtendedAuthMethod
+	authStorage *core.AuthStorage // global auth storage from Initialize
 }
 
 // Compile-time interface check: piAgent must implement Agent for backward compat.
@@ -145,6 +146,7 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 
 	pa.mu.Lock()
 	pa.authMethods = authMethods
+	pa.authStorage = authStorage
 	pa.mu.Unlock()
 
 	return acpsdk.InitializeResponse{
