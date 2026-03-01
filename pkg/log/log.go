@@ -18,9 +18,9 @@ import (
 // calls before Init (or when debug is disabled) are no-ops.
 var logger = slog.New(discardHandler{})
 
-// mu guards the one-time Init swap. After Init, logger is read without
-// locking because slog.Logger methods are safe for concurrent use and we
-// only assign logger once.
+// mu guards Init and resetLogger (used in tests). After Init, logger is
+// read without locking because slog.Logger methods are safe for concurrent
+// use and we only assign logger once per process.
 var mu sync.Mutex
 
 // Init configures the global debug logger.

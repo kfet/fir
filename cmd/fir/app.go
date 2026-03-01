@@ -269,10 +269,8 @@ func run() error {
 	}
 	defer debugCleanup()
 
-	if debugEnabled {
-		firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
-		firlog.Debug("args parsed", "provider", args.Provider, "model", args.Model, "mode", args.OutputMode)
-	}
+	firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
+	firlog.Debug("args parsed", "provider", args.Provider, "model", args.Model, "mode", args.OutputMode)
 
 	if args.Help {
 		PrintHelp()
