@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -749,6 +750,8 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handleChangelogCommand()
 	case "/reload":
 		m.handleReloadCommand()
+	case "/skills":
+		m.handleSkillsCommand(parts[1:])
 	case "/reexec":
 		m.handleReexecCommand()
 	case "/queue":
@@ -2255,6 +2258,127 @@ func (m *InteractiveMode) handleReloadCommand() {
 	m.showStatus("Reloaded extensions, skills, prompts, themes")
 }
 
+func (m *InteractiveMode) handleSkillsCommand(args []string) {
+	if len(args) == 0 || args[0] == "list" {
+		m.handleSkillsList()
+		return
+	}
+	if args[0] == "install" {
+		if len(args) < 2 {
+			m.showWarning("Usage: /skills install <name>")
+			return
+		}
+		m.handleSkillsInstall(args[1])
+		return
+	}
+	m.showWarning(fmt.Sprintf("Unknown skills subcommand: %s. Usage: /skills [list | install <name>]", args[0]))
+}
+
+func (m *InteractiveMode) handleSkillsList() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+
+	skills, _ := m.session.ResourceLoader().GetSkills()
+	if len(skills) == 0 {
+		m.showStatus("No skills loaded.")
+		return
+	}
+
+	// Sort by name
+	sorted := make([]core.Skill, len(skills))
+	copy(sorted, skills)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	nameW := 4
+	sourceW := 6
+	for _, s := range sorted {
+		if len(s.Name) > nameW {
+			nameW = len(s.Name)
+		}
+		if len(s.Source) > sourceW {
+			sourceW = len(s.Source)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION"))
+	for _, s := range sorted {
+		desc := s.Description
+		if len(desc) > 50 {
+			desc = desc[:47] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, s.Source, desc))
+	}
+
+	m.showStatus(strings.TrimRight(sb.String(), "\n"))
+}
+
+func (m *InteractiveMode) handleSkillsInstall(name string) {
+	builtins := core.LoadBuiltinSkills()
+	var found bool
+	for _, s := range builtins.Skills {
+		if s.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		available := make([]string, 0, len(builtins.Skills))
+		for _, s := range builtins.Skills {
+			available = append(available, s.Name)
+		}
+		sort.Strings(available)
+		m.showWarning(fmt.Sprintf("Unknown builtin skill %q. Available: %s", name, strings.Join(available, ", ")))
+		return
+	}
+
+	cwd, _ := os.Getwd()
+	targetDir := filepath.Join(cwd, ".fir", "skills", name)
+
+	if _, err := os.Stat(targetDir); err == nil {
+		m.showWarning(fmt.Sprintf("Skill %q already exists at %s", name, targetDir))
+		return
+	}
+
+	prefix := "builtin_skills/" + name
+	err := fs.WalkDir(core.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel := strings.TrimPrefix(path, prefix)
+		if rel == "" {
+			return nil
+		}
+		rel = strings.TrimPrefix(rel, "/")
+		target := filepath.Join(targetDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, readErr := core.BuiltinSkillsFS.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Failed to install skill %q: %v", name, err))
+		return
+	}
+
+	// Reload so the newly installed skill is picked up
+	if m.session != nil {
+		_ = m.session.Reload()
+		m.setupAutocomplete()
+	}
+
+	m.showStatus(fmt.Sprintf("Installed skill %q to %s (project)", name, targetDir))
+}
+
 func (m *InteractiveMode) handleReexecCommand() {
 	if m.session == nil {
 		m.showWarning("No session available")
@@ -2513,6 +2637,7 @@ func (m *InteractiveMode) showHelp() {
   /copy           - Copy last agent message to clipboard
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
+  /skills         - List loaded skills (or /skills install <name>)
   /reexec        - Re-exec into the current binary, preserving the session
   /quit           - Quit fir
 
