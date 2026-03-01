@@ -264,6 +264,9 @@ func PrintHelp() {
 Usage:
   %s [options] [@files...] [messages...]
   %s update                      Self-update to the latest release
+  %s skills [list]               List all loaded skills
+  %s skills install <name>       Install a builtin skill to project (.fir/skills/)
+                                   Options: --user (install to ~/.fir/agent/skills/), --force
 
 Options:
   --provider <name>              Provider name (default: google)
@@ -338,5 +341,5 @@ Available Tools (default: read, bash, edit, write):
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
 }

@@ -235,9 +235,12 @@ func reportSettingsErrors(settingsManager *core.SettingsManager, context string)
 
 // run is the main application logic.
 func run() error {
-	// "fir update" is a standalone subcommand — handle it before normal parsing.
+	// Standalone subcommands — handle before normal parsing.
 	if len(os.Args) >= 2 && os.Args[1] == "update" {
 		return runUpdate()
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "skills" {
+		return runSkills()
 	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
