@@ -321,11 +321,15 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 				}
 				var result ToolResult
 				if raw != nil {
-					if err := json.Unmarshal(raw, &result); err != nil {
-						return ToolResult{
-							Content: []ai.ToolResultContent{{Text: "failed to parse tool result: " + err.Error()}},
-							IsError: true,
-						}, nil
+					if err := json.Unmarshal(raw, &result); err != nil || len(result.Content) == 0 {
+						// Result is not in structured format — wrap raw JSON as text.
+						// Also handles plain strings like "hello".
+						var text string
+						if json.Unmarshal(raw, &text) == nil {
+							result.Content = []ai.ToolResultContent{{Text: text}}
+						} else {
+							result.Content = []ai.ToolResultContent{{Text: string(raw)}}
+						}
 					}
 				}
 				return result, nil

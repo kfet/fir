@@ -289,6 +289,9 @@ def run(
                 return
             try:
                 result = handler(params.get("params", {}), ctx)
+                # Wrap plain string results into structured format
+                if isinstance(result, str):
+                    result = {"content": [{"text": result}], "is_error": False}
                 _write_message(_make_response(msg_id, result), out)
             except ToolError as exc:
                 _write_message(_make_error(msg_id, exc.code, str(exc)), out)
