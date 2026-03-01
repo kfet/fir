@@ -49,7 +49,17 @@ type firSession struct {
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
 	lastResumeList  []core.SessionListInfo
+	configAccessor  thinkingAccessor // nil → use session (for testing)
 	mcpManager      *mcp.Manager // nil if no MCP servers configured
+}
+
+// getThinkingAccessor returns the thinkingAccessor for this session.
+// Uses configAccessor if set (tests), otherwise the AgentSession.
+func (s *firSession) getThinkingAccessor() thinkingAccessor {
+	if s.configAccessor != nil {
+		return s.configAccessor
+	}
+	return s.session
 }
 
 // firAgent implements the ACP Agent interface.

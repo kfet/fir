@@ -4,6 +4,7 @@
 
 ### Added
 - ACP: auth methods RFD support — `Initialize` now returns typed auth methods (`agent`, `env_var`, `terminal`) per [agentclientprotocol.com/rfds/auth-methods](https://agentclientprotocol.com/rfds/auth-methods); `Authenticate` dispatches by method type
+- ACP: thinking level config — `session/new` returns `configOptions` with a `thought_level` dropdown; `session/set_config_option` changes the thinking level; Zed renders this as the thinking mode picker
 - External process extensions: write extensions in any language (Python, bash, etc.) that communicate with fir over JSON-RPC 2.0 on stdio
 - External process extensions: `notify` and `set_status` inbound methods now call configurable callbacks (`NotifyFunc`/`SetStatusFunc`) on Bridge, enabling UI integration
 - External process extensions: `Manager.ConfirmFn` callback for interactive trust prompts on untrusted project-local extensions

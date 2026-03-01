@@ -106,7 +106,22 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 			if err != nil {
 				return nil, toReqErr(err)
 			}
-			return resp, nil
+			// Inject configOptions (not in SDK v0.6.3, present in upstream schema).
+			rawResp, merr := json.Marshal(resp)
+			if merr != nil {
+				return resp, nil
+			}
+			var respMap map[string]any
+			if merr := json.Unmarshal(rawResp, &respMap); merr != nil {
+				return resp, nil
+			}
+			pa.mu.Lock()
+			entry, ok := pa.sessions[string(resp.SessionId)]
+			pa.mu.Unlock()
+			if ok {
+				respMap["configOptions"] = buildConfigOptions(entry)
+			}
+			return respMap, nil
 
 		case "session/prompt":
 			var p acpsdk.PromptRequest
@@ -144,6 +159,17 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
 			resp, err := pa.SetSessionModel(ctx, p)
+			if err != nil {
+				return nil, toReqErr(err)
+			}
+			return resp, nil
+
+		case "session/set_config_option":
+			var p SetSessionConfigOptionRequest
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+			}
+			resp, err := pa.SetSessionConfigOption(ctx, p)
 			if err != nil {
 				return nil, toReqErr(err)
 			}

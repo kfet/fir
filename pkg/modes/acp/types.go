@@ -112,3 +112,48 @@ type ExtendedAuthMethod struct {
 
 // AuthRequiredError is the JSON-RPC error code for auth-required (-32000).
 const AuthRequiredError = -32000
+
+// ============================================================================
+// Session config types (not yet in the Go SDK v0.6.3)
+// https://agentclientprotocol.com/protocol/schema
+//
+// SessionConfigOption is a dropdown selector that appears in the client UI.
+// Category "thought_level" tells Zed to render it as the thinking mode picker.
+// ============================================================================
+
+// SessionConfigOptionCategory identifies the semantic category of a config option.
+type SessionConfigOptionCategory string
+
+const (
+	SessionConfigCategoryThoughtLevel SessionConfigOptionCategory = "thought_level"
+)
+
+// SessionConfigSelectOption is one selectable value in a config dropdown.
+type SessionConfigSelectOption struct {
+	Value       string  `json:"value"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+// SessionConfigOption describes a dropdown config selector and its current state.
+type SessionConfigOption struct {
+	Type         string                      `json:"type"` // always "select"
+	Id           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Description  *string                     `json:"description,omitempty"`
+	Category     SessionConfigOptionCategory `json:"category,omitempty"`
+	CurrentValue string                      `json:"currentValue"`
+	Options      []SessionConfigSelectOption `json:"options"`
+}
+
+// SetSessionConfigOptionRequest is the request for session/set_config_option.
+type SetSessionConfigOptionRequest struct {
+	SessionId string `json:"sessionId"`
+	ConfigId  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// SetSessionConfigOptionResponse is the response for session/set_config_option.
+type SetSessionConfigOptionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}
