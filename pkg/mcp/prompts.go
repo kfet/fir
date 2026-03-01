@@ -18,7 +18,7 @@ import (
 func listPromptsTool(session *sdk.ClientSession, serverName string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
-			Name:        "mcp__" + serverName + "__list_prompts",
+			Name:        sanitizeToolName("mcp__" + serverName + "__list_prompts"),
 			Description: "List all prompt templates available on MCP server " + serverName + ". Call this before get_prompt to discover available names and arguments.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 		},
@@ -74,7 +74,7 @@ func listPromptsTool(session *sdk.ClientSession, serverName string) agent.AgentT
 func getPromptTool(session *sdk.ClientSession, serverName string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
-			Name:        "mcp__" + serverName + "__get_prompt",
+			Name:        sanitizeToolName("mcp__" + serverName + "__get_prompt"),
 			Description: "Render a named prompt template from MCP server " + serverName + " with optional arguments.",
 			Parameters: json.RawMessage(`{
 				"type":"object",

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/debug"
 )
 
 // acpConn abstracts the methods used on *acpsdk.AgentSideConnection,
@@ -39,6 +40,7 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 	sessionCancels := map[string]func(){}
 
 	return func(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+		debug.Log("acp: incoming method=%s params=%s", method, truncate(string(params), 200))
 		switch method {
 		case "authenticate":
 			var p acpsdk.AuthenticateRequest
@@ -212,6 +214,14 @@ func (r *rawConn) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRe
 
 func (r *rawConn) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
 	return acpsdk.SendRequest[acpsdk.WriteTextFileResponse](r.conn, ctx, acpsdk.ClientMethodFsWriteTextFile, params)
+}
+
+// truncate returns s truncated to n characters with "…" suffix if needed.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // toReqErr converts a Go error to a JSON-RPC RequestError.

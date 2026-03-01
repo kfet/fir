@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -21,6 +22,20 @@ import (
 // If registry is non-nil, tool calls with a non-empty toolCallID and a non-nil
 // onUpdate callback will set a progress token on the MCP request so the server
 // can report progress, and route incoming progress notifications back to onUpdate.
+// invalidToolNameChars matches any character not allowed in LLM tool names.
+// Anthropic requires: ^[a-zA-Z0-9_-]{1,128}$
+var invalidToolNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+
+// sanitizeToolName replaces disallowed characters with underscores and
+// truncates to 128 characters to satisfy LLM provider tool name constraints.
+func sanitizeToolName(name string) string {
+	name = invalidToolNameChars.ReplaceAllString(name, "_")
+	if len(name) > 128 {
+		name = name[:128]
+	}
+	return name
+}
+
 func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, registry *progressRegistry) agent.AgentTool {
 	label := tool.Title
 	if label == "" {
@@ -30,9 +45,13 @@ func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, re
 	// Capture tool name for closure (avoid loop variable capture issues).
 	toolName := tool.Name
 
+	// Sanitize the combined name to match Anthropic's tool name pattern:
+	// ^[a-zA-Z0-9_-]{1,128}$
+	sanitizedName := sanitizeToolName("mcp__" + serverName + "__" + toolName)
+
 	return agent.AgentTool{
 		Tool: ai.Tool{
-			Name:        "mcp__" + serverName + "__" + toolName,
+			Name:        sanitizedName,
 			Description: tool.Description,
 			Parameters:  tool.InputSchema,
 		},

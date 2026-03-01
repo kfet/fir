@@ -372,9 +372,10 @@ func TestReload_Empty(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	builtinCount := len(LoadBuiltinSkills().Skills)
 	skills, diags := loader.GetSkills()
-	if len(skills) != 0 {
-		t.Errorf("expected 0 skills, got %d", len(skills))
+	if len(skills) != builtinCount {
+		t.Errorf("expected %d skills (builtins only), got %d", builtinCount, len(skills))
 	}
 	if len(diags) != 0 {
 		t.Errorf("expected 0 diags, got %d", len(diags))
@@ -412,12 +413,21 @@ Skill content here`)
 		t.Fatal(err)
 	}
 
+	builtinCount := len(LoadBuiltinSkills().Skills)
 	skills, _ := loader.GetSkills()
-	if len(skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(skills))
+	if len(skills) != builtinCount+1 {
+		t.Fatalf("expected %d skills (1 + %d builtins), got %d", builtinCount+1, builtinCount, len(skills))
 	}
-	if skills[0].Name != "test-skill" {
-		t.Errorf("expected name test-skill, got %s", skills[0].Name)
+	// Find the test skill
+	var found bool
+	for _, s := range skills {
+		if s.Name == "test-skill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected to find test-skill in loaded skills")
 	}
 }
 

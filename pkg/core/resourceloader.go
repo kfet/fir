@@ -234,6 +234,21 @@ func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionP
 	})
 	r.skills = result.Skills
 	r.skillDiagnostics = result.Diagnostics
+
+	// Append builtin skills that aren't already loaded (lowest priority).
+	if !r.noSkills {
+		existing := make(map[string]bool, len(r.skills))
+		for _, s := range r.skills {
+			existing[s.Name] = true
+		}
+		builtins := LoadBuiltinSkills()
+		r.skillDiagnostics = append(r.skillDiagnostics, builtins.Diagnostics...)
+		for _, s := range builtins.Skills {
+			if !existing[s.Name] {
+				r.skills = append(r.skills, s)
+			}
+		}
+	}
 	r.applyExtensionMetadata(extensionPaths, skillFilePaths(r.skills))
 
 	for _, skill := range r.skills {

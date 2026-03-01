@@ -17,7 +17,7 @@ import (
 func listResourcesTool(session *sdk.ClientSession, serverName string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
-			Name:        "mcp__" + serverName + "__list_resources",
+			Name:        sanitizeToolName("mcp__" + serverName + "__list_resources"),
 			Description: "List all resources and resource templates exposed by MCP server " + serverName + ". Call this before read_resource to discover available URIs.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 		},
@@ -52,7 +52,7 @@ func listResourcesTool(session *sdk.ClientSession, serverName string) agent.Agen
 func readResourceTool(session *sdk.ClientSession, serverName string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
-			Name:        "mcp__" + serverName + "__read_resource",
+			Name:        sanitizeToolName("mcp__" + serverName + "__read_resource"),
 			Description: "Read the content of a resource from MCP server " + serverName + " by URI. Use list_resources first to discover available URIs.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"uri":{"type":"string","description":"URI of the resource to read"}},"required":["uri"]}`),
 		},

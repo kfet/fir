@@ -23,6 +23,7 @@ import (
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/debug"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -197,6 +198,7 @@ func (m *InteractiveMode) startUpdateNoticeWatcher() {
 
 // Init initializes the TUI and components.
 func (m *InteractiveMode) Init() error {
+	debug.Log("interactive: initializing TUI")
 	// Create terminal and TUI
 	term := tui.NewProcessTerminal()
 	m.ui = tui.NewTUI(term, false)
@@ -500,6 +502,12 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			m.isBashMode.Store(false)
 			m.updateEditorBorderColor()
 			return
+		}
+
+		// Clear command status on Escape (dismiss stale messages)
+		m.commandStatusContainer.Clear()
+		if m.ui != nil {
+			m.ui.RequestRender(false)
 		}
 
 		// Double-escape with empty editor
