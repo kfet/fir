@@ -138,6 +138,42 @@ func TestCodec_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCodec_WriteResponse_NilResult(t *testing.T) {
+	// JSON-RPC 2.0: successful response must include "result" even if null.
+	var buf bytes.Buffer
+	c := NewCodec(&buf, &buf)
+
+	if err := c.WriteResponse(1, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check raw JSON contains "result":null
+	raw := buf.String()
+	if !strings.Contains(raw, `"result":null`) {
+		t.Fatalf("expected result:null in response, got: %s", raw)
+	}
+	if strings.Contains(raw, `"error"`) {
+		t.Fatalf("unexpected error field in response: %s", raw)
+	}
+}
+
+func TestCodec_WriteResponse_ErrorOmitsResult(t *testing.T) {
+	var buf bytes.Buffer
+	c := NewCodec(&buf, &buf)
+
+	if err := c.WriteResponse(1, nil, &Error{Code: -32600, Message: "bad"}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := buf.String()
+	if strings.Contains(raw, `"result"`) {
+		t.Fatalf("result should be omitted on error response, got: %s", raw)
+	}
+	if !strings.Contains(raw, `"error"`) {
+		t.Fatalf("expected error field, got: %s", raw)
+	}
+}
+
 func TestError_ErrorInterface(t *testing.T) {
 	e := &Error{Code: -32601, Message: "Method not found"}
 	s := e.Error()

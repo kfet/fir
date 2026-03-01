@@ -20,9 +20,13 @@ type TrustEntry struct {
 
 // TrustStore manages a persistent set of trusted project-local extensions.
 // Keys in the JSON file are "projectDir:extensionName".
+// The store maintains an in-memory cache that is loaded once on first access
+// and written through on mutations.
 type TrustStore struct {
-	path string
-	mu   sync.Mutex
+	path   string
+	mu     sync.Mutex
+	cache  map[string]TrustEntry
+	loaded bool
 }
 
 // NewTrustStore returns a TrustStore using the default path
@@ -87,11 +91,10 @@ func (ts *TrustStore) save(m map[string]TrustEntry) error {
 func (ts *TrustStore) IsTrusted(projectDir, name, hash string) bool {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	m, err := ts.load()
-	if err != nil {
+	if err := ts.ensureLoaded(); err != nil {
 		return false
 	}
-	entry, ok := m[trustKey(projectDir, name)]
+	entry, ok := ts.cache[trustKey(projectDir, name)]
 	return ok && entry.Hash == hash
 }
 
@@ -99,25 +102,38 @@ func (ts *TrustStore) IsTrusted(projectDir, name, hash string) bool {
 func (ts *TrustStore) RecordTrust(projectDir, name, hash string) error {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
-	m, err := ts.load()
-	if err != nil {
+	if err := ts.ensureLoaded(); err != nil {
 		return err
 	}
-	m[trustKey(projectDir, name)] = TrustEntry{
+	ts.cache[trustKey(projectDir, name)] = TrustEntry{
 		Hash:      hash,
 		TrustedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	return ts.save(m)
+	return ts.save(ts.cache)
 }
 
 // RevokeTrust removes the trust entry for (projectDir, name).
 func (ts *TrustStore) RevokeTrust(projectDir, name string) error {
 	ts.mu.Lock()
 	defer ts.mu.Unlock()
+	if err := ts.ensureLoaded(); err != nil {
+		return err
+	}
+	delete(ts.cache, trustKey(projectDir, name))
+	return ts.save(ts.cache)
+}
+
+// ensureLoaded loads the cache from disk if not already loaded.
+// Must be called with ts.mu held.
+func (ts *TrustStore) ensureLoaded() error {
+	if ts.loaded {
+		return nil
+	}
 	m, err := ts.load()
 	if err != nil {
 		return err
 	}
-	delete(m, trustKey(projectDir, name))
-	return ts.save(m)
+	ts.cache = m
+	ts.loaded = true
+	return nil
 }

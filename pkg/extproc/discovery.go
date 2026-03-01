@@ -69,6 +69,59 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	return result, nil
 }
 
+// DiscoverWithDirs is like Discover but accepts explicit global and project
+// extension directories. This is useful for testing without depending on
+// os.UserHomeDir.
+func DiscoverWithDirs(globalDir, projectExtDir string) ([]ExtProcConfig, error) {
+	byName := make(map[string]ExtProcConfig)
+
+	dirs := []struct {
+		path  string
+		scope string
+	}{
+		{globalDir, "global"},
+		{projectExtDir, "project"},
+	}
+
+	for _, d := range dirs {
+		entries, err := os.ReadDir(d.path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.Mode()&0111 == 0 {
+				continue
+			}
+			name := stripExt(e.Name())
+			byName[name] = ExtProcConfig{
+				Name:  name,
+				Path:  filepath.Join(d.path, e.Name()),
+				Scope: d.scope,
+			}
+		}
+	}
+
+	result := make([]ExtProcConfig, 0, len(byName))
+	for _, cfg := range byName {
+		result = append(result, cfg)
+	}
+	return result, nil
+}
+
+// stripExt removes a single trailing file extension (e.g. ".py", ".sh").
+// This intentionally strips only one extension: "foo.tar.gz" becomes "foo.tar".
+// For extension naming this is sufficient since executable extensions use
+// single extensions like .py, .sh, or no extension at all.
 func stripExt(name string) string {
 	ext := filepath.Ext(name)
 	if ext != "" {

@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- External process extensions: write extensions in any language (Python, bash, etc.) that communicate with fir over JSON-RPC 2.0 on stdio
+- External process extensions: `notify` and `set_status` inbound methods now call configurable callbacks (`NotifyFunc`/`SetStatusFunc`) on Bridge, enabling UI integration
+- External process extensions: `Manager.ConfirmFn` callback for interactive trust prompts on untrusted project-local extensions
+- External process extensions: `CallHook` now fans out concurrently across all bridges instead of sequentially
+- External process extensions: `ProjectDir` and `Cwd` fields passed through to `extproc.Manager` from all `extension.Setup` callers
 - ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
 
 ### Changed

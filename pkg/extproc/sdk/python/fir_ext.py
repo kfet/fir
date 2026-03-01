@@ -196,9 +196,19 @@ class Context:
         """Show a notification in fir. *level*: info, warning, error."""
         self._call("notify", {"message": message, "level": level})
 
-    def exec(self, command: str, timeout_sec: int = 30) -> Dict[str, Any]:
-        """Run a shell command via fir. Returns dict with stdout, stderr, exit_code."""
-        return self._call("exec", {"command": command, "timeout": timeout_sec})
+    def exec(self, command: str, args: Optional[List[str]] = None, timeout: float = 10.0) -> Dict[str, Any]:
+        """Run a command via fir. Returns dict with stdout, stderr, exit_code.
+
+        Parameters
+        ----------
+        command : str
+            The command to execute.
+        args : list of str, optional
+            Arguments to pass to the command.
+        timeout : float, optional
+            How long to wait for the RPC response (client-side only, not sent to Go).
+        """
+        return self._call("exec", {"command": command, "args": args or []}, timeout=timeout)
 
     def send_message(self, role: str, content: str) -> None:
         """Inject a message into the session."""

@@ -48,23 +48,16 @@ func TestDiscover_ProjectLocal(t *testing.T) {
 }
 
 func TestDiscover_ProjectShadowsGlobal(t *testing.T) {
-	// We can't easily test global dir without mocking UserHomeDir,
-	// so we test the shadowing logic by verifying project-local wins
-	// when both directories contain the same name. We'll override the
-	// global dir by using a custom approach — but since Discover uses
-	// os.UserHomeDir, we test the core logic indirectly.
-	//
-	// Instead, test with discoverDirs helper.
 	projectDir := t.TempDir()
 	globalDir := t.TempDir()
 
 	writeExec(t, filepath.Join(globalDir, "tool"))
 	writeExec(t, filepath.Join(projectDir, "tool"))
 
-	configs := discoverFrom(t, []dirScope{
-		{globalDir, "global"},
-		{projectDir, "project"},
-	})
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(configs) != 1 {
 		t.Fatalf("expected 1 config, got %d", len(configs))
@@ -85,10 +78,10 @@ func TestDiscover_MultipleExtensions(t *testing.T) {
 	writeExec(t, filepath.Join(globalDir, "beta.py"))
 	writeExec(t, filepath.Join(projectDir, "gamma.sh"))
 
-	configs := discoverFrom(t, []dirScope{
-		{globalDir, "global"},
-		{projectDir, "project"},
-	})
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	sort.Slice(configs, func(i, j int) bool { return configs[i].Name < configs[j].Name })
 
@@ -104,49 +97,38 @@ func TestDiscover_MultipleExtensions(t *testing.T) {
 	}
 }
 
+func TestDiscoverWithDirs_GlobalOnly(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir() // empty
+
+	writeExec(t, filepath.Join(globalDir, "global-tool.py"))
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+	if configs[0].Name != "global-tool" {
+		t.Errorf("expected name 'global-tool', got %q", configs[0].Name)
+	}
+	if configs[0].Scope != "global" {
+		t.Errorf("expected scope 'global', got %q", configs[0].Scope)
+	}
+}
+
+func TestDiscoverWithDirs_NonexistentDirs(t *testing.T) {
+	configs, err := DiscoverWithDirs("/nonexistent/global", "/nonexistent/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected 0 configs, got %d", len(configs))
+	}
+}
+
 // helpers
-
-type dirScope struct {
-	path  string
-	scope string
-}
-
-func discoverFrom(t *testing.T, dirs []dirScope) []ExtProcConfig {
-	t.Helper()
-	byName := make(map[string]ExtProcConfig)
-	for _, d := range dirs {
-		entries, err := os.ReadDir(d.path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			t.Fatal(err)
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			if info.Mode()&0111 == 0 {
-				continue
-			}
-			name := stripExt(e.Name())
-			byName[name] = ExtProcConfig{
-				Name:  name,
-				Path:  filepath.Join(d.path, e.Name()),
-				Scope: d.scope,
-			}
-		}
-	}
-	result := make([]ExtProcConfig, 0, len(byName))
-	for _, cfg := range byName {
-		result = append(result, cfg)
-	}
-	return result
-}
 
 func writeExec(t *testing.T, path string) {
 	t.Helper()

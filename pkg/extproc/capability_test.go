@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestHandshake_Success(t *testing.T) {
@@ -46,7 +47,7 @@ func TestHandshake_Success(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, result, nil)
 	}()
 
-	got, err := Handshake(proc, "/tmp/project")
+	got, err := Handshake(proc, "/tmp/project", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,24 +79,42 @@ func TestHandshake_ErrorResponse(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, nil, &Error{Code: -32600, Message: "bad init"})
 	}()
 
-	_, err := Handshake(proc, "/tmp")
+	_, err := Handshake(proc, "/tmp", 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestHandshake_Timeout(t *testing.T) {
-	_, cW := io.Pipe()
+	cR, cW := io.Pipe()
 	fR, _ := io.Pipe() // nobody writes to fR → ReadMessage blocks
 
 	proc := &Process{
 		cfg:      ExtProcConfig{Name: "slow", Path: "/fake", Scope: "project"},
+		stdin:    cW,
 		codec:    NewCodec(fR, cW),
 		waitDone: make(chan struct{}),
 	}
 
-	_ = proc
-	t.Skip("skipping timeout test (would take 5s)")
+	// Drain the child-read side so WriteRequest doesn't block.
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := cR.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	start := time.Now()
+	_, err := Handshake(proc, "/tmp", 50*time.Millisecond)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed > 1*time.Second {
+		t.Fatalf("timeout took too long: %v", elapsed)
+	}
 }
 
 func TestHandshake_InitParams(t *testing.T) {
@@ -116,7 +135,7 @@ func TestHandshake_NilCodec(t *testing.T) {
 	proc := &Process{
 		cfg: ExtProcConfig{Name: "nil", Path: "/fake", Scope: "project"},
 	}
-	_, err := Handshake(proc, "/tmp")
+	_, err := Handshake(proc, "/tmp", 0)
 	if err == nil {
 		t.Fatal("expected error for nil codec")
 	}

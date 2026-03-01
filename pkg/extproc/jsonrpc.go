@@ -137,14 +137,29 @@ func (c *Codec) WriteNotification(method string, params any) error {
 }
 
 // WriteResponse writes a JSON-RPC 2.0 response.
+// Per JSON-RPC 2.0, a successful response (no error) always includes "result",
+// even if null.
 func (c *Codec) WriteResponse(id any, result any, rpcErr *Error) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	type resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      any    `json:"id"`
-		Result  any    `json:"result,omitempty"`
-		Error   *Error `json:"error,omitempty"`
+
+	// If this is a success response (no error) and result is nil,
+	// we must emit "result": null rather than omitting the field.
+	type respWithResult struct {
+		JSONRPC string         `json:"jsonrpc"`
+		ID      any            `json:"id"`
+		Result  any            `json:"result"`
+		Error   *Error         `json:"error,omitempty"`
 	}
-	return c.encoder.Encode(resp{"2.0", id, result, rpcErr})
+	type respWithError struct {
+		JSONRPC string         `json:"jsonrpc"`
+		ID      any            `json:"id"`
+		Result  any            `json:"result,omitempty"`
+		Error   *Error         `json:"error"`
+	}
+
+	if rpcErr != nil {
+		return c.encoder.Encode(respWithError{"2.0", id, result, rpcErr})
+	}
+	return c.encoder.Encode(respWithResult{"2.0", id, result, nil})
 }

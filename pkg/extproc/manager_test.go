@@ -55,7 +55,14 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	// Poll until the tool is registered (or timeout).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(api.toolsRegistered) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if len(api.toolsRegistered) != 1 {
 		t.Fatalf("expected 1 registered tool, got %d", len(api.toolsRegistered))
@@ -110,7 +117,14 @@ func TestManager_EmitEvent(t *testing.T) {
 	if err := mgr.Start(ctx, dir, dir, api); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// Poll until the extension bridge is ready (tool registered).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(api.toolsRegistered) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// EmitEvent should not panic; "session_start" is subscribed.
 	mgr.EmitEvent("session_start", map[string]string{"test": "data"})

@@ -158,6 +158,8 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	// Extensions
 	extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
 		EnabledNames: resolveEnabledExtensions(args, settingsManager),
+		ProjectDir:   cwd,
+		Cwd:          cwd,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)

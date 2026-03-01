@@ -3,6 +3,7 @@ package extproc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -10,12 +11,17 @@ import (
 	"github.com/kfet/fir/pkg/extproc/sdk"
 )
 
+// ConfirmFunc asks the user whether to trust an extension.
+// It receives the extension name and file path, and returns true to trust.
+type ConfirmFunc func(name, path string) bool
+
 // Manager owns all external process extension bridges for a session.
 type Manager struct {
-	logger  *slog.Logger
-	trust   *TrustStore
-	mu      sync.Mutex
-	bridges []*managedBridge
+	logger    *slog.Logger
+	trust     *TrustStore
+	mu        sync.Mutex
+	bridges   []*managedBridge
+	ConfirmFn ConfirmFunc
 }
 
 type managedBridge struct {
@@ -75,9 +81,15 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 			return err
 		}
 		if !m.trust.IsTrusted(projectDir, cfg.Name, hash) {
-			m.logger.Warn("skipping untrusted project-local extension",
-				"ext", cfg.Name, "path", cfg.Path)
-			return nil
+			if m.ConfirmFn != nil && m.ConfirmFn(cfg.Name, cfg.Path) {
+				if err := m.trust.RecordTrust(projectDir, cfg.Name, hash); err != nil {
+					return fmt.Errorf("recording trust: %w", err)
+				}
+			} else {
+				m.logger.Warn("skipping untrusted project-local extension",
+					"ext", cfg.Name, "path", cfg.Path)
+				return nil
+			}
 		}
 	}
 
@@ -86,7 +98,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		return err
 	}
 
-	caps, err := Handshake(proc, cwd)
+	caps, err := Handshake(proc, cwd, 0)
 	if err != nil {
 		_ = proc.Stop(context.Background())
 		return err
@@ -151,22 +163,40 @@ func (m *Manager) EmitEvent(name string, data any) {
 	}
 }
 
-// CallHook calls all bridges with the given hook and collects results.
+// CallHook calls all bridges with the given hook and collects results concurrently.
 func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
 
-	var results []json.RawMessage
-	for _, mb := range bridges {
-		raw, err := mb.bridge.CallHook(name, data, timeout)
-		if err != nil {
-			m.logger.Warn("hook call failed", "ext", mb.cfg.Name, "hook", name, "err", err)
-			continue
-		}
-		if raw != nil {
-			results = append(results, raw)
-		}
+	type indexedResult struct {
+		idx int
+		raw json.RawMessage
 	}
+
+	var (
+		wg      sync.WaitGroup
+		resMu   sync.Mutex
+		results []json.RawMessage
+	)
+
+	for i, mb := range bridges {
+		wg.Add(1)
+		go func(idx int, mb *managedBridge) {
+			defer wg.Done()
+			raw, err := mb.bridge.CallHook(name, data, timeout)
+			if err != nil {
+				m.logger.Warn("hook call failed", "ext", mb.cfg.Name, "hook", name, "err", err)
+				return
+			}
+			if raw != nil {
+				resMu.Lock()
+				results = append(results, raw)
+				resMu.Unlock()
+			}
+		}(i, mb)
+	}
+	wg.Wait()
+
 	return results, nil
 }

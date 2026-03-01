@@ -1,7 +1,6 @@
 package extproc
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -27,9 +26,13 @@ type InitResult struct {
 	Events []string   `json:"events,omitempty"`
 }
 
-// Handshake sends an "init" request to the extension process and waits
-// up to 5 seconds for a response. Returns the parsed InitResult.
-func Handshake(proc *Process, cwd string) (*InitResult, error) {
+// Handshake sends an "init" request to the extension process and waits for a
+// response. If timeout is zero, defaults to 5 seconds. Returns the parsed InitResult.
+func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, error) {
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+
 	codec := proc.GetCodec()
 	if codec == nil {
 		return nil, fmt.Errorf("extproc: process not started")
@@ -49,13 +52,13 @@ func Handshake(proc *Process, cwd string) (*InitResult, error) {
 		ch <- readResult{msg, err}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	select {
-	case <-ctx.Done():
-		// The reader goroutine will be unblocked when the caller
-		// calls proc.Stop(), which closes the process's pipes.
+	case <-timer.C:
+		// Close the codec reader to unblock the goroutine.
+		proc.CloseStdin()
 		return nil, fmt.Errorf("extproc: init handshake timed out")
 	case r := <-ch:
 		if r.err != nil {

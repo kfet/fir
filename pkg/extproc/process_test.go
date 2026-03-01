@@ -90,6 +90,39 @@ func TestProcess_RestartFailure(t *testing.T) {
 	}
 }
 
+func TestProcess_StopWaitCleanup(t *testing.T) {
+	// Verify that after Stop, Wait returns promptly (process dead, pipes closed,
+	// goroutines unblocked).
+	script := writeTestScript(t, "#!/bin/sh\ncat\n") // blocks on stdin
+
+	proc := NewProcess(
+		ExtProcConfig{Name: "cleanup", Path: script, Scope: "project"},
+		nil, slog.Default(),
+	)
+	if err := proc.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := proc.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait should return immediately since Stop waited for the process.
+	done := make(chan struct{})
+	go func() {
+		proc.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not return after Stop")
+	}
+}
+
 func TestProcess_Codec_RoundTrip(t *testing.T) {
 	// Script that echoes back a JSON-RPC response for any request.
 	script := writeTestScript(t, `#!/bin/sh

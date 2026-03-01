@@ -27,6 +27,7 @@ type Process struct {
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
+	stdin    io.WriteCloser
 	codec    *Codec
 	failures int
 	backoff  time.Duration
@@ -45,7 +46,7 @@ func NewProcess(cfg ExtProcConfig, env []string, logger *slog.Logger) *Process {
 		cfg:     cfg,
 		env:     env,
 		logger:  logger,
-		backoff: 1 * time.Second,
+		backoff: 0,
 	}
 }
 
@@ -54,6 +55,16 @@ func (p *Process) GetCodec() *Codec {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.codec
+}
+
+// CloseStdin closes the process's stdin pipe, which also unblocks any
+// pending reads on the codec's stdout side when the process exits.
+func (p *Process) CloseStdin() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
 }
 
 // Start spawns the child process and wires up the Codec and stderr logger.
@@ -85,6 +96,7 @@ func (p *Process) startLocked() error {
 	}
 
 	p.cmd = cmd
+	p.stdin = stdin
 	p.codec = NewCodec(stdout, stdin)
 	p.stopped = false
 	p.waitDone = make(chan struct{})
@@ -162,14 +174,18 @@ func (p *Process) Restart() error {
 	defer cancel()
 	_ = p.Stop(ctx)
 
-	time.Sleep(backoff)
+	if backoff > 0 {
+		time.Sleep(backoff)
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if err := p.startLocked(); err != nil {
 		p.failures++
-		if p.backoff < 30*time.Second {
+		if p.backoff == 0 {
+			p.backoff = 1 * time.Second
+		} else if p.backoff < 30*time.Second {
 			p.backoff *= 2
 			if p.backoff > 30*time.Second {
 				p.backoff = 30 * time.Second
@@ -182,6 +198,6 @@ func (p *Process) Restart() error {
 	// but per the spec, consecutive *failures* are what count.
 	// A successful start resets the counter.
 	p.failures = 0
-	p.backoff = 1 * time.Second
+	p.backoff = 0
 	return nil
 }

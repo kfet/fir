@@ -121,6 +121,26 @@ class TestToolCall(unittest.TestCase):
         self.assertEqual(msgs[1]["error"]["code"], -32000)
         self.assertIn("unexpected", msgs[1]["error"]["message"])
 
+    def test_tool_call_string_auto_wrap(self):
+        """When a tool handler returns a plain string, verify it is wrapped
+        into the structured content format."""
+        @fir_ext.tool("say_hi", "Returns a string")
+        def say_hi(params, ctx):
+            return "hello world"
+
+        inp = _make_input(
+            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "say_hi", "params": {}}},
+        )
+        out = io.StringIO()
+        fir_ext.run(input_stream=inp, output_stream=out)
+
+        msgs = _read_all_messages(out)
+        self.assertEqual(len(msgs), 2)
+        result = msgs[1]["result"]
+        self.assertEqual(result["content"], [{"text": "hello world"}])
+        self.assertFalse(result["is_error"])
+
 
 class TestHooks(unittest.TestCase):
     def setUp(self):

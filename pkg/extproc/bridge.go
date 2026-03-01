@@ -11,6 +11,12 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 )
 
+// NotifyFunc is called when an extension sends a "notify" request.
+type NotifyFunc func(level, message string)
+
+// SetStatusFunc is called when an extension sends a "set_status" request.
+type SetStatusFunc func(status string)
+
 // Bridge adapts an external process extension to fir's extension system.
 type Bridge struct {
 	proc *Process
@@ -18,6 +24,12 @@ type Bridge struct {
 
 	// subscribedEvents is a set for fast lookup.
 	subscribedEvents map[string]bool
+
+	// NotifyFn is called for inbound "notify" requests. If nil, an error is returned.
+	NotifyFn NotifyFunc
+
+	// SetStatusFn is called for inbound "set_status" requests. If nil, an error is returned.
+	SetStatusFn SetStatusFunc
 
 	// nextID generates unique request IDs for outbound requests.
 	// Starts at 100 to avoid collision with handshake ID (1).
@@ -73,6 +85,8 @@ func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 
 	select {
 	case <-ctx.Done():
+		// Close stdin to unblock the reader goroutine.
+		b.proc.CloseStdin()
 		return ctx.Err()
 	case err := <-errCh:
 		return err
@@ -86,8 +100,19 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 
 	switch req.Method {
 	case "notify":
-		// No direct UIContext access from BridgeAPI; acknowledge silently.
-		// TODO: wire to event bus when UIContext support is added.
+		var p struct {
+			Level   string `json:"level"`
+			Message string `json:"message"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if b.NotifyFn != nil {
+			b.NotifyFn(p.Level, p.Message)
+		}
 		result = map[string]any{"ok": true}
 
 	case "exec":
@@ -211,8 +236,18 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		result = map[string]any{"ok": ok}
 
 	case "set_status":
-		// No direct UIContext access; acknowledge silently.
-		// TODO: wire to event bus when UIContext support is added.
+		var p struct {
+			Status string `json:"status"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if b.SetStatusFn != nil {
+			b.SetStatusFn(p.Status)
+		}
 		result = map[string]any{"ok": true}
 
 	default:
