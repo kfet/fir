@@ -15,6 +15,10 @@
 - MCP: `WatchConfig` stop semantics documented as best-effort in the function comment
 
 ### Added
+- Built-in skills: 10 portable skills (overseer, research, review, fix, loop, monitor, notify, tmux-driver, claude-usage, skills) embedded in the binary, loaded as `source=builtin` with lowest priority
+- `fir skills [list]` CLI subcommand lists all loaded skills with name, source, and description
+- `fir skills install <name> [--user] [--force]` extracts a builtin skill to project or user directory
+- `/skills` slash command lists loaded skills inline; `/skills install <name>` extracts to project dir
 - `/queue` slash command shows the follow-up message queue with 1-based numbered previews; `/dequeue [N]` removes a single item by index (existing Alt+Up restores all as before)
 - MCP: hot reload — `WatchAndReload` watches `mcp.json` for changes and incrementally starts/stops servers; new servers connected, removed servers closed, changed servers restarted, unchanged left alone
 - MCP: `NewToolServer` exposes fir `agent.AgentTool` values as an MCP server, enabling external MCP clients to call fir's tools
