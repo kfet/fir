@@ -197,6 +197,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 			return agent.AgentToolResult{}, errors.New(outputText)
 		}
 
+		firlog.Warn("bash error", "err", err, "elapsed", time.Since(start))
 		return agent.AgentToolResult{}, err
 	}
 

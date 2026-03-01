@@ -26,7 +26,8 @@ var mu sync.Mutex
 // Init configures the global debug logger.
 // When enabled is false, all log calls remain no-ops (zero allocation).
 // When enabled is true, structured JSON logs are written to path.
-// The file is created/truncated on each run.
+// The file is created if it doesn't exist and appended to on each run,
+// so concurrent or successive fir processes share the same log safely.
 // Returns a cleanup function that flushes and closes the log file.
 func Init(enabled bool, path string) (cleanup func(), err error) {
 	mu.Lock()
@@ -36,7 +37,7 @@ func Init(enabled bool, path string) (cleanup func(), err error) {
 		return func() {}, nil
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, err
 	}

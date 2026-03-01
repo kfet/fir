@@ -89,12 +89,12 @@ func TestInit_BadPath(t *testing.T) {
 	}
 }
 
-func TestInit_TruncatesExistingFile(t *testing.T) {
+func TestInit_AppendsToExistingFile(t *testing.T) {
 	resetLogger()
 	path := filepath.Join(t.TempDir(), "debug.log")
 
-	// Write some pre-existing content.
-	os.WriteFile(path, []byte("old content\nold content\n"), 0644)
+	// Write some pre-existing content (valid JSON line).
+	os.WriteFile(path, []byte(`{"msg":"old"}`+"\n"), 0644)
 
 	cleanup, err := Init(true, path)
 	if err != nil {
@@ -107,12 +107,15 @@ func TestInit_TruncatesExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "old content") {
-		t.Error("file was not truncated")
-	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line, got %d", len(lines))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines (old + new), got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], `"old"`) {
+		t.Error("old content should be preserved")
+	}
+	if !strings.Contains(lines[1], `"fresh"`) {
+		t.Error("new content should be appended")
 	}
 }
 
