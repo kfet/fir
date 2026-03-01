@@ -57,9 +57,10 @@ type firAgent struct {
 	conn    acpConn
 	options Options
 
-	mu         sync.Mutex
-	sessions   map[string]*firSession
-	clientCaps acpsdk.ClientCapabilities
+	mu          sync.Mutex
+	sessions    map[string]*firSession
+	clientCaps  acpsdk.ClientCapabilities
+	authMethods []ExtendedAuthMethod
 }
 
 // Compile-time interface check: piAgent must implement Agent for backward compat.
@@ -132,6 +133,20 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	pa.mu.Lock()
 	pa.clientCaps = params.ClientCapabilities
 	pa.mu.Unlock()
+
+	// Build auth methods from the global agent dir config.
+	agentDir := core.DefaultAgentDir()
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
+		agentDir = dir
+	}
+	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	authMethods := buildAuthMethods(authStorage, modelRegistry)
+
+	pa.mu.Lock()
+	pa.authMethods = authMethods
+	pa.mu.Unlock()
+
 	return acpsdk.InitializeResponse{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		AgentInfo:       &acpsdk.Implementation{Name: "fir", Version: version},
@@ -141,11 +156,12 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 				EmbeddedContext: true,
 			},
 		},
+		AuthMethods: toSDKAuthMethods(authMethods),
 	}, nil
 }
 
-func (pa *firAgent) Authenticate(_ context.Context, _ acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
-	return acpsdk.AuthenticateResponse{}, nil
+func (pa *firAgent) Authenticate(ctx context.Context, req acpsdk.AuthenticateRequest) (acpsdk.AuthenticateResponse, error) {
+	return pa.handleAuthenticate(ctx, req)
 }
 
 func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
