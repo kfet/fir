@@ -342,6 +342,7 @@ func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
 	if opts.IncludeDefaults && opts.AgentDir != "" {
 		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.AgentDir, "skills"), "user", true))
 		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.Cwd, ".fir", "skills"), "project", true))
+		addSkills(LoadBuiltinSkills())
 	}
 
 	for _, rawPath := range opts.SkillPaths {
