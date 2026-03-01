@@ -54,6 +54,8 @@ func Handshake(proc *Process, cwd string) (*InitResult, error) {
 
 	select {
 	case <-ctx.Done():
+		// The reader goroutine will be unblocked when the caller
+		// calls proc.Stop(), which closes the process's pipes.
 		return nil, fmt.Errorf("extproc: init handshake timed out")
 	case r := <-ch:
 		if r.err != nil {

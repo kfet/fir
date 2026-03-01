@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -130,7 +131,7 @@ func (p *Process) Stop(ctx context.Context) error {
 	}
 
 	// SIGTERM
-	_ = cmd.Process.Signal(os.Interrupt)
+	_ = cmd.Process.Signal(syscall.SIGTERM)
 
 	select {
 	case <-done:

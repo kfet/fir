@@ -8,9 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/extension"
 )
 
 // Bridge adapts an external process extension to fir's extension system.
@@ -22,6 +20,7 @@ type Bridge struct {
 	subscribedEvents map[string]bool
 
 	// nextID generates unique request IDs for outbound requests.
+	// Starts at 100 to avoid collision with handshake ID (1).
 	nextID atomic.Int64
 
 	// pending tracks outbound requests waiting for a response.
@@ -35,17 +34,19 @@ func NewBridge(proc *Process, caps *InitResult) *Bridge {
 	for _, e := range caps.Events {
 		events[e] = true
 	}
-	return &Bridge{
+	b := &Bridge{
 		proc:             proc,
 		caps:             caps,
 		subscribedEvents: events,
 		pending:          make(map[int64]chan *Response),
 	}
+	b.nextID.Store(100) // avoid collision with handshake ID
+	return b
 }
 
 // Run starts the dispatch loop, reading messages from the process and routing
 // them. It blocks until ctx is cancelled or the codec returns an error.
-func (b *Bridge) Run(ctx context.Context, api extension.API) error {
+func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 	codec := b.proc.GetCodec()
 	if codec == nil {
 		return fmt.Errorf("extproc: process not started")
@@ -79,24 +80,14 @@ func (b *Bridge) Run(ctx context.Context, api extension.API) error {
 }
 
 // handleInbound dispatches an inbound request from the extension to the API.
-func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
+func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	var result any
 	var rpcErr *Error
 
 	switch req.Method {
 	case "notify":
-		var p struct {
-			Message string `json:"message"`
-			Level   string `json:"level"`
-		}
-		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
-		}
-		// notify requires UIContext — use Events bus as a proxy via SendMessage
-		// For now, call the extension API notify pattern: no direct UIContext access,
-		// but we can use SendMessage with a custom type.
-		// Actually, looking at the API, there's no direct Notify on API.
-		// We'll return success silently for now.
+		// No direct UIContext access from BridgeAPI; acknowledge silently.
+		// TODO: wire to event bus when UIContext support is added.
 		result = map[string]any{"ok": true}
 
 	case "exec":
@@ -105,7 +96,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Args    []string `json:"args"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		r, err := api.Exec(p.Command, p.Args)
 		if err != nil {
@@ -121,9 +115,12 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Display    bool   `json:"display"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
-		api.SendMessage(extension.CustomMessageSpec{
+		api.SendMessage(CustomMessageSpec{
 			CustomType: p.CustomType,
 			Content:    p.Content,
 			Display:    p.Display,
@@ -135,7 +132,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Content string `json:"content"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		api.SendUserMessage(p.Content, nil)
 		result = map[string]any{"ok": true}
@@ -145,7 +145,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Name string `json:"name"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		api.SetSessionName(p.Name)
 		result = map[string]any{"ok": true}
@@ -156,7 +159,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Label   string `json:"label"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		api.SetLabel(p.EntryID, p.Label)
 		result = map[string]any{"ok": true}
@@ -166,7 +172,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			EntryID string `json:"entry_id"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		api.ClearLabel(p.EntryID)
 		result = map[string]any{"ok": true}
@@ -179,7 +188,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			Names []string `json:"names"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		api.SetActiveTools(p.Names)
 		result = map[string]any{"ok": true}
@@ -190,21 +202,17 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 			ID       string `json:"id"`
 		}
 		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
 		}
 		ok := api.SetModel(&ai.Model{Provider: p.Provider, ID: p.ID})
 		result = map[string]any{"ok": ok}
 
 	case "set_status":
-		var p struct {
-			Key  string `json:"key"`
-			Text string `json:"text"`
-		}
-		if req.Params != nil {
-			_ = json.Unmarshal(*req.Params, &p)
-		}
-		// set_status needs UIContext which we don't have directly from API.
-		// Return success; integration with UI will be wired in manager.
+		// No direct UIContext access; acknowledge silently.
+		// TODO: wire to event bus when UIContext support is added.
 		result = map[string]any{"ok": true}
 
 	default:
@@ -216,7 +224,6 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api extension.API) {
 
 // routeResponse delivers an inbound response to the waiting caller.
 func (b *Bridge) routeResponse(resp *Response) {
-	// JSON numbers unmarshal as float64.
 	var id int64
 	switch v := resp.ID.(type) {
 	case float64:
@@ -241,8 +248,7 @@ func (b *Bridge) routeResponse(resp *Response) {
 	}
 }
 
-// EmitEvent sends a JSON-RPC notification to the extension if it subscribed
-// to the given event.
+// EmitEvent sends a JSON-RPC notification to the extension if it subscribed.
 func (b *Bridge) EmitEvent(name string, data any) error {
 	if !b.subscribedEvents[name] {
 		return nil
@@ -254,8 +260,7 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 	return codec.WriteNotification("event/"+name, data)
 }
 
-// CallHook sends a JSON-RPC request to the extension and waits for a response
-// up to the given timeout.
+// CallHook sends a JSON-RPC request and waits for a response with timeout.
 func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.RawMessage, error) {
 	codec := b.proc.GetCodec()
 	if codec == nil {
@@ -293,15 +298,15 @@ func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.Ra
 	}
 }
 
-// RegisterTools registers each tool from InitResult on the given extension API.
-func (b *Bridge) RegisterTools(api extension.API) {
+// RegisterTools registers each tool from InitResult on the given API.
+func (b *Bridge) RegisterTools(api BridgeAPI) {
 	for _, t := range b.caps.Tools {
 		tool := t // capture
-		api.RegisterTool(extension.ToolDefinition{
+		api.RegisterTool(ToolDefinition{
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  tool.Parameters,
-			Execute: func(ctx extension.ToolContext) (agent.AgentToolResult, error) {
+			Execute: func(ctx ToolContext) (ToolResult, error) {
 				params := map[string]any{
 					"tool_call_id": ctx.ToolCallID,
 					"name":         tool.Name,
@@ -309,27 +314,21 @@ func (b *Bridge) RegisterTools(api extension.API) {
 				}
 				raw, err := b.CallHook("tool_call", params, 30*time.Second)
 				if err != nil {
-					return agent.AgentToolResult{
+					return ToolResult{
 						Content: []ai.ToolResultContent{{Text: err.Error()}},
 						IsError: true,
 					}, nil
 				}
-				var result struct {
-					Content []ai.ToolResultContent `json:"content"`
-					IsError bool                   `json:"is_error"`
-				}
+				var result ToolResult
 				if raw != nil {
 					if err := json.Unmarshal(raw, &result); err != nil {
-						return agent.AgentToolResult{
+						return ToolResult{
 							Content: []ai.ToolResultContent{{Text: "failed to parse tool result: " + err.Error()}},
 							IsError: true,
 						}, nil
 					}
 				}
-				return agent.AgentToolResult{
-					Content: result.Content,
-					IsError: result.IsError,
-				}, nil
+				return result, nil
 			},
 		})
 	}

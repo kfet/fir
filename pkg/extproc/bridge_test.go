@@ -7,69 +7,56 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/extension"
 )
 
-// mockAPI implements extension.API for testing.
-type mockAPI struct {
+// mockBridgeAPI implements BridgeAPI for testing.
+type mockBridgeAPI struct {
 	execCalled      bool
 	execCmd         string
 	sessionName     string
 	activeTools     []string
-	sentMessages    []extension.CustomMessageSpec
+	sentMessages    []CustomMessageSpec
 	userMessages    []string
 	labels          map[string]string
 	modelSet        *ai.Model
-	toolsRegistered []extension.ToolDefinition
+	toolsRegistered []ToolDefinition
 }
 
-func newMockAPI() *mockAPI {
-	return &mockAPI{labels: make(map[string]string)}
+func newMockAPI() *mockBridgeAPI {
+	return &mockBridgeAPI{labels: make(map[string]string)}
 }
 
-func (m *mockAPI) On(string, extension.Handler)                                     {}
-func (m *mockAPI) RegisterTool(def extension.ToolDefinition)                        { m.toolsRegistered = append(m.toolsRegistered, def) }
-func (m *mockAPI) RegisterCommand(string, extension.Command)                        {}
-func (m *mockAPI) RegisterFlag(string, extension.Flag)                              {}
-func (m *mockAPI) RegisterShortcut(string, extension.ShortcutHandler)               {}
-func (m *mockAPI) SendMessage(msg extension.CustomMessageSpec, _ *extension.SendMessageOptions) {
+func (m *mockBridgeAPI) RegisterTool(def ToolDefinition) {
+	m.toolsRegistered = append(m.toolsRegistered, def)
+}
+func (m *mockBridgeAPI) SendMessage(msg CustomMessageSpec, _ *SendMessageOptions) {
 	m.sentMessages = append(m.sentMessages, msg)
 }
-func (m *mockAPI) SendUserMessage(content string, _ *extension.SendUserMessageOptions) {
+func (m *mockBridgeAPI) SendUserMessage(content string, _ *SendUserMessageOptions) {
 	m.userMessages = append(m.userMessages, content)
 }
-func (m *mockAPI) AppendEntry(string, any)              {}
-func (m *mockAPI) SetSessionName(name string)           { m.sessionName = name }
-func (m *mockAPI) GetSessionName() string               { return m.sessionName }
-func (m *mockAPI) SetLabel(id, label string)            { m.labels[id] = label }
-func (m *mockAPI) ClearLabel(id string)                 { delete(m.labels, id) }
-func (m *mockAPI) GetActiveTools() []string             { return m.activeTools }
-func (m *mockAPI) GetAllTools() []extension.ToolInfo    { return nil }
-func (m *mockAPI) SetActiveTools(names []string)        { m.activeTools = names }
-func (m *mockAPI) GetCommands() []core.SlashCommandInfo { return nil }
-func (m *mockAPI) SetModel(model *ai.Model) bool        { m.modelSet = model; return true }
-func (m *mockAPI) GetThinkingLevel() string              { return "" }
-func (m *mockAPI) SetThinkingLevel(string)               {}
-func (m *mockAPI) GetFlag(string) any                    { return nil }
-func (m *mockAPI) Events() core.EventBus                 { return nil }
-func (m *mockAPI) Exec(cmd string, args []string) (*extension.ExecResult, error) {
+func (m *mockBridgeAPI) SetSessionName(name string)    { m.sessionName = name }
+func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
+func (m *mockBridgeAPI) SetLabel(id, label string)     { m.labels[id] = label }
+func (m *mockBridgeAPI) ClearLabel(id string)          { delete(m.labels, id) }
+func (m *mockBridgeAPI) GetActiveTools() []string      { return m.activeTools }
+func (m *mockBridgeAPI) SetActiveTools(names []string)  { m.activeTools = names }
+func (m *mockBridgeAPI) SetModel(model *ai.Model) bool  { m.modelSet = model; return true }
+func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
 	m.execCalled = true
 	m.execCmd = cmd
-	return &extension.ExecResult{Stdout: "ok", ExitCode: 0}, nil
+	return ExecResult{Stdout: "ok", ExitCode: 0}, nil
 }
 
+// Verify mockBridgeAPI satisfies BridgeAPI at compile time.
+var _ BridgeAPI = (*mockBridgeAPI)(nil)
+
 // pipePair creates a Bridge connected via pipes (no real process).
-// Returns the bridge, the codec for the "extension side", and a cleanup func.
 func pipePair(caps *InitResult) (*Bridge, *Codec) {
-	// fir→ext: fir writes to extR
 	extR, firW := io.Pipe()
-	// ext→fir: ext writes to firR
 	firR, extW := io.Pipe()
 
-	// Create a fake process with a codec wired to the pipes.
 	proc := &Process{}
 	proc.codec = NewCodec(firR, firW)
 
@@ -87,7 +74,6 @@ func TestBridge_EmitEvent_Subscribed(t *testing.T) {
 	defer cancel()
 	go func() { _ = b.Run(ctx, newMockAPI()) }()
 
-	// Emit a subscribed event.
 	go func() {
 		_ = b.EmitEvent("session_start", map[string]string{"foo": "bar"})
 	}()
@@ -109,8 +95,6 @@ func TestBridge_EmitEvent_NotSubscribed(t *testing.T) {
 	b, _ := pipePair(&InitResult{
 		Events: []string{"session_start"},
 	})
-
-	// Emit an event the extension didn't subscribe to — should be a no-op.
 	err := b.EmitEvent("turn_end", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -124,23 +108,18 @@ func TestBridge_CallHook_Timeout(t *testing.T) {
 	defer cancel()
 	go func() { _ = b.Run(ctx, newMockAPI()) }()
 
-	// Simulate extension: read request but never respond.
 	go func() {
 		for {
 			_, err := extCodec.ReadMessage()
 			if err != nil {
 				return
 			}
-			// deliberately do not respond
 		}
 	}()
 
 	_, err := b.CallHook("hook/test", nil, 50*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
-	}
-	if got := err.Error(); got == "" {
-		t.Fatal("expected non-empty error")
 	}
 }
 
@@ -151,7 +130,6 @@ func TestBridge_CallHook_Success(t *testing.T) {
 	defer cancel()
 	go func() { _ = b.Run(ctx, newMockAPI()) }()
 
-	// Respond to the hook from the extension side.
 	go func() {
 		msg, err := extCodec.ReadMessage()
 		if err != nil {
@@ -177,16 +155,11 @@ func TestBridge_InboundExec(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
 
-	go func() {
-		_ = b.Run(ctx, api)
-	}()
-
-	// Send an exec request from the extension.
 	params := json.RawMessage(`{"command":"echo","args":["hello"]}`)
 	_ = extCodec.WriteRequest(1, "exec", &params)
 
-	// Read the response.
 	msg, err := extCodec.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
@@ -209,10 +182,7 @@ func TestBridge_InboundNotify(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	go func() {
-		_ = b.Run(ctx, api)
-	}()
+	go func() { _ = b.Run(ctx, api) }()
 
 	params := json.RawMessage(`{"message":"hello","level":"info"}`)
 	_ = extCodec.WriteRequest(1, "notify", &params)
@@ -245,12 +215,10 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 		t.Fatalf("got tool name %s", api.toolsRegistered[0].Name)
 	}
 
-	// Start Run in background to route the response.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = b.Run(ctx, api) }()
 
-	// Execute the tool — the extension side must respond.
 	go func() {
 		msg, err := extCodec.ReadMessage()
 		if err != nil {
@@ -261,7 +229,7 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, &result, nil)
 	}()
 
-	toolResult, err := api.toolsRegistered[0].Execute(extension.ToolContext{
+	toolResult, err := api.toolsRegistered[0].Execute(ToolContext{
 		ToolCallID: "tc1",
 		Params:     map[string]any{"arg": "val"},
 	})
@@ -275,7 +243,3 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 		t.Fatalf("unexpected content: %+v", toolResult.Content)
 	}
 }
-
-// Verify mockAPI satisfies extension.API at compile time.
-var _ extension.API = (*mockAPI)(nil)
-var _ agent.AgentToolResult // ensure import used

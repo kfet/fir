@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 )
 
 // Error represents a JSON-RPC 2.0 error object.
@@ -42,10 +43,12 @@ type Notification struct {
 }
 
 // Codec reads and writes JSON-RPC 2.0 messages over newline-delimited JSON.
+// Write methods are safe for concurrent use.
 type Codec struct {
 	reader  *bufio.Reader
 	writer  io.Writer
 	encoder *json.Encoder
+	writeMu sync.Mutex
 }
 
 // NewCodec creates a Codec from separate reader and writer.
@@ -110,6 +113,8 @@ func (c *Codec) ReadMessage() (any, error) {
 
 // WriteRequest writes a JSON-RPC 2.0 request.
 func (c *Codec) WriteRequest(id int, method string, params any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	msg := struct {
 		JSONRPC string `json:"jsonrpc"`
 		ID      int    `json:"id"`
@@ -121,6 +126,8 @@ func (c *Codec) WriteRequest(id int, method string, params any) error {
 
 // WriteNotification writes a JSON-RPC 2.0 notification (no id).
 func (c *Codec) WriteNotification(method string, params any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	msg := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -131,6 +138,8 @@ func (c *Codec) WriteNotification(method string, params any) error {
 
 // WriteResponse writes a JSON-RPC 2.0 response.
 func (c *Codec) WriteResponse(id any, result any, rpcErr *Error) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	type resp struct {
 		JSONRPC string `json:"jsonrpc"`
 		ID      any    `json:"id"`

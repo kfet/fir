@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/extproc/sdk"
 )
 
@@ -44,7 +43,7 @@ func (m *Manager) SetTrustStore(ts *TrustStore) {
 
 // Start discovers extensions, spawns processes, performs handshakes, and
 // starts bridge dispatch loops.
-func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api extension.API) error {
+func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
 	configs, err := Discover(projectDir)
 	if err != nil {
 		return err
@@ -68,7 +67,7 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	return nil
 }
 
-func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api extension.API, projectDir string) error {
+func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
 	// Trust check for project-local extensions.
 	if cfg.Scope == "project" {
 		hash, err := ComputeHash(cfg.Path)
@@ -118,11 +117,17 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 }
 
 // Stop shuts down all bridges and processes.
+// Sends session_shutdown event before stopping.
 func (m *Manager) Stop() error {
 	m.mu.Lock()
 	bridges := m.bridges
 	m.bridges = nil
 	m.mu.Unlock()
+
+	// Send shutdown event to all extensions.
+	for _, mb := range bridges {
+		_ = mb.bridge.EmitEvent("session_shutdown", nil)
+	}
 
 	for _, mb := range bridges {
 		mb.cancel()
