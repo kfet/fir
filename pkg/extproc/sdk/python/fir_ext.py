@@ -216,7 +216,7 @@ class Context:
 
     def set_status(self, text: str) -> None:
         """Set persistent status text in the footer."""
-        self._call("set_status", {"text": text})
+        self._call("set_status", {"status": text})
 
     def set_session_name(self, name: str) -> None:
         """Set the display name for the session."""
@@ -236,11 +236,11 @@ class Context:
 
     def set_active_tools(self, tools: List[str]) -> None:
         """Set which tools are active."""
-        self._call("set_active_tools", {"tools": tools})
+        self._call("set_active_tools", {"names": tools})
 
-    def set_model(self, model: str) -> None:
+    def set_model(self, provider: str, model_id: str) -> None:
         """Change the current model."""
-        self._call("set_model", {"model": model})
+        self._call("set_model", {"provider": provider, "id": model_id})
 
 
 # ---------------------------------------------------------------------------
