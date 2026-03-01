@@ -14,6 +14,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // BashToolParams are the parameters for the bash tool.
@@ -85,8 +86,18 @@ func NewBashToolWithPrefix(cwd, commandPrefix string) agent.AgentTool {
 	return t
 }
 
+// truncateForLog truncates a string for log output.
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
 // executeBash runs a bash command and returns the result.
 func executeBash(ctx context.Context, command, cwd string, timeout time.Duration) (agent.AgentToolResult, error) {
+	firlog.Debug("bash exec", "command", truncateForLog(command, 200), "cwd", cwd, "timeout", timeout)
+	start := time.Now()
 	// Verify cwd exists
 	if _, err := os.Stat(cwd); err != nil {
 		return agent.AgentToolResult{}, fmt.Errorf("working directory does not exist: %s", cwd)
@@ -181,12 +192,15 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 
 		// Process exited with non-zero code
 		if exitErr, ok := err.(*exec.ExitError); ok {
+			firlog.Debug("bash done", "exitCode", exitErr.ExitCode(), "outputLen", len(output), "elapsed", time.Since(start))
 			outputText += fmt.Sprintf("\n\nCommand exited with code %d", exitErr.ExitCode())
 			return agent.AgentToolResult{}, errors.New(outputText)
 		}
 
 		return agent.AgentToolResult{}, err
 	}
+
+	firlog.Debug("bash done", "exitCode", 0, "outputLen", len(output), "truncated", truncResult.Truncated, "elapsed", time.Since(start))
 
 	details := map[string]any{}
 	if fullOutputPath != "" {

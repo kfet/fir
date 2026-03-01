@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // --- Google Gemini API types ---
@@ -89,6 +90,7 @@ func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, optio
 			return
 		}
 
+		firlog.Debug("google response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
 			Reason:  output.StopReason,
@@ -131,6 +133,8 @@ func streamGoogleHTTP(
 	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse",
 		strings.TrimRight(baseURL, "/"), model.ID)
 
+	firlog.Debug("google request", "model", model.ID, "messageCount", len(prompt.Messages))
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -150,6 +154,7 @@ func streamGoogleHTTP(
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		firlog.Warn("google HTTP error", "model", model.ID, "err", "connection error")
 		// Don't wrap the original error — it may contain the full URL with the API key.
 		return fmt.Errorf("Google API request failed (model=%s): connection error", model.ID)
 	}
@@ -157,6 +162,7 @@ func streamGoogleHTTP(
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
+		firlog.Warn("google error response", "model", model.ID, "status", resp.StatusCode)
 		return fmt.Errorf("%d: %s", resp.StatusCode, string(bodyBytes))
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // ============================================================================
@@ -144,6 +145,7 @@ func (r *Runner) LoadEnabled(names []string) error {
 	if len(names) == 0 {
 		return nil
 	}
+	firlog.Debug("loading extensions", "names", names)
 	nameSet := make(map[string]bool, len(names))
 	for _, n := range names {
 		nameSet[n] = true
@@ -158,6 +160,7 @@ func (r *Runner) LoadEnabled(names []string) error {
 	}
 	for name := range nameSet {
 		log.Printf("extension %q requested but not registered (not compiled in?)", name)
+		firlog.Warn("extension not registered", "name", name)
 	}
 	return r.loadFactories(filtered)
 }
@@ -165,6 +168,7 @@ func (r *Runner) LoadEnabled(names []string) error {
 // loadFactories initializes the given extension factories.
 func (r *Runner) loadFactories(registered []RegisteredFactory) error {
 	for _, rf := range registered {
+		firlog.Debug("loading extension", "name", rf.Name)
 		ext := &Extension{
 			Name:      rf.Name,
 			handlers:  make(map[string][]Handler),
@@ -185,6 +189,7 @@ func (r *Runner) loadFactories(registered []RegisteredFactory) error {
 			defer func() {
 				if rv := recover(); rv != nil {
 					log.Printf("extension %q panicked during init: %v", rf.Name, rv)
+					firlog.Error("extension panicked during init", "name", rf.Name, "panic", rv)
 				}
 			}()
 			rf.Factory(api)
@@ -233,6 +238,7 @@ func (r *Runner) loadFactories(registered []RegisteredFactory) error {
 		}
 		r.mu.Unlock()
 	}
+	firlog.Info("extensions loaded", "count", len(registered), "tools", len(r.allTools), "commands", len(r.allCommands))
 	return nil
 }
 
@@ -393,6 +399,7 @@ func (r *Runner) emitHandlers(eventType string, event *Event) (any, error) {
 		return nil, nil
 	}
 
+	firlog.Debug("extension event", "type", eventType, "handlerCount", len(snapshot))
 	ctx := r.createContext()
 	var lastResult any
 
@@ -401,6 +408,7 @@ func (r *Runner) emitHandlers(eventType string, event *Event) (any, error) {
 			defer func() {
 				if rv := recover(); rv != nil {
 					err = fmt.Errorf("handler panicked: %v", rv)
+					firlog.Error("extension handler panicked", "event", eventType, "panic", rv)
 				}
 			}()
 			return h(event, ctx)
@@ -477,6 +485,7 @@ func (r *Runner) EmitToolCall(toolCallID, toolName string, input map[string]any)
 		return nil
 	}
 	if tcr, ok := result.(*ToolCallResult); ok {
+		firlog.Debug("tool hook", "tool", toolName, "blocked", tcr.Block)
 		return tcr
 	}
 	return nil

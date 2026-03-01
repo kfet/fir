@@ -67,6 +67,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
@@ -111,6 +112,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 			return nil, fmt.Errorf("%s", resolved.Error)
 		}
 		model = resolved.Model
+		firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "cli")
 		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
 		if args.Thinking == "" && resolved.ThinkingLevel != "" {
 			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
@@ -118,6 +120,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	} else if len(scopedModels) > 0 {
 		if !skipScopedOnContinue || (!args.Continue && !args.Resume) {
 			model = scopedModels[0].Model
+			firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "scoped")
 		}
 	}
 
@@ -150,6 +153,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	firlog.Debug("session created")
 
 	// Extensions
 	extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
@@ -223,6 +227,7 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 		effective = "high"
 	}
 	if effective != s.ThinkingLevel() {
+		firlog.Debug("thinking level", "requested", string(thinking), "clamped", effective)
 		s.SetThinkingLevel(effective)
 	}
 }
@@ -263,6 +268,7 @@ func run() error {
 
 	if debugEnabled {
 		firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
+		firlog.Debug("args parsed", "provider", args.Provider, "model", args.Model, "mode", args.OutputMode)
 	}
 
 	if args.Help {
@@ -328,10 +334,12 @@ func run() error {
 
 	// ACP mode creates sessions on demand, so dispatch before setupSession.
 	if isACPMode {
+		firlog.Debug("mode dispatch", "mode", "acp")
 		return runAcpMode(args)
 	}
 
 	if !isPrintMode && !isRPCMode {
+		firlog.Debug("mode dispatch", "mode", "interactive")
 		return runInteractiveMode(args, noticeCh)
 	}
 
@@ -349,6 +357,7 @@ func run() error {
 
 	// Run RPC mode
 	if isRPCMode {
+		firlog.Debug("mode dispatch", "mode", "rpc")
 		server := rpcmode.NewServer(setup.result.Session)
 		return server.Run()
 	}

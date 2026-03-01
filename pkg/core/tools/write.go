@@ -10,6 +10,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // WriteToolParams are the parameters for the write tool.
@@ -49,6 +50,8 @@ func NewWriteTool(cwd string) agent.AgentTool {
 			}
 
 			absolutePath := ResolveToCwd(path, cwd)
+
+			firlog.Debug("write file", "path", path, "contentLen", len(content))
 
 			// Check context cancellation
 			if ctx.Err() != nil {

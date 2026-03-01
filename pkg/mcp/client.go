@@ -15,6 +15,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -145,10 +146,12 @@ func commandTransport(cfg ServerConfig) (sdk.Transport, error) {
 // If any server fails to start, already-started sessions are closed before returning
 // the error.
 func (m *Manager) Start(ctx context.Context) ([]agent.AgentTool, error) {
+	firlog.Info("mcp starting", "servers", len(m.configs))
 	var tools []agent.AgentTool
 	for name, cfg := range m.configs {
 		sessionTools, err := m.startServer(ctx, name, cfg)
 		if err != nil {
+			firlog.Warn("mcp connection failed", "server", name, "err", err)
 			m.mu.Lock()
 			m.serverErrors[name] = err
 			m.mu.Unlock()
@@ -180,6 +183,7 @@ func (m *Manager) allTools() []agent.AgentTool {
 
 // startServer connects to a single MCP server and returns its adapted tools.
 func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig) ([]agent.AgentTool, error) {
+	firlog.Debug("mcp connecting", "server", name, "command", cfg.Command)
 	transport, err := m.dialFn(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create transport: %w", err)
@@ -359,6 +363,8 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		}
 		tools = append(tools, AdaptTool(session, name, tool, &m.progressReg))
 	}
+	firlog.Info("mcp connected", "server", name, "tools", len(tools))
+
 	// Expose MCP resources and prompts as additional tools.
 	tools = append(tools,
 		listResourcesTool(session, name),
@@ -514,6 +520,7 @@ func configsEqual(a, b ServerConfig) bool {
 // Close closes all active MCP sessions. Returns the first error encountered,
 // but always attempts to close every session.
 func (m *Manager) Close() error {
+	firlog.Debug("mcp shutting down", "servers", len(m.sessions))
 	m.mu.Lock()
 	sessions := make(map[string]*sdk.ClientSession, len(m.sessions))
 	for k, v := range m.sessions {

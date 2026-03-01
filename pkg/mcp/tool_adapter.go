@@ -8,6 +8,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -63,8 +64,10 @@ func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, re
 				callParams.Meta = sdk.Meta{"progressToken": toolCallID}
 				registry.register(toolCallID, onUpdate)
 			}
+			firlog.Debug("mcp tool call", "server", serverName, "tool", toolName)
 			result, err := session.CallTool(ctx, callParams)
 			if err != nil {
+				firlog.Warn("mcp tool call failed", "server", serverName, "tool", toolName, "err", err)
 				return agent.AgentToolResult{}, err
 			}
 			return convertResult(result), nil

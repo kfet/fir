@@ -11,6 +11,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // EditToolParams are the parameters for the edit tool.
@@ -31,6 +32,7 @@ type editResult struct {
 // replacement to the given content. It is the shared core of both NewEditTool and
 // NewEditToolWithReadWriter.
 func applyEditLogic(content, oldText, newText, path string) (editResult, error) {
+	firlog.Debug("edit file", "path", path, "oldLen", len(oldText), "newLen", len(newText))
 	bom := ""
 	if strings.HasPrefix(content, "\uFEFF") {
 		bom = "\uFEFF"

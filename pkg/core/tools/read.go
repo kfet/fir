@@ -12,6 +12,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // ReadToolParams are the parameters for the read tool.
@@ -95,6 +96,7 @@ func NewReadTool(cwd string) agent.AgentTool {
 
 // executeRead reads a file and returns the result.
 func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, error) {
+	firlog.Debug("read file", "path", path, "cwd", cwd)
 	absolutePath := ResolveReadPath(path, cwd)
 
 	// Check if file exists and is readable
