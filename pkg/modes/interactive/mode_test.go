@@ -847,12 +847,12 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		{"/exit", true, false, false},
 		{"/bogus", false, false, true},
 		// New commands (session-independent, should show warnings or work)
-		{"/login", false, false, true},   // "not yet implemented" warning
-		{"/logout", false, false, true},  // "not yet implemented" warning
-		{"/export", false, false, true},  // "not yet implemented"
-		{"/share", false, false, true},   // "not yet implemented"
-		{"/copy", false, false, true},    // "not yet implemented"
-		{"/name", false, false, true},    // usage warning (no args)
+		{"/login", false, false, true},     // "not yet implemented" warning
+		{"/logout", false, false, true},    // "not yet implemented" warning
+		{"/export", false, false, true},    // "not yet implemented"
+		{"/share", false, false, true},     // "not yet implemented"
+		{"/copy", false, false, true},      // "not yet implemented"
+		{"/name", false, false, true},      // usage warning (no args)
 		{"/changelog", false, true, false}, // shows "No changelog entries found." message
 		{"/tree", false, false, true},
 		{"/fork", false, false, true},
@@ -1445,16 +1445,16 @@ func TestResolveEnabledExtensions_SettingsOnly(t *testing.T) {
 
 	os.MkdirAll(agentDir, 0o755)
 	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify","sandbox"]}`), 0o600)
+		[]byte(`{"extensions":["notify"]}`), 0o600)
 
 	sm := core.NewSettingsManager(cwd, agentDir)
 	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
 
 	result := m.resolveEnabledExtensions()
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 extension, got %d: %v", len(result), result)
 	}
-	if result[0] != "notify" || result[1] != "sandbox" {
+	if result[0] != "notify" {
 		t.Errorf("unexpected extensions: %v", result)
 	}
 }
@@ -1465,11 +1465,11 @@ func TestResolveEnabledExtensions_CLIOnly(t *testing.T) {
 	sm := core.NewSettingsManager(cwd, agentDir)
 
 	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
-	m.cliExtensionNames = []string{"notify", "sandbox"}
+	m.cliExtensionNames = []string{"notify"}
 
 	result := m.resolveEnabledExtensions()
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 extension, got %d: %v", len(result), result)
 	}
 }
 
@@ -1483,19 +1483,14 @@ func TestResolveEnabledExtensions_MergedDeduplicated(t *testing.T) {
 
 	sm := core.NewSettingsManager(cwd, agentDir)
 	m := NewInteractiveMode(nil, nil, sm, InteractiveModeOptions{})
-	m.cliExtensionNames = []string{"notify", "sandbox"}
+	m.cliExtensionNames = []string{"notify"}
 
 	result := m.resolveEnabledExtensions()
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 extension (deduped), got %d: %v", len(result), result)
 	}
-	// "notify" from settings + "sandbox" from CLI (notify not duplicated)
-	found := map[string]bool{}
-	for _, n := range result {
-		found[n] = true
-	}
-	if !found["notify"] || !found["sandbox"] {
-		t.Errorf("expected notify and sandbox, got %v", result)
+	if result[0] != "notify" {
+		t.Errorf("expected notify, got %v", result)
 	}
 }
 

@@ -16,3 +16,4 @@ Thumbs.db
 # Env
 .envrc
 FLEET.md
+__pycache__/

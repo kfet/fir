@@ -157,14 +157,14 @@ or project):
 
 ```json
 {
-  "extensions": ["notify", "sandbox"]
+  "extensions": ["notify", "tmuxspinner"]
 }
 ```
 
 **Enable via CLI** — use `--extension` / `-e` (merges with config, deduplicated):
 
 ```bash
-fir -e notify -e sandbox "do something"
+fir -e notify -e tmuxspinner "do something"
 ```
 
 **Disable all** — `--no-extensions` overrides everything:
@@ -178,7 +178,6 @@ fir --no-extensions "do something"
 | Name | Description |
 |---|---|
 | `notify` | Sends a native terminal notification (OSC 777/99) when the agent finishes. Works in Ghostty, iTerm2, WezTerm, Kitty. |
-| `sandbox` | (TBD) Wraps bash commands with OS-level filesystem and network restrictions. Configured via `~/.fir/agent/sandbox.json` (global) or `.fir/sandbox.json` (project). |
 
 #### Writing custom extensions
 

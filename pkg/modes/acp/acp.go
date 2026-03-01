@@ -487,6 +487,8 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	if !pa.options.NoExtensions {
 		extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
 			EnabledNames: pa.options.EnabledExtensions,
+			ProjectDir:   cwd,
+			Cwd:          cwd,
 		})
 		if err == nil && extSetup != nil && extSetup.Runner != nil {
 			entry.extensionRunner = extSetup.Runner
