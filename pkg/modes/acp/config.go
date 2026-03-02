@@ -98,11 +98,11 @@ func buildModelConfigOption(reg *core.ModelRegistry, currentModel *ai.Model) Ses
 // buildConfigOptions returns all session config options for the given session.
 func buildConfigOptions(entry *firSession) []SessionConfigOption {
 	var opts []SessionConfigOption
+	opts = append(opts, buildThinkingConfigOptionFromAccessor(entry.getThinkingAccessor()))
 	// Model config only if we have a real session with model registry.
 	if entry.session != nil && entry.modelRegistry != nil {
 		opts = append(opts, buildModelConfigOption(entry.modelRegistry, entry.session.Model()))
 	}
-	opts = append(opts, buildThinkingConfigOptionFromAccessor(entry.getThinkingAccessor()))
 	return opts
 }
 
