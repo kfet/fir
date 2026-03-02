@@ -449,6 +449,14 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
+		// Handle extension slash commands — dispatched to the owning extension.
+		if strings.HasPrefix(text, "/") && m.isExtensionSlashCommand(text) {
+			m.editor.AddToHistory(text)
+			m.editor.SetText("")
+			go m.handleExtensionSlashCommand(text)
+			return
+		}
+
 		// Handle bash command (! for normal, !! for excluded from context)
 		if strings.HasPrefix(strings.TrimSpace(text), "!") {
 			trimmed := strings.TrimSpace(text)
@@ -663,7 +671,14 @@ func (m *InteractiveMode) setupAutocomplete() {
 	}
 
 	// Add extension commands
-	// (extensions do not register named slash commands)
+	if m.extSetup != nil && m.extSetup.Manager != nil {
+		for _, ec := range m.extSetup.Manager.GetCommands() {
+			commands = append(commands, SlashCommand{
+				Name:        ec.Spec.Name,
+				Description: ec.Spec.Description,
+			})
+		}
+	}
 
 	basePath, _ := os.Getwd()
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
@@ -690,6 +705,44 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 		return true
 	}
 	return false
+}
+
+// isExtensionSlashCommand reports whether text is a slash command registered
+// by a running extension.
+func (m *InteractiveMode) isExtensionSlashCommand(text string) bool {
+	if m.extSetup == nil || m.extSetup.Manager == nil {
+		return false
+	}
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return false
+	}
+	name := strings.TrimPrefix(parts[0], "/")
+	for _, ec := range m.extSetup.Manager.GetCommands() {
+		if ec.Spec.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// handleExtensionSlashCommand dispatches text to the owning extension and
+// shows any message it returns.
+func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
+	parts := strings.Fields(text)
+	if len(parts) == 0 {
+		return
+	}
+	name := strings.TrimPrefix(parts[0], "/")
+	args := parts[1:]
+	result, err := m.extSetup.Manager.DispatchCommand(name, args, 0)
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Extension command /%s failed: %v", name, err))
+		return
+	}
+	if result.Message != "" {
+		m.showMessage(result.Message)
+	}
 }
 
 // handleSlashCommand dispatches a builtin slash command.

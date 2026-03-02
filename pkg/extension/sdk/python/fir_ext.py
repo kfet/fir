@@ -62,6 +62,8 @@ _tools: list[dict[str, Any]] = []
 _tool_handlers: dict[str, Callable] = {}
 _hook_handlers: dict[str, Callable] = {}
 _event_handlers: dict[str, Callable] = {}
+_commands: list[dict[str, Any]] = []
+_command_handlers: dict[str, Callable] = {}
 
 # ---------------------------------------------------------------------------
 # Decorators
@@ -88,6 +90,28 @@ def tool(
             }
         )
         _tool_handlers[name] = fn
+        return fn
+
+    return decorator
+
+
+def command(name: str, description: str = "") -> Callable:
+    """Register a slash command (``/name``) that users can type in the TUI.
+
+    The decorated function receives ``(args: list[str], ctx: Context)`` and
+    may return a dict with an optional ``"message"`` key shown in the TUI,
+    or ``None`` to show nothing.
+
+    Example::
+
+        @fir_ext.command(name="greet", description="Greet the user")
+        def cmd_greet(args, ctx):
+            return {"message": f"Hello, {args[0] if args else 'world'}!"}
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _commands.append({"name": name, "description": description})
+        _command_handlers[name] = fn
         return fn
 
     return decorator
@@ -363,6 +387,20 @@ def run(
 
         # --- hooks ---
         if method.startswith("hook/"):
+            # hook/command is dispatched to registered command handlers.
+            if method == "hook/command":
+                cmd_name = params.get("name", "")
+                handler = _command_handlers.get(cmd_name)
+                if handler is None:
+                    _write_message(_make_response(msg_id, None), out)
+                    return
+                try:
+                    result = handler(params.get("args", []), ctx)
+                    _write_message(_make_response(msg_id, result), out)
+                except Exception as exc:
+                    _write_message(_make_error(msg_id, -32000, str(exc)), out)
+                return
+
             handler = _hook_handlers.get(method)
             if handler is None:
                 _write_message(_make_response(msg_id, None), out)
@@ -386,6 +424,7 @@ def run(
                 {
                     "name": ext_name,
                     "tools": list(_tools),
+                    "commands": list(_commands),
                     "events": subscribed_events,
                 },
             )

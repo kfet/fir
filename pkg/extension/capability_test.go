@@ -140,3 +140,83 @@ func TestHandshake_NilCodec(t *testing.T) {
 		t.Fatal("expected error for nil codec")
 	}
 }
+
+func TestValidateCommandName(t *testing.T) {
+	valid := []string{"greet", "hello-world", "cmd1", "my-cmd"}
+	for _, name := range valid {
+		if err := ValidateCommandName(name); err != nil {
+			t.Errorf("ValidateCommandName(%q) = %v, want nil", name, err)
+		}
+	}
+	invalid := []string{"", "Hello", "1abc", "_cmd", "cmd name", "cmd/sub", "CMD"}
+	for _, name := range invalid {
+		if err := ValidateCommandName(name); err == nil {
+			t.Errorf("ValidateCommandName(%q) = nil, want error", name)
+		}
+	}
+}
+
+func TestHandshake_Commands(t *testing.T) {
+	cR, cW := io.Pipe()
+	fR, fW := io.Pipe()
+
+	proc := &Process{
+		cfg:      ExtProcConfig{Name: "test", Path: "/fake", Scope: "project"},
+		codec:    NewCodec(fR, cW),
+		waitDone: make(chan struct{}),
+	}
+
+	extCodec := NewCodec(cR, fW)
+	go func() {
+		msg, _ := extCodec.ReadMessage()
+		req := msg.(*Request)
+		result := InitResult{
+			Name: "cmd-ext",
+			Commands: []CommandSpec{
+				{Name: "greet", Description: "Greet someone"},
+				{Name: "status", Description: "Show status"},
+			},
+		}
+		_ = extCodec.WriteResponse(req.ID, result, nil)
+	}()
+
+	got, err := Handshake(proc, "/tmp", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Commands) != 2 {
+		t.Fatalf("want 2 commands, got %d", len(got.Commands))
+	}
+	if got.Commands[0].Name != "greet" || got.Commands[1].Name != "status" {
+		t.Errorf("unexpected commands: %+v", got.Commands)
+	}
+}
+
+func TestHandshake_InvalidCommandName(t *testing.T) {
+	cR, cW := io.Pipe()
+	fR, fW := io.Pipe()
+
+	proc := &Process{
+		cfg:      ExtProcConfig{Name: "test", Path: "/fake", Scope: "project"},
+		codec:    NewCodec(fR, cW),
+		waitDone: make(chan struct{}),
+	}
+
+	extCodec := NewCodec(cR, fW)
+	go func() {
+		msg, _ := extCodec.ReadMessage()
+		req := msg.(*Request)
+		result := InitResult{
+			Name: "bad-ext",
+			Commands: []CommandSpec{
+				{Name: "Bad Name!", Description: "Invalid"},
+			},
+		}
+		_ = extCodec.WriteResponse(req.ID, result, nil)
+	}()
+
+	_, err := Handshake(proc, "/tmp", 0)
+	if err == nil {
+		t.Fatal("expected error for invalid command name")
+	}
+}

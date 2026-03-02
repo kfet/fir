@@ -290,3 +290,65 @@ func containsString(slice []string, s string) bool {
 	}
 	return false
 }
+
+// ExtCommand holds a slash command declared by an extension.
+type ExtCommand struct {
+	ExtName string
+	Spec    CommandSpec
+}
+
+// GetCommands returns all slash commands declared by running extensions.
+func (m *Manager) GetCommands() []ExtCommand {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	var cmds []ExtCommand
+	for _, mb := range bridges {
+		for _, spec := range mb.bridge.caps.Commands {
+			cmds = append(cmds, ExtCommand{ExtName: mb.cfg.Name, Spec: spec})
+		}
+	}
+	return cmds
+}
+
+// CommandResult is the result of dispatching a slash command to an extension.
+type CommandResult struct {
+	// Message is optional text shown to the user in the TUI.
+	Message string `json:"message"`
+}
+
+// DispatchCommand sends a hook/command call to the extension that owns name.
+// args are the whitespace-split arguments after the command name (may be empty).
+// Returns ErrCommandNotFound if no extension registered that command name.
+func (m *Manager) DispatchCommand(name string, args []string, timeout time.Duration) (CommandResult, error) {
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	for _, mb := range bridges {
+		for _, spec := range mb.bridge.caps.Commands {
+			if spec.Name == name {
+				params := map[string]any{
+					"name": name,
+					"args": args,
+				}
+				raw, err := mb.bridge.CallHook("hook/command", params, timeout)
+				if err != nil {
+					return CommandResult{}, fmt.Errorf("extension %s command %q: %w", mb.cfg.Name, name, err)
+				}
+				var result CommandResult
+				if raw != nil {
+					// Best-effort parse; ignore errors.
+					_ = json.Unmarshal(raw, &result)
+				}
+				return result, nil
+			}
+		}
+	}
+	return CommandResult{}, fmt.Errorf("extension: no command %q registered", name)
+}

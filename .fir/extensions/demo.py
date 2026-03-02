@@ -204,4 +204,15 @@ def on_tool_execution_end(params, ctx):
         ctx.clear_label(tcid)                         # clear_label
 
 
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.command(name="demo-echo", description="Echo arguments back as a TUI message")
+def cmd_demo_echo(args, ctx):
+    msg = " ".join(args) if args else "(no arguments)"
+    return {"message": f"demo-echo: {msg}"}
+
+
 fir_ext.run(name="demo")

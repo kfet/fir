@@ -70,6 +70,8 @@ class TestInitHandshake(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_init_returns_capabilities(self):
         @fir_ext.tool("my_tool", "A test tool", _TOOL_PARAMS)
@@ -107,6 +109,8 @@ class TestToolCall(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_tool_call_success(self):
         @fir_ext.tool("add", "Add two numbers", _ADD_PARAMS)
@@ -195,6 +199,8 @@ class TestHooks(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_hook_dispatch(self):
         @fir_ext.on("hook/tool_call")
@@ -234,6 +240,8 @@ class TestEvents(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_event_fires_handler(self):
         received = []
@@ -267,6 +275,8 @@ class TestContext(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_context_outbound_call(self):
         """Simulate extension calling ctx.set_status() during a tool_call."""
@@ -348,6 +358,10 @@ class TestDecorators(unittest.TestCase):
         fir_ext._tool_handlers.clear()
         fir_ext._hook_handlers.clear()
         fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
 
     def test_tool_decorator_registers(self):
         @fir_ext.tool("t1", "desc1")
@@ -383,6 +397,86 @@ class TestDecorators(unittest.TestCase):
             fir_ext._tools[0]["parameters"],
             {"type": "object", "properties": {}},
         )
+
+    def test_command_decorator_registers(self):
+        @fir_ext.command(name="greet", description="Say hello")
+        def greet(args, ctx):
+            return {"message": "hello"}
+
+        self.assertEqual(len(fir_ext._commands), 1)
+        self.assertEqual(fir_ext._commands[0]["name"], "greet")
+        self.assertEqual(fir_ext._commands[0]["description"], "Say hello")
+        self.assertIn("greet", fir_ext._command_handlers)
+
+
+class TestCommands(unittest.TestCase):
+    def setUp(self):
+        fir_ext._tools.clear()
+        fir_ext._tool_handlers.clear()
+        fir_ext._hook_handlers.clear()
+        fir_ext._event_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
+
+    def test_init_includes_commands(self):
+        @fir_ext.command(name="ping", description="Ping")
+        def ping(args, ctx):
+            return {"message": "pong"}
+
+        inp = _make_input(_init_msg())
+        out = io.StringIO()
+        fir_ext.run(name="cmd-ext", input_stream=inp, output_stream=out)
+
+        msgs = _read_all_messages(out)
+        result = msgs[0]["result"]
+        self.assertEqual(len(result["commands"]), 1)
+        self.assertEqual(result["commands"][0]["name"], "ping")
+        self.assertEqual(result["commands"][0]["description"], "Ping")
+
+    def test_hook_command_dispatched(self):
+        @fir_ext.command(name="greet", description="Greet")
+        def greet(args, ctx):
+            name = args[0] if args else "world"
+            return {"message": f"hello {name}"}
+
+        inp = _make_input(
+            _init_msg(),
+            _hook_msg("hook/command", {"name": "greet", "args": ["alice"]}),
+        )
+        out = io.StringIO()
+        fir_ext.run(input_stream=inp, output_stream=out)
+
+        msgs = _read_all_messages(out)
+        self.assertEqual(msgs[1]["result"], {"message": "hello alice"})
+
+    def test_hook_command_unknown_returns_null(self):
+        inp = _make_input(
+            _init_msg(),
+            _hook_msg("hook/command", {"name": "nope", "args": []}),
+        )
+        out = io.StringIO()
+        fir_ext.run(input_stream=inp, output_stream=out)
+
+        msgs = _read_all_messages(out)
+        self.assertIsNone(msgs[1]["result"])
+
+    def test_hook_command_error(self):
+        @fir_ext.command(name="fail", description="Always fails")
+        def fail(args, ctx):
+            raise ValueError("boom")
+
+        inp = _make_input(
+            _init_msg(),
+            _hook_msg("hook/command", {"name": "fail", "args": []}),
+        )
+        out = io.StringIO()
+        fir_ext.run(input_stream=inp, output_stream=out)
+
+        msgs = _read_all_messages(out)
+        self.assertIn("error", msgs[1])
+        self.assertIn("boom", msgs[1]["error"]["message"])
 
 
 class TestJsonRpcHelpers(unittest.TestCase):

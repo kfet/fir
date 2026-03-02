@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Extensions can now register slash commands via `InitResult.Commands`; users type `/name [args]` in the TUI and fir dispatches `hook/command` to the owning extension, showing any returned message; Python SDK gains a `@fir_ext.command()` decorator
 - ACP session resume now replays full conversation history (user messages, assistant text/thinking, tool calls with results) to the client via session update notifications, so past sessions are fully visible in the client UI
 - ACP `session/resume` response now includes `configOptions` (thinking level, model selectors) matching `session/new` behavior
 - `session_named` extension event emitted when session name changes or a named session is loaded; tmuxspinner extension now updates the tmux window name to match the session name

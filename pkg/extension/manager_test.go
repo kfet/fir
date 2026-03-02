@@ -2,6 +2,8 @@ package extension
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -242,5 +244,139 @@ func TestManager_AllowedNames(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if n := api.toolCount(); n != 1 {
 		t.Fatalf("expected exactly 1 tool, got %d (blocked-ext should have been skipped)", n)
+	}
+}
+
+// makeCmdBridge creates a Manager with one bridge that advertises commands.
+// The returned cleanup func stops the simulated extension.
+func makeCmdBridge(t *testing.T, mgr *Manager, cmds []CommandSpec, dispatch func(name string, args []string) CommandResult) context.CancelFunc {
+	t.Helper()
+
+	// fir-side pipes: fir reads from fR, writes to cW; ext reads from cR, writes to fW.
+	cR, cW := io.Pipe()
+	fR, fW := io.Pipe()
+
+	proc := &Process{
+		cfg:      ExtProcConfig{Name: "cmd-ext", Path: "/fake", Scope: "project"},
+		stdin:    cW,
+		codec:    NewCodec(fR, cW),
+		waitDone: make(chan struct{}),
+	}
+
+	caps := &InitResult{
+		Name:     "cmd-ext",
+		Commands: cmds,
+	}
+	bridge := NewBridge(proc, caps)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Simulate the extension: respond to hook/command calls.
+	extCodec := NewCodec(cR, fW)
+	go func() {
+		defer cR.Close()
+		defer fW.Close()
+		for {
+			msg, err := extCodec.ReadMessage()
+			if err != nil {
+				return
+			}
+			req, ok := msg.(*Request)
+			if !ok {
+				continue
+			}
+			if req.Method == "hook/command" {
+				var p struct {
+					Name string   `json:"name"`
+					Args []string `json:"args"`
+				}
+				if req.Params != nil {
+					_ = json.Unmarshal(*req.Params, &p)
+				}
+				result := dispatch(p.Name, p.Args)
+				_ = extCodec.WriteResponse(req.ID, result, nil)
+			}
+		}
+	}()
+
+	go func() {
+		if err := bridge.Run(ctx, newMockAPI()); err != nil && ctx.Err() == nil {
+			t.Logf("bridge exited: %v", err)
+		}
+	}()
+
+	mgr.mu.Lock()
+	mgr.bridges = append(mgr.bridges, &managedBridge{
+		cfg:    proc.cfg,
+		proc:   proc,
+		bridge: bridge,
+		cancel: cancel,
+	})
+	mgr.mu.Unlock()
+
+	return func() {
+		cancel()
+		cW.Close()
+		fR.Close()
+	}
+}
+
+func TestManager_GetCommands(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cmds := []CommandSpec{
+		{Name: "hello", Description: "Say hello"},
+		{Name: "status", Description: "Show status"},
+	}
+	cleanup := makeCmdBridge(t, mgr, cmds, func(name string, args []string) CommandResult {
+		return CommandResult{}
+	})
+	defer cleanup()
+
+	got := mgr.GetCommands()
+	if len(got) != 2 {
+		t.Fatalf("GetCommands: want 2, got %d", len(got))
+	}
+	if got[0].Spec.Name != "hello" || got[1].Spec.Name != "status" {
+		t.Errorf("unexpected commands: %+v", got)
+	}
+	if got[0].ExtName != "cmd-ext" {
+		t.Errorf("ExtName = %q, want cmd-ext", got[0].ExtName)
+	}
+}
+
+func TestManager_DispatchCommand(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cmds := []CommandSpec{{Name: "greet", Description: "Greet"}}
+	cleanup := makeCmdBridge(t, mgr, cmds, func(name string, args []string) CommandResult {
+		msg := "hi"
+		if len(args) > 0 {
+			msg = "hi " + args[0]
+		}
+		return CommandResult{Message: msg}
+	})
+	defer cleanup()
+
+	result, err := mgr.DispatchCommand("greet", []string{"alice"}, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Message != "hi alice" {
+		t.Errorf("message = %q, want %q", result.Message, "hi alice")
+	}
+}
+
+func TestManager_DispatchCommand_NotFound(t *testing.T) {
+	mgr := NewManager(slog.Default())
+
+	_, err := mgr.DispatchCommand("nonexistent", nil, time.Second)
+	if err == nil {
+		t.Fatal("expected error for unknown command")
+	}
+}
+
+func TestManager_GetCommands_Empty(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	if got := mgr.GetCommands(); len(got) != 0 {
+		t.Fatalf("expected empty, got %v", got)
 	}
 }

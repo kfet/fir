@@ -3,6 +3,7 @@ package extension
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -19,11 +20,33 @@ type ToolSpec struct {
 	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
+// CommandSpec describes a slash command registered by an extension.
+// The Name must be a valid identifier (letters, digits, hyphens) and must not
+// conflict with any built-in slash command.
+type CommandSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 // InitResult is the result returned by an extension in response to "init".
 type InitResult struct {
-	Name   string     `json:"name"`
-	Tools  []ToolSpec `json:"tools,omitempty"`
-	Events []string   `json:"events,omitempty"`
+	Name     string        `json:"name"`
+	Tools    []ToolSpec    `json:"tools,omitempty"`
+	Commands []CommandSpec `json:"commands,omitempty"`
+	Events   []string      `json:"events,omitempty"`
+}
+
+// commandNameRE validates extension command names: lowercase letters, digits,
+// hyphens; must start with a letter.
+var commandNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// ValidateCommandName checks that a command name is well-formed. It returns
+// the name unchanged on success.
+func ValidateCommandName(name string) error {
+	if !commandNameRE.MatchString(name) {
+		return fmt.Errorf("extension: command name %q must match [a-z][a-z0-9-]*", name)
+	}
+	return nil
 }
 
 // Handshake sends an "init" request to the extension process and waits for a
@@ -83,6 +106,11 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 			return nil, err
 		}
 		result.Name = validName
+		for _, cmd := range result.Commands {
+			if err := ValidateCommandName(cmd.Name); err != nil {
+				return nil, err
+			}
+		}
 		return &result, nil
 	}
 }
