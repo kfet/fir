@@ -746,6 +746,20 @@ func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 	return nil
 }
 
+// AddModel inserts a model into the registry if one with the same provider and
+// ID does not already exist. This is useful for tests and for dynamically
+// registering models that are not in the built-in list.
+func (r *ModelRegistry) AddModel(m *ai.Model) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, existing := range r.models {
+		if existing.Provider == m.Provider && existing.ID == m.ID {
+			return // already present
+		}
+	}
+	r.models = append(r.models, m)
+}
+
 // GetApiKey returns the API key for a model's provider.
 func (r *ModelRegistry) GetApiKey(model *ai.Model) string {
 	return r.authStorage.GetApiKey(model.Provider)

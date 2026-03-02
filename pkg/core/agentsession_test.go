@@ -2405,3 +2405,129 @@ func TestAgentSession_HasPendingWork_AssistantLast(t *testing.T) {
 		t.Error("HasPendingWork should be false when last message is assistant")
 	}
 }
+
+// ============================================================================
+// RecordCommand tests
+// ============================================================================
+
+func TestAgentSession_RecordCommand(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	session.RecordCommand("compact", "summarize recent work")
+
+	entries := session.SessionManager.GetEntries()
+	var found *SessionEntry
+	for _, e := range entries {
+		if e.Type == "command" {
+			found = e
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a command entry after RecordCommand")
+	}
+	if found.Command != "compact" {
+		t.Errorf("expected command 'compact', got %q", found.Command)
+	}
+	if found.Args != "summarize recent work" {
+		t.Errorf("expected args 'summarize recent work', got %q", found.Args)
+	}
+}
+
+func TestAgentSession_RecordCommand_NotInContext(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Seed a user message so context is non-empty.
+	session.SessionManager.AppendAIMessage(ai.NewUserMsg("hello", 0))
+	session.RecordCommand("reload", "")
+
+	ctx := session.SessionManager.BuildSessionContext()
+	// Only the user message should appear — the command must be excluded.
+	if len(ctx.Messages) != 1 {
+		t.Errorf("expected 1 message in context (command must be excluded), got %d", len(ctx.Messages))
+	}
+}
+
+// ============================================================================
+// SwitchSession model-restore tests
+// ============================================================================
+
+// newTestAgentSessionFromFile creates an AgentSession backed by an existing session file.
+func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession {
+	t.Helper()
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	dir := filepath.Dir(sessionFile)
+	sm := OpenSessionManager(sessionFile, dir)
+	settingsManager := NewSettingsManager(cwd, agentDir)
+
+	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	_ = rl.Reload()
+
+	modelRegistry := NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{ThinkingLevel: "off"},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return ConvertToLLM(msgs)
+		},
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   modelRegistry,
+		Cwd:             cwd,
+	})
+	return session
+}
+
+func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
+	// Build a session file that contains a model_change entry.
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+
+	sm := NewSessionManager(tmpDir, sessDir)
+	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
+		Provider: "anthropic",
+		Model:    "claude-opus-4",
+	}))
+	sm.AppendModelChange("anthropic", "claude-opus-4")
+	sessionFile := sm.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("expected session file to be set")
+	}
+
+	// Create a second session to switch FROM.
+	activeSession := newTestAgentSessionFromFile(t, sessionFile)
+	defer activeSession.Close()
+
+	// Inject a synthetic model into the registry so Find() can succeed.
+	targetModel := &ai.Model{
+		Provider: "anthropic",
+		ID:       "claude-opus-4",
+	}
+	// Register model manually via a stub override.
+	activeSession.modelRegistry.AddModel(targetModel)
+
+	// Switch to the session file.
+	if err := activeSession.SwitchSession(sessionFile); err != nil {
+		t.Fatalf("SwitchSession failed: %v", err)
+	}
+
+	// The active model should now be restored to claude-opus-4.
+	got := activeSession.Model()
+	if got == nil {
+		t.Fatal("expected model to be restored after SwitchSession, got nil")
+	}
+	if got.ID != "claude-opus-4" || got.Provider != "anthropic" {
+		t.Errorf("unexpected model after SwitchSession: provider=%q id=%q", got.Provider, got.ID)
+	}
+}

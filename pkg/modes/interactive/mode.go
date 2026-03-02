@@ -735,6 +735,12 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 	}
 	name := strings.TrimPrefix(parts[0], "/")
 	args := parts[1:]
+
+	// Record extension command for audit/metering.
+	if m.session != nil {
+		m.session.RecordCommand("ext:"+name, strings.Join(args, " "))
+	}
+
 	result, err := m.extSetup.Manager.DispatchCommand(name, args, 0)
 	if err != nil {
 		m.showWarning(fmt.Sprintf("Extension command /%s failed: %v", name, err))
@@ -755,6 +761,17 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		return
 	}
 	cmd := parts[0]
+
+	// Record all slash commands for audit/metering. Recording is best-effort;
+	// it is skipped if there is no session. Args are included for commands
+	// where they are meaningful for usage analysis.
+	if m.session != nil {
+		args := ""
+		if len(parts) > 1 {
+			args = strings.Join(parts[1:], " ")
+		}
+		m.session.RecordCommand(strings.TrimPrefix(cmd, "/"), args)
+	}
 
 	switch cmd {
 	case "/help", "/hotkeys":
@@ -1196,6 +1213,19 @@ func compactionFormatTokens(n int) string {
 // ============================================================================
 
 func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext bool) {
+	// Record the bash invocation for audit/metering.
+	if m.session != nil {
+		cmdArgs := command
+		if len(cmdArgs) > 200 {
+			cmdArgs = cmdArgs[:197] + "..."
+		}
+		name := "bash"
+		if excludeFromContext {
+			name = "bash_excluded"
+		}
+		m.session.RecordCommand(name, cmdArgs)
+	}
+
 	// Create UI component for display
 	bashComp := components.NewBashExecutionComponent(command, m.ui, excludeFromContext)
 	m.bashComponent.Store(bashComp)

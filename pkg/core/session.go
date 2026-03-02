@@ -75,6 +75,11 @@ type SessionEntry struct {
 
 	// session_info
 	Name string `json:"name,omitempty"`
+
+	// command — records a slash command or bash invocation for audit/metering.
+	// These entries are never included in the LLM context (see BuildSessionContextFromEntries).
+	Command string `json:"command,omitempty"`
+	Args    string `json:"args,omitempty"`
 }
 
 // GetParentID returns the parent entry ID, or empty string for root entries.
@@ -647,6 +652,27 @@ func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
 	return entry.ID
 }
 
+// AppendCommandEntry records a user-initiated command (slash command or bash
+// invocation) for audit/metering purposes. These entries are never included in
+// the LLM context — see BuildSessionContextFromEntries.
+//
+// command is the command name without the leading slash (e.g. "model", "compact").
+// args is any additional argument string relevant for metering (may be empty).
+func (sm *SessionManager) AppendCommandEntry(command, args string) string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	entry := &SessionEntry{
+		Type:      "command",
+		ID:        sm.generateID(),
+		ParentID:  sm.leafID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		Command:   command,
+		Args:      args,
+	}
+	return sm.appendEntry(entry)
+}
+
 // --- Branching ---
 
 func (sm *SessionManager) Branch(branchFromID string) {
@@ -913,6 +939,8 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 			}
 		case "compaction":
 			// Compaction summary is handled separately
+		case "command":
+			// Command entries are audit/metering records only — never sent to the LLM.
 		}
 	}
 

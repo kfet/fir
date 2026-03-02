@@ -777,6 +777,14 @@ func (s *AgentSession) SetThinkingLevel(level string) {
 	s.SessionManager.AppendThinkingLevelChange(level)
 }
 
+// RecordCommand records a user-initiated command for audit/metering purposes.
+// command is the command name without a leading slash (e.g. "model", "compact").
+// args captures any relevant argument for metering (may be empty).
+// These entries are never included in the LLM context.
+func (s *AgentSession) RecordCommand(command, args string) {
+	s.SessionManager.AppendCommandEntry(command, args)
+}
+
 // GetAvailableThinkingLevels returns the thinking levels available for the current model.
 func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 	model := s.Model()
@@ -937,6 +945,15 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	// Rebuild agent messages from session context
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
+
+	// Restore session model if recorded and still available.
+	// Use Agent.SetModel directly (not s.SetModel) to avoid writing a
+	// redundant model_change entry back into the session we just loaded.
+	if ctx.Model != nil && s.modelRegistry != nil {
+		if restored := s.modelRegistry.Find(ctx.Model.Provider, ctx.Model.ModelID); restored != nil {
+			s.Agent.SetModel(restored)
+		}
+	}
 
 	// Apply session thinking level if available
 	if ctx.ThinkingLevel != "" {

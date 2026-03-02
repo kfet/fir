@@ -1023,3 +1023,172 @@ func TestListAllSessions_SameAgentDirPassedTwice(t *testing.T) {
 		t.Errorf("expected 1 session (same dir passed twice, deduped by path), got %d", len(sessions))
 	}
 }
+
+// ============================================================================
+// Command entry tests
+// ============================================================================
+
+// TestSessionManagerCommandEntry verifies that AppendCommandEntry records a
+// "command" entry and that it is NOT included in the LLM context.
+func TestSessionManagerCommandEntry(t *testing.T) {
+	sm := InMemorySessionManager()
+
+	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	id := sm.AppendCommandEntry("model", "claude-opus-4")
+
+	if id == "" {
+		t.Fatal("expected non-empty entry ID")
+	}
+
+	entries := sm.GetEntries()
+	var found *SessionEntry
+	for _, e := range entries {
+		if e.ID == id {
+			found = e
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("command entry not found in session entries")
+	}
+	if found.Type != "command" {
+		t.Errorf("expected type 'command', got %q", found.Type)
+	}
+	if found.Command != "model" {
+		t.Errorf("expected command 'model', got %q", found.Command)
+	}
+	if found.Args != "claude-opus-4" {
+		t.Errorf("expected args 'claude-opus-4', got %q", found.Args)
+	}
+
+	// Command entries must not appear in the LLM context.
+	ctx := sm.BuildSessionContext()
+	for _, msg := range ctx.Messages {
+		// If somehow a command entry leaked, it would be a custom message —
+		// this check verifies none of the messages have a nil Message with
+		// no custom type (the context builder would skip them anyway, but
+		// be explicit).
+		if msg.Custom != nil {
+			if _, ok := msg.Custom.(*BashExecutionMessage); !ok {
+				if _, ok := msg.Custom.(*CustomMessage); !ok {
+					if _, ok := msg.Custom.(*BranchSummaryMessage); !ok {
+						if _, ok := msg.Custom.(*CompactionSummaryMessage); !ok {
+							t.Errorf("unexpected custom message type in context: %T", msg.Custom)
+						}
+					}
+				}
+			}
+		}
+	}
+	// Specifically: only the user message should be in context (1 message).
+	if len(ctx.Messages) != 1 {
+		t.Errorf("expected 1 message in context (command entry must be excluded), got %d", len(ctx.Messages))
+	}
+}
+
+// TestSessionManagerCommandEntryNoArgs verifies AppendCommandEntry works with empty args.
+func TestSessionManagerCommandEntryNoArgs(t *testing.T) {
+	sm := InMemorySessionManager()
+	id := sm.AppendCommandEntry("reload", "")
+	if id == "" {
+		t.Fatal("expected non-empty entry ID")
+	}
+	entries := sm.GetEntries()
+	var found *SessionEntry
+	for _, e := range entries {
+		if e.ID == id {
+			found = e
+		}
+	}
+	if found == nil {
+		t.Fatal("command entry not found")
+	}
+	if found.Args != "" {
+		t.Errorf("expected empty args, got %q", found.Args)
+	}
+}
+
+// TestSessionManagerCommandEntryRoundTrip verifies that command entries survive
+// a write-to-disk / read-from-disk cycle and remain correctly typed.
+func TestSessionManagerCommandEntryRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+
+	// Write session with a command entry (need an assistant message to flush).
+	sm1 := NewSessionManager(tmpDir, sessDir)
+	sm1.AppendAIMessage(ai.NewUserMsg("hi", time.Now().UnixMilli()))
+	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("hello")},
+		Provider: "test",
+		Model:    "test-model",
+	}))
+	sm1.AppendCommandEntry("compact", "summarize recent work")
+	sessionFile := sm1.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("expected session file to be set")
+	}
+
+	// Read it back.
+	sm2 := OpenSessionManager(sessionFile)
+	entries := sm2.GetEntries()
+
+	var cmdEntry *SessionEntry
+	for _, e := range entries {
+		if e.Type == "command" {
+			cmdEntry = e
+			break
+		}
+	}
+	if cmdEntry == nil {
+		t.Fatal("command entry not found after round-trip")
+	}
+	if cmdEntry.Command != "compact" {
+		t.Errorf("expected command 'compact', got %q", cmdEntry.Command)
+	}
+	if cmdEntry.Args != "summarize recent work" {
+		t.Errorf("expected args 'summarize recent work', got %q", cmdEntry.Args)
+	}
+
+	// Context should not include the command entry.
+	ctx := sm2.BuildSessionContext()
+	for _, msg := range ctx.Messages {
+		if msg.Message.Role() == "" && msg.Custom == nil {
+			t.Error("unexpected nil message in context")
+		}
+	}
+	// Only user + assistant messages (2), no command.
+	if len(ctx.Messages) != 2 {
+		t.Errorf("expected 2 messages in restored context, got %d", len(ctx.Messages))
+	}
+}
+
+// TestSessionManagerCommandEntryParentChain verifies that command entries are
+// linked into the entry parent chain correctly (each entry's parent is the
+// previous leaf, so commands don't break the chain for subsequent messages).
+func TestSessionManagerCommandEntryParentChain(t *testing.T) {
+	sm := InMemorySessionManager()
+
+	userID := sm.AppendAIMessage(ai.NewUserMsg("question", time.Now().UnixMilli()))
+	cmdID := sm.AppendCommandEntry("thinking", "high")
+
+	// Command's parent should be the user message.
+	cmdEntry := sm.GetEntry(cmdID)
+	if cmdEntry == nil {
+		t.Fatal("command entry not found")
+	}
+	if cmdEntry.ParentID != userID {
+		t.Errorf("command entry parent should be %s, got %s", userID, cmdEntry.ParentID)
+	}
+
+	// Subsequent message should have the command as parent.
+	assistantID := sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{ai.NewTextContent("response")},
+	}))
+	assistantEntry := sm.GetEntry(assistantID)
+	if assistantEntry == nil {
+		t.Fatal("assistant entry not found")
+	}
+	if assistantEntry.ParentID != cmdID {
+		t.Errorf("assistant entry parent should be %s (command), got %s", cmdID, assistantEntry.ParentID)
+	}
+}
