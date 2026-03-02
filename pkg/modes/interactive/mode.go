@@ -103,6 +103,10 @@ type InteractiveMode struct {
 	// updateCh receives a single update notice string (or "") when the
 	// background version check completes. Shown in the TUI at startup.
 	updateCh <-chan string
+
+	// clipboardReader reads an image from the system clipboard.
+	// Defaults to core.ReadClipboardImage; can be replaced in tests.
+	clipboardReader func() *core.ClipboardImage
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -143,6 +147,7 @@ func NewInteractiveMode(
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
+		clipboardReader:    core.ReadClipboardImage,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -1307,7 +1312,7 @@ func (m *InteractiveMode) handleCtrlZ() {
 }
 
 func (m *InteractiveMode) handleClipboardImagePaste() {
-	img := core.ReadClipboardImage()
+	img := m.clipboardReader()
 	if img == nil {
 		return // no image on clipboard, silently ignore
 	}

@@ -1870,13 +1870,35 @@ func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
 	tm := newTestMode(t)
 	initial := tm.editorText()
 
-	// In test environments clipboard is unavailable → ReadClipboardImage returns nil.
-	// The function should silently ignore this and leave the editor unchanged.
+	// Override the clipboard reader to return nil (no image available).
+	tm.mode.clipboardReader = func() *core.ClipboardImage { return nil }
+
 	tm.mode.handleClipboardImagePaste()
 	tm.waitRender()
 
 	if got := tm.editorText(); got != initial {
 		t.Errorf("expected editor unchanged (no image), got %q", got)
+	}
+}
+
+func TestHandleClipboardImagePaste_WithImage(t *testing.T) {
+	tm := newTestMode(t)
+
+	// Override the clipboard reader to return a fake PNG image.
+	fakeBytes := []byte("\x89PNG\r\n\x1a\n" + string(make([]byte, 100)))
+	tm.mode.clipboardReader = func() *core.ClipboardImage {
+		return &core.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
+	}
+
+	tm.mode.handleClipboardImagePaste()
+	tm.waitRender()
+
+	got := tm.editorText()
+	if got == "" {
+		t.Errorf("expected editor to contain image path, got empty string")
+	}
+	if !strings.HasSuffix(got, ".png") {
+		t.Errorf("expected editor to contain a .png path, got %q", got)
 	}
 }
 

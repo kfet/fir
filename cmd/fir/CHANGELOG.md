@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- Paste image (Ctrl+V): macOS `osascript` clipboard script now works — fixed three bugs: `NSPasteboardTypePNG`/`NSBitmapImageFileTypePNG` AppleScript constants caused "plural class name" syntax errors (replaced with string literals `"public.png"`/`"public.tiff"` and integer `4`); `do shell script "mktemp"` failed inside ASObjC scripts (temp file now created in Go); `properties:` is a reserved AppleScript keyword (escaped as `|properties|:`)
 - Bash command color output on macOS: add `CLICOLOR=1` to color-forcing env vars so macOS `/bin/ls` and other BSD tools emit colors when stdout is a pipe
 - `gh api` calls in update check now strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI codes in JSON output
 

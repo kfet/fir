@@ -172,12 +172,37 @@ func readClipboardImageViaXclip() *ClipboardImage {
 }
 
 // readClipboardImageViaMacOS reads an image from macOS clipboard using osascript.
+//
+// Notes on osascript quirks avoided here:
+//   - NSPasteboardTypePNG / NSPasteboardTypeTIFF constants cause "plural class
+//     name" syntax errors when used inside list literals; use string literals
+//     "public.png" / "public.tiff" instead.
+//   - NSBitmapImageFileTypePNG causes the same error as an inline argument;
+//     use the integer value 4 (NSBitmapImageFileTypePNG = 4).
+//   - "properties" is a reserved AppleScript keyword; escape it as |properties|.
+//   - `do shell script "mktemp ..."` is unreliable inside ASObjC scripts;
+//     create the temp file in Go and pass the path into the script.
 func readClipboardImageViaMacOS() *ClipboardImage {
-	// Use osascript to check if clipboard has an image and write it to a temp file
+	// Create a temp file in Go so osascript can write to a known path.
+	tmpFile, err := os.CreateTemp("", "fir-clipboard-*.png")
+	if err != nil {
+		return nil
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()         // osascript will overwrite it
+	defer os.Remove(tmpPath) // always clean up
+
+	// Build script with the temp path embedded.
+	// - Use "public.png" / "public.tiff" string literals (not NS* constants).
+	// - Use integer 4 for NSBitmapImageFileTypePNG.
+	// - Escape the reserved word "properties" as |properties|.
+	// - If PNG data is available directly, write it without conversion.
+	// - Fall back to TIFF→PNG conversion via NSBitmapImageRep.
 	script := `use framework "AppKit"
 set pb to current application's NSPasteboard's generalPasteboard()
-set imgTypes to {current application's NSPasteboardTypePNG, current application's NSPasteboardTypeTIFF}
-set bestType to pb's availableTypeFromArray:imgTypes
+set pngType to "public.png"
+set tiffType to "public.tiff"
+set bestType to pb's availableTypeFromArray:{pngType, tiffType}
 if bestType is missing value then
 	return "none"
 end if
@@ -185,25 +210,32 @@ set imgData to pb's dataForType:bestType
 if imgData is missing value then
 	return "none"
 end if
--- Convert to PNG via NSBitmapImageRep
+if bestType is equal to pngType then
+	imgData's writeToFile:"` + tmpPath + `" atomically:true
+	return "ok"
+end if
 set bitmapRep to current application's NSBitmapImageRep's imageRepWithData:imgData
-set pngData to bitmapRep's representationUsingType:(current application's NSBitmapImageFileTypePNG) properties:(missing value)
-set tmpPath to (do shell script "mktemp /tmp/fir-clipboard-XXXXXX.png")
-pngData's writeToFile:tmpPath atomically:true
-return tmpPath`
+if bitmapRep is missing value then
+	return "none"
+end if
+set pngData to bitmapRep's representationUsingType:4 |properties|:(missing value)
+if pngData is missing value then
+	return "none"
+end if
+pngData's writeToFile:"` + tmpPath + `" atomically:true
+return "ok"`
 
 	out, ok := runClipboardCommand("osascript", []string{"-e", script}, defaultReadTimeout)
 	if !ok {
 		return nil
 	}
 
-	path := strings.TrimSpace(string(out))
-	if path == "" || path == "none" {
+	result := strings.TrimSpace(string(out))
+	if result != "ok" {
 		return nil
 	}
 
-	data, err := os.ReadFile(path)
-	_ = os.Remove(path) // Clean up temp file
+	data, err := os.ReadFile(tmpPath)
 	if err != nil || len(data) == 0 {
 		return nil
 	}
