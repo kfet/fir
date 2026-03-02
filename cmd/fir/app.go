@@ -350,9 +350,9 @@ func run() error {
 	defer setup.result.Session.Close()
 
 	// Extension lifecycle for non-interactive modes
-	if setup.extSetup != nil && setup.extSetup.Runner != nil {
-		_ = setup.extSetup.Runner.EmitSessionStart()
-		defer func() { _ = setup.extSetup.Runner.EmitSessionShutdown() }()
+	if setup.extSetup != nil {
+		_ = setup.extSetup.EmitSessionStart()
+		defer func() { _ = setup.extSetup.EmitSessionShutdown() }()
 	}
 
 	// Run RPC mode
@@ -634,8 +634,8 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	defer setup.result.Session.Close()
 
 	// Extension lifecycle: shutdown deferred, start happens after UI wiring
-	if setup.extSetup != nil && setup.extSetup.Runner != nil {
-		defer func() { _ = setup.extSetup.Runner.EmitSessionShutdown() }()
+	if setup.extSetup != nil {
+		defer func() { _ = setup.extSetup.EmitSessionShutdown() }()
 	}
 
 	// Load keybindings
@@ -697,9 +697,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		mode.SetExtensionSetup(setup.extSetup, args.Extensions)
 		// Emit session_start after the UI context is wired so that extension
 		// handlers (e.g. claude-usage) can call SetStatus successfully.
-		if setup.extSetup.Runner != nil {
-			_ = setup.extSetup.Runner.EmitSessionStart()
-		}
+		_ = setup.extSetup.EmitSessionStart()
 	}
 
 	// Wire the update notice channel so the TUI shows it at startup.

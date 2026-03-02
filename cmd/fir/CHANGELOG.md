@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
+- Python extensions silently skipped: `ConfirmFn` was never wired in `Setup()`, so all project-local extproc extensions were dropped by the trust check; now auto-trusts on first run with a stderr notice and persists the hash
+- Python extensions never received `session_start` or proper `session_shutdown`/process teardown; `SetupResult` now has `EmitSessionStart()`/`EmitSessionShutdown()` methods that cover both Go and extproc extensions
+- Global `settings.json` had stale `"extensions": ["notify","tmuxspinner"]` (Go extension names) — removed; Python ext-proc extensions are auto-discovered from `.fir/extensions/` and need no settings entry
 - Bash command color output on macOS: add `CLICOLOR=1` to color-forcing env vars so macOS `/bin/ls` and other BSD tools emit colors when stdout is a pipe
 - `gh api` calls in update check now strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI codes in JSON output
 

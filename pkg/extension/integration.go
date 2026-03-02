@@ -2,6 +2,8 @@ package extension
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -30,6 +32,33 @@ func (r *SetupResult) Stop() {
 	}
 }
 
+// EmitSessionStart emits the session_start event to both compiled-in Go
+// extensions and external process extensions. Call this once after the
+// session and UI context are fully wired up.
+func (r *SetupResult) EmitSessionStart() error {
+	var runnerErr error
+	if r.Runner != nil {
+		runnerErr = r.Runner.EmitSessionStart()
+	}
+	if r.ExtProcManager != nil {
+		r.ExtProcManager.EmitEvent("session_start", nil)
+	}
+	return runnerErr
+}
+
+// EmitSessionShutdown emits session_shutdown to compiled-in Go extensions
+// and gracefully stops all external process extensions (which receive their
+// own session_shutdown notification inside Stop).
+func (r *SetupResult) EmitSessionShutdown() error {
+	var runnerErr error
+	if r.Runner != nil {
+		runnerErr = r.Runner.EmitSessionShutdown()
+	}
+	// mgr.Stop() sends session_shutdown to extproc extensions and terminates them.
+	r.Stop()
+	return runnerErr
+}
+
 // Reload tears down the current extensions and loads a new set.
 // It emits session_shutdown to old extensions, resets the runner,
 // loads the new extensions, and emits session_start to them.
@@ -45,6 +74,7 @@ func (r *SetupResult) Reload(ctx context.Context, enabledNames []string) error {
 
 	// Notify old extensions of shutdown.
 	_ = r.Runner.EmitSessionShutdown()
+	// (ExtProcManager.Reload handles its own stop/restart internally)
 
 	// Remove previously-added extension tools from the agent.
 	removeExtensionTools(r.session, r.Runner)
@@ -71,6 +101,9 @@ func (r *SetupResult) Reload(ctx context.Context, enabledNames []string) error {
 
 	// Notify new extensions of start.
 	_ = r.Runner.EmitSessionStart()
+	if r.ExtProcManager != nil {
+		r.ExtProcManager.EmitEvent("session_start", nil)
+	}
 
 	return nil
 }
@@ -87,6 +120,12 @@ type SetupOptions struct {
 
 	// Cwd is the current working directory passed to external process extensions.
 	Cwd string
+
+	// ConfirmFn is called to ask the user whether to trust a project-local
+	// external-process extension before its first execution. Return true to
+	// trust. If nil, a default is used: auto-trust and print a notice to
+	// stderr. Callers in interactive mode may supply a TUI-based dialog.
+	ConfirmFn extproc.ConfirmFunc
 }
 
 // Setup creates and configures an extension runner for the given session.
@@ -198,6 +237,20 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 	if opts.ProjectDir != "" {
 		logger := firlog.With("component", "extproc")
 		mgr := extproc.NewManager(logger)
+
+		// Wire the trust-confirmation callback. When none is supplied, default
+		// to auto-trusting so that scripts the user placed in .fir/extensions/
+		// are not silently dropped. A notice is printed to stderr so the first
+		// run is visible; subsequent runs are silent (hash stored in trust store).
+		confirmFn := opts.ConfirmFn
+		if confirmFn == nil {
+			confirmFn = func(name, path string) bool {
+				fmt.Fprintf(os.Stderr, "fir: trusting project extension %q (%s)\n", name, path)
+				return true
+			}
+		}
+		mgr.ConfirmFn = confirmFn
+
 		adapter := &ExtProcAdapter{api: runner.SharedAPI()}
 		cwd := opts.Cwd
 		if cwd == "" {
