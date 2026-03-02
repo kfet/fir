@@ -17,16 +17,13 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
-	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/extproc"
 	firlog "github.com/kfet/fir/pkg/log"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	rpcmode "github.com/kfet/fir/pkg/modes/rpc"
 	"github.com/kfet/fir/pkg/update"
-
-	// Import built-in extensions (registered via init())
-	_ "github.com/kfet/fir/pkg/extensions/claudeusage"
 )
 
 // sessionSetup holds common setup results shared between run modes.
@@ -35,7 +32,7 @@ type sessionSetup struct {
 	agentDir        string
 	result          *core.CreateAgentSessionResult
 	settingsManager *core.SettingsManager
-	extSetup        *extension.SetupResult
+	extSetup        *extproc.SetupResult
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -152,21 +149,15 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 	firlog.Debug("session created")
 
-	// Extensions
-	extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
-		EnabledNames: resolveEnabledExtensions(args, settingsManager),
-		ProjectDir:   cwd,
-		Cwd:          cwd,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
-	}
-
-	if extSetup != nil && extSetup.Runner != nil {
-		for name := range extSetup.Runner.GetFlags() {
-			if val, ok := args.UnknownFlags[name]; ok {
-				extSetup.Runner.SetFlagValue(name, val)
-			}
+	// Extensions — discover and start stdio-based extensions in .fir/extensions/
+	var extSetup *extproc.SetupResult
+	if !args.NoExtensions {
+		extSetup, err = extproc.Setup(result.Session, extproc.SetupOptions{
+			ProjectDir: cwd,
+			Cwd:        cwd,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
 		}
 	}
 
@@ -251,7 +242,7 @@ func run() error {
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
 
-	args := ParseArgs(os.Args[1:], nil)
+	args := ParseArgs(os.Args[1:])
 
 	// Initialise debug logging (file-only, never stdout/stderr).
 	debugEnabled := args.Debug || os.Getenv("FIR_DEBUG") == "1"
@@ -351,8 +342,8 @@ func run() error {
 
 	// Extension lifecycle for non-interactive modes
 	if setup.extSetup != nil {
-		_ = setup.extSetup.EmitSessionStart()
-		defer func() { _ = setup.extSetup.EmitSessionShutdown() }()
+		setup.extSetup.EmitSessionStart()
+		defer func() { setup.extSetup.EmitSessionShutdown() }()
 	}
 
 	// Run RPC mode
@@ -579,39 +570,6 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 	return nil
 }
 
-// resolveEnabledExtensions computes the list of extension names to activate.
-// Extensions are enabled via:
-//   - settings.json "extensions" array (global or project)
-//   - CLI --extension / -e flags
-//
-// --no-extensions disables all extensions regardless of config.
-func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
-	if args.NoExtensions {
-		return nil
-	}
-
-	seen := make(map[string]bool)
-	var names []string
-
-	// Add settings
-	for _, n := range sm.GetEnabledExtensions() {
-		if !seen[n] {
-			names = append(names, n)
-			seen[n] = true
-		}
-	}
-
-	// Add CLI --extension flags
-	for _, n := range args.Extensions {
-		if !seen[n] {
-			names = append(names, n)
-			seen[n] = true
-		}
-	}
-
-	return names
-}
-
 // runAcpMode runs ACP mode over stdin/stdout.
 func runAcpMode(args *Args) error {
 	acpmode.SetVersion(version)
@@ -621,7 +579,6 @@ func runAcpMode(args *Args) error {
 		NoSkills:                      args.NoSkills,
 		NoPromptTemplates:             args.NoPromptTemplates,
 		NoExtensions:                  args.NoExtensions,
-		EnabledExtensions:             args.Extensions,
 	})
 }
 
@@ -635,7 +592,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 
 	// Extension lifecycle: shutdown deferred, start happens after UI wiring
 	if setup.extSetup != nil {
-		defer func() { _ = setup.extSetup.EmitSessionShutdown() }()
+		defer func() { setup.extSetup.EmitSessionShutdown() }()
 	}
 
 	// Load keybindings
@@ -691,13 +648,11 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	interactive.SetVersion(version)
 
 	// Wire extension setup into interactive mode (enables /reload for extensions).
-	// This also sets the UIContext on the runner so that extensions can update
-	// the footer status and show notifications.
 	if setup.extSetup != nil {
-		mode.SetExtensionSetup(setup.extSetup, args.Extensions)
-		// Emit session_start after the UI context is wired so that extension
-		// handlers (e.g. claude-usage) can call SetStatus successfully.
-		_ = setup.extSetup.EmitSessionStart()
+		mode.SetExtensionSetup(setup.extSetup)
+		// Emit session_start after the UI context is wired so that extproc
+		// extension status callbacks are active before session_start fires.
+		setup.extSetup.EmitSessionStart()
 	}
 
 	// Wire the update notice channel so the TUI shows it at startup.

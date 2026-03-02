@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Removed
+- Go-based compiled-in extension system (`pkg/extension/`, `pkg/extensions/`) — replaced by the stdio-based extproc system exclusively
+- `--extension` / `-e` CLI flag (named Go extensions no longer exist)
+- `extensions` array in `settings.json` (no longer meaningful; extproc extensions are auto-discovered)
+
+### Added
+- `pkg/extproc/session_bridge.go` — `SessionBridge` directly implements `BridgeAPI` on `*core.AgentSession`, replacing the removed `ExtProcAdapter`
+- `pkg/extproc/setup.go` — `Setup()` and `SetupResult` wire extproc extensions into any session without the old `pkg/extension` indirection
+- `Manager.SetNotifyFn` / `Manager.SetSetStatusFn` — lets modes hook UI callbacks into extproc bridges
+
+### Fixed
+- `hook/tool_call` is now wired for extproc extensions in `pkg/extproc/setup.go` (previously required the removed Go extension layer)
+
 ### Added
 - `demo.py` example extension covering every extproc API method and all ten lifecycle events; includes a `hook/tool_call` handler that blocks tools prefixed with `"blocked:"`
 - `demo_ext_test.py` — 27 protocol-level Python tests for `demo.py` driven by a thread-safe `FakeFir` in-memory JSON-RPC server
@@ -12,7 +25,7 @@
 - `Context.set_model()` now returns `bool` (was `None`); the `ok` field from the fir response is surfaced
 - `Context.send_message()` now uses correct field names (`custom_type`, `content`, `display`) matching the bridge protocol (was using `role`, `content`)
 - Event handlers in `fir_ext.py` are now dispatched in worker threads so the read loop stays free to process outbound API call responses — previously an event handler calling any `ctx.xxx()` method would deadlock
-- `hook/tool_call` is now wired for extproc extensions in `pkg/extension/integration.go`; extproc `Manager.CallHook` is consulted after compiled-in Go extensions in `OnToolCall`
+- `hook/tool_call` was wired for extproc extensions via `pkg/extension/integration.go` (now replaced by `pkg/extproc/setup.go`)
 - `notify.py` extension: escape sequences written to `sys.stderr` were captured by the extproc pipe and logged as text, never reaching the terminal; fixed by writing to `/dev/tty` directly (bypasses the pipe, silently skips if no controlling terminal)
 - Python extensions silently skipped: `ConfirmFn` was never wired in `Setup()`, so all project-local extproc extensions were dropped by the trust check; now auto-trusts on first run with a stderr notice and persists the hash
 - Python extensions never received `session_start` or proper `session_shutdown`/process teardown; `SetupResult` now has `EmitSessionStart()`/`EmitSessionShutdown()` methods that cover both Go and extproc extensions

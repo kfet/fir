@@ -149,65 +149,18 @@ context.
 
 ### Extensions
 
-Extensions add custom tools, commands, keyboard shortcuts, and event hooks.
-They are **off by default** and must be enabled by name.
+Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
+and communicate with fir over JSON-RPC 2.0. Place them in `.fir/extensions/`
+in your project directory and they are automatically discovered and started.
 
-**Enable via config** — add an `"extensions"` array to `settings.json` (global
-or project):
+fir ships a Python SDK in `pkg/extproc/sdk/python/fir_extension.py` that
+handles the JSON-RPC protocol for you.
 
-```json
-{
-  "extensions": ["notify", "tmuxspinner"]
-}
-```
-
-**Enable via CLI** — use `--extension` / `-e` (merges with config, deduplicated):
-
-```bash
-fir -e notify -e tmuxspinner "do something"
-```
-
-**Disable all** — `--no-extensions` overrides everything:
+**Disable all extensions** — `--no-extensions` skips discovery:
 
 ```bash
 fir --no-extensions "do something"
 ```
-
-#### Built-in extensions
-
-| Name | Description |
-|---|---|
-| `notify` | Sends a native terminal notification (OSC 777/99) when the agent finishes. Works in Ghostty, iTerm2, WezTerm, Kitty. |
-
-#### Writing custom extensions
-
-Extensions are Go packages that register themselves at build time via `init()`:
-
-```go
-package myext
-
-import "github.com/kfet/fir/pkg/extension"
-
-func init() {
-    extension.Register("myext", func(api extension.API) {
-        api.On("agent_end", func(event *extension.Event, ctx extension.Context) (any, error) {
-            // called when the agent finishes a response
-            return nil, nil
-        })
-    })
-}
-```
-
-Add a blank import in `cmd/fir/app.go` and rebuild:
-
-```go
-import _ "github.com/kfet/fir/pkg/extensions/myext"
-```
-
-Extensions can subscribe to lifecycle events (`session_start`, `agent_start`,
-`agent_end`, `tool_call`, `tool_result`, `input`, etc.), register tools
-callable by the LLM, add slash commands, define CLI flags, and register
-keyboard shortcuts. See `pkg/extension/types.go` for the full API.
 
 ## Build
 
@@ -240,8 +193,7 @@ pkg/
   agent/         Core agent loop
   ai/            LLM providers, streaming, model registry
   core/          Tools, sessions, prompt templates
-  extension/     Extension loading
-  extensions/    Built-in extensions
+  extproc/       External process (stdio) extension system
   modes/         Output modes (text, JSON, RPC)
   tui/           Terminal UI (markdown rendering, themes)
 ```

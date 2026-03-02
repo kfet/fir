@@ -23,6 +23,10 @@ type Manager struct {
 	bridges   []*managedBridge
 	ConfirmFn ConfirmFunc
 
+	// Optional UI callbacks, applied to each bridge when it starts.
+	notifyFn    NotifyFunc
+	setStatusFn SetStatusFunc
+
 	// Saved from Start() for Reload().
 	projectDir string
 	cwd        string
@@ -50,6 +54,22 @@ func NewManager(logger *slog.Logger) *Manager {
 // SetTrustStore overrides the default TrustStore (useful for testing).
 func (m *Manager) SetTrustStore(ts *TrustStore) {
 	m.trust = ts
+}
+
+// SetNotifyFn sets the notification callback applied to all new bridges.
+// Call before Start() or Reload() to take effect.
+func (m *Manager) SetNotifyFn(fn NotifyFunc) {
+	m.mu.Lock()
+	m.notifyFn = fn
+	m.mu.Unlock()
+}
+
+// SetSetStatusFn sets the status callback applied to all new bridges.
+// Call before Start() or Reload() to take effect.
+func (m *Manager) SetSetStatusFn(fn SetStatusFunc) {
+	m.mu.Lock()
+	m.setStatusFn = fn
+	m.mu.Unlock()
 }
 
 // Start discovers extensions, spawns processes, performs handshakes, and
@@ -117,6 +137,18 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
+
+	// Wire optional UI callbacks.
+	m.mu.Lock()
+	notifyFn := m.notifyFn
+	setStatusFn := m.setStatusFn
+	m.mu.Unlock()
+	if notifyFn != nil {
+		bridge.NotifyFn = notifyFn
+	}
+	if setStatusFn != nil {
+		bridge.SetStatusFn = setStatusFn
+	}
 
 	bCtx, cancel := context.WithCancel(ctx)
 	go func() {

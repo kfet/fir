@@ -22,8 +22,6 @@ type Options struct {
 	NoPromptTemplates bool
 	// Disable extension loading (--no-extensions).
 	NoExtensions bool
-	// Enabled extension names.
-	EnabledExtensions []string
 }
 
 // ============================================================================

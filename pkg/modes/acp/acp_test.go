@@ -3,7 +3,6 @@ package acp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -471,88 +469,6 @@ func TestRawConnMethodHandler_UnknownMethod(t *testing.T) {
 	}
 }
 
-func TestHandleSlashCommand_ExtensionExecuteCommand(t *testing.T) {
-	// Register a temporary extension command, then verify handleSlashCommand
-	// calls ExecuteCommand (not session.Prompt) for it.
-	extension.ClearRegistry()
-	defer extension.ClearRegistry()
-
-	var capturedArgs string
-	extension.Register("acp-ext-test", func(api extension.API) {
-		api.RegisterCommand("myextcmd", extension.Command{
-			Description: "test command",
-			Handler: func(args string, ctx extension.CommandContext) error {
-				capturedArgs = args
-				return nil
-			},
-		})
-	})
-
-	runner := extension.NewRunner(core.NewEventBus())
-	if err := runner.LoadAll(); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
-
-	mc := newMockConn()
-	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	entry := &firSession{
-		termState:       newTerminalState(),
-		extensionRunner: runner,
-	}
-
-	found := pa.handleSlashCommand("s1", entry, "myextcmd", "hello world")
-	if !found {
-		t.Error("expected handleSlashCommand to return true for extension command")
-	}
-	if capturedArgs != "hello world" {
-		t.Errorf("ExecuteCommand args = %q, want %q", capturedArgs, "hello world")
-	}
-	// Should NOT have sent any agent message (command was handled by extension, not AI)
-	if len(mc.getUpdates()) != 0 {
-		t.Errorf("expected no agent updates for successful extension command, got %d", len(mc.getUpdates()))
-	}
-}
-
-func TestHandleSlashCommand_ExtensionExecuteCommand_Error(t *testing.T) {
-	extension.ClearRegistry()
-	defer extension.ClearRegistry()
-
-	extension.Register("acp-ext-err-test", func(api extension.API) {
-		api.RegisterCommand("failcmd", extension.Command{
-			Description: "failing command",
-			Handler: func(args string, ctx extension.CommandContext) error {
-				return fmt.Errorf("intentional error")
-			},
-		})
-	})
-
-	runner := extension.NewRunner(core.NewEventBus())
-	if err := runner.LoadAll(); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
-
-	mc := newMockConn()
-	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	entry := &firSession{
-		termState:       newTerminalState(),
-		extensionRunner: runner,
-	}
-
-	found := pa.handleSlashCommand("s1", entry, "failcmd", "")
-	if !found {
-		t.Error("expected handleSlashCommand to return true for registered extension command")
-	}
-	// Should have sent an error message to the agent
-	updates := mc.getUpdates()
-	if len(updates) == 0 {
-		t.Fatal("expected at least one agent message for extension command error")
-	}
-	if updates[0].Update.AgentMessageChunk == nil {
-		t.Error("expected AgentMessageChunk for error update")
-	}
-}
-
-// newMinimalSession creates a minimal AgentSession with SessionManager and Agent,
 // for use in slash command tests that don't need a real LLM provider.
 func newMinimalSession(t *testing.T) *core.AgentSession {
 	t.Helper()

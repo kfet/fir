@@ -23,13 +23,14 @@ Run `make test` to verify your changes. Always finish every task with `make all`
 
 ## Extensions
 
-Extensions register via `init()` using `extension.Register(...)`. For an extension to be available at runtime, it **must** be blank-imported in `cmd/fir/app.go`:
+Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
+and communicate with fir over JSON-RPC 2.0 on stdio. They are discovered
+automatically from `.fir/extensions/` in the project directory.
 
-```go
-_ "github.com/kfet/fir/pkg/extensions/notify"
-```
+The extension system lives in `pkg/extproc/`. New extensions need no code
+changes — just drop a `.py` or `.sh` file in `.fir/extensions/`.
 
-If you add a new extension package under `pkg/extensions/`, always add the corresponding blank import to `cmd/fir/app.go` — otherwise its `init()` never runs and the extension silently does not load.
+Use `--no-extensions` to disable all extension discovery.
 
 ## Changelog
 

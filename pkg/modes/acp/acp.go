@@ -26,7 +26,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
-	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/extproc"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 )
@@ -39,15 +39,15 @@ func SetVersion(v string) { version = v }
 
 // firSession holds per-session state.
 type firSession struct {
-	session         *core.AgentSession
-	modelRegistry   *core.ModelRegistry
-	extensionRunner *extension.Runner
-	unsubscribe     func()
-	cwd             string
-	agentDir        string
-	termState       *terminalState
-	pendingArgs     sync.Map // toolCallID → map[string]any
-	resumeMu        sync.Mutex
+	session       *core.AgentSession
+	modelRegistry *core.ModelRegistry
+	extSetup      *extproc.SetupResult
+	unsubscribe   func()
+	cwd           string
+	agentDir      string
+	termState     *terminalState
+	pendingArgs   sync.Map // toolCallID → map[string]any
+	resumeMu      sync.Mutex
 	lastResumeList  []core.SessionListInfo
 	configAccessor  thinkingAccessor // nil → use session (for testing)
 	mcpManager      *mcp.Manager // nil if no MCP servers configured
@@ -128,6 +128,9 @@ func RunAcpMode(opts Options) error {
 			entry.unsubscribe()
 		}
 		entry.session.Close()
+		if entry.extSetup != nil {
+			entry.extSetup.EmitSessionShutdown()
+		}
 		if entry.mcpManager != nil {
 			_ = entry.mcpManager.Close()
 		}
@@ -382,7 +385,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 
 	// Close any existing session with the same ID before creating a new one.
 	// Without this, a client retry would overwrite the old session's unsubscribe,
-	// extensionRunner, and agent goroutine, leaking all three.
+	// extSetup, and agent goroutine, leaking all three.
 	pa.mu.Lock()
 	if existing, ok := pa.sessions[sessionID]; ok {
 		delete(pa.sessions, sessionID)
@@ -393,6 +396,9 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 			existing.unsubscribe()
 		}
 		existing.session.Close()
+		if existing.extSetup != nil {
+			existing.extSetup.EmitSessionShutdown()
+		}
 	} else {
 		pa.mu.Unlock()
 	}
@@ -511,16 +517,15 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	})
 	entry.unsubscribe = unsub
 
-	// Extension setup
+	// Extension setup — discover stdio-based extensions in .fir/extensions/
 	if !pa.options.NoExtensions {
-		extSetup, err := extension.Setup(result.Session, core.NewEventBus(), extension.SetupOptions{
-			EnabledNames: pa.options.EnabledExtensions,
-			ProjectDir:   cwd,
-			Cwd:          cwd,
+		extSetup, err := extproc.Setup(result.Session, extproc.SetupOptions{
+			ProjectDir: cwd,
+			Cwd:        cwd,
 		})
-		if err == nil && extSetup != nil && extSetup.Runner != nil {
-			entry.extensionRunner = extSetup.Runner
-			_ = extSetup.Runner.EmitSessionStart()
+		if err == nil && extSetup != nil {
+			entry.extSetup = extSetup
+			extSetup.EmitSessionStart()
 		}
 	}
 
@@ -905,10 +910,6 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		} else {
 			// Auto-resume if pending work (unanswered user message or tool result)
 			if entry.session.HasPendingWork() {
-				// Notify extensions that work is resuming
-				if entry.extensionRunner != nil {
-					_ = entry.extensionRunner.EmitAgentStart()
-				}
 				go func() { _ = entry.session.Agent.Continue() }()
 				pa.sendAgentMessage(sessionID, "Session compacted successfully. Resuming.")
 			} else {
@@ -1039,6 +1040,9 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		if err := entry.session.Reload(); err != nil {
 			pa.sendAgentMessage(sessionID, fmt.Sprintf("Reload failed: %v", err))
 		} else {
+			if entry.extSetup != nil {
+				_ = entry.extSetup.Reload(context.Background())
+			}
 			pa.sendAvailableCommands(sessionID)
 			pa.sendAgentMessage(sessionID, "Reload completed successfully.")
 		}
@@ -1049,16 +1053,6 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		return true
 
 	default:
-		// Check extension commands first (matches interactive/mode.go ordering)
-		if entry.extensionRunner != nil {
-			if found, err := entry.extensionRunner.ExecuteCommand(command, args); found {
-				if err != nil {
-					pa.sendAgentMessage(sessionID, fmt.Sprintf("Extension command error: %v", err))
-				}
-				return true
-			}
-		}
-
 		// Check prompt templates
 		templates, _ := entry.session.ResourceLoader().GetPrompts()
 		for _, t := range templates {
@@ -1435,17 +1429,6 @@ func (pa *firAgent) sendAvailableCommands(sessionID string) {
 			desc = "Skill: " + s.Name
 		}
 		commands = append(commands, acpsdk.AvailableCommand{Name: "skill:" + s.Name, Description: desc})
-	}
-
-	// Add extension commands
-	if entry.extensionRunner != nil {
-		for name, cmd := range entry.extensionRunner.GetCommands() {
-			desc := cmd.Description
-			if desc == "" {
-				desc = "(extension command)"
-			}
-			commands = append(commands, acpsdk.AvailableCommand{Name: name, Description: desc})
-		}
 	}
 
 	_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{

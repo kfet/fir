@@ -24,7 +24,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/debug"
-	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/extproc"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
@@ -93,12 +93,8 @@ type InteractiveMode struct {
 	// Event subscription
 	unsubscribe func()
 
-	// Extension runner (optional)
-	extensionRunner *extension.Runner
-
-	// Extension reload support
-	extSetup          *extension.SetupResult
-	cliExtensionNames []string // extension names from CLI args (merged with settings on reload)
+	// Extproc extension setup (optional)
+	extSetup *extproc.SetupResult
 
 	// updateCh receives a single update notice string (or "") when the
 	// background version check completes. Shown in the TUI at startup.
@@ -150,26 +146,29 @@ func NewInteractiveMode(
 	return m
 }
 
-// SetExtensionRunner sets the extension runner for command/event handling.
-func (m *InteractiveMode) SetExtensionRunner(runner *extension.Runner) {
-	m.extensionRunner = runner
-	if runner != nil {
-		runner.SetUIContext(&modeUIContext{mode: m})
-	}
-}
-
-// SetExtensionSetup stores the full extension setup result and CLI extension
-// names so that /reload can tear down and rebuild extensions based on updated
-// settings.json while preserving CLI-provided extension names.
-func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult, cliExtNames []string) {
+// SetExtensionSetup stores the extproc extension setup so that /reload can
+// restart external process extensions.
+func (m *InteractiveMode) SetExtensionSetup(setup *extproc.SetupResult) {
 	m.extSetup = setup
-	m.cliExtensionNames = cliExtNames
-	if setup != nil {
-		m.extensionRunner = setup.Runner
-		// Wire the UI context so extensions can set footer statuses and
-		// show notifications. Without this, all UI calls go to the noop
-		// context and are silently discarded.
-		setup.Runner.SetUIContext(&modeUIContext{mode: m})
+	if setup != nil && setup.Manager != nil {
+		// Wire UI callbacks so extproc extensions can set footer status and
+		// show notifications.
+		setup.Manager.SetNotifyFn(func(level, message string) {
+			switch level {
+			case "error", "warning":
+				m.showWarning(message)
+			default:
+				m.showMessage(message)
+			}
+		})
+		setup.Manager.SetSetStatusFn(func(status string) {
+			if m.footerDataProvider != nil {
+				m.footerDataProvider.SetExtensionStatus("extproc", status)
+				if m.ui != nil {
+					m.ui.RequestRender(false)
+				}
+			}
+		})
 	}
 }
 
@@ -659,14 +658,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 	}
 
 	// Add extension commands
-	if m.extensionRunner != nil {
-		for name, cmd := range m.extensionRunner.GetCommands() {
-			commands = append(commands, SlashCommand{
-				Name:        name,
-				Description: cmd.Description,
-			})
-		}
-	}
+	// (extproc extensions don't register named slash commands)
 
 	basePath, _ := os.Getwd()
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
@@ -691,13 +683,6 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 	}
 	if core.IsBuiltinSlashCommandName(cmd[1:]) {
 		return true
-	}
-	// Check extension commands
-	if m.extensionRunner != nil {
-		extCmd := cmd[1:] // strip "/"
-		if m.extensionRunner.GetCommand(extCmd) != nil {
-			return true
-		}
 	}
 	return false
 }
@@ -781,21 +766,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/quit", "/exit":
 		m.Shutdown()
 	default:
-		// Try extension commands (strip leading /)
-		extCmd := cmd[1:] // remove "/"
-		extArgs := ""
-		if len(parts) > 1 {
-			extArgs = strings.Join(parts[1:], " ")
-		}
-		if m.extensionRunner != nil {
-			if found, err := m.extensionRunner.ExecuteCommand(extCmd, extArgs); found {
-				if err != nil {
-					m.showWarning(fmt.Sprintf("Extension command error: %v", err))
-				}
-				return
-			}
-		}
-		// Fall through: not a builtin and not an extension command.
+		// Not a builtin command.
 		// Check if it's a skill or prompt template command before declaring unknown.
 		m.showWarning(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd))
 	}
@@ -2116,42 +2087,6 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, fmt.Sprintf("%s %.4f", t.Fg("dim", "Total:"), stats.Cost))
 	}
 
-	// Extensions section
-	if m.extensionRunner != nil {
-		exts := m.extensionRunner.Extensions()
-		if len(exts) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, t.Bold("Extensions"))
-			for _, ext := range exts {
-				lines = append(lines, fmt.Sprintf("  %s", ext.Name))
-			}
-		}
-		tools := m.extensionRunner.GetTools()
-		if len(tools) > 0 {
-			items := make(map[string]string, len(tools))
-			for name, td := range tools {
-				items[name] = td.Label
-			}
-			lines = append(lines, formatSortedSection(t, "Extension Tools", "", items)...)
-		}
-		cmds := m.extensionRunner.GetCommands()
-		if len(cmds) > 0 {
-			items := make(map[string]string, len(cmds))
-			for name, cmd := range cmds {
-				items[name] = cmd.Description
-			}
-			lines = append(lines, formatSortedSection(t, "Extension Commands", "/", items)...)
-		}
-		shortcuts := m.extensionRunner.GetShortcuts()
-		if len(shortcuts) > 0 {
-			items := make(map[string]string, len(shortcuts))
-			for key, sh := range shortcuts {
-				items[key] = sh.Description
-			}
-			lines = append(lines, formatSortedSection(t, "Extension Shortcuts", "", items)...)
-		}
-	}
-
 	m.showMessage(strings.Join(lines, "\n"))
 }
 
@@ -2260,10 +2195,9 @@ func (m *InteractiveMode) handleReloadCommand() {
 		return
 	}
 
-	// Reload extensions if setup is available.
+	// Reload extproc extensions if setup is available.
 	if m.extSetup != nil {
-		enabledNames := m.resolveEnabledExtensions()
-		if err := m.extSetup.Reload(m.ctx, enabledNames); err != nil {
+		if err := m.extSetup.Reload(m.ctx); err != nil {
 			m.showWarning(fmt.Sprintf("Extension reload failed: %v", err))
 			// Continue — skills/prompts were already reloaded successfully.
 		}
@@ -2436,27 +2370,6 @@ func (m *InteractiveMode) ReexecIfRequested() {
 		fmt.Fprintf(os.Stderr, "reexec failed: exec %s: %v\n", m.reexecBinary, err)
 		os.Exit(1)
 	}
-}
-
-// resolveEnabledExtensions merges extension names from the (freshly reloaded)
-// settings with the CLI-provided extension names.
-func (m *InteractiveMode) resolveEnabledExtensions() []string {
-	names := m.settings.GetEnabledExtensions()
-
-	if len(m.cliExtensionNames) > 0 {
-		seen := make(map[string]bool, len(names))
-		for _, n := range names {
-			seen[n] = true
-		}
-		for _, n := range m.cliExtensionNames {
-			if !seen[n] {
-				names = append(names, n)
-				seen[n] = true
-			}
-		}
-	}
-
-	return names
 }
 
 // ============================================================================
@@ -2841,10 +2754,6 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 			// If no pending work and successful, show completion status
 			if event.ErrorMessage == "" && event.CompactionResult != nil && !m.session.HasPendingWork() {
 				m.showStatus(fmt.Sprintf("Auto-compacted: %d tokens", event.CompactionResult.TokensBefore))
-				// Notify extensions that the auto-compaction phase is done
-				if m.extensionRunner != nil {
-					_ = m.extensionRunner.EmitAgentEnd(nil)
-				}
 			}
 			// If pending work, agent will resume naturally via EventAgentStart (no notification needed here)
 			m.ui.RequestRender(false)
@@ -2891,11 +2800,6 @@ func (m *InteractiveMode) onAgentStart() {
 	m.activityContainer.AddChild(loader)
 	m.streamingComponent = nil
 	m.ui.RequestRender(false)
-
-	// Notify extensions that work is starting
-	if m.extensionRunner != nil {
-		_ = m.extensionRunner.EmitAgentStart()
-	}
 }
 
 func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
@@ -3010,65 +2914,5 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)
-
-	// Notify extensions that agent work is ending
-	if m.extensionRunner != nil {
-		_ = m.extensionRunner.EmitAgentEnd(nil)
-	}
 }
 
-// ============================================================================
-// Extension UIContext bridge
-// ============================================================================
-
-// modeUIContext bridges the extension.UIContext interface to the interactive
-// mode's TUI and FooterDataProvider. Without this bridge, extensions fall
-// back to the noop UI context and their SetStatus/Notify calls are silently
-// discarded.
-type modeUIContext struct {
-	mode *InteractiveMode
-}
-
-var _ extension.UIContext = (*modeUIContext)(nil)
-
-func (u *modeUIContext) Select(title string, options []string) (string, error) {
-	// Not implemented for extension UI context — extensions shouldn't block
-	// with interactive selectors during event handlers.
-	return "", nil
-}
-
-func (u *modeUIContext) Confirm(title string, message string) (bool, error) {
-	return false, nil
-}
-
-func (u *modeUIContext) Input(title string, placeholder string) (string, error) {
-	return "", nil
-}
-
-func (u *modeUIContext) Notify(message string, level string) {
-	switch level {
-	case "error":
-		u.mode.showWarning(message)
-	case "warning":
-		u.mode.showWarning(message)
-	default:
-		u.mode.showMessage(message)
-	}
-}
-
-func (u *modeUIContext) SetStatus(key string, text string) {
-	if u.mode.footerDataProvider != nil {
-		u.mode.footerDataProvider.SetExtensionStatus(key, text)
-		if u.mode.ui != nil {
-			u.mode.ui.RequestRender(false)
-		}
-	}
-}
-
-func (u *modeUIContext) SetWidget(key string, lines []string) {
-	// Widget support not yet implemented for interactive mode extensions.
-}
-
-func (u *modeUIContext) ClearWidget(key string) {
-	// Widget support not yet implemented for interactive mode extensions.
-}
