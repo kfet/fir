@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"context"

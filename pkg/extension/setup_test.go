@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"os"
@@ -49,7 +49,7 @@ func (s *stubResourceLoader) GetPathMetadata() map[string]core.PathMetadata {
 func (s *stubResourceLoader) ExtendResources(core.ResourceExtensionPaths) {}
 func (s *stubResourceLoader) Reload() error                               { return nil }
 
-// TestSetupHookToolCall verifies that OnToolCall consults extproc extensions
+// TestSetupHookToolCall verifies that OnToolCall consults extensions
 // via hook/tool_call when an extension is loaded through Setup().
 func TestSetupHookToolCall(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
@@ -113,7 +113,7 @@ fir_ext.run(name="test-hook-ext")
 	if block == nil {
 		t.Error("expected block for blocked:dangerous")
 	} else if block.Reason == "" {
-		t.Error("expected non-empty reason from extproc hook")
+		t.Error("expected non-empty reason from extension hook")
 	}
 
 	// Normal tools should pass through.

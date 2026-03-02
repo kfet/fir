@@ -151,7 +151,7 @@ Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
 and communicate with fir over JSON-RPC 2.0. Place them in `.fir/extensions/`
 in your project directory and they are automatically discovered and started.
 
-fir ships a Python SDK in `pkg/extproc/sdk/python/fir_ext.py` that
+fir ships a Python SDK in `pkg/extension/sdk/python/fir_ext.py` that
 handles the JSON-RPC protocol for you.
 
 **Disable all extensions** — `--no-extensions` skips discovery:
@@ -191,7 +191,7 @@ pkg/
   agent/         Core agent loop
   ai/            LLM providers, streaming, model registry
   core/          Tools, sessions, prompt templates
-  extproc/       External process (stdio) extension system
+  extension/     Extension system (stdio JSON-RPC, external processes)
   modes/         Output modes (text, JSON, RPC)
   tui/           Terminal UI (markdown rendering, themes)
 ```

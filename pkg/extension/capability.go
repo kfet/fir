@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"encoding/json"
@@ -35,11 +35,11 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 
 	codec := proc.GetCodec()
 	if codec == nil {
-		return nil, fmt.Errorf("extproc: process not started")
+		return nil, fmt.Errorf("extension: process not started")
 	}
 
 	if err := codec.WriteRequest(1, "init", InitParams{Version: "1", Cwd: cwd}); err != nil {
-		return nil, fmt.Errorf("extproc: send init: %w", err)
+		return nil, fmt.Errorf("extension: send init: %w", err)
 	}
 
 	type readResult struct {
@@ -59,24 +59,24 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 	case <-timer.C:
 		// Close the codec reader to unblock the goroutine.
 		proc.CloseStdin()
-		return nil, fmt.Errorf("extproc: init handshake timed out")
+		return nil, fmt.Errorf("extension: init handshake timed out")
 	case r := <-ch:
 		if r.err != nil {
-			return nil, fmt.Errorf("extproc: read init response: %w", r.err)
+			return nil, fmt.Errorf("extension: read init response: %w", r.err)
 		}
 		resp, ok := r.msg.(*Response)
 		if !ok {
-			return nil, fmt.Errorf("extproc: expected Response, got %T", r.msg)
+			return nil, fmt.Errorf("extension: expected Response, got %T", r.msg)
 		}
 		if resp.Error != nil {
 			return nil, resp.Error
 		}
 		if resp.Result == nil {
-			return nil, fmt.Errorf("extproc: init response has no result")
+			return nil, fmt.Errorf("extension: init response has no result")
 		}
 		var result InitResult
 		if err := json.Unmarshal(*resp.Result, &result); err != nil {
-			return nil, fmt.Errorf("extproc: parse init result: %w", err)
+			return nil, fmt.Errorf("extension: parse init result: %w", err)
 		}
 		validName, err := ValidateExtensionName(result.Name, proc.cfg.Name)
 		if err != nil {

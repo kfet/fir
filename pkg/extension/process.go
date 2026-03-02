@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"bufio"
@@ -15,7 +15,7 @@ import (
 )
 
 // ErrTooManyFailures is returned when a process exceeds the max restart attempts.
-var ErrTooManyFailures = errors.New("extproc: too many consecutive failures")
+var ErrTooManyFailures = errors.New("extension: too many consecutive failures")
 
 const maxRestarts = 5
 
@@ -80,19 +80,19 @@ func (p *Process) startLocked() error {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("extproc: stdin pipe: %w", err)
+		return fmt.Errorf("extension: stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("extproc: stdout pipe: %w", err)
+		return fmt.Errorf("extension: stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("extproc: stderr pipe: %w", err)
+		return fmt.Errorf("extension: stderr pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("extproc: start %s: %w", p.cfg.Name, err)
+		return fmt.Errorf("extension: start %s: %w", p.cfg.Name, err)
 	}
 
 	p.cmd = cmd
@@ -124,7 +124,7 @@ func (p *Process) Wait() error {
 	done := p.waitDone
 	p.mu.Unlock()
 	if done == nil {
-		return errors.New("extproc: not started")
+		return errors.New("extension: not started")
 	}
 	<-done
 	return p.waitErr

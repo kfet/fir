@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// SetupOptions configures extproc extension discovery for a session.
+// SetupOptions configures extension discovery for a session.
 type SetupOptions struct {
 	// ProjectDir is the project root for discovering external process extensions
 	// (looks for .fir/extensions/*.py and .fir/extensions/*.sh).
@@ -48,7 +48,7 @@ type SetupOptions struct {
 	EnabledNames []string
 }
 
-// SetupResult holds the running state of extproc extensions for a session.
+// SetupResult holds the running state of extensions for a session.
 type SetupResult struct {
 	// Manager owns all external process extension bridges (may be nil if
 	// no ProjectDir was configured or no extensions were discovered).
@@ -64,7 +64,7 @@ func (r *SetupResult) Stop() {
 	}
 }
 
-// EmitSessionStart emits session_start to all running extproc extensions.
+// EmitSessionStart emits session_start to all running extensions.
 func (r *SetupResult) EmitSessionStart() {
 	if r.Manager != nil {
 		r.Manager.EmitEvent("session_start", nil)
@@ -81,22 +81,22 @@ func (r *SetupResult) Reload(ctx context.Context) error {
 	if r.Manager == nil {
 		return nil
 	}
-	firlog.Info("extproc extensions reloading")
+	firlog.Info("extensions reloading")
 	return r.Manager.Reload(ctx)
 }
 
 // Setup discovers and starts external process extensions for the given session.
 // It wires:
-//   - Tool hooks (hook/tool_call) so extproc extensions can intercept tool calls.
-//   - Agent session event forwarding to the extproc manager.
+//   - Tool hooks (hook/tool_call) so extensions can intercept tool calls.
+//   - Agent session event forwarding to the extension manager.
 //
-// Returns nil (with no error) when ProjectDir is empty (extproc disabled).
+// Returns nil (with no error) when ProjectDir is empty (extension disabled).
 func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) {
 	if opts.ProjectDir == "" {
 		return nil, nil
 	}
 
-	logger := firlog.With("component", "extproc")
+	logger := firlog.With("component", "extension")
 	mgr := NewManager(logger)
 	if opts.TrustStorePath != "" {
 		mgr.SetTrustStore(NewTrustStoreWithPath(opts.TrustStorePath))
@@ -130,7 +130,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 	}
 
 	if err := mgr.Start(context.Background(), opts.ProjectDir, cwd, bridge); err != nil {
-		firlog.Warn("extproc manager start failed", "err", err)
+		firlog.Warn("extension manager start failed", "err", err)
 	}
 
 	result := &SetupResult{
@@ -138,7 +138,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 		session: session,
 	}
 
-	// Wire tool hooks so extproc extensions can intercept tool calls via
+	// Wire tool hooks so extensions can intercept tool calls via
 	// hook/tool_call. When no extensions are running the hook is a no-op.
 	hooks := &core.AgentSessionHooks{
 		OnToolCall: func(toolCallID, toolName string, input map[string]any) *core.ToolCallBlock {
@@ -164,7 +164,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 	}
 	session.SetHooks(hooks)
 
-	// Forward agent session events to extproc extensions.
+	// Forward agent session events to extensions.
 	session.Subscribe(func(event core.AgentSessionEvent) {
 		ae := event.AgentEvent
 		if ae == nil {

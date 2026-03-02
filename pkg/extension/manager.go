@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/extproc/sdk"
+	"github.com/kfet/fir/pkg/extension/sdk"
 )
 
 // ConfirmFunc asks the user whether to trust an extension.

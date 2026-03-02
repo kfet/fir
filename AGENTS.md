@@ -27,7 +27,7 @@ Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
 and communicate with fir over JSON-RPC 2.0 on stdio. They are discovered
 automatically from `.fir/extensions/` in the project directory.
 
-The extension system lives in `pkg/extproc/`. New extensions need no code
+The extension system lives in `pkg/extension/`. New extensions need no code
 changes — just drop a `.py` or `.sh` file in `.fir/extensions/`.
 
 Use `--no-extensions` to disable all extension discovery.

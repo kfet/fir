@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- Restore `--extension <name>` / `-e <name>` CLI flag for filtering extproc extensions by name (repeatable; merged with `settings.json` "extensions" list)
+- Restore `--extension <name>` / `-e <name>` CLI flag for filtering extensions by name (repeatable; merged with `settings.json` "extensions" list)
 - `SetupOptions.EnabledNames` — allowlist of extension names; when non-empty only matching extensions are started
 - `Manager.AllowedNames` — allowlist checked in `startOne`; skips extensions not in the list
 - Sub-directory support for extension discovery: a directory inside `.fir/extensions/` (or `~/.config/fir/extensions/`) is treated as an extension whose name is the directory name; entry point is resolved as `main`, `main.py`, `main.sh`, `<dirname>`, `<dirname>.py`, `<dirname>.sh`, or the first executable found alphabetically
@@ -58,6 +58,7 @@
 - ACP: `/skills` output uses markdown table
 
 ### Changed
+- Renamed `pkg/extproc` → `pkg/extension` — the package name now matches the user-facing concept; import path is `github.com/kfet/fir/pkg/extension`
 - Python SDK: `Callable` import moved to `TYPE_CHECKING`; `id` params renamed to `msg_id`; modernised annotations
 - E2E skill reduced to ~130 lines running `make test-e2e`
 - Skills: `builtin: true` frontmatter distinguishes distributable from project-only skills

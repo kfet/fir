@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"fmt"
@@ -14,11 +14,11 @@ func ValidateExtensionName(name, fallback string) (string, error) {
 		return fallback, nil
 	}
 	if strings.ContainsAny(name, `/\`) {
-		return "", fmt.Errorf("extproc: extension name %q contains path separators", name)
+		return "", fmt.Errorf("extension: extension name %q contains path separators", name)
 	}
 	for _, r := range name {
 		if unicode.IsControl(r) {
-			return "", fmt.Errorf("extproc: extension name %q contains control characters", name)
+			return "", fmt.Errorf("extension: extension name %q contains control characters", name)
 		}
 	}
 	return name, nil
