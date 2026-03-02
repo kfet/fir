@@ -2,9 +2,8 @@ package extproc
 
 import "github.com/kfet/fir/pkg/ai"
 
-// BridgeAPI is the subset of the extension API that external process
-// extensions can call. Defined here to avoid an import cycle with
-// pkg/extension.
+// BridgeAPI is the subset of the session API that external process
+// extensions can call. Implemented by SessionBridge in session_bridge.go.
 type BridgeAPI interface {
 	Exec(command string, args []string) (ExecResult, error)
 	SendMessage(spec CustomMessageSpec, opts *SendMessageOptions)

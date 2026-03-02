@@ -200,21 +200,6 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | `coding-agent/src/modes/rpc/rpc-mode.ts` (exportToHtml) | `pkg/core/export.go` | ✅ |
 | `coding-agent/src/modes/rpc/rpc-types.ts` | `pkg/modes/rpc/types.go` | ✅ |
 
-## Extension System (`pkg/extension/`)
-
-| TS Source | Go File | Status |
-|---|---|---|
-| `coding-agent/src/core/extensions/types.ts` | `pkg/extension/types.go` | ✅ |
-| `coding-agent/src/core/extensions/loader.ts` | `pkg/extension/registry.go` | ✅ |
-| `coding-agent/src/core/extensions/runner.ts` | `pkg/extension/runner.go` | ✅ |
-| (integration helper) | `pkg/extension/integration.go` | ✅ |
-
-## Built-in Extensions (`pkg/extensions/`)
-
-| TS Source | Go File | Status |
-|---|---|---|
-| `examples/extensions/notify.ts` | `pkg/extensions/notify/notify.go` | ✅ |
-
 ## CLI Entry Point (`cmd/fir/`)
 
 | TS Source | Go File | Status |

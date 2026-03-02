@@ -12,7 +12,6 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
-	"github.com/kfet/fir/pkg/core"
 )
 
 // ============================================================================
@@ -170,98 +169,6 @@ func TestResolveTools_UnknownToolIgnored(t *testing.T) {
 	result := resolveTools(args, t.TempDir())
 	if len(result) != 1 {
 		t.Errorf("expected 1 tool (unknown ignored), got %d", len(result))
-	}
-}
-
-// ============================================================================
-// resolveEnabledExtensions
-// ============================================================================
-
-func TestResolveEnabledExtensions_Default(t *testing.T) {
-	cwd := t.TempDir()
-	agentDir := t.TempDir()
-	sm := core.NewSettingsManager(cwd, agentDir)
-
-	args := &Args{}
-	result := resolveEnabledExtensions(args, sm)
-	// No extensions enabled by default unless configured in settings or CLI
-	if len(result) != 0 {
-		t.Errorf("expected [] by default, got %v", result)
-	}
-}
-
-func TestResolveEnabledExtensions_FromSettings(t *testing.T) {
-	cwd := t.TempDir()
-	agentDir := t.TempDir()
-
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify","tmuxspinner"]}`), 0o600)
-
-	sm := core.NewSettingsManager(cwd, agentDir)
-	args := &Args{}
-	result := resolveEnabledExtensions(args, sm)
-	// notify + tmuxspinner from settings
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions, got %d: %v", len(result), result)
-	}
-	if result[0] != "notify" || result[1] != "tmuxspinner" {
-		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
-	}
-}
-
-func TestResolveEnabledExtensions_FromCLI(t *testing.T) {
-	cwd := t.TempDir()
-	agentDir := t.TempDir()
-	sm := core.NewSettingsManager(cwd, agentDir)
-
-	args := &Args{Extensions: []string{"notify", "tmuxspinner"}}
-	result := resolveEnabledExtensions(args, sm)
-	// Only CLI extensions, no implicit defaults
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions from CLI, got %d: %v", len(result), result)
-	}
-	if result[0] != "notify" || result[1] != "tmuxspinner" {
-		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
-	}
-}
-
-func TestResolveEnabledExtensions_MergedDeduped(t *testing.T) {
-	cwd := t.TempDir()
-	agentDir := t.TempDir()
-
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify"]}`), 0o600)
-
-	sm := core.NewSettingsManager(cwd, agentDir)
-	args := &Args{Extensions: []string{"notify", "tmuxspinner"}}
-	result := resolveEnabledExtensions(args, sm)
-	// notify from settings + tmuxspinner from CLI; notify deduplicated
-	if len(result) != 2 {
-		t.Fatalf("expected 2 extensions (deduped), got %d: %v", len(result), result)
-	}
-	if result[0] != "notify" || result[1] != "tmuxspinner" {
-		t.Errorf("unexpected extensions: %v (expected [notify tmuxspinner])", result)
-	}
-}
-
-func TestResolveEnabledExtensions_NoExtensionsFlag(t *testing.T) {
-	cwd := t.TempDir()
-	agentDir := t.TempDir()
-
-	os.MkdirAll(agentDir, 0o755)
-	os.WriteFile(filepath.Join(agentDir, "settings.json"),
-		[]byte(`{"extensions":["notify","tmuxspinner"]}`), 0o600)
-
-	sm := core.NewSettingsManager(cwd, agentDir)
-	args := &Args{
-		NoExtensions: true,
-		Extensions:   []string{"tmuxspinner"},
-	}
-	result := resolveEnabledExtensions(args, sm)
-	if len(result) != 0 {
-		t.Errorf("expected 0 extensions with --no-extensions, got %d: %v", len(result), result)
 	}
 }
 

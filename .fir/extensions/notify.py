@@ -11,7 +11,6 @@ This is a Python port of pkg/extensions/notify.
 """
 
 import os
-import sys
 
 import fir_ext
 
@@ -24,26 +23,37 @@ def _in_kitty():
     return os.environ.get("KITTY_WINDOW_ID", "") != ""
 
 
+def _write_to_tty(data: bytes) -> None:
+    """Write bytes directly to /dev/tty, bypassing any captured pipes."""
+    try:
+        with open("/dev/tty", "wb", buffering=0) as tty:
+            tty.write(data)
+    except OSError:
+        pass  # no controlling terminal (e.g. headless CI) — silently skip
+
+
 def _notify_osc777(title: str, body: str):
     """OSC 777 notification (Ghostty, iTerm2, WezTerm, rxvt-unicode)."""
     if _in_tmux():
-        _ = sys.stderr.write(
-            f"\x1bPtmux;\x1b\x1b]777;notify;{title};{body}\x1b\x1b\\\x1b\\"
+        _write_to_tty(
+            f"\x1bPtmux;\x1b\x1b]777;notify;{title};{body}\x1b\x1b\\\x1b\\".encode()
         )
     else:
-        _ = sys.stderr.write(f"\x1b]777;notify;{title};{body}\x1b\\")
-    _ = sys.stderr.flush()
+        _write_to_tty(f"\x1b]777;notify;{title};{body}\x1b\\".encode())
 
 
 def _notify_osc99(title: str, body: str):
     """Kitty OSC 99 notification."""
     if _in_tmux():
-        _ = sys.stderr.write(f"\x1bPtmux;\x1b\x1b]99;i=1:d=0;{title}\x1b\x1b\\\x1b\\")
-        _ = sys.stderr.write(f"\x1bPtmux;\x1b\x1b]99;i=1:p=body;{body}\x1b\x1b\\\x1b\\")
+        _write_to_tty(
+            f"\x1bPtmux;\x1b\x1b]99;i=1:d=0;{title}\x1b\x1b\\\x1b\\".encode()
+        )
+        _write_to_tty(
+            f"\x1bPtmux;\x1b\x1b]99;i=1:p=body;{body}\x1b\x1b\\\x1b\\".encode()
+        )
     else:
-        _ = sys.stderr.write(f"\x1b]99;i=1:d=0;{title}\x1b\\")
-        _ = sys.stderr.write(f"\x1b]99;i=1:p=body;{body}\x1b\\")
-    _ = sys.stderr.flush()
+        _write_to_tty(f"\x1b]99;i=1:d=0;{title}\x1b\\".encode())
+        _write_to_tty(f"\x1b]99;i=1:p=body;{body}\x1b\\".encode())
 
 
 def notify_terminal(title: str, body: str):

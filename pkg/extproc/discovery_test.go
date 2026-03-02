@@ -29,7 +29,7 @@ func TestDiscover_ProjectLocal(t *testing.T) {
 	writeExec(t, filepath.Join(extDir, "hello.sh"))
 	// Non-executable file — should be skipped
 	os.WriteFile(filepath.Join(extDir, "skip.txt"), []byte("x"), 0o644)
-	// Subdirectory — should be skipped
+	// Subdirectory with no executables — should be skipped
 	os.MkdirAll(filepath.Join(extDir, "subdir"), 0o755)
 
 	configs, err := Discover(dir)
@@ -125,6 +125,135 @@ func TestDiscoverWithDirs_NonexistentDirs(t *testing.T) {
 	}
 	if len(configs) != 0 {
 		t.Fatalf("expected 0 configs, got %d", len(configs))
+	}
+}
+
+func TestDiscover_SubdirMainPy(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Sub-directory with main.py — discovered as "myext"
+	subdir := filepath.Join(globalDir, "myext")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPy := filepath.Join(subdir, "main.py")
+	writeExec(t, mainPy)
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d: %v", len(configs), configs)
+	}
+	cfg := configs[0]
+	if cfg.Name != "myext" {
+		t.Errorf("expected name 'myext', got %q", cfg.Name)
+	}
+	if cfg.Path != mainPy {
+		t.Errorf("expected path %q, got %q", mainPy, cfg.Path)
+	}
+	if cfg.Scope != "global" {
+		t.Errorf("expected scope 'global', got %q", cfg.Scope)
+	}
+}
+
+func TestDiscover_SubdirDirnameEntry(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Sub-directory named "notify" with notify.py inside
+	subdir := filepath.Join(projectDir, "notify")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entryPoint := filepath.Join(subdir, "notify.py")
+	writeExec(t, entryPoint)
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+	if configs[0].Name != "notify" {
+		t.Errorf("expected 'notify', got %q", configs[0].Name)
+	}
+	if configs[0].Path != entryPoint {
+		t.Errorf("expected path %q, got %q", entryPoint, configs[0].Path)
+	}
+}
+
+func TestDiscover_SubdirFallbackFirstExec(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Sub-directory with an oddly-named executable (no standard name)
+	subdir := filepath.Join(globalDir, "tool")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExec(t, filepath.Join(subdir, "run.sh"))
+	// Non-executable — should be ignored
+	os.WriteFile(filepath.Join(subdir, "README.md"), []byte("x"), 0o644)
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+	if configs[0].Name != "tool" {
+		t.Errorf("expected 'tool', got %q", configs[0].Name)
+	}
+}
+
+func TestDiscover_SubdirNoExecutable(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Sub-directory with no executable — should be skipped
+	subdir := filepath.Join(projectDir, "empty-ext")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(subdir, "README.md"), []byte("x"), 0o644)
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected 0 configs (subdir with no exec skipped), got %d", len(configs))
+	}
+}
+
+func TestDiscover_SubdirShadowsGlobalFile(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Global has a plain file named "tool"
+	writeExec(t, filepath.Join(globalDir, "tool.py"))
+
+	// Project has a sub-directory named "tool" with main.py — should shadow
+	subdir := filepath.Join(projectDir, "tool")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExec(t, filepath.Join(subdir, "main.py"))
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 (project shadows global), got %d", len(configs))
+	}
+	if configs[0].Scope != "project" {
+		t.Errorf("expected project scope, got %q", configs[0].Scope)
 	}
 }
 

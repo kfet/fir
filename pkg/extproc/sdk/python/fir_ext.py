@@ -239,9 +239,26 @@ class Context:
         """
         return self._call("exec", {"command": command, "args": args or []}, timeout=timeout)
 
-    def send_message(self, role: str, content: str) -> None:
-        """Inject a message into the session."""
-        self._call("send_message", {"role": role, "content": content})
+    def send_message(self, custom_type: str, content: Any, *, display: bool = False) -> None:
+        """Inject a custom message into the session.
+
+        Parameters
+        ----------
+        custom_type : str
+            Arbitrary type tag consumed by the session renderer.
+        content : any JSON-serialisable value
+            Payload attached to the message.
+        display : bool, optional
+            When True the message is shown in the UI.
+        """
+        self._call(
+            "send_message",
+            {"custom_type": custom_type, "content": content, "display": display},
+        )
+
+    def send_user_message(self, content: str) -> None:
+        """Inject a user-role message into the session."""
+        self._call("send_user_message", {"content": content})
 
     def set_status(self, text: str) -> None:
         """Set persistent status text in the footer."""
@@ -267,9 +284,12 @@ class Context:
         """Set which tools are active."""
         self._call("set_active_tools", {"names": tools})
 
-    def set_model(self, provider: str, model_id: str) -> None:
-        """Change the current model."""
-        self._call("set_model", {"provider": provider, "id": model_id})
+    def set_model(self, provider: str, model_id: str) -> bool:
+        """Change the current model. Returns True on success."""
+        result = self._call("set_model", {"provider": provider, "id": model_id})
+        if isinstance(result, dict):
+            return bool(result.get("ok"))
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -376,11 +396,19 @@ def run(
             event_name = method[len("event/") :]
             handler = _event_handlers.get(event_name)
             if handler is not None:
-                try:
-                    handler(params, ctx)
-                except Exception:
-                    import traceback
-                    traceback.print_exc(file=sys.stderr)
+                # Run in a worker thread so the read loop stays free to deliver
+                # responses to any ctx.xxx() outbound calls the handler makes.
+                def _run_event(h=handler, p=params):
+                    try:
+                        h(p, ctx)
+                    except Exception:
+                        import traceback
+
+                        traceback.print_exc(file=sys.stderr)
+
+                t = threading.Thread(target=_run_event, daemon=True)
+                t.start()
+                _workers.append(t)
             return
 
         # --- response to an outbound request we made ---

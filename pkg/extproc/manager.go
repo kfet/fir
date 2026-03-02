@@ -23,6 +23,14 @@ type Manager struct {
 	bridges   []*managedBridge
 	ConfirmFn ConfirmFunc
 
+	// AllowedNames is an optional allowlist of extension names. When non-empty,
+	// only extensions whose Name appears in this list are started.
+	AllowedNames []string
+
+	// Optional UI callbacks, applied to each bridge when it starts.
+	notifyFn    NotifyFunc
+	setStatusFn SetStatusFunc
+
 	// Saved from Start() for Reload().
 	projectDir string
 	cwd        string
@@ -50,6 +58,22 @@ func NewManager(logger *slog.Logger) *Manager {
 // SetTrustStore overrides the default TrustStore (useful for testing).
 func (m *Manager) SetTrustStore(ts *TrustStore) {
 	m.trust = ts
+}
+
+// SetNotifyFn sets the notification callback applied to all new bridges.
+// Call before Start() or Reload() to take effect.
+func (m *Manager) SetNotifyFn(fn NotifyFunc) {
+	m.mu.Lock()
+	m.notifyFn = fn
+	m.mu.Unlock()
+}
+
+// SetSetStatusFn sets the status callback applied to all new bridges.
+// Call before Start() or Reload() to take effect.
+func (m *Manager) SetSetStatusFn(fn SetStatusFunc) {
+	m.mu.Lock()
+	m.setStatusFn = fn
+	m.mu.Unlock()
 }
 
 // Start discovers extensions, spawns processes, performs handshakes, and
@@ -85,6 +109,15 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 }
 
 func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
+	// Allowlist check: skip extensions not in AllowedNames when the list is set.
+	m.mu.Lock()
+	allowed := m.AllowedNames
+	m.mu.Unlock()
+	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
+		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
+		return nil
+	}
+
 	// Trust check for project-local extensions.
 	if cfg.Scope == "project" {
 		hash, err := ComputeHash(cfg.Path)
@@ -117,6 +150,18 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
+
+	// Wire optional UI callbacks.
+	m.mu.Lock()
+	notifyFn := m.notifyFn
+	setStatusFn := m.setStatusFn
+	m.mu.Unlock()
+	if notifyFn != nil {
+		bridge.NotifyFn = notifyFn
+	}
+	if setStatusFn != nil {
+		bridge.SetStatusFn = setStatusFn
+	}
 
 	bCtx, cancel := context.WithCancel(ctx)
 	go func() {
@@ -230,4 +275,14 @@ func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json
 	wg.Wait()
 
 	return results, nil
+}
+
+// containsString reports whether s is in slice.
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

@@ -2,50 +2,69 @@
 
 ## [Unreleased]
 
-### Fixed
-- Paste image (Ctrl+V): macOS `osascript` clipboard script now works — fixed three bugs: `NSPasteboardTypePNG`/`NSBitmapImageFileTypePNG` AppleScript constants caused "plural class name" syntax errors (replaced with string literals `"public.png"`/`"public.tiff"` and integer `4`); `do shell script "mktemp"` failed inside ASObjC scripts (temp file now created in Go); `properties:` is a reserved AppleScript keyword (escaped as `|properties|:`)
-- Bash command color output on macOS: add `CLICOLOR=1` to color-forcing env vars so macOS `/bin/ls` and other BSD tools emit colors when stdout is a pipe
-- `gh api` calls in update check now strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI codes in JSON output
-
 ### Added
-- ACP: auth methods RFD support — `Initialize` now returns typed auth methods (`agent`, `env_var`, `terminal`) per [agentclientprotocol.com/rfds/auth-methods](https://agentclientprotocol.com/rfds/auth-methods); `Authenticate` dispatches by method type
-- ACP: thinking level config — `session/new` returns `configOptions` with a `thought_level` dropdown; `session/set_config_option` changes the thinking level; Zed renders this as the thinking mode picker
-- ACP: model selector via configOptions — models now exposed as `configOptions` with `category: "model"` in addition to the legacy `models` field; `session/set_config_option` handles model switching; Zed renders this as the model picker dropdown
-- Python static checks: `make lint-python` runs ruff (linting) + ty (type checking) on SDK and extensions; `make test-python` runs all Python tests; `make install-uv` target for bootstrapping uv
-- Python SDK: `ReadStream`/`WriteStream` protocols for stream parameters — replaces `IO[str]`, enables simple test fakes without full IO interface
-- Unified Python tooling config in `pyproject.toml` (ruff + ty) — removed separate `ruff.toml` and `ty.toml`
-- Python extension tests moved from `.fir/extensions/` to `pkg/extproc/sdk/python/` — keeps extension directory clean for user-facing scripts only
-- Python extension examples: `notify.py` and `tmuxspinner.py` in `.fir/extensions/` — ports of the built-in Go extensions demonstrating the ext-proc Python SDK
-- `/reload` now reloads external process (Python/bash) extensions — re-discovers and restarts ext-proc extensions so new `.py`/`.sh` files are picked up without restarting the session
-- External process extensions: write extensions in any language (Python, bash, etc.) that communicate with fir over JSON-RPC 2.0 on stdio
-- External process extensions: `notify` and `set_status` inbound methods now call configurable callbacks (`NotifyFunc`/`SetStatusFunc`) on Bridge, enabling UI integration
-- External process extensions: `Manager.ConfirmFn` callback for interactive trust prompts on untrusted project-local extensions
-- External process extensions: `CallHook` now fans out concurrently across all bridges instead of sequentially
-- External process extensions: `ProjectDir` and `Cwd` fields passed through to `extproc.Manager` from all `extension.Setup` callers
-- E2E: proper Go test suite in `tests/e2e/` — 7 test files (1418 LOC) covering all 48 test cases with embedded mock OpenAI SSE server; `make test-e2e` target; `//go:build e2e` tag keeps them out of regular `make test`
-- ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
-
-### Changed
-- Python SDK: `Callable` import moved to `TYPE_CHECKING` block; `id` params renamed to `msg_id` to avoid shadowing builtin; modernised type annotations (`Optional`/`Dict`/`List` → native syntax)
-- E2E: skill reduced from 1031 lines of manual test procedures to ~130 lines that run `make test-e2e` and report failures
-- Skills: added `builtin: true` frontmatter property to distinguish distributable builtin skills from project-only skills; only skills with this property are embedded in the binary; project-specific skills (e2e, release, sync, work) excluded from distribution
-- Refactor: `.fir/skills` is now a symlink to `pkg/core/builtin_skills` — single source of truth, eliminates duplicate copy; `go:embed` reads the real directory
-- Refactor: `StripAnsi` and `AppendColorEnv` consolidated into `pkg/core/tools/ansi.go` — single source shared by both `ExecuteBash` (user `!`/`!!`) and AI-invoked bash tool
-- Theme: dark theme `toolOutput` color brightened from `#808080` to `#b0b0b0` for better readability
-
-### Fixed
-- Clear command status TUI (from /queue, /session, etc.) when user submits any new input
-- `Manager.Reload` no longer stores `context.Context` in a struct — context is passed as a parameter to avoid cancelled-context bugs
-- Python extension examples now use `FIR_EXT_SDK_PYTHON` env var instead of hardcoded relative path, preventing SDK resolution failures and path injection
-- `/reload` no longer calls `addExtensionTools` twice — extproc reload moved before the single call
-- ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
-- TUI: bash output now preserves original ANSI colors from commands (e.g. `git diff`, test runners, `ls --color`) — injects `CLICOLOR_FORCE=3` and `FORCE_COLOR=1` so tools emit colors even through pipes, applies to both `!`/`!!` bash mode and AI-invoked bash tool calls
-- TUI: AI-invoked bash tool now stores raw ANSI output in `Details["rawOutput"]` for colored display while sending stripped text to the LLM
-- TUI: AI-invoked bash tool now stores raw ANSI output in `Details["rawOutput"]` for colored display while sending stripped text to the LLM
+- Restore `--extension <name>` / `-e <name>` CLI flag for filtering extproc extensions by name (repeatable; merged with `settings.json` "extensions" list)
+- `SetupOptions.EnabledNames` — allowlist of extension names; when non-empty only matching extensions are started
+- `Manager.AllowedNames` — allowlist checked in `startOne`; skips extensions not in the list
+- Sub-directory support for extension discovery: a directory inside `.fir/extensions/` (or `~/.config/fir/extensions/`) is treated as an extension whose name is the directory name; entry point is resolved as `main`, `main.py`, `main.sh`, `<dirname>`, `<dirname>.py`, `<dirname>.sh`, or the first executable found alphabetically
+- `resolveEnabledExtensions()` in `cmd/fir/app.go` and `pkg/modes/acp/acp.go` merges settings + CLI flags into the enabled-names list
+- `EnabledExtensions []string` restored to `acp.Options`; wired through to `extproc.Setup()`
 
 ### Removed
-- `pyrightconfig.json` — replaced by ty (Rust-based type checker) configured in `pyproject.toml`
+- Go-based compiled-in extension system (`pkg/extension/`, `pkg/extensions/`) — replaced by the stdio-based extproc system exclusively
+- `pyrightconfig.json` — replaced by ty configured in `pyproject.toml`
 - `sandbox` extension (incomplete framework with no real OS-level enforcement)
+
+### Added
+- `SetupOptions.TrustStorePath` — overrides default trust-store path; avoids polluting `~/.config/fir/` in tests
+- `TestSetupHookToolCall` — Go integration test for `hook/tool_call` through `extproc.Setup()`
+- `pkg/extproc/session_bridge.go` — `SessionBridge` implements `BridgeAPI` on `*core.AgentSession`, replacing the removed `ExtProcAdapter`
+- `pkg/extproc/setup.go` — `Setup()` + `SetupResult` wire extproc extensions into a session without the old Go extension layer
+- `Manager.SetNotifyFn` / `Manager.SetSetStatusFn` — lets modes hook UI callbacks into extproc bridges
+- `demo.py` example extension covering every extproc API method and all ten lifecycle events; blocks tools prefixed `"blocked:"` via `hook/tool_call`
+- `demo_ext_test.py` — 27 protocol-level Python tests for `demo.py` driven by `FakeFir` in-memory JSON-RPC server
+- `demo_integration_test.go` — 19 Go e2e tests spawning the real `demo.py` via a background pump goroutine
+- `Context.send_user_message()` added to the Python SDK (was missing; bridge already handled it)
+- Python static checks: `make lint-python` runs ruff + ty; `make test-python` runs all Python tests
+- Python SDK: `ReadStream`/`WriteStream` protocols replacing `IO[str]`, enabling simple test fakes
+- Unified Python tooling config in `pyproject.toml` (ruff + ty) — removed separate `ruff.toml` and `ty.toml`
+- Python extension tests moved from `.fir/extensions/` to `pkg/extproc/sdk/python/`
+- `/reload` now reloads extproc extensions — re-discovers `.py`/`.sh` files without restarting the session
+- External process extensions: write extensions in any language communicating via JSON-RPC 2.0 on stdio
+- External process extensions: `notify` and `set_status` calls configurable `NotifyFn`/`SetStatusFn` on Bridge
+- External process extensions: `Manager.ConfirmFn` for interactive trust prompts
+- External process extensions: `CallHook` fans out concurrently across all bridges
+- E2E: proper Go test suite in `tests/e2e/` — 48 test cases with embedded mock OpenAI SSE server
+- ACP: `/skills` slash command — list and install builtin skills
+- Skills: `builtin: true` frontmatter — only embedded skills get binary distribution
+
+### Fixed
+- Paste image (Ctrl+V): macOS `osascript` clipboard script now works — fixed three bugs: `NSPasteboardTypePNG`/`NSBitmapImageFileTypePNG` AppleScript constants caused "plural class name" syntax errors (replaced with string literals `"public.png"`/`"public.tiff"` and integer `4`); `do shell script "mktemp"` failed inside ASObjC scripts (temp file now created in Go); `properties:` is a reserved AppleScript keyword (escaped as `|properties|:`)
+- `hook/tool_call` wired for extproc extensions in `pkg/extproc/setup.go`
+- `handleOutbound` in demo integration test released `rec.mu` before pipe write (prevented `waitOutbound` timeout)
+- `doInit` in demo integration test uses constant ID 0 instead of resetting mutable `nextID`
+- `Context.set_model()` now returns `bool` (was `None`); surfaces `ok` field from response
+- `Context.send_message()` now uses correct field names (`custom_type`/`content`/`display`); was `role`/`content`
+- Event handlers in `fir_ext.py` dispatched in worker threads — prevents deadlock when handlers call `ctx.xxx()`
+- `notify.py`: writes to `/dev/tty` directly instead of stderr to avoid capture by the extproc pipe
+- Python extensions silently skipped: `ConfirmFn` never wired; now auto-trusts with stderr notice
+- Python extensions never received `session_start` / proper `session_shutdown`; fixed via `EmitSessionStart()`/`EmitSessionShutdown()`
+- `settings.json` stale `extensions` array removed
+- Bash command color: `CLICOLOR=1` added to color-forcing env vars for macOS BSD tools
+- `gh api` calls in update check strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI in JSON
+- Clear command status TUI when user submits new input
+- `Manager.Reload` passes context as parameter instead of storing in struct
+- `/reload` no longer calls `addExtensionTools` twice
+- ACP: `/skills` output uses markdown table
+
+### Changed
+- Python SDK: `Callable` import moved to `TYPE_CHECKING`; `id` params renamed to `msg_id`; modernised annotations
+- E2E skill reduced to ~130 lines running `make test-e2e`
+- Skills: `builtin: true` frontmatter distinguishes distributable from project-only skills
+- Refactor: `.fir/skills` is a symlink to `pkg/core/builtin_skills` — single source of truth
+- Refactor: `StripAnsi`/`AppendColorEnv` consolidated into `pkg/core/tools/ansi.go`
+- Theme: dark theme `toolOutput` color brightened from `#808080` to `#b0b0b0`
+
 
 ## [0.9.0] - 2026-02-28
 
