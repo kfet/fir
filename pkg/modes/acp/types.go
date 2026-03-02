@@ -126,6 +126,7 @@ type SessionConfigOptionCategory string
 
 const (
 	SessionConfigCategoryThoughtLevel SessionConfigOptionCategory = "thought_level"
+	SessionConfigCategoryModel        SessionConfigOptionCategory = "model"
 )
 
 // SessionConfigSelectOption is one selectable value in a config dropdown.

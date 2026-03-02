@@ -6,10 +6,15 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-const thinkingConfigID = "thinking_level"
+const (
+	thinkingConfigID = "thinking_level"
+	modelConfigID    = "model"
+)
 
 // thinkingAccessor abstracts the thinking-level operations on a session.
 type thinkingAccessor interface {
@@ -60,11 +65,45 @@ func buildThinkingConfigOptionFromAccessor(s thinkingAccessor) SessionConfigOpti
 	}
 }
 
+// buildModelConfigOption creates a SessionConfigOption for the model selector.
+func buildModelConfigOption(reg *core.ModelRegistry, currentModel *ai.Model) SessionConfigOption {
+	available := reg.GetAvailable()
+	options := make([]SessionConfigSelectOption, 0, len(available))
+	for _, m := range available {
+		value := fmt.Sprintf("%s/%s", m.Provider, m.ID)
+		name := fmt.Sprintf("%s / %s", m.Name, shortProvider(m.Provider))
+		options = append(options, SessionConfigSelectOption{
+			Value: value,
+			Name:  name,
+		})
+	}
+
+	currentValue := ""
+	if currentModel != nil {
+		currentValue = fmt.Sprintf("%s/%s", currentModel.Provider, currentModel.ID)
+	}
+
+	desc := "The model to use for this session"
+	return SessionConfigOption{
+		Type:         "select",
+		Id:           modelConfigID,
+		Name:         "Model",
+		Description:  &desc,
+		Category:     SessionConfigCategoryModel,
+		CurrentValue: currentValue,
+		Options:      options,
+	}
+}
+
 // buildConfigOptions returns all session config options for the given session.
 func buildConfigOptions(entry *firSession) []SessionConfigOption {
-	return []SessionConfigOption{
-		buildThinkingConfigOptionFromAccessor(entry.getThinkingAccessor()),
+	var opts []SessionConfigOption
+	// Model config only if we have a real session with model registry.
+	if entry.session != nil && entry.modelRegistry != nil {
+		opts = append(opts, buildModelConfigOption(entry.modelRegistry, entry.session.Model()))
 	}
+	opts = append(opts, buildThinkingConfigOptionFromAccessor(entry.getThinkingAccessor()))
+	return opts
 }
 
 // SetSessionConfigOption handles the session/set_config_option method.
@@ -77,6 +116,18 @@ func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionC
 	}
 
 	switch params.ConfigId {
+	case modelConfigID:
+		provider, modelID, err := ParseModelID(params.Value)
+		if err != nil {
+			return SetSessionConfigOptionResponse{}, err
+		}
+		model := entry.modelRegistry.Find(provider, modelID)
+		if model == nil {
+			return SetSessionConfigOptionResponse{}, fmt.Errorf("model not found: %s", params.Value)
+		}
+		entry.session.SetModel(model)
+		firlog.Info("acp set model via config", "sessionId", params.SessionId, "model", params.Value)
+
 	case thinkingConfigID:
 		accessor := entry.getThinkingAccessor()
 		level := agent.ThinkingLevel(params.Value)

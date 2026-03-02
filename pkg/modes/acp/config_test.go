@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/core"
 )
 
 func TestBuildThinkingConfigOption_WithLevels(t *testing.T) {
@@ -157,6 +158,57 @@ func TestSetSessionConfigOption_UnknownSession(t *testing.T) {
 	})
 	if err == nil {
 		t.Error("expected error for unknown session")
+	}
+}
+
+func TestBuildModelConfigOption(t *testing.T) {
+	auth := core.NewInMemoryAuthStorage(nil)
+	auth.SetRuntimeApiKey("anthropic", "test-key")
+	reg := core.NewModelRegistry(auth, "")
+
+	available := reg.GetAvailable()
+	if len(available) == 0 {
+		t.Skip("no available models with auth")
+	}
+
+	current := available[0]
+	opt := buildModelConfigOption(reg, current)
+
+	if opt.Id != modelConfigID {
+		t.Errorf("Id = %q, want %q", opt.Id, modelConfigID)
+	}
+	if opt.Type != "select" {
+		t.Errorf("Type = %q, want select", opt.Type)
+	}
+	if opt.Category != SessionConfigCategoryModel {
+		t.Errorf("Category = %q, want model", opt.Category)
+	}
+	if len(opt.Options) == 0 {
+		t.Error("expected available model options")
+	}
+	if opt.CurrentValue == "" {
+		t.Error("expected non-empty currentValue")
+	}
+	// Current value should be in options.
+	found := false
+	for _, o := range opt.Options {
+		if o.Value == opt.CurrentValue {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("currentValue %q not found in options", opt.CurrentValue)
+	}
+}
+
+func TestBuildModelConfigOption_NilModel(t *testing.T) {
+	auth := core.NewInMemoryAuthStorage(nil)
+	reg := core.NewModelRegistry(auth, "")
+
+	opt := buildModelConfigOption(reg, nil)
+	if opt.CurrentValue != "" {
+		t.Errorf("expected empty currentValue for nil model, got %q", opt.CurrentValue)
 	}
 }
 
