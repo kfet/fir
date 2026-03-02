@@ -27,8 +27,6 @@ import (
 
 	// Import built-in extensions (registered via init())
 	_ "github.com/kfet/fir/pkg/extensions/claudeusage"
-	_ "github.com/kfet/fir/pkg/extensions/notify"
-	_ "github.com/kfet/fir/pkg/extensions/tmuxspinner"
 )
 
 // sessionSetup holds common setup results shared between run modes.
