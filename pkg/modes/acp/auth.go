@@ -81,28 +81,30 @@ func collectProviders(modelRegistry *core.ModelRegistry) []string {
 	return providers
 }
 
+// providerDisplayNames maps provider IDs to human-readable names.
+var providerDisplayNames = map[string]string{
+	"openai":                 "OpenAI",
+	"anthropic":              "Anthropic",
+	"google":                 "Google",
+	"groq":                   "Groq",
+	"xai":                    "xAI",
+	"cerebras":               "Cerebras",
+	"openrouter":             "OpenRouter",
+	"mistral":                "Mistral",
+	"github-copilot":         "GitHub Copilot",
+	"azure-openai-responses": "Azure OpenAI",
+	"vercel-ai-gateway":      "Vercel AI Gateway",
+	"zai":                    "ZAI",
+	"minimax":                "MiniMax",
+	"minimax-cn":             "MiniMax CN",
+	"huggingface":            "Hugging Face",
+	"amazon-bedrock":         "Amazon Bedrock",
+	"google-vertex":          "Google Vertex",
+}
+
 // formatProviderName converts a provider ID like "openai" to "OpenAI" for display.
 func formatProviderName(pid string) string {
-	replacer := map[string]string{
-		"openai":                  "OpenAI",
-		"anthropic":               "Anthropic",
-		"google":                  "Google",
-		"groq":                    "Groq",
-		"xai":                     "xAI",
-		"cerebras":                "Cerebras",
-		"openrouter":              "OpenRouter",
-		"mistral":                 "Mistral",
-		"github-copilot":          "GitHub Copilot",
-		"azure-openai-responses":  "Azure OpenAI",
-		"vercel-ai-gateway":       "Vercel AI Gateway",
-		"zai":                     "ZAI",
-		"minimax":                 "MiniMax",
-		"minimax-cn":              "MiniMax CN",
-		"huggingface":             "Hugging Face",
-		"amazon-bedrock":          "Amazon Bedrock",
-		"google-vertex":           "Google Vertex",
-	}
-	if name, ok := replacer[pid]; ok {
+	if name, ok := providerDisplayNames[pid]; ok {
 		return name
 	}
 	// Fallback: capitalize first letter of each segment.
