@@ -71,6 +71,20 @@ func KnownApiKeyEnvVars() []string {
 	return keys
 }
 
+// ProviderEnvVar returns the primary API key environment variable name for a provider.
+// Returns "" if the provider has no simple env var mapping (e.g., bedrock, vertex).
+func ProviderEnvVar(provider string) string {
+	// Handle special cases with multiple env vars — return the primary one.
+	switch provider {
+	case string(ProviderAnthropic):
+		return "ANTHROPIC_API_KEY"
+	case string(ProviderGitHubCopilot):
+		return "COPILOT_GITHUB_TOKEN"
+	}
+	v, _ := providerEnvMap[provider]
+	return v
+}
+
 // GetEnvApiKey returns the API key for a provider from known environment variables.
 // Returns "" if no key is found.
 func GetEnvApiKey(provider string) string {

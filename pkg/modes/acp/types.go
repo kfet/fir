@@ -67,3 +67,94 @@ type ResumeSessionResponse struct {
 	// Models is the current model state for the resumed session.
 	Models interface{} `json:"models,omitempty"`
 }
+
+// ============================================================================
+// Extended AuthMethod types (RFD: auth-methods)
+// https://agentclientprotocol.com/rfds/auth-methods
+//
+// The Go SDK (v0.6.3) AuthMethod has only Id/Name/Description.
+// The RFD adds a "type" discriminator with type-specific fields.
+// We define these locally until the SDK adds native support.
+// ============================================================================
+
+// AuthMethodType is the type discriminator for auth methods per the RFD.
+type AuthMethodType string
+
+const (
+	// AuthMethodTypeAgent means the agent handles auth itself (default).
+	AuthMethodTypeAgent AuthMethodType = "agent"
+	// AuthMethodTypeEnvVar means the client collects a key and passes it as an env var.
+	AuthMethodTypeEnvVar AuthMethodType = "env_var"
+	// AuthMethodTypeTerminal means the client runs the agent in an interactive terminal.
+	AuthMethodTypeTerminal AuthMethodType = "terminal"
+)
+
+// ExtendedAuthMethod extends acpsdk.AuthMethod with RFD auth-methods fields.
+// JSON-serialized, these extra fields ride alongside the SDK's Id/Name/Description.
+type ExtendedAuthMethod struct {
+	// Id is the unique identifier for this auth method.
+	Id string `json:"id"`
+	// Name is the human-readable display name.
+	Name string `json:"name"`
+	// Description provides details about this auth method.
+	Description string `json:"description,omitempty"`
+	// Type is the auth method discriminator. Defaults to "agent" if empty.
+	Type AuthMethodType `json:"type,omitempty"`
+	// VarName is the env var name (env_var type only).
+	VarName string `json:"varName,omitempty"`
+	// Link is an optional URL where the user can obtain their key (env_var type only).
+	Link string `json:"link,omitempty"`
+	// Args are additional CLI arguments (terminal type only).
+	Args []string `json:"args,omitempty"`
+	// Env are additional environment variables (terminal type only).
+	Env map[string]string `json:"env,omitempty"`
+}
+
+// AuthRequiredError is the JSON-RPC error code for auth-required (-32000).
+const AuthRequiredError = -32000
+
+// ============================================================================
+// Session config types (not yet in the Go SDK v0.6.3)
+// https://agentclientprotocol.com/protocol/schema
+//
+// SessionConfigOption is a dropdown selector that appears in the client UI.
+// Category "thought_level" tells Zed to render it as the thinking mode picker.
+// ============================================================================
+
+// SessionConfigOptionCategory identifies the semantic category of a config option.
+type SessionConfigOptionCategory string
+
+const (
+	SessionConfigCategoryThoughtLevel SessionConfigOptionCategory = "thought_level"
+	SessionConfigCategoryModel        SessionConfigOptionCategory = "model"
+)
+
+// SessionConfigSelectOption is one selectable value in a config dropdown.
+type SessionConfigSelectOption struct {
+	Value       string  `json:"value"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+// SessionConfigOption describes a dropdown config selector and its current state.
+type SessionConfigOption struct {
+	Type         string                      `json:"type"` // always "select"
+	Id           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Description  *string                     `json:"description,omitempty"`
+	Category     SessionConfigOptionCategory `json:"category,omitempty"`
+	CurrentValue string                      `json:"currentValue"`
+	Options      []SessionConfigSelectOption `json:"options"`
+}
+
+// SetSessionConfigOptionRequest is the request for session/set_config_option.
+type SetSessionConfigOptionRequest struct {
+	SessionId string `json:"sessionId"`
+	ConfigId  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// SetSessionConfigOptionResponse is the response for session/set_config_option.
+type SetSessionConfigOptionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+}

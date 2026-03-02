@@ -125,3 +125,23 @@ func TestGetEnvApiKey_GoogleVertex_NoCredentials(t *testing.T) {
 		t.Errorf("expected '', got %q", got)
 	}
 }
+
+func TestProviderEnvVar(t *testing.T) {
+	tests := []struct {
+		provider string
+		want     string
+	}{
+		{"openai", "OPENAI_API_KEY"},
+		{"anthropic", "ANTHROPIC_API_KEY"},
+		{"github-copilot", "COPILOT_GITHUB_TOKEN"},
+		{"google", "GEMINI_API_KEY"},
+		{"unknown", ""},
+		{"amazon-bedrock", ""},  // no simple env var mapping
+		{"google-vertex", ""},   // no simple env var mapping
+	}
+	for _, tt := range tests {
+		if got := ProviderEnvVar(tt.provider); got != tt.want {
+			t.Errorf("ProviderEnvVar(%q) = %q, want %q", tt.provider, got, tt.want)
+		}
+	}
+}
