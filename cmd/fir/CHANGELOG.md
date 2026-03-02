@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-02
+
 ### Added
 - Restore `--extension <name>` / `-e <name>` CLI flag for filtering extensions by name (repeatable; merged with `settings.json` "extensions" list)
 - `SetupOptions.EnabledNames` — allowlist of extension names; when non-empty only matching extensions are started
