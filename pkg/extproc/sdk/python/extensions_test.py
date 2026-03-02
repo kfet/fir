@@ -2,7 +2,6 @@
 """Tests for the Python extension examples — imports the real extension files."""
 
 import importlib.util
-import io
 import os
 import sys
 import unittest
@@ -61,57 +60,65 @@ class TestStripSpinnerSuffix(unittest.TestCase):
 class TestNotifyFormats(unittest.TestCase):
     """Verify notification escape sequences produced by the real notify.py."""
 
+    def _capture_tty(self, fn, *args, **kwargs):
+        """Call fn and return the bytes that would have been written to /dev/tty."""
+        written: list[bytes] = []
+
+        def fake_write_to_tty(data: bytes) -> None:
+            written.append(data)
+
+        with patch.object(_notify, "_write_to_tty", side_effect=fake_write_to_tty):
+            fn(*args, **kwargs)
+        return b"".join(written).decode()
+
     def test_osc777_no_tmux(self):
-        buf = io.StringIO()
-        with patch.dict(os.environ, {"TMUX": ""}, clear=False), patch("sys.stderr", buf):
-            _notify._notify_osc777("title", "body")
-        self.assertEqual(buf.getvalue(), "\x1b]777;notify;title;body\x1b\\")
+        with patch.dict(os.environ, {"TMUX": ""}, clear=False):
+            result = self._capture_tty(_notify._notify_osc777, "title", "body")
+        self.assertEqual(result, "\x1b]777;notify;title;body\x1b\\")
 
     def test_osc777_in_tmux(self):
-        buf = io.StringIO()
         with patch.dict(
             os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False
-        ), patch("sys.stderr", buf):
-            _notify._notify_osc777("title", "body")
+        ):
+            result = self._capture_tty(_notify._notify_osc777, "title", "body")
         self.assertEqual(
-            buf.getvalue(),
+            result,
             "\x1bPtmux;\x1b\x1b]777;notify;title;body\x1b\x1b\\\x1b\\",
         )
 
     def test_osc99_no_tmux(self):
-        buf = io.StringIO()
-        with patch.dict(os.environ, {"TMUX": ""}, clear=False), patch("sys.stderr", buf):
-            _notify._notify_osc99("title", "body")
-        result = buf.getvalue()
+        with patch.dict(os.environ, {"TMUX": ""}, clear=False):
+            result = self._capture_tty(_notify._notify_osc99, "title", "body")
         self.assertIn("99;i=1:d=0;title", result)
         self.assertIn("99;i=1:p=body;body", result)
 
     def test_osc99_in_tmux(self):
-        buf = io.StringIO()
         with patch.dict(
             os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False
-        ), patch("sys.stderr", buf):
-            _notify._notify_osc99("title", "body")
-        result = buf.getvalue()
+        ):
+            result = self._capture_tty(_notify._notify_osc99, "title", "body")
         self.assertIn("Ptmux;", result)
         self.assertIn("99;i=1:d=0;title", result)
         self.assertIn("99;i=1:p=body;body", result)
 
     def test_notify_terminal_uses_osc99_in_kitty(self):
-        buf = io.StringIO()
         with patch.dict(
             os.environ, {"KITTY_WINDOW_ID": "1", "TMUX": ""}, clear=False
-        ), patch("sys.stderr", buf):
-            _notify.notify_terminal("fir", "Ready for input")
-        self.assertIn("99;", buf.getvalue())
+        ):
+            result = self._capture_tty(_notify.notify_terminal, "fir", "Ready for input")
+        self.assertIn("99;", result)
 
     def test_notify_terminal_uses_osc777_outside_kitty(self):
-        buf = io.StringIO()
         env = {k: v for k, v in os.environ.items() if k != "KITTY_WINDOW_ID"}
         env["TMUX"] = ""
-        with patch.dict(os.environ, env, clear=True), patch("sys.stderr", buf):
-            _notify.notify_terminal("fir", "Ready for input")
-        self.assertIn("777;", buf.getvalue())
+        with patch.dict(os.environ, env, clear=True):
+            result = self._capture_tty(_notify.notify_terminal, "fir", "Ready for input")
+        self.assertIn("777;", result)
+
+    def test_write_to_tty_silently_skips_on_oserror(self):
+        """_write_to_tty must not raise even if /dev/tty is unavailable."""
+        with patch("builtins.open", side_effect=OSError("no tty")):
+            _notify._write_to_tty(b"hello")  # should not raise
 
 
 if __name__ == "__main__":

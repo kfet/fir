@@ -2,6 +2,7 @@ package extension
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -183,15 +184,41 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 		},
 	})
 
+	// Declare the result early so hook closures can reference ExtProcManager
+	// once it is set (after the extproc manager starts below).
+	setupResult := &SetupResult{
+		Runner:  runner,
+		session: session,
+	}
+
 	// Set up tool hooks on the session.
 	// These are always wired so that extensions loaded via Reload() work
 	// without re-wrapping tools. When no handlers are registered, the
 	// runner's emit methods return nil and the hooks are no-ops.
 	hooks := &core.AgentSessionHooks{
 		OnToolCall: func(toolCallID, toolName string, input map[string]any) *core.ToolCallBlock {
-			result := runner.EmitToolCall(toolCallID, toolName, input)
-			if result != nil && result.Block {
-				return &core.ToolCallBlock{Reason: result.Reason}
+			// Check compiled-in Go extensions first.
+			if r := runner.EmitToolCall(toolCallID, toolName, input); r != nil && r.Block {
+				return &core.ToolCallBlock{Reason: r.Reason}
+			}
+			// Check extproc extensions (hook/tool_call).
+			if mgr := setupResult.ExtProcManager; mgr != nil {
+				raws, err := mgr.CallHook("hook/tool_call", map[string]any{
+					"tool_call_id": toolCallID,
+					"tool_name":    toolName,
+					"params":       input,
+				}, 5*time.Second)
+				if err == nil {
+					for _, raw := range raws {
+						var h struct {
+							Block  bool   `json:"block"`
+							Reason string `json:"reason"`
+						}
+						if json.Unmarshal(raw, &h) == nil && h.Block {
+							return &core.ToolCallBlock{Reason: h.Reason}
+						}
+					}
+				}
 			}
 			return nil
 		},
@@ -228,11 +255,6 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 	// can call them. Each ToolDefinition is converted to an agent.AgentTool.
 	addExtensionTools(session, runner)
 
-	result := &SetupResult{
-		Runner:  runner,
-		session: session,
-	}
-
 	// Start external process extensions if a project directory is configured.
 	if opts.ProjectDir != "" {
 		logger := firlog.With("component", "extproc")
@@ -259,7 +281,7 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 		if err := mgr.Start(context.Background(), opts.ProjectDir, cwd, adapter); err != nil {
 			firlog.Warn("extproc manager start failed", "err", err)
 		} else {
-			result.ExtProcManager = mgr
+			setupResult.ExtProcManager = mgr
 			// Re-add tools in case extproc extensions registered new ones.
 			addExtensionTools(session, runner)
 			// Forward session events to external process extensions.
@@ -267,7 +289,7 @@ func Setup(session *core.AgentSession, eventBus core.EventBus, opts SetupOptions
 		}
 	}
 
-	return result, nil
+	return setupResult, nil
 }
 
 // addExtensionTools converts extension-registered ToolDefinitions to

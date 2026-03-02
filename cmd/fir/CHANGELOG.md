@@ -2,14 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+- `demo.py` example extension covering every extproc API method and all ten lifecycle events; includes a `hook/tool_call` handler that blocks tools prefixed with `"blocked:"`
+- `demo_ext_test.py` — 27 protocol-level Python tests for `demo.py` driven by a thread-safe `FakeFir` in-memory JSON-RPC server
+- `demo_integration_test.go` — 19 Go e2e integration tests that spawn the real `demo.py` process via a background pump goroutine
+- `Context.send_user_message()` method to the Python SDK (was missing; bridge already handled it)
+
 ### Fixed
+- `Context.set_model()` now returns `bool` (was `None`); the `ok` field from the fir response is surfaced
+- `Context.send_message()` now uses correct field names (`custom_type`, `content`, `display`) matching the bridge protocol (was using `role`, `content`)
+- Event handlers in `fir_ext.py` are now dispatched in worker threads so the read loop stays free to process outbound API call responses — previously an event handler calling any `ctx.xxx()` method would deadlock
+- `hook/tool_call` is now wired for extproc extensions in `pkg/extension/integration.go`; extproc `Manager.CallHook` is consulted after compiled-in Go extensions in `OnToolCall`
+- `notify.py` extension: escape sequences written to `sys.stderr` were captured by the extproc pipe and logged as text, never reaching the terminal; fixed by writing to `/dev/tty` directly (bypasses the pipe, silently skips if no controlling terminal)
 - Python extensions silently skipped: `ConfirmFn` was never wired in `Setup()`, so all project-local extproc extensions were dropped by the trust check; now auto-trusts on first run with a stderr notice and persists the hash
 - Python extensions never received `session_start` or proper `session_shutdown`/process teardown; `SetupResult` now has `EmitSessionStart()`/`EmitSessionShutdown()` methods that cover both Go and extproc extensions
 - Global `settings.json` had stale `"extensions": ["notify","tmuxspinner"]` (Go extension names) — removed; Python ext-proc extensions are auto-discovered from `.fir/extensions/` and need no settings entry
 - Bash command color output on macOS: add `CLICOLOR=1` to color-forcing env vars so macOS `/bin/ls` and other BSD tools emit colors when stdout is a pipe
 - `gh api` calls in update check now strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI codes in JSON output
-
-### Added
 - ACP: auth methods RFD support — `Initialize` now returns typed auth methods (`agent`, `env_var`, `terminal`) per [agentclientprotocol.com/rfds/auth-methods](https://agentclientprotocol.com/rfds/auth-methods); `Authenticate` dispatches by method type
 - ACP: thinking level config — `session/new` returns `configOptions` with a `thought_level` dropdown; `session/set_config_option` changes the thinking level; Zed renders this as the thinking mode picker
 - ACP: model selector via configOptions — models now exposed as `configOptions` with `category: "model"` in addition to the legacy `models` field; `session/set_config_option` handles model switching; Zed renders this as the model picker dropdown
