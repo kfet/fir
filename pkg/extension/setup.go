@@ -170,7 +170,6 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 		if event.AgentEvent == nil {
 			switch event.Type {
 			case "session_named":
-				firlog.Debug("extension setup: forwarding session_named", "name", event.SessionName)
 				mgr.EmitEvent("session_named", map[string]any{
 					"name": event.SessionName,
 				})

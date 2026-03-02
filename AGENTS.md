@@ -17,6 +17,8 @@ GIT_EDITOR=true git rebase --continue
 GIT_EDITOR=true git commit
 ```
 
+When merging a feature branch back to main, always use `git merge --ff-only` to keep a linear history and avoid merge commits. Rebase the branch first if needed.
+
 ## Testing
 
 Run `make test` to verify your changes. Always finish every task with `make all` to confirm the full build and test suite passes.
