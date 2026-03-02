@@ -154,10 +154,26 @@ in your project directory and they are automatically discovered and started.
 fir ships a Python SDK in `pkg/extension/sdk/python/fir_ext.py` that
 handles the JSON-RPC protocol for you.
 
-**Disable all extensions** — `--no-extensions` skips discovery:
+Extensions placed in `.fir/extensions/` (project) or `~/.config/fir/extensions/`
+(global) are discovered automatically. To restrict which extensions are loaded,
+set `extensions` in your settings file as a **name allowlist**:
+
+```jsonc
+// .fir/settings.json (project) or ~/.fir/agent/settings.json (global)
+{
+  "extensions": ["demo", "hello"]
+}
+```
+
+When the list is non-empty, only discovered extensions whose name matches an
+entry are started. When absent or empty, all discovered extensions run.
+
+You can also enable specific extensions per-invocation with `--extension` /
+`-e`, or disable all of them with `--no-extensions`:
 
 ```bash
-fir --no-extensions "do something"
+fir -e demo -e hello "do something"   # only these two
+fir --no-extensions "do something"     # none at all
 ```
 
 ## Build

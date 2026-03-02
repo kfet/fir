@@ -166,10 +166,18 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 
 	// Forward agent session events to extensions.
 	session.Subscribe(func(event core.AgentSessionEvent) {
-		ae := event.AgentEvent
-		if ae == nil {
+		// Session-level events (no agent event)
+		if event.AgentEvent == nil {
+			switch event.Type {
+			case "session_named":
+				firlog.Debug("extension setup: forwarding session_named", "name", event.SessionName)
+				mgr.EmitEvent("session_named", map[string]any{
+					"name": event.SessionName,
+				})
+			}
 			return
 		}
+		ae := event.AgentEvent
 		switch ae.Type {
 		case agent.EventAgentStart:
 			mgr.EmitEvent("agent_start", nil)

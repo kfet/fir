@@ -923,3 +923,98 @@ func TestRawConnMethodHandler_SessionNew_NonStdioMCPServerSkipped(t *testing.T) 
 		t.Errorf("unexpected InvalidParams: %+v", reqErr)
 	}
 }
+
+func TestReplaySessionHistory(t *testing.T) {
+	// Create a temp dir for session storage.
+	tmpDir := t.TempDir()
+	sessionDir := filepath.Join(tmpDir, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a SessionManager and populate it with messages.
+	sm := core.NewSessionManager(tmpDir, sessionDir)
+
+	// User message
+	sm.AppendAIMessage(ai.NewUserMsg("Hello, how are you?", time.Now().UnixMilli()))
+
+	// Assistant message with text and a tool call
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			ai.NewTextContent("Let me check that for you."),
+			ai.NewToolCallContent("tc-1", "bash", map[string]any{"command": "echo hello"}),
+		},
+	}))
+
+	// Tool result
+	sm.AppendAIMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+		Role:       "toolResult",
+		ToolCallID: "tc-1",
+		ToolName:   "bash",
+		Content:    []ai.ToolResultContent{{Type: "text", Text: "hello\n"}},
+	}))
+
+	// Final assistant message
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:    "assistant",
+		Content: []ai.AssistantContent{ai.NewTextContent("The command executed successfully.")},
+	}))
+
+	// Create a mock agent session with the SessionManager.
+	entry := &firSession{
+		session:   &core.AgentSession{SessionManager: sm},
+		termState: newTerminalState(),
+	}
+
+	mc := newMockConn()
+	pa := &firAgent{
+		conn:     mc,
+		sessions: map[string]*firSession{"test-session": entry},
+	}
+
+	pa.replaySessionHistory("test-session", entry)
+
+	mc.mu.Lock()
+	updates := make([]acpsdk.SessionNotification, len(mc.updates))
+	copy(updates, mc.updates)
+	mc.mu.Unlock()
+
+	// We expect: user msg, agent text, tool call start, tool result, agent text
+	// = 5 updates
+	if len(updates) < 5 {
+		t.Fatalf("expected at least 5 updates, got %d", len(updates))
+	}
+
+	// First update: user message
+	if updates[0].Update.UserMessageChunk == nil {
+		t.Error("expected first update to be user message chunk")
+	} else if updates[0].Update.UserMessageChunk.Content.Text == nil ||
+		updates[0].Update.UserMessageChunk.Content.Text.Text != "Hello, how are you?" {
+		t.Error("user message text mismatch")
+	}
+
+	// Second: agent text
+	if updates[1].Update.AgentMessageChunk == nil {
+		t.Error("expected second update to be agent message chunk")
+	}
+
+	// Third: tool call start
+	if updates[2].Update.ToolCall == nil {
+		t.Error("expected third update to be tool call start")
+	} else if string(updates[2].Update.ToolCall.ToolCallId) != "tc-1" {
+		t.Errorf("tool call ID = %q, want %q", updates[2].Update.ToolCall.ToolCallId, "tc-1")
+	}
+
+	// Fourth: tool call update (result)
+	if updates[3].Update.ToolCallUpdate == nil {
+		t.Error("expected fourth update to be tool call update")
+	} else if string(updates[3].Update.ToolCallUpdate.ToolCallId) != "tc-1" {
+		t.Errorf("tool call update ID = %q, want %q", updates[3].Update.ToolCallUpdate.ToolCallId, "tc-1")
+	}
+
+	// Fifth: final agent message
+	if updates[4].Update.AgentMessageChunk == nil {
+		t.Error("expected fifth update to be agent message chunk")
+	}
+}

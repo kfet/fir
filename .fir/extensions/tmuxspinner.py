@@ -70,6 +70,20 @@ class Spinner:
         self._thread = None
         self._running = False
 
+    def set_base_name(self, name):
+        """Update the base name (e.g., when session is renamed)."""
+        with self._lock:
+            if not self._pane_id:
+                self._pane_id = _pane_id()
+                if self._pane_id:
+                    _disable_auto_rename(self._pane_id)
+                    self._base_name = _strip_spinner_suffix(
+                        _read_window_name(self._pane_id) or "fir"
+                    )
+            self._base_name = name
+            if self._pane_id and not self._running:
+                _rename_window(self._pane_id, self._base_name)
+
     def start(self):
         with self._lock:
             if self._running:
@@ -171,6 +185,12 @@ if _in_tmux() and _has_controlling_terminal():
     @fir_ext.on("session_shutdown")
     def on_session_shutdown(params, ctx):
         _spinner.stop()
+
+    @fir_ext.on("session_named")
+    def on_session_named(params, ctx):
+        name = (params or {}).get("name", "")
+        if name:
+            _spinner.set_base_name(name)
 
 
 fir_ext.run(name="tmuxspinner")

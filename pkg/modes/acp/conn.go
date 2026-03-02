@@ -195,7 +195,22 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 			if err != nil {
 				return nil, toReqErr(err)
 			}
-			return resp, nil
+			// Inject configOptions like session/new.
+			rawResp, merr := json.Marshal(resp)
+			if merr != nil {
+				return resp, nil
+			}
+			var respMap map[string]any
+			if merr := json.Unmarshal(rawResp, &respMap); merr != nil {
+				return resp, nil
+			}
+			pa.mu.Lock()
+			resumeEntry, rok := pa.sessions[p.SessionId]
+			pa.mu.Unlock()
+			if rok {
+				respMap["configOptions"] = buildConfigOptions(resumeEntry)
+			}
+			return respMap, nil
 
 		default:
 			return nil, acpsdk.NewMethodNotFound(method)

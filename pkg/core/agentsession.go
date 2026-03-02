@@ -103,6 +103,9 @@ type AgentSessionEvent struct {
 	// CompactionInfo is set on auto_compaction_start to give the UI
 	// upfront visibility into what will be compacted.
 	CompactionInfo *CompactionInfo
+
+	// SessionName is set on "session_named" events.
+	SessionName string
 }
 
 // AgentSessionEventListener receives session events.
@@ -899,6 +902,10 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 // SetSessionName sets the display name for the current session.
 func (s *AgentSession) SetSessionName(name string) {
 	s.SessionManager.AppendSessionInfo(name)
+	s.emit(AgentSessionEvent{
+		Type:        "session_named",
+		SessionName: name,
+	})
 }
 
 // GetSessionName returns the display name for the current session.
@@ -939,6 +946,14 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	// Rebuild system prompt
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+
+	// Emit session_named if the loaded session has a name
+	if name := s.SessionManager.GetSessionName(); name != "" {
+		s.emit(AgentSessionEvent{
+			Type:        "session_named",
+			SessionName: name,
+		})
+	}
 
 	return nil
 }

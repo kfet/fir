@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- ACP session resume now replays full conversation history (user messages, assistant text/thinking, tool calls with results) to the client via session update notifications, so past sessions are fully visible in the client UI
+- ACP `session/resume` response now includes `configOptions` (thinking level, model selectors) matching `session/new` behavior
+- `session_named` extension event emitted when session name changes or a named session is loaded; tmuxspinner extension now updates the tmux window name to match the session name
+
 ### Fixed
 - tmuxspinner: spinner not always stopped on exit — restore window name immediately in `stop()`, add `atexit`/`SIGTERM` handlers as safety net, and add 250ms grace period in `Manager.Stop()` so extensions can process `session_shutdown` before being killed
 - tmuxspinner: no longer renames the tmux window when fir runs as a subprocess (e.g. ACP mode) — checks for a controlling terminal via `/dev/tty` before activating

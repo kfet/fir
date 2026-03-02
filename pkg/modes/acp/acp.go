@@ -413,9 +413,10 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		return ResumeSessionResponse{}, fmt.Errorf("switch session: %w", err)
 	}
 
-	// Send available commands after response.
+	// Send available commands and replay history after response.
 	go func() {
 		pa.sendAvailableCommands(sessionID)
+		pa.replaySessionHistory(sessionID, entry)
 	}()
 
 	var models interface{}
@@ -423,6 +424,155 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		models = BuildModelState(entry.modelRegistry, m)
 	}
 	return ResumeSessionResponse{Models: models}, nil
+}
+
+// replaySessionHistory pushes the historical messages from a resumed session
+// to the ACP client as session update notifications. This allows the client
+// to display the full conversation history from previous turns.
+func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
+	ctx := entry.session.SessionManager.BuildSessionContext()
+	sid := acpsdk.SessionId(sessionID)
+
+	// Track tool calls from assistant messages so we can match them with results.
+	type pendingTool struct {
+		name string
+		args map[string]any
+	}
+	pendingTools := make(map[string]pendingTool)
+
+	for _, msg := range ctx.Messages {
+		switch msg.Role() {
+		case "user":
+			um := msg.AsUser()
+			if um == nil {
+				continue
+			}
+			text := extractUserText(um.Content)
+			if text != "" {
+				_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+					SessionId: sid,
+					Update:    acpsdk.UpdateUserMessageText(text),
+				})
+			}
+
+		case "assistant":
+			am := msg.AsAssistant()
+			if am == nil {
+				continue
+			}
+			for _, c := range am.Content {
+				if c.IsText() && c.Text != nil {
+					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+						SessionId: sid,
+						Update:    acpsdk.UpdateAgentMessageText(c.Text.Text),
+					})
+				} else if c.IsThinking() && c.Thinking != nil {
+					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+						SessionId: sid,
+						Update:    acpsdk.UpdateAgentThoughtText(c.Thinking.Thinking),
+					})
+				} else if c.IsToolCall() && c.ToolCall != nil {
+					tc := c.ToolCall
+					pendingTools[tc.ID] = pendingTool{name: tc.Name, args: tc.Arguments}
+
+					var startOpts []acpsdk.ToolCallStartOpt
+					startOpts = append(startOpts,
+						acpsdk.WithStartKind(MapToolKind(tc.Name)),
+						acpsdk.WithStartStatus("completed"),
+						acpsdk.WithStartRawInput(tc.Arguments),
+					)
+					locs := BuildToolLocations(tc.Name, tc.Arguments)
+					if len(locs) > 0 {
+						startOpts = append(startOpts, acpsdk.WithStartLocations(locs))
+					}
+					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+						SessionId: sid,
+						Update:    acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitle(tc.Name, tc.Arguments), startOpts...),
+					})
+				}
+			}
+
+		case "toolResult":
+			tr := msg.AsToolResult()
+			if tr == nil {
+				continue
+			}
+			status := acpsdk.ToolCallStatus("completed")
+			if tr.IsError {
+				status = "failed"
+			}
+			var updateOpts []acpsdk.ToolCallUpdateOpt
+			updateOpts = append(updateOpts, acpsdk.WithUpdateStatus(status))
+
+			// Build result for raw output.
+			resultMap := map[string]any{
+				"content": toolResultToContent(tr.Content),
+				"isError": tr.IsError,
+			}
+			if tr.Details != nil {
+				resultMap["details"] = tr.Details
+			}
+			updateOpts = append(updateOpts, acpsdk.WithUpdateRawOutput(resultMap))
+
+			// Build display content using the original tool args if available.
+			var argsMap map[string]any
+			toolName := tr.ToolName
+			if pt, ok := pendingTools[tr.ToolCallID]; ok {
+				argsMap = pt.args
+				toolName = pt.name
+				delete(pendingTools, tr.ToolCallID)
+			}
+			content, locations := BuildToolCallContent(toolName, argsMap, resultMap, tr.IsError)
+			if len(content) > 0 {
+				updateOpts = append(updateOpts, acpsdk.WithUpdateContent(content))
+			}
+			if len(locations) > 0 {
+				updateOpts = append(updateOpts, acpsdk.WithUpdateLocations(locations))
+			}
+
+			_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+				SessionId: sid,
+				Update:    acpsdk.UpdateToolCall(acpsdk.ToolCallId(tr.ToolCallID), updateOpts...),
+			})
+		}
+	}
+}
+
+// extractUserText extracts text from a UserMessage content field,
+// which may be a string or []UserContentBlock.
+func extractUserText(content any) string {
+	if s, ok := content.(string); ok {
+		return s
+	}
+	blocks, ok := content.([]any)
+	if !ok {
+		return fmt.Sprint(content)
+	}
+	var parts []string
+	for _, b := range blocks {
+		m, ok := b.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := m["type"].(string); t == "text" {
+			if text, ok := m["text"].(string); ok {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// toolResultToContent converts ToolResultContent to a generic slice for serialization.
+func toolResultToContent(content []ai.ToolResultContent) []any {
+	result := make([]any, 0, len(content))
+	for _, c := range content {
+		result = append(result, map[string]any{
+			"type": c.Type,
+			"text": c.Text,
+		})
+	}
+	return result
 }
 
 // ============================================================================
@@ -968,7 +1118,8 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 			if name == "" {
 				name = sessions[0].Path
 			}
-			pa.sendAgentMessage(sessionID, fmt.Sprintf("Continued session: %s\nNote: Previous message history is not visible in this client view.", name))
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Continued session: %s", name))
+			pa.replaySessionHistory(sessionID, entry)
 		}
 		return true
 
@@ -1115,7 +1266,8 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 	if err := entry.session.SwitchSession(sessionPath); err != nil {
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to resume session: %v", err))
 	} else {
-		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s\nNote: Previous message history is not visible in this client view.", sessionPath))
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s", sessionPath))
+		pa.replaySessionHistory(sessionID, entry)
 	}
 }
 
