@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- tmuxspinner: spinner not always stopped on exit — restore window name immediately in `stop()`, add `atexit`/`SIGTERM` handlers as safety net, and add 250ms grace period in `Manager.Stop()` so extensions can process `session_shutdown` before being killed
+- tmuxspinner: no longer renames the tmux window when fir runs as a subprocess (e.g. ACP mode) — checks for a controlling terminal via `/dev/tty` before activating
+
 ## [0.10.0] - 2026-03-02
 
 ### Added

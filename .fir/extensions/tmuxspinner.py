@@ -8,7 +8,9 @@ No-op when not running inside tmux ($TMUX unset).
 This is a Python port of pkg/extensions/tmuxspinner.
 """
 
+import atexit
 import os
+import signal
 import subprocess
 import threading
 
@@ -93,18 +95,25 @@ class Spinner:
             self._stop_event.set()
             self._running = False
             thread = self._thread
+            pane = self._pane_id
+            base = self._base_name
+
+        # Restore window name immediately, before waiting for the thread.
+        if pane:
+            _rename_window(pane, base)
 
         if thread:
-            thread.join(timeout=5)
-
-        with self._lock:
-            _rename_window(self._pane_id, self._base_name)
+            thread.join(timeout=2)
 
     def _loop(self):
         assert self._stop_event is not None
         i = 0
         last_set = ""
         while not self._stop_event.wait(SPIN_INTERVAL):
+            # Re-check after waking — stop() may have been called during the wait.
+            if self._stop_event.is_set():
+                break
+
             with self._lock:
                 target = self._pane_id
 
@@ -124,9 +133,32 @@ class Spinner:
             i += 1
 
 
-# Only activate if inside tmux
-if _in_tmux():
+def _has_controlling_terminal():
+    """Check if the process has a controlling terminal."""
+    try:
+        fd = os.open("/dev/tty", os.O_RDONLY | os.O_NOCTTY)
+        os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
+# Only activate if inside tmux AND we have a controlling terminal.
+# When fir is spawned as a subprocess (e.g. ACP mode), there's no
+# controlling terminal so the spinner stays dormant.
+if _in_tmux() and _has_controlling_terminal():
     _spinner = Spinner()
+
+    # Safety net: restore window name on exit regardless of how we shut down.
+    atexit.register(lambda: _spinner.stop())
+
+    def _sigterm_handler(signum, frame):
+        _spinner.stop()
+        # Re-raise so the process actually exits
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     @fir_ext.on("agent_start")
     def on_agent_start(params, ctx):

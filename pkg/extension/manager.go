@@ -192,10 +192,14 @@ func (m *Manager) Stop() error {
 	m.bridges = nil
 	m.mu.Unlock()
 
-	// Send shutdown event to all extensions.
+	// Send shutdown event to all extensions and give them a moment
+	// to handle it (e.g. restore tmux window names) before killing.
 	for _, mb := range bridges {
 		_ = mb.bridge.EmitEvent("session_shutdown", nil)
 	}
+
+	// Brief grace period so extensions can process the shutdown event.
+	time.Sleep(250 * time.Millisecond)
 
 	for _, mb := range bridges {
 		mb.cancel()
