@@ -84,12 +84,15 @@ func (d *demoProc) send(msg any) {
 
 // handleOutbound processes an outbound API call from the extension and sends
 // the expected response. All calls are recorded on d.rec.
+//
+// The mutex is released before the pipe write so that waitOutbound's spin loop
+// can acquire d.rec.mu while the write is in progress.
 func (d *demoProc) handleOutbound(msg jrpcMsg) {
 	id := *msg.ID
 
+	// Record the call while holding the mutex, then release before the pipe
+	// write so that waitOutbound's spin loop is never locked out.
 	d.rec.mu.Lock()
-	defer d.rec.mu.Unlock()
-
 	var result any
 
 	switch msg.Method {
@@ -175,6 +178,8 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		d.t.Logf("unhandled outbound method: %s", msg.Method)
 		result = map[string]any{"ok": true}
 	}
+
+	d.rec.mu.Unlock() // release before pipe write
 
 	d.send(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
@@ -370,11 +375,12 @@ func TestDemo_Init(t *testing.T) {
 	proc, cancel := startDemo(t)
 	defer cancel()
 
+	const initID = 0
 	proc.send(map[string]any{
-		"jsonrpc": "2.0", "id": 1, "method": "init",
+		"jsonrpc": "2.0", "id": initID, "method": "init",
 		"params": map[string]any{"version": "1", "cwd": "/tmp"},
 	})
-	resp, ok := proc.recv(1, 5*time.Second)
+	resp, ok := proc.recv(initID, 5*time.Second)
 	if !ok {
 		t.Fatal("init: timed out")
 	}
@@ -425,13 +431,15 @@ func TestDemo_Init(t *testing.T) {
 }
 
 // doInit sends a standard init and waits for the response.
+// It uses a fixed ID (0) that does not consume a slot from d.nextID, so
+// subsequent callTool/callHook invocations start cleanly from 2.
 func doInit(proc *demoProc) {
-	proc.nextID = 1
+	const initID = 0
 	proc.send(map[string]any{
-		"jsonrpc": "2.0", "id": 1, "method": "init",
+		"jsonrpc": "2.0", "id": initID, "method": "init",
 		"params": map[string]any{"version": "1", "cwd": "/tmp"},
 	})
-	if _, ok := proc.recv(1, 5*time.Second); !ok {
+	if _, ok := proc.recv(initID, 5*time.Second); !ok {
 		proc.t.Fatal("doInit: timed out")
 	}
 }

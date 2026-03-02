@@ -35,6 +35,11 @@ type SetupOptions struct {
 	// SetStatusFn is called when an extension sends a "set_status" request. If
 	// nil, status updates are silently dropped.
 	SetStatusFn SetStatusFunc
+
+	// TrustStorePath overrides the path used to persist trusted-extension hashes.
+	// Leave empty to use the default (~/.config/fir/trusted-extensions.json).
+	// Useful in tests to avoid polluting the user's global trust store.
+	TrustStorePath string
 }
 
 // SetupResult holds the running state of extproc extensions for a session.
@@ -87,6 +92,9 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 
 	logger := firlog.With("component", "extproc")
 	mgr := NewManager(logger)
+	if opts.TrustStorePath != "" {
+		mgr.SetTrustStore(NewTrustStoreWithPath(opts.TrustStorePath))
+	}
 
 	// Wire trust confirmation.
 	confirmFn := opts.ConfirmFn
