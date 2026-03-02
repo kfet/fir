@@ -2263,7 +2263,7 @@ func (m *InteractiveMode) handleReloadCommand() {
 	// Reload extensions if setup is available.
 	if m.extSetup != nil {
 		enabledNames := m.resolveEnabledExtensions()
-		if err := m.extSetup.Reload(enabledNames); err != nil {
+		if err := m.extSetup.Reload(m.ctx, enabledNames); err != nil {
 			m.showWarning(fmt.Sprintf("Extension reload failed: %v", err))
 			// Continue — skills/prompts were already reloaded successfully.
 		}

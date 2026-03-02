@@ -3,9 +3,19 @@
 import io
 import json
 import threading
+import time
 import unittest
 
 import fir_ext
+
+_TOOL_PARAMS = {
+    "type": "object",
+    "properties": {"x": {"type": "string"}},
+}
+_ADD_PARAMS = {
+    "type": "object",
+    "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+}
 
 
 def _make_input(*messages):
@@ -24,6 +34,36 @@ def _read_all_messages(stream):
     return msgs
 
 
+def _init_msg(msg_id=1):
+    return {"jsonrpc": "2.0", "id": msg_id, "method": "init", "params": {}}
+
+
+def _tool_call_msg(name, params=None, msg_id=2):
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "method": "tool_call",
+        "params": {"name": name, "params": params or {}},
+    }
+
+
+def _hook_msg(hook_name, params=None, msg_id=2):
+    return {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "method": hook_name,
+        "params": params or {},
+    }
+
+
+def _event_msg(event_name, params=None):
+    return {
+        "jsonrpc": "2.0",
+        "method": f"event/{event_name}",
+        "params": params or {},
+    }
+
+
 class TestInitHandshake(unittest.TestCase):
     def setUp(self):
         fir_ext._tools.clear()
@@ -32,7 +72,7 @@ class TestInitHandshake(unittest.TestCase):
         fir_ext._event_handlers.clear()
 
     def test_init_returns_capabilities(self):
-        @fir_ext.tool("my_tool", "A test tool", {"type": "object", "properties": {"x": {"type": "string"}}})
+        @fir_ext.tool("my_tool", "A test tool", _TOOL_PARAMS)
         def my_tool(params, ctx):
             return {"ok": True}
 
@@ -40,7 +80,13 @@ class TestInitHandshake(unittest.TestCase):
         def on_start(params, ctx):
             pass
 
-        inp = _make_input({"jsonrpc": "2.0", "id": 1, "method": "init", "params": {"version": "1", "cwd": "/tmp"}})
+        init = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "init",
+            "params": {"version": "1", "cwd": "/tmp"},
+        }
+        inp = _make_input(init)
         out = io.StringIO()
         fir_ext.run(name="test-ext", input_stream=inp, output_stream=out)
 
@@ -63,13 +109,13 @@ class TestToolCall(unittest.TestCase):
         fir_ext._event_handlers.clear()
 
     def test_tool_call_success(self):
-        @fir_ext.tool("add", "Add two numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}})
+        @fir_ext.tool("add", "Add two numbers", _ADD_PARAMS)
         def add(params, ctx):
             return {"sum": params["a"] + params["b"]}
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "add", "params": {"a": 3, "b": 4}}},
+            _init_msg(),
+            _tool_call_msg("add", {"a": 3, "b": 4}),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -80,8 +126,8 @@ class TestToolCall(unittest.TestCase):
 
     def test_tool_call_unknown(self):
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "nope", "params": {}}},
+            _init_msg(),
+            _tool_call_msg("nope"),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -95,8 +141,8 @@ class TestToolCall(unittest.TestCase):
             raise fir_ext.ToolError("boom", code=-32001)
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "fail", "params": {}}},
+            _init_msg(),
+            _tool_call_msg("fail"),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -111,8 +157,8 @@ class TestToolCall(unittest.TestCase):
             raise ValueError("unexpected")
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "oops", "params": {}}},
+            _init_msg(),
+            _tool_call_msg("oops"),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -124,13 +170,14 @@ class TestToolCall(unittest.TestCase):
     def test_tool_call_string_auto_wrap(self):
         """When a tool handler returns a plain string, verify it is wrapped
         into the structured content format."""
+
         @fir_ext.tool("say_hi", "Returns a string")
         def say_hi(params, ctx):
             return "hello world"
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "say_hi", "params": {}}},
+            _init_msg(),
+            _tool_call_msg("say_hi"),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -157,19 +204,22 @@ class TestHooks(unittest.TestCase):
             return None
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "hook/tool_call", "params": {"name": "dangerous"}},
+            _init_msg(),
+            _hook_msg("hook/tool_call", {"name": "dangerous"}),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
 
         msgs = _read_all_messages(out)
-        self.assertEqual(msgs[1]["result"], {"block": True, "reason": "too dangerous"})
+        self.assertEqual(
+            msgs[1]["result"],
+            {"block": True, "reason": "too dangerous"},
+        )
 
     def test_hook_unregistered_returns_null(self):
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "id": 2, "method": "hook/input", "params": {}},
+            _init_msg(),
+            _hook_msg("hook/input"),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -193,8 +243,8 @@ class TestEvents(unittest.TestCase):
             received.append(params)
 
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "method": "event/turn_end", "params": {"turn": 3}},
+            _init_msg(),
+            _event_msg("turn_end", {"turn": 3}),
         )
         out = io.StringIO()
         fir_ext.run(input_stream=inp, output_stream=out)
@@ -203,8 +253,8 @@ class TestEvents(unittest.TestCase):
 
     def test_unknown_event_ignored(self):
         inp = _make_input(
-            {"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}},
-            {"jsonrpc": "2.0", "method": "event/unknown_thing", "params": {}},
+            _init_msg(),
+            _event_msg("unknown_thing"),
         )
         out = io.StringIO()
         # Should not raise
@@ -219,11 +269,8 @@ class TestContext(unittest.TestCase):
         fir_ext._event_handlers.clear()
 
     def test_context_outbound_call(self):
-        """Simulate extension calling ctx.set_status() during a tool_call.
+        """Simulate extension calling ctx.set_status() during a tool_call."""
 
-        The handler runs in a thread; the main read loop stays free to
-        deliver the fir response for set_status back to ctx._call().
-        """
         @fir_ext.tool("do_status", "Sets status")
         def do_status(params, ctx):
             ctx.set_status("working")
@@ -231,17 +278,14 @@ class TestContext(unittest.TestCase):
 
         out = io.StringIO()
 
-        # We need a custom input stream: after delivering init + tool_call,
-        # it waits for the handler's outbound set_status request to appear
-        # on out, then provides the matching response on the input.
         class FakeInput:
             def __init__(self):
                 self._lines = [
-                    json.dumps({"jsonrpc": "2.0", "id": 1, "method": "init", "params": {}}) + "\n",
-                    json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tool_call", "params": {"name": "do_status", "params": {}}}) + "\n",
+                    json.dumps(_init_msg()) + "\n",
+                    json.dumps(_tool_call_msg("do_status")) + "\n",
                 ]
                 self._idx = 0
-                self._extra = []
+                self._extra: list[str] = []
                 self._extra_ready = threading.Event()
 
             def readline(self):
@@ -249,12 +293,11 @@ class TestContext(unittest.TestCase):
                     line = self._lines[self._idx]
                     self._idx += 1
                     return line
-                # Wait for an injected line (the fir response to set_status)
                 if self._extra_ready.wait(timeout=10):
                     self._extra_ready.clear()
                     if self._extra:
                         return self._extra.pop(0)
-                return ""  # EOF
+                return ""
 
             def inject(self, msg):
                 self._extra.append(json.dumps(msg) + "\n")
@@ -263,8 +306,6 @@ class TestContext(unittest.TestCase):
         fake_in = FakeInput()
 
         def watch_and_respond():
-            """Watch out for the set_status request and inject a response."""
-            import time
             seen = set()
             for _ in range(200):
                 time.sleep(0.02)
@@ -275,11 +316,13 @@ class TestContext(unittest.TestCase):
                     seen.add(line)
                     msg = json.loads(line)
                     if msg.get("method") == "set_status":
-                        fake_in.inject({"jsonrpc": "2.0", "id": msg["id"], "result": None})
-                        # After response delivered, handler finishes, main loop
-                        # will read EOF and exit. Give it a moment then signal EOF.
+                        resp = {
+                            "jsonrpc": "2.0",
+                            "id": msg["id"],
+                            "result": None,
+                        }
+                        fake_in.inject(resp)
                         time.sleep(0.1)
-                        fake_in.inject(None)  # won't work, use empty
                         fake_in._extra.append("")
                         fake_in._extra_ready.set()
                         return
@@ -291,10 +334,12 @@ class TestContext(unittest.TestCase):
         t.join(timeout=5)
 
         msgs = _read_all_messages(out)
-        # Verify set_status was called outbound
-        self.assertTrue(any(m.get("method") == "set_status" for m in msgs))
-        # Verify tool_call got result
-        self.assertTrue(any(m.get("result") == {"done": True} for m in msgs))
+        self.assertTrue(
+            any(m.get("method") == "set_status" for m in msgs),
+        )
+        self.assertTrue(
+            any(m.get("result") == {"done": True} for m in msgs),
+        )
 
 
 class TestDecorators(unittest.TestCase):
@@ -334,13 +379,19 @@ class TestDecorators(unittest.TestCase):
         def bare(params, ctx):
             pass
 
-        self.assertEqual(fir_ext._tools[0]["parameters"], {"type": "object", "properties": {}})
+        self.assertEqual(
+            fir_ext._tools[0]["parameters"],
+            {"type": "object", "properties": {}},
+        )
 
 
 class TestJsonRpcHelpers(unittest.TestCase):
     def test_make_response(self):
         r = fir_ext._make_response(42, {"ok": True})
-        self.assertEqual(r, {"jsonrpc": "2.0", "id": 42, "result": {"ok": True}})
+        self.assertEqual(
+            r,
+            {"jsonrpc": "2.0", "id": 42, "result": {"ok": True}},
+        )
 
     def test_make_error(self):
         r = fir_ext._make_error(1, -32600, "bad")
@@ -352,6 +403,7 @@ class TestJsonRpcHelpers(unittest.TestCase):
         fir_ext._write_message(msg, buf)
         buf.seek(0)
         got = fir_ext._read_message(buf)
+        assert got is not None
         self.assertEqual(got["method"], "test")
 
     def test_read_eof(self):

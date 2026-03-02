@@ -171,6 +171,10 @@ func fetchViaGH(ctx context.Context) (*Release, error) {
 	}
 	cmd := exec.CommandContext(ctx, ghPath, "api",
 		fmt.Sprintf("repos/%s/%s/releases/latest", repoOwner, repoName))
+	// Prevent gh from colorizing JSON output. CLICOLOR_FORCE (set for bash
+	// tool display) overrides NO_COLOR in gh, so we must clear it explicitly.
+	cmd.Env = filterEnv(os.Environ(), "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR")
+	cmd.Env = append(cmd.Env, "NO_COLOR=1")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh api failed (run 'gh auth login'?): %w", err)
@@ -286,4 +290,22 @@ func writeCache(path string, e *cacheEntry) {
 		return
 	}
 	_ = os.WriteFile(path, data, 0o600)
+}
+
+// filterEnv returns env with entries matching any of the given prefixes removed.
+func filterEnv(env []string, prefixes ...string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		skip := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(e, p+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }

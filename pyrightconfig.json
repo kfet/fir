@@ -1,0 +1,4 @@
+{
+  "extraPaths": ["pkg/extproc/sdk/python"],
+  "typeCheckingMode": "standard",
+}

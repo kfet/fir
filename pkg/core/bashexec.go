@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
@@ -38,14 +37,6 @@ type BashResult struct {
 	Truncated bool
 	// FullOutputPath is the path to temp file with full output (if output exceeded threshold).
 	FullOutputPath string
-}
-
-// ansiRegexp matches ANSI escape sequences.
-var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[^[(\x1b]`)
-
-// stripAnsi removes ANSI escape codes from text.
-func stripAnsi(s string) string {
-	return ansiRegexp.ReplaceAllString(s, "")
 }
 
 // sanitizeBinaryOutput replaces non-printable characters (except common whitespace
@@ -90,7 +81,7 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 	// When streaming for display, inject env vars that tell CLI tools to
 	// emit ANSI colors even when stdout is not a TTY.
 	if opts != nil && opts.OnChunk != nil {
-		cmd.Env = appendColorEnv(cmd.Env)
+		cmd.Env = tools.AppendColorEnv(cmd.Env)
 	}
 
 	// Create pipes for stdout and stderr
@@ -132,7 +123,7 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		}
 
 		// Strip ANSI for LLM context storage
-		text := stripAnsi(rawText)
+		text := tools.StripAnsi(rawText)
 
 		// Start temp file if exceeds threshold
 		if totalBytes > tools.DefaultMaxBytes && tempFile == nil {
@@ -223,31 +214,6 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		Truncated:      truncationResult.Truncated,
 		FullOutputPath: tempFilePath,
 	}, nil
-}
-
-// appendColorEnv appends environment variables that force CLI tools to emit
-// ANSI color codes even when stdout is not a TTY. Covers:
-//   - CLICOLOR_FORCE=1 — BSD/macOS convention (ls, bat, fd, ripgrep, etc.)
-//   - FORCE_COLOR=1    — Node.js/chalk convention (jest, vitest, etc.)
-//
-// Existing values are not overwritten so the user can opt out.
-func appendColorEnv(env []string) []string {
-	hasCLI, hasForce := false, false
-	for _, e := range env {
-		if strings.HasPrefix(e, "CLICOLOR_FORCE=") {
-			hasCLI = true
-		}
-		if strings.HasPrefix(e, "FORCE_COLOR=") {
-			hasForce = true
-		}
-	}
-	if !hasCLI {
-		env = append(env, "CLICOLOR_FORCE=1")
-	}
-	if !hasForce {
-		env = append(env, "FORCE_COLOR=1")
-	}
-	return env
 }
 
 // ExecuteBashSimple runs a bash command and returns the output as a string.

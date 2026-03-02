@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models check-uv lint-python test-python install-uv
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -27,7 +27,7 @@ build:
 	@mkdir -p $(BINDIR)
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
-all: test-race pgo build build-all
+all: test-race pgo build build-all lint-python test-python
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
@@ -47,7 +47,7 @@ test-e2e:
 	go test -v -count=1 -tags=e2e -timeout 120s ./tests/e2e/
 
 # Build test binaries for end-to-end testing
-test-bins: 
+test-bins:
 	@mkdir -p $(BINDIR)
 	go test -c -o $(BINDIR)/acp.test ./pkg/modes/acp/
 	go test -c -o $(BINDIR)/mcp.test ./pkg/mcp/
@@ -87,3 +87,23 @@ generate-models:
 
 clean:
 	rm -rf $(BINDIR)
+
+# ---------------------------------------------------------------------------
+# Python SDK & extensions
+# ---------------------------------------------------------------------------
+
+PYTHON_DIRS := pkg/extproc/sdk/python .fir/extensions
+
+install-uv:
+	@echo "Installing uv via Astral installer..."
+	curl -LsSf https://astral.sh/uv/install.sh | sh
+
+check-uv:
+	@command -v uv >/dev/null 2>&1 || { echo "uv not found. Run 'make install-uv' first."; exit 1; }
+
+lint-python: check-uv
+	uvx ruff check $(PYTHON_DIRS)
+	uvx ty check $(PYTHON_DIRS)
+
+test-python: check-uv
+	PYTHONPATH=pkg/extproc/sdk/python python3 -m unittest discover -s pkg/extproc/sdk/python -p '*_test.py' -v

@@ -30,6 +30,19 @@ cat >/dev/null
 	return script
 }
 
+// pollToolCount waits until the mock API has at least n tools registered,
+// or the deadline expires.
+func pollToolCount(api *mockBridgeAPI, n int, timeout time.Duration) int {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if api.toolCount() >= n {
+			return api.toolCount()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return api.toolCount()
+}
+
 func TestManager_StartStop(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := writeExtScript(t, dir, "test-ext")
@@ -55,17 +68,8 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Poll until the tool is registered (or timeout).
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(api.toolsRegistered) >= 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	if len(api.toolsRegistered) != 1 {
-		t.Fatalf("expected 1 registered tool, got %d", len(api.toolsRegistered))
+	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 registered tool, got %d", n)
 	}
 
 	if err := mgr.Stop(); err != nil {
@@ -91,8 +95,8 @@ func TestManager_UntrustedSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(api.toolsRegistered) != 0 {
-		t.Fatalf("expected 0 tools (untrusted), got %d", len(api.toolsRegistered))
+	if n := api.toolCount(); n != 0 {
+		t.Fatalf("expected 0 tools (untrusted), got %d", n)
 	}
 
 	mgr.Stop()
@@ -117,14 +121,8 @@ func TestManager_EmitEvent(t *testing.T) {
 	if err := mgr.Start(ctx, dir, dir, api); err != nil {
 		t.Fatal(err)
 	}
-	// Poll until the extension bridge is ready (tool registered).
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(api.toolsRegistered) >= 1 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+
+	pollToolCount(api, 1, 5*time.Second)
 
 	// EmitEvent should not panic; "session_start" is subscribed.
 	mgr.EmitEvent("session_start", map[string]string{"test": "data"})
@@ -147,5 +145,62 @@ func TestManager_NoExtensions(t *testing.T) {
 	}
 	if err := mgr.Stop(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManager_ReloadBeforeStart(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	err := mgr.Reload(context.Background())
+	if err == nil {
+		t.Fatal("expected error from Reload before Start")
+	}
+}
+
+func TestManager_Reload(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeExtScript(t, dir, "reload-ext")
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	hash, err := ComputeHash(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.RecordTrust(dir, "reload-ext", hash); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool before reload, got %d", n)
+	}
+
+	// Add a second extension before reload.
+	script2 := writeExtScript(t, dir, "reload-ext2")
+	hash2, _ := ComputeHash(script2)
+	ts.RecordTrust(dir, "reload-ext2", hash2)
+
+	// Reload with a fresh context.
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	defer reloadCancel()
+
+	api.clearTools()
+
+	if err := mgr.Reload(reloadCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 tools after reload, got %d", n)
 	}
 }

@@ -88,3 +88,31 @@ func TestBashExecutionComponent_PreserveAnsi(t *testing.T) {
 		t.Errorf("output should contain text, got %q", got)
 	}
 }
+
+func TestBashExecutionComponent_RenderPreservesAnsi(t *testing.T) {
+	comp := NewBashExecutionComponent("ls --color", nil, false)
+
+	// Simulate colored output from bash
+	comp.AppendOutput("\x1b[32mgreen_file\x1b[0m\n\x1b[34mblue_dir\x1b[0m")
+
+	// Mark complete so we get stable output (no loader)
+	exitCode := 0
+	comp.SetComplete(&exitCode, false, nil, "")
+
+	lines := comp.Render(80)
+	rendered := strings.Join(lines, "\n")
+
+	// The rendered output should contain the ANSI escape codes
+	if !strings.Contains(rendered, "\x1b[32m") {
+		t.Errorf("rendered output should preserve green ANSI code, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "\x1b[34m") {
+		t.Errorf("rendered output should preserve blue ANSI code, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "green_file") {
+		t.Errorf("rendered output should contain green_file, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "blue_dir") {
+		t.Errorf("rendered output should contain blue_dir, got:\n%s", rendered)
+	}
+}

@@ -161,10 +161,10 @@ func (tc *ToolExecutionComponent) renderBashContent() {
 		t.Fg("toolTitle", t.Bold("$ "+commandDisplay))+timeoutSuffix, 0, 0, nil))
 
 	if tc.result != nil {
-		output := strings.TrimSpace(tc.getTextOutput())
+		output := strings.TrimSpace(tc.getBashDisplayOutput())
 		if output != "" {
-			// Pass through raw output to preserve ANSI colors from commands
-			// (e.g. git diff, test runners, ls --color, grep --color).
+			// Use raw output (with ANSI colors) from tool details when available,
+			// falling back to stripped text for LLM-only results.
 
 			if tc.expanded {
 				tc.contentBox.AddChild(tuicomp.NewText("\n"+output, 0, 0, nil))
@@ -244,6 +244,17 @@ func (tc *ToolExecutionComponent) getTextOutput() string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// getBashDisplayOutput returns raw output with ANSI colors preserved for display.
+// Falls back to getTextOutput (ANSI-stripped) if raw output is not available.
+func (tc *ToolExecutionComponent) getBashDisplayOutput() string {
+	if tc.result != nil && tc.result.Details != nil {
+		if raw, ok := tc.result.Details["rawOutput"].(string); ok && raw != "" {
+			return strings.ReplaceAll(raw, "\r", "")
+		}
+	}
+	return tc.getTextOutput()
 }
 
 func (tc *ToolExecutionComponent) formatToolExecution() string {

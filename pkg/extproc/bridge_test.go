@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 // mockBridgeAPI implements BridgeAPI for testing.
 type mockBridgeAPI struct {
+	mu              sync.Mutex
 	execCalled      bool
 	execCmd         string
 	sessionName     string
@@ -27,8 +29,22 @@ func newMockAPI() *mockBridgeAPI {
 	return &mockBridgeAPI{labels: make(map[string]string)}
 }
 
+func (m *mockBridgeAPI) toolCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.toolsRegistered)
+}
+
+func (m *mockBridgeAPI) clearTools() {
+	m.mu.Lock()
+	m.toolsRegistered = nil
+	m.mu.Unlock()
+}
+
 func (m *mockBridgeAPI) RegisterTool(def ToolDefinition) {
+	m.mu.Lock()
 	m.toolsRegistered = append(m.toolsRegistered, def)
+	m.mu.Unlock()
 }
 func (m *mockBridgeAPI) SendMessage(msg CustomMessageSpec, _ *SendMessageOptions) {
 	m.sentMessages = append(m.sentMessages, msg)

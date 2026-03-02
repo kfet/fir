@@ -37,7 +37,7 @@ func (r *SetupResult) Stop() {
 // Because the tool hooks and event bridge closures reference the Runner
 // (not individual extensions), they automatically dispatch to the newly
 // loaded handlers after reload — no re-wiring is needed.
-func (r *SetupResult) Reload(enabledNames []string) error {
+func (r *SetupResult) Reload(ctx context.Context, enabledNames []string) error {
 	if r.Runner == nil {
 		return nil
 	}
@@ -59,7 +59,14 @@ func (r *SetupResult) Reload(enabledNames []string) error {
 		}
 	}
 
-	// Add newly registered extension tools to the agent.
+	// Reload external process extensions (re-discovers .py/.sh files).
+	if r.ExtProcManager != nil {
+		if err := r.ExtProcManager.Reload(ctx); err != nil {
+			firlog.Warn("extproc reload failed", "err", err)
+		}
+	}
+
+	// Add all extension tools (Go + extproc) to the agent.
 	addExtensionTools(r.session, r.Runner)
 
 	// Notify new extensions of start.

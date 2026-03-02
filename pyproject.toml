@@ -1,0 +1,50 @@
+# Python tooling configuration for fir.
+# Covers the SDK (pkg/extproc/sdk/python) and bundled extensions (.fir/extensions).
+
+[project]
+requires-python = ">=3.12"
+
+# --- ruff (linter + formatter) ------------------------------------------------
+# Run: uvx ruff check
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "N",    # pep8-naming
+  "UP",   # pyupgrade — modernise syntax
+  "B",    # flake8-bugbear — likely bugs
+  "A",    # flake8-builtins — shadowing builtins
+  "SIM",  # flake8-simplify
+  "TCH",  # flake8-type-checking — move imports behind TYPE_CHECKING
+  "RUF",  # Ruff-specific rules
+  "S",    # flake8-bandit — security
+  "C4",   # flake8-comprehensions
+  "DTZ",  # flake8-datetimez
+  "T10",  # flake8-debugger — no leftover debugger calls
+  "PIE",  # flake8-pie — misc lint
+  "RSE",  # flake8-raise
+  "RET",  # flake8-return
+  "FLY",  # flynt — use f-strings
+  "PERF", # perflint — performance anti-patterns
+]
+ignore = [
+  "PT009", # we use unittest.TestCase, not bare assert
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*_test.py" = ["S101", "S106", "S108", "S603", "PLR2004"]
+"**/tests/**" = ["S101", "S106", "S108", "S603", "PLR2004"]
+".fir/extensions/*.py" = ["S101", "T201", "S603", "S607"]
+
+# --- ty (type checker) --------------------------------------------------------
+# Run: uvx ty check
+
+[tool.ty.environment]
+extra-paths = ["pkg/extproc/sdk/python"]
+python-version = "3.12"

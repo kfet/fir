@@ -2,10 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- Bash command color output on macOS: add `CLICOLOR=1` to color-forcing env vars so macOS `/bin/ls` and other BSD tools emit colors when stdout is a pipe
+- `gh api` calls in update check now strip `CLICOLOR_FORCE`/`FORCE_COLOR` to prevent ANSI codes in JSON output
+
 ### Added
 - ACP: auth methods RFD support — `Initialize` now returns typed auth methods (`agent`, `env_var`, `terminal`) per [agentclientprotocol.com/rfds/auth-methods](https://agentclientprotocol.com/rfds/auth-methods); `Authenticate` dispatches by method type
 - ACP: thinking level config — `session/new` returns `configOptions` with a `thought_level` dropdown; `session/set_config_option` changes the thinking level; Zed renders this as the thinking mode picker
 - ACP: model selector via configOptions — models now exposed as `configOptions` with `category: "model"` in addition to the legacy `models` field; `session/set_config_option` handles model switching; Zed renders this as the model picker dropdown
+- Python static checks: `make lint-python` runs ruff (linting) + ty (type checking) on SDK and extensions; `make test-python` runs all Python tests; `make install-uv` target for bootstrapping uv
+- Python SDK: `ReadStream`/`WriteStream` protocols for stream parameters — replaces `IO[str]`, enables simple test fakes without full IO interface
+- Unified Python tooling config in `pyproject.toml` (ruff + ty) — removed separate `ruff.toml` and `ty.toml`
+- Python extension tests moved from `.fir/extensions/` to `pkg/extproc/sdk/python/` — keeps extension directory clean for user-facing scripts only
+- Python extension examples: `notify.py` and `tmuxspinner.py` in `.fir/extensions/` — ports of the built-in Go extensions demonstrating the ext-proc Python SDK
+- `/reload` now reloads external process (Python/bash) extensions — re-discovers and restarts ext-proc extensions so new `.py`/`.sh` files are picked up without restarting the session
 - External process extensions: write extensions in any language (Python, bash, etc.) that communicate with fir over JSON-RPC 2.0 on stdio
 - External process extensions: `notify` and `set_status` inbound methods now call configurable callbacks (`NotifyFunc`/`SetStatusFunc`) on Bridge, enabling UI integration
 - External process extensions: `Manager.ConfirmFn` callback for interactive trust prompts on untrusted project-local extensions
@@ -15,16 +25,25 @@
 - ACP: `/skills` slash command — list loaded skills (`/skills` or `/skills list`) and install builtin skills (`/skills install <name> [--user] [--force]`)
 
 ### Changed
+- Python SDK: `Callable` import moved to `TYPE_CHECKING` block; `id` params renamed to `msg_id` to avoid shadowing builtin; modernised type annotations (`Optional`/`Dict`/`List` → native syntax)
 - E2E: skill reduced from 1031 lines of manual test procedures to ~130 lines that run `make test-e2e` and report failures
 - Skills: added `builtin: true` frontmatter property to distinguish distributable builtin skills from project-only skills; only skills with this property are embedded in the binary; project-specific skills (e2e, release, sync, work) excluded from distribution
 - Refactor: `.fir/skills` is now a symlink to `pkg/core/builtin_skills` — single source of truth, eliminates duplicate copy; `go:embed` reads the real directory
+- Refactor: `StripAnsi` and `AppendColorEnv` consolidated into `pkg/core/tools/ansi.go` — single source shared by both `ExecuteBash` (user `!`/`!!`) and AI-invoked bash tool
+- Theme: dark theme `toolOutput` color brightened from `#808080` to `#b0b0b0` for better readability
 
 ### Fixed
 - Clear command status TUI (from /queue, /session, etc.) when user submits any new input
+- `Manager.Reload` no longer stores `context.Context` in a struct — context is passed as a parameter to avoid cancelled-context bugs
+- Python extension examples now use `FIR_EXT_SDK_PYTHON` env var instead of hardcoded relative path, preventing SDK resolution failures and path injection
+- `/reload` no longer calls `addExtensionTools` twice — extproc reload moved before the single call
 - ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
-- TUI: bash output now preserves original ANSI colors from commands (e.g. `git diff`, test runners, `ls --color`) — injects `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` so tools emit colors even through pipes, applies to both `!`/`!!` bash mode and AI-invoked bash tool calls
+- TUI: bash output now preserves original ANSI colors from commands (e.g. `git diff`, test runners, `ls --color`) — injects `CLICOLOR_FORCE=3` and `FORCE_COLOR=1` so tools emit colors even through pipes, applies to both `!`/`!!` bash mode and AI-invoked bash tool calls
+- TUI: AI-invoked bash tool now stores raw ANSI output in `Details["rawOutput"]` for colored display while sending stripped text to the LLM
+- TUI: AI-invoked bash tool now stores raw ANSI output in `Details["rawOutput"]` for colored display while sending stripped text to the LLM
 
 ### Removed
+- `pyrightconfig.json` — replaced by ty (Rust-based type checker) configured in `pyproject.toml`
 - `sandbox` extension (incomplete framework with no real OS-level enforcement)
 
 ## [0.9.0] - 2026-02-28
@@ -79,17 +98,7 @@
 
 ### Fixed
 - MCP: `ToolListChangedHandler` no longer races on `m.OnToolsChanged`; stale-session guard prevents old sessions from overwriting tools after a hot reload
-- MCP: removed duplicate `serverConfigEqual` helper; `Reload` and `WatchAndReload` share a single `configsEqual` function
-- MCP: `CompletePromptArg`/`CompleteResourceURI` docs now accurately state that errors are propagated (not silently converted to empty slices)
-- MCP: progress notifications no longer silently dropped when the SDK's `handleAsync` goroutine dispatches after `CallTool` returns
-- MCP: `ImageContent` with non-image MIME types (e.g. `application/pdf`) no longer tagged as `ContentTypeImage`, preventing API errors on strict providers
-- MCP: resource blob content with non-image MIME types returned as base64 text rather than `ContentTypeImage`
-- MCP: `file://` root URI now correctly percent-encodes paths with spaces or special characters
-- MCP: unknown `transport` values in `mcp.json` now return an error instead of silently falling through to stdio
-- Core: `runAutoCompaction` now resumes when `PendingToolCalls` are non-empty, matching `HasPendingWork()` logic
-
-### Changed
-- Auto-resume agent after both `/compact` (manual) and auto-compaction when there is pending work (unanswered user message, unprocessed tool result, or pending tool executions). Shows "Working..." spinner and resumes seamlessly. Unified handling: if cancelled, show status and stop; if pending work, show "Working..." and resume; otherwise show completion status.
+- MCP: removed duplicate `serverConfigEqual` helper; `Reload` and `WatchAnd- Auto-resume agent after both `/compact` (manual) and auto-compaction when there is pending work (unanswered user message, unprocessed tool result, or pending tool executions). Shows "Working..." spinner and resumes seamlessly. Unified handling: if cancelled, show status and stop; if pending work, show "Working..." and resume; otherwise show completion status.
 - Overseer skill: each fleet now gets its own git worktree + branch (`fleet/<session>`); all agents work inside it
 - Overseer skill: auto-resume mid-task agents after `/compact` or rate-limit pause with `"Continue."`
 - Overseer skill: recommend cheap model (Haiku) since it doesn't write code
@@ -244,6 +253,27 @@
 ### Changed
 
 - `/changelog` command now uses embedded changelog content instead of looking for a file next to the binary.
+
+## [0.1.0] - 2026-02-19
+
+### Added
+
+- Initial release of fir, a Go port of the pi-mono coding agent.
+- Full agent loop with streaming LLM support (Anthropic, OpenAI, Google, Poe).
+- TUI with fuzzy autocomplete, `/`-menus, and model picker.
+- RPC mode over stdio for programmatic integration.
+- Extension system with sandbox support and init()-based registration.
+- Session management with resume, continue, and export.
+- Tool execution framework with bash, read, write, edit, and glob.
+- OAuth callback server for provider authentication.
+- Compaction with progress UX.
+- Model generation from upstream TypeScript definitions.
+- Cross-compilation for darwin/linux (arm64, amd64, arm6).
+- PGO-optimized build support.
+- Thinking level control (off, minimal, low, medium, high, xhigh).
+- Skill and prompt template system.
+- HTML session export.
+ embedded changelog content instead of looking for a file next to the binary.
 
 ## [0.1.0] - 2026-02-19
 

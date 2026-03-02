@@ -407,3 +407,31 @@ func TestCheckLatest_StaleCache_TriesNetwork(t *testing.T) {
 		t.Log("stale cache + cancelled ctx: no error returned (timing)")
 	}
 }
+
+func TestFilterEnv(t *testing.T) {
+	env := []string{"CLICOLOR=1", "CLICOLOR_FORCE=3", "FORCE_COLOR=1", "PATH=/usr/bin", "HOME=/home/user"}
+	got := filterEnv(env, "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR")
+	for _, e := range got {
+		if e == "CLICOLOR=1" || e == "CLICOLOR_FORCE=3" || e == "FORCE_COLOR=1" {
+			t.Errorf("should have been filtered: %s", e)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 remaining entries, got %d: %v", len(got), got)
+	}
+}
+
+func TestFilterEnv_Empty(t *testing.T) {
+	got := filterEnv(nil, "FOO")
+	if len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
+	}
+}
+
+func TestFilterEnv_NoMatch(t *testing.T) {
+	env := []string{"PATH=/usr/bin"}
+	got := filterEnv(env, "CLICOLOR")
+	if len(got) != 1 {
+		t.Errorf("expected 1, got %d", len(got))
+	}
+}

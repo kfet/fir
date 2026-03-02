@@ -22,6 +22,11 @@ type Manager struct {
 	mu        sync.Mutex
 	bridges   []*managedBridge
 	ConfirmFn ConfirmFunc
+
+	// Saved from Start() for Reload().
+	projectDir string
+	cwd        string
+	api        BridgeAPI
 }
 
 type managedBridge struct {
@@ -50,6 +55,12 @@ func (m *Manager) SetTrustStore(ts *TrustStore) {
 // Start discovers extensions, spawns processes, performs handshakes, and
 // starts bridge dispatch loops.
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
+	m.mu.Lock()
+	m.projectDir = projectDir
+	m.cwd = cwd
+	m.api = api
+	m.mu.Unlock()
+
 	configs, err := Discover(projectDir)
 	if err != nil {
 		return err
@@ -148,6 +159,26 @@ func (m *Manager) Stop() error {
 		cancel()
 	}
 	return nil
+}
+
+// Reload stops all running extensions and re-discovers/starts them.
+// The provided context controls the lifetime of the new bridges.
+func (m *Manager) Reload(ctx context.Context) error {
+	m.mu.Lock()
+	projectDir := m.projectDir
+	cwd := m.cwd
+	api := m.api
+	m.mu.Unlock()
+
+	if projectDir == "" || api == nil {
+		return fmt.Errorf("manager was not started; cannot reload")
+	}
+
+	// Stop existing extensions (emits session_shutdown).
+	_ = m.Stop()
+
+	// Re-discover and start.
+	return m.Start(ctx, projectDir, cwd, api)
 }
 
 // EmitEvent fans out a notification to all bridges.

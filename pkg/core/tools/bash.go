@@ -113,7 +113,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	// Create command
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = AppendColorEnv(os.Environ())
 
 	// Run bash in its own process group so we can kill the entire group
 	// (bash + any child processes it spawns) on cancellation. Without
@@ -142,6 +142,10 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	err := cmd.Run()
 
 	output := buf.String()
+
+	// Keep raw output (with ANSI) for display, strip for LLM context
+	rawOutput := output
+	output = StripAnsi(output)
 
 	// Apply tail truncation
 	truncResult := TruncateTail(output, TruncationOptions{})
@@ -207,6 +211,11 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	if fullOutputPath != "" {
 		details["fullOutputPath"] = fullOutputPath
 	}
+
+	// Store raw output (with ANSI colors) for TUI display.
+	// Truncate to same line budget as the LLM output.
+	rawTrunc := TruncateTail(rawOutput, TruncationOptions{})
+	details["rawOutput"] = rawTrunc.Content
 
 	return agent.AgentToolResult{
 		Content: []ai.ToolResultContent{

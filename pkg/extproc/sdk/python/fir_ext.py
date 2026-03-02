@@ -35,16 +35,33 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class ReadStream(Protocol):
+    """Minimal interface for an input stream (e.g. sys.stdin)."""
+
+    def readline(self) -> str: ...
+
+
+class WriteStream(Protocol):
+    """Minimal interface for an output stream (e.g. sys.stdout)."""
+
+    def write(self, s: str, /) -> int: ...
+    def flush(self) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Global registries (populated by decorators, consumed by run())
 # ---------------------------------------------------------------------------
 
-_tools: List[Dict[str, Any]] = []
-_tool_handlers: Dict[str, Callable] = {}
-_hook_handlers: Dict[str, Callable] = {}
-_event_handlers: Dict[str, Callable] = {}
+_tools: list[dict[str, Any]] = []
+_tool_handlers: dict[str, Callable] = {}
+_hook_handlers: dict[str, Callable] = {}
+_event_handlers: dict[str, Callable] = {}
 
 # ---------------------------------------------------------------------------
 # Decorators
@@ -54,7 +71,7 @@ _event_handlers: Dict[str, Callable] = {}
 def tool(
     name: str,
     description: str,
-    parameters: Optional[Dict[str, Any]] = None,
+    parameters: dict[str, Any] | None = None,
 ) -> Callable:
     """Register a tool that fir can invoke via ``tool_call``.
 
@@ -104,6 +121,8 @@ def on(event_name: str) -> Callable:
 class ToolError(Exception):
     """Raise inside a tool handler to return a structured error to fir."""
 
+    code: int
+
     def __init__(self, message: str, code: int = -32000):
         super().__init__(message)
         self.code = code
@@ -116,7 +135,7 @@ class ToolError(Exception):
 _write_lock = threading.Lock()
 
 
-def _read_message(input_stream=None) -> Optional[Dict[str, Any]]:
+def _read_message(input_stream: ReadStream | None = None) -> dict[str, Any] | None:
     """Read one newline-delimited JSON-RPC message from *input_stream*."""
     stream = input_stream or sys.stdin
     line = stream.readline()
@@ -125,7 +144,7 @@ def _read_message(input_stream=None) -> Optional[Dict[str, Any]]:
     return json.loads(line)
 
 
-def _write_message(msg: Dict[str, Any], output_stream=None) -> None:
+def _write_message(msg: dict[str, Any], output_stream: WriteStream | None = None) -> None:
     """Write one newline-delimited JSON-RPC message to *output_stream*."""
     stream = output_stream or sys.stdout
     with _write_lock:
@@ -133,16 +152,16 @@ def _write_message(msg: Dict[str, Any], output_stream=None) -> None:
         stream.flush()
 
 
-def _make_response(id: Any, result: Any) -> Dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": id, "result": result}
+def _make_response(msg_id: Any, result: Any) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
 
-def _make_error(id: Any, code: int, message: str) -> Dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
+def _make_error(msg_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": code, "message": message}}
 
 
-def _make_request(id: Any, method: str, params: Any = None) -> Dict[str, Any]:
-    msg: Dict[str, Any] = {"jsonrpc": "2.0", "id": id, "method": method}
+def _make_request(msg_id: Any, method: str, params: Any = None) -> dict[str, Any]:
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "id": msg_id, "method": method}
     if params is not None:
         msg["params"] = params
     return msg
@@ -169,8 +188,16 @@ class Context:
     Passed as the second argument to every handler.
     """
 
-    def __init__(self, output_stream=None, pending: Optional[Dict[int, threading.Event]] = None,
-                 results: Optional[Dict[int, Any]] = None):
+    _out: WriteStream | None
+    _pending: dict[int, threading.Event]
+    _results: dict[int, Any]
+
+    def __init__(
+        self,
+        output_stream: WriteStream | None = None,
+        pending: dict[int, threading.Event] | None = None,
+        results: dict[int, Any] | None = None,
+    ):
         self._out = output_stream
         self._pending = pending if pending is not None else {}
         self._results = results if results is not None else {}
@@ -182,9 +209,9 @@ class Context:
         self._pending[rid] = event
         _write_message(_make_request(rid, method, params), self._out)
         if not event.wait(timeout):
-            self._pending.pop(rid, None)
+            _ = self._pending.pop(rid, None)
             raise TimeoutError(f"Timed out waiting for response to {method}")
-        self._pending.pop(rid, None)
+        _ = self._pending.pop(rid, None)
         resp = self._results.pop(rid, None)
         if resp and "error" in resp:
             raise RuntimeError(resp["error"].get("message", "unknown error"))
@@ -196,7 +223,9 @@ class Context:
         """Show a notification in fir. *level*: info, warning, error."""
         self._call("notify", {"message": message, "level": level})
 
-    def exec(self, command: str, args: Optional[List[str]] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    def exec(
+        self, command: str, args: list[str] | None = None, timeout: float = 10.0
+    ) -> dict[str, Any]:
         """Run a command via fir. Returns dict with stdout, stderr, exit_code.
 
         Parameters
@@ -230,11 +259,11 @@ class Context:
         """Clear a label from a session entry."""
         self._call("clear_label", {"entry_id": entry_id})
 
-    def get_active_tools(self) -> List[str]:
+    def get_active_tools(self) -> list[str]:
         """Return the list of currently active tool names."""
         return self._call("get_active_tools")
 
-    def set_active_tools(self, tools: List[str]) -> None:
+    def set_active_tools(self, tools: list[str]) -> None:
         """Set which tools are active."""
         self._call("set_active_tools", {"names": tools})
 
@@ -249,9 +278,9 @@ class Context:
 
 
 def run(
-    name: Optional[str] = None,
-    input_stream=None,
-    output_stream=None,
+    name: str | None = None,
+    input_stream: ReadStream | None = None,
+    output_stream: WriteStream | None = None,
 ) -> None:
     """Start the extension event loop.
 
@@ -270,21 +299,18 @@ def run(
     out = output_stream or sys.stdout
 
     # Pending outbound requests (extension→fir)
-    pending: Dict[int, threading.Event] = {}
-    results: Dict[int, Any] = {}
+    pending: dict[int, threading.Event] = {}
+    results: dict[int, Any] = {}
 
     ctx = Context(output_stream=out, pending=pending, results=results)
 
     # Worker threads for handlers that may call back into fir
-    _workers: List[threading.Thread] = []
+    _workers: list[threading.Thread] = []
 
     # Collect subscribed events
-    subscribed_events: List[str] = list(_event_handlers.keys())
-    # Hooks are also events the extension must subscribe to
-    for h in _hook_handlers:
-        subscribed_events.append(h)
+    subscribed_events: list[str] = list(_event_handlers.keys()) + list(_hook_handlers.keys())
 
-    def _handle_request(method: str, msg_id: Any, params: Dict[str, Any]) -> None:
+    def _handle_request(method: str, msg_id: Any, params: dict[str, Any]) -> None:
         """Handle a tool_call or hook in a worker thread so the read loop
         stays free to deliver responses to outbound ``ctx._call()`` requests."""
 
@@ -293,9 +319,7 @@ def run(
             tool_name = params.get("name", "")
             handler = _tool_handlers.get(tool_name)
             if handler is None:
-                _write_message(
-                    _make_error(msg_id, -32601, f"Unknown tool: {tool_name}"), out
-                )
+                _write_message(_make_error(msg_id, -32601, f"Unknown tool: {tool_name}"), out)
                 return
             try:
                 result = handler(params.get("params", {}), ctx)
@@ -322,7 +346,7 @@ def run(
                 _write_message(_make_error(msg_id, -32000, str(exc)), out)
             return
 
-    def _dispatch(msg: Dict[str, Any]) -> None:
+    def _dispatch(msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
         msg_id = msg.get("id")
         params = msg.get("params", {})
@@ -342,22 +366,21 @@ def run(
 
         # --- tool_call / hooks: run in thread so read loop stays free ---
         if method in ("tool_call",) or method.startswith("hook/"):
-            t = threading.Thread(
-                target=_handle_request, args=(method, msg_id, params), daemon=True
-            )
+            t = threading.Thread(target=_handle_request, args=(method, msg_id, params), daemon=True)
             t.start()
             _workers.append(t)
             return
 
         # --- events (async notifications, no id) ---
         if method.startswith("event/"):
-            event_name = method[len("event/"):]
+            event_name = method[len("event/") :]
             handler = _event_handlers.get(event_name)
             if handler is not None:
                 try:
                     handler(params, ctx)
                 except Exception:
-                    pass  # events are fire-and-forget
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
             return
 
         # --- response to an outbound request we made ---

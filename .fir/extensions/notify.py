@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Send native terminal notifications when the agent finishes.
+
+Supports multiple terminal protocols:
+  - OSC 777: Ghostty, iTerm2, WezTerm, rxvt-unicode
+  - OSC 99: Kitty
+
+When inside tmux, wraps sequences in DCS passthrough format.
+
+This is a Python port of pkg/extensions/notify.
+"""
+
+import os
+import sys
+
+import fir_ext
+
+
+def _in_tmux():
+    return os.environ.get("TMUX", "") != ""
+
+
+def _in_kitty():
+    return os.environ.get("KITTY_WINDOW_ID", "") != ""
+
+
+def _notify_osc777(title: str, body: str):
+    """OSC 777 notification (Ghostty, iTerm2, WezTerm, rxvt-unicode)."""
+    if _in_tmux():
+        _ = sys.stderr.write(
+            f"\x1bPtmux;\x1b\x1b]777;notify;{title};{body}\x1b\x1b\\\x1b\\"
+        )
+    else:
+        _ = sys.stderr.write(f"\x1b]777;notify;{title};{body}\x1b\\")
+    _ = sys.stderr.flush()
+
+
+def _notify_osc99(title: str, body: str):
+    """Kitty OSC 99 notification."""
+    if _in_tmux():
+        _ = sys.stderr.write(f"\x1bPtmux;\x1b\x1b]99;i=1:d=0;{title}\x1b\x1b\\\x1b\\")
+        _ = sys.stderr.write(f"\x1bPtmux;\x1b\x1b]99;i=1:p=body;{body}\x1b\x1b\\\x1b\\")
+    else:
+        _ = sys.stderr.write(f"\x1b]99;i=1:d=0;{title}\x1b\\")
+        _ = sys.stderr.write(f"\x1b]99;i=1:p=body;{body}\x1b\\")
+    _ = sys.stderr.flush()
+
+
+def notify_terminal(title: str, body: str):
+    if _in_kitty():
+        _notify_osc99(title, body)
+    else:
+        _notify_osc777(title, body)
+
+
+@fir_ext.on("agent_end")
+def on_agent_end(params, ctx):
+    notify_terminal("fir", "Ready for input")
+
+
+fir_ext.run(name="notify")

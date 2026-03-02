@@ -338,7 +338,7 @@ func TestSetupResultReload(t *testing.T) {
 	// Reload with ext-b instead
 	extAStarted = false
 	extBStarted = false
-	if err := result.Reload([]string{"ext-b"}); err != nil {
+	if err := result.Reload(context.Background(), []string{"ext-b"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -407,7 +407,7 @@ func TestSetupResultReloadToEmpty(t *testing.T) {
 	}
 
 	// Reload to empty (disable all extensions)
-	if err := result.Reload(nil); err != nil {
+	if err := result.Reload(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if !shutdownCalled {
@@ -460,7 +460,7 @@ func TestSetupResultReloadFromEmpty(t *testing.T) {
 	}
 
 	// Reload to add an extension
-	if err := result.Reload([]string{"ext-late"}); err != nil {
+	if err := result.Reload(context.Background(), []string{"ext-late"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -946,7 +946,7 @@ func TestReloadRemovesAndAddsExtensionTools(t *testing.T) {
 	}
 
 	// Reload with ext-b
-	if err := result.Reload([]string{"ext-with-tool-b"}); err != nil {
+	if err := result.Reload(context.Background(), []string{"ext-with-tool-b"}); err != nil {
 		t.Fatal(err)
 	}
 

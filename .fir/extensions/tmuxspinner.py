@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Animate a spinner in the tmux window name while the agent is working.
+
+When the agent is idle, the original window name is restored.
+Uses `tmux rename-window` to set the window name.
+No-op when not running inside tmux ($TMUX unset).
+
+This is a Python port of pkg/extensions/tmuxspinner.
+"""
+
+import os
+import subprocess
+import threading
+
+import fir_ext
+
+FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPIN_INTERVAL = 0.15  # seconds
+
+
+def _in_tmux():
+    return os.environ.get("TMUX", "") != ""
+
+
+def _pane_id():
+    return os.environ.get("TMUX_PANE", "")
+
+
+def _run_tmux(*args):
+    try:
+        result = subprocess.run(
+            ["tmux", *list(args)], capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _read_window_name(target):
+    return _run_tmux("display-message", "-t", target, "-p", "#W")
+
+
+def _rename_window(target, name):
+    _run_tmux("rename-window", "-t", target, name)
+
+
+def _disable_auto_rename(target):
+    _run_tmux("set-window-option", "-t", target, "automatic-rename", "off")
+
+
+def _strip_spinner_suffix(name):
+    """Remove trailing ' <braille>' suffixes."""
+    while len(name) >= 2:
+        last = name[-1]
+        if name[-2] == " " and "\u2800" <= last <= "\u28ff":
+            name = name[:-2]
+        else:
+            break
+    return name
+
+
+class Spinner:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pane_id = ""
+        self._base_name = ""
+        self._stop_event = None
+        self._thread = None
+        self._running = False
+
+    def start(self):
+        with self._lock:
+            if self._running:
+                return
+            if not self._pane_id:
+                self._pane_id = _pane_id()
+                if not self._pane_id:
+                    return
+                name = _read_window_name(self._pane_id)
+                self._base_name = _strip_spinner_suffix(name) if name else "fir"
+                _disable_auto_rename(self._pane_id)
+
+            self._stop_event = threading.Event()
+            self._running = True
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+
+    def stop(self):
+        with self._lock:
+            if not self._running:
+                return
+            assert self._stop_event is not None
+            self._stop_event.set()
+            self._running = False
+            thread = self._thread
+
+        if thread:
+            thread.join(timeout=5)
+
+        with self._lock:
+            _rename_window(self._pane_id, self._base_name)
+
+    def _loop(self):
+        assert self._stop_event is not None
+        i = 0
+        last_set = ""
+        while not self._stop_event.wait(SPIN_INTERVAL):
+            with self._lock:
+                target = self._pane_id
+
+            # Detect user renames
+            if last_set:
+                current = _read_window_name(target)
+                if current and current != last_set:
+                    with self._lock:
+                        self._base_name = _strip_spinner_suffix(current)
+
+            with self._lock:
+                base = self._base_name
+
+            name = f"{base} {FRAMES[i % len(FRAMES)]}"
+            _rename_window(target, name)
+            last_set = name
+            i += 1
+
+
+# Only activate if inside tmux
+if _in_tmux():
+    _spinner = Spinner()
+
+    @fir_ext.on("agent_start")
+    def on_agent_start(params, ctx):
+        _spinner.start()
+
+    @fir_ext.on("agent_end")
+    def on_agent_end(params, ctx):
+        _spinner.stop()
+
+    @fir_ext.on("session_shutdown")
+    def on_session_shutdown(params, ctx):
+        _spinner.stop()
+
+
+fir_ext.run(name="tmuxspinner")

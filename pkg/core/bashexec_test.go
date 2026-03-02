@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kfet/fir/pkg/core/tools"
 )
 
 func TestExecuteBash_SimpleCommand(t *testing.T) {
@@ -129,15 +131,18 @@ func TestExecuteBash_OnChunkInjectsColorEnv(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := ExecuteBash(ctx, `echo "CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.ExitCode != 0 {
 		t.Errorf("exit code = %d", result.ExitCode)
 	}
-	if !strings.Contains(result.Output, "CLI=1") {
-		t.Errorf("expected CLICOLOR_FORCE=1 in output, got %q", result.Output)
+	if !strings.Contains(result.Output, "COLOR=1") {
+		t.Errorf("expected CLICOLOR=1 in output, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "CLI=3") {
+		t.Errorf("expected CLICOLOR_FORCE=3 in output, got %q", result.Output)
 	}
 	if !strings.Contains(result.Output, "FORCE=1") {
 		t.Errorf("expected FORCE_COLOR=1 in output, got %q", result.Output)
@@ -145,6 +150,7 @@ func TestExecuteBash_OnChunkInjectsColorEnv(t *testing.T) {
 }
 
 func TestExecuteBash_OnChunkRespectsExistingColorEnv(t *testing.T) {
+	t.Setenv("CLICOLOR", "0")
 	t.Setenv("CLICOLOR_FORCE", "0")
 	t.Setenv("FORCE_COLOR", "0")
 
@@ -156,9 +162,12 @@ func TestExecuteBash_OnChunkRespectsExistingColorEnv(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result, err := ExecuteBash(ctx, `echo "CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, "COLOR=0") {
+		t.Errorf("should respect existing CLICOLOR=0, got %q", result.Output)
 	}
 	if !strings.Contains(result.Output, "CLI=0") {
 		t.Errorf("should respect existing CLICOLOR_FORCE=0, got %q", result.Output)
@@ -234,9 +243,9 @@ func TestStripAnsi(t *testing.T) {
 		{"", ""},
 	}
 	for _, tt := range tests {
-		got := stripAnsi(tt.input)
+		got := tools.StripAnsi(tt.input)
 		if got != tt.want {
-			t.Errorf("stripAnsi(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("StripAnsi(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }
