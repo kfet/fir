@@ -4,8 +4,6 @@ A fast, portable AI coding agent. Single binary, no runtime dependencies.
 
 `fir` is a Go implementation of [pi](https://github.com/badlogic/pi-mono) by
 [Mario Zechner](https://github.com/badlogic) and closely tracks it upstream.
-All credit for the original design — the agent loop, tool system, TUI,
-multi-provider architecture, and TS extension framework goes to that project.
 
 The motivation for this port is size and portability, specifically I was aiming
 for an efficient minimal agent running on a Raspberry Pi Zero W.
@@ -153,7 +151,7 @@ Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
 and communicate with fir over JSON-RPC 2.0. Place them in `.fir/extensions/`
 in your project directory and they are automatically discovered and started.
 
-fir ships a Python SDK in `pkg/extproc/sdk/python/fir_extension.py` that
+fir ships a Python SDK in `pkg/extproc/sdk/python/fir_ext.py` that
 handles the JSON-RPC protocol for you.
 
 **Disable all extensions** — `--no-extensions` skips discovery:

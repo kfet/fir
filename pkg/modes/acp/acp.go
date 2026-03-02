@@ -520,8 +520,9 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	// Extension setup — discover stdio-based extensions in .fir/extensions/
 	if !pa.options.NoExtensions {
 		extSetup, err := extproc.Setup(result.Session, extproc.SetupOptions{
-			ProjectDir: cwd,
-			Cwd:        cwd,
+			ProjectDir:   cwd,
+			Cwd:          cwd,
+			EnabledNames: resolveEnabledExtensions(pa.options.EnabledExtensions, settingsManager),
 		})
 		if err == nil && extSetup != nil {
 			entry.extSetup = extSetup
@@ -1449,4 +1450,26 @@ func parseInt(s string) int {
 		return 0
 	}
 	return n
+}
+
+// resolveEnabledExtensions merges the CLI --extension names with the
+// project/global settings "extensions" list. When the combined list is empty,
+// all discovered extensions are started. The caller must check NoExtensions
+// before calling this.
+func resolveEnabledExtensions(cliNames []string, sm *core.SettingsManager) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, n := range sm.GetEnabledExtensions() {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	for _, n := range cliNames {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	return names
 }

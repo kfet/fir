@@ -2,10 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+- Restore `--extension <name>` / `-e <name>` CLI flag for filtering extproc extensions by name (repeatable; merged with `settings.json` "extensions" list)
+- `SetupOptions.EnabledNames` — allowlist of extension names; when non-empty only matching extensions are started
+- `Manager.AllowedNames` — allowlist checked in `startOne`; skips extensions not in the list
+- Sub-directory support for extension discovery: a directory inside `.fir/extensions/` (or `~/.config/fir/extensions/`) is treated as an extension whose name is the directory name; entry point is resolved as `main`, `main.py`, `main.sh`, `<dirname>`, `<dirname>.py`, `<dirname>.sh`, or the first executable found alphabetically
+- `resolveEnabledExtensions()` in `cmd/fir/app.go` and `pkg/modes/acp/acp.go` merges settings + CLI flags into the enabled-names list
+- `EnabledExtensions []string` restored to `acp.Options`; wired through to `extproc.Setup()`
+
 ### Removed
 - Go-based compiled-in extension system (`pkg/extension/`, `pkg/extensions/`) — replaced by the stdio-based extproc system exclusively
-- `--extension` / `-e` CLI flag (named Go extensions no longer exist)
-- `extensions` array in `settings.json` (no longer meaningful; extproc extensions are auto-discovered)
 - `pyrightconfig.json` — replaced by ty configured in `pyproject.toml`
 - `sandbox` extension (incomplete framework with no real OS-level enforcement)
 

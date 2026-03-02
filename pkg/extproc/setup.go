@@ -40,6 +40,12 @@ type SetupOptions struct {
 	// Leave empty to use the default (~/.config/fir/trusted-extensions.json).
 	// Useful in tests to avoid polluting the user's global trust store.
 	TrustStorePath string
+
+	// EnabledNames is an optional allowlist of extension names to activate.
+	// When non-empty, only extensions whose name matches an entry are started.
+	// When empty (the default), all discovered extensions are started.
+	// This is populated from the "extensions" settings key and --extension flags.
+	EnabledNames []string
 }
 
 // SetupResult holds the running state of extproc extensions for a session.
@@ -94,6 +100,9 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 	mgr := NewManager(logger)
 	if opts.TrustStorePath != "" {
 		mgr.SetTrustStore(NewTrustStoreWithPath(opts.TrustStorePath))
+	}
+	if len(opts.EnabledNames) > 0 {
+		mgr.AllowedNames = opts.EnabledNames
 	}
 
 	// Wire trust confirmation.

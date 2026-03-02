@@ -39,6 +39,7 @@ type Args struct {
 	Models             []string
 	Tools              []string
 	NoTools            bool
+	Extensions         []string
 	NoExtensions       bool
 	Print              bool
 	Export             string
@@ -175,6 +176,10 @@ func ParseArgs(args []string) *Args {
 		case arg == "--no-extensions":
 			result.NoExtensions = true
 
+		case (arg == "--extension" || arg == "-e") && i+1 < len(args):
+			i++
+			result.Extensions = append(result.Extensions, args[i])
+
 		case arg == "--skill" && i+1 < len(args):
 			i++
 			result.Skills = append(result.Skills, args[i])
@@ -262,6 +267,8 @@ Options:
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --no-extensions                Disable all extensions (overrides config)
+  --extension <name>, -e <name>  Enable a specific extension by name (repeatable; overrides config)
+                                 When any --extension flag is set, only named extensions are started
   --skill <path>                 Load a skill file or directory
   --no-skills                    Disable skills
   --prompt-template <path>       Load a prompt template file or directory

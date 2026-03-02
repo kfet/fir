@@ -204,3 +204,43 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatalf("expected 2 tools after reload, got %d", n)
 	}
 }
+
+func TestManager_AllowedNames(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write two extensions.
+	script1 := writeExtScript(t, dir, "allowed-ext")
+	script2 := writeExtScript(t, dir, "blocked-ext")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash1, _ := ComputeHash(script1)
+	hash2, _ := ComputeHash(script2)
+	ts.RecordTrust(dir, "allowed-ext", hash1)
+	ts.RecordTrust(dir, "blocked-ext", hash2)
+
+	api := newMockAPI()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mgr := NewManager(logger)
+	mgr.SetTrustStore(ts)
+	// Allow only "allowed-ext"; "blocked-ext" should be skipped.
+	mgr.AllowedNames = []string{"allowed-ext"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	// Only one tool should be registered (from allowed-ext).
+	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool (allowed-ext only), got %d", n)
+	}
+
+	// Give a moment for any unexpected second registration.
+	time.Sleep(100 * time.Millisecond)
+	if n := api.toolCount(); n != 1 {
+		t.Fatalf("expected exactly 1 tool, got %d (blocked-ext should have been skipped)", n)
+	}
+}

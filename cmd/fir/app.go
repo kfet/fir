@@ -153,8 +153,9 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	var extSetup *extproc.SetupResult
 	if !args.NoExtensions {
 		extSetup, err = extproc.Setup(result.Session, extproc.SetupOptions{
-			ProjectDir: cwd,
-			Cwd:        cwd,
+			ProjectDir:   cwd,
+			Cwd:          cwd,
+			EnabledNames: resolveEnabledExtensions(args, settingsManager),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
@@ -570,6 +571,32 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 	return nil
 }
 
+// resolveEnabledExtensions computes the allowlist of extension names to activate.
+// Extensions are enabled via:
+//   - settings.json "extensions" array (global or project)
+//   - CLI --extension / -e flags
+//
+// When the combined list is empty, all discovered extensions are started.
+// --no-extensions disables all extensions regardless of config (handled by the caller).
+func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
+	seen := make(map[string]bool)
+	var names []string
+
+	for _, n := range sm.GetEnabledExtensions() {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	for _, n := range args.Extensions {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	return names
+}
+
 // runAcpMode runs ACP mode over stdin/stdout.
 func runAcpMode(args *Args) error {
 	acpmode.SetVersion(version)
@@ -579,6 +606,7 @@ func runAcpMode(args *Args) error {
 		NoSkills:                      args.NoSkills,
 		NoPromptTemplates:             args.NoPromptTemplates,
 		NoExtensions:                  args.NoExtensions,
+		EnabledExtensions:             args.Extensions,
 	})
 }
 

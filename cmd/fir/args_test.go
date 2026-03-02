@@ -181,6 +181,33 @@ func TestParseArgs_NoExtensions(t *testing.T) {
 	}
 }
 
+func TestParseArgs_Extension(t *testing.T) {
+	args := ParseArgs([]string{"--extension", "myext"})
+	if len(args.Extensions) != 1 || args.Extensions[0] != "myext" {
+		t.Errorf("expected Extensions=[myext], got %v", args.Extensions)
+	}
+}
+
+func TestParseArgs_ExtensionShortFlag(t *testing.T) {
+	args := ParseArgs([]string{"-e", "ext1", "-e", "ext2"})
+	if len(args.Extensions) != 2 {
+		t.Fatalf("expected 2 extensions, got %d: %v", len(args.Extensions), args.Extensions)
+	}
+	if args.Extensions[0] != "ext1" || args.Extensions[1] != "ext2" {
+		t.Errorf("unexpected extensions: %v", args.Extensions)
+	}
+}
+
+func TestParseArgs_ExtensionMultiple(t *testing.T) {
+	args := ParseArgs([]string{"--extension", "alpha", "--extension", "beta"})
+	if len(args.Extensions) != 2 {
+		t.Fatalf("expected 2 extensions, got %d", len(args.Extensions))
+	}
+	if args.Extensions[0] != "alpha" || args.Extensions[1] != "beta" {
+		t.Errorf("unexpected: %v", args.Extensions)
+	}
+}
+
 func TestParseArgs_Skills(t *testing.T) {
 	args := ParseArgs([]string{"--skill", "skill1.md", "--skill", "skill2.md"})
 	if len(args.Skills) != 2 {
