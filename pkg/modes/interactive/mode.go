@@ -428,6 +428,14 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
+		// Clear any lingering command status (e.g. from /queue, /session, etc.)
+		if m.commandStatusContainer != nil {
+			m.commandStatusContainer.Clear()
+			if m.ui != nil {
+				m.ui.RequestRender(false)
+			}
+		}
+
 		// Handle slash commands — known builtins are dispatched locally;
 		// everything else (skill commands, prompt templates) falls through
 		// to session.Prompt which expands them.

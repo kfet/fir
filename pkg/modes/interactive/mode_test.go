@@ -1106,6 +1106,32 @@ func TestInteractiveMode_ShowWarningAppearsInStatus(t *testing.T) {
 	}
 }
 
+func TestInteractiveMode_StatusClearedOnSubmit(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.showStatus("Queue is empty")
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Queue is empty") {
+		t.Fatal("expected status text before submit")
+	}
+
+	// Simulate user pressing Enter with a new message — the status should clear.
+	// Use a slash command that also produces its own status, but first test with
+	// a non-slash input that goes to session.Prompt (which is nil in test, but
+	// the clearing happens before dispatch).
+	tm.term.ClearOutput()
+	tm.mode.editor.SetText("/help")
+	tm.mode.editor.OnSubmit("/help")
+	tm.waitRender()
+
+	output = tm.renderedOutput()
+	if strings.Contains(output, "Queue is empty") {
+		t.Error("expected previous status to be cleared after submit")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // extractEntryText
 // ---------------------------------------------------------------------------

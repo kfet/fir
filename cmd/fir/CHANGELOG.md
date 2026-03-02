@@ -17,6 +17,7 @@
 - Refactor: `.fir/skills` is now a symlink to `pkg/core/builtin_skills` — single source of truth, eliminates duplicate copy; `go:embed` reads the real directory
 
 ### Fixed
+- Clear command status TUI (from /queue, /session, etc.) when user submits any new input
 - ACP: `/skills` output now uses a markdown table so it renders correctly in ACP clients instead of collapsing into a wall of text
 - TUI: bash output now preserves original ANSI colors from commands (e.g. `git diff`, test runners, `ls --color`) — injects `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` so tools emit colors even through pipes, applies to both `!`/`!!` bash mode and AI-invoked bash tool calls
 
