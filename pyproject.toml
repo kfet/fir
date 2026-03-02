@@ -1,5 +1,5 @@
 # Python tooling configuration for fir.
-# Covers the SDK (pkg/extproc/sdk/python) and bundled extensions (.fir/extensions).
+# Covers the SDK (pkg/extension/sdk/python) and bundled extensions (.fir/extensions).
 
 [project]
 requires-python = ">=3.12"
@@ -46,5 +46,5 @@ ignore = [
 # Run: uvx ty check
 
 [tool.ty.environment]
-extra-paths = ["pkg/extproc/sdk/python"]
+extra-paths = ["pkg/extension/sdk/python"]
 python-version = "3.12"

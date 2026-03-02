@@ -26,7 +26,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
-	"github.com/kfet/fir/pkg/extproc"
+	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 )
@@ -41,7 +41,7 @@ func SetVersion(v string) { version = v }
 type firSession struct {
 	session       *core.AgentSession
 	modelRegistry *core.ModelRegistry
-	extSetup      *extproc.SetupResult
+	extSetup      *extension.SetupResult
 	unsubscribe   func()
 	cwd           string
 	agentDir      string
@@ -519,7 +519,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 
 	// Extension setup — discover stdio-based extensions in .fir/extensions/
 	if !pa.options.NoExtensions {
-		extSetup, err := extproc.Setup(result.Session, extproc.SetupOptions{
+		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
 			EnabledNames: resolveEnabledExtensions(pa.options.EnabledExtensions, settingsManager),

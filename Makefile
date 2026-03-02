@@ -92,7 +92,7 @@ clean:
 # Python SDK & extensions
 # ---------------------------------------------------------------------------
 
-PYTHON_DIRS := pkg/extproc/sdk/python .fir/extensions
+PYTHON_DIRS := pkg/extension/sdk/python .fir/extensions
 
 install-uv:
 	@echo "Installing uv via Astral installer..."
@@ -106,4 +106,4 @@ lint-python: check-uv
 	uvx ty check $(PYTHON_DIRS)
 
 test-python: check-uv
-	PYTHONPATH=pkg/extproc/sdk/python python3 -m unittest discover -s pkg/extproc/sdk/python -p '*_test.py' -v
+	PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py' -v

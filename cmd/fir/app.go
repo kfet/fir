@@ -17,7 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
-	"github.com/kfet/fir/pkg/extproc"
+	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
@@ -32,7 +32,7 @@ type sessionSetup struct {
 	agentDir        string
 	result          *core.CreateAgentSessionResult
 	settingsManager *core.SettingsManager
-	extSetup        *extproc.SetupResult
+	extSetup        *extension.SetupResult
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -150,9 +150,9 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	firlog.Debug("session created")
 
 	// Extensions — discover and start stdio-based extensions in .fir/extensions/
-	var extSetup *extproc.SetupResult
+	var extSetup *extension.SetupResult
 	if !args.NoExtensions {
-		extSetup, err = extproc.Setup(result.Session, extproc.SetupOptions{
+		extSetup, err = extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
 			EnabledNames: resolveEnabledExtensions(args, settingsManager),
@@ -678,7 +678,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	// Wire extension setup into interactive mode (enables /reload for extensions).
 	if setup.extSetup != nil {
 		mode.SetExtensionSetup(setup.extSetup)
-		// Emit session_start after the UI context is wired so that extproc
+		// Emit session_start after the UI context is wired so that
 		// extension status callbacks are active before session_start fires.
 		setup.extSetup.EmitSessionStart()
 	}

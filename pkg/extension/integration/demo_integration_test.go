@@ -3,8 +3,8 @@ package integration
 // Tests for demo.py — exercises the full JSON-RPC protocol between Go and
 // the demo extension. Every outbound method call and every event is covered.
 //
-// Unlike the unit tests (pkg/extproc/sdk/python/demo_ext_test.py), this file
-// drives the real Python process through the actual extproc.Process / Bridge
+// Unlike the unit tests (pkg/extension/sdk/python/demo_ext_test.py), this file
+// drives the real Python process through the actual extension.Process / Bridge
 // stack, so it is a genuine end-to-end integration test.
 
 import (

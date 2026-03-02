@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import "github.com/kfet/fir/pkg/ai"
 

@@ -1,4 +1,4 @@
-package extproc
+package extension
 
 import (
 	"context"
@@ -61,7 +61,7 @@ func NewBridge(proc *Process, caps *InitResult) *Bridge {
 func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 	codec := b.proc.GetCodec()
 	if codec == nil {
-		return fmt.Errorf("extproc: process not started")
+		return fmt.Errorf("extension: process not started")
 	}
 
 	errCh := make(chan error, 1)
@@ -290,7 +290,7 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 	}
 	codec := b.proc.GetCodec()
 	if codec == nil {
-		return fmt.Errorf("extproc: not connected")
+		return fmt.Errorf("extension: not connected")
 	}
 	return codec.WriteNotification("event/"+name, data)
 }
@@ -299,7 +299,7 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.RawMessage, error) {
 	codec := b.proc.GetCodec()
 	if codec == nil {
-		return nil, fmt.Errorf("extproc: not connected")
+		return nil, fmt.Errorf("extension: not connected")
 	}
 
 	id := b.nextID.Add(1)
@@ -329,7 +329,7 @@ func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.Ra
 		b.pendingMu.Lock()
 		delete(b.pending, id)
 		b.pendingMu.Unlock()
-		return nil, fmt.Errorf("extproc: hook %s timed out after %s", name, timeout)
+		return nil, fmt.Errorf("extension: hook %s timed out after %s", name, timeout)
 	}
 }
 

@@ -24,7 +24,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/debug"
-	"github.com/kfet/fir/pkg/extproc"
+	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
@@ -94,7 +94,7 @@ type InteractiveMode struct {
 	unsubscribe func()
 
 	// Extproc extension setup (optional)
-	extSetup *extproc.SetupResult
+	extSetup *extension.SetupResult
 
 	// updateCh receives a single update notice string (or "") when the
 	// background version check completes. Shown in the TUI at startup.
@@ -151,12 +151,12 @@ func NewInteractiveMode(
 	return m
 }
 
-// SetExtensionSetup stores the extproc extension setup so that /reload can
+// SetExtensionSetup stores the extension setup so that /reload can
 // restart external process extensions.
-func (m *InteractiveMode) SetExtensionSetup(setup *extproc.SetupResult) {
+func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 	m.extSetup = setup
 	if setup != nil && setup.Manager != nil {
-		// Wire UI callbacks so extproc extensions can set footer status and
+		// Wire UI callbacks so extensions can set footer status and
 		// show notifications.
 		setup.Manager.SetNotifyFn(func(level, message string) {
 			switch level {
@@ -168,7 +168,7 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extproc.SetupResult) {
 		})
 		setup.Manager.SetSetStatusFn(func(status string) {
 			if m.footerDataProvider != nil {
-				m.footerDataProvider.SetExtensionStatus("extproc", status)
+				m.footerDataProvider.SetExtensionStatus("extension", status)
 				if m.ui != nil {
 					m.ui.RequestRender(false)
 				}
@@ -663,7 +663,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 	}
 
 	// Add extension commands
-	// (extproc extensions don't register named slash commands)
+	// (extensions do not register named slash commands)
 
 	basePath, _ := os.Getwd()
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
@@ -2200,7 +2200,7 @@ func (m *InteractiveMode) handleReloadCommand() {
 		return
 	}
 
-	// Reload extproc extensions if setup is available.
+	// Reload extensions if setup is available.
 	if m.extSetup != nil {
 		if err := m.extSetup.Reload(m.ctx); err != nil {
 			m.showWarning(fmt.Sprintf("Extension reload failed: %v", err))
