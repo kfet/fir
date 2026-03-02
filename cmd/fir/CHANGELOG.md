@@ -40,6 +40,7 @@
 
 ### Fixed
 - Paste image (Ctrl+V): macOS `osascript` clipboard script now works — fixed three bugs: `NSPasteboardTypePNG`/`NSBitmapImageFileTypePNG` AppleScript constants caused "plural class name" syntax errors (replaced with string literals `"public.png"`/`"public.tiff"` and integer `4`); `do shell script "mktemp"` failed inside ASObjC scripts (temp file now created in Go); `properties:` is a reserved AppleScript keyword (escaped as `|properties|:`)
+- Python SDK: `_workers` thread list now pruned after every 100 entries to prevent unbounded growth in long-running sessions
 - `hook/tool_call` wired for extproc extensions in `pkg/extproc/setup.go`
 - `handleOutbound` in demo integration test released `rec.mu` before pipe write (prevented `waitOutbound` timeout)
 - `doInit` in demo integration test uses constant ID 0 instead of resetting mutable `nextID`

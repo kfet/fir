@@ -1,22 +1,15 @@
-## Reviewed 2026-03-02 (cycle 1 — post-extproc-demo work)
+## Reviewed 2026-03-02 (cycle 2 — post-rename to pkg/extension)
 
-Files: pkg/extension/integration.go, pkg/extproc/sdk/python/fir_ext.py,
-.fir/extensions/demo.py, pkg/extproc/sdk/python/demo_ext_test.py,
-pkg/extproc/integration/demo_integration_test.go, pkg/extensions/claudeusage/*,
-pkg/extension/extproc_hook_test.go (new)
+Files: pkg/extension/*.go, pkg/extension/sdk/python/fir_ext.py,
+pkg/extension/integration/demo_integration_test.go, cmd/fir/app.go,
+pkg/modes/interactive/mode.go, pkg/modes/acp/acp.go
 
 ---
 
-## Simplification
-
-- `pkg/extproc/sdk/python/fir_ext.py:365,412` — The `_workers` list is appended to on
-  every tool call and event but completed threads are never pruned during the session.
-  Threads are daemon threads and all joined at shutdown, so this is safe. For very
-  long-running sessions with thousands of tool calls the list stays alive for the
-  process lifetime. Low priority; acceptable as-is.
-
 ## Test Coverage
 
-- `pkg/extproc/sdk/python/extensions_test.py` (carry-over from cycle 4) — tests use
-  inline copies of functions rather than importing from the actual extension files. If
-  the real implementations diverge, tests won't catch it.
+- `pkg/extension/sdk/python/extensions_test.py` — tests use `_load_extension()` to
+  import the real `.fir/extensions/*.py` files, which is good. However `fir_ext.run()`
+  is mocked out, so the decorator registrations (`@fir_ext.tool`, `@fir_ext.on`) are
+  not exercised through the real SDK. Low priority; the `demo_ext_test.py` and
+  `fir_ext_test.py` suites cover the SDK thoroughly.

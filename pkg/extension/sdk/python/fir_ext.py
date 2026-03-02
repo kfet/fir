@@ -326,6 +326,14 @@ def run(
 
     # Worker threads for handlers that may call back into fir
     _workers: list[threading.Thread] = []
+    _worker_prune_threshold = 100  # prune completed threads when list exceeds this
+
+    def _track_worker(t: threading.Thread) -> None:
+        """Append a worker thread, pruning completed ones when the list grows large."""
+        nonlocal _workers
+        _workers.append(t)
+        if len(_workers) > _worker_prune_threshold:
+            _workers = [w for w in _workers if w.is_alive()]
 
     # Collect subscribed events
     subscribed_events: list[str] = list(_event_handlers.keys()) + list(_hook_handlers.keys())
@@ -388,7 +396,7 @@ def run(
         if method in ("tool_call",) or method.startswith("hook/"):
             t = threading.Thread(target=_handle_request, args=(method, msg_id, params), daemon=True)
             t.start()
-            _workers.append(t)
+            _track_worker(t)
             return
 
         # --- events (async notifications, no id) ---
@@ -408,7 +416,7 @@ def run(
 
                 t = threading.Thread(target=_run_event, daemon=True)
                 t.start()
-                _workers.append(t)
+                _track_worker(t)
             return
 
         # --- response to an outbound request we made ---
