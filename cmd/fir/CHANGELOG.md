@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-02
+
 ### Added
 - Session `command` entry type records every slash command (and bash invocation) for audit/metering; entries are written to the JSONL session file but never included in the LLM context
 - `AgentSession.RecordCommand` / `SessionManager.AppendCommandEntry` — new API to persist command audit entries
