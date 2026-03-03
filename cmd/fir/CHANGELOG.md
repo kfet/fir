@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Local usage tracking: CLI flags, slash commands, tool use, session types, and modes are tracked in `~/.fir/agent/usage.json` (new `pkg/usage` package)
+
 ### Fixed
 - Fix ANSI escape sequence corruption in tmux: editor border lines no longer repeat per-character SGR color escapes; the entire border is now colored as a single string, matching DynamicBorder behavior
 
