@@ -2,15 +2,45 @@
 # usage.sh — fetch and display Anthropic API usage stats
 #
 # Usage:
-#   TOKEN=<bearer-token> ./usage.sh
-#   ./usage.sh <bearer-token>
+#   ./usage.sh                      # auto-detects token from known credential files
+#   ./usage.sh <bearer-token>       # explicit token as argument
+#   TOKEN=<bearer-token> ./usage.sh # explicit token via env var
 #
 # The token must be an OAuth Bearer token (not a standard sk-ant-... API key).
-# See the skill's SKILL.md for how to obtain it.
+# Auto-detection searches ~/.fir/agent/auth.json and ~/.claude/.credentials.json.
 
 set -euo pipefail
 
+find_token() {
+  local entry file filter value
+  local search_entries=(
+    "$HOME/.fir/agent/auth.json:.anthropic.access // empty"
+    "$HOME/.claude/.credentials.json:.claudeAiOauthToken // .access_token // empty"
+  )
+
+  for entry in "${search_entries[@]}"; do
+    file="${entry%%:*}"
+    filter="${entry#*:}"
+    if [[ -f "$file" ]]; then
+      if value=$(jq -r "$filter" "$file" 2>/dev/null); then
+        if [[ -n "$value" && "$value" != "null" ]]; then
+          printf "%s" "$value"
+          return 0
+        fi
+      fi
+    fi
+  done
+
+  return 1
+}
+
 TOKEN="${1:-${TOKEN:-}}"
+
+if [[ -z "$TOKEN" ]]; then
+  if token="$(find_token)"; then
+    TOKEN="$token"
+  fi
+fi
 
 if [[ -z "$TOKEN" ]]; then
   echo "Error: no token provided." >&2

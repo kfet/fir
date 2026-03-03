@@ -14,42 +14,40 @@ The usage stats endpoint (`https://api.anthropic.com/api/oauth/usage`) requires 
 
 Standard API keys will **not** work — the endpoint rejects them.
 
-## Step 1 — Extract the Token
+## Step 1 — Run the Script
 
-Look for an OAuth token in common locations:
+The script auto-detects your OAuth token from known credential files. In most cases, just run it:
 
 ```bash
-# Try common credential files
-for f in ~/.fir/agent/auth.json ~/.claude/.credentials.json; do
-  [ -f "$f" ] && echo "Found: $f"
-done
+bash "$SKILL_DIR/scripts/usage.sh"
 ```
 
-### Common locations
+You can also pass a token explicitly:
+
+```bash
+bash "$SKILL_DIR/scripts/usage.sh" "$TOKEN"
+# or
+TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh"
+```
+
+### Where auto-detection looks
 
 | Tool | File | Key |
 |------|------|-----|
 | fir | `~/.fir/agent/auth.json` | `.anthropic.access` |
-| Claude Code | `~/.claude/.credentials.json` | `"access_token"` or `"claudeAiOauthToken"` |
+| Claude Code | `~/.claude/.credentials.json` | `"claudeAiOauthToken"` or `"access_token"` |
 
-Extract with jq:
+### Manual fallback
+
+If auto-detection fails (e.g. non-standard install), extract the token yourself:
+
 ```bash
 TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
 # or
 TOKEN=$(jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
 ```
 
-## Step 2 — Run the Script
-
-The script lives at `scripts/usage.sh` (relative to this skill). Pass the token via the `TOKEN` env var or as the first argument:
-
-```bash
-TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh"
-# or
-bash "$SKILL_DIR/scripts/usage.sh" "$TOKEN"
-```
-
-## Step 3 — Interpret the Response
+## Step 2 — Interpret the Response
 
 The script prints all non-null usage windows returned by the API, then `extra_usage` if overage billing is enabled.
 
