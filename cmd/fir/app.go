@@ -712,6 +712,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	return err
 }
 
+
 // recordCLIFlags records which CLI flags were used for usage tracking.
 func recordCLIFlags(tracker *usage.Tracker, args *Args) {
 	record := func(flag string) { tracker.Record(usage.EventCLIFlag, flag) }
