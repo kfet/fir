@@ -1253,11 +1253,34 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error)
 		data, _ := json.Marshal(e)
 		lines = append(lines, string(data))
 	}
-	if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
-		return nil, fmt.Errorf("cannot write forked session: %w", err)
+
+	// Only write the file now if it contains an assistant message.
+	// Otherwise defer to the first persist call, matching newSession()
+	// and avoiding duplicate headers.
+	hasAssistant := false
+	for _, e := range entries {
+		if e.Type == "message" && len(e.RawMessage) > 0 {
+			var msg struct {
+				Role string `json:"role"`
+			}
+			if json.Unmarshal(e.RawMessage, &msg) == nil && msg.Role == "assistant" {
+				hasAssistant = true
+				break
+			}
+		}
 	}
 
-	return OpenSessionManager(newSessionFile, sessionDir), nil
+	if hasAssistant {
+		if err := os.WriteFile(newSessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+			return nil, fmt.Errorf("cannot write forked session: %w", err)
+		}
+	}
+
+	sm := OpenSessionManager(newSessionFile, sessionDir)
+	if !hasAssistant {
+		sm.flushed = false
+	}
+	return sm, nil
 }
 
 // SessionsDir returns the parent directory that contains all per-project session directories.

@@ -583,7 +583,7 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 				if supportsBedrockAdaptiveThinking(model.ID) {
 					additionalFields["thinking"] = map[string]any{"type": "adaptive"}
 					additionalFields["output_config"] = map[string]any{
-						"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning)),
+						"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning), model.ID),
 					}
 				} else {
 					budget := 1024
@@ -633,7 +633,8 @@ func supportsBedrockThinkingSignature(model *ai.Model) bool {
 
 // supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking.
 func supportsBedrockAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 
 // bedrockImageFormat maps MIME types to Bedrock image format strings.

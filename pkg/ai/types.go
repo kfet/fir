@@ -178,6 +178,10 @@ type ThinkingContent struct {
 	Type              string `json:"type"` // always "thinking"
 	Thinking          string `json:"thinking"`
 	ThinkingSignature string `json:"thinkingSignature,omitempty"`
+	// Redacted indicates the thinking content was redacted by safety filters.
+	// The opaque encrypted payload is stored in ThinkingSignature so it can
+	// be passed back to the API for multi-turn continuity.
+	Redacted bool `json:"redacted,omitempty"`
 }
 
 // ImageContent represents a base64-encoded image.

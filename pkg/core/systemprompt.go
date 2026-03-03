@@ -29,6 +29,12 @@ type ContextFile struct {
 type BuildSystemPromptOptions struct {
 	CustomPrompt       string
 	SelectedTools      []string
+	// ToolSnippets provides optional one-line snippets keyed by tool name.
+	// Falls back to the built-in description when empty.
+	ToolSnippets map[string]string
+	// PromptGuidelines provides additional guideline bullets appended to the
+	// default system prompt guidelines.
+	PromptGuidelines []string
 	AppendSystemPrompt string
 	Cwd                string
 	ContextFiles       []ContextFile
@@ -86,19 +92,25 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, dateTime, appendSection st
 }
 
 func buildDefaultPrompt(opts BuildSystemPromptOptions, dateTime, appendSection string) string {
-	// Filter to known tools
-	var tools []string
-	for _, t := range opts.SelectedTools {
-		if _, ok := ToolDescriptions[t]; ok {
-			tools = append(tools, t)
-		}
-	}
+	// Build tools list. Built-ins use ToolDescriptions; custom tools use snippets.
+	tools := opts.SelectedTools
 
 	toolsList := "(none)"
 	if len(tools) > 0 {
 		var lines []string
 		for _, t := range tools {
-			lines = append(lines, fmt.Sprintf("- %s: %s", t, ToolDescriptions[t]))
+			snippet := ""
+			if opts.ToolSnippets != nil {
+				snippet = opts.ToolSnippets[t]
+			}
+			if snippet == "" {
+				if desc, ok := ToolDescriptions[t]; ok {
+					snippet = desc
+				} else {
+					snippet = t
+				}
+			}
+			lines = append(lines, fmt.Sprintf("- %s: %s", t, snippet))
 		}
 		toolsList = strings.Join(lines, "\n")
 	}
@@ -108,29 +120,45 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, dateTime, appendSection s
 		toolSet[t] = true
 	}
 
-	// Build guidelines
+	// Build guidelines with deduplication
+	seen := make(map[string]bool)
 	var guidelines []string
+	addGuideline := func(g string) {
+		if seen[g] {
+			return
+		}
+		seen[g] = true
+		guidelines = append(guidelines, g)
+	}
 
 	if toolSet["bash"] && !toolSet["grep"] && !toolSet["find"] && !toolSet["ls"] {
-		guidelines = append(guidelines, "Use bash for file operations like ls, rg, find")
+		addGuideline("Use bash for file operations like ls, rg, find")
 	} else if toolSet["bash"] && (toolSet["grep"] || toolSet["find"] || toolSet["ls"]) {
-		guidelines = append(guidelines, "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)")
+		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)")
 	}
 
 	if toolSet["read"] && toolSet["edit"] {
-		guidelines = append(guidelines, "Use read to examine files before editing. You must use this tool instead of cat or sed.")
+		addGuideline("Use read to examine files before editing. You must use this tool instead of cat or sed.")
 	}
 	if toolSet["edit"] {
-		guidelines = append(guidelines, "Use edit for precise changes (old text must match exactly)")
+		addGuideline("Use edit for precise changes (old text must match exactly)")
 	}
 	if toolSet["write"] {
-		guidelines = append(guidelines, "Use write only for new files or complete rewrites")
+		addGuideline("Use write only for new files or complete rewrites")
 	}
 	if toolSet["edit"] || toolSet["write"] {
-		guidelines = append(guidelines, "When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did")
+		addGuideline("When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did")
 	}
-	guidelines = append(guidelines, "Be concise in your responses")
-	guidelines = append(guidelines, "Show file paths clearly when working with files")
+
+	for _, g := range opts.PromptGuidelines {
+		g = strings.TrimSpace(g)
+		if g != "" {
+			addGuideline(g)
+		}
+	}
+
+	addGuideline("Be concise in your responses")
+	addGuideline("Show file paths clearly when working with files")
 
 	var guidelineLines []string
 	for _, g := range guidelines {

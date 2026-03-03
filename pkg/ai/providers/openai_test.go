@@ -437,23 +437,19 @@ func TestBuildOpenAIRequestBody_ZaiThinking(t *testing.T) {
 	m := &ai.Model{Provider: "zai", BaseURL: "https://api.z.ai", ID: "claude-3.5-sonnet", Reasoning: true, MaxTokens: 16384}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	// With reasoning: should use "enabled"
+	// With reasoning: should use enable_thinking: true
 	body, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{ReasoningEffort: "high"})
 	require.NoError(t, err)
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))
-	thinking, ok := parsed["thinking"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "enabled", thinking["type"])
+	assert.Equal(t, true, parsed["enable_thinking"])
 
-	// Without reasoning: should use "disabled"
+	// Without reasoning: should not set enable_thinking
 	body2, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{})
 	require.NoError(t, err)
 	var parsed2 map[string]any
 	require.NoError(t, json.Unmarshal(body2, &parsed2))
-	thinking2, ok := parsed2["thinking"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "disabled", thinking2["type"])
+	assert.Nil(t, parsed2["enable_thinking"])
 }
 
 func TestBuildOpenAIRequestBody_EmptyToolsForToolHistory(t *testing.T) {

@@ -1357,8 +1357,23 @@ func (m *InteractiveMode) handleDequeueCommand(arg string) {
 }
 
 func (m *InteractiveMode) handleCtrlZ() {
+	// Ignore SIGINT while suspended so Ctrl+C in the terminal does not
+	// kill the backgrounded process.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	// Set up handler to restore TUI when resumed.
+	contCh := make(chan os.Signal, 1)
+	signal.Notify(contCh, continueSignal())
+	go func() {
+		<-contCh
+		signal.Stop(contCh)
+		signal.Stop(sigCh)
+		m.ui.Start()
+		m.ui.RequestRender(true)
+	}()
+
 	// Send SIGTSTP to self (suspend)
-	// On most systems, this suspends the process
 	p, err := os.FindProcess(os.Getpid())
 	if err == nil {
 		_ = p.Signal(suspendSignal())

@@ -383,6 +383,8 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 	}{
 		{"claude-opus-4.6-20260101", true},
 		{"claude-opus-4-6-20260101", true},
+		{"claude-sonnet-4-6-20260101", true},
+		{"claude-sonnet-4.6-20260101", true},
 		{"claude-sonnet-4-20250514", false},
 		{"claude-opus-4-20250514", false},
 		{"gpt-4o", false},
@@ -397,20 +399,23 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 
 func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 	tests := []struct {
-		level ai.ThinkingLevel
-		want  string
+		level   ai.ThinkingLevel
+		modelID string
+		want    string
 	}{
-		{ai.ThinkingMinimal, "low"},
-		{ai.ThinkingLow, "low"},
-		{ai.ThinkingMedium, "medium"},
-		{ai.ThinkingHigh, "high"},
-		{ai.ThinkingXHigh, "max"},
-		{"", "high"}, // default
+		{ai.ThinkingMinimal, "claude-opus-4-6", "low"},
+		{ai.ThinkingLow, "claude-opus-4-6", "low"},
+		{ai.ThinkingMedium, "claude-opus-4-6", "medium"},
+		{ai.ThinkingHigh, "claude-opus-4-6", "high"},
+		{ai.ThinkingXHigh, "claude-opus-4-6", "max"},
+		{ai.ThinkingXHigh, "claude-sonnet-4-6", "high"}, // max only valid on Opus 4.6
+		{ai.ThinkingXHigh, "claude-sonnet-4.6-20260101", "high"},
+		{"", "claude-opus-4-6", "high"}, // default
 	}
 	for _, tt := range tests {
-		got := mapThinkingLevelToEffort(tt.level)
+		got := mapThinkingLevelToEffort(tt.level, tt.modelID)
 		if got != tt.want {
-			t.Errorf("mapThinkingLevelToEffort(%q) = %q, want %q", tt.level, got, tt.want)
+			t.Errorf("mapThinkingLevelToEffort(%q, %q) = %q, want %q", tt.level, tt.modelID, got, tt.want)
 		}
 	}
 }

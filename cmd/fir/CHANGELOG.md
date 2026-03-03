@@ -3,10 +3,25 @@
 ## [Unreleased]
 
 ### Added
+- `--offline` flag and `FIR_OFFLINE` env var to disable startup network operations (version check)
+- Sonnet 4.6 adaptive thinking support (Anthropic and Bedrock providers)
+- Redacted thinking block handling: safety-redacted thinking is preserved for same-model replay and stripped for cross-model
+- `ToolSnippets` and `PromptGuidelines` in system prompt builder for extension tool descriptions and custom guidelines
+- `UnregisterProvider` on model registry and OAuth registry for clean provider lifecycle
+- `PromptSnippet` and `PromptGuidelines` fields on extension `ToolDefinition`
 - Builtin `self` skill documenting fir configuration, modes, auth, extensions, skills, and full `settings.json` reference; kept in sync by tests that reflect on the `Settings` struct and parse the example JSON
 - Builtin extensions: extensions in `builtin_extensions/` with `# --- / builtin: true / # ---` comment frontmatter are embedded in the binary and auto-discovered at lowest priority (shadowed by global/project extensions)
 
 ### Fixed
+- Temperature no longer sent with Anthropic thinking mode (incompatible with extended thinking)
+- Z.ai thinking now uses `enable_thinking` instead of `thinking` param (matches upstream change)
+- xhigh thinking level clamped to "high" for Sonnet 4.6 (max only valid on Opus 4.6)
+- Skip interleaved-thinking beta header for adaptive thinking models (deprecated/redundant)
+- Guard nil OpenAI choices array in streaming response
+- Session fork defers file write when no assistant message present (prevents duplicate headers)
+- Ignore SIGINT while process is suspended (Ctrl+Z) to prevent accidental kill
+- Use alt+v for image paste on Windows (ctrl+v conflicts with terminal paste)
+- `ModelRegistry.Refresh` now resets API/OAuth registrations before reapplying dynamic providers
 - Google OAuth (Antigravity/Gemini CLI) and OpenAI Codex: no longer shows "Paste the redirect URL" prompt when browser callback succeeds; manual input is deferred 3 seconds, giving the browser flow time to complete first
 
 ## [0.11.0] - 2026-03-02

@@ -51,6 +51,7 @@ type Args struct {
 	NoThemes           bool
 	ListModels         any // true (bool) or string (search pattern)
 	Verbose            bool
+	Offline            bool
 	Debug              bool
 	DebugLogFile       string
 	Messages           []string
@@ -212,6 +213,8 @@ func ParseArgs(args []string) *Args {
 
 		case arg == "--verbose":
 			result.Verbose = true
+		case arg == "--offline":
+			result.Offline = true
 
 		case arg == "--debug":
 			result.Debug = true
@@ -278,6 +281,7 @@ Options:
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup
+  --offline                      Disable startup network operations (same as FIR_OFFLINE=1)
   --debug                        Enable debug logging to file
   --debug-log-file <path>        Debug log path (default: ~/.fir/agent/debug.log)
   --help, -h                     Show this help

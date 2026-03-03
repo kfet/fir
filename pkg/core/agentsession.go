@@ -184,6 +184,8 @@ type AgentSession struct {
 
 	// System prompt
 	baseSystemPrompt string
+	toolSnippets     map[string]string
+	promptGuidelines []string
 
 	// Bash execution
 	bashCancel   context.CancelFunc
@@ -485,9 +487,11 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
-		Skills:       skills,
-		ContextFiles: contextFiles,
-		Cwd:          s.cwd,
+		Skills:           skills,
+		ContextFiles:     contextFiles,
+		ToolSnippets:     s.toolSnippets,
+		PromptGuidelines: s.promptGuidelines,
+		Cwd:              s.cwd,
 	})
 
 	// Apply custom system prompt override

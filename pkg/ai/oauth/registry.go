@@ -10,15 +10,21 @@ import (
 var (
 	registryMu sync.RWMutex
 	registry   = map[string]Provider{}
+	builtins   []Provider
 )
 
 func init() {
 	// Register all built-in OAuth providers.
-	RegisterProvider(&AnthropicProvider{})
-	RegisterProvider(&GitHubCopilotProvider{})
-	RegisterProvider(&GeminiCLIProvider{})
-	RegisterProvider(&AntigravityProvider{})
-	RegisterProvider(&OpenAICodexProvider{})
+	builtins = []Provider{
+		&AnthropicProvider{},
+		&GitHubCopilotProvider{},
+		&GeminiCLIProvider{},
+		&AntigravityProvider{},
+		&OpenAICodexProvider{},
+	}
+	for _, p := range builtins {
+		registry[p.ID()] = p
+	}
 }
 
 // RegisterProvider registers a custom OAuth provider.
@@ -26,6 +32,30 @@ func RegisterProvider(p Provider) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[p.ID()] = p
+}
+
+// UnregisterProvider removes a provider. Built-in providers are restored
+// to their default implementation rather than deleted.
+func UnregisterProvider(id string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	for _, b := range builtins {
+		if b.ID() == id {
+			registry[id] = b
+			return
+		}
+	}
+	delete(registry, id)
+}
+
+// ResetProviders restores the registry to only the built-in providers.
+func ResetProviders() {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry = make(map[string]Provider, len(builtins))
+	for _, p := range builtins {
+		registry[p.ID()] = p
+	}
 }
 
 // GetProvider returns the OAuth provider with the given ID, or nil.

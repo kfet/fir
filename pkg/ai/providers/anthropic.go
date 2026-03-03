@@ -16,7 +16,7 @@ import (
 )
 
 // claudeCodeVersion mimics Claude Code's version for OAuth stealth mode.
-const claudeCodeVersion = "2.1.2"
+const claudeCodeVersion = "2.1.62"
 
 // claudeCodeTools are the canonical tool names from Claude Code 2.x.
 var claudeCodeTools = []string{
@@ -68,10 +68,11 @@ func isOAuthTokenStr(apiKey string) bool {
 }
 
 func supportsAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 
-func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
+func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	switch level {
 	case ai.ThinkingMinimal, ai.ThinkingLow:
 		return "low"
@@ -80,7 +81,11 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		return "max"
+		// "max" is only valid on Opus 4.6; clamp to "high" for Sonnet 4.6
+		if strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") {
+			return "max"
+		}
+		return "high"
 	default:
 		return "high"
 	}
@@ -213,6 +218,13 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
 				case "thinking":
 					output.Content = append(output.Content, ai.NewThinkingContent(""))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
+				case "redacted_thinking":
+					data, _ := cb["data"].(string)
+					tc := ai.NewThinkingContent("[Reasoning redacted]")
+					tc.Thinking.ThinkingSignature = data
+					tc.Thinking.Redacted = true
+					output.Content = append(output.Content, tc)
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
 				case "tool_use":
 					toolID, _ := cb["id"].(string)
@@ -347,7 +359,7 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
-		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning)
+		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning, model.ID)
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
@@ -383,7 +395,12 @@ func RegisterAnthropic(r *ai.Registry) {
 // --- Internal helpers ---
 
 func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, options *ai.StreamOptions) map[string]string {
-	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+	// Adaptive thinking models (Opus 4.6, Sonnet 4.6) have interleaved thinking built-in.
+	// The beta header is deprecated/redundant, so skip it.
+	betaFeatures := "fine-grained-tool-streaming-2025-05-14"
+	if !supportsAdaptiveThinking(model.ID) {
+		betaFeatures += ",interleaved-thinking-2025-05-14"
+	}
 
 	headers := map[string]string{
 		"accept":            "application/json",
@@ -393,7 +410,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 
 	if oauthToken {
 		headers["anthropic-beta"] = fmt.Sprintf("claude-code-20250219,oauth-2025-04-20,%s", betaFeatures)
-		headers["user-agent"] = fmt.Sprintf("claude-cli/%s (external, cli)", claudeCodeVersion)
+		headers["user-agent"] = fmt.Sprintf("claude-cli/%s", claudeCodeVersion)
 		headers["x-app"] = "cli"
 		headers["authorization"] = "Bearer " + apiKey
 	} else {
@@ -464,8 +481,11 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	// Messages
 	params["messages"] = convertAnthropicMessages(ctx.Messages, model, oauthToken, retention)
 
-	// Temperature
-	if options != nil && options.Temperature != nil {
+	// Temperature is incompatible with extended thinking (adaptive or budget-based).
+	thinkingEnabled := options != nil && options.Headers != nil &&
+		(options.Headers["x-anthropic-thinking-enabled"] == "true" ||
+			options.Headers["x-anthropic-thinking-effort"] != "")
+	if options != nil && options.Temperature != nil && !thinkingEnabled {
 		params["temperature"] = *options.Temperature
 	}
 
@@ -581,6 +601,14 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 					}
 					blocks = append(blocks, map[string]any{"type": "text", "text": c.Text.Text})
 				} else if c.IsThinking() {
+					// Redacted thinking: pass the opaque payload back as redacted_thinking
+					if c.Thinking.Redacted {
+						blocks = append(blocks, map[string]any{
+							"type": "redacted_thinking",
+							"data": c.Thinking.ThinkingSignature,
+						})
+						continue
+					}
 					if strings.TrimSpace(c.Thinking.Thinking) == "" {
 						continue
 					}
