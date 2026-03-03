@@ -24,6 +24,7 @@ import (
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	rpcmode "github.com/kfet/fir/pkg/modes/rpc"
 	"github.com/kfet/fir/pkg/update"
+	"github.com/kfet/fir/pkg/usage"
 )
 
 // sessionSetup holds common setup results shared between run modes.
@@ -33,6 +34,7 @@ type sessionSetup struct {
 	result          *core.CreateAgentSessionResult
 	settingsManager *core.SettingsManager
 	extSetup        *extension.SetupResult
+	usageTracker    *usage.Tracker
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -118,6 +120,9 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		}
 	}
 
+	// Usage tracking
+	usageTracker := usage.New(usage.DefaultPath(agentDir))
+
 	// Build session options
 	sessionOpts := core.CreateAgentSessionOptions{
 		Cwd:             cwd,
@@ -129,6 +134,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ScopedModels:    scopedModels,
+		UsageTracker:    usage.NewSessionTracker(usageTracker),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
 			ModelRegistry:   modelRegistry,
@@ -176,12 +182,16 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	// Clamp thinking level to model capabilities
 	clampThinkingLevel(result.Session, args.Thinking)
 
+	// Record CLI usage
+	recordCLIFlags(usageTracker, args)
+
 	return &sessionSetup{
 		cwd:             cwd,
 		agentDir:        agentDir,
 		result:          result,
 		settingsManager: settingsManager,
 		extSetup:        extSetup,
+		usageTracker:    usageTracker,
 	}, nil
 }
 
@@ -700,4 +710,104 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	})
 	mode.ReexecIfRequested() // never returns if /reexec was used
 	return err
+}
+
+// recordCLIFlags records which CLI flags were used for usage tracking.
+func recordCLIFlags(tracker *usage.Tracker, args *Args) {
+	record := func(flag string) { tracker.Record(usage.EventCLIFlag, flag) }
+
+	if args.Provider != "" {
+		record("--provider")
+	}
+	if args.Model != "" {
+		record("--model")
+	}
+	if args.ApiKey != "" {
+		record("--api-key")
+	}
+	if args.SystemPrompt != "" {
+		record("--system-prompt")
+	}
+	if args.AppendSystemPrompt != "" {
+		record("--append-system-prompt")
+	}
+	if args.Thinking != "" {
+		record("--thinking")
+	}
+	if args.Continue {
+		record("--continue")
+	}
+	if args.Resume {
+		record("--resume")
+	}
+	if args.Print {
+		record("--print")
+	}
+	if args.NoSession {
+		record("--no-session")
+	}
+	if args.Session != "" {
+		record("--session")
+	}
+	if len(args.Models) > 0 {
+		record("--models")
+	}
+	if args.NoTools {
+		record("--no-tools")
+	}
+	if len(args.Tools) > 0 {
+		record("--tools")
+	}
+	if args.NoExtensions {
+		record("--no-extensions")
+	}
+	if len(args.Extensions) > 0 {
+		record("--extension")
+	}
+	if args.NoSkills {
+		record("--no-skills")
+	}
+	if len(args.Skills) > 0 {
+		record("--skill")
+	}
+	if args.Export != "" {
+		record("--export")
+	}
+	if args.Verbose {
+		record("--verbose")
+	}
+	if args.Debug {
+		record("--debug")
+	}
+	if args.ListModels != nil {
+		record("--list-models")
+	}
+	if len(args.FileArgs) > 0 {
+		record("@file")
+	}
+
+	// Record the mode
+	switch args.OutputMode {
+	case ModeJSON:
+		tracker.Record(usage.EventMode, "json")
+	case ModeRPC:
+		tracker.Record(usage.EventMode, "rpc")
+	case ModeACP:
+		tracker.Record(usage.EventMode, "acp")
+	default:
+		if args.Print {
+			tracker.Record(usage.EventMode, "print")
+		} else {
+			tracker.Record(usage.EventMode, "interactive")
+		}
+	}
+
+	// Record session type
+	if args.Continue {
+		tracker.Record(usage.EventSession, "continue")
+	} else if args.Resume {
+		tracker.Record(usage.EventSession, "resume")
+	} else {
+		tracker.Record(usage.EventSession, "new")
+	}
 }

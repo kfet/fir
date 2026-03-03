@@ -773,6 +773,13 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.session.RecordCommand(strings.TrimPrefix(cmd, "/"), args)
 	}
 
+	// Track slash command usage locally.
+	if m.session != nil {
+		if ut := m.session.UsageTracker(); ut != nil {
+			ut.RecordSlashCommand(cmd)
+		}
+	}
+
 	switch cmd {
 	case "/help", "/hotkeys":
 		m.showHelp()

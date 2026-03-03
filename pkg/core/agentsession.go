@@ -139,6 +139,13 @@ type ToolResultModification struct {
 	IsError *bool
 }
 
+// UsageTracker records feature usage events. Implementations must be safe
+// for concurrent use.
+type UsageTracker interface {
+	RecordToolUse(toolName string)
+	RecordSlashCommand(name string)
+}
+
 // AgentSessionHooks provides optional hooks for external systems (e.g., extensions).
 type AgentSessionHooks struct {
 	// OnToolCall is called before each tool execution. Return non-nil to block.
@@ -157,6 +164,7 @@ type AgentSessionOptions struct {
 	Cwd              string
 	ScopedModels     []ScopedModel
 	Hooks            *AgentSessionHooks
+	UsageTracker     UsageTracker
 }
 
 // ============================================================================
@@ -199,6 +207,9 @@ type AgentSession struct {
 
 	// Extension hooks
 	hooks *AgentSessionHooks
+
+	// Usage tracking (optional; nil disables tracking)
+	usageTracker UsageTracker
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -213,6 +224,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		cwd:              opts.Cwd,
 		scopedModels:     opts.ScopedModels,
 		hooks:            opts.Hooks,
+		usageTracker:     opts.UsageTracker,
 	}
 
 	// Subscribe to agent events for internal handling
@@ -227,6 +239,11 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	)
 
 	return s
+}
+
+// UsageTracker returns the session's usage tracker, or nil if not set.
+func (s *AgentSession) UsageTracker() UsageTracker {
+	return s.usageTracker
 }
 
 // ============================================================================
@@ -313,6 +330,11 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 		Type:       string(event.Type),
 	}
 	s.emit(sessionEvent)
+
+	// Track tool use
+	if event.Type == agent.EventToolExecutionStart && event.ToolName != "" && s.usageTracker != nil {
+		s.usageTracker.RecordToolUse(event.ToolName)
+	}
 
 	// Session persistence on message_end
 	if event.Type == agent.EventMessageEnd && event.Message != nil {

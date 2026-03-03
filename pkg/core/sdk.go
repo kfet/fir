@@ -50,6 +50,9 @@ type CreateAgentSessionOptions struct {
 
 	// CompactionRunner handles context compaction. When nil, compaction is disabled.
 	CompactionRunner CompactionRunner
+
+	// UsageTracker records feature usage events. When nil, tracking is disabled.
+	UsageTracker UsageTracker
 }
 
 // CreateAgentSessionResult is returned by CreateAgentSession.
@@ -244,6 +247,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		ResourceLoader:   resourceLoader,
 		ModelRegistry:    modelRegistry,
 		CompactionRunner: opts.CompactionRunner,
+		UsageTracker:     opts.UsageTracker,
 		Cwd:              cwd,
 		ScopedModels:     opts.ScopedModels,
 	})
