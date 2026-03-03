@@ -77,7 +77,8 @@ type builtinExtMeta struct {
 	FileName    string // original filename in the embedded FS
 }
 
-// listBuiltinExtensionMeta reads frontmatter from all embedded extensions.
+// listBuiltinExtensionMeta reads frontmatter from all embedded extensions
+// marked with builtin: true.
 func listBuiltinExtensionMeta() []builtinExtMeta {
 	entries, err := core.BuiltinExtensionsFS.ReadDir("builtin_extensions")
 	if err != nil {
@@ -94,6 +95,9 @@ func listBuiltinExtensionMeta() []builtinExtMeta {
 			continue
 		}
 		fm := core.ParseCommentFrontmatter(string(data))
+		if !fm.Builtin {
+			continue
+		}
 		name := fm.Name
 		if name == "" {
 			name = strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
