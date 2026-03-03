@@ -9,7 +9,7 @@ import (
 
 // SDKVersion is bumped whenever the embedded SDK files change.
 // A new version causes re-extraction on next run.
-const SDKVersion = "1"
+const SDKVersion = "2"
 
 // cacheDir is the function used to locate the cache directory.
 // Tests override this to avoid touching ~/.cache.
