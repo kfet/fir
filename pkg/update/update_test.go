@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,7 +14,7 @@ import (
 )
 
 // ============================================================================
-// semverCompare / isNewer
+// semverCompare / IsNewer
 // ============================================================================
 
 func TestSemverCompare(t *testing.T) {
@@ -65,47 +63,10 @@ func TestIsNewer(t *testing.T) {
 		{"", "0.4.0", false},
 	}
 	for _, tc := range cases {
-		got := isNewer(tc.candidate, tc.current)
+		got := IsNewer(tc.candidate, tc.current)
 		if got != tc.want {
-			t.Errorf("isNewer(%q, %q) = %v, want %v", tc.candidate, tc.current, got, tc.want)
+			t.Errorf("IsNewer(%q, %q) = %v, want %v", tc.candidate, tc.current, got, tc.want)
 		}
-	}
-}
-
-// ============================================================================
-// findChecksum
-// ============================================================================
-
-func TestFindChecksum(t *testing.T) {
-	checksums := "abc123  fir-linux-amd64\ndef456  fir-linux-arm6\n789xyz  fir-darwin-arm64\n"
-	cases := []struct {
-		filename string
-		want     string
-	}{
-		{"fir-linux-amd64", "abc123"},
-		{"fir-linux-arm6", "def456"},
-		{"fir-darwin-arm64", "789xyz"},
-		{"fir-windows-amd64", ""},
-		{"", ""},
-	}
-	for _, tc := range cases {
-		got := findChecksum(checksums, tc.filename)
-		if got != tc.want {
-			t.Errorf("findChecksum(%q) = %q, want %q", tc.filename, got, tc.want)
-		}
-	}
-}
-
-func TestFindChecksum_Empty(t *testing.T) {
-	if got := findChecksum("", "fir-linux-amd64"); got != "" {
-		t.Errorf("expected empty for empty checksums, got %q", got)
-	}
-}
-
-func TestFindChecksum_MalformedLines(t *testing.T) {
-	checksums := "onlyonetoken\nabc  fir-linux-amd64\n   \n"
-	if got := findChecksum(checksums, "fir-linux-amd64"); got != "abc" {
-		t.Errorf("got %q, want %q", got, "abc")
 	}
 }
 
@@ -146,9 +107,6 @@ func TestUpdateNotice_SuggestsFirUpdate(t *testing.T) {
 	if !strings.Contains(notice, "fir update") {
 		t.Errorf("notice should suggest fir update, got: %q", notice)
 	}
-	if strings.Contains(notice, "brew") {
-		t.Errorf("notice should not mention brew, got: %q", notice)
-	}
 }
 
 // ============================================================================
@@ -156,99 +114,14 @@ func TestUpdateNotice_SuggestsFirUpdate(t *testing.T) {
 // ============================================================================
 
 func TestHasGH_ReturnsBool(t *testing.T) {
-	// Just verify it doesn't panic — result depends on the system.
 	_ = HasGH()
-}
-
-// ============================================================================
-// parseRelease
-// ============================================================================
-
-func TestParseRelease_Valid(t *testing.T) {
-	data := `{
-		"tag_name": "v0.5.0",
-		"assets": [
-			{"name": "fir-darwin-arm64", "browser_download_url": "https://example.com/fir-darwin-arm64"},
-			{"name": "fir-linux-amd64", "browser_download_url": "https://example.com/fir-linux-amd64"},
-			{"name": "checksums.txt", "browser_download_url": "https://example.com/checksums.txt"}
-		]
-	}`
-	rel, err := parseRelease([]byte(data))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rel.Version != "v0.5.0" {
-		t.Errorf("Version = %q, want v0.5.0", rel.Version)
-	}
-	if rel.ChecksumsURL != "https://example.com/checksums.txt" {
-		t.Errorf("ChecksumsURL = %q", rel.ChecksumsURL)
-	}
-	// AssetURL depends on CurrentPlatform; just verify it's set for one of them.
-	platform := CurrentPlatform()
-	expectedURL := "https://example.com/fir-" + platform
-	if platform == "darwin-arm64" || platform == "linux-amd64" {
-		if rel.AssetURL != expectedURL {
-			t.Errorf("AssetURL = %q, want %q", rel.AssetURL, expectedURL)
-		}
-	}
-}
-
-func TestParseRelease_NoMatchingAsset(t *testing.T) {
-	data := `{"tag_name": "v0.5.0", "assets": [{"name": "fir-windows-amd64", "browser_download_url": "https://example.com/fir-windows-amd64"}]}`
-	rel, err := parseRelease([]byte(data))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rel.AssetURL != "" {
-		t.Errorf("expected empty AssetURL for non-matching platform, got %q", rel.AssetURL)
-	}
-}
-
-func TestParseRelease_InvalidJSON(t *testing.T) {
-	_, err := parseRelease([]byte("not json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
 }
 
 // ============================================================================
 // ErrNotAccessible
 // ============================================================================
 
-func TestFetchLatest_ErrNotAccessible(t *testing.T) {
-	// Spin up a test server that returns 404.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	// Temporarily override apiURL by testing the HTTP path directly.
-	// Since apiURL is a const, we test the behavior via the test server by
-	// calling the internal HTTP logic.  FetchLatest hits the hardcoded URL,
-	// so instead we test the status-code handling in isolation.
-	for _, code := range []int{401, 403, 404} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(code)
-		}))
-		resp, err := http.Get(srv.URL)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		srv.Close()
-
-		// Verify that these status codes would produce ErrNotAccessible.
-		switch resp.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-			// This is the path that FetchLatest takes — returns ErrNotAccessible.
-		default:
-			t.Errorf("status %d should be handled as ErrNotAccessible", code)
-		}
-	}
-}
-
 func TestErrNotAccessible_IsError(t *testing.T) {
-	// Verify the sentinel error can be detected with errors.Is.
 	err := fmt.Errorf("wrapped: %w", ErrNotAccessible)
 	if !errors.Is(err, ErrNotAccessible) {
 		t.Error("expected errors.Is to detect ErrNotAccessible through wrapping")
@@ -408,30 +281,4 @@ func TestCheckLatest_StaleCache_TriesNetwork(t *testing.T) {
 	}
 }
 
-func TestFilterEnv(t *testing.T) {
-	env := []string{"CLICOLOR=1", "CLICOLOR_FORCE=3", "FORCE_COLOR=1", "PATH=/usr/bin", "HOME=/home/user"}
-	got := filterEnv(env, "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR")
-	for _, e := range got {
-		if e == "CLICOLOR=1" || e == "CLICOLOR_FORCE=3" || e == "FORCE_COLOR=1" {
-			t.Errorf("should have been filtered: %s", e)
-		}
-	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 remaining entries, got %d: %v", len(got), got)
-	}
-}
 
-func TestFilterEnv_Empty(t *testing.T) {
-	got := filterEnv(nil, "FOO")
-	if len(got) != 0 {
-		t.Errorf("expected empty, got %v", got)
-	}
-}
-
-func TestFilterEnv_NoMatch(t *testing.T) {
-	env := []string{"PATH=/usr/bin"}
-	got := filterEnv(env, "CLICOLOR")
-	if len(got) != 1 {
-		t.Errorf("expected 1, got %d", len(got))
-	}
-}

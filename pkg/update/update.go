@@ -6,20 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
+
+	selfupdate "github.com/creativeprojects/go-selfupdate"
 )
 
 const (
 	repoOwner = "kfet"
 	repoName  = "fir"
-	apiURL    = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
 	cacheTTL  = 24 * time.Hour
 )
 
@@ -27,15 +25,12 @@ const (
 // because the repository is private and no credentials were provided.
 var ErrNotAccessible = errors.New("GitHub releases not accessible (private repo?)")
 
-// Release holds information about a GitHub release asset for the current platform.
+// Release holds information about a release for the current platform.
 type Release struct {
 	// Version is the release tag, e.g. "v0.5.0".
 	Version string
-	// AssetURL is the direct download URL for this platform's binary.
-	// Empty if no matching asset was found in the release.
-	AssetURL string
-	// ChecksumsURL is the URL for the checksums.txt asset (may be empty).
-	ChecksumsURL string
+	// inner is the underlying go-selfupdate release (nil for cache-only results).
+	inner *selfupdate.Release
 }
 
 // cacheEntry is persisted to agentDir/update-check.json to limit API calls.
@@ -44,15 +39,40 @@ type cacheEntry struct {
 	LatestVersion string    `json:"latest_version"`
 }
 
+// newUpdater creates a go-selfupdate Updater configured for our asset naming.
+// Our release assets are named "fir-{os}-{arch}" (raw binaries, no archive).
+func newUpdater(source selfupdate.Source) (*selfupdate.Updater, error) {
+	cfg := selfupdate.Config{
+		Source: source,
+		// Match our "fir-{os}-{arch}" naming via filter.
+		Filters: []string{`^fir-`},
+	}
+	// Override Arm version for our "linux-arm6" naming.
+	if runtime.GOOS == "linux" && runtime.GOARCH == "arm" {
+		cfg.Arm = 6
+	}
+	return selfupdate.NewUpdater(cfg)
+}
+
+// newGitHubSource creates a GitHub source, optionally with a token.
+func newGitHubSource(token string) (*selfupdate.GitHubSource, error) {
+	return selfupdate.NewGitHubSource(selfupdate.GitHubConfig{
+		APIToken: token,
+	})
+}
+
+// repo returns the repository slug for our project.
+func repo() selfupdate.RepositorySlug {
+	return selfupdate.ParseSlug(repoOwner + "/" + repoName)
+}
+
 // CheckLatest returns the latest release if it is newer than currentVersion,
 // using a 24-hour cache to avoid hammering the GitHub API.
 //
-// Uses HTTPS only (no gh fallback) to keep the background check lightweight.
 // Returns (nil, nil) if the current version is up to date, if the check is
 // skipped (dev build), or if the API call fails non-fatally.
 // cacheDir is the directory where update-check.json is written (agentDir).
 func CheckLatest(ctx context.Context, currentVersion, cacheDir string) (*Release, error) {
-	// Skip check for dev builds — version is meaningless.
 	if currentVersion == "" || currentVersion == "dev" {
 		return nil, nil
 	}
@@ -61,125 +81,138 @@ func CheckLatest(ctx context.Context, currentVersion, cacheDir string) (*Release
 
 	// Fast path: use cached result if still fresh.
 	if entry, ok := readCache(cachePath); ok && time.Since(entry.CheckedAt) < cacheTTL {
-		if !isNewer(entry.LatestVersion, currentVersion) {
+		if !IsNewer(entry.LatestVersion, currentVersion) {
 			return nil, nil
 		}
 		return &Release{Version: entry.LatestVersion}, nil
 	}
 
-	// Slow path: fetch from GitHub.
-	rel, err := FetchLatest(ctx)
+	// Slow path: fetch from GitHub (no auth for background check).
+	source, err := newGitHubSource("")
 	if err != nil {
 		return nil, err
 	}
+	updater, err := newUpdater(source)
+	if err != nil {
+		return nil, err
+	}
+
+	latest, found, err := updater.DetectLatest(ctx, repo())
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+
+	version := latest.Version()
 
 	// Update cache (best-effort).
 	writeCache(cachePath, &cacheEntry{
 		CheckedAt:     time.Now(),
-		LatestVersion: rel.Version,
+		LatestVersion: version,
 	})
 
-	if !isNewer(rel.Version, currentVersion) {
+	if !IsNewer(version, currentVersion) {
 		return nil, nil
 	}
-	return rel, nil
-}
-
-// releaseJSON is the subset of the GitHub Releases API response we need.
-type releaseJSON struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-	} `json:"assets"`
-}
-
-// parseRelease converts raw JSON from the GitHub Releases API into a Release.
-func parseRelease(data []byte) (*Release, error) {
-	var r releaseJSON
-	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("parse release JSON: %w", err)
-	}
-	rel := &Release{Version: r.TagName}
-	want := "fir-" + CurrentPlatform()
-	for _, a := range r.Assets {
-		switch a.Name {
-		case want:
-			rel.AssetURL = a.BrowserDownloadURL
-		case "checksums.txt":
-			rel.ChecksumsURL = a.BrowserDownloadURL
-		}
-	}
-	return rel, nil
+	return &Release{Version: version, inner: latest}, nil
 }
 
 // FetchLatest fetches the latest release from GitHub via HTTPS (no auth).
-// Returns ErrNotAccessible if the repo appears private (401/403/404).
 func FetchLatest(ctx context.Context) (*Release, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	source, err := newGitHubSource("")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "fir-update-check/1")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		// success — parse below
-	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-		return nil, ErrNotAccessible
-	default:
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	return parseRelease(data)
+	return fetchLatestWithSource(ctx, source)
 }
 
 // FetchLatestOrGH fetches the latest release, trying plain HTTPS first and
-// falling back to the gh CLI for private repos.  This is used by "fir update"
-// where we want to try harder than the background check.
+// falling back to the gh CLI token for private repos.
 func FetchLatestOrGH(ctx context.Context) (*Release, error) {
 	rel, err := FetchLatest(ctx)
 	if err == nil {
 		return rel, nil
 	}
-	if !errors.Is(err, ErrNotAccessible) {
-		return nil, err // network error, not auth
+	// Try with gh CLI token.
+	token := ghToken(ctx)
+	if token == "" {
+		return nil, fmt.Errorf("repo may be private — install gh (https://cli.github.com) and run 'gh auth login': %w", err)
 	}
-	// Repo appears private — try gh CLI.
-	return fetchViaGH(ctx)
+	source, err := newGitHubSource(token)
+	if err != nil {
+		return nil, err
+	}
+	return fetchLatestWithSource(ctx, source)
 }
 
-// fetchViaGH uses the gh CLI (which handles SSH/OAuth auth) to query the
-// GitHub Releases API.  Returns an error if gh is not installed or not
-// authenticated.
-func fetchViaGH(ctx context.Context) (*Release, error) {
-	ghPath, err := exec.LookPath("gh")
+func fetchLatestWithSource(ctx context.Context, source selfupdate.Source) (*Release, error) {
+	updater, err := newUpdater(source)
 	if err != nil {
-		return nil, fmt.Errorf("repo is private and gh CLI is not installed — " +
-			"install gh (https://cli.github.com) and run 'gh auth login'")
+		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, ghPath, "api",
-		fmt.Sprintf("repos/%s/%s/releases/latest", repoOwner, repoName))
-	// Prevent gh from colorizing JSON output. CLICOLOR_FORCE (set for bash
-	// tool display) overrides NO_COLOR in gh, so we must clear it explicitly.
-	cmd.Env = filterEnv(os.Environ(), "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR")
-	cmd.Env = append(cmd.Env, "NO_COLOR=1")
-	out, err := cmd.Output()
+	latest, found, err := updater.DetectLatest(ctx, repo())
 	if err != nil {
-		return nil, fmt.Errorf("gh api failed (run 'gh auth login'?): %w", err)
+		return nil, err
 	}
-	return parseRelease(out)
+	if !found {
+		return nil, fmt.Errorf("no release found for %s/%s", repoOwner, repoName)
+	}
+	return &Release{Version: latest.Version(), inner: latest}, nil
+}
+
+// SelfUpdate downloads the release binary for the current platform and
+// atomically replaces the running executable.
+func SelfUpdate(ctx context.Context, rel *Release) error {
+	if rel.inner == nil {
+		// Re-fetch to get asset URLs (cache-only releases don't have them).
+		fetched, err := FetchLatestOrGH(ctx)
+		if err != nil {
+			return err
+		}
+		rel = fetched
+	}
+	if rel.inner == nil {
+		return fmt.Errorf("no release assets available")
+	}
+
+	// Determine source — try unauthenticated first, fall back to gh token.
+	source, err := newGitHubSource("")
+	if err != nil {
+		return err
+	}
+	updater, err := newUpdater(source)
+	if err != nil {
+		return err
+	}
+
+	exePath, err := selfupdate.ExecutablePath()
+	if err != nil {
+		return fmt.Errorf("locate current executable: %w", err)
+	}
+
+	err = updater.UpdateTo(ctx, rel.inner, exePath)
+	if err != nil {
+		// Retry with gh token for private repos.
+		token := ghToken(ctx)
+		if token == "" {
+			return err
+		}
+		source, err2 := newGitHubSource(token)
+		if err2 != nil {
+			return err
+		}
+		updater, err2 = newUpdater(source)
+		if err2 != nil {
+			return err
+		}
+		err = updater.UpdateTo(ctx, rel.inner, exePath)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // HasGH reports whether the gh CLI is on the PATH.
@@ -188,9 +221,7 @@ func HasGH() bool {
 	return err == nil
 }
 
-// CurrentPlatform returns the platform suffix used in release asset names,
-// matching the naming convention in the Makefile (e.g. "darwin-arm64",
-// "linux-arm6", "linux-amd64").
+// CurrentPlatform returns the platform suffix used in release asset names.
 func CurrentPlatform() string {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
@@ -210,8 +241,7 @@ func CurrentPlatform() string {
 	}
 }
 
-// UpdateNotice returns a one-line message to print when a newer version is
-// available, suggesting "fir update".
+// UpdateNotice returns a one-line message when a newer version is available.
 func UpdateNotice(newVersion string) string {
 	return fmt.Sprintf("› fir %s available — run: fir update", newVersion)
 }
@@ -219,21 +249,16 @@ func UpdateNotice(newVersion string) string {
 // IsNewer reports whether candidate is strictly newer than current.
 // Both strings are expected to be semver with an optional leading "v".
 func IsNewer(candidate, current string) bool {
-	return isNewer(candidate, current)
+	c := strings.TrimPrefix(candidate, "v")
+	cur := strings.TrimPrefix(current, "v")
+	if c == "" || c == cur {
+		return false
+	}
+	return semverCompare(c, cur) > 0
 }
-
-func isNewer(candidate, current string) bool {
-	c := trimV(candidate)
-	cur := trimV(current)
-	return c != "" && c != cur && semverCompare(c, cur) > 0
-}
-
-func trimV(s string) string { return strings.TrimPrefix(s, "v") }
 
 // semverCompare compares two "major.minor.patch[-pre]" version strings.
 // Returns 1 if a > b, -1 if a < b, 0 if equal.
-// Pre-release versions (e.g., "1.0.0-beta") are considered less than
-// the corresponding release ("1.0.0"), per semver spec.
 func semverCompare(a, b string) int {
 	aPre := ""
 	bPre := ""
@@ -250,10 +275,10 @@ func semverCompare(a, b string) int {
 	for i := 0; i < 3; i++ {
 		av, bv := 0, 0
 		if i < len(aParts) {
-			av, _ = strconv.Atoi(aParts[i])
+			av = atoi(aParts[i])
 		}
 		if i < len(bParts) {
-			bv, _ = strconv.Atoi(bParts[i])
+			bv = atoi(bParts[i])
 		}
 		if av != bv {
 			if av > bv {
@@ -262,7 +287,6 @@ func semverCompare(a, b string) int {
 			return -1
 		}
 	}
-	// Numeric parts equal; a pre-release version is less than a release.
 	switch {
 	case aPre != "" && bPre == "":
 		return -1
@@ -270,6 +294,30 @@ func semverCompare(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+	return n
+}
+
+// ghToken extracts the GitHub OAuth token from the gh CLI.
+func ghToken(ctx context.Context) string {
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func readCache(path string) (*cacheEntry, bool) {
@@ -292,20 +340,4 @@ func writeCache(path string, e *cacheEntry) {
 	_ = os.WriteFile(path, data, 0o600)
 }
 
-// filterEnv returns env with entries matching any of the given prefixes removed.
-func filterEnv(env []string, prefixes ...string) []string {
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		skip := false
-		for _, p := range prefixes {
-			if strings.HasPrefix(e, p+"=") {
-				skip = true
-				break
-			}
-		}
-		if !skip {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
-}
+

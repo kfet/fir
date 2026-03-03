@@ -7,6 +7,7 @@
 
 ### Changed
 - Rename `overseer` skill to `shepherd`
+- Adopt `creativeprojects/go-selfupdate` for release detection and binary self-update, replacing custom HTTP download, checksum verification, and platform-matching code
 
 ### Fixed
 - Fix ANSI escape sequence corruption in tmux: editor border lines no longer repeat per-character SGR color escapes; the entire border is now colored as a single string, matching DynamicBorder behavior
