@@ -124,12 +124,13 @@ class Spinner:
             pane = self._pane_id
             base = self._display_name()
 
-        # Restore window name immediately, before waiting for the thread.
-        if pane:
-            _rename_window(pane, base)
-
+        # Wait for the spinner loop to finish so no rename races with us.
         if thread:
             thread.join(timeout=2)
+
+        # Now restore the window name — guaranteed no more loop renames.
+        if pane:
+            _rename_window(pane, base)
 
     def _loop(self):
         assert self._stop_event is not None
