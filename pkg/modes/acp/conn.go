@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"runtime"
 	"sync"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/debug"
@@ -35,7 +37,7 @@ var _ acpConn = (*acpsdk.AgentSideConnection)(nil)
 // Unfortunately, AgentSideConnection.handle is unexported, so we can't chain
 // to it. Instead, we build our own complete dispatch table. This keeps the code
 // in one place and avoids any SDK forking.
-func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
+func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 	mu := sync.Mutex{}
 	sessionCancels := map[string]func(){}
 
@@ -121,6 +123,21 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 			if ok {
 				respMap["configOptions"] = buildConfigOptions(entry)
 			}
+			// Send available commands AFTER the response is written to stdout.
+			// Without this, the notification races the response and arrives first,
+			// causing clients to drop commands for a session they don't know yet.
+			//
+			// AfterWrite waits for the next stdout write. In rare cases a concurrent
+			// event-handler write could signal it before the response write; the
+			// Gosched+Sleep below lets the SDK's handleInbound finish sending the
+			// response even in that edge case.
+			afterWrite := wn.AfterWrite()
+			go func() {
+				<-afterWrite
+				runtime.Gosched()
+				time.Sleep(5 * time.Millisecond)
+				pa.sendAvailableCommands(string(resp.SessionId))
+			}()
 			return respMap, nil
 
 		case "session/prompt":
@@ -210,6 +227,15 @@ func rawMethodHandler(pa *firAgent) acpsdk.MethodHandler {
 			if rok {
 				respMap["configOptions"] = buildConfigOptions(resumeEntry)
 			}
+			// Send available commands + replay history AFTER the response is written.
+			afterWrite := wn.AfterWrite()
+			go func() {
+				<-afterWrite
+				runtime.Gosched()
+				time.Sleep(5 * time.Millisecond)
+				pa.sendAvailableCommands(p.SessionId)
+				pa.replaySessionHistory(p.SessionId, resumeEntry)
+			}()
 			return respMap, nil
 
 		default:
@@ -273,11 +299,45 @@ func toReqErr(err error) *acpsdk.RequestError {
 	return acpsdk.NewInternalError(map[string]any{"error": err.Error()})
 }
 
+// writeNotifier wraps an io.Writer and signals waiters after each Write.
+// This allows goroutines to wait for a response to be flushed before
+// sending follow-up notifications, avoiding the race where a notification
+// for a session arrives before the session/new response.
+type writeNotifier struct {
+	inner io.Writer
+	mu    sync.Mutex
+	ch    chan struct{} // closed after the next Write, then recreated
+}
+
+func newWriteNotifier(w io.Writer) *writeNotifier {
+	return &writeNotifier{inner: w, ch: make(chan struct{})}
+}
+
+func (w *writeNotifier) Write(p []byte) (int, error) {
+	n, err := w.inner.Write(p)
+	// Signal all waiters that a write completed.
+	w.mu.Lock()
+	old := w.ch
+	w.ch = make(chan struct{})
+	w.mu.Unlock()
+	close(old)
+	return n, err
+}
+
+// AfterWrite returns a channel that is closed after the next Write completes.
+// Used by handlers to defer notifications until after the response is sent.
+func (w *writeNotifier) AfterWrite() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ch
+}
+
 // newRawConn creates a raw connection that handles ALL inbound methods
 // (including unstable session/list and session/resume) and returns
 // an acpConn for outbound calls plus a done channel.
 func newRawConn(pa *firAgent, stdout io.Writer, stdin io.Reader) (acpConn, <-chan struct{}) {
-	handler := rawMethodHandler(pa)
-	conn := acpsdk.NewConnection(handler, stdout, stdin)
+	wn := newWriteNotifier(stdout)
+	handler := rawMethodHandler(pa, wn)
+	conn := acpsdk.NewConnection(handler, wn, stdin)
 	return &rawConn{conn: conn}, conn.Done()
 }

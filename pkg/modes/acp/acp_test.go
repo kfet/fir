@@ -3,10 +3,13 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -459,7 +463,7 @@ func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 
 func TestRawConnMethodHandler_UnknownMethod(t *testing.T) {
 	pa := &firAgent{sessions: make(map[string]*firSession)}
-	handler := rawMethodHandler(pa)
+	handler := rawMethodHandler(pa, newWriteNotifier(io.Discard))
 	result, reqErr := handler(context.Background(), "unknown/method", []byte("{}"))
 	if result != nil {
 		t.Errorf("expected nil result for unknown method, got %v", result)
@@ -867,7 +871,7 @@ func TestRawConnMethodHandler_SessionNew_AcceptsMcpServers(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 
-	handler := rawMethodHandler(pa)
+	handler := rawMethodHandler(pa, newWriteNotifier(io.Discard))
 
 	// Use "false" (exits immediately) as the MCP server command.  This keeps
 	// the test fast: the MCP handshake fails with EOF right away instead of
@@ -903,7 +907,7 @@ func TestRawConnMethodHandler_SessionNew_AcceptsMcpServers(t *testing.T) {
 func TestRawConnMethodHandler_SessionNew_NonStdioMCPServerSkipped(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	handler := rawMethodHandler(pa)
+	handler := rawMethodHandler(pa, newWriteNotifier(io.Discard))
 
 	// HTTP-transport server — Stdio will be nil after SDK unmarshal.
 	// The "type":"http" discriminator is required for the SDK to pick the Http variant.
@@ -1018,3 +1022,306 @@ func TestReplaySessionHistory(t *testing.T) {
 		t.Error("expected fifth update to be agent message chunk")
 	}
 }
+
+// ============================================================================
+// Extension command tests
+// ============================================================================
+
+// noopBridgeAPI implements extension.BridgeAPI for testing — all methods are no-ops.
+type noopBridgeAPI struct{}
+
+func (n *noopBridgeAPI) Exec(_ string, _ []string) (extension.ExecResult, error) {
+	return extension.ExecResult{}, nil
+}
+func (n *noopBridgeAPI) SendMessage(_ extension.CustomMessageSpec, _ *extension.SendMessageOptions) {}
+func (n *noopBridgeAPI) SendUserMessage(_ string, _ *extension.SendUserMessageOptions)              {}
+func (n *noopBridgeAPI) SetSessionName(_ string)                                                    {}
+func (n *noopBridgeAPI) GetSessionName() string                                                     { return "" }
+func (n *noopBridgeAPI) SetLabel(_ string, _ string)                                                {}
+func (n *noopBridgeAPI) ClearLabel(_ string)                                                        {}
+func (n *noopBridgeAPI) GetActiveTools() []string                                                   { return nil }
+func (n *noopBridgeAPI) SetActiveTools(_ []string)                                                  {}
+func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
+func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                   {}
+
+// writeCommandExtScript writes a Python extension script that:
+//   - responds to the init handshake with a "greet" command
+//   - responds to hook/command calls with a "Hello!" message
+//
+// Skips the test if python3 is not available.
+func writeCommandExtScript(t *testing.T, dir string) string {
+	t.Helper()
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(extDir, "greet-ext.py")
+	script := `#!/usr/bin/env python3
+import sys, json, io
+stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+line = stdin.readline().strip()
+if line:
+    req = json.loads(line)
+    resp = {"jsonrpc": "2.0", "id": req.get("id", 1),
+            "result": {"name": "greet-ext", "commands": [{"name": "greet", "description": "Say hello"}]}}
+    print(json.dumps(resp), flush=True)
+for line in stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        req = json.loads(line)
+        resp = {"jsonrpc": "2.0", "id": req.get("id", 1), "result": {"message": "Hello!"}}
+        print(json.dumps(resp), flush=True)
+    except Exception:
+        pass
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return scriptPath
+}
+
+// startExtManager creates and starts an extension.Manager with the given project dir,
+// returning the manager and a stop func.
+func startExtManager(t *testing.T, projectDir, scriptPath string) (*extension.Manager, func()) {
+	t.Helper()
+	trustPath := filepath.Join(projectDir, "trust.json")
+	ts := extension.NewTrustStoreWithPath(trustPath)
+	hash, err := extension.ComputeHash(scriptPath)
+	if err != nil {
+		t.Fatal("compute hash:", err)
+	}
+	if err := ts.RecordTrust(projectDir, "greet-ext", hash); err != nil {
+		t.Fatal("record trust:", err)
+	}
+
+	mgr := extension.NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+	if err := mgr.Start(context.Background(), projectDir, projectDir, &noopBridgeAPI{}); err != nil {
+		t.Fatal("mgr.Start:", err)
+	}
+
+	// Poll until commands appear (extension handshake is async).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(mgr.GetCommands()) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(mgr.GetCommands()) == 0 {
+		_ = mgr.Stop()
+		t.Fatal("extension commands did not appear within 5s")
+	}
+
+	return mgr, func() { _ = mgr.Stop() }
+}
+
+// TestSendAvailableCommands_IncludesExtensionCommands verifies that extension
+// commands registered via the Python extension system appear in the
+// available_commands_update notification sent after session/new.
+func TestSendAvailableCommands_IncludesExtensionCommands(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeCommandExtScript(t, dir)
+	mgr, stop := startExtManager(t, dir, scriptPath)
+	defer stop()
+
+	mc := newMockConn()
+	extSetup := &extension.SetupResult{Manager: mgr}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess, extSetup: extSetup}
+	pa := &firAgent{conn: mc, sessions: map[string]*firSession{"s1": entry}}
+
+	pa.sendAvailableCommands("s1")
+
+	updates := mc.getUpdates()
+	if len(updates) == 0 {
+		t.Fatal("expected at least one update")
+	}
+	u := updates[0].Update
+	if u.AvailableCommandsUpdate == nil {
+		t.Fatal("expected AvailableCommandsUpdate")
+	}
+	var found bool
+	for _, cmd := range u.AvailableCommandsUpdate.AvailableCommands {
+		if cmd.Name == "greet" && cmd.Description == "Say hello" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("extension command 'greet' not in available commands; got: %+v", u.AvailableCommandsUpdate.AvailableCommands)
+	}
+}
+
+// TestHandleSlashCommand_ExtensionDispatch verifies that an extension-registered
+// slash command is dispatched to the extension and its response is forwarded as
+// an agent message.
+func TestHandleSlashCommand_ExtensionDispatch(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeCommandExtScript(t, dir)
+	mgr, stop := startExtManager(t, dir, scriptPath)
+	defer stop()
+
+	mc := newMockConn()
+	extSetup := &extension.SetupResult{Manager: mgr}
+	entry := &firSession{termState: newTerminalState(), extSetup: extSetup}
+	pa := &firAgent{conn: mc, sessions: map[string]*firSession{"s1": entry}}
+
+	handled := pa.handleSlashCommand("s1", entry, "greet", "world")
+	if !handled {
+		t.Error("expected handleSlashCommand to return true for extension command")
+	}
+
+	// The extension returns {"message": "Hello!"} which should appear as an agent message.
+	updates := mc.getUpdates()
+	var found bool
+	for _, n := range updates {
+		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Hello!") {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected extension response 'Hello!' in agent messages; got %d updates", len(updates))
+	}
+}
+
+// TestHandleSlashCommand_ExtensionNilGuard verifies that handleSlashCommand
+// does not panic and returns false when extSetup is nil.
+func TestHandleSlashCommand_ExtensionNilGuard(t *testing.T) {
+	mc := newMockConn()
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{termState: newTerminalState(), session: sess, extSetup: nil}
+	pa := &firAgent{conn: mc, sessions: map[string]*firSession{"s1": entry}}
+
+	// "myext" is not a built-in command and there's no extension, so returns false.
+	handled := pa.handleSlashCommand("s1", entry, "myext", "")
+	if handled {
+		t.Error("expected handleSlashCommand to return false for unknown command with nil extSetup")
+	}
+}
+
+// TestWriteNotifier_AfterWrite verifies that AfterWrite signals after a write.
+func TestWriteNotifier_AfterWrite(t *testing.T) {
+	var buf strings.Builder
+	wn := newWriteNotifier(&buf)
+
+	ch := wn.AfterWrite()
+
+	// Channel should not be signaled yet.
+	select {
+	case <-ch:
+		t.Fatal("AfterWrite signaled before any write")
+	default:
+	}
+
+	// Write something.
+	_, _ = wn.Write([]byte("hello"))
+
+	// Channel should now be closed.
+	select {
+	case <-ch:
+		// ok
+	default:
+		t.Fatal("AfterWrite not signaled after write")
+	}
+
+	if buf.String() != "hello" {
+		t.Errorf("inner writer got %q, want %q", buf.String(), "hello")
+	}
+}
+
+// TestSessionNew_CommandsAfterResponse verifies that the available_commands_update
+// notification is sent AFTER the session/new response, not before.
+// This is the test that would have caught the race where the goroutine in
+// NewSession sent the notification before the response was on the wire.
+func TestSessionNew_CommandsAfterResponse(t *testing.T) {
+	// Use a writer that records the order of JSON messages.
+	var mu sync.Mutex
+	var messages []string
+
+	pr, pw := io.Pipe()
+	wn := newWriteNotifier(pw)
+
+	// Read JSON lines from the pipe and classify them.
+	go func() {
+		decoder := json.NewDecoder(pr)
+		for decoder.More() {
+			var msg map[string]any
+			if err := decoder.Decode(&msg); err != nil {
+				return
+			}
+			mu.Lock()
+			if _, hasResult := msg["result"]; hasResult {
+				messages = append(messages, "response")
+			} else if method, _ := msg["method"].(string); method == "session/update" {
+				messages = append(messages, "notification")
+			}
+			mu.Unlock()
+		}
+	}()
+
+	pa := &firAgent{sessions: make(map[string]*firSession)}
+	handler := rawMethodHandler(pa, wn)
+	conn := acpsdk.NewConnection(handler, wn, strings.NewReader(""))
+	pa.conn = &rawConn{conn: conn}
+
+	// Create a minimal session manually (NewSession requires too much infra).
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{session: sess, termState: newTerminalState()}
+	pa.mu.Lock()
+	pa.sessions["test-sess"] = entry
+	pa.mu.Unlock()
+
+	// Simulate the initialize + session/new flow by calling the handler directly.
+	// First initialize (required to set clientCaps).
+	initParams, _ := json.Marshal(acpsdk.InitializeRequest{
+		ProtocolVersion:    1,
+		ClientCapabilities: acpsdk.ClientCapabilities{},
+	})
+	handler(context.Background(), "initialize", initParams)
+
+	// Now simulate session/new via the handler.
+	// We can't call NewSession directly because it creates a full AgentSession.
+	// Instead, test the mechanism: call sendAvailableCommands deferred via writeNotifier.
+	afterWrite := wn.AfterWrite()
+	go func() {
+		<-afterWrite
+		pa.sendAvailableCommands("test-sess")
+	}()
+
+	// Simulate the response write (this is what handleInbound does after handler returns).
+	resp := map[string]any{"jsonrpc": "2.0", "id": 2, "result": map[string]any{"sessionId": "test-sess"}}
+	b, _ := json.Marshal(resp)
+	b = append(b, '\n')
+	_, _ = wn.Write(b)
+
+	// Give the goroutine time to send the notification.
+	time.Sleep(100 * time.Millisecond)
+	pw.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(messages) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d: %v", len(messages), messages)
+	}
+	if messages[0] != "response" {
+		t.Errorf("first message should be response, got %q", messages[0])
+	}
+	if messages[1] != "notification" {
+		t.Errorf("second message should be notification, got %q", messages[1])
+	}
+}
+

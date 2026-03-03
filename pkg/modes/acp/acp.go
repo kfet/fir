@@ -231,9 +231,6 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 		models = BuildModelState(entry.modelRegistry, m)
 	}
 
-	// Send available commands after response
-	go pa.sendAvailableCommands(sessionID)
-
 	return acpsdk.NewSessionResponse{
 		SessionId: acpsdk.SessionId(sessionID),
 		Models:    models,
@@ -412,12 +409,6 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	if err := entry.session.SwitchSession(sessionPath); err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("switch session: %w", err)
 	}
-
-	// Send available commands and replay history after response.
-	go func() {
-		pa.sendAvailableCommands(sessionID)
-		pa.replaySessionHistory(sessionID, entry)
-	}()
 
 	var models interface{}
 	if m := entry.session.Model(); m != nil {
@@ -1205,6 +1196,25 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		return true
 
 	default:
+		// Check extension slash commands first (mirrors interactive mode ordering).
+		if entry.extSetup != nil && entry.extSetup.Manager != nil {
+			for _, ec := range entry.extSetup.Manager.GetCommands() {
+				if ec.Spec.Name == command {
+					var argList []string
+					if args != "" {
+						argList = strings.Fields(args)
+					}
+					result, err := entry.extSetup.Manager.DispatchCommand(command, argList, 0)
+					if err != nil {
+						pa.sendAgentMessage(sessionID, fmt.Sprintf("Extension command /%s failed: %v", command, err))
+					} else if result.Message != "" {
+						pa.sendAgentMessage(sessionID, result.Message)
+					}
+					return true
+				}
+			}
+		}
+
 		// Check prompt templates
 		templates, _ := entry.session.ResourceLoader().GetPrompts()
 		for _, t := range templates {
@@ -1582,6 +1592,17 @@ func (pa *firAgent) sendAvailableCommands(sessionID string) {
 			desc = "Skill: " + s.Name
 		}
 		commands = append(commands, acpsdk.AvailableCommand{Name: "skill:" + s.Name, Description: desc})
+	}
+
+	// Add extension commands
+	if entry.extSetup != nil && entry.extSetup.Manager != nil {
+		for _, ec := range entry.extSetup.Manager.GetCommands() {
+			desc := ec.Spec.Description
+			if desc == "" {
+				desc = "Extension command"
+			}
+			commands = append(commands, acpsdk.AvailableCommand{Name: ec.Spec.Name, Description: desc})
+		}
 	}
 
 	_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{

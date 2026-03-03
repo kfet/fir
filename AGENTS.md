@@ -23,6 +23,8 @@ When merging a feature branch back to main, always use `git merge --ff-only` to 
 
 Run `make test` to verify your changes. Always finish every task with `make all` to confirm the full build and test suite passes.
 
+When fixing a regression, **write the test first** so it fails before your fix, then make it pass. This confirms the test actually catches the bug.
+
 ## Extensions
 
 Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses

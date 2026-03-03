@@ -65,36 +65,43 @@ class Spinner:
     def __init__(self):
         self._lock = threading.Lock()
         self._pane_id = ""
-        self._base_name = ""
+        self._original_name = ""   # actual tmux window name (before fir touched it)
+        self._session_name = ""    # fir session name to append
         self._stop_event = None
         self._thread = None
         self._running = False
 
-    def set_base_name(self, name):
-        """Update the base name (e.g., when session is renamed)."""
+    def _display_name(self):
+        """Compute display name: original window name with session name appended."""
+        if self._session_name:
+            return f"{self._original_name} {self._session_name}"
+        return self._original_name
+
+    def _init_pane(self):
+        """Initialise pane ID and original window name if not done yet. Caller holds lock."""
+        if not self._pane_id:
+            self._pane_id = _pane_id()
+            if self._pane_id:
+                _disable_auto_rename(self._pane_id)
+                self._original_name = _strip_spinner_suffix(
+                    _read_window_name(self._pane_id) or "fir"
+                )
+
+    def set_session_name(self, name):
+        """Append the fir session name to the window name."""
         with self._lock:
-            if not self._pane_id:
-                self._pane_id = _pane_id()
-                if self._pane_id:
-                    _disable_auto_rename(self._pane_id)
-                    self._base_name = _strip_spinner_suffix(
-                        _read_window_name(self._pane_id) or "fir"
-                    )
-            self._base_name = name
+            self._init_pane()
+            self._session_name = name
             if self._pane_id and not self._running:
-                _rename_window(self._pane_id, self._base_name)
+                _rename_window(self._pane_id, self._display_name())
 
     def start(self):
         with self._lock:
             if self._running:
                 return
+            self._init_pane()
             if not self._pane_id:
-                self._pane_id = _pane_id()
-                if not self._pane_id:
-                    return
-                name = _read_window_name(self._pane_id)
-                self._base_name = _strip_spinner_suffix(name) if name else "fir"
-                _disable_auto_rename(self._pane_id)
+                return
 
             self._stop_event = threading.Event()
             self._running = True
@@ -110,7 +117,7 @@ class Spinner:
             self._running = False
             thread = self._thread
             pane = self._pane_id
-            base = self._base_name
+            base = self._display_name()
 
         # Restore window name immediately, before waiting for the thread.
         if pane:
@@ -131,15 +138,16 @@ class Spinner:
             with self._lock:
                 target = self._pane_id
 
-            # Detect user renames
+            # Detect user renames: if the window name changed from what we last set,
+            # update the original name (stripping any spinner suffix we may have added).
             if last_set:
                 current = _read_window_name(target)
                 if current and current != last_set:
                     with self._lock:
-                        self._base_name = _strip_spinner_suffix(current)
+                        self._original_name = _strip_spinner_suffix(current)
 
             with self._lock:
-                base = self._base_name
+                base = self._display_name()
 
             name = f"{base} {FRAMES[i % len(FRAMES)]}"
             _rename_window(target, name)
@@ -190,7 +198,7 @@ if _in_tmux() and _has_controlling_terminal():
     def on_session_named(params, ctx):
         name = (params or {}).get("name", "")
         if name:
-            _spinner.set_base_name(name)
+            _spinner.set_session_name(name)
 
 
 fir_ext.run(name="tmuxspinner")
