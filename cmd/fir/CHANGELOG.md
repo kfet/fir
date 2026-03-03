@@ -13,6 +13,9 @@
 - Builtin extensions: extensions in `builtin_extensions/` with `# --- / builtin: true / # ---` comment frontmatter are embedded in the binary and auto-discovered at lowest priority (shadowed by global/project extensions)
 
 ### Fixed
+- TOCTOU race in `ModelRegistry.UnregisterProvider`: eliminated double lock/unlock pattern
+- Potential deadlock in `ModelRegistry.Refresh`: external registry resets now happen outside `r.mu` lock
+- Extension tools now populate `toolSnippets`/`promptGuidelines` on the agent session via `RegisterToolPromptMetadata`
 - Temperature no longer sent with Anthropic thinking mode (incompatible with extended thinking)
 - Z.ai thinking now uses `enable_thinking` instead of `thinking` param (matches upstream change)
 - xhigh thinking level clamped to "high" for Sonnet 4.6 (max only valid on Opus 4.6)

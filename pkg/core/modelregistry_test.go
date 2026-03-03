@@ -785,3 +785,46 @@ func TestModelRegistry_DefaultModelsJsonPath(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, path)
 	}
 }
+
+func TestModelRegistry_RegisterAndUnregisterProvider(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	reg := NewModelRegistry(NewAuthStorage(authPath), "")
+
+	// Register a custom provider with models
+	err := reg.RegisterProvider("test-provider", &ProviderConfigInput{
+		BaseURL: "https://example.com/api",
+		ApiKey:  "test-key",
+		Models: []ProviderModelInput{
+			{
+				ID:   "test-model",
+				Name: "Test Model",
+				Api:  ai.ApiOpenAICompletions,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterProvider failed: %v", err)
+	}
+
+	// Should find the model
+	m := reg.Find("test-provider", "test-model")
+	if m == nil {
+		t.Fatal("expected to find test-model after RegisterProvider")
+	}
+
+	// Unregister
+	reg.UnregisterProvider("test-provider")
+
+	// Should no longer find the model
+	m = reg.Find("test-provider", "test-model")
+	if m != nil {
+		t.Error("expected test-model to be gone after UnregisterProvider")
+	}
+}
+
+func TestModelRegistry_UnregisterProvider_NoOp(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	reg := NewModelRegistry(NewAuthStorage(authPath), "")
+	// Should not panic or error on unknown provider
+	reg.UnregisterProvider("nonexistent-provider")
+}
