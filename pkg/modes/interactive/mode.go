@@ -747,7 +747,7 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 		return
 	}
 	if result.Message != "" {
-		m.showMessage(result.Message)
+		m.showStatus(result.Message)
 	}
 }
 
