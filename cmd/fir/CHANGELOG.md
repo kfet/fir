@@ -13,8 +13,6 @@
 - Bump `SDKVersion` to 2 so `fir_ext.command()` is actually extracted to the cache; without this, extensions crashed with `AttributeError` and extension commands were silently skipped
 - ACP `session/resume` response now includes `configOptions` (thinking level, model selectors) matching `session/new` behavior
 - `session_named` extension event emitted when session name changes or a named session is loaded; tmuxspinner extension now updates the tmux window name to match the session name
-
-### Fixed
 - ACP mode: fix race where `available_commands_update` notification was sent before the `session/new` response, causing clients to drop all slash commands; use a `writeNotifier` to defer notifications until after the response is flushed
 - ACP mode: restore extension slash commands — `sendAvailableCommands` now includes extension-registered commands and `handleSlashCommand` dispatches them via `Manager.DispatchCommand`
 - `SwitchSession` (`/resume`) now restores the model recorded in the resumed session, not just the thinking level
