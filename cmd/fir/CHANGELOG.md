@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `fir extensions [list]` and `fir extensions install <name>` CLI subcommands to list and install builtin extensions, mirroring the existing `fir skills` commands
+
 ## [0.13.0] - 2026-03-03
 
 ### Added

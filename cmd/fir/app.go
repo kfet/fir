@@ -249,6 +249,9 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "skills" {
 		return runSkills()
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "extensions" {
+		return runExtensions()
+	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
