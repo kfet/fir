@@ -7,7 +7,7 @@ description: Start and manage non-trivial work. Creates a git worktree and featu
 
 All non-trivial work happens in a **git worktree** on a feature branch. Never edit the main branch directly.
 
-**If the task touches multiple packages or needs parallel work streams, use the [overseer skill](../overseer/SKILL.md) instead.** The overseer will refer back to this skill for worktree setup, then coordinate multiple agents within it.
+**If the task touches multiple packages or needs parallel work streams, use the [shepherd skill](../shepherd/SKILL.md) instead.** The shepherd will refer back to this skill for worktree setup, then coordinate multiple agents within it.
 
 ## Starting Work
 

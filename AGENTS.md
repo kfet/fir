@@ -1,5 +1,7 @@
 Use idiomatic Go. Keep it simple.
 
+`.fir/skills` is a symlink to `pkg/core/builtin_skills/`. They are the same directory — don't treat them as separate copies.
+
 Split large files into smaller ones, making sure to update the mapping in `sync/UPSTREAM_MAP.md`
 
 See `PLAN.md` for the current plan and process.

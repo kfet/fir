@@ -1,10 +1,10 @@
 ---
 builtin: true
-name: overseer
+name: shepherd
 description: Shepherd a fleet of coding agents in tmux. Keep them productive, unstuck, and not stepping on each other.
 ---
 
-# Overseer
+# Shepherd
 
 You run the outer loop. You don't write code — you make sure the agents who do are effective.
 
@@ -163,7 +163,7 @@ Only create a new tmux session if the agent process is dead or the window is gon
 
 Multiple agents on one worktree **will** collide on git operations.
 
-**Best practice: the overseer does all commits.** Tell agents: "Do NOT run `git add` or `git commit`. Make your changes and run tests. I will commit." After each agent reports success, commit their files yourself:
+**Best practice: the shepherd does all commits.** Tell agents: "Do NOT run `git add` or `git commit`. Make your changes and run tests. I will commit." After each agent reports success, commit their files yourself:
 
 ```bash
 cd "$WORKTREE"

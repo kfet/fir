@@ -22,7 +22,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"loop":              false,
 		"monitor":           false,
 		"notify":            false,
-		"overseer":          false,
+		"shepherd":          false,
 		"research":          false,
 		"review":            false,
 		"self":              false,

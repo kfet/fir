@@ -5,6 +5,9 @@
 ### Added
 - Local usage tracking: CLI flags, slash commands, tool use, session types, and modes are tracked in `~/.fir/agent/usage.json` (new `pkg/usage` package)
 
+### Changed
+- Rename `overseer` skill to `shepherd`
+
 ### Fixed
 - Fix ANSI escape sequence corruption in tmux: editor border lines no longer repeat per-character SGR color escapes; the entire border is now colored as a single string, matching DynamicBorder behavior
 
@@ -198,7 +201,7 @@
 - Duplicate extension commands now log a warning and are skipped instead of silently overwriting the previous registration.
 
 ### Added
-- New skill - overseer - shepherds a fleet of agents to perform a task
+- New skill - shepherd (formerly overseer) - shepherds a fleet of agents to perform a task
 
 ## [0.6.0] - 2026-02-24
 
