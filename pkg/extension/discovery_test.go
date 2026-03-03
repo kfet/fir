@@ -13,8 +13,10 @@ func TestDiscover_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Filter out builtins — we only care that no project/global are found.
+	configs = filterScope(configs, "builtin")
 	if len(configs) != 0 {
-		t.Fatalf("expected 0 configs, got %d", len(configs))
+		t.Fatalf("expected 0 non-builtin configs, got %d", len(configs))
 	}
 }
 
@@ -36,6 +38,8 @@ func TestDiscover_ProjectLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Filter out builtins — we only care about project-local discovery.
+	configs = filterScope(configs, "builtin")
 	if len(configs) != 1 {
 		t.Fatalf("expected 1 config, got %d", len(configs))
 	}
@@ -257,7 +261,41 @@ func TestDiscover_SubdirShadowsGlobalFile(t *testing.T) {
 	}
 }
 
+func TestDiscoverWithDirs_SkipsBuiltinMarked(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	// Write an extension with builtin: true — should be skipped by scanExtDir.
+	content := "#!/usr/bin/env python3\n# ---\n# builtin: true\n# ---\nimport sys\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "builtin-ext.py"), []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write a normal extension — should be discovered.
+	writeExec(t, filepath.Join(projectDir, "normal.sh"))
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config (builtin skipped), got %d: %v", len(configs), configs)
+	}
+	if configs[0].Name != "normal" {
+		t.Errorf("expected 'normal', got %q", configs[0].Name)
+	}
+}
+
 // helpers
+
+func filterScope(configs []ExtProcConfig, excludeScope string) []ExtProcConfig {
+	var out []ExtProcConfig
+	for _, c := range configs {
+		if c.Scope != excludeScope {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 func writeExec(t *testing.T, path string) {
 	t.Helper()

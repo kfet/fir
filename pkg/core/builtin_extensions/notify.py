@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# ---
+# name: notify
+# description: Send native terminal notifications when the agent finishes
+# builtin: true
+# ---
 """Send native terminal notifications when the agent finishes.
 
 Supports multiple terminal protocols:

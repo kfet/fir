@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Builtin extensions: extensions in `builtin_extensions/` with `# --- / builtin: true / # ---` comment frontmatter are embedded in the binary and auto-discovered at lowest priority (shadowed by global/project extensions)
+
+### Fixed
+- Google OAuth (Antigravity/Gemini CLI) and OpenAI Codex: no longer shows "Paste the redirect URL" prompt when browser callback succeeds; manual input is deferred 3 seconds, giving the browser flow time to complete first
+
 ## [0.11.0] - 2026-03-02
 
 ### Added

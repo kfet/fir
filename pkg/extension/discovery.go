@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kfet/fir/pkg/core"
 )
 
 // ExtProcConfig describes a discovered external process extension.
@@ -24,13 +26,25 @@ type ExtProcConfig struct {
 func Discover(projectDir string) ([]ExtProcConfig, error) {
 	byName := make(map[string]ExtProcConfig)
 
+	// Builtin extensions (lowest priority — shadowed by global and project).
+	builtins, err := core.LoadBuiltinExtensions()
+	if err == nil {
+		for _, b := range builtins {
+			byName[b.Name] = ExtProcConfig{
+				Name:  b.Name,
+				Path:  b.Path,
+				Scope: "builtin",
+			}
+		}
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 	globalDir := filepath.Join(homeDir, ".config", "fir", "extensions")
 
-	// Global first, then project-local (shadows global).
+	// Global then project-local (each shadows the previous).
 	dirs := []struct {
 		path  string
 		scope string
@@ -81,6 +95,8 @@ func DiscoverWithDirs(globalDir, projectExtDir string) ([]ExtProcConfig, error) 
 
 // scanExtDir scans a single extensions directory, populating byName.
 // It handles both plain executable files and sub-directories.
+// Files with builtin: true comment frontmatter are skipped when scanning
+// project or global directories (they are handled by LoadBuiltinExtensions).
 func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -113,9 +129,18 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			continue
 		}
 		name := stripExt(e.Name())
+		filePath := filepath.Join(dir, e.Name())
+
+		// Skip files marked as builtin — they're handled by LoadBuiltinExtensions.
+		if data, err := os.ReadFile(filePath); err == nil {
+			if core.ParseCommentFrontmatter(string(data)).Builtin {
+				continue
+			}
+		}
+
 		byName[name] = ExtProcConfig{
 			Name:  name,
-			Path:  filepath.Join(dir, e.Name()),
+			Path:  filePath,
 			Scope: scope,
 		}
 	}

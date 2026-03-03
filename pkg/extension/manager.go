@@ -118,7 +118,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		return nil
 	}
 
-	// Trust check for project-local extensions.
+	// Trust check for project-local extensions (builtins are always trusted).
 	if cfg.Scope == "project" {
 		hash, err := ComputeHash(cfg.Path)
 		if err != nil {

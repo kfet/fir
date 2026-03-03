@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# ---
+# name: tmuxspinner
+# description: Animate a spinner in the tmux window name while the agent is working
+# builtin: true
+# ---
 """Animate a spinner in the tmux window name while the agent is working.
 
 When the agent is idle, the original window name is restored.
