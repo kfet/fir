@@ -3,48 +3,17 @@ package update
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 // ============================================================================
-// semverCompare / IsNewer
+// IsNewer
 // ============================================================================
-
-func TestSemverCompare(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want int
-	}{
-		{"1.0.0", "1.0.0", 0},
-		{"1.0.1", "1.0.0", 1},
-		{"1.0.0", "1.0.1", -1},
-		{"2.0.0", "1.9.9", 1},
-		{"1.9.9", "2.0.0", -1},
-		{"0.5.0", "0.4.9", 1},
-		{"0.4.9", "0.5.0", -1},
-		{"1.0", "1.0.0", 0},
-		{"1", "1.0.0", 0},
-		// Pre-release versions
-		{"1.0.0-beta", "1.0.0", -1},
-		{"1.0.0", "1.0.0-rc1", 1},
-		{"1.0.0-alpha", "1.0.0-beta", 0},   // same numeric, both pre-release
-		{"2.0.0-beta", "1.9.9", 1},          // higher numeric wins despite pre-release
-		{"1.0.0-beta+build", "1.0.0", -1},   // build metadata stripped too
-	}
-	for _, tc := range cases {
-		got := semverCompare(tc.a, tc.b)
-		if got != tc.want {
-			t.Errorf("semverCompare(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
 
 func TestIsNewer(t *testing.T) {
 	cases := []struct {
@@ -61,33 +30,16 @@ func TestIsNewer(t *testing.T) {
 		{"v0.5.0", "0.4.0", true},
 		{"0.5.0", "v0.4.0", true},
 		{"", "0.4.0", false},
+		// Pre-release versions
+		{"1.0.0-beta", "1.0.0", false},
+		{"1.0.0", "1.0.0-rc1", true},
+		{"2.0.0-beta", "1.9.9", true},
 	}
 	for _, tc := range cases {
 		got := IsNewer(tc.candidate, tc.current)
 		if got != tc.want {
 			t.Errorf("IsNewer(%q, %q) = %v, want %v", tc.candidate, tc.current, got, tc.want)
 		}
-	}
-}
-
-// ============================================================================
-// CurrentPlatform
-// ============================================================================
-
-func TestCurrentPlatform_ReturnsNonEmpty(t *testing.T) {
-	if p := CurrentPlatform(); p == "" {
-		t.Error("CurrentPlatform() returned empty string")
-	}
-}
-
-func TestCurrentPlatform_ContainsOS(t *testing.T) {
-	goos := runtime.GOOS
-	if goos != "darwin" && goos != "linux" {
-		t.Skipf("skipping OS check for unsupported GOOS=%s", goos)
-	}
-	p := CurrentPlatform()
-	if !strings.HasPrefix(p, goos) {
-		t.Errorf("CurrentPlatform() = %q, expected to start with %q", p, goos)
 	}
 }
 
@@ -106,25 +58,6 @@ func TestUpdateNotice_SuggestsFirUpdate(t *testing.T) {
 	notice := UpdateNotice("v0.5.0")
 	if !strings.Contains(notice, "fir update") {
 		t.Errorf("notice should suggest fir update, got: %q", notice)
-	}
-}
-
-// ============================================================================
-// HasGH
-// ============================================================================
-
-func TestHasGH_ReturnsBool(t *testing.T) {
-	_ = HasGH()
-}
-
-// ============================================================================
-// ErrNotAccessible
-// ============================================================================
-
-func TestErrNotAccessible_IsError(t *testing.T) {
-	err := fmt.Errorf("wrapped: %w", ErrNotAccessible)
-	if !errors.Is(err, ErrNotAccessible) {
-		t.Error("expected errors.Is to detect ErrNotAccessible through wrapping")
 	}
 }
 
@@ -281,4 +214,40 @@ func TestCheckLatest_StaleCache_TriesNetwork(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// ghToken
+// ============================================================================
 
+func TestGhToken_NoGH(t *testing.T) {
+	// If gh isn't installed or not authed, should return empty string (not panic).
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = ghToken(ctx)
+}
+
+// ============================================================================
+// IsNewer edge cases
+// ============================================================================
+
+func TestIsNewer_InvalidVersion(t *testing.T) {
+	if IsNewer("not-a-version", "1.0.0") {
+		t.Error("expected false for invalid candidate")
+	}
+	if IsNewer("1.0.0", "not-a-version") {
+		t.Error("expected false for invalid current")
+	}
+}
+
+func TestIsNewer_EqualWithV(t *testing.T) {
+	if got := IsNewer("v1.2.3", "1.2.3"); got {
+		t.Errorf("expected false for equal versions with mixed v prefix, got %v", got)
+	}
+}
+
+func TestUpdateNotice_Format(t *testing.T) {
+	notice := UpdateNotice("v1.0.0")
+	want := fmt.Sprintf("› fir v1.0.0 available — run: fir update")
+	if notice != want {
+		t.Errorf("got %q, want %q", notice, want)
+	}
+}

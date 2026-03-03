@@ -4,15 +4,14 @@ package update
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
 	selfupdate "github.com/creativeprojects/go-selfupdate"
+	goversion "github.com/hashicorp/go-version"
 )
 
 const (
@@ -20,10 +19,6 @@ const (
 	repoName  = "fir"
 	cacheTTL  = 24 * time.Hour
 )
-
-// ErrNotAccessible indicates the GitHub API returned 401/403/404, typically
-// because the repository is private and no credentials were provided.
-var ErrNotAccessible = errors.New("GitHub releases not accessible (private repo?)")
 
 // Release holds information about a release for the current platform.
 type Release struct {
@@ -42,16 +37,10 @@ type cacheEntry struct {
 // newUpdater creates a go-selfupdate Updater configured for our asset naming.
 // Our release assets are named "fir-{os}-{arch}" (raw binaries, no archive).
 func newUpdater(source selfupdate.Source) (*selfupdate.Updater, error) {
-	cfg := selfupdate.Config{
-		Source: source,
-		// Match our "fir-{os}-{arch}" naming via filter.
+	return selfupdate.NewUpdater(selfupdate.Config{
+		Source:  source,
 		Filters: []string{`^fir-`},
-	}
-	// Override Arm version for our "linux-arm6" naming.
-	if runtime.GOOS == "linux" && runtime.GOARCH == "arm" {
-		cfg.Arm = 6
-	}
-	return selfupdate.NewUpdater(cfg)
+	})
 }
 
 // newGitHubSource creates a GitHub source, optionally with a token.
@@ -201,32 +190,6 @@ func SelfUpdate(ctx context.Context, rel *Release) error {
 	return nil
 }
 
-// HasGH reports whether the gh CLI is on the PATH.
-func HasGH() bool {
-	_, err := exec.LookPath("gh")
-	return err == nil
-}
-
-// CurrentPlatform returns the platform suffix used in release asset names.
-func CurrentPlatform() string {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-	switch {
-	case goos == "darwin" && goarch == "arm64":
-		return "darwin-arm64"
-	case goos == "darwin" && goarch == "amd64":
-		return "darwin-amd64"
-	case goos == "linux" && goarch == "arm64":
-		return "linux-arm64"
-	case goos == "linux" && goarch == "arm":
-		return "linux-arm6"
-	case goos == "linux" && goarch == "amd64":
-		return "linux-amd64"
-	default:
-		return goos + "-" + goarch
-	}
-}
-
 // UpdateNotice returns a one-line message when a newer version is available.
 func UpdateNotice(newVersion string) string {
 	return fmt.Sprintf("› fir %s available — run: fir update", newVersion)
@@ -235,61 +198,15 @@ func UpdateNotice(newVersion string) string {
 // IsNewer reports whether candidate is strictly newer than current.
 // Both strings are expected to be semver with an optional leading "v".
 func IsNewer(candidate, current string) bool {
-	c := strings.TrimPrefix(candidate, "v")
-	cur := strings.TrimPrefix(current, "v")
-	if c == "" || c == cur {
+	c, err := goversion.NewVersion(candidate)
+	if err != nil {
 		return false
 	}
-	return semverCompare(c, cur) > 0
-}
-
-// semverCompare compares two "major.minor.patch[-pre]" version strings.
-// Returns 1 if a > b, -1 if a < b, 0 if equal.
-func semverCompare(a, b string) int {
-	aPre := ""
-	bPre := ""
-	if idx := strings.IndexAny(a, "-+"); idx >= 0 {
-		aPre = a[idx:]
-		a = a[:idx]
+	cur, err := goversion.NewVersion(current)
+	if err != nil {
+		return false
 	}
-	if idx := strings.IndexAny(b, "-+"); idx >= 0 {
-		bPre = b[idx:]
-		b = b[:idx]
-	}
-	aParts := strings.SplitN(a, ".", 3)
-	bParts := strings.SplitN(b, ".", 3)
-	for i := 0; i < 3; i++ {
-		av, bv := 0, 0
-		if i < len(aParts) {
-			av = atoi(aParts[i])
-		}
-		if i < len(bParts) {
-			bv = atoi(bParts[i])
-		}
-		if av != bv {
-			if av > bv {
-				return 1
-			}
-			return -1
-		}
-	}
-	switch {
-	case aPre != "" && bPre == "":
-		return -1
-	case aPre == "" && bPre != "":
-		return 1
-	}
-	return 0
-}
-
-func atoi(s string) int {
-	n := 0
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
-	}
-	return n
+	return c.GreaterThan(cur)
 }
 
 // ghToken extracts the GitHub OAuth token from the gh CLI.
@@ -325,5 +242,3 @@ func writeCache(path string, e *cacheEntry) {
 	}
 	_ = os.WriteFile(path, data, 0o600)
 }
-
-

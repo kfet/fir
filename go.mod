@@ -7,6 +7,7 @@ require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/go-version v1.8.0
 	github.com/mattn/go-runewidth v0.0.20
 	github.com/modelcontextprotocol/go-sdk v1.3.1
 	github.com/rivo/uniseg v0.4.7
@@ -32,7 +33,6 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
-	github.com/hashicorp/go-version v1.8.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.3 // indirect
