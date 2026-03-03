@@ -220,42 +220,57 @@ func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult,
 		err   error
 	}
 	manualCh := make(chan manualResult, 1)
-	go func() {
-		input, err := manualInput()
-		manualCh <- manualResult{input, err}
-	}()
 
-	select {
-	case result, ok := <-resultCh:
-		if ok && result != nil {
-			if result.State != verifier {
+	// Don't prompt for manual input immediately — give the browser callback
+	// a chance to arrive first. Only show the prompt after a short delay or
+	// if the callback channel closes without a result.
+	manualStarted := false
+	startManual := func() {
+		if manualStarted {
+			return
+		}
+		manualStarted = true
+		go func() {
+			input, err := manualInput()
+			manualCh <- manualResult{input, err}
+		}()
+	}
+
+	// Wait briefly for the browser callback before showing manual input.
+	delay := time.NewTimer(3 * time.Second)
+	defer delay.Stop()
+
+	for {
+		select {
+		case result, ok := <-resultCh:
+			if ok && result != nil {
+				if result.State != verifier {
+					return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
+				}
+				return result.Code, nil
+			}
+			// Callback server closed without result — fall back to manual.
+			startManual()
+			// Continue loop to wait on manualCh.
+			resultCh = nil // Don't select on it again.
+
+		case <-delay.C:
+			// Browser hasn't responded yet — show manual input prompt.
+			startManual()
+
+		case mr := <-manualCh:
+			if mr.err != nil {
+				return "", mr.err
+			}
+			code, state := parseRedirectURL(mr.input)
+			if state != "" && state != verifier {
 				return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
 			}
-			return result.Code, nil
-		}
-		// Channel closed, check manual
-		mr := <-manualCh
-		if mr.err != nil {
-			return "", mr.err
-		}
-		code, state := parseRedirectURL(mr.input)
-		if state != "" && state != verifier {
-			return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
-		}
-		return code, nil
+			return code, nil
 
-	case mr := <-manualCh:
-		if mr.err != nil {
-			return "", mr.err
+		case <-ctx.Done():
+			return "", fmt.Errorf("login cancelled")
 		}
-		code, state := parseRedirectURL(mr.input)
-		if state != "" && state != verifier {
-			return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
-		}
-		return code, nil
-
-	case <-ctx.Done():
-		return "", fmt.Errorf("login cancelled")
 	}
 }
 

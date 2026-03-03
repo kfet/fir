@@ -156,3 +156,24 @@ func TestRaceCallbackAndManual_NilChannel(t *testing.T) {
 		t.Errorf("got code %q, want %q", code, "manual_code")
 	}
 }
+
+func TestRaceCallbackAndManual_BrowserWins(t *testing.T) {
+	ctx := context.Background()
+	ch := make(chan *callbackResult, 1)
+	ch <- &callbackResult{Code: "browser_code", State: "v1"}
+
+	manualCalled := false
+	code, err := raceCallbackAndManual(ctx, ch, func() (string, error) {
+		manualCalled = true
+		return "", fmt.Errorf("should not be called")
+	}, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "browser_code" {
+		t.Errorf("got code %q, want %q", code, "browser_code")
+	}
+	if manualCalled {
+		t.Error("manual input should not have been called when browser callback wins")
+	}
+}

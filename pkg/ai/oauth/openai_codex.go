@@ -243,34 +243,50 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	var code string
 
 	if callbacks.OnManualCodeInput != nil && codeCh != nil {
-		// Race: browser callback vs manual input
+		// Race: browser callback vs manual input (delayed)
 		type manualResult struct {
 			input string
 			err   error
 		}
 		manualCh := make(chan manualResult, 1)
-		go func() {
-			input, err := callbacks.OnManualCodeInput()
-			manualCh <- manualResult{input, err}
-			cancelCallback()
-		}()
 
-		select {
-		case c := <-codeCh:
-			if c != "" {
+		// Defer manual prompt so the browser callback has a chance to arrive first.
+		manualStarted := false
+		startManual := func() {
+			if manualStarted {
+				return
+			}
+			manualStarted = true
+			go func() {
+				input, err := callbacks.OnManualCodeInput()
+				manualCh <- manualResult{input, err}
+				cancelCallback()
+			}()
+		}
+
+		delay := time.NewTimer(3 * time.Second)
+		defer delay.Stop()
+
+		for code == "" {
+			select {
+			case c := <-codeCh:
+				if c != "" {
+					code = c
+				}
+			case <-delay.C:
+				startManual()
+			case mr := <-manualCh:
+				if mr.err != nil {
+					return nil, mr.err
+				}
+				c, s := parseAuthorizationInput(mr.input)
+				if s != "" && s != state {
+					return nil, fmt.Errorf("state mismatch")
+				}
 				code = c
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
-		case mr := <-manualCh:
-			if mr.err != nil {
-				return nil, mr.err
-			}
-			c, s := parseAuthorizationInput(mr.input)
-			if s != "" && s != state {
-				return nil, fmt.Errorf("state mismatch")
-			}
-			code = c
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		}
 	} else if codeCh != nil {
 		// Wait for callback with timeout

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Builtin `self` skill documenting fir configuration, modes, auth, extensions, skills, and full `settings.json` reference; kept in sync by tests that reflect on the `Settings` struct and parse the example JSON
 - Builtin extensions: extensions in `builtin_extensions/` with `# --- / builtin: true / # ---` comment frontmatter are embedded in the binary and auto-discovered at lowest priority (shadowed by global/project extensions)
 
 ### Fixed
