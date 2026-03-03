@@ -111,6 +111,24 @@ When a generator's upstream TS file changes: (1) apply logic changes to the Go g
 | `coding-agent/src/core/compaction/utils.ts` | `pkg/core/compaction/utils.go` | ✅ |
 | (compaction runner wiring) | `pkg/core/compaction/runner.go` | ✅ |
 
+## Extensions (`pkg/extension/`)
+
+Fir's extension system is **not a direct port** of the upstream TS extensions (loader/runner/types). The TS system loads JS/TS modules in-process; fir uses standalone Python/shell scripts communicating over JSON-RPC on stdio. The upstream files are tracked in the baseline for change detection but mapped to fir's own architecture.
+
+| TS Source | Go File | Notes |
+|---|---|---|
+| `coding-agent/src/core/extensions/types.ts` | `pkg/extension/api.go` | Types (ToolDefinition, etc.) are conceptually ported; struct fields kept in sync |
+| `coding-agent/src/core/extensions/loader.ts` | `pkg/extension/discovery.go` + `pkg/extension/manager.go` | Discovery/loading reimplemented for subprocess model |
+| `coding-agent/src/core/extensions/runner.ts` | `pkg/extension/bridge.go` + `pkg/extension/session_bridge.go` | Runtime wiring reimplemented; tool registration, provider lifecycle tracked |
+| (fir-only) | `pkg/extension/jsonrpc.go` | JSON-RPC 2.0 transport (no upstream equivalent) |
+| (fir-only) | `pkg/extension/process.go` | Subprocess lifecycle management (no upstream equivalent) |
+| (fir-only) | `pkg/extension/capability.go` | Capability negotiation (no upstream equivalent) |
+| (fir-only) | `pkg/extension/trust.go` | Extension trust/approval (no upstream equivalent) |
+| (fir-only) | `pkg/extension/validate.go` | Schema validation (no upstream equivalent) |
+| (fir-only) | `pkg/extension/setup.go` | Auto-install dependencies (no upstream equivalent) |
+| (fir-only) | `pkg/extension/sdk/` | Python SDK (`fir_ext.py`) for extension authors |
+| `coding-agent/src/core/package-manager.ts` | Not ported (TS/npm specific) | ❌ |
+
 ## TUI (`pkg/tui/`)
 
 | TS Source | Go File | Status |
@@ -222,4 +240,3 @@ Unstable types (session/list, session/resume, session/set_model) defined locally
 | `coding-agent/src/modes/acp/acp-mode.ts` (helpers) | `pkg/modes/acp/helpers.go` | ⬜ |
 | `coding-agent/src/modes/acp/acp-terminal.ts` | `pkg/modes/acp/terminal.go` | ⬜ |
 | `coding-agent/src/modes/acp/acp-mode.ts` (PiAgent) | `pkg/modes/acp/acp.go` | ⬜ |
-| `coding-agent/src/core/package-manager.ts` | Not ported (TS/npm specific) | ❌ |
