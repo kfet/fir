@@ -507,6 +507,23 @@ func (s *AgentSession) buildSystemPrompt() {
 	s.baseSystemPrompt = prompt
 }
 
+// RegisterToolPromptMetadata adds a tool's prompt snippet and guidelines to the
+// system prompt builder and rebuilds the system prompt. This is called when
+// extension tools are registered at runtime.
+func (s *AgentSession) RegisterToolPromptMetadata(toolName, snippet string, guidelines []string) {
+	if snippet != "" {
+		if s.toolSnippets == nil {
+			s.toolSnippets = make(map[string]string)
+		}
+		s.toolSnippets[toolName] = snippet
+	}
+	if len(guidelines) > 0 {
+		s.promptGuidelines = append(s.promptGuidelines, guidelines...)
+	}
+	s.buildSystemPrompt()
+	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+}
+
 // expandSkillCommand expands /skill:<name> commands into skill XML blocks.
 // Returns the original text unchanged if it's not a skill command.
 func (s *AgentSession) expandSkillCommand(text string) string {

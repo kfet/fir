@@ -170,4 +170,8 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 	copy(tools, state.Tools)
 	tools[len(state.Tools)] = wrapped[0]
 	b.session.Agent.SetTools(tools)
+
+	// Register tool prompt metadata so the system prompt includes the tool's
+	// snippet and guidelines.
+	b.session.RegisterToolPromptMetadata(def.Name, def.PromptSnippet, def.PromptGuidelines)
 }

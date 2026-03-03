@@ -367,15 +367,16 @@ func NewModelRegistry(authStorage *AuthStorage, modelsJsonPath string) *ModelReg
 
 // Refresh reloads models from disk (built-in + custom from models.json).
 func (r *ModelRegistry) Refresh() {
+	// Reset external registries outside r.mu to avoid lock-ordering issues
+	// (these registries have their own locks).
+	ai.DefaultRegistry.ClearApiProviders()
+	providers.RegisterDefaultProviders()
+	oauth.ResetProviders()
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.customProviderApiKeys = make(map[string]string)
 	r.loadError = ""
-
-	// Ensure dynamic API/OAuth registrations are rebuilt from current provider state.
-	ai.DefaultRegistry.ClearApiProviders()
-	providers.RegisterDefaultProviders()
-	oauth.ResetProviders()
 
 	r.loadModels()
 
@@ -802,12 +803,10 @@ func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderCo
 // models from disk so that built-in models overridden by this provider are restored.
 func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	r.mu.Lock()
-	hasProvider := r.registeredProviders[providerName] != nil
-	r.mu.Unlock()
-	if !hasProvider {
+	if r.registeredProviders[providerName] == nil {
+		r.mu.Unlock()
 		return
 	}
-	r.mu.Lock()
 	delete(r.registeredProviders, providerName)
 	delete(r.customProviderApiKeys, providerName)
 	r.mu.Unlock()

@@ -13,6 +13,9 @@ func suspendSignal() os.Signal {
 }
 
 func continueSignal() os.Signal {
-	// Windows doesn't have SIGCONT; use SIGINT as a no-op placeholder.
+	// Windows doesn't have SIGCONT. Return a signal that will never fire
+	// naturally in the suspend flow (suspend itself is a no-op on Windows).
+	// Using SIGINT here is safe because handleCtrlZ never actually suspends
+	// on Windows, so the SIGCONT listener goroutine is effectively dead code.
 	return syscall.SIGINT
 }

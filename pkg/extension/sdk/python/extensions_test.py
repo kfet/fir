@@ -14,16 +14,29 @@ _EXTENSIONS_DIR = os.path.join(_PROJECT_ROOT, ".fir", "extensions")
 
 
 def _load_extension(name: str):
-    """Load a .fir/extensions/<name>.py module with fir_ext.run() stubbed out.
+    """Load a .fir/extensions/<name>.py module using the real fir_ext SDK.
 
-    fir_ext.run() blocks on stdin, so we replace it with a no-op. The
-    fir_ext.on() decorator is kept as a passthrough so handler functions are
-    still defined on the module.
+    fir_ext.run() blocks on stdin, so we replace it with a no-op. All
+    decorators (@fir_ext.tool, @fir_ext.on, @fir_ext.command) use the real
+    SDK so registrations are fully exercised.
     """
+    # Import the real SDK module from this directory.
+    sdk_path = os.path.join(_HERE, "fir_ext.py")
+    sdk_spec = importlib.util.spec_from_file_location("fir_ext", sdk_path)
+    real_fir_ext = importlib.util.module_from_spec(sdk_spec)  # type: ignore[arg-type]
+    sdk_spec.loader.exec_module(real_fir_ext)  # type: ignore[union-attr]
+
+    # Clear global registries so extensions don't leak between loads.
+    real_fir_ext._tools.clear()
+    real_fir_ext._tool_handlers.clear()
+    real_fir_ext._hook_handlers.clear()
+    real_fir_ext._event_handlers.clear()
+    real_fir_ext._commands.clear()
+    real_fir_ext._command_handlers.clear()
+
     path = os.path.join(_EXTENSIONS_DIR, f"{name}.py")
-    fake_fir_ext = MagicMock()
-    fake_fir_ext.on = lambda _event: (lambda fn: fn)
-    with patch.dict(sys.modules, {"fir_ext": fake_fir_ext}):
+    with patch.object(real_fir_ext, "run", MagicMock()), \
+         patch.dict(sys.modules, {"fir_ext": real_fir_ext}):
         spec = importlib.util.spec_from_file_location(name, path)
         mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
