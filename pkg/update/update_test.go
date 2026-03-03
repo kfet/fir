@@ -3,7 +3,6 @@ package update
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -246,7 +245,7 @@ func TestIsNewer_EqualWithV(t *testing.T) {
 
 func TestUpdateNotice_Format(t *testing.T) {
 	notice := UpdateNotice("v1.0.0")
-	want := fmt.Sprintf("› fir v1.0.0 available — run: fir update")
+	want := "› fir v1.0.0 available — run: fir update"
 	if notice != want {
 		t.Errorf("got %q, want %q", notice, want)
 	}
