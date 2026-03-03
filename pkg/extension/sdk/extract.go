@@ -9,6 +9,9 @@ import (
 
 // SDKVersion is bumped whenever the embedded SDK files change.
 // A new version causes re-extraction on next run.
+//
+// IMPORTANT: bump this any time fir_ext.py (or any other embedded SDK file)
+// is modified, otherwise the old cached version will keep being used.
 const SDKVersion = "2"
 
 // cacheDir is the function used to locate the cache directory.
