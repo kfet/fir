@@ -736,8 +736,6 @@ func (e *Editor) Render(width int) []string {
 	}
 	e.lastWidth = layoutWidth
 
-	horizontal := e.BorderColor("─")
-
 	layoutLines := e.layoutText(layoutWidth)
 
 	termRows := 24
@@ -791,7 +789,7 @@ func (e *Editor) Render(width int) []string {
 		}
 		result = append(result, e.BorderColor(indicator+strings.Repeat("─", remaining)))
 	} else {
-		result = append(result, strings.Repeat(horizontal, width))
+		result = append(result, e.BorderColor(strings.Repeat("─", width)))
 	}
 
 	emitCursorMarker := e.Focused && e.autocompleteState == ""
@@ -872,7 +870,7 @@ func (e *Editor) Render(width int) []string {
 		}
 		result = append(result, e.BorderColor(indicator+strings.Repeat("─", remaining)))
 	} else {
-		result = append(result, strings.Repeat(horizontal, width))
+		result = append(result, e.BorderColor(strings.Repeat("─", width)))
 	}
 
 	// Autocomplete list

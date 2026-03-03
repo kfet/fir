@@ -175,111 +175,6 @@ func TestAnthropic_Thinking(t *testing.T) {
 	}
 }
 
-func TestAnthropic_RedactedThinking(t *testing.T) {
-	srv := mockSSEServer(t, "anthropic_redacted_thinking.sse")
-	defer srv.Close()
-
-	model := anthropicModel(srv.URL)
-	ctx := ai.Context{
-		Messages: []ai.Message{ai.NewUserMsg("Hello", 1000)},
-	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
-
-	stream := StreamAnthropic(context.Background(), model, ctx, opts)
-	events := collectEvents(t, stream)
-
-	result := stream.Result()
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content blocks, got %d", len(result.Content))
-	}
-
-	// First block should be redacted thinking
-	if !result.Content[0].IsThinking() {
-		t.Fatal("expected thinking content for first block")
-	}
-	tc := result.Content[0].Thinking
-	if !tc.Redacted {
-		t.Error("expected Redacted=true")
-	}
-	if tc.ThinkingSignature != "encrypted-opaque-payload-abc123" {
-		t.Errorf("unexpected signature: %q", tc.ThinkingSignature)
-	}
-	if tc.Thinking != "[Reasoning redacted]" {
-		t.Errorf("unexpected thinking text: %q", tc.Thinking)
-	}
-
-	// Second block should be text
-	if !result.Content[1].IsText() {
-		t.Fatal("expected text content for second block")
-	}
-	if result.Content[1].Text.Text != "Here is my response." {
-		t.Errorf("unexpected text: %q", result.Content[1].Text.Text)
-	}
-
-	var hasThinkingStart bool
-	for _, evt := range events {
-		if evt.Type == ai.EventThinkingStart {
-			hasThinkingStart = true
-		}
-	}
-	if !hasThinkingStart {
-		t.Error("missing thinking_start event for redacted block")
-	}
-}
-
-func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
-	model := anthropicModel("http://localhost")
-
-	// Create a message with a redacted thinking block
-	msg := ai.AssistantMessage{
-		Role:     "assistant",
-		Provider: "anthropic",
-		Api:      "anthropic-messages",
-		Model:    model.ID,
-		Content: []ai.AssistantContent{
-			{Thinking: &ai.ThinkingContent{
-				Type:              "thinking",
-				Thinking:          "[Reasoning redacted]",
-				ThinkingSignature: "encrypted-data",
-				Redacted:          true,
-			}},
-			ai.NewTextContent("Hello"),
-		},
-	}
-
-	messages := []ai.Message{ai.NewUserMsg("Hi", 0), ai.NewAssistantMsg(msg)}
-	result := convertAnthropicMessages(messages, model, false, ai.CacheShort)
-
-	blocks := result
-
-	// Find the redacted_thinking block
-	found := false
-	for _, msgMap := range blocks {
-		role, _ := msgMap["role"].(string)
-		if role != "assistant" {
-			continue
-		}
-		content, ok := msgMap["content"].([]map[string]any)
-		if !ok {
-			continue
-		}
-		for _, block := range content {
-			if block["type"] == "redacted_thinking" {
-				found = true
-				if block["data"] != "encrypted-data" {
-					t.Errorf("expected data 'encrypted-data', got %v", block["data"])
-				}
-			}
-		}
-	}
-	if !found {
-		t.Error("expected redacted_thinking block in converted messages")
-	}
-}
-
 func TestAnthropic_StreamingError(t *testing.T) {
 	srv := mockSSEServer(t, "anthropic_error.sse")
 	defer srv.Close()
@@ -488,8 +383,6 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 	}{
 		{"claude-opus-4.6-20260101", true},
 		{"claude-opus-4-6-20260101", true},
-		{"claude-sonnet-4-6-20260101", true},
-		{"claude-sonnet-4.6-20260101", true},
 		{"claude-sonnet-4-20250514", false},
 		{"claude-opus-4-20250514", false},
 		{"gpt-4o", false},
@@ -504,23 +397,20 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 
 func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 	tests := []struct {
-		level   ai.ThinkingLevel
-		modelID string
-		want    string
+		level ai.ThinkingLevel
+		want  string
 	}{
-		{ai.ThinkingMinimal, "claude-opus-4-6", "low"},
-		{ai.ThinkingLow, "claude-opus-4-6", "low"},
-		{ai.ThinkingMedium, "claude-opus-4-6", "medium"},
-		{ai.ThinkingHigh, "claude-opus-4-6", "high"},
-		{ai.ThinkingXHigh, "claude-opus-4-6", "max"},
-		{ai.ThinkingXHigh, "claude-sonnet-4-6", "high"}, // max only valid on Opus 4.6
-		{ai.ThinkingXHigh, "claude-sonnet-4.6-20260101", "high"},
-		{"", "claude-opus-4-6", "high"}, // default
+		{ai.ThinkingMinimal, "low"},
+		{ai.ThinkingLow, "low"},
+		{ai.ThinkingMedium, "medium"},
+		{ai.ThinkingHigh, "high"},
+		{ai.ThinkingXHigh, "max"},
+		{"", "high"}, // default
 	}
 	for _, tt := range tests {
-		got := mapThinkingLevelToEffort(tt.level, tt.modelID)
+		got := mapThinkingLevelToEffort(tt.level)
 		if got != tt.want {
-			t.Errorf("mapThinkingLevelToEffort(%q, %q) = %q, want %q", tt.level, tt.modelID, got, tt.want)
+			t.Errorf("mapThinkingLevelToEffort(%q) = %q, want %q", tt.level, got, tt.want)
 		}
 	}
 }

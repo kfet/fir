@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -37,13 +36,6 @@ const (
 	ActionResume                   AppAction = "resume"
 )
 
-func pasteImageKey() string {
-	if runtime.GOOS == "windows" {
-		return "alt+v"
-	}
-	return "ctrl+v"
-}
-
 // DefaultAppKeybindings maps app actions to their default key bindings.
 var DefaultAppKeybindings = map[AppAction][]string{
 	ActionInterrupt:                {"escape"},
@@ -60,7 +52,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionExternalEditor:           {"ctrl+g"},
 	ActionFollowUp:                 {"alt+enter"},
 	ActionDequeue:                  {"alt+up"},
-	ActionPasteImage:               {pasteImageKey()},
+	ActionPasteImage:               {"ctrl+v"},
 	ActionNewSession:               {},
 	ActionSelectThinking:           {},
 	ActionTree:                     {},

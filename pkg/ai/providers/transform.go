@@ -50,14 +50,6 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 				switch {
 				case block.IsThinking():
 					b := block.Thinking
-					// Redacted thinking is opaque encrypted content, only valid for the same model.
-					// Drop it for cross-model to avoid API errors.
-					if b.Redacted {
-						if isSameModel {
-							newContent = append(newContent, block)
-						}
-						continue
-					}
 					if isSameModel && b.ThinkingSignature != "" {
 						newContent = append(newContent, block)
 					} else if b.Thinking == "" || strings.TrimSpace(b.Thinking) == "" {

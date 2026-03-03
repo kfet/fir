@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -12,7 +13,7 @@ func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
 	auth := core.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
-	methods := buildAuthMethods(auth, reg)
+	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
 
 	// Should have env_var methods for providers that have models.
 	envMethods := filterByType(methods, AuthMethodTypeEnvVar)
@@ -35,14 +36,17 @@ func TestBuildAuthMethods_OAuthMethods(t *testing.T) {
 	auth := core.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
-	methods := buildAuthMethods(auth, reg)
+	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
 
-	// InMemoryAuthStorage registers default OAuth providers.
+	// Without terminal-auth capability, all OAuth providers get type "agent".
 	oauthMethods := filterByType(methods, AuthMethodTypeAgent)
 	if len(oauthMethods) == 0 {
-		t.Log("no OAuth methods (may depend on registered providers)")
+		t.Fatal("expected at least one OAuth agent method")
 	}
 	for _, m := range oauthMethods {
+		if !strings.HasPrefix(m.Id, "oauth-") {
+			continue
+		}
 		if m.Type != AuthMethodTypeAgent {
 			t.Errorf("method %q type = %q, want agent", m.Id, m.Type)
 		}
@@ -192,6 +196,94 @@ func TestHandleAuthenticate_Terminal(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("terminal auth should succeed (no-op): %v", err)
+	}
+}
+
+func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
+	auth := core.NewInMemoryAuthStorage(nil)
+	reg := core.NewModelRegistry(auth, "")
+
+	// Simulate a client that supports terminal-auth (like Zed).
+	caps := acpsdk.ClientCapabilities{
+		Meta: map[string]any{"terminal-auth": true},
+	}
+	methods := buildAuthMethods(auth, reg, caps)
+
+	// OAuth methods should have _meta["terminal-auth"] with command info.
+	var oauthMethods []ExtendedAuthMethod
+	for _, m := range methods {
+		if strings.HasPrefix(m.Id, "oauth-") {
+			oauthMethods = append(oauthMethods, m)
+		}
+	}
+	if len(oauthMethods) == 0 {
+		t.Fatal("expected at least one OAuth method")
+	}
+	for _, m := range oauthMethods {
+		if m.Meta == nil {
+			t.Errorf("method %q should have _meta for terminal-auth", m.Id)
+			continue
+		}
+		ta, ok := m.Meta["terminal-auth"].(map[string]any)
+		if !ok {
+			t.Errorf("method %q _meta[terminal-auth] should be a map", m.Id)
+			continue
+		}
+		if _, ok := ta["command"]; !ok {
+			t.Errorf("method %q terminal-auth missing command", m.Id)
+		}
+		args, ok := ta["args"].([]string)
+		if !ok || len(args) < 2 || args[0] != "--login" {
+			t.Errorf("method %q terminal-auth args should start with --login, got %v", m.Id, ta["args"])
+		}
+	}
+}
+
+func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
+	// Anthropic doesn't use a callback server, so authenticateOAuth should
+	// reject it immediately without making any network calls.
+	auth := core.NewInMemoryAuthStorage(nil)
+	pa := &firAgent{
+		sessions:    make(map[string]*firSession),
+		authStorage: auth,
+		authMethods: []ExtendedAuthMethod{
+			{
+				Id:   "oauth-anthropic",
+				Name: "Anthropic",
+				Type: AuthMethodTypeAgent,
+			},
+		},
+	}
+
+	_, err := pa.handleAuthenticate(context.Background(), acpsdk.AuthenticateRequest{
+		MethodId: "oauth-anthropic",
+	})
+	if err == nil {
+		t.Fatal("expected error for provider without callback server")
+	}
+	if !strings.Contains(err.Error(), "interactive input") {
+		t.Errorf("expected error about interactive input, got: %v", err)
+	}
+}
+
+func TestAuthenticateOAuth_NilAuthStorage(t *testing.T) {
+	pa := &firAgent{
+		sessions:    make(map[string]*firSession),
+		authStorage: nil,
+		authMethods: []ExtendedAuthMethod{
+			{
+				Id:   "oauth-anthropic",
+				Name: "Anthropic",
+				Type: AuthMethodTypeAgent,
+			},
+		},
+	}
+
+	_, err := pa.handleAuthenticate(context.Background(), acpsdk.AuthenticateRequest{
+		MethodId: "oauth-anthropic",
+	})
+	if err == nil {
+		t.Error("expected error when authStorage is nil")
 	}
 }
 

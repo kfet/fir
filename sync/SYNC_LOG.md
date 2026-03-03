@@ -1,26 +1,5 @@
 # Sync Log
 
-## 2026-03-02 — Sync to commit c65de34e
-
-- `ai/src/types.ts` → `pkg/ai/types.go`: Added `Redacted` field to `ThinkingContent` for safety-redacted thinking blocks.
-- `ai/src/env-api-keys.ts` → `pkg/ai/envkeys.go`: Already had HF_TOKEN/KIMI_API_KEY; Vertex ADC caching fix is Node-specific, skipped.
-- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated models.
-- `ai/src/providers/anthropic.ts` → `pkg/ai/providers/anthropic.go`: Sonnet 4.6 adaptive thinking support; redacted_thinking block handling; xhigh→high clamping for non-Opus; temperature incompatible with thinking; skip interleaved-thinking beta for adaptive models; Claude Code version bumped to 2.1.62; drop "(external, cli)" from user-agent.
-- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: Z.ai now uses `enable_thinking` instead of `thinking` param (same as Qwen); guard nil choices array.
-- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: Sonnet 4.6 adaptive thinking; xhigh→high clamping.
-- `ai/src/providers/transform-messages.ts` → `pkg/ai/providers/transform.go`: Drop redacted thinking blocks for cross-model conversations.
-- `ai/src/utils/oauth/index.ts` → `pkg/ai/oauth/registry.go`: Added `UnregisterProvider` (restores built-in) and `ResetProviders`.
-- `coding-agent/src/cli/args.ts` → `cmd/fir/args.go`: Added `--offline` flag.
-- `coding-agent/src/main.ts` → `cmd/fir/app.go`: Added offline mode (`--offline` / `FIR_OFFLINE`); skip version check when offline.
-- `coding-agent/src/core/model-registry.ts` → `pkg/core/modelregistry.go`: Added `UnregisterProvider`; `Refresh` now resets API/OAuth registrations before reapplying.
-- `coding-agent/src/core/system-prompt.ts` → `pkg/core/systemprompt.go`: Added `ToolSnippets` and `PromptGuidelines` to `BuildSystemPromptOptions`; guideline deduplication.
-- `coding-agent/src/core/agent-session.ts` → `pkg/core/agentsession.go`: Added `toolSnippets`/`promptGuidelines` fields wired to system prompt builder.
-- `coding-agent/src/core/keybindings.ts` → `pkg/core/keybindings.go`: Use `alt+v` for image paste on Windows.
-- `coding-agent/src/core/session-manager.ts` → `pkg/core/session.go`: Fork defers file write when no assistant message present (prevents duplicate headers).
-- `coding-agent/src/modes/interactive/interactive-mode.ts` → `pkg/modes/interactive/mode.go`: Ignore SIGINT while suspended (Ctrl+Z); restore on SIGCONT.
-- `coding-agent/src/core/extensions/types.ts` → `pkg/extension/api.go`: Added `PromptSnippet`/`PromptGuidelines` to `ToolDefinition`.
-- Skipped (not ported): `export-html/tool-renderer.ts`, `tools-manager.ts`, `mom/`, `tui/terminal.ts` (koffi ESM loading, Node-specific), `package-manager.ts`.
-
 ## 2026-02-25 — Sync to commit 5c0ec26c
 
 - `coding-agent/src/core/extensions/loader.ts` → `pkg/extension/registry.go`: Discovery order flipped — project-local extensions now load before global ones (first registration wins). Flag defaults no longer overwrite CLI-set values.

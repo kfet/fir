@@ -3,6 +3,7 @@
 package oauth
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -10,21 +11,15 @@ import (
 var (
 	registryMu sync.RWMutex
 	registry   = map[string]Provider{}
-	builtins   []Provider
 )
 
 func init() {
 	// Register all built-in OAuth providers.
-	builtins = []Provider{
-		&AnthropicProvider{},
-		&GitHubCopilotProvider{},
-		&GeminiCLIProvider{},
-		&AntigravityProvider{},
-		&OpenAICodexProvider{},
-	}
-	for _, p := range builtins {
-		registry[p.ID()] = p
-	}
+	RegisterProvider(&AnthropicProvider{})
+	RegisterProvider(&GitHubCopilotProvider{})
+	RegisterProvider(&GeminiCLIProvider{})
+	RegisterProvider(&AntigravityProvider{})
+	RegisterProvider(&OpenAICodexProvider{})
 }
 
 // RegisterProvider registers a custom OAuth provider.
@@ -34,30 +29,6 @@ func RegisterProvider(p Provider) {
 	registry[p.ID()] = p
 }
 
-// UnregisterProvider removes a provider. Built-in providers are restored
-// to their default implementation rather than deleted.
-func UnregisterProvider(id string) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	for _, b := range builtins {
-		if b.ID() == id {
-			registry[id] = b
-			return
-		}
-	}
-	delete(registry, id)
-}
-
-// ResetProviders restores the registry to only the built-in providers.
-func ResetProviders() {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry = make(map[string]Provider, len(builtins))
-	for _, p := range builtins {
-		registry[p.ID()] = p
-	}
-}
-
 // GetProvider returns the OAuth provider with the given ID, or nil.
 func GetProvider(id string) Provider {
 	registryMu.RLock()
@@ -65,7 +36,7 @@ func GetProvider(id string) Provider {
 	return registry[id]
 }
 
-// GetProviders returns all registered OAuth providers.
+// GetProviders returns all registered OAuth providers, sorted by ID for stable ordering.
 func GetProviders() []Provider {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -73,6 +44,9 @@ func GetProviders() []Provider {
 	for _, p := range registry {
 		result = append(result, p)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ID() < result[j].ID()
+	})
 	return result
 }
 

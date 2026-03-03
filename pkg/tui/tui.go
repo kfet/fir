@@ -732,10 +732,21 @@ func (t *TUI) DoRender() {
 	t.previousWidth = width
 }
 
+// segmentResetNoHyperlink resets ANSI styles without the OSC 8 hyperlink reset.
+// Used for lines that don't contain hyperlinks to avoid tmux OSC parsing issues.
+const segmentResetNoHyperlink = "\x1b[0m"
+
+// hyperlinkOpener is the OSC 8 prefix that starts a hyperlink.
+const hyperlinkOpener = "\x1b]8;"
+
 func (t *TUI) applyLineResets(lines []string) {
 	for i, line := range lines {
 		if !IsImageLine(line) {
-			lines[i] = line + segmentReset
+			if strings.Contains(line, hyperlinkOpener) {
+				lines[i] = line + segmentReset
+			} else {
+				lines[i] = line + segmentResetNoHyperlink
+			}
 		}
 	}
 }

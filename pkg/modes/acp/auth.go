@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -27,39 +28,71 @@ var providerKeyLinks = map[string]string{
 // buildAuthMethods constructs the list of ExtendedAuthMethod for the initialize response.
 // It inspects the auth storage and model registry to determine which providers
 // are available and what auth methods each supports.
-func buildAuthMethods(authStorage *core.AuthStorage, modelRegistry *core.ModelRegistry) []ExtendedAuthMethod {
+func buildAuthMethods(authStorage *core.AuthStorage, modelRegistry *core.ModelRegistry, clientCaps acpsdk.ClientCapabilities) []ExtendedAuthMethod {
 	var methods []ExtendedAuthMethod
+
+	// Check if client supports terminal-auth (like Zed does).
+	clientSupportsMeta := clientCaps.Meta
+	supportsTerminalAuth := false
+	if metaMap, ok := clientSupportsMeta.(map[string]any); ok {
+		supportsTerminalAuth = metaMap["terminal-auth"] == true
+	}
 
 	// Collect unique provider IDs from all known models.
 	providers := collectProviders(modelRegistry)
 
-	// For each provider, add env_var auth methods.
-	for _, pid := range providers {
-		if envVar := ai.ProviderEnvVar(pid); envVar != "" {
-			name := formatProviderName(pid) + " API Key"
-			m := ExtendedAuthMethod{
-				Id:          "env-" + pid,
-				Name:        name,
-				Description: fmt.Sprintf("Set %s environment variable", envVar),
-				Type:        AuthMethodTypeEnvVar,
-				VarName:     envVar,
+	// Add env_var auth methods only when the client doesn't support terminal-auth.
+	// Clients like Zed that support terminal-auth don't handle env_var methods
+	// (they render them as non-functional buttons), so we omit them to avoid clutter.
+	if !supportsTerminalAuth {
+		for _, pid := range providers {
+			if envVar := ai.ProviderEnvVar(pid); envVar != "" {
+				name := formatProviderName(pid) + " API Key"
+				m := ExtendedAuthMethod{
+					Id:          "env-" + pid,
+					Name:        name,
+					Description: fmt.Sprintf("Set %s environment variable", envVar),
+					Type:        AuthMethodTypeEnvVar,
+					VarName:     envVar,
+				}
+				if link, ok := providerKeyLinks[pid]; ok {
+					m.Link = link
+				}
+				methods = append(methods, m)
 			}
-			if link, ok := providerKeyLinks[pid]; ok {
-				m.Link = link
-			}
-			methods = append(methods, m)
 		}
 	}
 
-	// Add OAuth auth methods for each registered OAuth provider.
+	// Determine the fir executable path for terminal-auth.
+	execPath, _ := os.Executable()
+
+	// Add OAuth auth methods.
 	oauthProviders := authStorage.GetOAuthProviders()
 	for _, op := range oauthProviders {
-		methods = append(methods, ExtendedAuthMethod{
+		m := ExtendedAuthMethod{
 			Id:          "oauth-" + op.ID(),
-			Name:        op.Name(),
+			Name:        fmt.Sprintf("Login with %s", op.Name()),
 			Description: fmt.Sprintf("Login with %s via OAuth", op.Name()),
-			Type:        AuthMethodTypeAgent,
-		})
+		}
+
+		if supportsTerminalAuth {
+			// Client supports terminal-auth: put command info in _meta
+			// so the client can spawn an interactive terminal.
+			m.Meta = map[string]any{
+				"terminal-auth": map[string]any{
+					"command": execPath,
+					"args":    []string{"--login", op.ID()},
+					"label":   fmt.Sprintf("%s Login", op.Name()),
+				},
+			}
+		} else {
+			// Agent handles the OAuth flow directly: open browser, poll/wait.
+			// Device code flows (GitHub Copilot) and callback server flows
+			// (OpenAI, Google) both work without terminal interaction.
+			m.Type = AuthMethodTypeAgent
+		}
+
+		methods = append(methods, m)
 	}
 
 	return methods
@@ -197,7 +230,11 @@ func (pa *firAgent) handleAuthenticate(ctx context.Context, req acpsdk.Authentic
 }
 
 // authenticateOAuth triggers the OAuth login flow for the given method.
-func (pa *firAgent) authenticateOAuth(_ context.Context, method *ExtendedAuthMethod) (acpsdk.AuthenticateResponse, error) {
+// It opens the browser for the user, blocks until the OAuth flow completes,
+// and returns success/failure. The auth URL is returned in Meta so ACP clients
+// can display it or open a browser. For device-code flows (GitHub Copilot),
+// the verification code is included in the instructions.
+func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthMethod) (acpsdk.AuthenticateResponse, error) {
 	// Extract provider ID from method ID (e.g., "oauth-anthropic" → "anthropic").
 	providerID := strings.TrimPrefix(method.Id, "oauth-")
 
@@ -209,14 +246,41 @@ func (pa *firAgent) authenticateOAuth(_ context.Context, method *ExtendedAuthMet
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("auth storage not initialized")
 	}
 
+	provider := oauth.GetProvider(providerID)
+	if provider == nil {
+		return acpsdk.AuthenticateResponse{}, fmt.Errorf("unknown OAuth provider: %s", providerID)
+	}
+
+	// Providers that don't use a callback server require user interaction
+	// (e.g. pasting a code or entering a domain). We can't prompt through ACP,
+	// so these providers must use terminal-auth instead.
+	if !provider.UsesCallbackServer() {
+		return acpsdk.AuthenticateResponse{}, fmt.Errorf(
+			"%s OAuth requires interactive input which is not supported in ACP agent mode; "+
+				"use terminal-auth or set %s environment variable",
+			formatProviderName(providerID), ai.ProviderEnvVar(providerID))
+	}
+
 	err := authStorage.Login(providerID, oauth.LoginCallbacks{
+		Ctx: ctx,
 		OnAuth: func(info oauth.AuthInfo) {
-			firlog.Info("acp oauth auth url", "url", info.URL)
+			firlog.Info("acp oauth: opening browser", "url", info.URL)
+			if err := core.OpenBrowser(info.URL); err != nil {
+				firlog.Info("acp oauth: failed to open browser", "error", err)
+			}
+		},
+		OnProgress: func(message string) {
+			firlog.Info("acp oauth progress", "message", message)
 		},
 	})
 	if err != nil {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("oauth login failed for %s: %w", providerID, err)
 	}
+
+	// Refresh all session model registries so newly authenticated models are available.
+	pa.refreshAllModelRegistries()
+
+	firlog.Info("acp oauth login completed successfully", "provider", providerID)
 	return acpsdk.AuthenticateResponse{}, nil
 }
 
@@ -230,6 +294,23 @@ func (pa *firAgent) authenticateEnvVar(_ context.Context, method *ExtendedAuthMe
 	if val == "" {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("environment variable %s is not set", method.VarName)
 	}
+	// Refresh model registries so models using this API key become available.
+	pa.refreshAllModelRegistries()
 	firlog.Info("acp env_var auth confirmed", "var", method.VarName)
 	return acpsdk.AuthenticateResponse{}, nil
+}
+
+// refreshAllModelRegistries refreshes the model registry in every active session.
+// Called after successful authentication so newly available models appear immediately.
+func (pa *firAgent) refreshAllModelRegistries() {
+	pa.mu.Lock()
+	sessions := make(map[string]*firSession, len(pa.sessions))
+	for k, v := range pa.sessions {
+		sessions[k] = v
+	}
+	pa.mu.Unlock()
+
+	for _, entry := range sessions {
+		entry.modelRegistry.Refresh()
+	}
 }

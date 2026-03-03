@@ -13,9 +13,3 @@ pkg/modes/interactive/mode.go, pkg/modes/acp/acp.go
   is mocked out, so the decorator registrations (`@fir_ext.tool`, `@fir_ext.on`) are
   not exercised through the real SDK. Low priority; the `demo_ext_test.py` and
   `fir_ext_test.py` suites cover the SDK thoroughly.
-
-## Correctness
-
-- `pkg/modes/interactive/signal_windows.go:16` — `continueSignal()` returns `syscall.SIGINT`.
-  On Windows, suspend/resume is a no-op (SIGTSTP not supported), so the SIGCONT listener
-  goroutine is effectively dead code. Documented with comment.

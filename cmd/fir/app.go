@@ -245,12 +245,6 @@ func run() error {
 
 	args := ParseArgs(os.Args[1:])
 
-	// Handle offline mode
-	if args.Offline || isTruthyEnv("FIR_OFFLINE") {
-		os.Setenv("FIR_OFFLINE", "1")
-		os.Setenv("FIR_SKIP_VERSION_CHECK", "1")
-	}
-
 	// Initialise debug logging (file-only, never stdout/stderr).
 	debugEnabled := args.Debug || os.Getenv("FIR_DEBUG") == "1"
 	debugPath := args.DebugLogFile
@@ -294,7 +288,7 @@ func run() error {
 	// Skipped for machine-to-machine modes (RPC, ACP).
 	// The channel always receives exactly one value (notice text or "").
 	noticeCh := make(chan string, 1)
-	wantUpdateCheck := args.OutputMode != ModeRPC && args.OutputMode != ModeACP && !isTruthyEnv("FIR_SKIP_VERSION_CHECK")
+	wantUpdateCheck := args.OutputMode != ModeRPC && args.OutputMode != ModeACP
 	if wantUpdateCheck {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -329,6 +323,11 @@ func run() error {
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
 	isRPCMode := args.OutputMode == ModeRPC
 	isACPMode := args.OutputMode == ModeACP
+
+	// Handle --login: run interactive OAuth login and exit.
+	if args.Login != "" {
+		return runLogin(args)
+	}
 
 	// ACP mode creates sessions on demand, so dispatch before setupSession.
 	if isACPMode {
@@ -701,9 +700,4 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	})
 	mode.ReexecIfRequested() // never returns if /reexec was used
 	return err
-}
-
-func isTruthyEnv(key string) bool {
-	v := os.Getenv(key)
-	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 }

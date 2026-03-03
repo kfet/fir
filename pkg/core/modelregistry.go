@@ -11,8 +11,6 @@ import (
 	"sync"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
-	"github.com/kfet/fir/pkg/ai/providers"
 )
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---
@@ -367,17 +365,10 @@ func NewModelRegistry(authStorage *AuthStorage, modelsJsonPath string) *ModelReg
 
 // Refresh reloads models from disk (built-in + custom from models.json).
 func (r *ModelRegistry) Refresh() {
-	// Reset external registries outside r.mu to avoid lock-ordering issues
-	// (these registries have their own locks).
-	ai.DefaultRegistry.ClearApiProviders()
-	providers.RegisterDefaultProviders()
-	oauth.ResetProviders()
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.customProviderApiKeys = make(map[string]string)
 	r.loadError = ""
-
 	r.loadModels()
 
 	for providerName, config := range r.registeredProviders {
@@ -797,20 +788,6 @@ func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderCo
 	defer r.mu.Unlock()
 	r.registeredProviders[providerName] = config
 	return r.applyProviderConfig(providerName, config)
-}
-
-// UnregisterProvider removes a previously registered provider and refreshes
-// models from disk so that built-in models overridden by this provider are restored.
-func (r *ModelRegistry) UnregisterProvider(providerName string) {
-	r.mu.Lock()
-	if r.registeredProviders[providerName] == nil {
-		r.mu.Unlock()
-		return
-	}
-	delete(r.registeredProviders, providerName)
-	delete(r.customProviderApiKeys, providerName)
-	r.mu.Unlock()
-	r.Refresh()
 }
 
 func (r *ModelRegistry) applyProviderConfig(providerName string, config *ProviderConfigInput) error {

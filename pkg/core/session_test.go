@@ -832,39 +832,6 @@ func TestForkFrom_InvalidSource(t *testing.T) {
 	}
 }
 
-func TestForkFrom_NoAssistant_DefersWrite(t *testing.T) {
-	srcDir := t.TempDir()
-	dstDir := t.TempDir()
-	sessionsDir := filepath.Join(dstDir, "sessions")
-
-	// Create a source session with only a user message (no assistant)
-	srcSM := NewSessionManager(srcDir, filepath.Join(srcDir, "sessions"))
-	srcSM.AppendAgentMessage(newTestAgentMsg(t, "user", "hello"))
-	// Force flush so file exists
-	srcSM.AppendAgentMessage(newTestAgentMsg(t, "assistant", ""))
-	srcFile := srcSM.GetSessionFile()
-	if srcFile == "" {
-		t.Fatal("source session file not set")
-	}
-
-	// Create a new source with only user message
-	srcDir2 := t.TempDir()
-	srcSM2 := NewSessionManager(srcDir2, filepath.Join(srcDir2, "sessions"))
-	srcSM2.AppendAgentMessage(newTestAgentMsg(t, "user", "hello"))
-	srcSM2.AppendAgentMessage(newTestAgentMsg(t, "assistant", "world"))
-	srcFile2 := srcSM2.GetSessionFile()
-
-	// Fork from the session with an assistant - file should be written
-	forkSM, err := ForkFrom(srcFile2, dstDir, sessionsDir)
-	if err != nil {
-		t.Fatalf("ForkFrom failed: %v", err)
-	}
-	forkFile := forkSM.GetSessionFile()
-	if _, err := os.Stat(forkFile); os.IsNotExist(err) {
-		t.Error("expected fork file to be written when source has assistant message")
-	}
-}
-
 func TestListAllSessions(t *testing.T) {
 	agentDir := t.TempDir()
 

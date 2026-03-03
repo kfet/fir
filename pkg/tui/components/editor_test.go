@@ -579,6 +579,23 @@ func TestEditor_History_EmptyIgnored(t *testing.T) {
 // Render tests
 // ---------------------------------------------------------------------------
 
+func TestEditor_BorderSingleEscape(t *testing.T) {
+	// Regression: border was repeating a per-character colored "─" string,
+	// producing hundreds of redundant ANSI escapes that corrupted tmux output.
+	e := newTestEditor()
+	lines := e.Render(80)
+	top := lines[0]
+	bottom := lines[len(lines)-1]
+	// Each border should contain at most 2 SGR escape sequences (open + close),
+	// not one pair per dash character.
+	for _, border := range []string{top, bottom} {
+		count := strings.Count(border, "\x1b[")
+		if count > 4 {
+			t.Errorf("border has %d escape sequences (expected ≤4), line: %q", count, border)
+		}
+	}
+}
+
 func TestEditor_RenderEmpty(t *testing.T) {
 	e := newTestEditor()
 	lines := e.Render(40)

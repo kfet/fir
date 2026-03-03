@@ -2,29 +2,28 @@
 
 ## [Unreleased]
 
+### Fixed
+- Fix ANSI escape sequence corruption in tmux: editor border lines no longer repeat per-character SGR color escapes; the entire border is now colored as a single string, matching DynamicBorder behavior
+
+## [0.12.0] - 2026-03-03
+
 ### Added
-- `--offline` flag and `FIR_OFFLINE` env var to disable startup network operations (version check)
-- Sonnet 4.6 adaptive thinking support (Anthropic and Bedrock providers)
-- Redacted thinking block handling: safety-redacted thinking is preserved for same-model replay and stripped for cross-model
-- `ToolSnippets` and `PromptGuidelines` in system prompt builder for extension tool descriptions and custom guidelines
-- `UnregisterProvider` on model registry and OAuth registry for clean provider lifecycle
-- `PromptSnippet` and `PromptGuidelines` fields on extension `ToolDefinition`
+- `--login <provider>` CLI flag for interactive OAuth login, used by ACP terminal auth so clients like Zed can spawn a terminal for the login flow
+- ACP auth: terminal auth methods for all OAuth providers; when the client advertises `_meta["terminal-auth"]` capability (like Zed), auth methods include `_meta["terminal-auth"]` with command/args so the client spawns `fir --login <provider>` in an interactive terminal (matches Claude Agent's pattern)
+- Local copy of ACP auth-methods RFD spec in `docs/acp-spec/rfd-auth-methods.md`
 - Builtin `self` skill documenting fir configuration, modes, auth, extensions, skills, and full `settings.json` reference; kept in sync by tests that reflect on the `Settings` struct and parse the example JSON
 - Builtin extensions: extensions in `builtin_extensions/` with `# --- / builtin: true / # ---` comment frontmatter are embedded in the binary and auto-discovered at lowest priority (shadowed by global/project extensions)
 
 ### Fixed
-- TOCTOU race in `ModelRegistry.UnregisterProvider`: eliminated double lock/unlock pattern
-- Potential deadlock in `ModelRegistry.Refresh`: external registry resets now happen outside `r.mu` lock
-- Extension tools now populate `toolSnippets`/`promptGuidelines` on the agent session via `RegisterToolPromptMetadata`
-- Temperature no longer sent with Anthropic thinking mode (incompatible with extended thinking)
-- Z.ai thinking now uses `enable_thinking` instead of `thinking` param (matches upstream change)
-- xhigh thinking level clamped to "high" for Sonnet 4.6 (max only valid on Opus 4.6)
-- Skip interleaved-thinking beta header for adaptive thinking models (deprecated/redundant)
-- Guard nil OpenAI choices array in streaming response
-- Session fork defers file write when no assistant message present (prevents duplicate headers)
-- Ignore SIGINT while process is suspended (Ctrl+Z) to prevent accidental kill
-- Use alt+v for image paste on Windows (ctrl+v conflicts with terminal paste)
-- `ModelRegistry.Refresh` now resets API/OAuth registrations before reapplying dynamic providers
+- Fix ANSI escape sequence corruption in tmux: only emit OSC 8 hyperlink reset on lines that contain hyperlinks, avoiding tmux OSC parsing issues that caused `8;2;R;G;Bm` fragments to appear as visible text in border lines
+- ACP OAuth: GitHub Copilot and other device-code providers now work via `authenticate` — removed incorrect `UsesCallbackServer()` gate that blocked non-callback providers, added `OnPrompt` callback for providers that need it
+- ACP OAuth: all OAuth providers now offered as `agent` type (not `terminal`) so clients without terminal-auth can still trigger the flow
+- ACP auth: model registries are now refreshed after successful OAuth or env var authentication so newly available models appear immediately
+- ACP auth: provider list is now stable-ordered (OAuth providers sorted by ID); previously map iteration caused random reordering on each initialize
+- ACP auth: env_var auth methods hidden when client supports terminal-auth (e.g. Zed) since Zed renders them as non-functional buttons
+- ACP auth: prompt errors now surface as JSON-RPC errors (AUTH_REQUIRED -32000 for auth failures) instead of being silently swallowed
+- ACP auth: tests no longer trigger real Anthropic OAuth network calls
+- ACP OAuth authentication: `--login` now saves credentials to the correct path (`auth.json`) so ACP mode can find them after terminal auth completes
 - Google OAuth (Antigravity/Gemini CLI) and OpenAI Codex: no longer shows "Paste the redirect URL" prompt when browser callback succeeds; manual input is deferred 3 seconds, giving the browser flow time to complete first
 
 ## [0.11.0] - 2026-03-02

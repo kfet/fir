@@ -184,8 +184,6 @@ type AgentSession struct {
 
 	// System prompt
 	baseSystemPrompt string
-	toolSnippets     map[string]string
-	promptGuidelines []string
 
 	// Bash execution
 	bashCancel   context.CancelFunc
@@ -487,11 +485,9 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
-		Skills:           skills,
-		ContextFiles:     contextFiles,
-		ToolSnippets:     s.toolSnippets,
-		PromptGuidelines: s.promptGuidelines,
-		Cwd:              s.cwd,
+		Skills:       skills,
+		ContextFiles: contextFiles,
+		Cwd:          s.cwd,
 	})
 
 	// Apply custom system prompt override
@@ -505,23 +501,6 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	s.baseSystemPrompt = prompt
-}
-
-// RegisterToolPromptMetadata adds a tool's prompt snippet and guidelines to the
-// system prompt builder and rebuilds the system prompt. This is called when
-// extension tools are registered at runtime.
-func (s *AgentSession) RegisterToolPromptMetadata(toolName, snippet string, guidelines []string) {
-	if snippet != "" {
-		if s.toolSnippets == nil {
-			s.toolSnippets = make(map[string]string)
-		}
-		s.toolSnippets[toolName] = snippet
-	}
-	if len(guidelines) > 0 {
-		s.promptGuidelines = append(s.promptGuidelines, guidelines...)
-	}
-	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 }
 
 // expandSkillCommand expands /skill:<name> commands into skill XML blocks.

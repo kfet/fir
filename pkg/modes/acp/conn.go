@@ -81,6 +81,15 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 					"resume": map[string]any{},
 				}
 			}
+			// Replace authMethods with extended format (RFD auth-methods).
+			// The SDK's AuthMethod only has id/name/description/_meta, but the RFD
+			// defines type/varName/link/args/env as top-level fields.
+			pa.mu.Lock()
+			extMethods := pa.authMethods
+			pa.mu.Unlock()
+			if len(extMethods) > 0 {
+				respMap["authMethods"] = extMethods
+			}
 			return respMap, nil
 
 		case "session/cancel":

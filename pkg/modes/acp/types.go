@@ -109,6 +109,8 @@ type ExtendedAuthMethod struct {
 	Args []string `json:"args,omitempty"`
 	// Env are additional environment variables (terminal type only).
 	Env map[string]string `json:"env,omitempty"`
+	// Meta is the _meta extension point, used for terminal-auth capability negotiation.
+	Meta map[string]any `json:"_meta,omitempty"`
 }
 
 // AuthRequiredError is the JSON-RPC error code for auth-required (-32000).

@@ -47,14 +47,8 @@ type SendUserMessageOptions struct {
 type ToolDefinition struct {
 	Name        string
 	Description string
-	// PromptSnippet is an optional one-line snippet for the system prompt's
-	// Available tools section. Falls back to Description when empty.
-	PromptSnippet string
-	// PromptGuidelines are optional guideline bullets appended to the system
-	// prompt's Guidelines section when this tool is active.
-	PromptGuidelines []string
-	Parameters       map[string]any
-	Execute          ToolExecuteFunc
+	Parameters  map[string]any
+	Execute     ToolExecuteFunc
 }
 
 // ToolExecuteFunc executes a tool.

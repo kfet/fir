@@ -450,9 +450,6 @@ func parseOpenAISSE(
 			continue
 		}
 
-		if len(chunk.Choices) == 0 {
-			continue
-		}
 		choice := chunk.Choices[0]
 
 		if choice.FinishReason != nil {
@@ -647,14 +644,19 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	// Thinking / reasoning format
 	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
 		switch compat.ThinkingFormat {
-		case ai.ThinkingFormatZAI, ai.ThinkingFormatQwen:
-			// Both Z.ai and Qwen use enable_thinking: boolean
+		case ai.ThinkingFormatZAI:
+			// Z.ai uses binary thinking: { type: "enabled" | "disabled" }
+			body["thinking"] = map[string]any{"type": "enabled"}
+		case ai.ThinkingFormatQwen:
 			body["enable_thinking"] = true
 		default:
 			if compat.SupportsReasoningEffort {
 				body["reasoning_effort"] = string(options.ReasoningEffort)
 			}
 		}
+	} else if compat.ThinkingFormat == ai.ThinkingFormatZAI && model.Reasoning {
+		// Must explicitly disable since z.ai defaults to thinking enabled
+		body["thinking"] = map[string]any{"type": "disabled"}
 	}
 
 	// OpenRouter provider routing preferences

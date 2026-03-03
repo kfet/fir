@@ -10,7 +10,3 @@ import (
 func suspendSignal() os.Signal {
 	return syscall.SIGTSTP
 }
-
-func continueSignal() os.Signal {
-	return syscall.SIGCONT
-}

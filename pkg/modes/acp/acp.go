@@ -155,7 +155,7 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	}
 	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
-	authMethods := buildAuthMethods(authStorage, modelRegistry)
+	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
 
 	pa.mu.Lock()
 	pa.authMethods = authMethods
@@ -266,7 +266,17 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		opts = &core.PromptOptions{Images: images}
 	}
 	if err := entry.session.Prompt(text, opts); err != nil {
-		pa.sendAgentMessage(string(params.SessionId), fmt.Sprintf("Error: %v", err))
+		errMsg := err.Error()
+		// Surface auth errors as AUTH_REQUIRED so the client shows the login UI.
+		if strings.Contains(errMsg, "no model selected") ||
+			strings.Contains(errMsg, "API key") ||
+			strings.Contains(errMsg, "authentication") ||
+			strings.Contains(errMsg, "unauthorized") ||
+			strings.Contains(errMsg, "401") {
+			return acpsdk.PromptResponse{}, acpsdk.NewAuthRequired(map[string]any{"error": errMsg})
+		}
+		// Return other errors as internal errors so the client displays them.
+		return acpsdk.PromptResponse{}, err
 	}
 
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
