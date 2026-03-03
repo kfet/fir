@@ -2487,6 +2487,46 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 	return session
 }
 
+func TestAgentSession_SwitchSession_RestoresThinkingLevel_NoSpuriousEntry(t *testing.T) {
+	// Build a session file that contains a thinking_level_change entry.
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+
+	sm := NewSessionManager(tmpDir, sessDir)
+	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
+		Provider: "test",
+		Model:    "test-model",
+	}))
+	sm.AppendThinkingLevelChange("high")
+	sessionFile := sm.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("expected session file to be set")
+	}
+	entryCountBefore := len(sm.GetEntries())
+
+	// Create an active session and switch to the saved file.
+	activeSession := newTestAgentSessionFromFile(t, sessionFile)
+	defer activeSession.Close()
+
+	if err := activeSession.SwitchSession(sessionFile); err != nil {
+		t.Fatalf("SwitchSession failed: %v", err)
+	}
+
+	// Thinking level should be restored.
+	if got := activeSession.ThinkingLevel(); got != "high" {
+		t.Errorf("expected thinking level 'high' after SwitchSession, got %q", got)
+	}
+
+	// No new entries should have been appended to the session file.
+	entryCountAfter := len(activeSession.SessionManager.GetEntries())
+	if entryCountAfter != entryCountBefore {
+		t.Errorf("SwitchSession wrote %d new session entries (want 0); spurious entries break idempotent resume",
+			entryCountAfter-entryCountBefore)
+	}
+}
+
 func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 	// Build a session file that contains a model_change entry.
 	tmpDir := t.TempDir()

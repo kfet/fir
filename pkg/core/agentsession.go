@@ -955,9 +955,10 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 		}
 	}
 
-	// Apply session thinking level if available
+	// Restore thinking level from the session without writing a new
+	// thinking_level_change entry (we are loading, not changing).
 	if ctx.ThinkingLevel != "" {
-		s.SetThinkingLevel(ctx.ThinkingLevel)
+		s.Agent.SetThinkingLevel(agent.ThinkingLevel(ctx.ThinkingLevel))
 	}
 
 	// Rebuild system prompt

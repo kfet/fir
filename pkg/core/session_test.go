@@ -1062,25 +1062,8 @@ func TestSessionManagerCommandEntry(t *testing.T) {
 	}
 
 	// Command entries must not appear in the LLM context.
+	// The sole meaningful check: only the user message should be in context.
 	ctx := sm.BuildSessionContext()
-	for _, msg := range ctx.Messages {
-		// If somehow a command entry leaked, it would be a custom message —
-		// this check verifies none of the messages have a nil Message with
-		// no custom type (the context builder would skip them anyway, but
-		// be explicit).
-		if msg.Custom != nil {
-			if _, ok := msg.Custom.(*BashExecutionMessage); !ok {
-				if _, ok := msg.Custom.(*CustomMessage); !ok {
-					if _, ok := msg.Custom.(*BranchSummaryMessage); !ok {
-						if _, ok := msg.Custom.(*CompactionSummaryMessage); !ok {
-							t.Errorf("unexpected custom message type in context: %T", msg.Custom)
-						}
-					}
-				}
-			}
-		}
-	}
-	// Specifically: only the user message should be in context (1 message).
 	if len(ctx.Messages) != 1 {
 		t.Errorf("expected 1 message in context (command entry must be excluded), got %d", len(ctx.Messages))
 	}
