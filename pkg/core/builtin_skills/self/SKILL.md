@@ -64,11 +64,13 @@ A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extens
 
 Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e` flags, or `--no-extensions`.
 
+Builtin extensions (notify, tmuxspinner, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
+
 ## Skills
 
 Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML frontmatter. They provide specialized workflows the agent can follow. Skills are auto-discovered from project, user, and builtin directories.
 
-Use `/skills` to list loaded skills, `/reload` to pick up changes.
+Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills and `fir skills install <name>` to extract a builtin skill for customisation.
 
 ## Key Concepts
 

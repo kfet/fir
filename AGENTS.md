@@ -10,6 +10,8 @@ Do not ignore any issues, address them promptly, even if preexisting. Do not pos
 
 Do not leave incomplete or stubbed code. Ensure all code is functional and tested.
 
+When adding or changing user-visible features (CLI flags, subcommands, slash commands, settings), update the `self` skill (`.fir/skills/self/SKILL.md`) to keep it accurate.
+
 ## Git
 
 Git commands that require an editor (e.g. `git rebase --continue`, `git commit`, `git merge --continue`) will open vim non-interactively and hang. Always prefix such commands with `GIT_EDITOR=true` to accept the default message without opening an editor:

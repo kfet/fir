@@ -33,8 +33,8 @@ For private repos, the script uses `gh` if installed, or `GITHUB_TOKEN`:
 gh auth login
 curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
 
-# Option 2: token
-GITHUB_TOKEN=ghp_... curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+# Option 2: token (use gh to supply it automatically)
+curl -fsSL -H "Authorization: token $(gh auth token)" https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
 ```
 
 ### Go install
