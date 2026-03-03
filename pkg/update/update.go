@@ -177,8 +177,11 @@ func SelfUpdate(ctx context.Context, rel *Release) error {
 		return fmt.Errorf("no release assets available")
 	}
 
-	// Determine source — try unauthenticated first, fall back to gh token.
-	source, err := newGitHubSource("")
+	// Use the same auth strategy as detection: try unauthenticated, fall back
+	// to gh token. We pick the token up front to avoid a wasted unauthenticated
+	// attempt on private repos.
+	token := ghToken(ctx)
+	source, err := newGitHubSource(token)
 	if err != nil {
 		return err
 	}
@@ -192,25 +195,8 @@ func SelfUpdate(ctx context.Context, rel *Release) error {
 		return fmt.Errorf("locate current executable: %w", err)
 	}
 
-	err = updater.UpdateTo(ctx, rel.inner, exePath)
-	if err != nil {
-		// Retry with gh token for private repos.
-		token := ghToken(ctx)
-		if token == "" {
-			return err
-		}
-		source, err2 := newGitHubSource(token)
-		if err2 != nil {
-			return err
-		}
-		updater, err2 = newUpdater(source)
-		if err2 != nil {
-			return err
-		}
-		err = updater.UpdateTo(ctx, rel.inner, exePath)
-		if err != nil {
-			return err
-		}
+	if err := updater.UpdateTo(ctx, rel.inner, exePath); err != nil {
+		return err
 	}
 	return nil
 }
