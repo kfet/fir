@@ -8,10 +8,14 @@
 - `ModelRegistry.AddModel` — inject a model by value (useful for tests and dynamic registration)
 - Extensions can now register slash commands via `InitResult.Commands`; users type `/name [args]` in the TUI and fir dispatches `hook/command` to the owning extension, showing any returned message; Python SDK gains a `@fir_ext.command()` decorator
 - ACP session resume now replays full conversation history (user messages, assistant text/thinking, tool calls with results) to the client via session update notifications, so past sessions are fully visible in the client UI
+
+### Fixed
+- Bump `SDKVersion` to 2 so `fir_ext.command()` is actually extracted to the cache; without this, extensions crashed with `AttributeError` and extension commands were silently skipped
 - ACP `session/resume` response now includes `configOptions` (thinking level, model selectors) matching `session/new` behavior
 - `session_named` extension event emitted when session name changes or a named session is loaded; tmuxspinner extension now updates the tmux window name to match the session name
 
 ### Fixed
+- ACP mode: restore extension slash commands — `sendAvailableCommands` now includes extension-registered commands and `handleSlashCommand` dispatches them via `Manager.DispatchCommand`; regression from Go extension system removal
 - `SwitchSession` (`/resume`) now restores the model recorded in the resumed session, not just the thinking level
 - tmuxspinner: session name now appended to the original window name rather than fully replacing it (e.g. `bash fix-bug ⠋` instead of `fix-bug ⠋`)
 - tmuxspinner: spinner not always stopped on exit — restore window name immediately in `stop()`, add `atexit`/`SIGTERM` handlers as safety net, and add 250ms grace period in `Manager.Stop()` so extensions can process `session_shutdown` before being killed
