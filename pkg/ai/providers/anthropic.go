@@ -78,12 +78,6 @@ func supportsCompaction(modelID string) bool {
 		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 
-// supportsServerTools returns true for models that support Anthropic server-side tools.
-// All current Claude models support web_search, web_fetch, and code_execution.
-func supportsServerTools(modelID string) bool {
-	return strings.Contains(modelID, "claude-")
-}
-
 func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
 	switch level {
 	case ai.ThinkingMinimal, ai.ThinkingLow:
@@ -438,7 +432,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 
 	// Add server tool betas if needed.
-	if options != nil && supportsServerTools(model.ID) {
+	if options != nil {
 		seen := map[string]bool{}
 		for _, st := range options.ServerTools {
 			var beta string
@@ -549,12 +543,10 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	if len(ctx.Tools) > 0 {
 		allTools = append(allTools, convertAnthropicTools(ctx.Tools, oauthToken)...)
 	}
-	if options != nil && supportsServerTools(model.ID) {
+	if options != nil {
 		for _, st := range options.ServerTools {
 			allTools = append(allTools, convertAnthropicServerTool(st))
 		}
-	} else if options != nil && len(options.ServerTools) > 0 {
-		firlog.Debug("skipping server tools — model does not support them", "model", model.ID)
 	}
 	if len(allTools) > 0 {
 		params["tools"] = allTools

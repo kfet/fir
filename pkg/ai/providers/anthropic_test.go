@@ -1923,22 +1923,26 @@ func TestAnthropic_SupportsCompaction(t *testing.T) {
 	}
 }
 
-func TestAnthropic_SupportsServerTools(t *testing.T) {
-	tests := []struct {
-		model string
-		want  bool
-	}{
-		{"claude-opus-4-6", true},
-		{"claude-sonnet-4-20250514", true},
-		{"claude-haiku-4-5-20251001", true},
-		{"gpt-4o", false},
-		{"gemini-2.0-flash", false},
+func TestAnthropic_ServerToolsSentForAnyModel(t *testing.T) {
+	// Any model using the Anthropic Messages API gets server tools if configured.
+	model := &ai.Model{ID: "custom-model", BaseURL: "https://my-proxy.example.com", MaxTokens: 8192}
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
 	}
-	for _, tt := range tests {
-		got := supportsServerTools(tt.model)
-		if got != tt.want {
-			t.Errorf("supportsServerTools(%q) = %v, want %v", tt.model, got, tt.want)
-		}
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "web_search_20250305"},
+		},
+	}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+	tools, ok := params["tools"].([]map[string]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected 1 server tool for custom model, got %v", params["tools"])
+	}
+	if tools[0]["type"] != "web_search_20250305" {
+		t.Errorf("expected web_search_20250305, got %v", tools[0]["type"])
 	}
 }
 
@@ -1958,20 +1962,18 @@ func TestAnthropic_CompactionSkippedForUnsupportedModel(t *testing.T) {
 	}
 }
 
-func TestAnthropic_ServerToolsSkippedForNonClaudeModel(t *testing.T) {
-	model := &ai.Model{ID: "gpt-4o", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
-	ctx := ai.Context{
-		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
-	}
+func TestAnthropic_ServerToolsBetaHeaders_AnyModel(t *testing.T) {
+	// Beta headers are added for any model using the Anthropic API.
+	model := &ai.Model{ID: "my-custom-claude", BaseURL: "https://proxy.example.com"}
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
 		ServerTools: []ai.AnthropicServerTool{
 			{Type: "web_search_20250305"},
 		},
 	}
 
-	params := buildAnthropicParams(model, ctx, false, opts)
-	if _, ok := params["tools"]; ok {
-		t.Error("expected no tools for non-Claude model")
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	if !strings.Contains(beta, "web-search-2025-03-05") {
+		t.Errorf("expected web-search beta for custom model, got %s", beta)
 	}
 }
