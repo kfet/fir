@@ -164,7 +164,12 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "steeringMode": "one-at-a-time",      // "one-at-a-time" or "auto"
   "followUpMode": "one-at-a-time",      // "one-at-a-time" or "auto"
   "transport": "sse",                    // Transport protocol
-  "serverTools": ["web_search"],         // Anthropic server-side tools: "web_search", "code_execution"
+  "serverTools": ["web_search"],         // Anthropic server-side tools: "web_search", "web_fetch", "code_execution"
+  "serverCompaction": {                  // Anthropic server-side context compaction
+    "enabled": true,
+    "triggerTokens": 150000,             // When to trigger (min 50000, default 150000)
+    "instructions": ""                   // Custom summarization prompt (replaces default)
+  },
 
   // Internal (managed by fir)
   "lastChangelogVersion": "",            // Last changelog version shown to user

@@ -1591,8 +1591,9 @@ func TestAnthropic_ServerTools_BetaHeaders(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
 	opts := &ai.StreamOptions{
 		ServerTools: []ai.AnthropicServerTool{
-			{Type: "web_search_20250305"},
-			{Type: "code_execution_20250522"},
+			{Type: "web_search_20260209"},
+			{Type: "web_fetch_20260209"},
+			{Type: "code_execution_20250825"},
 		},
 	}
 
@@ -1601,7 +1602,10 @@ func TestAnthropic_ServerTools_BetaHeaders(t *testing.T) {
 	if !strings.Contains(beta, "web-search-2025-03-05") {
 		t.Errorf("expected web-search beta in header, got %s", beta)
 	}
-	if !strings.Contains(beta, "code-execution-2025-05-22") {
+	if !strings.Contains(beta, "web-fetch-2025-09-10") {
+		t.Errorf("expected web-fetch beta in header, got %s", beta)
+	}
+	if !strings.Contains(beta, "code-execution-2025-08-25") {
 		t.Errorf("expected code-execution beta in header, got %s", beta)
 	}
 }
@@ -1610,8 +1614,8 @@ func TestAnthropic_ServerTools_BetaHeaders_NoDuplicates(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
 	opts := &ai.StreamOptions{
 		ServerTools: []ai.AnthropicServerTool{
-			{Type: "web_search_20250305", Name: "search1"},
-			{Type: "web_search_20250305", Name: "search2"},
+			{Type: "web_search_20260209", Name: "search1"},
+			{Type: "web_search_20260209", Name: "search2"},
 		},
 	}
 
@@ -1807,5 +1811,95 @@ func TestAnthropic_ConvertServerTool_DefaultName(t *testing.T) {
 	tool2 := convertAnthropicServerTool(st2)
 	if tool2["name"] != "my_search" {
 		t.Errorf("expected name my_search, got %v", tool2["name"])
+	}
+}
+
+func TestAnthropic_CompactionParams(t *testing.T) {
+	model := &ai.Model{ID: "claude-opus-4-6", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
+	}
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		Compaction: &ai.AnthropicCompaction{
+			Enabled:       true,
+			TriggerTokens: 100000,
+			Instructions:  "Keep code snippets and variable names.",
+		},
+	}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+
+	cm, ok := params["context_management"].(map[string]any)
+	if !ok {
+		t.Fatal("expected context_management param")
+	}
+	edits, ok := cm["edits"].([]map[string]any)
+	if !ok || len(edits) != 1 {
+		t.Fatal("expected exactly 1 compaction edit")
+	}
+	edit := edits[0]
+	if edit["type"] != "compact_20260112" {
+		t.Errorf("expected type=compact_20260112, got %v", edit["type"])
+	}
+	trigger, _ := edit["trigger"].(map[string]any)
+	if trigger == nil || trigger["value"] != 100000 {
+		t.Errorf("expected trigger value=100000, got %v", trigger)
+	}
+	if edit["instructions"] != "Keep code snippets and variable names." {
+		t.Errorf("unexpected instructions: %v", edit["instructions"])
+	}
+}
+
+func TestAnthropic_CompactionBetaHeader(t *testing.T) {
+	model := &ai.Model{ID: "claude-opus-4-6", BaseURL: "https://api.anthropic.com"}
+	opts := &ai.StreamOptions{
+		Compaction: &ai.AnthropicCompaction{Enabled: true},
+	}
+
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	if !strings.Contains(beta, "compact-2026-01-12") {
+		t.Errorf("expected compact beta in header, got %s", beta)
+	}
+}
+
+func TestAnthropic_CompactionDisabled_NoBeta(t *testing.T) {
+	model := &ai.Model{ID: "claude-opus-4-6", BaseURL: "https://api.anthropic.com"}
+	opts := &ai.StreamOptions{
+		Compaction: &ai.AnthropicCompaction{Enabled: false},
+	}
+
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	if strings.Contains(beta, "compact") {
+		t.Errorf("did not expect compact beta when disabled, got %s", beta)
+	}
+}
+
+func TestAnthropic_FormatWebFetchResult(t *testing.T) {
+	cb := map[string]any{
+		"type": "web_fetch_tool_result",
+		"content": []any{
+			map[string]any{
+				"type":    "web_fetch_result",
+				"url":     "https://golang.org/doc/tutorial",
+				"content": "Welcome to the Go tutorial...",
+			},
+		},
+	}
+	text := formatWebFetchResult(cb)
+	if !strings.Contains(text, "https://golang.org/doc/tutorial") {
+		t.Errorf("expected URL in output, got %q", text)
+	}
+	if !strings.Contains(text, "Welcome to the Go tutorial") {
+		t.Errorf("expected content in output, got %q", text)
+	}
+}
+
+func TestAnthropic_CompactionStopReason(t *testing.T) {
+	got := mapAnthropicStopReason("compaction")
+	if got != ai.StopReasonStop {
+		t.Errorf("expected StopReasonStop for compaction, got %v", got)
 	}
 }

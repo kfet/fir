@@ -54,6 +54,9 @@ type AgentLoopConfig struct {
 	// ServerTools configures Anthropic server-side tools (web search, code execution, etc.).
 	// Only used when the model provider is Anthropic.
 	ServerTools []ai.AnthropicServerTool
+
+	// Compaction configures Anthropic server-side context compaction.
+	Compaction *ai.AnthropicCompaction
 }
 
 // ThinkingLevel is an alias for ai.ThinkingLevel so all packages use the same type.

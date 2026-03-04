@@ -142,18 +142,18 @@ const (
 
 // --- Stream options ---
 
-// AnthropicServerTool configures a server-side tool (e.g. web_search, code_execution)
+// AnthropicServerTool configures a server-side tool (e.g. web_search, web_fetch, code_execution)
 // that Anthropic's API executes on behalf of the model.
 type AnthropicServerTool struct {
-	// Type is the tool type identifier, e.g. "web_search_20250305" or "code_execution_20250522".
+	// Type is the tool type identifier, e.g. "web_search_20260209" or "code_execution_20250825".
 	Type string `json:"type"`
 	// Name is an optional display name override.
 	Name string `json:"name,omitempty"`
 	// MaxUses limits how many times the tool can be used per turn (0 = unlimited).
 	MaxUses int `json:"max_uses,omitempty"`
-	// AllowedDomains restricts web search to specific domains (web_search only, max 10).
+	// AllowedDomains restricts search/fetch to specific domains (web_search/web_fetch only, max 10).
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
-	// BlockedDomains prevents web search from using specific domains (web_search only, max 25).
+	// BlockedDomains prevents search/fetch from using specific domains (web_search/web_fetch only, max 25).
 	BlockedDomains []string `json:"blocked_domains,omitempty"`
 	// UserLocation sets geographic context for web search (web_search only).
 	UserLocation *AnthropicUserLocation `json:"user_location,omitempty"`
@@ -161,11 +161,22 @@ type AnthropicServerTool struct {
 
 // AnthropicUserLocation provides geographic context for web search.
 type AnthropicUserLocation struct {
-	Type      string `json:"type"` // always "approximate"
-	City      string `json:"city,omitempty"`
-	Region    string `json:"region,omitempty"`
-	Country   string `json:"country,omitempty"`
-	Timezone  string `json:"timezone,omitempty"`
+	Type     string `json:"type"` // always "approximate"
+	City     string `json:"city,omitempty"`
+	Region   string `json:"region,omitempty"`
+	Country  string `json:"country,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// AnthropicCompaction configures server-side context compaction.
+type AnthropicCompaction struct {
+	// Enabled turns on server-side compaction.
+	Enabled bool `json:"enabled"`
+	// TriggerTokens sets the input token threshold to trigger compaction (min 50000).
+	// 0 uses the API default (150000).
+	TriggerTokens int `json:"triggerTokens,omitempty"`
+	// Instructions is a custom summarization prompt. Replaces the default entirely.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // StreamOptions are the base options shared by all streaming calls.
@@ -182,6 +193,7 @@ type StreamOptions struct {
 	ToolChoice      string                `json:"toolChoice,omitempty"`
 	Metadata        map[string]any        `json:"metadata,omitempty"`
 	ServerTools     []AnthropicServerTool `json:"serverTools,omitempty"`
+	Compaction      *AnthropicCompaction  `json:"compaction,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.

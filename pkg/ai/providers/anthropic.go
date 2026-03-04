@@ -88,7 +88,7 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
 
 func mapAnthropicStopReason(reason string) ai.StopReason {
 	switch reason {
-	case "end_turn", "pause_turn", "stop_sequence":
+	case "end_turn", "pause_turn", "stop_sequence", "compaction":
 		return ai.StopReasonStop
 	case "max_tokens":
 		return ai.StopReasonLength
@@ -238,6 +238,12 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				case "code_execution_tool_result":
 					// Server-side code execution results — format as text.
 					text := formatCodeExecutionResult(cb)
+					output.Content = append(output.Content, ai.NewTextContent(text))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+				case "web_fetch_tool_result":
+					// Server-side web fetch results — format as text.
+					text := formatWebFetchResult(cb)
 					output.Content = append(output.Content, ai.NewTextContent(text))
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
@@ -426,13 +432,18 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 			switch {
 			case strings.HasPrefix(st.Type, "web_search"):
 				beta = "web-search-2025-03-05"
+			case strings.HasPrefix(st.Type, "web_fetch"):
+				beta = "web-fetch-2025-09-10"
 			case strings.HasPrefix(st.Type, "code_execution"):
-				beta = "code-execution-2025-05-22"
+				beta = "code-execution-2025-08-25"
 			}
 			if beta != "" && !seen[beta] {
 				seen[beta] = true
 				betaFeatures += "," + beta
 			}
+		}
+		if options.Compaction != nil && options.Compaction.Enabled {
+			betaFeatures += ",compact-2026-01-12"
 		}
 	}
 
@@ -561,6 +572,25 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 		default:
 			// Specific tool name
 			params["tool_choice"] = map[string]any{"type": "tool", "name": options.ToolChoice}
+		}
+	}
+
+	// Server-side compaction
+	if options != nil && options.Compaction != nil && options.Compaction.Enabled {
+		edit := map[string]any{
+			"type": "compact_20260112",
+		}
+		if options.Compaction.TriggerTokens > 0 {
+			edit["trigger"] = map[string]any{
+				"type":  "input_tokens",
+				"value": options.Compaction.TriggerTokens,
+			}
+		}
+		if options.Compaction.Instructions != "" {
+			edit["instructions"] = options.Compaction.Instructions
+		}
+		params["context_management"] = map[string]any{
+			"edits": []map[string]any{edit},
 		}
 	}
 
@@ -879,6 +909,38 @@ func formatWebSearchResult(cb map[string]any) string {
 			}
 			if snippet != "" {
 				b.WriteString(snippet)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// formatWebFetchResult formats a web_fetch_tool_result content block as readable text.
+func formatWebFetchResult(cb map[string]any) string {
+	content, _ := cb["content"].([]any)
+	if len(content) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, item := range content {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		itemType, _ := m["type"].(string)
+		switch itemType {
+		case "web_fetch_result":
+			url, _ := m["url"].(string)
+			text, _ := m["content"].(string)
+			if url != "" {
+				b.WriteString("Fetched: ")
+				b.WriteString(url)
+				b.WriteString("\n")
+			}
+			if text != "" {
+				b.WriteString(text)
 				b.WriteString("\n")
 			}
 			b.WriteString("\n")

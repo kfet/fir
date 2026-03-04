@@ -212,3 +212,45 @@ func TestCreateAgentSessionOptions_Defaults(t *testing.T) {
 		t.Error("expected nil Model default")
 	}
 }
+
+func TestResolveServerTools_ShortNames(t *testing.T) {
+	tools := resolveServerTools([]string{"web_search", "web_fetch", "code_execution"})
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(tools))
+	}
+	if tools[0].Type != "web_search_20250305" {
+		t.Errorf("expected web_search_20250305, got %s", tools[0].Type)
+	}
+	if tools[1].Type != "web_fetch_20250910" {
+		t.Errorf("expected web_fetch_20250910, got %s", tools[1].Type)
+	}
+	if tools[2].Type != "code_execution_20250825" {
+		t.Errorf("expected code_execution_20250825, got %s", tools[2].Type)
+	}
+}
+
+func TestResolveServerTools_RawTypePassthrough(t *testing.T) {
+	tools := resolveServerTools([]string{"web_search_20260209"})
+	if len(tools) != 1 || tools[0].Type != "web_search_20260209" {
+		t.Errorf("expected raw type passthrough, got %v", tools)
+	}
+}
+
+func TestResolveServerTools_DeduplicateCodeExecution(t *testing.T) {
+	// Dynamic filtering versions auto-inject code_execution, so explicit ones should be removed
+	tools := resolveServerTools([]string{"web_search_20260209", "code_execution"})
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool (code_execution removed), got %d: %v", len(tools), tools)
+	}
+	if tools[0].Type != "web_search_20260209" {
+		t.Errorf("expected web_search_20260209, got %s", tools[0].Type)
+	}
+}
+
+func TestResolveServerTools_NoDeduplicateWithBasicVersions(t *testing.T) {
+	// Basic versions don't auto-inject, so keep code_execution
+	tools := resolveServerTools([]string{"web_search", "code_execution"})
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(tools))
+	}
+}

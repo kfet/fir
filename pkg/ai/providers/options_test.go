@@ -107,3 +107,20 @@ func TestBuildBaseOptions_ServerToolsPassThrough(t *testing.T) {
 	assert.Equal(t, "web_search_20250305", opts.ServerTools[0].Type)
 	assert.Equal(t, "code_execution_20250522", opts.ServerTools[1].Type)
 }
+
+func TestBuildBaseOptions_CompactionPassThrough(t *testing.T) {
+	model := &ai.Model{MaxTokens: 8192}
+	simple := &ai.SimpleStreamOptions{
+		StreamOptions: ai.StreamOptions{
+			ApiKey: "test-key",
+			Compaction: &ai.AnthropicCompaction{
+				Enabled:       true,
+				TriggerTokens: 100000,
+			},
+		},
+	}
+	opts := BuildBaseOptions(model, simple, "")
+	assert.NotNil(t, opts.Compaction)
+	assert.True(t, opts.Compaction.Enabled)
+	assert.Equal(t, 100000, opts.Compaction.TriggerTokens)
+}

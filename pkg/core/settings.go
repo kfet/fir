@@ -16,6 +16,13 @@ type CompactionSettings struct {
 	KeepRecentTokens *int  `json:"keepRecentTokens,omitempty"`
 }
 
+// ServerCompactionSettings controls Anthropic server-side context compaction.
+type ServerCompactionSettings struct {
+	Enabled       *bool  `json:"enabled,omitempty"`
+	TriggerTokens *int   `json:"triggerTokens,omitempty"`
+	Instructions  string `json:"instructions,omitempty"`
+}
+
 // BranchSummarySettings controls branch summary behavior.
 type BranchSummarySettings struct {
 	ReserveTokens *int `json:"reserveTokens,omitempty"`
@@ -88,6 +95,7 @@ type Settings struct {
 	ShowHardwareCursor    *bool                     `json:"showHardwareCursor,omitempty"`
 	Markdown              *MarkdownSettings          `json:"markdown,omitempty"`
 	ServerTools           []string                  `json:"serverTools,omitempty"`
+	ServerCompaction      *ServerCompactionSettings  `json:"serverCompaction,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -139,6 +147,17 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	}
 	if overrides.ServerTools != nil {
 		r.ServerTools = overrides.ServerTools
+	}
+	if overrides.ServerCompaction != nil {
+		if r.ServerCompaction == nil {
+			r.ServerCompaction = overrides.ServerCompaction
+		} else {
+			sc := *r.ServerCompaction
+			mergeBool(&sc.Enabled, overrides.ServerCompaction.Enabled)
+			mergeInt(&sc.TriggerTokens, overrides.ServerCompaction.TriggerTokens)
+			mergeStr(&sc.Instructions, overrides.ServerCompaction.Instructions)
+			r.ServerCompaction = &sc
+		}
 	}
 
 	// Nested struct pointers: merge field-by-field if both set, override wins if only override set
@@ -1128,4 +1147,11 @@ func (sm *SettingsManager) SetServerTools(tools []string) {
 	sm.globalSettings.ServerTools = tools
 	sm.markModified("serverTools")
 	sm.save()
+}
+
+// GetServerCompaction returns the Anthropic server-side compaction settings.
+func (sm *SettingsManager) GetServerCompaction() *ServerCompactionSettings {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.settings.ServerCompaction
 }

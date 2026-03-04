@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -232,6 +233,16 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		agentOpts.ServerTools = resolveServerTools(serverToolNames)
 	}
 
+	// Configure server-side compaction from settings (Anthropic only).
+	if sc := settingsManager.GetServerCompaction(); sc != nil && sc.Enabled != nil && *sc.Enabled {
+		c := &ai.AnthropicCompaction{Enabled: true}
+		if sc.TriggerTokens != nil {
+			c.TriggerTokens = *sc.TriggerTokens
+		}
+		c.Instructions = sc.Instructions
+		agentOpts.Compaction = c
+	}
+
 	a := agent.NewAgent(agentOpts)
 
 	// Restore messages or record initial state
@@ -315,21 +326,46 @@ func AllTools(cwd string) []agent.AgentTool {
 }
 
 // serverToolTypeMap maps short names to Anthropic server tool type identifiers.
+// Uses basic versions that work without code execution dependencies.
+// For dynamic filtering versions, use the raw type identifiers (e.g. "web_search_20260209").
 var serverToolTypeMap = map[string]string{
 	"web_search":     "web_search_20250305",
-	"code_execution": "code_execution_20250522",
+	"web_fetch":      "web_fetch_20250910",
+	"code_execution": "code_execution_20250825",
 }
 
 // resolveServerTools converts short tool names (from settings) to AnthropicServerTool structs.
+// Deduplicates code_execution when dynamic-filtering tool versions (20260209) auto-inject it.
 func resolveServerTools(names []string) []ai.AnthropicServerTool {
 	var tools []ai.AnthropicServerTool
+	hasDynamicFiltering := false
+	hasExplicitCodeExec := false
+
 	for _, name := range names {
 		toolType, ok := serverToolTypeMap[name]
 		if !ok {
-			// Allow raw type identifiers too (e.g. "web_search_20250305").
 			toolType = name
+		}
+		if strings.HasPrefix(toolType, "web_search_20260") || strings.HasPrefix(toolType, "web_fetch_20260") {
+			hasDynamicFiltering = true
+		}
+		if strings.HasPrefix(toolType, "code_execution") {
+			hasExplicitCodeExec = true
 		}
 		tools = append(tools, ai.AnthropicServerTool{Type: toolType})
 	}
+
+	// Dynamic filtering tool versions auto-inject code_execution server-side.
+	// Remove our explicit code_execution to avoid name conflicts.
+	if hasDynamicFiltering && hasExplicitCodeExec {
+		filtered := tools[:0]
+		for _, t := range tools {
+			if !strings.HasPrefix(t.Type, "code_execution") {
+				filtered = append(filtered, t)
+			}
+		}
+		tools = filtered
+	}
+
 	return tools
 }

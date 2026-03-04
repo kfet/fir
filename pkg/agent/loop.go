@@ -250,6 +250,7 @@ func streamAssistantResponse(
 			Temperature:     config.Temperature,
 			MaxTokens:       config.MaxTokens,
 			ServerTools:     config.ServerTools,
+			Compaction:      config.Compaction,
 		},
 		Reasoning:       config.Reasoning,
 		ThinkingBudgets: config.ThinkingBudgets,
