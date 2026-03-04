@@ -58,6 +58,9 @@ type AgentOptions struct {
 
 	// MaxRetryDelayMs caps how long to wait for server-requested retries.
 	MaxRetryDelayMs *int
+
+	// ServerTools configures Anthropic server-side tools (web search, code execution, etc.).
+	ServerTools []ai.AnthropicServerTool
 }
 
 // Agent orchestrates the agent loop with state management and event dispatch.
@@ -81,6 +84,7 @@ type Agent struct {
 	thinkingBudgets *ai.ThinkingBudgets
 	transport       ai.Transport
 	maxRetryDelayMs *int
+	serverTools     []ai.AnthropicServerTool
 
 	// idleCh is closed when the agent finishes processing.
 	idleCh chan struct{}
@@ -156,6 +160,9 @@ func NewAgent(opts AgentOptions) *Agent {
 	}
 	if opts.MaxRetryDelayMs != nil {
 		a.maxRetryDelayMs = opts.MaxRetryDelayMs
+	}
+	if len(opts.ServerTools) > 0 {
+		a.serverTools = opts.ServerTools
 	}
 
 	return a
@@ -570,6 +577,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 		Transport:        a.transport,
 		ThinkingBudgets:  a.thinkingBudgets,
 		MaxRetryDelayMs:  a.maxRetryDelayMs,
+		ServerTools:      a.serverTools,
 		ConvertToLLM:     a.convertToLLM,
 		TransformContext: a.transformCtx,
 		GetApiKey:        a.getApiKey,

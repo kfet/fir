@@ -87,6 +87,7 @@ type Settings struct {
 	AutocompleteMaxVisible *int                     `json:"autocompleteMaxVisible,omitempty"`
 	ShowHardwareCursor    *bool                     `json:"showHardwareCursor,omitempty"`
 	Markdown              *MarkdownSettings          `json:"markdown,omitempty"`
+	ServerTools           []string                  `json:"serverTools,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -135,6 +136,9 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	}
 	if overrides.EnabledModels != nil {
 		r.EnabledModels = overrides.EnabledModels
+	}
+	if overrides.ServerTools != nil {
+		r.ServerTools = overrides.ServerTools
 	}
 
 	// Nested struct pointers: merge field-by-field if both set, override wins if only override set
@@ -1107,4 +1111,21 @@ func (sm *SettingsManager) SetProjectThemePaths(paths []string) {
 	projectSettings.Themes = paths
 	sm.markProjectModified("themes")
 	sm.saveProjectSettings(projectSettings)
+}
+
+// GetServerTools returns the configured Anthropic server-side tool types.
+// Valid values: "web_search", "code_execution", "programmatic_tool_calling".
+func (sm *SettingsManager) GetServerTools() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.settings.ServerTools
+}
+
+// SetServerTools sets the Anthropic server-side tool types.
+func (sm *SettingsManager) SetServerTools(tools []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.ServerTools = tools
+	sm.markModified("serverTools")
+	sm.save()
 }

@@ -249,6 +249,7 @@ func streamAssistantResponse(
 			MaxRetryDelayMs: config.MaxRetryDelayMs,
 			Temperature:     config.Temperature,
 			MaxTokens:       config.MaxTokens,
+			ServerTools:     config.ServerTools,
 		},
 		Reasoning:       config.Reasoning,
 		ThinkingBudgets: config.ThinkingBudgets,

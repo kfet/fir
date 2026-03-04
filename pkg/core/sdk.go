@@ -227,6 +227,11 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		},
 	}
 
+	// Configure server tools from settings (Anthropic only).
+	if serverToolNames := settingsManager.GetServerTools(); len(serverToolNames) > 0 {
+		agentOpts.ServerTools = resolveServerTools(serverToolNames)
+	}
+
 	a := agent.NewAgent(agentOpts)
 
 	// Restore messages or record initial state
@@ -307,4 +312,25 @@ func AllTools(cwd string) []agent.AgentTool {
 		tools.NewFindTool(cwd),
 		tools.NewLsTool(cwd),
 	}
+}
+
+// serverToolTypeMap maps short names to Anthropic server tool type identifiers.
+var serverToolTypeMap = map[string]string{
+	"web_search":               "web_search_20250305",
+	"code_execution":           "code_execution_20250522",
+	"programmatic_tool_calling": "programmatic_tool_calling_20250624",
+}
+
+// resolveServerTools converts short tool names (from settings) to AnthropicServerTool structs.
+func resolveServerTools(names []string) []ai.AnthropicServerTool {
+	var tools []ai.AnthropicServerTool
+	for _, name := range names {
+		toolType, ok := serverToolTypeMap[name]
+		if !ok {
+			// Allow raw type identifiers too (e.g. "web_search_20250305").
+			toolType = name
+		}
+		tools = append(tools, ai.AnthropicServerTool{Type: toolType})
+	}
+	return tools
 }

@@ -50,6 +50,10 @@ type AgentLoopConfig struct {
 
 	// MaxRetryDelayMs is the maximum delay between retries in milliseconds.
 	MaxRetryDelayMs *int
+
+	// ServerTools configures Anthropic server-side tools (web search, code execution, etc.).
+	// Only used when the model provider is Anthropic.
+	ServerTools []ai.AnthropicServerTool
 }
 
 // ThinkingLevel is an alias for ai.ThinkingLevel so all packages use the same type.
