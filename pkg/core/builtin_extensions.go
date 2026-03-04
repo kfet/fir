@@ -25,6 +25,7 @@ type ExtensionFrontmatter struct {
 	Name        string
 	Description string
 	Builtin     bool
+	Modes       []string
 }
 
 // ParseCommentFrontmatter parses frontmatter from comment-delimited blocks.
@@ -80,11 +81,35 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Description = value
 		case "builtin":
 			fm.Builtin = value == "true"
+		case "mode", "modes":
+			fm.Modes = parseExtensionModes(value)
 		}
 	}
 
 	// No closing delimiter found.
 	return ExtensionFrontmatter{}
+}
+
+func parseExtensionModes(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	modes := make([]string, 0, len(parts))
+	for _, part := range parts {
+		mode := strings.Trim(strings.TrimSpace(part), `"'`)
+		if mode == "" {
+			continue
+		}
+		modes = append(modes, mode)
+	}
+	if len(modes) == 0 {
+		return nil
+	}
+	return modes
 }
 
 // extractBuiltinExtensions extracts the builtin_extensions/ tree to a temp

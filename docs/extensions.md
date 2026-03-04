@@ -293,6 +293,20 @@ Extensions must be **executable files** (have the execute permission bit set). T
 
 **Shadowing:** If a project-local extension has the same name as a global one, the project-local version takes precedence.
 
+### Optional mode targeting
+
+Extensions can opt into specific fir modes with comment frontmatter at the top of the script:
+
+```python
+#!/usr/bin/env python3
+# ---
+# modes: tui, acp
+# ---
+```
+
+Supported values include `tui`/`interactive`, `text`, `json`, `rpc`, and `acp`.
+If omitted, the extension runs in all modes.
+
 ### Non-Python Extensions
 
 Any executable works. For a bash extension, write the JSON-RPC protocol manually:

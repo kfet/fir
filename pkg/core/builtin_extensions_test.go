@@ -1,12 +1,15 @@
 package core
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseCommentFrontmatter(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		want    ExtensionFrontmatter
+		name  string
+		input string
+		want  ExtensionFrontmatter
 	}{
 		{
 			name: "basic",
@@ -21,6 +24,15 @@ import sys
 			want: ExtensionFrontmatter{Name: "my-ext", Description: "Does things", Builtin: true},
 		},
 		{
+			name: "modes",
+			input: `#!/usr/bin/env python3
+# ---
+# modes: tui, acp, json
+# ---
+`,
+			want: ExtensionFrontmatter{Modes: []string{"tui", "acp", "json"}},
+		},
+		{
 			name: "no shebang",
 			input: `# ---
 # builtin: true
@@ -29,7 +41,7 @@ import sys
 			want: ExtensionFrontmatter{Builtin: true},
 		},
 		{
-			name:  "no frontmatter",
+			name: "no frontmatter",
 			input: `#!/usr/bin/env python3
 import sys
 `,
@@ -57,7 +69,7 @@ import sys
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ParseCommentFrontmatter(tt.input)
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("got %+v, want %+v", got, tt.want)
 			}
 		})

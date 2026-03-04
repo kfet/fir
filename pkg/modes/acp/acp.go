@@ -675,6 +675,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
+			Mode:         "acp",
 			EnabledNames: resolveEnabledExtensions(pa.options.EnabledExtensions, settingsManager),
 		})
 		if err == nil && extSetup != nil {

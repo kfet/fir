@@ -161,6 +161,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		extSetup, err = extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
+			Mode:         resolveExtensionMode(args),
 			EnabledNames: resolveEnabledExtensions(args, settingsManager),
 		})
 		if err != nil {
@@ -193,6 +194,22 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		extSetup:        extSetup,
 		usageTracker:    usageTracker,
 	}, nil
+}
+
+func resolveExtensionMode(args *Args) string {
+	if args.OutputMode == ModeRPC {
+		return "rpc"
+	}
+	if args.OutputMode == ModeJSON {
+		return "json"
+	}
+	if args.OutputMode == ModeACP {
+		return "acp"
+	}
+	if args.Print {
+		return "text"
+	}
+	return "interactive"
 }
 
 // checkModelAvailable returns an error if no model is available and the mode

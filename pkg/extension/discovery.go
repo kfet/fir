@@ -10,9 +10,10 @@ import (
 
 // ExtProcConfig describes a discovered external process extension.
 type ExtProcConfig struct {
-	Name  string // derived from filename or sub-directory name
-	Path  string // absolute path to the executable
-	Scope string // "project" or "global"
+	Name  string   // derived from filename or sub-directory name
+	Path  string   // absolute path to the executable
+	Scope string   // "project", "global", or "builtin"
+	Modes []string // optional mode allowlist from comment frontmatter
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -30,10 +31,12 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	builtins, err := core.LoadBuiltinExtensions()
 	if err == nil {
 		for _, b := range builtins {
+			modes := extensionModesFromPath(b.Path)
 			byName[b.Name] = ExtProcConfig{
 				Name:  b.Name,
 				Path:  b.Path,
 				Scope: "builtin",
+				Modes: modes,
 			}
 		}
 	}
@@ -118,6 +121,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				Name:  name,
 				Path:  entryPoint,
 				Scope: scope,
+				Modes: extensionModesFromPath(entryPoint),
 			}
 			continue
 		}
@@ -131,9 +135,11 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		name := stripExt(e.Name())
 		filePath := filepath.Join(dir, e.Name())
 
-		// Skip files marked as builtin — they're handled by LoadBuiltinExtensions.
+		// Parse comment frontmatter once so we can skip builtin files and capture mode constraints.
+		fm := core.ExtensionFrontmatter{}
 		if data, err := os.ReadFile(filePath); err == nil {
-			if core.ParseCommentFrontmatter(string(data)).Builtin {
+			fm = core.ParseCommentFrontmatter(string(data))
+			if fm.Builtin {
 				continue
 			}
 		}
@@ -142,6 +148,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Name:  name,
 			Path:  filePath,
 			Scope: scope,
+			Modes: fm.Modes,
 		}
 	}
 	return nil
@@ -204,4 +211,12 @@ func stripExt(name string) string {
 		return strings.TrimSuffix(name, ext)
 	}
 	return name
+}
+
+func extensionModesFromPath(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return core.ParseCommentFrontmatter(string(data)).Modes
 }

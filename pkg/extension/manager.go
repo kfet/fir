@@ -28,6 +28,10 @@ type Manager struct {
 	// only extensions whose Name appears in this list are started.
 	AllowedNames []string
 
+	// ActiveMode is the currently running fir mode (interactive, text, json, rpc, acp).
+	// Extensions with mode constraints that do not include this mode are skipped.
+	ActiveMode string
+
 	// Optional UI callbacks, applied to each bridge when it starts.
 	notifyFn    NotifyFunc
 	setStatusFn SetStatusFunc
@@ -124,6 +128,10 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	m.mu.Unlock()
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
+		return nil
+	}
+	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {
+		m.logger.Debug("skipping extension (mode mismatch)", "ext", cfg.Name, "activeMode", m.ActiveMode, "modes", cfg.Modes)
 		return nil
 	}
 

@@ -297,6 +297,33 @@ func filterScope(configs []ExtProcConfig, excludeScope string) []ExtProcConfig {
 	return out
 }
 
+func TestDiscoverWithDirs_ParsesModesFromFrontmatter(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+
+	script := `#!/usr/bin/env python3
+# ---
+# modes: tui, acp
+# ---
+print("ok")
+`
+	path := filepath.Join(projectDir, "mode-ext.py")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected 1 config, got %d", len(configs))
+	}
+	if got := configs[0].Modes; len(got) != 2 || got[0] != "tui" || got[1] != "acp" {
+		t.Fatalf("modes = %v, want [tui acp]", got)
+	}
+}
+
 func writeExec(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {

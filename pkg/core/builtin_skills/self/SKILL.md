@@ -64,6 +64,8 @@ A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extens
 
 Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e` flags, or `--no-extensions`.
 
+Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, `json`, `rpc`, or `text`.
+
 Builtin extensions (notify, tmuxspinner, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
 ## Skills

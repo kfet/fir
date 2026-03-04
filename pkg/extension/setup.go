@@ -41,6 +41,10 @@ type SetupOptions struct {
 	// Useful in tests to avoid polluting the user's global trust store.
 	TrustStorePath string
 
+	// Mode is the active fir mode for this session (interactive, text, json, rpc, acp).
+	// Extensions can constrain themselves via comment frontmatter `mode`/`modes`.
+	Mode string
+
 	// EnabledNames is an optional allowlist of extension names to activate.
 	// When non-empty, only extensions whose name matches an entry are started.
 	// When empty (the default), all discovered extensions are started.
@@ -104,6 +108,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 	if len(opts.EnabledNames) > 0 {
 		mgr.SetAllowedNames(opts.EnabledNames)
 	}
+	mgr.ActiveMode = opts.Mode
 
 	// Wire trust confirmation.
 	confirmFn := opts.ConfirmFn

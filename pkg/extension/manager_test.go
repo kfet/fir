@@ -32,6 +32,27 @@ cat >/dev/null
 	return script
 }
 
+func writeExtScriptWithModes(t *testing.T, dir, name, modes string) string {
+	t.Helper()
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, name)
+	content := `#!/bin/sh
+# ---
+# modes: ` + modes + `
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[{"name":"test_tool","description":"a test tool"}],"events":["session_start","turn_end"]}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
 // pollToolCount waits until the mock API has at least n tools registered,
 // or the deadline expires.
 func pollToolCount(api *mockBridgeAPI, n int, timeout time.Duration) int {
@@ -244,6 +265,39 @@ func TestManager_AllowedNames(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if n := api.toolCount(); n != 1 {
 		t.Fatalf("expected exactly 1 tool, got %d (blocked-ext should have been skipped)", n)
+	}
+}
+
+func TestManager_ActiveMode(t *testing.T) {
+	dir := t.TempDir()
+
+	script1 := writeExtScriptWithModes(t, dir, "acp-ext", "acp")
+	script2 := writeExtScriptWithModes(t, dir, "tui-ext", "tui")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash1, _ := ComputeHash(script1)
+	hash2, _ := ComputeHash(script2)
+	ts.RecordTrust(dir, "acp-ext", hash1)
+	ts.RecordTrust(dir, "tui-ext", hash2)
+
+	api := newMockAPI()
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+	mgr.ActiveMode = "acp"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool in acp mode, got %d", n)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := api.toolCount(); n != 1 {
+		t.Fatalf("expected exactly 1 tool after filtering by mode, got %d", n)
 	}
 }
 
