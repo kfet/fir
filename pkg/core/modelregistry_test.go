@@ -785,3 +785,75 @@ func TestModelRegistry_DefaultModelsJsonPath(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, path)
 	}
 }
+
+func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	content := `{
+  "providers": {
+    "proxy": {
+      "baseUrl": "https://proxy.example.com",
+      "apiKey": "test-key",
+      "api": "anthropic-messages",
+      "models": [
+        {
+          "id": "my-claude-proxy",
+          "serverTools": ["web_search_20260209", "web_fetch_20260209"],
+          "compaction": true
+        }
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(modelsPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	m := registry.Find("proxy", "my-claude-proxy")
+	if m == nil {
+		t.Fatal("expected custom model")
+	}
+	if len(m.ServerTools) != 2 || m.ServerTools[0] != "web_search_20260209" {
+		t.Fatalf("unexpected serverTools: %#v", m.ServerTools)
+	}
+	if !m.Compaction {
+		t.Fatal("expected compaction=true")
+	}
+}
+
+func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
+	provider := "test-provider-override-capabilities"
+	id := "override-me"
+	ai.RegisterModel(&ai.Model{ID: id, Name: id, Api: ai.ApiAnthropicMessages, Provider: provider, BaseURL: "https://api.example.com", Input: []ai.InputModality{ai.InputText}, Cost: ai.ModelCost{}, ContextWindow: 128000, MaxTokens: 4096})
+
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	content := `{
+  "providers": {
+    "` + provider + `": {
+      "modelOverrides": {
+        "` + id + `": {
+          "serverTools": ["web_search_20250305"],
+          "compaction": true
+        }
+      }
+    }
+  }
+}`
+	if err := os.WriteFile(modelsPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	m := registry.Find(provider, id)
+	if m == nil {
+		t.Fatal("expected overridden model")
+	}
+	if !m.Compaction {
+		t.Fatal("expected compaction override=true")
+	}
+	if len(m.ServerTools) != 1 || m.ServerTools[0] != "web_search_20250305" {
+		t.Fatalf("unexpected serverTools override: %#v", m.ServerTools)
+	}
+}

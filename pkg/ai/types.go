@@ -646,7 +646,9 @@ type Model struct {
 	ContextWindow int               `json:"contextWindow"`
 	MaxTokens     int               `json:"maxTokens"`
 	Headers       map[string]string `json:"headers,omitempty"`
-	Compat        any               `json:"compat,omitempty"` // *OpenAICompletionsCompat or *OpenAIResponsesCompat
+	Compat        any               `json:"compat,omitempty"`      // *OpenAICompletionsCompat or *OpenAIResponsesCompat
+	ServerTools   []string          `json:"serverTools,omitempty"` // supported server tool types: "web_search", "web_fetch", "code_execution"
+	Compaction    bool              `json:"compaction,omitempty"`  // supports server-side context compaction
 }
 
 // StreamFunction is the raw provider streaming function signature.
@@ -658,6 +660,16 @@ type SimpleStreamFunction func(ctx context.Context, model *Model, prompt Context
 // SupportsImages returns true if the model accepts image input.
 func (m *Model) SupportsImages() bool {
 	return slices.Contains(m.Input, InputImage)
+}
+
+// SupportsServerTool returns true if the model supports a specific server tool type.
+func (m *Model) SupportsServerTool(toolType string) bool {
+	return slices.Contains(m.ServerTools, toolType)
+}
+
+// SupportsAnyServerTools returns true if the model supports any server tools.
+func (m *Model) SupportsAnyServerTools() bool {
+	return len(m.ServerTools) > 0
 }
 
 // GetOpenAICompletionsCompat returns the OpenAI completions compat settings, or nil.

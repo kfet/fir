@@ -71,11 +71,39 @@ func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
 }
 
-// supportsCompaction returns true for models that support server-side compaction.
-// Currently only Claude Opus 4.6 and Sonnet 4.6.
-func supportsCompaction(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
-		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
+func matchesServerToolCapability(model *ai.Model, toolType string) bool {
+	if model == nil {
+		return false
+	}
+	if len(model.ServerTools) == 0 {
+		// Backward-compatible default for custom models/providers that haven't declared capabilities yet.
+		return true
+	}
+	if model.SupportsServerTool(toolType) {
+		return true
+	}
+	// Accept short-name capabilities too.
+	base := toolType
+	if idx := strings.LastIndex(toolType, "_"); idx > 0 {
+		base = toolType[:idx]
+	}
+	return model.SupportsServerTool(base)
+}
+
+func supportsModelCompaction(model *ai.Model) bool {
+	if model == nil {
+		return false
+	}
+	if model.Compaction {
+		return true
+	}
+	// Legacy fallback until all built-ins include explicit capability metadata.
+	if len(model.ServerTools) == 0 {
+		id := model.ID
+		return strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
+			strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
+	}
+	return false
 }
 
 func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
@@ -435,6 +463,9 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	if options != nil {
 		seen := map[string]bool{}
 		for _, st := range options.ServerTools {
+			if !matchesServerToolCapability(model, st.Type) {
+				continue
+			}
 			var beta string
 			switch {
 			case strings.HasPrefix(st.Type, "web_search"):
@@ -449,7 +480,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 				betaFeatures += "," + beta
 			}
 		}
-		if options.Compaction != nil && options.Compaction.Enabled && supportsCompaction(model.ID) {
+		if options.Compaction != nil && options.Compaction.Enabled && supportsModelCompaction(model) {
 			betaFeatures += ",compact-2026-01-12"
 		}
 	}
@@ -545,7 +576,11 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	}
 	if options != nil {
 		for _, st := range options.ServerTools {
-			allTools = append(allTools, convertAnthropicServerTool(st))
+			if matchesServerToolCapability(model, st.Type) {
+				allTools = append(allTools, convertAnthropicServerTool(st))
+			} else {
+				firlog.Debug("skipping unsupported server tool for model", "model", model.ID, "toolType", st.Type)
+			}
 		}
 	}
 	if len(allTools) > 0 {
@@ -584,7 +619,7 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 
 	// Server-side compaction
 	if options != nil && options.Compaction != nil && options.Compaction.Enabled {
-		if supportsCompaction(model.ID) {
+		if supportsModelCompaction(model) {
 			edit := map[string]any{
 				"type": "compact_20260112",
 			}
@@ -828,8 +863,8 @@ func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {
 
 // Anthropic web search domain limits.
 const (
-	maxAllowedDomains  = 10
-	maxBlockedDomains  = 25
+	maxAllowedDomains = 10
+	maxBlockedDomains = 25
 )
 
 // serverToolDefaultName derives the default tool name from the type identifier.

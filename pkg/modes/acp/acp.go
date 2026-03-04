@@ -1143,7 +1143,14 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		if name != "" {
 			info += fmt.Sprintf("**Name:** %s\n", name)
 		}
-		info += fmt.Sprintf("**ID:** %s\n\n", stats.SessionID)
+		info += fmt.Sprintf("**ID:** %s\n", stats.SessionID)
+		if entry.extSetup != nil && entry.extSetup.Manager != nil {
+			enabled := entry.extSetup.Manager.EnabledExtensionNames()
+			if len(enabled) > 0 {
+				info += fmt.Sprintf("**Extensions:** %s\n", strings.Join(enabled, ", "))
+			}
+		}
+		info += "\n"
 		info += fmt.Sprintf("**Messages**\n- User: %d\n- Assistant: %d\n- Tool Calls: %d\n- Total: %d\n\n",
 			stats.UserMessages, stats.AssistantMessages, stats.ToolCalls, stats.TotalMessages)
 		info += fmt.Sprintf("**Tokens**\n- Input: %d\n- Output: %d\n- Total: %d\n",

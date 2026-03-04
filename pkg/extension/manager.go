@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -297,6 +298,42 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// EnabledExtensionNames returns the enabled extension names for this manager.
+//
+// If AllowedNames is configured, that list is returned (sorted, deduplicated)
+// so callers can surface the user's configured enablement.
+// Otherwise, names of currently running extensions are returned.
+func (m *Manager) EnabledExtensionNames() []string {
+	m.mu.Lock()
+	allowed := append([]string(nil), m.AllowedNames...)
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	names := make(map[string]struct{})
+	if len(allowed) > 0 {
+		for _, name := range allowed {
+			if name == "" {
+				continue
+			}
+			names[name] = struct{}{}
+		}
+	} else {
+		for _, mb := range bridges {
+			if mb.cfg.Name == "" {
+				continue
+			}
+			names[mb.cfg.Name] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ExtCommand holds a slash command declared by an extension.

@@ -1,6 +1,8 @@
 package interactive
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -454,6 +456,46 @@ func TestInteractiveMode_SlashExit(t *testing.T) {
 		// expected
 	default:
 		t.Error("expected /exit to trigger shutdown")
+	}
+}
+
+func TestInteractiveMode_ReexecCommand_CustomBinary(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Ensure the session is persisted so /reexec can resume it.
+	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	bin := filepath.Join(t.TempDir(), "fir-test-bin")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+
+	tm.mode.handleReexecCommand("/reexec " + bin)
+
+	abs, _ := filepath.Abs(bin)
+	if tm.mode.reexecBinary != abs {
+		t.Fatalf("reexecBinary = %q, want %q", tm.mode.reexecBinary, abs)
+	}
+	if len(tm.mode.reexecArgs) < 1 || tm.mode.reexecArgs[0] != abs {
+		t.Fatalf("reexecArgs = %v, want first arg %q", tm.mode.reexecArgs, abs)
+	}
+}
+
+func TestInteractiveMode_ReexecCommand_NonExecutablePath(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	// Ensure the session is persisted so validation reaches executable checks.
+	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	nonExec := filepath.Join(t.TempDir(), "not-exec")
+	if err := os.WriteFile(nonExec, []byte("nope"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	tm.mode.handleReexecCommand("/reexec " + nonExec)
+
+	if tm.mode.reexecBinary != "" {
+		t.Fatalf("reexecBinary = %q, want empty", tm.mode.reexecBinary)
 	}
 }
 

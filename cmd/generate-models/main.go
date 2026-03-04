@@ -34,21 +34,23 @@ import (
 
 // modelSpec is the internal representation of a model used during generation.
 type modelSpec struct {
-	ID            string
-	Name          string
-	API           string
-	Provider      string
-	BaseURL       string
-	Reasoning     bool
-	Input         []string // "text", "image"
-	CostInput     float64
-	CostOutput    float64
-	CostCacheRead float64
+	ID             string
+	Name           string
+	API            string
+	Provider       string
+	BaseURL        string
+	Reasoning      bool
+	Input          []string // "text", "image"
+	CostInput      float64
+	CostOutput     float64
+	CostCacheRead  float64
 	CostCacheWrite float64
-	ContextWindow int
-	MaxTokens     int
-	Headers       map[string]string
-	Compat        *compatSpec
+	ContextWindow  int
+	MaxTokens      int
+	Headers        map[string]string
+	Compat         *compatSpec
+	ServerTools    []string // "web_search", "web_fetch", "code_execution"
+	Compaction     bool
 }
 
 // compatSpec represents OpenAICompletionsCompat fields used in models.
@@ -65,12 +67,12 @@ func boolPtr(b bool) *bool { return &b }
 // --- models.dev types ---
 
 type modelsDevModel struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	ToolCall bool   `json:"tool_call"`
-	Reasoning bool  `json:"reasoning"`
-	Status   string `json:"status"`
-	Limit    struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ToolCall  bool   `json:"tool_call"`
+	Reasoning bool   `json:"reasoning"`
+	Status    string `json:"status"`
+	Limit     struct {
 		Context int `json:"context"`
 		Output  int `json:"output"`
 	} `json:"limit"`
@@ -97,19 +99,19 @@ type modelsDevData map[string]modelsDevProvider
 // --- OpenRouter types ---
 
 type openRouterModel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
 	Architecture struct {
 		Modality string `json:"modality"`
 	} `json:"architecture"`
 	Pricing struct {
-		Prompt         string `json:"prompt"`
-		Completion     string `json:"completion"`
-		InputCacheRead string `json:"input_cache_read"`
+		Prompt          string `json:"prompt"`
+		Completion      string `json:"completion"`
+		InputCacheRead  string `json:"input_cache_read"`
 		InputCacheWrite string `json:"input_cache_write"`
 	} `json:"pricing"`
 	ContextLength int `json:"context_length"`
-	TopProvider struct {
+	TopProvider   struct {
 		MaxCompletionTokens int `json:"max_completion_tokens"`
 	} `json:"top_provider"`
 	SupportedParameters []string `json:"supported_parameters"`
@@ -128,8 +130,8 @@ type aiGatewayModel struct {
 	MaxTokens     int      `json:"max_tokens"`
 	Tags          []string `json:"tags"`
 	Pricing       struct {
-		Input          any `json:"input"`
-		Output         any `json:"output"`
+		Input           any `json:"input"`
+		Output          any `json:"output"`
 		InputCacheRead  any `json:"input_cache_read"`
 		InputCacheWrite any `json:"input_cache_write"`
 	} `json:"pricing"`
@@ -806,14 +808,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	// Add missing EU Opus 4.6 profile
 	if !hasModel(all, "amazon-bedrock", "eu.anthropic.claude-opus-4-6-v1") {
 		all = append(all, modelSpec{
-			ID:             "eu.anthropic.claude-opus-4-6-v1",
-			Name:           "Claude Opus 4.6 (EU)",
-			API:            "bedrock-converse-stream",
-			Provider:       "amazon-bedrock",
-			BaseURL:        "https://bedrock-runtime.us-east-1.amazonaws.com",
-			Reasoning:      true,
-			Input:          []string{"text", "image"},
-			CostInput:      5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
+			ID:        "eu.anthropic.claude-opus-4-6-v1",
+			Name:      "Claude Opus 4.6 (EU)",
+			API:       "bedrock-converse-stream",
+			Provider:  "amazon-bedrock",
+			BaseURL:   "https://bedrock-runtime.us-east-1.amazonaws.com",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
 			ContextWindow: 200000, MaxTokens: 128000,
 		})
 	}
@@ -821,14 +823,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	// Add missing Claude Opus 4.6
 	if !hasModel(all, "anthropic", "claude-opus-4-6") {
 		all = append(all, modelSpec{
-			ID:             "claude-opus-4-6",
-			Name:           "Claude Opus 4.6",
-			API:            "anthropic-messages",
-			Provider:       "anthropic",
-			BaseURL:        "https://api.anthropic.com",
-			Reasoning:      true,
-			Input:          []string{"text", "image"},
-			CostInput:      5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
+			ID:        "claude-opus-4-6",
+			Name:      "Claude Opus 4.6",
+			API:       "anthropic-messages",
+			Provider:  "anthropic",
+			BaseURL:   "https://api.anthropic.com",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
 			ContextWindow: 200000, MaxTokens: 128000,
 		})
 	}
@@ -836,14 +838,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	// Add missing Claude Sonnet 4.6
 	if !hasModel(all, "anthropic", "claude-sonnet-4-6") {
 		all = append(all, modelSpec{
-			ID:             "claude-sonnet-4-6",
-			Name:           "Claude Sonnet 4.6",
-			API:            "anthropic-messages",
-			Provider:       "anthropic",
-			BaseURL:        "https://api.anthropic.com",
-			Reasoning:      true,
-			Input:          []string{"text", "image"},
-			CostInput:      3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
+			ID:        "claude-sonnet-4-6",
+			Name:      "Claude Sonnet 4.6",
+			API:       "anthropic-messages",
+			Provider:  "anthropic",
+			BaseURL:   "https://api.anthropic.com",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
 			ContextWindow: 200000, MaxTokens: 64000,
 		})
 	}
@@ -980,14 +982,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	// enables custom tool definitions (not returned by models.dev).
 	if !hasModel(all, "google", "gemini-3.1-pro-preview-customtools") {
 		all = append(all, modelSpec{
-			ID:            "gemini-3.1-pro-preview-customtools",
-			Name:          "Gemini 3.1 Pro Preview Custom Tools",
-			API:           "google-generative-ai",
-			Provider:      "google",
-			BaseURL:       "https://generativelanguage.googleapis.com/v1beta",
-			Reasoning:     true,
-			Input:         []string{"text", "image"},
-			CostInput:     2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
+			ID:        "gemini-3.1-pro-preview-customtools",
+			Name:      "Gemini 3.1 Pro Preview Custom Tools",
+			API:       "google-generative-ai",
+			Provider:  "google",
+			BaseURL:   "https://generativelanguage.googleapis.com/v1beta",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: 65536,
 		})
 	}
@@ -1111,6 +1113,30 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		}
 	}
 
+	// Annotate Anthropic Messages Claude models with known server-tool capabilities.
+	for i := range all {
+		m := &all[i]
+		if m.API != "anthropic-messages" {
+			continue
+		}
+		if !strings.Contains(m.ID, "claude") {
+			continue
+		}
+		if len(m.ServerTools) == 0 {
+			m.ServerTools = []string{
+				"web_search_20250305",
+				"web_search_20260209",
+				"web_fetch_20250910",
+				"web_fetch_20260209",
+				"code_execution_20250825",
+			}
+		}
+		if strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
+			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") {
+			m.Compaction = true
+		}
+	}
+
 	return all
 }
 
@@ -1217,6 +1243,14 @@ func renderInput(input []string) string {
 	return "[]string{" + strings.Join(quoted, ", ") + "}"
 }
 
+func renderStringSlice(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = goString(s)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
 // generateGoSource generates the complete Go source file from the model list.
 func generateGoSource(models []modelSpec) string {
 	var sb strings.Builder
@@ -1243,6 +1277,12 @@ func generateGoSource(models []modelSpec) string {
 		compat := renderCompat(m.Compat)
 		if compat != "nil" {
 			sb.WriteString(fmt.Sprintf("\t\tCompat:        %s,\n", compat))
+		}
+		if len(m.ServerTools) > 0 {
+			sb.WriteString(fmt.Sprintf("\t\tServerTools:   %s,\n", renderStringSlice(m.ServerTools)))
+		}
+		if m.Compaction {
+			sb.WriteString("\t\tCompaction:    true,\n")
 		}
 		sb.WriteString("\t})\n")
 	}

@@ -1260,10 +1260,10 @@ func TestAnthropic_ConvertMessages_NoCacheControl(t *testing.T) {
 
 func TestAnthropic_ConvertMessages_UserImageContent(t *testing.T) {
 	model := &ai.Model{
-		ID:      "claude-sonnet",
-		BaseURL: "https://api.anthropic.com",
+		ID:        "claude-sonnet",
+		BaseURL:   "https://api.anthropic.com",
 		MaxTokens: 8192,
-		Input:   []ai.InputModality{ai.InputText, ai.InputImage},
+		Input:     []ai.InputModality{ai.InputText, ai.InputImage},
 	}
 
 	msgs := []ai.Message{
@@ -1904,57 +1904,46 @@ func TestAnthropic_CompactionStopReason(t *testing.T) {
 	}
 }
 
-func TestAnthropic_SupportsCompaction(t *testing.T) {
-	tests := []struct {
-		model string
-		want  bool
-	}{
-		{"claude-opus-4-6", true},
-		{"claude-sonnet-4-6", true},
-		{"claude-sonnet-4-20250514", false},
-		{"claude-opus-4-20250514", false},
-		{"claude-haiku-4-5-20251001", false},
-	}
-	for _, tt := range tests {
-		got := supportsCompaction(tt.model)
-		if got != tt.want {
-			t.Errorf("supportsCompaction(%q) = %v, want %v", tt.model, got, tt.want)
-		}
-	}
-}
-
 func TestAnthropic_ServerToolsSentForAnyModel(t *testing.T) {
-	// Any model using the Anthropic Messages API gets server tools if configured.
+	// Backward-compatible: if model capabilities are not declared, send configured tools.
 	model := &ai.Model{ID: "custom-model", BaseURL: "https://my-proxy.example.com", MaxTokens: 8192}
-	ctx := ai.Context{
-		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
-	}
-	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
-		ServerTools: []ai.AnthropicServerTool{
-			{Type: "web_search_20250305"},
-		},
-	}
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
+	opts := &ai.StreamOptions{ApiKey: "test-key", ServerTools: []ai.AnthropicServerTool{{Type: "web_search_20250305"}}}
 
 	params := buildAnthropicParams(model, ctx, false, opts)
 	tools, ok := params["tools"].([]map[string]any)
 	if !ok || len(tools) != 1 {
 		t.Fatalf("expected 1 server tool for custom model, got %v", params["tools"])
 	}
-	if tools[0]["type"] != "web_search_20250305" {
-		t.Errorf("expected web_search_20250305, got %v", tools[0]["type"])
+}
+
+func TestAnthropic_ServerToolsFilteredByModelCapability(t *testing.T) {
+	model := &ai.Model{
+		ID:          "custom-model",
+		BaseURL:     "https://my-proxy.example.com",
+		MaxTokens:   8192,
+		ServerTools: []string{"web_search_20260209"},
+	}
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
+	opts := &ai.StreamOptions{ApiKey: "test-key", ServerTools: []ai.AnthropicServerTool{
+		{Type: "web_search_20260209"},
+		{Type: "web_fetch_20260209"},
+	}}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+	tools, ok := params["tools"].([]map[string]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("expected only supported tool, got %v", params["tools"])
+	}
+	if tools[0]["type"] != "web_search_20260209" {
+		t.Fatalf("expected web_search_20260209, got %v", tools[0]["type"])
 	}
 }
 
 func TestAnthropic_CompactionSkippedForUnsupportedModel(t *testing.T) {
-	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
-	ctx := ai.Context{
-		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
-	}
-	opts := &ai.StreamOptions{
-		ApiKey:     "test-key",
-		Compaction: &ai.AnthropicCompaction{Enabled: true, TriggerTokens: 100000},
-	}
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192, Compaction: false}
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
+	opts := &ai.StreamOptions{ApiKey: "test-key", Compaction: &ai.AnthropicCompaction{Enabled: true, TriggerTokens: 100000}}
 
 	params := buildAnthropicParams(model, ctx, false, opts)
 	if _, ok := params["context_management"]; ok {

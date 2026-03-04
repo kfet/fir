@@ -847,7 +847,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/skills":
 		m.handleSkillsCommand(parts[1:])
 	case "/reexec":
-		m.handleReexecCommand()
+		m.handleReexecCommand(text)
 	case "/queue":
 		m.handleQueueCommand()
 	case "/dequeue":
@@ -2168,6 +2168,12 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, t.Fg("dim", "File: ")+"In-memory")
 	}
 	lines = append(lines, t.Fg("dim", "ID: ")+stats.SessionID)
+	if m.extSetup != nil && m.extSetup.Manager != nil {
+		enabled := m.extSetup.Manager.EnabledExtensionNames()
+		if len(enabled) > 0 {
+			lines = append(lines, t.Fg("dim", "Extensions: ")+strings.Join(enabled, ", "))
+		}
+	}
 	lines = append(lines, "")
 	lines = append(lines, t.Bold("Messages"))
 	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "User:"), stats.UserMessages))
@@ -2440,7 +2446,7 @@ func (m *InteractiveMode) handleSkillsInstall(name string) {
 	m.showStatus(fmt.Sprintf("Installed skill %q to %s (project)", name, targetDir))
 }
 
-func (m *InteractiveMode) handleReexecCommand() {
+func (m *InteractiveMode) handleReexecCommand(text string) {
 	if m.session == nil {
 		m.showWarning("No session available")
 		return
@@ -2450,10 +2456,35 @@ func (m *InteractiveMode) handleReexecCommand() {
 		return
 	}
 
-	binary, err := os.Executable()
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Cannot determine executable path: %v", err))
-		return
+	reexecPath := strings.TrimSpace(strings.TrimPrefix(text, "/reexec"))
+	binary := ""
+	if reexecPath == "" {
+		var err error
+		binary, err = os.Executable()
+		if err != nil {
+			m.showWarning(fmt.Sprintf("Cannot determine executable path: %v", err))
+			return
+		}
+	} else {
+		abs, err := filepath.Abs(reexecPath)
+		if err != nil {
+			m.showWarning(fmt.Sprintf("Invalid reexec path %q: %v", reexecPath, err))
+			return
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			m.showWarning(fmt.Sprintf("Cannot access reexec binary %q: %v", reexecPath, err))
+			return
+		}
+		if info.IsDir() {
+			m.showWarning(fmt.Sprintf("Reexec path is a directory: %s", abs))
+			return
+		}
+		if info.Mode()&0o111 == 0 {
+			m.showWarning(fmt.Sprintf("Reexec target is not executable: %s", abs))
+			return
+		}
+		binary = abs
 	}
 
 	sessionFile := m.session.SessionManager.GetSessionFile()
@@ -2678,7 +2709,7 @@ func (m *InteractiveMode) showHelp() {
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
   /skills         - List loaded skills (or /skills install <name>)
-  /reexec        - Re-exec into the current binary, preserving the session
+  /reexec [path] - Re-exec into current or specified binary, preserving the session
   /quit           - Quit fir
 
 Keyboard shortcuts:

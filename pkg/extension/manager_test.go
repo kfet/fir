@@ -380,3 +380,32 @@ func TestManager_GetCommands_Empty(t *testing.T) {
 		t.Fatalf("expected empty, got %v", got)
 	}
 }
+
+func TestManager_EnabledExtensionNames_FromAllowedNames(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	mgr.AllowedNames = []string{"zeta", "alpha", "alpha", ""}
+
+	got := mgr.EnabledExtensionNames()
+	want := []string{"alpha", "zeta"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestManager_EnabledExtensionNames_FromRunningExtensions(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cleanup := makeCmdBridge(t, mgr, nil, func(name string, args []string) CommandResult {
+		return CommandResult{}
+	})
+	defer cleanup()
+
+	got := mgr.EnabledExtensionNames()
+	if len(got) != 1 || got[0] != "cmd-ext" {
+		t.Fatalf("EnabledExtensionNames = %v, want [cmd-ext]", got)
+	}
+}

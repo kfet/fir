@@ -74,7 +74,8 @@ Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skil
 
 ## Key Concepts
 
-- **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; `/fork` creates branches, `/tree` navigates them.
+- **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; `/fork` creates branches, `/tree` navigates them. Use `/session` for version, IDs, message/token stats, and enabled extensions.
+- **Re-exec for local build testing** — use `/reexec` to restart into the current binary while preserving the active session, or `/reexec <path>` to switch to a specific built binary.
 - **Compaction** — when context grows large, fir automatically summarizes older messages to stay within the model's context window. Configurable via `settings.json`.
 - **Thinking levels** — control reasoning depth: none, minimal, low, medium, high. Toggle with `Shift+Tab` or `--thinking`.
 - **Scoped models** — use `/scoped-models` to pick which models `Ctrl+P` cycles through.
@@ -165,6 +166,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "followUpMode": "one-at-a-time",      // "one-at-a-time" or "auto"
   "transport": "sse",                    // Transport protocol
   "serverTools": ["web_search"],         // Anthropic server-side tools: "web_search", "web_fetch", "code_execution"
+                                          // You can also use raw types (e.g. "web_search_20260209"); model support is controlled per-model in models.json
   "serverCompaction": {                  // Anthropic server-side context compaction
     "enabled": true,
     "triggerTokens": 150000,             // When to trigger (min 50000, default 150000)

@@ -3,12 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Anthropic server-side tool/compaction capabilities are now model metadata (`Model.ServerTools`, `Model.Compaction`) populated by model generation and configurable in custom `models.json` definitions/overrides
 - Anthropic server-side tools support: `web_search`, `web_fetch`, and `code_execution` can be enabled via `serverTools` setting; also supports raw type identifiers for newer versions with dynamic filtering
 - Anthropic server-side context compaction via `serverCompaction` setting for long-running conversations
 - `fir extensions [list]` and `fir extensions install <name>` CLI subcommands to list and install builtin extensions, mirroring the existing `fir skills` commands
 
 ### Fixed
 - `/reload` now re-applies extension allowlists from current settings and `--extension` flags before restarting extensions, so removed names are actually disabled without restarting fir
+
+### Changed
+- `/reexec` now accepts an optional binary path (`/reexec [path]`) to exec a specific build while preserving the active session
+- `/session` now includes the list of enabled extensions in both interactive and ACP modes
 
 ## [0.13.0] - 2026-03-03
 

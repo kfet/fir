@@ -521,7 +521,13 @@ func TestHandleSlashCommand_Session(t *testing.T) {
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	sess := newMinimalSession(t)
 	defer sess.Close()
-	entry := &firSession{termState: newTerminalState(), session: sess}
+	mgr := extension.NewManager(slog.Default())
+	mgr.AllowedNames = []string{"tmuxspinner", "demo"}
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+		extSetup:  &extension.SetupResult{Manager: mgr},
+	}
 
 	found := pa.handleSlashCommand("s1", entry, "session", "")
 	if !found {
@@ -543,6 +549,9 @@ func TestHandleSlashCommand_Session(t *testing.T) {
 	}
 	if !strings.Contains(chunk.Content.Text.Text, "Messages") || !strings.Contains(chunk.Content.Text.Text, "Tokens") {
 		t.Errorf("expected Messages and Tokens sections in session info, got: %q", chunk.Content.Text.Text)
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "**Extensions:** demo, tmuxspinner") {
+		t.Errorf("expected enabled extensions in session info, got: %q", chunk.Content.Text.Text)
 	}
 }
 

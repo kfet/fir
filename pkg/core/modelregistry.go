@@ -32,15 +32,15 @@ type CompatConfig struct {
 	SupportsStore                    *bool                       `json:"supportsStore,omitempty"`
 	SupportsDeveloperRole            *bool                       `json:"supportsDeveloperRole,omitempty"`
 	SupportsReasoningEffort          *bool                       `json:"supportsReasoningEffort,omitempty"`
-	SupportsUsageInStreaming          *bool                       `json:"supportsUsageInStreaming,omitempty"`
+	SupportsUsageInStreaming         *bool                       `json:"supportsUsageInStreaming,omitempty"`
 	MaxTokensField                   string                      `json:"maxTokensField,omitempty"`
 	RequiresToolResultName           *bool                       `json:"requiresToolResultName,omitempty"`
 	RequiresAssistantAfterToolResult *bool                       `json:"requiresAssistantAfterToolResult,omitempty"`
 	RequiresThinkingAsText           *bool                       `json:"requiresThinkingAsText,omitempty"`
 	RequiresMistralToolIds           *bool                       `json:"requiresMistralToolIds,omitempty"`
 	ThinkingFormat                   string                      `json:"thinkingFormat,omitempty"`
-	OpenRouterRouting                *OpenRouterRoutingConfig     `json:"openRouterRouting,omitempty"`
-	VercelGatewayRouting             *VercelGatewayRoutingConfig  `json:"vercelGatewayRouting,omitempty"`
+	OpenRouterRouting                *OpenRouterRoutingConfig    `json:"openRouterRouting,omitempty"`
+	VercelGatewayRouting             *VercelGatewayRoutingConfig `json:"vercelGatewayRouting,omitempty"`
 }
 
 // toOpenAICompletionsCompat converts a CompatConfig to the ai package's OpenAICompletionsCompat.
@@ -52,7 +52,7 @@ func (c *CompatConfig) toOpenAICompletionsCompat() *ai.OpenAICompletionsCompat {
 		SupportsStore:                    c.SupportsStore,
 		SupportsDeveloperRole:            c.SupportsDeveloperRole,
 		SupportsReasoningEffort:          c.SupportsReasoningEffort,
-		SupportsUsageInStreaming:          c.SupportsUsageInStreaming,
+		SupportsUsageInStreaming:         c.SupportsUsageInStreaming,
 		MaxTokensField:                   ai.MaxTokensField(c.MaxTokensField),
 		RequiresToolResultName:           c.RequiresToolResultName,
 		RequiresAssistantAfterToolResult: c.RequiresAssistantAfterToolResult,
@@ -97,6 +97,8 @@ type ModelDefinition struct {
 	MaxTokens     *int              `json:"maxTokens,omitempty"`
 	Headers       map[string]string `json:"headers,omitempty"`
 	Compat        *CompatConfig     `json:"compat,omitempty"`
+	ServerTools   []string          `json:"serverTools,omitempty"`
+	Compaction    *bool             `json:"compaction,omitempty"`
 }
 
 // ModelOverride holds per-model overrides (all fields optional, merged with built-in model).
@@ -109,17 +111,19 @@ type ModelOverride struct {
 	MaxTokens     *int              `json:"maxTokens,omitempty"`
 	Headers       map[string]string `json:"headers,omitempty"`
 	Compat        *CompatConfig     `json:"compat,omitempty"`
+	ServerTools   []string          `json:"serverTools,omitempty"`
+	Compaction    *bool             `json:"compaction,omitempty"`
 }
 
 // ProviderConfig is the per-provider section in models.json.
 type ProviderConfig struct {
-	BaseURL        string                    `json:"baseUrl,omitempty"`
-	ApiKey         string                    `json:"apiKey,omitempty"`
-	Api            string                    `json:"api,omitempty"`
-	Headers        map[string]string         `json:"headers,omitempty"`
-	AuthHeader     *bool                     `json:"authHeader,omitempty"`
-	Models         []ModelDefinition         `json:"models,omitempty"`
-	ModelOverrides map[string]ModelOverride   `json:"modelOverrides,omitempty"`
+	BaseURL        string                   `json:"baseUrl,omitempty"`
+	ApiKey         string                   `json:"apiKey,omitempty"`
+	Api            string                   `json:"api,omitempty"`
+	Headers        map[string]string        `json:"headers,omitempty"`
+	AuthHeader     *bool                    `json:"authHeader,omitempty"`
+	Models         []ModelDefinition        `json:"models,omitempty"`
+	ModelOverrides map[string]ModelOverride `json:"modelOverrides,omitempty"`
 }
 
 // ModelsConfig is the top-level models.json structure.
@@ -141,8 +145,8 @@ type ProviderOverride struct {
 // CustomModelsResult is the result of loading custom models from models.json.
 type CustomModelsResult struct {
 	Models         []*ai.Model
-	Overrides      map[string]*ProviderOverride           // provider -> override
-	ModelOverrides map[string]map[string]*ModelOverride     // provider -> modelId -> override
+	Overrides      map[string]*ProviderOverride         // provider -> override
+	ModelOverrides map[string]map[string]*ModelOverride // provider -> modelId -> override
 	Error          string
 }
 
@@ -251,6 +255,12 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 	if override.MaxTokens != nil {
 		result.MaxTokens = *override.MaxTokens
 	}
+	if override.ServerTools != nil {
+		result.ServerTools = append([]string(nil), override.ServerTools...)
+	}
+	if override.Compaction != nil {
+		result.Compaction = *override.Compaction
+	}
 
 	// Merge cost (partial override)
 	if override.Cost != nil {
@@ -324,6 +334,8 @@ type ProviderModelInput struct {
 	MaxTokens     int
 	Headers       map[string]string
 	Compat        any
+	ServerTools   []string
+	Compaction    bool
 }
 
 // ModelRegistry loads and manages models, resolves API keys via AuthStorage.
@@ -692,6 +704,11 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				compat = modelDef.Compat.toOpenAICompletionsCompat()
 			}
 
+			compaction := false
+			if modelDef.Compaction != nil {
+				compaction = *modelDef.Compaction
+			}
+
 			models = append(models, &ai.Model{
 				ID:            modelDef.ID,
 				Name:          name,
@@ -705,6 +722,8 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				MaxTokens:     maxTokens,
 				Headers:       headers,
 				Compat:        compat,
+				ServerTools:   append([]string(nil), modelDef.ServerTools...),
+				Compaction:    compaction,
 			})
 		}
 	}
@@ -871,6 +890,8 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 				MaxTokens:     modelDef.MaxTokens,
 				Headers:       headers,
 				Compat:        modelDef.Compat,
+				ServerTools:   append([]string(nil), modelDef.ServerTools...),
+				Compaction:    modelDef.Compaction,
 			})
 		}
 
