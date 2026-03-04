@@ -71,6 +71,19 @@ func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
 }
 
+// supportsCompaction returns true for models that support server-side compaction.
+// Currently only Claude Opus 4.6 and Sonnet 4.6.
+func supportsCompaction(modelID string) bool {
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
+}
+
+// supportsServerTools returns true for models that support Anthropic server-side tools.
+// All current Claude models support web_search, web_fetch, and code_execution.
+func supportsServerTools(modelID string) bool {
+	return strings.Contains(modelID, "claude-")
+}
+
 func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
 	switch level {
 	case ai.ThinkingMinimal, ai.ThinkingLow:
@@ -425,7 +438,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 
 	// Add server tool betas if needed.
-	if options != nil {
+	if options != nil && supportsServerTools(model.ID) {
 		seen := map[string]bool{}
 		for _, st := range options.ServerTools {
 			var beta string
@@ -442,7 +455,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 				betaFeatures += "," + beta
 			}
 		}
-		if options.Compaction != nil && options.Compaction.Enabled {
+		if options.Compaction != nil && options.Compaction.Enabled && supportsCompaction(model.ID) {
 			betaFeatures += ",compact-2026-01-12"
 		}
 	}
@@ -536,10 +549,12 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	if len(ctx.Tools) > 0 {
 		allTools = append(allTools, convertAnthropicTools(ctx.Tools, oauthToken)...)
 	}
-	if options != nil {
+	if options != nil && supportsServerTools(model.ID) {
 		for _, st := range options.ServerTools {
 			allTools = append(allTools, convertAnthropicServerTool(st))
 		}
+	} else if options != nil && len(options.ServerTools) > 0 {
+		firlog.Debug("skipping server tools — model does not support them", "model", model.ID)
 	}
 	if len(allTools) > 0 {
 		params["tools"] = allTools
@@ -577,20 +592,24 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 
 	// Server-side compaction
 	if options != nil && options.Compaction != nil && options.Compaction.Enabled {
-		edit := map[string]any{
-			"type": "compact_20260112",
-		}
-		if options.Compaction.TriggerTokens > 0 {
-			edit["trigger"] = map[string]any{
-				"type":  "input_tokens",
-				"value": options.Compaction.TriggerTokens,
+		if supportsCompaction(model.ID) {
+			edit := map[string]any{
+				"type": "compact_20260112",
 			}
-		}
-		if options.Compaction.Instructions != "" {
-			edit["instructions"] = options.Compaction.Instructions
-		}
-		params["context_management"] = map[string]any{
-			"edits": []map[string]any{edit},
+			if options.Compaction.TriggerTokens > 0 {
+				edit["trigger"] = map[string]any{
+					"type":  "input_tokens",
+					"value": options.Compaction.TriggerTokens,
+				}
+			}
+			if options.Compaction.Instructions != "" {
+				edit["instructions"] = options.Compaction.Instructions
+			}
+			params["context_management"] = map[string]any{
+				"edits": []map[string]any{edit},
+			}
+		} else {
+			firlog.Debug("skipping server compaction — model does not support it", "model", model.ID)
 		}
 	}
 

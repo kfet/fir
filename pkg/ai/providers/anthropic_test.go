@@ -1903,3 +1903,75 @@ func TestAnthropic_CompactionStopReason(t *testing.T) {
 		t.Errorf("expected StopReasonStop for compaction, got %v", got)
 	}
 }
+
+func TestAnthropic_SupportsCompaction(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-4-6", true},
+		{"claude-sonnet-4-6", true},
+		{"claude-sonnet-4-20250514", false},
+		{"claude-opus-4-20250514", false},
+		{"claude-haiku-4-5-20251001", false},
+	}
+	for _, tt := range tests {
+		got := supportsCompaction(tt.model)
+		if got != tt.want {
+			t.Errorf("supportsCompaction(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}
+
+func TestAnthropic_SupportsServerTools(t *testing.T) {
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{"claude-opus-4-6", true},
+		{"claude-sonnet-4-20250514", true},
+		{"claude-haiku-4-5-20251001", true},
+		{"gpt-4o", false},
+		{"gemini-2.0-flash", false},
+	}
+	for _, tt := range tests {
+		got := supportsServerTools(tt.model)
+		if got != tt.want {
+			t.Errorf("supportsServerTools(%q) = %v, want %v", tt.model, got, tt.want)
+		}
+	}
+}
+
+func TestAnthropic_CompactionSkippedForUnsupportedModel(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
+	}
+	opts := &ai.StreamOptions{
+		ApiKey:     "test-key",
+		Compaction: &ai.AnthropicCompaction{Enabled: true, TriggerTokens: 100000},
+	}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+	if _, ok := params["context_management"]; ok {
+		t.Error("expected no context_management for unsupported model")
+	}
+}
+
+func TestAnthropic_ServerToolsSkippedForNonClaudeModel(t *testing.T) {
+	model := &ai.Model{ID: "gpt-4o", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
+	}
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "web_search_20250305"},
+		},
+	}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+	if _, ok := params["tools"]; ok {
+		t.Error("expected no tools for non-Claude model")
+	}
+}
