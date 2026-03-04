@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Anthropic server-side tools support: `web_search_20250305`, `code_execution_20250522`, and `programmatic_tool_calling_20250624` can be passed via `StreamOptions.ServerTools` for Anthropic API calls
 - `fir extensions [list]` and `fir extensions install <name>` CLI subcommands to list and install builtin extensions, mirroring the existing `fir skills` commands
 
 ## [0.13.0] - 2026-03-03

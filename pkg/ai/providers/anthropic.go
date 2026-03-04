@@ -222,6 +222,39 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					}
 					output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
+				case "server_tool_use":
+					// Server-side tool invocation (web_search, code_execution, etc.)
+					// We emit a text block showing the tool is running.
+					output.Content = append(output.Content, ai.NewTextContent(""))
+					blocks[idx] = &blockInfo{contentIdx: contentIdx}
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					continue // skip default blocks[idx] assignment below
+				case "web_search_tool_result":
+					// Server-side web search results — format as text summary.
+					text := formatWebSearchResult(cb)
+					output.Content = append(output.Content, ai.NewTextContent(text))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+				case "code_execution_tool_result":
+					// Server-side code execution results — format as text.
+					text := formatCodeExecutionResult(cb)
+					output.Content = append(output.Content, ai.NewTextContent(text))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+				case "tool_invocation":
+					// Programmatic tool calling — server-side tool invocation.
+					// These are informational; the API handles execution.
+					toolName, _ := cb["tool_name"].(string)
+					text := fmt.Sprintf("[calling %s]\n", toolName)
+					output.Content = append(output.Content, ai.NewTextContent(text))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+				case "tool_output":
+					// Programmatic tool calling — server-side tool result.
+					text := formatToolOutput(cb)
+					output.Content = append(output.Content, ai.NewTextContent(text))
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
 				}
 				blocks[idx] = &blockInfo{contentIdx: contentIdx}
 
@@ -385,6 +418,26 @@ func RegisterAnthropic(r *ai.Registry) {
 func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, options *ai.StreamOptions) map[string]string {
 	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 
+	// Add server tool betas if needed.
+	if options != nil {
+		seen := map[string]bool{}
+		for _, st := range options.ServerTools {
+			var beta string
+			switch {
+			case strings.HasPrefix(st.Type, "web_search"):
+				beta = "web-search-2025-03-05"
+			case strings.HasPrefix(st.Type, "code_execution"):
+				beta = "code-execution-2025-05-22"
+			case strings.HasPrefix(st.Type, "programmatic_tool_calling"):
+				beta = "programmatic-tool-calling-2025-06-24"
+			}
+			if beta != "" && !seen[beta] {
+				seen[beta] = true
+				betaFeatures += "," + beta
+			}
+		}
+	}
+
 	headers := map[string]string{
 		"accept":            "application/json",
 		"anthropic-version": "2023-06-01",
@@ -470,8 +523,17 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	}
 
 	// Tools
+	var allTools []map[string]any
 	if len(ctx.Tools) > 0 {
-		params["tools"] = convertAnthropicTools(ctx.Tools, oauthToken)
+		allTools = append(allTools, convertAnthropicTools(ctx.Tools, oauthToken)...)
+	}
+	if options != nil {
+		for _, st := range options.ServerTools {
+			allTools = append(allTools, convertAnthropicServerTool(st))
+		}
+	}
+	if len(allTools) > 0 {
+		params["tools"] = allTools
 	}
 
 	// Thinking (from internal headers)
@@ -723,6 +785,144 @@ func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {
 		})
 	}
 	return result
+}
+
+// convertAnthropicServerTool converts an AnthropicServerTool to the Anthropic API format.
+func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
+	tool := map[string]any{
+		"type": st.Type,
+	}
+	if st.Name != "" {
+		tool["name"] = st.Name
+	}
+	if st.MaxUses > 0 {
+		tool["max_uses"] = st.MaxUses
+	}
+	if len(st.AllowedDomains) > 0 {
+		tool["allowed_domains"] = st.AllowedDomains
+	}
+	if len(st.BlockedDomains) > 0 {
+		tool["blocked_domains"] = st.BlockedDomains
+	}
+	if st.UserLocation != nil {
+		tool["user_location"] = st.UserLocation
+	}
+	return tool
+}
+
+// formatWebSearchResult formats a web_search_tool_result content block as readable text.
+func formatWebSearchResult(cb map[string]any) string {
+	content, _ := cb["content"].([]any)
+	if len(content) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, item := range content {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		itemType, _ := m["type"].(string)
+		switch itemType {
+		case "web_search_result":
+			title, _ := m["title"].(string)
+			url, _ := m["url"].(string)
+			snippet, _ := m["page_snippet"].(string)
+			if title != "" {
+				b.WriteString(title)
+				if url != "" {
+					b.WriteString(" (")
+					b.WriteString(url)
+					b.WriteString(")")
+				}
+				b.WriteString("\n")
+			}
+			if snippet != "" {
+				b.WriteString(snippet)
+				b.WriteString("\n")
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// formatCodeExecutionResult formats a code_execution_tool_result content block as readable text.
+func formatCodeExecutionResult(cb map[string]any) string {
+	content, _ := cb["content"].([]any)
+	if len(content) == 0 {
+		// Check for top-level stdout/stderr (alternative format).
+		var b strings.Builder
+		if stdout, _ := cb["stdout"].(string); stdout != "" {
+			b.WriteString(stdout)
+			b.WriteString("\n")
+		}
+		if stderr, _ := cb["stderr"].(string); stderr != "" {
+			b.WriteString("stderr: ")
+			b.WriteString(stderr)
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
+	var b strings.Builder
+	for _, item := range content {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		itemType, _ := m["type"].(string)
+		switch itemType {
+		case "code_execution_output":
+			output, _ := m["output"].(string)
+			if output != "" {
+				b.WriteString(output)
+				b.WriteString("\n")
+			}
+		case "code_execution_error":
+			errName, _ := m["error_name"].(string)
+			errMsg, _ := m["error_message"].(string)
+			b.WriteString("Error")
+			if errName != "" {
+				b.WriteString(" (")
+				b.WriteString(errName)
+				b.WriteString(")")
+			}
+			if errMsg != "" {
+				b.WriteString(": ")
+				b.WriteString(errMsg)
+			}
+			b.WriteString("\n")
+		case "image":
+			// Images from code execution (e.g. matplotlib plots) — note their presence.
+			b.WriteString("[generated image]\n")
+		}
+	}
+	return b.String()
+}
+
+// formatToolOutput formats a tool_output content block from programmatic tool calling.
+func formatToolOutput(cb map[string]any) string {
+	output, _ := cb["output"].(string)
+	if output != "" {
+		return output + "\n"
+	}
+	// Some tool outputs use a content array.
+	content, _ := cb["content"].([]any)
+	if len(content) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, item := range content {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text, _ := m["text"].(string); text != "" {
+			b.WriteString(text)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 // updateAnthropicUsage updates usage from an Anthropic usage object.

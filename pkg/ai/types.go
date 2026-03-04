@@ -142,19 +142,46 @@ const (
 
 // --- Stream options ---
 
+// AnthropicServerTool configures a server-side tool (e.g. web_search, code_execution)
+// that Anthropic's API executes on behalf of the model.
+type AnthropicServerTool struct {
+	// Type is the tool type identifier, e.g. "web_search_20250305" or "code_execution_20250522".
+	Type string `json:"type"`
+	// Name is an optional display name override.
+	Name string `json:"name,omitempty"`
+	// MaxUses limits how many times the tool can be used per turn (0 = unlimited).
+	MaxUses int `json:"max_uses,omitempty"`
+	// AllowedDomains restricts web search to specific domains (web_search only).
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	// BlockedDomains prevents web search from using specific domains (web_search only).
+	BlockedDomains []string `json:"blocked_domains,omitempty"`
+	// UserLocation sets geographic context for web search (web_search only).
+	UserLocation *AnthropicUserLocation `json:"user_location,omitempty"`
+}
+
+// AnthropicUserLocation provides geographic context for web search.
+type AnthropicUserLocation struct {
+	Type      string `json:"type"` // always "approximate"
+	City      string `json:"city,omitempty"`
+	Region    string `json:"region,omitempty"`
+	Country   string `json:"country,omitempty"`
+	Timezone  string `json:"timezone,omitempty"`
+}
+
 // StreamOptions are the base options shared by all streaming calls.
 type StreamOptions struct {
-	Temperature     *float64          `json:"temperature,omitempty"`
-	MaxTokens       *int              `json:"maxTokens,omitempty"`
-	ApiKey          string            `json:"apiKey,omitempty"`
-	Transport       Transport         `json:"transport,omitempty"`
-	CacheRetention  CacheRetention    `json:"cacheRetention,omitempty"`
-	SessionID       string            `json:"sessionId,omitempty"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	MaxRetryDelayMs *int              `json:"maxRetryDelayMs,omitempty"`
-	ReasoningEffort ThinkingLevel     `json:"reasoningEffort,omitempty"`
-	ToolChoice      string            `json:"toolChoice,omitempty"`
-	Metadata        map[string]any    `json:"metadata,omitempty"`
+	Temperature     *float64              `json:"temperature,omitempty"`
+	MaxTokens       *int                  `json:"maxTokens,omitempty"`
+	ApiKey          string                `json:"apiKey,omitempty"`
+	Transport       Transport             `json:"transport,omitempty"`
+	CacheRetention  CacheRetention        `json:"cacheRetention,omitempty"`
+	SessionID       string                `json:"sessionId,omitempty"`
+	Headers         map[string]string     `json:"headers,omitempty"`
+	MaxRetryDelayMs *int                  `json:"maxRetryDelayMs,omitempty"`
+	ReasoningEffort ThinkingLevel         `json:"reasoningEffort,omitempty"`
+	ToolChoice      string                `json:"toolChoice,omitempty"`
+	Metadata        map[string]any        `json:"metadata,omitempty"`
+	ServerTools     []AnthropicServerTool `json:"serverTools,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.

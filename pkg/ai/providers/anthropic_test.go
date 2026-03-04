@@ -1515,3 +1515,230 @@ func TestAnthropic_RegisterProvider(t *testing.T) {
 		t.Errorf("expected api %s, got %s", ai.ApiAnthropicMessages, p.Api)
 	}
 }
+
+func TestAnthropic_ServerTools_InParams(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("search for Go tutorials", 1000)},
+		Tools: []ai.Tool{{
+			Name:        "read",
+			Description: "Read a file",
+			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+	}
+
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		ServerTools: []ai.AnthropicServerTool{
+			{
+				Type:           "web_search_20250305",
+				Name:           "web_search",
+				MaxUses:        5,
+				AllowedDomains: []string{"golang.org"},
+				UserLocation:   &ai.AnthropicUserLocation{Type: "approximate", Country: "US"},
+			},
+			{
+				Type: "code_execution_20250522",
+			},
+		},
+	}
+
+	params := buildAnthropicParams(model, ctx, false, opts)
+
+	tools, ok := params["tools"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected tools as []map[string]any")
+	}
+	// 1 regular tool + 2 server tools
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(tools))
+	}
+
+	// First tool is the regular tool
+	if tools[0]["name"] != "read" {
+		t.Errorf("expected first tool name=read, got %v", tools[0]["name"])
+	}
+
+	// Second tool is web_search
+	ws := tools[1]
+	if ws["type"] != "web_search_20250305" {
+		t.Errorf("expected type=web_search_20250305, got %v", ws["type"])
+	}
+	if ws["name"] != "web_search" {
+		t.Errorf("expected name=web_search, got %v", ws["name"])
+	}
+	if ws["max_uses"] != 5 {
+		t.Errorf("expected max_uses=5, got %v", ws["max_uses"])
+	}
+	domains, _ := ws["allowed_domains"].([]string)
+	if len(domains) != 1 || domains[0] != "golang.org" {
+		t.Errorf("expected allowed_domains=[golang.org], got %v", ws["allowed_domains"])
+	}
+	loc, _ := ws["user_location"].(*ai.AnthropicUserLocation)
+	if loc == nil || loc.Country != "US" {
+		t.Errorf("expected user_location with country=US, got %v", ws["user_location"])
+	}
+
+	// Third tool is code_execution
+	ce := tools[2]
+	if ce["type"] != "code_execution_20250522" {
+		t.Errorf("expected type=code_execution_20250522, got %v", ce["type"])
+	}
+}
+
+func TestAnthropic_ServerTools_BetaHeaders(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	opts := &ai.StreamOptions{
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "web_search_20250305"},
+			{Type: "code_execution_20250522"},
+		},
+	}
+
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	if !strings.Contains(beta, "web-search-2025-03-05") {
+		t.Errorf("expected web-search beta in header, got %s", beta)
+	}
+	if !strings.Contains(beta, "code-execution-2025-05-22") {
+		t.Errorf("expected code-execution beta in header, got %s", beta)
+	}
+}
+
+func TestAnthropic_ServerTools_BetaHeaders_NoDuplicates(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	opts := &ai.StreamOptions{
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "web_search_20250305", Name: "search1"},
+			{Type: "web_search_20250305", Name: "search2"},
+		},
+	}
+
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	// Count occurrences of the beta string
+	count := strings.Count(beta, "web-search-2025-03-05")
+	if count != 1 {
+		t.Errorf("expected exactly 1 occurrence of web-search beta, got %d in %q", count, beta)
+	}
+}
+
+func TestAnthropic_FormatWebSearchResult(t *testing.T) {
+	cb := map[string]any{
+		"type": "web_search_tool_result",
+		"content": []any{
+			map[string]any{
+				"type":         "web_search_result",
+				"title":        "Go Tutorial",
+				"url":          "https://golang.org/doc/tutorial",
+				"page_snippet": "Learn Go programming.",
+			},
+		},
+	}
+	text := formatWebSearchResult(cb)
+	if !strings.Contains(text, "Go Tutorial") {
+		t.Errorf("expected title in output, got %q", text)
+	}
+	if !strings.Contains(text, "https://golang.org/doc/tutorial") {
+		t.Errorf("expected URL in output, got %q", text)
+	}
+}
+
+func TestAnthropic_FormatCodeExecutionResult(t *testing.T) {
+	cb := map[string]any{
+		"type": "code_execution_tool_result",
+		"content": []any{
+			map[string]any{
+				"type":   "code_execution_output",
+				"output": "42",
+			},
+		},
+	}
+	text := formatCodeExecutionResult(cb)
+	if !strings.Contains(text, "42") {
+		t.Errorf("expected output in result, got %q", text)
+	}
+
+	// Error case
+	cbErr := map[string]any{
+		"type": "code_execution_tool_result",
+		"content": []any{
+			map[string]any{
+				"type":          "code_execution_error",
+				"error_name":    "ValueError",
+				"error_message": "invalid input",
+			},
+		},
+	}
+	text = formatCodeExecutionResult(cbErr)
+	if !strings.Contains(text, "ValueError") || !strings.Contains(text, "invalid input") {
+		t.Errorf("expected error info in result, got %q", text)
+	}
+}
+
+func TestAnthropic_ProgrammaticToolCalling_BetaHeader(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	opts := &ai.StreamOptions{
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "programmatic_tool_calling_20250624"},
+		},
+	}
+
+	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	beta := headers["anthropic-beta"]
+	if !strings.Contains(beta, "programmatic-tool-calling-2025-06-24") {
+		t.Errorf("expected programmatic-tool-calling beta in header, got %s", beta)
+	}
+}
+
+func TestAnthropic_FormatToolOutput(t *testing.T) {
+	// String output
+	cb := map[string]any{
+		"type":   "tool_output",
+		"output": "result: 42",
+	}
+	text := formatToolOutput(cb)
+	if !strings.Contains(text, "result: 42") {
+		t.Errorf("expected output text, got %q", text)
+	}
+
+	// Content array output
+	cb2 := map[string]any{
+		"type": "tool_output",
+		"content": []any{
+			map[string]any{"type": "text", "text": "line 1"},
+			map[string]any{"type": "text", "text": "line 2"},
+		},
+	}
+	text = formatToolOutput(cb2)
+	if !strings.Contains(text, "line 1") || !strings.Contains(text, "line 2") {
+		t.Errorf("expected content array text, got %q", text)
+	}
+}
+
+func TestAnthropic_CodeExecution_ImageInResult(t *testing.T) {
+	cb := map[string]any{
+		"type": "code_execution_tool_result",
+		"content": []any{
+			map[string]any{
+				"type":   "code_execution_output",
+				"output": "Plot saved",
+			},
+			map[string]any{
+				"type": "image",
+				"source": map[string]any{
+					"type":       "base64",
+					"media_type": "image/png",
+					"data":       "iVBOR...",
+				},
+			},
+		},
+	}
+	text := formatCodeExecutionResult(cb)
+	if !strings.Contains(text, "Plot saved") {
+		t.Errorf("expected output text, got %q", text)
+	}
+	if !strings.Contains(text, "[generated image]") {
+		t.Errorf("expected image placeholder, got %q", text)
+	}
+}
