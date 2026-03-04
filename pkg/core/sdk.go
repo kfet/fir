@@ -316,9 +316,8 @@ func AllTools(cwd string) []agent.AgentTool {
 
 // serverToolTypeMap maps short names to Anthropic server tool type identifiers.
 var serverToolTypeMap = map[string]string{
-	"web_search":               "web_search_20250305",
-	"code_execution":           "code_execution_20250522",
-	"programmatic_tool_calling": "programmatic_tool_calling_20250624",
+	"web_search":     "web_search_20250305",
+	"code_execution": "code_execution_20250522",
 }
 
 // resolveServerTools converts short tool names (from settings) to AnthropicServerTool structs.

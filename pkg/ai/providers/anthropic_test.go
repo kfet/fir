@@ -1677,18 +1677,19 @@ func TestAnthropic_FormatCodeExecutionResult(t *testing.T) {
 	}
 }
 
-func TestAnthropic_ProgrammaticToolCalling_BetaHeader(t *testing.T) {
+func TestAnthropic_UnknownServerTool_NoBeta(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
 	opts := &ai.StreamOptions{
 		ServerTools: []ai.AnthropicServerTool{
-			{Type: "programmatic_tool_calling_20250624"},
+			{Type: "unknown_tool_20260101"},
 		},
 	}
 
 	headers := buildAnthropicHeaders(model, "test-key", false, opts)
 	beta := headers["anthropic-beta"]
-	if !strings.Contains(beta, "programmatic-tool-calling-2025-06-24") {
-		t.Errorf("expected programmatic-tool-calling beta in header, got %s", beta)
+	// Unknown tools should not add any extra beta
+	if strings.Count(beta, ",") != 1 {
+		t.Errorf("expected only base betas, got %s", beta)
 	}
 }
 
@@ -1773,5 +1774,38 @@ func TestAnthropic_ServerTools_DomainLimits(t *testing.T) {
 	blockedResult, _ := tool2["blocked_domains"].([]string)
 	if len(blockedResult) != 25 {
 		t.Errorf("expected blocked_domains truncated to 25, got %d", len(blockedResult))
+	}
+}
+
+func TestAnthropic_ServerToolDefaultName(t *testing.T) {
+	tests := []struct {
+		toolType string
+		want     string
+	}{
+		{"web_search_20250305", "web_search"},
+		{"code_execution_20250522", "code_execution"},
+		{"some_tool_20260101", "some_tool"},
+		{"notool", "notool"},
+	}
+	for _, tt := range tests {
+		got := serverToolDefaultName(tt.toolType)
+		if got != tt.want {
+			t.Errorf("serverToolDefaultName(%q) = %q, want %q", tt.toolType, got, tt.want)
+		}
+	}
+}
+
+func TestAnthropic_ConvertServerTool_DefaultName(t *testing.T) {
+	st := ai.AnthropicServerTool{Type: "web_search_20250305"}
+	tool := convertAnthropicServerTool(st)
+	if tool["name"] != "web_search" {
+		t.Errorf("expected default name web_search, got %v", tool["name"])
+	}
+
+	// Explicit name wins
+	st2 := ai.AnthropicServerTool{Type: "web_search_20250305", Name: "my_search"}
+	tool2 := convertAnthropicServerTool(st2)
+	if tool2["name"] != "my_search" {
+		t.Errorf("expected name my_search, got %v", tool2["name"])
 	}
 }

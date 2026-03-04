@@ -90,3 +90,20 @@ func TestAdjustMaxTokensForThinking_XhighClamped(t *testing.T) {
 	assert.Equal(t, 8192+16384, maxTok)
 	assert.Equal(t, 16384, budget)
 }
+
+func TestBuildBaseOptions_ServerToolsPassThrough(t *testing.T) {
+	model := &ai.Model{MaxTokens: 8192}
+	simple := &ai.SimpleStreamOptions{
+		StreamOptions: ai.StreamOptions{
+			ApiKey: "test-key",
+			ServerTools: []ai.AnthropicServerTool{
+				{Type: "web_search_20250305"},
+				{Type: "code_execution_20250522"},
+			},
+		},
+	}
+	opts := BuildBaseOptions(model, simple, "")
+	assert.Equal(t, 2, len(opts.ServerTools))
+	assert.Equal(t, "web_search_20250305", opts.ServerTools[0].Type)
+	assert.Equal(t, "code_execution_20250522", opts.ServerTools[1].Type)
+}

@@ -428,8 +428,6 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 				beta = "web-search-2025-03-05"
 			case strings.HasPrefix(st.Type, "code_execution"):
 				beta = "code-execution-2025-05-22"
-			case strings.HasPrefix(st.Type, "programmatic_tool_calling"):
-				beta = "programmatic-tool-calling-2025-06-24"
 			}
 			if beta != "" && !seen[beta] {
 				seen[beta] = true
@@ -793,13 +791,39 @@ const (
 	maxBlockedDomains  = 25
 )
 
+// serverToolDefaultName derives the default tool name from the type identifier.
+// e.g. "web_search_20250305" → "web_search", "code_execution_20250522" → "code_execution".
+func serverToolDefaultName(toolType string) string {
+	// Strip the trailing _YYYYMMDD version suffix.
+	for i := len(toolType) - 1; i >= 0; i-- {
+		if toolType[i] == '_' {
+			// Check if everything after _ is digits (a date suffix).
+			suffix := toolType[i+1:]
+			allDigits := len(suffix) > 0
+			for _, c := range suffix {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return toolType[:i]
+			}
+			break
+		}
+	}
+	return toolType
+}
+
 // convertAnthropicServerTool converts an AnthropicServerTool to the Anthropic API format.
 func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
+	name := st.Name
+	if name == "" {
+		name = serverToolDefaultName(st.Type)
+	}
 	tool := map[string]any{
 		"type": st.Type,
-	}
-	if st.Name != "" {
-		tool["name"] = st.Name
+		"name": name,
 	}
 	if st.MaxUses > 0 {
 		tool["max_uses"] = st.MaxUses

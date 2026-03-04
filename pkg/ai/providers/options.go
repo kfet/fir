@@ -41,6 +41,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		SessionID:       options.SessionID,
 		Headers:         options.Headers,
 		MaxRetryDelayMs: options.MaxRetryDelayMs,
+		ServerTools:     options.ServerTools,
 	}
 }
 
