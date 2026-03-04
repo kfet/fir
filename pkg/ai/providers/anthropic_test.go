@@ -5,6 +5,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1740,5 +1741,37 @@ func TestAnthropic_CodeExecution_ImageInResult(t *testing.T) {
 	}
 	if !strings.Contains(text, "[generated image]") {
 		t.Errorf("expected image placeholder, got %q", text)
+	}
+}
+
+func TestAnthropic_ServerTools_DomainLimits(t *testing.T) {
+	// AllowedDomains over limit gets truncated
+	domains := make([]string, 15)
+	for i := range domains {
+		domains[i] = fmt.Sprintf("domain%d.com", i)
+	}
+	st := ai.AnthropicServerTool{
+		Type:           "web_search_20250305",
+		AllowedDomains: domains,
+	}
+	tool := convertAnthropicServerTool(st)
+	allowed, _ := tool["allowed_domains"].([]string)
+	if len(allowed) != 10 {
+		t.Errorf("expected allowed_domains truncated to 10, got %d", len(allowed))
+	}
+
+	// BlockedDomains over limit gets truncated
+	blocked := make([]string, 30)
+	for i := range blocked {
+		blocked[i] = fmt.Sprintf("block%d.com", i)
+	}
+	st2 := ai.AnthropicServerTool{
+		Type:           "web_search_20250305",
+		BlockedDomains: blocked,
+	}
+	tool2 := convertAnthropicServerTool(st2)
+	blockedResult, _ := tool2["blocked_domains"].([]string)
+	if len(blockedResult) != 25 {
+		t.Errorf("expected blocked_domains truncated to 25, got %d", len(blockedResult))
 	}
 }

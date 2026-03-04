@@ -787,6 +787,12 @@ func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {
 	return result
 }
 
+// Anthropic web search domain limits.
+const (
+	maxAllowedDomains  = 10
+	maxBlockedDomains  = 25
+)
+
 // convertAnthropicServerTool converts an AnthropicServerTool to the Anthropic API format.
 func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
 	tool := map[string]any{
@@ -799,10 +805,20 @@ func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
 		tool["max_uses"] = st.MaxUses
 	}
 	if len(st.AllowedDomains) > 0 {
-		tool["allowed_domains"] = st.AllowedDomains
+		domains := st.AllowedDomains
+		if len(domains) > maxAllowedDomains {
+			firlog.Warn("web_search allowed_domains exceeds limit, truncating", "count", len(domains), "max", maxAllowedDomains)
+			domains = domains[:maxAllowedDomains]
+		}
+		tool["allowed_domains"] = domains
 	}
 	if len(st.BlockedDomains) > 0 {
-		tool["blocked_domains"] = st.BlockedDomains
+		domains := st.BlockedDomains
+		if len(domains) > maxBlockedDomains {
+			firlog.Warn("web_search blocked_domains exceeds limit, truncating", "count", len(domains), "max", maxBlockedDomains)
+			domains = domains[:maxBlockedDomains]
+		}
+		tool["blocked_domains"] = domains
 	}
 	if st.UserLocation != nil {
 		tool["user_location"] = st.UserLocation

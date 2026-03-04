@@ -151,9 +151,9 @@ type AnthropicServerTool struct {
 	Name string `json:"name,omitempty"`
 	// MaxUses limits how many times the tool can be used per turn (0 = unlimited).
 	MaxUses int `json:"max_uses,omitempty"`
-	// AllowedDomains restricts web search to specific domains (web_search only).
+	// AllowedDomains restricts web search to specific domains (web_search only, max 10).
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
-	// BlockedDomains prevents web search from using specific domains (web_search only).
+	// BlockedDomains prevents web search from using specific domains (web_search only, max 25).
 	BlockedDomains []string `json:"blocked_domains,omitempty"`
 	// UserLocation sets geographic context for web search (web_search only).
 	UserLocation *AnthropicUserLocation `json:"user_location,omitempty"`
