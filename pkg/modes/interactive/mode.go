@@ -50,12 +50,12 @@ type InteractiveMode struct {
 	editorContainer *tui.Container // holds editor or selector overlay
 
 	// State
-	messageContainer   *tui.Container
+	messageContainer       *tui.Container
 	activityContainer      *tui.Container // spinners: "Working...", "Compacting..."
 	commandStatusContainer *tui.Container // transient command result messages
-	footerComponent    *components.FooterComponent
-	footerDataProvider *core.FooterDataProvider
-	markdownTheme      tuicomp.MarkdownTheme
+	footerComponent        *components.FooterComponent
+	footerDataProvider     *core.FooterDataProvider
+	markdownTheme          tuicomp.MarkdownTheme
 
 	// Streaming state
 	streamingComponent *components.AssistantMessageComponent
@@ -95,6 +95,11 @@ type InteractiveMode struct {
 
 	// Extproc extension setup (optional)
 	extSetup *extension.SetupResult
+
+	// beforeExtensionReload runs immediately before extSetup.Reload during /reload.
+	// Used by callers to refresh extension-specific configuration (like allowlists)
+	// from settings that were just reloaded by session.Reload().
+	beforeExtensionReload func() error
 
 	// updateCh receives a single update notice string (or "") when the
 	// background version check completes. Shown in the TUI at startup.
@@ -175,6 +180,12 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 			}
 		})
 	}
+}
+
+// SetBeforeExtensionReload installs a hook executed during /reload after
+// session.Reload() and before extension manager reload.
+func (m *InteractiveMode) SetBeforeExtensionReload(fn func() error) {
+	m.beforeExtensionReload = fn
 }
 
 // SetUpdateChannel supplies a channel that delivers a single update notice
@@ -2292,6 +2303,11 @@ func (m *InteractiveMode) handleReloadCommand() {
 
 	// Reload extensions if setup is available.
 	if m.extSetup != nil {
+		if m.beforeExtensionReload != nil {
+			if err := m.beforeExtensionReload(); err != nil {
+				m.showWarning(fmt.Sprintf("Extension reload setup failed: %v", err))
+			}
+		}
 		if err := m.extSetup.Reload(m.ctx); err != nil {
 			m.showWarning(fmt.Sprintf("Extension reload failed: %v", err))
 			// Continue — skills/prompts were already reloaded successfully.
@@ -3010,4 +3026,3 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)
 }
-

@@ -39,18 +39,19 @@ func SetVersion(v string) { version = v }
 
 // firSession holds per-session state.
 type firSession struct {
-	session       *core.AgentSession
-	modelRegistry *core.ModelRegistry
-	extSetup      *extension.SetupResult
-	unsubscribe   func()
-	cwd           string
-	agentDir      string
-	termState     *terminalState
-	pendingArgs   sync.Map // toolCallID → map[string]any
-	resumeMu      sync.Mutex
+	session         *core.AgentSession
+	modelRegistry   *core.ModelRegistry
+	settingsManager *core.SettingsManager
+	extSetup        *extension.SetupResult
+	unsubscribe     func()
+	cwd             string
+	agentDir        string
+	termState       *terminalState
+	pendingArgs     sync.Map // toolCallID → map[string]any
+	resumeMu        sync.Mutex
 	lastResumeList  []core.SessionListInfo
 	configAccessor  thinkingAccessor // nil → use session (for testing)
-	mcpManager      *mcp.Manager // nil if no MCP servers configured
+	mcpManager      *mcp.Manager     // nil if no MCP servers configured
 }
 
 // getThinkingAccessor returns the thinkingAccessor for this session.
@@ -655,12 +656,13 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	}
 
 	entry := &firSession{
-		session:       result.Session,
-		modelRegistry: modelRegistry,
-		cwd:           cwd,
-		agentDir:      agentDir,
-		termState:     newTerminalState(),
-		mcpManager:    mcpMgr,
+		session:         result.Session,
+		modelRegistry:   modelRegistry,
+		settingsManager: settingsManager,
+		cwd:             cwd,
+		agentDir:        agentDir,
+		termState:       newTerminalState(),
+		mcpManager:      mcpMgr,
 	}
 
 	unsub := result.Session.Subscribe(func(event core.AgentSessionEvent) {
@@ -1194,6 +1196,9 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 			pa.sendAgentMessage(sessionID, fmt.Sprintf("Reload failed: %v", err))
 		} else {
 			if entry.extSetup != nil {
+				if entry.extSetup.Manager != nil {
+					entry.extSetup.Manager.SetAllowedNames(resolveEnabledExtensions(pa.options.EnabledExtensions, entry.settingsManager))
+				}
 				_ = entry.extSetup.Reload(context.Background())
 			}
 			pa.sendAvailableCommands(sessionID)

@@ -76,6 +76,14 @@ func (m *Manager) SetSetStatusFn(fn SetStatusFunc) {
 	m.mu.Unlock()
 }
 
+// SetAllowedNames updates the optional extension allowlist.
+// Pass an empty slice to allow all discovered extensions.
+func (m *Manager) SetAllowedNames(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.AllowedNames = append([]string(nil), names...)
+}
+
 // Start discovers extensions, spawns processes, performs handshakes, and
 // starts bridge dispatch loops.
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {

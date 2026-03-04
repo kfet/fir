@@ -7,6 +7,9 @@
 - Anthropic server-side context compaction via `serverCompaction` setting for long-running conversations
 - `fir extensions [list]` and `fir extensions install <name>` CLI subcommands to list and install builtin extensions, mirroring the existing `fir skills` commands
 
+### Fixed
+- `/reload` now re-applies extension allowlists from current settings and `--extension` flags before restarting extensions, so removed names are actually disabled without restarting fir
+
 ## [0.13.0] - 2026-03-03
 
 ### Added

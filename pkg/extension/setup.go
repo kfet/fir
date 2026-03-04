@@ -102,7 +102,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 		mgr.SetTrustStore(NewTrustStoreWithPath(opts.TrustStorePath))
 	}
 	if len(opts.EnabledNames) > 0 {
-		mgr.AllowedNames = opts.EnabledNames
+		mgr.SetAllowedNames(opts.EnabledNames)
 	}
 
 	// Wire trust confirmation.

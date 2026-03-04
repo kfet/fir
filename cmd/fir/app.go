@@ -696,6 +696,12 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	// Wire extension setup into interactive mode (enables /reload for extensions).
 	if setup.extSetup != nil {
 		mode.SetExtensionSetup(setup.extSetup)
+		mode.SetBeforeExtensionReload(func() error {
+			if setup.extSetup.Manager != nil {
+				setup.extSetup.Manager.SetAllowedNames(resolveEnabledExtensions(args, setup.settingsManager))
+			}
+			return nil
+		})
 		// Emit session_start after the UI context is wired so that
 		// extension status callbacks are active before session_start fires.
 		setup.extSetup.EmitSessionStart()

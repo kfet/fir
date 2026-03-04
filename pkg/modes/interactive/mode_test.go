@@ -9,6 +9,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
@@ -1248,6 +1249,24 @@ func TestInteractiveMode_SlashReloadWithSession(t *testing.T) {
 	output := tm.renderedOutput()
 	if strings.Contains(output, "failed") {
 		t.Error("reload should succeed")
+	}
+}
+
+func TestInteractiveMode_SlashReloadRunsExtensionPreHook(t *testing.T) {
+	tm := newTestModeWithSession(t)
+
+	called := false
+	tm.mode.extSetup = &extension.SetupResult{}
+	tm.mode.SetBeforeExtensionReload(func() error {
+		called = true
+		return nil
+	})
+
+	tm.mode.handleSlashCommand("/reload")
+	tm.waitRender()
+
+	if !called {
+		t.Fatal("expected /reload to run extension pre-reload hook")
 	}
 }
 
