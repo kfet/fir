@@ -3,7 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- Gemini 3.1 Flash Light enabled in Google, Google Vertex, Google Cloud Code Assist, and Google Antigravity OAuth providers
 - Extensions can now constrain where they run via comment frontmatter (`# mode:` / `# modes:`), e.g. `tui`, `text`, `json`, `rpc`, and `acp`
+- Updated notify and tmuxspinner extensions to be constrained to TUI mode
 - Anthropic server-side tool/compaction capabilities are now model metadata (`Model.ServerTools`, `Model.Compaction`) populated by model generation and configurable in custom `models.json` definitions/overrides
 - Anthropic server-side tools support: `web_search`, `web_fetch`, and `code_execution` can be enabled via `serverTools` setting; also supports raw type identifiers for newer versions with dynamic filtering
 - Anthropic server-side context compaction via `serverCompaction` setting for long-running conversations

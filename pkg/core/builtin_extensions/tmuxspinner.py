@@ -3,6 +3,7 @@
 # name: tmuxspinner
 # description: Animate a spinner in the tmux window name while the agent is working
 # builtin: true
+# modes: tui
 # ---
 """Animate a spinner in the tmux window name while the agent is working.
 
@@ -35,9 +36,7 @@ def _pane_id():
 
 def _run_tmux(*args):
     try:
-        result = subprocess.run(
-            ["tmux", *list(args)], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["tmux", *list(args)], capture_output=True, text=True, timeout=5)
         return result.stdout.strip()
     except Exception:
         return ""
@@ -70,8 +69,8 @@ class Spinner:
     def __init__(self):
         self._lock = threading.Lock()
         self._pane_id = ""
-        self._original_name = ""   # actual tmux window name (before fir touched it)
-        self._session_name = ""    # fir session name to append
+        self._original_name = ""  # actual tmux window name (before fir touched it)
+        self._session_name = ""  # fir session name to append
         self._stop_event = None
         self._thread = None
         self._running = False
