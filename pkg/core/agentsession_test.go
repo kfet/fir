@@ -2571,3 +2571,69 @@ func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 		t.Errorf("unexpected model after SwitchSession: provider=%q id=%q", got.Provider, got.ID)
 	}
 }
+
+// ============================================================================
+// Plan
+// ============================================================================
+
+func TestAgentSession_UpdatePlan_EmitsEvent(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	var received []AgentSessionEvent
+	var mu sync.Mutex
+
+	unsub := session.Subscribe(func(event AgentSessionEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		received = append(received, event)
+	})
+	defer unsub()
+
+	entries := []agent.PlanEntry{
+		{Content: "Step 1", Status: "pending"},
+		{Content: "Step 2", Status: "done"},
+	}
+	session.UpdatePlan(entries)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(received) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(received))
+	}
+	ev := received[0]
+	if ev.Type != "plan_update" {
+		t.Errorf("expected plan_update, got %s", ev.Type)
+	}
+	if len(ev.PlanEntries) != 2 {
+		t.Fatalf("expected 2 plan entries, got %d", len(ev.PlanEntries))
+	}
+	if ev.PlanEntries[0].Content != "Step 1" {
+		t.Errorf("expected Step 1, got %s", ev.PlanEntries[0].Content)
+	}
+}
+
+func TestAgentSession_PlanEntries_ReturnsDefensiveCopy(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	entries := []agent.PlanEntry{
+		{Content: "Step 1", Status: "pending"},
+	}
+	session.UpdatePlan(entries)
+
+	copy1 := session.PlanEntries()
+	copy2 := session.PlanEntries()
+
+	// Mutating copy1 should not affect copy2 or the internal state.
+	copy1[0].Content = "MUTATED"
+
+	copy3 := session.PlanEntries()
+	if copy3[0].Content != "Step 1" {
+		t.Errorf("PlanEntries returned a reference, not a copy: got %s", copy3[0].Content)
+	}
+	if copy2[0].Content != "Step 1" {
+		t.Errorf("earlier copy was mutated: got %s", copy2[0].Content)
+	}
+}

@@ -967,8 +967,9 @@ func (pa *firAgent) createBashKillTool(sessionID string) agent.AgentTool {
 // ============================================================================
 
 func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event core.AgentSessionEvent) {
-	// Handle session-level events (no AgentEvent).
-	if event.Type == "plan_update" {
+	// Handle session-level events first (no AgentEvent required).
+	switch event.Type {
+	case "plan_update":
 		entry.plan.update(event.PlanEntries)
 		return
 	}

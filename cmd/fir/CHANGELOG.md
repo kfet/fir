@@ -4,6 +4,7 @@
 
 ### Added
 
+- Plan progress tracking in ACP mode: clients (e.g. Zed) see live tool execution status as plan entries
 - Individual server tool toggles in `/settings`: web search, web fetch, code execution
 
 ### Changed

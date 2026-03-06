@@ -258,9 +258,11 @@ func (s *AgentSession) UpdatePlan(entries []agent.PlanEntry) {
 	s.mu.Lock()
 	s.plan = entries
 	s.mu.Unlock()
+	snapshot := make([]agent.PlanEntry, len(entries))
+	copy(snapshot, entries)
 	s.emit(AgentSessionEvent{
 		Type:        "plan_update",
-		PlanEntries: entries,
+		PlanEntries: snapshot,
 	})
 }
 
@@ -1490,6 +1492,8 @@ func (s *AgentSession) Close() {
 // (e.g. the plan tool) to the agent's current tool set.
 func (s *AgentSession) RegisterSessionTools() {
 	state := s.Agent.State()
-	allTools := append(state.Tools, tools.NewPlanTool(s))
+	allTools := make([]agent.AgentTool, len(state.Tools), len(state.Tools)+1)
+	copy(allTools, state.Tools)
+	allTools = append(allTools, tools.NewPlanTool(s))
 	s.Agent.SetTools(allTools)
 }

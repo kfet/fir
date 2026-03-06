@@ -136,3 +136,22 @@ func TestPlanTool_NoEntriesParam(t *testing.T) {
 		t.Fatalf("calls = %d", mock.calls)
 	}
 }
+
+func TestPlanTool_EntriesNotArray(t *testing.T) {
+	mock := &mockPlanUpdater{}
+	tool := NewPlanTool(mock)
+
+	result, err := tool.Execute(context.Background(), "tc6", map[string]any{
+		"entries": "not an array",
+	}, nil)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Error("expected error for non-array entries")
+	}
+	if mock.calls != 0 {
+		t.Fatalf("calls = %d, want 0", mock.calls)
+	}
+}
