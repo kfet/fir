@@ -12,7 +12,7 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 
 ## Features
 
-- **Interactive & non-interactive modes** — REPL, one-shot (`-p`), and JSON-RPC
+- **Interactive & non-interactive modes** — REPL, one-shot (`-p`), and ACP
 - **Multi-provider** — Anthropic, OpenAI, Google Gemini, Groq, xAI, Mistral, OpenRouter, AWS Bedrock, Azure OpenAI
 - **Built-in tools** — `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
 - **Sessions** — continue (`-c`) or resume (`-r`) previous conversations
@@ -199,7 +199,7 @@ pkg/
   ai/            LLM providers, streaming, model registry
   core/          Tools, sessions, prompt templates
   extension/     Extension system (stdio JSON-RPC, external processes)
-  modes/         Output modes (text, JSON, RPC)
+  modes/         Output modes (interactive, print, ACP)
   tui/           Terminal UI (markdown rendering, themes)
 ```
 

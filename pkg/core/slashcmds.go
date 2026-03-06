@@ -65,6 +65,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "reexec", Description: "Re-exec into the current or a specified binary, preserving the session"},
 	{Name: "queue", Description: "Show the follow-up message queue"},
 	{Name: "dequeue", Description: "Restore queued messages to the editor (/dequeue [N] removes item N)"},
+	{Name: "plan", Description: "Show/hide the current session plan"},
 	{Name: "quit", Description: "Quit fir"},
 }
 

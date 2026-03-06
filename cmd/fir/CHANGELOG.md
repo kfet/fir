@@ -8,6 +8,7 @@
 
 ### Added
 
+- Plan visualization in TUI mode: plan entries are shown inline and updated live; toggle with `/plan` command
 - GPT-5.4 and GPT-5.4 Pro model support for OpenAI and Azure providers
 
 ## [0.15.0] - 2026-03-06

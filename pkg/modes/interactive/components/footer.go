@@ -39,6 +39,12 @@ type FooterData struct {
 	ContextTokens  int
 	// QueuedMessages is the number of follow-up messages waiting in the queue.
 	QueuedMessages int
+	// PlanCompleted is the number of completed plan entries.
+	PlanCompleted int
+	// PlanTotal is the total number of plan entries (0 = no plan).
+	PlanTotal int
+	// PlanCurrentStep is the content of the current in-progress step (empty if none).
+	PlanCurrentStep string
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -143,6 +149,24 @@ func (f *FooterComponent) Render(width int) []string {
 	if data.QueuedMessages > 0 {
 		queueStr := fmt.Sprintf("📬 %d queued", data.QueuedMessages)
 		statsParts = append(statsParts, t.Fg("warning", queueStr))
+	}
+
+	// Plan progress
+	if data.PlanTotal > 0 {
+		planStr := fmt.Sprintf("📋 %d/%d", data.PlanCompleted, data.PlanTotal)
+		if data.PlanCurrentStep != "" {
+			step := data.PlanCurrentStep
+			// Truncate long step names
+			if len(step) > 30 {
+				step = step[:27] + "..."
+			}
+			planStr += ": " + step
+		}
+		if data.PlanCompleted == data.PlanTotal {
+			statsParts = append(statsParts, t.Fg("success", planStr))
+		} else {
+			statsParts = append(statsParts, t.Fg("accent", planStr))
+		}
 	}
 
 	statsLeft := strings.Join(statsParts, " ")

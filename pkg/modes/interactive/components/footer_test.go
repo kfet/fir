@@ -141,3 +141,62 @@ func TestFooterComponent_WithProvider(t *testing.T) {
 		t.Error("expected provider and model in output, got:", lines)
 	}
 }
+
+func TestFooterComponent_PlanProgress(t *testing.T) {
+	f := NewFooterComponent(func() FooterData {
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			PlanTotal:     5,
+			PlanCompleted: 2,
+			PlanCurrentStep: "Write tests",
+		}
+	})
+
+	lines := f.Render(120)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "📋") {
+		t.Fatal("expected plan emoji in footer")
+	}
+	if !strings.Contains(joined, "2/5") {
+		t.Fatal("expected plan progress count")
+	}
+	if !strings.Contains(joined, "Write tests") {
+		t.Fatal("expected current step name")
+	}
+}
+
+func TestFooterComponent_PlanCompleted(t *testing.T) {
+	f := NewFooterComponent(func() FooterData{
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			PlanTotal:     3,
+			PlanCompleted: 3,
+		}
+	})
+
+	lines := f.Render(120)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "3/3") {
+		t.Fatal("expected completed plan count")
+	}
+}
+
+func TestFooterComponent_NoPlan(t *testing.T) {
+	f := NewFooterComponent(func() FooterData{
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+		}
+	})
+
+	lines := f.Render(120)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "📋") {
+		t.Fatal("should not show plan indicator when no plan")
+	}
+}

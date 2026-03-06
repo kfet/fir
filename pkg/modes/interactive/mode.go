@@ -53,6 +53,8 @@ type InteractiveMode struct {
 	messageContainer       *tui.Container
 	activityContainer      *tui.Container // spinners: "Working...", "Compacting..."
 	commandStatusContainer *tui.Container // transient command result messages
+	planContainer          *tui.Container // plan visualization
+	planComponent          *components.PlanComponent
 	footerComponent        *components.FooterComponent
 	footerDataProvider     *core.FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
@@ -246,6 +248,10 @@ func (m *InteractiveMode) Init() error {
 	// Create command status container (for transient command result messages)
 	m.commandStatusContainer = &tui.Container{}
 	m.ui.AddChild(m.commandStatusContainer)
+
+	// Create plan container (shows plan entries above the editor)
+	m.planContainer = &tui.Container{}
+	m.ui.AddChild(m.planContainer)
 
 	// Create editor container (holds editor or selector overlays)
 	m.editorContainer = &tui.Container{}
@@ -863,6 +869,8 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handleDequeueCommand(arg)
 	case "/quit", "/exit":
 		m.Shutdown()
+	case "/plan":
+		m.handlePlanCommand()
 	default:
 		// Not a builtin command.
 		// Check if it's a skill or prompt template command before declaring unknown.
@@ -2688,6 +2696,43 @@ func (m *InteractiveMode) IsBashMode() bool {
 // Display helpers
 // ============================================================================
 
+func (m *InteractiveMode) onPlanUpdate(entries []agent.PlanEntry) {
+	m.planContainer.Clear()
+	if len(entries) == 0 {
+		m.planComponent = nil
+	} else {
+		if m.planComponent != nil {
+			m.planComponent.SetEntries(entries)
+		} else {
+			m.planComponent = components.NewPlanComponent(entries)
+		}
+		m.planContainer.AddChild(m.planComponent)
+	}
+	m.ui.RequestRender(false)
+}
+
+func (m *InteractiveMode) handlePlanCommand() {
+	if m.session == nil {
+		m.showWarning("No active session.")
+		return
+	}
+	entries := m.session.PlanEntries()
+	if len(entries) == 0 {
+		m.showStatus("No plan entries.")
+		return
+	}
+	// Toggle: if plan is already shown, hide it
+	if m.planComponent != nil {
+		m.planContainer.Clear()
+		m.planComponent = nil
+		m.ui.RequestRender(false)
+		return
+	}
+	m.planComponent = components.NewPlanComponent(entries)
+	m.planContainer.AddChild(m.planComponent)
+	m.ui.RequestRender(false)
+}
+
 func (m *InteractiveMode) showMessage(text string) {
 	if m.messageContainer == nil {
 		return
@@ -2730,6 +2775,7 @@ func (m *InteractiveMode) showHelp() {
   /model          - Select model (or /model <search>)
   /thinking       - Select thinking level
   /settings       - Open settings menu
+  /plan           - Show/hide the current session plan
   /theme          - Select theme
   /new            - Start a new session
   /compact        - Compact conversation context
@@ -2818,6 +2864,21 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 
 	// Queued follow-up messages
 	data.QueuedMessages = m.session.Agent.FollowUpQueueLen()
+
+	// Plan progress
+	if entries := m.session.PlanEntries(); len(entries) > 0 {
+		data.PlanTotal = len(entries)
+		for _, e := range entries {
+			switch e.Status {
+			case agent.PlanEntryStatusCompleted:
+				data.PlanCompleted++
+			case agent.PlanEntryStatusInProgress:
+				if data.PlanCurrentStep == "" {
+					data.PlanCurrentStep = e.Content
+				}
+			}
+		}
+	}
 
 	return data
 }
@@ -2937,6 +2998,8 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 			}
 			// If pending work, agent will resume naturally via EventAgentStart (no notification needed here)
 			m.ui.RequestRender(false)
+		case "plan_update":
+			m.onPlanUpdate(event.PlanEntries)
 		}
 		return
 	}

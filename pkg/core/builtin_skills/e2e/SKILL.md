@@ -31,7 +31,7 @@ This runs `go test -v -count=1 -tags=e2e -timeout 120s ./tests/e2e/`. The test s
 ### Running a specific test
 
 ```bash
-cd "$PROJECT_ROOT" && go test -v -count=1 -tags=e2e -timeout 120s -run TestRPC_Prompt ./tests/e2e/ 2>&1; echo "EXIT:$?"
+cd "$PROJECT_ROOT" && go test -v -count=1 -tags=e2e -timeout 120s -run TestPrint_PipedStdin ./tests/e2e/ 2>&1; echo "EXIT:$?"
 ```
 
 ### Test files
@@ -41,7 +41,6 @@ cd "$PROJECT_ROOT" && go test -v -count=1 -tags=e2e -timeout 120s -run TestRPC_P
 | `helpers_test.go` | `TestMain` + shared helpers | Builds binary, starts mock server, creates agent dir |
 | `mock_server_test.go` | — | In-process mock OpenAI SSE server |
 | `print_test.go` | 7 tests | Print mode: piped stdin, message arg, no-session, no API key, JSON output, API failure, bad provider |
-| `rpc_test.go` | 22 tests | RPC mode: all commands (get_state, prompt, models, thinking, bash, sessions, etc.) |
 | `cli_test.go` | 11 tests | CLI flags: help, version, list-models, themes, model resolution |
 | `tools_test.go` | 3 tests | Tool execution via mock: read, write, bash |
 | `acp_test.go` | 4 tests | ACP mode: initialize, session/new, unknown method, malformed JSON |

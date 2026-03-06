@@ -1,6 +1,12 @@
 ---
 name: work
-description: Start and manage non-trivial work. Creates a git worktree and feature branch before any edits.
+description: >-
+  Use this skill whenever you are about to make non-trivial changes: adding a feature,
+  refactoring across files, fixing a bug that touches multiple packages, implementing a
+  plan, or any edit you wouldn't be comfortable making directly on main. Also use it when
+  the user asks you to "work on", "implement", "build", "add", "refactor", "rewrite", or
+  "fix" something substantial. Creates a git worktree and feature branch before any edits
+  so work is isolated and reversible.
 ---
 
 # Work

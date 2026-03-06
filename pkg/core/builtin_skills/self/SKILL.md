@@ -12,9 +12,9 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 
 ## Modes
 
-- **Interactive** (default) — full TUI with markdown rendering, streaming, slash commands
+- **Interactive** (default) — full TUI with markdown rendering, streaming, slash commands, and live plan visualization (`/plan` to toggle)
 - **Print** (`-p` / `--print`) — non-interactive one-shot; process prompt and exit
-- **JSON-RPC** (`--mode json-rpc`) — machine-readable JSON-RPC 2.0 over stdio
+- **ACP** (`--mode acp`) — Agent Client Protocol, JSON-RPC 2.0 over stdio for IDE integrations
 - **ACP** (`--mode acp`) — Agent Client Protocol server for editor integrations (e.g. Zed)
 
 ## Configuration Hierarchy
@@ -64,7 +64,7 @@ A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extens
 
 Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e` flags, or `--no-extensions`.
 
-Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, `json`, `rpc`, or `text`.
+Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, `json`, or `text`.
 
 Builtin extensions (notify, tmuxspinner, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
