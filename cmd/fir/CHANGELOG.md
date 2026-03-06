@@ -4,7 +4,7 @@
 
 ### Added
 
-- Server tools toggle in `/settings` (none / web_search / all)
+- Individual server tool toggles in `/settings`: web search, web fetch, code execution
 - Server compaction toggle in `/settings` for Anthropic server-side context compaction
 
 ## [0.14.1] - 2026-03-05
