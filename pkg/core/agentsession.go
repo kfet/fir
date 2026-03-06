@@ -15,6 +15,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/core/tools"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -106,6 +107,9 @@ type AgentSessionEvent struct {
 
 	// SessionName is set on "session_named" events.
 	SessionName string
+
+	// PlanEntries is set on "plan_update" events.
+	PlanEntries []agent.PlanEntry
 }
 
 // AgentSessionEventListener receives session events.
@@ -210,6 +214,9 @@ type AgentSession struct {
 
 	// Usage tracking (optional; nil disables tracking)
 	usageTracker UsageTracker
+
+	// Plan entries (guarded by mu)
+	plan []agent.PlanEntry
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -244,6 +251,26 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 // UsageTracker returns the session's usage tracker, or nil if not set.
 func (s *AgentSession) UsageTracker() UsageTracker {
 	return s.usageTracker
+}
+
+// UpdatePlan replaces the plan entries and emits a "plan_update" event.
+func (s *AgentSession) UpdatePlan(entries []agent.PlanEntry) {
+	s.mu.Lock()
+	s.plan = entries
+	s.mu.Unlock()
+	s.emit(AgentSessionEvent{
+		Type:        "plan_update",
+		PlanEntries: entries,
+	})
+}
+
+// PlanEntries returns a copy of the current plan entries.
+func (s *AgentSession) PlanEntries() []agent.PlanEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]agent.PlanEntry, len(s.plan))
+	copy(out, s.plan)
+	return out
 }
 
 // ============================================================================
@@ -1457,4 +1484,12 @@ func (s *AgentSession) Close() {
 	if s.unsubAgent != nil {
 		s.unsubAgent()
 	}
+}
+
+// RegisterSessionTools appends tools that require a session reference
+// (e.g. the plan tool) to the agent's current tool set.
+func (s *AgentSession) RegisterSessionTools() {
+	state := s.Agent.State()
+	allTools := append(state.Tools, tools.NewPlanTool(s))
+	s.Agent.SetTools(allTools)
 }

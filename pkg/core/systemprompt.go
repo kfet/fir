@@ -17,6 +17,7 @@ var ToolDescriptions = map[string]string{
 	"grep":  "Search file contents for patterns (respects .gitignore)",
 	"find":  "Find files by glob pattern (respects .gitignore)",
 	"ls":    "List directory contents",
+	"plan":  "Create and track a step-by-step plan for complex tasks",
 }
 
 // ContextFile is a pre-loaded context file for the system prompt.
@@ -131,6 +132,9 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, dateTime, appendSection s
 	}
 	guidelines = append(guidelines, "Be concise in your responses")
 	guidelines = append(guidelines, "Show file paths clearly when working with files")
+	if toolSet["plan"] {
+		guidelines = append(guidelines, "For non-trivial tasks, use the plan tool to break work into steps and track progress")
+	}
 
 	var guidelineLines []string
 	for _, g := range guidelines {

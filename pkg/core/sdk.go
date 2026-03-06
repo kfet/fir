@@ -268,6 +268,9 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		ScopedModels:     opts.ScopedModels,
 	})
 
+	// Register session-aware tools (plan tool needs a session reference).
+	session.RegisterSessionTools()
+
 	return &CreateAgentSessionResult{
 		Session:              session,
 		ModelFallbackMessage: modelFallbackMessage,
