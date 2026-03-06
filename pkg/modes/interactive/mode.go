@@ -69,7 +69,7 @@ type InteractiveMode struct {
 	running         bool
 	shutdownRequest bool
 	hideThinking    bool
-	autoCompact     bool
+	autoCompactMode string // "off", "client", "server"
 	isBashMode      atomic.Bool
 
 	// Theme
@@ -134,16 +134,21 @@ func NewInteractiveMode(
 
 	cwd, _ := os.Getwd()
 
-	autoCompact := true
+	autoCompactMode := "client"
 	if settings != nil {
-		autoCompact = settings.GetCompactionEnabled()
+		if !settings.GetCompactionEnabled() {
+			autoCompactMode = "off"
+		}
+		if sc := settings.GetServerCompaction(); sc != nil && sc.Enabled != nil && *sc.Enabled {
+			autoCompactMode = "server"
+		}
 	}
 
 	m := &InteractiveMode{
 		session:            session,
 		keybindings:        keybindings,
 		settings:           settings,
-		autoCompact:        autoCompact,
+		autoCompactMode:    autoCompactMode,
 		footerDataProvider: core.NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -999,7 +1004,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 		}
 
 		config := components.SettingsConfig{
-			AutoCompact:             m.autoCompact,
+			AutoCompactMode:         m.autoCompactMode,
 			HideThinkingBlock:       m.hideThinking,
 			ThinkingLevel:           m.session.ThinkingLevel(),
 			AvailableThinkingLevels: levelStrs,
@@ -1012,13 +1017,25 @@ func (m *InteractiveMode) showSettingsSelector() {
 			ServerToolWebSearch:     serverToolsHas(m.settings.GetServerTools(), "web_search"),
 			ServerToolWebFetch:     serverToolsHas(m.settings.GetServerTools(), "web_fetch"),
 			ServerToolCodeExec:     serverToolsHas(m.settings.GetServerTools(), "code_execution"),
-			ServerCompaction:        serverCompactionEnabled(m.settings.GetServerCompaction()),
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
-			OnAutoCompactChange: func(v bool) {
-				m.autoCompact = v
-				m.settings.SetCompactionEnabled(v)
+			OnAutoCompactModeChange: func(mode string) {
+				m.autoCompactMode = mode
+				switch mode {
+				case "off":
+					m.settings.SetCompactionEnabled(false)
+					m.settings.SetServerCompactionEnabled(false)
+					m.session.Agent.SetCompaction(nil)
+				case "client":
+					m.settings.SetCompactionEnabled(true)
+					m.settings.SetServerCompactionEnabled(false)
+					m.session.Agent.SetCompaction(nil)
+				case "server":
+					m.settings.SetCompactionEnabled(true) // fallback
+					m.settings.SetServerCompactionEnabled(true)
+					m.session.Agent.SetCompaction(&ai.AnthropicCompaction{Enabled: true})
+				}
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
 			OnThinkingLevelChange: func(level string) {
@@ -1040,14 +1057,6 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetServerTools(names)
 				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
 			},
-			OnServerCompactionChange: func(v bool) {
-				m.settings.SetServerCompactionEnabled(v)
-				if v {
-					m.session.Agent.SetCompaction(&ai.AnthropicCompaction{Enabled: true})
-				} else {
-					m.session.Agent.SetCompaction(nil)
-				}
-			},
 			OnCancel: func() { done() },
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
@@ -1058,11 +1067,6 @@ func (m *InteractiveMode) showSettingsSelector() {
 // ============================================================================
 // Server tools helpers
 // ============================================================================
-
-// serverCompactionEnabled returns whether server-side compaction is enabled.
-func serverCompactionEnabled(sc *core.ServerCompactionSettings) bool {
-	return sc != nil && sc.Enabled != nil && *sc.Enabled
-}
 
 // serverToolsHas returns whether a tool name is in the configured list.
 func serverToolsHas(names []string, name string) bool {
@@ -2770,7 +2774,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 
 	data := components.FooterData{
 		Pwd:         pwd,
-		AutoCompact: m.autoCompact,
+		AutoCompact: m.autoCompactMode != "off",
 	}
 
 	if m.session == nil {

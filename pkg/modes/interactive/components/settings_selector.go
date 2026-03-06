@@ -23,7 +23,7 @@ var ThinkingDescriptions = map[string]string{
 
 // SettingsConfig holds all settings values for the selector.
 type SettingsConfig struct {
-	AutoCompact            bool
+	AutoCompactMode        string // "off", "client", "server"
 	ShowImages             bool
 	AutoResizeImages       bool
 	BlockImages            bool
@@ -42,7 +42,6 @@ type SettingsConfig struct {
 	ServerToolWebSearch    bool
 	ServerToolWebFetch     bool
 	ServerToolCodeExec     bool
-	ServerCompaction       bool
 	ShowHardwareCursor     bool
 	EditorPaddingX         int
 	AutocompleteMaxVisible int
@@ -52,7 +51,7 @@ type SettingsConfig struct {
 
 // SettingsCallbacks holds callbacks for settings changes.
 type SettingsCallbacks struct {
-	OnAutoCompactChange            func(bool)
+	OnAutoCompactModeChange        func(string)
 	OnShowImagesChange             func(bool)
 	OnAutoResizeImagesChange       func(bool)
 	OnBlockImagesChange            func(bool)
@@ -67,7 +66,6 @@ type SettingsCallbacks struct {
 	OnCollapseChangelogChange      func(bool)
 	OnDoubleEscapeActionChange     func(string)
 	OnServerToolsChange            func([]string) // receives full list of enabled tool names
-	OnServerCompactionChange       func(bool)
 	OnShowHardwareCursorChange     func(bool)
 	OnEditorPaddingXChange         func(int)
 	OnAutocompleteMaxVisibleChange func(int)
@@ -118,7 +116,7 @@ func boolStr(v bool) string {
 
 func buildSettingsEntries(config SettingsConfig) []settingEntry {
 	entries := []settingEntry{
-		{ID: "autocompact", Label: "Auto-compact", Description: "Automatically compact context when it gets too large", CurrentValue: boolStr(config.AutoCompact), Values: []string{"true", "false"}},
+		{ID: "autocompact", Label: "Auto-compact", Description: "Compact context automatically (client, server, or off)", CurrentValue: config.AutoCompactMode, Values: []string{"client", "server", "off"}},
 		{ID: "auto-resize-images", Label: "Auto-resize images", Description: "Resize large images to 2000x2000 max", CurrentValue: boolStr(config.AutoResizeImages), Values: []string{"true", "false"}},
 		{ID: "block-images", Label: "Block images", Description: "Prevent images from being sent to LLM providers", CurrentValue: boolStr(config.BlockImages), Values: []string{"true", "false"}},
 		{ID: "skill-commands", Label: "Skill commands", Description: "Register skills as /skill:name commands", CurrentValue: boolStr(config.EnableSkillCommands), Values: []string{"true", "false"}},
@@ -132,7 +130,6 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "server-tool-web-search", Label: "Server: web search", Description: "Anthropic server-side web search", CurrentValue: boolStr(config.ServerToolWebSearch), Values: []string{"true", "false"}},
 		{ID: "server-tool-web-fetch", Label: "Server: web fetch", Description: "Anthropic server-side web page/PDF fetching", CurrentValue: boolStr(config.ServerToolWebFetch), Values: []string{"true", "false"}},
 		{ID: "server-tool-code-exec", Label: "Server: code execution", Description: "Anthropic server-side Python sandbox", CurrentValue: boolStr(config.ServerToolCodeExec), Values: []string{"true", "false"}},
-		{ID: "server-compaction", Label: "Server compaction", Description: "Anthropic server-side context compaction", CurrentValue: boolStr(config.ServerCompaction), Values: []string{"true", "false"}},
 		{ID: "show-hardware-cursor", Label: "Show hardware cursor", Description: "Show terminal cursor for IME support", CurrentValue: boolStr(config.ShowHardwareCursor), Values: []string{"true", "false"}},
 		{ID: "editor-padding", Label: "Editor padding", Description: "Horizontal padding for input editor (0-3)", CurrentValue: strconv.Itoa(config.EditorPaddingX), Values: []string{"0", "1", "2", "3"}},
 		{ID: "autocomplete-max-visible", Label: "Autocomplete max items", Description: "Max visible items in autocomplete dropdown", CurrentValue: strconv.Itoa(config.AutocompleteMaxVisible), Values: []string{"3", "5", "7", "10", "15", "20"}},
@@ -250,8 +247,8 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	cb := c.callbacks
 	switch id {
 	case "autocompact":
-		if cb.OnAutoCompactChange != nil {
-			cb.OnAutoCompactChange(value == "true")
+		if cb.OnAutoCompactModeChange != nil {
+			cb.OnAutoCompactModeChange(value)
 		}
 	case "auto-resize-images":
 		if cb.OnAutoResizeImagesChange != nil {
@@ -302,10 +299,6 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "server-tool-code-exec":
 		c.config.ServerToolCodeExec = value == "true"
 		c.fireServerToolsChange()
-	case "server-compaction":
-		if cb.OnServerCompactionChange != nil {
-			cb.OnServerCompactionChange(value == "true")
-		}
 	case "show-hardware-cursor":
 		if cb.OnShowHardwareCursorChange != nil {
 			cb.OnShowHardwareCursorChange(value == "true")

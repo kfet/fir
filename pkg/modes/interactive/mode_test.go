@@ -22,8 +22,8 @@ func TestNewInteractiveMode(t *testing.T) {
 	if m == nil {
 		t.Fatal("expected non-nil InteractiveMode")
 	}
-	if m.autoCompact != true {
-		t.Error("expected autoCompact default true")
+	if m.autoCompactMode != "client" {
+		t.Error("expected autoCompactMode default client")
 	}
 }
 

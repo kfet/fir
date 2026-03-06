@@ -7,7 +7,7 @@ import (
 
 func defaultSettingsConfig() SettingsConfig {
 	return SettingsConfig{
-		AutoCompact:             true,
+		AutoCompactMode:         "client",
 		ShowImages:              true,
 		AutoResizeImages:        true,
 		BlockImages:             false,
@@ -69,19 +69,19 @@ func TestSettingsSelectorComponent_Navigation(t *testing.T) {
 func TestSettingsSelectorComponent_CycleValue(t *testing.T) {
 	changed := false
 	comp := NewSettingsSelectorComponent(defaultSettingsConfig(), SettingsCallbacks{
-		OnAutoCompactChange: func(v bool) {
+		OnAutoCompactModeChange: func(v string) {
 			changed = true
-			if v != false {
-				t.Errorf("expected false, got %v", v)
+			if v != "server" {
+				t.Errorf("expected server, got %v", v)
 			}
 		},
 	})
 
-	// First entry is autocompact, currently "true"
+	// First entry is autocompact, currently "client"
 	comp.selectedIndex = 0
 	comp.HandleInput("\x1b[C") // right arrow cycles
 	if !changed {
-		t.Error("expected OnAutoCompactChange to be called")
+		t.Error("expected OnAutoCompactModeChange to be called")
 	}
 }
 
