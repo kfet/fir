@@ -403,6 +403,9 @@ func (m *InteractiveMode) Run(opts InteractiveModeOptions) error {
 		signal.Stop(sigCh)
 	}()
 
+	// Restore sidecar state from a previous reexec (queued messages, editor text).
+	m.restoreReexecSidecar()
+
 	// Send initial prompt if provided
 	if opts.InitialPrompt != "" {
 		go func() {
@@ -3195,4 +3198,41 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 	m.ui.RequestRender(false)
+}
+
+// restoreReexecSidecar restores queued messages and pending editor input
+// from a sidecar file written by a previous /reexec invocation.
+func (m *InteractiveMode) restoreReexecSidecar() {
+	if os.Getenv("FIR_REEXEC_CONTINUE") != "1" {
+		return
+	}
+	os.Unsetenv("FIR_REEXEC_CONTINUE")
+
+	sessionFile := m.session.SessionManager.GetSessionFile()
+	if sessionFile == "" {
+		return
+	}
+
+	sidecar, err := core.ReadReexecSidecar(sessionFile)
+	if err != nil {
+		debug.Log("restoreReexecSidecar: read error: %v", err)
+		return
+	}
+	if sidecar == nil {
+		return
+	}
+
+	restored := 0
+	for _, msg := range sidecar.QueueMessages {
+		m.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg(msg, 0)))
+		restored++
+	}
+
+	if sidecar.PendingInput != "" {
+		m.editor.SetText(sidecar.PendingInput)
+	}
+
+	if restored > 0 {
+		m.showStatus(fmt.Sprintf("Reexec: restored %d queued message(s)", restored))
+	}
 }

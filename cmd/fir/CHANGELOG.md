@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Hot-reload via `/reexec` now preserves message queue and pending editor input
+
 ### Removed
 
 - Removed RPC mode (`--output-format rpc`); use ACP mode for programmatic integration
