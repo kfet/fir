@@ -457,14 +457,20 @@ func TestDrainUpdateNotice_NoValue_NonBlocking(t *testing.T) {
 // runUpdate
 // ============================================================================
 
-func TestRunUpdate_MacOS_ReturnNil(t *testing.T) {
+func TestRunUpdate_MacOS_NoNetwork(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS-specific path")
 	}
-	// On macOS, runUpdate instructs user to use brew and returns nil.
+	// Replace the default HTTP transport so FetchLatest fails immediately.
+	orig := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("mock network error")
+	})
+	defer func() { http.DefaultTransport = orig }()
+
 	err := runUpdate()
-	if err != nil {
-		t.Errorf("runUpdate() on macOS should return nil, got %v", err)
+	if err == nil {
+		t.Error("expected error when FetchLatest fails, got nil")
 	}
 }
 

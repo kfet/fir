@@ -1668,7 +1668,6 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 				msg += "\n" + info.Instructions
 			}
 			m.showMessage(msg)
-			m.showStatus(msg)
 		},
 		OnPrompt: promptUser,
 		OnManualCodeInput: func() (string, error) {
