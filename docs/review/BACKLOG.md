@@ -1,15 +1,15 @@
-## Reviewed 2026-03-02 (cycle 2 — post-rename to pkg/extension)
+## Review — 2026-03-06
 
-Files: pkg/extension/*.go, pkg/extension/sdk/python/fir_ext.py,
-pkg/extension/integration/demo_integration_test.go, cmd/fir/app.go,
-pkg/modes/interactive/mode.go, pkg/modes/acp/acp.go
+Files reviewed: `pkg/agent/plan.go`, `pkg/agent/plan_test.go`, `pkg/core/agentsession.go`, `pkg/core/sdk.go`, `pkg/core/systemprompt.go`, `pkg/core/tools/plan.go`, `pkg/core/tools/plan_test.go`, `pkg/modes/acp/plan.go`, `pkg/modes/acp/plan_test.go`, `pkg/modes/acp/acp.go`
 
----
+## Correctness
+
+(No items.)
+
+## Simplification
+
+- `pkg/modes/acp/plan.go` — `planConn` interface duplicates the `SessionUpdate` method signature already on `acpConn`. The planTracker could just take `acpConn` directly instead of defining a narrower interface, since both are test-friendly. Minor either way. NOTE: it's a good style to be explicit about interface boundaries, so let's keep the interface as-is.
 
 ## Test Coverage
 
-- `pkg/extension/sdk/python/extensions_test.py` — tests use `_load_extension()` to
-  import the real `.fir/extensions/*.py` files, which is good. However `fir_ext.run()`
-  is mocked out, so the decorator registrations (`@fir_ext.tool`, `@fir_ext.on`) are
-  not exercised through the real SDK. Low priority; the `demo_ext_test.py` and
-  `fir_ext_test.py` suites cover the SDK thoroughly.
+(No items.)

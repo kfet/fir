@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-03-06
+
 ### Added
 
 - Plan progress tracking in ACP mode: clients (e.g. Zed) see live tool execution status as plan entries
