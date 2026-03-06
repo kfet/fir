@@ -302,6 +302,13 @@ func (a *Agent) GetFollowUpMode() string {
 }
 
 // SetTools sets the available tools.
+// SetServerTools updates the Anthropic server-side tools (web search, code execution, etc.).
+func (a *Agent) SetServerTools(tools []ai.AnthropicServerTool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.serverTools = tools
+}
+
 func (a *Agent) SetTools(tools []AgentTool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

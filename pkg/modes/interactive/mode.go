@@ -1009,6 +1009,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 			FollowUpMode:            m.settings.GetFollowUpMode(),
 			Transport:               m.settings.GetTransport(),
 			DoubleEscapeAction:      m.settings.GetDoubleEscapeAction(),
+			ServerTools:             serverToolsPreset(m.settings.GetServerTools()),
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
@@ -1032,11 +1033,50 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetTransport(transport)
 				m.session.Agent.SetTransport(ai.Transport(transport))
 			},
+			OnServerToolsChange: func(preset string) {
+				names := serverToolsFromPreset(preset)
+				m.settings.SetServerTools(names)
+				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
+			},
 			OnCancel: func() { done() },
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
 		return selector, selector
 	})
+}
+
+// ============================================================================
+// Server tools helpers
+// ============================================================================
+
+// serverToolsPreset returns a UI preset name from the configured server tool names.
+func serverToolsPreset(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	has := make(map[string]bool, len(names))
+	for _, n := range names {
+		has[n] = true
+	}
+	if has["web_search"] && has["code_execution"] {
+		return "all"
+	}
+	if has["web_search"] {
+		return "web_search"
+	}
+	return "all" // unknown combo → show as all
+}
+
+// serverToolsFromPreset returns tool names from a UI preset.
+func serverToolsFromPreset(preset string) []string {
+	switch preset {
+	case "web_search":
+		return []string{"web_search"}
+	case "all":
+		return []string{"web_search", "code_execution"}
+	default:
+		return nil
+	}
 }
 
 // ============================================================================

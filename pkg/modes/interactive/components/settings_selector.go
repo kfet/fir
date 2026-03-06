@@ -38,6 +38,7 @@ type SettingsConfig struct {
 	HideThinkingBlock      bool
 	CollapseChangelog      bool
 	DoubleEscapeAction     string // "fork", "tree", "none"
+	ServerTools            string // "none", "web_search", "all"
 	ShowHardwareCursor     bool
 	EditorPaddingX         int
 	AutocompleteMaxVisible int
@@ -61,6 +62,7 @@ type SettingsCallbacks struct {
 	OnHideThinkingBlockChange      func(bool)
 	OnCollapseChangelogChange      func(bool)
 	OnDoubleEscapeActionChange     func(string)
+	OnServerToolsChange            func(string)
 	OnShowHardwareCursorChange     func(bool)
 	OnEditorPaddingXChange         func(int)
 	OnAutocompleteMaxVisibleChange func(int)
@@ -122,6 +124,7 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "collapse-changelog", Label: "Collapse changelog", Description: "Show condensed changelog after updates", CurrentValue: boolStr(config.CollapseChangelog), Values: []string{"true", "false"}},
 		{ID: "quiet-startup", Label: "Quiet startup", Description: "Disable verbose printing at startup", CurrentValue: boolStr(config.QuietStartup), Values: []string{"true", "false"}},
 		{ID: "double-escape-action", Label: "Double-escape action", Description: "Action when pressing Escape twice with empty editor", CurrentValue: config.DoubleEscapeAction, Values: []string{"tree", "fork", "none"}},
+		{ID: "server-tools", Label: "Server tools", Description: "Anthropic server-side tools (web search, code execution)", CurrentValue: config.ServerTools, Values: []string{"none", "web_search", "all"}},
 		{ID: "show-hardware-cursor", Label: "Show hardware cursor", Description: "Show terminal cursor for IME support", CurrentValue: boolStr(config.ShowHardwareCursor), Values: []string{"true", "false"}},
 		{ID: "editor-padding", Label: "Editor padding", Description: "Horizontal padding for input editor (0-3)", CurrentValue: strconv.Itoa(config.EditorPaddingX), Values: []string{"0", "1", "2", "3"}},
 		{ID: "autocomplete-max-visible", Label: "Autocomplete max items", Description: "Max visible items in autocomplete dropdown", CurrentValue: strconv.Itoa(config.AutocompleteMaxVisible), Values: []string{"3", "5", "7", "10", "15", "20"}},
@@ -281,6 +284,10 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "double-escape-action":
 		if cb.OnDoubleEscapeActionChange != nil {
 			cb.OnDoubleEscapeActionChange(value)
+		}
+	case "server-tools":
+		if cb.OnServerToolsChange != nil {
+			cb.OnServerToolsChange(value)
 		}
 	case "show-hardware-cursor":
 		if cb.OnShowHardwareCursorChange != nil {

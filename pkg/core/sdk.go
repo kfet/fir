@@ -230,7 +230,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	// Configure server tools from settings (Anthropic only).
 	if serverToolNames := settingsManager.GetServerTools(); len(serverToolNames) > 0 {
-		agentOpts.ServerTools = resolveServerTools(serverToolNames)
+		agentOpts.ServerTools = ResolveServerTools(serverToolNames)
 	}
 
 	// Configure server-side compaction from settings (Anthropic only).
@@ -334,9 +334,9 @@ var serverToolTypeMap = map[string]string{
 	"code_execution": "code_execution_20250825",
 }
 
-// resolveServerTools converts short tool names (from settings) to AnthropicServerTool structs.
+// ResolveServerTools converts short tool names (from settings) to AnthropicServerTool structs.
 // Deduplicates code_execution when dynamic-filtering tool versions (20260209) auto-inject it.
-func resolveServerTools(names []string) []ai.AnthropicServerTool {
+func ResolveServerTools(names []string) []ai.AnthropicServerTool {
 	var tools []ai.AnthropicServerTool
 	hasDynamicFiltering := false
 	hasExplicitCodeExec := false
