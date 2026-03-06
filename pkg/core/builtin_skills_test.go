@@ -27,6 +27,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"review":            false,
 		"self":              false,
 		"skill-creator":     false,
+		"skill-updater":     false,
 		"tmux-driver":       false,
 	}
 

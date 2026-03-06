@@ -45,6 +45,8 @@ type FooterData struct {
 	PlanTotal int
 	// PlanCurrentStep is the content of the current in-progress step (empty if none).
 	PlanCurrentStep string
+	// PlanKeyHint is the display string for the toggle-plan keybinding (e.g. "ctrl+r").
+	PlanKeyHint string
 }
 
 // FooterComponent renders a status footer with pwd, token stats, and context usage.
@@ -156,11 +158,13 @@ func (f *FooterComponent) Render(width int) []string {
 		planStr := fmt.Sprintf("📋 %d/%d", data.PlanCompleted, data.PlanTotal)
 		if data.PlanCurrentStep != "" {
 			step := data.PlanCurrentStep
-			// Truncate long step names
 			if len(step) > 30 {
 				step = step[:27] + "..."
 			}
 			planStr += ": " + step
+		}
+		if data.PlanKeyHint != "" {
+			planStr += " (" + data.PlanKeyHint + ")"
 		}
 		if data.PlanCompleted == data.PlanTotal {
 			statsParts = append(statsParts, t.Fg("success", planStr))

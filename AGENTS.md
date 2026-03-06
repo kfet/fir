@@ -4,8 +4,6 @@ Use idiomatic Go. Keep it simple.
 
 Split large files into smaller ones, making sure to update the mapping in `sync/UPSTREAM_MAP.md`
 
-See `PLAN.md` for the current plan and process.
-
 Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks.
 
 Do not leave incomplete or stubbed code. Ensure all code is functional and tested.
@@ -54,7 +52,7 @@ To add or fix a model so it survives regeneration, add it to `applyOverridesAndA
 
 ## ACP Mode
 
-ACP is a **standalone mode** (`pkg/modes/acp/`), not an extension. See `docs/plan/15-modes-as-extensions.md` for the full analysis of why.
+ACP is a **standalone mode** (`pkg/modes/acp/`), not an extension.
 
 Key constraints:
 - Uses `github.com/coder/acp-go-sdk` for stable types + JSON-RPC transport.

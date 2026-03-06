@@ -2,7 +2,7 @@
 
 Reviewer: Claude (automated review)  
 Date: 2026-03-01  
-Scope: `pkg/extproc/`, `pkg/extproc/sdk/`, `docs/plan/ext-process.md`
+Scope: `pkg/extproc/`, `pkg/extproc/sdk/`
 
 ---
 

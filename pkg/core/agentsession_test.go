@@ -2637,3 +2637,175 @@ func TestAgentSession_PlanEntries_ReturnsDefensiveCopy(t *testing.T) {
 		t.Errorf("earlier copy was mutated: got %s", copy2[0].Content)
 	}
 }
+
+func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := InMemorySessionManager()
+	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	rl := NewResourceLoader(ResourceLoaderOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		SettingsManager: settingsManager,
+	})
+	_ = rl.Reload()
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Api:           "test-api",
+		Provider:      "test-provider",
+		BaseURL:       "http://localhost",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	}
+
+	makeStream := func() *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			msg := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
+				Api:        model.Api,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				Usage:      ai.Usage{Input: 10, Output: 5},
+				StopReason: ai.StopReasonStop,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: msg})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return makeStream()
+		},
+		GetApiKey: func(provider string) (string, error) {
+			return "test-key", nil
+		},
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		Cwd:             tmpDir,
+	})
+	defer session.Close()
+
+	// Set a plan before any prompt
+	session.UpdatePlan([]agent.PlanEntry{
+		{Content: "Step 1", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
+	})
+	if len(session.PlanEntries()) != 1 {
+		t.Fatal("plan should have 1 entry after UpdatePlan")
+	}
+
+	// Next prompt: plan existed before this turn, so it gets cleared after
+	if err := session.Prompt("first"); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+
+	if len(session.PlanEntries()) != 0 {
+		t.Error("plan should be cleared after the next interaction completes")
+	}
+}
+
+func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := InMemorySessionManager()
+	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	rl := NewResourceLoader(ResourceLoaderOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		SettingsManager: settingsManager,
+	})
+	_ = rl.Reload()
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Api:           "test-api",
+		Provider:      "test-provider",
+		BaseURL:       "http://localhost",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			stream := ai.NewAssistantMessageEventStream()
+			go func() {
+				msg := &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
+					Api:        m.Api,
+					Provider:   m.Provider,
+					Model:      m.ID,
+					Usage:      ai.Usage{Input: 10, Output: 5},
+					StopReason: ai.StopReasonStop,
+				}
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: msg})
+				stream.End(nil)
+			}()
+			return stream
+		},
+		GetApiKey: func(provider string) (string, error) { return "test-key", nil },
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		Cwd:             tmpDir,
+	})
+	defer session.Close()
+
+	// Collect plan_update events emitted during the turn.
+	var planEvents []AgentSessionEvent
+	var mu sync.Mutex
+	unsub := session.Subscribe(func(ev AgentSessionEvent) {
+		if ev.Type == "plan_update" {
+			mu.Lock()
+			planEvents = append(planEvents, ev)
+			mu.Unlock()
+		}
+	})
+	defer unsub()
+
+	// No plan before the turn — Prompt must not emit a spurious plan_update.
+	if len(session.PlanEntries()) != 0 {
+		t.Fatal("expected no plan entries before turn")
+	}
+
+	if err := session.Prompt("hello"); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+
+	mu.Lock()
+	n := len(planEvents)
+	mu.Unlock()
+
+	if n != 0 {
+		t.Errorf("expected no plan_update events when plan was empty before turn, got %d", n)
+	}
+}

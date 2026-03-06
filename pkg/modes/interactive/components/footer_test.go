@@ -151,6 +151,7 @@ func TestFooterComponent_PlanProgress(t *testing.T) {
 			PlanTotal:     5,
 			PlanCompleted: 2,
 			PlanCurrentStep: "Write tests",
+			PlanKeyHint:   "ctrl+r",
 		}
 	})
 
@@ -164,6 +165,9 @@ func TestFooterComponent_PlanProgress(t *testing.T) {
 	}
 	if !strings.Contains(joined, "Write tests") {
 		t.Fatal("expected current step name")
+	}
+	if !strings.Contains(joined, "ctrl+r") {
+		t.Fatal("expected keybinding hint")
 	}
 }
 

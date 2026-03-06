@@ -414,6 +414,10 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		return fmt.Errorf("no model selected. Use /login or set an API key environment variable")
 	}
 
+	// If a plan was left over from a previous turn, remember to clear it
+	// once this turn finishes so stale plans don't persist indefinitely.
+	hadPlanBeforeTurn := len(s.PlanEntries()) > 0
+
 	// Build system prompt before each turn
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
@@ -470,6 +474,13 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 
 	// Wait for the agent loop to complete (it runs in a goroutine)
 	s.Agent.WaitForIdle()
+
+	// Clear a plan that existed before this turn started so stale plans
+	// don't linger across interactions.
+	if hadPlanBeforeTurn {
+		s.UpdatePlan(nil)
+	}
+
 	return nil
 }
 

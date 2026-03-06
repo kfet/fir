@@ -34,6 +34,7 @@ const (
 	ActionTree                     AppAction = "tree"
 	ActionFork                     AppAction = "fork"
 	ActionResume                   AppAction = "resume"
+	ActionTogglePlan               AppAction = "togglePlan"
 )
 
 // DefaultAppKeybindings maps app actions to their default key bindings.
@@ -58,6 +59,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionTree:                     {},
 	ActionFork:                     {},
 	ActionResume:                   {},
+	ActionTogglePlan:               {"ctrl+r"},
 }
 
 // KeybindingsConfig is the JSON config mapping actions to key IDs.

@@ -67,6 +67,25 @@ tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir"
 
 **Never repurpose agents from another project.** `/new` wipes context. If a session belongs to a different project/worktree, leave it alone.
 
+## Plan Tracking
+
+If the `plan` tool is available, use it to track overall project progress across the fleet. Create it once at fleet setup, and update it every loop cycle.
+
+**At setup:** Create one entry per major task/milestone (not per agent). Set the first active task to `in_progress`, the rest to `pending`.
+
+```
+plan:
+  - Analyze and design (high, in_progress)
+  - Implement feature X (high, pending)
+  - Implement feature Y (medium, pending)
+  - Write tests (medium, pending)
+  - Review and merge (low, pending)
+```
+
+**Each cycle:** Reflect actual state — mark completed tasks `completed`, the currently running task `in_progress`, and future tasks `pending`. Keep entries coarse (milestones, not individual file edits).
+
+**At close-out:** Mark all entries `completed` before stopping the fleet.
+
 ## FLEET.md — Persist and Restore
 
 Maintain `FLEET.md` in the worktree root. Include session name, project/worktree paths, branch, and an agents table (Window, Role, Current Task, Status).
@@ -96,6 +115,7 @@ Poll every 10 seconds. Each cycle:
 1. **Did anything land?** — `git -C "$WORKTREE" log --oneline -5`
 2. **Is anyone stuck?** — Check context % and spinner via `tm-capture`.
 3. **Is the build green?** — Run the project's test command in `$WORKTREE`.
+4. **Update the plan** — Reflect completed/active milestones if the plan tool is available.
 
 Rename windows every cycle to reflect activity:
 
@@ -182,7 +202,7 @@ Assign tasks that touch **completely different files** to minimize conflicts.
 
 ## Close-Out — Before Declaring Done
 
-When all tasks appear complete and the build is green, do NOT stop. Run the reviewer one final time (or re-read REVIEW.md). Fix every finding. Then re-read the original task prompt and verify each stated requirement is met — not just compiling, but actually functional. Only stop the fleet when every requirement is checked off and every review finding is fixed.
+When all tasks appear complete and the build is green, do NOT stop. Run the reviewer one final time (or re-read REVIEW.md). Fix every finding. Then re-read the original task prompt and verify each stated requirement is met — not just compiling, but actually functional. Mark all plan entries `completed`. Only stop the fleet when every requirement is checked off and every review finding is fixed.
 
 ## What Makes a Good Task
 

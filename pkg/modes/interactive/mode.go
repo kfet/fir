@@ -55,6 +55,8 @@ type InteractiveMode struct {
 	commandStatusContainer *tui.Container // transient command result messages
 	planContainer          *tui.Container // plan visualization
 	planComponent          *components.PlanComponent
+	planHidden             bool // true = plan widget collapsed (footer still shows progress)
+	planInContainer        bool // true = planComponent is currently a child of planContainer
 	footerComponent        *components.FooterComponent
 	footerDataProvider     *core.FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
@@ -251,6 +253,7 @@ func (m *InteractiveMode) Init() error {
 
 	// Create plan container (shows plan entries above the editor)
 	m.planContainer = &tui.Container{}
+	m.planHidden = true // start collapsed; Ctrl+R or /plan to expand
 	m.ui.AddChild(m.planContainer)
 
 	// Create editor container (holds editor or selector overlays)
@@ -612,6 +615,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	})
 	m.editor.OnAction(core.ActionResume, func() {
 		m.showSessionSelector()
+	})
+	m.editor.OnAction(core.ActionTogglePlan, func() {
+		m.togglePlanVisibility()
 	})
 	m.editor.OnAction(core.ActionClear, func() {
 		m.handleCtrlC()
@@ -2697,21 +2703,32 @@ func (m *InteractiveMode) IsBashMode() bool {
 // ============================================================================
 
 func (m *InteractiveMode) onPlanUpdate(entries []agent.PlanEntry) {
-	m.planContainer.Clear()
 	if len(entries) == 0 {
 		m.planComponent = nil
+		if m.planInContainer {
+			m.planContainer.Clear()
+			m.planInContainer = false
+		}
 	} else {
 		if m.planComponent != nil {
+			// Update entries in-place; container membership is unchanged.
 			m.planComponent.SetEntries(entries)
 		} else {
 			m.planComponent = components.NewPlanComponent(entries)
+			if !m.planHidden {
+				m.planContainer.AddChild(m.planComponent)
+				m.planInContainer = true
+			}
 		}
-		m.planContainer.AddChild(m.planComponent)
 	}
 	m.ui.RequestRender(false)
 }
 
 func (m *InteractiveMode) handlePlanCommand() {
+	m.togglePlanVisibility()
+}
+
+func (m *InteractiveMode) togglePlanVisibility() {
 	if m.session == nil {
 		m.showWarning("No active session.")
 		return
@@ -2721,15 +2738,21 @@ func (m *InteractiveMode) handlePlanCommand() {
 		m.showStatus("No plan entries.")
 		return
 	}
-	// Toggle: if plan is already shown, hide it
-	if m.planComponent != nil {
-		m.planContainer.Clear()
-		m.planComponent = nil
-		m.ui.RequestRender(false)
-		return
+	m.planHidden = !m.planHidden
+	if m.planHidden {
+		if m.planInContainer {
+			m.planContainer.Clear()
+			m.planInContainer = false
+		}
+	} else {
+		if m.planComponent == nil {
+			m.planComponent = components.NewPlanComponent(entries)
+		}
+		if !m.planInContainer {
+			m.planContainer.AddChild(m.planComponent)
+			m.planInContainer = true
+		}
 	}
-	m.planComponent = components.NewPlanComponent(entries)
-	m.planContainer.AddChild(m.planComponent)
 	m.ui.RequestRender(false)
 }
 
@@ -2808,6 +2831,7 @@ Keyboard shortcuts:
   Ctrl+L          - Open model selector
   Ctrl+O          - Toggle tool output expansion
   Ctrl+T          - Toggle thinking block visibility
+  Ctrl+R          - Toggle plan visibility
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands
@@ -2877,6 +2901,9 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 					data.PlanCurrentStep = e.Content
 				}
 			}
+		}
+		if keys := m.keybindings.GetKeys(core.ActionTogglePlan); len(keys) > 0 {
+			data.PlanKeyHint = keys[0]
 		}
 	}
 

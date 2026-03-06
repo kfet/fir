@@ -20,7 +20,8 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 			Name: "plan",
 			Description: "Create or update a plan for tracking task progress. " +
 				"Use this for non-trivial tasks to break them into steps and track completion. " +
-				"Each call replaces the entire plan — always include all entries.",
+				"Each call replaces the entire plan — always include all entries. " +
+				"Update the plan after every completed step — mark it completed before moving to the next one.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

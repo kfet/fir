@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: skill-creator
-description: How to create and modify skills. Use this when adding, editing, or documenting a skill.
+description: Create or modify a fir skill — write SKILL.md with frontmatter and instructions, then run the skill-updater quality review before reloading.
 ---
 
 # Skills
@@ -25,4 +25,5 @@ After the frontmatter, write Markdown instructions for the agent that will execu
 
 - [ ] Create `.fir/skills/<name>/SKILL.md` with frontmatter and instructions.
 - [ ] Keep the `description` clear and keyword-rich — it's how agents discover the skill.
-- [ ] After creating or modifying a skill, tell the user to `/reload`.
+- [ ] Run the **skill-updater** review (see `.fir/skills/skill-updater/SKILL.md`) on the finished file before telling the user to `/reload`.
+- [ ] Tell the user to `/reload`.
