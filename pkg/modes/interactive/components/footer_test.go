@@ -47,7 +47,7 @@ func TestFooterComponent_Render(t *testing.T) {
 			TotalInput:    5000,
 			TotalOutput:   1500,
 			ContextWindow: 200000,
-			AutoCompact:   true,
+			AutoCompactMode: "client",
 		}
 	})
 

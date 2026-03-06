@@ -2774,7 +2774,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 
 	data := components.FooterData{
 		Pwd:         pwd,
-		AutoCompact: m.autoCompactMode != "off",
+		AutoCompactMode: m.autoCompactMode,
 	}
 
 	if m.session == nil {

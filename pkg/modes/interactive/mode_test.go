@@ -82,7 +82,7 @@ func TestInteractiveMode_GetFooterData(t *testing.T) {
 	if data.Pwd == "" {
 		t.Error("expected non-empty pwd")
 	}
-	if data.AutoCompact != true {
+	if data.AutoCompactMode != "client" {
 		t.Error("expected auto-compact true")
 	}
 }

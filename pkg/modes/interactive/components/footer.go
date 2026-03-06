@@ -29,7 +29,7 @@ type FooterData struct {
 	TotalCacheWrite  int
 	TotalCost        float64
 	UsingSubscription bool
-	AutoCompact      bool
+	AutoCompactMode  string // "off", "client", "server"
 	MultipleProviders bool
 	ExtensionStatuses map[string]string
 	// ContextPercent is the estimated context usage percentage from GetContextUsage.
@@ -111,8 +111,11 @@ func (f *FooterComponent) Render(width int) []string {
 
 	// Context percentage — use estimated context usage (not accumulated totals)
 	autoIndicator := ""
-	if data.AutoCompact {
+	switch data.AutoCompactMode {
+	case "client":
 		autoIndicator = " (auto)"
+	case "server":
+		autoIndicator = " (auto-server)"
 	}
 
 	contextWindow := data.ContextWindow
