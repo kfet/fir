@@ -111,7 +111,7 @@ func TestParseArgs_ThinkingInvalid(t *testing.T) {
 }
 
 func TestParseArgs_Mode(t *testing.T) {
-	for _, mode := range []string{"text", "json", "rpc"} {
+	for _, mode := range []string{"text", "json"} {
 		args := ParseArgs([]string{"--mode", mode})
 		if string(args.OutputMode) != mode {
 			t.Errorf("expected mode %q, got %q", mode, args.OutputMode)

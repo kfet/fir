@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed RPC mode (`--output-format rpc`); use ACP mode for programmatic integration
+
 ### Added
 
 - GPT-5.4 and GPT-5.4 Pro model support for OpenAI and Azure providers

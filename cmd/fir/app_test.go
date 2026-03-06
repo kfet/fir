@@ -309,7 +309,7 @@ func TestCheckModelAvailable_WithModel(t *testing.T) {
 		{},
 		{Print: true},
 		{OutputMode: ModeJSON},
-		{OutputMode: ModeRPC},
+		{OutputMode: ModeACP},
 	} {
 		if err := checkModelAvailable(model, args); err != nil {
 			t.Errorf("expected no error with model present, got %v (args: %+v)", err, args)
@@ -337,7 +337,6 @@ func TestCheckModelAvailable_NilModel_NonInteractive(t *testing.T) {
 	}{
 		{"print", &Args{Print: true}},
 		{"json", &Args{OutputMode: ModeJSON}},
-		{"rpc", &Args{OutputMode: ModeRPC}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

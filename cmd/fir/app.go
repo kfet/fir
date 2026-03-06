@@ -22,7 +22,6 @@ import (
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
-	rpcmode "github.com/kfet/fir/pkg/modes/rpc"
 	"github.com/kfet/fir/pkg/update"
 	"github.com/kfet/fir/pkg/usage"
 )
@@ -197,9 +196,6 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 }
 
 func resolveExtensionMode(args *Args) string {
-	if args.OutputMode == ModeRPC {
-		return "rpc"
-	}
 	if args.OutputMode == ModeJSON {
 		return "json"
 	}
@@ -213,13 +209,13 @@ func resolveExtensionMode(args *Args) string {
 }
 
 // checkModelAvailable returns an error if no model is available and the mode
-// requires one (print, JSON, RPC). Interactive TUI mode is allowed to start
+// requires one (print, JSON). Interactive TUI mode is allowed to start
 // without a model so the user can /login.
 func checkModelAvailable(model *ai.Model, args *Args) error {
 	if model != nil {
 		return nil
 	}
-	if args.Print || args.OutputMode == ModeJSON || args.OutputMode == ModeRPC {
+	if args.Print || args.OutputMode == ModeJSON {
 		return fmt.Errorf("no models available\n\nSet an API key environment variable:\n  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.")
 	}
 	return nil
@@ -315,10 +311,10 @@ func run() error {
 	agentDir := resolveAgentDir()
 
 	// Start async version check for interactive and print modes.
-	// Skipped for machine-to-machine modes (RPC, ACP).
+	// Skipped for machine-to-machine modes (ACP).
 	// The channel always receives exactly one value (notice text or "").
 	noticeCh := make(chan string, 1)
-	wantUpdateCheck := args.OutputMode != ModeRPC && args.OutputMode != ModeACP
+	wantUpdateCheck := args.OutputMode != ModeACP
 	if wantUpdateCheck {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -340,8 +336,8 @@ func run() error {
 		drainUpdateNotice(noticeCh)
 	}
 
-	// Read piped stdin (if not a TTY) — skip for RPC and ACP modes which read stdin directly
-	if args.OutputMode != ModeRPC && args.OutputMode != ModeACP {
+	// Read piped stdin (if not a TTY) — skip for ACP mode which reads stdin directly
+	if args.OutputMode != ModeACP {
 		stdinContent := readPipedStdin()
 		if stdinContent != "" {
 			args.Print = true
@@ -351,7 +347,6 @@ func run() error {
 
 	// Determine mode
 	isPrintMode := args.Print || args.OutputMode == ModeJSON
-	isRPCMode := args.OutputMode == ModeRPC
 	isACPMode := args.OutputMode == ModeACP
 
 	// Handle --login: run interactive OAuth login and exit.
@@ -365,7 +360,7 @@ func run() error {
 		return runAcpMode(args)
 	}
 
-	if !isPrintMode && !isRPCMode {
+	if !isPrintMode {
 		firlog.Debug("mode dispatch", "mode", "interactive")
 		return runInteractiveMode(args, noticeCh)
 	}
@@ -380,13 +375,6 @@ func run() error {
 	if setup.extSetup != nil {
 		setup.extSetup.EmitSessionStart()
 		defer func() { setup.extSetup.EmitSessionShutdown() }()
-	}
-
-	// Run RPC mode
-	if isRPCMode {
-		firlog.Debug("mode dispatch", "mode", "rpc")
-		server := rpcmode.NewServer(setup.result.Session)
-		return server.Run()
 	}
 
 	// Process @file arguments
@@ -816,8 +804,6 @@ func recordCLIFlags(tracker *usage.Tracker, args *Args) {
 	switch args.OutputMode {
 	case ModeJSON:
 		tracker.Record(usage.EventMode, "json")
-	case ModeRPC:
-		tracker.Record(usage.EventMode, "rpc")
 	case ModeACP:
 		tracker.Record(usage.EventMode, "acp")
 	default:

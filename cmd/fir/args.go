@@ -16,8 +16,7 @@ type Mode string
 const (
 	ModeText Mode = "text"
 	ModeJSON Mode = "json"
-	ModeRPC  Mode = "rpc"
-	ModeACP  Mode = "acp"
+	ModeACP Mode = "acp"
 )
 
 // Args holds parsed CLI arguments.
@@ -91,7 +90,7 @@ func ParseArgs(args []string) *Args {
 		case arg == "--mode" && i+1 < len(args):
 			i++
 			mode := args[i]
-			if mode == "text" || mode == "json" || mode == "rpc" || mode == "acp" {
+			if mode == "text" || mode == "json" || mode == "acp" {
 				result.OutputMode = Mode(mode)
 			}
 

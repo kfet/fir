@@ -1,4 +1,4 @@
-// Package modes provides entry points for the different execution modes (print, interactive, rpc).
+// Package modes provides entry points for the different execution modes (print, interactive, acp).
 package modes
 
 import (
