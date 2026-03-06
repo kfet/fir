@@ -52,6 +52,7 @@ type modelSpec struct {
 	ServerTools    []string // "web_search", "web_fetch", "code_execution"
 	Compaction     bool
 	SWEScore       float64 // best known SWE-bench Verified score (0–100 %)
+	SWEInferred    bool    // true when SWEScore is inherited from family, not directly benchmarked
 }
 
 // compatSpec represents OpenAICompletionsCompat fields used in models.
@@ -215,6 +216,8 @@ type swePattern struct {
 // sweModelPatterns maps model ID substrings to SWE-bench Verified scores.
 // Patterns MUST be ordered most-specific to least-specific within each model
 // family so that the first match wins (e.g. "claude-opus-4-6" before "claude-opus-4").
+//
+// init() validates this ordering at startup.
 var sweModelPatterns = []swePattern{
 	// --- Claude Opus 4.6 ---
 	{"claude-opus-4-6", "claude-opus-4-6", 80.8},
@@ -266,6 +269,21 @@ var sweModelPatterns = []swePattern{
 	{"k2p5", "k2p5", 76.8},
 	// --- Grok 4 ---
 	{"grok-4", "grok-4", 72.0},
+}
+
+func init() {
+	// Validate sweModelPatterns ordering: if pattern A appears before pattern B and
+	// B.contains is a substring of A.contains, then B can never match (A always wins).
+	// The correct order is most-specific (longest) first.
+	for i := 0; i < len(sweModelPatterns); i++ {
+		for j := i + 1; j < len(sweModelPatterns); j++ {
+			a, b := sweModelPatterns[i], sweModelPatterns[j]
+			if strings.Contains(b.contains, a.contains) && a.contains != b.contains {
+				log.Fatalf("sweModelPatterns misordered: pattern %d %q is a substring of pattern %d %q — move the more-specific pattern first",
+					i, a.contains, j, b.contains)
+			}
+		}
+	}
 }
 
 // sweLeaderboardPatterns maps substrings of lowercased SWE-bench leaderboard entry
@@ -439,6 +457,201 @@ func matchSWELeaderboardName(lower string) string {
 		}
 	}
 	return ""
+}
+
+// dateSuffixRe matches date suffixes like -20241022 at end of model IDs.
+var dateSuffixRe = regexp.MustCompile(`-\d{8}$`)
+
+// extractFamily returns a normalised "base family" string for lineage grouping.
+//
+// The goal is to group models that are close iterations of each other (same
+// generation, same class) while keeping distinct generations apart. We preserve
+// the first version-like token as the "generation" to avoid grouping Claude 3
+// with Claude 4, or GPT-5.1 with GPT-5.4.
+//
+// Examples:
+//
+//	claude-opus-4-6              → claude-opus-4
+//	claude-opus-4-5-20251101     → claude-opus-4
+//	claude-sonnet-4-5            → claude-sonnet-4
+//	claude-3-5-sonnet-20241022   → claude-3-sonnet
+//	claude-3-7-sonnet-20250219   → claude-3-sonnet
+//	claude-3-opus-20240229       → claude-3-opus
+//	gemini-3.1-pro-preview       → gemini-3-pro
+//	gemini-2.5-flash             → gemini-2-flash
+//	gpt-5.4-pro                  → gpt-5-pro
+//	gpt-5.2-codex                → gpt-5-codex
+//	gpt-5.2                      → gpt-5
+//	deepseek/deepseek-v3.2       → deepseek
+//	google/gemini-2.5-pro        → gemini-2-pro
+//	minimax-m2.5                 → minimax-m2
+//	grok-4-1-fast                → grok-4-fast
+//	kimi-k2-thinking             → kimi-k2-thinking
+//	k2p5                         → k2p5
+func extractFamily(modelID string) string {
+	id := modelID
+
+	// Strip OpenRouter-style "provider/" prefix.
+	if idx := strings.LastIndex(id, "/"); idx >= 0 {
+		id = id[idx+1:]
+	}
+
+	// Strip Bedrock-style dotted prefixes: "us.anthropic.claude-…" → "claude-…"
+	// We find the FIRST dot followed by a hyphenated model name (contains "-")
+	// to avoid picking version dots like "v3.2".
+	// Assumption: dotted prefixes always end with a lowercase letter segment
+	// (e.g. ".claude", ".deepseek"). This is correct for all known provider
+	// naming conventions as of 2026-03.
+	for i := 0; i < len(id); i++ {
+		if id[i] == '.' {
+			after := id[i+1:]
+			if len(after) > 0 && after[0] >= 'a' && after[0] <= 'z' && strings.Contains(after, "-") {
+				id = after
+				i = -1 // restart scan on the remaining string
+			}
+		}
+	}
+
+	// Lowercase for uniform matching.
+	id = strings.ToLower(id)
+
+	// Strip Bedrock version suffixes like "-v1:0", ":0" at end.
+	if idx := strings.LastIndex(id, ":"); idx >= 0 {
+		id = id[:idx]
+	}
+
+	// Strip date suffixes: -20241022, -20250929, etc.
+	id = dateSuffixRe.ReplaceAllString(id, "")
+
+	// Strip common tags.
+	for _, tag := range []string{"-latest", "-preview", "-exp", "-free", "-customtools"} {
+		id = strings.ReplaceAll(id, tag, "")
+	}
+
+	// Strip trailing dashes left over from tag removal.
+	id = strings.TrimRight(id, "-")
+
+	// Normalise embedded version dots in tokens.
+	// - Pure version tokens like "v3.2", "5.4" are kept as-is (isVersionToken handles them).
+	// - Tokens with alpha prefix like "gemini" stay as-is.
+	// - Mixed tokens like "m2.5" get their trailing ".N" stripped → "m2".
+	parts := strings.Split(id, "-")
+	var expanded []string
+	for _, p := range parts {
+		if dot := strings.Index(p, "."); dot > 0 && !isVersionToken(p) {
+			prefix := p[:dot]
+			suffix := p[dot+1:]
+			if isAlpha(prefix) && isVersionToken(suffix) {
+				// "gemini.5" → split to "gemini" + "5" (alpha prefix + version)
+				expanded = append(expanded, prefix, suffix)
+				continue
+			}
+			// "m2.5" → strip sub-version → "m2"
+			if isVersionToken(suffix) {
+				expanded = append(expanded, prefix)
+				continue
+			}
+		}
+		expanded = append(expanded, p)
+	}
+
+	// Classify tokens: keep word tokens and the FIRST version token (as
+	// the generation marker). Drop subsequent version tokens.
+	var family []string
+	seenGeneration := false
+	for _, p := range expanded {
+		if isVersionToken(p) {
+			if !seenGeneration {
+				// Keep the major part of the first version as the generation.
+				// "4.6" → "4", "3.1" → "3", "5.4" → "5", "v3.2" → "3"
+				gen := p
+				if gen[0] == 'v' {
+					gen = gen[1:]
+				}
+				if dot := strings.Index(gen, "."); dot >= 0 {
+					gen = gen[:dot]
+				}
+				family = append(family, gen)
+				seenGeneration = true
+			}
+			continue
+		}
+		family = append(family, p)
+	}
+
+	if len(family) == 0 {
+		return id
+	}
+	return strings.Join(family, "-")
+}
+
+// isAlpha returns true if s is non-empty and contains only lowercase ASCII letters.
+func isAlpha(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// isVersionToken returns true if a hyphen-delimited token looks like a version
+// number or date: pure digits, dotted digits (3.1, 4.5), "v3", "v3.2", single
+// digit, etc.
+func isVersionToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	// "v3", "v3.2"
+	stripped := s
+	if stripped[0] == 'v' && len(stripped) > 1 {
+		stripped = stripped[1:]
+	}
+	// Check if all remaining chars are digits or dots.
+	for _, c := range stripped {
+		if c != '.' && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// inferSWEScores propagates SWE-bench scores to unscored models via lineage.
+//
+// For each model with SWEScore == 0, it looks up the model's "family" (via
+// extractFamily) and assigns familyMaxScore + 0.1, flagging SWEInferred = true.
+// This ensures new/unbenched models from strong families surface near the top.
+func inferSWEScores(all []modelSpec) []modelSpec {
+	// Pass 1: find max actual (non-inferred) score per family.
+	familyMax := make(map[string]float64)
+	for i := range all {
+		if all[i].SWEScore == 0 || all[i].SWEInferred {
+			continue
+		}
+		fam := extractFamily(all[i].ID)
+		if all[i].SWEScore > familyMax[fam] {
+			familyMax[fam] = all[i].SWEScore
+		}
+	}
+
+	// Pass 2: assign inferred scores to unscored models.
+	inferred := 0
+	for i := range all {
+		if all[i].SWEScore > 0 {
+			continue
+		}
+		fam := extractFamily(all[i].ID)
+		if maxScore, ok := familyMax[fam]; ok {
+			all[i].SWEScore = math.Round((maxScore+0.1)*10) / 10
+			all[i].SWEInferred = true
+			inferred++
+		}
+	}
+	log.Printf("Inferred SWE-bench scores for %d models via lineage inheritance", inferred)
+	return all
 }
 
 // --- Fetchers ---
@@ -1593,6 +1806,9 @@ func generateGoSource(models []modelSpec) string {
 		if m.SWEScore > 0 {
 			sb.WriteString(fmt.Sprintf("\t\tSWEScore:      %s,\n", formatFloat(m.SWEScore)))
 		}
+		if m.SWEInferred {
+			sb.WriteString("\t\tSWEInferred:   true,\n")
+		}
 		sb.WriteString("\t})\n")
 	}
 
@@ -1645,6 +1861,9 @@ func main() {
 	// Annotate models with SWE-bench Verified scores for capability ordering.
 	all = applySWEScores(all, sweScores)
 
+	// Propagate scores to unbenched models via family lineage inheritance.
+	all = inferSWEScores(all)
+
 	// Generate Go source
 	source := generateGoSource(all)
 
@@ -1658,18 +1877,22 @@ func main() {
 	// Print statistics
 	reasoningCount := 0
 	sweCount := 0
+	sweInferredCount := 0
 	for _, m := range all {
 		if m.Reasoning {
 			reasoningCount++
 		}
 		if m.SWEScore > 0 {
 			sweCount++
+			if m.SWEInferred {
+				sweInferredCount++
+			}
 		}
 	}
 	log.Printf("Model Statistics:")
 	log.Printf("  Total models: %d", len(all))
 	log.Printf("  Reasoning-capable models: %d", reasoningCount)
-	log.Printf("  Models with SWE-bench scores: %d", sweCount)
+	log.Printf("  Models with SWE-bench scores: %d (%d verified, %d inferred)", sweCount, sweCount-sweInferredCount, sweInferredCount)
 
 	// Per-provider counts
 	providerCounts := make(map[string]int)

@@ -284,7 +284,11 @@ func (c *ModelSelectorComponent) updateList() {
 		providerBadge := t.Fg("muted", "["+item.Provider+"]")
 		sweBadge := ""
 		if item.Model.SWEScore > 0 {
-			sweBadge = " " + t.Fg("muted", fmt.Sprintf("[SWE:%.0f%%]", item.Model.SWEScore))
+			if item.Model.SWEInferred {
+				sweBadge = " " + t.Fg("warning", fmt.Sprintf("[SWE:~%.0f%%]", item.Model.SWEScore))
+			} else {
+				sweBadge = " " + t.Fg("muted", fmt.Sprintf("[SWE:%.0f%%]", item.Model.SWEScore))
+			}
 		}
 
 		var line string
