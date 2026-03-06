@@ -11,6 +11,9 @@
 - Anthropic server-side context compaction via `serverCompaction` setting for long-running conversations
 - `fir extensions [list]` and `fir extensions install <name>` CLI subcommands to list and install builtin extensions, mirroring the existing `fir skills` commands
 
+### Changed
+- Bedrock provider now uses the AWS SDK for Go v2 (`BedrockRuntime.ConverseStream`) instead of raw HTTP+SSE, enabling proper SigV4 signing, credential resolution (profiles, IAM, IRSA, ECS), and region handling
+
 ### Fixed
 - Bedrock bearer token auth now sends the AWS_BEARER_TOKEN_BEDROCK value instead of the "<authenticated>" placeholder
 - `/reload` now re-applies extension allowlists from current settings and `--extension` flags before restarting extensions, so removed names are actually disabled without restarting fir

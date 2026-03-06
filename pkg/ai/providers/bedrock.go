@@ -1,29 +1,33 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
 // Upstream hash: 1caadb2e
 //
-// NOTE: The TS version uses the AWS SDK (@aws-sdk/client-bedrock-runtime)
-// which handles SigV4 signing internally. This Go port uses raw HTTP and
-// expects either:
-// - A proxy/gateway that handles auth (AWS_BEDROCK_SKIP_AUTH=1 pattern)
-// - Pre-signed URLs in model.BaseURL
-// - Future: native SigV4 signing without CGo
+// Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
+// SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
 package providers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
+	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// --- Bedrock Converse Stream event types ---
-// These mirror the ConverseStream response event structure.
+// bedrockBlockState tracks content block state during streaming.
+type bedrockBlockState struct {
+	contentIdx  int
+	partialJSON string
+}
 
 // StreamBedrock implements streaming for Amazon Bedrock's ConverseStream API.
 func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
@@ -45,116 +49,81 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 			stream.End(nil)
 		}()
 
-		apiKey := ""
-		if options != nil {
-			apiKey = options.ApiKey
+		emitError := func(msg string) {
+			output.StopReason = ai.StopReasonError
+			output.ErrorMessage = msg
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 		}
-		if apiKey == "" || apiKey == "<authenticated>" {
-			if envKey := os.Getenv("AWS_BEARER_TOKEN_BEDROCK"); envKey != "" {
-				apiKey = envKey
-			} else if apiKey == "<authenticated>" {
-				apiKey = ""
-			}
-		}
-		// Bedrock doesn't use API keys like other providers — it uses AWS credentials.
-		// For now, we allow empty apiKey since auth may be handled by proxy/gateway.
 
-		body, err := buildBedrockRequestBody(model, prompt, options)
+		// Build AWS SDK client
+		client, err := newBedrockClient(ctx, model, options)
 		if err != nil {
-			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = fmt.Sprintf("building request: %v", err)
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			emitError(fmt.Sprintf("creating bedrock client: %v", err))
 			return
 		}
 
-		baseURL := model.BaseURL
-		if baseURL == "" {
-			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = "bedrock requires baseURL to be set (direct API or proxy)"
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+		// Build ConverseStream input
+		input, err := buildConverseStreamInput(model, prompt, options)
+		if err != nil {
+			emitError(fmt.Sprintf("building request: %v", err))
 			return
 		}
-		url := strings.TrimRight(baseURL, "/") + "/model/" + model.ID + "/converse-stream"
 
 		firlog.Debug("bedrock request", "model", model.ID, "messageCount", len(prompt.Messages))
 
-		headers := map[string]string{}
-		if apiKey != "" {
-			headers["Authorization"] = "Bearer " + apiKey
-		}
-		for k, v := range model.Headers {
-			headers[k] = v
-		}
-		if options != nil {
-			for k, v := range options.Headers {
-				headers[k] = v
+		resp, err := client.ConverseStream(ctx, input)
+		if err != nil {
+			if ctx.Err() != nil {
+				output.StopReason = ai.StopReasonAborted
+				output.ErrorMessage = "request aborted"
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonAborted, Error: output})
+			} else {
+				emitError(err.Error())
 			}
+			return
 		}
 
-		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))
+		eventStream := resp.GetStream()
+		defer eventStream.Close()
 
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
 
-		// Track content block indices
-		type blockState struct {
-			contentIdx  int
-			partialJSON string
-		}
-		blocks := map[int]*blockState{}
+		blocks := map[int]*bedrockBlockState{}
 
-		for evt := range sseEvents {
-			if evt.Data == "" || evt.Data == "[DONE]" {
-				continue
-			}
-
-			var raw map[string]any
-			if err := json.Unmarshal([]byte(evt.Data), &raw); err != nil {
-				continue
-			}
-
-			// messageStart
-			if _, ok := raw["messageStart"]; ok {
+		for event := range eventStream.Events() {
+			switch ev := event.(type) {
+			case *brtypes.ConverseStreamOutputMemberMessageStart:
 				// Already sent EventStart above
-				continue
-			}
+				_ = ev
 
-			// contentBlockStart
-			if cbs, ok := raw["contentBlockStart"].(map[string]any); ok {
-				blockIdx := jsonInt(cbs, "contentBlockIndex")
-				if start, ok := cbs["start"].(map[string]any); ok {
-					if toolUse, ok := start["toolUse"].(map[string]any); ok {
-						idx := len(output.Content)
-						toolID, _ := toolUse["toolUseId"].(string)
-						toolName, _ := toolUse["name"].(string)
-						output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
-						blocks[blockIdx] = &blockState{contentIdx: idx}
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventToolcallStart,
-							ContentIndex: idx,
-							Partial:      output,
-						})
-					}
-				}
-				continue
-			}
-
-			// contentBlockDelta
-			if cbd, ok := raw["contentBlockDelta"].(map[string]any); ok {
-				blockIdx := jsonInt(cbd, "contentBlockIndex")
-				delta, _ := cbd["delta"].(map[string]any)
-				if delta == nil {
-					continue
+			case *brtypes.ConverseStreamOutputMemberContentBlockStart:
+				blockIdx := int(derefI32(ev.Value.ContentBlockIndex))
+				if start, ok := ev.Value.Start.(*brtypes.ContentBlockStartMemberToolUse); ok {
+					idx := len(output.Content)
+					output.Content = append(output.Content, ai.NewToolCallContent(
+						derefStr(start.Value.ToolUseId),
+						derefStr(start.Value.Name),
+						map[string]any{},
+					))
+					blocks[blockIdx] = &bedrockBlockState{contentIdx: idx}
+					stream.Push(ai.AssistantMessageEvent{
+						Type:         ai.EventToolcallStart,
+						ContentIndex: idx,
+						Partial:      output,
+					})
 				}
 
+			case *brtypes.ConverseStreamOutputMemberContentBlockDelta:
+				blockIdx := int(derefI32(ev.Value.ContentBlockIndex))
 				bs := blocks[blockIdx]
 
-				// Text delta
-				if text, ok := delta["text"].(string); ok {
+				switch delta := ev.Value.Delta.(type) {
+				case *brtypes.ContentBlockDeltaMemberText:
+					text := delta.Value
 					if bs == nil {
-						// Create new text block
 						idx := len(output.Content)
 						output.Content = append(output.Content, ai.NewTextContent(""))
-						bs = &blockState{contentIdx: idx}
+						bs = &bedrockBlockState{contentIdx: idx}
 						blocks[blockIdx] = bs
 						stream.Push(ai.AssistantMessageEvent{
 							Type:         ai.EventTextStart,
@@ -171,11 +140,10 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 						Delta:        text,
 						Partial:      output,
 					})
-				}
 
-				// Tool use delta
-				if toolUse, ok := delta["toolUse"].(map[string]any); ok && bs != nil {
-					if input, ok := toolUse["input"].(string); ok {
+				case *brtypes.ContentBlockDeltaMemberToolUse:
+					if bs != nil && delta.Value.Input != nil {
+						input := *delta.Value.Input
 						bs.partialJSON += input
 						parsed := ai.ParseStreamingJSON(bs.partialJSON)
 						c := output.Content[bs.contentIdx]
@@ -188,45 +156,13 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 							Partial:      output,
 						})
 					}
+
+				case *brtypes.ContentBlockDeltaMemberReasoningContent:
+					handleReasoningDelta(delta.Value, blockIdx, bs, blocks, output, stream)
 				}
 
-				// Reasoning/thinking delta
-				if rc, ok := delta["reasoningContent"].(map[string]any); ok {
-					if bs == nil {
-						// Create new thinking block
-						idx := len(output.Content)
-						output.Content = append(output.Content, ai.NewThinkingContent(""))
-						bs = &blockState{contentIdx: idx}
-						blocks[blockIdx] = bs
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventThinkingStart,
-							ContentIndex: idx,
-							Partial:      output,
-						})
-					}
-					if text, ok := rc["text"].(string); ok && text != "" {
-						c := output.Content[bs.contentIdx]
-						c.Thinking.Thinking += text
-						output.Content[bs.contentIdx] = c
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventThinkingDelta,
-							ContentIndex: bs.contentIdx,
-							Delta:        text,
-							Partial:      output,
-						})
-					}
-					if sig, ok := rc["signature"].(string); ok && sig != "" {
-						c := output.Content[bs.contentIdx]
-						c.Thinking.ThinkingSignature += sig
-						output.Content[bs.contentIdx] = c
-					}
-				}
-				continue
-			}
-
-			// contentBlockStop
-			if cbs, ok := raw["contentBlockStop"].(map[string]any); ok {
-				blockIdx := jsonInt(cbs, "contentBlockIndex")
+			case *brtypes.ConverseStreamOutputMemberContentBlockStop:
+				blockIdx := int(derefI32(ev.Value.ContentBlockIndex))
 				bs := blocks[blockIdx]
 				if bs == nil {
 					continue
@@ -263,62 +199,36 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 					})
 				}
 				delete(blocks, blockIdx)
-				continue
-			}
 
-			// messageStop
-			if ms, ok := raw["messageStop"].(map[string]any); ok {
-				reason, _ := ms["stopReason"].(string)
-				output.StopReason = mapBedrockStopReason(reason)
-				continue
-			}
+			case *brtypes.ConverseStreamOutputMemberMessageStop:
+				output.StopReason = mapBedrockStopReason(string(ev.Value.StopReason))
 
-			// metadata
-			if meta, ok := raw["metadata"].(map[string]any); ok {
-				if usage, ok := meta["usage"].(map[string]any); ok {
-					output.Usage.Input = jsonInt(usage, "inputTokens")
-					output.Usage.Output = jsonInt(usage, "outputTokens")
-					output.Usage.CacheRead = jsonInt(usage, "cacheReadInputTokens")
-					output.Usage.CacheWrite = jsonInt(usage, "cacheWriteInputTokens")
-					output.Usage.TotalTokens = jsonInt(usage, "totalTokens")
+			case *brtypes.ConverseStreamOutputMemberMetadata:
+				if ev.Value.Usage != nil {
+					output.Usage.Input = int(derefI32(ev.Value.Usage.InputTokens))
+					output.Usage.Output = int(derefI32(ev.Value.Usage.OutputTokens))
+					output.Usage.TotalTokens = int(derefI32(ev.Value.Usage.TotalTokens))
+					if ev.Value.Usage.CacheReadInputTokens != nil {
+						output.Usage.CacheRead = int(*ev.Value.Usage.CacheReadInputTokens)
+					}
+					if ev.Value.Usage.CacheWriteInputTokens != nil {
+						output.Usage.CacheWrite = int(*ev.Value.Usage.CacheWriteInputTokens)
+					}
 					if output.Usage.TotalTokens == 0 {
 						output.Usage.TotalTokens = output.Usage.Input + output.Usage.Output
 					}
 					ai.CalculateCost(model, &output.Usage)
 				}
-				continue
-			}
-
-			// Error events
-			for _, errKey := range []string{
-				"internalServerException",
-				"modelStreamErrorException",
-				"validationException",
-				"throttlingException",
-				"serviceUnavailableException",
-			} {
-				if errObj, ok := raw[errKey].(map[string]any); ok {
-					errMsg, _ := errObj["message"].(string)
-					firlog.Warn("bedrock error", "type", errKey, "err", errMsg)
-					output.StopReason = ai.StopReasonError
-					output.ErrorMessage = fmt.Sprintf("%s: %s", errKey, errMsg)
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
-					return
-				}
 			}
 		}
 
-		// Check for SSE-level errors
-		select {
-		case err := <-sseErr:
-			if err != nil {
-				firlog.Warn("bedrock SSE error", "err", err)
-				output.StopReason = ai.StopReasonError
-				output.ErrorMessage = err.Error()
-				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
-				return
-			}
-		default:
+		// Check for stream-level errors
+		if err := eventStream.Err(); err != nil {
+			firlog.Warn("bedrock stream error", "err", err)
+			output.StopReason = ai.StopReasonError
+			output.ErrorMessage = err.Error()
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			return
 		}
 
 		firlog.Debug("bedrock response complete", "model", model.ID, "stopReason", output.StopReason)
@@ -330,6 +240,87 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 	}()
 
 	return stream
+}
+
+// handleReasoningDelta processes a reasoning/thinking content block delta.
+func handleReasoningDelta(
+	delta brtypes.ReasoningContentBlockDelta,
+	blockIdx int,
+	bs *bedrockBlockState,
+	blocks map[int]*bedrockBlockState,
+	output *ai.AssistantMessage,
+	stream *ai.AssistantMessageEventStream,
+) {
+	switch rc := delta.(type) {
+	case *brtypes.ReasoningContentBlockDeltaMemberText:
+		text := rc.Value
+		if bs == nil {
+			idx := len(output.Content)
+			output.Content = append(output.Content, ai.NewThinkingContent(""))
+			bs = &bedrockBlockState{contentIdx: idx}
+			blocks[blockIdx] = bs
+			stream.Push(ai.AssistantMessageEvent{
+				Type:         ai.EventThinkingStart,
+				ContentIndex: idx,
+				Partial:      output,
+			})
+		}
+		c := output.Content[bs.contentIdx]
+		c.Thinking.Thinking += text
+		output.Content[bs.contentIdx] = c
+		stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventThinkingDelta,
+			ContentIndex: bs.contentIdx,
+			Delta:        text,
+			Partial:      output,
+		})
+
+	case *brtypes.ReasoningContentBlockDeltaMemberSignature:
+		if bs != nil {
+			c := output.Content[bs.contentIdx]
+			c.Thinking.ThinkingSignature += rc.Value
+			output.Content[bs.contentIdx] = c
+		}
+	}
+}
+
+// --- AWS SDK client construction ---
+
+func newBedrockClient(ctx context.Context, model *ai.Model, options *ai.StreamOptions) (*bedrockruntime.Client, error) {
+	region := os.Getenv("AWS_REGION")
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+
+	var cfgOpts []func(*awsconfig.LoadOptions) error
+	cfgOpts = append(cfgOpts, awsconfig.WithRegion(region))
+
+	// Support proxies that don't need authentication
+	if os.Getenv("AWS_BEDROCK_SKIP_AUTH") == "1" {
+		cfgOpts = append(cfgOpts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider("dummy-access-key", "dummy-secret-key", ""),
+		))
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, cfgOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("loading AWS config: %w", err)
+	}
+
+	var clientOpts []func(*bedrockruntime.Options)
+
+	// Use custom base URL if set (proxy/gateway scenario)
+	if model.BaseURL != "" {
+		baseURL := strings.TrimRight(model.BaseURL, "/")
+		clientOpts = append(clientOpts, func(o *bedrockruntime.Options) {
+			o.BaseEndpoint = &baseURL
+		})
+	}
+
+	return bedrockruntime.NewFromConfig(cfg, clientOpts...), nil
 }
 
 func mapBedrockStopReason(reason string) ai.StopReason {
@@ -345,11 +336,11 @@ func mapBedrockStopReason(reason string) ai.StopReason {
 	}
 }
 
-// --- Request body building ---
+// --- Build ConverseStream input ---
 
-func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamOptions) ([]byte, error) {
-	body := map[string]any{
-		"modelId": model.ID,
+func buildConverseStreamInput(model *ai.Model, ctx ai.Context, options *ai.StreamOptions) (*bedrockruntime.ConverseStreamInput, error) {
+	input := &bedrockruntime.ConverseStreamInput{
+		ModelId: strPtr(model.ID),
 	}
 
 	retention := resolveCacheRetention("")
@@ -360,21 +351,58 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 
 	// System prompt
 	if ctx.SystemPrompt != "" {
-		sysBlocks := []map[string]any{
-			{"text": ctx.SystemPrompt},
+		input.System = []brtypes.SystemContentBlock{
+			&brtypes.SystemContentBlockMemberText{Value: ctx.SystemPrompt},
 		}
 		if canCache {
-			cp := map[string]any{"type": "default"}
-			if retention == ai.CacheLong {
-				cp["ttl"] = "ONE_HOUR"
-			}
-			sysBlocks = append(sysBlocks, map[string]any{"cachePoint": cp})
+			input.System = append(input.System, &brtypes.SystemContentBlockMemberCachePoint{
+				Value: bedrockCachePoint(retention),
+			})
 		}
-		body["system"] = sysBlocks
 	}
 
 	// Messages
-	var messages []map[string]any
+	input.Messages = convertBedrockMessages(ctx.Messages, model, canCache, retention)
+
+	// Inference config
+	if options != nil && (options.MaxTokens != nil || options.Temperature != nil) {
+		ic := &brtypes.InferenceConfiguration{}
+		if options.MaxTokens != nil {
+			v := int32(*options.MaxTokens)
+			ic.MaxTokens = &v
+		}
+		if options.Temperature != nil {
+			v := float32(*options.Temperature)
+			ic.Temperature = &v
+		}
+		input.InferenceConfig = ic
+	}
+
+	// Tools
+	toolChoice := ""
+	if options != nil {
+		toolChoice = options.ToolChoice
+	}
+	if len(ctx.Tools) > 0 && toolChoice != "none" {
+		input.ToolConfig = convertBedrockToolConfig(ctx.Tools, toolChoice)
+	}
+
+	// Thinking/reasoning config
+	if options != nil && options.Headers != nil {
+		if reasoning := options.Headers["x-bedrock-reasoning"]; reasoning != "" {
+			if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
+				fields := buildBedrockAdditionalFields(model.ID, reasoning, options)
+				if fields != nil {
+					input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
+				}
+			}
+		}
+	}
+
+	return input, nil
+}
+
+func convertBedrockMessages(messages []ai.Message, model *ai.Model, canCache bool, retention ai.CacheRetention) []brtypes.Message {
 	normalizeID := func(id string, _ *ai.Model, _ *ai.AssistantMessage) string {
 		var b strings.Builder
 		b.Grow(min(len(id), 64))
@@ -390,122 +418,121 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 		}
 		return b.String()
 	}
-	transformed := TransformMessages(ctx.Messages, model, normalizeID)
+
+	transformed := TransformMessages(messages, model, normalizeID)
+	var result []brtypes.Message
+
 	for i := 0; i < len(transformed); i++ {
 		msg := &transformed[i]
 
 		if u := msg.AsUser(); u != nil {
+			var blocks []brtypes.ContentBlock
 			switch content := u.Content.(type) {
 			case string:
 				if strings.TrimSpace(content) != "" {
-					messages = append(messages, map[string]any{
-						"role":    "user",
-						"content": []map[string]any{{"text": content}},
-					})
+					blocks = append(blocks, &brtypes.ContentBlockMemberText{Value: content})
 				}
 			case []any:
-				var blocks []map[string]any
 				for _, item := range content {
 					if m, ok := item.(map[string]any); ok {
 						switch m["type"] {
 						case "text":
 							if text, ok := m["text"].(string); ok {
-								blocks = append(blocks, map[string]any{"text": text})
+								blocks = append(blocks, &brtypes.ContentBlockMemberText{Value: text})
 							}
 						case "image":
 							if model.SupportsImages() {
-								data, _ := m["data"].(string)
-								mime, _ := m["mimeType"].(string)
-								blocks = append(blocks, map[string]any{
-									"image": map[string]any{
-										"format": bedrockImageFormat(mime),
-										"source": map[string]any{"bytes": data},
-									},
-								})
+								blocks = append(blocks, convertImageBlock(m))
 							}
 						}
 					}
 				}
-				if len(blocks) > 0 {
-					messages = append(messages, map[string]any{
-						"role":    "user",
-						"content": blocks,
-					})
-				}
 			}
+			if len(blocks) > 0 {
+				result = append(result, brtypes.Message{
+					Role:    brtypes.ConversationRoleUser,
+					Content: blocks,
+				})
+			}
+
 		} else if a := msg.AsAssistant(); a != nil {
-			var contentBlocks []map[string]any
+			var blocks []brtypes.ContentBlock
 			for _, block := range a.Content {
 				switch {
 				case block.IsText():
 					if strings.TrimSpace(block.Text.Text) != "" {
-						contentBlocks = append(contentBlocks, map[string]any{"text": block.Text.Text})
+						blocks = append(blocks, &brtypes.ContentBlockMemberText{Value: block.Text.Text})
 					}
 				case block.IsToolCall():
 					tc := block.ToolCall
-					contentBlocks = append(contentBlocks, map[string]any{
-						"toolUse": map[string]any{
-							"toolUseId": tc.ID,
-							"name":      tc.Name,
-							"input":     tc.Arguments,
+					blocks = append(blocks, &brtypes.ContentBlockMemberToolUse{
+						Value: brtypes.ToolUseBlock{
+							ToolUseId: strPtr(tc.ID),
+							Name:      strPtr(tc.Name),
+							Input:     document.NewLazyDocument(tc.Arguments),
 						},
 					})
 				case block.IsThinking():
 					if strings.TrimSpace(block.Thinking.Thinking) != "" {
-						reasoning := map[string]any{
-							"text": block.Thinking.Thinking,
+						reasoning := brtypes.ReasoningTextBlock{
+							Text: strPtr(block.Thinking.Thinking),
 						}
-						// Only include signature for Anthropic Claude models
 						if supportsBedrockThinkingSignature(model) {
-							reasoning["signature"] = block.Thinking.ThinkingSignature
+							reasoning.Signature = strPtr(block.Thinking.ThinkingSignature)
 						}
-						contentBlocks = append(contentBlocks, map[string]any{
-							"reasoningContent": map[string]any{
-								"reasoningText": reasoning,
+						blocks = append(blocks, &brtypes.ContentBlockMemberReasoningContent{
+							Value: &brtypes.ReasoningContentBlockMemberReasoningText{
+								Value: reasoning,
 							},
 						})
 					}
 				}
 			}
-			if len(contentBlocks) > 0 {
-				messages = append(messages, map[string]any{
-					"role":    "assistant",
-					"content": contentBlocks,
+			if len(blocks) > 0 {
+				result = append(result, brtypes.Message{
+					Role:    brtypes.ConversationRoleAssistant,
+					Content: blocks,
 				})
 			}
+
 		} else if tr := msg.AsToolResult(); tr != nil {
 			// Collect consecutive tool results into a single user message
-			var toolResults []map[string]any
+			var blocks []brtypes.ContentBlock
 			for {
 				tr := transformed[i].AsToolResult()
 				if tr == nil {
 					break
 				}
-				var content []map[string]any
+				var content []brtypes.ToolResultContentBlock
 				for _, c := range tr.Content {
 					if c.IsText() {
-						content = append(content, map[string]any{"text": c.Text})
+						content = append(content, &brtypes.ToolResultContentBlockMemberText{Value: c.Text})
 					} else if c.IsImage() && model.SupportsImages() {
-						content = append(content, map[string]any{
-							"image": map[string]any{
-								"format": bedrockImageFormat(c.MimeType),
-								"source": map[string]any{"bytes": c.Data},
-							},
-						})
+						imgBytes, err := base64.StdEncoding.DecodeString(c.Data)
+						if err == nil {
+							content = append(content, &brtypes.ToolResultContentBlockMemberImage{
+								Value: brtypes.ImageBlock{
+									Format: bedrockImageFormatSDK(c.MimeType),
+									Source: &brtypes.ImageSourceMemberBytes{Value: imgBytes},
+								},
+							})
+						}
 					}
 				}
 				if len(content) == 0 {
-					content = []map[string]any{{"text": ""}}
+					content = []brtypes.ToolResultContentBlock{
+						&brtypes.ToolResultContentBlockMemberText{Value: ""},
+					}
 				}
-				status := "success"
+				status := brtypes.ToolResultStatusSuccess
 				if tr.IsError {
-					status = "error"
+					status = brtypes.ToolResultStatusError
 				}
-				toolResults = append(toolResults, map[string]any{
-					"toolResult": map[string]any{
-						"toolUseId": tr.ToolCallID,
-						"content":   content,
-						"status":    status,
+				blocks = append(blocks, &brtypes.ContentBlockMemberToolResult{
+					Value: brtypes.ToolResultBlock{
+						ToolUseId: strPtr(tr.ToolCallID),
+						Content:   content,
+						Status:    status,
 					},
 				})
 				if i+1 < len(transformed) && transformed[i+1].Role() == ai.RoleToolResult {
@@ -514,101 +541,104 @@ func buildBedrockRequestBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 					break
 				}
 			}
-			messages = append(messages, map[string]any{
-				"role":    "user",
-				"content": toolResults,
+			result = append(result, brtypes.Message{
+				Role:    brtypes.ConversationRoleUser,
+				Content: blocks,
 			})
 		}
 	}
 
 	// Add cache point to last user message
-	if canCache && len(messages) > 0 {
-		last := messages[len(messages)-1]
-		if role, _ := last["role"].(string); role == "user" {
-			if content, ok := last["content"].([]map[string]any); ok {
-				cp := map[string]any{"type": "default"}
-				if retention == ai.CacheLong {
-					cp["ttl"] = "ONE_HOUR"
-				}
-				last["content"] = append(content, map[string]any{"cachePoint": cp})
-			}
-		}
-	}
-
-	body["messages"] = messages
-
-	// Inference config
-	inferenceConfig := map[string]any{}
-	if options != nil && options.MaxTokens != nil {
-		inferenceConfig["maxTokens"] = *options.MaxTokens
-	}
-	if options != nil && options.Temperature != nil {
-		inferenceConfig["temperature"] = *options.Temperature
-	}
-	if len(inferenceConfig) > 0 {
-		body["inferenceConfig"] = inferenceConfig
-	}
-
-	// Tools with tool choice
-	toolChoice := ""
-	if options != nil {
-		toolChoice = options.ToolChoice
-	}
-	if len(ctx.Tools) > 0 && toolChoice != "none" {
-		var tools []map[string]any
-		for _, tool := range ctx.Tools {
-			tools = append(tools, map[string]any{
-				"toolSpec": map[string]any{
-					"name":        tool.Name,
-					"description": tool.Description,
-					"inputSchema": map[string]any{"json": tool.Parameters},
-				},
+	if canCache && len(result) > 0 {
+		last := &result[len(result)-1]
+		if last.Role == brtypes.ConversationRoleUser {
+			last.Content = append(last.Content, &brtypes.ContentBlockMemberCachePoint{
+				Value: bedrockCachePoint(retention),
 			})
 		}
-		toolConfig := map[string]any{"tools": tools}
-		switch toolChoice {
-		case "auto":
-			toolConfig["toolChoice"] = map[string]any{"auto": map[string]any{}}
-		case "any":
-			toolConfig["toolChoice"] = map[string]any{"any": map[string]any{}}
-		case "":
-			// No explicit tool choice
-		default:
-			// Specific tool name
-			toolConfig["toolChoice"] = map[string]any{"tool": map[string]any{"name": toolChoice}}
-		}
-		body["toolConfig"] = toolConfig
 	}
 
-	// Thinking/reasoning config (via headers from StreamSimple)
-	if options != nil && options.Headers != nil {
-		if reasoning := options.Headers["x-bedrock-reasoning"]; reasoning != "" {
-			if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
-				additionalFields := map[string]any{}
-				if supportsBedrockAdaptiveThinking(model.ID) {
-					additionalFields["thinking"] = map[string]any{"type": "adaptive"}
-					additionalFields["output_config"] = map[string]any{
-						"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning)),
-					}
-				} else {
-					budget := 1024
-					if b := options.Headers["x-bedrock-thinking-budget"]; b != "" {
-						fmt.Sscanf(b, "%d", &budget)
-					}
-					additionalFields["thinking"] = map[string]any{
-						"type":          "enabled",
-						"budget_tokens": budget,
-					}
-					if options.Headers["x-bedrock-interleaved-thinking"] == "true" {
-						additionalFields["anthropic_beta"] = []string{"interleaved-thinking-2025-05-14"}
-					}
-				}
-				body["additionalModelRequestFields"] = additionalFields
-			}
+	return result
+}
+
+func convertImageBlock(m map[string]any) brtypes.ContentBlock {
+	data, _ := m["data"].(string)
+	mime, _ := m["mimeType"].(string)
+	imgBytes, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		// Fall back to raw bytes if not base64
+		imgBytes = []byte(data)
+	}
+	return &brtypes.ContentBlockMemberImage{
+		Value: brtypes.ImageBlock{
+			Format: bedrockImageFormatSDK(mime),
+			Source: &brtypes.ImageSourceMemberBytes{Value: imgBytes},
+		},
+	}
+}
+
+func convertBedrockToolConfig(tools []ai.Tool, toolChoice string) *brtypes.ToolConfiguration {
+	var sdkTools []brtypes.Tool
+	for _, tool := range tools {
+		sdkTools = append(sdkTools, &brtypes.ToolMemberToolSpec{
+			Value: brtypes.ToolSpecification{
+				Name:        strPtr(tool.Name),
+				Description: strPtr(tool.Description),
+				InputSchema: &brtypes.ToolInputSchemaMemberJson{
+					Value: document.NewLazyDocument(tool.Parameters),
+				},
+			},
+		})
+	}
+
+	config := &brtypes.ToolConfiguration{Tools: sdkTools}
+
+	switch toolChoice {
+	case "auto":
+		config.ToolChoice = &brtypes.ToolChoiceMemberAuto{Value: brtypes.AutoToolChoice{}}
+	case "any":
+		config.ToolChoice = &brtypes.ToolChoiceMemberAny{Value: brtypes.AnyToolChoice{}}
+	case "":
+		// No explicit tool choice
+	default:
+		config.ToolChoice = &brtypes.ToolChoiceMemberTool{
+			Value: brtypes.SpecificToolChoice{Name: strPtr(toolChoice)},
 		}
 	}
 
-	return json.Marshal(body)
+	return config
+}
+
+func buildBedrockAdditionalFields(modelID, reasoning string, options *ai.StreamOptions) map[string]any {
+	if supportsBedrockAdaptiveThinking(modelID) {
+		return map[string]any{
+			"thinking":      map[string]any{"type": "adaptive"},
+			"output_config": map[string]any{"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning))},
+		}
+	}
+
+	budget := 1024
+	if b := options.Headers["x-bedrock-thinking-budget"]; b != "" {
+		fmt.Sscanf(b, "%d", &budget)
+	}
+	fields := map[string]any{
+		"thinking": map[string]any{
+			"type":          "enabled",
+			"budget_tokens": budget,
+		},
+	}
+	if options.Headers["x-bedrock-interleaved-thinking"] == "true" {
+		fields["anthropic_beta"] = []string{"interleaved-thinking-2025-05-14"}
+	}
+	return fields
+}
+
+func bedrockCachePoint(retention ai.CacheRetention) brtypes.CachePointBlock {
+	cp := brtypes.CachePointBlock{Type: brtypes.CachePointTypeDefault}
+	if retention == ai.CacheLong {
+		cp.Ttl = brtypes.CacheTTLOneHour
+	}
+	return cp
 }
 
 // supportsBedrockPromptCaching checks if the model supports prompt caching.
@@ -630,7 +660,6 @@ func supportsBedrockPromptCaching(model *ai.Model) bool {
 }
 
 // supportsBedrockThinkingSignature checks if the model supports thinking signatures.
-// Only Anthropic Claude models support the signature field in reasoningContent.
 func supportsBedrockThinkingSignature(model *ai.Model) bool {
 	id := strings.ToLower(model.ID)
 	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
@@ -641,17 +670,17 @@ func supportsBedrockAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
 }
 
-// bedrockImageFormat maps MIME types to Bedrock image format strings.
-func bedrockImageFormat(mimeType string) string {
+// bedrockImageFormatSDK maps MIME types to Bedrock ImageFormat enum values.
+func bedrockImageFormatSDK(mimeType string) brtypes.ImageFormat {
 	switch mimeType {
 	case "image/png":
-		return "png"
+		return brtypes.ImageFormatPng
 	case "image/gif":
-		return "gif"
+		return brtypes.ImageFormatGif
 	case "image/webp":
-		return "webp"
+		return brtypes.ImageFormatWebp
 	default:
-		return "jpeg"
+		return brtypes.ImageFormatJpeg
 	}
 }
 
@@ -697,4 +726,22 @@ func RegisterBedrock(reg *ai.Registry) {
 		Stream:       StreamBedrock,
 		StreamSimple: StreamSimpleBedrock,
 	}, "builtin")
+}
+
+// --- Helpers ---
+
+func strPtr(s string) *string { return &s }
+
+func derefI32(p *int32) int32 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
