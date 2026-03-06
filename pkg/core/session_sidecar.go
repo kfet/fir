@@ -17,7 +17,7 @@ func ReexecSidecarPath(sessionFile string) string {
 	return sessionFile + ".reexec.json"
 }
 
-// WriteReexecSidecar writes the sidecar JSON atomically next to the session file.
+// WriteReexecSidecar writes the sidecar JSON next to the session file.
 func WriteReexecSidecar(sessionFile string, sidecar *ReexecSidecar) error {
 	data, err := json.Marshal(sidecar)
 	if err != nil {

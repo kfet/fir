@@ -2552,9 +2552,9 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 	sessionBase := filepath.Base(sessionFile)
 
 	// Save queue and pending input to survive the exec.
+	queueTexts := m.session.PeekFollowUpQueue()
 	sc := &core.ReexecSidecar{
-		QueueMessages: m.session.ClearFollowUpQueue(),
-		PendingInput:  m.editor.Text(),
+		QueueMessages: queueTexts,
 	}
 	if err := core.WriteReexecSidecar(sessionFile, sc); err != nil {
 		// Non-fatal, but warn the user.
@@ -3224,7 +3224,7 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 
 	restored := 0
 	for _, msg := range sidecar.QueueMessages {
-		m.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg(msg, 0)))
+		m.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
 		restored++
 	}
 
