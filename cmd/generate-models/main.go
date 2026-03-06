@@ -887,6 +887,30 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			ContextWindow: 128000, MaxTokens: 16384,
 		})
 	}
+	if !hasModel(all, "openai", "gpt-5.4") {
+		all = append(all, modelSpec{
+			ID: "gpt-5.4", Name: "GPT-5.4",
+			API: "openai-responses", Provider: "openai", BaseURL: "https://api.openai.com/v1",
+			Reasoning: true, Input: []string{"text", "image"},
+			CostInput: 2.5, CostOutput: 15, CostCacheRead: 0.25, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 128000,
+		})
+	}
+	// Fix cache read pricing for gpt-5.4-pro across all providers
+	for i := range all {
+		if all[i].ID == "gpt-5.4-pro" || strings.HasSuffix(all[i].ID, "/gpt-5.4-pro") {
+			all[i].CostCacheRead = 3
+		}
+	}
+	if !hasModel(all, "openai", "gpt-5.4-pro") {
+		all = append(all, modelSpec{
+			ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro",
+			API: "openai-responses", Provider: "openai", BaseURL: "https://api.openai.com/v1",
+			Reasoning: true, Input: []string{"text", "image"},
+			CostInput: 30, CostOutput: 180, CostCacheRead: 3, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 128000,
+		})
+	}
 
 	// OpenAI Codex (ChatGPT OAuth) models
 	const codexBaseURL = "https://chatgpt.com/backend-api"
@@ -921,6 +945,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text"},
 			CostInput: 0, CostOutput: 0, CostCacheRead: 0, CostCacheWrite: 0,
 			ContextWindow: 128000, MaxTokens: codexMaxTokens},
+		{ID: "gpt-5.4", Name: "GPT-5.4", API: "openai-codex-responses", Provider: "openai-codex",
+			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
+			CostInput: 2.5, CostOutput: 15, CostCacheRead: 0.25, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: codexMaxTokens},
 	}
 	all = append(all, codexModels...)
 

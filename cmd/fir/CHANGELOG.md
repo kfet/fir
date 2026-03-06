@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- GPT-5.4 and GPT-5.4 Pro model support for OpenAI and Azure providers
+
 ## [0.15.0] - 2026-03-06
 
 ### Added
