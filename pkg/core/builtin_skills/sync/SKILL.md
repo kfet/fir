@@ -11,18 +11,18 @@ Sync a downstream port with the latest changes from the upstream source reposito
 
 Before starting, identify:
 - **Upstream repo path** — relative or absolute path to the upstream repository
-- **Baseline file** — records the last-synced state (default: `sync/.baseline-hashes`)
-- **File map** — maps upstream files to downstream equivalents (default: `sync/UPSTREAM_MAP.md`). When splitting a large downstream file into smaller ones, update this map so future syncs know where to apply upstream changes.
-- **Sync log** — records sync history (default: `sync/SYNC_LOG.md`)
-- **Check script** — detects changes (default: `sync/sync-check.sh`)
-- **Record script** — updates baseline (default: `sync/sync-record.sh`)
+- **Baseline file** — records the last-synced state (default: `.fir/skills/sync/data/.baseline-hashes`)
+- **File map** — maps upstream files to downstream equivalents (default: `.fir/skills/sync/data/UPSTREAM_MAP.md`). When splitting a large downstream file into smaller ones, update this map so future syncs know where to apply upstream changes.
+- **Sync log** — records sync history (default: `.fir/skills/sync/data/SYNC_LOG.md`)
+- **Check script** — detects changes (default: `.fir/skills/sync/scripts/sync-check.sh`)
+- **Record script** — updates baseline (default: `.fir/skills/sync/scripts/sync-record.sh`)
 
 ---
 
 ## Step 1 — Detect changes
 
 ```bash
-bash sync/sync-check.sh <UPSTREAM_PATH>
+bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
 ```
 
 If output is `No upstream changes detected.` — you are done.
@@ -66,13 +66,13 @@ Check if it belongs to a component that isn't ported. If so, skip it. If it's a 
 After all downstream files are updated and tests pass:
 
 ```bash
-bash sync/sync-record.sh <UPSTREAM_PATH>
+bash .fir/skills/sync/scripts/sync-record.sh <UPSTREAM_PATH>
 ```
 
 Verify it's clean:
 
 ```bash
-bash sync/sync-check.sh <UPSTREAM_PATH>
+bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
 # Expected: No upstream changes detected.
 ```
 

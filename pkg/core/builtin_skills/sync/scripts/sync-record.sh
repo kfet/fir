@@ -1,9 +1,9 @@
 #!/bin/bash
-# Usage: ./sync/sync-record.sh ../pi-mono
+# Usage: ./.fir/skills/sync/sync-record.sh ../pi-mono
 # Records hash baseline for all TS source files
 
 UPSTREAM="$1"
-OUTPUT="sync/.baseline-hashes"
+OUTPUT=".fir/skills/sync/data/.baseline-hashes"
 
 if [ -z "$UPSTREAM" ]; then
     echo "Usage: $0 <path-to-pi-mono>"

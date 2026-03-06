@@ -1,9 +1,9 @@
 #!/bin/bash
-# Usage: ./sync/sync-check.sh ../pi-mono
+# Usage: ./.fir/skills/sync/sync-check.sh ../pi-mono
 # Shows which TS files changed since last sync
 
 UPSTREAM="$1"
-BASELINE="sync/.baseline-hashes"
+BASELINE=".fir/skills/sync/data/.baseline-hashes"
 
 if [ -z "$UPSTREAM" ]; then
     echo "Usage: $0 <path-to-pi-mono>"
