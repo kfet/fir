@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Server tools toggle in `/settings` (none / web_search / all)
+
 ## [0.14.1] - 2026-03-05
 
 ### Fixed
