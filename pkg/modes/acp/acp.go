@@ -46,6 +46,7 @@ type firSession struct {
 	unsubscribe     func()
 	cwd             string
 	agentDir        string
+	plan            *planTracker
 	termState       *terminalState
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
@@ -279,6 +280,9 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		// Return other errors as internal errors so the client displays them.
 		return acpsdk.PromptResponse{}, err
 	}
+
+	// Clear plan at end of turn so the next turn starts fresh.
+	entry.plan.clear()
 
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
 }
@@ -661,6 +665,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		settingsManager: settingsManager,
 		cwd:             cwd,
 		agentDir:        agentDir,
+		plan:            &planTracker{conn: pa.conn, sessionID: sessionID},
 		termState:       newTerminalState(),
 		mcpManager:      mcpMgr,
 	}
@@ -962,6 +967,12 @@ func (pa *firAgent) createBashKillTool(sessionID string) agent.AgentTool {
 // ============================================================================
 
 func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event core.AgentSessionEvent) {
+	// Handle session-level events (no AgentEvent).
+	if event.Type == "plan_update" {
+		entry.plan.update(event.PlanEntries)
+		return
+	}
+
 	if event.AgentEvent == nil {
 		return
 	}
