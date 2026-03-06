@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-03-05
+
+### Fixed
+
+- Deduplicate OAuth auth URL display so it renders once instead of twice
+
 ## [0.14.0] - 2026-03-05
 
 ### Added
