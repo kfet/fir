@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -68,6 +69,27 @@ func TestStreamBedrock_SimpleResponse(t *testing.T) {
 	assert.True(t, hasTextDelta)
 	assert.True(t, hasTextEnd)
 	assert.True(t, hasDone)
+}
+
+func TestStreamBedrock_EnvBearerToken(t *testing.T) {
+	fixture := loadFixture(t, "bedrock_simple_response.sse")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "bedrock-test-key")
+
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer bedrock-test-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write(fixture)
+	})
+	defer srv.Close()
+
+	model := bedrockTestModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+
+	stream := StreamBedrock(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "<authenticated>"})
+	result := stream.Result()
+	require.NotNil(t, result)
+	assert.Equal(t, ai.StopReasonStop, result.StopReason)
 }
 
 func TestStreamBedrock_ToolCall(t *testing.T) {

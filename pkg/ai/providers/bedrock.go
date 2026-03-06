@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -48,8 +49,12 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		if options != nil {
 			apiKey = options.ApiKey
 		}
-		if apiKey == "" {
-			apiKey = ai.GetEnvApiKey(model.Provider)
+		if apiKey == "" || apiKey == "<authenticated>" {
+			if envKey := os.Getenv("AWS_BEARER_TOKEN_BEDROCK"); envKey != "" {
+				apiKey = envKey
+			} else if apiKey == "<authenticated>" {
+				apiKey = ""
+			}
 		}
 		// Bedrock doesn't use API keys like other providers — it uses AWS credentials.
 		// For now, we allow empty apiKey since auth may be handled by proxy/gateway.
