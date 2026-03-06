@@ -1009,7 +1009,9 @@ func (m *InteractiveMode) showSettingsSelector() {
 			FollowUpMode:            m.settings.GetFollowUpMode(),
 			Transport:               m.settings.GetTransport(),
 			DoubleEscapeAction:      m.settings.GetDoubleEscapeAction(),
-			ServerTools:             serverToolsPreset(m.settings.GetServerTools()),
+			ServerToolWebSearch:     serverToolsHas(m.settings.GetServerTools(), "web_search"),
+			ServerToolWebFetch:     serverToolsHas(m.settings.GetServerTools(), "web_fetch"),
+			ServerToolCodeExec:     serverToolsHas(m.settings.GetServerTools(), "code_execution"),
 			ServerCompaction:        serverCompactionEnabled(m.settings.GetServerCompaction()),
 			AutocompleteMaxVisible:  10,
 		}
@@ -1034,8 +1036,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetTransport(transport)
 				m.session.Agent.SetTransport(ai.Transport(transport))
 			},
-			OnServerToolsChange: func(preset string) {
-				names := serverToolsFromPreset(preset)
+			OnServerToolsChange: func(names []string) {
 				m.settings.SetServerTools(names)
 				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
 			},
@@ -1063,39 +1064,14 @@ func serverCompactionEnabled(sc *core.ServerCompactionSettings) bool {
 	return sc != nil && sc.Enabled != nil && *sc.Enabled
 }
 
-// serverToolsPreset returns a UI preset name from the configured server tool names.
-func serverToolsPreset(names []string) string {
-	if len(names) == 0 {
-		return "none"
-	}
-	has := make(map[string]bool, len(names))
+// serverToolsHas returns whether a tool name is in the configured list.
+func serverToolsHas(names []string, name string) bool {
 	for _, n := range names {
-		has[n] = true
+		if n == name {
+			return true
+		}
 	}
-	if has["web_search"] && has["code_execution"] {
-		return "all"
-	}
-	if has["web_search"] {
-		return "web_search"
-	}
-	if has["code_execution"] {
-		return "code_execution"
-	}
-	return "all" // unknown combo → show as all
-}
-
-// serverToolsFromPreset returns tool names from a UI preset.
-func serverToolsFromPreset(preset string) []string {
-	switch preset {
-	case "web_search":
-		return []string{"web_search"}
-	case "code_execution":
-		return []string{"code_execution"}
-	case "all":
-		return []string{"web_search", "code_execution"}
-	default:
-		return nil
-	}
+	return false
 }
 
 // ============================================================================

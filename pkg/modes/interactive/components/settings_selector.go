@@ -38,7 +38,10 @@ type SettingsConfig struct {
 	HideThinkingBlock      bool
 	CollapseChangelog      bool
 	DoubleEscapeAction     string // "fork", "tree", "none"
-	ServerTools            string // "none", "web_search", "all"
+	ServerTools            string // computed display; not directly used
+	ServerToolWebSearch    bool
+	ServerToolWebFetch     bool
+	ServerToolCodeExec     bool
 	ServerCompaction       bool
 	ShowHardwareCursor     bool
 	EditorPaddingX         int
@@ -63,7 +66,7 @@ type SettingsCallbacks struct {
 	OnHideThinkingBlockChange      func(bool)
 	OnCollapseChangelogChange      func(bool)
 	OnDoubleEscapeActionChange     func(string)
-	OnServerToolsChange            func(string)
+	OnServerToolsChange            func([]string) // receives full list of enabled tool names
 	OnServerCompactionChange       func(bool)
 	OnShowHardwareCursorChange     func(bool)
 	OnEditorPaddingXChange         func(int)
@@ -126,7 +129,9 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "collapse-changelog", Label: "Collapse changelog", Description: "Show condensed changelog after updates", CurrentValue: boolStr(config.CollapseChangelog), Values: []string{"true", "false"}},
 		{ID: "quiet-startup", Label: "Quiet startup", Description: "Disable verbose printing at startup", CurrentValue: boolStr(config.QuietStartup), Values: []string{"true", "false"}},
 		{ID: "double-escape-action", Label: "Double-escape action", Description: "Action when pressing Escape twice with empty editor", CurrentValue: config.DoubleEscapeAction, Values: []string{"tree", "fork", "none"}},
-		{ID: "server-tools", Label: "Server tools", Description: "Anthropic server-side tools (web search, code execution)", CurrentValue: config.ServerTools, Values: []string{"none", "web_search", "code_execution", "all"}},
+		{ID: "server-tool-web-search", Label: "Server: web search", Description: "Anthropic server-side web search", CurrentValue: boolStr(config.ServerToolWebSearch), Values: []string{"true", "false"}},
+		{ID: "server-tool-web-fetch", Label: "Server: web fetch", Description: "Anthropic server-side web page/PDF fetching", CurrentValue: boolStr(config.ServerToolWebFetch), Values: []string{"true", "false"}},
+		{ID: "server-tool-code-exec", Label: "Server: code execution", Description: "Anthropic server-side Python sandbox", CurrentValue: boolStr(config.ServerToolCodeExec), Values: []string{"true", "false"}},
 		{ID: "server-compaction", Label: "Server compaction", Description: "Anthropic server-side context compaction", CurrentValue: boolStr(config.ServerCompaction), Values: []string{"true", "false"}},
 		{ID: "show-hardware-cursor", Label: "Show hardware cursor", Description: "Show terminal cursor for IME support", CurrentValue: boolStr(config.ShowHardwareCursor), Values: []string{"true", "false"}},
 		{ID: "editor-padding", Label: "Editor padding", Description: "Horizontal padding for input editor (0-3)", CurrentValue: strconv.Itoa(config.EditorPaddingX), Values: []string{"0", "1", "2", "3"}},
@@ -288,10 +293,15 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 		if cb.OnDoubleEscapeActionChange != nil {
 			cb.OnDoubleEscapeActionChange(value)
 		}
-	case "server-tools":
-		if cb.OnServerToolsChange != nil {
-			cb.OnServerToolsChange(value)
-		}
+	case "server-tool-web-search":
+		c.config.ServerToolWebSearch = value == "true"
+		c.fireServerToolsChange()
+	case "server-tool-web-fetch":
+		c.config.ServerToolWebFetch = value == "true"
+		c.fireServerToolsChange()
+	case "server-tool-code-exec":
+		c.config.ServerToolCodeExec = value == "true"
+		c.fireServerToolsChange()
 	case "server-compaction":
 		if cb.OnServerCompactionChange != nil {
 			cb.OnServerCompactionChange(value == "true")
@@ -323,6 +333,24 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 			cb.OnThemeChange(value)
 		}
 	}
+}
+
+// fireServerToolsChange builds the tool name list from individual toggles and fires the callback.
+func (c *SettingsSelectorComponent) fireServerToolsChange() {
+	if c.callbacks.OnServerToolsChange == nil {
+		return
+	}
+	var names []string
+	if c.config.ServerToolWebSearch {
+		names = append(names, "web_search")
+	}
+	if c.config.ServerToolWebFetch {
+		names = append(names, "web_fetch")
+	}
+	if c.config.ServerToolCodeExec {
+		names = append(names, "code_execution")
+	}
+	c.callbacks.OnServerToolsChange(names)
 }
 
 // SelectedEntry returns the currently selected entry.
