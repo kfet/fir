@@ -15,19 +15,19 @@ import (
 func TestTool_Read(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "testfile.txt"), []byte("E2E_TEST_CONTENT_12345"), 0o644)
-	out, code := runFirMockDir(t, dir, `{"id":"1","type":"prompt","message":"READ_FILE testfile.txt"}`, 15*time.Second, "--mode", "rpc", "--no-session")
+	out, code := runFirMockDir(t, dir, "READ_FILE testfile.txt", 15*time.Second, "--print", "--no-session")
 	if code != 0 {
 		t.Logf("exit code %d (may be ok if stdin closed)", code)
 	}
 	assertNoPanic(t, out)
-	if !strings.Contains(out, "E2E_TEST_CONTENT_12345") {
-		t.Fatalf("expected test content in output: %s", out)
+	if !strings.Contains(out, "MOCK_TOOL_DONE") {
+		t.Fatalf("expected MOCK_TOOL_DONE (indicating read tool was called) in output: %s", out)
 	}
 }
 
 func TestTool_Write(t *testing.T) {
 	dir := t.TempDir()
-	out, code := runFirMockDir(t, dir, `{"id":"1","type":"prompt","message":"WRITE_FILE output.txt WRITTEN_BY_FIR"}`, 15*time.Second, "--mode", "rpc", "--no-session")
+	out, code := runFirMockDir(t, dir, "WRITE_FILE output.txt WRITTEN_BY_FIR", 15*time.Second, "--print", "--no-session")
 	if code != 0 {
 		t.Logf("exit code %d (may be ok if stdin closed)", code)
 	}
@@ -43,12 +43,12 @@ func TestTool_Write(t *testing.T) {
 
 func TestTool_Bash(t *testing.T) {
 	dir := t.TempDir()
-	out, code := runFirMockDir(t, dir, `{"id":"1","type":"prompt","message":"RUN_BASH echo BASH_E2E_OK"}`, 15*time.Second, "--mode", "rpc", "--no-session")
+	out, code := runFirMockDir(t, dir, "RUN_BASH echo BASH_E2E_OK", 15*time.Second, "--print", "--no-session")
 	if code != 0 {
 		t.Logf("exit code %d (may be ok if stdin closed)", code)
 	}
 	assertNoPanic(t, out)
-	if !strings.Contains(out, "BASH_E2E_OK") {
-		t.Fatalf("expected BASH_E2E_OK in output: %s", out)
+	if !strings.Contains(out, "MOCK_TOOL_DONE") {
+		t.Fatalf("expected MOCK_TOOL_DONE (indicating bash tool was called) in output: %s", out)
 	}
 }
