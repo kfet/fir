@@ -25,6 +25,7 @@ PGO_STAMP := default.pgo.stamp
 
 build:
 	@mkdir -p $(BINDIR)
+	go mod tidy
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
 all: test-race pgo build build-all lint-python test-python
