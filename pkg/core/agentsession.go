@@ -254,7 +254,26 @@ func (s *AgentSession) UsageTracker() UsageTracker {
 }
 
 // UpdatePlan replaces the plan entries and emits a "plan_update" event.
+// The new state is also persisted to the session file so it survives resume.
 func (s *AgentSession) UpdatePlan(entries []agent.PlanEntry) {
+	s.mu.Lock()
+	s.plan = entries
+	s.mu.Unlock()
+	s.SessionManager.AppendPlanUpdate(entries)
+	snapshot := make([]agent.PlanEntry, len(entries))
+	copy(snapshot, entries)
+	s.emit(AgentSessionEvent{
+		Type:        "plan_update",
+		PlanEntries: snapshot,
+	})
+}
+
+// restorePlan sets the in-memory plan and emits a plan_update event without
+// writing a new session entry (used when loading an existing session).
+func (s *AgentSession) restorePlan(entries []agent.PlanEntry) {
+	if len(entries) == 0 {
+		return
+	}
 	s.mu.Lock()
 	s.plan = entries
 	s.mu.Unlock()
@@ -1023,6 +1042,9 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 		s.Agent.SetThinkingLevel(agent.ThinkingLevel(ctx.ThinkingLevel))
 	}
 
+	// Restore plan state from session without writing a new entry.
+	s.restorePlan(ctx.PlanEntries)
+
 	// Rebuild system prompt
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
@@ -1072,6 +1094,7 @@ func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool
 	// Reload messages from entries
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
+	s.restorePlan(ctx.PlanEntries)
 
 	return selectedText, false, nil
 }
@@ -1481,6 +1504,7 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	// Rebuild messages from the new branch
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
+	s.restorePlan(ctx.PlanEntries)
 
 	// Find user message text at this entry for editor pre-fill
 	entry := s.SessionManager.GetEntry(entryID)

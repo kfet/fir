@@ -12,7 +12,7 @@ Sync a downstream port with the latest changes from the upstream source reposito
 Before starting, identify:
 - **Upstream repo path** — relative or absolute path to the upstream repository
 - **Baseline file** — records the last-synced state (default: `sync/.baseline-hashes`)
-- **File map** — maps upstream files to downstream equivalents (default: `sync/UPSTREAM_MAP.md`)
+- **File map** — maps upstream files to downstream equivalents (default: `sync/UPSTREAM_MAP.md`). When splitting a large downstream file into smaller ones, update this map so future syncs know where to apply upstream changes.
 - **Sync log** — records sync history (default: `sync/SYNC_LOG.md`)
 - **Check script** — detects changes (default: `sync/sync-check.sh`)
 - **Record script** — updates baseline (default: `sync/sync-record.sh`)

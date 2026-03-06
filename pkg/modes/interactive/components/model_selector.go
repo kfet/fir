@@ -184,6 +184,12 @@ func (c *ModelSelectorComponent) sortModels(models []ModelItem) []ModelItem {
 		if !iCurrent && jCurrent {
 			return false
 		}
+		// Sort by SWE-bench Verified score descending; unscored models go last.
+		iScore := sorted[i].Model.SWEScore
+		jScore := sorted[j].Model.SWEScore
+		if iScore != jScore {
+			return iScore > jScore
+		}
 		return sorted[i].Provider < sorted[j].Provider
 	})
 	return sorted
@@ -276,13 +282,17 @@ func (c *ModelSelectorComponent) updateList() {
 			checkmark = t.Fg("success", " ✓")
 		}
 		providerBadge := t.Fg("muted", "["+item.Provider+"]")
+		sweBadge := ""
+		if item.Model.SWEScore > 0 {
+			sweBadge = " " + t.Fg("muted", fmt.Sprintf("[SWE:%.0f%%]", item.Model.SWEScore))
+		}
 
 		var line string
 		if isSelected {
 			prefix := t.Fg("accent", "→ ")
-			line = prefix + t.Fg("accent", item.ID) + " " + providerBadge + checkmark
+			line = prefix + t.Fg("accent", item.ID) + " " + providerBadge + sweBadge + checkmark
 		} else {
-			line = "  " + item.ID + " " + providerBadge + checkmark
+			line = "  " + item.ID + " " + providerBadge + sweBadge + checkmark
 		}
 		c.listContainer.AddChild(tuicomp.NewText(line, 0, 0, nil))
 	}

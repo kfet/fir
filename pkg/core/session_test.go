@@ -1175,3 +1175,96 @@ func TestSessionManagerCommandEntryParentChain(t *testing.T) {
 		t.Errorf("assistant entry parent should be %s (command), got %s", cmdID, assistantEntry.ParentID)
 	}
 }
+
+func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir, filepath.Join(tmpDir, "sessions"))
+
+	// Need an assistant message first so the session flushes to disk
+	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("hi")},
+		Provider: "test",
+		Model:    "test-model",
+	}))
+
+	entries := []agent.PlanEntry{
+		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
+		{Content: "Step 2", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
+	}
+	sm.AppendPlanUpdate(entries)
+
+	sessionFile := sm.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("expected a session file to be written")
+	}
+
+	// Reload the session from disk and verify plan is in context
+	sm2 := OpenSessionManager(sessionFile)
+	ctx := sm2.BuildSessionContext()
+
+	if len(ctx.PlanEntries) != 2 {
+		t.Fatalf("expected 2 plan entries after reload, got %d", len(ctx.PlanEntries))
+	}
+	if ctx.PlanEntries[0].Content != "Step 1" {
+		t.Errorf("expected Step 1, got %s", ctx.PlanEntries[0].Content)
+	}
+	if ctx.PlanEntries[1].Status != agent.PlanEntryStatusPending {
+		t.Errorf("expected pending, got %s", ctx.PlanEntries[1].Status)
+	}
+}
+
+func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir, filepath.Join(tmpDir, "sessions"))
+
+	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Content:  []ai.AssistantContent{ai.NewTextContent("hi")},
+		Provider: "test",
+		Model:    "test-model",
+	}))
+
+	// Set a plan then clear it
+	sm.AppendPlanUpdate([]agent.PlanEntry{
+		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
+	})
+	sm.AppendPlanUpdate(nil) // clear
+
+	sessionFile := sm.GetSessionFile()
+	sm2 := OpenSessionManager(sessionFile)
+	ctx := sm2.BuildSessionContext()
+
+	if len(ctx.PlanEntries) != 0 {
+		t.Errorf("expected plan to be empty after clear, got %d entries", len(ctx.PlanEntries))
+	}
+}
+
+func TestBuildSessionContextFromEntries_PlanNotInMessages(t *testing.T) {
+	entries := []*SessionEntry{
+		{
+			Type:      "plan_update",
+			ID:        "e1",
+			ParentID:  "",
+			Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	}
+	// Marshal plan entries into it
+	planData, _ := json.Marshal([]agent.PlanEntry{
+		{Content: "Do thing", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
+	})
+	entries[0].PlanEntries = planData
+
+	byID := map[string]*SessionEntry{"e1": entries[0]}
+	ctx := BuildSessionContextFromEntries(entries, "e1", byID)
+
+	if len(ctx.Messages) != 0 {
+		t.Errorf("plan_update should not produce LLM messages, got %d", len(ctx.Messages))
+	}
+	if len(ctx.PlanEntries) != 1 {
+		t.Fatalf("expected 1 plan entry in context, got %d", len(ctx.PlanEntries))
+	}
+	if ctx.PlanEntries[0].Content != "Do thing" {
+		t.Errorf("wrong plan entry content: %s", ctx.PlanEntries[0].Content)
+	}
+}

@@ -80,6 +80,9 @@ type SessionEntry struct {
 	// These entries are never included in the LLM context (see BuildSessionContextFromEntries).
 	Command string `json:"command,omitempty"`
 	Args    string `json:"args,omitempty"`
+
+	// plan_update
+	PlanEntries json.RawMessage `json:"planEntries,omitempty"`
 }
 
 // GetParentID returns the parent entry ID, or empty string for root entries.
@@ -103,6 +106,7 @@ type SessionContext struct {
 	Messages      []agent.AgentMessage
 	ThinkingLevel string
 	Model         *SessionModelRef
+	PlanEntries   []agent.PlanEntry
 }
 
 // SessionModelRef identifies a model from the session.
@@ -652,6 +656,24 @@ func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
 	return entry.ID
 }
 
+// AppendPlanUpdate records the current plan state. These entries are never
+// included in the LLM context but are used to restore the plan on resume.
+// An empty/nil entries slice records a cleared plan.
+func (sm *SessionManager) AppendPlanUpdate(entries []agent.PlanEntry) string {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	data, _ := json.Marshal(entries)
+	entry := &SessionEntry{
+		Type:        "plan_update",
+		ID:          sm.generateID(),
+		ParentID:    sm.leafID,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		PlanEntries: data,
+	}
+	return sm.appendEntry(entry)
+}
+
 // AppendCommandEntry records a user-initiated command (slash command or bash
 // invocation) for audit/metering purposes. These entries are never included in
 // the LLM context — see BuildSessionContextFromEntries.
@@ -897,6 +919,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 	thinkingLevel := "off"
 	var model *SessionModelRef
 	var compaction *SessionEntry
+	var lastPlanRaw json.RawMessage
 
 	for _, entry := range path {
 		switch entry.Type {
@@ -917,7 +940,15 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 			}
 		case "compaction":
 			compaction = entry
+		case "plan_update":
+			lastPlanRaw = entry.PlanEntries
 		}
+	}
+
+	// Decode the most recent plan state (nil raw → empty plan).
+	var planEntries []agent.PlanEntry
+	if len(lastPlanRaw) > 0 {
+		_ = json.Unmarshal(lastPlanRaw, &planEntries)
 	}
 
 	// Build messages
@@ -941,6 +972,8 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 			// Compaction summary is handled separately
 		case "command":
 			// Command entries are audit/metering records only — never sent to the LLM.
+		case "plan_update":
+			// Plan entries are metadata — never sent to the LLM.
 		}
 	}
 
@@ -983,6 +1016,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 		Messages:      messages,
 		ThinkingLevel: thinkingLevel,
 		Model:         model,
+		PlanEntries:   planEntries,
 	}
 }
 

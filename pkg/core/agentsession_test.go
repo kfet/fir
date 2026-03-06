@@ -2809,3 +2809,94 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 		t.Errorf("expected no plan_update events when plan was empty before turn, got %d", n)
 	}
 }
+
+func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := t.TempDir()
+	sessionDir := filepath.Join(agentDir, "sessions")
+
+	sm := NewSessionManager(tmpDir, sessionDir)
+	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	rl := NewResourceLoader(ResourceLoaderOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		SettingsManager: settingsManager,
+	})
+	_ = rl.Reload()
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Api:           "test-api",
+		Provider:      "test-provider",
+		BaseURL:       "http://localhost",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			stream := ai.NewAssistantMessageEventStream()
+			go func() {
+				msg := &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
+					Api:        m.Api,
+					Provider:   m.Provider,
+					Model:      m.ID,
+					Usage:      ai.Usage{Input: 10, Output: 5},
+					StopReason: ai.StopReasonStop,
+				}
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: msg})
+				stream.End(nil)
+			}()
+			return stream
+		},
+		GetApiKey: func(provider string) (string, error) { return "test-key", nil },
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		Cwd:             tmpDir,
+	})
+	defer session.Close()
+
+	// Need at least one full turn so the session file is flushed
+	if err := session.Prompt("hello"); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+
+	// Set a plan — should be persisted to session
+	session.UpdatePlan([]agent.PlanEntry{
+		{Content: "Task A", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
+		{Content: "Task B", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
+	})
+
+	sessionFile := sm.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("no session file written")
+	}
+
+	// Reload the session from disk and check the plan is in context
+	sm2 := OpenSessionManager(sessionFile)
+	ctx := sm2.BuildSessionContext()
+
+	if len(ctx.PlanEntries) != 2 {
+		t.Fatalf("expected 2 plan entries after reload, got %d", len(ctx.PlanEntries))
+	}
+	if ctx.PlanEntries[0].Content != "Task A" {
+		t.Errorf("expected Task A, got %s", ctx.PlanEntries[0].Content)
+	}
+	if ctx.PlanEntries[1].Status != agent.PlanEntryStatusPending {
+		t.Errorf("expected pending, got %s", ctx.PlanEntries[1].Status)
+	}
+}

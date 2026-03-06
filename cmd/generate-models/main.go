@@ -51,6 +51,7 @@ type modelSpec struct {
 	Compat         *compatSpec
 	ServerTools    []string // "web_search", "web_fetch", "code_execution"
 	Compaction     bool
+	SWEScore       float64 // best known SWE-bench Verified score (0–100 %)
 }
 
 // compatSpec represents OpenAICompletionsCompat fields used in models.
@@ -186,6 +187,258 @@ func hasString(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// --- SWE-bench types ---
+
+type sweBenchResult struct {
+	Name     string  `json:"name"`
+	Resolved float64 `json:"resolved"`
+}
+
+type sweBenchLeaderboard struct {
+	Name    string           `json:"name"`
+	Results []sweBenchResult `json:"results"`
+}
+
+type sweBenchData struct {
+	Leaderboards []sweBenchLeaderboard `json:"leaderboards"`
+}
+
+// swePattern maps a model-ID substring to a canonical model key and baseline score.
+type swePattern struct {
+	contains string  // substring to match in model ID (case-sensitive)
+	modelKey string  // canonical key for live-leaderboard lookup
+	score    float64 // curated baseline SWE-bench Verified % (best known)
+}
+
+// sweModelPatterns maps model ID substrings to SWE-bench Verified scores.
+// Patterns MUST be ordered most-specific to least-specific within each model
+// family so that the first match wins (e.g. "claude-opus-4-6" before "claude-opus-4").
+var sweModelPatterns = []swePattern{
+	// --- Claude Opus 4.6 ---
+	{"claude-opus-4-6", "claude-opus-4-6", 80.8},
+	{"claude-opus-4.6", "claude-opus-4-6", 80.8},
+	// --- Claude Opus 4.5 ---
+	{"claude-opus-4-5", "claude-opus-4-5", 80.9},
+	{"claude-opus-4.5", "claude-opus-4-5", 80.9},
+	// --- Claude Opus 4.1 (older) ---
+	{"claude-opus-4-1", "claude-opus-4-1", 73.0},
+	{"claude-opus-4.1", "claude-opus-4-1", 73.0},
+	// --- Claude Sonnet 4.6 ---
+	{"claude-sonnet-4-6", "claude-sonnet-4-6", 79.6},
+	{"claude-sonnet-4.6", "claude-sonnet-4-6", 79.6},
+	// --- Claude Sonnet 4.5 ---
+	{"claude-sonnet-4-5", "claude-sonnet-4-5", 77.2},
+	{"claude-sonnet-4.5", "claude-sonnet-4-5", 77.2},
+	// --- Claude Sonnet 4 (base, no sub-version) ---
+	{"claude-sonnet-4", "claude-sonnet-4", 68.0},
+	// --- Claude Haiku 4.5 ---
+	{"claude-haiku-4-5", "claude-haiku-4-5", 70.0},
+	{"claude-haiku-4.5", "claude-haiku-4-5", 70.0},
+	// --- GPT-5.x (most specific first) ---
+	{"gpt-5.4-pro", "gpt-5.4-pro", 74.8},
+	{"gpt-5.4", "gpt-5.4", 72.8},
+	{"gpt-5.3-codex", "gpt-5.3-codex", 71.4},
+	{"gpt-5.2-codex", "gpt-5.2-codex", 77.8},
+	{"gpt-5.2", "gpt-5.2", 80.0},
+	{"gpt-5.1-codex-max", "gpt-5.1-codex-max", 67.0},
+	{"gpt-5.1-codex", "gpt-5.1-codex", 66.6},
+	{"gpt-5.1", "gpt-5.1", 63.2},
+	{"gpt-5-mini", "gpt-5-mini", 58.0},
+	// --- Gemini 3.x (most specific first) ---
+	{"gemini-3.1-pro", "gemini-3.1-pro-preview", 80.6},
+	{"gemini-3-flash", "gemini-3-flash-preview", 75.8},
+	{"gemini-3-pro", "gemini-3-pro-preview", 70.0},
+	// --- Gemini 2.x ---
+	{"gemini-2.5-pro", "gemini-2.5-pro", 57.6},
+	{"gemini-2.5-flash", "gemini-2.5-flash", 47.3},
+	{"gemini-2.0-flash", "gemini-2.0-flash", 42.1},
+	// --- MiniMax ---
+	{"minimax-m2.5", "minimax-m2.5", 80.2},
+	// --- DeepSeek V3.2 ---
+	{"DeepSeek-V3.2", "deepseek-v3.2", 70.8},
+	{"deepseek-v3.2", "deepseek-v3.2", 70.8},
+	{"deepseek.v3.2", "deepseek-v3.2", 70.8},
+	// --- Kimi K2.5 / K2 Thinking ---
+	{"kimi-k2-thinking", "kimi-k2-thinking", 69.4},
+	{"kimi-k2.5", "k2p5", 76.8},
+	{"k2p5", "k2p5", 76.8},
+	// --- Grok 4 ---
+	{"grok-4", "grok-4", 72.0},
+}
+
+// sweLeaderboardPatterns maps substrings of lowercased SWE-bench leaderboard entry
+// names to canonical model keys so that live-fetched scores can update baselines.
+// Must be ordered most-specific to least-specific within each family.
+var sweLeaderboardPatterns = []struct {
+	contains string
+	modelKey string
+}{
+	// Claude Opus 4.6
+	{"claude opus 4.6", "claude-opus-4-6"},
+	{"claude-opus-4-6", "claude-opus-4-6"},
+	{"claude 4.6 opus", "claude-opus-4-6"},
+	// Claude Opus 4.5
+	{"claude opus 4.5", "claude-opus-4-5"},
+	{"claude-opus-4-5", "claude-opus-4-5"},
+	{"claude 4.5 opus", "claude-opus-4-5"},
+	// Claude Sonnet 4.6
+	{"claude sonnet 4.6", "claude-sonnet-4-6"},
+	{"claude-sonnet-4-6", "claude-sonnet-4-6"},
+	{"claude 4.6 sonnet", "claude-sonnet-4-6"},
+	// Claude Sonnet 4.5
+	{"claude sonnet 4.5", "claude-sonnet-4-5"},
+	{"claude-sonnet-4-5", "claude-sonnet-4-5"},
+	{"claude 4.5 sonnet", "claude-sonnet-4-5"},
+	// Claude Haiku 4.5
+	{"claude haiku 4.5", "claude-haiku-4-5"},
+	{"claude-haiku-4-5", "claude-haiku-4-5"},
+	{"claude 4.5 haiku", "claude-haiku-4-5"},
+	// Claude Sonnet 4 (no sub-version)
+	{"claude 4 sonnet", "claude-sonnet-4"},
+	// GPT — specific first
+	{"gpt-5.4-pro", "gpt-5.4-pro"},
+	{"gpt 5.4 pro", "gpt-5.4-pro"},
+	{"gpt-5.4", "gpt-5.4"},
+	{"gpt 5.4", "gpt-5.4"},
+	{"gpt-5.3-codex", "gpt-5.3-codex"},
+	{"gpt 5.3 codex", "gpt-5.3-codex"},
+	{"gpt-5.2-codex", "gpt-5.2-codex"},
+	{"gpt 5.2 codex", "gpt-5.2-codex"},
+	{"gpt-5.2", "gpt-5.2"},
+	{"gpt 5.2", "gpt-5.2"},
+	{"gpt-5.1-codex-max", "gpt-5.1-codex-max"},
+	{"gpt 5.1 codex max", "gpt-5.1-codex-max"},
+	{"gpt-5.1-codex", "gpt-5.1-codex"},
+	{"gpt 5.1 codex", "gpt-5.1-codex"},
+	{"gpt-5.1", "gpt-5.1"},
+	{"gpt 5.1", "gpt-5.1"},
+	{"gpt-5-mini", "gpt-5-mini"},
+	{"gpt 5 mini", "gpt-5-mini"},
+	// Gemini
+	{"gemini-3.1-pro", "gemini-3.1-pro-preview"},
+	{"gemini 3.1 pro", "gemini-3.1-pro-preview"},
+	{"gemini-3-flash", "gemini-3-flash-preview"},
+	{"gemini 3 flash", "gemini-3-flash-preview"},
+	{"gemini-3-pro", "gemini-3-pro-preview"},
+	{"gemini 3 pro", "gemini-3-pro-preview"},
+	{"gemini-2.5-pro", "gemini-2.5-pro"},
+	{"gemini 2.5 pro", "gemini-2.5-pro"},
+	{"gemini-2.5-flash", "gemini-2.5-flash"},
+	{"gemini 2.5 flash", "gemini-2.5-flash"},
+	{"gemini-2.0-flash", "gemini-2.0-flash"},
+	{"gemini 2.0 flash", "gemini-2.0-flash"},
+	// MiniMax
+	{"minimax m2.5", "minimax-m2.5"},
+	{"minimax-m2.5", "minimax-m2.5"},
+	// DeepSeek
+	{"deepseek v3.2", "deepseek-v3.2"},
+	{"deepseek-v3.2", "deepseek-v3.2"},
+	// Kimi
+	{"kimi k2.5", "k2p5"},
+	{"kimi-k2.5", "k2p5"},
+	{"kimi k2 thinking", "kimi-k2-thinking"},
+	// Grok 4
+	{"grok-4", "grok-4"},
+	{"grok 4", "grok-4"},
+}
+
+// fetchSWEBenchScores fetches the official SWE-bench Verified leaderboard JSON from
+// GitHub. Returns a map of lowercased entry name → best resolved score.
+// On failure it logs a warning and returns nil so generation proceeds without live data.
+func fetchSWEBenchScores() map[string]float64 {
+	const url = "https://raw.githubusercontent.com/SWE-bench/swe-bench.github.io/master/data/leaderboards.json"
+	log.Println("Fetching SWE-bench Verified leaderboard...")
+	var data sweBenchData
+	if err := fetchJSON(url, &data); err != nil {
+		log.Printf("Warning: SWE-bench fetch failed (curated baseline scores will be used): %v", err)
+		return nil
+	}
+	scores := make(map[string]float64)
+	for _, lb := range data.Leaderboards {
+		if lb.Name != "Verified" {
+			continue
+		}
+		for _, r := range lb.Results {
+			key := strings.ToLower(r.Name)
+			if existing, ok := scores[key]; !ok || r.Resolved > existing {
+				scores[key] = r.Resolved
+			}
+		}
+	}
+	log.Printf("Loaded %d SWE-bench Verified leaderboard entries", len(scores))
+	return scores
+}
+
+// applySWEScores populates SWEScore on every model spec.
+//
+// Strategy:
+//  1. Start with the curated baseline scores embedded in sweModelPatterns.
+//  2. If live leaderboard data is available, update baselines for known models
+//     when the live score is higher (using sweLeaderboardPatterns for name→key matching).
+//  3. Apply the final per-key scores to all model specs whose IDs contain the
+//     corresponding pattern substring. The first (most-specific) match wins.
+func applySWEScores(all []modelSpec, leaderboard map[string]float64) []modelSpec {
+	// Build working copy of patterns so we can update scores without mutating the package var.
+	patterns := make([]swePattern, len(sweModelPatterns))
+	copy(patterns, sweModelPatterns)
+
+	// Index patterns by modelKey for fast live-score updates.
+	keyToIdx := make(map[string]int, len(patterns))
+	for i, p := range patterns {
+		if _, dup := keyToIdx[p.modelKey]; !dup {
+			keyToIdx[p.modelKey] = i
+		}
+	}
+
+	// Apply live leaderboard scores — override baseline when live is higher.
+	if leaderboard != nil {
+		liveByKey := make(map[string]float64)
+		for entryName, score := range leaderboard {
+			key := matchSWELeaderboardName(entryName)
+			if key == "" {
+				continue
+			}
+			if existing, ok := liveByKey[key]; !ok || score > existing {
+				liveByKey[key] = score
+			}
+		}
+		for key, score := range liveByKey {
+			if idx, ok := keyToIdx[key]; ok && score > patterns[idx].score {
+				// Update every pattern that shares this modelKey.
+				for i := range patterns {
+					if patterns[i].modelKey == key {
+						patterns[i].score = score
+					}
+				}
+			}
+		}
+	}
+
+	// Apply scores to all model specs — first matching pattern wins.
+	for i := range all {
+		for _, p := range patterns {
+			if strings.Contains(all[i].ID, p.contains) {
+				if p.score > all[i].SWEScore {
+					all[i].SWEScore = p.score
+				}
+				break
+			}
+		}
+	}
+	return all
+}
+
+// matchSWELeaderboardName maps a lowercased leaderboard entry name to the canonical
+// model key used in sweModelPatterns. Returns "" if no match is found.
+func matchSWELeaderboardName(lower string) string {
+	for _, p := range sweLeaderboardPatterns {
+		if strings.Contains(lower, p.contains) {
+			return p.modelKey
+		}
+	}
+	return ""
 }
 
 // --- Fetchers ---
@@ -1337,6 +1590,9 @@ func generateGoSource(models []modelSpec) string {
 		if m.Compaction {
 			sb.WriteString("\t\tCompaction:    true,\n")
 		}
+		if m.SWEScore > 0 {
+			sb.WriteString(fmt.Sprintf("\t\tSWEScore:      %s,\n", formatFloat(m.SWEScore)))
+		}
 		sb.WriteString("\t})\n")
 	}
 
@@ -1372,6 +1628,10 @@ func main() {
 		log.Printf("Warning: AI Gateway fetch failed: %v", err)
 	}
 
+	// Fetch SWE-bench Verified leaderboard for model capability ordering.
+	// Failure is non-fatal; curated baseline scores are used instead.
+	sweScores := fetchSWEBenchScores()
+
 	// Combine: models.dev first (takes priority during dedup)
 	all := append(modelsDevModels, openRouterModels...)
 	all = append(all, aiGatewayModels...)
@@ -1381,6 +1641,9 @@ func main() {
 
 	// Deduplicate and sort
 	all = deduplicate(all)
+
+	// Annotate models with SWE-bench Verified scores for capability ordering.
+	all = applySWEScores(all, sweScores)
 
 	// Generate Go source
 	source := generateGoSource(all)
@@ -1394,14 +1657,19 @@ func main() {
 
 	// Print statistics
 	reasoningCount := 0
+	sweCount := 0
 	for _, m := range all {
 		if m.Reasoning {
 			reasoningCount++
+		}
+		if m.SWEScore > 0 {
+			sweCount++
 		}
 	}
 	log.Printf("Model Statistics:")
 	log.Printf("  Total models: %d", len(all))
 	log.Printf("  Reasoning-capable models: %d", reasoningCount)
+	log.Printf("  Models with SWE-bench scores: %d", sweCount)
 
 	// Per-provider counts
 	providerCounts := make(map[string]int)

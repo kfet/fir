@@ -2548,6 +2548,16 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 
 	sessionBase := filepath.Base(sessionFile)
 
+	// Save queue and pending input to survive the exec.
+	sc := &core.ReexecSidecar{
+		QueueMessages: m.session.ClearFollowUpQueue(),
+		PendingInput:  m.editor.Text(),
+	}
+	if err := core.WriteReexecSidecar(sessionFile, sc); err != nil {
+		// Non-fatal, but warn the user.
+		m.showWarning(fmt.Sprintf("Failed to save reexec state: %v", err))
+	}
+
 	// Store reexec intent — the actual exec happens after Run() returns.
 	m.reexecBinary = binary
 	m.reexecArgs = []string{binary, "--session-dir", sessionDir, "--session", sessionBase}
@@ -2560,7 +2570,8 @@ func (m *InteractiveMode) ReexecIfRequested() {
 	if m.reexecBinary == "" {
 		return
 	}
-	if err := syscall.Exec(m.reexecBinary, m.reexecArgs, os.Environ()); err != nil {
+	env := append(os.Environ(), "FIR_REEXEC_CONTINUE=1")
+	if err := syscall.Exec(m.reexecBinary, m.reexecArgs, env); err != nil {
 		fmt.Fprintf(os.Stderr, "reexec failed: exec %s: %v\n", m.reexecBinary, err)
 		os.Exit(1)
 	}

@@ -271,6 +271,11 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Register session-aware tools (plan tool needs a session reference).
 	session.RegisterSessionTools()
 
+	// Restore plan state from an existing session without writing a new entry.
+	if hasExistingSession {
+		session.restorePlan(existingSession.PlanEntries)
+	}
+
 	return &CreateAgentSessionResult{
 		Session:              session,
 		ModelFallbackMessage: modelFallbackMessage,

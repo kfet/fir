@@ -175,7 +175,11 @@ func LoadBuiltinExtensions() ([]BuiltinExtension, error) {
 
 	for _, e := range entries {
 		if e.IsDir() {
-			// TODO: support subdirectory extensions with main.py entry point
+			exts, err := loadBuiltinSubdirExtension(extractDir, e.Name())
+			if err != nil {
+				continue
+			}
+			extensions = append(extensions, exts...)
 			continue
 		}
 		path := "builtin_extensions/" + e.Name()
@@ -198,4 +202,78 @@ func LoadBuiltinExtensions() ([]BuiltinExtension, error) {
 	}
 
 	return extensions, nil
+}
+
+// loadBuiltinSubdirExtension loads a builtin extension from a subdirectory in
+// the embedded FS. It resolves the entry point using the same candidate list as
+// project-level subdirectory extensions: main.py, main.sh, main, <dirname>.py,
+// <dirname>.sh, <dirname>, then the first file alphabetically.
+func loadBuiltinSubdirExtension(extractDir, dirname string) ([]BuiltinExtension, error) {
+	fsDir := "builtin_extensions/" + dirname
+
+	entryName, err := findBuiltinSubdirEntryPoint(fsDir, dirname)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := BuiltinExtensionsFS.ReadFile(fsDir + "/" + entryName)
+	if err != nil {
+		return nil, err
+	}
+
+	fm := ParseCommentFrontmatter(string(data))
+	if !fm.Builtin {
+		return nil, nil
+	}
+
+	name := fm.Name
+	if name == "" {
+		name = dirname
+	}
+
+	return []BuiltinExtension{{
+		Name: name,
+		Path: filepath.Join(extractDir, dirname, entryName),
+	}}, nil
+}
+
+// findBuiltinSubdirEntryPoint returns the filename of the entry point inside
+// fsDir (an embedded FS path). Checks candidates in order, then falls back to
+// the first file alphabetically.
+func findBuiltinSubdirEntryPoint(fsDir, dirname string) (string, error) {
+	candidates := []string{
+		"main.py",
+		"main.sh",
+		"main",
+		dirname + ".py",
+		dirname + ".sh",
+		dirname,
+	}
+
+	subEntries, err := BuiltinExtensionsFS.ReadDir(fsDir)
+	if err != nil {
+		return "", err
+	}
+
+	names := make(map[string]bool, len(subEntries))
+	for _, se := range subEntries {
+		if !se.IsDir() {
+			names[se.Name()] = true
+		}
+	}
+
+	for _, c := range candidates {
+		if names[c] {
+			return c, nil
+		}
+	}
+
+	// Fallback: first file alphabetically.
+	for _, se := range subEntries {
+		if !se.IsDir() {
+			return se.Name(), nil
+		}
+	}
+
+	return "", fmt.Errorf("no entry point found in builtin extension subdirectory %q", fsDir)
 }

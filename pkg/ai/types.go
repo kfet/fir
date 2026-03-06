@@ -649,6 +649,7 @@ type Model struct {
 	Compat        any               `json:"compat,omitempty"`      // *OpenAICompletionsCompat or *OpenAIResponsesCompat
 	ServerTools   []string          `json:"serverTools,omitempty"` // supported server tool types: "web_search", "web_fetch", "code_execution"
 	Compaction    bool              `json:"compaction,omitempty"`  // supports server-side context compaction
+	SWEScore      float64           `json:"sweScore,omitempty"`    // best known SWE-bench Verified score (0–100 %)
 }
 
 // StreamFunction is the raw provider streaming function signature.
