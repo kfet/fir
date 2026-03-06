@@ -1010,6 +1010,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 			Transport:               m.settings.GetTransport(),
 			DoubleEscapeAction:      m.settings.GetDoubleEscapeAction(),
 			ServerTools:             serverToolsPreset(m.settings.GetServerTools()),
+			ServerCompaction:        serverCompactionEnabled(m.settings.GetServerCompaction()),
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
@@ -1038,6 +1039,14 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.settings.SetServerTools(names)
 				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
 			},
+			OnServerCompactionChange: func(v bool) {
+				m.settings.SetServerCompactionEnabled(v)
+				if v {
+					m.session.Agent.SetCompaction(&ai.AnthropicCompaction{Enabled: true})
+				} else {
+					m.session.Agent.SetCompaction(nil)
+				}
+			},
 			OnCancel: func() { done() },
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
@@ -1048,6 +1057,11 @@ func (m *InteractiveMode) showSettingsSelector() {
 // ============================================================================
 // Server tools helpers
 // ============================================================================
+
+// serverCompactionEnabled returns whether server-side compaction is enabled.
+func serverCompactionEnabled(sc *core.ServerCompactionSettings) bool {
+	return sc != nil && sc.Enabled != nil && *sc.Enabled
+}
 
 // serverToolsPreset returns a UI preset name from the configured server tool names.
 func serverToolsPreset(names []string) string {

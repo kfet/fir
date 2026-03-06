@@ -309,6 +309,13 @@ func (a *Agent) SetServerTools(tools []ai.AnthropicServerTool) {
 	a.serverTools = tools
 }
 
+// SetCompaction updates the Anthropic server-side compaction settings.
+func (a *Agent) SetCompaction(c *ai.AnthropicCompaction) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.compaction = c
+}
+
 func (a *Agent) SetTools(tools []AgentTool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

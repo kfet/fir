@@ -1155,3 +1155,15 @@ func (sm *SettingsManager) GetServerCompaction() *ServerCompactionSettings {
 	defer sm.mu.RUnlock()
 	return sm.settings.ServerCompaction
 }
+
+// SetServerCompactionEnabled enables or disables Anthropic server-side compaction.
+func (sm *SettingsManager) SetServerCompactionEnabled(enabled bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.globalSettings.ServerCompaction == nil {
+		sm.globalSettings.ServerCompaction = &ServerCompactionSettings{}
+	}
+	sm.globalSettings.ServerCompaction.Enabled = &enabled
+	sm.markModified("serverCompaction")
+	sm.save()
+}
