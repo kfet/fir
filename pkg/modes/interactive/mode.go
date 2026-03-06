@@ -1078,6 +1078,9 @@ func serverToolsPreset(names []string) string {
 	if has["web_search"] {
 		return "web_search"
 	}
+	if has["code_execution"] {
+		return "code_execution"
+	}
 	return "all" // unknown combo → show as all
 }
 
@@ -1086,6 +1089,8 @@ func serverToolsFromPreset(preset string) []string {
 	switch preset {
 	case "web_search":
 		return []string{"web_search"}
+	case "code_execution":
+		return []string{"code_execution"}
 	case "all":
 		return []string{"web_search", "code_execution"}
 	default:
