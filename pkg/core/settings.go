@@ -962,6 +962,14 @@ func (sm *SettingsManager) GetEnableSkillCommands() bool {
 	return boolDefault(sm.settings.EnableSkillCommands, true)
 }
 
+func (sm *SettingsManager) SetEnableSkillCommands(enabled bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.EnableSkillCommands = &enabled
+	sm.markModified("enableSkillCommands")
+	sm.save()
+}
+
 func (sm *SettingsManager) GetThinkingBudgets() *ThinkingBudgetsSettings {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

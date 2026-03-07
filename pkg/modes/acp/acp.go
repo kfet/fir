@@ -1267,7 +1267,7 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		}
 
 		// Check skill commands
-		if strings.HasPrefix(command, "skill:") {
+		if strings.HasPrefix(command, "skill:") && (entry.settingsManager == nil || entry.settingsManager.GetEnableSkillCommands()) {
 			skillName := strings.TrimPrefix(command, "skill:")
 			skills, _ := entry.session.ResourceLoader().GetSkills()
 			for _, s := range skills {
@@ -1620,13 +1620,15 @@ func (pa *firAgent) sendAvailableCommands(sessionID string) {
 	}
 
 	// Add skill commands
-	skills, _ := entry.session.ResourceLoader().GetSkills()
-	for _, s := range skills {
-		desc := s.Description
-		if desc == "" {
-			desc = "Skill: " + s.Name
+	if entry.settingsManager == nil || entry.settingsManager.GetEnableSkillCommands() {
+		skills, _ := entry.session.ResourceLoader().GetSkills()
+		for _, s := range skills {
+			desc := s.Description
+			if desc == "" {
+				desc = "Skill: " + s.Name
+			}
+			commands = append(commands, acpsdk.AvailableCommand{Name: "skill:" + s.Name, Description: desc})
 		}
-		commands = append(commands, acpsdk.AvailableCommand{Name: "skill:" + s.Name, Description: desc})
 	}
 
 	// Add extension commands

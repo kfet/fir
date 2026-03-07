@@ -682,12 +682,14 @@ func (m *InteractiveMode) setupAutocomplete() {
 	if m.session != nil {
 		rl := m.session.ResourceLoader()
 		if rl != nil {
-			if skills, _ := rl.GetSkills(); len(skills) > 0 {
-				for _, skill := range skills {
-					commands = append(commands, SlashCommand{
-						Name:        "skill:" + skill.Name,
-						Description: skill.Description,
-					})
+			if m.settings != nil && m.settings.GetEnableSkillCommands() {
+				if skills, _ := rl.GetSkills(); len(skills) > 0 {
+					for _, skill := range skills {
+						commands = append(commands, SlashCommand{
+							Name:        "skill:" + skill.Name,
+							Description: skill.Description,
+						})
+					}
 				}
 			}
 			if prompts, _ := rl.GetPrompts(); len(prompts) > 0 {
@@ -1034,6 +1036,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 			ServerToolWebSearch:     serverToolsHas(m.settings.GetServerTools(), "web_search"),
 			ServerToolWebFetch:     serverToolsHas(m.settings.GetServerTools(), "web_fetch"),
 			ServerToolCodeExec:     serverToolsHas(m.settings.GetServerTools(), "code_execution"),
+			EnableSkillCommands:    m.settings.GetEnableSkillCommands(),
 			AutocompleteMaxVisible:  10,
 		}
 		callbacks := components.SettingsCallbacks{
@@ -1055,6 +1058,10 @@ func (m *InteractiveMode) showSettingsSelector() {
 				}
 			},
 			OnHideThinkingBlockChange: func(v bool) { m.hideThinking = v },
+			OnEnableSkillCommandsChange: func(v bool) {
+				m.settings.SetEnableSkillCommands(v)
+				m.setupAutocomplete()
+			},
 			OnThinkingLevelChange: func(level string) {
 				m.session.SetThinkingLevel(level)
 				m.settings.SetDefaultThinkingLevel(level)

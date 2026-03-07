@@ -591,6 +591,11 @@ func (s *AgentSession) expandSkillCommand(text string) string {
 		return text
 	}
 
+	// If skill commands are disabled, don't expand
+	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSkillCommands() {
+		return text
+	}
+
 	spaceIdx := strings.Index(text, " ")
 	var skillName, args string
 	if spaceIdx == -1 {
