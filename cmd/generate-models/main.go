@@ -286,79 +286,52 @@ func init() {
 	}
 }
 
-// sweLeaderboardPatterns maps substrings of lowercased SWE-bench leaderboard entry
+// sweLeaderboardPatterns maps normalised substrings of SWE-bench leaderboard entry
 // names to canonical model keys so that live-fetched scores can update baselines.
+// Names are normalised by normaliseSWEName before matching: punctuation is stripped,
+// runs of whitespace collapsed, so only one entry per model is needed.
 // Must be ordered most-specific to least-specific within each family.
 var sweLeaderboardPatterns = []struct {
 	contains string
 	modelKey string
 }{
-	// Claude Opus 4.6
-	{"claude opus 4.6", "claude-opus-4-6"},
-	{"claude-opus-4-6", "claude-opus-4-6"},
-	{"claude 4.6 opus", "claude-opus-4-6"},
-	// Claude Opus 4.5
-	{"claude opus 4.5", "claude-opus-4-5"},
-	{"claude-opus-4-5", "claude-opus-4-5"},
-	{"claude 4.5 opus", "claude-opus-4-5"},
-	// Claude Sonnet 4.6
-	{"claude sonnet 4.6", "claude-sonnet-4-6"},
-	{"claude-sonnet-4-6", "claude-sonnet-4-6"},
-	{"claude 4.6 sonnet", "claude-sonnet-4-6"},
-	// Claude Sonnet 4.5
-	{"claude sonnet 4.5", "claude-sonnet-4-5"},
-	{"claude-sonnet-4-5", "claude-sonnet-4-5"},
-	{"claude 4.5 sonnet", "claude-sonnet-4-5"},
-	// Claude Haiku 4.5
-	{"claude haiku 4.5", "claude-haiku-4-5"},
-	{"claude-haiku-4-5", "claude-haiku-4-5"},
-	{"claude 4.5 haiku", "claude-haiku-4-5"},
-	// Claude Sonnet 4 (no sub-version)
+	// Claude — specific versions first
+	{"claude opus 46", "claude-opus-4-6"},
+	{"claude 46 opus", "claude-opus-4-6"},
+	{"claude opus 45", "claude-opus-4-5"},
+	{"claude 45 opus", "claude-opus-4-5"},
+	{"claude sonnet 46", "claude-sonnet-4-6"},
+	{"claude 46 sonnet", "claude-sonnet-4-6"},
+	{"claude sonnet 45", "claude-sonnet-4-5"},
+	{"claude 45 sonnet", "claude-sonnet-4-5"},
+	{"claude haiku 45", "claude-haiku-4-5"},
+	{"claude 45 haiku", "claude-haiku-4-5"},
 	{"claude 4 sonnet", "claude-sonnet-4"},
 	// GPT — specific first
-	{"gpt-5.4-pro", "gpt-5.4-pro"},
-	{"gpt 5.4 pro", "gpt-5.4-pro"},
-	{"gpt-5.4", "gpt-5.4"},
-	{"gpt 5.4", "gpt-5.4"},
-	{"gpt-5.3-codex", "gpt-5.3-codex"},
-	{"gpt 5.3 codex", "gpt-5.3-codex"},
-	{"gpt-5.2-codex", "gpt-5.2-codex"},
-	{"gpt 5.2 codex", "gpt-5.2-codex"},
-	{"gpt-5.2", "gpt-5.2"},
-	{"gpt 5.2", "gpt-5.2"},
-	{"gpt-5.1-codex-max", "gpt-5.1-codex-max"},
-	{"gpt 5.1 codex max", "gpt-5.1-codex-max"},
-	{"gpt-5.1-codex", "gpt-5.1-codex"},
-	{"gpt 5.1 codex", "gpt-5.1-codex"},
-	{"gpt-5.1", "gpt-5.1"},
-	{"gpt 5.1", "gpt-5.1"},
-	{"gpt-5-mini", "gpt-5-mini"},
+	{"gpt 54 pro", "gpt-5.4-pro"},
+	{"gpt 54", "gpt-5.4"},
+	{"gpt 53 codex", "gpt-5.3-codex"},
+	{"gpt 52 codex", "gpt-5.2-codex"},
+	{"gpt 52", "gpt-5.2"},
+	{"gpt 51 codex max", "gpt-5.1-codex-max"},
+	{"gpt 51 codex", "gpt-5.1-codex"},
+	{"gpt 51", "gpt-5.1"},
 	{"gpt 5 mini", "gpt-5-mini"},
 	// Gemini
-	{"gemini-3.1-pro", "gemini-3.1-pro-preview"},
-	{"gemini 3.1 pro", "gemini-3.1-pro-preview"},
-	{"gemini-3-flash", "gemini-3-flash-preview"},
+	{"gemini 31 pro", "gemini-3.1-pro-preview"},
 	{"gemini 3 flash", "gemini-3-flash-preview"},
-	{"gemini-3-pro", "gemini-3-pro-preview"},
 	{"gemini 3 pro", "gemini-3-pro-preview"},
-	{"gemini-2.5-pro", "gemini-2.5-pro"},
-	{"gemini 2.5 pro", "gemini-2.5-pro"},
-	{"gemini-2.5-flash", "gemini-2.5-flash"},
-	{"gemini 2.5 flash", "gemini-2.5-flash"},
-	{"gemini-2.0-flash", "gemini-2.0-flash"},
-	{"gemini 2.0 flash", "gemini-2.0-flash"},
+	{"gemini 25 pro", "gemini-2.5-pro"},
+	{"gemini 25 flash", "gemini-2.5-flash"},
+	{"gemini 20 flash", "gemini-2.0-flash"},
 	// MiniMax
-	{"minimax m2.5", "minimax-m2.5"},
-	{"minimax-m2.5", "minimax-m2.5"},
+	{"minimax m25", "minimax-m2.5"},
 	// DeepSeek
-	{"deepseek v3.2", "deepseek-v3.2"},
-	{"deepseek-v3.2", "deepseek-v3.2"},
+	{"deepseek v32", "deepseek-v3.2"},
 	// Kimi
-	{"kimi k2.5", "k2p5"},
-	{"kimi-k2.5", "k2p5"},
+	{"kimi k25", "k2p5"},
 	{"kimi k2 thinking", "kimi-k2-thinking"},
-	// Grok 4
-	{"grok-4", "grok-4"},
+	// Grok
 	{"grok 4", "grok-4"},
 }
 
@@ -448,11 +421,29 @@ func applySWEScores(all []modelSpec, leaderboard map[string]float64) []modelSpec
 	return all
 }
 
+// normaliseSWEName strips punctuation and collapses whitespace so that
+// "claude-opus-4.5", "claude opus 4.5", and "Claude Opus 45" all normalise
+// to "claude opus 45".
+var sweNameDigitPunctRe = regexp.MustCompile(`(\d)[.\-](\d)`)
+var sweNamePunctRe = regexp.MustCompile(`[.\-_]`)
+var sweNameSpaceRe = regexp.MustCompile(`\s+`)
+
+func normaliseSWEName(s string) string {
+	s = strings.ToLower(s)
+	// Remove dots/hyphens between digits: "4.5" → "45", "4-5" → "45"
+	s = sweNameDigitPunctRe.ReplaceAllString(s, "${1}${2}")
+	// Replace remaining punctuation with spaces
+	s = sweNamePunctRe.ReplaceAllString(s, " ")
+	s = sweNameSpaceRe.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
 // matchSWELeaderboardName maps a lowercased leaderboard entry name to the canonical
 // model key used in sweModelPatterns. Returns "" if no match is found.
 func matchSWELeaderboardName(lower string) string {
+	normalised := normaliseSWEName(lower)
 	for _, p := range sweLeaderboardPatterns {
-		if strings.Contains(lower, p.contains) {
+		if strings.Contains(normalised, p.contains) {
 			return p.modelKey
 		}
 	}
