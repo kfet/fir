@@ -1,0 +1,24 @@
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"type":"shell_call","id":"sh_001","status":"in_progress","action":{"type":"exec","commands":["echo hello world"]},"call_id":"call_001"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"shell_call","id":"sh_001","status":"completed","action":{"type":"exec","commands":["echo hello world"]},"call_id":"call_001"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"type":"shell_call_output","id":"sho_001","call_id":"call_001","output":[{"stdout":"hello world\n"}]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"shell_call_output","id":"sho_001","call_id":"call_001","output":[{"stdout":"hello world\n"}]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_01","role":"assistant","content":[],"status":"in_progress"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Done!"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"type":"message","id":"msg_01","role":"assistant","content":[{"type":"output_text","text":"Done!"}],"status":"completed"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_001","status":"completed","usage":{"input_tokens":50,"output_tokens":20,"total_tokens":70,"input_tokens_details":{"cached_tokens":0}}}}
+

@@ -180,8 +180,23 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 	}
 
 	// Tools
-	if len(ctx.Tools) > 0 {
-		body["tools"] = convertResponsesTools(ctx.Tools, false)
+	tools := convertResponsesTools(ctx.Tools, false)
+
+	// Add hosted shell tool when code_execution is configured.
+	if options != nil {
+		for _, st := range options.ServerTools {
+			if strings.HasPrefix(st.Type, "code_execution") {
+				tools = append(tools, map[string]any{
+					"type":        "shell",
+					"environment": map[string]any{"type": "container_auto"},
+				})
+				break
+			}
+		}
+	}
+
+	if len(tools) > 0 {
+		body["tools"] = tools
 	}
 
 	// Reasoning
@@ -273,9 +288,20 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 		} else if msg.AsAssistant() != nil {
 			am := msg.AsAssistant()
 			for _, block := range am.Content {
-				switch {
-				case block.IsText():
-					msgID := block.Text.TextSignature
+				if block.IsText() {
+					sig := block.Text.TextSignature
+
+					// Replay shell_call / shell_call_output items as raw objects.
+					if strings.HasPrefix(sig, "shell:") || strings.HasPrefix(sig, "shell_output:") {
+						rawJSON := sig[strings.Index(sig, ":")+1:]
+						var item map[string]any
+						if err := json.Unmarshal([]byte(rawJSON), &item); err == nil {
+							input = append(input, item)
+						}
+						continue
+					}
+
+					msgID := sig
 					if msgID == "" {
 						msgID = fmt.Sprintf("msg_%d", len(input))
 					} else if len(msgID) > 64 {
@@ -291,7 +317,7 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 						},
 					})
 
-				case block.IsThinking():
+				} else if block.IsThinking() {
 					if block.Thinking.ThinkingSignature != "" {
 						// Re-serialize the reasoning item from the signature
 						var item map[string]any
@@ -300,7 +326,7 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 						}
 					}
 
-				case block.IsToolCall():
+				} else if block.IsToolCall() {
 					tc := block.ToolCall
 					parts := strings.SplitN(tc.ID, "|", 2)
 					callID := parts[0]

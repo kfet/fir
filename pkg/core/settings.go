@@ -1140,15 +1140,17 @@ func (sm *SettingsManager) SetProjectThemePaths(paths []string) {
 	sm.saveProjectSettings(projectSettings)
 }
 
-// GetServerTools returns the configured Anthropic server-side tool types.
+// GetServerTools returns the configured server-side tool types.
 // Valid values: "web_search", "code_execution", "programmatic_tool_calling".
+// For Anthropic: maps to native server tools (web_search, code_execution, etc.).
+// For OpenAI Responses API: "code_execution" maps to the hosted shell tool.
 func (sm *SettingsManager) GetServerTools() []string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.settings.ServerTools
 }
 
-// SetServerTools sets the Anthropic server-side tool types.
+// SetServerTools sets the server-side tool types.
 func (sm *SettingsManager) SetServerTools(tools []string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()

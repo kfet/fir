@@ -140,6 +140,53 @@ func (p *responsesSSEProcessor) handleOutputItemAdded(raw map[string]any) {
 			ContentIndex: idx,
 			Partial:      p.output,
 		})
+
+	case "shell_call":
+		// Server-side hosted shell — show commands being executed.
+		idx := len(p.output.Content)
+		text := formatShellCall(itemRaw)
+		p.output.Content = append(p.output.Content, ai.NewTextContent(text))
+		// Store the raw item JSON for multi-turn replay.
+		itemJSON, _ := json.Marshal(itemRaw)
+		p.current = &responsesItemState{
+			itemType:    "shell_call",
+			contentIdx:  idx,
+			partialJSON: string(itemJSON),
+		}
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextStart,
+			ContentIndex: idx,
+			Partial:      p.output,
+		})
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextDelta,
+			ContentIndex: idx,
+			Delta:        text,
+			Partial:      p.output,
+		})
+
+	case "shell_call_output":
+		// Server-side hosted shell output.
+		idx := len(p.output.Content)
+		text := formatShellCallOutput(itemRaw)
+		p.output.Content = append(p.output.Content, ai.NewTextContent(text))
+		itemJSON, _ := json.Marshal(itemRaw)
+		p.current = &responsesItemState{
+			itemType:    "shell_call_output",
+			contentIdx:  idx,
+			partialJSON: string(itemJSON),
+		}
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextStart,
+			ContentIndex: idx,
+			Partial:      p.output,
+		})
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextDelta,
+			ContentIndex: idx,
+			Delta:        text,
+			Partial:      p.output,
+		})
 	}
 }
 
@@ -331,6 +378,39 @@ func (p *responsesSSEProcessor) handleOutputItemDone(raw map[string]any) {
 			ToolCall:     tc,
 			Partial:      p.output,
 		})
+
+	case "shell_call":
+		idx := p.current.contentIdx
+		// Update text with final item data and store raw JSON for multi-turn replay.
+		text := formatShellCall(itemRaw)
+		c := p.output.Content[idx]
+		c.Text.Text = text
+		if itemJSON, err := json.Marshal(itemRaw); err == nil {
+			c.Text.TextSignature = "shell:" + string(itemJSON)
+		}
+		p.output.Content[idx] = c
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextEnd,
+			ContentIndex: idx,
+			Content:      text,
+			Partial:      p.output,
+		})
+
+	case "shell_call_output":
+		idx := p.current.contentIdx
+		text := formatShellCallOutput(itemRaw)
+		c := p.output.Content[idx]
+		c.Text.Text = text
+		if itemJSON, err := json.Marshal(itemRaw); err == nil {
+			c.Text.TextSignature = "shell_output:" + string(itemJSON)
+		}
+		p.output.Content[idx] = c
+		p.stream.Push(ai.AssistantMessageEvent{
+			Type:         ai.EventTextEnd,
+			ContentIndex: idx,
+			Content:      text,
+			Partial:      p.output,
+		})
 	}
 	p.current = nil
 }
@@ -485,4 +565,50 @@ func uint32ToBase36(n uint32) string {
 		n /= 36
 	}
 	return string(result)
+}
+
+// formatShellCall formats a shell_call item as readable text showing the commands.
+func formatShellCall(item map[string]any) string {
+	var b strings.Builder
+	b.WriteString("[shell] ")
+	if action, ok := item["action"].(map[string]any); ok {
+		if cmds, ok := action["commands"].([]any); ok {
+			for i, cmd := range cmds {
+				if i > 0 {
+					b.WriteString(" && ")
+				}
+				if s, ok := cmd.(string); ok {
+					b.WriteString(s)
+				}
+			}
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// formatShellCallOutput formats a shell_call_output item as readable text.
+func formatShellCallOutput(item map[string]any) string {
+	var b strings.Builder
+	if output, ok := item["output"].([]any); ok {
+		for _, entry := range output {
+			em, _ := entry.(map[string]any)
+			if em == nil {
+				continue
+			}
+			if stdout, ok := em["stdout"].(string); ok && stdout != "" {
+				b.WriteString(stdout)
+			}
+			if stderr, ok := em["stderr"].(string); ok && stderr != "" {
+				b.WriteString(stderr)
+			}
+		}
+	}
+	// Fallback: single-string output field.
+	if b.Len() == 0 {
+		if out, ok := item["output"].(string); ok {
+			b.WriteString(out)
+		}
+	}
+	return b.String()
 }

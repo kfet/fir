@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- OpenAI Responses API: `code_execution` server tool setting now enables the hosted shell tool (`container_auto`), with streaming support and multi-turn replay
+
 ### Fixed
 
 - Skill commands setting now actually works: toggling it off hides `/skill:*` commands from autocomplete and prevents expansion
