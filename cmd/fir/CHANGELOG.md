@@ -2,9 +2,16 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-03-06
+
 ### Added
 
 - Hot-reload via `/reexec` now preserves message queue and pending editor input
+- Models ordered by SWE-bench Verified score in the model selector; scores are fetched live from the official leaderboard during `make generate-models` with curated baselines as fallback; unbenched models inherit scores from their family lineage (+0.1 bump, shown as `[SWE:~N%]`); `[SWE:N%]` badge shown per model in the selector list
+- Session files now persist plan state (`plan_update` entries in JSONL); plan is restored automatically on session resume
+- Auto-clear plan after the next user interaction completes, preventing stale plans from persisting across turns
+- Plan visualization in TUI mode: plan entries are shown inline and updated live; toggle with `Ctrl+R` or `/plan` command (starts hidden, footer always shows progress)
+- GPT-5.4 and GPT-5.4 Pro model support for OpenAI and Azure providers
 
 ### Removed
 
@@ -13,14 +20,6 @@
 ### Fixed
 
 - `TestLoadBuiltinSkills_ReturnsExpectedSkills` now includes `skill-updater` in the expected set
-
-### Added
-
-- Models ordered by SWE-bench Verified score in the model selector; scores are fetched live from the official leaderboard during `make generate-models` with curated baselines as fallback; unbenched models inherit scores from their family lineage (+0.1 bump, shown as `[SWE:~N%]`); `[SWE:N%]` badge shown per model in the selector list
-- Session files now persist plan state (`plan_update` entries in JSONL); plan is restored automatically on session resume
-- Auto-clear plan after the next user interaction completes, preventing stale plans from persisting across turns
-- Plan visualization in TUI mode: plan entries are shown inline and updated live; toggle with `Ctrl+R` or `/plan` command (starts hidden, footer always shows progress)
-- GPT-5.4 and GPT-5.4 Pro model support for OpenAI and Azure providers
 
 ## [0.15.0] - 2026-03-06
 
