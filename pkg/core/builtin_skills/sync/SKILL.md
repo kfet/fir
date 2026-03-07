@@ -1,11 +1,11 @@
 ---
 name: sync
-description: Sync a downstream port with upstream source changes. Detects changed files, applies equivalent changes, and updates the baseline.
+description: Sync with the upstream source changes. Detect changed files, apply equivalent changes, and update the baseline.
 ---
 
 # Upstream Sync
 
-Sync a downstream port with the latest changes from the upstream source repository.
+Sync with the latest changes from the upstream source repository.
 
 ## Configuration
 
@@ -19,7 +19,19 @@ Before starting, identify:
 
 ---
 
-## Step 1 — Detect changes
+## Step 1 — Pull latest upstream
+
+Before detecting changes, pull the latest commits in the upstream repo:
+
+```bash
+git -C <UPSTREAM_PATH> pull --ff-only
+```
+
+If the pull fails (e.g. dirty working tree or diverged history), stop and inform the user.
+
+---
+
+## Step 2 — Detect changes
 
 ```bash
 bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
@@ -35,7 +47,7 @@ CHANGED: path/to/upstream/file.ts
 
 ---
 
-## Step 2 — For each changed file, look up the downstream counterpart
+## Step 3 — For each changed file, look up the downstream counterpart
 
 Open the file map. Find the upstream path in the table. It tells you whether the file is a **normal port** or a **generator**.
 
@@ -61,7 +73,7 @@ Check if it belongs to a component that isn't ported. If so, skip it. If it's a 
 
 ---
 
-## Step 3 — Update the baseline
+## Step 4 — Update the baseline
 
 After all downstream files are updated and tests pass:
 
@@ -78,7 +90,7 @@ bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
 
 ---
 
-## Step 4 — Log the sync
+## Step 5 — Log the sync
 
 Append an entry to the sync log:
 
@@ -90,7 +102,7 @@ Append an entry to the sync log:
 
 ---
 
-## Step 5 — Check project watch
+## Step 6 — Check project watch
 
 After syncing, glance at `.fir/skills/sync/data/PROJECT_WATCH.md` for other projects worth checking. If it's been more than a week since the last look, quickly scan their recent releases for ideas relevant to fir.
 
