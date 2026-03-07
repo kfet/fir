@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-03-06
+
 ### Added
 
 - `/update` slash command: update fir to the latest version in-place and automatically restart the session
