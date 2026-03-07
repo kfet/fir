@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Upstream sync: trimmed tracked files from 580 to 48 (AI layer, providers, oauth, agent loop, model/prompt core only); dropped TUI, tools, interactive components, and other diverged layers
+- Added PROJECT_WATCH.md for lightweight tracking of aider, goose, cline, and claude-code
+
 ## [0.17.0] - 2026-03-06
 
 ### Added

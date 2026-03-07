@@ -90,6 +90,12 @@ Append an entry to the sync log:
 
 ---
 
+## Step 5 — Check project watch
+
+After syncing, glance at `.fir/skills/sync/data/PROJECT_WATCH.md` for other projects worth checking. If it's been more than a week since the last look, quickly scan their recent releases for ideas relevant to fir.
+
+---
+
 ## Rules
 
 - **Never update the baseline before verifying the build and tests pass.**
