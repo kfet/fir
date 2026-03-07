@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-03-06
+
 ### Changed
 
 - Plan tool description now instructs the agent to create plans proactively at the start of multi-step tasks
