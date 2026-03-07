@@ -1380,6 +1380,30 @@ Check the code for bugs and style issues.`
 	}
 }
 
+func TestExpandSkillCommand_DisabledSetting(t *testing.T) {
+	session, cwd := newTestAgentSession(t)
+	defer session.Close()
+
+	// Create a valid skill
+	skillDir := filepath.Join(cwd, ".fir", "skills", "review")
+	os.MkdirAll(skillDir, 0755)
+	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: review
+description: Review code
+---
+Check the code.`), 0644)
+	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+
+	// Disable skill commands
+	session.SettingsManager.SetEnableSkillCommands(false)
+
+	text := "/skill:review fix the bug"
+	got := session.expandSkillCommand(text)
+	if got != text {
+		t.Errorf("expected unexpanded %q when disabled, got %q", text, got)
+	}
+}
+
 func TestExpandSkillCommand_NoArgs(t *testing.T) {
 	session, cwd := newTestAgentSession(t)
 	defer session.Close()

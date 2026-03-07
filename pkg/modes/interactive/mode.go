@@ -682,7 +682,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 	if m.session != nil {
 		rl := m.session.ResourceLoader()
 		if rl != nil {
-			if m.settings != nil && m.settings.GetEnableSkillCommands() {
+			if m.settings == nil || m.settings.GetEnableSkillCommands() {
 				if skills, _ := rl.GetSkills(); len(skills) > 0 {
 					for _, skill := range skills {
 						commands = append(commands, SlashCommand{

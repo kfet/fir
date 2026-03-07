@@ -74,6 +74,11 @@ func TestInMemorySettingsManager_SettersAndGetters(t *testing.T) {
 
 	sm.SetTransport("streamingJson")
 	assert.Equal(t, "streamingJson", sm.GetTransport())
+
+	sm.SetEnableSkillCommands(false)
+	assert.False(t, sm.GetEnableSkillCommands())
+	sm.SetEnableSkillCommands(true)
+	assert.True(t, sm.GetEnableSkillCommands())
 }
 
 func TestInMemorySettingsManager_CompactionSettings(t *testing.T) {
