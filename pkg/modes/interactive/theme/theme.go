@@ -165,7 +165,7 @@ func rgbTo256(r, g, b int) int {
 	}
 	spread := maxC - minC
 
-	if spread < 10 && grayDist < cubeDist {
+	if spread < 30 && grayDist < cubeDist {
 		return grayIndex
 	}
 	return cubeIndex

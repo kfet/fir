@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 256-color fallback: dark background colors (toolPendingBg, customMessageBg, etc.) no longer map to saturated blue/red/green; they correctly fall back to dark grays
+
 ## [0.16.2] - 2026-03-06
 
 ### Changed

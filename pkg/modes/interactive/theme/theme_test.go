@@ -63,6 +63,28 @@ func TestRgbTo256_Gray(t *testing.T) {
 	}
 }
 
+func TestRgbTo256_NearGrayWithTint(t *testing.T) {
+	// Dark colors with slight tints (e.g. #282832) should map to grayscale,
+	// not saturated cube colors like #00005f (index 17).
+	tests := []struct {
+		name    string
+		r, g, b int
+	}{
+		{"toolPendingBg #282832", 0x28, 0x28, 0x32},
+		{"customMessageBg #2d2838", 0x2d, 0x28, 0x38},
+		{"userMessageBg #343541", 0x34, 0x35, 0x41},
+		{"selectedBg #3a3a4a", 0x3a, 0x3a, 0x4a},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := rgbTo256(tt.r, tt.g, tt.b)
+			if idx < 232 || idx > 255 {
+				t.Errorf("expected grayscale (232-255), got %d", idx)
+			}
+		})
+	}
+}
+
 func TestDetectColorMode(t *testing.T) {
 	mode := DetectColorMode()
 	if mode != ColorModeTruecolor && mode != ColorMode256 {
