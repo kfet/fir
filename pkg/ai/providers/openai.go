@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -78,12 +78,12 @@ type resolvedCompat struct {
 	SupportsStore                    bool
 	SupportsDeveloperRole            bool
 	SupportsReasoningEffort          bool
+	ReasoningEffortMap               map[string]string
 	SupportsUsageInStreaming         bool
 	MaxTokensField                   ai.MaxTokensField
 	RequiresToolResultName           bool
 	RequiresAssistantAfterToolResult bool
 	RequiresThinkingAsText           bool
-	RequiresMistralToolIds           bool
 	ThinkingFormat                   ai.ThinkingFormat
 	SupportsStrictMode               bool
 }
@@ -97,15 +97,13 @@ func detectCompat(model *ai.Model) resolvedCompat {
 
 	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
 		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
-		provider == "mistral" || strings.Contains(baseURL, "mistral.ai") ||
 		strings.Contains(baseURL, "chutes.ai") || strings.Contains(baseURL, "deepseek.com") ||
 		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai")
 
-	useMaxTokens := provider == "mistral" || strings.Contains(baseURL, "mistral.ai") ||
-		strings.Contains(baseURL, "chutes.ai")
+	useMaxTokens := strings.Contains(baseURL, "chutes.ai")
 
 	isGrok := provider == "xai" || strings.Contains(baseURL, "api.x.ai")
-	isMistral := provider == "mistral" || strings.Contains(baseURL, "mistral.ai")
+	isGroq := provider == "groq" || strings.Contains(baseURL, "groq.com")
 
 	maxField := ai.MaxTokensFieldMaxCompletionTokens
 	if useMaxTokens {
@@ -117,16 +115,27 @@ func detectCompat(model *ai.Model) resolvedCompat {
 		thinkingFmt = ai.ThinkingFormatZAI
 	}
 
+	var reasoningEffortMap map[string]string
+	if isGroq && model.ID == "qwen/qwen3-32b" {
+		reasoningEffortMap = map[string]string{
+			"minimal": "default",
+			"low":     "default",
+			"medium":  "default",
+			"high":    "default",
+			"xhigh":   "default",
+		}
+	}
+
 	return resolvedCompat{
 		SupportsStore:                    !isNonStandard,
 		SupportsDeveloperRole:            !isNonStandard,
 		SupportsReasoningEffort:          !isGrok && !isZai,
+		ReasoningEffortMap:               reasoningEffortMap,
 		SupportsUsageInStreaming:         true,
 		MaxTokensField:                   maxField,
-		RequiresToolResultName:           isMistral,
+		RequiresToolResultName:           false,
 		RequiresAssistantAfterToolResult: false,
-		RequiresThinkingAsText:           isMistral,
-		RequiresMistralToolIds:           isMistral,
+		RequiresThinkingAsText:           false,
 		ThinkingFormat:                   thinkingFmt,
 		SupportsStrictMode:               true,
 	}
@@ -149,6 +158,9 @@ func getCompat(model *ai.Model) resolvedCompat {
 	if c.SupportsReasoningEffort != nil {
 		detected.SupportsReasoningEffort = *c.SupportsReasoningEffort
 	}
+	if c.ReasoningEffortMap != nil {
+		detected.ReasoningEffortMap = c.ReasoningEffortMap
+	}
 	if c.SupportsUsageInStreaming != nil {
 		detected.SupportsUsageInStreaming = *c.SupportsUsageInStreaming
 	}
@@ -164,9 +176,6 @@ func getCompat(model *ai.Model) resolvedCompat {
 	if c.RequiresThinkingAsText != nil {
 		detected.RequiresThinkingAsText = *c.RequiresThinkingAsText
 	}
-	if c.RequiresMistralToolIds != nil {
-		detected.RequiresMistralToolIds = *c.RequiresMistralToolIds
-	}
 	if c.ThinkingFormat != "" {
 		detected.ThinkingFormat = c.ThinkingFormat
 	}
@@ -175,26 +184,6 @@ func getCompat(model *ai.Model) resolvedCompat {
 	}
 
 	return detected
-}
-
-// --- Tool ID normalization ---
-
-// normalizeMistralToolID normalizes tool IDs for Mistral (exactly 9 alphanumeric chars).
-func normalizeMistralToolID(id string) string {
-	var b strings.Builder
-	for _, c := range id {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-			b.WriteRune(c)
-		}
-	}
-	normalized := b.String()
-	const padding = "ABCDEFGHI"
-	if len(normalized) < 9 {
-		normalized += padding[:9-len(normalized)]
-	} else if len(normalized) > 9 {
-		normalized = normalized[:9]
-	}
-	return normalized
 }
 
 // hasToolHistory checks if conversation messages contain tool calls or tool results.
@@ -644,19 +633,21 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	// Thinking / reasoning format
 	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
 		switch compat.ThinkingFormat {
-		case ai.ThinkingFormatZAI:
-			// Z.ai uses binary thinking: { type: "enabled" | "disabled" }
-			body["thinking"] = map[string]any{"type": "enabled"}
-		case ai.ThinkingFormatQwen:
+		case ai.ThinkingFormatZAI, ai.ThinkingFormatQwen:
+			// Both Z.ai and Qwen use enable_thinking: boolean
 			body["enable_thinking"] = true
 		default:
 			if compat.SupportsReasoningEffort {
-				body["reasoning_effort"] = string(options.ReasoningEffort)
+				effort := string(options.ReasoningEffort)
+				if mapped, ok := compat.ReasoningEffortMap[effort]; ok {
+					effort = mapped
+				}
+				body["reasoning_effort"] = effort
 			}
 		}
-	} else if compat.ThinkingFormat == ai.ThinkingFormatZAI && model.Reasoning {
-		// Must explicitly disable since z.ai defaults to thinking enabled
-		body["thinking"] = map[string]any{"type": "disabled"}
+	} else if (compat.ThinkingFormat == ai.ThinkingFormatZAI || compat.ThinkingFormat == ai.ThinkingFormatQwen) && model.Reasoning {
+		// Must explicitly disable since z.ai/qwen default to thinking enabled
+		body["enable_thinking"] = false
 	}
 
 	// OpenRouter provider routing preferences
@@ -688,10 +679,6 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 
 // normalizeOpenAIToolCallID normalizes tool call IDs for OpenAI-compatible providers.
 func normalizeOpenAIToolCallID(id string, model *ai.Model, compat resolvedCompat) string {
-	if compat.RequiresMistralToolIds {
-		return normalizeMistralToolID(id)
-	}
-
 	// Handle pipe-separated IDs from OpenAI Responses API
 	if strings.Contains(id, "|") {
 		parts := strings.SplitN(id, "|", 2)

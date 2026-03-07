@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: 9e22d391
+// Upstream hash: c99b9940
 package ai
 
 import (
@@ -69,6 +69,7 @@ const (
 	ProviderMinimaxCN            Provider = "minimax-cn"
 	ProviderHuggingface          Provider = "huggingface"
 	ProviderOpenCode             Provider = "opencode"
+	ProviderOpenCodeGo           Provider = "opencode-go"
 	ProviderKimiCoding           Provider = "kimi-coding"
 )
 
@@ -217,6 +218,10 @@ type ThinkingContent struct {
 	Type              string `json:"type"` // always "thinking"
 	Thinking          string `json:"thinking"`
 	ThinkingSignature string `json:"thinkingSignature,omitempty"`
+	// When true, the thinking content was redacted by safety filters. The opaque
+	// encrypted payload is stored in ThinkingSignature so it can be passed back
+	// to the API for multi-turn continuity.
+	Redacted bool `json:"redacted,omitempty"`
 }
 
 // ImageContent represents a base64-encoded image.
@@ -586,12 +591,12 @@ type OpenAICompletionsCompat struct {
 	SupportsStore                    *bool                 `json:"supportsStore,omitempty"`
 	SupportsDeveloperRole            *bool                 `json:"supportsDeveloperRole,omitempty"`
 	SupportsReasoningEffort          *bool                 `json:"supportsReasoningEffort,omitempty"`
+	ReasoningEffortMap               map[string]string     `json:"reasoningEffortMap,omitempty"`
 	SupportsUsageInStreaming         *bool                 `json:"supportsUsageInStreaming,omitempty"`
 	MaxTokensField                   MaxTokensField        `json:"maxTokensField,omitempty"`
 	RequiresToolResultName           *bool                 `json:"requiresToolResultName,omitempty"`
 	RequiresAssistantAfterToolResult *bool                 `json:"requiresAssistantAfterToolResult,omitempty"`
 	RequiresThinkingAsText           *bool                 `json:"requiresThinkingAsText,omitempty"`
-	RequiresMistralToolIds           *bool                 `json:"requiresMistralToolIds,omitempty"`
 	ThinkingFormat                   ThinkingFormat        `json:"thinkingFormat,omitempty"`
 	OpenRouterRouting                *OpenRouterRouting    `json:"openRouterRouting,omitempty"`
 	VercelGatewayRouting             *VercelGatewayRouting `json:"vercelGatewayRouting,omitempty"`

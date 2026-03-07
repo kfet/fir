@@ -1,5 +1,29 @@
 # Sync Log
 
+## 2026-03-07 — Sync to commit c99b9940
+
+- `ai/src/types.ts` → `pkg/ai/types.go`: Added `opencode-go` provider, `TextSignatureV1` type, `Redacted` field on ThinkingContent, `ReasoningEffortMap` on OpenAICompletionsCompat, removed `RequiresMistralToolIds`.
+- `ai/src/env-api-keys.ts` → `pkg/ai/envkeys.go`: Added `opencode-go` env key mapping.
+- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: Region resolution respects AWS_PROFILE; Sonnet 4.6 added to adaptive thinking; xhigh effort clamped to "high" for non-Opus models.
+- `ai/src/providers/google-gemini-cli.ts` → `pkg/ai/providers/google_gemini_cli.go`: Added autopush endpoint fallback; simplified antigravity headers (removed extra X-Goog-Api-Client/Client-Metadata); version bumped to 1.18.4; Claude thinking header now checks provider+prefix+reasoning instead of name pattern; 403/404 now cascade to next endpoint immediately; Gemini 3.1 model matching via regex.
+- `ai/src/providers/google-shared.ts` → `pkg/ai/providers/google_shared.go`: Use `skip_thought_signature_validator` sentinel for unsigned Gemini 3 tool calls instead of converting to text.
+- `ai/src/providers/google-vertex.ts` → `pkg/ai/providers/google_vertex.go`: Hash updated (Gemini 3.1 regex matching already correct in Go).
+- `ai/src/providers/google.ts` → `pkg/ai/providers/google.go`: Hash updated.
+- `ai/src/providers/openai-codex-responses.ts` → `pkg/ai/providers/openai_codex_responses.go`: Added gpt-5.4 to minimal→low reasoning clamping.
+- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: Removed all Mistral-specific compat (tool IDs, thinking-as-text, max_tokens, assistant-after-tool-result); unified Z.ai and Qwen to both use `enable_thinking`; added `ReasoningEffortMap` support; added Groq qwen3-32b reasoning effort mapping.
+- `ai/src/providers/openai-responses-shared.ts` → `pkg/ai/providers/openai_responses_shared.go`: Added TextSignatureV1 encode/parse with phase support for OpenAI Responses assistant message IDs.
+- `ai/src/providers/register-builtins.ts` → `pkg/ai/providers/register_builtins.go`: Added `SetBuiltInRegistrar` for `ResetApiProviders` support; lazy Bedrock loading N/A in Go.
+- `ai/src/api-registry.ts` → `pkg/ai/registry.go`: Added `ResetApiProviders` and `SetBuiltInRegistrar` methods.
+- `ai/src/utils/oauth/index.ts` → `pkg/ai/oauth/registry.go`: Added `UnregisterProvider` and `ResetProviders` functions.
+- `ai/src/utils/overflow.ts` → `pkg/ai/overflow.go`: Added Mistral overflow pattern.
+- `ai/src/stream.ts` → `pkg/ai/stream.go`: Hash updated (http-proxy removal N/A in Go).
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: Mistral API changed to `mistral-conversations`; added opencode-go variant; added claude-sonnet-4-6 Antigravity; added gemini-3.1-flash-lite-preview; added GitHub Copilot gpt-5.3-codex; gpt-5.4 context window fixes; OpenRouter pricing overrides.
+- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated with new models.
+- `coding-agent/src/core/model-registry.ts` → `pkg/core/modelregistry.go`: Added per-model `baseUrl` override; added `UnregisterProvider`; refresh now resets API/OAuth registrations; removed `RequiresMistralToolIds` from compat.
+- `coding-agent/src/core/model-resolver.ts` → `pkg/core/modelresolver.go`: Updated default models (gpt-5.4, gemini-3.1-pro-high, opencode-go); added `buildFallbackModel` for custom model IDs; `FindInitialModel` now uses `ResolveCliModel`.
+- `ai/src/utils/http-proxy.ts` → deleted upstream; was never ported (N/A in Go).
+- `ai/src/index.ts`, `ai/src/models.ts` → not tracked (no downstream equivalent).
+
 ## 2026-02-25 — Sync to commit 5c0ec26c
 
 - `coding-agent/src/core/extensions/loader.ts` → `pkg/extension/registry.go`: Discovery order flipped — project-local extensions now load before global ones (first registration wins). Flag defaults no longer overwrite CLI-set values.

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/register-builtins.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import "github.com/kfet/fir/pkg/ai"
@@ -21,4 +21,7 @@ func RegisterBuiltInApiProviders(r *ai.Registry) {
 // in the default registry.
 func RegisterDefaultProviders() {
 	RegisterBuiltInApiProviders(ai.DefaultRegistry)
+	ai.DefaultRegistry.SetBuiltInRegistrar(func(r *ai.Registry) {
+		RegisterBuiltInApiProviders(r)
+	})
 }

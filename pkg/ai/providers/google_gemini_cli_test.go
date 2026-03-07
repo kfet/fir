@@ -67,12 +67,18 @@ func TestIsRetryableError(t *testing.T) {
 	}
 }
 
-func TestIsClaudeThinkingModel(t *testing.T) {
-	if !isClaudeThinkingModel("claude-3.5-sonnet-thinking") {
-		t.Error("expected true for claude thinking model")
+func TestNeedsClaudeThinkingBetaHeader(t *testing.T) {
+	claudeModel := &ai.Model{Provider: "google-antigravity", ID: "claude-3.5-sonnet", Reasoning: true}
+	if !needsClaudeThinkingBetaHeader(claudeModel) {
+		t.Error("expected true for antigravity claude model with reasoning")
 	}
-	if isClaudeThinkingModel("gemini-2.0-flash") {
+	geminiModel := &ai.Model{Provider: "google-antigravity", ID: "gemini-2.0-flash", Reasoning: true}
+	if needsClaudeThinkingBetaHeader(geminiModel) {
 		t.Error("expected false for gemini model")
+	}
+	nonAntigravity := &ai.Model{Provider: "anthropic", ID: "claude-3.5-sonnet", Reasoning: true}
+	if needsClaudeThinkingBetaHeader(nonAntigravity) {
+		t.Error("expected false for non-antigravity claude model")
 	}
 }
 

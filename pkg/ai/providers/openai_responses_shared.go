@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses-shared.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -336,7 +336,8 @@ func (p *responsesSSEProcessor) handleOutputItemDone(raw map[string]any) {
 		c := p.output.Content[idx]
 		c.Text.Text = finalText
 		if id, ok := itemRaw["id"].(string); ok {
-			c.Text.TextSignature = id
+			phase, _ := itemRaw["phase"].(string)
+			c.Text.TextSignature = encodeTextSignatureV1(id, phase)
 		}
 		p.output.Content[idx] = c
 		p.stream.Push(ai.AssistantMessageEvent{
@@ -565,6 +566,44 @@ func uint32ToBase36(n uint32) string {
 		n /= 36
 	}
 	return string(result)
+}
+
+// --- TextSignatureV1 encoding/parsing ---
+
+// encodeTextSignatureV1 encodes an ID and optional phase into a JSON string.
+func encodeTextSignatureV1(id string, phase string) string {
+	m := map[string]any{"v": 1, "id": id}
+	if phase != "" {
+		m["phase"] = phase
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+type parsedTextSignature struct {
+	ID    string
+	Phase string
+}
+
+// parseTextSignature parses a TextSignatureV1 JSON string, or returns the raw string as legacy ID.
+func parseTextSignature(sig string) *parsedTextSignature {
+	if sig == "" {
+		return nil
+	}
+	if strings.HasPrefix(sig, "{") {
+		var parsed struct {
+			V     int    `json:"v"`
+			ID    string `json:"id"`
+			Phase string `json:"phase"`
+		}
+		if err := json.Unmarshal([]byte(sig), &parsed); err == nil && parsed.V == 1 && parsed.ID != "" {
+			if parsed.Phase == "commentary" || parsed.Phase == "final_answer" {
+				return &parsedTextSignature{ID: parsed.ID, Phase: parsed.Phase}
+			}
+			return &parsedTextSignature{ID: parsed.ID}
+		}
+	}
+	return &parsedTextSignature{ID: sig}
 }
 
 // formatShellCall formats a shell_call item as readable text showing the commands.

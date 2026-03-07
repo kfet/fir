@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -305,13 +305,17 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 						continue
 					}
 
-					msgID := sig
+					parsed := parseTextSignature(sig)
+					var msgID string
+					if parsed != nil {
+						msgID = parsed.ID
+					}
 					if msgID == "" {
 						msgID = fmt.Sprintf("msg_%d", len(input))
 					} else if len(msgID) > 64 {
 						msgID = "msg_" + shortHash(msgID)
 					}
-					input = append(input, map[string]any{
+					entry := map[string]any{
 						"type":   "message",
 						"role":   "assistant",
 						"id":     msgID,
@@ -319,7 +323,11 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 						"content": []map[string]any{
 							{"type": "output_text", "text": block.Text.Text, "annotations": []any{}},
 						},
-					})
+					}
+					if parsed != nil && parsed.Phase != "" {
+						entry["phase"] = parsed.Phase
+					}
+					input = append(input, entry)
 
 				} else if block.IsThinking() {
 					if block.Thinking.ThinkingSignature != "" {

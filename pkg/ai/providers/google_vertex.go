@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-vertex.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (

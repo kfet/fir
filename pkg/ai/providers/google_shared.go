@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-shared.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -207,26 +207,27 @@ func convertAssistantParts(model *ai.Model, a *ai.AssistantMessage) []GooglePart
 			tc := block.ToolCall
 			sig := ResolveThoughtSignature(isSameProviderAndModel, tc.ThoughtSignature)
 
+			// Gemini 3 requires thoughtSignature on all function calls when thinking mode is enabled.
+			// Use the skip_thought_signature_validator sentinel for unsigned function calls
+			// (e.g. replayed from providers without thought signatures like Claude via Antigravity).
 			isGemini3 := strings.Contains(strings.ToLower(model.ID), "gemini-3")
-			if isGemini3 && sig == "" {
-				// Convert unsigned function calls to text for Gemini 3
-				parts = append(parts, GooglePart{
-					Text: "[Historical context: a different model called tool \"" + tc.Name + "\". Do not mimic this format - use proper function calling.]",
-				})
-			} else {
-				fc := &GoogleFunctionCall{
-					Name: tc.Name,
-					Args: tc.Arguments,
-				}
-				if RequiresToolCallId(model.ID) {
-					fc.ID = tc.ID
-				}
-				p := GooglePart{FunctionCall: fc}
-				if sig != "" {
-					p.ThoughtSignature = sig
-				}
-				parts = append(parts, p)
+			effectiveSig := sig
+			if effectiveSig == "" && isGemini3 {
+				effectiveSig = "skip_thought_signature_validator"
 			}
+
+			fc := &GoogleFunctionCall{
+				Name: tc.Name,
+				Args: tc.Arguments,
+			}
+			if RequiresToolCallId(model.ID) {
+				fc.ID = tc.ID
+			}
+			p := GooglePart{FunctionCall: fc}
+			if effectiveSig != "" {
+				p.ThoughtSignature = effectiveSig
+			}
+			parts = append(parts, p)
 		}
 	}
 

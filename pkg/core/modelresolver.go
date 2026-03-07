@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
-// Upstream hash: 380236a0
+// Upstream hash: c99b9940
 package core
 
 import (
@@ -13,12 +13,12 @@ import (
 var DefaultModelPerProvider = map[ai.Provider]string{
 	"amazon-bedrock":        "us.anthropic.claude-opus-4-6-v1",
 	"anthropic":             "claude-opus-4-6",
-	"openai":                "gpt-5.1-codex",
+	"openai":                "gpt-5.4",
 	"azure-openai-responses": "gpt-5.2",
-	"openai-codex":          "gpt-5.3-codex",
+	"openai-codex":          "gpt-5.4",
 	"google":                "gemini-2.5-pro",
 	"google-gemini-cli":     "gemini-2.5-pro",
-	"google-antigravity":    "gemini-3-pro-high",
+	"google-antigravity":    "gemini-3.1-pro-high",
 	"google-vertex":         "gemini-3-pro-preview",
 	"github-copilot":        "gpt-4o",
 	"openrouter":            "openai/gpt-5.1-codex",
@@ -32,6 +32,7 @@ var DefaultModelPerProvider = map[ai.Provider]string{
 	"minimax-cn":            "MiniMax-M2.1",
 	"huggingface":           "moonshotai/Kimi-K2.5",
 	"opencode":              "claude-opus-4-6",
+	"opencode-go":           "kimi-k2.5",
 	"kimi-coding":           "kimi-k2-thinking",
 }
 
@@ -347,6 +348,20 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 		}
 	}
 
+	if provider != "" {
+		fallbackModel := buildFallbackModel(provider, pattern, allModels)
+		if fallbackModel != nil {
+			fallbackWarning := fmt.Sprintf("Model %q not found for provider %q. Using custom model id.", pattern, provider)
+			if res.Warning != "" {
+				fallbackWarning = res.Warning + " " + fallbackWarning
+			}
+			return ResolveCliModelResult{
+				Model:   fallbackModel,
+				Warning: fallbackWarning,
+			}
+		}
+	}
+
 	display := opts.CLIModel
 	if provider != "" {
 		display = provider + "/" + pattern
@@ -355,6 +370,40 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 		Warning: res.Warning,
 		Error:   fmt.Sprintf("Model %q not found. Use --list-models to see available models.", display),
 	}
+}
+
+// buildFallbackModel creates a model with a custom ID when the exact model
+// isn't found but we know the provider. Copies settings from the provider's
+// default model (or first model) and overrides the ID.
+func buildFallbackModel(provider, modelID string, availableModels []*ai.Model) *ai.Model {
+	var providerModels []*ai.Model
+	for _, m := range availableModels {
+		if m.Provider == provider {
+			providerModels = append(providerModels, m)
+		}
+	}
+	if len(providerModels) == 0 {
+		return nil
+	}
+
+	defaultID := DefaultModelPerProvider[ai.Provider(provider)]
+	var baseModel *ai.Model
+	if defaultID != "" {
+		for _, m := range providerModels {
+			if m.ID == defaultID {
+				baseModel = m
+				break
+			}
+		}
+	}
+	if baseModel == nil {
+		baseModel = providerModels[0]
+	}
+
+	clone := *baseModel
+	clone.ID = modelID
+	clone.Name = modelID
+	return &clone
 }
 
 // ResolveModelScope resolves model patterns to ScopedModels.
@@ -413,11 +462,17 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 
 	// 1. CLI args
 	if opts.CLIProvider != "" && opts.CLIModel != "" {
-		found := opts.ModelRegistry.Find(opts.CLIProvider, opts.CLIModel)
-		if found == nil {
+		resolved := ResolveCliModel(ResolveCliModelOptions{
+			CLIProvider:   opts.CLIProvider,
+			CLIModel:      opts.CLIModel,
+			ModelRegistry: opts.ModelRegistry,
+		})
+		if resolved.Error != "" {
 			return InitialModelResult{ThinkingLevel: defaultTL}
 		}
-		return InitialModelResult{Model: found, ThinkingLevel: defaultTL}
+		if resolved.Model != nil {
+			return InitialModelResult{Model: resolved.Model, ThinkingLevel: defaultTL}
+		}
 	}
 
 	// 2. First scoped model (skip if continuing)

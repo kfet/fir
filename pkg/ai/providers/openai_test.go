@@ -194,19 +194,18 @@ func TestDetectCompat_OpenAI(t *testing.T) {
 	assert.True(t, c.SupportsDeveloperRole)
 	assert.True(t, c.SupportsReasoningEffort)
 	assert.Equal(t, ai.MaxTokensFieldMaxCompletionTokens, c.MaxTokensField)
-	assert.False(t, c.RequiresMistralToolIds)
 	assert.Equal(t, ai.ThinkingFormatOpenAI, c.ThinkingFormat)
 }
 
 func TestDetectCompat_Mistral(t *testing.T) {
 	m := &ai.Model{Provider: "mistral", BaseURL: "https://api.mistral.ai"}
 	c := detectCompat(m)
-	assert.False(t, c.SupportsStore)
-	assert.False(t, c.SupportsDeveloperRole)
-	assert.Equal(t, ai.MaxTokensFieldMaxTokens, c.MaxTokensField)
-	assert.True(t, c.RequiresMistralToolIds)
-	assert.True(t, c.RequiresThinkingAsText)
-	assert.True(t, c.RequiresToolResultName)
+	// Mistral is no longer treated as non-standard (uses mistral-conversations API now)
+	assert.True(t, c.SupportsStore)
+	assert.True(t, c.SupportsDeveloperRole)
+	assert.Equal(t, ai.MaxTokensFieldMaxCompletionTokens, c.MaxTokensField)
+	assert.False(t, c.RequiresThinkingAsText)
+	assert.False(t, c.RequiresToolResultName)
 }
 
 func TestDetectCompat_Zai(t *testing.T) {
@@ -237,19 +236,16 @@ func TestDetectCompat_Chutes(t *testing.T) {
 }
 
 func TestGetCompat_MergesExplicit(t *testing.T) {
-	trueVal := true
 	m := &ai.Model{
 		Provider: "openai",
 		BaseURL:  "https://api.openai.com",
 		Compat: &ai.OpenAICompletionsCompat{
-			RequiresMistralToolIds: &trueVal,
-			MaxTokensField:        ai.MaxTokensFieldMaxTokens,
+			MaxTokensField: ai.MaxTokensFieldMaxTokens,
 		},
 	}
 	c := getCompat(m)
-	assert.True(t, c.RequiresMistralToolIds) // overridden
 	assert.Equal(t, ai.MaxTokensFieldMaxTokens, c.MaxTokensField) // overridden
-	assert.True(t, c.SupportsStore)          // detected default
+	assert.True(t, c.SupportsStore)                                // detected default
 }
 
 func TestGetCompat_NilCompat(t *testing.T) {
@@ -259,13 +255,6 @@ func TestGetCompat_NilCompat(t *testing.T) {
 }
 
 // --- Tool ID normalization tests ---
-
-func TestNormalizeMistralToolID(t *testing.T) {
-	assert.Equal(t, "abc123XYZ", normalizeMistralToolID("abc123XYZ"))
-	assert.Equal(t, "callABCDE", normalizeMistralToolID("call"))
-	assert.Equal(t, "abcdefghi", normalizeMistralToolID("abcdefghijklmno"))
-	assert.Equal(t, "abc12ABCD", normalizeMistralToolID("abc-12_!@"))
-}
 
 func TestNormalizeOpenAIToolCallID_PipeSeparated(t *testing.T) {
 	compat := resolvedCompat{}
@@ -281,13 +270,6 @@ func TestNormalizeOpenAIToolCallID_OpenAITruncation(t *testing.T) {
 	longID := "call_" + string(make([]byte, 50))
 	result := normalizeOpenAIToolCallID(longID, m, compat)
 	assert.LessOrEqual(t, len(result), 40)
-}
-
-func TestNormalizeOpenAIToolCallID_MistralFormat(t *testing.T) {
-	compat := resolvedCompat{RequiresMistralToolIds: true}
-	m := &ai.Model{Provider: "mistral"}
-	result := normalizeOpenAIToolCallID("call_abcdef", m, compat)
-	assert.Len(t, result, 9)
 }
 
 func TestNormalizeOpenAIToolCallID_CopilotClaude(t *testing.T) {
@@ -378,11 +360,11 @@ func TestBuildOpenAIRequestBody_SystemRole(t *testing.T) {
 	assert.Equal(t, "system", first["role"])
 }
 
-func TestBuildOpenAIRequestBody_MistralMaxTokens(t *testing.T) {
+func TestBuildOpenAIRequestBody_ChutesMaxTokens(t *testing.T) {
 	m := &ai.Model{
-		Provider:  "mistral",
-		BaseURL:   "https://api.mistral.ai",
-		ID:        "devstral",
+		Provider:  "chutes",
+		BaseURL:   "https://api.chutes.ai",
+		ID:        "some-model",
 		MaxTokens: 32000,
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
@@ -437,23 +419,19 @@ func TestBuildOpenAIRequestBody_ZaiThinking(t *testing.T) {
 	m := &ai.Model{Provider: "zai", BaseURL: "https://api.z.ai", ID: "claude-3.5-sonnet", Reasoning: true, MaxTokens: 16384}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	// With reasoning: should use "enabled"
+	// With reasoning: should use enable_thinking: true
 	body, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{ReasoningEffort: "high"})
 	require.NoError(t, err)
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))
-	thinking, ok := parsed["thinking"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "enabled", thinking["type"])
+	assert.Equal(t, true, parsed["enable_thinking"])
 
-	// Without reasoning: should use "disabled"
+	// Without reasoning: should use enable_thinking: false
 	body2, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{})
 	require.NoError(t, err)
 	var parsed2 map[string]any
 	require.NoError(t, json.Unmarshal(body2, &parsed2))
-	thinking2, ok := parsed2["thinking"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "disabled", thinking2["type"])
+	assert.Equal(t, false, parsed2["enable_thinking"])
 }
 
 func TestBuildOpenAIRequestBody_EmptyToolsForToolHistory(t *testing.T) {

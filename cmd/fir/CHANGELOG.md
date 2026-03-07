@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Upstream sync to c99b9940: Mistral migrated to `mistral-conversations` API; added `opencode-go` provider; Sonnet 4.6 adaptive thinking in Bedrock; `skip_thought_signature_validator` for Gemini 3 unsigned tool calls; TextSignatureV1 with phase support; `ReasoningEffortMap` for per-model effort mapping; Groq qwen3-32b reasoning effort clamping; gpt-5.4 models; claude-sonnet-4-6 Antigravity; gemini-3.1-flash-lite-preview; provider fallback for unknown model IDs; `UnregisterProvider` and `ResetProviders` for dynamic provider lifecycle
+
 ### Changed
 
 - Upstream sync: trimmed tracked files from 580 to 48 (AI layer, providers, oauth, agent loop, model/prompt core only); dropped TUI, tools, interactive components, and other diverged layers

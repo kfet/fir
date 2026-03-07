@@ -43,7 +43,7 @@ func TestStreamOpenAIResponses_SimpleResponse(t *testing.T) {
 	require.True(t, len(result.Content) > 0)
 	require.True(t, result.Content[0].IsText())
 	assert.Equal(t, "Hello, world!", result.Content[0].Text.Text)
-	assert.Equal(t, "msg_01", result.Content[0].Text.TextSignature)
+	assert.Equal(t, `{"id":"msg_01","v":1}`, result.Content[0].Text.TextSignature)
 
 	// Check usage — 20 input - 10 cached = 10 non-cached input
 	assert.Equal(t, 10, result.Usage.Input)

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/stream.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package ai
 
 import "context"

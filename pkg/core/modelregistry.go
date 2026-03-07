@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-registry.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package core
 
 import (
@@ -37,7 +37,6 @@ type CompatConfig struct {
 	RequiresToolResultName           *bool                       `json:"requiresToolResultName,omitempty"`
 	RequiresAssistantAfterToolResult *bool                       `json:"requiresAssistantAfterToolResult,omitempty"`
 	RequiresThinkingAsText           *bool                       `json:"requiresThinkingAsText,omitempty"`
-	RequiresMistralToolIds           *bool                       `json:"requiresMistralToolIds,omitempty"`
 	ThinkingFormat                   string                      `json:"thinkingFormat,omitempty"`
 	OpenRouterRouting                *OpenRouterRoutingConfig    `json:"openRouterRouting,omitempty"`
 	VercelGatewayRouting             *VercelGatewayRoutingConfig `json:"vercelGatewayRouting,omitempty"`
@@ -57,7 +56,6 @@ func (c *CompatConfig) toOpenAICompletionsCompat() *ai.OpenAICompletionsCompat {
 		RequiresToolResultName:           c.RequiresToolResultName,
 		RequiresAssistantAfterToolResult: c.RequiresAssistantAfterToolResult,
 		RequiresThinkingAsText:           c.RequiresThinkingAsText,
-		RequiresMistralToolIds:           c.RequiresMistralToolIds,
 		ThinkingFormat:                   ai.ThinkingFormat(c.ThinkingFormat),
 	}
 	if c.OpenRouterRouting != nil {
@@ -90,6 +88,7 @@ type ModelDefinition struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name,omitempty"`
 	Api           string            `json:"api,omitempty"`
+	BaseURL       string            `json:"baseUrl,omitempty"`
 	Reasoning     *bool             `json:"reasoning,omitempty"`
 	Input         []string          `json:"input,omitempty"`
 	Cost          *ModelCostConfig  `json:"cost,omitempty"`
@@ -199,9 +198,6 @@ func mergeCompat(base any, override *CompatConfig) any {
 	}
 	if overrideCompat.RequiresThinkingAsText != nil {
 		merged.RequiresThinkingAsText = overrideCompat.RequiresThinkingAsText
-	}
-	if overrideCompat.RequiresMistralToolIds != nil {
-		merged.RequiresMistralToolIds = overrideCompat.RequiresMistralToolIds
 	}
 	if overrideCompat.ThinkingFormat != "" {
 		merged.ThinkingFormat = overrideCompat.ThinkingFormat
@@ -379,8 +375,16 @@ func NewModelRegistry(authStorage *AuthStorage, modelsJsonPath string) *ModelReg
 func (r *ModelRegistry) Refresh() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.refresh()
+}
+
+func (r *ModelRegistry) refresh() {
 	r.customProviderApiKeys = make(map[string]string)
 	r.loadError = ""
+
+	// Reset API provider registry so dynamic registrations are rebuilt.
+	ai.DefaultRegistry.ResetApiProviders()
+
 	r.loadModels()
 
 	for providerName, config := range r.registeredProviders {
@@ -714,7 +718,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				Name:          name,
 				Api:           api,
 				Provider:      providerName,
-				BaseURL:       providerConfig.BaseURL,
+				BaseURL:       firstNonEmpty(modelDef.BaseURL, providerConfig.BaseURL),
 				Reasoning:     reasoning,
 				Input:         input,
 				Cost:          cost,
@@ -807,6 +811,20 @@ func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderCo
 	defer r.mu.Unlock()
 	r.registeredProviders[providerName] = config
 	return r.applyProviderConfig(providerName, config)
+}
+
+// UnregisterProvider removes a previously registered provider.
+// Removes the provider from the registry and reloads models from disk so that
+// built-in models overridden by this provider are restored to their original state.
+func (r *ModelRegistry) UnregisterProvider(providerName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.registeredProviders[providerName]; !ok {
+		return
+	}
+	delete(r.registeredProviders, providerName)
+	delete(r.customProviderApiKeys, providerName)
+	r.refresh()
 }
 
 func (r *ModelRegistry) applyProviderConfig(providerName string, config *ProviderConfigInput) error {
@@ -930,4 +948,13 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 // DefaultModelsJsonPath returns the default path for models.json.
 func DefaultModelsJsonPath(agentDir string) string {
 	return filepath.Join(agentDir, "models.json")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

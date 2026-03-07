@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/api-registry.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package ai
 
 import (
@@ -21,8 +21,9 @@ type registeredProvider struct {
 
 // Registry manages registered API providers.
 type Registry struct {
-	mu        sync.RWMutex
-	providers map[Api]*registeredProvider
+	mu                sync.RWMutex
+	providers         map[Api]*registeredProvider
+	builtInRegistrar  func(*Registry)
 }
 
 // DefaultRegistry is the global provider registry.
@@ -83,6 +84,22 @@ func (r *Registry) ClearApiProviders() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.providers = make(map[Api]*registeredProvider)
+}
+
+// ResetApiProviders removes all dynamic providers and re-registers built-in ones.
+// builtInRegistrar is called after clearing to restore built-in providers.
+func (r *Registry) ResetApiProviders() {
+	r.ClearApiProviders()
+	if r.builtInRegistrar != nil {
+		r.builtInRegistrar(r)
+	}
+}
+
+// SetBuiltInRegistrar stores the function used to re-register built-in providers on reset.
+func (r *Registry) SetBuiltInRegistrar(f func(*Registry)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.builtInRegistrar = f
 }
 
 // MustGetApiProvider returns the provider or panics if not registered.

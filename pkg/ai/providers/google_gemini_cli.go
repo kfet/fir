@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-gemini-cli.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -25,9 +25,10 @@ import (
 // --- Constants ---
 
 const (
-	geminiCLIDefaultEndpoint   = "https://cloudcode-pa.googleapis.com"
-	antigravityDailyEndpoint   = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion  = "1.18.3"
+	geminiCLIDefaultEndpoint      = "https://cloudcode-pa.googleapis.com"
+	antigravityDailyEndpoint      = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+	antigravityAutopushEndpoint   = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
+	defaultAntigravityVersion     = "1.18.4"
 	claudeThinkingBetaHeader   = "interleaved-thinking-2025-05-14"
 	geminiCLIMaxRetries        = 3
 	geminiCLIBaseDelayMs       = 1000
@@ -65,9 +66,7 @@ func geminiCLIHeaders() map[string]string {
 func antigravityHeaders() map[string]string {
 	version := defaultAntigravityVersion
 	return map[string]string{
-		"User-Agent":        fmt.Sprintf("antigravity/%s %s/%s", version, runtime.GOOS, runtime.GOARCH),
-		"X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-		"Client-Metadata":   `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
+		"User-Agent": fmt.Sprintf("antigravity/%s %s/%s", version, runtime.GOOS, runtime.GOARCH),
 	}
 }
 
@@ -248,10 +247,26 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 	return 0
 }
 
-func isClaudeThinkingModel(modelID string) bool {
-	lower := strings.ToLower(modelID)
-	return strings.Contains(lower, "claude") && strings.Contains(lower, "thinking")
+func needsClaudeThinkingBetaHeader(model *ai.Model) bool {
+	return model.Provider == "google-antigravity" && strings.HasPrefix(model.ID, "claude-") && model.Reasoning
 }
+
+func isGemini3ProModel(modelID string) bool {
+	lower := strings.ToLower(modelID)
+	return gemini3ProRegex.MatchString(lower)
+}
+
+func isGemini3FlashModel(modelID string) bool {
+	lower := strings.ToLower(modelID)
+	return gemini3FlashRegex.MatchString(lower)
+}
+
+func isGemini3ModelID(modelID string) bool {
+	return isGemini3ProModel(modelID) || isGemini3FlashModel(modelID)
+}
+
+var gemini3ProRegex = regexp.MustCompile(`gemini-3(?:\.1)?-pro`)
+var gemini3FlashRegex = regexp.MustCompile(`gemini-3(?:\.1)?-flash`)
 
 func isRetryableError(status int, errorText string) bool {
 	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
@@ -464,7 +479,7 @@ func streamGeminiCLI(
 	if baseURL != "" {
 		endpoints = []string{baseURL}
 	} else if isAntigravity {
-		endpoints = []string{antigravityDailyEndpoint, geminiCLIDefaultEndpoint}
+		endpoints = []string{antigravityDailyEndpoint, antigravityAutopushEndpoint, geminiCLIDefaultEndpoint}
 	} else {
 		endpoints = []string{geminiCLIDefaultEndpoint}
 	}
@@ -482,7 +497,7 @@ func streamGeminiCLI(
 	hdrs["Authorization"] = "Bearer " + creds.Token
 	hdrs["Content-Type"] = "application/json"
 	hdrs["Accept"] = "text/event-stream"
-	if isClaudeThinkingModel(model.ID) {
+	if needsClaudeThinkingBetaHeader(model) {
 		hdrs["anthropic-beta"] = claudeThinkingBetaHeader
 	}
 	if options != nil {
@@ -491,21 +506,20 @@ func streamGeminiCLI(
 		}
 	}
 
-	// Retry loop
+	// Retry loop with endpoint fallback.
+	// On 403/404, immediately try the next endpoint (no delay).
+	// On 429/5xx, retry with backoff on the same or next endpoint.
 	var resp *http.Response
 	var lastErr error
 	var requestURL string
+	endpointIndex := 0
 
 	for attempt := 0; attempt <= geminiCLIMaxRetries; attempt++ {
 		if ctx.Err() != nil {
 			return fmt.Errorf("request was aborted")
 		}
 
-		epIdx := attempt
-		if epIdx >= len(endpoints) {
-			epIdx = len(endpoints) - 1
-		}
-		requestURL = endpoints[epIdx] + "/v1internal:streamGenerateContent?alt=sse"
+		requestURL = endpoints[endpointIndex] + "/v1internal:streamGenerateContent?alt=sse"
 
 		req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyJSON))
 		if err != nil {
@@ -534,7 +548,18 @@ func streamGeminiCLI(
 		resp.Body.Close()
 		errorText := string(errorBody)
 
+		// On 403/404, cascade to the next endpoint immediately (no delay)
+		if (resp.StatusCode == 403 || resp.StatusCode == 404) && endpointIndex < len(endpoints)-1 {
+			endpointIndex++
+			continue
+		}
+
 		if attempt < geminiCLIMaxRetries && isRetryableError(resp.StatusCode, errorText) {
+			// Advance endpoint if possible
+			if endpointIndex < len(endpoints)-1 {
+				endpointIndex++
+			}
+
 			serverDelay := extractRetryDelay(errorText, resp.Header)
 			delayMs := serverDelay
 			if delayMs == 0 {
@@ -925,7 +950,7 @@ func StreamSimpleGoogleGeminiCLI(
 	}
 
 	effort := ClampReasoning(options.Reasoning)
-	if strings.Contains(model.ID, "3-pro") || strings.Contains(model.ID, "3.1-pro") || strings.Contains(model.ID, "3-flash") {
+	if isGemini3ModelID(model.ID) {
 		level := getGeminiCLIThinkingLevel(effort, model.ID)
 		base.Headers = mergeHeaders(base.Headers, map[string]string{
 			"x-gemini-thinking-enabled": "true",
@@ -945,7 +970,7 @@ func StreamSimpleGoogleGeminiCLI(
 }
 
 func getGeminiCLIThinkingLevel(effort ai.ThinkingLevel, modelID string) GoogleThinkingLevel {
-	if strings.Contains(modelID, "3-pro") || strings.Contains(modelID, "3.1-pro") {
+	if isGemini3ProModel(modelID) {
 		switch effort {
 		case ai.ThinkingMinimal, ai.ThinkingLow:
 			return ThinkingLevelLow

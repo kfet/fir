@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/env-api-keys.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package ai
 
 import (
@@ -24,6 +24,7 @@ var providerEnvMap = map[string]string{
 	string(ProviderMinimaxCN):           "MINIMAX_CN_API_KEY",
 	string(ProviderHuggingface):         "HF_TOKEN",
 	string(ProviderOpenCode):            "OPENCODE_API_KEY",
+	string(ProviderOpenCodeGo):          "OPENCODE_API_KEY",
 	string(ProviderKimiCoding):          "KIMI_API_KEY",
 }
 

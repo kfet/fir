@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 //
 // Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
 // SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
@@ -287,16 +287,21 @@ func handleReasoningDelta(
 // --- AWS SDK client construction ---
 
 func newBedrockClient(ctx context.Context, model *ai.Model, options *ai.StreamOptions) (*bedrockruntime.Client, error) {
+	// Region resolution: explicit env vars > SDK default chain.
+	// When AWS_PROFILE is set, we leave region unset so the SDK can
+	// resolve it from aws profile configs. Otherwise fall back to us-east-1.
 	region := os.Getenv("AWS_REGION")
 	if region == "" {
 		region = os.Getenv("AWS_DEFAULT_REGION")
 	}
-	if region == "" {
+	if region == "" && os.Getenv("AWS_PROFILE") == "" {
 		region = "us-east-1"
 	}
 
 	var cfgOpts []func(*awsconfig.LoadOptions) error
-	cfgOpts = append(cfgOpts, awsconfig.WithRegion(region))
+	if region != "" {
+		cfgOpts = append(cfgOpts, awsconfig.WithRegion(region))
+	}
 
 	// Support proxies that don't need authentication
 	if os.Getenv("AWS_BEDROCK_SKIP_AUTH") == "1" {
@@ -613,7 +618,7 @@ func buildBedrockAdditionalFields(modelID, reasoning string, options *ai.StreamO
 	if supportsBedrockAdaptiveThinking(modelID) {
 		return map[string]any{
 			"thinking":      map[string]any{"type": "adaptive"},
-			"output_config": map[string]any{"effort": mapThinkingLevelToEffort(ai.ThinkingLevel(reasoning))},
+			"output_config": map[string]any{"effort": bedrockThinkingLevelToEffort(ai.ThinkingLevel(reasoning), modelID)},
 		}
 	}
 
@@ -665,9 +670,30 @@ func supportsBedrockThinkingSignature(model *ai.Model) bool {
 	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
 }
 
-// supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking.
+// supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking (Opus 4.6 and Sonnet 4.6).
 func supportsBedrockAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
+}
+
+// bedrockThinkingLevelToEffort maps thinking level to Bedrock effort value.
+// Only Opus models support "max"; other models clamp xhigh to "high".
+func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
+	switch level {
+	case ai.ThinkingMinimal, ai.ThinkingLow:
+		return "low"
+	case ai.ThinkingMedium:
+		return "medium"
+	case ai.ThinkingHigh:
+		return "high"
+	case ai.ThinkingXHigh:
+		if strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") {
+			return "max"
+		}
+		return "high"
+	default:
+		return "high"
+	}
 }
 
 // bedrockImageFormatSDK maps MIME types to Bedrock ImageFormat enum values.

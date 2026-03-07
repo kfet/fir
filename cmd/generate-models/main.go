@@ -994,9 +994,9 @@ func loadModelsDevData() ([]modelSpec, error) {
 			models = append(models, modelSpec{
 				ID:             id,
 				Name:           stringOr(m.Name, id),
-				API:            "openai-completions",
+				API:            "mistral-conversations",
 				Provider:       "mistral",
-				BaseURL:        "https://api.mistral.ai/v1",
+				BaseURL:        "https://api.mistral.ai",
 				Reasoning:      m.Reasoning,
 				Input:          input,
 				CostInput:      m.Cost.Input,
@@ -1040,8 +1040,20 @@ func loadModelsDevData() ([]modelSpec, error) {
 		}
 	}
 
-	// --- OpenCode Zen ---
-	if p, ok := data["opencode"]; ok {
+	// --- OpenCode Zen (Zen and Go) ---
+	opencodeVariants := []struct {
+		key      string
+		provider string
+		basePath string
+	}{
+		{"opencode", "opencode", "https://opencode.ai/zen"},
+		{"opencode-go", "opencode-go", "https://opencode.ai/zen/go"},
+	}
+	for _, variant := range opencodeVariants {
+		p, ok := data[variant.key]
+		if !ok {
+			continue
+		}
 		for id, m := range p.Models {
 			if !m.ToolCall {
 				continue
@@ -1057,22 +1069,22 @@ func loadModelsDevData() ([]modelSpec, error) {
 			switch m.Provider.NPM {
 			case "@ai-sdk/openai":
 				api = "openai-responses"
-				baseURL = "https://opencode.ai/zen/v1"
+				baseURL = variant.basePath + "/v1"
 			case "@ai-sdk/anthropic":
 				api = "anthropic-messages"
-				baseURL = "https://opencode.ai/zen"
+				baseURL = variant.basePath
 			case "@ai-sdk/google":
 				api = "google-generative-ai"
-				baseURL = "https://opencode.ai/zen/v1"
+				baseURL = variant.basePath + "/v1"
 			default:
 				api = "openai-completions"
-				baseURL = "https://opencode.ai/zen/v1"
+				baseURL = variant.basePath + "/v1"
 			}
 			models = append(models, modelSpec{
 				ID:             id,
 				Name:           stringOr(m.Name, id),
 				API:            api,
-				Provider:       "opencode",
+				Provider:       variant.provider,
 				BaseURL:        baseURL,
 				Reasoning:      m.Reasoning,
 				Input:          input,
@@ -1227,16 +1239,30 @@ func stringOr(s, def string) string {
 
 // hasModel returns true if any model in all with the given provider and id exists.
 func hasModel(all []modelSpec, provider, id string) bool {
-	for _, m := range all {
-		if m.Provider == provider && m.ID == id {
-			return true
+	return findModel(all, provider, id) != nil
+}
+
+func findModel(all []modelSpec, provider, id string) *modelSpec {
+	for i := range all {
+		if all[i].Provider == provider && all[i].ID == id {
+			return &all[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // applyOverridesAndAdditions applies all the manual fixups from the TS script.
 func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
+	// Filter out opencode/opencode-go gpt-5.3-codex-spark
+	filtered := all[:0]
+	for _, m := range all {
+		if (m.Provider == "opencode" || m.Provider == "opencode-go") && m.ID == "gpt-5.3-codex-spark" {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	all = filtered
+
 	// Fix incorrect cache pricing for Claude Opus 4.5 from models.dev
 	for i := range all {
 		if all[i].Provider == "anthropic" && all[i].ID == "claude-opus-4-5" {
@@ -1253,12 +1279,32 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			m.CostCacheWrite = 6.25
 			m.ContextWindow = 200000
 		}
-		if (m.Provider == "anthropic" || m.Provider == "opencode") && m.ID == "claude-opus-4-6" {
+		if (m.Provider == "anthropic" || m.Provider == "opencode" || m.Provider == "opencode-go") && m.ID == "claude-opus-4-6" {
 			m.ContextWindow = 200000
 		}
-		// opencode lists Claude Sonnet 4/4.5 with 1M context, actual limit is 200K
-		if m.Provider == "opencode" && (m.ID == "claude-sonnet-4-5" || m.ID == "claude-sonnet-4") {
+		// OpenCode variants list Claude Sonnet 4/4.5 with 1M context, actual limit is 200K
+		if (m.Provider == "opencode" || m.Provider == "opencode-go") && (m.ID == "claude-sonnet-4-5" || m.ID == "claude-sonnet-4") {
 			m.ContextWindow = 200000
+		}
+		if (m.Provider == "opencode" || m.Provider == "opencode-go") && m.ID == "gpt-5.4" {
+			m.ContextWindow = 272000
+			m.MaxTokens = 128000
+		}
+		if m.Provider == "openai" && m.ID == "gpt-5.4" {
+			m.ContextWindow = 272000
+			m.MaxTokens = 128000
+		}
+		// Keep selected OpenRouter model metadata stable until upstream settles.
+		if m.Provider == "openrouter" && m.ID == "moonshotai/kimi-k2.5" {
+			m.CostInput = 0.41
+			m.CostOutput = 2.06
+			m.CostCacheRead = 0.07
+			m.MaxTokens = 4096
+		}
+		if m.Provider == "openrouter" && m.ID == "z-ai/glm-5" {
+			m.CostInput = 0.6
+			m.CostOutput = 1.9
+			m.CostCacheRead = 0.119
 		}
 	}
 
@@ -1367,6 +1413,26 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			CostInput: 30, CostOutput: 180, CostCacheRead: 3, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: 128000,
 		})
+	}
+
+	// Add missing Gemini 3.1 Flash Lite Preview until models.dev includes it.
+	if !hasModel(all, "google", "gemini-3.1-flash-lite-preview") {
+		all = append(all, modelSpec{
+			ID: "gemini-3.1-flash-lite-preview", Name: "Gemini 3.1 Flash Lite Preview",
+			API: "google-generative-ai", Provider: "google",
+			BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+			Reasoning: true, Input: []string{"text", "image"},
+			ContextWindow: 1048576, MaxTokens: 65536,
+		})
+	}
+
+	// Add missing GitHub Copilot GPT-5.3 models until models.dev includes them.
+	copilotBase := findModel(all, "github-copilot", "gpt-5.2-codex")
+	if copilotBase != nil && !hasModel(all, "github-copilot", "gpt-5.3-codex") {
+		clone := *copilotBase
+		clone.ID = "gpt-5.3-codex"
+		clone.Name = "GPT-5.3 Codex"
+		all = append(all, clone)
 	}
 
 	// OpenAI Codex (ChatGPT OAuth) models
@@ -1539,6 +1605,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
 			Input: []string{"text", "image"}, CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
 			ContextWindow: 200000, MaxTokens: 128000},
+		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6 (Antigravity)", API: "google-gemini-cli",
+			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
+			Input: []string{"text", "image"}, CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
+			ContextWindow: 200000, MaxTokens: 64000},
 		{ID: "gpt-oss-120b-medium", Name: "GPT-OSS 120B Medium (Antigravity)", API: "google-gemini-cli",
 			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: false,
 			Input: []string{"text"}, CostInput: 0.09, CostOutput: 0.36, CostCacheRead: 0, CostCacheWrite: 0,

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package providers
 
 import (
@@ -82,7 +82,7 @@ func clampCodexReasoningEffort(modelID, effort string) string {
 		id = id[idx+1:]
 	}
 	switch {
-	case (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3")) && effort == "minimal":
+	case (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4")) && effort == "minimal":
 		return "low"
 	case id == "gpt-5.1" && effort == "xhigh":
 		return "high"

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/overflow.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: c99b9940
 package ai
 
 import "regexp"
@@ -17,8 +17,9 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)exceeds the available context size`),     // llama.cpp
 	regexp.MustCompile(`(?i)greater than the context length`),        // LM Studio
 	regexp.MustCompile(`(?i)context window exceeds limit`),           // MiniMax
-	regexp.MustCompile(`(?i)exceeded model token limit`),             // Kimi
-	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),          // Generic
+	regexp.MustCompile(`(?i)exceeded model token limit`),                                       // Kimi
+	regexp.MustCompile(`(?i)too large for model with \d+ maximum context length`),               // Mistral
+	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),                                     // Generic
 	regexp.MustCompile(`(?i)too many tokens`),                        // Generic
 	regexp.MustCompile(`(?i)token limit exceeded`),                   // Generic
 }

@@ -43,8 +43,9 @@ func TestResponsesSSEProcessor_TextStream(t *testing.T) {
 
 	// output_item.done
 	proc.processEvent(`{"type":"response.output_item.done","item":{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"Hello world!"}]}}`)
-	if output.Content[0].Text.TextSignature != "msg_1" {
-		t.Errorf("expected text signature 'msg_1', got %q", output.Content[0].Text.TextSignature)
+	expectedSig := `{"id":"msg_1","v":1}`
+	if output.Content[0].Text.TextSignature != expectedSig {
+		t.Errorf("expected text signature %q, got %q", expectedSig, output.Content[0].Text.TextSignature)
 	}
 }
 
