@@ -182,8 +182,8 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 	// Tools
 	tools := convertResponsesTools(ctx.Tools, false)
 
-	// Add hosted shell tool when code_execution is configured.
-	if options != nil {
+	// Add hosted shell tool when code_execution is configured and model supports it.
+	if options != nil && supportsHostedShell(model) {
 		for _, st := range options.ServerTools {
 			if strings.HasPrefix(st.Type, "code_execution") {
 				tools = append(tools, map[string]any{
@@ -440,4 +440,24 @@ func RegisterOpenAIResponses(reg *ai.Registry) {
 		Stream:       StreamOpenAIResponses,
 		StreamSimple: StreamSimpleOpenAIResponses,
 	}, "builtin")
+}
+
+// supportsHostedShell returns true if the model supports the OpenAI hosted shell tool.
+// Currently only GPT-5+ and o3/o4 models support it.
+func supportsHostedShell(model *ai.Model) bool {
+	if model == nil {
+		return false
+	}
+	id := strings.ToLower(model.ID)
+	if strings.HasPrefix(id, "gpt-5") {
+		return true
+	}
+	if strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4") {
+		return true
+	}
+	// Codex models support shell.
+	if strings.HasPrefix(id, "codex") {
+		return true
+	}
+	return false
 }

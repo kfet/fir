@@ -184,7 +184,16 @@ func TestStreamOpenAIResponses_ShellCall(t *testing.T) {
 }
 
 func TestBuildOpenAIResponsesBody_ShellTool(t *testing.T) {
-	model := openaiResponsesTestModel("http://localhost")
+	// GPT-5 model — should add shell tool
+	model := &ai.Model{
+		ID:            "gpt-5",
+		Name:          "GPT-5",
+		Api:           ai.ApiOpenAIResponses,
+		Provider:      ai.ProviderOpenAI,
+		BaseURL:       "http://localhost",
+		ContextWindow: 128000,
+		MaxTokens:     16384,
+	}
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Hello", 0)},
 		Tools:    []ai.Tool{{Name: "read", Description: "Read a file", Parameters: map[string]any{"type": "object"}}},
@@ -217,7 +226,15 @@ func TestBuildOpenAIResponsesBody_ShellTool(t *testing.T) {
 }
 
 func TestBuildOpenAIResponsesBody_ShellToolNoFunctionTools(t *testing.T) {
-	model := openaiResponsesTestModel("http://localhost")
+	model := &ai.Model{
+		ID:            "gpt-5",
+		Name:          "GPT-5",
+		Api:           ai.ApiOpenAIResponses,
+		Provider:      ai.ProviderOpenAI,
+		BaseURL:       "http://localhost",
+		ContextWindow: 128000,
+		MaxTokens:     16384,
+	}
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Hello", 0)},
 	}
@@ -237,6 +254,30 @@ func TestBuildOpenAIResponsesBody_ShellToolNoFunctionTools(t *testing.T) {
 	assert.Equal(t, 1, len(tools))
 	shellTool := tools[0].(map[string]any)
 	assert.Equal(t, "shell", shellTool["type"])
+}
+
+func TestBuildOpenAIResponsesBody_ShellToolUnsupportedModel(t *testing.T) {
+	// GPT-4o does NOT support shell tool
+	model := openaiResponsesTestModel("http://localhost")
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("Hello", 0)},
+		Tools:    []ai.Tool{{Name: "read", Description: "Read a file", Parameters: map[string]any{"type": "object"}}},
+	}
+
+	opts := &ai.StreamOptions{
+		ApiKey: "sk-test",
+		ServerTools: []ai.AnthropicServerTool{
+			{Type: "code_execution_20250825"},
+		},
+	}
+	body, err := buildOpenAIResponsesBody(model, ctx, opts)
+	require.NoError(t, err)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	tools := parsed["tools"].([]any)
+	assert.Equal(t, 1, len(tools)) // only function tool, no shell
+	funcTool := tools[0].(map[string]any)
+	assert.Equal(t, "function", funcTool["type"])
 }
 
 func TestConvertResponsesInput_ShellCallReplay(t *testing.T) {
