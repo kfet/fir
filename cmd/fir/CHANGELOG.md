@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-03-06
+
 ### Changed
 
 - Plan tool prompt rewritten to be directive ("MUST") with a concrete 3-step threshold
