@@ -78,6 +78,7 @@ Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skil
 
 - **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; `/fork` creates branches, `/tree` navigates them. Use `/session` for version, IDs, message/token stats, and enabled extensions.
 - **Re-exec for local build testing** — use `/reexec` to restart into the current binary while preserving the active session, or `/reexec <path>` to switch to a specific built binary.
+- **In-place update** — use `/update` to check for, download, and install the latest release, then automatically restart the session.
 - **Compaction** — when context grows large, fir automatically summarizes older messages to stay within the model's context window. Configurable via `settings.json`.
 - **Thinking levels** — control reasoning depth: none, minimal, low, medium, high. Toggle with `Shift+Tab` or `--thinking`.
 - **Scoped models** — use `/scoped-models` to pick which models `Ctrl+P` cycles through.

@@ -1,12 +1,10 @@
-## Review — 2026-03-06
+# Review Backlog
 
-Files reviewed:
-- `pkg/ai/types.go`
-- `cmd/generate-models/main.go`
-- `cmd/generate-models/main_test.go`
-- `pkg/modes/interactive/components/model_selector.go`
-- `pkg/ai/models_generated.go` (spot-checked)
+## 2026-03-06 — Reviewed: pkg/modes/interactive/mode.go, pkg/core/slashcmds.go (/update command)
 
----
+No issues found.
 
-_All items from initial review have been addressed._
+## 2026-03-06 — Reviewed: pkg/ai/providers/openai_responses.go
+
+### ~~Simplification~~ (FIXED)
+- ~~`pkg/ai/providers/openai_responses.go:218,290` — duplicated `supportsImage` check~~ → Extracted `modelSupportsImage()` helper.

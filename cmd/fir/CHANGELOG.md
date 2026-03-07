@@ -4,6 +4,7 @@
 
 ### Added
 
+- `/update` slash command: update fir to the latest version in-place and automatically restart the session
 - OpenAI Responses API: `code_execution` server tool setting now enables the hosted shell tool (`container_auto`), with streaming support and multi-turn replay
 
 ### Fixed

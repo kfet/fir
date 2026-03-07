@@ -28,6 +28,7 @@ import (
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/fir/pkg/update"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
@@ -870,6 +871,8 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handleSkillsCommand(parts[1:])
 	case "/reexec":
 		m.handleReexecCommand(text)
+	case "/update":
+		go m.handleUpdateCommand()
 	case "/queue":
 		m.handleQueueCommand()
 	case "/dequeue":
@@ -2506,6 +2509,42 @@ func (m *InteractiveMode) handleSkillsInstall(name string) {
 	}
 
 	m.showStatus(fmt.Sprintf("Installed skill %q to %s (project)", name, targetDir))
+}
+
+func (m *InteractiveMode) handleUpdateCommand() {
+	if m.session != nil && m.session.IsStreaming() {
+		m.showWarning("Wait for the current response to finish.")
+		return
+	}
+
+	m.showMessage("Checking for updates...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rel, err := update.FetchLatestOrGH(ctx)
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Failed to check for updates: %v", err))
+		return
+	}
+
+	if !update.IsNewer(rel.Version, version) {
+		m.showMessage(fmt.Sprintf("Already on the latest version (%s).", version))
+		return
+	}
+
+	m.showMessage(fmt.Sprintf("Updating fir %s → %s...", version, rel.Version))
+
+	if err := update.SelfUpdate(ctx, rel); err != nil {
+		m.showWarning(fmt.Sprintf("Update failed: %v", err))
+		return
+	}
+
+	m.showMessage(fmt.Sprintf("Updated to fir %s. Restarting...", rel.Version))
+
+	// Give the user a moment to see the message, then reexec.
+	time.Sleep(500 * time.Millisecond)
+	m.handleReexecCommand("/reexec")
 }
 
 func (m *InteractiveMode) handleReexecCommand(text string) {

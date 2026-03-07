@@ -227,8 +227,19 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 	return json.Marshal(body)
 }
 
+// modelSupportsImage reports whether the model accepts image input.
+func modelSupportsImage(model *ai.Model) bool {
+	for _, m := range model.Input {
+		if m == ai.InputImage {
+			return true
+		}
+	}
+	return false
+}
+
 // convertResponsesInput converts ai.Context to OpenAI Responses API input format.
 func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
+	supportsImage := modelSupportsImage(model)
 	var input []any
 
 	// System prompt
@@ -257,13 +268,6 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 				})
 			} else if parts, ok := um.Content.([]any); ok {
 				var content []map[string]any
-				supportsImage := false
-				for _, m := range model.Input {
-					if m == ai.InputImage {
-						supportsImage = true
-						break
-					}
-				}
 				for _, p := range parts {
 					switch v := p.(type) {
 					case ai.TextContent:
@@ -371,13 +375,6 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 			})
 
 			// Send images as a follow-up user message
-			supportsImage := false
-			for _, m := range model.Input {
-				if m == ai.InputImage {
-					supportsImage = true
-					break
-				}
-			}
 			if hasImages && supportsImage {
 				var imageParts []map[string]any
 				imageParts = append(imageParts, map[string]any{
