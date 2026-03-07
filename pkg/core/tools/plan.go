@@ -19,16 +19,14 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 		Tool: ai.Tool{
 			Name: "plan",
 			Description: "Create or update a plan for tracking task progress. " +
-				"Break non-trivial tasks into steps and track completion.\n\n" +
-				"When to create a plan:\n" +
-				"- Any task with multiple sequential steps\n" +
-				"- Work where progress or status can be tracked\n" +
-				"- Tasks that take more than a couple of tool calls to complete\n\n" +
-				"How to use:\n" +
-				"- Create the plan at the START, before doing any work\n" +
+				"You MUST create a plan before starting any task that involves 3 or more non-trivial steps. " +
+				"When in doubt, create a plan.\n\n" +
+				"Rules:\n" +
+				"- Create the plan BEFORE your first action — not midway through\n" +
 				"- Mark each step \"in_progress\" as you begin it, \"completed\" when done\n" +
+				"- Update the plan after completing each step, before moving to the next\n" +
 				"- Each call replaces the entire plan — always include all entries\n" +
-				"- Update the plan after every completed step before moving to the next one",
+				"- Keep steps concrete and actionable, not vague",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

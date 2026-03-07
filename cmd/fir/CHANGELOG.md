@@ -4,6 +4,12 @@
 
 ### Changed
 
+- Plan tool prompt rewritten to be directive ("MUST") with a concrete 3-step threshold
+
+## [0.16.1] - 2026-03-06
+
+### Changed
+
 - Plan tool description now instructs the agent to create plans proactively at the start of multi-step tasks
 
 ## [0.16.0] - 2026-03-06
