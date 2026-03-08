@@ -5,7 +5,7 @@ package components
 import (
 	"fmt"
 
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )

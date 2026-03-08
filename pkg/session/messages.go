@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/messages.ts
 // Upstream hash: 1caadb2e
-package msg
+package session
 
 import (
 	"encoding/json"

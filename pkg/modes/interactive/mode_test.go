@@ -12,10 +12,8 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
-	fmsg "github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
@@ -145,7 +143,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 			ThinkingLevel: "off",
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return fmsg.ConvertToLLM(msgs)
+			return session.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1669,7 +1667,7 @@ func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
 	initial := tm.editorText()
 
 	// Override the clipboard reader to return nil (no image available).
-	tm.mode.clipboardReader = func() *platform.ClipboardImage { return nil }
+	tm.mode.clipboardReader = func() *core.ClipboardImage { return nil }
 
 	tm.mode.handleClipboardImagePaste()
 	tm.waitRender()
@@ -1684,8 +1682,8 @@ func TestHandleClipboardImagePaste_WithImage(t *testing.T) {
 
 	// Override the clipboard reader to return a fake PNG image.
 	fakeBytes := []byte("\x89PNG\r\n\x1a\n" + string(make([]byte, 100)))
-	tm.mode.clipboardReader = func() *platform.ClipboardImage {
-		return &platform.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
+	tm.mode.clipboardReader = func() *core.ClipboardImage {
+		return &core.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
 	}
 
 	tm.mode.handleClipboardImagePaste()
@@ -1986,7 +1984,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 			Messages:      []agent.AgentMessage{userMsg, assistantMsg},
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return fmsg.ConvertToLLM(msgs)
+			return session.ConvertToLLM(msgs)
 		},
 	})
 

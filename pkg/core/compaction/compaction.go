@@ -14,7 +14,6 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/session"
-	fmsg "github.com/kfet/fir/pkg/msg"
 )
 
 // ============================================================================
@@ -200,13 +199,13 @@ func EstimateTokens(message agent.AgentMessage) int {
 	// Handle custom message types
 	if message.Custom != nil {
 		switch msg := message.Custom.(type) {
-		case *fmsg.BashExecutionMessage:
+		case *session.BashExecutionMessage:
 			chars = len(msg.Command) + len(msg.Output)
-		case *fmsg.BranchSummaryMessage:
+		case *session.BranchSummaryMessage:
 			chars = len(msg.Summary)
-		case *fmsg.CompactionSummaryMessage:
+		case *session.CompactionSummaryMessage:
 			chars = len(msg.Summary)
-		case *fmsg.CustomMessage:
+		case *session.CustomMessage:
 			if s, ok := msg.Content.(string); ok {
 				chars = len(s)
 			}
@@ -399,7 +398,7 @@ func getMessageFromEntry(entry *session.SessionEntry) *agent.AgentMessage {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 			var content any
 			json.Unmarshal(entry.Content, &content)
-			cm := &fmsg.CustomMessage{
+			cm := &session.CustomMessage{
 				Role:       "custom",
 				CustomType: entry.CustomType,
 				Content:    content,
@@ -413,14 +412,14 @@ func getMessageFromEntry(entry *session.SessionEntry) *agent.AgentMessage {
 	case "branch_summary":
 		if entry.Summary != "" {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			am := fmsg.CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts)
+			am := session.CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts)
 			return &am
 		}
 
 	case "compaction":
 		if entry.Summary != "" {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			am := fmsg.CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, ts)
+			am := session.CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, ts)
 			return &am
 		}
 	}
@@ -673,7 +672,7 @@ func GenerateSummary(
 ) (string, error) {
 	maxTokens := int(0.8 * float64(reserveTokens))
 
-	llmMessages, err := fmsg.ConvertToLLM(currentMessages)
+	llmMessages, err := session.ConvertToLLM(currentMessages)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}
@@ -728,7 +727,7 @@ func generateTurnPrefixSummary(
 ) (string, error) {
 	maxTokens := int(0.5 * float64(reserveTokens))
 
-	llmMessages, err := fmsg.ConvertToLLM(messages)
+	llmMessages, err := session.ConvertToLLM(messages)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}

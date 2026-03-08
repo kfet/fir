@@ -29,7 +29,6 @@ import (
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	"github.com/kfet/fir/pkg/update"
-	"github.com/kfet/fir/pkg/usage"
 )
 
 // sessionSetup holds common setup results shared between run modes.
@@ -39,7 +38,7 @@ type sessionSetup struct {
 	result          *core.CreateAgentSessionResult
 	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
-	usageTracker    *usage.Tracker
+	usageTracker    *Tracker
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -126,7 +125,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	// Usage tracking
-	usageTracker := usage.New(usage.DefaultPath(agentDir))
+	usageTracker := New(DefaultPath(agentDir))
 
 	// Build session options
 	sessionOpts := core.CreateAgentSessionOptions{
@@ -139,7 +138,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ScopedModels:    scopedModels,
-		UsageTracker:    usage.NewSessionTracker(usageTracker),
+		UsageTracker:    NewSessionTracker(usageTracker),
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
 			ModelRegistry:   modelRegistry,
@@ -733,8 +732,8 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 }
 
 // recordCLIFlags records which CLI flags were used for usage tracking.
-func recordCLIFlags(tracker *usage.Tracker, args *Args) {
-	record := func(flag string) { tracker.Record(usage.EventCLIFlag, flag) }
+func recordCLIFlags(tracker *Tracker, args *Args) {
+	record := func(flag string) { tracker.Record(EventCLIFlag, flag) }
 
 	if args.Provider != "" {
 		record("--provider")
@@ -809,23 +808,23 @@ func recordCLIFlags(tracker *usage.Tracker, args *Args) {
 	// Record the mode
 	switch args.OutputMode {
 	case ModeJSON:
-		tracker.Record(usage.EventMode, "json")
+		tracker.Record(EventMode, "json")
 	case ModeACP:
-		tracker.Record(usage.EventMode, "acp")
+		tracker.Record(EventMode, "acp")
 	default:
 		if args.Print {
-			tracker.Record(usage.EventMode, "print")
+			tracker.Record(EventMode, "print")
 		} else {
-			tracker.Record(usage.EventMode, "interactive")
+			tracker.Record(EventMode, "interactive")
 		}
 	}
 
 	// Record session type
 	if args.Continue {
-		tracker.Record(usage.EventSession, "continue")
+		tracker.Record(EventSession, "continue")
 	} else if args.Resume {
-		tracker.Record(usage.EventSession, "resume")
+		tracker.Record(EventSession, "resume")
 	} else {
-		tracker.Record(usage.EventSession, "new")
+		tracker.Record(EventSession, "new")
 	}
 }

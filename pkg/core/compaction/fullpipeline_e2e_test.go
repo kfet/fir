@@ -14,7 +14,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )

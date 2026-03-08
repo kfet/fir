@@ -10,7 +10,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/session"
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 )
 
 func makeUserEntry(id, text string) *session.SessionEntry {

@@ -1,10 +1,10 @@
-// Package debug provides a global debug logger for fir.
+// debug.go contains the legacy debug.Log API, now merged into pkg/log.
 //
 // Debug logging is enabled via the --debug CLI flag or the FIR_DEBUG=1
 // environment variable. When disabled, all debug calls are no-ops.
 // Output goes to stderr so it never interferes with stdout-based
 // protocols (RPC, ACP, JSON mode).
-package debug
+package log
 
 import (
 	"fmt"
@@ -13,27 +13,27 @@ import (
 	"time"
 )
 
-var enabled atomic.Bool
+var debugEnabled atomic.Bool
 
 func init() {
 	if os.Getenv("FIR_DEBUG") != "" {
-		enabled.Store(true)
+		debugEnabled.Store(true)
 	}
 }
 
 // Enable turns debug logging on.
-func Enable() { enabled.Store(true) }
+func Enable() { debugEnabled.Store(true) }
 
 // Disable turns debug logging off.
-func Disable() { enabled.Store(false) }
+func Disable() { debugEnabled.Store(false) }
 
 // Enabled reports whether debug logging is active.
-func Enabled() bool { return enabled.Load() }
+func Enabled() bool { return debugEnabled.Load() }
 
 // Log writes a timestamped debug message to stderr.
 // It is a no-op when debug logging is disabled.
 func Log(format string, args ...any) {
-	if !enabled.Load() {
+	if !debugEnabled.Load() {
 		return
 	}
 	msg := fmt.Sprintf(format, args...)

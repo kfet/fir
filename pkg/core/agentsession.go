@@ -17,9 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/session"
-	fmsg "github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/agent/tools"
 	firlog "github.com/kfet/fir/pkg/log"
@@ -489,7 +487,7 @@ func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
 		s.SessionManager.AppendAgentMessage(msg)
 	case "custom":
 		if msg.Custom != nil {
-			if cm, ok := msg.Custom.(*fmsg.CustomMessage); ok {
+			if cm, ok := msg.Custom.(*session.CustomMessage); ok {
 				data, _ := json.Marshal(cm.Content)
 				s.SessionManager.AppendCustomEntry(cm.CustomType, data)
 			}
@@ -1280,13 +1278,13 @@ func (s *AgentSession) Reload() error {
 // ============================================================================
 
 // ExecuteBash executes a bash command and records the result in session history.
-func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (platform.BashResult, error) {
+func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (BashResult, error) {
 	return s.ExecuteBashWithOptions(command, onChunk, false)
 }
 
 // ExecuteBashWithOptions executes a bash command with optional streaming, cancellation,
 // and the option to exclude the result from context.
-func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (platform.BashResult, error) {
+func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (BashResult, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.bashCancelMu.Lock()
 	s.bashCancel = cancel
@@ -1306,7 +1304,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 		resolvedCommand = prefix + "\n" + command
 	}
 
-	result, err := platform.ExecuteBash(ctx, resolvedCommand, &platform.BashExecutorOptions{
+	result, err := ExecuteBash(ctx, resolvedCommand, &BashExecutorOptions{
 		OnChunk: onChunk,
 	})
 	if err != nil {
@@ -1315,7 +1313,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 
 	// Record in session
 	exitCode := result.ExitCode
-	bashMsg := &fmsg.BashExecutionMessage{
+	bashMsg := &session.BashExecutionMessage{
 		Role:               "bashExecution",
 		Command:            command,
 		Output:             result.Output,

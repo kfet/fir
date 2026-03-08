@@ -9,7 +9,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 )
 
 // SessionBridge implements BridgeAPI directly on top of a core.AgentSession.

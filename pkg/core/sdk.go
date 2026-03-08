@@ -14,7 +14,6 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/agent/tools"
@@ -205,7 +204,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			Tools:         agentTools,
 		},
 		ConvertToLLM: func(messages []agent.AgentMessage) ([]ai.Message, error) {
-			return msg.ConvertToLLM(messages)
+			return session.ConvertToLLM(messages)
 		},
 		SessionID:    sessionManager.GetSessionID(),
 		SteeringMode: settingsManager.GetSteeringMode(),

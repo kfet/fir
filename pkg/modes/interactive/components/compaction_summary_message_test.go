@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 )
 
 func TestFormatTokenCount(t *testing.T) {

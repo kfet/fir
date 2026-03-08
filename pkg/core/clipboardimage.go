@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/utils/clipboard-image.ts
 // Upstream hash: 1caadb2e
-package platform
+package core
 
 import (
 	"os"

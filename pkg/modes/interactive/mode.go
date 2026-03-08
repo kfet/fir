@@ -22,14 +22,13 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/agent/tools"
-	"github.com/kfet/fir/pkg/debug"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -117,8 +116,8 @@ type InteractiveMode struct {
 	updateCh <-chan string
 
 	// clipboardReader reads an image from the system clipboard.
-	// Defaults to platform.ReadClipboardImage; can be replaced in tests.
-	clipboardReader func() *platform.ClipboardImage
+	// Defaults to core.ReadClipboardImage; can be replaced in tests.
+	clipboardReader func() *core.ClipboardImage
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -164,7 +163,7 @@ func NewInteractiveMode(
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
-		clipboardReader:    platform.ReadClipboardImage,
+		clipboardReader:    core.ReadClipboardImage,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -229,7 +228,7 @@ func (m *InteractiveMode) startUpdateNoticeWatcher() {
 
 // Init initializes the TUI and components.
 func (m *InteractiveMode) Init() error {
-	debug.Log("interactive: initializing TUI")
+	firlog.Log("interactive: initializing TUI")
 	// Create terminal and TUI
 	term := tui.NewProcessTerminal()
 	m.ui = tui.NewTUI(term, false)
@@ -1465,7 +1464,7 @@ func (m *InteractiveMode) handleClipboardImagePaste() {
 		return // no image on clipboard, silently ignore
 	}
 
-	ext := platform.ExtensionForImageMimeType(img.MimeType)
+	ext := core.ExtensionForImageMimeType(img.MimeType)
 	if ext == "" {
 		ext = "png"
 	}
@@ -1737,10 +1736,10 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
 			// Try to auto-open the browser.
-			browserOpened := platform.OpenBrowser(info.URL) == nil
+			browserOpened := core.OpenBrowser(info.URL) == nil
 
 			// Show a clickable OSC 8 hyperlink so the URL stays on one line.
-			link := platform.Hyperlink(info.URL, info.URL)
+			link := core.Hyperlink(info.URL, info.URL)
 			var msg string
 			if browserOpened {
 				msg = fmt.Sprintf("Opening browser… if it doesn't appear, visit:\n%s", link)
@@ -2155,7 +2154,7 @@ func (m *InteractiveMode) performShare() {
 		m.showWarning("Gist created but no URL returned")
 		return
 	}
-	link := platform.Hyperlink(gistURL, gistURL)
+	link := core.Hyperlink(gistURL, gistURL)
 	m.showStatus(fmt.Sprintf("Session shared: %s", link))
 }
 
@@ -2203,7 +2202,7 @@ func (m *InteractiveMode) handleCopyCommand() {
 		m.showWarning("No agent messages to copy yet.")
 		return
 	}
-	platform.CopyToClipboard(text)
+	core.CopyToClipboard(text)
 	m.showStatus("Copied last agent message to clipboard")
 }
 
@@ -3285,7 +3284,7 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 
 	sidecar, err := session.ReadReexecSidecar(sessionFile)
 	if err != nil {
-		debug.Log("restoreReexecSidecar: read error: %v", err)
+		firlog.Log("restoreReexecSidecar: read error: %v", err)
 		return
 	}
 	if sidecar == nil {

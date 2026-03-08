@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	fmsg "github.com/kfet/fir/pkg/msg"
+	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/tui/components"

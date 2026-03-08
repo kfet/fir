@@ -1,9 +1,9 @@
-// Package usage tracks local feature usage counters.
+// Package main tracks local feature usage counters.
 //
 // Data is stored in a JSON file (default: ~/.fir/agent/usage.json).
 // All writes are atomic (write-to-temp + rename). Reads tolerate missing
 // or corrupt files gracefully.
-package usage
+package main
 
 import (
 	"encoding/json"

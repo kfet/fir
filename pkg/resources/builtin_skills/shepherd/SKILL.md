@@ -61,11 +61,11 @@ tm-win "$SESSION" reviewer
 _tm set-option -t "$SESSION" -g automatic-rename off
 ```
 
-**Model selection:** Workers must use the **same provider** as the shepherd. Never switch providers — auto-server routing is unpredictable and workers may land on a provider with no credentials.
+**Model selection:** Workers must use the **same provider** as the shepherd. Default to **Anthropic** unless the user says otherwise. Ask the user if you're unsure.
 
-**The shepherd currently has no way to detect its own provider** (no CLI arg access, no footer bar parsing, no `/info` command). Default to **Anthropic** unless the user says otherwise. Ask the user if you're unsure.
+Select model according to the tasks.
 
-| Provider | Coding workers | Review/design |
+| Provider | Coding workers (cheaper) | Review/design (expensive) |
 |----------|---------------|---------------|
 | Anthropic | `sonnet` | `opus` |
 | OpenAI | `gpt-mini` | `gpt-pro` |
@@ -79,8 +79,6 @@ CHEAP_MODEL="sonnet"
 
 tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --provider $PROVIDER --model $CHEAP_MODEL"
 ```
-
-If the user specifies a non-obvious provider name (e.g., `amazon-bedrock`, `google-gemini-cli`), use that exact string. When in doubt, launch one worker first, confirm it connects, then launch the rest.
 
 Address agents as `SESSION:WINDOW`.
 

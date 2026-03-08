@@ -1,4 +1,4 @@
-package usage
+package main
 
 // SessionTracker adapts a Tracker to the core.UsageTracker interface.
 type SessionTracker struct {

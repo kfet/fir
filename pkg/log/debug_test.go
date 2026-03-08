@@ -1,29 +1,31 @@
-package debug
+package log_test
 
 import (
 	"bytes"
 	"os"
 	"strings"
 	"testing"
+
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 func TestLog_Disabled(t *testing.T) {
-	Disable()
-	defer Disable()
+	firlog.Disable()
+	defer firlog.Disable()
 	// Should not panic or produce output when disabled
-	Log("this should be a no-op: %d", 42)
+	firlog.Log("this should be a no-op: %d", 42)
 }
 
 func TestLog_Enabled(t *testing.T) {
-	Enable()
-	defer Disable()
+	firlog.Enable()
+	defer firlog.Disable()
 
 	// Capture stderr
 	old := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
-	Log("test message: %s", "hello")
+	firlog.Log("test message: %s", "hello")
 
 	w.Close()
 	os.Stderr = old
@@ -41,13 +43,13 @@ func TestLog_Enabled(t *testing.T) {
 }
 
 func TestEnabled(t *testing.T) {
-	Disable()
-	if Enabled() {
+	firlog.Disable()
+	if firlog.Enabled() {
 		t.Error("expected disabled")
 	}
-	Enable()
-	if !Enabled() {
+	firlog.Enable()
+	if !firlog.Enabled() {
 		t.Error("expected enabled")
 	}
-	Disable()
+	firlog.Disable()
 }

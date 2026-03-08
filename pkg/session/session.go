@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	fmsg "github.com/kfet/fir/pkg/msg"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -1040,7 +1039,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 		case "branch_summary":
 			if entry.Summary != "" {
 				ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-				messages = append(messages, fmsg.CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts))
+				messages = append(messages, CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts))
 			}
 		case "compaction":
 			// Compaction summary is handled separately
@@ -1054,7 +1053,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 	if compaction != nil {
 		// Emit compaction summary first
 		ts, _ := time.Parse(time.RFC3339Nano, compaction.Timestamp)
-		messages = append(messages, fmsg.CreateCompactionSummaryMessage(compaction.Summary, compaction.TokensBefore, ts))
+		messages = append(messages, CreateCompactionSummaryMessage(compaction.Summary, compaction.TokensBefore, ts))
 
 		// Find compaction index in path
 		compactionIdx := -1

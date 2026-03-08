@@ -11,7 +11,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/debug"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // acpConn abstracts the methods used on *acpsdk.AgentSideConnection,
@@ -42,7 +42,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 	sessionCancels := map[string]func(){}
 
 	return func(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-		debug.Log("acp: incoming method=%s params=%s", method, truncate(string(params), 200))
+		firlog.Log("acp: incoming method=%s params=%s", method, truncate(string(params), 200))
 		switch method {
 		case "authenticate":
 			var p acpsdk.AuthenticateRequest
