@@ -28,7 +28,7 @@ build:
 	go mod tidy
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
-all: test-race pgo build build-all lint-python test-python
+all: test-race build build-all lint-python test-python
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
@@ -96,7 +96,7 @@ clean:
 RELEASE_TAG := v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
 RELEASE_BINS := $(BINARY)-darwin-arm64 $(BINARY)-darwin-amd64 $(BINARY)-linux-arm6 $(BINARY)-linux-arm64 $(BINARY)-linux-amd64
 
-publish: build-all
+publish: pgo build-all
 	@echo "Publishing $(RELEASE_TAG)..."
 	git push origin main $(RELEASE_TAG)
 	gh release create $(RELEASE_TAG) --title "fir $(shell cat VERSION)" --latest $(RELEASE_BINS)
