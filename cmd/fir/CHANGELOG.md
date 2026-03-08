@@ -4,6 +4,7 @@
 
 ### Added
 
+- Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)
 - Plan nudger: periodic steering reminder to update the plan every 5 turns when incomplete entries exist
 - Plan title: optional `title` parameter on the plan tool, shown in the plan header and footer status bar
 - `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
