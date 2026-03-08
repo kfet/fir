@@ -275,6 +275,7 @@ Last reviewed: **2026-03-08**
 | 3d. `export.go` → interactive | ❌ TODO | Still in `pkg/core/` (126 lines) |
 | 3e. `footerdataprovider.go` → interactive | ❌ TODO | Still in `pkg/core/` (232 lines) |
 | 3f. `bashexec.go` → platform or agent | ❌ TODO | Still in `pkg/core/` (246 lines) — infra utility |
+| 3g. Update UPSTREAM_MAP.md paths | ✅ Done | Fixed stale `pkg/core/` → new package paths |
 
 ### Phase 4: Dependency Injection on AgentSession — ❌ NOT STARTED
 

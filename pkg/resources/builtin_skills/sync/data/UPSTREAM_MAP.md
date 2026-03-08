@@ -65,9 +65,9 @@ fir has diverged enough that syncing them costs more than it saves.
 
 | TS Source | Go File | Status |
 |---|---|---|
-| `coding-agent/src/core/system-prompt.ts` | `pkg/core/systemprompt.go` | ✅ |
-| `coding-agent/src/core/model-resolver.ts` | `pkg/core/modelresolver.go` | ✅ |
-| `coding-agent/src/core/model-registry.ts` | `pkg/core/modelregistry.go` | ✅ |
+| `coding-agent/src/core/system-prompt.ts` | `pkg/resources/systemprompt.go` | ✅ |
+| `coding-agent/src/core/model-resolver.ts` | `pkg/models/modelresolver.go` | ✅ |
+| `coding-agent/src/core/model-registry.ts` | `pkg/models/modelregistry.go` | ✅ |
 
 ## No Longer Tracked
 
