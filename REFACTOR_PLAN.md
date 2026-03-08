@@ -277,11 +277,7 @@ Last reviewed: **2026-03-08**
 | 3f. `bashexec.go` → platform | ✅ Done | Moved to `pkg/platform/bashexec.go` with tests; core imports `platform.ExecuteBash` |
 | 3g. Update UPSTREAM_MAP.md paths | ✅ Done | Fixed stale `pkg/core/` → new package paths |
 
-### Phase 4: Dependency Injection on AgentSession — 🔄 IN PROGRESS
-
-NOTE: make sure to apply these from the main branch:
-commit 9ee5c36f3efc12cf5d3368976f7011516dda6659 (HEAD -> main) - changelog: session listing speed improvements
-commit 542c1bda056b594af6571d1fed55761437319544 - session: fast listing via sidecar cache, parallel loading, and top-N pre-sort
+### Phase 4: Dependency Injection on AgentSession — ✅ COMPLETE
 
 | Step | Status | Notes |
 |------|--------|-------|
@@ -289,20 +285,28 @@ commit 542c1bda056b594af6571d1fed55761437319544 - session: fast listing via side
 | 4b. Refactor `AgentSessionOptions` | ⏸️ Deferred | External callers use many concrete-only methods (GetTree, ForceFlush, AppendLabelChange, GetCwd, Refresh, etc.). Full DI swap deferred until a consumer actually needs a custom implementation. |
 | 4c. Move `core/tools/` → `pkg/agent/tools/` | ✅ Done | 26 files moved, 9 consumers updated |
 
-### Phase 5: Wire Up & Validate — ❌ NOT STARTED
+### Phase 5: Wire Up & Validate — ✅ COMPLETE
 
-### Phase 6: Optional Sub-modules — ❌ NOT STARTED
+| Step | Status | Notes |
+|------|--------|-------|
+| 5a. Update all consumers | ✅ Done | All imports updated during Phase 1–4 extractions; no stale `core.X` refs for moved types |
+| 5b. Verify no import cycles | ✅ Done | `go vet ./...` clean |
+| 5c. Full build & test | ✅ Done | `make all` passes |
+| 5d. Verify standalone usage | ✅ Done | `pkg/ai` has zero internal deps; `pkg/agent` depends only on `ai` + `log` |
+
+### Phase 6: Optional Sub-modules — ❌ NOT STARTED (low priority)
 
 ### Current `pkg/core` State
 
-**6 source files, ~2,292 lines** (down from ~10,400 — **78% reduction**)
+**7 source files, ~2,459 lines** (down from ~10,400 — **76% reduction**)
 
 | File | Lines | Status |
 |------|-------|--------|
-| `agentsession.go` | 1548 | Stays (core orchestration) |
+| `agentsession.go` | 1621 | Stays (core orchestration) |
 | `sdk.go` | 385 | Stays (convenience constructor) |
 | `changelog.go` | 138 | Stays |
 | `export.go` | 126 | Stays (AgentSession method, 3 callers) |
+| `interfaces.go` | 94 | Stays |
 | `timings.go` | 71 | Stays |
 | `compaction_progress.go` | 24 | Stays |
 
@@ -337,4 +341,4 @@ After the refactoring, `pkg/core` retains only:
 - `timings.go` — timing utilities
 - `changelog.go` — changelog parsing
 
-Roughly **~2,166 lines** down from **~10,400** — a 79% reduction.
+Roughly **~2,459 lines** down from **~10,400** — a 76% reduction.
