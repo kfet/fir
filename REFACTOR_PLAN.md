@@ -279,6 +279,10 @@ Last reviewed: **2026-03-08**
 
 ### Phase 4: Dependency Injection on AgentSession — 🔄 IN PROGRESS
 
+NOTE: make sure to apply these from the main branch:
+commit 9ee5c36f3efc12cf5d3368976f7011516dda6659 (HEAD -> main) - changelog: session listing speed improvements
+commit 542c1bda056b594af6571d1fed55761437319544 - session: fast listing via sidecar cache, parallel loading, and top-N pre-sort
+
 | Step | Status | Notes |
 |------|--------|-------|
 | 4a. Define interfaces | ✅ Done | `pkg/core/interfaces.go`: `SessionStore`, `SettingsReader`, `ModelFinder` with compile-time checks |
@@ -334,11 +338,3 @@ After the refactoring, `pkg/core` retains only:
 - `changelog.go` — changelog parsing
 
 Roughly **~2,166 lines** down from **~10,400** — a 79% reduction.
-
----
-
-## Future: Agent Self-Awareness
-
-The agent (LLM) currently has **no way to discover its own live settings** — provider, model, context usage, session ID, etc. This matters for the shepherd skill (needs to launch workers on the same provider) and any skill that adapts behavior based on model capabilities.
-
-**Needed:** A `/info` slash command (or equivalent) that prints current provider, model ID, context %, and session ID as readable text in the conversation. This would let the shepherd detect its provider and pass `--provider` to workers automatically instead of hardcoding Anthropic as the default.
