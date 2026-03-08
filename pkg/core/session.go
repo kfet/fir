@@ -83,6 +83,7 @@ type SessionEntry struct {
 
 	// plan_update
 	PlanEntries json.RawMessage `json:"planEntries,omitempty"`
+	PlanTitle   string          `json:"planTitle,omitempty"`
 }
 
 // GetParentID returns the parent entry ID, or empty string for root entries.
@@ -107,6 +108,7 @@ type SessionContext struct {
 	ThinkingLevel string
 	Model         *SessionModelRef
 	PlanEntries   []agent.PlanEntry
+	PlanTitle     string
 }
 
 // SessionModelRef identifies a model from the session.
@@ -672,7 +674,7 @@ func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
 // AppendPlanUpdate records the current plan state. These entries are never
 // included in the LLM context but are used to restore the plan on resume.
 // An empty/nil entries slice records a cleared plan.
-func (sm *SessionManager) AppendPlanUpdate(entries []agent.PlanEntry) string {
+func (sm *SessionManager) AppendPlanUpdate(title string, entries []agent.PlanEntry) string {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -683,6 +685,7 @@ func (sm *SessionManager) AppendPlanUpdate(entries []agent.PlanEntry) string {
 		ParentID:    sm.leafID,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 		PlanEntries: data,
+		PlanTitle:   title,
 	}
 	return sm.appendEntry(entry)
 }
@@ -933,6 +936,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 	var model *SessionModelRef
 	var compaction *SessionEntry
 	var lastPlanRaw json.RawMessage
+	var lastPlanTitle string
 
 	for _, entry := range path {
 		switch entry.Type {
@@ -955,6 +959,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 			compaction = entry
 		case "plan_update":
 			lastPlanRaw = entry.PlanEntries
+			lastPlanTitle = entry.PlanTitle
 		}
 	}
 
@@ -1030,6 +1035,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 		ThinkingLevel: thinkingLevel,
 		Model:         model,
 		PlanEntries:   planEntries,
+		PlanTitle:     lastPlanTitle,
 	}
 }
 

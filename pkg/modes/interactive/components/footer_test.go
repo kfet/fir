@@ -189,6 +189,28 @@ func TestFooterComponent_PlanCompleted(t *testing.T) {
 	}
 }
 
+func TestFooterComponent_PlanCompletedWithTitle(t *testing.T) {
+	f := NewFooterComponent(func() FooterData{
+		return FooterData{
+			Pwd:           "/home/user",
+			ModelID:       "test-model",
+			ContextWindow: 128000,
+			PlanTotal:     2,
+			PlanCompleted: 2,
+			PlanTitle:     "Implement caching",
+		}
+	})
+
+	lines := f.Render(120)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "2/2") {
+		t.Fatal("expected completed plan count")
+	}
+	if !strings.Contains(joined, "Implement caching") {
+		t.Fatal("expected plan title in footer when plan is complete")
+	}
+}
+
 func TestFooterComponent_NoPlan(t *testing.T) {
 	f := NewFooterComponent(func() FooterData{
 		return FooterData{

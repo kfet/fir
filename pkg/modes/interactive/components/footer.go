@@ -45,6 +45,8 @@ type FooterData struct {
 	PlanTotal int
 	// PlanCurrentStep is the content of the current in-progress step (empty if none).
 	PlanCurrentStep string
+	// PlanTitle is a short title for the plan (shown when plan is complete).
+	PlanTitle string
 	// PlanKeyHint is the display string for the toggle-plan keybinding (e.g. "ctrl+r").
 	PlanKeyHint string
 }
@@ -156,7 +158,14 @@ func (f *FooterComponent) Render(width int) []string {
 	// Plan progress
 	if data.PlanTotal > 0 {
 		planStr := fmt.Sprintf("📋 %d/%d", data.PlanCompleted, data.PlanTotal)
-		if data.PlanCurrentStep != "" {
+		if data.PlanCompleted == data.PlanTotal && data.PlanTitle != "" {
+			// Plan is done — show the title instead of step content
+			title := data.PlanTitle
+			if len(title) > 30 {
+				title = title[:27] + "..."
+			}
+			planStr += ": " + title
+		} else if data.PlanCurrentStep != "" {
 			step := data.PlanCurrentStep
 			if len(step) > 30 {
 				step = step[:27] + "..."

@@ -14,14 +14,16 @@ type PlanComponent struct {
 	*tuicomp.Box
 
 	mu      sync.Mutex
+	title   string
 	entries []agent.PlanEntry
 }
 
 // NewPlanComponent creates a new PlanComponent.
-func NewPlanComponent(entries []agent.PlanEntry) *PlanComponent {
+func NewPlanComponent(title string, entries []agent.PlanEntry) *PlanComponent {
 	t := theme.GetTheme()
 	c := &PlanComponent{
 		Box:     tuicomp.NewBox(1, 1, func(s string) string { return t.Bg("customMessageBg", s) }),
+		title:   title,
 		entries: entries,
 	}
 	c.updateDisplay()
@@ -29,8 +31,9 @@ func NewPlanComponent(entries []agent.PlanEntry) *PlanComponent {
 }
 
 // SetEntries updates the plan entries and rebuilds the display.
-func (c *PlanComponent) SetEntries(entries []agent.PlanEntry) {
+func (c *PlanComponent) SetEntries(title string, entries []agent.PlanEntry) {
 	c.mu.Lock()
+	c.title = title
 	c.entries = entries
 	c.mu.Unlock()
 	c.updateDisplay()
@@ -47,11 +50,16 @@ func (c *PlanComponent) updateDisplay() {
 	t := theme.GetTheme()
 
 	c.mu.Lock()
+	title := c.title
 	entries := make([]agent.PlanEntry, len(c.entries))
 	copy(entries, c.entries)
 	c.mu.Unlock()
 
-	label := t.Fg("customMessageLabel", "\x1b[1m[plan]\x1b[22m")
+	labelText := "[plan]"
+	if title != "" {
+		labelText = "[plan: " + title + "]"
+	}
+	label := t.Fg("customMessageLabel", "\x1b[1m"+labelText+"\x1b[22m")
 	c.AddChild(tuicomp.NewText(label, 0, 0, nil))
 
 	if len(entries) == 0 {

@@ -1,5 +1,7 @@
 Use idiomatic Go. Keep it simple.
 
+Prefer `sync/atomic`, `sync.Once`, and channels over manual mutex management when appropriate.
+
 `.fir/skills` is a symlink to `pkg/core/builtin_skills/`. They are the same directory — don't treat them as separate copies.
 
 Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks.

@@ -9,18 +9,20 @@ import (
 
 // mockPlanUpdater records UpdatePlan calls.
 type mockPlanUpdater struct {
+	title   string
 	entries []agent.PlanEntry
 	calls   int
 }
 
-func (m *mockPlanUpdater) UpdatePlan(entries []agent.PlanEntry) {
+func (m *mockPlanUpdater) UpdatePlan(title string, entries []agent.PlanEntry) {
+	m.title = title
 	m.entries = entries
 	m.calls++
 }
 
 func TestPlanTool_Basic(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	if tool.Name != "plan" {
 		t.Fatalf("name = %q, want plan", tool.Name)
@@ -58,7 +60,7 @@ func TestPlanTool_Basic(t *testing.T) {
 
 func TestPlanTool_EmptyEntries(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	result, err := tool.Execute(context.Background(), "tc2", map[string]any{
 		"entries": []any{},
@@ -77,7 +79,7 @@ func TestPlanTool_EmptyEntries(t *testing.T) {
 
 func TestPlanTool_InvalidStatus(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	result, err := tool.Execute(context.Background(), "tc3", map[string]any{
 		"entries": []any{
@@ -100,7 +102,7 @@ func TestPlanTool_InvalidStatus(t *testing.T) {
 
 func TestPlanTool_MissingContent(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	result, err := tool.Execute(context.Background(), "tc4", map[string]any{
 		"entries": []any{
@@ -121,7 +123,7 @@ func TestPlanTool_MissingContent(t *testing.T) {
 
 func TestPlanTool_NoEntriesParam(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	result, err := tool.Execute(context.Background(), "tc5", map[string]any{}, nil)
 
@@ -139,7 +141,7 @@ func TestPlanTool_NoEntriesParam(t *testing.T) {
 
 func TestPlanTool_EntriesNotArray(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	tool := NewPlanTool(mock)
+	tool := NewPlanTool(mock, nil)
 
 	result, err := tool.Execute(context.Background(), "tc6", map[string]any{
 		"entries": "not an array",
@@ -153,5 +155,77 @@ func TestPlanTool_EntriesNotArray(t *testing.T) {
 	}
 	if mock.calls != 0 {
 		t.Fatalf("calls = %d, want 0", mock.calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PlanNudger tests
+// ---------------------------------------------------------------------------
+
+func TestPlanNudger_FiresAfterInterval(t *testing.T) {
+	active := true
+	n := NewPlanNudger(3, func() bool { return active })
+
+	// Turns 1-2: no nudge
+	for i := 0; i < 2; i++ {
+		n.RecordTurn()
+		if msg := n.Check(); msg != "" {
+			t.Fatalf("unexpected nudge after turn %d", i+1)
+		}
+	}
+
+	// Turn 3: should nudge
+	n.RecordTurn()
+	if msg := n.Check(); msg == "" {
+		t.Fatal("expected nudge after 3 turns")
+	}
+
+	// Counter was reset, so next check should not nudge
+	if msg := n.Check(); msg != "" {
+		t.Fatal("nudge should not fire immediately after reset")
+	}
+}
+
+func TestPlanNudger_NoNudgeWithoutActivePlan(t *testing.T) {
+	n := NewPlanNudger(1, func() bool { return false })
+	n.RecordTurn()
+	if msg := n.Check(); msg != "" {
+		t.Fatal("should not nudge when no active plan")
+	}
+}
+
+func TestPlanNudger_ResetOnPlanUpdate(t *testing.T) {
+	n := NewPlanNudger(2, func() bool { return true })
+	n.RecordTurn()
+	n.RecordPlanUpdate() // reset
+	n.RecordTurn()
+	if msg := n.Check(); msg != "" {
+		t.Fatal("should not nudge — counter was reset by plan update")
+	}
+	n.RecordTurn()
+	if msg := n.Check(); msg == "" {
+		t.Fatal("expected nudge after 2 turns since last update")
+	}
+}
+
+func TestPlanNudger_NudgerResetsCounter(t *testing.T) {
+	mock := &mockPlanUpdater{}
+	n := NewPlanNudger(1, func() bool { return true })
+	tool := NewPlanTool(mock, n)
+
+	// Simulate turns
+	n.RecordTurn()
+	n.RecordTurn()
+
+	// Calling the plan tool should reset
+	_, _ = tool.Execute(context.Background(), "tc", map[string]any{
+		"entries": []any{
+			map[string]any{"content": "step", "status": "pending", "priority": "high"},
+		},
+	}, nil)
+
+	// Counter should be reset — need interval turns again
+	if msg := n.Check(); msg != "" {
+		t.Fatal("should not nudge immediately after plan tool call")
 	}
 }

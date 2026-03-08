@@ -2779,7 +2779,7 @@ func (m *InteractiveMode) IsBashMode() bool {
 // Display helpers
 // ============================================================================
 
-func (m *InteractiveMode) onPlanUpdate(entries []agent.PlanEntry) {
+func (m *InteractiveMode) onPlanUpdate(title string, entries []agent.PlanEntry) {
 	if len(entries) == 0 {
 		m.planComponent = nil
 		if m.planInContainer {
@@ -2789,9 +2789,9 @@ func (m *InteractiveMode) onPlanUpdate(entries []agent.PlanEntry) {
 	} else {
 		if m.planComponent != nil {
 			// Update entries in-place; container membership is unchanged.
-			m.planComponent.SetEntries(entries)
+			m.planComponent.SetEntries(title, entries)
 		} else {
-			m.planComponent = components.NewPlanComponent(entries)
+			m.planComponent = components.NewPlanComponent(title, entries)
 			if !m.planHidden {
 				m.planContainer.AddChild(m.planComponent)
 				m.planInContainer = true
@@ -2811,6 +2811,7 @@ func (m *InteractiveMode) togglePlanVisibility() {
 		return
 	}
 	entries := m.session.PlanEntries()
+	title := m.session.PlanTitle()
 	if len(entries) == 0 {
 		m.showStatus("No plan entries.")
 		return
@@ -2823,7 +2824,7 @@ func (m *InteractiveMode) togglePlanVisibility() {
 		}
 	} else {
 		if m.planComponent == nil {
-			m.planComponent = components.NewPlanComponent(entries)
+			m.planComponent = components.NewPlanComponent(title, entries)
 		}
 		if !m.planInContainer {
 			m.planContainer.AddChild(m.planComponent)
@@ -2969,6 +2970,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 	// Plan progress
 	if entries := m.session.PlanEntries(); len(entries) > 0 {
 		data.PlanTotal = len(entries)
+		data.PlanTitle = m.session.PlanTitle()
 		for _, e := range entries {
 			switch e.Status {
 			case agent.PlanEntryStatusCompleted:
@@ -3103,7 +3105,7 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 			// If pending work, agent will resume naturally via EventAgentStart (no notification needed here)
 			m.ui.RequestRender(false)
 		case "plan_update":
-			m.onPlanUpdate(event.PlanEntries)
+			m.onPlanUpdate(event.PlanTitle, event.PlanEntries)
 		}
 		return
 	}

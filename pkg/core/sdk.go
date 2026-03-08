@@ -275,7 +275,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	// Restore plan state from an existing session without writing a new entry.
 	if hasExistingSession {
-		session.restorePlan(existingSession.PlanEntries)
+		session.restorePlan(existingSession.PlanTitle, existingSession.PlanEntries)
 	}
 
 	return &CreateAgentSessionResult{

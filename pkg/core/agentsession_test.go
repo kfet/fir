@@ -2717,7 +2717,7 @@ func TestAgentSession_UpdatePlan_EmitsEvent(t *testing.T) {
 		{Content: "Step 1", Status: "pending"},
 		{Content: "Step 2", Status: "done"},
 	}
-	session.UpdatePlan(entries)
+	session.UpdatePlan("Test Plan", entries)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2744,7 +2744,7 @@ func TestAgentSession_PlanEntries_ReturnsDefensiveCopy(t *testing.T) {
 	entries := []agent.PlanEntry{
 		{Content: "Step 1", Status: "pending"},
 	}
-	session.UpdatePlan(entries)
+	session.UpdatePlan("Test Plan", entries)
 
 	copy1 := session.PlanEntries()
 	copy2 := session.PlanEntries()
@@ -2827,7 +2827,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	defer session.Close()
 
 	// Set a plan before any prompt
-	session.UpdatePlan([]agent.PlanEntry{
+	session.UpdatePlan("Test", []agent.PlanEntry{
 		{Content: "Step 1", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
 	})
 	if len(session.PlanEntries()) != 1 {
@@ -2999,7 +2999,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	}
 
 	// Set a plan — should be persisted to session
-	session.UpdatePlan([]agent.PlanEntry{
+	session.UpdatePlan("Test", []agent.PlanEntry{
 		{Content: "Task A", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Task B", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
 	})

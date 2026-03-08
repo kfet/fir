@@ -3,18 +3,68 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 )
 
-// PlanUpdater is the interface the plan tool needs from a session.
-type PlanUpdater interface {
-	UpdatePlan(entries []agent.PlanEntry)
+// DefaultPlanNudgeInterval is the number of turns between plan update reminders.
+const DefaultPlanNudgeInterval = 5
+
+// PlanNudger generates periodic steering reminders to update an active plan.
+// It is safe for concurrent use.
+type PlanNudger struct {
+	mu               sync.Mutex
+	turnsSinceUpdate int
+	interval         int
+	hasActivePlan    func() bool
 }
 
-// NewPlanTool creates the plan tool. It requires a PlanUpdater (typically *core.AgentSession).
-func NewPlanTool(session PlanUpdater) agent.AgentTool {
+// NewPlanNudger creates a nudger that fires every interval turns when
+// hasActivePlan returns true. Call RecordPlanUpdate when the plan tool is
+// invoked and RecordTurn after each agent turn.
+//
+// hasActivePlan is called while the nudger's internal mutex is held, so it
+// must not attempt to acquire the nudger's mutex (it may acquire other locks).
+func NewPlanNudger(interval int, hasActivePlan func() bool) *PlanNudger {
+	return &PlanNudger{interval: interval, hasActivePlan: hasActivePlan}
+}
+
+// RecordTurn increments the turn counter.
+func (n *PlanNudger) RecordTurn() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.turnsSinceUpdate++
+}
+
+// RecordPlanUpdate resets the turn counter (the model just updated the plan).
+func (n *PlanNudger) RecordPlanUpdate() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.turnsSinceUpdate = 0
+}
+
+// Check returns a nudge message if enough turns have elapsed and there is an
+// active plan with incomplete entries. Returns empty string otherwise.
+func (n *PlanNudger) Check() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.turnsSinceUpdate >= n.interval && n.hasActivePlan() {
+		n.turnsSinceUpdate = 0
+		return "Reminder: update your plan to reflect current progress."
+	}
+	return ""
+}
+
+// PlanUpdater is the interface the plan tool needs from a session.
+type PlanUpdater interface {
+	UpdatePlan(title string, entries []agent.PlanEntry)
+}
+
+// NewPlanTool creates the plan tool. It requires a PlanUpdater (typically
+// *core.AgentSession). If nudger is non-nil, it is reset on each plan update.
+func NewPlanTool(session PlanUpdater, nudger *PlanNudger) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name: "plan",
@@ -30,6 +80,10 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"title": map[string]any{
+						"type":        "string",
+						"description": "Short title for the plan (e.g. \"Implement caching layer\"). Shown in the plan header and status bar.",
+					},
 					"entries": map[string]any{
 						"type":        "array",
 						"description": "The complete list of plan entries. Each entry has content, status, and priority.",
@@ -68,7 +122,12 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 				}, nil
 			}
 
-			session.UpdatePlan(entries)
+			title, _ := params["title"].(string)
+
+			session.UpdatePlan(title, entries)
+			if nudger != nil {
+				nudger.RecordPlanUpdate()
+			}
 
 			var msg string
 			if len(entries) == 0 {

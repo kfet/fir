@@ -4,6 +4,8 @@
 
 ### Added
 
+- Plan nudger: periodic steering reminder to update the plan every 5 turns when incomplete entries exist
+- Plan title: optional `title` parameter on the plan tool, shown in the plan header and footer status bar
 - `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
 - Extract `pkg/auth` from `pkg/core` — credential/OAuth storage as a standalone leaf package
 - Extract `pkg/config` from `pkg/core` — settings, config value resolution, and defaults as a standalone leaf package
@@ -17,6 +19,7 @@
 
 ### Fixed
 
+- Plan tool: stale plans no longer cleared after a turn where the model updated the plan
 - tmuxspinner now clears appended session name on `/new`, session switch, and `/reexec`
 
 ### Changed

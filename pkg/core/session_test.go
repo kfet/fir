@@ -1192,7 +1192,7 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Step 2", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
 	}
-	sm.AppendPlanUpdate(entries)
+	sm.AppendPlanUpdate("Test Plan", entries)
 
 	sessionFile := sm.GetSessionFile()
 	if sessionFile == "" {
@@ -1212,6 +1212,9 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 	if ctx.PlanEntries[1].Status != agent.PlanEntryStatusPending {
 		t.Errorf("expected pending, got %s", ctx.PlanEntries[1].Status)
 	}
+	if ctx.PlanTitle != "Test Plan" {
+		t.Errorf("expected plan title 'Test Plan', got %q", ctx.PlanTitle)
+	}
 }
 
 func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
@@ -1226,10 +1229,10 @@ func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
 	}))
 
 	// Set a plan then clear it
-	sm.AppendPlanUpdate([]agent.PlanEntry{
+	sm.AppendPlanUpdate("Temp Plan", []agent.PlanEntry{
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 	})
-	sm.AppendPlanUpdate(nil) // clear
+	sm.AppendPlanUpdate("", nil) // clear
 
 	sessionFile := sm.GetSessionFile()
 	sm2 := OpenSessionManager(sessionFile)
@@ -1237,6 +1240,9 @@ func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
 
 	if len(ctx.PlanEntries) != 0 {
 		t.Errorf("expected plan to be empty after clear, got %d entries", len(ctx.PlanEntries))
+	}
+	if ctx.PlanTitle != "" {
+		t.Errorf("expected empty plan title after clear, got %q", ctx.PlanTitle)
 	}
 }
 
@@ -1254,6 +1260,7 @@ func TestBuildSessionContextFromEntries_PlanNotInMessages(t *testing.T) {
 		{Content: "Do thing", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
 	})
 	entries[0].PlanEntries = planData
+	entries[0].PlanTitle = "My Plan"
 
 	byID := map[string]*SessionEntry{"e1": entries[0]}
 	ctx := BuildSessionContextFromEntries(entries, "e1", byID)
@@ -1266,5 +1273,8 @@ func TestBuildSessionContextFromEntries_PlanNotInMessages(t *testing.T) {
 	}
 	if ctx.PlanEntries[0].Content != "Do thing" {
 		t.Errorf("wrong plan entry content: %s", ctx.PlanEntries[0].Content)
+	}
+	if ctx.PlanTitle != "My Plan" {
+		t.Errorf("expected plan title 'My Plan', got %q", ctx.PlanTitle)
 	}
 }

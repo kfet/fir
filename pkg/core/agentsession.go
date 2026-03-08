@@ -111,6 +111,8 @@ type AgentSessionEvent struct {
 
 	// PlanEntries is set on "plan_update" events.
 	PlanEntries []agent.PlanEntry
+	// PlanTitle is set on "plan_update" events.
+	PlanTitle string
 }
 
 // AgentSessionEventListener receives session events.
@@ -217,7 +219,12 @@ type AgentSession struct {
 	usageTracker UsageTracker
 
 	// Plan entries (guarded by mu)
-	plan []agent.PlanEntry
+	plan        []agent.PlanEntry
+	planTitle   string
+	planVersion int64 // incremented on each UpdatePlan call
+
+	// Plan nudger (created once, lives for session lifetime)
+	planNudger *tools.PlanNudger
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -234,6 +241,9 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 	}
+
+	// Create plan nudger — checks whether incomplete plan entries exist
+	s.planNudger = tools.NewPlanNudger(tools.DefaultPlanNudgeInterval, s.hasActivePlan)
 
 	// Subscribe to agent events for internal handling
 	s.unsubAgent = s.Agent.Subscribe(s.handleAgentEvent)
@@ -254,28 +264,32 @@ func (s *AgentSession) UsageTracker() UsageTracker {
 	return s.usageTracker
 }
 
-// UpdatePlan replaces the plan entries and emits a "plan_update" event.
+// UpdatePlan replaces the plan entries and title, emits a "plan_update" event.
 // The new state is also persisted to the session file so it survives resume.
-func (s *AgentSession) UpdatePlan(entries []agent.PlanEntry) {
+func (s *AgentSession) UpdatePlan(title string, entries []agent.PlanEntry) {
 	s.mu.Lock()
+	s.planTitle = title
 	s.plan = entries
+	s.planVersion++
 	s.mu.Unlock()
-	s.SessionManager.AppendPlanUpdate(entries)
+	s.SessionManager.AppendPlanUpdate(title, entries)
 	snapshot := make([]agent.PlanEntry, len(entries))
 	copy(snapshot, entries)
 	s.emit(AgentSessionEvent{
 		Type:        "plan_update",
 		PlanEntries: snapshot,
+		PlanTitle:   title,
 	})
 }
 
 // restorePlan sets the in-memory plan and emits a plan_update event without
 // writing a new session entry (used when loading an existing session).
-func (s *AgentSession) restorePlan(entries []agent.PlanEntry) {
-	if len(entries) == 0 {
+func (s *AgentSession) restorePlan(title string, entries []agent.PlanEntry) {
+	if len(entries) == 0 && title == "" {
 		return
 	}
 	s.mu.Lock()
+	s.planTitle = title
 	s.plan = entries
 	s.mu.Unlock()
 	snapshot := make([]agent.PlanEntry, len(entries))
@@ -283,6 +297,7 @@ func (s *AgentSession) restorePlan(entries []agent.PlanEntry) {
 	s.emit(AgentSessionEvent{
 		Type:        "plan_update",
 		PlanEntries: snapshot,
+		PlanTitle:   title,
 	})
 }
 
@@ -293,6 +308,32 @@ func (s *AgentSession) PlanEntries() []agent.PlanEntry {
 	out := make([]agent.PlanEntry, len(s.plan))
 	copy(out, s.plan)
 	return out
+}
+
+// PlanTitle returns the current plan title.
+func (s *AgentSession) PlanTitle() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.planTitle
+}
+
+// planVersionNum returns the current plan version counter.
+func (s *AgentSession) planVersionNum() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.planVersion
+}
+
+// hasActivePlan reports whether the plan has any non-completed entries.
+func (s *AgentSession) hasActivePlan() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.plan {
+		if e.Status != agent.PlanEntryStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================
@@ -403,6 +444,14 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 			s.checkAutoCompaction(msg)
 		}
 	}
+
+	// Plan nudge: record turns and steer when it's time to remind.
+	if event.Type == agent.EventTurnEnd && s.planNudger != nil {
+		s.planNudger.RecordTurn()
+		if msg := s.planNudger.Check(); msg != "" {
+			s.Agent.Steer(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
+		}
+	}
 }
 
 func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
@@ -436,7 +485,9 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 
 	// If a plan was left over from a previous turn, remember to clear it
 	// once this turn finishes so stale plans don't persist indefinitely.
-	hadPlanBeforeTurn := len(s.PlanEntries()) > 0
+	preTurnPlan := s.PlanEntries()
+	hadPlanBeforeTurn := len(preTurnPlan) > 0
+	planVersionBefore := s.planVersionNum()
 
 	// Build system prompt before each turn
 	s.buildSystemPrompt()
@@ -495,10 +546,10 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// Wait for the agent loop to complete (it runs in a goroutine)
 	s.Agent.WaitForIdle()
 
-	// Clear a plan that existed before this turn started so stale plans
-	// don't linger across interactions.
-	if hadPlanBeforeTurn {
-		s.UpdatePlan(nil)
+	// Clear a stale plan from a previous turn. If the model created or
+	// updated the plan during *this* turn, keep it.
+	if hadPlanBeforeTurn && s.planVersionNum() == planVersionBefore {
+		s.UpdatePlan("", nil)
 	}
 
 	return nil
@@ -1054,7 +1105,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	}
 
 	// Restore plan state from session without writing a new entry.
-	s.restorePlan(ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
 
 	// Rebuild system prompt
 	s.buildSystemPrompt()
@@ -1104,7 +1155,7 @@ func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool
 	// Reload messages from entries
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
-	s.restorePlan(ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
 
 	return selectedText, false, nil
 }
@@ -1514,7 +1565,7 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	// Rebuild messages from the new branch
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
-	s.restorePlan(ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
 
 	// Find user message text at this entry for editor pre-fill
 	entry := s.SessionManager.GetEntry(entryID)
@@ -1539,6 +1590,6 @@ func (s *AgentSession) RegisterSessionTools() {
 	state := s.Agent.State()
 	allTools := make([]agent.AgentTool, len(state.Tools), len(state.Tools)+1)
 	copy(allTools, state.Tools)
-	allTools = append(allTools, tools.NewPlanTool(s))
+	allTools = append(allTools, tools.NewPlanTool(s, s.planNudger))
 	s.Agent.SetTools(allTools)
 }
