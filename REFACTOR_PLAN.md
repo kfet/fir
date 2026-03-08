@@ -294,40 +294,24 @@ Last reviewed: **2026-03-08**
 | 5c. Full build & test | ✅ Done | `make all` passes |
 | 5d. Verify standalone usage | ✅ Done | `pkg/ai` has zero internal deps; `pkg/agent` depends only on `ai` + `log` |
 
-### Phase 6: Consolidate Small Packages — ❌ NOT STARTED
+### Phase 6: Consolidate Small Packages — ✅ COMPLETE
+
+| Step | Status | Notes |
+|------|--------|-------|
+| 6a. `pkg/msg` → `pkg/session` | ✅ Done | `messages.go`, `messages_test.go` merged; all consumers updated |
+| 6b. `pkg/debug` → `pkg/log` | ✅ Done | `debug.go`, `debug_test.go` merged; 2 consumers updated |
+| 6c. `pkg/platform` → `pkg/core` | ✅ Done | All 8 platform files merged into core; 4 consumers updated |
+| 6d. `pkg/usage` → `cmd/fir` | ✅ Done | 3 files moved to cmd/fir; `app.go` updated |
 
 The extraction phases created 18 top-level packages under `pkg/`. Several are too small to justify their own directory. This phase merges them back into natural homes to reach **14 top-level packages**.
 
-#### 6a. `pkg/msg` → `pkg/session` (192 lines)
+#### 6a. `pkg/msg` → `pkg/session` ✅ Done
 
-- **Why:** Message types (`BashExecutionMessage`, `BranchSummaryMessage`, `CompactionSummaryMessage`, `CustomMessage`) are session entry payloads. `session` already imports `msg`.
-- **Move:** `pkg/msg/messages.go` → `pkg/session/messages.go`, `pkg/msg/messages_test.go` → `pkg/session/messages_test.go`
-- **Change package declaration** from `msg` to `session`
-- **Update imports:** `session` no longer imports `msg`; all external consumers change `msg.X` → `session.X`
-- **Consumers to update:** `pkg/core/agentsession.go`, `pkg/core/sdk.go`, `pkg/core/compaction/`, `pkg/extension/session_bridge.go`, `pkg/modes/interactive/components/` (branch_summary, compaction_summary, custom_message), `pkg/session/session.go`
+#### 6b. `pkg/debug` → `pkg/log` ✅ Done
 
-#### 6b. `pkg/debug` → `pkg/log` (42 lines)
+#### 6c. `pkg/platform` → `pkg/core` ✅ Done
 
-- **Why:** Both are tiny logging infrastructure (combined: 131 lines). `debug` has 2 consumers.
-- **Move:** `pkg/debug/debug.go` functions (`Enable`, `Disable`, `Enabled`, `Log`) into `pkg/log/debug.go`
-- **Update imports:** `pkg/modes/acp/conn.go`, `pkg/modes/interactive/mode.go` change `debug.X` → `firlog.X` (they already import `firlog`)
-- **Delete:** `pkg/debug/`
-
-#### 6c. `pkg/platform` → `pkg/core` (624 lines)
-
-- **Why:** `core` already imports `platform`; the extraction created an unnecessary indirection. Platform utilities (bashexec, clipboard, browser) are used by AgentSession and modes — they're core infrastructure.
-- **Move:** all files from `pkg/platform/` into `pkg/core/`
-- **Change package declaration** from `platform` to `core`
-- **Update imports:** `cmd/fir/login.go`, `pkg/modes/acp/auth.go`, `pkg/modes/interactive/mode.go` change `platform.X` → `core.X`
-- **Remove:** the `platform` import from `pkg/core/agentsession.go` (now same package)
-- **Also update** UPSTREAM_MAP.md paths
-
-#### 6d. `pkg/usage` → `cmd/fir` internal (168 lines)
-
-- **Why:** Single consumer (`cmd/fir/app.go`). No reason to be a shared package.
-- **Move:** `pkg/usage/usage.go` → `cmd/fir/usage.go`
-- **Change package declaration** from `usage` to `main`
-- **Update:** `cmd/fir/app.go` removes import, calls functions directly
+#### 6d. `pkg/usage` → `cmd/fir` internal ✅ Done
 
 #### Result
 
