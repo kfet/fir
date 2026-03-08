@@ -294,7 +294,86 @@ Last reviewed: **2026-03-08**
 | 5c. Full build & test | ✅ Done | `make all` passes |
 | 5d. Verify standalone usage | ✅ Done | `pkg/ai` has zero internal deps; `pkg/agent` depends only on `ai` + `log` |
 
-### Phase 6: Optional Sub-modules — ❌ NOT STARTED (low priority)
+### Phase 6: Consolidate Small Packages — ❌ NOT STARTED
+
+The extraction phases created 18 top-level packages under `pkg/`. Several are too small to justify their own directory. This phase merges them back into natural homes to reach **14 top-level packages**.
+
+#### 6a. `pkg/msg` → `pkg/session` (192 lines)
+
+- **Why:** Message types (`BashExecutionMessage`, `BranchSummaryMessage`, `CompactionSummaryMessage`, `CustomMessage`) are session entry payloads. `session` already imports `msg`.
+- **Move:** `pkg/msg/messages.go` → `pkg/session/messages.go`, `pkg/msg/messages_test.go` → `pkg/session/messages_test.go`
+- **Change package declaration** from `msg` to `session`
+- **Update imports:** `session` no longer imports `msg`; all external consumers change `msg.X` → `session.X`
+- **Consumers to update:** `pkg/core/agentsession.go`, `pkg/core/sdk.go`, `pkg/core/compaction/`, `pkg/extension/session_bridge.go`, `pkg/modes/interactive/components/` (branch_summary, compaction_summary, custom_message), `pkg/session/session.go`
+
+#### 6b. `pkg/debug` → `pkg/log` (42 lines)
+
+- **Why:** Both are tiny logging infrastructure (combined: 131 lines). `debug` has 2 consumers.
+- **Move:** `pkg/debug/debug.go` functions (`Enable`, `Disable`, `Enabled`, `Log`) into `pkg/log/debug.go`
+- **Update imports:** `pkg/modes/acp/conn.go`, `pkg/modes/interactive/mode.go` change `debug.X` → `firlog.X` (they already import `firlog`)
+- **Delete:** `pkg/debug/`
+
+#### 6c. `pkg/platform` → `pkg/core` (624 lines)
+
+- **Why:** `core` already imports `platform`; the extraction created an unnecessary indirection. Platform utilities (bashexec, clipboard, browser) are used by AgentSession and modes — they're core infrastructure.
+- **Move:** all files from `pkg/platform/` into `pkg/core/`
+- **Change package declaration** from `platform` to `core`
+- **Update imports:** `cmd/fir/login.go`, `pkg/modes/acp/auth.go`, `pkg/modes/interactive/mode.go` change `platform.X` → `core.X`
+- **Remove:** the `platform` import from `pkg/core/agentsession.go` (now same package)
+- **Also update** UPSTREAM_MAP.md paths
+
+#### 6d. `pkg/usage` → `cmd/fir` internal (168 lines)
+
+- **Why:** Single consumer (`cmd/fir/app.go`). No reason to be a shared package.
+- **Move:** `pkg/usage/usage.go` → `cmd/fir/usage.go`
+- **Change package declaration** from `usage` to `main`
+- **Update:** `cmd/fir/app.go` removes import, calls functions directly
+
+#### Result
+
+After Phase 6, the top-level layout is:
+
+```
+pkg/                        # 14 packages (down from 18)
+├── agent/                  # Agent loop + tools/
+├── ai/                     # LLM types + providers/ + oauth/
+├── auth/                   # Credential storage
+├── config/                 # Settings + defaults
+├── core/                   # Orchestration + platform utils + compaction/
+├── extension/              # Extension discovery & JSON-RPC
+├── log/                    # Logging + debug
+├── mcp/                    # MCP client
+├── models/                 # Model registry + resolver
+├── modes/                  # interactive/ + print/ + acp/
+├── resources/              # .fir/ loading, skills, prompts
+├── session/                # Session persistence + message types
+├── tui/                    # Terminal UI components
+└── update/                 # Self-update
+```
+
+### Phase 7: Split God Files — ❌ NOT STARTED (optional)
+
+No logic changes — just splitting large files into multiple files within the same package.
+
+#### 7a. `pkg/modes/interactive/mode.go` (3,308 lines, 94 functions)
+
+Split into:
+- `commands.go` — `handleSlashCommand` + 18 `handle*Command` functions (~1,200 lines)
+- `events.go` — `subscribeToAgent`, `handleEvent`, `onAgent*`, `onMessage*`, `onToolExec*` (~300 lines)
+- `selectors.go` — `showModelSelector`, `showSessionSelector`, `showTreeSelector`, `showOAuthSelector`, etc. (~600 lines)
+- `mode.go` — Init, Run, Shutdown, setupEditorHandlers, footer — core lifecycle (~1,200 lines)
+
+#### 7b. `pkg/modes/acp/acp.go` (1,690 lines, 39 functions)
+
+Split RPC method handlers into `methods.go`.
+
+### Phase 8: Optional — Go Sub-modules — ❌ NOT STARTED (low priority)
+
+For independent versioning and consumption:
+
+- Add `pkg/ai/go.mod` → `github.com/kfet/fir/pkg/ai`
+- Add `pkg/agent/go.mod` → `github.com/kfet/fir/pkg/agent`
+- Use `go.work` at repo root for local development
 
 ### Current `pkg/core` State
 
@@ -310,34 +389,3 @@ Last reviewed: **2026-03-08**
 | `compaction_progress.go` | 24 | Stays |
 
 ⚠️ **Build status:** `make all` passes ✅ (verified 2026-03-08)
-
----
-
-## Testing Strategy
-
-Every phase must follow this pattern:
-1. **Before implementing:** run `make test-e2e` and `make all` to establish a green baseline
-2. **After implementing:** run `make test-e2e` and `make all` to verify no regressions
-3. **If a phase changes user-visible behavior:** add e2e test coverage *before* the change so the test validates the refactor preserved behavior
-
----
-
-## Execution Strategy
-
-- **One extraction at a time**, run `make all` after each
-- **Phase 1 → 2 → 3 → 4 → 5** in order; each phase builds on the previous
-- **Phase 3 and 4 can partially overlap** since they touch different files
-- **No logic changes** — this is purely structural (move code + update imports)
-- **Estimated scope:** ~40 files to move, ~60 files with import updates
-
-## What Stays in `pkg/core`
-
-After the refactoring, `pkg/core` retains only:
-
-- `agentsession.go` — orchestration via injected interfaces
-- `compaction_progress.go` — compaction context helpers
-- `sdk.go` — `CreateAgentSession` convenience constructor
-- `timings.go` — timing utilities
-- `changelog.go` — changelog parsing
-
-Roughly **~2,365 lines** down from **~10,400** — a 77% reduction.
