@@ -131,7 +131,6 @@ type SessionListInfo struct {
 	Modified          time.Time
 	MessageCount      int
 	FirstMessage      string
-	AllMessagesText   string
 }
 
 // --- NewSessionOptions ---
@@ -351,6 +350,7 @@ func (sm *SessionManager) rewriteFile() {
 	if err := os.WriteFile(sm.sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "session: write %s: %v\n", sm.sessionFile, err)
 	}
+	sm.updateSidecar()
 }
 
 // ForceFlush writes the session to disk regardless of whether an assistant
@@ -411,7 +411,57 @@ func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 		if _, err := f.WriteString("\n"); err != nil {
 			fmt.Fprintf(os.Stderr, "session: write newline: %v\n", err)
 		}
+		sm.updateSidecar()
 	}
+}
+
+// updateSidecar rebuilds and writes the metadata sidecar for the current
+// session file. Called after every disk write so listing never needs a full
+// parse on warm runs. Errors are silently ignored — listing must never fail
+// because of a sidecar write failure.
+func (sm *SessionManager) updateSidecar() {
+	if !sm.persist || sm.sessionFile == "" || sm.header == nil {
+		return
+	}
+	stat, err := os.Stat(sm.sessionFile)
+	if err != nil {
+		return
+	}
+	var messageCount int
+	var firstMessage string
+	var name string
+	for _, e := range sm.entries {
+		if e.Type == "session_info" && e.Name != "" {
+			name = e.Name
+		}
+		if e.Type != "message" {
+			continue
+		}
+		messageCount++
+		if firstMessage == "" && len(e.RawMessage) > 0 {
+			var probe struct {
+				Role    string `json:"role"`
+				Content any    `json:"content"`
+			}
+			if json.Unmarshal(e.RawMessage, &probe) == nil && probe.Role == "user" {
+				firstMessage = extractTextFromAny(probe.Content)
+			}
+		}
+	}
+	if firstMessage == "" {
+		firstMessage = "(no messages)"
+	}
+	created, _ := time.Parse(time.RFC3339Nano, sm.header.Timestamp)
+	writeSidecar(sm.sessionFile, &MetaSidecar{
+		Name:              name,
+		FirstMessage:      firstMessage,
+		Cwd:               sm.header.Cwd,
+		ID:                sm.header.ID,
+		ParentSessionPath: sm.header.ParentSession,
+		Created:           created,
+		MessageCount:      messageCount,
+		ModTime:           stat.ModTime(),
+	})
 }
 
 func (sm *SessionManager) appendEntry(entry *SessionEntry) string {
@@ -1150,7 +1200,7 @@ func findMostRecentSession(sessionDir string) string {
 }
 
 // ListSessions lists all sessions in a directory, sorted by modified time (most recent first).
-func ListSessions(cwd, sessionDir string) ([]SessionListInfo, error) {
+func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
 	dirEntries, err := os.ReadDir(sessionDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1159,19 +1209,52 @@ func ListSessions(cwd, sessionDir string) ([]SessionListInfo, error) {
 		return nil, err
 	}
 
-	var sessions []SessionListInfo
+	// Collect .jsonl filenames. ReadDir returns them in lexicographic order,
+	// which equals chronological order for our TIMESTAMP_UUID.jsonl naming
+	// scheme. Reverse to get most-recent-first, then cap at 200 so we bound
+	// I/O even on a cold cache.
+	const maxSessions = 200
+	var paths []string
 	for _, de := range dirEntries {
-		if !strings.HasSuffix(de.Name(), ".jsonl") {
-			continue
+		if strings.HasSuffix(de.Name(), ".jsonl") {
+			paths = append(paths, filepath.Join(sessionDir, de.Name()))
 		}
-		path := filepath.Join(sessionDir, de.Name())
-		info := buildSessionListInfo(path)
-		if info != nil {
-			sessions = append(sessions, *info)
+	}
+	// Reverse (ReadDir is ascending; we want most-recent first).
+	for i, j := 0, len(paths)-1; i < j; i, j = i+1, j-1 {
+		paths[i], paths[j] = paths[j], paths[i]
+	}
+	if len(paths) > maxSessions {
+		paths = paths[:maxSessions]
+	}
+
+	// Load concurrently with a bounded worker pool.
+	const workers = 8
+	type result struct {
+		info *SessionListInfo
+	}
+	results := make([]result, len(paths))
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			results[idx] = result{info: buildSessionListInfo(path)}
+			<-sem
+		}(i, p)
+	}
+	wg.Wait()
+
+	var sessions []SessionListInfo
+	for _, r := range results {
+		if r.info != nil {
+			sessions = append(sessions, *r.info)
 		}
 	}
 
-	// Sort by modified time (most recent first)
+	// Sort by modified time (most recent first).
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].Modified.After(sessions[j].Modified)
 	})
@@ -1180,19 +1263,34 @@ func ListSessions(cwd, sessionDir string) ([]SessionListInfo, error) {
 }
 
 func buildSessionListInfo(filePath string) *SessionListInfo {
-	header, entries := loadEntriesFromFile(filePath)
-	if header == nil {
-		return nil
-	}
-
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		return nil
 	}
 
+	// Fast path: use the metadata sidecar if it is current.
+	if m := readSidecar(filePath, stat.ModTime()); m != nil {
+		return &SessionListInfo{
+			Path:              filePath,
+			ID:                m.ID,
+			Cwd:               m.Cwd,
+			Name:              m.Name,
+			ParentSessionPath: m.ParentSessionPath,
+			Created:           m.Created,
+			Modified:          stat.ModTime(),
+			MessageCount:      m.MessageCount,
+			FirstMessage:      m.FirstMessage,
+		}
+	}
+
+	// Slow path: full parse, then write sidecar for next time.
+	header, entries := loadEntriesFromFile(filePath)
+	if header == nil {
+		return nil
+	}
+
 	var messageCount int
 	var firstMessage string
-	var allMessages []string
 	var name string
 
 	for _, entry := range entries {
@@ -1204,19 +1302,13 @@ func buildSessionListInfo(filePath string) *SessionListInfo {
 		}
 		messageCount++
 
-		if len(entry.RawMessage) > 0 {
+		if firstMessage == "" && len(entry.RawMessage) > 0 {
 			var probe struct {
 				Role    string `json:"role"`
 				Content any    `json:"content"`
 			}
-			if json.Unmarshal(entry.RawMessage, &probe) == nil {
-				text := extractTextFromAny(probe.Content)
-				if text != "" {
-					allMessages = append(allMessages, text)
-					if firstMessage == "" && probe.Role == "user" {
-						firstMessage = text
-					}
-				}
+			if json.Unmarshal(entry.RawMessage, &probe) == nil && probe.Role == "user" {
+				firstMessage = extractTextFromAny(probe.Content)
 			}
 		}
 	}
@@ -1227,7 +1319,7 @@ func buildSessionListInfo(filePath string) *SessionListInfo {
 
 	created, _ := time.Parse(time.RFC3339Nano, header.Timestamp)
 
-	return &SessionListInfo{
+	info := &SessionListInfo{
 		Path:              filePath,
 		ID:                header.ID,
 		Cwd:               header.Cwd,
@@ -1237,8 +1329,20 @@ func buildSessionListInfo(filePath string) *SessionListInfo {
 		Modified:          stat.ModTime(),
 		MessageCount:      messageCount,
 		FirstMessage:      firstMessage,
-		AllMessagesText:   strings.Join(allMessages, " "),
 	}
+
+	writeSidecar(filePath, &MetaSidecar{
+		Name:              name,
+		FirstMessage:      firstMessage,
+		Cwd:               header.Cwd,
+		ID:                header.ID,
+		ParentSessionPath: header.ParentSession,
+		Created:           created,
+		MessageCount:      messageCount,
+		ModTime:           stat.ModTime(),
+	})
+
+	return info
 }
 
 func extractTextFromAny(content any) string {
@@ -1323,37 +1427,54 @@ func SessionsDir(agentDir string) string {
 // Additional agent dirs (e.g. ~/.pi/agent) can be passed to merge sessions from multiple sources.
 func ListAllSessions(agentDir string, extraAgentDirs ...string) ([]SessionListInfo, error) {
 	dirs := append([]string{agentDir}, extraAgentDirs...)
-	seen := make(map[string]bool)
-	var all []SessionListInfo
 
+	// Collect all subdirectories to scan.
+	type subDir struct{ path string }
+	var subDirs []subDir
 	for _, dir := range dirs {
 		sessionsDir := SessionsDir(dir)
 		dirEntries, err := os.ReadDir(sessionsDir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			continue // skip dirs we can't read
+			continue
 		}
-
 		for _, de := range dirEntries {
-			if !de.IsDir() {
-				continue
+			if de.IsDir() {
+				subDirs = append(subDirs, subDir{filepath.Join(sessionsDir, de.Name())})
 			}
-			subDir := filepath.Join(sessionsDir, de.Name())
-			sessions, err := ListSessions("", subDir)
-			if err != nil {
-				continue
+		}
+	}
+
+	// Load each subdirectory concurrently.
+	type subdirResult struct {
+		sessions []SessionListInfo
+	}
+	results := make([]subdirResult, len(subDirs))
+	const workers = 8
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i, sd := range subDirs {
+		wg.Add(1)
+		go func(idx int, path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			sessions, _ := ListSessions("", path)
+			results[idx] = subdirResult{sessions: sessions}
+			<-sem
+		}(i, sd.path)
+	}
+	wg.Wait()
+
+	seen := make(map[string]bool)
+	var all []SessionListInfo
+	for _, r := range results {
+		for _, s := range r.sessions {
+			key := s.Path
+			if resolved, err := filepath.EvalSymlinks(key); err == nil {
+				key = resolved
 			}
-			for _, s := range sessions {
-				key := s.Path
-				if resolved, err := filepath.EvalSymlinks(key); err == nil {
-					key = resolved
-				}
-				if !seen[key] {
-					seen[key] = true
-					all = append(all, s)
-				}
+			if !seen[key] {
+				seen[key] = true
+				all = append(all, s)
 			}
 		}
 	}

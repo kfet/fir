@@ -70,12 +70,12 @@ func TestParseSearchQuery_UnclosedQuote(t *testing.T) {
 
 func makeSession(id, name, text, cwd string) *session.SessionListInfo {
 	return &session.SessionListInfo{
-		ID:              id,
-		Name:            name,
-		AllMessagesText: text,
-		Cwd:             cwd,
-		Created:         time.Now(),
-		Modified:        time.Now(),
+		ID:           id,
+		Name:         name,
+		FirstMessage: text,
+		Cwd:          cwd,
+		Created:      time.Now(),
+		Modified:     time.Now(),
 	}
 }
 

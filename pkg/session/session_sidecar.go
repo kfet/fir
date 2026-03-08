@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"os"
+	"time"
 )
 
 // ReexecSidecar holds state that must survive a reexec: queued follow-up
@@ -45,4 +46,45 @@ func ReadReexecSidecar(sessionFile string) (*ReexecSidecar, error) {
 		return nil, err
 	}
 	return &sc, nil
+}
+
+// MetaSidecar caches session metadata to speed up listing.
+type MetaSidecar struct {
+	Name              string    `json:"name"`
+	FirstMessage      string    `json:"first_message"`
+	Cwd               string    `json:"cwd"`
+	ID                string    `json:"id"`
+	ParentSessionPath string    `json:"parent_session_path"`
+	Created           time.Time `json:"created"`
+	MessageCount      int       `json:"message_count"`
+	ModTime           time.Time `json:"mod_time"` // mtime of the .jsonl when this was written
+}
+
+func metaSidecarPath(jsonlPath string) string {
+	return jsonlPath + ".meta.json"
+}
+
+func readSidecar(jsonlPath string, jsonlMtime time.Time) *MetaSidecar {
+	path := metaSidecarPath(jsonlPath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m MetaSidecar
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	if !m.ModTime.Equal(jsonlMtime) {
+		return nil
+	}
+	return &m
+}
+
+func writeSidecar(jsonlPath string, m *MetaSidecar) {
+	path := metaSidecarPath(jsonlPath)
+	data, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, data, 0o644)
 }

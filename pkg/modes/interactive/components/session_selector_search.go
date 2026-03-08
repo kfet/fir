@@ -75,7 +75,7 @@ func normalizeWhitespaceLower(text string) string {
 }
 
 func getSessionSearchText(session *session.SessionListInfo) string {
-	return session.ID + " " + session.Name + " " + session.AllMessagesText + " " + session.Cwd
+	return session.ID + " " + session.Name + " " + session.FirstMessage + " " + session.Cwd
 }
 
 // HasSessionName returns whether a session has a user-defined name.
