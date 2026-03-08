@@ -33,7 +33,9 @@ source "$SKILL_DIR/scripts/tmux-helpers.sh"   # gives tm-* commands
 
 ### Worktree — One Per Fleet
 
-Follow the [work skill](../work/SKILL.md) to create a worktree and branch. Use `fleet/` as the branch prefix instead of `work/`:
+**Ask the user first** whether work should happen in the current directory or a new worktree. If the user says "we're already in the right worktree," use it as-is — don't create another one.
+
+If a new worktree is needed, follow the [work skill](../work/SKILL.md) to create one. Use `fleet/` as the branch prefix instead of `work/`:
 
 ```bash
 PROJECT=$(git rev-parse --show-toplevel)
@@ -45,7 +47,7 @@ WORKTREE="${PROJECT}-wt-${FEATURE}"
 git -C "$PROJECT" worktree add "$WORKTREE" -b "$BRANCH"
 ```
 
-All commands use `$WORKTREE`. **Never send agents to `$PROJECT`.**
+All commands use `$WORKTREE`. **Never send agents to a different project's worktree.**
 
 When done: merge the branch (or open a PR), then `git worktree remove` and `git branch -d`.
 
@@ -57,6 +59,20 @@ tm-new "$SESSION" worker-1
 tm-win "$SESSION" worker-2
 tm-win "$SESSION" reviewer
 _tm set-option -t "$SESSION" -g automatic-rename off
+```
+
+**Model selection:** Prefer cheaper models for coding workers — they burn through tokens fast. Reserve expensive models for research, design, or review roles where quality-per-token matters more. Pick the latest variant of the cost-efficient tier for the current provider — don't switch providers:
+
+| Provider | Coding workers | Review/design |
+|----------|---------------|---------------|
+| Anthropic | `sonnet` | `opus` |
+| OpenAI | `gpt-mini` | `gpt-pro` |
+| Google | `gemini-flash` | `gemini-pro` |
+
+Use `--model` to set the model. Use short aliases (e.g. `sonnet`, `gpt-mini`) — fir resolves them to the latest version:
+
+```bash
+tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --model sonnet"
 ```
 
 Address agents as `SESSION:WINDOW`. Launch agents using the same executable you're running:
