@@ -22,7 +22,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/compaction"
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"

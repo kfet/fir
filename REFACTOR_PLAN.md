@@ -265,23 +265,23 @@ Last reviewed: **2026-03-08**
 | 2b. `pkg/session` | ✅ Done | `session.go`, `session_sidecar.go` moved with tests |
 | 2c. `pkg/resources` | ✅ Done | All resource files moved; also absorbed `slashcmds.go` and `systemprompt.go` from core |
 
-### Phase 3: Move UI Concerns Out of Core — 🔶 PARTIAL
+### Phase 3: Move UI Concerns Out of Core — ✅ COMPLETE
 
 | Step | Status | Notes |
 |------|--------|-------|
 | 3a. `keybindings.go` → interactive | ✅ Done | Moved to `pkg/tui/` |
 | 3b. `clipboard*.go`, `browser.go` → `pkg/platform/` | ✅ Done | `clipboard.go`, `clipboardimage.go`, `browser.go` in `pkg/platform/` |
 | 3c. `messages.go` → `pkg/msg/` | ✅ Done | Moved to `pkg/msg/` |
-| 3d. `export.go` → interactive | ❌ TODO | Still in `pkg/core/` (126 lines) |
-| 3e. `footerdataprovider.go` → interactive | ❌ TODO | Still in `pkg/core/` (232 lines) |
-| 3f. `bashexec.go` → platform or agent | ❌ TODO | Still in `pkg/core/` (246 lines) — infra utility |
+| 3d. `export.go` | ✅ Stays | Stays in `pkg/core/` — `ExportToHTML` is an `AgentSession` method called by 3 consumers (cmd/fir, interactive, acp) |
+| 3e. `footerdataprovider.go` → interactive | ✅ Done | Moved to `pkg/modes/interactive/` with tests |
+| 3f. `bashexec.go` → platform | ✅ Done | Moved to `pkg/platform/bashexec.go` with tests; core imports `platform.ExecuteBash` |
 | 3g. Update UPSTREAM_MAP.md paths | ✅ Done | Fixed stale `pkg/core/` → new package paths |
 
-### Phase 4: Dependency Injection on AgentSession — ❌ NOT STARTED
+### Phase 4: Dependency Injection on AgentSession — 🔄 IN PROGRESS
 
 | Step | Status | Notes |
 |------|--------|-------|
-| 4a. Define interfaces | ❌ TODO | |
+| 4a. Define interfaces | ✅ Done | `pkg/core/interfaces.go`: `SessionStore`, `SettingsReader`, `ModelFinder` with compile-time checks |
 | 4b. Refactor `AgentSessionOptions` | ❌ TODO | |
 | 4c. Move `core/tools/` → `pkg/agent/tools/` | ❌ TODO | |
 
@@ -291,23 +291,18 @@ Last reviewed: **2026-03-08**
 
 ### Current `pkg/core` State
 
-**8 source files, ~2,770 lines** (down from ~10,400 — **73% reduction**)
+**6 source files, ~2,292 lines** (down from ~10,400 — **78% reduction**)
 
 | File | Lines | Status |
 |------|-------|--------|
 | `agentsession.go` | 1548 | Stays (core orchestration) |
 | `sdk.go` | 385 | Stays (convenience constructor) |
-| `bashexec.go` | 246 | Should move out (Phase 3f) |
-| `footerdataprovider.go` | 232 | Should move out (Phase 3e) |
 | `changelog.go` | 138 | Stays |
-| `export.go` | 126 | Should move out (Phase 3d) |
+| `export.go` | 126 | Stays (AgentSession method, 3 callers) |
 | `timings.go` | 71 | Stays |
 | `compaction_progress.go` | 24 | Stays |
 
-**After Phase 3 completes:** ~2,166 lines in core (79% reduction).
-
-⚠️ **Build status:** `make all` passes ✅ (fixed stale `clipboard_test.go` in core)
-⚠️ **E2E status:** All 25 tests pass ✅ (verified 2026-03-08)
+⚠️ **Build status:** `make all` passes ✅ (verified 2026-03-08)
 
 ---
 
@@ -339,3 +334,11 @@ After the refactoring, `pkg/core` retains only:
 - `changelog.go` — changelog parsing
 
 Roughly **~2,166 lines** down from **~10,400** — a 79% reduction.
+
+---
+
+## Future: Agent Self-Awareness
+
+The agent (LLM) currently has **no way to discover its own live settings** — provider, model, context usage, session ID, etc. This matters for the shepherd skill (needs to launch workers on the same provider) and any skill that adapts behavior based on model capabilities.
+
+**Needed:** A `/info` slash command (or equivalent) that prints current provider, model ID, context %, and session ID as readable text in the conversation. This would let the shepherd detect its provider and pass `--provider` to workers automatically instead of hardcoding Anthropic as the default.

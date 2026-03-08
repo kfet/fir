@@ -2721,7 +2721,7 @@ func TestAgentSession_UpdatePlan_EmitsEvent(t *testing.T) {
 		{Content: "Step 1", Status: "pending"},
 		{Content: "Step 2", Status: "done"},
 	}
-	session.UpdatePlan("Test Plan", entries)
+	session.UpdatePlan("Test Plan", entries, nil)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2748,7 +2748,7 @@ func TestAgentSession_PlanEntries_ReturnsDefensiveCopy(t *testing.T) {
 	entries := []agent.PlanEntry{
 		{Content: "Step 1", Status: "pending"},
 	}
-	session.UpdatePlan("Test Plan", entries)
+	session.UpdatePlan("Test Plan", entries, nil)
 
 	copy1 := session.PlanEntries()
 	copy2 := session.PlanEntries()
@@ -2833,7 +2833,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	// Set a plan before any prompt
 	session.UpdatePlan("Test", []agent.PlanEntry{
 		{Content: "Step 1", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
-	})
+	}, nil)
 	if len(session.PlanEntries()) != 1 {
 		t.Fatal("plan should have 1 entry after UpdatePlan")
 	}
@@ -3006,7 +3006,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	session.UpdatePlan("Test", []agent.PlanEntry{
 		{Content: "Task A", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Task B", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
-	})
+	}, nil)
 
 	sessionFile := sm.GetSessionFile()
 	if sessionFile == "" {

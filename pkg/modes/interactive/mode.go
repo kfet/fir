@@ -28,7 +28,7 @@ import (
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/debug"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
@@ -65,7 +65,7 @@ type InteractiveMode struct {
 	planHidden             bool // true = plan widget collapsed (footer still shows progress)
 	planInContainer        bool // true = planComponent is currently a child of planContainer
 	footerComponent        *components.FooterComponent
-	footerDataProvider     *core.FooterDataProvider
+	footerDataProvider     *FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
 
 	// Streaming state
@@ -160,7 +160,7 @@ func NewInteractiveMode(
 		keybindings:        keybindings,
 		settings:           settings,
 		autoCompactMode:    autoCompactMode,
-		footerDataProvider: core.NewFooterDataProvider(cwd),
+		footerDataProvider: NewFooterDataProvider(cwd),
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
@@ -2783,7 +2783,7 @@ func (m *InteractiveMode) IsBashMode() bool {
 // Display helpers
 // ============================================================================
 
-func (m *InteractiveMode) onPlanUpdate(title string, entries []agent.PlanEntry) {
+func (m *InteractiveMode) onPlanUpdate(title string, entries []agent.PlanEntry, metadata map[string]string) {
 	if len(entries) == 0 {
 		m.planComponent = nil
 		if m.planInContainer {
@@ -2793,9 +2793,9 @@ func (m *InteractiveMode) onPlanUpdate(title string, entries []agent.PlanEntry) 
 	} else {
 		if m.planComponent != nil {
 			// Update entries in-place; container membership is unchanged.
-			m.planComponent.SetEntries(title, entries)
+			m.planComponent.SetEntries(title, entries, metadata)
 		} else {
-			m.planComponent = components.NewPlanComponent(title, entries)
+			m.planComponent = components.NewPlanComponent(title, entries, metadata)
 			if !m.planHidden {
 				m.planContainer.AddChild(m.planComponent)
 				m.planInContainer = true
@@ -2816,6 +2816,7 @@ func (m *InteractiveMode) togglePlanVisibility() {
 	}
 	entries := m.session.PlanEntries()
 	title := m.session.PlanTitle()
+	metadata := m.session.PlanMetadata()
 	if len(entries) == 0 {
 		m.showStatus("No plan entries.")
 		return
@@ -2828,7 +2829,7 @@ func (m *InteractiveMode) togglePlanVisibility() {
 		}
 	} else {
 		if m.planComponent == nil {
-			m.planComponent = components.NewPlanComponent(title, entries)
+			m.planComponent = components.NewPlanComponent(title, entries, metadata)
 		}
 		if !m.planInContainer {
 			m.planContainer.AddChild(m.planComponent)
@@ -3109,7 +3110,7 @@ func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
 			// If pending work, agent will resume naturally via EventAgentStart (no notification needed here)
 			m.ui.RequestRender(false)
 		case "plan_update":
-			m.onPlanUpdate(event.PlanTitle, event.PlanEntries)
+			m.onPlanUpdate(event.PlanTitle, event.PlanEntries, event.PlanMetadata)
 		}
 		return
 	}

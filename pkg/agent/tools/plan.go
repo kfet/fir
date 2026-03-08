@@ -59,7 +59,7 @@ func (n *PlanNudger) Check() string {
 
 // PlanUpdater is the interface the plan tool needs from a session.
 type PlanUpdater interface {
-	UpdatePlan(title string, entries []agent.PlanEntry)
+	UpdatePlan(title string, entries []agent.PlanEntry, metadata map[string]string)
 }
 
 // NewPlanTool creates the plan tool. It requires a PlanUpdater (typically
@@ -76,13 +76,22 @@ func NewPlanTool(session PlanUpdater, nudger *PlanNudger) agent.AgentTool {
 				"- Mark each step \"in_progress\" as you begin it, \"completed\" when done\n" +
 				"- Update the plan after completing each step, before moving to the next\n" +
 				"- Each call replaces the entire plan — always include all entries\n" +
-				"- Keep steps concrete and actionable, not vague",
+				"- Keep steps concrete and actionable, not vague\n" +
+				"- Use metadata for short contextual info (e.g. how to access a fleet, session name, worktree path)",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"title": map[string]any{
 						"type":        "string",
 						"description": "Short title for the plan (e.g. \"Implement caching layer\"). Shown in the plan header and status bar.",
+					},
+					"metadata": map[string]any{
+						"type":        "object",
+						"description": "Optional key-value pairs shown in the plan header. Max 5 keys, values ≤80 chars. Use for context like session names, access commands, or links.",
+						"additionalProperties": map[string]any{
+							"type":      "string",
+							"maxLength": 80,
+						},
 					},
 					"entries": map[string]any{
 						"type":        "array",
@@ -123,8 +132,9 @@ func NewPlanTool(session PlanUpdater, nudger *PlanNudger) agent.AgentTool {
 			}
 
 			title, _ := params["title"].(string)
+			metadata := parsePlanMetadata(params)
 
-			session.UpdatePlan(title, entries)
+			session.UpdatePlan(title, entries, metadata)
 			if nudger != nil {
 				nudger.RecordPlanUpdate()
 			}
@@ -184,4 +194,31 @@ func parsePlanEntries(params map[string]any) ([]agent.PlanEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// parsePlanMetadata extracts the optional metadata map from plan params.
+// Enforces max 5 keys and 80-char value limit.
+func parsePlanMetadata(params map[string]any) map[string]string {
+	raw, ok := params["metadata"]
+	if !ok {
+		return nil
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok || len(obj) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(obj))
+	i := 0
+	for k, v := range obj {
+		if i >= 5 {
+			break
+		}
+		s, _ := v.(string)
+		if len(s) > 80 {
+			s = s[:80]
+		}
+		result[k] = s
+		i++
+	}
+	return result
 }

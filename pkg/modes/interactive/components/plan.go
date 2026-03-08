@@ -13,27 +13,30 @@ import (
 type PlanComponent struct {
 	*tuicomp.Box
 
-	mu      sync.Mutex
-	title   string
-	entries []agent.PlanEntry
+	mu       sync.Mutex
+	title    string
+	metadata map[string]string
+	entries  []agent.PlanEntry
 }
 
 // NewPlanComponent creates a new PlanComponent.
-func NewPlanComponent(title string, entries []agent.PlanEntry) *PlanComponent {
+func NewPlanComponent(title string, entries []agent.PlanEntry, metadata map[string]string) *PlanComponent {
 	t := theme.GetTheme()
 	c := &PlanComponent{
-		Box:     tuicomp.NewBox(1, 1, func(s string) string { return t.Bg("customMessageBg", s) }),
-		title:   title,
-		entries: entries,
+		Box:      tuicomp.NewBox(1, 1, func(s string) string { return t.Bg("customMessageBg", s) }),
+		title:    title,
+		metadata: metadata,
+		entries:  entries,
 	}
 	c.updateDisplay()
 	return c
 }
 
 // SetEntries updates the plan entries and rebuilds the display.
-func (c *PlanComponent) SetEntries(title string, entries []agent.PlanEntry) {
+func (c *PlanComponent) SetEntries(title string, entries []agent.PlanEntry, metadata map[string]string) {
 	c.mu.Lock()
 	c.title = title
+	c.metadata = metadata
 	c.entries = entries
 	c.mu.Unlock()
 	c.updateDisplay()
@@ -51,6 +54,7 @@ func (c *PlanComponent) updateDisplay() {
 
 	c.mu.Lock()
 	title := c.title
+	metadata := c.metadata
 	entries := make([]agent.PlanEntry, len(c.entries))
 	copy(entries, c.entries)
 	c.mu.Unlock()
@@ -61,6 +65,14 @@ func (c *PlanComponent) updateDisplay() {
 	}
 	label := t.Fg("customMessageLabel", "\x1b[1m"+labelText+"\x1b[22m")
 	c.AddChild(tuicomp.NewText(label, 0, 0, nil))
+
+	// Render metadata key-value pairs
+	if len(metadata) > 0 {
+		for k, v := range metadata {
+			line := t.Fg("muted", fmt.Sprintf("  %s: %s", k, v))
+			c.AddChild(tuicomp.NewText(line, 0, 0, nil))
+		}
+	}
 
 	if len(entries) == 0 {
 		c.AddChild(tuicomp.NewText(t.Fg("muted", "  No plan entries."), 0, 0, nil))

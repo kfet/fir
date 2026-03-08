@@ -1,4 +1,4 @@
-package core
+package platform
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 )
 
 func TestExecuteBash_SimpleCommand(t *testing.T) {

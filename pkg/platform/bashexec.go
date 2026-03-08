@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/bash-executor.ts
 // Upstream hash: 1caadb2e
-package core
+package platform
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 )
 
 // BashExecutorOptions configures bash execution.

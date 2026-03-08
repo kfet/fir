@@ -8,7 +8,7 @@ import (
 )
 
 func TestPlanComponent_Empty(t *testing.T) {
-	c := NewPlanComponent("", nil)
+	c := NewPlanComponent("", nil, nil)
 	lines := c.Render(80)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "[plan]") {
@@ -25,7 +25,7 @@ func TestPlanComponent_Entries(t *testing.T) {
 		{Content: "Step two", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Step three", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityLow},
 	}
-	c := NewPlanComponent("Test", entries)
+	c := NewPlanComponent("Test", entries, nil)
 	lines := c.Render(80)
 	joined := strings.Join(lines, "\n")
 
@@ -53,7 +53,7 @@ func TestPlanComponent_Entries(t *testing.T) {
 }
 
 func TestPlanComponent_SetEntries(t *testing.T) {
-	c := NewPlanComponent("", nil)
+	c := NewPlanComponent("", nil, nil)
 	lines := c.Render(80)
 	if !strings.Contains(strings.Join(lines, "\n"), "No plan entries") {
 		t.Fatal("expected empty initially")
@@ -61,7 +61,7 @@ func TestPlanComponent_SetEntries(t *testing.T) {
 
 	c.SetEntries("Updated", []agent.PlanEntry{
 		{Content: "New step", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
-	})
+	}, nil)
 	lines = c.Render(80)
 	if !strings.Contains(strings.Join(lines, "\n"), "New step") {
 		t.Fatal("expected new step after SetEntries")
@@ -72,7 +72,7 @@ func TestPlanComponent_HighPriority(t *testing.T) {
 	entries := []agent.PlanEntry{
 		{Content: "Urgent", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityHigh},
 	}
-	c := NewPlanComponent("Test", entries)
+	c := NewPlanComponent("Test", entries, nil)
 	lines := c.Render(80)
 	joined := strings.Join(lines, "\n")
 	// High priority items get a "!" marker

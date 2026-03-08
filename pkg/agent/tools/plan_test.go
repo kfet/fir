@@ -9,14 +9,16 @@ import (
 
 // mockPlanUpdater records UpdatePlan calls.
 type mockPlanUpdater struct {
-	title   string
-	entries []agent.PlanEntry
-	calls   int
+	title    string
+	entries  []agent.PlanEntry
+	metadata map[string]string
+	calls    int
 }
 
-func (m *mockPlanUpdater) UpdatePlan(title string, entries []agent.PlanEntry) {
+func (m *mockPlanUpdater) UpdatePlan(title string, entries []agent.PlanEntry, metadata map[string]string) {
 	m.title = title
 	m.entries = entries
+	m.metadata = metadata
 	m.calls++
 }
 

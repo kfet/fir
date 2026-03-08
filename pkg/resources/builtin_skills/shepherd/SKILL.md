@@ -61,7 +61,9 @@ tm-win "$SESSION" reviewer
 _tm set-option -t "$SESSION" -g automatic-rename off
 ```
 
-**Model selection:** Prefer cheaper models for coding workers — they burn through tokens fast. Reserve expensive models for research, design, or review roles where quality-per-token matters more. Pick the latest variant of the cost-efficient tier for the current provider — don't switch providers:
+**Model selection:** Workers must use the **same provider** as the shepherd. Never switch providers — auto-server routing is unpredictable and workers may land on a provider with no credentials.
+
+**The shepherd currently has no way to detect its own provider** (no CLI arg access, no footer bar parsing, no `/info` command). Default to **Anthropic** unless the user says otherwise. Ask the user if you're unsure.
 
 | Provider | Coding workers | Review/design |
 |----------|---------------|---------------|
@@ -69,17 +71,18 @@ _tm set-option -t "$SESSION" -g automatic-rename off
 | OpenAI | `gpt-mini` | `gpt-pro` |
 | Google | `gemini-flash` | `gemini-pro` |
 
-Use `--model` to set the model. Use short aliases (e.g. `sonnet`, `gpt-mini`) — fir resolves them to the latest version:
+**Always pass `--provider` explicitly** to workers so they don't get routed to a different provider by auto-server:
 
 ```bash
-tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --model sonnet"
+PROVIDER="anthropic"         # default — ask user if different
+CHEAP_MODEL="sonnet"
+
+tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --provider $PROVIDER --model $CHEAP_MODEL"
 ```
 
-Address agents as `SESSION:WINDOW`. Launch agents using the same executable you're running:
+If the user specifies a non-obvious provider name (e.g., `amazon-bedrock`, `google-gemini-cli`), use that exact string. When in doubt, launch one worker first, confirm it connects, then launch the rest.
 
-```bash
-tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir"
-```
+Address agents as `SESSION:WINDOW`.
 
 **Never repurpose agents from another project.** `/new` wipes context. If a session belongs to a different project/worktree, leave it alone.
 
@@ -87,18 +90,41 @@ tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir"
 
 If the `plan` tool is available, use it to track overall project progress across the fleet. Create it once at fleet setup, and update it every loop cycle.
 
-**At setup:** Create one entry per major task/milestone (not per agent). Set the first active task to `in_progress`, the rest to `pending`.
+**At setup:** Create one entry per major task/milestone (not per agent). Set the first active task to `in_progress`, the rest to `pending`. **You must include `metadata` and `title`** in every plan call so the user can find the fleet:
+
+```json
+{
+  "title": "Refactor pkg/core",
+  "metadata": {
+    "session": "fir-refactor",
+    "worktree": "/path/to/project-wt-refactor",
+    "attach": "tmux -S <socket> attach -t fir-refactor",
+    "branch": "fleet/fir-refactor"
+  },
+  "entries": [
+    {"content": "Analyze and design", "priority": "high", "status": "in_progress"},
+    {"content": "Implement feature X", "priority": "high", "status": "pending"}
+  ]
+}
+```
+
+The `attach` value must use the **actual socket path** from `tm-new` output (look for the `Monitor:` line). Without it the user can't connect to the fleet session.
+
+**Each cycle:** Reflect actual state — mark completed tasks `completed`, the currently running task `in_progress`, and future tasks `pending`. Keep entries coarse (milestones, not individual file edits).
+
+**Include per-worker status in the plan.** After capturing each worker's output during the loop, add a plan entry per worker summarizing what they're doing. Format: `"[worker-N] <status summary>"`. This makes worker state visible alongside milestones:
 
 ```
 plan:
-  - Analyze and design (high, in_progress)
-  - Implement feature X (high, pending)
-  - Implement feature Y (medium, pending)
-  - Write tests (medium, pending)
-  - Review and merge (low, pending)
+  - Move export.go (high, in_progress)
+  - Move bashexec.go (high, in_progress)
+  - Move footerdataprovider.go (high, pending)
+  - [worker-1] reading bashexec.go, planning move (medium, in_progress)
+  - [worker-2] rate-limited, waiting for reset (medium, in_progress)
+  - [worker-3] idle, unassigned (low, pending)
 ```
 
-**Each cycle:** Reflect actual state — mark completed tasks `completed`, the currently running task `in_progress`, and future tasks `pending`. Keep entries coarse (milestones, not individual file edits).
+Update worker entries every cycle based on `tm-capture` output — look for spinner (working), error messages (stuck/rate-limited), context %, and the last visible action.
 
 **Worker self-reported progress:** Workers also have access to the `plan` tool and may use it to report their own progress on sub-tasks. To check a worker's current plan, send `/plan` to their tmux window and capture the output:
 

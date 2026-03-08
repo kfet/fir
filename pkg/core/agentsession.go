@@ -19,8 +19,9 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	fmsg "github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -117,6 +118,8 @@ type AgentSessionEvent struct {
 	PlanEntries []agent.PlanEntry
 	// PlanTitle is set on "plan_update" events.
 	PlanTitle string
+	// PlanMetadata is set on "plan_update" events.
+	PlanMetadata map[string]string
 }
 
 // AgentSessionEventListener receives session events.
@@ -223,9 +226,10 @@ type AgentSession struct {
 	usageTracker UsageTracker
 
 	// Plan entries (guarded by mu)
-	plan        []agent.PlanEntry
-	planTitle   string
-	planVersion int64 // incremented on each UpdatePlan call
+	plan         []agent.PlanEntry
+	planTitle    string
+	planMetadata map[string]string
+	planVersion  int64 // incremented on each UpdatePlan call
 
 	// Plan nudger (created once, lives for session lifetime)
 	planNudger *tools.PlanNudger
@@ -270,38 +274,42 @@ func (s *AgentSession) UsageTracker() UsageTracker {
 
 // UpdatePlan replaces the plan entries and title, emits a "plan_update" event.
 // The new state is also persisted to the session file so it survives resume.
-func (s *AgentSession) UpdatePlan(title string, entries []agent.PlanEntry) {
+func (s *AgentSession) UpdatePlan(title string, entries []agent.PlanEntry, metadata map[string]string) {
 	s.mu.Lock()
 	s.planTitle = title
+	s.planMetadata = metadata
 	s.plan = entries
 	s.planVersion++
 	s.mu.Unlock()
-	s.SessionManager.AppendPlanUpdate(title, entries)
+	s.SessionManager.AppendPlanUpdate(title, entries, metadata)
 	snapshot := make([]agent.PlanEntry, len(entries))
 	copy(snapshot, entries)
 	s.emit(AgentSessionEvent{
-		Type:        "plan_update",
-		PlanEntries: snapshot,
-		PlanTitle:   title,
+		Type:         "plan_update",
+		PlanEntries:  snapshot,
+		PlanTitle:    title,
+		PlanMetadata: metadata,
 	})
 }
 
 // restorePlan sets the in-memory plan and emits a plan_update event without
 // writing a new session entry (used when loading an existing session).
-func (s *AgentSession) restorePlan(title string, entries []agent.PlanEntry) {
+func (s *AgentSession) restorePlan(title string, entries []agent.PlanEntry, metadata map[string]string) {
 	if len(entries) == 0 && title == "" {
 		return
 	}
 	s.mu.Lock()
 	s.planTitle = title
+	s.planMetadata = metadata
 	s.plan = entries
 	s.mu.Unlock()
 	snapshot := make([]agent.PlanEntry, len(entries))
 	copy(snapshot, entries)
 	s.emit(AgentSessionEvent{
-		Type:        "plan_update",
-		PlanEntries: snapshot,
-		PlanTitle:   title,
+		Type:         "plan_update",
+		PlanEntries:  snapshot,
+		PlanTitle:    title,
+		PlanMetadata: metadata,
 	})
 }
 
@@ -319,6 +327,20 @@ func (s *AgentSession) PlanTitle() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.planTitle
+}
+
+// PlanMetadata returns a copy of the current plan metadata.
+func (s *AgentSession) PlanMetadata() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.planMetadata == nil {
+		return nil
+	}
+	out := make(map[string]string, len(s.planMetadata))
+	for k, v := range s.planMetadata {
+		out[k] = v
+	}
+	return out
 }
 
 // planVersionNum returns the current plan version counter.
@@ -553,7 +575,7 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// Clear a stale plan from a previous turn. If the model created or
 	// updated the plan during *this* turn, keep it.
 	if hadPlanBeforeTurn && s.planVersionNum() == planVersionBefore {
-		s.UpdatePlan("", nil)
+		s.UpdatePlan("", nil, nil)
 	}
 
 	return nil
@@ -1109,7 +1131,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	}
 
 	// Restore plan state from session without writing a new entry.
-	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	// Rebuild system prompt
 	s.buildSystemPrompt()
@@ -1159,7 +1181,7 @@ func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool
 	// Reload messages from entries
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
-	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	return selectedText, false, nil
 }
@@ -1258,13 +1280,13 @@ func (s *AgentSession) Reload() error {
 // ============================================================================
 
 // ExecuteBash executes a bash command and records the result in session history.
-func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (BashResult, error) {
+func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (platform.BashResult, error) {
 	return s.ExecuteBashWithOptions(command, onChunk, false)
 }
 
 // ExecuteBashWithOptions executes a bash command with optional streaming, cancellation,
 // and the option to exclude the result from context.
-func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (BashResult, error) {
+func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (platform.BashResult, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.bashCancelMu.Lock()
 	s.bashCancel = cancel
@@ -1284,7 +1306,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 		resolvedCommand = prefix + "\n" + command
 	}
 
-	result, err := ExecuteBash(ctx, resolvedCommand, &BashExecutorOptions{
+	result, err := platform.ExecuteBash(ctx, resolvedCommand, &platform.BashExecutorOptions{
 		OnChunk: onChunk,
 	})
 	if err != nil {
@@ -1569,7 +1591,7 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	// Rebuild messages from the new branch
 	ctx := s.SessionManager.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
-	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries)
+	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	// Find user message text at this entry for editor pre-fill
 	entry := s.SessionManager.GetEntry(entryID)

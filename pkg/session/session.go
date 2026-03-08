@@ -83,8 +83,9 @@ type SessionEntry struct {
 	Args    string `json:"args,omitempty"`
 
 	// plan_update
-	PlanEntries json.RawMessage `json:"planEntries,omitempty"`
-	PlanTitle   string          `json:"planTitle,omitempty"`
+	PlanEntries  json.RawMessage   `json:"planEntries,omitempty"`
+	PlanTitle    string             `json:"planTitle,omitempty"`
+	PlanMetadata map[string]string  `json:"planMetadata,omitempty"`
 }
 
 // GetParentID returns the parent entry ID, or empty string for root entries.
@@ -110,6 +111,7 @@ type SessionContext struct {
 	Model         *SessionModelRef
 	PlanEntries   []agent.PlanEntry
 	PlanTitle     string
+	PlanMetadata  map[string]string
 }
 
 // SessionModelRef identifies a model from the session.
@@ -725,18 +727,19 @@ func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
 // AppendPlanUpdate records the current plan state. These entries are never
 // included in the LLM context but are used to restore the plan on resume.
 // An empty/nil entries slice records a cleared plan.
-func (sm *SessionManager) AppendPlanUpdate(title string, entries []agent.PlanEntry) string {
+func (sm *SessionManager) AppendPlanUpdate(title string, entries []agent.PlanEntry, metadata map[string]string) string {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	data, _ := json.Marshal(entries)
 	entry := &SessionEntry{
-		Type:        "plan_update",
-		ID:          sm.generateID(),
-		ParentID:    sm.leafID,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		PlanEntries: data,
-		PlanTitle:   title,
+		Type:         "plan_update",
+		ID:           sm.generateID(),
+		ParentID:     sm.leafID,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
+		PlanEntries:  data,
+		PlanTitle:    title,
+		PlanMetadata: metadata,
 	}
 	return sm.appendEntry(entry)
 }
@@ -988,6 +991,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 	var compaction *SessionEntry
 	var lastPlanRaw json.RawMessage
 	var lastPlanTitle string
+	var lastPlanMetadata map[string]string
 
 	for _, entry := range path {
 		switch entry.Type {
@@ -1011,6 +1015,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 		case "plan_update":
 			lastPlanRaw = entry.PlanEntries
 			lastPlanTitle = entry.PlanTitle
+			lastPlanMetadata = entry.PlanMetadata
 		}
 	}
 
@@ -1087,6 +1092,7 @@ func BuildSessionContextFromEntries(entries []*SessionEntry, leafID string, byID
 		Model:         model,
 		PlanEntries:   planEntries,
 		PlanTitle:     lastPlanTitle,
+		PlanMetadata:  lastPlanMetadata,
 	}
 }
 

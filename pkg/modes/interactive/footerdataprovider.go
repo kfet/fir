@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/footer-data-provider.ts
 // Upstream hash: 1caadb2e
-package core
+package interactive
 
 import (
 	"os"

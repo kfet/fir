@@ -1193,7 +1193,7 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Step 2", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
 	}
-	sm.AppendPlanUpdate("Test Plan", entries)
+	sm.AppendPlanUpdate("Test Plan", entries, nil)
 
 	sessionFile := sm.GetSessionFile()
 	if sessionFile == "" {
@@ -1232,8 +1232,8 @@ func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
 	// Set a plan then clear it
 	sm.AppendPlanUpdate("Temp Plan", []agent.PlanEntry{
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
-	})
-	sm.AppendPlanUpdate("", nil) // clear
+	}, nil)
+	sm.AppendPlanUpdate("", nil, nil) // clear
 
 	sessionFile := sm.GetSessionFile()
 	sm2 := OpenSessionManager(sessionFile)

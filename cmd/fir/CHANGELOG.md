@@ -5,6 +5,11 @@
 ### Added
 
 - Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)
+- `pkg/core/interfaces.go`: `SessionStore`, `SettingsReader`, `ModelFinder` DI interfaces with compile-time satisfaction checks (Phase 4a)
+- Move `pkg/core/tools` to `pkg/agent/tools` — tool implementations depend only on `pkg/agent`, `pkg/ai`, `pkg/log`; no core dependency
+- Extract `footerdataprovider.go` from `pkg/core` to `pkg/modes/interactive/` — footer data is only used by interactive mode
+- Extract `bashexec.go` from `pkg/core` to `pkg/platform/` — bash execution as a standalone platform utility
+- Plan metadata: optional `metadata` key-value pairs (max 5 keys, 80-char values) shown in plan header — useful for fleet access info like session name, worktree path, attach command
 - Plan nudger: periodic steering reminder to update the plan every 5 turns when incomplete entries exist
 - Plan title: optional `title` parameter on the plan tool, shown in the plan header and footer status bar
 - `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)

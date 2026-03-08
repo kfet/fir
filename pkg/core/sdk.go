@@ -17,7 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
-	"github.com/kfet/fir/pkg/core/tools"
+	"github.com/kfet/fir/pkg/agent/tools"
 )
 
 // ============================================================================
@@ -279,7 +279,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	// Restore plan state from an existing session without writing a new entry.
 	if hasExistingSession {
-		session.restorePlan(existingSession.PlanTitle, existingSession.PlanEntries)
+		session.restorePlan(existingSession.PlanTitle, existingSession.PlanEntries, existingSession.PlanMetadata)
 	}
 
 	return &CreateAgentSessionResult{
