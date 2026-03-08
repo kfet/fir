@@ -281,8 +281,8 @@ Last reviewed: **2026-03-08**
 
 | Step | Status | Notes |
 |------|--------|-------|
-| 4a. Define interfaces | ✅ Done | `pkg/core/interfaces.go`: `SessionStore`, `SettingsReader`, `ModelFinder` with compile-time checks |
-| 4b. Refactor `AgentSessionOptions` | ⏸️ Deferred | External callers use many concrete-only methods (GetTree, ForceFlush, AppendLabelChange, GetCwd, Refresh, etc.). Full DI swap deferred until a consumer actually needs a custom implementation. |
+| 4a. Define interfaces | ❌ Removed | Dead code — no consumers used them; deleted `interfaces.go` |
+| 4b. Refactor `AgentSessionOptions` | ⏭️ Skipped | All consumers use concrete types directly (20+ methods); no alternate implementations exist |
 | 4c. Move `core/tools/` → `pkg/agent/tools/` | ✅ Done | 26 files moved, 9 consumers updated |
 
 ### Phase 5: Wire Up & Validate — ✅ COMPLETE
@@ -298,7 +298,7 @@ Last reviewed: **2026-03-08**
 
 ### Current `pkg/core` State
 
-**7 source files, ~2,459 lines** (down from ~10,400 — **76% reduction**)
+**6 source files, ~2,365 lines** (down from ~10,400 — **77% reduction**)
 
 | File | Lines | Status |
 |------|-------|--------|
@@ -306,7 +306,6 @@ Last reviewed: **2026-03-08**
 | `sdk.go` | 385 | Stays (convenience constructor) |
 | `changelog.go` | 138 | Stays |
 | `export.go` | 126 | Stays (AgentSession method, 3 callers) |
-| `interfaces.go` | 94 | Stays |
 | `timings.go` | 71 | Stays |
 | `compaction_progress.go` | 24 | Stays |
 
@@ -341,4 +340,4 @@ After the refactoring, `pkg/core` retains only:
 - `timings.go` — timing utilities
 - `changelog.go` — changelog parsing
 
-Roughly **~2,459 lines** down from **~10,400** — a 76% reduction.
+Roughly **~2,365 lines** down from **~10,400** — a 77% reduction.
