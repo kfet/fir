@@ -286,8 +286,8 @@ commit 542c1bda056b594af6571d1fed55761437319544 - session: fast listing via side
 | Step | Status | Notes |
 |------|--------|-------|
 | 4a. Define interfaces | ✅ Done | `pkg/core/interfaces.go`: `SessionStore`, `SettingsReader`, `ModelFinder` with compile-time checks |
-| 4b. Refactor `AgentSessionOptions` | ❌ TODO | |
-| 4c. Move `core/tools/` → `pkg/agent/tools/` | ❌ TODO | |
+| 4b. Refactor `AgentSessionOptions` | ⏸️ Deferred | External callers use many concrete-only methods (GetTree, ForceFlush, AppendLabelChange, GetCwd, Refresh, etc.). Full DI swap deferred until a consumer actually needs a custom implementation. |
+| 4c. Move `core/tools/` → `pkg/agent/tools/` | ✅ Done | 26 files moved, 9 consumers updated |
 
 ### Phase 5: Wire Up & Validate — ❌ NOT STARTED
 
