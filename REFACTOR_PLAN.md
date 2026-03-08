@@ -307,6 +307,16 @@ Last reviewed: **2026-03-08**
 **After Phase 3 completes:** ~2,166 lines in core (79% reduction).
 
 ⚠️ **Build status:** `make all` passes ✅ (fixed stale `clipboard_test.go` in core)
+⚠️ **E2E status:** All 25 tests pass ✅ (verified 2026-03-08)
+
+---
+
+## Testing Strategy
+
+Every phase must follow this pattern:
+1. **Before implementing:** run `make test-e2e` and `make all` to establish a green baseline
+2. **After implementing:** run `make test-e2e` and `make all` to verify no regressions
+3. **If a phase changes user-visible behavior:** add e2e test coverage *before* the change so the test validates the refactor preserved behavior
 
 ---
 
