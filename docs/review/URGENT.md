@@ -1,3 +1,1 @@
-# URGENT
-
-_No urgent issues found (2026-03-06)._
+_(no urgent issues)_

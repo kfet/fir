@@ -7,10 +7,11 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
 	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
@@ -33,7 +34,7 @@ func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
 }
 
 func TestBuildAuthMethods_OAuthMethods(t *testing.T) {
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
 	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
@@ -200,7 +201,7 @@ func TestHandleAuthenticate_Terminal(t *testing.T) {
 }
 
 func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
 	// Simulate a client that supports terminal-auth (like Zed).
@@ -242,7 +243,7 @@ func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
 func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
 	// Anthropic doesn't use a callback server, so authenticateOAuth should
 	// reject it immediately without making any network calls.
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	pa := &firAgent{
 		sessions:    make(map[string]*firSession),
 		authStorage: auth,

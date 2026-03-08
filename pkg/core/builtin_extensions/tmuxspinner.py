@@ -95,7 +95,21 @@ class Spinner:
         """Append the fir session name to the window name."""
         with self._lock:
             self._init_pane()
+            old = self._session_name
             self._session_name = name
+
+            # If the original window name ends with the OLD session suffix
+            # (e.g. after a reexec where the previous process left it),
+            # strip it so we don't stack names.
+            if old and self._original_name.endswith(" " + old):
+                self._original_name = self._original_name[: -(len(old) + 1)]
+
+            # If the original window name ends with the NEW session suffix
+            # (e.g. reexec preserved "fir myname" and we're told name="myname"),
+            # strip it so _display_name() doesn't duplicate it.
+            if name and self._original_name.endswith(" " + name):
+                self._original_name = self._original_name[: -(len(name) + 1)]
+
             if self._pane_id and not self._running:
                 _rename_window(self._pane_id, self._display_name())
 
@@ -202,8 +216,7 @@ if _in_tmux() and _has_controlling_terminal():
     @fir_ext.on("session_named")
     def on_session_named(params, ctx):
         name = (params or {}).get("name", "")
-        if name:
-            _spinner.set_session_name(name)
+        _spinner.set_session_name(name)
 
 
 fir_ext.run(name="tmuxspinner")

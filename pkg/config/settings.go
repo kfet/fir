@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/settings-manager.ts
 // Upstream hash: 380236a0
-package core
+package config
 
 import (
 	"encoding/json"

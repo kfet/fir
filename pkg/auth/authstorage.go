@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/auth-storage.ts
 // Upstream hash: 4ba3e5be
-package core
+package auth
 
 import (
 	"encoding/json"
@@ -175,11 +175,8 @@ type AuthStorage struct {
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
-// This is the primary constructor for file-based storage.
+// authPath must be non-empty.
 func NewAuthStorage(authPath string) *AuthStorage {
-	if authPath == "" {
-		authPath = filepath.Join(DefaultAgentDir(), "auth.json")
-	}
 	return newAuthStorage(NewFileAuthStorageBackend(authPath))
 }
 
@@ -393,7 +390,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 				return s.refreshOAuthToken(provider, oauthProvider)
 			}
 
-			oauthCreds := authCredToOAuthCreds(&cred)
+			oauthCreds := AuthCredToOAuthCreds(&cred)
 			key := oauthProvider.GetAPIKey(oauthCreds)
 			s.mu.RUnlock()
 			return key
@@ -433,18 +430,18 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 
 		// Check if another process already refreshed
 		if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
-			oauthCreds := authCredToOAuthCreds(&cred)
+			oauthCreds := AuthCredToOAuthCreds(&cred)
 			return refreshResult{apiKey: oauthProvider.GetAPIKey(oauthCreds), updatedData: currentData}, nil, nil
 		}
 
 		// Perform the refresh
-		oauthCreds := authCredToOAuthCreds(&cred)
+		oauthCreds := AuthCredToOAuthCreds(&cred)
 		newCreds, err := oauthProvider.RefreshToken(oauthCreds)
 		if err != nil {
 			return refreshResult{updatedData: currentData}, nil, nil
 		}
 
-		currentData[provider] = oauthCredsToAuthCred(newCreds)
+		currentData[provider] = OAuthCredsToAuthCred(newCreds)
 		b, _ := json.MarshalIndent(currentData, "", "  ")
 		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData}, b, nil
 	})
@@ -468,15 +465,15 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 		cred, ok := s.data[provider]
 		s.mu.RUnlock()
 		if ok && cred.Type == CredentialTypeOAuth {
-			oauthCreds := authCredToOAuthCreds(&cred)
+			oauthCreds := AuthCredToOAuthCreds(&cred)
 			return oauthProvider.GetAPIKey(oauthCreds)
 		}
 	}
 	return ""
 }
 
-// authCredToOAuthCreds converts an AuthCredential to an oauth.Credentials.
-func authCredToOAuthCreds(cred *AuthCredential) *oauth.Credentials {
+// AuthCredToOAuthCreds converts an AuthCredential to an oauth.Credentials.
+func AuthCredToOAuthCreds(cred *AuthCredential) *oauth.Credentials {
 	c := &oauth.Credentials{
 		Access:  cred.Access,
 		Refresh: cred.Refresh,
@@ -488,8 +485,8 @@ func authCredToOAuthCreds(cred *AuthCredential) *oauth.Credentials {
 	return c
 }
 
-// oauthCredsToAuthCred converts oauth.Credentials to an AuthCredential.
-func oauthCredsToAuthCred(creds *oauth.Credentials) AuthCredential {
+// OAuthCredsToAuthCred converts oauth.Credentials to an AuthCredential.
+func OAuthCredsToAuthCred(creds *oauth.Credentials) AuthCredential {
 	ac := AuthCredential{
 		Type:    CredentialTypeOAuth,
 		Access:  creds.Access,
@@ -525,7 +522,7 @@ func (s *AuthStorage) Login(providerID string, callbacks oauth.LoginCallbacks) e
 		return err
 	}
 
-	return s.Set(providerID, oauthCredsToAuthCred(creds))
+	return s.Set(providerID, OAuthCredsToAuthCred(creds))
 }
 
 // Logout removes credentials for a provider.

@@ -10,11 +10,13 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestDefaultRunner_IsEnabled(t *testing.T) {
 	// Default settings (nil Compaction block) → enabled=true
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{SettingsManager: sm}
 	if !runner.IsEnabled() {
 		t.Error("expected IsEnabled()=true with default settings")
@@ -22,8 +24,8 @@ func TestDefaultRunner_IsEnabled(t *testing.T) {
 
 	// Explicitly disabled
 	disabled := false
-	smOff := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	smOff := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			Enabled: &disabled,
 		},
 	})
@@ -34,8 +36,8 @@ func TestDefaultRunner_IsEnabled(t *testing.T) {
 
 	// Explicitly enabled
 	enabled := true
-	smOn := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	smOn := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			Enabled: &enabled,
 		},
 	})
@@ -46,7 +48,7 @@ func TestDefaultRunner_IsEnabled(t *testing.T) {
 }
 
 func TestDefaultRunner_ShouldCompact(t *testing.T) {
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
 	}
@@ -65,8 +67,8 @@ func TestDefaultRunner_ShouldCompact(t *testing.T) {
 
 func TestDefaultRunner_ShouldCompact_Disabled(t *testing.T) {
 	enabled := false
-	sm := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	sm := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			Enabled: &enabled,
 		},
 	})
@@ -81,7 +83,7 @@ func TestDefaultRunner_ShouldCompact_Disabled(t *testing.T) {
 
 func TestDefaultRunner_GetStats_EmptySession(t *testing.T) {
 	session := makeTestSession(t, nil)
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{SettingsManager: sm}
 
 	info := runner.GetStats(session)
@@ -102,7 +104,7 @@ func TestDefaultRunner_GetStats_WithMessages(t *testing.T) {
 		Usage:      ai.Usage{Input: 10, Output: 3},
 	}))
 
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{SettingsManager: sm}
 
 	info := runner.GetStats(session)
@@ -150,7 +152,7 @@ func makeTestSession(t *testing.T, model *ai.Model) *core.AgentSession {
 	return core.NewAgentSession(core.AgentSessionOptions{
 		Agent:          ag,
 		SessionManager: smgr,
-		SettingsManager: core.NewInMemorySettingsManager(core.Settings{}),
+		SettingsManager: config.NewInMemorySettingsManager(config.Settings{}),
 		ResourceLoader: noopResourceLoader{},
 		Cwd:            tmpDir,
 	})
@@ -158,10 +160,10 @@ func makeTestSession(t *testing.T, model *ai.Model) *core.AgentSession {
 
 func TestRunCompaction_NoModel(t *testing.T) {
 	session := makeTestSession(t, nil)
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
@@ -178,10 +180,10 @@ func TestRunCompaction_NoApiKey(t *testing.T) {
 		Provider: "test-provider",
 	}
 	session := makeTestSession(t, model)
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(core.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
@@ -198,11 +200,11 @@ func TestRunCompaction_NothingToCompact(t *testing.T) {
 		Provider: "test-provider",
 	}
 	session := makeTestSession(t, model)
-	sm := core.NewInMemorySettingsManager(core.Settings{})
+	sm := config.NewInMemorySettingsManager(config.Settings{})
 
 	// Create a registry with a pre-seeded API key (in-memory, no disk I/O).
-	authStorage := core.NewInMemoryAuthStorage(core.AuthStorageData{
-		"test-provider": {Type: core.CredentialTypeAPIKey, Key: "test-key-123"},
+	authStorage := auth.NewInMemoryAuthStorage(auth.AuthStorageData{
+		"test-provider": {Type: auth.CredentialTypeAPIKey, Key: "test-key-123"},
 	})
 	registry := core.NewModelRegistry(authStorage, "")
 

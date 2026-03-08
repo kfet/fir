@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/resolve-config-value.ts
 // Upstream hash: 1caadb2e
-package core
+package config
 
 import (
 	"context"

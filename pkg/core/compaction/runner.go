@@ -7,12 +7,13 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // DefaultRunner implements core.CompactionRunner using the compaction package.
 type DefaultRunner struct {
-	SettingsManager *core.SettingsManager
+	SettingsManager *config.SettingsManager
 	ModelRegistry   *core.ModelRegistry
 }
 

@@ -7,14 +7,16 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // setupTestModelRegistry creates a ModelRegistry with a temp auth file.
-func setupTestModelRegistry(t *testing.T, modelsJsonPath string) (*ModelRegistry, *AuthStorage) {
+func setupTestModelRegistry(t *testing.T, modelsJsonPath string) (*ModelRegistry, *auth.AuthStorage) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	authPath := filepath.Join(tmpDir, "auth.json")
-	authStorage := NewAuthStorage(authPath)
+	authStorage := auth.NewAuthStorage(authPath)
 	registry := NewModelRegistry(authStorage, modelsJsonPath)
 	return registry, authStorage
 }
@@ -566,7 +568,7 @@ func TestModelRegistry_CustomModels_MergeOverridesBuiltIn(t *testing.T) {
 }
 
 func TestModelRegistry_FallbackApiKey(t *testing.T) {
-	ClearConfigValueCache()
+	config.ClearConfigValueCache()
 	tmpDir := t.TempDir()
 	modelsPath := filepath.Join(tmpDir, "models.json")
 
@@ -617,11 +619,11 @@ func TestModelRegistry_IsUsingOAuth(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	authPath := filepath.Join(tmpDir, "auth.json")
-	authStorage := NewAuthStorage(authPath)
+	authStorage := auth.NewAuthStorage(authPath)
 
 	// Set OAuth credential.
-	authStorage.Set("test-provider-oauth", AuthCredential{
-		Type:   CredentialTypeOAuth,
+	authStorage.Set("test-provider-oauth", auth.AuthCredential{
+		Type:   auth.CredentialTypeOAuth,
 		Access: "oauth-token",
 	})
 
@@ -638,7 +640,7 @@ func TestModelRegistry_IsUsingOAuth(t *testing.T) {
 }
 
 func TestModelRegistry_AuthHeader(t *testing.T) {
-	ClearConfigValueCache()
+	config.ClearConfigValueCache()
 	tmpDir := t.TempDir()
 	modelsPath := filepath.Join(tmpDir, "models.json")
 
@@ -674,7 +676,7 @@ func TestModelRegistry_AuthHeader(t *testing.T) {
 }
 
 func TestModelRegistry_HeaderMerging(t *testing.T) {
-	ClearConfigValueCache()
+	config.ClearConfigValueCache()
 	tmpDir := t.TempDir()
 	modelsPath := filepath.Join(tmpDir, "models.json")
 

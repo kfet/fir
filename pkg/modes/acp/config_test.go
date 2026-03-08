@@ -6,6 +6,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestBuildThinkingConfigOption_WithLevels(t *testing.T) {
@@ -162,7 +163,7 @@ func TestSetSessionConfigOption_UnknownSession(t *testing.T) {
 }
 
 func TestBuildModelConfigOption(t *testing.T) {
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	auth.SetRuntimeApiKey("anthropic", "test-key")
 	reg := core.NewModelRegistry(auth, "")
 
@@ -203,7 +204,7 @@ func TestBuildModelConfigOption(t *testing.T) {
 }
 
 func TestBuildModelConfigOption_NilModel(t *testing.T) {
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	reg := core.NewModelRegistry(auth, "")
 
 	opt := buildModelConfigOption(reg, nil)

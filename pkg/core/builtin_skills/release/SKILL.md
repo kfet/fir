@@ -35,4 +35,14 @@ If the user provides a version, use it. Otherwise, auto-determine:
 - **Avoid interactive git**: Always pass `-m` to `git tag -a` and `git commit`. Git may try to open vim/nano, which fails in non-interactive environments.
 - **Moving tags**: If you need to move a tag after an additional commit, use `git tag -d vVERSION` then re-create it.
 
-If any step fails, stop and report the error. Do not push — the user decides when to push.
+## Publishing
+
+After the user confirms, run `make publish` to:
+- Push the commit and tag to origin
+- Create a GitHub release marked as **latest** with all cross-compiled binaries
+
+This ensures `fir update` on remote hosts picks up the new version.
+
+Alternatively, `make deploy` pushes binaries directly to Tailscale hosts via scp (no GitHub release needed).
+
+If any step fails, stop and report the error. Do not push or publish unless the user confirms.

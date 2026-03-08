@@ -69,9 +69,22 @@ func (r *SetupResult) Stop() {
 }
 
 // EmitSessionStart emits session_start to all running extensions.
+// If the session has an existing name (e.g. resumed via --session or /reexec),
+// a session_named event follows so extensions can sync with it.
 func (r *SetupResult) EmitSessionStart() {
 	if r.Manager != nil {
 		r.Manager.EmitEvent("session_start", nil)
+
+		// Emit session_named for resumed sessions so extensions like
+		// tmuxspinner can distinguish the session suffix from the
+		// original window name.
+		if r.session != nil {
+			if name := r.session.GetSessionName(); name != "" {
+				r.Manager.EmitEvent("session_named", map[string]any{
+					"name": name,
+				})
+			}
+		}
 	}
 }
 

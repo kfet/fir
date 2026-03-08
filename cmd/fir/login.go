@@ -7,6 +7,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // runLogin runs the interactive OAuth login flow for a given provider and exits.
@@ -26,7 +27,7 @@ func runLogin(args *Args) error {
 	}
 
 	agentDir := resolveAgentDir()
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 
 	fmt.Fprintf(os.Stderr, "Logging in to %s...\n", provider.Name())
 

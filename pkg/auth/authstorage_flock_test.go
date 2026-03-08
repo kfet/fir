@@ -3,7 +3,7 @@
 
 //go:build !windows
 
-package core
+package auth
 
 import (
 	"bufio"

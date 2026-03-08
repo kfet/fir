@@ -11,6 +11,8 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/core/tools"
 )
 
@@ -25,8 +27,8 @@ type CreateAgentSessionOptions struct {
 	// AgentDir is the global config directory. Default: ~/.fir/agent
 	AgentDir string
 
-	// AuthStorage for credentials. Default: NewAuthStorage(agentDir/auth.json)
-	AuthStorage *AuthStorage
+	// AuthStorage for credentials. Default: auth.NewAuthStorage(agentDir/auth.json)
+	AuthStorage *auth.AuthStorage
 	// ModelRegistry for model lookup/key resolution. Default: created from AuthStorage.
 	ModelRegistry *ModelRegistry
 
@@ -47,7 +49,7 @@ type CreateAgentSessionOptions struct {
 	SessionManager *SessionManager
 
 	// SettingsManager. Default: SettingsManager.Create(cwd, agentDir).
-	SettingsManager *SettingsManager
+	SettingsManager *config.SettingsManager
 
 	// CompactionRunner handles context compaction. When nil, compaction is disabled.
 	CompactionRunner CompactionRunner
@@ -88,7 +90,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Auth & model registry
 	authStorage := opts.AuthStorage
 	if authStorage == nil {
-		authStorage = NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+		authStorage = auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	}
 
 	modelRegistry := opts.ModelRegistry
@@ -99,7 +101,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Settings
 	settingsManager := opts.SettingsManager
 	if settingsManager == nil {
-		settingsManager = NewSettingsManager(cwd, agentDir)
+		settingsManager = config.NewSettingsManager(cwd, agentDir)
 	}
 
 	// Session
@@ -168,7 +170,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		} else {
 			tl := settingsManager.GetDefaultThinkingLevel()
 			if tl == "" {
-				tl = string(DefaultThinkingLevel)
+				tl = string(config.DefaultThinkingLevel)
 			}
 			thinkingLevel = tl
 		}
@@ -176,7 +178,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	if thinkingLevel == "" {
 		tl := settingsManager.GetDefaultThinkingLevel()
 		if tl == "" {
-			tl = string(DefaultThinkingLevel)
+			tl = string(config.DefaultThinkingLevel)
 		}
 		thinkingLevel = tl
 	}

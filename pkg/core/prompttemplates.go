@@ -8,10 +8,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/kfet/fir/pkg/config"
 )
 
-// ConfigDirName is the project-local configuration directory name.
-const ConfigDirName = ".fir"
 
 // PromptTemplate represents a prompt template loaded from a markdown file.
 type PromptTemplate struct {
@@ -219,7 +219,7 @@ func LoadPromptTemplates(opts LoadPromptTemplatesOptions) []PromptTemplate {
 		}
 
 		// Project templates from cwd/.fir/prompts/
-		projectDir := filepath.Join(cwd, ConfigDirName, "prompts")
+		projectDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 		templates = append(templates, loadTemplatesFromDir(projectDir, "project", "(project)")...)
 	}
 
@@ -228,7 +228,7 @@ func LoadPromptTemplates(opts LoadPromptTemplatesOptions) []PromptTemplate {
 	if opts.AgentDir != "" {
 		userPromptsDir = filepath.Join(opts.AgentDir, "prompts")
 	}
-	projectPromptsDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	projectPromptsDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 
 	// Explicit prompt paths
 	for _, rawPath := range opts.PromptPaths {

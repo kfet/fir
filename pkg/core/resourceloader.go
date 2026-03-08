@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kfet/fir/pkg/config"
 )
 
 // ============================================================================
@@ -59,7 +61,7 @@ type ResourceLoaderOptions struct {
 	Cwd      string
 	AgentDir string
 
-	SettingsManager *SettingsManager
+	SettingsManager *config.SettingsManager
 
 	AdditionalSkillPaths          []string
 	AdditionalPromptTemplatePaths []string
@@ -76,7 +78,7 @@ type DefaultResourceLoader struct {
 	cwd      string
 	agentDir string
 
-	settingsManager *SettingsManager
+	settingsManager *config.SettingsManager
 
 	additionalSkillPaths  []string
 	additionalPromptPaths []string
@@ -115,7 +117,7 @@ func NewResourceLoader(opts ResourceLoaderOptions) *DefaultResourceLoader {
 
 	sm := opts.SettingsManager
 	if sm == nil {
-		sm = NewSettingsManager(cwd, agentDir)
+		sm = config.NewSettingsManager(cwd, agentDir)
 	}
 
 	return &DefaultResourceLoader{
@@ -318,7 +320,7 @@ func (r *DefaultResourceLoader) resolveAppendSystemPrompt() []string {
 }
 
 func (r *DefaultResourceLoader) discoverSystemPromptFile() string {
-	projectPath := filepath.Join(r.cwd, ConfigDirName, "SYSTEM.md")
+	projectPath := filepath.Join(r.cwd, config.ConfigDirName, "SYSTEM.md")
 	if fileExists(projectPath) {
 		return projectPath
 	}
@@ -330,7 +332,7 @@ func (r *DefaultResourceLoader) discoverSystemPromptFile() string {
 }
 
 func (r *DefaultResourceLoader) discoverAppendSystemPromptFile() string {
-	projectPath := filepath.Join(r.cwd, ConfigDirName, "APPEND_SYSTEM.md")
+	projectPath := filepath.Join(r.cwd, config.ConfigDirName, "APPEND_SYSTEM.md")
 	if fileExists(projectPath) {
 		return projectPath
 	}
@@ -390,8 +392,8 @@ func (r *DefaultResourceLoader) addDefaultMetadataForPath(filePath string) {
 		filepath.Join(r.agentDir, "prompts"),
 	}
 	projectRoots := []string{
-		filepath.Join(r.cwd, ConfigDirName, "skills"),
-		filepath.Join(r.cwd, ConfigDirName, "prompts"),
+		filepath.Join(r.cwd, config.ConfigDirName, "skills"),
+		filepath.Join(r.cwd, config.ConfigDirName, "prompts"),
 	}
 
 	for _, root := range agentRoots {
@@ -421,7 +423,7 @@ func defaultSkillPaths(cwd, agentDir string) []string {
 		paths = append(paths, globalDir)
 	}
 	// Project skill dir
-	projectDir := filepath.Join(cwd, ConfigDirName, "skills")
+	projectDir := filepath.Join(cwd, config.ConfigDirName, "skills")
 	if dirExists(projectDir) {
 		paths = append(paths, projectDir)
 	}
@@ -434,7 +436,7 @@ func defaultPromptPaths(cwd, agentDir string) []string {
 	if dirExists(globalDir) {
 		paths = append(paths, globalDir)
 	}
-	projectDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	projectDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	if dirExists(projectDir) {
 		paths = append(paths, projectDir)
 	}

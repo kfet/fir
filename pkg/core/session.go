@@ -350,6 +350,19 @@ func (sm *SessionManager) rewriteFile() {
 	}
 }
 
+// ForceFlush writes the session to disk regardless of whether an assistant
+// message exists. Used before /reexec to ensure metadata (e.g. session name)
+// survives across process replacement.
+func (sm *SessionManager) ForceFlush() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if !sm.persist || sm.sessionFile == "" || len(sm.entries) == 0 {
+		return
+	}
+	sm.rewriteFile()
+	sm.flushed = true
+}
+
 func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 	if !sm.persist || sm.sessionFile == "" {
 		return

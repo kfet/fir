@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core/tools"
 	firlog "github.com/kfet/fir/pkg/log"
@@ -161,7 +162,7 @@ type AgentSessionHooks struct {
 type AgentSessionOptions struct {
 	Agent            *agent.Agent
 	SessionManager   *SessionManager
-	SettingsManager  *SettingsManager
+	SettingsManager  *config.SettingsManager
 	ResourceLoader   ResourceLoader
 	ModelRegistry    *ModelRegistry
 	CompactionRunner CompactionRunner
@@ -180,7 +181,7 @@ type AgentSessionOptions struct {
 type AgentSession struct {
 	Agent           *agent.Agent
 	SessionManager  *SessionManager
-	SettingsManager *SettingsManager
+	SettingsManager *config.SettingsManager
 
 	resourceLoader   ResourceLoader
 	modelRegistry    *ModelRegistry
@@ -1017,6 +1018,11 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.Agent.ReplaceMessages(nil)
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
+	s.emit(AgentSessionEvent{
+		Type:        "session_named",
+		SessionName: "",
+	})
 	return true, nil
 }
 
@@ -1054,13 +1060,12 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 
-	// Emit session_named if the loaded session has a name
-	if name := s.SessionManager.GetSessionName(); name != "" {
-		s.emit(AgentSessionEvent{
-			Type:        "session_named",
-			SessionName: name,
-		})
-	}
+	// Emit session_named so extensions (e.g. tmuxspinner) update the window title.
+	// Always emit, even with an empty name, so the old name is cleared.
+	s.emit(AgentSessionEvent{
+		Type:        "session_named",
+		SessionName: s.SessionManager.GetSessionName(),
+	})
 
 	return nil
 }

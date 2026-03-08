@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // TestAutoCompaction_E2E_ThresholdTriggered simulates a full agent loop
@@ -20,7 +22,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
 		ID:            "test-model",
@@ -89,7 +91,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -163,7 +165,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
 		ID:            "test-model",
@@ -226,7 +228,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -269,7 +271,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
 		ID:            "test-model",
@@ -339,7 +341,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -406,7 +408,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
 		ID:            "test-model",
@@ -466,7 +468,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -510,8 +512,8 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 
 	sm := InMemorySessionManager(cwd)
 	enabled := false
-	settingsManager := NewInMemorySettingsManager(Settings{
-		Compaction: &CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			Enabled: &enabled,
 		},
 	})
@@ -569,7 +571,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(""), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -661,7 +663,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
 		ID:            "test-model",
@@ -741,7 +743,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})

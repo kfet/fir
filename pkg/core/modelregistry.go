@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/kfet/fir/pkg/ai"
+	configpkg "github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---
@@ -278,7 +280,7 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 
 	// Merge headers
 	if len(override.Headers) > 0 {
-		resolvedHeaders := ResolveHeaders(override.Headers)
+		resolvedHeaders := configpkg.ResolveHeaders(override.Headers)
 		if resolvedHeaders != nil {
 			merged := make(map[string]string)
 			for k, v := range model.Headers {
@@ -303,7 +305,7 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 // See pkg/ai/oauth/ for the full OAuth flow implementation.
 type OAuthProviderInterface struct {
 	ID           string
-	ModifyModels func(models []*ai.Model, cred *AuthCredential) []*ai.Model
+	ModifyModels func(models []*ai.Model, cred *auth.AuthCredential) []*ai.Model
 }
 
 // ProviderConfigInput is the input type for RegisterProvider.
@@ -341,13 +343,13 @@ type ModelRegistry struct {
 	customProviderApiKeys map[string]string
 	registeredProviders   map[string]*ProviderConfigInput
 	loadError             string
-	authStorage           *AuthStorage
+	authStorage           *auth.AuthStorage
 	modelsJsonPath        string
 }
 
 // NewModelRegistry creates a new ModelRegistry.
 // If modelsJsonPath is empty, no custom models are loaded.
-func NewModelRegistry(authStorage *AuthStorage, modelsJsonPath string) *ModelRegistry {
+func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *ModelRegistry {
 	r := &ModelRegistry{
 		customProviderApiKeys: make(map[string]string),
 		registeredProviders:   make(map[string]*ProviderConfigInput),
@@ -363,7 +365,7 @@ func NewModelRegistry(authStorage *AuthStorage, modelsJsonPath string) *ModelReg
 		if !ok {
 			return ""
 		}
-		return ResolveConfigValue(keyConfig)
+		return configpkg.ResolveConfigValue(keyConfig)
 	})
 
 	// Load models
@@ -420,8 +422,8 @@ func (r *ModelRegistry) loadModels() {
 	// Let OAuth providers modify their models (e.g., update baseUrl)
 	for _, oauthProvider := range r.authStorage.GetOAuthProviders() {
 		cred := r.authStorage.Get(oauthProvider.ID())
-		if cred != nil && cred.Type == CredentialTypeOAuth {
-			oauthCreds := authCredToOAuthCreds(cred)
+		if cred != nil && cred.Type == auth.CredentialTypeOAuth {
+			oauthCreds := auth.AuthCredToOAuthCreds(cred)
 			if modified := oauthProvider.ModifyModels(combined, oauthCreds); modified != nil {
 				combined = modified
 			}
@@ -451,7 +453,7 @@ func (r *ModelRegistry) loadBuiltInModels(
 				if providerOverride.BaseURL != "" {
 					copy.BaseURL = providerOverride.BaseURL
 				}
-				resolvedHeaders := ResolveHeaders(providerOverride.Headers)
+				resolvedHeaders := configpkg.ResolveHeaders(providerOverride.Headers)
 				if resolvedHeaders != nil {
 					merged := make(map[string]string)
 					for k, v := range model.Headers {
@@ -637,8 +639,8 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 			}
 
 			// Merge headers: provider headers are base, model headers override
-			providerHeaders := ResolveHeaders(providerConfig.Headers)
-			modelHeaders := ResolveHeaders(modelDef.Headers)
+			providerHeaders := configpkg.ResolveHeaders(providerConfig.Headers)
+			modelHeaders := configpkg.ResolveHeaders(modelDef.Headers)
 			var headers map[string]string
 			if providerHeaders != nil || modelHeaders != nil {
 				headers = make(map[string]string)
@@ -652,7 +654,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 
 			// If authHeader is true, add Authorization header with resolved API key
 			if providerConfig.AuthHeader != nil && *providerConfig.AuthHeader && providerConfig.ApiKey != "" {
-				resolvedKey := ResolveConfigValue(providerConfig.ApiKey)
+				resolvedKey := configpkg.ResolveConfigValue(providerConfig.ApiKey)
 				if resolvedKey != "" {
 					if headers == nil {
 						headers = make(map[string]string)
@@ -796,11 +798,11 @@ func (r *ModelRegistry) GetApiKeyForProvider(provider string) string {
 // IsUsingOAuth checks if a model is using OAuth credentials.
 func (r *ModelRegistry) IsUsingOAuth(model *ai.Model) bool {
 	cred := r.authStorage.Get(model.Provider)
-	return cred != nil && cred.Type == CredentialTypeOAuth
+	return cred != nil && cred.Type == auth.CredentialTypeOAuth
 }
 
 // AuthStorage returns the auth storage used by this registry.
-func (r *ModelRegistry) AuthStorage() *AuthStorage {
+func (r *ModelRegistry) AuthStorage() *auth.AuthStorage {
 	return r.authStorage
 }
 
@@ -871,8 +873,8 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 			}
 
 			// Merge headers
-			providerHeaders := ResolveHeaders(config.Headers)
-			modelHeaders := ResolveHeaders(modelDef.Headers)
+			providerHeaders := configpkg.ResolveHeaders(config.Headers)
+			modelHeaders := configpkg.ResolveHeaders(modelDef.Headers)
 			var headers map[string]string
 			if providerHeaders != nil || modelHeaders != nil {
 				headers = make(map[string]string)
@@ -886,7 +888,7 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 
 			// If authHeader is true, add Authorization header
 			if config.AuthHeader && config.ApiKey != "" {
-				resolvedKey := ResolveConfigValue(config.ApiKey)
+				resolvedKey := configpkg.ResolveConfigValue(config.ApiKey)
 				if resolvedKey != "" {
 					if headers == nil {
 						headers = make(map[string]string)
@@ -916,13 +918,13 @@ func (r *ModelRegistry) applyProviderConfig(providerName string, config *Provide
 		// Apply OAuth modifyModels if credentials exist
 		if config.OAuth != nil && config.OAuth.ModifyModels != nil {
 			cred := r.authStorage.Get(providerName)
-			if cred != nil && cred.Type == CredentialTypeOAuth {
+			if cred != nil && cred.Type == auth.CredentialTypeOAuth {
 				r.models = config.OAuth.ModifyModels(r.models, cred)
 			}
 		}
 	} else if config.BaseURL != "" {
 		// Override-only: update baseUrl/headers for existing models
-		resolvedHeaders := ResolveHeaders(config.Headers)
+		resolvedHeaders := configpkg.ResolveHeaders(config.Headers)
 		for i, m := range r.models {
 			if m.Provider != providerName {
 				continue

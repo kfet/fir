@@ -8,6 +8,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // ============================================================================
@@ -143,7 +144,7 @@ func TestCreateAgentSession_WithSettingsManager(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := NewSettingsManager(cwd, agentDir)
+	sm := config.NewSettingsManager(cwd, agentDir)
 
 	result, err := CreateAgentSession(context.Background(), CreateAgentSessionOptions{
 		Cwd:             cwd,

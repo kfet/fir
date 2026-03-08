@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // --- ParseCommandArgs ---
@@ -135,7 +136,7 @@ func TestLoadPromptTemplates_FromDir(t *testing.T) {
 
 func TestLoadPromptTemplates_ProjectDir(t *testing.T) {
 	cwd := t.TempDir()
-	projectDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	projectDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	os.MkdirAll(projectDir, 0755)
 
 	os.WriteFile(filepath.Join(projectDir, "greet.md"), []byte("Hello!"), 0644)
@@ -362,7 +363,7 @@ func TestLoadPromptTemplates_ExplicitUserDir(t *testing.T) {
 func TestLoadPromptTemplates_ExplicitProjectDir(t *testing.T) {
 	// When an explicit path matches the cwd/.fir/prompts, source should be "project"
 	cwd := t.TempDir()
-	promptsDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	promptsDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	os.MkdirAll(promptsDir, 0755)
 	os.WriteFile(filepath.Join(promptsDir, "review.md"), []byte("Review it!"), 0644)
 

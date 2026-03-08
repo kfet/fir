@@ -15,6 +15,8 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
@@ -31,7 +33,7 @@ type sessionSetup struct {
 	cwd             string
 	agentDir        string
 	result          *core.CreateAgentSessionResult
-	settingsManager *core.SettingsManager
+	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
 	usageTracker    *usage.Tracker
 }
@@ -51,7 +53,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	agentDir := resolveAgentDir()
 
 	// Auth and model registry
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 
 	if args.ApiKey != "" {
@@ -61,7 +63,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
 	}
 
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 	sessionManager := createSessionManager(args, cwd, agentDir)
@@ -247,7 +249,7 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 }
 
 // reportSettingsErrors reports any settings load errors to stderr.
-func reportSettingsErrors(settingsManager *core.SettingsManager, context string) {
+func reportSettingsErrors(settingsManager *config.SettingsManager, context string) {
 	for _, se := range settingsManager.DrainErrors() {
 		fmt.Fprintf(os.Stderr, "Warning (%s, %s settings): %v\n", context, se.Scope, se.Err)
 	}
@@ -447,7 +449,7 @@ func runUpdate() error {
 func runListModels(args *Args) error {
 	agentDir := resolveAgentDir()
 
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 
 	if args.ApiKey != "" && args.Provider != "" {
@@ -601,7 +603,7 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 //
 // When the combined list is empty, all discovered extensions are started.
 // --no-extensions disables all extensions regardless of config (handled by the caller).
-func resolveEnabledExtensions(args *Args, sm *core.SettingsManager) []string {
+func resolveEnabledExtensions(args *Args, sm *config.SettingsManager) []string {
 	seen := make(map[string]bool)
 	var names []string
 

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // TestSelfSkillSettingsExample extracts the settings.json example from the
@@ -40,7 +41,7 @@ func TestSelfSkillSettingsExample(t *testing.T) {
 	}
 	clean := strings.Join(cleanLines, "\n")
 
-	var s Settings
+	var s config.Settings
 	if err := json.Unmarshal([]byte(clean), &s); err != nil {
 		t.Fatalf("settings.json example in self skill does not parse:\n%v\n\nCleaned JSON:\n%s", err, clean)
 	}
@@ -96,7 +97,7 @@ func TestSelfSkillDocumentsAllSettings(t *testing.T) {
 	skillContent := string(data)
 
 	// Extract all JSON field names from Settings and nested structs.
-	missing := collectJSONFields(reflect.TypeOf(Settings{}), skillContent)
+	missing := collectJSONFields(reflect.TypeOf(config.Settings{}), skillContent)
 	if len(missing) > 0 {
 		t.Errorf("settings.json fields not documented in self skill SKILL.md:\n  %s\n\nAdd them to the settings.json Reference section.",
 			strings.Join(missing, "\n  "))

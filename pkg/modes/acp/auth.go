@@ -11,6 +11,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -28,7 +29,7 @@ var providerKeyLinks = map[string]string{
 // buildAuthMethods constructs the list of ExtendedAuthMethod for the initialize response.
 // It inspects the auth storage and model registry to determine which providers
 // are available and what auth methods each supports.
-func buildAuthMethods(authStorage *core.AuthStorage, modelRegistry *core.ModelRegistry, clientCaps acpsdk.ClientCapabilities) []ExtendedAuthMethod {
+func buildAuthMethods(authStorage *auth.AuthStorage, modelRegistry *core.ModelRegistry, clientCaps acpsdk.ClientCapabilities) []ExtendedAuthMethod {
 	var methods []ExtendedAuthMethod
 
 	// Check if client supports terminal-auth (like Zed does).

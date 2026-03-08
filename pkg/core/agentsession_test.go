@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // ============================================================================
@@ -24,7 +26,7 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 	agentDir := t.TempDir()
 
 	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := NewResourceLoader(ResourceLoaderOptions{
 		Cwd:      cwd,
@@ -32,7 +34,7 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 	})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{
@@ -254,6 +256,103 @@ func TestAgentSession_NewSession(t *testing.T) {
 	state := session.State()
 	if len(state.Messages) != 0 {
 		t.Errorf("expected 0 messages after new session, got %d", len(state.Messages))
+	}
+}
+
+func TestAgentSession_NewSessionCmd_EmitsSessionNamedEmpty(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Set a session name first.
+	session.SetSessionName("mytest")
+
+	// Subscribe and collect session_named events.
+	var events []AgentSessionEvent
+	var mu sync.Mutex
+	session.Subscribe(func(e AgentSessionEvent) {
+		if e.Type == "session_named" {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		}
+	})
+
+	// NewSessionCmd should emit session_named with empty name.
+	_, err := session.NewSessionCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 session_named event, got %d", len(events))
+	}
+	if events[0].SessionName != "" {
+		t.Errorf("expected empty SessionName, got %q", events[0].SessionName)
+	}
+}
+
+func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sessionsDir := filepath.Join(agentDir, "sessions")
+
+	sm := NewSessionManager(cwd, sessionsDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
+	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	_ = rl.Reload()
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return ConvertToLLM(msgs)
+		},
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		Cwd:             cwd,
+	})
+	defer session.Close()
+
+	// Set a session name.
+	session.SetSessionName("oldname")
+
+	// Create a new empty session file to switch to.
+	os.MkdirAll(sessionsDir, 0o755)
+	newPath := filepath.Join(sessionsDir, "empty-session.jsonl")
+	os.WriteFile(newPath, []byte{}, 0o600)
+
+	// Subscribe after naming so we only capture the switch event.
+	var events []AgentSessionEvent
+	var mu sync.Mutex
+	session.Subscribe(func(e AgentSessionEvent) {
+		if e.Type == "session_named" {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		}
+	})
+
+	err := session.SwitchSession(newPath)
+	if err != nil {
+		t.Fatalf("SwitchSession failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 session_named event from SwitchSession, got %d", len(events))
+	}
+	if events[0].SessionName != "" {
+		t.Errorf("expected empty SessionName after switching to unnamed session, got %q", events[0].SessionName)
 	}
 }
 
@@ -694,11 +793,11 @@ func TestAgentSession_BuildSystemPrompt_WithAgentsFile(t *testing.T) {
 	os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Custom project instructions"), 0o644)
 
 	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
@@ -728,15 +827,15 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 	agentDir := t.TempDir()
 
 	// Create custom system prompt
-	os.MkdirAll(filepath.Join(cwd, ConfigDirName), 0o755)
-	os.WriteFile(filepath.Join(cwd, ConfigDirName, "SYSTEM.md"), []byte("Custom system prompt"), 0o644)
+	os.MkdirAll(filepath.Join(cwd, config.ConfigDirName), 0o755)
+	os.WriteFile(filepath.Join(cwd, config.ConfigDirName, "SYSTEM.md"), []byte("Custom system prompt"), 0o644)
 
 	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
@@ -934,7 +1033,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager()
-	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
@@ -1439,7 +1538,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager(cwd)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
@@ -1465,7 +1564,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -1820,7 +1919,7 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
-		SettingsManager:  NewSettingsManager(cwd, agentDir),
+		SettingsManager:  config.NewSettingsManager(cwd, agentDir),
 		ResourceLoader:   rl,
 		CompactionRunner: runner,
 		Cwd:              cwd,
@@ -1850,7 +1949,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 	sessionsDir := filepath.Join(agentDir, "sessions")
 
 	sm := NewSessionManager(cwd, sessionsDir)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
@@ -1868,7 +1967,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:   NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		Cwd:             cwd,
 	})
 	defer session.Close()
@@ -2486,12 +2585,12 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 
 	dir := filepath.Dir(sessionFile)
 	sm := OpenSessionManager(sessionFile, dir)
-	settingsManager := NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	modelRegistry := NewModelRegistry(NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
@@ -2667,7 +2766,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager()
-	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
@@ -2750,7 +2849,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := InMemorySessionManager()
-	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
@@ -2840,7 +2939,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	sessionDir := filepath.Join(agentDir, "sessions")
 
 	sm := NewSessionManager(tmpDir, sessionDir)
-	settingsManager := NewSettingsManager(tmpDir, agentDir)
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := NewResourceLoader(ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,

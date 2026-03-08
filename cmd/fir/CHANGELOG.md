@@ -4,10 +4,24 @@
 
 ### Added
 
-- Upstream sync to c99b9940: Mistral migrated to `mistral-conversations` API; added `opencode-go` provider; Sonnet 4.6 adaptive thinking in Bedrock; `skip_thought_signature_validator` for Gemini 3 unsigned tool calls; TextSignatureV1 with phase support; `ReasoningEffortMap` for per-model effort mapping; Groq qwen3-32b reasoning effort clamping; gpt-5.4 models; claude-sonnet-4-6 Antigravity; gemini-3.1-flash-lite-preview; provider fallback for unknown model IDs; `UnregisterProvider` and `ResetProviders` for dynamic provider lifecycle
+- `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
+- Extract `pkg/auth` from `pkg/core` — credential/OAuth storage as a standalone leaf package
+- Extract `pkg/config` from `pkg/core` — settings, config value resolution, and defaults as a standalone leaf package
+- `make publish` target to create GitHub releases marked as latest with cross-compiled binaries
+- `make deploy` target to push binaries directly to Tailscale hosts via scp
+
+### Removed
+
+- `/clear` slash command (use `/new` instead)
+- Dead `EventBus` code from `pkg/core`
+
+### Fixed
+
+- tmuxspinner now clears appended session name on `/new`, session switch, and `/reexec`
 
 ### Changed
 
+- Upstream sync to c99b9940: Mistral migrated to `mistral-conversations` API; added `opencode-go` provider; Sonnet 4.6 adaptive thinking in Bedrock; `skip_thought_signature_validator` for Gemini 3 unsigned tool calls; TextSignatureV1 with phase support; `ReasoningEffortMap` for per-model effort mapping; Groq qwen3-32b reasoning effort clamping; gpt-5.4 models; claude-sonnet-4-6 Antigravity; gemini-3.1-flash-lite-preview; provider fallback for unknown model IDs; `UnregisterProvider` and `ResetProviders` for dynamic provider lifecycle
 - Upstream sync: trimmed tracked files from 580 to 48 (AI layer, providers, oauth, agent loop, model/prompt core only); dropped TUI, tools, interactive components, and other diverged layers
 - Added PROJECT_WATCH.md for lightweight tracking of aider, goose, cline, and claude-code
 

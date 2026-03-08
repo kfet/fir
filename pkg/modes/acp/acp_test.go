@@ -17,6 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
 )
 
@@ -418,7 +419,7 @@ func TestHandleSlashCommand_Changelog(t *testing.T) {
 func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
 	entry := &firSession{
 		termState:     newTerminalState(),
@@ -437,7 +438,7 @@ func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	auth := core.NewInMemoryAuthStorage(nil)
+	auth := auth.NewInMemoryAuthStorage(nil)
 	mr := core.NewModelRegistry(auth, "")
 	// Set up a fake logged-in provider
 	auth.SetRuntimeApiKey("anthropic", "test-key")

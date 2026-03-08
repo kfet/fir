@@ -24,6 +24,8 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/extension"
@@ -41,7 +43,7 @@ func SetVersion(v string) { version = v }
 type firSession struct {
 	session         *core.AgentSession
 	modelRegistry   *core.ModelRegistry
-	settingsManager *core.SettingsManager
+	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
 	unsubscribe     func()
 	cwd             string
@@ -73,7 +75,7 @@ type firAgent struct {
 	sessions    map[string]*firSession
 	clientCaps  acpsdk.ClientCapabilities
 	authMethods []ExtendedAuthMethod
-	authStorage *core.AuthStorage // global auth storage from Initialize
+	authStorage *auth.AuthStorage // global auth storage from Initialize
 }
 
 // Compile-time interface check: piAgent must implement Agent for backward compat.
@@ -155,7 +157,7 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
 
@@ -591,9 +593,9 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		agentDir = dir
 	}
 
-	authStorage := core.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	sessionManager := core.NewSessionManager(cwd, core.DefaultSessionDir(agentDir, cwd))
 
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
@@ -1666,7 +1668,7 @@ func parseInt(s string) int {
 // project/global settings "extensions" list. When the combined list is empty,
 // all discovered extensions are started. The caller must check NoExtensions
 // before calling this.
-func resolveEnabledExtensions(cliNames []string, sm *core.SettingsManager) []string {
+func resolveEnabledExtensions(cliNames []string, sm *config.SettingsManager) []string {
 	seen := make(map[string]bool)
 	var names []string
 	for _, n := range sm.GetEnabledExtensions() {

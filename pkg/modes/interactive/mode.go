@@ -22,6 +22,8 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/tools"
 	"github.com/kfet/fir/pkg/debug"
 	"github.com/kfet/fir/pkg/extension"
@@ -43,7 +45,7 @@ type InteractiveMode struct {
 	// Core dependencies
 	session     *core.AgentSession
 	keybindings *core.KeybindingsManager
-	settings    *core.SettingsManager
+	settings    *config.SettingsManager
 
 	// TUI
 	ui              *tui.TUI
@@ -129,7 +131,7 @@ type InteractiveModeOptions struct {
 func NewInteractiveMode(
 	session *core.AgentSession,
 	keybindings *core.KeybindingsManager,
-	settings *core.SettingsManager,
+	settings *config.SettingsManager,
 	opts InteractiveModeOptions,
 ) *InteractiveMode {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -609,7 +611,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.cycleModel("backward")
 	})
 	m.editor.OnAction(core.ActionNewSession, func() {
-		go m.handleClearCommand()
+		go m.handleClearCommand("")
 	})
 	m.editor.OnAction(core.ActionTree, func() {
 		m.showTreeSelector()
@@ -817,8 +819,12 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	switch cmd {
 	case "/help", "/hotkeys":
 		m.showHelp()
-	case "/clear", "/new":
-		go m.handleClearCommand()
+	case "/new":
+		var newName string
+		if len(parts) > 1 {
+			newName = strings.Join(parts[1:], " ")
+		}
+		go m.handleClearCommand(newName)
 	case "/compact":
 		var instructions string
 		if len(parts) > 1 {
@@ -1529,12 +1535,15 @@ func (m *InteractiveMode) handleExternalEditor() {
 	// On non-zero exit keep the original text (no-op).
 }
 
-func (m *InteractiveMode) handleClearCommand() {
+func (m *InteractiveMode) handleClearCommand(newName string) {
 	if m.session != nil {
 		_, err := m.session.NewSessionCmd()
 		if err != nil {
 			m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
 			return
+		}
+		if newName != "" {
+			m.session.SetSessionName(newName)
 		}
 	}
 	if m.messageContainer != nil {
@@ -1552,7 +1561,11 @@ func (m *InteractiveMode) handleClearCommand() {
 	if m.ui != nil {
 		m.ui.RequestRender(true)
 	}
-	m.showStatus("New session started")
+	if newName != "" {
+		m.showStatus(fmt.Sprintf("New session started: %s", newName))
+	} else {
+		m.showStatus("New session started")
+	}
 }
 
 // ============================================================================
@@ -1581,7 +1594,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 		providers := authStorage.List()
 		var loggedIn []string
 		for _, p := range providers {
-			if cred := authStorage.Get(p); cred != nil && cred.Type == core.CredentialTypeOAuth {
+			if cred := authStorage.Get(p); cred != nil && cred.Type == auth.CredentialTypeOAuth {
 				loggedIn = append(loggedIn, p)
 			}
 		}
@@ -1630,7 +1643,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 	selectItems := make([]tuicomp.SelectItem, len(oauthProviders))
 	for i, p := range oauthProviders {
 		desc := ""
-		if cred := authStorage.Get(p.ID()); cred != nil && cred.Type == core.CredentialTypeOAuth {
+		if cred := authStorage.Get(p.ID()); cred != nil && cred.Type == auth.CredentialTypeOAuth {
 			desc = "logged in"
 		}
 		selectItems[i] = tuicomp.SelectItem{Label: p.Name(), Value: p.ID(), Description: desc}
@@ -2594,6 +2607,10 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 		m.showWarning("No persisted session to resume after reexec")
 		return
 	}
+
+	// Force-flush the session file so metadata (e.g. session name) that
+	// hasn't been written yet (no assistant message) survives the reexec.
+	m.session.SessionManager.ForceFlush()
 
 	sessionBase := filepath.Base(sessionFile)
 

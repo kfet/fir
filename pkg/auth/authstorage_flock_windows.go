@@ -3,7 +3,7 @@
 
 //go:build windows
 
-package core
+package auth
 
 // flockExclusive is a no-op on Windows; the in-process sync.Mutex suffices
 // for the CLI use-case.

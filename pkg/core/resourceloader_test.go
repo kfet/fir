@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // ============================================================================
@@ -210,7 +211,7 @@ func TestResolvePromptInput_FromFile(t *testing.T) {
 func TestDefaultSkillPaths_ExistingDirs(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
 	globalSkills := filepath.Join(agentDir, "skills")
-	projectSkills := filepath.Join(cwd, ConfigDirName, "skills")
+	projectSkills := filepath.Join(cwd, config.ConfigDirName, "skills")
 	os.MkdirAll(globalSkills, 0o755)
 	os.MkdirAll(projectSkills, 0o755)
 
@@ -237,7 +238,7 @@ func TestDefaultSkillPaths_NoDirs(t *testing.T) {
 func TestDefaultPromptPaths_ExistingDirs(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
 	globalPrompts := filepath.Join(agentDir, "prompts")
-	projectPrompts := filepath.Join(cwd, ConfigDirName, "prompts")
+	projectPrompts := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	os.MkdirAll(globalPrompts, 0o755)
 	os.MkdirAll(projectPrompts, 0o755)
 
@@ -397,7 +398,7 @@ func TestReload_Empty(t *testing.T) {
 func TestReload_WithSkills(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
 	// Skills in subdirectories need SKILL.md; root-level .md files are also loaded
-	skillDir := filepath.Join(cwd, ConfigDirName, "skills", "test-skill")
+	skillDir := filepath.Join(cwd, config.ConfigDirName, "skills", "test-skill")
 	os.MkdirAll(skillDir, 0o755)
 	writeFile(t, filepath.Join(skillDir, "SKILL.md"), `---
 description: A test skill
@@ -466,7 +467,7 @@ func TestReload_WithSystemPrompt(t *testing.T) {
 
 func TestReload_WithSystemPromptFile(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	promptDir := filepath.Join(cwd, ConfigDirName)
+	promptDir := filepath.Join(cwd, config.ConfigDirName)
 	os.MkdirAll(promptDir, 0o755)
 	writeFile(t, filepath.Join(promptDir, "SYSTEM.md"), "System prompt from file")
 
@@ -498,7 +499,7 @@ func TestReload_WithAppendSystemPrompt(t *testing.T) {
 
 func TestReload_NoSkills(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	skillDir := filepath.Join(cwd, ConfigDirName, "skills", "test")
+	skillDir := filepath.Join(cwd, config.ConfigDirName, "skills", "test")
 	os.MkdirAll(skillDir, 0o755)
 	writeFile(t, filepath.Join(skillDir, "SKILL.md"), `---
 description: should be skipped
@@ -520,7 +521,7 @@ Content`)
 
 func TestReload_NoPromptTemplates(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	promptDir := filepath.Join(cwd, ConfigDirName, "prompts")
+	promptDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	os.MkdirAll(promptDir, 0o755)
 	writeFile(t, filepath.Join(promptDir, "test.md"), `---
 description: should be skipped
@@ -589,7 +590,7 @@ Content`)
 
 func TestPathMetadata_DefaultForSkills(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	skillDir := filepath.Join(cwd, ConfigDirName, "skills", "my-skill")
+	skillDir := filepath.Join(cwd, config.ConfigDirName, "skills", "my-skill")
 	os.MkdirAll(skillDir, 0o755)
 	writeFile(t, filepath.Join(skillDir, "SKILL.md"), `---
 description: test
@@ -731,7 +732,7 @@ func TestLoadContextFileFromDir_None(t *testing.T) {
 
 func TestDiscoverSystemPromptFile_Project(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	promptPath := filepath.Join(cwd, ConfigDirName, "SYSTEM.md")
+	promptPath := filepath.Join(cwd, config.ConfigDirName, "SYSTEM.md")
 	writeFile(t, promptPath, "system prompt")
 
 	loader := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
@@ -755,7 +756,7 @@ func TestDiscoverSystemPromptFile_Global(t *testing.T) {
 
 func TestDiscoverSystemPromptFile_ProjectPreferred(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	projectPath := filepath.Join(cwd, ConfigDirName, "SYSTEM.md")
+	projectPath := filepath.Join(cwd, config.ConfigDirName, "SYSTEM.md")
 	globalPath := filepath.Join(agentDir, "SYSTEM.md")
 	writeFile(t, projectPath, "project")
 	writeFile(t, globalPath, "global")
@@ -778,7 +779,7 @@ func TestDiscoverSystemPromptFile_None(t *testing.T) {
 
 func TestDiscoverAppendSystemPromptFile(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	promptPath := filepath.Join(cwd, ConfigDirName, "APPEND_SYSTEM.md")
+	promptPath := filepath.Join(cwd, config.ConfigDirName, "APPEND_SYSTEM.md")
 	writeFile(t, promptPath, "append content")
 
 	loader := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
@@ -794,7 +795,7 @@ func TestDiscoverAppendSystemPromptFile(t *testing.T) {
 
 func TestReload_Idempotent(t *testing.T) {
 	cwd, agentDir := setupResourceDir(t)
-	skillDir := filepath.Join(cwd, ConfigDirName, "skills", "s")
+	skillDir := filepath.Join(cwd, config.ConfigDirName, "skills", "s")
 	os.MkdirAll(skillDir, 0o755)
 	writeFile(t, filepath.Join(skillDir, "SKILL.md"), `---
 description: skill

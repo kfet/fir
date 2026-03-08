@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // ============================================================================
@@ -85,8 +87,8 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
 	sm := core.InMemorySessionManager(cwd)
-	settingsManager := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
 			KeepRecentTokens: ptrInt(2000),
 		},
@@ -100,9 +102,9 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 		MaxTokens:     4096,
 	}
 
-	authStorage := core.NewAuthStorage("")
-	authStorage.Set("e2e-provider", core.AuthCredential{
-		Type: core.CredentialTypeAPIKey,
+	authStorage := auth.NewInMemoryAuthStorage(nil)
+	authStorage.Set("e2e-provider", auth.AuthCredential{
+		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
 	modelRegistry := core.NewModelRegistry(authStorage, "")
@@ -319,8 +321,8 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
 	sm := core.InMemorySessionManager(cwd)
-	settingsManager := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
 			KeepRecentTokens: ptrInt(2000),
 		},
@@ -334,9 +336,9 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 		MaxTokens:     4096,
 	}
 
-	authStorage := core.NewAuthStorage("")
-	authStorage.Set("e2e-provider", core.AuthCredential{
-		Type: core.CredentialTypeAPIKey,
+	authStorage := auth.NewInMemoryAuthStorage(nil)
+	authStorage.Set("e2e-provider", auth.AuthCredential{
+		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
 	modelRegistry := core.NewModelRegistry(authStorage, "")
@@ -536,8 +538,8 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
 	sm := core.InMemorySessionManager(cwd)
-	settingsManager := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
 			KeepRecentTokens: ptrInt(1000), // small → most messages get compacted
 		},
@@ -551,9 +553,9 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 		MaxTokens:     4096,
 	}
 
-	authStorage := core.NewAuthStorage("")
-	authStorage.Set("e2e-provider", core.AuthCredential{
-		Type: core.CredentialTypeAPIKey,
+	authStorage := auth.NewInMemoryAuthStorage(nil)
+	authStorage.Set("e2e-provider", auth.AuthCredential{
+		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
 	modelRegistry := core.NewModelRegistry(authStorage, "")
@@ -698,8 +700,8 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 	agentDir := t.TempDir()
 
 	enabled := false
-	settingsManager := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			Enabled: &enabled,
 		},
 	})
@@ -747,7 +749,7 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 
 	runner := &DefaultRunner{
 		SettingsManager: settingsManager,
-		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(""), ""),
+		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 
 	sm := core.InMemorySessionManager(cwd)
@@ -759,7 +761,7 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    core.NewModelRegistry(core.NewAuthStorage(""), ""),
+		ModelRegistry:    core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -802,8 +804,8 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
 	sm := core.InMemorySessionManager(cwd)
-	settingsManager := core.NewInMemorySettingsManager(core.Settings{
-		Compaction: &core.CompactionSettings{
+	settingsManager := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
 			KeepRecentTokens: ptrInt(1000),
 		},
@@ -817,9 +819,9 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 		MaxTokens:     4096,
 	}
 
-	authStorage := core.NewAuthStorage("")
-	authStorage.Set("e2e-provider", core.AuthCredential{
-		Type: core.CredentialTypeAPIKey,
+	authStorage := auth.NewInMemoryAuthStorage(nil)
+	authStorage.Set("e2e-provider", auth.AuthCredential{
+		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
 	modelRegistry := core.NewModelRegistry(authStorage, "")

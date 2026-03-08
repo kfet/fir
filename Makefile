@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models check-uv lint-python test-python install-uv
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models check-uv lint-python test-python install-uv publish deploy
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -88,6 +88,39 @@ generate-models:
 
 clean:
 	rm -rf $(BINDIR)
+
+# ---------------------------------------------------------------------------
+# Release publishing & remote deployment
+# ---------------------------------------------------------------------------
+
+RELEASE_TAG := v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
+RELEASE_BINS := $(BINARY)-darwin-arm64 $(BINARY)-darwin-amd64 $(BINARY)-linux-arm6 $(BINARY)-linux-arm64 $(BINARY)-linux-amd64
+
+publish: build-all
+	@echo "Publishing $(RELEASE_TAG)..."
+	git push origin main $(RELEASE_TAG)
+	gh release create $(RELEASE_TAG) --title "fir $(shell cat VERSION)" --latest $(RELEASE_BINS)
+	@echo "Published $(RELEASE_TAG) as latest."
+
+# Deploy to a remote host via scp (auto-detects OS and arch)
+# Usage: make deploy HOST=myhost
+deploy: build-all
+	@if [ -z "$(HOST)" ]; then echo "Usage: make deploy HOST=<hostname>"; exit 1; fi
+	@INFO=$$(ssh -o ConnectTimeout=5 $(HOST) "uname -s -m") || { echo "Cannot reach $(HOST)"; exit 1; }; \
+	OS=$$(echo "$$INFO" | awk '{print $$1}'); \
+	ARCH=$$(echo "$$INFO" | awk '{print $$2}'); \
+	case "$$OS-$$ARCH" in \
+		Linux-aarch64|Linux-arm64)   BIN=$(BINARY)-linux-arm64 ;; \
+		Linux-armv6l)                BIN=$(BINARY)-linux-arm6 ;; \
+		Linux-armv7l)                BIN=$(BINARY)-linux-arm6 ;; \
+		Linux-x86_64)                BIN=$(BINARY)-linux-amd64 ;; \
+		Darwin-arm64)                BIN=$(BINARY)-darwin-arm64 ;; \
+		Darwin-x86_64)               BIN=$(BINARY)-darwin-amd64 ;; \
+		*) echo "Unsupported platform: $$OS $$ARCH"; exit 1 ;; \
+	esac; \
+	echo "Deploying to $(HOST) ($$OS/$$ARCH → $$BIN)..."; \
+	scp -q $$BIN $(HOST):~/.local/bin/fir && \
+	ssh $(HOST) "chmod +x ~/.local/bin/fir && ~/.local/bin/fir --version"
 
 # ---------------------------------------------------------------------------
 # Python SDK & extensions

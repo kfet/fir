@@ -9,8 +9,10 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 )
 
@@ -22,7 +24,7 @@ func newPrintTestSession(t *testing.T) *core.AgentSession {
 	agentDir := t.TempDir()
 
 	sm := core.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:      cwd,
@@ -30,7 +32,7 @@ func newPrintTestSession(t *testing.T) *core.AgentSession {
 	})
 	rl.Reload()
 
-	modelRegistry := core.NewModelRegistry(core.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := core.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // DefaultModelPerProvider maps known providers to their default model IDs.
@@ -455,7 +456,7 @@ func ResolveModelScope(patterns []string, registry *ModelRegistry) []ScopedModel
 
 // FindInitialModel finds the initial model based on priority.
 func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
-	defaultTL := string(DefaultThinkingLevel)
+	defaultTL := string(config.DefaultThinkingLevel)
 	if opts.DefaultThinkingLevel != "" {
 		defaultTL = opts.DefaultThinkingLevel
 	}

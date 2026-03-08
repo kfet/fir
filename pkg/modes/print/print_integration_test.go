@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
 )
@@ -65,7 +66,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	sessionMgr := core.InMemorySessionManager()
-	settingsMgr := core.NewSettingsManager(tmpDir, tmpDir)
+	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
@@ -145,7 +146,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	sessionMgr := core.InMemorySessionManager()
-	settingsMgr := core.NewSettingsManager(tmpDir, tmpDir)
+	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
@@ -216,7 +217,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	sessionMgr := core.InMemorySessionManager()
-	settingsMgr := core.NewSettingsManager(tmpDir, tmpDir)
+	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
@@ -295,7 +296,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	sessionMgr := core.InMemorySessionManager()
-	settingsMgr := core.NewSettingsManager(tmpDir, tmpDir)
+	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,

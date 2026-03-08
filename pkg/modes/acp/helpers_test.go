@@ -7,6 +7,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestParseModelID(t *testing.T) {
@@ -218,8 +219,8 @@ func TestBuildModelState(t *testing.T) {
 		t.Setenv(key, "")
 	}
 
-	auth := core.NewInMemoryAuthStorage(nil)
-	reg := core.NewModelRegistry(auth, "")
+	authStore := auth.NewInMemoryAuthStorage(nil)
+	reg := core.NewModelRegistry(authStore, "")
 
 	t.Run("nil current model returns nil", func(t *testing.T) {
 		state := BuildModelState(reg, nil)
@@ -245,7 +246,7 @@ func TestBuildModelState(t *testing.T) {
 	})
 
 	t.Run("with auth configured returns models for that provider", func(t *testing.T) {
-		auth2 := core.NewInMemoryAuthStorage(nil)
+		auth2 := auth.NewInMemoryAuthStorage(nil)
 		auth2.SetRuntimeApiKey("anthropic", "test-api-key")
 		reg2 := core.NewModelRegistry(auth2, "")
 		current := &ai.Model{ID: "claude-3-7-sonnet-20250219", Provider: "anthropic", Name: "Claude 3.7 Sonnet"}

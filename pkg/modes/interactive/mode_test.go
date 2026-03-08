@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -58,7 +60,6 @@ func TestInteractiveMode_SlashCommandParsing(t *testing.T) {
 		wantCmd string
 	}{
 		{"/help", "/help"},
-		{"/clear", "/clear"},
 		{"/quit", "/quit"},
 		{"/model gpt-4", "/model"},
 		{"/unknown-command", "/unknown-command"},
@@ -125,7 +126,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 	agentDir := t.TempDir()
 
 	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:      cwd,
@@ -148,7 +149,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(agentDir+"/auth.json"), ""),
+		ModelRegistry:   core.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
 		Cwd:             cwd,
 	})
 	t.Cleanup(func() { session.Close() })
@@ -515,7 +516,7 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	// core.BuiltinSlashCommands (or builtinAliases for hidden aliases).
 	handleCases := []string{
 		"/help", "/hotkeys",
-		"/clear", "/new",
+		"/new",
 		"/compact",
 		"/model",
 		"/thinking",
@@ -1955,7 +1956,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	agentDir := t.TempDir()
 
 	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
-	settingsManager := core.NewSettingsManager(cwd, agentDir)
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
 		Cwd:      cwd,
@@ -1989,7 +1990,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   core.NewModelRegistry(core.NewAuthStorage(agentDir+"/auth.json"), ""),
+		ModelRegistry:   core.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
 		Cwd:             cwd,
 	})
 	t.Cleanup(func() { session.Close() })

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
 )
 
 // --- Test models ---
@@ -255,7 +256,7 @@ func newTestRegistry(t *testing.T, models []*ai.Model) *ModelRegistry {
 	t.Helper()
 	dir := t.TempDir()
 	authPath := filepath.Join(dir, "auth.json")
-	authStorage := NewAuthStorage(authPath)
+	authStorage := auth.NewAuthStorage(authPath)
 
 	// Set up auth for all providers in our test models
 	providers := make(map[string]bool)
@@ -263,7 +264,7 @@ func newTestRegistry(t *testing.T, models []*ai.Model) *ModelRegistry {
 		providers[m.Provider] = true
 	}
 	for p := range providers {
-		authStorage.Set(p, AuthCredential{Type: CredentialTypeAPIKey, Key: "test-key"})
+		authStorage.Set(p, auth.AuthCredential{Type: auth.CredentialTypeAPIKey, Key: "test-key"})
 	}
 
 	// Register models
