@@ -84,6 +84,18 @@ plan:
 
 **Each cycle:** Reflect actual state — mark completed tasks `completed`, the currently running task `in_progress`, and future tasks `pending`. Keep entries coarse (milestones, not individual file edits).
 
+**Worker self-reported progress:** Workers also have access to the `plan` tool and may use it to report their own progress on sub-tasks. To check a worker's current plan, send `/plan` to their tmux window and capture the output:
+
+```bash
+tm-send "$SESSION:$WINDOW" "/plan"
+sleep 2
+tm-capture "$SESSION:$WINDOW" 30
+```
+
+This prints the worker's plan entries with their statuses. Incorporate what they report into your top-level plan: if a worker marks their sub-task complete, update the corresponding milestone. This is faster and more reliable than inferring progress from git logs alone.
+
+**Encouraging workers to use the plan tool:** When assigning a task, tell agents to use the `plan` tool to track their sub-steps and mark them as they go. Example instruction: *"Use the plan tool to break this into steps and update progress as you work."* This gives you live visibility without having to poll `tm-capture` for context clues.
+
 **At close-out:** Mark all entries `completed` before stopping the fleet.
 
 ## FLEET.md — Persist and Restore
