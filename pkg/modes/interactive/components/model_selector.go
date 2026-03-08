@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
@@ -47,7 +47,7 @@ type ModelSelectorComponent struct {
 	selectedIndex    int
 	currentModel     *ai.Model
 	settingsManager  *config.SettingsManager
-	modelRegistry    *core.ModelRegistry
+	modelRegistry    *models.ModelRegistry
 	onSelect         func(model *ai.Model)
 	onCancel         func()
 	errorMessage     string
@@ -66,7 +66,7 @@ var _ tui.Focusable = (*ModelSelectorComponent)(nil)
 func NewModelSelectorComponent(
 	currentModel *ai.Model,
 	settingsManager *config.SettingsManager,
-	modelRegistry *core.ModelRegistry,
+	modelRegistry *models.ModelRegistry,
 	scopedModels []ScopedModelItem,
 	onSelect func(model *ai.Model),
 	onCancel func(),

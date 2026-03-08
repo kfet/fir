@@ -15,6 +15,9 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/compaction"
@@ -54,7 +57,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 
 	// Auth and model registry
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 
 	if args.ApiKey != "" {
 		if args.Provider == "" {
@@ -69,7 +72,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
 	// Resource loader
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:                           cwd,
 		AgentDir:                      agentDir,
 		SettingsManager:               settingsManager,
@@ -85,19 +88,19 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	}
 
 	// Resolve scoped models
-	var scopedModels []core.ScopedModel
+	var scopedModels []models.ScopedModel
 	modelPatterns := args.Models
 	if len(modelPatterns) == 0 {
 		modelPatterns = settingsManager.GetEnabledModels()
 	}
 	if len(modelPatterns) > 0 {
-		scopedModels = core.ResolveModelScope(modelPatterns, modelRegistry)
+		scopedModels = models.ResolveModelScope(modelPatterns, modelRegistry)
 	}
 
 	// Resolve model from CLI flags
 	var model *ai.Model
 	if args.Model != "" {
-		resolved := core.ResolveCliModel(core.ResolveCliModelOptions{
+		resolved := models.ResolveCliModel(models.ResolveCliModelOptions{
 			CLIProvider:   args.Provider,
 			CLIModel:      args.Model,
 			ModelRegistry: modelRegistry,
@@ -450,7 +453,7 @@ func runListModels(args *Args) error {
 	agentDir := resolveAgentDir()
 
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 
 	if args.ApiKey != "" && args.Provider != "" {
 		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
@@ -498,22 +501,22 @@ func runExport(args *Args) error {
 }
 
 // createSessionManager creates the appropriate session manager based on CLI args.
-func createSessionManager(args *Args, cwd, agentDir string) *core.SessionManager {
+func createSessionManager(args *Args, cwd, agentDir string) *session.SessionManager {
 	sessionDir := args.SessionDir
 	if sessionDir == "" {
-		sessionDir = core.DefaultSessionDir(agentDir, cwd)
+		sessionDir = session.DefaultSessionDir(agentDir, cwd)
 	}
 
 	if args.NoSession {
-		return core.InMemorySessionManager()
+		return session.InMemorySessionManager()
 	}
 	if args.Session != "" {
-		return core.OpenSessionManager(filepath.Join(sessionDir, args.Session))
+		return session.OpenSessionManager(filepath.Join(sessionDir, args.Session))
 	}
 	if args.Continue {
-		return core.ContinueRecentSession(cwd, sessionDir)
+		return session.ContinueRecentSession(cwd, sessionDir)
 	}
-	return core.NewSessionManager(cwd, sessionDir)
+	return session.NewSessionManager(cwd, sessionDir)
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.

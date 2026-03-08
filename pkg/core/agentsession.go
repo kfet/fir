@@ -16,6 +16,10 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session"
+	fmsg "github.com/kfet/fir/pkg/msg"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/core/tools"
 	firlog "github.com/kfet/fir/pkg/log"
 )
@@ -163,13 +167,13 @@ type AgentSessionHooks struct {
 
 type AgentSessionOptions struct {
 	Agent            *agent.Agent
-	SessionManager   *SessionManager
+	SessionManager   *session.SessionManager
 	SettingsManager  *config.SettingsManager
-	ResourceLoader   ResourceLoader
-	ModelRegistry    *ModelRegistry
+	ResourceLoader   resources.ResourceLoader
+	ModelRegistry    *models.ModelRegistry
 	CompactionRunner CompactionRunner
 	Cwd              string
-	ScopedModels     []ScopedModel
+	ScopedModels     []models.ScopedModel
 	Hooks            *AgentSessionHooks
 	UsageTracker     UsageTracker
 }
@@ -182,14 +186,14 @@ type AgentSessionOptions struct {
 // It wraps the Agent with session persistence, compaction, tool management, and event routing.
 type AgentSession struct {
 	Agent           *agent.Agent
-	SessionManager  *SessionManager
+	SessionManager  *session.SessionManager
 	SettingsManager *config.SettingsManager
 
-	resourceLoader   ResourceLoader
-	modelRegistry    *ModelRegistry
+	resourceLoader   resources.ResourceLoader
+	modelRegistry    *models.ModelRegistry
 	compactionRunner CompactionRunner
 	cwd              string
-	scopedModels     []ScopedModel
+	scopedModels     []models.ScopedModel
 
 	// Event subscription
 	mu             sync.RWMutex
@@ -361,12 +365,12 @@ func (s *AgentSession) IsStreaming() bool {
 }
 
 // ResourceLoader returns the resource loader.
-func (s *AgentSession) ResourceLoader() ResourceLoader {
+func (s *AgentSession) ResourceLoader() resources.ResourceLoader {
 	return s.resourceLoader
 }
 
 // ModelRegistry returns the model registry.
-func (s *AgentSession) ModelRegistryRef() *ModelRegistry {
+func (s *AgentSession) ModelRegistryRef() *models.ModelRegistry {
 	return s.modelRegistry
 }
 
@@ -463,7 +467,7 @@ func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
 		s.SessionManager.AppendAgentMessage(msg)
 	case "custom":
 		if msg.Custom != nil {
-			if cm, ok := msg.Custom.(*CustomMessage); ok {
+			if cm, ok := msg.Custom.(*fmsg.CustomMessage); ok {
 				data, _ := json.Marshal(cm.Content)
 				s.SessionManager.AppendCustomEntry(cm.CustomType, data)
 			}
@@ -496,7 +500,7 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	// Expand skill commands (/skill:name args) and prompt templates (/template args)
 	content := s.expandSkillCommand(text)
 	if templates, _ := s.resourceLoader.GetPrompts(); len(templates) > 0 {
-		content = ExpandPromptTemplate(content, templates)
+		content = resources.ExpandPromptTemplate(content, templates)
 	}
 
 	ts := time.Now().UnixMilli()
@@ -612,12 +616,12 @@ func (s *AgentSession) buildSystemPrompt() {
 
 	// Collect agents files as context files
 	agentsFiles := s.resourceLoader.GetAgentsFiles()
-	contextFiles := make([]ContextFile, len(agentsFiles))
+	contextFiles := make([]resources.ContextFile, len(agentsFiles))
 	for i, f := range agentsFiles {
-		contextFiles[i] = ContextFile{Path: f.Path, Content: f.Content}
+		contextFiles[i] = resources.ContextFile{Path: f.Path, Content: f.Content}
 	}
 
-	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
+	prompt := resources.BuildSystemPrompt(resources.BuildSystemPromptOptions{
 		Skills:       skills,
 		ContextFiles: contextFiles,
 		Cwd:          s.cwd,
@@ -658,7 +662,7 @@ func (s *AgentSession) expandSkillCommand(text string) string {
 	}
 
 	skills, _ := s.resourceLoader.GetSkills()
-	var found *Skill
+	var found *resources.Skill
 	for i := range skills {
 		if skills[i].Name == skillName {
 			found = &skills[i]
@@ -674,7 +678,7 @@ func (s *AgentSession) expandSkillCommand(text string) string {
 		return text
 	}
 
-	body := strings.TrimSpace(StripFrontmatter(string(data)))
+	body := strings.TrimSpace(resources.StripFrontmatter(string(data)))
 	skillBlock := fmt.Sprintf("<skill name=%q location=%q>\nReferences are relative to %s.\n\n%s\n</skill>",
 		found.Name, found.FilePath, found.BaseDir, body)
 	if args != "" {
@@ -842,7 +846,7 @@ func calculateContextTokens(usage ai.Usage) int {
 
 // GetLatestCompactionEntry returns the most recent compaction entry in a session branch,
 // or nil if none exists.
-func GetLatestCompactionEntry(entries []*SessionEntry) *SessionEntry {
+func GetLatestCompactionEntry(entries []*session.SessionEntry) *session.SessionEntry {
 	for i := len(entries) - 1; i >= 0; i-- {
 		if entries[i].Type == "compaction" {
 			return entries[i]
@@ -944,7 +948,7 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 }
 
 // ScopedModelsRef returns the scoped models for this session.
-func (s *AgentSession) ScopedModelsRef() []ScopedModel {
+func (s *AgentSession) ScopedModelsRef() []models.ScopedModel {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.scopedModels
@@ -952,7 +956,7 @@ func (s *AgentSession) ScopedModelsRef() []ScopedModel {
 
 // SetScopedModels updates the session-only scoped model list used for Ctrl+P
 // cycling. A nil or empty slice clears the filter (all available models cycle).
-func (s *AgentSession) SetScopedModels(models []ScopedModel) {
+func (s *AgentSession) SetScopedModels(models []models.ScopedModel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.scopedModels = models
@@ -1143,11 +1147,11 @@ func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool
 
 	// Create the branched session
 	if entry.ParentID == "" {
-		s.SessionManager.NewSession(&NewSessionOptions{ParentSession: previousSessionFile})
+		s.SessionManager.NewSession(&session.NewSessionOptions{ParentSession: previousSessionFile})
 	} else {
 		if _, err := s.SessionManager.CreateBranchedSession(entry.ParentID); err != nil {
 			log.Printf("agentsession: branch failed for entry %s: %v", entry.ParentID, err)
-			s.SessionManager.NewSession(&NewSessionOptions{ParentSession: previousSessionFile})
+			s.SessionManager.NewSession(&session.NewSessionOptions{ParentSession: previousSessionFile})
 		}
 	}
 	s.Agent.SetSessionID(s.SessionManager.GetSessionID())
@@ -1289,7 +1293,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 
 	// Record in session
 	exitCode := result.ExitCode
-	bashMsg := &BashExecutionMessage{
+	bashMsg := &fmsg.BashExecutionMessage{
 		Role:               "bashExecution",
 		Command:            command,
 		Output:             result.Output,

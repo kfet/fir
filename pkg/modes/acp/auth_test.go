@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
 	auth := auth.NewInMemoryAuthStorage(nil)
-	reg := core.NewModelRegistry(auth, "")
+	reg := models.NewModelRegistry(auth, "")
 
 	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
 
@@ -35,7 +35,7 @@ func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
 
 func TestBuildAuthMethods_OAuthMethods(t *testing.T) {
 	auth := auth.NewInMemoryAuthStorage(nil)
-	reg := core.NewModelRegistry(auth, "")
+	reg := models.NewModelRegistry(auth, "")
 
 	methods := buildAuthMethods(auth, reg, acpsdk.ClientCapabilities{})
 
@@ -202,7 +202,7 @@ func TestHandleAuthenticate_Terminal(t *testing.T) {
 
 func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
 	auth := auth.NewInMemoryAuthStorage(nil)
-	reg := core.NewModelRegistry(auth, "")
+	reg := models.NewModelRegistry(auth, "")
 
 	// Simulate a client that supports terminal-auth (like Zed).
 	caps := acpsdk.ClientCapabilities{

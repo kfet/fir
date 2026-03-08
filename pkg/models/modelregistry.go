@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/model-registry.ts
 // Upstream hash: c99b9940
-package core
+package models
 
 import (
 	"encoding/json"
@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/kfet/fir/pkg/ai"
-	configpkg "github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
+	configpkg "github.com/kfet/fir/pkg/config"
 )
 
 // --- OpenAI Compatibility schemas (for JSON validation) ---

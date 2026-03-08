@@ -24,6 +24,9 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/compaction"
@@ -42,7 +45,7 @@ func SetVersion(v string) { version = v }
 // firSession holds per-session state.
 type firSession struct {
 	session         *core.AgentSession
-	modelRegistry   *core.ModelRegistry
+	modelRegistry   *models.ModelRegistry
 	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
 	unsubscribe     func()
@@ -52,7 +55,7 @@ type firSession struct {
 	termState       *terminalState
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
-	lastResumeList  []core.SessionListInfo
+	lastResumeList  []session.SessionListInfo
 	configAccessor  thinkingAccessor // nil → use session (for testing)
 	mcpManager      *mcp.Manager     // nil if no MCP servers configured
 }
@@ -158,7 +161,7 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 		agentDir = dir
 	}
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
 
 	pa.mu.Lock()
@@ -348,8 +351,8 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
-	sessionDir := core.DefaultSessionDir(agentDir, cwd)
-	sessions, err := core.ListSessions(cwd, sessionDir)
+	sessionDir := session.DefaultSessionDir(agentDir, cwd)
+	sessions, err := session.ListSessions(cwd, sessionDir)
 	if err != nil {
 		return ListSessionsResponse{}, err
 	}
@@ -388,7 +391,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		agentDir = dir
 	}
-	sessionsDir := core.SessionsDir(agentDir)
+	sessionsDir := session.SessionsDir(agentDir)
 	sessionPath, _ := filepath.Abs(params.SessionId)
 	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
 		return ResumeSessionResponse{}, fmt.Errorf("invalid session path: must be within sessions directory")
@@ -594,11 +597,11 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	}
 
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
-	modelRegistry := core.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	sessionManager := core.NewSessionManager(cwd, core.DefaultSessionDir(agentDir, cwd))
+	sessionManager := session.NewSessionManager(cwd, session.DefaultSessionDir(agentDir, cwd))
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:                           cwd,
 		AgentDir:                      agentDir,
 		SettingsManager:               settingsManager,
@@ -1089,8 +1092,8 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 
 	case "resume":
 		if args == "" {
-			sessionDir := core.DefaultSessionDir(entry.agentDir, entry.cwd)
-			sessions, _ := core.ListSessions(entry.cwd, sessionDir)
+			sessionDir := session.DefaultSessionDir(entry.agentDir, entry.cwd)
+			sessions, _ := session.ListSessions(entry.cwd, sessionDir)
 			if len(sessions) > 10 {
 				sessions = sessions[:10]
 			}
@@ -1115,13 +1118,13 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		return true
 
 	case "continue":
-		sessionDir := core.DefaultSessionDir(entry.agentDir, entry.cwd)
-		sessions, _ := core.ListSessions(entry.cwd, sessionDir)
+		sessionDir := session.DefaultSessionDir(entry.agentDir, entry.cwd)
+		sessions, _ := session.ListSessions(entry.cwd, sessionDir)
 		if len(sessions) == 0 {
 			pa.sendAgentMessage(sessionID, "No sessions available to continue.")
 			return true
 		}
-		sessionsDir := core.SessionsDir(entry.agentDir)
+		sessionsDir := session.SessionsDir(entry.agentDir)
 		if !IsPathWithinDirectory(sessions[0].Path, sessionsDir) {
 			pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
 			return true
@@ -1260,7 +1263,7 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 				if args != "" {
 					fullCmd += " " + args
 				}
-				expanded := core.ExpandPromptTemplate(fullCmd, templates)
+				expanded := resources.ExpandPromptTemplate(fullCmd, templates)
 				if expanded != fullCmd {
 					_ = entry.session.Prompt(expanded)
 				}
@@ -1304,7 +1307,7 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		sessionPath, _ = filepath.Abs(args)
 	}
 
-	sessionsDir := core.SessionsDir(entry.agentDir)
+	sessionsDir := session.SessionsDir(entry.agentDir)
 	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
 		pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
 		return
@@ -1434,7 +1437,7 @@ func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, arg
 			pa.sendAgentMessage(sessionID, "No skills loaded.")
 			return
 		}
-		sorted := make([]core.Skill, len(skills))
+		sorted := make([]resources.Skill, len(skills))
 		copy(sorted, skills)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
@@ -1464,7 +1467,7 @@ func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, arg
 			}
 		}
 
-		builtins := core.LoadBuiltinSkills()
+		builtins := resources.LoadBuiltinSkills()
 		var found bool
 		for _, s := range builtins.Skills {
 			if s.Name == name {
@@ -1496,7 +1499,7 @@ func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, arg
 		}
 
 		prefix := "builtin_skills/" + name
-		err := fs.WalkDir(core.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+		err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -1508,7 +1511,7 @@ func (pa *firAgent) handleSkillsCommand(sessionID string, entry *firSession, arg
 			if d.IsDir() {
 				return os.MkdirAll(dest, 0o755)
 			}
-			data, err := fs.ReadFile(core.BuiltinSkillsFS, path)
+			data, err := fs.ReadFile(resources.BuiltinSkillsFS, path)
 			if err != nil {
 				return err
 			}

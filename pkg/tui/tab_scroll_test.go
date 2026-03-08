@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -47,7 +47,7 @@ func TestSessionSelector_TabThenScroll(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		currentSessions,
 		components.SessionScopeCurrent,
-		func() ([]core.SessionListInfo, error) { return sessions, nil },
+		func() ([]session.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	// Wire OnRequestRedraw exactly as mode.go does.

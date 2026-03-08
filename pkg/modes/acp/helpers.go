@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
@@ -39,7 +39,7 @@ func shortProvider(provider string) string {
 
 // BuildModelState creates an ACP SessionModelState from the model registry.
 // Only includes models that have auth configured (API key or OAuth token).
-func BuildModelState(reg *core.ModelRegistry, currentModel *ai.Model) *acpsdk.SessionModelState {
+func BuildModelState(reg *models.ModelRegistry, currentModel *ai.Model) *acpsdk.SessionModelState {
 	if currentModel == nil {
 		return nil
 	}

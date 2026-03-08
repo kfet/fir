@@ -4,31 +4,31 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 )
 
-func testSessionTree() []*core.SessionTreeNode {
-	root := &core.SessionTreeNode{
-		Entry: &core.SessionEntry{ID: "root-001"},
+func testSessionTree() []*session.SessionTreeNode {
+	root := &session.SessionTreeNode{
+		Entry: &session.SessionEntry{ID: "root-001"},
 		Label: "Initial prompt",
-		Children: []*core.SessionTreeNode{
+		Children: []*session.SessionTreeNode{
 			{
-				Entry: &core.SessionEntry{ID: "child-001"},
+				Entry: &session.SessionEntry{ID: "child-001"},
 				Label: "Response A",
 			},
 			{
-				Entry: &core.SessionEntry{ID: "child-002"},
+				Entry: &session.SessionEntry{ID: "child-002"},
 				Label: "Response B",
-				Children: []*core.SessionTreeNode{
+				Children: []*session.SessionTreeNode{
 					{
-						Entry: &core.SessionEntry{ID: "grandchild-001"},
+						Entry: &session.SessionEntry{ID: "grandchild-001"},
 						Label: "Follow-up",
 					},
 				},
 			},
 		},
 	}
-	return []*core.SessionTreeNode{root}
+	return []*session.SessionTreeNode{root}
 }
 
 func TestTreeList_BuildFlatList(t *testing.T) {

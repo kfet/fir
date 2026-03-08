@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/slash-commands.ts
 // Upstream hash: 1caadb2e
-package core
+package resources
 
 // SlashCommandSource identifies where a slash command came from.
 type SlashCommandSource string

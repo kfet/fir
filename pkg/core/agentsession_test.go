@@ -13,6 +13,10 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	fmsg "github.com/kfet/fir/pkg/msg"
+	"github.com/kfet/fir/pkg/models"
+	sessionpkg "github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -25,16 +29,16 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:      cwd,
 		AgentDir: agentDir,
 	})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{
@@ -42,7 +46,7 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 			ThinkingLevel: "off",
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -298,9 +302,9 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionsDir := filepath.Join(agentDir, "sessions")
 
-	sm := NewSessionManager(cwd, sessionsDir)
+	sm := sessionpkg.NewSessionManager(cwd, sessionsDir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	a := agent.NewAgent(agent.AgentOptions{
@@ -308,7 +312,7 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -317,7 +321,7 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:  models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		Cwd:             cwd,
 	})
 	defer session.Close()
@@ -555,7 +559,7 @@ func TestGetLatestCompactionEntry_NilWhenEmpty(t *testing.T) {
 }
 
 func TestGetLatestCompactionEntry_NilWhenNoCompaction(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*sessionpkg.SessionEntry{
 		{Type: "message", ID: "1"},
 		{Type: "message", ID: "2"},
 	}
@@ -566,7 +570,7 @@ func TestGetLatestCompactionEntry_NilWhenNoCompaction(t *testing.T) {
 }
 
 func TestGetLatestCompactionEntry_ReturnsLatest(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*sessionpkg.SessionEntry{
 		{Type: "compaction", ID: "c1"},
 		{Type: "message", ID: "m1"},
 		{Type: "compaction", ID: "c2"},
@@ -579,7 +583,7 @@ func TestGetLatestCompactionEntry_ReturnsLatest(t *testing.T) {
 }
 
 func TestGetLatestCompactionEntry_SingleCompaction(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*sessionpkg.SessionEntry{
 		{Type: "message", ID: "m1"},
 		{Type: "compaction", ID: "c1"},
 	}
@@ -792,17 +796,17 @@ func TestAgentSession_BuildSystemPrompt_WithAgentsFile(t *testing.T) {
 
 	os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Custom project instructions"), 0o644)
 
-	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -830,17 +834,17 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 	os.MkdirAll(filepath.Join(cwd, config.ConfigDirName), 0o755)
 	os.WriteFile(filepath.Join(cwd, config.ConfigDirName, "SYSTEM.md"), []byte("Custom system prompt"), 0o644)
 
-	sm := NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
 
-	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1032,9 +1036,9 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionManager()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
 		SettingsManager: settingsManager,
@@ -1465,7 +1469,7 @@ Check the code for bugs and style issues.`
 	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644)
 
 	// Reload the resource loader to pick up the skill
-	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+	session.ResourceLoader().(*resources.DefaultResourceLoader).Reload()
 
 	got := session.expandSkillCommand("/skill:review fix the bug")
 	if !strings.Contains(got, "<skill name=") {
@@ -1491,7 +1495,7 @@ name: review
 description: Review code
 ---
 Check the code.`), 0644)
-	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+	session.ResourceLoader().(*resources.DefaultResourceLoader).Reload()
 
 	// Disable skill commands
 	session.SettingsManager.SetEnableSkillCommands(false)
@@ -1515,7 +1519,7 @@ description: Deploy the application
 ---
 Run the deploy steps.`), 0644)
 
-	session.ResourceLoader().(*DefaultResourceLoader).Reload()
+	session.ResourceLoader().(*resources.DefaultResourceLoader).Reload()
 
 	got := session.expandSkillCommand("/skill:deploy")
 	if !strings.Contains(got, "<skill name=") {
@@ -1537,9 +1541,9 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := sessionpkg.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	model := &ai.Model{
@@ -1555,7 +1559,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1564,7 +1568,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -1902,8 +1906,8 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
-	sm := InMemorySessionManager(cwd)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	sm := sessionpkg.InMemorySessionManager(cwd)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	a := agent.NewAgent(agent.AgentOptions{
@@ -1912,7 +1916,7 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1948,9 +1952,9 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionsDir := filepath.Join(agentDir, "sessions")
 
-	sm := NewSessionManager(cwd, sessionsDir)
+	sm := sessionpkg.NewSessionManager(cwd, sessionsDir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	a := agent.NewAgent(agent.AgentOptions{
@@ -1958,7 +1962,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1967,7 +1971,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:  models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		Cwd:             cwd,
 	})
 	defer session.Close()
@@ -2317,7 +2321,7 @@ func TestAgentSession_SetAndGetScopedModels(t *testing.T) {
 	}
 
 	// Set a slice and read it back.
-	models := []ScopedModel{{Model: nil, ThinkingLevel: "high"}}
+	models := []models.ScopedModel{{Model: nil, ThinkingLevel: "high"}}
 	session.SetScopedModels(models)
 	got := session.ScopedModelsRef()
 	if len(got) != 1 || got[0].ThinkingLevel != "high" {
@@ -2540,7 +2544,7 @@ func TestAgentSession_RecordCommand(t *testing.T) {
 	session.RecordCommand("compact", "summarize recent work")
 
 	entries := session.SessionManager.GetEntries()
-	var found *SessionEntry
+	var found *sessionpkg.SessionEntry
 	for _, e := range entries {
 		if e.Type == "command" {
 			found = e
@@ -2584,18 +2588,18 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 	agentDir := t.TempDir()
 
 	dir := filepath.Dir(sessionFile)
-	sm := OpenSessionManager(sessionFile, dir)
+	sm := sessionpkg.OpenSessionManager(sessionFile, dir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	modelRegistry := NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+	modelRegistry := models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
 
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{ThinkingLevel: "off"},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -2615,7 +2619,7 @@ func TestAgentSession_SwitchSession_RestoresThinkingLevel_NoSpuriousEntry(t *tes
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
-	sm := NewSessionManager(tmpDir, sessDir)
+	sm := sessionpkg.NewSessionManager(tmpDir, sessDir)
 	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
 	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
@@ -2655,7 +2659,7 @@ func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
-	sm := NewSessionManager(tmpDir, sessDir)
+	sm := sessionpkg.NewSessionManager(tmpDir, sessDir)
 	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
 	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
@@ -2765,9 +2769,9 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionManager()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
 		SettingsManager: settingsManager,
@@ -2848,9 +2852,9 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionManager()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
 		SettingsManager: settingsManager,
@@ -2938,9 +2942,9 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionDir := filepath.Join(agentDir, "sessions")
 
-	sm := NewSessionManager(tmpDir, sessionDir)
+	sm := sessionpkg.NewSessionManager(tmpDir, sessionDir)
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        agentDir,
 		SettingsManager: settingsManager,
@@ -3010,7 +3014,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	}
 
 	// Reload the session from disk and check the plan is in context
-	sm2 := OpenSessionManager(sessionFile)
+	sm2 := sessionpkg.OpenSessionManager(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 2 {

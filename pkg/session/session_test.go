@@ -1,4 +1,4 @@
-package core
+package session
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	fmsg "github.com/kfet/fir/pkg/msg"
 )
 
 func TestSessionManagerNewSession(t *testing.T) {
@@ -181,7 +182,7 @@ func TestSessionManagerBranchWithSummary(t *testing.T) {
 	found := false
 	for _, m := range ctx.Messages {
 		if m.Custom != nil {
-			if bs, ok := m.Custom.(*BranchSummaryMessage); ok {
+			if bs, ok := m.Custom.(*fmsg.BranchSummaryMessage); ok {
 				if bs.Summary == "Summary of abandoned branch" {
 					found = true
 				}
@@ -214,7 +215,7 @@ func TestSessionManagerCompaction(t *testing.T) {
 	if ctx.Messages[0].Custom == nil {
 		t.Error("first message should be compaction summary")
 	}
-	if _, ok := ctx.Messages[0].Custom.(*CompactionSummaryMessage); !ok {
+	if _, ok := ctx.Messages[0].Custom.(*fmsg.CompactionSummaryMessage); !ok {
 		t.Error("first message should be CompactionSummaryMessage")
 	}
 

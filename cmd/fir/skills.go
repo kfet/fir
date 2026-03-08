@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // runSkills implements the "fir skills" subcommand family.
@@ -46,7 +46,7 @@ func runSkillsList() error {
 	cwd, _ := os.Getwd()
 	agentDir := resolveAgentDir()
 
-	result := core.LoadSkills(core.LoadSkillsOptions{
+	result := resources.LoadSkills(resources.LoadSkillsOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
 		IncludeDefaults: true,
@@ -88,7 +88,7 @@ func runSkillsList() error {
 // runSkillsInstall extracts a builtin skill to the project or user directory.
 func runSkillsInstall(name string, user, force bool) error {
 	// Verify the skill exists in builtins
-	builtins := core.LoadBuiltinSkills()
+	builtins := resources.LoadBuiltinSkills()
 	var found bool
 	for _, s := range builtins.Skills {
 		if s.Name == name {
@@ -122,7 +122,7 @@ func runSkillsInstall(name string, user, force bool) error {
 
 	// Extract from embedded FS
 	prefix := "builtin_skills/" + name
-	err := fs.WalkDir(core.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ func runSkillsInstall(name string, user, force bool) error {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		data, err := core.BuiltinSkillsFS.ReadFile(path)
+		data, err := resources.BuiltinSkillsFS.ReadFile(path)
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
 // Upstream hash: c99b9940
-package core
+package models
 
 import (
 	"fmt"

@@ -12,6 +12,10 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	fmsg "github.com/kfet/fir/pkg/msg"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -86,7 +90,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := core.InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -107,7 +111,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
-	modelRegistry := core.NewModelRegistry(authStorage, "")
+	modelRegistry := models.NewModelRegistry(authStorage, "")
 
 	turnCounter := 0
 	// Each turn: input = 10000*turn. Threshold = 50000 - 5000 = 45000.
@@ -146,7 +150,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 			return streamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -155,10 +159,10 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 		ModelRegistry:   modelRegistry,
 	}
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	agentSess := core.NewAgentSession(core.AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
@@ -167,12 +171,12 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
-	defer session.Close()
+	defer agentSess.Close()
 
 	// Collect events
 	var events []core.AgentSessionEvent
 	var mu sync.Mutex
-	session.Subscribe(func(e core.AgentSessionEvent) {
+	agentSess.Subscribe(func(e core.AgentSessionEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, e)
@@ -182,7 +186,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		// Large user messages so keepRecentTokens=2000 actually cuts old turns
 		userMsg := fmt.Sprintf("User message for turn %d. ", i+1) + strings.Repeat("user context ", 100)
-		err := session.Prompt(userMsg)
+		err := agentSess.Prompt(userMsg)
 		if err != nil {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
@@ -251,7 +255,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 
 	// Verify session entries have a compaction entry
 	branch := sm.GetBranch("")
-	var compactionEntry *core.SessionEntry
+	var compactionEntry *session.SessionEntry
 	for _, entry := range branch {
 		if entry.Type == "compaction" {
 			compactionEntry = entry
@@ -272,13 +276,13 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	}
 
 	// Verify agent messages were rebuilt
-	state := session.State()
+	state := agentSess.State()
 	t.Logf("Agent has %d messages after compaction", len(state.Messages))
 
 	hasCompactionSummary := false
 	for _, msg := range state.Messages {
 		if msg.Custom != nil {
-			if csm, ok := msg.Custom.(*core.CompactionSummaryMessage); ok {
+			if csm, ok := msg.Custom.(*fmsg.CompactionSummaryMessage); ok {
 				hasCompactionSummary = true
 				if !strings.Contains(csm.Summary, "E2E threshold compaction summary") {
 					t.Errorf("compaction summary message has wrong summary: %s", csm.Summary)
@@ -304,7 +308,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	if firstMsg.Custom == nil {
 		t.Fatal("first message should be CompactionSummaryMessage")
 	}
-	if _, ok := firstMsg.Custom.(*core.CompactionSummaryMessage); !ok {
+	if _, ok := firstMsg.Custom.(*fmsg.CompactionSummaryMessage); !ok {
 		t.Fatalf("first message should be CompactionSummaryMessage, got %T", firstMsg.Custom)
 	}
 }
@@ -320,7 +324,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := core.InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -341,7 +345,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
-	modelRegistry := core.NewModelRegistry(authStorage, "")
+	modelRegistry := models.NewModelRegistry(authStorage, "")
 
 	var mu2 sync.Mutex
 	callCount := 0
@@ -416,7 +420,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 			return streamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -425,10 +429,10 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 		ModelRegistry:   modelRegistry,
 	}
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	agentSess := core.NewAgentSession(core.AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
@@ -437,11 +441,11 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
-	defer session.Close()
+	defer agentSess.Close()
 
 	var events []core.AgentSessionEvent
 	var evMu sync.Mutex
-	session.Subscribe(func(e core.AgentSessionEvent) {
+	agentSess.Subscribe(func(e core.AgentSessionEvent) {
 		evMu.Lock()
 		defer evMu.Unlock()
 		events = append(events, e)
@@ -449,7 +453,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 
 	// 3 normal turns
 	for i := 0; i < 3; i++ {
-		err := session.Prompt(fmt.Sprintf("Turn %d", i+1))
+		err := agentSess.Prompt(fmt.Sprintf("Turn %d", i+1))
 		if err != nil {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
@@ -458,7 +462,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 	}
 
 	// 4th prompt triggers overflow → compaction → retry
-	err := session.Prompt("Overflow trigger turn")
+	err := agentSess.Prompt("Overflow trigger turn")
 	if err != nil {
 		t.Fatalf("Overflow prompt failed: %v", err)
 	}
@@ -537,7 +541,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := core.InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -558,7 +562,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
-	modelRegistry := core.NewModelRegistry(authStorage, "")
+	modelRegistry := models.NewModelRegistry(authStorage, "")
 
 	turn := 0
 	streamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
@@ -592,7 +596,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 			return streamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -601,10 +605,10 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 		ModelRegistry:   modelRegistry,
 	}
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	agentSess := core.NewAgentSession(core.AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
@@ -613,14 +617,14 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
-	defer session.Close()
+	defer agentSess.Close()
 
 	// Run turns until compaction triggers
 	msgCountBeforeCompaction := 0
 	for i := 0; i < 5; i++ {
-		msgCountBeforeCompaction = len(session.State().Messages)
+		msgCountBeforeCompaction = len(agentSess.State().Messages)
 		userMsg := fmt.Sprintf("Message for turn %d. ", i+1) + strings.Repeat("user padding ", 100)
-		err := session.Prompt(userMsg)
+		err := agentSess.Prompt(userMsg)
 		if err != nil {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
@@ -663,7 +667,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 	if firstMsg.Custom == nil {
 		t.Fatal("first message should be a CompactionSummaryMessage")
 	}
-	csm, ok := firstMsg.Custom.(*core.CompactionSummaryMessage)
+	csm, ok := firstMsg.Custom.(*fmsg.CompactionSummaryMessage)
 	if !ok {
 		t.Fatalf("first message should be CompactionSummaryMessage, got %T", firstMsg.Custom)
 	}
@@ -743,39 +747,39 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 			return streamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
 	runner := &DefaultRunner{
 		SettingsManager: settingsManager,
-		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 
-	sm := core.InMemorySessionManager(cwd)
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	sm := session.InMemorySessionManager(cwd)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	agentSess := core.NewAgentSession(core.AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
-	defer session.Close()
+	defer agentSess.Close()
 
 	var events []core.AgentSessionEvent
 	var mu sync.Mutex
-	session.Subscribe(func(e core.AgentSessionEvent) {
+	agentSess.Subscribe(func(e core.AgentSessionEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, e)
 	})
 
-	err := session.Prompt("Hello")
+	err := agentSess.Prompt("Hello")
 	if err != nil {
 		t.Fatalf("Prompt failed: %v", err)
 	}
@@ -803,7 +807,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := core.InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -824,7 +828,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 		Type: auth.CredentialTypeAPIKey,
 		Key:  "e2e-test-key",
 	})
-	modelRegistry := core.NewModelRegistry(authStorage, "")
+	modelRegistry := models.NewModelRegistry(authStorage, "")
 
 	turn := 0
 	streamFn := func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
@@ -864,7 +868,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 			return streamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -873,10 +877,10 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 		ModelRegistry:   modelRegistry,
 	}
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	agentSess := core.NewAgentSession(core.AgentSessionOptions{
 		Agent:            a,
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
@@ -885,11 +889,11 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
-	defer session.Close()
+	defer agentSess.Close()
 
 	compactionCount := 0
 	var mu sync.Mutex
-	session.Subscribe(func(e core.AgentSessionEvent) {
+	agentSess.Subscribe(func(e core.AgentSessionEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		if e.Type == "auto_compaction_end" && e.CompactionResult != nil {
@@ -899,7 +903,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 
 	// Run 8 turns — should trigger at least 2 compactions with small context window
 	for i := 0; i < 8; i++ {
-		err := session.Prompt(fmt.Sprintf("Turn %d message", i+1))
+		err := agentSess.Prompt(fmt.Sprintf("Turn %d message", i+1))
 		if err != nil {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
@@ -932,7 +936,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 	}
 
 	// Agent messages should still be valid and contain a compaction summary
-	state := session.State()
+	state := agentSess.State()
 	t.Logf("Agent has %d messages after multiple compactions", len(state.Messages))
 	if len(state.Messages) == 0 {
 		t.Fatal("agent has no messages after compactions")

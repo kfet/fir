@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/kfet/fir/pkg/session"
 )
 
 // ExportToHTML exports the current session branch to an HTML file.
@@ -46,7 +48,7 @@ func (s *AgentSession) ExportToHTML(path string) (string, error) {
 
 // WriteConversationHTML writes the conversation history as a minimal HTML document.
 // This is shared between interactive (/export) and RPC (export_html) modes.
-func WriteConversationHTML(w io.Writer, entries []*SessionEntry, sessionID string) error {
+func WriteConversationHTML(w io.Writer, entries []*session.SessionEntry, sessionID string) error {
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="en">
 <head>

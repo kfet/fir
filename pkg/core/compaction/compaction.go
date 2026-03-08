@@ -13,6 +13,8 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
+	fmsg "github.com/kfet/fir/pkg/msg"
 )
 
 // ============================================================================
@@ -198,13 +200,13 @@ func EstimateTokens(message agent.AgentMessage) int {
 	// Handle custom message types
 	if message.Custom != nil {
 		switch msg := message.Custom.(type) {
-		case *core.BashExecutionMessage:
+		case *fmsg.BashExecutionMessage:
 			chars = len(msg.Command) + len(msg.Output)
-		case *core.BranchSummaryMessage:
+		case *fmsg.BranchSummaryMessage:
 			chars = len(msg.Summary)
-		case *core.CompactionSummaryMessage:
+		case *fmsg.CompactionSummaryMessage:
 			chars = len(msg.Summary)
-		case *core.CustomMessage:
+		case *fmsg.CustomMessage:
 			if s, ok := msg.Content.(string); ok {
 				chars = len(s)
 			}
@@ -273,7 +275,7 @@ func EstimateTokens(message agent.AgentMessage) int {
 // Cut point detection
 // ============================================================================
 
-func getMessageRole(entry *core.SessionEntry) string {
+func getMessageRole(entry *session.SessionEntry) string {
 	if entry.Type != "message" || len(entry.RawMessage) == 0 {
 		return ""
 	}
@@ -284,7 +286,7 @@ func getMessageRole(entry *core.SessionEntry) string {
 	return probe.Role
 }
 
-func findValidCutPoints(entries []*core.SessionEntry, startIndex, endIndex int) []int {
+func findValidCutPoints(entries []*session.SessionEntry, startIndex, endIndex int) []int {
 	var cutPoints []int
 	for i := startIndex; i < endIndex; i++ {
 		entry := entries[i]
@@ -303,7 +305,7 @@ func findValidCutPoints(entries []*core.SessionEntry, startIndex, endIndex int) 
 }
 
 // FindTurnStartIndex finds the user message that starts the turn containing the given entry.
-func FindTurnStartIndex(entries []*core.SessionEntry, entryIndex, startIndex int) int {
+func FindTurnStartIndex(entries []*session.SessionEntry, entryIndex, startIndex int) int {
 	for i := entryIndex; i >= startIndex; i-- {
 		entry := entries[i]
 		if entry.Type == "branch_summary" || entry.Type == "custom_message" {
@@ -320,7 +322,7 @@ func FindTurnStartIndex(entries []*core.SessionEntry, entryIndex, startIndex int
 }
 
 // FindCutPoint finds where to cut the session for compaction.
-func FindCutPoint(entries []*core.SessionEntry, startIndex, endIndex, keepRecentTokens int) CutPointResult {
+func FindCutPoint(entries []*session.SessionEntry, startIndex, endIndex, keepRecentTokens int) CutPointResult {
 	cutPoints := findValidCutPoints(entries, startIndex, endIndex)
 
 	if len(cutPoints) == 0 {
@@ -379,7 +381,7 @@ func FindCutPoint(entries []*core.SessionEntry, startIndex, endIndex, keepRecent
 // Message extraction from entries
 // ============================================================================
 
-func getMessageFromEntry(entry *core.SessionEntry) *agent.AgentMessage {
+func getMessageFromEntry(entry *session.SessionEntry) *agent.AgentMessage {
 	switch entry.Type {
 	case "message":
 		if len(entry.RawMessage) == 0 {
@@ -397,7 +399,7 @@ func getMessageFromEntry(entry *core.SessionEntry) *agent.AgentMessage {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 			var content any
 			json.Unmarshal(entry.Content, &content)
-			cm := &core.CustomMessage{
+			cm := &fmsg.CustomMessage{
 				Role:       "custom",
 				CustomType: entry.CustomType,
 				Content:    content,
@@ -411,14 +413,14 @@ func getMessageFromEntry(entry *core.SessionEntry) *agent.AgentMessage {
 	case "branch_summary":
 		if entry.Summary != "" {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			am := core.CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts)
+			am := fmsg.CreateBranchSummaryMessage(entry.Summary, entry.FromID, ts)
 			return &am
 		}
 
 	case "compaction":
 		if entry.Summary != "" {
 			ts, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-			am := core.CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, ts)
+			am := fmsg.CreateCompactionSummaryMessage(entry.Summary, entry.TokensBefore, ts)
 			return &am
 		}
 	}
@@ -430,7 +432,7 @@ func getMessageFromEntry(entry *core.SessionEntry) *agent.AgentMessage {
 // File operation extraction
 // ============================================================================
 
-func extractFileOperations(messages []agent.AgentMessage, entries []*core.SessionEntry, prevCompactionIndex int) *FileOperations {
+func extractFileOperations(messages []agent.AgentMessage, entries []*session.SessionEntry, prevCompactionIndex int) *FileOperations {
 	fileOps := NewFileOperations()
 
 	if prevCompactionIndex >= 0 {
@@ -460,7 +462,7 @@ func extractFileOperations(messages []agent.AgentMessage, entries []*core.Sessio
 // ============================================================================
 
 // PrepareCompaction prepares compaction data from session entries.
-func PrepareCompaction(pathEntries []*core.SessionEntry, settings CompactionSettings) *CompactionPreparation {
+func PrepareCompaction(pathEntries []*session.SessionEntry, settings CompactionSettings) *CompactionPreparation {
 	if len(pathEntries) == 0 {
 		return nil
 	}
@@ -671,7 +673,7 @@ func GenerateSummary(
 ) (string, error) {
 	maxTokens := int(0.8 * float64(reserveTokens))
 
-	llmMessages, err := core.ConvertToLLM(currentMessages)
+	llmMessages, err := fmsg.ConvertToLLM(currentMessages)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}
@@ -726,7 +728,7 @@ func generateTurnPrefixSummary(
 ) (string, error) {
 	maxTokens := int(0.5 * float64(reserveTokens))
 
-	llmMessages, err := core.ConvertToLLM(messages)
+	llmMessages, err := fmsg.ConvertToLLM(messages)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}

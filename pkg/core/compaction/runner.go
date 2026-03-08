@@ -7,6 +7,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
 )
@@ -14,7 +15,7 @@ import (
 // DefaultRunner implements core.CompactionRunner using the compaction package.
 type DefaultRunner struct {
 	SettingsManager *config.SettingsManager
-	ModelRegistry   *core.ModelRegistry
+	ModelRegistry   *models.ModelRegistry
 }
 
 // IsEnabled reports whether auto-compaction is enabled in settings.

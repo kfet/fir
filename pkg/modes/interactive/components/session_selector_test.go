@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 )
 
-func testSessions() []core.SessionListInfo {
+func testSessions() []session.SessionListInfo {
 	now := time.Now()
-	return []core.SessionListInfo{
+	return []session.SessionListInfo{
 		{
 			Path: "/sessions/s1.jsonl", ID: "s1", Cwd: "/home/user/project",
 			Name: "Main session", Modified: now.Add(-1 * time.Hour), MessageCount: 5,
@@ -157,7 +157,7 @@ func TestSessionSelectorComponent_ToggleScope(t *testing.T) {
 	loaderCalled := false
 	comp := NewSessionSelectorComponent(
 		currentSessions, SessionScopeCurrent,
-		func() ([]core.SessionListInfo, error) {
+		func() ([]session.SessionListInfo, error) {
 			loaderCalled = true
 			return allSessions, nil
 		},
@@ -214,17 +214,17 @@ func TestSessionSelectorComponent_SelectPath(t *testing.T) {
 
 func TestSessionSelectorComponent_FixedHeight(t *testing.T) {
 	now := time.Now()
-	currentSessions := make([]core.SessionListInfo, 5)
+	currentSessions := make([]session.SessionListInfo, 5)
 	for i := range currentSessions {
-		currentSessions[i] = core.SessionListInfo{
+		currentSessions[i] = session.SessionListInfo{
 			Path: "/sessions/s" + string(rune('0'+i)) + ".jsonl", ID: "s",
 			Cwd: "/home/user/project", Name: "Session",
 			Modified: now.Add(-time.Duration(i) * time.Hour), MessageCount: 1,
 		}
 	}
-	allSessions := make([]core.SessionListInfo, 20)
+	allSessions := make([]session.SessionListInfo, 20)
 	for i := range allSessions {
-		allSessions[i] = core.SessionListInfo{
+		allSessions[i] = session.SessionListInfo{
 			Path: "/sessions/a" + string(rune('0'+i)) + ".jsonl", ID: "a",
 			Cwd: "/home/user/project", Name: "All Session",
 			Modified: now.Add(-time.Duration(i) * time.Hour), MessageCount: 1,
@@ -233,7 +233,7 @@ func TestSessionSelectorComponent_FixedHeight(t *testing.T) {
 
 	comp := NewSessionSelectorComponent(
 		currentSessions, SessionScopeCurrent,
-		func() ([]core.SessionListInfo, error) { return allSessions, nil },
+		func() ([]session.SessionListInfo, error) { return allSessions, nil },
 		func(path string) {}, func() {},
 	)
 

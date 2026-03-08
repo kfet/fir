@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -19,11 +19,11 @@ type variableComp struct {
 func (v *variableComp) Render(_ int) []string { return v.lines }
 func (v *variableComp) Invalidate()           {}
 
-func make540Tree() []core.SessionListInfo {
+func make540Tree() []session.SessionListInfo {
 	now := time.Now()
-	s := make([]core.SessionListInfo, 540)
+	s := make([]session.SessionListInfo, 540)
 	for i := range s {
-		s[i] = core.SessionListInfo{
+		s[i] = session.SessionListInfo{
 			Path:         fmt.Sprintf("/sessions/s%04d.jsonl", i),
 			ID:           fmt.Sprintf("s%04d", i),
 			Name:         fmt.Sprintf("Session %04d", i),
@@ -98,7 +98,7 @@ func TestSessionSelector_540_ExactWriteRows(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		sessions,
 		components.SessionScopeAll,
-		func() ([]core.SessionListInfo, error) { return sessions, nil },
+		func() ([]session.SessionListInfo, error) { return sessions, nil },
 		func(path string) {}, func() {},
 	)
 
@@ -209,7 +209,7 @@ func TestSessionSelector_540_HeightChangeBeforeScroll(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		sessions,
 		components.SessionScopeAll,
-		func() ([]core.SessionListInfo, error) { return sessions, nil },
+		func() ([]session.SessionListInfo, error) { return sessions, nil },
 		func(path string) {}, func() {},
 	)
 

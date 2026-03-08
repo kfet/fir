@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/utils/frontmatter.ts
 // Upstream hash: 1caadb2e
-package core
+package resources
 
 import (
 	"strings"

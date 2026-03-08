@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // ExtProcConfig describes a discovered external process extension.
@@ -28,7 +28,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	byName := make(map[string]ExtProcConfig)
 
 	// Builtin extensions (lowest priority — shadowed by global and project).
-	builtins, err := core.LoadBuiltinExtensions()
+	builtins, err := resources.LoadBuiltinExtensions()
 	if err == nil {
 		for _, b := range builtins {
 			modes := extensionModesFromPath(b.Path)
@@ -136,9 +136,9 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		filePath := filepath.Join(dir, e.Name())
 
 		// Parse comment frontmatter once so we can skip builtin files and capture mode constraints.
-		fm := core.ExtensionFrontmatter{}
+		fm := resources.ExtensionFrontmatter{}
 		if data, err := os.ReadFile(filePath); err == nil {
-			fm = core.ParseCommentFrontmatter(string(data))
+			fm = resources.ParseCommentFrontmatter(string(data))
 			if fm.Builtin {
 				continue
 			}
@@ -218,5 +218,5 @@ func extensionModesFromPath(path string) []string {
 	if err != nil {
 		return nil
 	}
-	return core.ParseCommentFrontmatter(string(data)).Modes
+	return resources.ParseCommentFrontmatter(string(data)).Modes
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -71,11 +71,11 @@ func parseWPs(output string, initialCursorRow int) (eraseRows []int, finalRow in
 	return eraseRows, curRow
 }
 
-func make540WithTree() []core.SessionListInfo {
+func make540WithTree() []session.SessionListInfo {
 	now := time.Now()
-	s := make([]core.SessionListInfo, 540)
+	s := make([]session.SessionListInfo, 540)
 	for i := range s {
-		s[i] = core.SessionListInfo{
+		s[i] = session.SessionListInfo{
 			Path:         fmt.Sprintf("/sessions/s%04d.jsonl", i),
 			ID:           fmt.Sprintf("s%04d", i),
 			Cwd:          "/home/user/project",
@@ -114,7 +114,7 @@ func TestSessionSelector_540_WritePositions(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		sessions,
 		components.SessionScopeAll,
-		func() ([]core.SessionListInfo, error) { return sessions, nil },
+		func() ([]session.SessionListInfo, error) { return sessions, nil },
 		func(path string) {}, func() {},
 	)
 	ui.AddChild(comp)

@@ -10,12 +10,14 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // newSetupTestSession creates a minimal AgentSession for setup tests.
 func newSetupTestSession(t *testing.T, cwd string) *core.AgentSession {
 	t.Helper()
-	sm := core.InMemorySessionManager()
+	sm := session.InMemorySessionManager()
 	dummyModel := &ai.Model{
 		Provider:      "test",
 		ID:            "test-model",
@@ -36,17 +38,17 @@ func newSetupTestSession(t *testing.T, cwd string) *core.AgentSession {
 // stubResourceLoader is a no-op core.ResourceLoader for tests.
 type stubResourceLoader struct{}
 
-func (s *stubResourceLoader) GetSkills() ([]core.Skill, []core.ResourceDiagnostic) { return nil, nil }
-func (s *stubResourceLoader) GetPrompts() ([]core.PromptTemplate, []core.ResourceDiagnostic) {
+func (s *stubResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) { return nil, nil }
+func (s *stubResourceLoader) GetPrompts() ([]resources.PromptTemplate, []resources.ResourceDiagnostic) {
 	return nil, nil
 }
-func (s *stubResourceLoader) GetAgentsFiles() []core.AgentsFile { return nil }
+func (s *stubResourceLoader) GetAgentsFiles() []resources.AgentsFile { return nil }
 func (s *stubResourceLoader) GetSystemPrompt() string           { return "" }
 func (s *stubResourceLoader) GetAppendSystemPrompt() []string   { return nil }
-func (s *stubResourceLoader) GetPathMetadata() map[string]core.PathMetadata {
+func (s *stubResourceLoader) GetPathMetadata() map[string]resources.PathMetadata {
 	return nil
 }
-func (s *stubResourceLoader) ExtendResources(core.ResourceExtensionPaths) {}
+func (s *stubResourceLoader) ExtendResources(resources.ResourceExtensionPaths) {}
 func (s *stubResourceLoader) Reload() error                               { return nil }
 
 // TestSetupHookToolCall verifies that OnToolCall consults extensions

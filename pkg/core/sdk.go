@@ -11,6 +11,10 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/core/tools"
@@ -30,23 +34,23 @@ type CreateAgentSessionOptions struct {
 	// AuthStorage for credentials. Default: auth.NewAuthStorage(agentDir/auth.json)
 	AuthStorage *auth.AuthStorage
 	// ModelRegistry for model lookup/key resolution. Default: created from AuthStorage.
-	ModelRegistry *ModelRegistry
+	ModelRegistry *models.ModelRegistry
 
 	// Model to use. Default: from settings, else first available.
 	Model *ai.Model
 	// ThinkingLevel for reasoning. Default: from settings, else "medium".
 	ThinkingLevel string
 	// ScopedModels available for model cycling.
-	ScopedModels []ScopedModel
+	ScopedModels []models.ScopedModel
 
 	// Tools are the built-in tools to use. Default: coding tools [read, bash, edit, write].
 	Tools []agent.AgentTool
 
 	// ResourceLoader. When nil, DefaultResourceLoader is created and Reload'd.
-	ResourceLoader ResourceLoader
+	ResourceLoader resources.ResourceLoader
 
 	// SessionManager. Default: SessionManager.Create(cwd).
-	SessionManager *SessionManager
+	SessionManager *session.SessionManager
 
 	// SettingsManager. Default: SettingsManager.Create(cwd, agentDir).
 	SettingsManager *config.SettingsManager
@@ -95,7 +99,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	modelRegistry := opts.ModelRegistry
 	if modelRegistry == nil {
-		modelRegistry = NewModelRegistry(authStorage, DefaultModelsJsonPath(agentDir))
+		modelRegistry = models.NewModelRegistry(authStorage, models.DefaultModelsJsonPath(agentDir))
 	}
 
 	// Settings
@@ -107,13 +111,13 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// Session
 	sessionManager := opts.SessionManager
 	if sessionManager == nil {
-		sessionManager = NewSessionManager(cwd, DefaultSessionDir(agentDir, cwd))
+		sessionManager = session.NewSessionManager(cwd, session.DefaultSessionDir(agentDir, cwd))
 	}
 
 	// Resources
 	resourceLoader := opts.ResourceLoader
 	if resourceLoader == nil {
-		rl := NewResourceLoader(ResourceLoaderOptions{
+		rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 			Cwd:             cwd,
 			AgentDir:        agentDir,
 			SettingsManager: settingsManager,
@@ -144,7 +148,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	}
 
 	if model == nil {
-		result := FindInitialModel(FindInitialModelOptions{
+		result := models.FindInitialModel(models.FindInitialModelOptions{
 			ScopedModels:         opts.ScopedModels,
 			IsContinuing:         hasExistingSession,
 			DefaultProvider:      settingsManager.GetDefaultProvider(),
@@ -201,7 +205,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			Tools:         agentTools,
 		},
 		ConvertToLLM: func(messages []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(messages)
+			return msg.ConvertToLLM(messages)
 		},
 		SessionID:    sessionManager.GetSessionID(),
 		SteeringMode: settingsManager.GetSteeringMode(),

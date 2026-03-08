@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/core/resource-loader.ts
 // Upstream hash: 5c0ec26c
-package core
+package resources
 
 import (
 	"fmt"

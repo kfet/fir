@@ -17,6 +17,9 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
 )
@@ -420,7 +423,7 @@ func TestHandleSlashCommand_Login_NoArgs(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	auth := auth.NewInMemoryAuthStorage(nil)
-	mr := core.NewModelRegistry(auth, "")
+	mr := models.NewModelRegistry(auth, "")
 	entry := &firSession{
 		termState:     newTerminalState(),
 		modelRegistry: mr,
@@ -439,7 +442,7 @@ func TestHandleSlashCommand_Logout_InvalidProviderID(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	auth := auth.NewInMemoryAuthStorage(nil)
-	mr := core.NewModelRegistry(auth, "")
+	mr := models.NewModelRegistry(auth, "")
 	// Set up a fake logged-in provider
 	auth.SetRuntimeApiKey("anthropic", "test-key")
 	entry := &firSession{
@@ -479,8 +482,8 @@ func newMinimalSession(t *testing.T) *core.AgentSession {
 	t.Helper()
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
-	sm := core.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	sm := session.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	a := agent.NewAgent(agent.AgentOptions{})
 	return core.NewAgentSession(core.AgentSessionOptions{
 		Agent:          a,
@@ -586,7 +589,7 @@ func TestHandleResumeArg_InvalidNumber_WithList(t *testing.T) {
 	entry := &firSession{
 		termState: newTerminalState(),
 		agentDir:  agentDir,
-		lastResumeList: []core.SessionListInfo{
+		lastResumeList: []session.SessionListInfo{
 			{Path: filepath.Join(agentDir, "sessions", "a.json")},
 		},
 	}
@@ -625,7 +628,7 @@ func TestHandleResumeArg_ValidNumberFromList(t *testing.T) {
 		termState: newTerminalState(),
 		agentDir:  agentDir,
 		session:   sess,
-		lastResumeList: []core.SessionListInfo{
+		lastResumeList: []session.SessionListInfo{
 			{Path: sessPath},
 		},
 	}
@@ -947,7 +950,7 @@ func TestReplaySessionHistory(t *testing.T) {
 	}
 
 	// Create a SessionManager and populate it with messages.
-	sm := core.NewSessionManager(tmpDir, sessionDir)
+	sm := session.NewSessionManager(tmpDir, sessionDir)
 
 	// User message
 	sm.AppendAIMessage(ai.NewUserMsg("Hello, how are you?", time.Now().UnixMilli()))

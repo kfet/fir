@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 func TestBuildGroups_Empty(t *testing.T) {
@@ -20,7 +20,7 @@ func TestBuildGroups_SingleItem(t *testing.T) {
 			{
 				Path:    "/home/user/.fir/agent/skills/test/SKILL.md",
 				Enabled: true,
-				Metadata: core.PathMetadata{
+				Metadata: resources.PathMetadata{
 					Source: "auto",
 					Scope:  "user",
 					Origin: "top-level",
@@ -57,14 +57,14 @@ func TestBuildGroups_Sorting(t *testing.T) {
 			{
 				Path:    "/project/.fir/extensions/foo.ts",
 				Enabled: true,
-				Metadata: core.PathMetadata{Source: "auto", Scope: "project", Origin: "top-level"},
+				Metadata: resources.PathMetadata{Source: "auto", Scope: "project", Origin: "top-level"},
 			},
 		},
 		Skills: []ResolvedResource{
 			{
 				Path:    "/home/.fir/agent/skills/bar/SKILL.md",
 				Enabled: true,
-				Metadata: core.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
+				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
 		},
 	}
@@ -87,7 +87,7 @@ func TestConfigSelectorComponent_Render(t *testing.T) {
 			{
 				Path:    "/home/.fir/agent/skills/test/SKILL.md",
 				Enabled: true,
-				Metadata: core.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
+				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
 		},
 	}

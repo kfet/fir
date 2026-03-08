@@ -22,6 +22,9 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/core/tools"
@@ -330,7 +333,7 @@ func (m *InteractiveMode) showLoadedResources() {
 }
 
 // formatDiagnostics formats resource diagnostics for display.
-func formatDiagnostics(t *itheme.Theme, header string, diags []core.ResourceDiagnostic) string {
+func formatDiagnostics(t *itheme.Theme, header string, diags []resources.ResourceDiagnostic) string {
 	var lines []string
 	lines = append(lines, t.Fg("warning", "["+header+"]"))
 
@@ -341,7 +344,7 @@ func formatDiagnostics(t *itheme.Theme, header string, diags []core.ResourceDiag
 		losers []string
 	}
 	groups := make(map[string]*collisionGroup)
-	var otherDiags []core.ResourceDiagnostic
+	var otherDiags []resources.ResourceDiagnostic
 
 	for _, d := range diags {
 		if d.Type == "collision" && d.Collision != nil {
@@ -674,7 +677,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 func (m *InteractiveMode) setupAutocomplete() {
 	// Build slash command list from builtins
 	var commands []SlashCommand
-	for _, cmd := range core.BuiltinSlashCommands {
+	for _, cmd := range resources.BuiltinSlashCommands {
 		commands = append(commands, SlashCommand{
 			Name:        cmd.Name,
 			Description: cmd.Description,
@@ -737,7 +740,7 @@ func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 	if !strings.HasPrefix(cmd, "/") {
 		return false
 	}
-	if core.IsBuiltinSlashCommandName(cmd[1:]) {
+	if resources.IsBuiltinSlashCommandName(cmd[1:]) {
 		return true
 	}
 	return false
@@ -789,7 +792,7 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 
 // handleSlashCommand dispatches a builtin slash command.
 // Every case in the switch below must have a corresponding entry in
-// core.BuiltinSlashCommands (or builtinAliases for hidden aliases);
+// resources.BuiltinSlashCommands (or builtinAliases for hidden aliases);
 // TestInteractiveMode_IsBuiltinSlashCommand enforces this.
 func (m *InteractiveMode) handleSlashCommand(text string) {
 	parts := strings.Fields(text)
@@ -1122,12 +1125,12 @@ func (m *InteractiveMode) showSessionSelector() {
 			cwd = m.session.SessionManager.GetCwd()
 			sessionDir = m.session.SessionManager.GetSessionDir()
 		}
-		sessions, _ := core.ListSessions(cwd, sessionDir)
+		sessions, _ := session.ListSessions(cwd, sessionDir)
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
-			func() ([]core.SessionListInfo, error) {
-				return core.ListAllSessions(core.DefaultAgentDir(), core.PiAgentDir())
+			func() ([]session.SessionListInfo, error) {
+				return session.ListAllSessions(core.DefaultAgentDir(), core.PiAgentDir())
 			},
 			func(sessionPath string) {
 				done()
@@ -1803,7 +1806,7 @@ func (m *InteractiveMode) showScopedModelsSelector() {
 		hasFilter = true
 	} else if patterns := m.settings.GetEnabledModels(); len(patterns) > 0 {
 		hasFilter = true
-		for _, sm := range core.ResolveModelScope(patterns, registry) {
+		for _, sm := range models.ResolveModelScope(patterns, registry) {
 			enabledModelIDs[sm.Model.Provider+"/"+sm.Model.ID] = true
 		}
 	}
@@ -1827,15 +1830,15 @@ func (m *InteractiveMode) showScopedModelsSelector() {
 		for id := range currentEnabledIDs {
 			patterns = append(patterns, id)
 		}
-		resolved := core.ResolveModelScope(patterns, registry)
+		resolved := models.ResolveModelScope(patterns, registry)
 		currentThinkingLevel := m.session.ThinkingLevel()
-		scoped := make([]core.ScopedModel, len(resolved))
+		scoped := make([]models.ScopedModel, len(resolved))
 		for i, sm := range resolved {
 			level := sm.ThinkingLevel
 			if level == "" {
 				level = currentThinkingLevel
 			}
-			scoped[i] = core.ScopedModel{Model: sm.Model, ThinkingLevel: level}
+			scoped[i] = models.ScopedModel{Model: sm.Model, ThinkingLevel: level}
 		}
 		m.session.SetScopedModels(scoped)
 		m.ui.RequestRender(false)
@@ -2026,7 +2029,7 @@ func (m *InteractiveMode) handleFork(entryID string) {
 // ============================================================================
 
 // extractEntryText extracts display text from a session entry.
-func extractEntryText(entry *core.SessionEntry) string {
+func extractEntryText(entry *session.SessionEntry) string {
 	if entry.Type != "message" || len(entry.RawMessage) == 0 {
 		return entry.Type
 	}
@@ -2432,7 +2435,7 @@ func (m *InteractiveMode) handleSkillsList() {
 	}
 
 	// Sort by name
-	sorted := make([]core.Skill, len(skills))
+	sorted := make([]resources.Skill, len(skills))
 	copy(sorted, skills)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
@@ -2461,7 +2464,7 @@ func (m *InteractiveMode) handleSkillsList() {
 }
 
 func (m *InteractiveMode) handleSkillsInstall(name string) {
-	builtins := core.LoadBuiltinSkills()
+	builtins := resources.LoadBuiltinSkills()
 	var found bool
 	for _, s := range builtins.Skills {
 		if s.Name == name {
@@ -2488,7 +2491,7 @@ func (m *InteractiveMode) handleSkillsInstall(name string) {
 	}
 
 	prefix := "builtin_skills/" + name
-	err := fs.WalkDir(core.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+	err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -2501,7 +2504,7 @@ func (m *InteractiveMode) handleSkillsInstall(name string) {
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		data, readErr := core.BuiltinSkillsFS.ReadFile(path)
+		data, readErr := resources.BuiltinSkillsFS.ReadFile(path)
 		if readErr != nil {
 			return readErr
 		}
@@ -2616,10 +2619,10 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 
 	// Save queue and pending input to survive the exec.
 	queueTexts := m.session.PeekFollowUpQueue()
-	sc := &core.ReexecSidecar{
+	sc := &session.ReexecSidecar{
 		QueueMessages: queueTexts,
 	}
-	if err := core.WriteReexecSidecar(sessionFile, sc); err != nil {
+	if err := session.WriteReexecSidecar(sessionFile, sc); err != nil {
 		// Non-fatal, but warn the user.
 		m.showWarning(fmt.Sprintf("Failed to save reexec state: %v", err))
 	}
@@ -3278,7 +3281,7 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 		return
 	}
 
-	sidecar, err := core.ReadReexecSidecar(sessionFile)
+	sidecar, err := session.ReadReexecSidecar(sessionFile)
 	if err != nil {
 		debug.Log("restoreReexecSidecar: read error: %v", err)
 		return

@@ -11,33 +11,34 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // makeMessageEntry builds a SessionEntry of type "message" with the given role and content.
-func makeMessageEntry(role string, content any) *SessionEntry {
+func makeMessageEntry(role string, content any) *session.SessionEntry {
 	contentJSON, _ := json.Marshal(content)
 	msg, _ := json.Marshal(map[string]any{
 		"role":    role,
 		"content": json.RawMessage(contentJSON),
 	})
-	return &SessionEntry{
+	return &session.SessionEntry{
 		Type:       "message",
 		RawMessage: json.RawMessage(msg),
 	}
 }
 
 func TestExportToHTML_TempFile(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
+	agentSess, _ := newTestAgentSession(t)
+	defer agentSess.Close()
 
 	// Add a couple of messages so there's content to export.
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
+	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("world")},
 	})))
 
 	// Empty path → temp file created.
-	outPath, err := session.ExportToHTML("")
+	outPath, err := agentSess.ExportToHTML("")
 	if err != nil {
 		t.Fatalf("ExportToHTML temp path: %v", err)
 	}
@@ -64,13 +65,13 @@ func TestExportToHTML_TempFile(t *testing.T) {
 }
 
 func TestExportToHTML_ExplicitPath(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
+	agentSess, _ := newTestAgentSession(t)
+	defer agentSess.Close()
 
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("question", 0)))
+	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("question", 0)))
 
 	out := filepath.Join(t.TempDir(), "export.html")
-	gotPath, err := session.ExportToHTML(out)
+	gotPath, err := agentSess.ExportToHTML(out)
 	if err != nil {
 		t.Fatalf("ExportToHTML explicit path: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestExportToHTML_ExplicitPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWriteConversationHTML_UserAndAssistantMessages(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*session.SessionEntry{
 		makeMessageEntry("user", "Hello, world!"),
 		makeMessageEntry("assistant", "Hi there!"),
 	}
@@ -116,7 +117,7 @@ func TestWriteConversationHTML_UserAndAssistantMessages(t *testing.T) {
 }
 
 func TestWriteConversationHTML_HTMLEscaping(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*session.SessionEntry{
 		makeMessageEntry("user", "<script>alert('xss')</script>"),
 	}
 	var buf strings.Builder
@@ -147,7 +148,7 @@ func TestWriteConversationHTML_SessionIDEscaped(t *testing.T) {
 }
 
 func TestWriteConversationHTML_NonMessageEntriesSkipped(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*session.SessionEntry{
 		{Type: "compaction", RawMessage: json.RawMessage(`{"role":"user","content":"skip me"}`)},
 		{Type: "model_change"},
 		makeMessageEntry("user", "keep me"),
@@ -167,7 +168,7 @@ func TestWriteConversationHTML_NonMessageEntriesSkipped(t *testing.T) {
 }
 
 func TestWriteConversationHTML_EmptyContentSkipped(t *testing.T) {
-	entries := []*SessionEntry{
+	entries := []*session.SessionEntry{
 		makeMessageEntry("user", ""),
 		makeMessageEntry("assistant", "real content"),
 	}

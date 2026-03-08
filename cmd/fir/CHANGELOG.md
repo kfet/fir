@@ -9,6 +9,10 @@
 - `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
 - Extract `pkg/auth` from `pkg/core` — credential/OAuth storage as a standalone leaf package
 - Extract `pkg/config` from `pkg/core` — settings, config value resolution, and defaults as a standalone leaf package
+- Extract `pkg/models` from `pkg/core` — model registry and resolver as a standalone package
+- Extract `pkg/session` from `pkg/core` — session persistence (save/load/list/tree) as a standalone package
+- Extract `pkg/msg` from `pkg/core` — shared message types (branch summary, compaction summary, custom messages)
+- Extract `pkg/resources` from `pkg/core` — resource loader, skills, builtin extensions, frontmatter, prompt templates, system prompt, slash commands
 - `make publish` target to create GitHub releases marked as latest with cross-compiled binaries
 - `make deploy` target to push binaries directly to Tailscale hosts via scp
 

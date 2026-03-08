@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // TestSelfSkillSettingsExample extracts the settings.json example from the
@@ -75,7 +76,7 @@ func stripLineComment(line string) string {
 // selfSkillPath returns the file path to the builtin "self" skill.
 func selfSkillPath(t *testing.T) string {
 	t.Helper()
-	result := LoadBuiltinSkills()
+	result := resources.LoadBuiltinSkills()
 	for _, s := range result.Skills {
 		if s.Name == "self" {
 			return s.FilePath

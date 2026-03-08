@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 )
 
 func TestParseSearchQuery_Empty(t *testing.T) {
@@ -68,8 +68,8 @@ func TestParseSearchQuery_UnclosedQuote(t *testing.T) {
 	}
 }
 
-func makeSession(id, name, text, cwd string) *core.SessionListInfo {
-	return &core.SessionListInfo{
+func makeSession(id, name, text, cwd string) *session.SessionListInfo {
+	return &session.SessionListInfo{
 		ID:              id,
 		Name:            name,
 		AllMessagesText: text,
@@ -123,7 +123,7 @@ func TestFilterAndSortSessions_Empty(t *testing.T) {
 }
 
 func TestFilterAndSortSessions_NameFilter(t *testing.T) {
-	sessions := []*core.SessionListInfo{
+	sessions := []*session.SessionListInfo{
 		makeSession("1", "named", "text", "/"),
 		makeSession("2", "", "text", "/"),
 		makeSession("3", "also named", "text", "/"),
@@ -136,7 +136,7 @@ func TestFilterAndSortSessions_NameFilter(t *testing.T) {
 }
 
 func TestFilterAndSortSessions_Relevance(t *testing.T) {
-	sessions := []*core.SessionListInfo{
+	sessions := []*session.SessionListInfo{
 		makeSession("1", "", "python script", "/home"),
 		makeSession("2", "", "golang go module", "/home"),
 	}

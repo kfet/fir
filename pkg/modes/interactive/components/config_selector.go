@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -34,7 +34,7 @@ var resourceTypeLabels = map[ResourceType]string{
 type ResourceItem struct {
 	Path         string
 	Enabled      bool
-	Metadata     core.PathMetadata
+	Metadata     resources.PathMetadata
 	ResourceType ResourceType
 	DisplayName  string
 	GroupKey     string
@@ -62,7 +62,7 @@ type ResourceGroup struct {
 type ResolvedResource struct {
 	Path     string
 	Enabled  bool
-	Metadata core.PathMetadata
+	Metadata resources.PathMetadata
 }
 
 // ResolvedPaths holds all resolved resource paths by type.
@@ -73,7 +73,7 @@ type ResolvedPaths struct {
 	Themes     []ResolvedResource
 }
 
-func getGroupLabel(metadata core.PathMetadata) string {
+func getGroupLabel(metadata resources.PathMetadata) string {
 	if metadata.Origin == "package" {
 		return metadata.Source + " (" + metadata.Scope + ")"
 	}

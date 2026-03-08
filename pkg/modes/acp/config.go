@@ -7,7 +7,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -66,7 +66,7 @@ func buildThinkingConfigOptionFromAccessor(s thinkingAccessor) SessionConfigOpti
 }
 
 // buildModelConfigOption creates a SessionConfigOption for the model selector.
-func buildModelConfigOption(reg *core.ModelRegistry, currentModel *ai.Model) SessionConfigOption {
+func buildModelConfigOption(reg *models.ModelRegistry, currentModel *ai.Model) SessionConfigOption {
 	available := reg.GetAvailable()
 	options := make([]SessionConfigSelectOption, 0, len(available))
 	for _, m := range available {

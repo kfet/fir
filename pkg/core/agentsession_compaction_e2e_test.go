@@ -11,6 +11,10 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	fmsg "github.com/kfet/fir/pkg/msg"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -21,7 +25,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -70,7 +74,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 			return fakeStreamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -83,7 +87,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 		},
 	}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -91,7 +95,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -164,7 +168,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -212,7 +216,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 			return fakeStreamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -220,7 +224,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 		shouldCompactResult: false, // mock says don't compact
 	}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -228,7 +232,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -270,7 +274,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -327,13 +331,13 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 			return fakeStreamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
 	runner := &mockCompactionRunner{shouldCompactResult: false}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -341,7 +345,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -407,7 +411,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -447,7 +451,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 			return fakeStreamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -460,7 +464,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 		},
 	}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -468,7 +472,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -510,7 +514,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	enabled := false
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
@@ -555,7 +559,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 			return fakeStreamFn(m, ctx, opts)
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -563,7 +567,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 		shouldCompactResult: false, // disabled won't even reach here, but just in case
 	}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -571,7 +575,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})
@@ -662,7 +666,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := InMemorySessionManager(cwd)
+	sm := session.InMemorySessionManager(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -724,7 +728,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 		},
 		StreamFn: fakeStreamFn,
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -735,7 +739,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 		},
 	}
 
-	rl := NewResourceLoader(ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -743,7 +747,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 		SessionManager:   sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
-		ModelRegistry:    NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
+		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
 		CompactionRunner: runner,
 		Cwd:              cwd,
 	})

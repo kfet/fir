@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // runExtensions implements the "fir extensions" subcommand family.
@@ -80,7 +80,7 @@ type builtinExtMeta struct {
 // listBuiltinExtensionMeta reads frontmatter from all embedded extensions
 // marked with builtin: true.
 func listBuiltinExtensionMeta() []builtinExtMeta {
-	entries, err := core.BuiltinExtensionsFS.ReadDir("builtin_extensions")
+	entries, err := resources.BuiltinExtensionsFS.ReadDir("builtin_extensions")
 	if err != nil {
 		return nil
 	}
@@ -90,11 +90,11 @@ func listBuiltinExtensionMeta() []builtinExtMeta {
 		if e.IsDir() {
 			continue
 		}
-		data, err := core.BuiltinExtensionsFS.ReadFile("builtin_extensions/" + e.Name())
+		data, err := resources.BuiltinExtensionsFS.ReadFile("builtin_extensions/" + e.Name())
 		if err != nil {
 			continue
 		}
-		fm := core.ParseCommentFrontmatter(string(data))
+		fm := resources.ParseCommentFrontmatter(string(data))
 		if !fm.Builtin {
 			continue
 		}
@@ -149,7 +149,7 @@ func runExtensionsInstall(name string, user, force bool) error {
 	}
 
 	// Read from embedded FS
-	data, err := core.BuiltinExtensionsFS.ReadFile("builtin_extensions/" + found.FileName)
+	data, err := resources.BuiltinExtensionsFS.ReadFile("builtin_extensions/" + found.FileName)
 	if err != nil {
 		return fmt.Errorf("read builtin extension %q: %w", name, err)
 	}

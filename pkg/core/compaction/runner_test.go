@@ -10,6 +10,9 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
 )
@@ -124,15 +127,15 @@ func TestDefaultRunner_GetStats_WithMessages(t *testing.T) {
 // noopResourceLoader satisfies the ResourceLoader interface for tests.
 type noopResourceLoader struct{}
 
-func (n noopResourceLoader) GetSkills() ([]core.Skill, []core.ResourceDiagnostic) { return nil, nil }
-func (n noopResourceLoader) GetPrompts() ([]core.PromptTemplate, []core.ResourceDiagnostic) {
+func (n noopResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) { return nil, nil }
+func (n noopResourceLoader) GetPrompts() ([]resources.PromptTemplate, []resources.ResourceDiagnostic) {
 	return nil, nil
 }
-func (n noopResourceLoader) GetAgentsFiles() []core.AgentsFile           { return nil }
+func (n noopResourceLoader) GetAgentsFiles() []resources.AgentsFile           { return nil }
 func (n noopResourceLoader) GetSystemPrompt() string                     { return "" }
 func (n noopResourceLoader) GetAppendSystemPrompt() []string             { return nil }
-func (n noopResourceLoader) GetPathMetadata() map[string]core.PathMetadata { return nil }
-func (n noopResourceLoader) ExtendResources(core.ResourceExtensionPaths) {}
+func (n noopResourceLoader) GetPathMetadata() map[string]resources.PathMetadata { return nil }
+func (n noopResourceLoader) ExtendResources(resources.ResourceExtensionPaths) {}
 func (n noopResourceLoader) Reload() error                               { return nil }
 
 // makeTestSession creates a minimal AgentSession for testing RunCompaction error paths.
@@ -147,7 +150,7 @@ func makeTestSession(t *testing.T, model *ai.Model) *core.AgentSession {
 			Model: model,
 		},
 	})
-	smgr := core.NewSessionManager(tmpDir, sessionDir)
+	smgr := session.NewSessionManager(tmpDir, sessionDir)
 
 	return core.NewAgentSession(core.AgentSessionOptions{
 		Agent:          ag,
@@ -163,7 +166,7 @@ func TestRunCompaction_NoModel(t *testing.T) {
 	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
@@ -183,7 +186,7 @@ func TestRunCompaction_NoApiKey(t *testing.T) {
 	sm := config.NewInMemorySettingsManager(config.Settings{})
 	runner := &DefaultRunner{
 		SettingsManager: sm,
-		ModelRegistry:   core.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 	_, err := runner.RunCompaction(context.Background(), session, "")
 	if err == nil {
@@ -206,7 +209,7 @@ func TestRunCompaction_NothingToCompact(t *testing.T) {
 	authStorage := auth.NewInMemoryAuthStorage(auth.AuthStorageData{
 		"test-provider": {Type: auth.CredentialTypeAPIKey, Key: "test-key-123"},
 	})
-	registry := core.NewModelRegistry(authStorage, "")
+	registry := models.NewModelRegistry(authStorage, "")
 
 	runner := &DefaultRunner{
 		SettingsManager: sm,

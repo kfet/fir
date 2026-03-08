@@ -9,19 +9,21 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
+	fmsg "github.com/kfet/fir/pkg/msg"
 )
 
-func makeUserEntry(id, text string) *core.SessionEntry {
+func makeUserEntry(id, text string) *session.SessionEntry {
 	msg := ai.NewUserMsg(text, 0)
 	raw, _ := json.Marshal(msg)
-	return &core.SessionEntry{
+	return &session.SessionEntry{
 		Type:       "message",
 		ID:         id,
 		RawMessage: raw,
 	}
 }
 
-func makeAssistantEntry(id, text string, usage *ai.Usage) *core.SessionEntry {
+func makeAssistantEntry(id, text string, usage *ai.Usage) *session.SessionEntry {
 	content := []ai.AssistantContent{ai.NewTextContent(text)}
 	am := ai.AssistantMessage{
 		Content:    content,
@@ -32,21 +34,21 @@ func makeAssistantEntry(id, text string, usage *ai.Usage) *core.SessionEntry {
 	}
 	msg := ai.NewAssistantMsg(am)
 	raw, _ := json.Marshal(msg)
-	return &core.SessionEntry{
+	return &session.SessionEntry{
 		Type:       "message",
 		ID:         id,
 		RawMessage: raw,
 	}
 }
 
-func makeToolResultEntry(id string) *core.SessionEntry {
+func makeToolResultEntry(id string) *session.SessionEntry {
 	msg := ai.NewToolResultMsg(ai.ToolResultMessage{
 		ToolCallID: "tc1",
 		ToolName:   "read",
 		Content:    []ai.ToolResultContent{{Type: "text", Text: "result"}},
 	})
 	raw, _ := json.Marshal(msg)
-	return &core.SessionEntry{
+	return &session.SessionEntry{
 		Type:       "message",
 		ID:         id,
 		RawMessage: raw,
@@ -120,7 +122,7 @@ func TestEstimateContextTokens_NoUsage(t *testing.T) {
 }
 
 func TestFindCutPoint_Basic(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", strings.Repeat("x", 100)),
 		makeAssistantEntry("2", strings.Repeat("x", 100), nil),
 		makeUserEntry("3", strings.Repeat("x", 100)),
@@ -140,7 +142,7 @@ func TestFindCutPoint_Empty(t *testing.T) {
 }
 
 func TestFindTurnStartIndex_FromToolResult(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", "q"),
 		makeAssistantEntry("2", "r", nil),
 		makeToolResultEntry("3"),
@@ -280,7 +282,7 @@ func TestEstimateContextTokens_ErrorMessageSkipped(t *testing.T) {
 
 func TestPrepareCompaction_MinimalSession(t *testing.T) {
 	// Only 2 entries — should still produce a preparation
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", strings.Repeat("x", 400)),
 		makeAssistantEntry("2", strings.Repeat("y", 400), nil),
 	}
@@ -299,7 +301,7 @@ func TestPrepareCompaction_MinimalSession(t *testing.T) {
 }
 
 func TestPrepareCompaction_EndsWithCompaction(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", "hello"),
 		makeAssistantEntry("2", "world", nil),
 		{Type: "compaction", ID: "3", Summary: "summary"},
@@ -312,7 +314,7 @@ func TestPrepareCompaction_EndsWithCompaction(t *testing.T) {
 }
 
 func TestPrepareCompaction_WithPreviousCompaction(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", strings.Repeat("a", 200)),
 		makeAssistantEntry("2", strings.Repeat("b", 200), nil),
 		{Type: "compaction", ID: "3", Summary: "previous summary"},
@@ -343,7 +345,7 @@ func TestPrepareCompaction_WithPreviousCompaction(t *testing.T) {
 
 func TestPrepareCompaction_SplitTurn(t *testing.T) {
 	// Create a scenario where the cut point falls inside a turn (mid tool results)
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", strings.Repeat("x", 400)),
 		makeAssistantEntry("2", strings.Repeat("y", 400), nil),
 		makeUserEntry("3", strings.Repeat("a", 400)),   // turn start
@@ -371,7 +373,7 @@ func TestPrepareCompaction_SplitTurn(t *testing.T) {
 
 func TestEstimateTokens_CustomBashExecution(t *testing.T) {
 	msg := agent.AgentMessage{
-		Custom: &core.BashExecutionMessage{
+		Custom: &fmsg.BashExecutionMessage{
 			Command: strings.Repeat("c", 80),
 			Output:  strings.Repeat("o", 120),
 		},
@@ -385,7 +387,7 @@ func TestEstimateTokens_CustomBashExecution(t *testing.T) {
 
 func TestEstimateTokens_CustomBranchSummary(t *testing.T) {
 	msg := agent.AgentMessage{
-		Custom: &core.BranchSummaryMessage{
+		Custom: &fmsg.BranchSummaryMessage{
 			Summary: strings.Repeat("s", 200),
 		},
 	}
@@ -397,7 +399,7 @@ func TestEstimateTokens_CustomBranchSummary(t *testing.T) {
 
 func TestEstimateTokens_CustomCompactionSummary(t *testing.T) {
 	msg := agent.AgentMessage{
-		Custom: &core.CompactionSummaryMessage{
+		Custom: &fmsg.CompactionSummaryMessage{
 			Summary: strings.Repeat("s", 100),
 		},
 	}
@@ -409,7 +411,7 @@ func TestEstimateTokens_CustomCompactionSummary(t *testing.T) {
 
 func TestEstimateTokens_CustomMessage(t *testing.T) {
 	msg := agent.AgentMessage{
-		Custom: &core.CustomMessage{
+		Custom: &fmsg.CustomMessage{
 			Content: strings.Repeat("x", 40),
 		},
 	}
@@ -421,7 +423,7 @@ func TestEstimateTokens_CustomMessage(t *testing.T) {
 
 func TestEstimateTokens_CustomMessageNonString(t *testing.T) {
 	msg := agent.AgentMessage{
-		Custom: &core.CustomMessage{
+		Custom: &fmsg.CustomMessage{
 			Content: map[string]any{"key": "value"},
 		},
 	}
@@ -482,7 +484,7 @@ func TestExtractTextFromResponse_Empty(t *testing.T) {
 
 func TestGetMessageFromEntry_CustomMessage(t *testing.T) {
 	content, _ := json.Marshal("test content")
-	entry := &core.SessionEntry{
+	entry := &session.SessionEntry{
 		Type:       "custom_message",
 		ID:         "cm1",
 		CustomType: "my-extension",
@@ -500,7 +502,7 @@ func TestGetMessageFromEntry_CustomMessage(t *testing.T) {
 }
 
 func TestGetMessageFromEntry_BranchSummary(t *testing.T) {
-	entry := &core.SessionEntry{
+	entry := &session.SessionEntry{
 		Type:      "branch_summary",
 		ID:        "bs1",
 		Summary:   "Branch summary text",
@@ -514,7 +516,7 @@ func TestGetMessageFromEntry_BranchSummary(t *testing.T) {
 }
 
 func TestGetMessageFromEntry_CompactionEntry(t *testing.T) {
-	entry := &core.SessionEntry{
+	entry := &session.SessionEntry{
 		Type:      "compaction",
 		ID:        "c1",
 		Summary:   "Compaction summary",
@@ -527,7 +529,7 @@ func TestGetMessageFromEntry_CompactionEntry(t *testing.T) {
 }
 
 func TestGetMessageFromEntry_EmptyMessage(t *testing.T) {
-	entry := &core.SessionEntry{
+	entry := &session.SessionEntry{
 		Type: "message",
 		ID:   "m1",
 	}
@@ -538,7 +540,7 @@ func TestGetMessageFromEntry_EmptyMessage(t *testing.T) {
 }
 
 func TestGetMessageFromEntry_InvalidJSON(t *testing.T) {
-	entry := &core.SessionEntry{
+	entry := &session.SessionEntry{
 		Type:       "message",
 		ID:         "m1",
 		RawMessage: json.RawMessage(`{invalid`),
@@ -554,7 +556,7 @@ func TestExtractFileOperations_WithPrevCompaction(t *testing.T) {
 		ReadFiles:     []string{"/prev/read.go"},
 		ModifiedFiles: []string{"/prev/mod.go"},
 	})
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		{Type: "compaction", ID: "c1", Details: details},
 	}
 
@@ -602,7 +604,7 @@ func TestBuildSummarizationPrompt_UpdateWithCustomInstructions(t *testing.T) {
 }
 
 func TestFindCutPoint_SingleEntry(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeUserEntry("1", "hello"),
 	}
 	result := FindCutPoint(entries, 0, 1, 1000)
@@ -612,7 +614,7 @@ func TestFindCutPoint_SingleEntry(t *testing.T) {
 }
 
 func TestFindTurnStartIndex_NoneFound(t *testing.T) {
-	entries := []*core.SessionEntry{
+	entries := []*session.SessionEntry{
 		makeAssistantEntry("1", "response", nil),
 		makeToolResultEntry("2"),
 	}

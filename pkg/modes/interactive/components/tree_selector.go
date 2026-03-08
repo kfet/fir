@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -25,7 +25,7 @@ type gutterInfo struct {
 
 // flatNode is a flattened tree node for display/navigation.
 type flatNode struct {
-	node           *core.SessionTreeNode
+	node           *session.SessionTreeNode
 	indent         int  // indentation level (each level = 3 chars)
 	showConnector  bool // whether to show ├─ or └─
 	isLast         bool // true = last sibling (└─)
@@ -74,7 +74,7 @@ type TreeList struct {
 }
 
 // newTreeList creates a TreeList from the session tree.
-func newTreeList(tree []*core.SessionTreeNode, currentLeafID string) *TreeList {
+func newTreeList(tree []*session.SessionTreeNode, currentLeafID string) *TreeList {
 	tl := &TreeList{
 		currentLeafID:   currentLeafID,
 		maxVisibleLines: 20,
@@ -156,7 +156,7 @@ func (tl *TreeList) findNearestVisibleIndex(entryID string) int {
 // --- Flatten ---
 
 type flattenStackItem struct {
-	node           *core.SessionTreeNode
+	node           *session.SessionTreeNode
 	indent         int
 	justBranched   bool
 	showConnector  bool
@@ -165,7 +165,7 @@ type flattenStackItem struct {
 	isVirtualChild bool
 }
 
-func (tl *TreeList) flattenTree(roots []*core.SessionTreeNode) []flatNode {
+func (tl *TreeList) flattenTree(roots []*session.SessionTreeNode) []flatNode {
 	var result []flatNode
 	tl.toolCallMap = make(map[string]toolCallInfo)
 
@@ -174,10 +174,10 @@ func (tl *TreeList) flattenTree(roots []*core.SessionTreeNode) []flatNode {
 	}
 
 	// Build containsActive map (iterative post-order)
-	containsActive := make(map[*core.SessionTreeNode]bool)
+	containsActive := make(map[*session.SessionTreeNode]bool)
 	{
-		var allNodes []*core.SessionTreeNode
-		stack := make([]*core.SessionTreeNode, len(roots))
+		var allNodes []*session.SessionTreeNode
+		stack := make([]*session.SessionTreeNode, len(roots))
 		copy(stack, roots)
 		for len(stack) > 0 {
 			node := stack[len(stack)-1]
@@ -202,7 +202,7 @@ func (tl *TreeList) flattenTree(roots []*core.SessionTreeNode) []flatNode {
 	multipleRoots := len(roots) > 1
 
 	// Sort roots: active branch first
-	orderedRoots := make([]*core.SessionTreeNode, len(roots))
+	orderedRoots := make([]*session.SessionTreeNode, len(roots))
 	copy(orderedRoots, roots)
 	sortByActive(orderedRoots, containsActive)
 
@@ -241,7 +241,7 @@ func (tl *TreeList) flattenTree(roots []*core.SessionTreeNode) []flatNode {
 		multipleChildren := len(children) > 1
 
 		// Order children: active branch first
-		orderedChildren := make([]*core.SessionTreeNode, len(children))
+		orderedChildren := make([]*session.SessionTreeNode, len(children))
 		copy(orderedChildren, children)
 		sortByActive(orderedChildren, containsActive)
 
@@ -286,10 +286,10 @@ func (tl *TreeList) flattenTree(roots []*core.SessionTreeNode) []flatNode {
 	return result
 }
 
-func sortByActive(nodes []*core.SessionTreeNode, containsActive map[*core.SessionTreeNode]bool) {
+func sortByActive(nodes []*session.SessionTreeNode, containsActive map[*session.SessionTreeNode]bool) {
 	// Stable sort: active first, then original order
-	prioritized := make([]*core.SessionTreeNode, 0, len(nodes))
-	rest := make([]*core.SessionTreeNode, 0, len(nodes))
+	prioritized := make([]*session.SessionTreeNode, 0, len(nodes))
+	rest := make([]*session.SessionTreeNode, 0, len(nodes))
 	for _, n := range nodes {
 		if containsActive[n] {
 			prioritized = append(prioritized, n)
@@ -300,7 +300,7 @@ func sortByActive(nodes []*core.SessionTreeNode, containsActive map[*core.Sessio
 	copy(nodes, append(prioritized, rest...))
 }
 
-func (tl *TreeList) extractToolCalls(entry *core.SessionEntry) {
+func (tl *TreeList) extractToolCalls(entry *session.SessionEntry) {
 	if entry.Type != "message" || len(entry.RawMessage) == 0 {
 		return
 	}
@@ -428,7 +428,7 @@ func splitSearch(query string) []string {
 }
 
 // parseMessageInfo extracts role, hasText, stopReason, errorMessage from a raw message entry.
-func (tl *TreeList) parseMessageInfo(entry *core.SessionEntry) (role string, hasText bool, stopReason string, errorMessage string) {
+func (tl *TreeList) parseMessageInfo(entry *session.SessionEntry) (role string, hasText bool, stopReason string, errorMessage string) {
 	if len(entry.RawMessage) == 0 {
 		return "", false, "", ""
 	}
@@ -607,7 +607,7 @@ func (tl *TreeList) recalculateVisualStructure() {
 
 // --- Searchable text ---
 
-func (tl *TreeList) getSearchableText(node *core.SessionTreeNode) string {
+func (tl *TreeList) getSearchableText(node *session.SessionTreeNode) string {
 	entry := node.Entry
 	var parts []string
 	if node.Label != "" {
@@ -818,7 +818,7 @@ func (tl *TreeList) Render(width int) []string {
 
 // --- Entry display text ---
 
-func (tl *TreeList) getEntryDisplayText(node *core.SessionTreeNode, isSelected bool) string {
+func (tl *TreeList) getEntryDisplayText(node *session.SessionTreeNode, isSelected bool) string {
 	t := theme.GetTheme()
 	entry := node.Entry
 	normalize := func(s string) string {
@@ -902,7 +902,7 @@ func (tl *TreeList) getEntryDisplayText(node *core.SessionTreeNode, isSelected b
 	return result
 }
 
-func (tl *TreeList) parseToolResult(entry *core.SessionEntry) (toolCallID, toolName string) {
+func (tl *TreeList) parseToolResult(entry *session.SessionEntry) (toolCallID, toolName string) {
 	if len(entry.RawMessage) == 0 {
 		return "", ""
 	}
@@ -914,7 +914,7 @@ func (tl *TreeList) parseToolResult(entry *core.SessionEntry) (toolCallID, toolN
 	return msg.ToolCallID, msg.ToolName
 }
 
-func (tl *TreeList) parseBashCommand(entry *core.SessionEntry) string {
+func (tl *TreeList) parseBashCommand(entry *session.SessionEntry) string {
 	if len(entry.RawMessage) == 0 {
 		return ""
 	}
@@ -1125,7 +1125,7 @@ type TreeSelectorComponent struct {
 
 // NewTreeSelectorComponent creates the full tree selector UI.
 func NewTreeSelectorComponent(
-	tree []*core.SessionTreeNode,
+	tree []*session.SessionTreeNode,
 	currentLeafID string,
 	onSelect func(entryID string),
 	onCancel func(),

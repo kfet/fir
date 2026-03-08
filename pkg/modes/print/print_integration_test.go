@@ -12,6 +12,8 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // mockStreamFn returns a StreamFn that produces a canned response.
@@ -65,9 +67,9 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := core.InMemorySessionManager()
+	sessionMgr := session.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
 		SettingsManager: settingsMgr,
@@ -145,9 +147,9 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := core.InMemorySessionManager()
+	sessionMgr := session.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
 		SettingsManager: settingsMgr,
@@ -216,9 +218,9 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := core.InMemorySessionManager()
+	sessionMgr := session.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
 		SettingsManager: settingsMgr,
@@ -295,9 +297,9 @@ func TestPrintMode_NoMessage(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := core.InMemorySessionManager()
+	sessionMgr := session.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
 		AgentDir:        tmpDir,
 		SettingsManager: settingsMgr,

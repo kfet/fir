@@ -12,6 +12,10 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	fmsg "github.com/kfet/fir/pkg/msg"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
@@ -125,10 +129,10 @@ func newTestModeWithSession(t *testing.T) *testMode {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := session.NewSessionManager(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:      cwd,
 		AgentDir: agentDir,
 	})
@@ -140,7 +144,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 			ThinkingLevel: "off",
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -149,7 +153,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   core.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
 		Cwd:             cwd,
 	})
 	t.Cleanup(func() { session.Close() })
@@ -503,17 +507,17 @@ func TestInteractiveMode_ReexecCommand_NonExecutablePath(t *testing.T) {
 func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 
-	// Every entry in core.BuiltinSlashCommands must be recognised.
-	for _, cmd := range core.BuiltinSlashCommands {
+	// Every entry in resources.BuiltinSlashCommands must be recognised.
+	for _, cmd := range resources.BuiltinSlashCommands {
 		full := "/" + cmd.Name
 		if !m.isBuiltinSlashCommand(full) {
-			t.Errorf("core.BuiltinSlashCommands entry %q not recognised by isBuiltinSlashCommand", full)
+			t.Errorf("resources.BuiltinSlashCommands entry %q not recognised by isBuiltinSlashCommand", full)
 		}
 	}
 
 	// Every case handled by handleSlashCommand must also be recognised.
 	// If you add a new case to that switch, add it here AND to
-	// core.BuiltinSlashCommands (or builtinAliases for hidden aliases).
+	// resources.BuiltinSlashCommands (or builtinAliases for hidden aliases).
 	handleCases := []string{
 		"/help", "/hotkeys",
 		"/new",
@@ -541,7 +545,7 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	}
 	for _, cmd := range handleCases {
 		if !m.isBuiltinSlashCommand(cmd) {
-			t.Errorf("handleSlashCommand case %q not recognised; add it to core.BuiltinSlashCommands or builtinAliases", cmd)
+			t.Errorf("handleSlashCommand case %q not recognised; add it to resources.BuiltinSlashCommands or builtinAliases", cmd)
 		}
 	}
 
@@ -1178,7 +1182,7 @@ func TestInteractiveMode_StatusClearedOnSubmit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExtractEntryText_NonMessage(t *testing.T) {
-	entry := &core.SessionEntry{Type: "compaction"}
+	entry := &session.SessionEntry{Type: "compaction"}
 	got := extractEntryText(entry)
 	if got != "compaction" {
 		t.Errorf("expected 'compaction', got %q", got)
@@ -1187,7 +1191,7 @@ func TestExtractEntryText_NonMessage(t *testing.T) {
 
 func TestExtractEntryText_StringContent(t *testing.T) {
 	raw := []byte(`{"role":"user","content":"hello world"}`)
-	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if got != "hello world" {
 		t.Errorf("expected 'hello world', got %q", got)
@@ -1196,7 +1200,7 @@ func TestExtractEntryText_StringContent(t *testing.T) {
 
 func TestExtractEntryText_StringContentNewlines(t *testing.T) {
 	raw := []byte(`{"role":"user","content":"line1\nline2"}`)
-	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if !strings.Contains(got, "line1 line2") {
 		t.Errorf("expected newlines replaced with spaces, got %q", got)
@@ -1205,7 +1209,7 @@ func TestExtractEntryText_StringContentNewlines(t *testing.T) {
 
 func TestExtractEntryText_ArrayContent(t *testing.T) {
 	raw := []byte(`{"role":"assistant","content":[{"type":"text","text":"response text"}]}`)
-	entry := &core.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if got != "response text" {
 		t.Errorf("expected 'response text', got %q", got)
@@ -1213,7 +1217,7 @@ func TestExtractEntryText_ArrayContent(t *testing.T) {
 }
 
 func TestExtractEntryText_InvalidJSON(t *testing.T) {
-	entry := &core.SessionEntry{Type: "message", RawMessage: []byte(`{invalid`)}
+	entry := &session.SessionEntry{Type: "message", RawMessage: []byte(`{invalid`)}
 	got := extractEntryText(entry)
 	if got != "message" {
 		t.Errorf("expected 'message', got %q", got)
@@ -1221,7 +1225,7 @@ func TestExtractEntryText_InvalidJSON(t *testing.T) {
 }
 
 func TestExtractEntryText_EmptyRawMessage(t *testing.T) {
-	entry := &core.SessionEntry{Type: "message"}
+	entry := &session.SessionEntry{Type: "message"}
 	got := extractEntryText(entry)
 	if got != "message" {
 		t.Errorf("expected 'message', got %q", got)
@@ -1776,7 +1780,7 @@ func TestCycleModel_WithScopedModels(t *testing.T) {
 	// Restrict cycling to the first two available models via scoped models.
 	first := available[0]
 	second := available[1]
-	tm.mode.session.SetScopedModels([]core.ScopedModel{
+	tm.mode.session.SetScopedModels([]models.ScopedModel{
 		{Model: first},
 		{Model: second},
 	})
@@ -1796,7 +1800,7 @@ func TestCycleModel_WithScopedModels_Backward(t *testing.T) {
 
 	first := available[0]
 	second := available[1]
-	tm.mode.session.SetScopedModels([]core.ScopedModel{
+	tm.mode.session.SetScopedModels([]models.ScopedModel{
 		{Model: first},
 		{Model: second},
 	})
@@ -1955,10 +1959,10 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := core.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := session.NewSessionManager(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
-	rl := core.NewResourceLoader(core.ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:      cwd,
 		AgentDir: agentDir,
 	})
@@ -1981,7 +1985,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 			Messages:      []agent.AgentMessage{userMsg, assistantMsg},
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return core.ConvertToLLM(msgs)
+			return fmsg.ConvertToLLM(msgs)
 		},
 	})
 
@@ -1990,7 +1994,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
-		ModelRegistry:   core.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
+		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
 		Cwd:             cwd,
 	})
 	t.Cleanup(func() { session.Close() })

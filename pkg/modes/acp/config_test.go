@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -165,7 +165,7 @@ func TestSetSessionConfigOption_UnknownSession(t *testing.T) {
 func TestBuildModelConfigOption(t *testing.T) {
 	auth := auth.NewInMemoryAuthStorage(nil)
 	auth.SetRuntimeApiKey("anthropic", "test-key")
-	reg := core.NewModelRegistry(auth, "")
+	reg := models.NewModelRegistry(auth, "")
 
 	available := reg.GetAvailable()
 	if len(available) == 0 {
@@ -205,7 +205,7 @@ func TestBuildModelConfigOption(t *testing.T) {
 
 func TestBuildModelConfigOption_NilModel(t *testing.T) {
 	auth := auth.NewInMemoryAuthStorage(nil)
-	reg := core.NewModelRegistry(auth, "")
+	reg := models.NewModelRegistry(auth, "")
 
 	opt := buildModelConfigOption(reg, nil)
 	if opt.CurrentValue != "" {

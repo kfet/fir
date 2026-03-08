@@ -9,6 +9,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	fmsg "github.com/kfet/fir/pkg/msg"
 )
 
 // SessionBridge implements BridgeAPI directly on top of a core.AgentSession.
@@ -49,7 +50,7 @@ func (b *SessionBridge) SendMessage(spec CustomMessageSpec, opts *SendMessageOpt
 	b.session.SessionManager.AppendCustomEntry(spec.CustomType, raw)
 
 	if opts != nil && opts.DeliverAs != "" {
-		cm := &core.CustomMessage{
+		cm := &fmsg.CustomMessage{
 			Role:       "custom",
 			CustomType: spec.CustomType,
 			Content:    spec.Content,

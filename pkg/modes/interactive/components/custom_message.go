@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	fmsg "github.com/kfet/fir/pkg/msg"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/tui/components"
@@ -13,13 +13,13 @@ import (
 
 // MessageRenderer is a function that can render a custom message.
 // Returns nil if it cannot handle the message, letting the default renderer take over.
-type MessageRenderer func(msg *core.CustomMessage, expanded bool, theme *theme.Theme) tui.Component
+type MessageRenderer func(msg *fmsg.CustomMessage, expanded bool, theme *theme.Theme) tui.Component
 
 // CustomMessageComponent renders a custom message entry from extensions.
 // Uses distinct styling to differentiate from user messages.
 type CustomMessageComponent struct {
 	tui.Container
-	message         *core.CustomMessage
+	message         *fmsg.CustomMessage
 	customRenderer  MessageRenderer
 	box             *components.Box
 	customComponent tui.Component
@@ -33,7 +33,7 @@ var _ tui.Component = (*CustomMessageComponent)(nil)
 // customRenderer is optional and will be tried first for rendering.
 // If mdTheme is nil, it uses the global theme's markdown theme.
 func NewCustomMessageComponent(
-	message *core.CustomMessage,
+	message *fmsg.CustomMessage,
 	customRenderer MessageRenderer,
 	mdTheme *components.MarkdownTheme,
 ) *CustomMessageComponent {
@@ -110,7 +110,7 @@ func (c *CustomMessageComponent) rebuild() {
 }
 
 // extractCustomMessageText extracts the text content from a custom message.
-func extractCustomMessageText(msg *core.CustomMessage) string {
+func extractCustomMessageText(msg *fmsg.CustomMessage) string {
 	switch content := msg.Content.(type) {
 	case string:
 		return content

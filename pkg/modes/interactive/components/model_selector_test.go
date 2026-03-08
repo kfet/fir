@@ -6,7 +6,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/config"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -15,7 +15,7 @@ func TestModelSelectorComponent_Render(t *testing.T) {
 	settings := config.NewInMemorySettingsManager(config.Settings{})
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
-	registry := core.NewModelRegistry(authStorage, "")
+	registry := models.NewModelRegistry(authStorage, "")
 
 	comp := NewModelSelectorComponent(model, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
 	lines := comp.Render(80)

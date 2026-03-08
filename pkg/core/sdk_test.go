@@ -8,6 +8,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/config"
 )
 
@@ -121,7 +122,7 @@ func TestCreateAgentSession_WithResourceLoader(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	rl := NewResourceLoader(ResourceLoaderOptions{
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:      cwd,
 		AgentDir: agentDir,
 	})
