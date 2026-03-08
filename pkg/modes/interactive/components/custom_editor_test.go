@@ -3,22 +3,21 @@ package components
 import (
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
-func newTestCustomEditor() (*CustomEditor, *core.KeybindingsManager) {
+func newTestCustomEditor() (*CustomEditor, *tui.KeybindingsManager) {
 	_ = theme.InitTheme("dark", nil)
-	kb := core.NewKeybindingsManagerInMemory(core.KeybindingsConfig{})
+	kb := tui.NewKeybindingsManagerInMemory(tui.KeybindingsConfig{})
 	th := theme.GetEditorTheme()
 	ed := NewCustomEditor(nil, th, kb)
 	return ed, kb
 }
 
 func TestNewCustomEditor(t *testing.T) {
-	kb := core.NewKeybindingsManagerInMemory(core.KeybindingsConfig{})
+	kb := tui.NewKeybindingsManagerInMemory(tui.KeybindingsConfig{})
 	theme := theme.GetEditorTheme()
 	ed := NewCustomEditor(nil, theme, kb)
 	if ed == nil {
@@ -27,7 +26,7 @@ func TestNewCustomEditor(t *testing.T) {
 }
 
 func TestCustomEditor_OnAction(t *testing.T) {
-	kb := core.NewKeybindingsManagerInMemory(core.KeybindingsConfig{})
+	kb := tui.NewKeybindingsManagerInMemory(tui.KeybindingsConfig{})
 	theme := theme.GetEditorTheme()
 	ed := NewCustomEditor(nil, theme, kb)
 
@@ -44,7 +43,7 @@ func TestCustomEditor_OnAction(t *testing.T) {
 }
 
 func TestCustomEditor_HandleInput_ExtensionShortcut(t *testing.T) {
-	kb := core.NewKeybindingsManagerInMemory(core.KeybindingsConfig{})
+	kb := tui.NewKeybindingsManagerInMemory(tui.KeybindingsConfig{})
 	theme := theme.GetEditorTheme()
 	ed := NewCustomEditor(nil, theme, kb, tuicomp.EditorOptions{})
 
@@ -60,7 +59,7 @@ func TestCustomEditor_HandleInput_ExtensionShortcut(t *testing.T) {
 }
 
 func TestCustomEditor_EscapeWithoutAutocomplete(t *testing.T) {
-	kb := core.NewKeybindingsManagerInMemory(core.KeybindingsConfig{})
+	kb := tui.NewKeybindingsManagerInMemory(tui.KeybindingsConfig{})
 	theme := theme.GetEditorTheme()
 	ed := NewCustomEditor(nil, theme, kb)
 
@@ -103,7 +102,7 @@ func TestCustomEditor_ShiftEnter_InsertsNewline(t *testing.T) {
 				ed, _ := newTestCustomEditor()
 
 				followUpCalled := false
-				ed.OnAction(core.ActionFollowUp, func() { followUpCalled = true })
+				ed.OnAction(tui.ActionFollowUp, func() { followUpCalled = true })
 
 				ed.SetText("hello")
 				ed.HandleInput(seq.data)
@@ -140,7 +139,7 @@ func TestCustomEditor_ShiftEnter_LegacyEscapeCR(t *testing.T) {
 			ed, _ := newTestCustomEditor()
 
 			followUpCalled := false
-			ed.OnAction(core.ActionFollowUp, func() { followUpCalled = true })
+			ed.OnAction(tui.ActionFollowUp, func() { followUpCalled = true })
 
 			ed.SetText("hello")
 			ed.HandleInput("\x1b\r")
@@ -166,7 +165,7 @@ func TestCustomEditor_AltEnter_ModifyOtherKeys(t *testing.T) {
 	ed, _ := newTestCustomEditor()
 
 	followUpCalled := false
-	ed.OnAction(core.ActionFollowUp, func() { followUpCalled = true })
+	ed.OnAction(tui.ActionFollowUp, func() { followUpCalled = true })
 
 	ed.SetText("hello")
 	ed.HandleInput("\x1b[27;3;13~") // modifyOtherKeys alt+enter
@@ -186,7 +185,7 @@ func TestCustomEditor_AltEnter_Kitty(t *testing.T) {
 	ed, _ := newTestCustomEditor()
 
 	followUpCalled := false
-	ed.OnAction(core.ActionFollowUp, func() { followUpCalled = true })
+	ed.OnAction(tui.ActionFollowUp, func() { followUpCalled = true })
 
 	ed.SetText("hello")
 	ed.HandleInput("\x1b[13;3u") // Kitty alt+enter

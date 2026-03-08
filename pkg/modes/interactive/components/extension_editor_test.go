@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestExtensionEditorComponent_Render(t *testing.T) {
-	kb := core.NewKeybindingsManagerInMemory(nil)
+	kb := tui.NewKeybindingsManagerInMemory(nil)
 	comp := NewExtensionEditorComponent(nil, kb, "Edit content", "prefilled", func(string) {}, func() {})
 	lines := comp.Render(80)
 	if len(lines) == 0 {

@@ -22,6 +22,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
@@ -47,7 +48,7 @@ func SetVersion(v string) { version = v }
 type InteractiveMode struct {
 	// Core dependencies
 	session     *core.AgentSession
-	keybindings *core.KeybindingsManager
+	keybindings *tui.KeybindingsManager
 	settings    *config.SettingsManager
 
 	// TUI
@@ -116,8 +117,8 @@ type InteractiveMode struct {
 	updateCh <-chan string
 
 	// clipboardReader reads an image from the system clipboard.
-	// Defaults to core.ReadClipboardImage; can be replaced in tests.
-	clipboardReader func() *core.ClipboardImage
+	// Defaults to platform.ReadClipboardImage; can be replaced in tests.
+	clipboardReader func() *platform.ClipboardImage
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -133,7 +134,7 @@ type InteractiveModeOptions struct {
 // NewInteractiveMode creates a new interactive mode.
 func NewInteractiveMode(
 	session *core.AgentSession,
-	keybindings *core.KeybindingsManager,
+	keybindings *tui.KeybindingsManager,
 	settings *config.SettingsManager,
 	opts InteractiveModeOptions,
 ) *InteractiveMode {
@@ -163,7 +164,7 @@ func NewInteractiveMode(
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
-		clipboardReader:    core.ReadClipboardImage,
+		clipboardReader:    platform.ReadClipboardImage,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -592,49 +593,49 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	}
 
 	// Register app action handlers
-	m.editor.OnAction(core.ActionSelectModel, func() {
+	m.editor.OnAction(tui.ActionSelectModel, func() {
 		m.showModelSelector("")
 	})
-	m.editor.OnAction(core.ActionSelectThinking, func() {
+	m.editor.OnAction(tui.ActionSelectThinking, func() {
 		m.showThinkingSelector()
 	})
-	m.editor.OnAction(core.ActionExpandTools, func() {
+	m.editor.OnAction(tui.ActionExpandTools, func() {
 		m.toggleToolOutputExpansion()
 	})
-	m.editor.OnAction(core.ActionToggleThinking, func() {
+	m.editor.OnAction(tui.ActionToggleThinking, func() {
 		m.toggleThinkingBlockVisibility()
 	})
-	m.editor.OnAction(core.ActionCycleThinkingLevel, func() {
+	m.editor.OnAction(tui.ActionCycleThinkingLevel, func() {
 		m.cycleThinkingLevel()
 	})
-	m.editor.OnAction(core.ActionCycleModelForward, func() {
+	m.editor.OnAction(tui.ActionCycleModelForward, func() {
 		m.cycleModel("forward")
 	})
-	m.editor.OnAction(core.ActionCycleModelBackward, func() {
+	m.editor.OnAction(tui.ActionCycleModelBackward, func() {
 		m.cycleModel("backward")
 	})
-	m.editor.OnAction(core.ActionNewSession, func() {
+	m.editor.OnAction(tui.ActionNewSession, func() {
 		go m.handleClearCommand("")
 	})
-	m.editor.OnAction(core.ActionTree, func() {
+	m.editor.OnAction(tui.ActionTree, func() {
 		m.showTreeSelector()
 	})
-	m.editor.OnAction(core.ActionFork, func() {
+	m.editor.OnAction(tui.ActionFork, func() {
 		m.showUserMessageSelector()
 	})
-	m.editor.OnAction(core.ActionResume, func() {
+	m.editor.OnAction(tui.ActionResume, func() {
 		m.showSessionSelector()
 	})
-	m.editor.OnAction(core.ActionTogglePlan, func() {
+	m.editor.OnAction(tui.ActionTogglePlan, func() {
 		m.togglePlanVisibility()
 	})
-	m.editor.OnAction(core.ActionClear, func() {
+	m.editor.OnAction(tui.ActionClear, func() {
 		m.handleCtrlC()
 	})
-	m.editor.OnAction(core.ActionSuspend, func() {
+	m.editor.OnAction(tui.ActionSuspend, func() {
 		m.handleCtrlZ()
 	})
-	m.editor.OnAction(core.ActionExternalEditor, func() {
+	m.editor.OnAction(tui.ActionExternalEditor, func() {
 		m.handleExternalEditor()
 	})
 
@@ -642,7 +643,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	m.editor.OnPasteImage = func() {
 		go m.handleClipboardImagePaste()
 	}
-	m.editor.OnAction(core.ActionFollowUp, func() {
+	m.editor.OnAction(tui.ActionFollowUp, func() {
 		text := strings.TrimSpace(m.editor.GetText())
 		if text == "" {
 			return
@@ -655,7 +656,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			}()
 		}
 	})
-	m.editor.OnAction(core.ActionDequeue, func() {
+	m.editor.OnAction(tui.ActionDequeue, func() {
 		m.handleDequeue()
 	})
 
@@ -1464,7 +1465,7 @@ func (m *InteractiveMode) handleClipboardImagePaste() {
 		return // no image on clipboard, silently ignore
 	}
 
-	ext := core.ExtensionForImageMimeType(img.MimeType)
+	ext := platform.ExtensionForImageMimeType(img.MimeType)
 	if ext == "" {
 		ext = "png"
 	}
@@ -1736,10 +1737,10 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
 			// Try to auto-open the browser.
-			browserOpened := core.OpenBrowser(info.URL) == nil
+			browserOpened := platform.OpenBrowser(info.URL) == nil
 
 			// Show a clickable OSC 8 hyperlink so the URL stays on one line.
-			link := core.Hyperlink(info.URL, info.URL)
+			link := platform.Hyperlink(info.URL, info.URL)
 			var msg string
 			if browserOpened {
 				msg = fmt.Sprintf("Opening browser… if it doesn't appear, visit:\n%s", link)
@@ -2154,7 +2155,7 @@ func (m *InteractiveMode) performShare() {
 		m.showWarning("Gist created but no URL returned")
 		return
 	}
-	link := core.Hyperlink(gistURL, gistURL)
+	link := platform.Hyperlink(gistURL, gistURL)
 	m.showStatus(fmt.Sprintf("Session shared: %s", link))
 }
 
@@ -2202,7 +2203,7 @@ func (m *InteractiveMode) handleCopyCommand() {
 		m.showWarning("No agent messages to copy yet.")
 		return
 	}
-	core.CopyToClipboard(text)
+	platform.CopyToClipboard(text)
 	m.showStatus("Copied last agent message to clipboard")
 }
 
@@ -2984,7 +2985,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 				}
 			}
 		}
-		if keys := m.keybindings.GetKeys(core.ActionTogglePlan); len(keys) > 0 {
+		if keys := m.keybindings.GetKeys(tui.ActionTogglePlan); len(keys) > 0 {
 			data.PlanKeyHint = keys[0]
 		}
 	}

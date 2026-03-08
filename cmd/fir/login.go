@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/kfet/fir/pkg/ai/oauth"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/auth"
 )
 
@@ -33,7 +33,7 @@ func runLogin(args *Args) error {
 
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
-			browserOpened := core.OpenBrowser(info.URL) == nil
+			browserOpened := platform.OpenBrowser(info.URL) == nil
 			if browserOpened {
 				fmt.Fprintf(os.Stderr, "Opening browser… if it doesn't appear, visit:\n%s\n", info.URL)
 			} else {

@@ -12,6 +12,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/platform"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	fmsg "github.com/kfet/fir/pkg/msg"
@@ -169,7 +170,7 @@ func newTestModeInternal(t *testing.T, session *core.AgentSession) *testMode {
 	term := tui.NewMockTerminal(80, 24)
 	ui := tui.NewTUI(term, false)
 
-	keybindings := core.NewKeybindingsManager("")
+	keybindings := tui.NewKeybindingsManager("")
 	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
 	m.ui = ui
 	m.keybindings = keybindings
@@ -254,7 +255,7 @@ func TestInteractiveMode_NoFocusMeansNoInput(t *testing.T) {
 	ui := tui.NewTUI(term, false)
 
 	editorTheme := itheme.GetEditorTheme()
-	keybindings := core.NewKeybindingsManager("")
+	keybindings := tui.NewKeybindingsManager("")
 	editor := components.NewCustomEditor(ui, editorTheme, keybindings)
 	ui.AddChild(editor)
 
@@ -1668,7 +1669,7 @@ func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
 	initial := tm.editorText()
 
 	// Override the clipboard reader to return nil (no image available).
-	tm.mode.clipboardReader = func() *core.ClipboardImage { return nil }
+	tm.mode.clipboardReader = func() *platform.ClipboardImage { return nil }
 
 	tm.mode.handleClipboardImagePaste()
 	tm.waitRender()
@@ -1683,8 +1684,8 @@ func TestHandleClipboardImagePaste_WithImage(t *testing.T) {
 
 	// Override the clipboard reader to return a fake PNG image.
 	fakeBytes := []byte("\x89PNG\r\n\x1a\n" + string(make([]byte, 100)))
-	tm.mode.clipboardReader = func() *core.ClipboardImage {
-		return &core.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
+	tm.mode.clipboardReader = func() *platform.ClipboardImage {
+		return &platform.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
 	}
 
 	tm.mode.handleClipboardImagePaste()
@@ -1999,7 +2000,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	})
 	t.Cleanup(func() { session.Close() })
 
-	keybindings := core.NewKeybindingsManager("")
+	keybindings := tui.NewKeybindingsManager("")
 	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
 	m.session = session
 	t.Cleanup(func() { m.Shutdown() })

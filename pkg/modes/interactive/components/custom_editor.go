@@ -3,7 +3,6 @@
 package components
 
 import (
-	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -11,8 +10,8 @@ import (
 // CustomEditor wraps the Editor with app-level keybinding support.
 type CustomEditor struct {
 	*tuicomp.Editor
-	keybindings    *core.KeybindingsManager
-	actionHandlers map[core.AppAction]func()
+	keybindings    *tui.KeybindingsManager
+	actionHandlers map[tui.AppAction]func()
 
 	// Dynamic handlers that can be replaced
 	OnEscape            func()
@@ -22,16 +21,16 @@ type CustomEditor struct {
 }
 
 // NewCustomEditor creates a new CustomEditor.
-func NewCustomEditor(t *tui.TUI, theme tuicomp.EditorTheme, keybindings *core.KeybindingsManager, opts ...tuicomp.EditorOptions) *CustomEditor {
+func NewCustomEditor(t *tui.TUI, theme tuicomp.EditorTheme, keybindings *tui.KeybindingsManager, opts ...tuicomp.EditorOptions) *CustomEditor {
 	return &CustomEditor{
 		Editor:         tuicomp.NewEditor(t, theme, opts...),
 		keybindings:    keybindings,
-		actionHandlers: make(map[core.AppAction]func()),
+		actionHandlers: make(map[tui.AppAction]func()),
 	}
 }
 
 // OnAction registers a handler for an app action.
-func (ce *CustomEditor) OnAction(action core.AppAction, handler func()) {
+func (ce *CustomEditor) OnAction(action tui.AppAction, handler func()) {
 	ce.actionHandlers[action] = handler
 }
 
@@ -43,7 +42,7 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Check paste image
-	if ce.keybindings.Matches(data, core.ActionPasteImage) {
+	if ce.keybindings.Matches(data, tui.ActionPasteImage) {
 		if ce.OnPasteImage != nil {
 			ce.OnPasteImage()
 		}
@@ -51,11 +50,11 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Escape/interrupt — only if autocomplete is NOT active
-	if ce.keybindings.Matches(data, core.ActionInterrupt) {
+	if ce.keybindings.Matches(data, tui.ActionInterrupt) {
 		if !ce.IsShowingAutocomplete() {
 			handler := ce.OnEscape
 			if handler == nil {
-				handler = ce.actionHandlers[core.ActionInterrupt]
+				handler = ce.actionHandlers[tui.ActionInterrupt]
 			}
 			if handler != nil {
 				handler()
@@ -68,11 +67,11 @@ func (ce *CustomEditor) HandleInput(data string) {
 	}
 
 	// Exit (Ctrl+D) — only when editor is empty
-	if ce.keybindings.Matches(data, core.ActionExit) {
+	if ce.keybindings.Matches(data, tui.ActionExit) {
 		if ce.GetText() == "" {
 			handler := ce.OnCtrlD
 			if handler == nil {
-				handler = ce.actionHandlers[core.ActionExit]
+				handler = ce.actionHandlers[tui.ActionExit]
 			}
 			if handler != nil {
 				handler()
@@ -99,7 +98,7 @@ func (ce *CustomEditor) HandleInput(data string) {
 
 	// Check all other app actions
 	for action, handler := range ce.actionHandlers {
-		if action != core.ActionInterrupt && action != core.ActionExit && ce.keybindings.Matches(data, action) {
+		if action != tui.ActionInterrupt && action != tui.ActionExit && ce.keybindings.Matches(data, action) {
 			handler()
 			return
 		}

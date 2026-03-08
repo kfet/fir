@@ -17,6 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
@@ -652,7 +653,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	}
 
 	// Load keybindings
-	keybindings := core.NewKeybindingsManager(setup.agentDir)
+	keybindings := tui.NewKeybindingsManager(setup.agentDir)
 
 	// Process @file arguments and build initial prompt
 	var initialPrompt string

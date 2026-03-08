@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -29,7 +29,7 @@ func EditorKey(action tuicomp.EditorAction) string {
 }
 
 // AppKey returns the display string for an app action.
-func AppKey(keybindings *core.KeybindingsManager, action core.AppAction) string {
+func AppKey(keybindings *tui.KeybindingsManager, action tui.AppAction) string {
 	return formatKeys(keybindings.GetKeys(action))
 }
 
@@ -40,7 +40,7 @@ func KeyHint(action tuicomp.EditorAction, description string) string {
 }
 
 // AppKeyHint formats a keybinding hint for app-level actions.
-func AppKeyHint(keybindings *core.KeybindingsManager, action core.AppAction, description string) string {
+func AppKeyHint(keybindings *tui.KeybindingsManager, action tui.AppAction, description string) string {
 	t := theme.GetTheme()
 	return t.Fg("dim", AppKey(keybindings, action)) + t.Fg("muted", " "+description)
 }

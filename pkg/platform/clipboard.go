@@ -1,6 +1,6 @@
 // Ported from: packages/coding-agent/src/utils/clipboard.ts
 // Upstream hash: 1caadb2e
-package core
+package platform
 
 import (
 	"encoding/base64"

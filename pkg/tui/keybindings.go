@@ -1,13 +1,12 @@
 // Ported from: packages/coding-agent/src/core/keybindings.ts
 // Upstream hash: 1caadb2e
-package core
+package tui
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
 
-	"github.com/kfet/fir/pkg/tui"
 )
 
 // AppAction is an application-level action.
@@ -144,7 +143,7 @@ func (m *KeybindingsManager) GetKeys(action AppAction) []string {
 // Matches checks if terminal input data matches an app action.
 func (m *KeybindingsManager) Matches(data string, action AppAction) bool {
 	for _, key := range m.appActionKeys[action] {
-		if tui.MatchesKey(data, tui.KeyID(key)) {
+		if MatchesKey(data, KeyID(key)) {
 			return true
 		}
 	}

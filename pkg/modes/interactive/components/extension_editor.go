@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -23,13 +22,13 @@ type ExtensionEditorComponent struct {
 	onSubmit    func(value string)
 	onCancel    func()
 	tuiRef      *tui.TUI
-	keybindings *core.KeybindingsManager
+	keybindings *tui.KeybindingsManager
 }
 
 // NewExtensionEditorComponent creates a new ExtensionEditorComponent.
 func NewExtensionEditorComponent(
 	tuiRef *tui.TUI,
-	keybindings *core.KeybindingsManager,
+	keybindings *tui.KeybindingsManager,
 	title string,
 	prefill string,
 	onSubmit func(value string),
