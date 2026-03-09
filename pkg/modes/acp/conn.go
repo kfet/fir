@@ -42,7 +42,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 	sessionCancels := map[string]func(){}
 
 	return func(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-		firlog.Log("acp: incoming method=%s params=%s", method, truncate(string(params), 200))
+		firlog.Debug("acp: incoming method", "method", method, "params", truncate(string(params), 200))
 		switch method {
 		case "authenticate":
 			var p acpsdk.AuthenticateRequest

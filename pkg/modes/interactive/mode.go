@@ -228,7 +228,7 @@ func (m *InteractiveMode) startUpdateNoticeWatcher() {
 
 // Init initializes the TUI and components.
 func (m *InteractiveMode) Init() error {
-	firlog.Log("interactive: initializing TUI")
+	firlog.Debug("interactive: initializing TUI")
 	// Create terminal and TUI
 	term := tui.NewProcessTerminal()
 	m.ui = tui.NewTUI(term, false)
@@ -3284,7 +3284,7 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 
 	sidecar, err := session.ReadReexecSidecar(sessionFile)
 	if err != nil {
-		firlog.Log("restoreReexecSidecar: read error: %v", err)
+		firlog.Debug("restoreReexecSidecar: read error", "error", err)
 		return
 	}
 	if sidecar == nil {
