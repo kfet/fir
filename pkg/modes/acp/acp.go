@@ -78,7 +78,7 @@ type firAgent struct {
 	sessions    map[string]*firSession
 	clientCaps  acpsdk.ClientCapabilities
 	authMethods []ExtendedAuthMethod
-	authStorage *auth.AuthStorage // global auth storage from Initialize (same backing file as per-session instances)
+	authStorage *auth.AuthStorage // global auth storage from Initialize, shared by all sessions
 }
 
 // Compile-time interface check: firAgent must implement Agent.
@@ -152,7 +152,15 @@ func RunAcpMode(opts Options) error {
 func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
 	agentDir := resolveAgentDir()
 
-	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	// Reuse the global authStorage created in Initialize so that login/logout
+	// changes are immediately visible to all sessions without a Reload().
+	pa.mu.Lock()
+	authStorage := pa.authStorage
+	pa.mu.Unlock()
+	if authStorage == nil {
+		// Fallback for tests or edge cases where Initialize wasn't called.
+		authStorage = auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	}
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	sessionManager := session.NewSessionManager(cwd, session.DefaultSessionDir(agentDir, cwd))

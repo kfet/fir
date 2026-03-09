@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Share single `AuthStorage` instance across all ACP sessions instead of creating duplicates per session; login/logout changes are now immediately visible without `Reload()`
 - Fix MCP server subprocess leak when resuming an ACP session with a duplicate ID — `mcpManager.Close()` was missing from cleanup
 - Handle `filepath.Abs` error in ACP `ResumeSession` instead of silently discarding it
 
