@@ -335,21 +335,24 @@ pkg/                        # 14 packages (down from 18)
 └── update/                 # Self-update
 ```
 
-### Phase 7: Split God Files — ❌ NOT STARTED (optional)
+### Phase 7: Split God Files — ✅ COMPLETE
 
 No logic changes — just splitting large files into multiple files within the same package.
 
-#### 7a. `pkg/modes/interactive/mode.go` (3,308 lines, 94 functions)
+#### 7a. `pkg/modes/interactive/mode.go` (3,308 lines, 94 functions) ✅ Done
 
 Split into:
-- `commands.go` — `handleSlashCommand` + 18 `handle*Command` functions (~1,200 lines)
-- `events.go` — `subscribeToAgent`, `handleEvent`, `onAgent*`, `onMessage*`, `onToolExec*` (~300 lines)
-- `selectors.go` — `showModelSelector`, `showSessionSelector`, `showTreeSelector`, `showOAuthSelector`, etc. (~600 lines)
-- `mode.go` — Init, Run, Shutdown, setupEditorHandlers, footer — core lifecycle (~1,200 lines)
+- `commands.go` — slash command dispatch + all `handle*` functions (~1,483 lines)
+- `events.go` — agent subscription, chat management, footer data (~415 lines)
+- `selectors.go` — all `show*` overlays, OAuth, tree/fork selectors (~745 lines)
+- `mode.go` — Init, Run, Shutdown, setupEditorHandlers, setupAutocomplete, lifecycle (~713 lines)
 
-#### 7b. `pkg/modes/acp/acp.go` (1,690 lines, 39 functions)
+#### 7b. `pkg/modes/acp/acp.go` (1,690 lines, 39 functions) ✅ Done
 
-Split RPC method handlers into `methods.go`.
+Split into:
+- `methods.go` — all RPC method handlers (~1,089 lines)
+- `tools.go` — all ACP tool builder functions (~262 lines)
+- `acp.go` — core structs, RunAcpMode, helpers (~376 lines)
 
 ### Phase 8: Optional — Go Sub-modules — ❌ NOT STARTED (low priority)
 
@@ -372,4 +375,4 @@ For independent versioning and consumption:
 | `timings.go` | 71 | Stays |
 | `compaction_progress.go` | 24 | Stays |
 
-⚠️ **Build status:** `make all` passes ✅ (verified 2026-03-08)
+⚠️ **Build status:** `make all` passes ✅ (verified 2026-03-08, Phase 7 complete)

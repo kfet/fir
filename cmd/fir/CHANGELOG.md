@@ -5,6 +5,8 @@
 ### Changed
 - Removed unused slash commands: `/hotkeys` (alias for `/help`), `/fork` (available via keybinding), `/copy` (copy last message to clipboard)
 - Plan nudger now triggers on: 20 turns without an update, 2 minutes without an update, or when the agent stops with incomplete plan entries (compels continuation)
+- Phase 7: split `pkg/modes/interactive/mode.go` (3308 lines) into `mode.go` (lifecycle), `commands.go` (slash commands + handlers), `selectors.go` (selector overlays), `events.go` (agent events + chat)
+- Phase 7: split `pkg/modes/acp/acp.go` (1690 lines) into `acp.go` (core), `methods.go` (RPC handlers), `tools.go` (tool builders)
 
 ### Fixed
 
