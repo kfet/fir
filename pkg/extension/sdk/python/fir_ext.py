@@ -317,7 +317,7 @@ class Context:
 
     def continue_session(self) -> None:
         """Trigger the agent to continue without injecting any message."""
-        self._call("continue_session")
+        self._call("continue_session", timeout=60.0)
 
 
 # ---------------------------------------------------------------------------

@@ -225,6 +225,7 @@ func isGemini3ModelID(modelID string) bool {
 
 var gemini3ProRegex = regexp.MustCompile(`gemini-3(?:\.1)?-pro`)
 var gemini3FlashRegex = regexp.MustCompile(`gemini-3(?:\.1)?-flash`)
+var retryableTextRe = regexp.MustCompile(`(?i)service.?unavailable|other.?side.?closed`)
 
 func isRetryableError(status int, errorText string) bool {
 	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
@@ -233,8 +234,7 @@ func isRetryableError(status int, errorText string) bool {
 	if ai.IsRateLimitText(errorText) {
 		return true
 	}
-	re := regexp.MustCompile(`(?i)service.?unavailable|other.?side.?closed`)
-	return re.MatchString(errorText)
+	return retryableTextRe.MatchString(errorText)
 }
 
 func extractErrorMessage(errorText string) string {

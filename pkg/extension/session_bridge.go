@@ -139,7 +139,8 @@ func (b *SessionBridge) SetModel(model *ai.Model) bool {
 }
 
 func (b *SessionBridge) ContinueSession() error {
-	return b.session.Agent.Continue()
+	go func() { _ = b.session.Agent.Continue() }()
+	return nil
 }
 
 // RegisterTool adds an externally-defined tool to the session's agent.
