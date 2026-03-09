@@ -315,6 +315,10 @@ class Context:
             return bool(result.get("ok"))
         return False
 
+    def continue_session(self) -> None:
+        """Trigger the agent to continue without injecting any message."""
+        self._call("continue_session")
+
 
 # ---------------------------------------------------------------------------
 # Main loop

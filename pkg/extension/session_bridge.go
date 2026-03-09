@@ -138,6 +138,10 @@ func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	return true
 }
 
+func (b *SessionBridge) ContinueSession() error {
+	return b.session.Agent.Continue()
+}
+
 // RegisterTool adds an externally-defined tool to the session's agent.
 // The tool is wrapped with the session's hook interceptors so that
 // hook/tool_call interception still fires for it.

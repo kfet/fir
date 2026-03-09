@@ -250,6 +250,13 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		}
 		result = map[string]any{"ok": true}
 
+	case "continue_session":
+		if err := api.ContinueSession(); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = map[string]any{"ok": true}
+		}
+
 	default:
 		rpcErr = &Error{Code: -32601, Message: "method not found: " + req.Method}
 	}

@@ -15,6 +15,7 @@ type BridgeAPI interface {
 	GetActiveTools() []string
 	SetActiveTools(names []string)
 	SetModel(model *ai.Model) bool
+	ContinueSession() error
 	RegisterTool(def ToolDefinition)
 }
 

@@ -12,6 +12,9 @@
 
 ### Added
 
+- `pkg/ai/ratelimit.go`: shared rate-limit detection utility — `RateLimitInfo`, `DetectRateLimit(msg)`, `IsRateLimitText(text)`, `ExtractRetryDelayFromText(text)`; `google_gemini_cli.go` refactored to delegate to the shared helpers
+- `/schedule` extension (`.fir/extensions/schedule.py`): defer agent continuation to a future time with live countdown status (`/schedule 45m`, `/schedule 2pm`, `/schedule cancel`)
+- Extension bridge: `continue_session` method lets extensions call `session.Agent.Continue()` without injecting a message (`ctx.continue_session()` in Python SDK)
 - Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)
 - Move `pkg/core/tools` to `pkg/agent/tools` — tool implementations depend only on `pkg/agent`, `pkg/ai`, `pkg/log`; no core dependency
 - Extract `footerdataprovider.go` from `pkg/core` to `pkg/modes/interactive/` — footer data is only used by interactive mode

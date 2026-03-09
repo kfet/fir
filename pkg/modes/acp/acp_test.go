@@ -1055,6 +1055,7 @@ func (n *noopBridgeAPI) ClearLabel(_ string)                                    
 func (n *noopBridgeAPI) GetActiveTools() []string                                                   { return nil }
 func (n *noopBridgeAPI) SetActiveTools(_ []string)                                                  {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
+func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
 func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                   {}
 
 // writeCommandExtScript writes a Python extension script that:

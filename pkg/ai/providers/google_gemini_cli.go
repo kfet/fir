@@ -156,6 +156,7 @@ type geminiCLIUsageMetadata struct {
 
 // extractRetryDelay extracts retry delay from error text and response headers.
 // Returns delay in milliseconds, or 0 if not found.
+// Text-based pattern matching is delegated to ai.ExtractRetryDelayFromText.
 func extractRetryDelay(errorText string, headers http.Header) int {
 	normalizeDelay := func(ms int) int {
 		if ms > 0 {
@@ -196,52 +197,9 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 		}
 	}
 
-	// Pattern 1: "reset after 18h31m10s" / "reset after 39s"
-	resetRe := regexp.MustCompile(`(?i)reset after (?:(\d+)h)?(?:(\d+)m)?(\d+(?:\.\d+)?)s`)
-	if m := resetRe.FindStringSubmatch(errorText); m != nil {
-		var hours, minutes int
-		var seconds float64
-		if m[1] != "" {
-			hours, _ = strconv.Atoi(m[1])
-		}
-		if m[2] != "" {
-			minutes, _ = strconv.Atoi(m[2])
-		}
-		seconds, _ = strconv.ParseFloat(m[3], 64)
-		totalMs := int(float64((hours*60+minutes)*60)*1000 + seconds*1000)
-		if d := normalizeDelay(totalMs); d > 0 {
-			return d
-		}
-	}
-
-	// Pattern 2: "Please retry in Xs" or "Please retry in Xms"
-	retryRe := regexp.MustCompile(`(?i)Please retry in ([0-9.]+)(ms|s)`)
-	if m := retryRe.FindStringSubmatch(errorText); m != nil {
-		val, _ := strconv.ParseFloat(m[1], 64)
-		if val > 0 {
-			ms := val
-			if strings.ToLower(m[2]) == "s" {
-				ms = val * 1000
-			}
-			if d := normalizeDelay(int(ms)); d > 0 {
-				return d
-			}
-		}
-	}
-
-	// Pattern 3: "retryDelay": "34.074824224s"
-	delayRe := regexp.MustCompile(`(?i)"retryDelay":\s*"([0-9.]+)(ms|s)"`)
-	if m := delayRe.FindStringSubmatch(errorText); m != nil {
-		val, _ := strconv.ParseFloat(m[1], 64)
-		if val > 0 {
-			ms := val
-			if strings.ToLower(m[2]) == "s" {
-				ms = val * 1000
-			}
-			if d := normalizeDelay(int(ms)); d > 0 {
-				return d
-			}
-		}
+	// Delegate text-based pattern matching to the shared rate-limit utility.
+	if d := ai.ExtractRetryDelayFromText(errorText); d > 0 {
+		return normalizeDelay(int(d.Milliseconds()))
 	}
 
 	return 0
@@ -272,7 +230,10 @@ func isRetryableError(status int, errorText string) bool {
 	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
 		return true
 	}
-	re := regexp.MustCompile(`(?i)resource.?exhausted|rate.?limit|overloaded|service.?unavailable|other.?side.?closed`)
+	if ai.IsRateLimitText(errorText) {
+		return true
+	}
+	re := regexp.MustCompile(`(?i)service.?unavailable|other.?side.?closed`)
 	return re.MatchString(errorText)
 }
 

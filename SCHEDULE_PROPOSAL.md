@@ -27,7 +27,45 @@ execution, not mere pause.
 
 ## Design
 
-### 1. Slash command: `/schedule` (interactive mode)
+This feature is implemented as a **fir extension** (`.fir/extensions/schedule.py`),
+not as core code. The only core change needed is exposing `ctx.continue_session()` on
+the extension bridge API.
+
+### 1. Core change: `ctx.continue_session()`
+
+Add a single new method to the extension bridge that calls `session.Agent.Continue()`
+without injecting any message into the session history.
+
+**Go side:**
+
+```go
+// BridgeAPI (api.go) — add:
+ContinueSession() error
+
+// SessionBridge (session_bridge.go) — implement:
+func (b *SessionBridge) ContinueSession() error {
+    return b.session.Agent.Continue()
+}
+
+// Bridge (bridge.go) — handle inbound "continue_session" request:
+case "continue_session":
+    if err := api.ContinueSession(); err != nil {
+        rpcErr = &Error{Code: -32000, Message: err.Error()}
+    } else {
+        result = map[string]any{"ok": true}
+    }
+```
+
+**Python SDK:**
+
+```python
+# Context class in fir_ext.py — add:
+def continue_session(self) -> None:
+    """Resume the agent session (replay the last turn)."""
+    self._call("continue_session")
+```
+
+### 2. Extension: `.fir/extensions/schedule.py`
 
 ```
 /schedule 45m          — execute next turn in 45 minutes
@@ -38,68 +76,19 @@ execution, not mere pause.
 ```
 
 **Behavior:**
-- Shows a live countdown in the activity area using the existing `CountdownTimer`
-  component: `⏰ Scheduled — executing in 12m34s (at 2:00 PM)`
-- User can press **Escape** or type `/schedule cancel` to cancel without resuming.
-- When the timer fires:
-  1. Strip the trailing `StopReasonError` assistant message from the agent context
-     (keep it in session history, remove from LLM context). This is identical to
-     what `runAutoCompaction` does today at `agentsession.go` ~line 835.
-  2. Call `session.Agent.Continue()`. The agent replays the last user turn (or
-     pending tool results) against the LLM.
-- If the last message is NOT an error (user scheduled proactively), no stripping
-  occurs — just `Continue()`.
+- Parses relative durations (`45m`, `1h30m`) and absolute times (`2pm`, `14:00`).
+- Starts a background `threading.Timer` that calls `ctx.set_status()` every second
+  with a live countdown: `⏰ Scheduled — executing in 12m34s (at 2:00 PM)`
+- `/schedule cancel` cancels the timer and clears the status.
+- When the timer fires, calls `ctx.continue_session()` to replay the last turn.
+- Only one schedule can be active at a time. Starting a new one replaces the old.
 
-**Why explicit, not automatic?**
-Auto-sleeping is dangerous: Claude Code's auto `/rate-limit-options` has a bug where
-it fires repeatedly after a session reset, consuming tokens. `/schedule` is always
-user-initiated. The `scheduleOnRateLimit: "auto"` setting (§3) is opt-in.
-
-### 2. CLI flags: `--schedule` (print mode / headless)
-
-For scripted / headless / CI / shepherd-fleet usage:
-
-```bash
-fir -p --schedule 45m    "fix the tests"
-fir -p --schedule 14:00  "fix the tests"
-fir -c --schedule 30m                      # continue previous session, wait on rate-limit
-```
-
-**Behavior:**
-- On a rate-limit error, instead of exiting non-zero, sleep until the scheduled time,
-  then retry the full turn.
-- On non-rate-limit errors, exit immediately as today (don't block for unrelated
-  failures).
-- Writes a status line to stderr during the wait:
-  `Scheduled — executing in 12m34s (at 14:00)...`
-- Respects SIGINT/SIGTERM to cancel the wait and exit cleanly.
-
-### 3. Settings: `retry.scheduleOnRateLimit`
-
-```jsonc
-{
-  "retry": {
-    "enabled": true,
-    "maxRetries": 3,
-    "baseDelayMs": 2000,
-    "maxDelayMs": 60000,
-    "scheduleOnRateLimit": "off"   // NEW — "off" | "auto" | duration string e.g. "1h"
-  }
-}
-```
-
-- `"off"` **(default)** — current behavior: error after maxRetries.
-- `"auto"` — parse `Retry-After` / `x-ratelimit-reset` headers and error body via
-  the new `DetectRateLimit` helper (§4). Wait up to 1 hour automatically. Beyond
-  1 hour, prompt the user (interactive) or error (print).
-- `"30m"` / `"2h"` — willing to wait up to this duration. If the server-indicated
-  delay exceeds this cap, surface the error normally.
-
-### 4. New helper: `pkg/ai/ratelimit.go`
+### 3. Rate-limit detection helper: `pkg/ai/ratelimit.go`
 
 Generalize rate-limit detection and delay extraction out of individual providers
 (currently scattered across `google_gemini_cli.go`, `openai_codex_responses.go`, etc.)
-into a single shared utility.
+into a single shared utility. This is useful beyond the schedule feature and belongs
+in core.
 
 ```go
 package ai
@@ -125,109 +114,43 @@ Patterns to match (already scattered across providers, consolidate here):
   `x-ratelimit-reset-after` (reuse logic from `extractRetryDelay` in
   `google_gemini_cli.go`).
 
-### 5. New event types in `AgentSession`
-
-Following the existing `auto_compaction_start` / `auto_compaction_end` pattern,
-add `schedule_wait_start` and `schedule_wait_end` events so modes get notified
-without `agentsession.go` knowing anything about the UI or CLI.
-
-```go
-// In AgentSessionEvent (agentsession.go):
-// Type == "schedule_wait_start":
-//   RateLimitInfo *ai.RateLimitInfo  — info about why we're waiting
-//   ScheduledFor  time.Time          — absolute time of planned execution
-//
-// Type == "schedule_wait_end":
-//   Cancelled bool — true if user cancelled, false if timer fired
-```
-
-A new method `(s *AgentSession) StartSchedule(at time.Time)` lets the interactive
-mode initiate the wait (from `/schedule`) and also lets the session initiate it
-automatically (from `scheduleOnRateLimit: "auto"`).
-
-`CancelSchedule()` stops a running wait, emits `schedule_wait_end{Cancelled: true}`.
-
-### 6. Interactive mode wiring
-
-In `mode.go`:
-
-```go
-// Handle new session event
-case "schedule_wait_start":
-    m.showScheduleCountdown(event.ScheduledFor, event.RateLimitInfo)
-
-case "schedule_wait_end":
-    m.clearScheduleCountdown()
-    if !event.Cancelled {
-        // timer fired — agent.Continue() was already called by agentsession
-        m.showStatus("Scheduled execution started")
-    } else {
-        m.showStatus("Scheduled execution cancelled")
-    }
-```
-
-```go
-// Handle new slash command
-case "/schedule":
-    m.handleScheduleCommand(arg)  // parses arg, calls m.session.StartSchedule(at)
-```
-
-Escape key: if `m.activeSchedule != nil`, pressing Escape cancels the schedule
-instead of (or in addition to) clearing the editor.
-
-### 7. Print mode wiring (`cmd/fir/app.go`)
-
-```go
-if args.Schedule != "" {
-    // Parse --schedule value once, store as scheduledAt time.Time
-    // After each turn that ends in a rate-limit error:
-    //   - print status to stderr
-    //   - sleep until scheduledAt
-    //   - retry (loop back to run the agent turn again)
-}
-```
-
 ---
 
 ## File-by-file touchpoints
 
 | File | Change |
 |------|--------|
+| `pkg/extension/api.go` | Add `ContinueSession() error` to `BridgeAPI` |
+| `pkg/extension/session_bridge.go` | Implement `ContinueSession()` |
+| `pkg/extension/bridge.go` | Handle inbound `"continue_session"` request |
+| `pkg/extension/sdk/python/fir_ext.py` | Add `ctx.continue_session()` method |
+| `.fir/extensions/schedule.py` | **New file.** The extension itself |
 | `pkg/ai/ratelimit.go` | **New file.** `RateLimitInfo`, `DetectRateLimit()` |
 | `pkg/ai/providers/google_gemini_cli.go` | Refactor: delegate `extractRetryDelay` to shared util |
-| `pkg/config/settings.go` | Add `ScheduleOnRateLimit string` to `RetrySettings` |
-| `pkg/core/agentsession.go` | Add `StartSchedule()`, `CancelSchedule()`, `schedule_wait_start/end` events; call `checkScheduleOnRateLimit()` after error turns when setting is `"auto"` |
-| `pkg/modes/interactive/mode.go` | Handle `schedule_wait_start/end` events; `/schedule` slash command; Escape cancels active schedule |
-| `pkg/resources/slashcmds.go` | Add `/schedule` to `BuiltinSlashCommands` |
-| `cmd/fir/args.go` | Add `--schedule` flag; update `--help` text and examples |
-| `cmd/fir/app.go` | Wire `--schedule` into print mode run loop |
-| `.fir/skills/self/SKILL.md` | Document `/schedule` slash command and `--schedule` flag |
+| `.fir/skills/self/SKILL.md` | Document `/schedule` command |
 | `CHANGELOG.md` | Add entry under `## [Unreleased] ### Added` |
 
 ---
 
 ## Recommended implementation order
 
-1. **`pkg/ai/ratelimit.go`** — detection + delay extraction, fully unit-tested in
-   isolation. Refactor `extractRetryDelay` references to use it.
-2. **`/schedule` slash command** — interactive mode only, manual trigger. Shows
-   countdown, Escape cancels, timer fires `session.Agent.Continue()`. Hardest UI
-   piece, good to do early.
-3. **`AgentSession` event wiring** — `StartSchedule` / `CancelSchedule` /
-   `schedule_wait_start` / `schedule_wait_end`. Wire interactive mode to use them
-   so the slash command goes through the session rather than doing its own timer.
-4. **`--schedule` CLI flag** — print mode. Simpler: just sleep + retry loop.
-5. **`retry.scheduleOnRateLimit` setting** — auto-detect in `AgentSession`, emit
-   `schedule_wait_start` automatically when rate-limit detected and setting != "off".
-6. **`self` skill + CHANGELOG** — update docs last.
+1. **`ctx.continue_session()`** — add to `BridgeAPI`, `SessionBridge`, `Bridge`,
+   and `fir_ext.py`. Small, testable change.
+2. **`.fir/extensions/schedule.py`** — the extension. Command parsing, timer,
+   countdown via `set_status`, fire via `continue_session`.
+3. **`pkg/ai/ratelimit.go`** — detection + delay extraction, fully unit-tested.
+   Refactor `extractRetryDelay` references. (Independent of the extension; can
+   be used later to auto-suggest `/schedule` with a parsed delay.)
+4. **`self` skill + CHANGELOG** — update docs last.
 
 ---
 
 ## What this does NOT do
 
+- **No CLI/print mode scheduling** — use `sleep 45m && fir -p ...` or system cron.
+- **No automatic triggering** — `/schedule` is always user-initiated.
 - **No automatic model fallback** on rate-limit — separate feature.
 - **No cross-session / cron scheduling** — this is within-session only. Use cron +
   `fir -c` for true scheduled jobs.
 - **No multi-session orchestration** — the shepherd skill handles that.
-- **No infinite retry loop** — max 3 scheduled retries (same `maxRetries` config),
-  then surface the error.
+- **No infinite retry loop** — a single scheduled retry per `/schedule` invocation.

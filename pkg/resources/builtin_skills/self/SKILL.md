@@ -68,6 +68,23 @@ Extensions can optionally self-restrict by mode using script comment frontmatter
 
 Builtin extensions (notify, tmuxspinner, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
+### Project extension: `/schedule`
+
+The `schedule.py` extension in `.fir/extensions/` adds the `/schedule` slash command. It defers the next agent turn to a future time, useful after hitting a rate limit.
+
+```
+/schedule 45m        — resume in 45 minutes
+/schedule 1h30m      — resume in 1 h 30 m
+/schedule 2pm        — resume at 2:00 PM local time
+/schedule 14:00      — resume at 14:00
+/schedule 2:30pm     — resume at 2:30 PM
+/schedule cancel     — cancel an active schedule
+/schedule            — show current schedule status
+```
+
+While a schedule is active, a live countdown is shown in the status bar:
+`⏰ Scheduled — executing in 12m34s (at 2:00 PM)`. Only one schedule can be active at a time; starting a new one replaces the old.
+
 ## Skills
 
 Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML frontmatter. They provide specialized workflows the agent can follow. Skills are auto-discovered from project, user, and builtin directories.
