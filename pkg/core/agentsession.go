@@ -228,9 +228,6 @@ type AgentSession struct {
 	planTitle    string
 	planMetadata map[string]string
 	planVersion  int64 // incremented on each UpdatePlan call
-
-	// Plan nudger (created once, lives for session lifetime)
-	planNudger *tools.PlanNudger
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -247,9 +244,6 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 	}
-
-	// Create plan nudger — checks whether incomplete plan entries exist
-	s.planNudger = tools.NewPlanNudger(s.hasActivePlan)
 
 	// Subscribe to agent events for internal handling
 	s.unsubAgent = s.Agent.Subscribe(s.handleAgentEvent)
@@ -346,18 +340,6 @@ func (s *AgentSession) planVersionNum() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.planVersion
-}
-
-// hasActivePlan reports whether the plan has any non-completed entries.
-func (s *AgentSession) hasActivePlan() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, e := range s.plan {
-		if e.Status != agent.PlanEntryStatusCompleted {
-			return true
-		}
-	}
-	return false
 }
 
 // ============================================================================
@@ -469,20 +451,6 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 		}
 	}
 
-	// Plan nudge: record turns and steer when it's time to remind.
-	if event.Type == agent.EventTurnEnd && s.planNudger != nil {
-		s.planNudger.RecordTurn()
-		if msg := s.planNudger.Check(); msg != "" {
-			s.Agent.Steer(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
-		}
-	}
-
-	// Plan nudge on agent stop: compel the agent to continue if plan is unfinished.
-	if event.Type == agent.EventAgentEnd && s.planNudger != nil {
-		if msg := s.planNudger.CheckOnEnd(); msg != "" {
-			s.Agent.Steer(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
-		}
-	}
 }
 
 func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
@@ -1621,6 +1589,6 @@ func (s *AgentSession) RegisterSessionTools() {
 	state := s.Agent.State()
 	allTools := make([]agent.AgentTool, len(state.Tools), len(state.Tools)+1)
 	copy(allTools, state.Tools)
-	allTools = append(allTools, tools.NewPlanTool(s, s.planNudger))
+	allTools = append(allTools, tools.NewPlanTool(s))
 	s.Agent.SetTools(allTools)
 }

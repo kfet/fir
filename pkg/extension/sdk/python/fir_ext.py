@@ -263,7 +263,15 @@ class Context:
         """
         return self._call("exec", {"command": command, "args": args or []}, timeout=timeout)
 
-    def send_message(self, custom_type: str, content: Any, *, display: bool = False) -> None:
+    def send_message(
+        self,
+        custom_type: str,
+        content: Any,
+        *,
+        display: bool = False,
+        deliver_as: str | None = None,
+        trigger_turn: bool = False,
+    ) -> None:
         """Inject a custom message into the session.
 
         Parameters
@@ -274,15 +282,40 @@ class Context:
             Payload attached to the message.
         display : bool, optional
             When True the message is shown in the UI.
+        deliver_as : str, optional
+            How to deliver the message to the agent. One of ``"steer"`` or
+            ``"followUp"``. When omitted the message is only appended to the
+            session log.
+        trigger_turn : bool, optional
+            When True fir will start a new agent turn after injecting the
+            message.
         """
-        self._call(
-            "send_message",
-            {"custom_type": custom_type, "content": content, "display": display},
-        )
+        params: dict[str, Any] = {
+            "custom_type": custom_type,
+            "content": content,
+            "display": display,
+        }
+        if deliver_as is not None:
+            params["deliver_as"] = deliver_as
+        if trigger_turn:
+            params["trigger_turn"] = trigger_turn
+        self._call("send_message", params)
 
-    def send_user_message(self, content: str) -> None:
-        """Inject a user-role message into the session."""
-        self._call("send_user_message", {"content": content})
+    def send_user_message(self, content: str, *, deliver_as: str | None = None) -> None:
+        """Inject a user-role message into the session.
+
+        Parameters
+        ----------
+        content : str
+            The message text.
+        deliver_as : str, optional
+            How to deliver the message to the agent. One of ``"steer"`` or
+            ``"followUp"``. When omitted the message triggers a new user turn.
+        """
+        params: dict[str, Any] = {"content": content}
+        if deliver_as is not None:
+            params["deliver_as"] = deliver_as
+        self._call("send_user_message", params)
 
     def set_status(self, text: str) -> None:
         """Set persistent status text in the footer."""

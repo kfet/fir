@@ -3,90 +3,10 @@ package tools
 import (
 	"context"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 )
-
-// planNudgeTurnThreshold is the number of turns between plan update reminders.
-const planNudgeTurnThreshold = 20
-
-// planNudgeTimeThreshold is the elapsed time since the last plan update after
-// which a reminder will be sent.
-const planNudgeTimeThreshold = 2 * time.Minute
-
-// PlanNudger generates steering reminders to update an active plan.
-// A nudge fires when ANY of the following conditions are met:
-//   - The plan has not been updated for planNudgeTimeThreshold.
-//   - planNudgeTurnThreshold turns have elapsed since the last update.
-//   - The agent stops (CheckOnEnd), if the plan still has incomplete entries.
-//
-// It is safe for concurrent use.
-type PlanNudger struct {
-	mu               sync.Mutex
-	turnsSinceUpdate int
-	lastUpdate       time.Time
-	hasActivePlan    func() bool
-}
-
-// NewPlanNudger creates a nudger that reminds the agent to update its plan.
-// hasActivePlan should return true when the plan has incomplete entries.
-//
-// hasActivePlan is called while the nudger's internal mutex is held, so it
-// must not attempt to acquire the nudger's mutex (it may acquire other locks).
-func NewPlanNudger(hasActivePlan func() bool) *PlanNudger {
-	return &PlanNudger{
-		lastUpdate:    time.Now(),
-		hasActivePlan: hasActivePlan,
-	}
-}
-
-// RecordTurn increments the turn counter.
-func (n *PlanNudger) RecordTurn() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.turnsSinceUpdate++
-}
-
-// RecordPlanUpdate resets both the turn counter and the last-update timestamp.
-func (n *PlanNudger) RecordPlanUpdate() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.turnsSinceUpdate = 0
-	n.lastUpdate = time.Now()
-}
-
-// Check returns a nudge message when the plan needs attention — either because
-// planNudgeTurnThreshold turns have elapsed or planNudgeTimeThreshold time has
-// passed since the last update — and there is still an active plan.
-// Returns empty string when no nudge is needed.
-func (n *PlanNudger) Check() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if !n.hasActivePlan() {
-		return ""
-	}
-	if n.turnsSinceUpdate >= planNudgeTurnThreshold || time.Since(n.lastUpdate) >= planNudgeTimeThreshold {
-		n.turnsSinceUpdate = 0
-		n.lastUpdate = time.Now()
-		return "Reminder: update your plan to reflect current progress."
-	}
-	return ""
-}
-
-// CheckOnEnd returns a nudge message when the agent is about to stop and the
-// plan still has incomplete entries. This nudge compels the agent to continue
-// working rather than finishing with an unfinished plan.
-func (n *PlanNudger) CheckOnEnd() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.hasActivePlan() {
-		return "Your plan has incomplete steps. Continue working until all steps are completed or explicitly cancelled."
-	}
-	return ""
-}
 
 // PlanUpdater is the interface the plan tool needs from a session.
 type PlanUpdater interface {
@@ -94,8 +14,8 @@ type PlanUpdater interface {
 }
 
 // NewPlanTool creates the plan tool. It requires a PlanUpdater (typically
-// *core.AgentSession). If nudger is non-nil, it is reset on each plan update.
-func NewPlanTool(session PlanUpdater, nudger *PlanNudger) agent.AgentTool {
+// *core.AgentSession).
+func NewPlanTool(session PlanUpdater) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name: "plan",
@@ -166,9 +86,6 @@ func NewPlanTool(session PlanUpdater, nudger *PlanNudger) agent.AgentTool {
 			metadata := parsePlanMetadata(params)
 
 			session.UpdatePlan(title, entries, metadata)
-			if nudger != nil {
-				nudger.RecordPlanUpdate()
-			}
 
 			var msg string
 			if len(entries) == 0 {

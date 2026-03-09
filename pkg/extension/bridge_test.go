@@ -13,16 +13,18 @@ import (
 
 // mockBridgeAPI implements BridgeAPI for testing.
 type mockBridgeAPI struct {
-	mu              sync.Mutex
-	execCalled      bool
-	execCmd         string
-	sessionName     string
-	activeTools     []string
-	sentMessages    []CustomMessageSpec
-	userMessages    []string
-	labels          map[string]string
-	modelSet        *ai.Model
-	toolsRegistered []ToolDefinition
+	mu               sync.Mutex
+	execCalled       bool
+	execCmd          string
+	sessionName      string
+	activeTools      []string
+	sentMessages     []CustomMessageSpec
+	sentMsgOpts      []*SendMessageOptions
+	userMessages     []string
+	userMsgOpts      []*SendUserMessageOptions
+	labels           map[string]string
+	modelSet         *ai.Model
+	toolsRegistered  []ToolDefinition
 }
 
 func newMockAPI() *mockBridgeAPI {
@@ -46,11 +48,13 @@ func (m *mockBridgeAPI) RegisterTool(def ToolDefinition) {
 	m.toolsRegistered = append(m.toolsRegistered, def)
 	m.mu.Unlock()
 }
-func (m *mockBridgeAPI) SendMessage(msg CustomMessageSpec, _ *SendMessageOptions) {
+func (m *mockBridgeAPI) SendMessage(msg CustomMessageSpec, opts *SendMessageOptions) {
 	m.sentMessages = append(m.sentMessages, msg)
+	m.sentMsgOpts = append(m.sentMsgOpts, opts)
 }
-func (m *mockBridgeAPI) SendUserMessage(content string, _ *SendUserMessageOptions) {
+func (m *mockBridgeAPI) SendUserMessage(content string, opts *SendUserMessageOptions) {
 	m.userMessages = append(m.userMessages, content)
+	m.userMsgOpts = append(m.userMsgOpts, opts)
 }
 func (m *mockBridgeAPI) SetSessionName(name string)    { m.sessionName = name }
 func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
@@ -258,5 +262,110 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 	}
 	if len(toolResult.Content) != 1 || toolResult.Content[0].Text != "result" {
 		t.Fatalf("unexpected content: %+v", toolResult.Content)
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
+func TestBridge_SendMessage_DeliverAs(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"custom_type":"nudge","content":"hello","display":false,"deliver_as":"steer","trigger_turn":true}`)
+	_ = extCodec.WriteRequest(1, "send_message", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	waitFor(t, func() bool { return len(api.sentMessages) > 0 }, "send_message not called")
+	if api.sentMessages[0].CustomType != "nudge" {
+		t.Fatalf("got custom_type %q, want nudge", api.sentMessages[0].CustomType)
+	}
+	if api.sentMsgOpts[0] == nil {
+		t.Fatal("expected non-nil SendMessageOptions")
+	}
+	if api.sentMsgOpts[0].DeliverAs != "steer" {
+		t.Fatalf("got deliver_as %q, want steer", api.sentMsgOpts[0].DeliverAs)
+	}
+	if !api.sentMsgOpts[0].TriggerTurn {
+		t.Fatal("expected trigger_turn=true")
+	}
+}
+
+func TestBridge_SendMessage_DefaultOpts(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// No deliver_as or trigger_turn → opts should be empty (not nil)
+	params := json.RawMessage(`{"custom_type":"info","content":"hello"}`)
+	_ = extCodec.WriteRequest(2, "send_message", &params)
+
+	_, _ = extCodec.ReadMessage() // response
+
+	waitFor(t, func() bool { return len(api.sentMessages) > 0 }, "send_message not called")
+	if api.sentMsgOpts[0] == nil {
+		t.Fatal("expected non-nil SendMessageOptions even with defaults")
+	}
+	if api.sentMsgOpts[0].DeliverAs != "" {
+		t.Fatalf("expected empty deliver_as, got %q", api.sentMsgOpts[0].DeliverAs)
+	}
+	if api.sentMsgOpts[0].TriggerTurn {
+		t.Fatal("expected trigger_turn=false")
+	}
+}
+
+func TestBridge_SendUserMessage_DeliverAs(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"content":"steer me","deliver_as":"steer"}`)
+	_ = extCodec.WriteRequest(3, "send_user_message", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	waitFor(t, func() bool { return len(api.userMessages) > 0 }, "send_user_message not called")
+	if api.userMessages[0] != "steer me" {
+		t.Fatalf("got content %q, want steer me", api.userMessages[0])
+	}
+	if api.userMsgOpts[0] == nil {
+		t.Fatal("expected non-nil SendUserMessageOptions")
+	}
+	if api.userMsgOpts[0].DeliverAs != "steer" {
+		t.Fatalf("got deliver_as %q, want steer", api.userMsgOpts[0].DeliverAs)
 	}
 }

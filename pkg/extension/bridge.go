@@ -135,9 +135,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 
 	case "send_message":
 		var p struct {
-			CustomType string `json:"custom_type"`
-			Content    any    `json:"content"`
-			Display    bool   `json:"display"`
+			CustomType  string `json:"custom_type"`
+			Content     any    `json:"content"`
+			Display     bool   `json:"display"`
+			DeliverAs   string `json:"deliver_as"`
+			TriggerTurn bool   `json:"trigger_turn"`
 		}
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
@@ -149,12 +151,16 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			CustomType: p.CustomType,
 			Content:    p.Content,
 			Display:    p.Display,
-		}, nil)
+		}, &SendMessageOptions{
+			DeliverAs:   p.DeliverAs,
+			TriggerTurn: p.TriggerTurn,
+		})
 		result = map[string]any{"ok": true}
 
 	case "send_user_message":
 		var p struct {
-			Content string `json:"content"`
+			Content   string `json:"content"`
+			DeliverAs string `json:"deliver_as"`
 		}
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
@@ -162,7 +168,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		api.SendUserMessage(p.Content, nil)
+		api.SendUserMessage(p.Content, &SendUserMessageOptions{
+			DeliverAs: p.DeliverAs,
+		})
 		result = map[string]any{"ok": true}
 
 	case "set_session_name":

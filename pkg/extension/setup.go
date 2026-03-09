@@ -191,6 +191,23 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 				mgr.EmitEvent("session_named", map[string]any{
 					"name": event.SessionName,
 				})
+				mgr.EmitEvent("session_update", map[string]any{
+					"type":         event.Type,
+					"session_name": event.SessionName,
+					"plan": map[string]any{
+						"total":     len(event.PlanEntries),
+						"completed": countCompleted(event.PlanEntries),
+					},
+				})
+			case "plan_update":
+				mgr.EmitEvent("session_update", map[string]any{
+					"type":         event.Type,
+					"session_name": event.SessionName,
+					"plan": map[string]any{
+						"total":     len(event.PlanEntries),
+						"completed": countCompleted(event.PlanEntries),
+					},
+				})
 			}
 			return
 		}
@@ -223,4 +240,15 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 	})
 
 	return result, nil
+}
+
+// countCompleted returns the number of plan entries with status "completed".
+func countCompleted(entries []agent.PlanEntry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Status == agent.PlanEntryStatusCompleted {
+			n++
+		}
+	}
+	return n
 }
