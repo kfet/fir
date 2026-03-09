@@ -36,10 +36,7 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	pa.mu.Unlock()
 
 	// Build auth methods from the global agent dir config.
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
@@ -226,10 +223,7 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 		}
 	}
 
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 	sessionDir := session.DefaultSessionDir(agentDir, cwd)
 	sessions, err := session.ListSessions(cwd, sessionDir)
 	if err != nil {
@@ -266,12 +260,12 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	}
 
 	// Validate session path is within the sessions directory to prevent traversal.
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 	sessionsDir := session.SessionsDir(agentDir)
-	sessionPath, _ := filepath.Abs(params.SessionId)
+	sessionPath, err := filepath.Abs(params.SessionId)
+	if err != nil {
+		return ResumeSessionResponse{}, fmt.Errorf("invalid session path %q: %w", params.SessionId, err)
+	}
 	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
 		return ResumeSessionResponse{}, fmt.Errorf("invalid session path: must be within sessions directory")
 	}
@@ -294,6 +288,9 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		existing.session.Close()
 		if existing.extSetup != nil {
 			existing.extSetup.EmitSessionShutdown()
+		}
+		if existing.mcpManager != nil {
+			_ = existing.mcpManager.Close()
 		}
 	} else {
 		pa.mu.Unlock()

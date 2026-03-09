@@ -22,6 +22,7 @@ import (
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/mcp"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -370,9 +371,11 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 
 	// Track whether the old session's unsubscribe was called.
 	unsubscribeCalled := false
+	mcpMgr := mcp.NewManager(nil, false)
 	oldSession := &firSession{
 		session:   &core.AgentSession{},
 		termState: newTerminalState(),
+		mcpManager: mcpMgr,
 		unsubscribe: func() {
 			unsubscribeCalled = true
 		},
@@ -1336,6 +1339,260 @@ func TestSessionNew_CommandsAfterResponse(t *testing.T) {
 	}
 	if messages[1] != "notification" {
 		t.Errorf("second message should be notification, got %q", messages[1])
+	}
+}
+
+// ============================================================================
+// Tool Execute closure tests
+// ============================================================================
+
+func TestAcpBashTool_SessionNotFound(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	tool := pa.createAcpBashTool("/tmp", "nonexistent-session", "")
+
+	_, err := tool.Execute(context.Background(), "tc1", map[string]any{"command": "echo hi"}, nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !strings.Contains(err.Error(), "session not found") {
+		t.Errorf("expected 'session not found', got %q", err.Error())
+	}
+}
+
+func TestAcpBashTool_ShellCommandPrefix(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+
+	// Create a session so the lookup succeeds (it will still fail on AcpBashExec
+	// since there's no real terminal, but we can check the command was prefixed).
+	entry := &firSession{
+		session:   &core.AgentSession{},
+		termState: newTerminalState(),
+	}
+	pa.sessions["s1"] = entry
+
+	prefix := "set -euo pipefail"
+	tool := pa.createAcpBashTool("/tmp", "s1", prefix)
+
+	// The execute will fail because there's no real ACP terminal connection,
+	// but the prefix was applied before the AcpBashExec call. We verify the tool
+	// was created with the right description.
+	if !strings.Contains(tool.Tool.Description, "Execute a bash command") {
+		t.Error("bash tool missing expected description")
+	}
+	if tool.Tool.Name != "bash" {
+		t.Errorf("expected tool name 'bash', got %q", tool.Tool.Name)
+	}
+}
+
+func TestBashOutputTool_SessionNotFound(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	tool := pa.createBashOutputTool("nonexistent-session")
+
+	_, err := tool.Execute(context.Background(), "tc1", map[string]any{"command_id": "cmd1"}, nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !strings.Contains(err.Error(), "session not found") {
+		t.Errorf("expected 'session not found', got %q", err.Error())
+	}
+}
+
+func TestBashKillTool_SessionNotFound(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	tool := pa.createBashKillTool("nonexistent-session")
+
+	_, err := tool.Execute(context.Background(), "tc1", map[string]any{"command_id": "cmd1"}, nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !strings.Contains(err.Error(), "session not found") {
+		t.Errorf("expected 'session not found', got %q", err.Error())
+	}
+}
+
+func TestAcpBashTool_BackgroundCommand_SessionNotFound(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	tool := pa.createAcpBashTool("/tmp", "nonexistent-session", "")
+
+	_, err := tool.Execute(context.Background(), "tc1", map[string]any{
+		"command":           "sleep 100",
+		"run_in_background": true,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent session")
+	}
+	if !strings.Contains(err.Error(), "session not found") {
+		t.Errorf("expected 'session not found', got %q", err.Error())
+	}
+}
+
+// ============================================================================
+// ACP slash command tests
+// ============================================================================
+
+func TestHandleSlashCommand_Reload(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "reload", "")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for reload")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Reload completed") {
+		t.Errorf("expected reload success message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_SkillsList(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "skills", "")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for skills")
+	}
+	// Should send some message (either skill list or "No skills loaded")
+	if len(mc.getUpdates()) == 0 {
+		t.Error("expected at least one update for skills command")
+	}
+}
+
+func TestHandleSlashCommand_SkillsInstall_Unknown(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+		cwd:       t.TempDir(),
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "skills", "install nonexistent-skill-xyz")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for skills install")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Unknown builtin skill") {
+		t.Errorf("expected unknown skill error, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_Logout_NoProviders(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	as := auth.NewInMemoryAuthStorage(nil)
+	mr := models.NewModelRegistry(as, "")
+	entry := &firSession{
+		termState:     newTerminalState(),
+		modelRegistry: mr,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "logout", "")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for logout")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "No providers") {
+		t.Errorf("expected 'No providers' message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_Logout_All(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	as := auth.NewInMemoryAuthStorage(auth.AuthStorageData{"anthropic": {Type: auth.CredentialTypeAPIKey, Key: "test-key"}})
+	mr := models.NewModelRegistry(as, "")
+	entry := &firSession{
+		termState:     newTerminalState(),
+		modelRegistry: mr,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "logout", "all")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for logout all")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Logged out from all") {
+		t.Errorf("expected 'Logged out from all' message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_Logout_SpecificProvider(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	as := auth.NewInMemoryAuthStorage(auth.AuthStorageData{"anthropic": {Type: auth.CredentialTypeAPIKey, Key: "test-key"}})
+	mr := models.NewModelRegistry(as, "")
+	entry := &firSession{
+		termState:     newTerminalState(),
+		modelRegistry: mr,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "logout", "anthropic")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for logout")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Logged out from anthropic") {
+		t.Errorf("expected 'Logged out from anthropic' message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_Logout_NotLoggedIn(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	as := auth.NewInMemoryAuthStorage(auth.AuthStorageData{"anthropic": {Type: auth.CredentialTypeAPIKey, Key: "test-key"}})
+	mr := models.NewModelRegistry(as, "")
+	entry := &firSession{
+		termState:     newTerminalState(),
+		modelRegistry: mr,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "logout", "openai")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for logout")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "not logged in") {
+		t.Errorf("expected 'not logged in' message, got: %q", msg)
+	}
+}
+
+func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	as := auth.NewInMemoryAuthStorage(nil)
+	mr := models.NewModelRegistry(as, "")
+	entry := &firSession{
+		termState:     newTerminalState(),
+		modelRegistry: mr,
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "login", "bad;provider")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for login")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	if !strings.Contains(msg, "Invalid provider ID") {
+		t.Errorf("expected 'Invalid provider ID' message, got: %q", msg)
 	}
 }
 

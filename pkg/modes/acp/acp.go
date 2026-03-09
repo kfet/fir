@@ -34,6 +34,14 @@ var version = "dev"
 // SetVersion sets the version string for ACP mode responses.
 func SetVersion(v string) { version = v }
 
+// resolveAgentDir returns FIR_AGENT_DIR if set, otherwise the default agent directory.
+func resolveAgentDir() string {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
+		return dir
+	}
+	return core.DefaultAgentDir()
+}
+
 // firSession holds per-session state.
 type firSession struct {
 	session         *core.AgentSession
@@ -70,7 +78,7 @@ type firAgent struct {
 	sessions    map[string]*firSession
 	clientCaps  acpsdk.ClientCapabilities
 	authMethods []ExtendedAuthMethod
-	authStorage *auth.AuthStorage // global auth storage from Initialize
+	authStorage *auth.AuthStorage // global auth storage from Initialize (same backing file as per-session instances)
 }
 
 // Compile-time interface check: firAgent must implement Agent.
@@ -142,10 +150,7 @@ func RunAcpMode(opts Options) error {
 // ============================================================================
 
 func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
-	agentDir := core.DefaultAgentDir()
-	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
-		agentDir = dir
-	}
+	agentDir := resolveAgentDir()
 
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
