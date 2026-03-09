@@ -20,7 +20,9 @@ plan_completed = 0
 @fir_ext.on("session_update")
 def on_session_update(params, ctx):
     global turns_since_update, last_update_time, plan_total, plan_completed
-    plan = params.get("plan", {})
+    plan = params.get("plan")
+    if plan is None:
+        return
     plan_total = plan.get("total", 0)
     plan_completed = plan.get("completed", 0)
     turns_since_update = 0
