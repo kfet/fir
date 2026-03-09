@@ -191,14 +191,6 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 				mgr.EmitEvent("session_named", map[string]any{
 					"name": event.SessionName,
 				})
-				mgr.EmitEvent("session_update", map[string]any{
-					"type":         event.Type,
-					"session_name": event.SessionName,
-					"plan": map[string]any{
-						"total":     len(event.PlanEntries),
-						"completed": countCompleted(event.PlanEntries),
-					},
-				})
 			case "plan_update":
 				mgr.EmitEvent("session_update", map[string]any{
 					"type":         event.Type,

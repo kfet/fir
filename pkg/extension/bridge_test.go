@@ -49,12 +49,16 @@ func (m *mockBridgeAPI) RegisterTool(def ToolDefinition) {
 	m.mu.Unlock()
 }
 func (m *mockBridgeAPI) SendMessage(msg CustomMessageSpec, opts *SendMessageOptions) {
+	m.mu.Lock()
 	m.sentMessages = append(m.sentMessages, msg)
 	m.sentMsgOpts = append(m.sentMsgOpts, opts)
+	m.mu.Unlock()
 }
 func (m *mockBridgeAPI) SendUserMessage(content string, opts *SendUserMessageOptions) {
+	m.mu.Lock()
 	m.userMessages = append(m.userMessages, content)
 	m.userMsgOpts = append(m.userMsgOpts, opts)
+	m.mu.Unlock()
 }
 func (m *mockBridgeAPI) SetSessionName(name string)    { m.sessionName = name }
 func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
@@ -297,7 +301,13 @@ func TestBridge_SendMessage_DeliverAs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", resp.Error)
 	}
 
-	waitFor(t, func() bool { return len(api.sentMessages) > 0 }, "send_message not called")
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		return len(api.sentMessages) > 0
+	}, "send_message not called")
+	api.mu.Lock()
+	defer api.mu.Unlock()
 	if api.sentMessages[0].CustomType != "nudge" {
 		t.Fatalf("got custom_type %q, want nudge", api.sentMessages[0].CustomType)
 	}
@@ -326,7 +336,13 @@ func TestBridge_SendMessage_DefaultOpts(t *testing.T) {
 
 	_, _ = extCodec.ReadMessage() // response
 
-	waitFor(t, func() bool { return len(api.sentMessages) > 0 }, "send_message not called")
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		return len(api.sentMessages) > 0
+	}, "send_message not called")
+	api.mu.Lock()
+	defer api.mu.Unlock()
 	if api.sentMsgOpts[0] == nil {
 		t.Fatal("expected non-nil SendMessageOptions even with defaults")
 	}
@@ -358,7 +374,13 @@ func TestBridge_SendUserMessage_DeliverAs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", resp.Error)
 	}
 
-	waitFor(t, func() bool { return len(api.userMessages) > 0 }, "send_user_message not called")
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		return len(api.userMessages) > 0
+	}, "send_user_message not called")
+	api.mu.Lock()
+	defer api.mu.Unlock()
 	if api.userMessages[0] != "steer me" {
 		t.Fatalf("got content %q, want steer me", api.userMessages[0])
 	}
