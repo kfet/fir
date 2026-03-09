@@ -64,6 +64,15 @@ import sys
 `,
 			want: ExtensionFrontmatter{Name: "dev-only"},
 		},
+		{
+			name: "demo",
+			input: `#!/usr/bin/env python3
+# ---
+# demo: true
+# ---
+`,
+			want: ExtensionFrontmatter{Demo: true},
+		},
 	}
 
 	for _, tt := range tests {

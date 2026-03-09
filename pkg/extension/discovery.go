@@ -14,6 +14,7 @@ type ExtProcConfig struct {
 	Path  string   // absolute path to the executable
 	Scope string   // "project", "global", or "builtin"
 	Modes []string // optional mode allowlist from comment frontmatter
+	Demo  bool     // demo/test extension; skipped unless explicitly allowed
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -31,7 +32,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	builtins, err := resources.LoadBuiltinExtensions()
 	if err == nil {
 		for _, b := range builtins {
-			modes := extensionModesFromPath(b.Path)
+			modes := extensionFrontmatterFromPath(b.Path).Modes
 			byName[b.Name] = ExtProcConfig{
 				Name:  b.Name,
 				Path:  b.Path,
@@ -117,11 +118,13 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			if !ok {
 				continue
 			}
+			fm := extensionFrontmatterFromPath(entryPoint)
 			byName[name] = ExtProcConfig{
 				Name:  name,
 				Path:  entryPoint,
 				Scope: scope,
-				Modes: extensionModesFromPath(entryPoint),
+				Modes: fm.Modes,
+				Demo:  fm.Demo,
 			}
 			continue
 		}
@@ -149,6 +152,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Path:  filePath,
 			Scope: scope,
 			Modes: fm.Modes,
+			Demo:  fm.Demo,
 		}
 	}
 	return nil
@@ -213,10 +217,10 @@ func stripExt(name string) string {
 	return name
 }
 
-func extensionModesFromPath(path string) []string {
+func extensionFrontmatterFromPath(path string) resources.ExtensionFrontmatter {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return resources.ExtensionFrontmatter{}
 	}
-	return resources.ParseCommentFrontmatter(string(data)).Modes
+	return resources.ParseCommentFrontmatter(string(data))
 }

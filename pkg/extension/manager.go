@@ -130,6 +130,11 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
 		return nil
 	}
+	// Demo extensions are skipped unless explicitly in the allowlist.
+	if cfg.Demo && !containsString(allowed, cfg.Name) {
+		m.logger.Debug("skipping demo extension (not explicitly allowed)", "ext", cfg.Name)
+		return nil
+	}
 	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {
 		m.logger.Debug("skipping extension (mode mismatch)", "ext", cfg.Name, "activeMode", m.ActiveMode, "modes", cfg.Modes)
 		return nil
@@ -242,6 +247,11 @@ func (m *Manager) Reload(ctx context.Context) error {
 
 	// Stop existing extensions (emits session_shutdown).
 	_ = m.Stop()
+
+	// Remove previously registered extension tools to avoid duplicates.
+	if ur, ok := api.(interface{ UnregisterExtensionTools() }); ok {
+		ur.UnregisterExtensionTools()
+	}
 
 	// Re-discover and start.
 	return m.Start(ctx, projectDir, cwd, api)

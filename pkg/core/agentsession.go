@@ -964,7 +964,7 @@ func (s *AgentSession) SetHooks(hooks *AgentSessionHooks) {
 	s.hooks = hooks
 	if hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
 		state := s.Agent.State()
-		wrapped := s.WrapToolsWithHooks(state.Tools)
+		wrapped := s.WrapToolsWithHooks(state.Tools.Slice())
 		s.Agent.SetTools(wrapped)
 	}
 }
@@ -1587,8 +1587,9 @@ func (s *AgentSession) Close() {
 // (e.g. the plan tool) to the agent's current tool set.
 func (s *AgentSession) RegisterSessionTools() {
 	state := s.Agent.State()
-	allTools := make([]agent.AgentTool, len(state.Tools), len(state.Tools)+1)
-	copy(allTools, state.Tools)
-	allTools = append(allTools, tools.NewPlanTool(s))
+	existing := state.Tools.Slice()
+	allTools := make([]agent.AgentTool, len(existing)+1)
+	copy(allTools, existing)
+	allTools[len(existing)] = tools.NewPlanTool(s)
 	s.Agent.SetTools(allTools)
 }

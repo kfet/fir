@@ -100,7 +100,7 @@ type AgentState struct {
 	SystemPrompt    string
 	Model           *ai.Model
 	ThinkingLevel   ThinkingLevel
-	Tools           []AgentTool
+	Tools           *ToolSet
 	Messages        []AgentMessage
 	IsStreaming      bool
 	StreamMessage   *AgentMessage
@@ -143,7 +143,7 @@ type AgentTool struct {
 type AgentContext struct {
 	SystemPrompt string
 	Messages     []AgentMessage
-	Tools        []AgentTool
+	Tools        *ToolSet
 }
 
 // --- Agent Events ---

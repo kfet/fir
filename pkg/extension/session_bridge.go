@@ -17,7 +17,8 @@ import (
 // extensions can call back into the running session without going through
 // the (now removed) Go extension layer.
 type SessionBridge struct {
-	session *core.AgentSession
+	session  *core.AgentSession
+	extTools []string // names of tools registered by extensions
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
@@ -107,11 +108,7 @@ func (b *SessionBridge) ClearLabel(entryID string) {
 
 func (b *SessionBridge) GetActiveTools() []string {
 	state := b.session.Agent.State()
-	names := make([]string, len(state.Tools))
-	for i, t := range state.Tools {
-		names[i] = t.Name
-	}
-	return names
+	return state.Tools.Names()
 }
 
 func (b *SessionBridge) SetActiveTools(names []string) {
@@ -121,7 +118,7 @@ func (b *SessionBridge) SetActiveTools(names []string) {
 	}
 	state := b.session.Agent.State()
 	filtered := make([]agent.AgentTool, 0, len(names))
-	for _, t := range state.Tools {
+	for _, t := range state.Tools.Slice() {
 		if nameSet[t.Name] {
 			filtered = append(filtered, t)
 		}
@@ -172,8 +169,30 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 	wrapped := b.session.WrapToolsWithHooks([]agent.AgentTool{at})
 
 	state := b.session.Agent.State()
-	tools := make([]agent.AgentTool, len(state.Tools)+1)
-	copy(tools, state.Tools)
-	tools[len(state.Tools)] = wrapped[0]
-	b.session.Agent.SetTools(tools)
+	allTools := state.Tools.Slice()
+	allTools = append(allTools, wrapped[0])
+	b.session.Agent.SetTools(allTools)
+
+	b.extTools = append(b.extTools, def.Name)
+}
+
+// UnregisterExtensionTools removes all tools previously registered by extensions.
+// Called during reload to prevent duplicate tool names.
+func (b *SessionBridge) UnregisterExtensionTools() {
+	if len(b.extTools) == 0 {
+		return
+	}
+	remove := make(map[string]struct{}, len(b.extTools))
+	for _, name := range b.extTools {
+		remove[name] = struct{}{}
+	}
+	state := b.session.Agent.State()
+	var filtered []agent.AgentTool
+	for _, t := range state.Tools.Slice() {
+		if _, ok := remove[t.Name]; !ok {
+			filtered = append(filtered, t)
+		}
+	}
+	b.session.Agent.SetTools(filtered)
+	b.extTools = nil
 }

@@ -1,18 +1,13 @@
 package sdk
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 )
-
-// SDKVersion is bumped whenever the embedded SDK files change.
-// A new version causes re-extraction on next run.
-//
-// IMPORTANT: bump this any time fir_ext.py (or any other embedded SDK file)
-// is modified, otherwise the old cached version will keep being used.
-const SDKVersion = "2"
 
 // cacheDir is the function used to locate the cache directory.
 // Tests override this to avoid touching ~/.cache.
@@ -26,28 +21,78 @@ func defaultCacheDir() (string, error) {
 	return filepath.Join(home, ".cache", "fir", "sdks"), nil
 }
 
-// EnsureExtracted extracts the embedded SDK files to
-// ~/.cache/fir/sdks/<version>/ if they are not already present.
-// It returns the base path (e.g. ~/.cache/fir/sdks/1/).
+// embeddedHash returns a deterministic hash of all embedded SDK files.
+// Used as the directory name so extraction is skipped when unchanged.
+func embeddedHash() (string, error) {
+	h := sha256.New()
+	err := fs.WalkDir(EmbeddedSDKs, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// Include path in hash so renames are detected.
+		h.Write([]byte(path))
+		if d.IsDir() {
+			return nil
+		}
+		data, err := EmbeddedSDKs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// EnsureExtracted extracts the embedded SDK files to a content-addressed
+// directory under ~/.cache/fir/sdks/<hash>/. The hash is derived from the
+// embedded file contents so extraction is skipped when the SDK hasn't changed.
+//
+// Extraction is atomic: files are written to a temp directory and renamed
+// into place, so concurrent fir processes never see a partial extraction.
 func EnsureExtracted() (string, error) {
 	base, err := cacheDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, SDKVersion)
 
-	// Marker file signals a complete extraction.
-	marker := filepath.Join(dir, ".extracted")
-	if _, err := os.Stat(marker); err == nil {
+	hash, err := embeddedHash()
+	if err != nil {
+		return "", fmt.Errorf("sdk: hash embedded files: %w", err)
+	}
+
+	dir := filepath.Join(base, hash)
+
+	// If the directory already exists, the SDK is up to date.
+	if _, err := os.Stat(dir); err == nil {
 		return dir, nil
 	}
 
-	// Walk the embedded FS and write every file.
+	// Extract to a temp directory in the same parent, then rename atomically.
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("sdk: mkdir cache: %w", err)
+	}
+	tmp, err := os.MkdirTemp(base, ".extract-")
+	if err != nil {
+		return "", fmt.Errorf("sdk: create temp dir: %w", err)
+	}
+
+	// Clean up temp dir on failure; on success it's been renamed away.
+	success := false
+	defer func() {
+		if !success {
+			os.RemoveAll(tmp)
+		}
+	}()
+
 	if err := fs.WalkDir(EmbeddedSDKs, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		dest := filepath.Join(dir, path)
+		dest := filepath.Join(tmp, path)
 		if d.IsDir() {
 			return os.MkdirAll(dest, 0o755)
 		}
@@ -63,10 +108,17 @@ func EnsureExtracted() (string, error) {
 		return "", fmt.Errorf("sdk: extract: %w", err)
 	}
 
-	// Write marker.
-	if err := os.WriteFile(marker, []byte(SDKVersion), 0o644); err != nil {
-		return "", fmt.Errorf("sdk: write marker: %w", err)
+	// Atomic rename. If another process raced us, one rename wins and the
+	// loser gets EEXIST/ENOTEMPTY — that's fine, the content is identical.
+	if err := os.Rename(tmp, dir); err != nil {
+		// Another process won the race — use their copy.
+		if _, statErr := os.Stat(dir); statErr == nil {
+			success = true // prevent cleanup of already-renamed dir
+			return dir, nil
+		}
+		return "", fmt.Errorf("sdk: rename: %w", err)
 	}
+	success = true
 
 	return dir, nil
 }

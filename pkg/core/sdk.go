@@ -201,7 +201,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			SystemPrompt:  "",
 			Model:         model,
 			ThinkingLevel: agent.ThinkingLevel(thinkingLevel),
-			Tools:         agentTools,
+			Tools:         agent.ToolSetFrom(agentTools),
 		},
 		ConvertToLLM: func(messages []agent.AgentMessage) ([]ai.Message, error) {
 			return session.ConvertToLLM(messages)

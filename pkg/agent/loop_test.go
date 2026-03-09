@@ -105,7 +105,7 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 	agentCtx := &AgentContext{
 		SystemPrompt: "You are helpful.",
 		Messages:     []AgentMessage{},
-		Tools:        []AgentTool{readTool},
+		Tools: ToolSetFrom([]AgentTool{readTool}),
 	}
 
 	streamFn := mockStreamFn(
@@ -271,7 +271,7 @@ func TestAgentLoop_SteeringSkipsRemainingTools(t *testing.T) {
 	prompt := NewAgentMessage(ai.NewUserMsg("Run two tools", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
-		Tools:    []AgentTool{slowTool},
+		Tools: ToolSetFrom([]AgentTool{slowTool}),
 	}
 
 	streamFn := mockStreamFn(
@@ -421,7 +421,7 @@ func TestAgentLoop_ContextCancellationDuringTool(t *testing.T) {
 	prompt := NewAgentMessage(ai.NewUserMsg("Do blocking thing", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
-		Tools:    []AgentTool{blockingTool},
+		Tools: ToolSetFrom([]AgentTool{blockingTool}),
 	}
 
 	streamFn := mockStreamFn(
@@ -486,8 +486,11 @@ func TestAgentLoopContinue_AssistantMessage(t *testing.T) {
 		},
 	}
 
-	_, err := AgentLoopContinue(context.Background(), agentCtx, config, mockStreamFn(simpleResponse("hi")), events)
-	if err == nil {
-		t.Error("expected error for assistant as last message")
+	msgs, err := AgentLoopContinue(context.Background(), agentCtx, config, mockStreamFn(simpleResponse("continued")), events)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(msgs) == 0 {
+		t.Error("expected messages from continued loop")
 	}
 }

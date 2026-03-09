@@ -101,7 +101,7 @@ func NewAgent(opts AgentOptions) *Agent {
 			SystemPrompt:     "",
 			Model:            nil,
 			ThinkingLevel:    ThinkingOff,
-			Tools:            nil,
+			Tools:            NewToolSet(),
 			Messages:         nil,
 			IsStreaming:      false,
 			StreamMessage:    nil,
@@ -319,7 +319,7 @@ func (a *Agent) SetCompaction(c *ai.AnthropicCompaction) {
 func (a *Agent) SetTools(tools []AgentTool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state.Tools = tools
+	a.state.Tools = ToolSetFrom(tools)
 }
 
 // ReplaceMessages replaces all messages.
@@ -512,7 +512,16 @@ func (a *Agent) Continue() error {
 			a.runLoop(followUp, false)
 			return nil
 		}
-		return fmt.Errorf("cannot continue from message role: assistant")
+		// No queued messages — the assistant was likely interrupted mid-stream.
+		// Queue a synthetic "continue" as a steering message (invisible to the
+		// user) and kick off the loop with an empty prompt so the steering
+		// poll picks it up on the first iteration.
+		continueMsg := NewAgentMessage(ai.NewUserMsg("continue", 0))
+		a.mu.Lock()
+		a.steeringQueue = append(a.steeringQueue, continueMsg)
+		a.mu.Unlock()
+		a.runLoop(nil, false)
+		return nil
 	}
 
 	a.runLoop(nil, false)

@@ -25,6 +25,7 @@ type ExtensionFrontmatter struct {
 	Name        string
 	Description string
 	Builtin     bool
+	Demo        bool // demo/test extensions; not loaded unless explicitly allowed
 	Modes       []string
 }
 
@@ -81,6 +82,8 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Description = value
 		case "builtin":
 			fm.Builtin = value == "true"
+		case "demo":
+			fm.Demo = value == "true"
 		case "mode", "modes":
 			fm.Modes = parseExtensionModes(value)
 		}

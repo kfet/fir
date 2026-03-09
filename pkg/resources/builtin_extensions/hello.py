@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ---
+# demo: true
+# ---
 """Simple test extension: logs a message on agent_end."""
 
 import sys

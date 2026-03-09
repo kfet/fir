@@ -10,19 +10,18 @@ import (
 func TestEnsureExtracted(t *testing.T) {
 	tmp := t.TempDir()
 
-	// Override cacheDir so we don't touch ~/.cache.
 	orig := cacheDir
 	cacheDir = func() (string, error) { return tmp, nil }
 	t.Cleanup(func() { cacheDir = orig })
 
-	// First call: extracts files.
 	base, err := EnsureExtracted()
 	if err != nil {
 		t.Fatalf("EnsureExtracted: %v", err)
 	}
-	wantBase := filepath.Join(tmp, SDKVersion)
-	if base != wantBase {
-		t.Fatalf("base = %q, want %q", base, wantBase)
+
+	// Should be a content-addressed subdirectory.
+	if filepath.Dir(base) != tmp {
+		t.Fatalf("base parent = %q, want %q", filepath.Dir(base), tmp)
 	}
 
 	// fir_ext.py must exist.
@@ -33,12 +32,6 @@ func TestEnsureExtracted(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "def run(") {
 		t.Error("fir_ext.py does not contain expected content")
-	}
-
-	// Marker must exist.
-	marker := filepath.Join(base, ".extracted")
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("marker missing: %v", err)
 	}
 }
 
@@ -58,6 +51,29 @@ func TestEnsureExtractedIdempotent(t *testing.T) {
 	}
 	if p1 != p2 {
 		t.Fatalf("paths differ: %q vs %q", p1, p2)
+	}
+
+	// Only one directory (plus no stale temp dirs).
+	entries, _ := os.ReadDir(tmp)
+	if len(entries) != 1 {
+		t.Errorf("expected 1 cache entry, got %d", len(entries))
+	}
+}
+
+func TestEmbeddedHash(t *testing.T) {
+	h1, err := embeddedHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := embeddedHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h1 != h2 {
+		t.Fatalf("hash not deterministic: %q vs %q", h1, h2)
+	}
+	if len(h1) != 16 {
+		t.Fatalf("hash length = %d, want 16", len(h1))
 	}
 }
 

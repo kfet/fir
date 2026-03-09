@@ -54,11 +54,6 @@ func AgentLoopContinue(
 		return nil, fmt.Errorf("cannot continue: no messages in context")
 	}
 
-	lastMsg := agentCtx.Messages[len(agentCtx.Messages)-1]
-	if lastMsg.Role() == "assistant" {
-		return nil, fmt.Errorf("cannot continue from message role: assistant")
-	}
-
 	currentCtx := &AgentContext{
 		SystemPrompt: agentCtx.SystemPrompt,
 		Messages:     append([]AgentMessage{}, agentCtx.Messages...),
@@ -93,7 +88,7 @@ func runLoop(
 		}
 	}
 
-	firlog.Debug("agent loop starting", "messages", len(currentCtx.Messages), "tools", len(currentCtx.Tools))
+	firlog.Debug("agent loop starting", "messages", len(currentCtx.Messages), "tools", currentCtx.Tools.Len())
 
 	// Outer loop: continues when follow-up messages arrive
 	for {
@@ -219,8 +214,9 @@ func streamAssistantResponse(
 	}
 
 	// Build LLM context
-	llmTools := make([]ai.Tool, len(agentCtx.Tools))
-	for i, t := range agentCtx.Tools {
+	toolSlice := agentCtx.Tools.Slice()
+	llmTools := make([]ai.Tool, len(toolSlice))
+	for i, t := range toolSlice {
 		llmTools[i] = t.Tool
 	}
 
@@ -331,7 +327,7 @@ func streamAssistantResponse(
 // executeToolCalls executes tool calls from an assistant message.
 func executeToolCalls(
 	ctx context.Context,
-	tools []AgentTool,
+	tools *ToolSet,
 	assistantMsg *ai.AssistantMessage,
 	events chan<- AgentEvent,
 	getSteeringMessages func() ([]AgentMessage, error),
@@ -360,15 +356,9 @@ func executeToolCalls(
 		var isError bool
 
 		// Find the tool
-		var tool *AgentTool
-		for j := range tools {
-			if tools[j].Name == tc.Name {
-				tool = &tools[j]
-				break
-			}
-		}
+		tool, found := tools.Get(tc.Name)
 
-		if tool == nil {
+		if !found {
 			result = AgentToolResult{
 				Content: []ai.ToolResultContent{{Type: "text", Text: fmt.Sprintf("Tool %s not found", tc.Name)}},
 			}

@@ -2,7 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Demo/test extensions (`hello`, `demo`) are now marked with `demo: true` frontmatter and skipped during discovery unless explicitly listed in the extension allowlist
+- Extensions auto-reload when their files are created, modified, or removed; interactive mode shows a status message on reload
+- `/schedule` now accepts an optional user message after the time argument (e.g. `/schedule 45m run the tests`); when present, the message is sent as a user turn instead of a bare continue
+
+### Changed
+
+- Replace `Tools []AgentTool` with `*ToolSet` (ordered map keyed by name) in `AgentState` and `AgentContext`, making duplicate tool names structurally impossible
+
 ### Fixed
+
+- Fix duplicate tool registration on extension reload (`/reload` and auto-reload) causing API "tools: Tool names must be unique" errors
+- `Agent.Continue()` now resumes after an Escape-interrupted assistant response by injecting a synthetic "continue" user message, instead of returning an error
 
 - Share single `AuthStorage` instance across all ACP sessions instead of creating duplicates per session; login/logout changes are now immediately visible without `Reload()`
 - Fix MCP server subprocess leak when resuming an ACP session with a duplicate ID — `mcpManager.Close()` was missing from cleanup

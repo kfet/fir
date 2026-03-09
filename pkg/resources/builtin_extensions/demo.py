@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# ---
+# demo: true
+# ---
 """demo.py — comprehensive example exercising the full fir extension API.
 
 Outbound calls demonstrated (extension → fir):

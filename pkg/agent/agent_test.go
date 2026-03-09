@@ -229,18 +229,31 @@ func TestAgent_ContinueNoMessages(t *testing.T) {
 }
 
 func TestAgent_ContinueFromAssistant_NoQueued(t *testing.T) {
-	a := NewAgent(AgentOptions{})
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{
+			Model: testModel(),
+		},
+		StreamFn: mockStreamFn(simpleResponse("continued")),
+	})
 
 	assistMsg := ai.AssistantMessage{
 		Role:       ai.RoleAssistant,
-		Content:    []ai.AssistantContent{ai.NewTextContent("hi")},
+		Content:    []ai.AssistantContent{ai.NewTextContent("partial response")},
 		StopReason: ai.StopReasonStop,
 	}
 	a.AppendMessage(NewAgentMessage(ai.NewAssistantMsg(assistMsg)))
 
 	err := a.Continue()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot continue from message role: assistant")
+	assert.NoError(t, err)
+
+	// Wait for the async loop to finish.
+	a.WaitForIdle()
+
+	// Should have the original assistant, the steering "continue" message, and the new assistant response.
+	state := a.State()
+	assert.GreaterOrEqual(t, len(state.Messages), 3)
+	// The "continue" message is injected as steering (invisible), but still present in messages.
+	assert.Equal(t, "assistant", state.Messages[2].Role())
 }
 
 func TestAgent_Prompt_SimpleResponse(t *testing.T) {

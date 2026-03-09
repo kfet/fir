@@ -58,14 +58,45 @@ type SetupResult struct {
 	// no ProjectDir was configured or no extensions were discovered).
 	Manager *Manager
 
-	session *core.AgentSession
+	session   *core.AgentSession
+	stopWatch func() // stops the file watcher (nil if not watching)
+
+	// OnAutoReload is called when extensions are auto-reloaded due to file
+	// changes. The callback receives nil on success or the reload error.
+	// Set this before calling StartWatching.
+	OnAutoReload func(error)
 }
 
-// Stop shuts down all external process extensions.
+// Stop shuts down all external process extensions and the file watcher.
 func (r *SetupResult) Stop() {
+	if r.stopWatch != nil {
+		r.stopWatch()
+		r.stopWatch = nil
+	}
 	if r.Manager != nil {
 		_ = r.Manager.Stop()
 	}
+}
+
+// StartWatching begins watching extension directories for file changes and
+// auto-reloads when changes are detected. Call after Start and after setting
+// OnAutoReload. Safe to call multiple times (subsequent calls are no-ops if
+// already watching).
+func (r *SetupResult) StartWatching(ctx context.Context) {
+	if r.Manager == nil || r.stopWatch != nil {
+		return
+	}
+	EnsureExtensionDirs(r.Manager.projectDir)
+	stop, err := r.Manager.WatchAndReload(ctx, func(reloadErr error) {
+		if r.OnAutoReload != nil {
+			r.OnAutoReload(reloadErr)
+		}
+	})
+	if err != nil {
+		firlog.Warn("failed to start extension watcher", "err", err)
+		return
+	}
+	r.stopWatch = stop
 }
 
 // EmitSessionStart emits session_start to all running extensions.

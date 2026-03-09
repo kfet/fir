@@ -228,6 +228,64 @@ func TestManager_Reload(t *testing.T) {
 	}
 }
 
+// trackingMockAPI embeds mockBridgeAPI and adds UnregisterExtensionTools support.
+type trackingMockAPI struct {
+	*mockBridgeAPI
+	unregisterCalled int
+}
+
+func (t *trackingMockAPI) UnregisterExtensionTools() {
+	t.unregisterCalled++
+	t.clearTools()
+}
+
+func TestManager_ReloadCallsUnregister(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeExtScript(t, dir, "unreg-ext")
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	hash, err := ComputeHash(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.RecordTrust(dir, "unreg-ext", hash); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := &trackingMockAPI{mockBridgeAPI: newMockAPI()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := pollToolCount(api.mockBridgeAPI, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool before reload, got %d", n)
+	}
+
+	// Reload without manually clearing tools — UnregisterExtensionTools should handle it.
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	defer reloadCancel()
+
+	if err := mgr.Reload(reloadCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	if api.unregisterCalled != 1 {
+		t.Fatalf("expected UnregisterExtensionTools called once, got %d", api.unregisterCalled)
+	}
+
+	// Should still have exactly 1 tool (not 2 duplicates).
+	if n := pollToolCount(api.mockBridgeAPI, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool after reload (no duplicates), got %d", n)
+	}
+}
+
 func TestManager_AllowedNames(t *testing.T) {
 	dir := t.TempDir()
 
