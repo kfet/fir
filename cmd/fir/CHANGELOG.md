@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- Plan nudger now triggers on: 20 turns without an update, 2 minutes without an update, or when the agent stops with incomplete plan entries (compels continuation)
+
+### Fixed
+
+- Plan tool no longer rendered as raw JSON in the TUI — shows a compact summary (title + done/in-progress/pending counts) instead of the full argument dump
+
 ### Added
 
 - Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)

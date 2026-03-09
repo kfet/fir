@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 )
@@ -164,22 +165,22 @@ func TestPlanTool_EntriesNotArray(t *testing.T) {
 // PlanNudger tests
 // ---------------------------------------------------------------------------
 
-func TestPlanNudger_FiresAfterInterval(t *testing.T) {
+func TestPlanNudger_FiresAfterTurnThreshold(t *testing.T) {
 	active := true
-	n := NewPlanNudger(3, func() bool { return active })
+	n := NewPlanNudger(func() bool { return active })
 
-	// Turns 1-2: no nudge
-	for i := 0; i < 2; i++ {
+	// Turns 1-19: no nudge
+	for i := 0; i < 19; i++ {
 		n.RecordTurn()
 		if msg := n.Check(); msg != "" {
 			t.Fatalf("unexpected nudge after turn %d", i+1)
 		}
 	}
 
-	// Turn 3: should nudge
+	// Turn 20: should nudge
 	n.RecordTurn()
 	if msg := n.Check(); msg == "" {
-		t.Fatal("expected nudge after 3 turns")
+		t.Fatal("expected nudge after 20 turns")
 	}
 
 	// Counter was reset, so next check should not nudge
@@ -188,8 +189,48 @@ func TestPlanNudger_FiresAfterInterval(t *testing.T) {
 	}
 }
 
+func TestPlanNudger_FiresAfterTimeout(t *testing.T) {
+	n := NewPlanNudger(func() bool { return true })
+
+	// Fake the last-update time to be 3 minutes ago
+	n.mu.Lock()
+	n.lastUpdate = n.lastUpdate.Add(-3 * time.Minute)
+	n.mu.Unlock()
+
+	if msg := n.Check(); msg == "" {
+		t.Fatal("expected nudge when plan has not been updated for 3 minutes")
+	}
+}
+
+func TestPlanNudger_NoFireBeforeTimeout(t *testing.T) {
+	n := NewPlanNudger(func() bool { return true })
+
+	// 30 seconds ago — below threshold
+	n.mu.Lock()
+	n.lastUpdate = n.lastUpdate.Add(-30 * time.Second)
+	n.mu.Unlock()
+
+	if msg := n.Check(); msg != "" {
+		t.Fatal("should not nudge when plan was updated 30s ago")
+	}
+}
+
+func TestPlanNudger_CheckOnEnd_FiresWhenPlanActive(t *testing.T) {
+	n := NewPlanNudger(func() bool { return true })
+	if msg := n.CheckOnEnd(); msg == "" {
+		t.Fatal("CheckOnEnd should nudge when there is an active incomplete plan")
+	}
+}
+
+func TestPlanNudger_CheckOnEnd_NoFireWithoutActivePlan(t *testing.T) {
+	n := NewPlanNudger(func() bool { return false })
+	if msg := n.CheckOnEnd(); msg != "" {
+		t.Fatal("CheckOnEnd should not nudge when no active plan")
+	}
+}
+
 func TestPlanNudger_NoNudgeWithoutActivePlan(t *testing.T) {
-	n := NewPlanNudger(1, func() bool { return false })
+	n := NewPlanNudger(func() bool { return false })
 	n.RecordTurn()
 	if msg := n.Check(); msg != "" {
 		t.Fatal("should not nudge when no active plan")
@@ -197,27 +238,37 @@ func TestPlanNudger_NoNudgeWithoutActivePlan(t *testing.T) {
 }
 
 func TestPlanNudger_ResetOnPlanUpdate(t *testing.T) {
-	n := NewPlanNudger(2, func() bool { return true })
-	n.RecordTurn()
+	n := NewPlanNudger(func() bool { return true })
+
+	// Fill up 19 turns
+	for i := 0; i < 19; i++ {
+		n.RecordTurn()
+	}
 	n.RecordPlanUpdate() // reset
+
+	// Need another 20 turns after the reset
 	n.RecordTurn()
 	if msg := n.Check(); msg != "" {
 		t.Fatal("should not nudge — counter was reset by plan update")
 	}
-	n.RecordTurn()
+
+	for i := 1; i < 20; i++ {
+		n.RecordTurn()
+	}
 	if msg := n.Check(); msg == "" {
-		t.Fatal("expected nudge after 2 turns since last update")
+		t.Fatal("expected nudge after 20 turns since last update")
 	}
 }
 
 func TestPlanNudger_NudgerResetsCounter(t *testing.T) {
 	mock := &mockPlanUpdater{}
-	n := NewPlanNudger(1, func() bool { return true })
+	n := NewPlanNudger(func() bool { return true })
 	tool := NewPlanTool(mock, n)
 
-	// Simulate turns
-	n.RecordTurn()
-	n.RecordTurn()
+	// Simulate 20 turns (threshold)
+	for i := 0; i < 20; i++ {
+		n.RecordTurn()
+	}
 
 	// Calling the plan tool should reset
 	_, _ = tool.Execute(context.Background(), "tc", map[string]any{

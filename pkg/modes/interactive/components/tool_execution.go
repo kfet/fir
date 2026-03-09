@@ -274,6 +274,8 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 		return tc.formatFind(t, invalidArg)
 	case "grep":
 		return tc.formatGrep(t, invalidArg)
+	case "plan":
+		return tc.formatPlan(t)
 	default:
 		return tc.formatGeneric(t)
 	}
@@ -612,6 +614,60 @@ func (tc *ToolExecutionComponent) formatGrep(t *theme.Theme, invalidArg string) 
 				text += t.Fg("muted", fmt.Sprintf("\n... (%d more lines,", remaining)) +
 					" " + KeyHint(tuicomp.ActExpandTools, "to expand") + ")"
 			}
+		}
+	}
+	return text
+}
+
+func (tc *ToolExecutionComponent) formatPlan(t *theme.Theme) string {
+	title, _ := tc.args["title"].(string)
+	header := t.Fg("toolTitle", t.Bold("plan"))
+	if title != "" {
+		header += " " + t.Fg("accent", title)
+	}
+
+	// Count entries by status while the tool call is in-flight
+	entries, _ := tc.args["entries"].([]any)
+	if len(entries) == 0 {
+		if tc.result != nil {
+			return header + "\n\n" + t.Fg("toolOutput", tc.getTextOutput())
+		}
+		return header
+	}
+
+	var pending, inProgress, completed int
+	for _, raw := range entries {
+		obj, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch obj["status"] {
+		case "completed":
+			completed++
+		case "in_progress":
+			inProgress++
+		default:
+			pending++
+		}
+	}
+
+	parts := []string{}
+	if completed > 0 {
+		parts = append(parts, t.Fg("success", fmt.Sprintf("%d done", completed)))
+	}
+	if inProgress > 0 {
+		parts = append(parts, t.Fg("accent", fmt.Sprintf("%d in progress", inProgress)))
+	}
+	if pending > 0 {
+		parts = append(parts, t.Fg("muted", fmt.Sprintf("%d pending", pending)))
+	}
+	summary := strings.Join(parts, t.Fg("muted", " · "))
+	text := header + "  " + summary
+
+	if tc.result != nil {
+		output := tc.getTextOutput()
+		if output != "" {
+			text += "\n\n" + t.Fg("toolOutput", output)
 		}
 	}
 	return text

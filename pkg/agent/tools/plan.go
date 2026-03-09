@@ -4,31 +4,43 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 )
 
-// DefaultPlanNudgeInterval is the number of turns between plan update reminders.
-const DefaultPlanNudgeInterval = 5
+// planNudgeTurnThreshold is the number of turns between plan update reminders.
+const planNudgeTurnThreshold = 20
 
-// PlanNudger generates periodic steering reminders to update an active plan.
+// planNudgeTimeThreshold is the elapsed time since the last plan update after
+// which a reminder will be sent.
+const planNudgeTimeThreshold = 2 * time.Minute
+
+// PlanNudger generates steering reminders to update an active plan.
+// A nudge fires when ANY of the following conditions are met:
+//   - The plan has not been updated for planNudgeTimeThreshold.
+//   - planNudgeTurnThreshold turns have elapsed since the last update.
+//   - The agent stops (CheckOnEnd), if the plan still has incomplete entries.
+//
 // It is safe for concurrent use.
 type PlanNudger struct {
 	mu               sync.Mutex
 	turnsSinceUpdate int
-	interval         int
+	lastUpdate       time.Time
 	hasActivePlan    func() bool
 }
 
-// NewPlanNudger creates a nudger that fires every interval turns when
-// hasActivePlan returns true. Call RecordPlanUpdate when the plan tool is
-// invoked and RecordTurn after each agent turn.
+// NewPlanNudger creates a nudger that reminds the agent to update its plan.
+// hasActivePlan should return true when the plan has incomplete entries.
 //
 // hasActivePlan is called while the nudger's internal mutex is held, so it
 // must not attempt to acquire the nudger's mutex (it may acquire other locks).
-func NewPlanNudger(interval int, hasActivePlan func() bool) *PlanNudger {
-	return &PlanNudger{interval: interval, hasActivePlan: hasActivePlan}
+func NewPlanNudger(hasActivePlan func() bool) *PlanNudger {
+	return &PlanNudger{
+		lastUpdate:    time.Now(),
+		hasActivePlan: hasActivePlan,
+	}
 }
 
 // RecordTurn increments the turn counter.
@@ -38,21 +50,40 @@ func (n *PlanNudger) RecordTurn() {
 	n.turnsSinceUpdate++
 }
 
-// RecordPlanUpdate resets the turn counter (the model just updated the plan).
+// RecordPlanUpdate resets both the turn counter and the last-update timestamp.
 func (n *PlanNudger) RecordPlanUpdate() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.turnsSinceUpdate = 0
+	n.lastUpdate = time.Now()
 }
 
-// Check returns a nudge message if enough turns have elapsed and there is an
-// active plan with incomplete entries. Returns empty string otherwise.
+// Check returns a nudge message when the plan needs attention — either because
+// planNudgeTurnThreshold turns have elapsed or planNudgeTimeThreshold time has
+// passed since the last update — and there is still an active plan.
+// Returns empty string when no nudge is needed.
 func (n *PlanNudger) Check() string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.turnsSinceUpdate >= n.interval && n.hasActivePlan() {
+	if !n.hasActivePlan() {
+		return ""
+	}
+	if n.turnsSinceUpdate >= planNudgeTurnThreshold || time.Since(n.lastUpdate) >= planNudgeTimeThreshold {
 		n.turnsSinceUpdate = 0
+		n.lastUpdate = time.Now()
 		return "Reminder: update your plan to reflect current progress."
+	}
+	return ""
+}
+
+// CheckOnEnd returns a nudge message when the agent is about to stop and the
+// plan still has incomplete entries. This nudge compels the agent to continue
+// working rather than finishing with an unfinished plan.
+func (n *PlanNudger) CheckOnEnd() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.hasActivePlan() {
+		return "Your plan has incomplete steps. Continue working until all steps are completed or explicitly cancelled."
 	}
 	return ""
 }

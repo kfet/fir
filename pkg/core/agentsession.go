@@ -249,7 +249,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	}
 
 	// Create plan nudger — checks whether incomplete plan entries exist
-	s.planNudger = tools.NewPlanNudger(tools.DefaultPlanNudgeInterval, s.hasActivePlan)
+	s.planNudger = tools.NewPlanNudger(s.hasActivePlan)
 
 	// Subscribe to agent events for internal handling
 	s.unsubAgent = s.Agent.Subscribe(s.handleAgentEvent)
@@ -473,6 +473,13 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 	if event.Type == agent.EventTurnEnd && s.planNudger != nil {
 		s.planNudger.RecordTurn()
 		if msg := s.planNudger.Check(); msg != "" {
+			s.Agent.Steer(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
+		}
+	}
+
+	// Plan nudge on agent stop: compel the agent to continue if plan is unfinished.
+	if event.Type == agent.EventAgentEnd && s.planNudger != nil {
+		if msg := s.planNudger.CheckOnEnd(); msg != "" {
 			s.Agent.Steer(agent.NewAgentMessage(ai.NewUserMsg(msg, time.Now().UnixMilli())))
 		}
 	}
