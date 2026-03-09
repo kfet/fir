@@ -40,7 +40,6 @@ type BuiltinSlashCommand struct {
 // are derived from it via IsBuiltinSlashCommandName.
 var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "help", Description: "Show help"},
-	{Name: "hotkeys", Description: "Show all keyboard shortcuts"},
 	{Name: "theme", Description: "Select color theme"},
 	{Name: "thinking", Description: "Select thinking level"},
 	{Name: "model", Description: "Select model (opens selector UI)"},
@@ -50,11 +49,9 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "new", Description: "Start a new session (optionally with a name)"},
 	{Name: "compact", Description: "Manually compact the session context"},
 	{Name: "resume", Description: "Resume a different session"},
-	{Name: "fork", Description: "Create a new fork from a previous message"},
 	{Name: "tree", Description: "Navigate session tree (switch branches)"},
 	{Name: "export", Description: "Export session to HTML file"},
 	{Name: "share", Description: "Share session as a secret GitHub gist"},
-	{Name: "copy", Description: "Copy last agent message to clipboard"},
 	{Name: "name", Description: "Set session display name"},
 	{Name: "changelog", Description: "Show changelog entries"},
 	{Name: "login", Description: "Login with OAuth provider"},

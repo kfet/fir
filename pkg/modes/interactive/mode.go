@@ -820,7 +820,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	}
 
 	switch cmd {
-	case "/help", "/hotkeys":
+	case "/help":
 		m.showHelp()
 	case "/new":
 		var newName string
@@ -858,18 +858,10 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.showScopedModelsSelector()
 	case "/tree":
 		m.showTreeSelector()
-	case "/fork":
-		if len(parts) > 1 {
-			m.handleForkByNumber(parts[1])
-		} else {
-			m.showUserMessageSelector()
-		}
 	case "/export":
 		m.handleExportCommand(text)
 	case "/share":
 		m.handleShareCommand()
-	case "/copy":
-		m.handleCopyCommand()
 	case "/name":
 		m.handleNameCommand(text)
 	case "/changelog":
@@ -2158,54 +2150,6 @@ func (m *InteractiveMode) performShare() {
 	m.showStatus(fmt.Sprintf("Session shared: %s", link))
 }
 
-func (m *InteractiveMode) handleForkByNumber(numStr string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	n, err := strconv.Atoi(numStr)
-	if err != nil || n < 1 {
-		m.showWarning("Usage: /fork <number> — use /fork to see available messages")
-		return
-	}
-
-	userMsgs := m.session.GetUserMessagesForForking()
-	if n > len(userMsgs) {
-		m.showWarning(fmt.Sprintf("Message %d not found. Only %d user messages available.", n, len(userMsgs)))
-		return
-	}
-
-	entry := userMsgs[n-1]
-	selectedText, cancelled, forkErr := m.session.Fork(entry.EntryID)
-	if forkErr != nil {
-		m.showWarning(fmt.Sprintf("Fork failed: %s", forkErr))
-		return
-	}
-	if cancelled {
-		return
-	}
-
-	m.rebuildChatFromMessages()
-	if m.editor != nil && selectedText != "" {
-		m.editor.SetText(selectedText)
-	}
-	m.showStatus("Branched to new session")
-}
-
-func (m *InteractiveMode) handleCopyCommand() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	text := m.session.GetLastAssistantText()
-	if text == "" {
-		m.showWarning("No agent messages to copy yet.")
-		return
-	}
-	core.CopyToClipboard(text)
-	m.showStatus("Copied last agent message to clipboard")
-}
-
 func (m *InteractiveMode) handleNameCommand(text string) {
 	if m.session == nil {
 		m.showWarning("No session available")
@@ -2891,10 +2835,8 @@ func (m *InteractiveMode) showHelp() {
   /logout         - Logout from OAuth provider
   /scoped-models  - Enable/disable models for Ctrl+P cycling
   /tree           - Navigate session tree (switch branches)
-  /fork           - Create a new fork from a previous message
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist
-  /copy           - Copy last agent message to clipboard
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
   /skills         - List loaded skills (or /skills install <name>)

@@ -12,7 +12,6 @@ import (
 func testCommands() []SlashCommand {
 	return []SlashCommand{
 		{Name: "help", Description: "Show help"},
-		{Name: "hotkeys", Description: "Show keyboard shortcuts"},
 		{Name: "theme", Description: "Select color theme"},
 		{Name: "thinking", Description: "Select thinking level"},
 		{Name: "model", Description: "Select model"},

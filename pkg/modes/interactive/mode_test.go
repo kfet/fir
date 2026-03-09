@@ -418,21 +418,6 @@ func TestInteractiveMode_SlashHelp(t *testing.T) {
 	}
 }
 
-func TestInteractiveMode_SlashHotkeys(t *testing.T) {
-	tm := newTestMode(t)
-
-	tm.typeText("/hotkeys")
-	tm.pressEnter()
-	tm.waitRender()
-
-	if got := tm.editorText(); got != "" {
-		t.Errorf("expected empty editor after /hotkeys, got %q", got)
-	}
-	if tm.messageCount() == 0 {
-		t.Error("expected help message for /hotkeys")
-	}
-}
-
 func TestInteractiveMode_SlashQuit(t *testing.T) {
 	tm := newTestMode(t)
 
@@ -518,7 +503,7 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	// If you add a new case to that switch, add it here AND to
 	// resources.BuiltinSlashCommands (or builtinAliases for hidden aliases).
 	handleCases := []string{
-		"/help", "/hotkeys",
+		"/help",
 		"/new",
 		"/compact",
 		"/model",
@@ -530,10 +515,8 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 		"/login", "/logout",
 		"/scoped-models",
 		"/tree",
-		"/fork",
 		"/export",
 		"/share",
-		"/copy",
 		"/name",
 		"/changelog",
 		"/reload",
@@ -866,7 +849,7 @@ func TestInteractiveMode_SlashCommandClearsEditor(t *testing.T) {
 	tm := newTestMode(t)
 
 	// Verify handleSlashCommand dispatches correctly for simple commands
-	for _, cmd := range []string{"/help", "/hotkeys"} {
+	for _, cmd := range []string{"/help"} {
 		tm.typeText(cmd)
 		tm.pressEnter()
 		tm.waitRender()
@@ -886,7 +869,6 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		wantWarning  bool // something added to commandStatusContainer
 	}{
 		{"/help", false, true, false},
-		{"/hotkeys", false, true, false},
 		{"/quit", true, false, false},
 		{"/exit", true, false, false},
 		{"/bogus", false, false, true},
@@ -895,11 +877,9 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		{"/logout", false, false, true},    // "not yet implemented" warning
 		{"/export", false, false, true},    // "not yet implemented"
 		{"/share", false, false, true},     // "not yet implemented"
-		{"/copy", false, false, true},      // "not yet implemented"
 		{"/name", false, false, true},      // usage warning (no args)
 		{"/changelog", false, true, false}, // shows "No changelog entries found." message
 		{"/tree", false, false, true},
-		{"/fork", false, false, true},
 		{"/scoped-models", false, false, true},
 		{"/session", false, false, true}, // "No session available"
 		{"/reload", false, false, true},  // "No session available"
@@ -1093,7 +1073,7 @@ func TestInteractiveMode_SlashAutocompleteTriggers(t *testing.T) {
 func TestInteractiveMode_SlashAutocompleteFuzzy(t *testing.T) {
 	tm := newTestMode(t)
 
-	// Type "/he" — should filter to help/hotkeys
+	// Type "/he" — should filter to "help"
 	tm.typeText("/he")
 	tm.waitRender()
 
@@ -1883,67 +1863,6 @@ func TestHandleFork_NonUserMessage(t *testing.T) {
 	output := tm.renderedOutput()
 	if !strings.Contains(output, "Fork failed") {
 		t.Errorf("expected 'Fork failed' warning for non-user message, got:\n%s", output)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// handleForkByNumber tests
-// ---------------------------------------------------------------------------
-
-func TestHandleForkByNumber_InvalidNumber(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	tm.mode.handleForkByNumber("abc")
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Usage") {
-		t.Errorf("expected usage warning for invalid number, got:\n%s", output)
-	}
-}
-
-func TestHandleForkByNumber_Zero(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	// n < 1 is treated the same as invalid.
-	tm.mode.handleForkByNumber("0")
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Usage") {
-		t.Errorf("expected usage warning for n=0, got:\n%s", output)
-	}
-}
-
-func TestHandleForkByNumber_OutOfRange(t *testing.T) {
-	tm := newTestModeWithSession(t)
-	// No user messages in session, so n=1 is out of range.
-
-	tm.mode.handleForkByNumber("1")
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "not found") && !strings.Contains(output, "0 user") {
-		t.Errorf("expected 'not found' warning, got:\n%s", output)
-	}
-}
-
-func TestHandleForkByNumber_Valid(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	// Add a user message to fork from.
-	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("numbered fork message", 0))
-
-	tm.mode.handleForkByNumber("1")
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Branched") {
-		t.Errorf("expected 'Branched' status, got:\n%s", output)
-	}
-
-	if got := tm.editorText(); !strings.Contains(got, "numbered fork message") {
-		t.Errorf("expected forked text in editor, got %q", got)
 	}
 }
 

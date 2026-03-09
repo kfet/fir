@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- Removed unused slash commands: `/hotkeys` (alias for `/help`), `/fork` (available via keybinding), `/copy` (copy last message to clipboard)
 - Plan nudger now triggers on: 20 turns without an update, 2 minutes without an update, or when the agent stops with incomplete plan entries (compels continuation)
 
 ### Fixed
