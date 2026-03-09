@@ -13,28 +13,25 @@ NUDGE_TIME_THRESHOLD = 120  # seconds (2 minutes)
 
 turns_since_update = 0
 last_update_time = time.monotonic()
-has_active_plan = False
+plan_total = 0
+plan_completed = 0
 
 
 @fir_ext.on("session_update")
 def on_session_update(params, ctx):
-    global turns_since_update, last_update_time, has_active_plan
+    global turns_since_update, last_update_time, plan_total, plan_completed
     plan = params.get("plan", {})
-    total = plan.get("total", 0)
-    completed = plan.get("completed", 0)
-    if total > 0:
-        turns_since_update = 0
-        last_update_time = time.monotonic()
-        has_active_plan = total > completed
-    if total == 0:
-        has_active_plan = False
+    plan_total = plan.get("total", 0)
+    plan_completed = plan.get("completed", 0)
+    turns_since_update = 0
+    last_update_time = time.monotonic()
 
 
 @fir_ext.on("turn_end")
 def on_turn_end(params, ctx):
     global turns_since_update, last_update_time
     turns_since_update += 1
-    if not has_active_plan:
+    if plan_total <= plan_completed:
         return
     elapsed = time.monotonic() - last_update_time
     if turns_since_update >= NUDGE_TURN_THRESHOLD or elapsed >= NUDGE_TIME_THRESHOLD:
@@ -49,7 +46,7 @@ def on_turn_end(params, ctx):
 
 @fir_ext.on("agent_end")
 def on_agent_end(params, ctx):
-    if has_active_plan:
+    if plan_total > plan_completed:
         ctx.send_message(
             "nudge",
             "Your plan has incomplete steps. "
