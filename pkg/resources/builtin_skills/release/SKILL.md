@@ -37,12 +37,12 @@ If the user provides a version, use it. Otherwise, auto-determine:
 
 ## Publishing
 
-After the user confirms, run `make publish` to:
-- Push the commit and tag to origin
-- Create a GitHub release marked as **latest** with all cross-compiled binaries
+After the user confirms, run `make publish` to regenerate the PGO profile and amend the release commit if it changed, push the commit and tag to origin, and let GoReleaser CI build and create the release.
 
-This ensures `fir update` on remote hosts picks up the new version.
-
-Alternatively, `make deploy` pushes binaries directly to Tailscale hosts via scp (no GitHub release needed).
+Alternatively, `make deploy` pushes binaries directly to remote hosts via scp (no GitHub release needed).
 
 If any step fails, stop and report the error. Do not push or publish unless the user confirms.
+
+## Post-publish: Track CI
+
+After `make publish` succeeds, monitor the GitHub Actions workflows until they complete.
