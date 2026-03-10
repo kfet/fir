@@ -233,7 +233,6 @@ func TestSSEClient_Stream_ContextCancellation(t *testing.T) {
 		w.WriteHeader(200)
 		<-r.Context().Done()
 	}))
-	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &SSEClient{HTTPClient: srv.Client()}
@@ -248,6 +247,11 @@ func TestSSEClient_Stream_ContextCancellation(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "context canceled") {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	// CloseClientConnections unblocks the handler's <-r.Context().Done()
+	// so Close doesn't hang waiting for active connections.
+	srv.CloseClientConnections()
+	srv.Close()
 }
 
 func TestSSEClient_Stream_Headers(t *testing.T) {

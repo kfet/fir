@@ -6,6 +6,10 @@
 
 - `make publish` no longer builds or uploads assets locally — just pushes the tag and lets GoReleaser CI handle builds and releases
 
+### Fixed
+
+- Fix `TestSSEClient_Stream_ContextCancellation` hanging in CI by calling `CloseClientConnections` before `Close`
+
 ## [0.19.0] - 2026-03-09
 
 ### Added
