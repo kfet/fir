@@ -8,8 +8,8 @@ import time
 
 import fir_ext
 
-NUDGE_TURN_THRESHOLD = 20
-NUDGE_TIME_THRESHOLD = 120  # seconds (2 minutes)
+NUDGE_TURN_THRESHOLD = 10
+NUDGE_TIME_THRESHOLD = 60  # seconds (2 minutes)
 
 turns_since_update = 0
 last_update_time = time.monotonic()

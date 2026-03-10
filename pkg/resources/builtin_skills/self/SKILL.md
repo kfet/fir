@@ -66,24 +66,28 @@ Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e`
 
 Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, `json`, or `text`.
 
-Builtin extensions (notify, tmuxspinner, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
+Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
+
+Extensions auto-reload when their files are created, modified, or removed; interactive mode shows a status message on reload.
 
 ### Project extension: `/schedule`
 
 The `schedule.py` extension in `.fir/extensions/` adds the `/schedule` slash command. It defers the next agent turn to a future time, useful after hitting a rate limit.
 
 ```
-/schedule 45m        — resume in 45 minutes
-/schedule 1h30m      — resume in 1 h 30 m
-/schedule 2pm        — resume at 2:00 PM local time
-/schedule 14:00      — resume at 14:00
-/schedule 2:30pm     — resume at 2:30 PM
-/schedule cancel     — cancel an active schedule
-/schedule            — show current schedule status
+/schedule 45m              — resume in 45 minutes
+/schedule 1h30m            — resume in 1 h 30 m
+/schedule 2pm              — resume at 2:00 PM local time
+/schedule 14:00            — resume at 14:00
+/schedule 2:30pm           — resume at 2:30 PM
+/schedule 45m run tests    — resume in 45 min with a custom message
+/schedule cancel           — cancel (if only one active, else list)
+/schedule cancel <id>      — cancel a specific schedule by ID
+/schedule cancel all       — cancel all active schedules
+/schedule                  — show current schedule status
 ```
 
-While a schedule is active, a live countdown is shown in the status bar:
-`⏰ Scheduled — executing in 12m34s (at 2:00 PM)`. Only one schedule can be active at a time; starting a new one replaces the old.
+Multiple schedules can be active concurrently, each assigned a unique ID (e.g. `[s1]`, `[s2]`). While active, a live countdown is shown in the status bar.
 
 ## Skills
 
@@ -93,7 +97,7 @@ Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skil
 
 ## Key Concepts
 
-- **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; `/fork` creates branches, `/tree` navigates them. Use `/session` for version, IDs, message/token stats, and enabled extensions.
+- **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; double-Escape or `/tree` navigates branches. Use `/session` for version, IDs, message/token stats, and enabled extensions. Use `/new [name]` to start a fresh session, optionally naming it.
 - **Re-exec for local build testing** — use `/reexec` to restart into the current binary while preserving the active session, or `/reexec <path>` to switch to a specific built binary.
 - **In-place update** — use `/update` to check for, download, and install the latest release, then automatically restart the session.
 - **Compaction** — when context grows large, fir automatically summarizes older messages to stay within the model's context window. Configurable via `settings.json`.

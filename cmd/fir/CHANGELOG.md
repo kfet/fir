@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-03-09
+
 ### Added
 
 - `/schedule` extension (`.fir/extensions/schedule.py`): defer agent continuation to a future time with live countdown status (`/schedule 45m`, `/schedule 2pm`, `/schedule cancel`)
