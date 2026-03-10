@@ -17,6 +17,7 @@ Use the bundled `fir_ext` SDK (no install needed). Template:
 # ---
 # name: <extension-name>
 # description: <what the extension does>
+# events: <comma-separated list of events/hooks this extension subscribes to>
 # ---
 """<description>."""
 
@@ -82,12 +83,26 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 
 - [ ] Create `.fir/extensions/<name>.py` with a shebang (`#!/usr/bin/env python3`).
 - [ ] Add comment frontmatter (`# ---` / `# ---`) with at least `name:`. Files without frontmatter are ignored by discovery.
+- [ ] Declare **all** subscribed events/hooks in the `events:` frontmatter field (e.g. `events: agent_end, turn_end, hook/tool_call`). This enables lazy loading — the extension process is only started when a matching event fires.
+- [ ] If the extension registers slash commands, declare them in `commands:` frontmatter (e.g. `commands: my-cmd: Run something`). This lets fir show the command in `/help` before the extension is started.
 - [ ] Make it executable: `chmod +x .fir/extensions/<name>.py`.
 - [ ] Define tools with `@fir_ext.tool(...)` and/or event handlers with `@fir_ext.on(...)`.
 - [ ] End with `fir_ext.run(name="<name>")`.
 - [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.
 - [ ] Test by running fir with `--debug` and checking for init handshake success.
 - [ ] On first use, fir will prompt to trust the extension (project-local only).
+
+## Frontmatter Reference
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Extension identifier |
+| `description` | no | One-line description shown in `fir extensions list` |
+| `events` | recommended | Comma-separated events/hooks the extension subscribes to. Enables lazy loading. |
+| `commands` | if applicable | Slash commands: `name1: desc1, name2: desc2` |
+| `modes` | no | Restrict to specific modes: `tui`, `text`, `json`, `acp` |
+| `builtin` | no | `true` for bundled extensions (used internally) |
+| `demo` | no | `true` to skip unless explicitly enabled |
 
 ## Non-Python Extensions
 

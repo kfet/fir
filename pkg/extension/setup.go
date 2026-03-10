@@ -50,6 +50,11 @@ type SetupOptions struct {
 	// When empty (the default), all discovered extensions are started.
 	// This is populated from the "extensions" settings key and --extension flags.
 	EnabledNames []string
+
+	// OfferFixFn is called when a frontmatter mismatch is detected after an
+	// extension handshake. It receives the mismatch and returns true if the
+	// frontmatter should be auto-fixed. When nil, a warning is printed to stderr.
+	OfferFixFn func(mm FrontmatterMismatch) bool
 }
 
 // SetupResult holds the running state of extensions for a session.
@@ -163,6 +168,17 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 		}
 	}
 	mgr.ConfirmFn = confirmFn
+
+	// Wire frontmatter fix offer.
+	if opts.OfferFixFn != nil {
+		mgr.OfferFixFn = opts.OfferFixFn
+	} else {
+		// Default: print warning to stderr, don't fix.
+		mgr.OfferFixFn = func(mm FrontmatterMismatch) bool {
+			fmt.Fprintln(os.Stderr, FormatFrontmatterWarning(mm))
+			return false
+		}
+	}
 
 	// Wire optional UI callbacks.
 	if opts.NotifyFn != nil {

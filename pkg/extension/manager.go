@@ -22,6 +22,7 @@ type Manager struct {
 	trust     *TrustStore
 	mu        sync.Mutex
 	bridges   []*managedBridge
+	pending   []*pendingExtension // extensions deferred for lazy startup
 	ConfirmFn ConfirmFunc
 
 	// AllowedNames is an optional allowlist of extension names. When non-empty,
@@ -36,10 +37,16 @@ type Manager struct {
 	notifyFn    NotifyFunc
 	setStatusFn SetStatusFunc
 
+	// OfferFixFn is called when a frontmatter mismatch is detected after
+	// handshake. It receives the mismatch details and returns true if the
+	// user wants the frontmatter auto-fixed. When nil, only a warning is logged.
+	OfferFixFn func(mm FrontmatterMismatch) bool
+
 	// Saved from Start() for Reload().
 	projectDir string
 	cwd        string
 	api        BridgeAPI
+	sdkEnv     []string // cached SDK env vars
 }
 
 type managedBridge struct {
@@ -47,6 +54,13 @@ type managedBridge struct {
 	proc   *Process
 	bridge *Bridge
 	cancel context.CancelFunc
+}
+
+// pendingExtension is an extension that declared its events/commands in
+// frontmatter and will be started lazily on first matching event or command.
+type pendingExtension struct {
+	cfg    ExtProcConfig
+	events map[string]bool // event names this extension subscribes to
 }
 
 // NewManager creates a Manager with the given logger.
@@ -91,6 +105,10 @@ func (m *Manager) SetAllowedNames(names []string) {
 
 // Start discovers extensions, spawns processes, performs handshakes, and
 // starts bridge dispatch loops.
+//
+// Extensions that declare their subscribed events in frontmatter are deferred
+// for lazy startup — they are only spawned when the first matching event fires.
+// Extensions without frontmatter events are started eagerly (in parallel).
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
 	m.mu.Lock()
 	m.projectDir = projectDir
@@ -112,13 +130,65 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 		sdkEnv = sdk.SDKEnv(sdkPath)
 	}
 
+	m.mu.Lock()
+	m.sdkEnv = sdkEnv
+	m.mu.Unlock()
+
+	// Partition into eager (no frontmatter events) and lazy (has frontmatter events).
+	var eager []ExtProcConfig
 	for _, cfg := range configs {
-		if err := m.startOne(ctx, cfg, cwd, sdkEnv, api, projectDir); err != nil {
-			m.logger.Warn("failed to start extension",
-				"ext", cfg.Name, "err", err)
+		if m.shouldSkip(cfg) {
+			continue
+		}
+		if len(cfg.Events) > 0 {
+			// Defer: register as pending, start on first matching event.
+			eventSet := make(map[string]bool, len(cfg.Events))
+			for _, e := range cfg.Events {
+				eventSet[e] = true
+			}
+			m.mu.Lock()
+			m.pending = append(m.pending, &pendingExtension{cfg: cfg, events: eventSet})
+			m.mu.Unlock()
+			m.logger.Debug("deferred extension for lazy start", "ext", cfg.Name, "events", cfg.Events)
+		} else {
+			eager = append(eager, cfg)
 		}
 	}
+
+	// Start eager extensions concurrently — handshakes involve spawning
+	// Python interpreters and are I/O-bound, so parallelism helps a lot.
+	var wg sync.WaitGroup
+	for _, cfg := range eager {
+		wg.Add(1)
+		go func(cfg ExtProcConfig) {
+			defer wg.Done()
+			if err := m.startOne(ctx, cfg, cwd, sdkEnv, api, projectDir); err != nil {
+				m.logger.Warn("failed to start extension",
+					"ext", cfg.Name, "err", err)
+			}
+		}(cfg)
+	}
+	wg.Wait()
 	return nil
+}
+
+// shouldSkip returns true if the extension should be skipped based on
+// allowlist, demo, and mode filtering. Extracted from startOne so that
+// Start can partition before spawning goroutines.
+func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
+	m.mu.Lock()
+	allowed := m.AllowedNames
+	m.mu.Unlock()
+	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
+		return true
+	}
+	if cfg.Demo && !containsString(allowed, cfg.Name) {
+		return true
+	}
+	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {
+		return true
+	}
+	return false
 }
 
 func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
@@ -170,6 +240,21 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		return err
 	}
 
+	// Validate frontmatter against actual handshake capabilities.
+	if mm := CheckFrontmatter(cfg, caps); !mm.Empty() {
+		m.logger.Warn(FormatFrontmatterWarning(mm))
+		m.mu.Lock()
+		offerFix := m.OfferFixFn
+		m.mu.Unlock()
+		if offerFix != nil && offerFix(mm) {
+			if err := FixFrontmatter(cfg.Path, caps); err != nil {
+				m.logger.Warn("failed to fix frontmatter", "ext", cfg.Name, "err", err)
+			} else {
+				m.logger.Info("fixed frontmatter", "ext", cfg.Name)
+			}
+		}
+	}
+
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
 
@@ -212,6 +297,7 @@ func (m *Manager) Stop() error {
 	m.mu.Lock()
 	bridges := m.bridges
 	m.bridges = nil
+	m.pending = nil // discard any un-triggered lazy extensions
 	m.mu.Unlock()
 
 	// Send shutdown event to all extensions and give them a moment
@@ -258,7 +344,45 @@ func (m *Manager) Reload(ctx context.Context) error {
 }
 
 // EmitEvent fans out a notification to all bridges.
+// If any pending (lazy) extensions subscribe to this event, they are started
+// first so they receive it.
 func (m *Manager) EmitEvent(name string, data any) {
+	// Check for pending extensions that want this event.
+	m.mu.Lock()
+	var toStart []ExtProcConfig
+	var remaining []*pendingExtension
+	for _, pe := range m.pending {
+		if pe.events[name] {
+			toStart = append(toStart, pe.cfg)
+		} else {
+			remaining = append(remaining, pe)
+		}
+	}
+	m.pending = remaining
+	cwd := m.cwd
+	sdkEnv := m.sdkEnv
+	api := m.api
+	projectDir := m.projectDir
+	m.mu.Unlock()
+
+	// Start any triggered extensions (in parallel).
+	if len(toStart) > 0 {
+		var wg sync.WaitGroup
+		for _, cfg := range toStart {
+			wg.Add(1)
+			go func(cfg ExtProcConfig) {
+				defer wg.Done()
+				if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
+					m.logger.Warn("failed to lazy-start extension",
+						"ext", cfg.Name, "trigger", name, "err", err)
+				} else {
+					m.logger.Info("lazy-started extension", "ext", cfg.Name, "trigger", name)
+				}
+			}(cfg)
+		}
+		wg.Wait()
+	}
+
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
@@ -271,7 +395,47 @@ func (m *Manager) EmitEvent(name string, data any) {
 }
 
 // CallHook calls all bridges with the given hook and collects results concurrently.
+// If any pending (lazy) extensions subscribe to this hook, they are started
+// first so their hook handlers are active.
 func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
+	// Check for pending extensions that subscribe to this hook.
+	m.mu.Lock()
+	var toStart []ExtProcConfig
+	var remaining []*pendingExtension
+	for _, pe := range m.pending {
+		if pe.events[name] {
+			toStart = append(toStart, pe.cfg)
+		} else {
+			remaining = append(remaining, pe)
+		}
+	}
+	if len(toStart) > 0 {
+		m.pending = remaining
+	}
+	cwd := m.cwd
+	sdkEnv := m.sdkEnv
+	api := m.api
+	projectDir := m.projectDir
+	m.mu.Unlock()
+
+	// Start any triggered extensions (in parallel), blocking until ready.
+	if len(toStart) > 0 {
+		var wg sync.WaitGroup
+		for _, cfg := range toStart {
+			wg.Add(1)
+			go func(cfg ExtProcConfig) {
+				defer wg.Done()
+				if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
+					m.logger.Warn("failed to lazy-start extension for hook",
+						"ext", cfg.Name, "hook", name, "err", err)
+				} else {
+					m.logger.Info("lazy-started extension for hook", "ext", cfg.Name, "hook", name)
+				}
+			}(cfg)
+		}
+		wg.Wait()
+	}
+
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
@@ -327,6 +491,7 @@ func (m *Manager) EnabledExtensionNames() []string {
 	m.mu.Lock()
 	allowed := append([]string(nil), m.AllowedNames...)
 	bridges := append([]*managedBridge(nil), m.bridges...)
+	pending := append([]*pendingExtension(nil), m.pending...)
 	m.mu.Unlock()
 
 	names := make(map[string]struct{})
@@ -343,6 +508,11 @@ func (m *Manager) EnabledExtensionNames() []string {
 				continue
 			}
 			names[mb.cfg.Name] = struct{}{}
+		}
+		for _, pe := range pending {
+			if pe.cfg.Name != "" {
+				names[pe.cfg.Name] = struct{}{}
+			}
 		}
 	}
 
@@ -364,12 +534,22 @@ type ExtCommand struct {
 func (m *Manager) GetCommands() []ExtCommand {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
+	pending := append([]*pendingExtension(nil), m.pending...)
 	m.mu.Unlock()
 
 	var cmds []ExtCommand
 	for _, mb := range bridges {
 		for _, spec := range mb.bridge.caps.Commands {
 			cmds = append(cmds, ExtCommand{ExtName: mb.cfg.Name, Spec: spec})
+		}
+	}
+	// Include commands declared in frontmatter for pending (lazy) extensions.
+	for _, pe := range pending {
+		for _, cmd := range pe.cfg.Commands {
+			cmds = append(cmds, ExtCommand{
+				ExtName: pe.cfg.Name,
+				Spec:    CommandSpec{Name: cmd.Name, Description: cmd.Description},
+			})
 		}
 	}
 	return cmds
@@ -406,12 +586,49 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 				}
 				var result CommandResult
 				if raw != nil {
-					// Best-effort parse; ignore errors.
 					_ = json.Unmarshal(raw, &result)
 				}
 				return result, nil
 			}
 		}
 	}
+
+	// Check pending extensions for a matching frontmatter command.
+	m.mu.Lock()
+	var matchedCfg *ExtProcConfig
+	var remaining []*pendingExtension
+	for _, pe := range m.pending {
+		matched := false
+		for _, cmd := range pe.cfg.Commands {
+			if cmd.Name == name {
+				matched = true
+				cfg := pe.cfg
+				matchedCfg = &cfg
+				break
+			}
+		}
+		if !matched {
+			remaining = append(remaining, pe)
+		}
+	}
+	if matchedCfg != nil {
+		m.pending = remaining
+	}
+	cwd := m.cwd
+	sdkEnv := m.sdkEnv
+	api := m.api
+	projectDir := m.projectDir
+	m.mu.Unlock()
+
+	if matchedCfg != nil {
+		// Start the extension, then dispatch the command.
+		if err := m.startOne(context.Background(), *matchedCfg, cwd, sdkEnv, api, projectDir); err != nil {
+			return CommandResult{}, fmt.Errorf("failed to start extension %s for command %q: %w", matchedCfg.Name, name, err)
+		}
+		m.logger.Info("lazy-started extension for command", "ext", matchedCfg.Name, "command", name)
+		// Retry dispatch now that the extension is running.
+		return m.DispatchCommand(name, args, timeout)
+	}
+
 	return CommandResult{}, fmt.Errorf("extension: no command %q registered", name)
 }

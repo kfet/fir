@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -18,6 +19,7 @@ import (
 // the (now removed) Go extension layer.
 type SessionBridge struct {
 	session  *core.AgentSession
+	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string // names of tools registered by extensions
 }
 
@@ -144,6 +146,8 @@ func (b *SessionBridge) ContinueSession() error {
 // The tool is wrapped with the session's hook interceptors so that
 // hook/tool_call interception still fires for it.
 func (b *SessionBridge) RegisterTool(def ToolDefinition) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	at := agent.AgentTool{
 		Tool: ai.Tool{
 			Name:        def.Name,
@@ -179,6 +183,8 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 // UnregisterExtensionTools removes all tools previously registered by extensions.
 // Called during reload to prevent duplicate tool names.
 func (b *SessionBridge) UnregisterExtensionTools() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if len(b.extTools) == 0 {
 		return
 	}

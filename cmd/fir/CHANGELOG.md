@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Extension frontmatter supports `events` and `commands` fields for lazy loading — extensions declare what they subscribe to without being started
+- Test validates that each builtin extension's frontmatter declares all its `@fir_ext.on()` events and `@fir_ext.command()` commands
+- Runtime frontmatter validation: after handshake, extensions with mismatched frontmatter get a warning and an offer to auto-fix the file
+
+### Changed
+
+- Parallelize extension process startup and handshakes, reducing startup time by ~50% when multiple extensions are active
+- Add mutex to `SessionBridge` to protect concurrent tool registration during parallel extension startup
+- Extensions that declare `events` in frontmatter are now started lazily on first matching event, reducing startup from ~760ms to ~30ms with default extensions
+
 ## [0.18.0] - 2026-03-09
 
 ### Added

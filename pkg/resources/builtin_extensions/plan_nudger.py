@@ -3,6 +3,7 @@
 # name: plan-nudger
 # description: Remind the agent to update its plan periodically
 # builtin: true
+# events: session_update, turn_end, agent_end
 # ---
 import time
 
