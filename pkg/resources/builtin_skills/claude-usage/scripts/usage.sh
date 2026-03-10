@@ -6,10 +6,17 @@
 #   ./usage.sh <bearer-token>       # explicit token as argument
 #   TOKEN=<bearer-token> ./usage.sh # explicit token via env var
 #
+# Options:
+#   --raw         Print the full JSON response instead of the formatted summary
+#   --verbose     On error, print the full response body for debugging
+#
 # The token must be an OAuth Bearer token (not a standard sk-ant-... API key).
 # Auto-detection searches ~/.fir/agent/auth.json and ~/.claude/.credentials.json.
 
 set -euo pipefail
+
+RAW=false
+VERBOSE=false
 
 find_token() {
   local entry file filter value
@@ -34,7 +41,16 @@ find_token() {
   return 1
 }
 
-TOKEN="${1:-${TOKEN:-}}"
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --raw)     RAW=true; shift ;;
+    --verbose) VERBOSE=true; shift ;;
+    *)         POSITIONAL+=("$1"); shift ;;
+  esac
+done
+
+TOKEN="${POSITIONAL[0]:-${TOKEN:-}}"
 
 if [[ -z "$TOKEN" ]]; then
   if token="$(find_token)"; then
@@ -49,11 +65,37 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-curl -s \
+RESPONSE=$(curl -s -w '\n%{http_code}' \
   -H "Authorization: Bearer $TOKEN" \
   -H "anthropic-beta: oauth-2025-04-20" \
   -H "Accept: application/json" \
-  https://api.anthropic.com/api/oauth/usage | python3 -c "
+  https://api.anthropic.com/api/oauth/usage)
+
+HTTP_CODE=$(tail -1 <<< "$RESPONSE")
+BODY=$(sed '$ d' <<< "$RESPONSE")
+
+if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+  echo "Error: API returned HTTP $HTTP_CODE" >&2
+  if $VERBOSE; then
+    echo "$BODY" >&2
+  else
+    # Try to extract a short error message
+    msg=$(echo "$BODY" | jq -r '.error.message // .error // .message // empty' 2>/dev/null || true)
+    if [[ -n "$msg" ]]; then
+      echo "$msg" >&2
+    else
+      echo "(use --verbose to see the full response)" >&2
+    fi
+  fi
+  exit 1
+fi
+
+if $RAW; then
+  echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY"
+  exit 0
+fi
+
+echo "$BODY" | python3 -c "
 import sys, json, datetime
 
 data = json.load(sys.stdin)
