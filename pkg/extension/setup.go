@@ -249,6 +249,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 					"plan": map[string]any{
 						"total":     len(event.PlanEntries),
 						"completed": countCompleted(event.PlanEntries),
+						"metadata":  event.PlanMetadata,
 					},
 				})
 			}

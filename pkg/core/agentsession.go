@@ -1068,6 +1068,8 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.Agent.ReplaceMessages(nil)
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+	// Clear plan state so stale plans don't persist across sessions.
+	s.UpdatePlan("", nil, nil)
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",

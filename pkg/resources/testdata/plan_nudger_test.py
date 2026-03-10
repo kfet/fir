@@ -72,6 +72,26 @@ class TestSessionUpdateHandler(unittest.TestCase):
         handler({"plan": {"total": 1, "completed": 0}}, ctx)
         self.assertGreater(self.mod.last_update_time, old_time)
 
+    def test_next_update_in_sets_threshold(self):
+        handler = self.handlers["session_update"]
+        ctx = mock.MagicMock()
+        handler({"plan": {"total": 5, "completed": 1, "metadata": {"next_update_in": "10"}}}, ctx)
+        self.assertEqual(self.mod.turn_threshold, 10)
+
+    def test_next_update_in_zero_uses_default(self):
+        handler = self.handlers["session_update"]
+        ctx = mock.MagicMock()
+        self.mod.turn_threshold = 10
+        handler({"plan": {"total": 5, "completed": 1, "metadata": {"next_update_in": "0"}}}, ctx)
+        self.assertEqual(self.mod.turn_threshold, self.mod.DEFAULT_TURN_THRESHOLD)
+
+    def test_next_update_in_missing_uses_default(self):
+        handler = self.handlers["session_update"]
+        ctx = mock.MagicMock()
+        self.mod.turn_threshold = 10
+        handler({"plan": {"total": 5, "completed": 1}}, ctx)
+        self.assertEqual(self.mod.turn_threshold, self.mod.DEFAULT_TURN_THRESHOLD)
+
 
 class TestTurnEndHandler(unittest.TestCase):
     def setUp(self):
@@ -101,7 +121,7 @@ class TestTurnEndHandler(unittest.TestCase):
         ctx = mock.MagicMock()
         self.mod.plan_total = 5
         self.mod.plan_completed = 2
-        self.mod.turns_since_update = self.mod.NUDGE_TURN_THRESHOLD - 1
+        self.mod.turns_since_update = self.mod.turn_threshold - 1
         handler({}, ctx)
         ctx.send_message.assert_called_once()
         args = ctx.send_message.call_args
@@ -123,7 +143,7 @@ class TestTurnEndHandler(unittest.TestCase):
         ctx = mock.MagicMock()
         self.mod.plan_total = 5
         self.mod.plan_completed = 2
-        self.mod.turns_since_update = self.mod.NUDGE_TURN_THRESHOLD - 1
+        self.mod.turns_since_update = self.mod.turn_threshold - 1
         old_time = self.mod.last_update_time
         time.sleep(0.01)
         handler({}, ctx)

@@ -38,8 +38,7 @@ type cacheEntry struct {
 // Our release assets are named "fir-{os}-{arch}" (raw binaries, no archive).
 func newUpdater(source selfupdate.Source) (*selfupdate.Updater, error) {
 	return selfupdate.NewUpdater(selfupdate.Config{
-		Source:  source,
-		Filters: []string{`^fir-`},
+		Source: source,
 	})
 }
 

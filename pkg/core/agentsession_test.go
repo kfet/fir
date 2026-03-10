@@ -263,6 +263,32 @@ func TestAgentSession_NewSession(t *testing.T) {
 	}
 }
 
+func TestAgentSession_NewSessionCmd_ClearsPlan(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	// Set a plan.
+	session.UpdatePlan("My Plan", []agent.PlanEntry{
+		{Content: "step 1", Status: agent.PlanEntryStatusCompleted, Priority: agent.PlanEntryPriorityMedium},
+	}, nil)
+
+	if len(session.PlanEntries()) == 0 {
+		t.Fatal("plan should have entries before /new")
+	}
+
+	_, err := session.NewSessionCmd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(session.PlanEntries()) != 0 {
+		t.Error("plan should be cleared after /new")
+	}
+	if session.PlanTitle() != "" {
+		t.Error("plan title should be empty after /new")
+	}
+}
+
 func TestAgentSession_NewSessionCmd_EmitsSessionNamedEmpty(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()

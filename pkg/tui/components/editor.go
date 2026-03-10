@@ -584,7 +584,9 @@ func (e *Editor) IsShowingAutocomplete() bool {
 
 // SetFocused sets the focus state.
 func (e *Editor) SetFocused(focused bool) {
+	e.mu.Lock()
 	e.Focused = focused
+	e.mu.Unlock()
 }
 
 // Invalidate is a no-op for Editor.

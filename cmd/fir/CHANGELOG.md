@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- Plan nudger reads `next_update_in` from plan metadata — lets the LLM hint how many turns until its next plan update instead of the fixed 5-turn default
+- Forward plan metadata to extensions via `session_update` events
+
+### Fixed
+
+- Fix data race in `Editor.SetFocused` — acquire mutex to prevent concurrent read from `Render`
+
+## [0.19.3] - 2026-03-09
+
+### Fixed
+
+- Fix plan not being cleared when starting a new session with `/new`
+
+### Fixed
+
+- Fix `fir update` downloading wrong platform binary — remove overly broad filter that bypassed OS/arch matching
+
 ## [0.19.2] - 2026-03-09
 
 ### Fixed

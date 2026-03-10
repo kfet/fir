@@ -28,7 +28,8 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 				"- Update the plan after completing each step, before moving to the next\n" +
 				"- Each call replaces the entire plan — always include all entries\n" +
 				"- Keep steps concrete and actionable, not vague\n" +
-				"- Use metadata for short contextual info (e.g. how to access a fleet, session name, worktree path)",
+				"- Use metadata for short contextual info (e.g. how to access a fleet, session name, worktree path)\n" +
+				"- Always set metadata key \"next_update_in\" to estimate how many turns before your next plan update (e.g. \"3\"). This controls how often you get reminded.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -38,7 +39,7 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 					},
 					"metadata": map[string]any{
 						"type":        "object",
-						"description": "Optional key-value pairs shown in the plan header. Max 5 keys, values ≤80 chars. Use for context like session names, access commands, or links.",
+						"description": "Optional key-value pairs shown in the plan header. Max 5 keys, values ≤80 chars. Use for context like session names, access commands, or links. Always include \"next_update_in\" with your estimated turns until next update.",
 						"additionalProperties": map[string]any{
 							"type":      "string",
 							"maxLength": 80,
