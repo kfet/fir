@@ -38,6 +38,10 @@ automatically from `.fir/extensions/` in the project directory.
 The extension system lives in `pkg/extension/`. New extensions need no code
 changes — just drop a `.py` or `.sh` file in `.fir/extensions/`.
 
+Every extension script **must** have a comment frontmatter block (`# ---` … `# ---`) with at least a `name` key. Files without frontmatter are ignored by discovery.
+
+**Never place test files in the extensions directory** (`pkg/resources/builtin_extensions/` or `.fir/extensions/`). Extension tests belong in `pkg/resources/testdata/` (Python unit tests) or `pkg/extension/integration/` (Go integration tests). Files in the extensions directory are embedded and discovered at runtime — test files there cause 5-second handshake timeouts on every startup.
+
 Use `--no-extensions` to disable all extension discovery.
 
 ## Changelog

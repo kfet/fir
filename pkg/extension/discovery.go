@@ -139,9 +139,13 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		filePath := filepath.Join(dir, e.Name())
 
 		// Parse comment frontmatter once so we can skip builtin files and capture mode constraints.
+		// Files without valid frontmatter (e.g. test scripts, helper modules) are not extensions.
 		fm := resources.ExtensionFrontmatter{}
 		if data, err := os.ReadFile(filePath); err == nil {
 			fm = resources.ParseCommentFrontmatter(string(data))
+			if !fm.Present {
+				continue
+			}
 			if fm.Builtin {
 				continue
 			}

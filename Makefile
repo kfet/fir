@@ -141,3 +141,4 @@ lint-python: check-uv
 
 test-python: check-uv
 	PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py' -v
+	PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p '*_test.py' -v

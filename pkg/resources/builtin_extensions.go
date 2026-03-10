@@ -27,6 +27,7 @@ type ExtensionFrontmatter struct {
 	Builtin     bool
 	Demo        bool // demo/test extensions; not loaded unless explicitly allowed
 	Modes       []string
+	Present     bool // true when a valid frontmatter block was found
 }
 
 // ParseCommentFrontmatter parses frontmatter from comment-delimited blocks.
@@ -62,6 +63,7 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 		line := strings.TrimSpace(lines[i])
 		if line == "# ---" {
 			// Closing delimiter found; return what we have.
+			fm.Present = true
 			return fm
 		}
 		if !strings.HasPrefix(line, "# ") {

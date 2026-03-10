@@ -21,7 +21,7 @@ func TestParseCommentFrontmatter(t *testing.T) {
 # ---
 import sys
 `,
-			want: ExtensionFrontmatter{Name: "my-ext", Description: "Does things", Builtin: true},
+			want: ExtensionFrontmatter{Name: "my-ext", Description: "Does things", Builtin: true, Present: true},
 		},
 		{
 			name: "modes",
@@ -30,7 +30,7 @@ import sys
 # modes: tui, acp, json
 # ---
 `,
-			want: ExtensionFrontmatter{Modes: []string{"tui", "acp", "json"}},
+			want: ExtensionFrontmatter{Modes: []string{"tui", "acp", "json"}, Present: true},
 		},
 		{
 			name: "no shebang",
@@ -38,7 +38,7 @@ import sys
 # builtin: true
 # ---
 `,
-			want: ExtensionFrontmatter{Builtin: true},
+			want: ExtensionFrontmatter{Builtin: true, Present: true},
 		},
 		{
 			name: "no frontmatter",
@@ -62,7 +62,7 @@ import sys
 # name: dev-only
 # ---
 `,
-			want: ExtensionFrontmatter{Name: "dev-only"},
+			want: ExtensionFrontmatter{Name: "dev-only", Present: true},
 		},
 		{
 			name: "demo",
@@ -71,7 +71,7 @@ import sys
 # demo: true
 # ---
 `,
-			want: ExtensionFrontmatter{Demo: true},
+			want: ExtensionFrontmatter{Demo: true, Present: true},
 		},
 	}
 

@@ -45,7 +45,7 @@ func TestWatchAndReload(t *testing.T) {
 
 	// Write a new extension file — should trigger reload.
 	extFile := filepath.Join(extDir, "test_ext.py")
-	if err := os.WriteFile(extFile, []byte("#!/usr/bin/env python3\nprint('hello')"), 0755); err != nil {
+	if err := os.WriteFile(extFile, []byte("#!/usr/bin/env python3\n# ---\n# name: test-ext\n# ---\nprint('hello')"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +154,7 @@ func TestWatchAndReload_StopCancels(t *testing.T) {
 	stop()
 
 	extFile := filepath.Join(extDir, "test_ext.py")
-	if err := os.WriteFile(extFile, []byte("#!/usr/bin/env python3\nprint('hello')"), 0755); err != nil {
+	if err := os.WriteFile(extFile, []byte("#!/usr/bin/env python3\n# ---\n# name: test-ext\n# ---\nprint('hello')"), 0755); err != nil {
 		t.Fatal(err)
 	}
 

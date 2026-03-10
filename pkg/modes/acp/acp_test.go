@@ -1118,6 +1118,10 @@ func writeCommandExtScript(t *testing.T, dir string) string {
 	}
 	scriptPath := filepath.Join(extDir, "greet-ext.py")
 	script := `#!/usr/bin/env python3
+# ---
+# name: greet-ext
+# description: Test greeting extension
+# ---
 import sys, json, io
 stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 line = stdin.readline().strip()

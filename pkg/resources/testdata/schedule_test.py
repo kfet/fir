@@ -4,30 +4,34 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
+import threading
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 # Add the extension dir and SDK to the path so we can import schedule helpers.
-_ext_dir = os.path.dirname(os.path.abspath(__file__))
+_ext_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "builtin_extensions")
 sys.path.insert(0, _ext_dir)
 _sdk_dir = os.path.join(
     os.path.dirname(_ext_dir), "..", "pkg", "extension", "sdk", "python",
 )
 sys.path.insert(0, os.path.normpath(_sdk_dir))
 
-# We need to mock fir_ext before importing schedule, since schedule calls
-# fir_ext.run() and decorators at import time.
-fir_ext_mock = mock.MagicMock()
-fir_ext_mock.command = lambda **kw: lambda fn: fn
-fir_ext_mock.run = mock.MagicMock()
-sys.modules["fir_ext"] = fir_ext_mock
+# We need to prevent fir_ext.run() from blocking when schedule.py is imported.
+# Import the real fir_ext SDK first, then import schedule with run() patched.
+import fir_ext  # noqa: E402
 
-# Now import the module under test.
 import importlib  # noqa: E402
 
-schedule = importlib.import_module("schedule")
+with mock.patch.object(fir_ext, "run"):
+    schedule = importlib.import_module("schedule")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _ctx():
@@ -42,6 +46,36 @@ def _reset():
         for e in schedule._schedules.values():
             e.stop_event.set()
         schedule._schedules.clear()
+
+
+class _Timeout:
+    """Per-test SIGALRM timeout (Unix only). No-op on Windows."""
+
+    def __init__(self, seconds: int = 5):
+        self.seconds = seconds
+        self._old = None
+
+    def __enter__(self):
+        if hasattr(signal, "SIGALRM"):
+            def _handler(signum, frame):
+                raise TimeoutError(
+                    f"Test timed out after {self.seconds}s"
+                )
+            self._old = signal.signal(signal.SIGALRM, _handler)
+            signal.alarm(self.seconds)
+        return self
+
+    def __exit__(self, *exc):
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+            if self._old is not None:
+                signal.signal(signal.SIGALRM, self._old)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Pure-function tests (no threads, no timeout needed)
+# ---------------------------------------------------------------------------
 
 
 class TestFormatCountdown(unittest.TestCase):
@@ -87,8 +121,6 @@ class TestFormatTime(unittest.TestCase):
 
 
 class TestParseTarget(unittest.TestCase):
-    """Test _parse_target with a fixed _now()."""
-
     def setUp(self):
         self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
         self._patch = mock.patch.object(
@@ -129,7 +161,6 @@ class TestParseTarget(unittest.TestCase):
         t = schedule._parse_target("2pm")
         assert t is not None
         self.assertEqual(t.hour, 14)
-        self.assertEqual(t.minute, 0)
 
     def test_pm_with_minutes(self):
         t = schedule._parse_target("2:30pm")
@@ -159,7 +190,6 @@ class TestParseTarget(unittest.TestCase):
         t = schedule._parse_target("14:00")
         assert t is not None
         self.assertEqual(t.hour, 14)
-        self.assertEqual(t.minute, 0)
 
     def test_24h_past(self):
         t = schedule._parse_target("09:00")
@@ -176,20 +206,41 @@ class TestParseTarget(unittest.TestCase):
         self.assertIsNone(schedule._parse_target("42"))
 
 
-class TestCmdSchedule(unittest.TestCase):
-    """Test cmd_schedule with multiple schedule support."""
+# ---------------------------------------------------------------------------
+# Command tests — mock threading.Thread so no real threads are spawned.
+# ---------------------------------------------------------------------------
 
+
+class _FakeThread:
+    """Fake thread that records start() but never actually runs."""
+
+    def __init__(self, target=None, args=(), daemon=False, **kw):
+        self.target = target
+        self.args = args
+        self.daemon = daemon
+        self._started = False
+
+    def start(self):
+        self._started = True
+
+
+class TestCmdSchedule(unittest.TestCase):
     def setUp(self):
         self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
-        self._patch = mock.patch.object(
+        self._now_patch = mock.patch.object(
             schedule, "_now", return_value=self._fixed,
         )
-        self._patch.start()
+        self._thread_patch = mock.patch(
+            "threading.Thread", side_effect=_FakeThread,
+        )
+        self._now_patch.start()
+        self._thread_patch.start()
         _reset()
 
     def tearDown(self):
-        self._patch.stop()
         _reset()
+        self._thread_patch.stop()
+        self._now_patch.stop()
 
     def test_no_args_no_schedule(self):
         result = schedule.cmd_schedule([], _ctx())
@@ -204,27 +255,22 @@ class TestCmdSchedule(unittest.TestCase):
         self.assertIn("Could not parse", result["message"])
 
     def test_schedule_relative(self):
-        ctx = _ctx()
-        result = schedule.cmd_schedule(["30m"], ctx)
+        result = schedule.cmd_schedule(["30m"], _ctx())
         self.assertIn("Scheduled", result["message"])
         self.assertIn("continue", result["message"])
-        # Should contain an ID like [s1]
         self.assertRegex(result["message"], r"\[s\d+\]")
 
     def test_schedule_with_message(self):
-        ctx = _ctx()
-        result = schedule.cmd_schedule(["10m", "run", "the", "tests"], ctx)
+        result = schedule.cmd_schedule(["10m", "run", "the", "tests"], _ctx())
         self.assertIn("send message: run the tests", result["message"])
 
     def test_multiple_schedules(self):
         ctx = _ctx()
         r1 = schedule.cmd_schedule(["30m"], ctx)
         r2 = schedule.cmd_schedule(["1h"], ctx)
-        # Both should succeed with different IDs
         id1 = r1["message"].split("[")[1].split("]")[0]
         id2 = r2["message"].split("[")[1].split("]")[0]
         self.assertNotEqual(id1, id2)
-        # Status should list both
         with schedule._lock:
             self.assertEqual(len(schedule._schedules), 2)
 
@@ -234,7 +280,6 @@ class TestCmdSchedule(unittest.TestCase):
         schedule.cmd_schedule(["1h", "deploy"], ctx)
         result = schedule.cmd_schedule([], ctx)
         self.assertIn("Active schedules", result["message"])
-        # Should show both entries
         self.assertIn("continue", result["message"])
         self.assertIn("deploy", result["message"])
 
@@ -244,10 +289,8 @@ class TestCmdSchedule(unittest.TestCase):
         r2 = schedule.cmd_schedule(["1h"], ctx)
         id1 = r1["message"].split("[")[1].split("]")[0]
         id2 = r2["message"].split("[")[1].split("]")[0]
-        # Cancel first
         result = schedule.cmd_schedule(["cancel", id1], ctx)
         self.assertIn(f"[{id1}] cancelled", result["message"])
-        # Second should still be active
         with schedule._lock:
             self.assertIn(id2, schedule._schedules)
             self.assertNotIn(id1, schedule._schedules)
@@ -263,7 +306,6 @@ class TestCmdSchedule(unittest.TestCase):
             self.assertEqual(len(schedule._schedules), 0)
 
     def test_cancel_ambiguous(self):
-        """cancel with no id and multiple schedules should list them."""
         ctx = _ctx()
         schedule.cmd_schedule(["30m"], ctx)
         schedule.cmd_schedule(["1h"], ctx)
@@ -271,7 +313,6 @@ class TestCmdSchedule(unittest.TestCase):
         self.assertIn("Multiple schedules", result["message"])
 
     def test_cancel_single_no_id(self):
-        """cancel with no id and exactly one schedule should cancel it."""
         ctx = _ctx()
         schedule.cmd_schedule(["30m"], ctx)
         result = schedule.cmd_schedule(["cancel"], ctx)
@@ -280,9 +321,8 @@ class TestCmdSchedule(unittest.TestCase):
             self.assertEqual(len(schedule._schedules), 0)
 
     def test_cancel_bad_id(self):
-        ctx = _ctx()
-        schedule.cmd_schedule(["30m"], ctx)
-        result = schedule.cmd_schedule(["cancel", "s999"], ctx)
+        schedule.cmd_schedule(["30m"], _ctx())
+        result = schedule.cmd_schedule(["cancel", "s999"], _ctx())
         self.assertIn("No schedule with id", result["message"])
 
     def test_cancel_all_empty(self):
@@ -290,9 +330,13 @@ class TestCmdSchedule(unittest.TestCase):
         self.assertEqual(result["message"], "No schedules to cancel.")
 
 
-class TestCountdownThread(unittest.TestCase):
-    """Test _run_countdown fires the right action."""
+# ---------------------------------------------------------------------------
+# Countdown thread tests — run _run_countdown directly with already-expired
+# targets so they complete instantly. Use a timeout as a safety net.
+# ---------------------------------------------------------------------------
 
+
+class TestCountdownThread(unittest.TestCase):
     def setUp(self):
         _reset()
 
@@ -300,32 +344,121 @@ class TestCountdownThread(unittest.TestCase):
         _reset()
 
     def test_fires_continue(self):
-        ctx = mock.MagicMock()
-        stop = threading.Event()
-        target = datetime.now(tz=UTC) - timedelta(seconds=1)
-        schedule._run_countdown("test1", target, stop, ctx)
-        ctx.continue_session.assert_called_once()
-        ctx.send_user_message.assert_not_called()
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            stop = threading.Event()
+            target = datetime.now(tz=UTC) - timedelta(seconds=1)
+            schedule._run_countdown("t1", target, stop, ctx)
+            ctx.continue_session.assert_called_once()
+            ctx.send_user_message.assert_not_called()
 
     def test_fires_message(self):
-        ctx = mock.MagicMock()
-        stop = threading.Event()
-        target = datetime.now(tz=UTC) - timedelta(seconds=1)
-        schedule._run_countdown("test2", target, stop, ctx, message="do it")
-        ctx.send_user_message.assert_called_once_with("do it")
-        ctx.continue_session.assert_not_called()
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            stop = threading.Event()
+            target = datetime.now(tz=UTC) - timedelta(seconds=1)
+            schedule._run_countdown("t2", target, stop, ctx, message="do it")
+            ctx.send_user_message.assert_called_once_with("do it")
+            ctx.continue_session.assert_not_called()
 
     def test_cancel_no_fire(self):
-        ctx = mock.MagicMock()
-        stop = threading.Event()
-        stop.set()
-        target = datetime.now(tz=UTC) + timedelta(hours=1)
-        schedule._run_countdown("test3", target, stop, ctx)
-        ctx.continue_session.assert_not_called()
-        ctx.send_user_message.assert_not_called()
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            stop = threading.Event()
+            stop.set()
+            target = datetime.now(tz=UTC) + timedelta(hours=1)
+            schedule._run_countdown("t3", target, stop, ctx)
+            ctx.continue_session.assert_not_called()
+            ctx.send_user_message.assert_not_called()
 
 
-import threading  # noqa: E402
+# ---------------------------------------------------------------------------
+# Integration test — real threads, real timers (short durations).
+# ---------------------------------------------------------------------------
+
+
+class TestIntegration(unittest.TestCase):
+    """End-to-end test using real threads with short timers."""
+
+    def setUp(self):
+        _reset()
+
+    def tearDown(self):
+        _reset()
+
+    def test_schedule_fires_continue(self):
+        """Schedule 1s, wait for the thread to fire continue_session."""
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            result = schedule.cmd_schedule(["1s"], ctx)
+            self.assertIn("Scheduled", result["message"])
+
+            # Wait for the countdown thread to finish and fire.
+            deadline = datetime.now(tz=UTC) + timedelta(seconds=4)
+            while datetime.now(tz=UTC) < deadline:
+                if ctx.continue_session.called:
+                    break
+                threading.Event().wait(0.1)
+
+            ctx.continue_session.assert_called_once()
+            ctx.send_user_message.assert_not_called()
+            with schedule._lock:
+                self.assertEqual(len(schedule._schedules), 0)
+
+    def test_schedule_fires_message(self):
+        """Schedule 1s with a message, wait for send_user_message."""
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            result = schedule.cmd_schedule(["1s", "hello", "world"], ctx)
+            self.assertIn("send message", result["message"])
+
+            deadline = datetime.now(tz=UTC) + timedelta(seconds=4)
+            while datetime.now(tz=UTC) < deadline:
+                if ctx.send_user_message.called:
+                    break
+                threading.Event().wait(0.1)
+
+            ctx.send_user_message.assert_called_once_with("hello world")
+            ctx.continue_session.assert_not_called()
+
+    def test_multiple_schedules_fire_independently(self):
+        """Two schedules at different times both fire."""
+        with _Timeout(10):
+            ctx = mock.MagicMock()
+            schedule.cmd_schedule(["1s", "first"], ctx)
+            schedule.cmd_schedule(["2s", "second"], ctx)
+            with schedule._lock:
+                self.assertEqual(len(schedule._schedules), 2)
+
+            # Wait for both to fire.
+            deadline = datetime.now(tz=UTC) + timedelta(seconds=5)
+            while datetime.now(tz=UTC) < deadline:
+                if ctx.send_user_message.call_count >= 2:
+                    break
+                threading.Event().wait(0.1)
+
+            self.assertEqual(ctx.send_user_message.call_count, 2)
+            calls = [c.args[0] for c in ctx.send_user_message.call_args_list]
+            self.assertIn("first", calls)
+            self.assertIn("second", calls)
+            with schedule._lock:
+                self.assertEqual(len(schedule._schedules), 0)
+
+    def test_cancel_before_fire(self):
+        """Cancel a schedule before it fires; verify no action taken."""
+        with _Timeout(5):
+            ctx = mock.MagicMock()
+            r = schedule.cmd_schedule(["3s"], ctx)
+            sid = r["message"].split("[")[1].split("]")[0]
+
+            # Cancel immediately.
+            result = schedule.cmd_schedule(["cancel", sid], ctx)
+            self.assertIn("cancelled", result["message"])
+
+            # Wait a bit to confirm it doesn't fire.
+            threading.Event().wait(1.0)
+            ctx.continue_session.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

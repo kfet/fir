@@ -72,6 +72,9 @@ func TestSetupHookToolCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := `#!/usr/bin/env python3
+# ---
+# name: test-hook-ext
+# ---
 import fir_ext
 
 @fir_ext.on("hook/tool_call")

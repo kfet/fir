@@ -21,6 +21,9 @@ func writeExtScript(t *testing.T, dir, name string) string {
 	}
 	script := filepath.Join(extDir, name)
 	content := `#!/bin/sh
+# ---
+# name: ` + name + `
+# ---
 read line
 echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[{"name":"test_tool","description":"a test tool"}],"events":["session_start","turn_end"]}}'
 # Stay alive reading stdin until it closes

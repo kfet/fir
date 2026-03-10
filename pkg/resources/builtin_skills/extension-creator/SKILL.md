@@ -14,6 +14,10 @@ Use the bundled `fir_ext` SDK (no install needed). Template:
 
 ```python
 #!/usr/bin/env python3
+# ---
+# name: <extension-name>
+# description: <what the extension does>
+# ---
 """<description>."""
 
 import fir_ext
@@ -77,9 +81,11 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 ## Checklist
 
 - [ ] Create `.fir/extensions/<name>.py` with a shebang (`#!/usr/bin/env python3`).
+- [ ] Add comment frontmatter (`# ---` / `# ---`) with at least `name:`. Files without frontmatter are ignored by discovery.
 - [ ] Make it executable: `chmod +x .fir/extensions/<name>.py`.
 - [ ] Define tools with `@fir_ext.tool(...)` and/or event handlers with `@fir_ext.on(...)`.
 - [ ] End with `fir_ext.run(name="<name>")`.
+- [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.
 - [ ] Test by running fir with `--debug` and checking for init handshake success.
 - [ ] On first use, fir will prompt to trust the extension (project-local only).
 

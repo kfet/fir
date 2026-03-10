@@ -328,21 +328,24 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
             if len(_schedules) == 1:
                 sid, entry = next(iter(_schedules.items()))
                 del _schedules[sid]
-                entry.stop_event.set()
-                with contextlib.suppress(Exception):
-                    _update_status(ctx)
-                return {"message": f"Schedule [{sid}] cancelled."}
-            # Multiple — list them
-            entries = sorted(
-                _schedules.values(), key=lambda e: e.target,
-            )
-        lines = [
-            "Multiple schedules active. "
-            "Specify an id or use `cancel all`:",
-        ]
-        for e in entries:
-            lines.append(_format_entry(e))
-        return {"message": "\n".join(lines)}
+            else:
+                # Multiple — list them
+                entries = sorted(
+                    _schedules.values(), key=lambda e: e.target,
+                )
+                lines = [
+                    "Multiple schedules active. "
+                    "Specify an id or use `cancel all`:",
+                ]
+                for e in entries:
+                    lines.append(_format_entry(e))
+                return {"message": "\n".join(lines)}
+
+        # Outside the lock — stop the entry and update status.
+        entry.stop_event.set()
+        with contextlib.suppress(Exception):
+            _update_status(ctx)
+        return {"message": f"Schedule [{sid}] cancelled."}
 
     # ── parse target time ─────────────────────────────────────────────
     target = _parse_target(args[0])

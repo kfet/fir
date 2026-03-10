@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Extension discovery now requires comment frontmatter (`# ---`); files without it (e.g. test scripts) are skipped, fixing a 5-second startup delay caused by `schedule_test.py` handshake timeout
+- Move `schedule_test.py` out of `builtin_extensions/` to `pkg/resources/testdata/` so it is not embedded or discovered at runtime
+
 ### Added
 
+- `/schedule` now supports multiple concurrent scheduled tasks, each with a unique ID (e.g. `[s1]`, `[s2]`); use `/schedule cancel <id>` to cancel a specific task or `/schedule cancel all` to cancel all
 - Demo/test extensions (`hello`, `demo`) are now marked with `demo: true` frontmatter and skipped during discovery unless explicitly listed in the extension allowlist
 - Extensions auto-reload when their files are created, modified, or removed; interactive mode shows a status message on reload
 - `/schedule` now accepts an optional user message after the time argument (e.g. `/schedule 45m run the tests`); when present, the message is sent as a user turn instead of a bare continue
@@ -14,6 +20,7 @@
 
 ### Fixed
 
+- Fix ACP test `greet-ext.py` missing comment frontmatter, causing discovery to skip it after the frontmatter-required change
 - Fix duplicate tool registration on extension reload (`/reload` and auto-reload) causing API "tools: Tool names must be unique" errors
 - `Agent.Continue()` now resumes after an Escape-interrupted assistant response by injecting a synthetic "continue" user message, instead of returning an error
 
