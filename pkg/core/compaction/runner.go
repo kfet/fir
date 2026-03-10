@@ -24,9 +24,9 @@ func (r *DefaultRunner) IsEnabled() bool {
 }
 
 // ShouldCompact checks if compaction should trigger based on token counts.
-func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int) bool {
+func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int, inputCostPerMTok float64) bool {
 	settings := r.compactionSettings()
-	return ShouldCompact(contextTokens, contextWindow, settings)
+	return ShouldCompact(contextTokens, contextWindow, settings, inputCostPerMTok)
 }
 
 // GetStats returns pre-run information about what a compaction would process
@@ -109,9 +109,19 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, session *core.AgentSe
 
 func (r *DefaultRunner) compactionSettings() CompactionSettings {
 	s := r.SettingsManager.GetCompactionSettings()
-	return CompactionSettings{
+	cs := CompactionSettings{
 		Enabled:          s.Enabled,
 		ReserveTokens:    s.ReserveTokens,
 		KeepRecentTokens: s.KeepRecentTokens,
 	}
+	if s.FillRatio != nil {
+		cs.FillRatio = *s.FillRatio
+	}
+	if s.MaxContextTokens != nil {
+		cs.MaxContextTokens = *s.MaxContextTokens
+	}
+	if s.MaxContextCost != nil {
+		cs.MaxContextCost = *s.MaxContextCost
+	}
+	return cs
 }

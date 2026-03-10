@@ -58,12 +58,12 @@ func TestDefaultRunner_ShouldCompact(t *testing.T) {
 
 	// Default settings: reserveTokens=16384
 	// Should compact when contextTokens > contextWindow - reserveTokens
-	if runner.ShouldCompact(50000, 200000) {
+	if runner.ShouldCompact(50000, 200000, 0) {
 		t.Error("should not compact when well under threshold")
 	}
 
 	// contextWindow=200000, reserve=16384 → threshold=183616
-	if !runner.ShouldCompact(190000, 200000) {
+	if !runner.ShouldCompact(190000, 200000, 0) {
 		t.Error("should compact when over threshold")
 	}
 }
@@ -79,7 +79,7 @@ func TestDefaultRunner_ShouldCompact_Disabled(t *testing.T) {
 		SettingsManager: sm,
 	}
 
-	if runner.ShouldCompact(190000, 200000) {
+	if runner.ShouldCompact(190000, 200000, 0) {
 		t.Error("should not compact when disabled")
 	}
 }

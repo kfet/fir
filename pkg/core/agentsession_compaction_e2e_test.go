@@ -620,7 +620,7 @@ type rebuildingMockCompactionRunner struct {
 }
 
 func (r *rebuildingMockCompactionRunner) IsEnabled() bool { return true }
-func (r *rebuildingMockCompactionRunner) ShouldCompact(_, _ int) bool { return false }
+func (r *rebuildingMockCompactionRunner) ShouldCompact(_, _ int, _ float64) bool { return false }
 func (r *rebuildingMockCompactionRunner) GetStats(_ *AgentSession) *CompactionInfo { return nil }
 func (r *rebuildingMockCompactionRunner) RunCompaction(_ context.Context, session *AgentSession, _ string) (*CompactionResultInfo, error) {
 	r.runCalled = true

@@ -459,7 +459,7 @@ func (m *mockCompactionRunner) IsEnabled() bool {
 	return m.isEnabled
 }
 
-func (m *mockCompactionRunner) ShouldCompact(contextTokens, contextWindow int) bool {
+func (m *mockCompactionRunner) ShouldCompact(contextTokens, contextWindow int, inputCostPerMTok float64) bool {
 	return m.shouldCompactResult
 }
 

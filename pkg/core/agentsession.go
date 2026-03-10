@@ -78,7 +78,7 @@ type CompactionRunner interface {
 	// IsEnabled reports whether auto-compaction is turned on in settings.
 	IsEnabled() bool
 	// ShouldCompact checks if compaction should trigger.
-	ShouldCompact(contextTokens, contextWindow int) bool
+	ShouldCompact(contextTokens, contextWindow int, inputCostPerMTok float64) bool
 	// GetStats returns pre-run information about what a compaction would process
 	// without running any LLM calls. Returns nil if there is nothing to compact.
 	GetStats(session *AgentSession) *CompactionInfo
@@ -741,7 +741,7 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 	}
 
 	contextTokens := calculateContextTokens(assistantMessage.Usage)
-	shouldCompact := s.compactionRunner.ShouldCompact(contextTokens, contextWindow)
+	shouldCompact := s.compactionRunner.ShouldCompact(contextTokens, contextWindow, model.Cost.Input)
 	firlog.Debug("compaction check",
 		"contextTokens", contextTokens,
 		"contextWindow", contextWindow,

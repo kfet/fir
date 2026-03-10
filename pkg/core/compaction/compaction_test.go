@@ -92,22 +92,169 @@ func TestCalculateContextTokens_WithTotal(t *testing.T) {
 
 func TestShouldCompact_Under(t *testing.T) {
 	settings := CompactionSettings{Enabled: true, ReserveTokens: 1000, KeepRecentTokens: 5000}
-	if ShouldCompact(5000, 10000, settings) {
+	if ShouldCompact(5000, 10000, settings, 0.0) {
 		t.Error("should not compact when under threshold")
 	}
 }
 
 func TestShouldCompact_Over(t *testing.T) {
 	settings := CompactionSettings{Enabled: true, ReserveTokens: 1000, KeepRecentTokens: 5000}
-	if !ShouldCompact(9500, 10000, settings) {
+	if !ShouldCompact(9500, 10000, settings, 0.0) {
 		t.Error("should compact when over threshold")
 	}
 }
 
 func TestShouldCompact_Disabled(t *testing.T) {
 	settings := CompactionSettings{Enabled: false, ReserveTokens: 1000, KeepRecentTokens: 5000}
-	if ShouldCompact(9500, 10000, settings) {
+	if ShouldCompact(9500, 10000, settings, 0.0) {
 		t.Error("should not compact when disabled")
+	}
+}
+
+// TestShouldCompact_FillRatioLower verifies that a fillRatio of 0.5 triggers
+// compaction earlier than the default 0.90.
+//
+// ShouldCompact uses a two-part check on the fill-ratio path:
+//  1. Gate: skip if ratio < fillRatio
+//  2. Trigger: contextTokens > contextWindow - ReserveTokens
+//
+// To show the lower ratio fires sooner, we pick ReserveTokens large enough
+// that the reserve threshold (contextWindow - ReserveTokens = 5500) sits in
+// the 50–90% band. At 60% fill (6000 tokens) the gate passes for fillRatio=0.5
+// and the reserve check fires, but the default gate (0.90) would have blocked it.
+func TestShouldCompact_FillRatioLower(t *testing.T) {
+	settings := CompactionSettings{
+		Enabled:       true,
+		ReserveTokens: 4500, // threshold = 10000 - 4500 = 5500
+		FillRatio:     0.5,
+	}
+	// 60% fill (6000 > 5500) — lower ratio gate passes, reserve check fires.
+	if !ShouldCompact(6000, 10000, settings, 0.0) {
+		t.Error("fillRatio=0.5 should compact at 60% fill")
+	}
+	// Same token count with default fillRatio=0.0 (→ 0.90): gate blocks (0.6 < 0.9).
+	defaultSettings := CompactionSettings{Enabled: true, ReserveTokens: 4500}
+	if ShouldCompact(6000, 10000, defaultSettings, 0.0) {
+		t.Error("default fillRatio should NOT compact at 60% fill")
+	}
+	// At 40% fill (4000 < 5500) the reserve check itself doesn't fire.
+	if ShouldCompact(4000, 10000, settings, 0.0) {
+		t.Error("fillRatio=0.5 should not compact at 40% fill")
+	}
+}
+
+// TestShouldCompact_FillRatioDisabled verifies that a fillRatio > 1.0
+// effectively disables ratio-based compaction.
+func TestShouldCompact_FillRatioDisabled(t *testing.T) {
+	settings := CompactionSettings{
+		Enabled:       true,
+		ReserveTokens: 100,
+		FillRatio:     2.0, // impossible to reach
+	}
+	// Even at 99% fill the ratio path should not fire.
+	if ShouldCompact(9900, 10000, settings, 0.0) {
+		t.Error("fillRatio=2.0 should not trigger ratio-based compaction")
+	}
+}
+
+// TestShouldCompact_MaxContextTokens verifies that MaxContextTokens triggers
+// compaction when exceeded, even when the fill ratio is low.
+func TestShouldCompact_MaxContextTokens(t *testing.T) {
+	settings := CompactionSettings{
+		Enabled:          true,
+		ReserveTokens:    1000,
+		MaxContextTokens: 5000,
+	}
+	// 6000 tokens > cap of 5000 — must compact.
+	if !ShouldCompact(6000, 100000, settings, 0.0) {
+		t.Error("should compact when MaxContextTokens exceeded (low fill ratio)")
+	}
+	// 4000 tokens < cap — should not compact.
+	if ShouldCompact(4000, 100000, settings, 0.0) {
+		t.Error("should not compact when under MaxContextTokens")
+	}
+}
+
+// TestShouldCompact_MaxContextCost verifies that MaxContextCost triggers
+// compaction when the estimated input cost exceeds the threshold.
+func TestShouldCompact_MaxContextCost(t *testing.T) {
+	// 100 000 tokens * $15/MTok = $1.50/turn → above $1.00 threshold.
+	settings := CompactionSettings{
+		Enabled:        true,
+		ReserveTokens:  1000,
+		MaxContextCost: 1.00,
+	}
+	if !ShouldCompact(100_000, 200_000, settings, 15.0) {
+		t.Error("should compact when cost exceeds MaxContextCost")
+	}
+	// 50 000 tokens * $15/MTok = $0.75/turn → below threshold.
+	if ShouldCompact(50_000, 200_000, settings, 15.0) {
+		t.Error("should not compact when cost is below MaxContextCost")
+	}
+}
+
+// TestShouldCompact_MaxContextCostZeroPricing verifies that MaxContextCost
+// does NOT trigger when inputCostPerMTok is 0 (unknown pricing).
+func TestShouldCompact_MaxContextCostZeroPricing(t *testing.T) {
+	settings := CompactionSettings{
+		Enabled:        true,
+		ReserveTokens:  1000,
+		MaxContextCost: 0.01, // very low threshold
+	}
+	// Even with 1M tokens, unknown pricing means cost path must be skipped.
+	if ShouldCompact(1_000_000, 2_000_000, settings, 0.0) {
+		t.Error("cost-based compaction should not fire when inputCostPerMTok=0")
+	}
+}
+
+// TestShouldCompact_MaxContextCostVerySmall verifies that a very small
+// MaxContextCost threshold triggers at low token counts.
+func TestShouldCompact_MaxContextCostVerySmall(t *testing.T) {
+	// 1000 tokens * $15/MTok = $0.015/turn → above $0.001 threshold.
+	settings := CompactionSettings{
+		Enabled:        true,
+		ReserveTokens:  100,
+		MaxContextCost: 0.001,
+	}
+	if !ShouldCompact(1000, 200_000, settings, 15.0) {
+		t.Error("very small MaxContextCost should trigger at low token counts")
+	}
+}
+
+// TestShouldCompact_NegativeFieldsTreatedAsZero verifies that negative values
+// for FillRatio, MaxContextTokens, and MaxContextCost are treated as
+// zero/disabled (i.e. the default fill-ratio path is used, caps are skipped).
+func TestShouldCompact_NegativeFieldsTreatedAsZero(t *testing.T) {
+	settings := CompactionSettings{
+		Enabled:          true,
+		ReserveTokens:    1000,
+		FillRatio:        -0.5, // treated as 0 → default 0.90
+		MaxContextTokens: -100, // treated as disabled
+		MaxContextCost:   -1.0, // treated as disabled
+	}
+	// At 95% fill the default ratio path should still fire.
+	if !ShouldCompact(9500, 10000, settings, 5.0) {
+		t.Error("negative FillRatio should fall back to default 0.90 and trigger at 95%")
+	}
+	// At 50% fill should not trigger (no caps active, ratio not exceeded).
+	if ShouldCompact(5000, 10000, settings, 5.0) {
+		t.Error("negative fields should not cause false positives at 50% fill")
+	}
+}
+
+// TestShouldCompact_ZeroFieldsPreserveDefaults verifies that zero-valued new
+// fields leave the existing default behavior completely unchanged.
+func TestShouldCompact_ZeroFieldsPreserveDefaults(t *testing.T) {
+	base := CompactionSettings{Enabled: true, ReserveTokens: 1000}
+	// FillRatio==0 → default 0.90; MaxContextTokens==0 and MaxContextCost==0 → disabled.
+
+	// Under default 0.90 threshold → no compact.
+	if ShouldCompact(5000, 10000, base, 0.0) {
+		t.Error("zero-valued new fields: should not compact at 50% fill")
+	}
+	// Over 0.90 threshold with insufficient headroom → compact.
+	if !ShouldCompact(9500, 10000, base, 0.0) {
+		t.Error("zero-valued new fields: should compact at 95% fill")
 	}
 }
 
