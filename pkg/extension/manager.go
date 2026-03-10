@@ -343,62 +343,10 @@ func (m *Manager) Reload(ctx context.Context) error {
 	return m.Start(ctx, projectDir, cwd, api)
 }
 
-// EmitEvent fans out a notification to all bridges.
-// If any pending (lazy) extensions subscribe to this event, they are started
-// first so they receive it.
-func (m *Manager) EmitEvent(name string, data any) {
-	// Check for pending extensions that want this event.
-	m.mu.Lock()
-	var toStart []ExtProcConfig
-	var remaining []*pendingExtension
-	for _, pe := range m.pending {
-		if pe.events[name] {
-			toStart = append(toStart, pe.cfg)
-		} else {
-			remaining = append(remaining, pe)
-		}
-	}
-	m.pending = remaining
-	cwd := m.cwd
-	sdkEnv := m.sdkEnv
-	api := m.api
-	projectDir := m.projectDir
-	m.mu.Unlock()
-
-	// Start any triggered extensions (in parallel).
-	if len(toStart) > 0 {
-		var wg sync.WaitGroup
-		for _, cfg := range toStart {
-			wg.Add(1)
-			go func(cfg ExtProcConfig) {
-				defer wg.Done()
-				if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
-					m.logger.Warn("failed to lazy-start extension",
-						"ext", cfg.Name, "trigger", name, "err", err)
-				} else {
-					m.logger.Info("lazy-started extension", "ext", cfg.Name, "trigger", name)
-				}
-			}(cfg)
-		}
-		wg.Wait()
-	}
-
-	m.mu.Lock()
-	bridges := append([]*managedBridge(nil), m.bridges...)
-	m.mu.Unlock()
-
-	for _, mb := range bridges {
-		if err := mb.bridge.EmitEvent(name, data); err != nil {
-			m.logger.Warn("emit event failed", "ext", mb.cfg.Name, "event", name, "err", err)
-		}
-	}
-}
-
-// CallHook calls all bridges with the given hook and collects results concurrently.
-// If any pending (lazy) extensions subscribe to this hook, they are started
-// first so their hook handlers are active.
-func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
-	// Check for pending extensions that subscribe to this hook.
+// startPendingForEvent starts any pending (lazy) extensions that subscribe to
+// the given event or hook name. It removes them from the pending list and
+// starts them in parallel, blocking until all are ready.
+func (m *Manager) startPendingForEvent(name string) {
 	m.mu.Lock()
 	var toStart []ExtProcConfig
 	var remaining []*pendingExtension
@@ -418,23 +366,48 @@ func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json
 	projectDir := m.projectDir
 	m.mu.Unlock()
 
-	// Start any triggered extensions (in parallel), blocking until ready.
-	if len(toStart) > 0 {
-		var wg sync.WaitGroup
-		for _, cfg := range toStart {
-			wg.Add(1)
-			go func(cfg ExtProcConfig) {
-				defer wg.Done()
-				if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
-					m.logger.Warn("failed to lazy-start extension for hook",
-						"ext", cfg.Name, "hook", name, "err", err)
-				} else {
-					m.logger.Info("lazy-started extension for hook", "ext", cfg.Name, "hook", name)
-				}
-			}(cfg)
-		}
-		wg.Wait()
+	if len(toStart) == 0 {
+		return
 	}
+
+	var wg sync.WaitGroup
+	for _, cfg := range toStart {
+		wg.Add(1)
+		go func(cfg ExtProcConfig) {
+			defer wg.Done()
+			if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
+				m.logger.Warn("failed to lazy-start extension",
+					"ext", cfg.Name, "trigger", name, "err", err)
+			} else {
+				m.logger.Info("lazy-started extension", "ext", cfg.Name, "trigger", name)
+			}
+		}(cfg)
+	}
+	wg.Wait()
+}
+
+// EmitEvent fans out a notification to all bridges.
+// If any pending (lazy) extensions subscribe to this event, they are started
+// first so they receive it.
+func (m *Manager) EmitEvent(name string, data any) {
+	m.startPendingForEvent(name)
+
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	for _, mb := range bridges {
+		if err := mb.bridge.EmitEvent(name, data); err != nil {
+			m.logger.Warn("emit event failed", "ext", mb.cfg.Name, "event", name, "err", err)
+		}
+	}
+}
+
+// CallHook calls all bridges with the given hook and collects results concurrently.
+// If any pending (lazy) extensions subscribe to this hook, they are started
+// first so their hook handlers are active.
+func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
+	m.startPendingForEvent(name)
 
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
