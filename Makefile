@@ -95,7 +95,13 @@ clean:
 
 RELEASE_TAG := v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
-publish: build
+publish: pgo build
+	@if ! git diff --quiet default.pgo default.pgo.stamp 2>/dev/null; then \
+		echo "PGO profile updated, amending release commit..."; \
+		git add default.pgo default.pgo.stamp && \
+		git commit --amend --no-edit && \
+		git tag -f -a $(RELEASE_TAG) -m "release: $(RELEASE_TAG)"; \
+	fi
 	@echo "Publishing $(RELEASE_TAG)..."
 	git push origin main $(RELEASE_TAG)
 	@echo "Pushed $(RELEASE_TAG). GoReleaser CI will build and upload assets."
