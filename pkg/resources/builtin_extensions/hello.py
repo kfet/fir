@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # ---
 # demo: true
+# events: session_start, agent_end
 # ---
 """Simple test extension: logs a message on agent_end."""
 

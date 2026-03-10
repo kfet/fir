@@ -133,9 +133,8 @@ func TestBuiltinExtensionFrontmatterCompleteness(t *testing.T) {
 		if !fm.Present {
 			continue // non-extension file
 		}
-		if fm.Demo {
-			continue // demo extensions are not loaded by default
-		}
+		// Demo extensions are checked too — they should represent
+		// how production extensions look.
 
 		t.Run(fm.Name, func(t *testing.T) {
 			// Extract @fir_ext.on("...") event/hook subscriptions from source.

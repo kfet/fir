@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # ---
 # demo: true
+# events: hook/tool_call, session_start, session_shutdown, agent_start, agent_end, turn_start, turn_end, message_start, message_end, tool_execution_start, tool_execution_end
+# commands: demo-echo: Echo arguments back as a TUI message
 # ---
 """demo.py — comprehensive example exercising the full fir extension API.
 

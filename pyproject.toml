@@ -40,7 +40,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "*_test.py" = ["S101", "S106", "S108", "S603", "PLR2004"]
 "**/tests/**" = ["S101", "S106", "S108", "S603", "PLR2004"]
-".fir/extensions/*.py" = ["S101", "T201", "S603", "S607"]
+".fir/extensions/*.py" = ["E501", "S101", "T201", "S603", "S607"]
 
 # --- ty (type checker) --------------------------------------------------------
 # Run: uvx ty check
