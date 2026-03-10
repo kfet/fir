@@ -2,83 +2,67 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Extension discovery now requires comment frontmatter (`# ---`); files without it (e.g. test scripts) are skipped, fixing a 5-second startup delay caused by `schedule_test.py` handshake timeout
-- Move `schedule_test.py` out of `builtin_extensions/` to `pkg/resources/testdata/` so it is not embedded or discovered at runtime
-
 ### Added
 
+- `/schedule` extension (`.fir/extensions/schedule.py`): defer agent continuation to a future time with live countdown status (`/schedule 45m`, `/schedule 2pm`, `/schedule cancel`)
 - `/schedule` now supports multiple concurrent scheduled tasks, each with a unique ID (e.g. `[s1]`, `[s2]`); use `/schedule cancel <id>` to cancel a specific task or `/schedule cancel all` to cancel all
+- `/schedule` now accepts an optional user message after the time argument (e.g. `/schedule 45m run the tests`); when present, the message is sent as a user turn instead of a bare continue
+- `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
 - Demo/test extensions (`hello`, `demo`) are now marked with `demo: true` frontmatter and skipped during discovery unless explicitly listed in the extension allowlist
 - Extensions auto-reload when their files are created, modified, or removed; interactive mode shows a status message on reload
-- `/schedule` now accepts an optional user message after the time argument (e.g. `/schedule 45m run the tests`); when present, the message is sent as a user turn instead of a bare continue
-
-### Changed
-
-- Replace `Tools []AgentTool` with `*ToolSet` (ordered map keyed by name) in `AgentState` and `AgentContext`, making duplicate tool names structurally impossible
-
-### Fixed
-
-- Fix ACP test `greet-ext.py` missing comment frontmatter, causing discovery to skip it after the frontmatter-required change
-- Fix duplicate tool registration on extension reload (`/reload` and auto-reload) causing API "tools: Tool names must be unique" errors
-- `Agent.Continue()` now resumes after an Escape-interrupted assistant response by injecting a synthetic "continue" user message, instead of returning an error
-
-- Share single `AuthStorage` instance across all ACP sessions instead of creating duplicates per session; login/logout changes are now immediately visible without `Reload()`
-- Fix MCP server subprocess leak when resuming an ACP session with a duplicate ID — `mcpManager.Close()` was missing from cleanup
-- Handle `filepath.Abs` error in ACP `ResumeSession` instead of silently discarding it
-
-### Changed
-- Removed unused slash commands: `/hotkeys` (alias for `/help`), `/fork` (available via keybinding), `/copy` (copy last message to clipboard)
-- Plan nudger now triggers on: 20 turns without an update, 2 minutes without an update, or when the agent stops with incomplete plan entries (compels continuation)
-- Phase 7: split `pkg/modes/interactive/mode.go` (3308 lines) into `mode.go` (lifecycle), `commands.go` (slash commands + handlers), `selectors.go` (selector overlays), `events.go` (agent events + chat)
-- Phase 7: split `pkg/modes/acp/acp.go` (1690 lines) into `acp.go` (core), `methods.go` (RPC handlers), `tools.go` (tool builders)
-- Extract `resolveAgentDir()` helper in ACP mode — replaces 5 duplicated `DefaultAgentDir` + env-override blocks
-
-### Fixed
-
-- Plan tool no longer rendered as raw JSON in the TUI — shows a compact summary (title + done/in-progress/pending counts) instead of the full argument dump
-
-### Added
-
-- `pkg/ai/ratelimit.go`: shared rate-limit detection utility — `RateLimitInfo`, `DetectRateLimit(msg)`, `IsRateLimitText(text)`, `ExtractRetryDelayFromText(text)`; `google_gemini_cli.go` refactored to delegate to the shared helpers
-- `/schedule` extension (`.fir/extensions/schedule.py`): defer agent continuation to a future time with live countdown status (`/schedule 45m`, `/schedule 2pm`, `/schedule cancel`)
 - Extension bridge: `continue_session` method lets extensions call `session.Agent.Continue()` without injecting a message (`ctx.continue_session()` in Python SDK)
 - Extensions can now use `deliver_as` option in `send_message` and `send_user_message` to steer or follow-up the agent directly
 - New `session_update` event emitted to extensions on session state changes (plan updates, session naming)
 - Plan nudger extracted from core into built-in extension (`plan_nudger.py`)
-- Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)
-- Move `pkg/core/tools` to `pkg/agent/tools` — tool implementations depend only on `pkg/agent`, `pkg/ai`, `pkg/log`; no core dependency
-- Extract `footerdataprovider.go` from `pkg/core` to `pkg/modes/interactive/` — footer data is only used by interactive mode
-- Extract `bashexec.go` from `pkg/core` to `pkg/platform/` — bash execution as a standalone platform utility
 - Plan metadata: optional `metadata` key-value pairs (max 5 keys, 80-char values) shown in plan header — useful for fleet access info like session name, worktree path, attach command
-- Plan nudger: periodic steering reminder to update the plan every 5 turns when incomplete entries exist
 - Plan title: optional `title` parameter on the plan tool, shown in the plan header and footer status bar
-- `/new` command now accepts an optional `<name>` parameter to name the session on creation (e.g. `/new my-feature`)
+- `pkg/ai/ratelimit.go`: shared rate-limit detection utility — `RateLimitInfo`, `DetectRateLimit(msg)`, `IsRateLimitText(text)`, `ExtractRetryDelayFromText(text)`; `google_gemini_cli.go` refactored to delegate to the shared helpers
+- Session listing speed: metadata sidecar cache (.jsonl.meta.json) eliminates full file reads on warm runs; parallel 8-worker loading; top-200 filename pre-sort caps cold-cache I/O; dropped AllMessagesText from search (ID + Name + FirstMessage + Cwd)
+- `make publish` target to create GitHub releases marked as latest with cross-compiled binaries
+- `make deploy` target to push binaries directly to Tailscale hosts via scp
+
+### Changed
+
+- Replace `Tools []AgentTool` with `*ToolSet` (ordered map keyed by name) in `AgentState` and `AgentContext`, making duplicate tool names structurally impossible
+- Removed unused slash commands: `/hotkeys` (alias for `/help`), `/fork` (available via keybinding), `/copy` (copy last message to clipboard)
+- Removed `/clear` slash command (use `/new` instead)
+- Plan nudger now triggers on: 20 turns without an update, 2 minutes without an update, or when the agent stops with incomplete plan entries (compels continuation)
+- Upstream sync to c99b9940: Mistral migrated to `mistral-conversations` API; added `opencode-go` provider; Sonnet 4.6 adaptive thinking in Bedrock; `skip_thought_signature_validator` for Gemini 3 unsigned tool calls; TextSignatureV1 with phase support; `ReasoningEffortMap` for per-model effort mapping; Groq qwen3-32b reasoning effort clamping; gpt-5.4 models; claude-sonnet-4-6 Antigravity; gemini-3.1-flash-lite-preview; provider fallback for unknown model IDs; `UnregisterProvider` and `ResetProviders` for dynamic provider lifecycle
+- Upstream sync: trimmed tracked files from 580 to 48 (AI layer, providers, oauth, agent loop, model/prompt core only); dropped TUI, tools, interactive components, and other diverged layers
+- Added PROJECT_WATCH.md for lightweight tracking of aider, goose, cline, and claude-code
+
+### Removed
+
+- Dead `EventBus` code from `pkg/core`
+
+### Fixed
+
+- Extension discovery now requires comment frontmatter (`# ---`); files without it (e.g. test scripts) are skipped, fixing a 5-second startup delay caused by `schedule_test.py` handshake timeout
+- Move `schedule_test.py` out of `builtin_extensions/` to `pkg/resources/testdata/` so it is not embedded or discovered at runtime
+- Fix ACP test `greet-ext.py` missing comment frontmatter, causing discovery to skip it after the frontmatter-required change
+- Fix duplicate tool registration on extension reload (`/reload` and auto-reload) causing API "tools: Tool names must be unique" errors
+- `Agent.Continue()` now resumes after an Escape-interrupted assistant response by injecting a synthetic "continue" user message, instead of returning an error
+- Share single `AuthStorage` instance across all ACP sessions instead of creating duplicates per session; login/logout changes are now immediately visible without `Reload()`
+- Fix MCP server subprocess leak when resuming an ACP session with a duplicate ID — `mcpManager.Close()` was missing from cleanup
+- Handle `filepath.Abs` error in ACP `ResumeSession` instead of silently discarding it
+- Plan tool no longer rendered as raw JSON in the TUI — shows a compact summary (title + done/in-progress/pending counts) instead of the full argument dump
+- Plan tool: stale plans no longer cleared after a turn where the model updated the plan
+- tmuxspinner now clears appended session name on `/new`, session switch, and `/reexec`
+
+### Refactored
+
+- Phase 7: split `pkg/modes/interactive/mode.go` (3308 lines) into `mode.go` (lifecycle), `commands.go` (slash commands + handlers), `selectors.go` (selector overlays), `events.go` (agent events + chat)
+- Phase 7: split `pkg/modes/acp/acp.go` (1690 lines) into `acp.go` (core), `methods.go` (RPC handlers), `tools.go` (tool builders)
+- Extract `resolveAgentDir()` helper in ACP mode — replaces 5 duplicated `DefaultAgentDir` + env-override blocks
+- Move `pkg/core/tools` to `pkg/agent/tools` — tool implementations depend only on `pkg/agent`, `pkg/ai`, `pkg/log`; no core dependency
+- Extract `footerdataprovider.go` from `pkg/core` to `pkg/modes/interactive/`
+- Extract `bashexec.go` from `pkg/core` to `pkg/platform/`
 - Extract `pkg/auth` from `pkg/core` — credential/OAuth storage as a standalone leaf package
 - Extract `pkg/config` from `pkg/core` — settings, config value resolution, and defaults as a standalone leaf package
 - Extract `pkg/models` from `pkg/core` — model registry and resolver as a standalone package
 - Extract `pkg/session` from `pkg/core` — session persistence (save/load/list/tree) as a standalone package
 - Extract `pkg/msg` from `pkg/core` — shared message types (branch summary, compaction summary, custom messages)
 - Extract `pkg/resources` from `pkg/core` — resource loader, skills, builtin extensions, frontmatter, prompt templates, system prompt, slash commands
-- `make publish` target to create GitHub releases marked as latest with cross-compiled binaries
-- `make deploy` target to push binaries directly to Tailscale hosts via scp
-
-### Removed
-
-- `/clear` slash command (use `/new` instead)
-- Dead `EventBus` code from `pkg/core`
-
-### Fixed
-
-- Plan tool: stale plans no longer cleared after a turn where the model updated the plan
-- tmuxspinner now clears appended session name on `/new`, session switch, and `/reexec`
-
-### Changed
-
-- Upstream sync to c99b9940: Mistral migrated to `mistral-conversations` API; added `opencode-go` provider; Sonnet 4.6 adaptive thinking in Bedrock; `skip_thought_signature_validator` for Gemini 3 unsigned tool calls; TextSignatureV1 with phase support; `ReasoningEffortMap` for per-model effort mapping; Groq qwen3-32b reasoning effort clamping; gpt-5.4 models; claude-sonnet-4-6 Antigravity; gemini-3.1-flash-lite-preview; provider fallback for unknown model IDs; `UnregisterProvider` and `ResetProviders` for dynamic provider lifecycle
-- Upstream sync: trimmed tracked files from 580 to 48 (AI layer, providers, oauth, agent loop, model/prompt core only); dropped TUI, tools, interactive components, and other diverged layers
-- Added PROJECT_WATCH.md for lightweight tracking of aider, goose, cline, and claude-code
 
 ## [0.17.0] - 2026-03-06
 
