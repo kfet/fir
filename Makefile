@@ -94,13 +94,11 @@ clean:
 # ---------------------------------------------------------------------------
 
 RELEASE_TAG := v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
-RELEASE_BINS := $(BINARY)-darwin-arm64 $(BINARY)-darwin-amd64 $(BINARY)-linux-arm6 $(BINARY)-linux-arm64 $(BINARY)-linux-amd64
 
-publish: pgo build-all
+publish: build
 	@echo "Publishing $(RELEASE_TAG)..."
 	git push origin main $(RELEASE_TAG)
-	gh release create $(RELEASE_TAG) --title "fir $(shell cat VERSION)" --latest $(RELEASE_BINS)
-	@echo "Published $(RELEASE_TAG) as latest."
+	@echo "Pushed $(RELEASE_TAG). GoReleaser CI will build and upload assets."
 
 # Deploy to a remote host via scp (auto-detects OS and arch)
 # Usage: make deploy HOST=myhost

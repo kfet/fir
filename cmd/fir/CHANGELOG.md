@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `make publish` no longer builds or uploads assets locally — just pushes the tag and lets GoReleaser CI handle builds and releases
+
 ## [0.19.0] - 2026-03-09
 
 ### Added
