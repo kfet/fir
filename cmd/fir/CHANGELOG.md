@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix `fir update` on ARM devices (RPi) — rename asset from `arm6` to `armv6` to match go-selfupdate's expected naming convention
+
 ## [0.19.1] - 2026-03-09
 
 ### Changed

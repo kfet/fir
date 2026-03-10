@@ -37,7 +37,7 @@ install:
 build-all: build
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/
 	GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/
-	GOOS=linux GOARCH=arm GOARM=6 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm6 ./cmd/fir/
+	GOOS=linux GOARCH=arm GOARM=6 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-armv6 ./cmd/fir/
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/fir/
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/fir/
 
@@ -115,8 +115,8 @@ deploy: build-all
 	ARCH=$$(echo "$$INFO" | awk '{print $$2}'); \
 	case "$$OS-$$ARCH" in \
 		Linux-aarch64|Linux-arm64)   BIN=$(BINARY)-linux-arm64 ;; \
-		Linux-armv6l)                BIN=$(BINARY)-linux-arm6 ;; \
-		Linux-armv7l)                BIN=$(BINARY)-linux-arm6 ;; \
+		Linux-armv6l)                BIN=$(BINARY)-linux-armv6 ;; \
+		Linux-armv7l)                BIN=$(BINARY)-linux-armv6 ;; \
 		Linux-x86_64)                BIN=$(BINARY)-linux-amd64 ;; \
 		Darwin-arm64)                BIN=$(BINARY)-darwin-arm64 ;; \
 		Darwin-x86_64)               BIN=$(BINARY)-darwin-amd64 ;; \
