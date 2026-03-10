@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-03-09
+
 ### Added
 
 - Extension frontmatter supports `events` and `commands` fields for lazy loading — extensions declare what they subscribe to without being started
