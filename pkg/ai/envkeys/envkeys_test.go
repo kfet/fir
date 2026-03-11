@@ -1,6 +1,6 @@
 // Ported from: packages/ai/src/env-api-keys.ts
 // Upstream hash: 1caadb2e
-package ai
+package envkeys
 
 import (
 	"os"

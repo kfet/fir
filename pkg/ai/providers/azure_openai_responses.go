@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -119,7 +120,7 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 			apiKey = options.ApiKey
 		}
 		if apiKey == "" {
-			apiKey = ai.GetEnvApiKey(model.Provider)
+			apiKey = envkeys.GetEnvApiKey(model.Provider)
 		}
 		if apiKey == "" {
 			apiKey = os.Getenv("AZURE_OPENAI_API_KEY")
@@ -285,7 +286,7 @@ func StreamSimpleAzureOpenAIResponses(ctx context.Context, model *ai.Model, prom
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		apiKey = os.Getenv("AZURE_OPENAI_API_KEY")

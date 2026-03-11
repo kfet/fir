@@ -11,6 +11,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
@@ -1709,7 +1710,7 @@ func TestPerformShare_NoBinary(t *testing.T) {
 func setupAvailableModels(t *testing.T, tm *testMode) []*ai.Model {
 	t.Helper()
 	// Isolate test from any API keys in the developer's environment.
-	for _, key := range ai.KnownApiKeyEnvVars() {
+	for _, key := range envkeys.KnownApiKeyEnvVars() {
 		t.Setenv(key, "")
 	}
 	tm.mode.session.ModelRegistryRef().AuthStorage().SetRuntimeApiKey("anthropic", "test-key")

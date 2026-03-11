@@ -6,6 +6,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 )
@@ -215,7 +216,7 @@ func TestParseIntHelpers(t *testing.T) {
 
 func TestBuildModelState(t *testing.T) {
 	// Isolate from any real API keys set in the environment.
-	for _, key := range ai.KnownApiKeyEnvVars() {
+	for _, key := range envkeys.KnownApiKeyEnvVars() {
 		t.Setenv(key, "")
 	}
 

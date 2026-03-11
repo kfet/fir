@@ -1,31 +1,33 @@
 // Ported from: packages/ai/src/env-api-keys.ts
 // Upstream hash: c99b9940
-package ai
+package envkeys
 
 import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // providerEnvMap maps provider names to their API key environment variables.
 var providerEnvMap = map[string]string{
-	string(ProviderOpenAI):              "OPENAI_API_KEY",
-	string(ProviderAzureOpenAIResponses): "AZURE_OPENAI_API_KEY",
-	string(ProviderGoogle):              "GEMINI_API_KEY",
-	string(ProviderGroq):                "GROQ_API_KEY",
-	string(ProviderCerebras):            "CEREBRAS_API_KEY",
-	string(ProviderXAI):                 "XAI_API_KEY",
-	string(ProviderOpenRouter):          "OPENROUTER_API_KEY",
-	string(ProviderVercelAIGateway):     "AI_GATEWAY_API_KEY",
-	string(ProviderZAI):                 "ZAI_API_KEY",
-	string(ProviderMistral):             "MISTRAL_API_KEY",
-	string(ProviderMinimax):             "MINIMAX_API_KEY",
-	string(ProviderMinimaxCN):           "MINIMAX_CN_API_KEY",
-	string(ProviderHuggingface):         "HF_TOKEN",
-	string(ProviderOpenCode):            "OPENCODE_API_KEY",
-	string(ProviderOpenCodeGo):          "OPENCODE_API_KEY",
-	string(ProviderKimiCoding):          "KIMI_API_KEY",
+	string(ai.ProviderOpenAI):              "OPENAI_API_KEY",
+	string(ai.ProviderAzureOpenAIResponses): "AZURE_OPENAI_API_KEY",
+	string(ai.ProviderGoogle):              "GEMINI_API_KEY",
+	string(ai.ProviderGroq):                "GROQ_API_KEY",
+	string(ai.ProviderCerebras):            "CEREBRAS_API_KEY",
+	string(ai.ProviderXAI):                 "XAI_API_KEY",
+	string(ai.ProviderOpenRouter):          "OPENROUTER_API_KEY",
+	string(ai.ProviderVercelAIGateway):     "AI_GATEWAY_API_KEY",
+	string(ai.ProviderZAI):                 "ZAI_API_KEY",
+	string(ai.ProviderMistral):             "MISTRAL_API_KEY",
+	string(ai.ProviderMinimax):             "MINIMAX_API_KEY",
+	string(ai.ProviderMinimaxCN):           "MINIMAX_CN_API_KEY",
+	string(ai.ProviderHuggingface):         "HF_TOKEN",
+	string(ai.ProviderOpenCode):            "OPENCODE_API_KEY",
+	string(ai.ProviderOpenCodeGo):          "OPENCODE_API_KEY",
+	string(ai.ProviderKimiCoding):          "KIMI_API_KEY",
 }
 
 // additionalAuthEnvVars lists env vars used by providers whose auth logic can't
@@ -77,9 +79,9 @@ func KnownApiKeyEnvVars() []string {
 func ProviderEnvVar(provider string) string {
 	// Handle special cases with multiple env vars — return the primary one.
 	switch provider {
-	case string(ProviderAnthropic):
+	case string(ai.ProviderAnthropic):
 		return "ANTHROPIC_API_KEY"
-	case string(ProviderGitHubCopilot):
+	case string(ai.ProviderGitHubCopilot):
 		return "COPILOT_GITHUB_TOKEN"
 	}
 	v, _ := providerEnvMap[provider]
@@ -90,7 +92,7 @@ func ProviderEnvVar(provider string) string {
 // Returns "" if no key is found.
 func GetEnvApiKey(provider string) string {
 	switch provider {
-	case string(ProviderGitHubCopilot):
+	case string(ai.ProviderGitHubCopilot):
 		if v := os.Getenv("COPILOT_GITHUB_TOKEN"); v != "" {
 			return v
 		}
@@ -99,14 +101,14 @@ func GetEnvApiKey(provider string) string {
 		}
 		return os.Getenv("GITHUB_TOKEN")
 
-	case string(ProviderAnthropic):
+	case string(ai.ProviderAnthropic):
 		// ANTHROPIC_OAUTH_TOKEN takes precedence over ANTHROPIC_API_KEY
 		if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
 			return v
 		}
 		return os.Getenv("ANTHROPIC_API_KEY")
 
-	case string(ProviderGoogleVertex):
+	case string(ai.ProviderGoogleVertex):
 		if hasVertexADCCredentials() &&
 			(os.Getenv("GOOGLE_CLOUD_PROJECT") != "" || os.Getenv("GCLOUD_PROJECT") != "") &&
 			os.Getenv("GOOGLE_CLOUD_LOCATION") != "" {
@@ -114,7 +116,7 @@ func GetEnvApiKey(provider string) string {
 		}
 		return ""
 
-	case string(ProviderAmazonBedrock):
+	case string(ai.ProviderAmazonBedrock):
 		if os.Getenv("AWS_PROFILE") != "" ||
 			(os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "") ||
 			os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" ||

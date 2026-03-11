@@ -1,18 +1,19 @@
-package ai
+package overflow
 
 import (
 	"testing"
 
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/stretchr/testify/assert"
 )
 
-func makeErrorMsg(errorMsg string) *AssistantMessage {
-	return &AssistantMessage{
-		Role:         RoleAssistant,
-		Api:          ApiAnthropicMessages,
-		Provider:     ProviderAnthropic,
+func makeErrorMsg(errorMsg string) *ai.AssistantMessage {
+	return &ai.AssistantMessage{
+		Role:         ai.RoleAssistant,
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
 		Model:        "claude-3",
-		StopReason:   StopReasonError,
+		StopReason:   ai.StopReasonError,
 		ErrorMessage: errorMsg,
 	}
 }
@@ -79,19 +80,19 @@ func TestIsContextOverflow_NotOverflow(t *testing.T) {
 }
 
 func TestIsContextOverflow_SilentOverflow(t *testing.T) {
-	msg := &AssistantMessage{
-		Role:       RoleAssistant,
-		StopReason: StopReasonStop,
-		Usage:      Usage{Input: 150000, CacheRead: 10000},
+	msg := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 150000, CacheRead: 10000},
 	}
 	assert.True(t, IsContextOverflow(msg, 128000))
 }
 
 func TestIsContextOverflow_SilentOverflow_WithinWindow(t *testing.T) {
-	msg := &AssistantMessage{
-		Role:       RoleAssistant,
-		StopReason: StopReasonStop,
-		Usage:      Usage{Input: 50000, CacheRead: 10000},
+	msg := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.Usage{Input: 50000, CacheRead: 10000},
 	}
 	assert.False(t, IsContextOverflow(msg, 128000))
 }
@@ -101,7 +102,7 @@ func TestIsContextOverflow_NilMessage(t *testing.T) {
 }
 
 func TestIsContextOverflow_NoContextWindow(t *testing.T) {
-	msg := &AssistantMessage{StopReason: StopReasonStop, Usage: Usage{Input: 999999}}
+	msg := &ai.AssistantMessage{StopReason: ai.StopReasonStop, Usage: ai.Usage{Input: 999999}}
 	assert.False(t, IsContextOverflow(msg, 0))
 }
 

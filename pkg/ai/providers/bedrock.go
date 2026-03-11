@@ -20,6 +20,7 @@ import (
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/jsonparse"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -145,7 +146,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 					if bs != nil && delta.Value.Input != nil {
 						input := *delta.Value.Input
 						bs.partialJSON += input
-						parsed := ai.ParseStreamingJSON(bs.partialJSON)
+						parsed := jsonparse.ParseStreamingJSON(bs.partialJSON)
 						c := output.Content[bs.contentIdx]
 						c.ToolCall.Arguments = parsed
 						output.Content[bs.contentIdx] = c
@@ -187,7 +188,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 					})
 				case c.IsToolCall():
 					if bs.partialJSON != "" {
-						parsed := ai.ParseStreamingJSON(bs.partialJSON)
+						parsed := jsonparse.ParseStreamingJSON(bs.partialJSON)
 						c.ToolCall.Arguments = parsed
 						output.Content[idx] = c
 					}

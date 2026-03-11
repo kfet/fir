@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -82,7 +83,7 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			apiKey = options.ApiKey
 		}
 		if apiKey == "" {
-			apiKey = ai.GetEnvApiKey(model.Provider)
+			apiKey = envkeys.GetEnvApiKey(model.Provider)
 		}
 		if apiKey == "" {
 			output.StopReason = ai.StopReasonError
@@ -417,7 +418,7 @@ func StreamSimpleOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		return errorStreamProvider(model, fmt.Sprintf("no API key for provider: %s", model.Provider))

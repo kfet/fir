@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/models"
@@ -48,7 +48,7 @@ func buildAuthMethods(authStorage *auth.AuthStorage, modelRegistry *models.Model
 	// (they render them as non-functional buttons), so we omit them to avoid clutter.
 	if !supportsTerminalAuth {
 		for _, pid := range providers {
-			if envVar := ai.ProviderEnvVar(pid); envVar != "" {
+			if envVar := envkeys.ProviderEnvVar(pid); envVar != "" {
 				name := formatProviderName(pid) + " API Key"
 				m := ExtendedAuthMethod{
 					Id:          "env-" + pid,
@@ -260,7 +260,7 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf(
 			"%s OAuth requires interactive input which is not supported in ACP agent mode; "+
 				"use terminal-auth or set %s environment variable",
-			formatProviderName(providerID), ai.ProviderEnvVar(providerID))
+			formatProviderName(providerID), envkeys.ProviderEnvVar(providerID))
 	}
 
 	err := authStorage.Login(providerID, oauth.LoginCallbacks{
@@ -292,7 +292,7 @@ func (pa *firAgent) authenticateEnvVar(_ context.Context, method *ExtendedAuthMe
 	if method.VarName == "" {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("env_var auth method missing varName")
 	}
-	val := ai.GetEnvApiKey(strings.TrimPrefix(method.Id, "env-"))
+	val := envkeys.GetEnvApiKey(strings.TrimPrefix(method.Id, "env-"))
 	if val == "" {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("environment variable %s is not set", method.VarName)
 	}

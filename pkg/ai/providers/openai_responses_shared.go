@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/jsonparse"
 )
 
 // responsesSSEProcessor processes SSE events for the OpenAI Responses API format.
@@ -271,7 +272,7 @@ func (p *responsesSSEProcessor) handleFunctionCallArgsDelta(raw map[string]any) 
 		return
 	}
 	p.current.partialJSON += delta
-	parsed := ai.ParseStreamingJSON(p.current.partialJSON)
+	parsed := jsonparse.ParseStreamingJSON(p.current.partialJSON)
 	c := p.output.Content[p.current.contentIdx]
 	c.ToolCall.Arguments = parsed
 	p.output.Content[p.current.contentIdx] = c
@@ -292,7 +293,7 @@ func (p *responsesSSEProcessor) handleFunctionCallArgsDone(raw map[string]any) {
 		return
 	}
 	p.current.partialJSON = argsStr
-	parsed := ai.ParseStreamingJSON(argsStr)
+	parsed := jsonparse.ParseStreamingJSON(argsStr)
 	c := p.output.Content[p.current.contentIdx]
 	c.ToolCall.Arguments = parsed
 	p.output.Content[p.current.contentIdx] = c

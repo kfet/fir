@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -156,7 +157,7 @@ type geminiCLIUsageMetadata struct {
 
 // extractRetryDelay extracts retry delay from error text and response headers.
 // Returns delay in milliseconds, or 0 if not found.
-// Text-based pattern matching is delegated to ai.ExtractRetryDelayFromText.
+// Text-based pattern matching is delegated to ratelimit.ExtractRetryDelayFromText.
 func extractRetryDelay(errorText string, headers http.Header) int {
 	normalizeDelay := func(ms int) int {
 		if ms > 0 {
@@ -198,7 +199,7 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 	}
 
 	// Delegate text-based pattern matching to the shared rate-limit utility.
-	if d := ai.ExtractRetryDelayFromText(errorText); d > 0 {
+	if d := ratelimit.ExtractRetryDelayFromText(errorText); d > 0 {
 		return normalizeDelay(int(d.Milliseconds()))
 	}
 
@@ -231,7 +232,7 @@ func isRetryableError(status int, errorText string) bool {
 	if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
 		return true
 	}
-	if ai.IsRateLimitText(errorText) {
+	if ratelimit.IsRateLimitText(errorText) {
 		return true
 	}
 	return retryableTextRe.MatchString(errorText)

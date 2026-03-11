@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
+	"github.com/kfet/fir/pkg/ai/jsonparse"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -178,7 +180,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			apiKey = options.ApiKey
 		}
 		if apiKey == "" {
-			apiKey = ai.GetEnvApiKey(model.Provider)
+			apiKey = envkeys.GetEnvApiKey(model.Provider)
 		}
 		if apiKey == "" {
 			output.StopReason = ai.StopReasonError
@@ -329,7 +331,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					partial, _ := delta["partial_json"].(string)
 					bi.partialJSON += partial
 					if ci < len(output.Content) && output.Content[ci].IsToolCall() {
-						output.Content[ci].ToolCall.Arguments = ai.ParseStreamingJSON(bi.partialJSON)
+						output.Content[ci].ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
 					}
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallDelta, ContentIndex: ci, Delta: partial, Partial: output})
 				case "signature_delta":
@@ -355,7 +357,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				} else if c.IsThinking() {
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: ci, Content: c.Thinking.Thinking, Partial: output})
 				} else if c.IsToolCall() {
-					c.ToolCall.Arguments = ai.ParseStreamingJSON(bi.partialJSON)
+					c.ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallEnd, ContentIndex: ci, ToolCall: c.ToolCall, Partial: output})
 				}
 
@@ -406,7 +408,7 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 
 	base := BuildBaseOptions(model, options, apiKey)

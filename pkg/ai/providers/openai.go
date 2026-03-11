@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
+	"github.com/kfet/fir/pkg/ai/jsonparse"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -261,7 +263,7 @@ func streamOpenAIHTTP(
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		return fmt.Errorf("no API key for provider: %s", model.Provider)
@@ -385,7 +387,7 @@ func parseOpenAISSE(
 			})
 		case c.IsToolCall():
 			if currentBlockIdx < len(blocks) && blocks[currentBlockIdx].partialArgs != "" {
-				parsed := ai.ParseStreamingJSON(blocks[currentBlockIdx].partialArgs)
+				parsed := jsonparse.ParseStreamingJSON(blocks[currentBlockIdx].partialArgs)
 				c.ToolCall.Arguments = parsed
 				output.Content[currentBlockIdx] = c
 			}
@@ -533,7 +535,7 @@ func parseOpenAISSE(
 					}
 					if tc.Function.Arguments != "" {
 						blocks[currentBlockIdx].partialArgs += tc.Function.Arguments
-						c.ToolCall.Arguments = ai.ParseStreamingJSON(blocks[currentBlockIdx].partialArgs)
+						c.ToolCall.Arguments = jsonparse.ParseStreamingJSON(blocks[currentBlockIdx].partialArgs)
 					}
 				}
 				output.Content[currentBlockIdx] = c
@@ -1068,7 +1070,7 @@ func StreamSimpleOpenAICompletions(ctx context.Context, model *ai.Model, prompt 
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		return errorStreamProvider(model, fmt.Sprintf("no API key for provider: %s", model.Provider))

@@ -1,8 +1,12 @@
 // Ported from: packages/ai/src/utils/overflow.ts
 // Upstream hash: c99b9940
-package ai
+package overflow
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/kfet/fir/pkg/ai"
+)
 
 // overflowPatterns are regex patterns to detect context overflow errors.
 var overflowPatterns = []*regexp.Regexp{
@@ -27,13 +31,13 @@ var overflowPatterns = []*regexp.Regexp{
 var statusCodePattern = regexp.MustCompile(`(?i)^4(00|13)\s*(status code)?\s*\(no body\)`)
 
 // IsContextOverflow checks if an assistant message represents a context overflow error.
-func IsContextOverflow(message *AssistantMessage, contextWindow int) bool {
+func IsContextOverflow(message *ai.AssistantMessage, contextWindow int) bool {
 	if message == nil {
 		return false
 	}
 
 	// Case 1: Error-based overflow
-	if message.StopReason == StopReasonError && message.ErrorMessage != "" {
+	if message.StopReason == ai.StopReasonError && message.ErrorMessage != "" {
 		for _, p := range overflowPatterns {
 			if p.MatchString(message.ErrorMessage) {
 				return true
@@ -45,7 +49,7 @@ func IsContextOverflow(message *AssistantMessage, contextWindow int) bool {
 	}
 
 	// Case 2: Silent overflow
-	if contextWindow > 0 && message.StopReason == StopReasonStop {
+	if contextWindow > 0 && message.StopReason == ai.StopReasonStop {
 		inputTokens := message.Usage.Input + message.Usage.CacheRead
 		if inputTokens > contextWindow {
 			return true

@@ -1,4 +1,4 @@
-package ai
+package ratelimit
 
 import (
 	"math"
@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // RateLimitInfo describes a detected rate-limit condition.
@@ -105,8 +107,8 @@ func ExtractRetryDelayFromText(text string) time.Duration {
 //
 // It returns RateLimitInfo with IsRateLimit=false for nil messages, non-error
 // stop reasons, or error messages that do not match any rate-limit pattern.
-func DetectRateLimit(msg *AssistantMessage) RateLimitInfo {
-	if msg == nil || msg.StopReason != StopReasonError {
+func DetectRateLimit(msg *ai.AssistantMessage) RateLimitInfo {
+	if msg == nil || msg.StopReason != ai.StopReasonError {
 		return RateLimitInfo{}
 	}
 	text := msg.ErrorMessage

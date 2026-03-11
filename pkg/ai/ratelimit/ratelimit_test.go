@@ -1,16 +1,18 @@
-package ai
+package ratelimit
 
 import (
 	"testing"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // --- helpers ---
 
-func makeErrMsg(text string) *AssistantMessage {
-	return &AssistantMessage{
-		Role:         RoleAssistant,
-		StopReason:   StopReasonError,
+func makeErrMsg(text string) *ai.AssistantMessage {
+	return &ai.AssistantMessage{
+		Role:         ai.RoleAssistant,
+		StopReason:   ai.StopReasonError,
 		ErrorMessage: text,
 	}
 }
@@ -190,14 +192,14 @@ func TestDetectRateLimit_NilMessage(t *testing.T) {
 }
 
 func TestDetectRateLimit_NonErrorStopReason(t *testing.T) {
-	msg := &AssistantMessage{
-		Role:         RoleAssistant,
-		StopReason:   StopReasonStop,
+	msg := &ai.AssistantMessage{
+		Role:         ai.RoleAssistant,
+		StopReason:   ai.StopReasonStop,
 		ErrorMessage: "rate limit exceeded",
 	}
 	info := DetectRateLimit(msg)
 	if info.IsRateLimit {
-		t.Error("DetectRateLimit with StopReasonStop should return IsRateLimit=false")
+		t.Error("DetectRateLimit with ai.StopReasonStop should return IsRateLimit=false")
 	}
 }
 
@@ -320,9 +322,9 @@ func TestDetectRateLimit_MessagePreserved(t *testing.T) {
 }
 
 func TestDetectRateLimit_AbortedStopReason(t *testing.T) {
-	msg := &AssistantMessage{
-		Role:         RoleAssistant,
-		StopReason:   StopReasonAborted,
+	msg := &ai.AssistantMessage{
+		Role:         ai.RoleAssistant,
+		StopReason:   ai.StopReasonAborted,
 		ErrorMessage: "rate limit exceeded",
 	}
 	info := DetectRateLimit(msg)
@@ -332,9 +334,9 @@ func TestDetectRateLimit_AbortedStopReason(t *testing.T) {
 }
 
 func TestDetectRateLimit_ToolUseStopReason(t *testing.T) {
-	msg := &AssistantMessage{
-		Role:         RoleAssistant,
-		StopReason:   StopReasonToolUse,
+	msg := &ai.AssistantMessage{
+		Role:         ai.RoleAssistant,
+		StopReason:   ai.StopReasonToolUse,
 		ErrorMessage: "rate limit exceeded",
 	}
 	info := DetectRateLimit(msg)

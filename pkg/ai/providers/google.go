@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -115,7 +116,7 @@ func streamGoogleHTTP(
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		return fmt.Errorf("no API key for provider: %s", model.Provider)
@@ -473,7 +474,7 @@ func StreamSimpleGoogle(ctx context.Context, model *ai.Model, prompt ai.Context,
 		apiKey = options.ApiKey
 	}
 	if apiKey == "" {
-		apiKey = ai.GetEnvApiKey(model.Provider)
+		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
 		return errorStreamProvider(model, fmt.Sprintf("no API key for provider: %s", model.Provider))

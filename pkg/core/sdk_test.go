@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/config"
 )
@@ -163,7 +163,7 @@ func TestCreateAgentSession_WithSettingsManager(t *testing.T) {
 func TestCreateAgentSession_ThinkingLevelDefaults(t *testing.T) {
 	// Isolate from any real API keys in the environment so no model is picked
 	// as available; without a model the thinking level must be "off".
-	for _, key := range ai.KnownApiKeyEnvVars() {
+	for _, key := range envkeys.KnownApiKeyEnvVars() {
 		t.Setenv(key, "")
 	}
 	cwd := t.TempDir()

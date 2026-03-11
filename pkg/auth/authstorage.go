@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/oauth"
 )
 
@@ -334,7 +334,7 @@ func (s *AuthStorage) HasAuth(provider string) bool {
 	if _, ok := s.data[provider]; ok {
 		return true
 	}
-	if ai.GetEnvApiKey(provider) != "" {
+	if envkeys.GetEnvApiKey(provider) != "" {
 		return true
 	}
 	if s.fallbackResolver != nil && s.fallbackResolver(provider) != "" {
@@ -399,7 +399,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 	s.mu.RUnlock()
 
 	// Environment variable
-	if key := ai.GetEnvApiKey(provider); key != "" {
+	if key := envkeys.GetEnvApiKey(provider); key != "" {
 		return key
 	}
 

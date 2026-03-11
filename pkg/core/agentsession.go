@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/overflow"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
@@ -739,7 +740,7 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 	}
 
 	// Case 1: Overflow — LLM returned context overflow error
-	if sameModel && !errorIsFromBeforeCompaction && ai.IsContextOverflow(assistantMessage, contextWindow) {
+	if sameModel && !errorIsFromBeforeCompaction && overflow.IsContextOverflow(assistantMessage, contextWindow) {
 		// Respect the Enabled setting even for overflow-triggered compaction.
 		if !s.compactionRunner.IsEnabled() {
 			return

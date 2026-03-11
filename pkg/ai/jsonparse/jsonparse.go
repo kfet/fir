@@ -1,6 +1,6 @@
 // Ported from: packages/ai/src/utils/json-parse.ts
 // Upstream hash: 1caadb2e
-package ai
+package jsonparse
 
 import (
 	"encoding/json"
