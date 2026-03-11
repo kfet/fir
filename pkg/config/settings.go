@@ -64,7 +64,6 @@ type MarkdownSettings struct {
 
 // Settings is the full settings schema.
 type Settings struct {
-	LastChangelogVersion  string                   `json:"lastChangelogVersion,omitempty"`
 	DefaultProvider       string                   `json:"defaultProvider,omitempty"`
 	DefaultModel          string                   `json:"defaultModel,omitempty"`
 	DefaultThinkingLevel  string                   `json:"defaultThinkingLevel,omitempty"`
@@ -106,7 +105,6 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	r := base
 
 	// Simple string fields: override wins if non-empty
-	mergeStr(&r.LastChangelogVersion, overrides.LastChangelogVersion)
 	mergeStr(&r.DefaultProvider, overrides.DefaultProvider)
 	mergeStr(&r.DefaultModel, overrides.DefaultModel)
 	mergeStr(&r.DefaultThinkingLevel, overrides.DefaultThinkingLevel)
