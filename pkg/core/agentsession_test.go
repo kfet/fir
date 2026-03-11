@@ -2874,6 +2874,86 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	}
 }
 
+func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := sessionpkg.InMemorySessionManager()
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		SettingsManager: settingsManager,
+	})
+	_ = rl.Reload()
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Name:          "Test Model",
+		Api:           "test-api",
+		Provider:      "test-provider",
+		BaseURL:       "http://localhost",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	}
+
+	makeStream := func() *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			msg := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
+				Api:        model.Api,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				Usage:      ai.Usage{Input: 10, Output: 5},
+				StopReason: ai.StopReasonStop,
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: msg})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			SystemPrompt:  "test",
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return makeStream()
+		},
+		GetApiKey: func(provider string) (string, error) {
+			return "test-key", nil
+		},
+	})
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionManager:  sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		Cwd:             tmpDir,
+	})
+	defer session.Close()
+
+	// Set a fully-completed plan
+	session.UpdatePlan("Done", []agent.PlanEntry{
+		{Content: "Step 1", Status: agent.PlanEntryStatusCompleted, Priority: agent.PlanEntryPriorityHigh},
+		{Content: "Step 2", Status: agent.PlanEntryStatusCompleted, Priority: agent.PlanEntryPriorityMedium},
+	}, nil)
+
+	if err := session.Prompt("next task"); err != nil {
+		t.Fatalf("Prompt returned error: %v", err)
+	}
+
+	if len(session.PlanEntries()) != 0 {
+		t.Error("completed plan should be cleared at the start of the next turn")
+	}
+}
+
 func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()

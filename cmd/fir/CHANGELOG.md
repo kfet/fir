@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Clear fully-completed plans immediately at the start of the next turn instead of waiting until the turn finishes
 - Fix data race in `Editor.SetFocused` — acquire mutex to prevent concurrent read from `Render`
 
 ## [0.19.3] - 2026-03-09

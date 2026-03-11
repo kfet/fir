@@ -314,6 +314,19 @@ func (s *AgentSession) PlanEntries() []agent.PlanEntry {
 	return out
 }
 
+// allPlanEntriesCompleted reports whether every entry has status "completed".
+func allPlanEntriesCompleted(entries []agent.PlanEntry) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		if e.Status != agent.PlanEntryStatusCompleted {
+			return false
+		}
+	}
+	return true
+}
+
 // PlanTitle returns the current plan title.
 func (s *AgentSession) PlanTitle() string {
 	s.mu.RLock()
@@ -482,11 +495,19 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		return fmt.Errorf("no model selected. Use /login or set an API key environment variable")
 	}
 
-	// If a plan was left over from a previous turn, remember to clear it
-	// once this turn finishes so stale plans don't persist indefinitely.
+	// If a fully-completed plan was left over from a previous turn, clear it
+	// immediately — there's no value showing a stale "done" plan. For
+	// in-progress plans, remember to clear after this turn finishes so the
+	// model can still reference it during the turn.
 	preTurnPlan := s.PlanEntries()
 	hadPlanBeforeTurn := len(preTurnPlan) > 0
 	planVersionBefore := s.planVersionNum()
+
+	if hadPlanBeforeTurn && allPlanEntriesCompleted(preTurnPlan) {
+		s.UpdatePlan("", nil, nil)
+		hadPlanBeforeTurn = false
+		planVersionBefore = s.planVersionNum()
+	}
 
 	// Build system prompt before each turn
 	s.buildSystemPrompt()
