@@ -18,12 +18,12 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/core"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // ============================================================================
@@ -145,9 +145,9 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 	}
 
 	// Regular prompt
-	var opts *core.PromptOptions
+	var opts *session.PromptOptions
 	if len(images) > 0 {
-		opts = &core.PromptOptions{Images: images}
+		opts = &session.PromptOptions{Images: images}
 	}
 	if err := entry.session.Prompt(text, opts); err != nil {
 		errMsg := err.Error()
@@ -224,8 +224,8 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 	}
 
 	agentDir := resolveAgentDir()
-	sessionDir := session.DefaultSessionDir(agentDir, cwd)
-	sessions, err := session.ListSessions(cwd, sessionDir)
+	sessionDir := store.DefaultSessionDir(agentDir, cwd)
+	sessions, err := store.ListSessions(cwd, sessionDir)
 	if err != nil {
 		return ListSessionsResponse{}, err
 	}
@@ -261,7 +261,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 
 	// Validate session path is within the sessions directory to prevent traversal.
 	agentDir := resolveAgentDir()
-	sessionsDir := session.SessionsDir(agentDir)
+	sessionsDir := store.SessionsDir(agentDir)
 	sessionPath, err := filepath.Abs(params.SessionId)
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("invalid session path %q: %w", params.SessionId, err)
@@ -466,7 +466,7 @@ func toolResultToContent(content []ai.ToolResultContent) []any {
 // Event handling
 // ============================================================================
 
-func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event core.AgentSessionEvent) {
+func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event session.AgentSessionEvent) {
 	// Handle session-level events first (no AgentEvent required).
 	switch event.Type {
 	case "plan_update":
@@ -587,8 +587,8 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 
 	case "resume":
 		if args == "" {
-			sessionDir := session.DefaultSessionDir(entry.agentDir, entry.cwd)
-			sessions, _ := session.ListSessions(entry.cwd, sessionDir)
+			sessionDir := store.DefaultSessionDir(entry.agentDir, entry.cwd)
+			sessions, _ := store.ListSessions(entry.cwd, sessionDir)
 			if len(sessions) > 10 {
 				sessions = sessions[:10]
 			}
@@ -613,13 +613,13 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		return true
 
 	case "continue":
-		sessionDir := session.DefaultSessionDir(entry.agentDir, entry.cwd)
-		sessions, _ := session.ListSessions(entry.cwd, sessionDir)
+		sessionDir := store.DefaultSessionDir(entry.agentDir, entry.cwd)
+		sessions, _ := store.ListSessions(entry.cwd, sessionDir)
 		if len(sessions) == 0 {
 			pa.sendAgentMessage(sessionID, "No sessions available to continue.")
 			return true
 		}
-		sessionsDir := session.SessionsDir(entry.agentDir)
+		sessionsDir := store.SessionsDir(entry.agentDir)
 		if !IsPathWithinDirectory(sessions[0].Path, sessionsDir) {
 			pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
 			return true
@@ -675,7 +675,7 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		return true
 
 	case "changelog":
-		entries := core.GetChangelogEntries()
+		entries := session.GetChangelogEntries()
 		if len(entries) == 0 {
 			pa.sendAgentMessage(sessionID, "No changelog entries found.")
 		} else {
@@ -802,7 +802,7 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		sessionPath, _ = filepath.Abs(args)
 	}
 
-	sessionsDir := session.SessionsDir(entry.agentDir)
+	sessionsDir := store.SessionsDir(entry.agentDir)
 	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
 		pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
 		return

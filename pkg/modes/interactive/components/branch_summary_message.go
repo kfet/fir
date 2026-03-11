@@ -3,8 +3,8 @@
 package components
 
 import (
-	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
@@ -12,12 +12,12 @@ import (
 type BranchSummaryMessageComponent struct {
 	*tuicomp.Box
 	expanded    bool
-	message     *fmsg.BranchSummaryMessage
+	message     *store.BranchSummaryMessage
 	markdownThm tuicomp.MarkdownTheme
 }
 
 // NewBranchSummaryMessageComponent creates a new BranchSummaryMessageComponent.
-func NewBranchSummaryMessageComponent(message *fmsg.BranchSummaryMessage, mdTheme *tuicomp.MarkdownTheme) *BranchSummaryMessageComponent {
+func NewBranchSummaryMessageComponent(message *store.BranchSummaryMessage, mdTheme *tuicomp.MarkdownTheme) *BranchSummaryMessageComponent {
 	if mdTheme == nil {
 		mt := theme.GetMarkdownTheme()
 		mdTheme = &mt

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
@@ -18,11 +18,11 @@ func stripAnsi(s string) string {
 }
 
 // makeNSessions returns n SessionListInfo values for testing.
-func makeNSessions(n int) []session.SessionListInfo {
+func makeNSessions(n int) []store.SessionListInfo {
 	now := time.Now()
-	s := make([]session.SessionListInfo, n)
+	s := make([]store.SessionListInfo, n)
 	for i := range s {
-		s[i] = session.SessionListInfo{
+		s[i] = store.SessionListInfo{
 			Path:         fmt.Sprintf("/sessions/s%03d.jsonl", i),
 			ID:           fmt.Sprintf("s%03d", i),
 			Cwd:          "/home/user/project",
@@ -268,7 +268,7 @@ func TestSessionSelector_ScopeToggleHeightStable(t *testing.T) {
 
 	comp := NewSessionSelectorComponent(
 		currentSessions, SessionScopeCurrent,
-		func() ([]session.SessionListInfo, error) { return allSessions, nil },
+		func() ([]store.SessionListInfo, error) { return allSessions, nil },
 		func(path string) {}, func() {},
 	)
 

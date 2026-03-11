@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
@@ -74,16 +74,16 @@ func normalizeWhitespaceLower(text string) string {
 	return strings.TrimRight(b.String(), " ")
 }
 
-func getSessionSearchText(session *session.SessionListInfo) string {
+func getSessionSearchText(session *store.SessionListInfo) string {
 	return session.ID + " " + session.Name + " " + session.FirstMessage + " " + session.Cwd
 }
 
 // HasSessionName returns whether a session has a user-defined name.
-func HasSessionName(session *session.SessionListInfo) bool {
+func HasSessionName(session *store.SessionListInfo) bool {
 	return strings.TrimSpace(session.Name) != ""
 }
 
-func matchesNameFilter(session *session.SessionListInfo, filter NameFilter) bool {
+func matchesNameFilter(session *store.SessionListInfo, filter NameFilter) bool {
 	if filter == NameFilterAll {
 		return true
 	}
@@ -164,7 +164,7 @@ func ParseSearchQuery(query string) ParsedSearchQuery {
 }
 
 // MatchSession checks if a session matches a parsed search query.
-func MatchSession(session *session.SessionListInfo, parsed ParsedSearchQuery) MatchResult {
+func MatchSession(session *store.SessionListInfo, parsed ParsedSearchQuery) MatchResult {
 	text := getSessionSearchText(session)
 
 	if parsed.Mode == "regex" {
@@ -223,13 +223,13 @@ func MatchSession(session *session.SessionListInfo, parsed ParsedSearchQuery) Ma
 
 // FilterAndSortSessions filters and sorts sessions by query and options.
 func FilterAndSortSessions(
-	sessions []*session.SessionListInfo,
+	sessions []*store.SessionListInfo,
 	query string,
 	sortMode SortMode,
 	nameFilter NameFilter,
-) []*session.SessionListInfo {
+) []*store.SessionListInfo {
 	// Apply name filter
-	var nameFiltered []*session.SessionListInfo
+	var nameFiltered []*store.SessionListInfo
 	if nameFilter == NameFilterAll {
 		nameFiltered = sessions
 	} else {
@@ -252,7 +252,7 @@ func FilterAndSortSessions(
 
 	// Recent mode: filter only, keep incoming order
 	if sortMode == SortRecent {
-		var filtered []*session.SessionListInfo
+		var filtered []*store.SessionListInfo
 		for _, s := range nameFiltered {
 			if res := MatchSession(s, parsed); res.Matches {
 				filtered = append(filtered, s)
@@ -263,7 +263,7 @@ func FilterAndSortSessions(
 
 	// Relevance mode: sort by score, tie-break by modified desc
 	type scored struct {
-		session *session.SessionListInfo
+		session *store.SessionListInfo
 		score   float64
 	}
 	var results []scored
@@ -282,7 +282,7 @@ func FilterAndSortSessions(
 		return results[i].session.Modified.After(results[j].session.Modified)
 	})
 
-	out := make([]*session.SessionListInfo, len(results))
+	out := make([]*store.SessionListInfo, len(results))
 	for i, r := range results {
 		out[i] = r.session
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // TestSessionList_NewlineInName verifies that a session whose Name or
@@ -20,9 +20,9 @@ import (
 func TestSessionList_NewlineInName(t *testing.T) {
 	now := time.Now()
 
-	sessions := make([]session.SessionListInfo, 20)
+	sessions := make([]store.SessionListInfo, 20)
 	for i := range sessions {
-		sessions[i] = session.SessionListInfo{
+		sessions[i] = store.SessionListInfo{
 			Path:     fmt.Sprintf("/s/%04d.jsonl", i),
 			ID:       fmt.Sprintf("s%04d", i),
 			Cwd:      "/home/user/project",

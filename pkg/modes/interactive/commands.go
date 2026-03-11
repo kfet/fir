@@ -19,13 +19,13 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/modes/interactive/components"
+	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
-	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/modes/interactive/components"
-	"github.com/kfet/fir/pkg/update"
+	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/fir/pkg/update"
 )
 
 // ============================================================================
@@ -250,7 +250,7 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 		label := m.compactionLoaderLabel(info, fmt.Sprintf("%s... %d tokens written (Esc to cancel)", phase, tokensWritten))
 		loader.SetMessage(label)
 	}
-	ctx = core.WithCompactionProgress(ctx, progressFn)
+	ctx = session.WithCompactionProgress(ctx, progressFn)
 
 	result, err := m.session.RunCompaction(ctx, customInstructions)
 	loader.Stop()
@@ -293,7 +293,7 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 
 // compactionLoaderLabel builds the loader message string shown during compaction.
 // info may be nil (no stats known yet). suffix is appended after the stats.
-func (m *InteractiveMode) compactionLoaderLabel(info *core.CompactionInfo, suffix string) string {
+func (m *InteractiveMode) compactionLoaderLabel(info *session.CompactionInfo, suffix string) string {
 	if info == nil {
 		if suffix != "" {
 			return "Compacting context... " + suffix
@@ -488,7 +488,7 @@ func (m *InteractiveMode) handleClipboardImagePaste() {
 		return // no image on clipboard, silently ignore
 	}
 
-	ext := core.ExtensionForImageMimeType(img.MimeType)
+	ext := session.ExtensionForImageMimeType(img.MimeType)
 	if ext == "" {
 		ext = "png"
 	}
@@ -600,7 +600,7 @@ func (m *InteractiveMode) handleClearCommand(newName string) {
 // ============================================================================
 
 // extractEntryText extracts display text from a session entry.
-func extractEntryText(entry *session.SessionEntry) string {
+func extractEntryText(entry *store.SessionEntry) string {
 	if entry.Type != "message" || len(entry.RawMessage) == 0 {
 		return entry.Type
 	}
@@ -725,7 +725,7 @@ func (m *InteractiveMode) performShare() {
 		m.showWarning("Gist created but no URL returned")
 		return
 	}
-	link := core.Hyperlink(gistURL, gistURL)
+	link := session.Hyperlink(gistURL, gistURL)
 	m.showStatus(fmt.Sprintf("Session shared: %s", link))
 }
 
@@ -826,7 +826,7 @@ func formatSortedSection(t *itheme.Theme, title, prefix string, items map[string
 }
 
 func (m *InteractiveMode) handleChangelogCommand() {
-	entries := core.GetChangelogEntries()
+	entries := session.GetChangelogEntries()
 	if len(entries) == 0 {
 		m.showMessage("No changelog entries found.")
 		return
@@ -852,7 +852,7 @@ func (m *InteractiveMode) handleChangelogCommand() {
 }
 
 // formatChangelogEntry renders a single changelog entry with theme colors.
-func formatChangelogEntry(t *itheme.Theme, entry core.ChangelogEntry) []string {
+func formatChangelogEntry(t *itheme.Theme, entry session.ChangelogEntry) []string {
 	var out []string
 	for _, line := range strings.Split(entry.Content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -1142,10 +1142,10 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 
 	// Save queue and pending input to survive the exec.
 	queueTexts := m.session.PeekFollowUpQueue()
-	sc := &session.ReexecSidecar{
+	sc := &store.ReexecSidecar{
 		QueueMessages: queueTexts,
 	}
-	if err := session.WriteReexecSidecar(sessionFile, sc); err != nil {
+	if err := store.WriteReexecSidecar(sessionFile, sc); err != nil {
 		// Non-fatal, but warn the user.
 		m.showWarning(fmt.Sprintf("Failed to save reexec state: %v", err))
 	}

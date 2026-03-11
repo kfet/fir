@@ -12,22 +12,22 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/tui"
-	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/core/compaction"
-	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/fir/pkg/compaction"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/models"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/update"
 )
 
@@ -35,7 +35,7 @@ import (
 type sessionSetup struct {
 	cwd             string
 	agentDir        string
-	result          *core.CreateAgentSessionResult
+	result          *session.CreateAgentSessionResult
 	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
 	usageTracker    *Tracker
@@ -128,7 +128,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	usageTracker := New(DefaultPath(agentDir))
 
 	// Build session options
-	sessionOpts := core.CreateAgentSessionOptions{
+	sessionOpts := session.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
 		AuthStorage:     authStorage,
@@ -153,7 +153,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		sessionOpts.ThinkingLevel = string(args.Thinking)
 	}
 
-	result, err := core.CreateAgentSession(context.Background(), sessionOpts)
+	result, err := session.CreateAgentSession(context.Background(), sessionOpts)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
@@ -501,22 +501,22 @@ func runExport(args *Args) error {
 }
 
 // createSessionManager creates the appropriate session manager based on CLI args.
-func createSessionManager(args *Args, cwd, agentDir string) *session.SessionManager {
+func createSessionManager(args *Args, cwd, agentDir string) *store.SessionManager {
 	sessionDir := args.SessionDir
 	if sessionDir == "" {
-		sessionDir = session.DefaultSessionDir(agentDir, cwd)
+		sessionDir = store.DefaultSessionDir(agentDir, cwd)
 	}
 
 	if args.NoSession {
-		return session.InMemorySessionManager()
+		return store.InMemorySessionManager()
 	}
 	if args.Session != "" {
-		return session.OpenSessionManager(filepath.Join(sessionDir, args.Session))
+		return store.OpenSessionManager(filepath.Join(sessionDir, args.Session))
 	}
 	if args.Continue {
-		return session.ContinueRecentSession(cwd, sessionDir)
+		return store.ContinueRecentSession(cwd, sessionDir)
 	}
-	return session.NewSessionManager(cwd, sessionDir)
+	return store.NewSessionManager(cwd, sessionDir)
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.
@@ -524,7 +524,7 @@ func resolveAgentDir() string {
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		return dir
 	}
-	return core.DefaultAgentDir()
+	return session.DefaultAgentDir()
 }
 
 // drainUpdateNotice non-blockingly reads a notice from noticeCh and prints

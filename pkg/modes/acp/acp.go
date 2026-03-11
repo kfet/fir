@@ -17,15 +17,15 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/compaction"
 	"github.com/kfet/fir/pkg/config"
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/core/compaction"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // version is set via SetVersion before RunAcpMode.
@@ -39,12 +39,12 @@ func resolveAgentDir() string {
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		return dir
 	}
-	return core.DefaultAgentDir()
+	return session.DefaultAgentDir()
 }
 
 // firSession holds per-session state.
 type firSession struct {
-	session         *core.AgentSession
+	session         *session.AgentSession
 	modelRegistry   *models.ModelRegistry
 	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
@@ -55,7 +55,7 @@ type firSession struct {
 	termState       *terminalState
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
-	lastResumeList  []session.SessionListInfo
+	lastResumeList  []store.SessionListInfo
 	configAccessor  thinkingAccessor // nil → use session (for testing)
 	mcpManager      *mcp.Manager     // nil if no MCP servers configured
 }
@@ -163,7 +163,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	}
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
-	sessionManager := session.NewSessionManager(cwd, session.DefaultSessionDir(agentDir, cwd))
+	sessionManager := store.NewSessionManager(cwd, store.DefaultSessionDir(agentDir, cwd))
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:                           cwd,
@@ -193,9 +193,9 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		toolList = pa.createAcpTools(cwd, sessionID, useClientTerminal, useClientFs, shellCommandPrefix)
 	} else {
 		if shellCommandPrefix != "" {
-			toolList = core.DefaultCodingToolsWithPrefix(cwd, shellCommandPrefix)
+			toolList = session.DefaultCodingToolsWithPrefix(cwd, shellCommandPrefix)
 		} else {
-			toolList = core.DefaultCodingTools(cwd)
+			toolList = session.DefaultCodingTools(cwd)
 		}
 	}
 
@@ -210,7 +210,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		toolList = append(toolList, mcpTools...)
 	}
 
-	result, err := core.CreateAgentSession(ctx, core.CreateAgentSessionOptions{
+	result, err := session.CreateAgentSession(ctx, session.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
 		AuthStorage:     authStorage,
@@ -239,7 +239,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		mcpManager:      mcpMgr,
 	}
 
-	unsub := result.Session.Subscribe(func(event core.AgentSessionEvent) {
+	unsub := result.Session.Subscribe(func(event session.AgentSessionEvent) {
 		pa.handleEvent(sessionID, entry, event)
 	})
 	entry.unsubscribe = unsub

@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // mockStreamFn returns a StreamFn that produces a canned response.
@@ -22,12 +22,12 @@ func mockStreamFn(text string) agent.StreamFn {
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
 			msg := &ai.AssistantMessage{
-				Role:     ai.RoleAssistant,
-				Content:  []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: text}}},
-				Api:      model.Api,
-				Provider: model.Provider,
-				Model:    model.ID,
-				Usage:    ai.Usage{Input: 10, Output: 5},
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: text}}},
+				Api:        model.Api,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				Usage:      ai.Usage{Input: 10, Output: 5},
 				StopReason: ai.StopReasonStop,
 				Timestamp:  time.Now().UnixMilli(),
 			}
@@ -67,7 +67,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := session.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -76,7 +76,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 	})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sessionMgr,
 		SettingsManager: settingsMgr,
@@ -147,7 +147,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := session.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -156,7 +156,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 	})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sessionMgr,
 		SettingsManager: settingsMgr,
@@ -218,7 +218,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := session.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -227,7 +227,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 	})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sessionMgr,
 		SettingsManager: settingsMgr,
@@ -297,7 +297,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := session.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionManager()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -306,7 +306,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 	})
 	_ = rl.Reload()
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sessionMgr,
 		SettingsManager: settingsMgr,

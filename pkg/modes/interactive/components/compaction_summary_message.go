@@ -5,8 +5,8 @@ package components
 import (
 	"fmt"
 
-	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
@@ -14,12 +14,12 @@ import (
 type CompactionSummaryMessageComponent struct {
 	*tuicomp.Box
 	expanded    bool
-	message     *fmsg.CompactionSummaryMessage
+	message     *store.CompactionSummaryMessage
 	markdownThm tuicomp.MarkdownTheme
 }
 
 // NewCompactionSummaryMessageComponent creates a new CompactionSummaryMessageComponent.
-func NewCompactionSummaryMessageComponent(message *fmsg.CompactionSummaryMessage, mdTheme *tuicomp.MarkdownTheme) *CompactionSummaryMessageComponent {
+func NewCompactionSummaryMessageComponent(message *store.CompactionSummaryMessage, mdTheme *tuicomp.MarkdownTheme) *CompactionSummaryMessageComponent {
 	if mdTheme == nil {
 		mt := theme.GetMarkdownTheme()
 		mdTheme = &mt

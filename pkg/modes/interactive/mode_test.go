@@ -9,17 +9,17 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
@@ -129,7 +129,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := session.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := store.NewSessionManager(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -144,11 +144,11 @@ func newTestModeWithSession(t *testing.T) *testMode {
 			ThinkingLevel: "off",
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return session.ConvertToLLM(msgs)
+			return store.ConvertToLLM(msgs)
 		},
 	})
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
@@ -164,7 +164,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 // newTestModeInternal creates a minimal interactive mode with MockTerminal.
 // If session is non-nil it is set BEFORE ui.Start() to avoid a data race
 // between the test goroutine and the TUI render goroutine.
-func newTestModeInternal(t *testing.T, session *core.AgentSession) *testMode {
+func newTestModeInternal(t *testing.T, session *session.AgentSession) *testMode {
 	t.Helper()
 	term := tui.NewMockTerminal(80, 24)
 	ui := tui.NewTUI(term, false)
@@ -1162,7 +1162,7 @@ func TestInteractiveMode_StatusClearedOnSubmit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExtractEntryText_NonMessage(t *testing.T) {
-	entry := &session.SessionEntry{Type: "compaction"}
+	entry := &store.SessionEntry{Type: "compaction"}
 	got := extractEntryText(entry)
 	if got != "compaction" {
 		t.Errorf("expected 'compaction', got %q", got)
@@ -1171,7 +1171,7 @@ func TestExtractEntryText_NonMessage(t *testing.T) {
 
 func TestExtractEntryText_StringContent(t *testing.T) {
 	raw := []byte(`{"role":"user","content":"hello world"}`)
-	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &store.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if got != "hello world" {
 		t.Errorf("expected 'hello world', got %q", got)
@@ -1180,7 +1180,7 @@ func TestExtractEntryText_StringContent(t *testing.T) {
 
 func TestExtractEntryText_StringContentNewlines(t *testing.T) {
 	raw := []byte(`{"role":"user","content":"line1\nline2"}`)
-	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &store.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if !strings.Contains(got, "line1 line2") {
 		t.Errorf("expected newlines replaced with spaces, got %q", got)
@@ -1189,7 +1189,7 @@ func TestExtractEntryText_StringContentNewlines(t *testing.T) {
 
 func TestExtractEntryText_ArrayContent(t *testing.T) {
 	raw := []byte(`{"role":"assistant","content":[{"type":"text","text":"response text"}]}`)
-	entry := &session.SessionEntry{Type: "message", RawMessage: raw}
+	entry := &store.SessionEntry{Type: "message", RawMessage: raw}
 	got := extractEntryText(entry)
 	if got != "response text" {
 		t.Errorf("expected 'response text', got %q", got)
@@ -1197,7 +1197,7 @@ func TestExtractEntryText_ArrayContent(t *testing.T) {
 }
 
 func TestExtractEntryText_InvalidJSON(t *testing.T) {
-	entry := &session.SessionEntry{Type: "message", RawMessage: []byte(`{invalid`)}
+	entry := &store.SessionEntry{Type: "message", RawMessage: []byte(`{invalid`)}
 	got := extractEntryText(entry)
 	if got != "message" {
 		t.Errorf("expected 'message', got %q", got)
@@ -1205,7 +1205,7 @@ func TestExtractEntryText_InvalidJSON(t *testing.T) {
 }
 
 func TestExtractEntryText_EmptyRawMessage(t *testing.T) {
-	entry := &session.SessionEntry{Type: "message"}
+	entry := &store.SessionEntry{Type: "message"}
 	got := extractEntryText(entry)
 	if got != "message" {
 		t.Errorf("expected 'message', got %q", got)
@@ -1338,7 +1338,7 @@ func TestCompactionLoaderLabel(t *testing.T) {
 	}
 
 	// non-nil info, no suffix
-	info := &core.CompactionInfo{MessagesToSummarize: 42, TokensBefore: 95000}
+	info := &session.CompactionInfo{MessagesToSummarize: 42, TokensBefore: 95000}
 	label = m.compactionLoaderLabel(info, "")
 	if !strings.Contains(label, "42") {
 		t.Errorf("expected message count in label: %q", label)
@@ -1648,7 +1648,7 @@ func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
 	initial := tm.editorText()
 
 	// Override the clipboard reader to return nil (no image available).
-	tm.mode.clipboardReader = func() *core.ClipboardImage { return nil }
+	tm.mode.clipboardReader = func() *session.ClipboardImage { return nil }
 
 	tm.mode.handleClipboardImagePaste()
 	tm.waitRender()
@@ -1663,8 +1663,8 @@ func TestHandleClipboardImagePaste_WithImage(t *testing.T) {
 
 	// Override the clipboard reader to return a fake PNG image.
 	fakeBytes := []byte("\x89PNG\r\n\x1a\n" + string(make([]byte, 100)))
-	tm.mode.clipboardReader = func() *core.ClipboardImage {
-		return &core.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
+	tm.mode.clipboardReader = func() *session.ClipboardImage {
+		return &session.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
 	}
 
 	tm.mode.handleClipboardImagePaste()
@@ -1878,7 +1878,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := session.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := store.NewSessionManager(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -1904,11 +1904,11 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 			Messages:      []agent.AgentMessage{userMsg, assistantMsg},
 		},
 		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
-			return session.ConvertToLLM(msgs)
+			return store.ConvertToLLM(msgs)
 		},
 	})
 
-	session := core.NewAgentSession(core.AgentSessionOptions{
+	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sm,
 		SettingsManager: settingsManager,

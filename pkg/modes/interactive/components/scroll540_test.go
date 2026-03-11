@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
 // make540Sessions creates 540 sessions that match the user-reported failure scenario.
 // Some sessions are children of others to exercise the tree prefix rendering path.
-func make540Sessions() []session.SessionListInfo {
+func make540Sessions() []store.SessionListInfo {
 	now := time.Now()
-	s := make([]session.SessionListInfo, 540)
+	s := make([]store.SessionListInfo, 540)
 	for i := range s {
-		s[i] = session.SessionListInfo{
+		s[i] = store.SessionListInfo{
 			Path:         fmt.Sprintf("/sessions/s%04d.jsonl", i),
 			ID:           fmt.Sprintf("s%04d", i),
 			Cwd:          "/home/user/project",
@@ -182,7 +182,7 @@ func TestSessionSelector_540_NoDifferentialFullRedraws(t *testing.T) {
 	ui := tui.NewTUI(term)
 	comp := NewSessionSelectorComponent(
 		sessions, SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(path string) {}, func() {},
 	)
 	ui.AddChild(comp)

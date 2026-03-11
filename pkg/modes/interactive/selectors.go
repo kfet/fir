@@ -10,11 +10,11 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -210,7 +210,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 			},
 			OnServerToolsChange: func(names []string) {
 				m.settings.SetServerTools(names)
-				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
+				m.session.Agent.SetServerTools(session.ResolveServerTools(names))
 			},
 			OnCancel: func() { done() },
 			OnMaxContextTokensChange: func(tokens int) {
@@ -247,12 +247,12 @@ func (m *InteractiveMode) showSessionSelector() {
 			cwd = m.session.SessionManager.GetCwd()
 			sessionDir = m.session.SessionManager.GetSessionDir()
 		}
-		sessions, _ := session.ListSessions(cwd, sessionDir)
+		sessions, _ := store.ListSessions(cwd, sessionDir)
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
-			func() ([]session.SessionListInfo, error) {
-				return session.ListAllSessions(core.DefaultAgentDir(), core.PiAgentDir())
+			func() ([]store.SessionListInfo, error) {
+				return store.ListAllSessions(session.DefaultAgentDir(), session.PiAgentDir())
 			},
 			func(sessionPath string) {
 				done()
@@ -460,10 +460,10 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
 			// Try to auto-open the browser.
-			browserOpened := core.OpenBrowser(info.URL) == nil
+			browserOpened := session.OpenBrowser(info.URL) == nil
 
 			// Show a clickable OSC 8 hyperlink so the URL stays on one line.
-			link := core.Hyperlink(info.URL, info.URL)
+			link := session.Hyperlink(info.URL, info.URL)
 			var msg string
 			if browserOpened {
 				msg = fmt.Sprintf("Opening browser… if it doesn't appear, visit:\n%s", link)

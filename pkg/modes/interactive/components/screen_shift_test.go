@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
@@ -158,11 +158,11 @@ func stripAnsiS(s string) string {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-func make540Sessions2() []session.SessionListInfo {
+func make540Sessions2() []store.SessionListInfo {
 	now := time.Now()
-	s := make([]session.SessionListInfo, 540)
+	s := make([]store.SessionListInfo, 540)
 	for i := range s {
-		s[i] = session.SessionListInfo{
+		s[i] = store.SessionListInfo{
 			Path:         fmt.Sprintf("/sessions/s%04d.jsonl", i),
 			ID:           fmt.Sprintf("s%04d", i),
 			Cwd:          "/home/user/project",
@@ -229,7 +229,7 @@ func TestSessionSelector_ScreenShift(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		sessions,
 		components.SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	ui.AddChild(comp)
@@ -307,7 +307,7 @@ func TestSessionSelector_ScreenShift_SmallTerminal(t *testing.T) {
 	comp := components.NewSessionSelectorComponent(
 		sessions,
 		components.SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	ui.AddChild(comp)
@@ -365,9 +365,9 @@ func TestSessionSelector_NewlineInName_ScreenStability(t *testing.T) {
 	const termH = 55 // large enough to show all 20 msgs + 31-line selector
 	now := time.Now()
 
-	sessions := make([]session.SessionListInfo, 200)
+	sessions := make([]store.SessionListInfo, 200)
 	for i := range sessions {
-		sessions[i] = session.SessionListInfo{
+		sessions[i] = store.SessionListInfo{
 			Path:     fmt.Sprintf("/s/%04d.jsonl", i),
 			ID:       fmt.Sprintf("s%04d", i),
 			Cwd:      "/project",
@@ -391,7 +391,7 @@ func TestSessionSelector_NewlineInName_ScreenStability(t *testing.T) {
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	ui.AddChild(comp)
@@ -459,9 +459,9 @@ func TestSessionSelector_UnicodeSeparators_ScreenStability(t *testing.T) {
 	const termH = 55 // large enough to show 20 msgs + 31-line selector
 	now := time.Now()
 
-	sessions := make([]session.SessionListInfo, 200)
+	sessions := make([]store.SessionListInfo, 200)
 	for i := range sessions {
-		sessions[i] = session.SessionListInfo{
+		sessions[i] = store.SessionListInfo{
 			Path:     fmt.Sprintf("/s/%04d.jsonl", i),
 			ID:       fmt.Sprintf("s%04d", i),
 			Cwd:      "/project",
@@ -498,7 +498,7 @@ func TestSessionSelector_UnicodeSeparators_ScreenStability(t *testing.T) {
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	ui.AddChild(comp)
@@ -540,9 +540,9 @@ func TestSessionSelector_CwdWithSeparators_ScreenStability(t *testing.T) {
 	const termH = 55 // large enough to show 20 msgs + 31-line selector
 	now := time.Now()
 
-	sessions := make([]session.SessionListInfo, 200)
+	sessions := make([]store.SessionListInfo, 200)
 	for i := range sessions {
-		sessions[i] = session.SessionListInfo{
+		sessions[i] = store.SessionListInfo{
 			Path:     fmt.Sprintf("/s/%04d.jsonl", i),
 			ID:       fmt.Sprintf("s%04d", i),
 			Cwd:      "/project",
@@ -569,7 +569,7 @@ func TestSessionSelector_CwdWithSeparators_ScreenStability(t *testing.T) {
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,
-		func() ([]session.SessionListInfo, error) { return sessions, nil },
+		func() ([]store.SessionListInfo, error) { return sessions, nil },
 		func(string) {}, func() {},
 	)
 	ui.AddChild(comp)

@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 )
 
 func TestSkillInvocationMessage_Collapsed(t *testing.T) {
-	block := &core.ParsedSkillBlock{
+	block := &session.ParsedSkillBlock{
 		Name:    "test-skill",
 		Content: "skill content here",
 	}
@@ -30,7 +30,7 @@ func TestSkillInvocationMessage_Collapsed(t *testing.T) {
 }
 
 func TestSkillInvocationMessage_Expanded(t *testing.T) {
-	block := &core.ParsedSkillBlock{
+	block := &session.ParsedSkillBlock{
 		Name:    "test-skill",
 		Content: "skill content here",
 	}

@@ -9,22 +9,22 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
-	fmsg "github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
-// SessionBridge implements BridgeAPI directly on top of a core.AgentSession.
+// SessionBridge implements BridgeAPI directly on top of a session.AgentSession.
 // It is the concrete adapter used in production so that external process
 // extensions can call back into the running session without going through
 // the (now removed) Go extension layer.
 type SessionBridge struct {
-	session  *core.AgentSession
+	session  *session.AgentSession
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
-	extTools []string // names of tools registered by extensions
+	extTools []string   // names of tools registered by extensions
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
-func NewSessionBridge(session *core.AgentSession) *SessionBridge {
+func NewSessionBridge(session *session.AgentSession) *SessionBridge {
 	return &SessionBridge{session: session}
 }
 
@@ -53,7 +53,7 @@ func (b *SessionBridge) SendMessage(spec CustomMessageSpec, opts *SendMessageOpt
 	b.session.SessionManager.AppendCustomEntry(spec.CustomType, raw)
 
 	if opts != nil && opts.DeliverAs != "" {
-		cm := &fmsg.CustomMessage{
+		cm := &store.CustomMessage{
 			Role:       "custom",
 			CustomType: spec.CustomType,
 			Content:    spec.Content,

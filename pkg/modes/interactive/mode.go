@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/config"
-	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/extension"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -33,7 +33,7 @@ func SetVersion(v string) { version = v }
 // InteractiveMode manages the interactive TUI session.
 type InteractiveMode struct {
 	// Core dependencies
-	session     *core.AgentSession
+	session     *session.AgentSession
 	keybindings *tui.KeybindingsManager
 	settings    *config.SettingsManager
 
@@ -103,8 +103,8 @@ type InteractiveMode struct {
 	updateCh <-chan string
 
 	// clipboardReader reads an image from the system clipboard.
-	// Defaults to core.ReadClipboardImage; can be replaced in tests.
-	clipboardReader func() *core.ClipboardImage
+	// Defaults to session.ReadClipboardImage; can be replaced in tests.
+	clipboardReader func() *session.ClipboardImage
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -119,7 +119,7 @@ type InteractiveModeOptions struct {
 
 // NewInteractiveMode creates a new interactive mode.
 func NewInteractiveMode(
-	session *core.AgentSession,
+	asession *session.AgentSession,
 	keybindings *tui.KeybindingsManager,
 	settings *config.SettingsManager,
 	opts InteractiveModeOptions,
@@ -142,7 +142,7 @@ func NewInteractiveMode(
 	}
 
 	m := &InteractiveMode{
-		session:            session,
+		session:            asession,
 		keybindings:        keybindings,
 		settings:           settings,
 		autoCompactMode:    autoCompactMode,
@@ -150,7 +150,7 @@ func NewInteractiveMode(
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
-		clipboardReader:    core.ReadClipboardImage,
+		clipboardReader:    session.ReadClipboardImage,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -644,7 +644,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.editor.SetText("")
 		if m.session != nil {
 			go func() {
-				_ = m.session.Prompt(text, &core.PromptOptions{StreamingBehavior: "followUp"})
+				_ = m.session.Prompt(text, &session.PromptOptions{StreamingBehavior: "followUp"})
 			}()
 		}
 	})
@@ -716,4 +716,3 @@ func (m *InteractiveMode) setupAutocomplete() {
 	provider := NewCombinedAutocompleteProvider(commands, basePath)
 	m.editor.SetAutocompleteProvider(provider)
 }
-

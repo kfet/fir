@@ -3,12 +3,12 @@ package main
 import (
 	_ "embed"
 
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 )
 
 //go:embed CHANGELOG.md
 var changelogContent string
 
 func init() {
-	core.SetEmbeddedChangelog(changelogContent)
+	session.SetEmbeddedChangelog(changelogContent)
 }

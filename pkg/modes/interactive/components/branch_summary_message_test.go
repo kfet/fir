@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	fmsg "github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 func TestBranchSummaryMessage_Collapsed(t *testing.T) {
-	msg := &fmsg.BranchSummaryMessage{
+	msg := &store.BranchSummaryMessage{
 		Role:    "branchSummary",
 		Summary: "This is a branch summary",
 		FromID:  "from-123",
@@ -28,7 +28,7 @@ func TestBranchSummaryMessage_Collapsed(t *testing.T) {
 }
 
 func TestBranchSummaryMessage_Expanded(t *testing.T) {
-	msg := &fmsg.BranchSummaryMessage{
+	msg := &store.BranchSummaryMessage{
 		Role:    "branchSummary",
 		Summary: "This is a branch summary",
 		FromID:  "from-123",

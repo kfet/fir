@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/core"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // SetupOptions configures extension discovery for a session.
@@ -63,7 +63,7 @@ type SetupResult struct {
 	// no ProjectDir was configured or no extensions were discovered).
 	Manager *Manager
 
-	session   *core.AgentSession
+	session   *session.AgentSession
 	stopWatch func() // stops the file watcher (nil if not watching)
 
 	// OnAutoReload is called when extensions are auto-reloaded due to file
@@ -144,7 +144,7 @@ func (r *SetupResult) Reload(ctx context.Context) error {
 //   - Agent session event forwarding to the extension manager.
 //
 // Returns nil (with no error) when ProjectDir is empty (extension disabled).
-func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) {
+func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, error) {
 	if opts.ProjectDir == "" {
 		return nil, nil
 	}
@@ -188,7 +188,7 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 		mgr.SetSetStatusFn(opts.SetStatusFn)
 	}
 
-	bridge := NewSessionBridge(session)
+	bridge := NewSessionBridge(asession)
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = opts.ProjectDir
@@ -200,13 +200,13 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 
 	result := &SetupResult{
 		Manager: mgr,
-		session: session,
+		session: asession,
 	}
 
 	// Wire tool hooks so extensions can intercept tool calls via
 	// hook/tool_call. When no extensions are running the hook is a no-op.
-	hooks := &core.AgentSessionHooks{
-		OnToolCall: func(toolCallID, toolName string, input map[string]any) *core.ToolCallBlock {
+	hooks := &session.AgentSessionHooks{
+		OnToolCall: func(toolCallID, toolName string, input map[string]any) *session.ToolCallBlock {
 			raws, err := mgr.CallHook("hook/tool_call", map[string]any{
 				"tool_call_id": toolCallID,
 				"tool_name":    toolName,
@@ -221,16 +221,16 @@ func Setup(session *core.AgentSession, opts SetupOptions) (*SetupResult, error) 
 					Reason string `json:"reason"`
 				}
 				if json.Unmarshal(raw, &h) == nil && h.Block {
-					return &core.ToolCallBlock{Reason: h.Reason}
+					return &session.ToolCallBlock{Reason: h.Reason}
 				}
 			}
 			return nil
 		},
 	}
-	session.SetHooks(hooks)
+	asession.SetHooks(hooks)
 
 	// Forward agent session events to extensions.
-	session.Subscribe(func(event core.AgentSessionEvent) {
+	asession.Subscribe(func(event session.AgentSessionEvent) {
 		// Session-level events (no agent event)
 		if event.AgentEvent == nil {
 			switch event.Type {

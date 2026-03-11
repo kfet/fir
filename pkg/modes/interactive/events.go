@@ -9,11 +9,11 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -30,7 +30,7 @@ func (m *InteractiveMode) AddUserMessage(text string) {
 
 // addUserMessageToChat adds a user message, rendering skill blocks specially.
 func (m *InteractiveMode) addUserMessageToChat(text string) {
-	skillBlock := core.ParseSkillBlock(text)
+	skillBlock := session.ParseSkillBlock(text)
 	if skillBlock != nil {
 		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 		skillComp := components.NewSkillInvocationMessageComponent(skillBlock, &m.markdownTheme)
@@ -76,12 +76,12 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 
 func (m *InteractiveMode) subscribeToAgent() {
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
-	m.unsubscribe = m.session.Subscribe(func(event core.AgentSessionEvent) {
+	m.unsubscribe = m.session.Subscribe(func(event session.AgentSessionEvent) {
 		m.handleEvent(event)
 	})
 }
 
-func (m *InteractiveMode) handleEvent(event core.AgentSessionEvent) {
+func (m *InteractiveMode) handleEvent(event session.AgentSessionEvent) {
 	// Invalidate footer on every event (token counts, etc. may have changed)
 	if m.footerComponent != nil {
 		m.footerComponent.Invalidate()
@@ -390,7 +390,7 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 		return
 	}
 
-	sidecar, err := session.ReadReexecSidecar(sessionFile)
+	sidecar, err := store.ReadReexecSidecar(sessionFile)
 	if err != nil {
 		firlog.Debug("restoreReexecSidecar: read error", "error", err)
 		return

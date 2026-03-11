@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -28,20 +28,20 @@ const (
 
 // sessionTreeNode is a hierarchical session tree node.
 type sessionTreeNode struct {
-	session  session.SessionListInfo
+	session  store.SessionListInfo
 	children []*sessionTreeNode
 }
 
 // flatSessionNode is a flattened tree node for display.
 type flatSessionNode struct {
-	session           session.SessionListInfo
+	session           store.SessionListInfo
 	depth             int
 	isLast            bool
 	ancestorContinues []bool
 }
 
 // buildSessionTree builds a tree from sessions based on parent paths.
-func buildSessionTree(sessions []session.SessionListInfo) []*sessionTreeNode {
+func buildSessionTree(sessions []store.SessionListInfo) []*sessionTreeNode {
 	byPath := map[string]*sessionTreeNode{}
 	for i := range sessions {
 		byPath[sessions[i].Path] = &sessionTreeNode{session: sessions[i]}
@@ -135,7 +135,7 @@ func formatSessionDate(t time.Time) string {
 
 // sessionList is the internal session list with search.
 type sessionList struct {
-	allSessions      []session.SessionListInfo
+	allSessions      []store.SessionListInfo
 	filteredSessions []flatSessionNode
 	selectedIndex    int
 	searchInput      *tuicomp.Input
@@ -159,14 +159,14 @@ func newSessionList() *sessionList {
 }
 
 // SetSessions updates the session data.
-func (sl *sessionList) SetSessions(sessions []session.SessionListInfo) {
+func (sl *sessionList) SetSessions(sessions []store.SessionListInfo) {
 	sl.allSessions = sessions
 	sl.applyFilter("")
 }
 
 func (sl *sessionList) applyFilter(query string) {
 	// Convert to pointers for FilterAndSortSessions.
-	ptrs := make([]*session.SessionListInfo, len(sl.allSessions))
+	ptrs := make([]*store.SessionListInfo, len(sl.allSessions))
 	for i := range sl.allSessions {
 		ptrs[i] = &sl.allSessions[i]
 	}
@@ -192,7 +192,7 @@ func (sl *sessionList) applyFilter(query string) {
 		// Filter via rich search engine (SortRecent mode = filter only, no extra
 		// sort), then build the thread tree which sorts internally by modified.
 		matched := FilterAndSortSessions(ptrs, query, SortRecent, NameFilterAll)
-		sessions := make([]session.SessionListInfo, len(matched))
+		sessions := make([]store.SessionListInfo, len(matched))
 		for i, s := range matched {
 			sessions[i] = *s
 		}
@@ -364,10 +364,10 @@ type SessionSelectorComponent struct {
 	scope             SessionScope
 	titleText         *tuicomp.Text
 	hintText          *tuicomp.Text
-	currentSessions   []session.SessionListInfo
-	allSessions       []session.SessionListInfo
+	currentSessions   []store.SessionListInfo
+	allSessions       []store.SessionListInfo
 	allSessionsLoaded bool
-	allSessionsLoader func() ([]session.SessionListInfo, error)
+	allSessionsLoader func() ([]store.SessionListInfo, error)
 
 	// OnRequestRedraw is called when the component needs a full redraw
 	// (e.g., after scope toggle which changes content dramatically).
@@ -378,9 +378,9 @@ type SessionSelectorComponent struct {
 // allSessionsLoader is called lazily on first Tab press to load sessions from all folders.
 // It may be nil if scope toggling is not needed.
 func NewSessionSelectorComponent(
-	sessions []session.SessionListInfo,
+	sessions []store.SessionListInfo,
 	scope SessionScope,
-	allSessionsLoader func() ([]session.SessionListInfo, error),
+	allSessionsLoader func() ([]store.SessionListInfo, error),
 	onSelect func(path string),
 	onCancel func(),
 ) *SessionSelectorComponent {
@@ -465,7 +465,7 @@ func (c *SessionSelectorComponent) HandleInput(data string) {
 }
 
 // SetSessions updates the session data.
-func (c *SessionSelectorComponent) SetSessions(sessions []session.SessionListInfo) {
+func (c *SessionSelectorComponent) SetSessions(sessions []store.SessionListInfo) {
 	c.sessionList.SetSessions(sessions)
 }
 

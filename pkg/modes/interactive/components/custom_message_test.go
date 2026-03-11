@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	fmsg "github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestCustomMessageComponent_DefaultRendering(t *testing.T) {
-	msg := &fmsg.CustomMessage{
+	msg := &store.CustomMessage{
 		Role:       "custom",
 		CustomType: "myext",
 		Content:    "Hello from extension",
@@ -34,7 +34,7 @@ func TestCustomMessageComponent_DefaultRendering(t *testing.T) {
 }
 
 func TestCustomMessageComponent_ArrayContent(t *testing.T) {
-	msg := &fmsg.CustomMessage{
+	msg := &store.CustomMessage{
 		Role:       "custom",
 		CustomType: "ext",
 		Content: []any{
@@ -57,14 +57,14 @@ func TestCustomMessageComponent_ArrayContent(t *testing.T) {
 }
 
 func TestCustomMessageComponent_CustomRenderer(t *testing.T) {
-	msg := &fmsg.CustomMessage{
+	msg := &store.CustomMessage{
 		Role:       "custom",
 		CustomType: "special",
 		Content:    "content",
 		Display:    true,
 	}
 
-	renderer := func(m *fmsg.CustomMessage, expanded bool, theme *theme.Theme) tui.Component {
+	renderer := func(m *store.CustomMessage, expanded bool, theme *theme.Theme) tui.Component {
 		return &mockComponent{lines: []string{"custom rendered"}}
 	}
 
@@ -78,14 +78,14 @@ func TestCustomMessageComponent_CustomRenderer(t *testing.T) {
 }
 
 func TestCustomMessageComponent_CustomRendererNil(t *testing.T) {
-	msg := &fmsg.CustomMessage{
+	msg := &store.CustomMessage{
 		Role:       "custom",
 		CustomType: "fallback",
 		Content:    "Fallback content",
 		Display:    true,
 	}
 
-	renderer := func(m *fmsg.CustomMessage, expanded bool, theme *theme.Theme) tui.Component {
+	renderer := func(m *store.CustomMessage, expanded bool, theme *theme.Theme) tui.Component {
 		return nil // signal to fall through to default
 	}
 

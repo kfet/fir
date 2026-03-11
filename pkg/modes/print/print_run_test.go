@@ -9,24 +9,24 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/models"
+	printmode "github.com/kfet/fir/pkg/modes/print"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/auth"
-	printmode "github.com/kfet/fir/pkg/modes/print"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // newPrintTestSession creates a minimal AgentSession with no model attached,
 // suitable for testing the print.Run function paths that don't call Prompt.
-func newPrintTestSession(t *testing.T) *core.AgentSession {
+func newPrintTestSession(t *testing.T) *session.AgentSession {
 	t.Helper()
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := session.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := store.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -47,7 +47,7 @@ func newPrintTestSession(t *testing.T) *core.AgentSession {
 		},
 	})
 
-	sess := core.NewAgentSession(core.AgentSessionOptions{
+	sess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
 		SessionManager:  sm,
 		SettingsManager: settingsManager,
@@ -210,10 +210,10 @@ func TestRun_JSONMode_EventsEmittedDuringRun(t *testing.T) {
 	sess := newPrintTestSession(t)
 
 	subCount := 0
-	unsub := sess.Subscribe(func(_ core.AgentSessionEvent) { subCount++ })
+	unsub := sess.Subscribe(func(_ session.AgentSessionEvent) { subCount++ })
 	defer unsub()
 
-	sess.PublishEvent(core.AgentSessionEvent{})
+	sess.PublishEvent(session.AgentSessionEvent{})
 	if subCount != 1 {
 		t.Fatalf("subscription not working: got count %d, want 1", subCount)
 	}

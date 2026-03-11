@@ -16,13 +16,13 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
-	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/extension"
 	"github.com/kfet/fir/pkg/mcp"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 func TestPiAgent_Initialize(t *testing.T) {
@@ -187,7 +187,7 @@ func TestHandleEvent_TextDelta(t *testing.T) {
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	entry := &firSession{termState: newTerminalState()}
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type: agent.EventMessageUpdate,
 			AssistantMessageEvent: &ai.AssistantMessageEvent{
@@ -211,7 +211,7 @@ func TestHandleEvent_ThinkingDelta(t *testing.T) {
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	entry := &firSession{termState: newTerminalState()}
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type: agent.EventMessageUpdate,
 			AssistantMessageEvent: &ai.AssistantMessageEvent{
@@ -232,7 +232,7 @@ func TestHandleEvent_NilAgentEvent(t *testing.T) {
 	entry := &firSession{termState: newTerminalState()}
 
 	// Should not panic
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{AgentEvent: nil})
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{AgentEvent: nil})
 	if len(mc.getUpdates()) != 0 {
 		t.Error("expected no updates for nil AgentEvent")
 	}
@@ -243,7 +243,7 @@ func TestHandleEvent_ToolExecutionStart(t *testing.T) {
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	entry := &firSession{termState: newTerminalState()}
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type:       agent.EventToolExecutionStart,
 			ToolCallID: "tc1",
@@ -276,7 +276,7 @@ func TestHandleEvent_ToolExecutionEnd(t *testing.T) {
 	// Store pending args first
 	entry.pendingArgs.Store("tc1", map[string]any{"path": "foo.go"})
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type:       agent.EventToolExecutionEnd,
 			ToolCallID: "tc1",
@@ -309,7 +309,7 @@ func TestHandleEvent_ToolExecutionEnd_WithAcpTerminal(t *testing.T) {
 	// Simulate a pending ACP terminal
 	entry.termState.pendingBashTerminals["tc1"] = "term-1"
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type:       agent.EventToolExecutionEnd,
 			ToolCallID: "tc1",
@@ -333,7 +333,7 @@ func TestHandleEvent_ToolExecutionEnd_Error(t *testing.T) {
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
 	entry := &firSession{termState: newTerminalState()}
 
-	pa.handleEvent("s1", entry, core.AgentSessionEvent{
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
 		AgentEvent: &agent.AgentEvent{
 			Type:       agent.EventToolExecutionEnd,
 			ToolCallID: "tc2",
@@ -414,8 +414,8 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 	unsubscribeCalled := false
 	mcpMgr := mcp.NewManager(nil, false)
 	oldSession := &firSession{
-		session:   &core.AgentSession{},
-		termState: newTerminalState(),
+		session:    &session.AgentSession{},
+		termState:  newTerminalState(),
 		mcpManager: mcpMgr,
 		unsubscribe: func() {
 			unsubscribeCalled = true
@@ -452,7 +452,7 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 func TestHandleSlashCommand_Changelog(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	entry := &firSession{termState: newTerminalState(), session: &core.AgentSession{}}
+	entry := &firSession{termState: newTerminalState(), session: &session.AgentSession{}}
 	// Should return true and send a message (even if changelog is empty).
 	result := pa.handleSlashCommand("s1", entry, "changelog", "")
 	if !result {
@@ -522,14 +522,14 @@ func TestRawConnMethodHandler_UnknownMethod(t *testing.T) {
 }
 
 // for use in slash command tests that don't need a real LLM provider.
-func newMinimalSession(t *testing.T) *core.AgentSession {
+func newMinimalSession(t *testing.T) *session.AgentSession {
 	t.Helper()
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
-	sm := session.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := store.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	a := agent.NewAgent(agent.AgentOptions{})
-	return core.NewAgentSession(core.AgentSessionOptions{
+	return session.NewAgentSession(session.AgentSessionOptions{
 		Agent:          a,
 		SessionManager: sm,
 		ResourceLoader: rl,
@@ -633,7 +633,7 @@ func TestHandleResumeArg_InvalidNumber_WithList(t *testing.T) {
 	entry := &firSession{
 		termState: newTerminalState(),
 		agentDir:  agentDir,
-		lastResumeList: []session.SessionListInfo{
+		lastResumeList: []store.SessionListInfo{
 			{Path: filepath.Join(agentDir, "sessions", "a.json")},
 		},
 	}
@@ -672,7 +672,7 @@ func TestHandleResumeArg_ValidNumberFromList(t *testing.T) {
 		termState: newTerminalState(),
 		agentDir:  agentDir,
 		session:   sess,
-		lastResumeList: []session.SessionListInfo{
+		lastResumeList: []store.SessionListInfo{
 			{Path: sessPath},
 		},
 	}
@@ -994,7 +994,7 @@ func TestReplaySessionHistory(t *testing.T) {
 	}
 
 	// Create a SessionManager and populate it with messages.
-	sm := session.NewSessionManager(tmpDir, sessionDir)
+	sm := store.NewSessionManager(tmpDir, sessionDir)
 
 	// User message
 	sm.AppendAIMessage(ai.NewUserMsg("Hello, how are you?", time.Now().UnixMilli()))
@@ -1024,7 +1024,7 @@ func TestReplaySessionHistory(t *testing.T) {
 
 	// Create a mock agent session with the SessionManager.
 	entry := &firSession{
-		session:   &core.AgentSession{SessionManager: sm},
+		session:   &session.AgentSession{SessionManager: sm},
 		termState: newTerminalState(),
 	}
 
@@ -1100,7 +1100,7 @@ func (n *noopBridgeAPI) GetActiveTools() []string                               
 func (n *noopBridgeAPI) SetActiveTools(_ []string)                                                  {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
-func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                   {}
+func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                    {}
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command
@@ -1412,7 +1412,7 @@ func TestAcpBashTool_ShellCommandPrefix(t *testing.T) {
 	// Create a session so the lookup succeeds (it will still fail on AcpBashExec
 	// since there's no real terminal, but we can check the command was prefixed).
 	entry := &firSession{
-		session:   &core.AgentSession{},
+		session:   &session.AgentSession{},
 		termState: newTerminalState(),
 	}
 	pa.sessions["s1"] = entry
@@ -1640,4 +1640,3 @@ func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
 		t.Errorf("expected 'Invalid provider ID' message, got: %q", msg)
 	}
 }
-

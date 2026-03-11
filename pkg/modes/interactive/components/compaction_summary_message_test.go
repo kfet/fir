@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	fmsg "github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 func TestFormatTokenCount(t *testing.T) {
@@ -28,7 +28,7 @@ func TestFormatTokenCount(t *testing.T) {
 }
 
 func TestCompactionSummaryMessage_Collapsed(t *testing.T) {
-	msg := &fmsg.CompactionSummaryMessage{
+	msg := &store.CompactionSummaryMessage{
 		Role:         "compactionSummary",
 		Summary:      "compacted context",
 		TokensBefore: 5000,
@@ -48,7 +48,7 @@ func TestCompactionSummaryMessage_Collapsed(t *testing.T) {
 }
 
 func TestCompactionSummaryMessage_Expanded(t *testing.T) {
-	msg := &fmsg.CompactionSummaryMessage{
+	msg := &store.CompactionSummaryMessage{
 		Role:         "compactionSummary",
 		Summary:      "compacted context details",
 		TokensBefore: 5000,

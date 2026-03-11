@@ -9,8 +9,8 @@ import (
 	"os"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // ErrAgentAborted is returned when the agent stops with an error or aborted
@@ -39,11 +39,11 @@ type Options struct {
 
 // Run executes print (single-shot) mode.
 // It sends prompts to the agent session and outputs results to stdout.
-func Run(session *core.AgentSession, opts Options) error {
+func Run(asession *session.AgentSession, opts Options) error {
 	firlog.Debug("print mode", "outputMode", opts.Mode)
 	if opts.Mode == ModeJSON {
 		// Subscribe early to capture all events as JSON
-		session.Subscribe(func(event core.AgentSessionEvent) {
+		asession.Subscribe(func(event session.AgentSessionEvent) {
 			data, err := json.Marshal(event)
 			if err == nil {
 				fmt.Println(string(data))
@@ -53,25 +53,25 @@ func Run(session *core.AgentSession, opts Options) error {
 
 	// Send initial message
 	if opts.InitialMessage != "" {
-		promptOpts := &core.PromptOptions{}
+		promptOpts := &session.PromptOptions{}
 		if len(opts.InitialImages) > 0 {
 			promptOpts.Images = opts.InitialImages
 		}
-		if err := session.Prompt(opts.InitialMessage, promptOpts); err != nil {
+		if err := asession.Prompt(opts.InitialMessage, promptOpts); err != nil {
 			return fmt.Errorf("initial prompt failed: %w", err)
 		}
 	}
 
 	// Send remaining messages
 	for _, msg := range opts.Messages {
-		if err := session.Prompt(msg); err != nil {
+		if err := asession.Prompt(msg); err != nil {
 			return fmt.Errorf("prompt failed: %w", err)
 		}
 	}
 
 	// In text mode, output the final assistant response
 	if opts.Mode == ModeText {
-		state := session.State()
+		state := asession.State()
 		messages := state.Messages
 		if len(messages) == 0 {
 			return nil

@@ -10,7 +10,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/oauth"
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
@@ -267,7 +267,7 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 		Ctx: ctx,
 		OnAuth: func(info oauth.AuthInfo) {
 			firlog.Info("acp oauth: opening browser", "url", info.URL)
-			if err := core.OpenBrowser(info.URL); err != nil {
+			if err := session.OpenBrowser(info.URL); err != nil {
 				firlog.Info("acp oauth: failed to open browser", "error", err)
 			}
 		},

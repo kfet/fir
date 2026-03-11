@@ -3,7 +3,7 @@
 package components
 
 import (
-	"github.com/kfet/fir/pkg/core"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -13,12 +13,12 @@ import (
 type SkillInvocationMessageComponent struct {
 	*tuicomp.Box
 	expanded    bool
-	skillBlock  *core.ParsedSkillBlock
+	skillBlock  *session.ParsedSkillBlock
 	markdownThm tuicomp.MarkdownTheme
 }
 
 // NewSkillInvocationMessageComponent creates a new SkillInvocationMessageComponent.
-func NewSkillInvocationMessageComponent(skillBlock *core.ParsedSkillBlock, mdTheme *tuicomp.MarkdownTheme) *SkillInvocationMessageComponent {
+func NewSkillInvocationMessageComponent(skillBlock *session.ParsedSkillBlock, mdTheme *tuicomp.MarkdownTheme) *SkillInvocationMessageComponent {
 	if mdTheme == nil {
 		mt := theme.GetMarkdownTheme()
 		mdTheme = &mt

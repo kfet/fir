@@ -9,15 +9,15 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/core"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // newSetupTestSession creates a minimal AgentSession for setup tests.
-func newSetupTestSession(t *testing.T, cwd string) *core.AgentSession {
+func newSetupTestSession(t *testing.T, cwd string) *session.AgentSession {
 	t.Helper()
-	sm := session.InMemorySessionManager()
+	sm := store.InMemorySessionManager()
 	dummyModel := &ai.Model{
 		Provider:      "test",
 		ID:            "test-model",
@@ -27,7 +27,7 @@ func newSetupTestSession(t *testing.T, cwd string) *core.AgentSession {
 	a := agent.NewAgent(agent.AgentOptions{
 		InitialState: &agent.AgentState{Model: dummyModel},
 	})
-	return core.NewAgentSession(core.AgentSessionOptions{
+	return session.NewAgentSession(session.AgentSessionOptions{
 		Agent:          a,
 		SessionManager: sm,
 		ResourceLoader: &stubResourceLoader{},
@@ -35,21 +35,23 @@ func newSetupTestSession(t *testing.T, cwd string) *core.AgentSession {
 	})
 }
 
-// stubResourceLoader is a no-op core.ResourceLoader for tests.
+// stubResourceLoader is a no-op session.ResourceLoader for tests.
 type stubResourceLoader struct{}
 
-func (s *stubResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) { return nil, nil }
+func (s *stubResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) {
+	return nil, nil
+}
 func (s *stubResourceLoader) GetPrompts() ([]resources.PromptTemplate, []resources.ResourceDiagnostic) {
 	return nil, nil
 }
 func (s *stubResourceLoader) GetAgentsFiles() []resources.AgentsFile { return nil }
-func (s *stubResourceLoader) GetSystemPrompt() string           { return "" }
-func (s *stubResourceLoader) GetAppendSystemPrompt() []string   { return nil }
+func (s *stubResourceLoader) GetSystemPrompt() string                { return "" }
+func (s *stubResourceLoader) GetAppendSystemPrompt() []string        { return nil }
 func (s *stubResourceLoader) GetPathMetadata() map[string]resources.PathMetadata {
 	return nil
 }
 func (s *stubResourceLoader) ExtendResources(resources.ResourceExtensionPaths) {}
-func (s *stubResourceLoader) Reload() error                               { return nil }
+func (s *stubResourceLoader) Reload() error                                    { return nil }
 
 // TestSetupHookToolCall verifies that OnToolCall consults extensions
 // via hook/tool_call when an extension is loaded through Setup().
