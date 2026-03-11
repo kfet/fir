@@ -8,6 +8,10 @@
 - Plan nudger reads `next_update_in` from plan metadata — lets the LLM hint how many turns until its next plan update instead of the fixed 5-turn default
 - Forward plan metadata to extensions via `session_update` events
 
+### Removed
+
+- Remove unused `CopyToClipboard` and helpers (dead code)
+
 ### Fixed
 
 - Clear fully-completed plans immediately at the start of the next turn instead of waiting until the turn finishes
