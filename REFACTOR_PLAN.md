@@ -51,13 +51,13 @@ Keep utilities as sub-packages of `core/`.
 |---|---|---|
 | `pkg/core` | `AgentSession`, plan management, `CompactionRunner` interface, timings, changelog | `agentsession.go`, `compaction_progress.go`, `timings.go`, `changelog.go` |
 | `pkg/core/exec` | `BashExecutor` | `bashexec.go` |
-| `pkg/core/clipboard` | Clipboard text + image read (X11/Wayland/macOS) | `clipboard.go`, `clipboardimage.go` |
 | `pkg/core/export` | `ExportToHTML`, `WriteConversationHTML` | `export.go` |
 | `pkg/core/toolreg` | `DefaultCodingTools`, `AllTools`, `ResolveServerTools` | `sdk.go` |
 
 Steps:
 1. Create sub-packages, move code, update imports.
-2. `core/compaction/` stays as-is.
+2. Move clipboard files (`clipboard.go`, `clipboardimage.go`) to `pkg/resources/clipboard/`.
+3. `core/compaction/` stays as-is.
 3. `core/browser.go` stays in `core` (tiny, used by AgentSession).
 4. Run `make all` to confirm.
 
@@ -106,6 +106,7 @@ coupling; otherwise leave as-is with clearer file naming.
 | Package | Contents |
 |---|---|
 | `pkg/resources` | `ResourceLoader` interface, shared types |
+| `pkg/resources/clipboard` | Clipboard image reading (X11/Wayland/macOS) |
 | `pkg/resources/skills` | Skill loading, skill frontmatter, embedded skills |
 | `pkg/resources/extensions` | Extension discovery, extension frontmatter, embedded extensions |
 
@@ -155,7 +156,6 @@ pkg/
   auth/               Credential storage
   config/             User/project configuration
   core/               AgentSession orchestration
-    clipboard/        Clipboard access (X11/Wayland/macOS)
     compaction/       Context compaction
     exec/             Bash command execution
     export/           HTML conversation export
@@ -172,6 +172,7 @@ pkg/
       theme/          Theme definitions
     print/            Non-interactive print mode
   resources/          Resource loading
+    clipboard/        Clipboard image reading (X11/Wayland/macOS)
     extensions/       Embedded extension loading
     skills/           Embedded skill loading
   session/            Session persistence
