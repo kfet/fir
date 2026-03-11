@@ -4,7 +4,7 @@
 
 ### Added
 
-- Flexible compaction triggers: configurable `fillRatio`, `maxContextTokens`, and `maxContextCost` settings
+- Compaction: `maxContextTokens` setting — hard token cap that triggers compaction regardless of fill ratio
 - Plan nudger reads `next_update_in` from plan metadata — lets the LLM hint how many turns until its next plan update instead of the fixed 5-turn default
 - Forward plan metadata to extensions via `session_update` events
 

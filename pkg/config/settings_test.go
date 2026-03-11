@@ -91,31 +91,21 @@ func TestInMemorySettingsManager_CompactionSettings(t *testing.T) {
 	assert.False(t, result.Enabled)
 	assert.Equal(t, 16384, result.ReserveTokens)
 	assert.Equal(t, 20000, result.KeepRecentTokens)
-	assert.Nil(t, result.FillRatio)
 	assert.Nil(t, result.MaxContextTokens)
-	assert.Nil(t, result.MaxContextCost)
 }
 
-func TestInMemorySettingsManager_CompactionSettingsNewFields(t *testing.T) {
-	fillRatio := 0.5
+func TestInMemorySettingsManager_CompactionSettingsMaxContextTokens(t *testing.T) {
 	maxTokens := 50000
-	maxCost := 1.50
 	sm := NewInMemorySettingsManager(Settings{
 		Compaction: &CompactionSettings{
-			FillRatio:        &fillRatio,
 			MaxContextTokens: &maxTokens,
-			MaxContextCost:   &maxCost,
 		},
 	})
 
 	result := sm.GetCompactionSettings()
 	assert.True(t, result.Enabled)
-	assert.NotNil(t, result.FillRatio)
-	assert.Equal(t, 0.5, *result.FillRatio)
 	assert.NotNil(t, result.MaxContextTokens)
 	assert.Equal(t, 50000, *result.MaxContextTokens)
-	assert.NotNil(t, result.MaxContextCost)
-	assert.Equal(t, 1.50, *result.MaxContextCost)
 }
 
 func TestInMemorySettingsManager_RetrySettings(t *testing.T) {
@@ -177,27 +167,22 @@ func TestDeepMergeSettings_NestedMerge(t *testing.T) {
 	assert.Equal(t, 3, *result.Retry.MaxRetries)  // from overrides
 }
 
-func TestDeepMergeSettings_CompactionNewFields(t *testing.T) {
+func TestDeepMergeSettings_CompactionMaxContextTokens(t *testing.T) {
 	base := Settings{
 		Compaction: &CompactionSettings{
-			Enabled:   boolPtr(true),
-			FillRatio: float64Ptr(0.9),
+			Enabled: boolPtr(true),
 		},
 	}
 	overrides := Settings{
 		Compaction: &CompactionSettings{
-			FillRatio:        float64Ptr(0.5),
 			MaxContextTokens: intPtr(50000),
-			MaxContextCost:   float64Ptr(1.0),
 		},
 	}
 
 	result := deepMergeSettings(base, overrides)
 	require.NotNil(t, result.Compaction)
-	assert.Equal(t, true, *result.Compaction.Enabled)          // from base
-	assert.Equal(t, 0.5, *result.Compaction.FillRatio)         // overridden
+	assert.Equal(t, true, *result.Compaction.Enabled)           // from base
 	assert.Equal(t, 50000, *result.Compaction.MaxContextTokens) // from overrides
-	assert.Equal(t, 1.0, *result.Compaction.MaxContextCost)     // from overrides
 }
 
 func TestSettingsManager_FilePersistence(t *testing.T) {
@@ -378,4 +363,3 @@ func TestSettingsManager_InMemoryStorage(t *testing.T) {
 
 func boolPtr(b bool) *bool       { return &b }
 func intPtr(i int) *int          { return &i }
-func float64Ptr(f float64) *float64 { return &f }

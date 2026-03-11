@@ -11,12 +11,10 @@ import (
 
 // CompactionSettings controls context compaction behavior.
 type CompactionSettings struct {
-	Enabled          *bool    `json:"enabled,omitempty"`
-	ReserveTokens    *int     `json:"reserveTokens,omitempty"`
-	KeepRecentTokens *int     `json:"keepRecentTokens,omitempty"`
-	FillRatio        *float64 `json:"fillRatio,omitempty"`
-	MaxContextTokens *int     `json:"maxContextTokens,omitempty"`
-	MaxContextCost   *float64 `json:"maxContextCost,omitempty"`
+	Enabled          *bool `json:"enabled,omitempty"`
+	ReserveTokens    *int  `json:"reserveTokens,omitempty"`
+	KeepRecentTokens *int  `json:"keepRecentTokens,omitempty"`
+	MaxContextTokens *int  `json:"maxContextTokens,omitempty"`
 }
 
 // ServerCompactionSettings controls Anthropic server-side context compaction.
@@ -172,9 +170,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 			mergeBool(&c.Enabled, overrides.Compaction.Enabled)
 			mergeInt(&c.ReserveTokens, overrides.Compaction.ReserveTokens)
 			mergeInt(&c.KeepRecentTokens, overrides.Compaction.KeepRecentTokens)
-			mergeFloat64(&c.FillRatio, overrides.Compaction.FillRatio)
 			mergeInt(&c.MaxContextTokens, overrides.Compaction.MaxContextTokens)
-			mergeFloat64(&c.MaxContextCost, overrides.Compaction.MaxContextCost)
 			r.Compaction = &c
 		}
 	}
@@ -260,13 +256,6 @@ func mergeBool(dst **bool, src *bool) {
 
 // mergeInt overwrites dst with src if src is non-nil.
 func mergeInt(dst **int, src *int) {
-	if src != nil {
-		*dst = src
-	}
-}
-
-// mergeFloat64 overwrites dst with src if src is non-nil.
-func mergeFloat64(dst **float64, src *float64) {
 	if src != nil {
 		*dst = src
 	}
@@ -836,9 +825,7 @@ type CompactionResult struct {
 	Enabled          bool
 	ReserveTokens    int
 	KeepRecentTokens int
-	FillRatio        *float64
 	MaxContextTokens *int
-	MaxContextCost   *float64
 }
 
 func (sm *SettingsManager) GetCompactionSettings() CompactionResult {
@@ -853,9 +840,7 @@ func (sm *SettingsManager) GetCompactionSettings() CompactionResult {
 		r.Enabled = boolDefault(c.Enabled, true)
 		r.ReserveTokens = intDefault(c.ReserveTokens, 16384)
 		r.KeepRecentTokens = intDefault(c.KeepRecentTokens, 20000)
-		r.FillRatio = c.FillRatio
 		r.MaxContextTokens = c.MaxContextTokens
-		r.MaxContextCost = c.MaxContextCost
 	}
 	return r
 }

@@ -135,9 +135,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
     "enabled": true,                     // Auto-compact when context is large
     "reserveTokens": 16384,              // Tokens reserved for compaction summary
     "keepRecentTokens": 20000,           // Recent tokens to keep uncompacted
-    "fillRatio": 0.90,                   // Fraction of context window that triggers compaction (default 0.90; >1.0 disables)
-    "maxContextTokens": 0,               // Hard token cap — compact when exceeded (0 = disabled)
-    "maxContextCost": 0                  // Hard cost cap in USD/turn — compact when exceeded (0 = disabled)
+    "maxContextTokens": 0               // Hard token cap — compact when exceeded (0 = disabled)
   },
 
   // Branch summary

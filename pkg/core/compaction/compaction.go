@@ -52,12 +52,10 @@ type CompactionDetails struct {
 
 // CompactionSettings controls compaction behavior.
 type CompactionSettings struct {
-	Enabled          bool    `json:"enabled"`
-	ReserveTokens    int     `json:"reserveTokens"`
-	KeepRecentTokens int     `json:"keepRecentTokens"`
-	FillRatio        float64 `json:"fillRatio"`        // 0.0–1.0; 0 means default (0.90)
-	MaxContextTokens int     `json:"maxContextTokens"` // absolute token cap; 0 = disabled
-	MaxContextCost   float64 `json:"maxContextCost"`   // USD per turn cap; 0 = disabled
+	Enabled          bool `json:"enabled"`
+	ReserveTokens    int  `json:"reserveTokens"`
+	KeepRecentTokens int  `json:"keepRecentTokens"`
+	MaxContextTokens int  `json:"maxContextTokens"` // absolute token cap; 0 = disabled
 }
 
 // DefaultCompactionSettings are the default compaction settings.
@@ -173,41 +171,23 @@ func EstimateContextTokens(messages []agent.AgentMessage) ContextUsageEstimate {
 }
 
 // ShouldCompact checks if compaction should trigger.
-// Compaction fires if ANY of the following conditions is true (OR semantics):
+// Compaction fires if either condition is true:
 //   - Absolute token cap: contextTokens > MaxContextTokens (when MaxContextTokens > 0)
-//   - Cost cap: estimated input cost per turn > MaxContextCost (when both > 0)
-//   - Fill-ratio + reserve: context is at least fillRatio full AND remaining
-//     headroom < ReserveTokens.  fillRatio defaults to 0.90 when zero.
-//
-// inputCostPerMTok is the model's input cost in USD per million tokens.
-// Pass 0 if pricing is unknown; the cost-cap check is skipped.
-func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings, inputCostPerMTok float64) bool {
-	if !settings.Enabled {
-		return false
-	}
-	if contextWindow <= 0 {
+//   - Fill-ratio + reserve: context is at least 90% full AND remaining
+//     headroom < ReserveTokens.
+func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings) bool {
+	if !settings.Enabled || contextWindow <= 0 {
 		return false
 	}
 
-	// Absolute token cap (bypasses ReserveTokens guard — this is a hard limit).
+	// Absolute token cap — fires unconditionally when set.
 	if settings.MaxContextTokens > 0 && contextTokens > settings.MaxContextTokens {
 		return true
 	}
 
-	// Cost cap: compact when input cost per turn exceeds threshold.
-	if settings.MaxContextCost > 0 && inputCostPerMTok > 0 {
-		costUSD := float64(contextTokens) * inputCostPerMTok / 1_000_000
-		if costUSD > settings.MaxContextCost {
-			return true
-		}
-	}
-
-	// Fill ratio (configurable; default 0.90). A value > 1.0 disables this path.
-	fillRatio := settings.FillRatio
-	if fillRatio <= 0 {
-		fillRatio = 0.90
-	}
-	if float64(contextTokens)/float64(contextWindow) < fillRatio {
+	// Existing fill-ratio + reserve path.
+	const minFillRatio = 0.90
+	if float64(contextTokens)/float64(contextWindow) < minFillRatio {
 		return false
 	}
 	return contextTokens > contextWindow-settings.ReserveTokens
