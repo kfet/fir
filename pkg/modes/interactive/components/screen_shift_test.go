@@ -1,4 +1,4 @@
-package tui_test
+package components_test
 
 import (
 	"fmt"
