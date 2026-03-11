@@ -18,36 +18,36 @@ var ThinkingDescriptions = map[string]string{
 	"low":     "Light reasoning (~2k tokens)",
 	"medium":  "Moderate reasoning (~8k tokens)",
 	"high":    "Deep reasoning (~16k tokens)",
-	"xhigh":  "Maximum reasoning (~32k tokens)",
+	"xhigh":   "Maximum reasoning (~32k tokens)",
 }
 
 // SettingsConfig holds all settings values for the selector.
 type SettingsConfig struct {
-	AutoCompactMode        string // "off", "client", "server"
-	ShowImages             bool
-	AutoResizeImages       bool
-	BlockImages            bool
-	EnableSkillCommands    bool
-	SteeringMode           string // "all" or "one-at-a-time"
-	FollowUpMode           string // "all" or "one-at-a-time"
-	Transport              string // "sse", "websocket", or "auto"
-	ThinkingLevel          string
+	AutoCompactMode         string // "off", "client", "server"
+	ShowImages              bool
+	AutoResizeImages        bool
+	BlockImages             bool
+	EnableSkillCommands     bool
+	SteeringMode            string // "all" or "one-at-a-time"
+	FollowUpMode            string // "all" or "one-at-a-time"
+	Transport               string // "sse", "websocket", or "auto"
+	ThinkingLevel           string
 	AvailableThinkingLevels []string
-	CurrentTheme           string
-	AvailableThemes        []string
-	HideThinkingBlock      bool
-	CollapseChangelog      bool
-	DoubleEscapeAction     string // "fork", "tree", "none"
-	ServerTools            string // computed display; not directly used
-	ServerToolWebSearch    bool
-	ServerToolWebFetch     bool
-	ServerToolCodeExec     bool
-	ShowHardwareCursor     bool
-	EditorPaddingX         int
-	AutocompleteMaxVisible int
-	QuietStartup           bool
-	ClearOnShrink          bool
-	MaxContextTokens       int // hard token cap for compaction; 0 = disabled
+	CurrentTheme            string
+	AvailableThemes         []string
+	HideThinkingBlock       bool
+	CollapseChangelog       bool
+	DoubleEscapeAction      string // "fork", "tree", "none"
+	ServerTools             string // computed display; not directly used
+	ServerToolWebSearch     bool
+	ServerToolWebFetch      bool
+	ServerToolCodeExec      bool
+	ShowHardwareCursor      bool
+	EditorPaddingX          int
+	AutocompleteMaxVisible  int
+	QuietStartup            bool
+	ClearOnShrink           bool
+	MaxContextTokens        int // hard token cap for compaction; 0 = disabled
 }
 
 // SettingsCallbacks holds callbacks for settings changes.
@@ -119,7 +119,10 @@ func boolStr(v bool) string {
 func buildSettingsEntries(config SettingsConfig) []settingEntry {
 	entries := []settingEntry{
 		{ID: "autocompact", Label: "Auto-compact", Description: "Compact context automatically (client, server, or off)", CurrentValue: config.AutoCompactMode, Values: []string{"client", "server", "off"}},
-		{ID: "max-context-tokens", Label: "Max context tokens", Description: "Hard token cap — compact when exceeded (0 = disabled)", CurrentValue: strconv.Itoa(config.MaxContextTokens), Values: []string{"0", "50000", "100000", "150000", "200000"}},
+		{ID: "max-context-tokens", Label: "Max context tokens", Description: "Hard token cap — compact when exceeded (0 = disabled)", CurrentValue: strconv.Itoa(config.MaxContextTokens), Values: []string{
+			"0", "40000", "50000", "60000", "80000", "100000",
+			"120000", "140000", "160000", "180000", "200000",
+			"300000", "400000", "600000", "800000", "1000000"}},
 		{ID: "auto-resize-images", Label: "Auto-resize images", Description: "Resize large images to 2000x2000 max", CurrentValue: boolStr(config.AutoResizeImages), Values: []string{"true", "false"}},
 		{ID: "block-images", Label: "Block images", Description: "Prevent images from being sent to LLM providers", CurrentValue: boolStr(config.BlockImages), Values: []string{"true", "false"}},
 		{ID: "skill-commands", Label: "Skill commands", Description: "Register skills as /skill:name commands", CurrentValue: boolStr(config.EnableSkillCommands), Values: []string{"true", "false"}},
