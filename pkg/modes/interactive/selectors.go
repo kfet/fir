@@ -154,6 +154,7 @@ func (m *InteractiveMode) showSettingsSelector() {
 
 		config := components.SettingsConfig{
 			AutoCompactMode:         m.autoCompactMode,
+			MaxContextTokens:        m.settings.GetCompactionMaxContextTokens(),
 			HideThinkingBlock:       m.hideThinking,
 			ThinkingLevel:           m.session.ThinkingLevel(),
 			AvailableThinkingLevels: levelStrs,
@@ -212,6 +213,9 @@ func (m *InteractiveMode) showSettingsSelector() {
 				m.session.Agent.SetServerTools(core.ResolveServerTools(names))
 			},
 			OnCancel: func() { done() },
+			OnMaxContextTokensChange: func(tokens int) {
+				m.settings.SetCompactionMaxContextTokens(tokens)
+			},
 		}
 		selector := components.NewSettingsSelectorComponent(config, callbacks)
 		return selector, selector

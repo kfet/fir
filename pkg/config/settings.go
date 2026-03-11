@@ -821,6 +821,28 @@ func (sm *SettingsManager) GetCompactionKeepRecentTokens() int {
 	return 20000
 }
 
+// GetCompactionMaxContextTokens returns the hard token cap (0 = disabled).
+func (sm *SettingsManager) GetCompactionMaxContextTokens() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Compaction != nil && sm.settings.Compaction.MaxContextTokens != nil {
+		return *sm.settings.Compaction.MaxContextTokens
+	}
+	return 0
+}
+
+// SetCompactionMaxContextTokens sets the hard token cap. 0 disables the cap.
+func (sm *SettingsManager) SetCompactionMaxContextTokens(tokens int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.globalSettings.Compaction == nil {
+		sm.globalSettings.Compaction = &CompactionSettings{}
+	}
+	sm.globalSettings.Compaction.MaxContextTokens = &tokens
+	sm.markModified("compaction", "maxContextTokens")
+	sm.save()
+}
+
 type CompactionResult struct {
 	Enabled          bool
 	ReserveTokens    int

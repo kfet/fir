@@ -47,6 +47,7 @@ type SettingsConfig struct {
 	AutocompleteMaxVisible int
 	QuietStartup           bool
 	ClearOnShrink          bool
+	MaxContextTokens       int // hard token cap for compaction; 0 = disabled
 }
 
 // SettingsCallbacks holds callbacks for settings changes.
@@ -71,6 +72,7 @@ type SettingsCallbacks struct {
 	OnAutocompleteMaxVisibleChange func(int)
 	OnQuietStartupChange           func(bool)
 	OnClearOnShrinkChange          func(bool)
+	OnMaxContextTokensChange       func(int)
 	OnCancel                       func()
 }
 
@@ -117,6 +119,7 @@ func boolStr(v bool) string {
 func buildSettingsEntries(config SettingsConfig) []settingEntry {
 	entries := []settingEntry{
 		{ID: "autocompact", Label: "Auto-compact", Description: "Compact context automatically (client, server, or off)", CurrentValue: config.AutoCompactMode, Values: []string{"client", "server", "off"}},
+		{ID: "max-context-tokens", Label: "Max context tokens", Description: "Hard token cap — compact when exceeded (0 = disabled)", CurrentValue: strconv.Itoa(config.MaxContextTokens), Values: []string{"0", "50000", "100000", "150000", "200000"}},
 		{ID: "auto-resize-images", Label: "Auto-resize images", Description: "Resize large images to 2000x2000 max", CurrentValue: boolStr(config.AutoResizeImages), Values: []string{"true", "false"}},
 		{ID: "block-images", Label: "Block images", Description: "Prevent images from being sent to LLM providers", CurrentValue: boolStr(config.BlockImages), Values: []string{"true", "false"}},
 		{ID: "skill-commands", Label: "Skill commands", Description: "Register skills as /skill:name commands", CurrentValue: boolStr(config.EnableSkillCommands), Values: []string{"true", "false"}},
@@ -316,6 +319,11 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "clear-on-shrink":
 		if cb.OnClearOnShrinkChange != nil {
 			cb.OnClearOnShrinkChange(value == "true")
+		}
+	case "max-context-tokens":
+		if cb.OnMaxContextTokensChange != nil {
+			v, _ := strconv.Atoi(value)
+			cb.OnMaxContextTokensChange(v)
 		}
 	case "thinking":
 		if cb.OnThinkingLevelChange != nil {
