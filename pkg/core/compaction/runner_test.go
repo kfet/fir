@@ -58,12 +58,12 @@ func TestDefaultRunner_ShouldCompact(t *testing.T) {
 
 	// Default settings: reserveTokens=16384
 	// Should compact when contextTokens > contextWindow - reserveTokens
-	if runner.ShouldCompact(50000, 200000, 0) {
+	if runner.ShouldCompact(50000, 200000) {
 		t.Error("should not compact when well under threshold")
 	}
 
 	// contextWindow=200000, reserve=16384 → threshold=183616
-	if !runner.ShouldCompact(190000, 200000, 0) {
+	if !runner.ShouldCompact(190000, 200000) {
 		t.Error("should compact when over threshold")
 	}
 }
@@ -79,8 +79,27 @@ func TestDefaultRunner_ShouldCompact_Disabled(t *testing.T) {
 		SettingsManager: sm,
 	}
 
-	if runner.ShouldCompact(190000, 200000, 0) {
+	if runner.ShouldCompact(190000, 200000) {
 		t.Error("should not compact when disabled")
+	}
+}
+
+func TestDefaultRunner_ShouldCompact_MaxContextTokens(t *testing.T) {
+	maxTokens := 50000
+	sm := config.NewInMemorySettingsManager(config.Settings{
+		Compaction: &config.CompactionSettings{
+			MaxContextTokens: &maxTokens,
+		},
+	})
+	runner := &DefaultRunner{SettingsManager: sm}
+
+	// Under cap — should not compact (fill ratio is low)
+	if runner.ShouldCompact(40000, 200000) {
+		t.Error("should not compact when under MaxContextTokens")
+	}
+	// Over cap — should compact even at low fill ratio
+	if !runner.ShouldCompact(60000, 200000) {
+		t.Error("should compact when over MaxContextTokens")
 	}
 }
 

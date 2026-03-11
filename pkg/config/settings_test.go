@@ -108,6 +108,26 @@ func TestInMemorySettingsManager_CompactionSettingsMaxContextTokens(t *testing.T
 	assert.Equal(t, 50000, *result.MaxContextTokens)
 }
 
+func TestInMemorySettingsManager_SetCompactionMaxContextTokens(t *testing.T) {
+	sm := NewInMemorySettingsManager(Settings{})
+
+	// Default is 0 (disabled)
+	assert.Equal(t, 0, sm.GetCompactionMaxContextTokens())
+
+	// Set a value
+	sm.SetCompactionMaxContextTokens(100000)
+	assert.Equal(t, 100000, sm.GetCompactionMaxContextTokens())
+
+	// Also visible via GetCompactionSettings
+	result := sm.GetCompactionSettings()
+	assert.NotNil(t, result.MaxContextTokens)
+	assert.Equal(t, 100000, *result.MaxContextTokens)
+
+	// Set to 0 disables
+	sm.SetCompactionMaxContextTokens(0)
+	assert.Equal(t, 0, sm.GetCompactionMaxContextTokens())
+}
+
 func TestInMemorySettingsManager_RetrySettings(t *testing.T) {
 	sm := NewInMemorySettingsManager(Settings{})
 
