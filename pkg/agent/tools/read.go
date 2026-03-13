@@ -3,6 +3,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -114,7 +115,17 @@ func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, e
 		return readImage(absolutePath, path, mimeType)
 	}
 
-	// Read as text
+	// Read as text. When offset or limit are set, avoid reading the entire
+	// file into memory — stream only the lines we need plus enough extra for
+	// truncation limits.
+	if offset != nil || limit != nil {
+		result, err := readTextPartial(absolutePath, path, offset, limit)
+		if err != nil {
+			return agent.AgentToolResult{}, err
+		}
+		return result, nil
+	}
+
 	data, err := os.ReadFile(absolutePath)
 	if err != nil {
 		return agent.AgentToolResult{}, fmt.Errorf("failed to read file %s: %w", path, err)
@@ -150,6 +161,139 @@ func readImage(absolutePath, displayPath, mimeType string) (agent.AgentToolResul
 // ReadFileFn is a function that reads a file and returns its text content.
 // Used for ACP client delegation.
 type ReadFileFn func(ctx context.Context, path string) (string, error)
+
+// readTextPartial reads only the needed lines from a file, avoiding loading
+// the entire file into memory. It counts total lines by scanning the full file
+// but only keeps the lines in the requested range in memory.
+func readTextPartial(absolutePath, displayPath string, offset, limit *int) (agent.AgentToolResult, error) {
+	f, err := os.Open(absolutePath)
+	if err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("failed to read file %s: %w", displayPath, err)
+	}
+	defer f.Close()
+
+	startLine := 0 // 0-indexed
+	if offset != nil {
+		startLine = *offset - 1
+		if startLine < 0 {
+			startLine = 0
+		}
+	}
+
+	// Determine how many lines we actually need to collect. We need enough
+	// for the user limit (if any) and the truncation limits (max lines/bytes).
+	maxNeeded := DefaultMaxLines
+	if limit != nil && *limit < maxNeeded {
+		maxNeeded = *limit
+	}
+	// Read one extra line so we can detect "more lines remaining" accurately.
+	maxNeeded++
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // allow up to 1MB per line
+
+	var collected []string
+	lineNum := 0 // 0-indexed
+	totalLines := 0
+	bytesCollected := 0
+	// We stop collecting once we have enough, but keep counting lines.
+	collecting := true
+
+	for scanner.Scan() {
+		totalLines++
+		if lineNum < startLine {
+			lineNum++
+			continue
+		}
+		if collecting {
+			line := scanner.Text()
+			collected = append(collected, line)
+			bytesCollected += len(line) + 1 // +1 for newline
+			lineNum++
+			// Stop collecting once we have enough lines or bytes.
+			if len(collected) >= maxNeeded || bytesCollected > DefaultMaxBytes {
+				collecting = false
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("failed to read file %s: %w", displayPath, err)
+	}
+
+	if startLine >= totalLines {
+		return agent.AgentToolResult{}, fmt.Errorf("offset %d is beyond end of file (%d lines total)", startLine+1, totalLines)
+	}
+
+	// Now we have only the needed lines; use applyReadFilters for consistent
+	// truncation/formatting but build a synthetic "full file" that starts at
+	// our offset so the function computes correct line numbers. We need to
+	// tell it the total file lines too, so we reconstruct things carefully.
+	//
+	// Instead of applyReadFilters (which re-splits), do the formatting inline
+	// for efficiency.
+	return formatPartialRead(displayPath, collected, startLine, totalLines, offset, limit)
+}
+
+// formatPartialRead formats the output for a partial read, handling truncation
+// and continuation messages. collected contains lines starting at startLine (0-indexed).
+func formatPartialRead(path string, collected []string, startLine, totalLines int, offset, limit *int) (agent.AgentToolResult, error) {
+	// Determine how many lines the user wants.
+	wantLines := len(collected)
+	if limit != nil && *limit < wantLines {
+		wantLines = *limit
+	}
+	// Cap at DefaultMaxLines.
+	if wantLines > DefaultMaxLines {
+		wantLines = DefaultMaxLines
+	}
+
+	// Apply byte limit.
+	byteCount := 0
+	actualLines := 0
+	for i := 0; i < wantLines && i < len(collected); i++ {
+		lineBytes := len(collected[i])
+		if i == 0 && lineBytes > DefaultMaxBytes {
+			// First line exceeds byte limit.
+			startLineDisplay := startLine + 1
+			firstLineSize := FormatSize(lineBytes)
+			outputText := fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
+				startLineDisplay, firstLineSize, FormatSize(DefaultMaxBytes), startLineDisplay, path, DefaultMaxBytes)
+			return agent.AgentToolResult{
+				Content: []ai.ToolResultContent{{Type: "text", Text: outputText}},
+			}, nil
+		}
+		if byteCount+lineBytes+1 > DefaultMaxBytes && i > 0 {
+			break
+		}
+		byteCount += lineBytes + 1
+		actualLines++
+	}
+
+	output := strings.Join(collected[:actualLines], "\n")
+	startLineDisplay := startLine + 1
+	endLineDisplay := startLine + actualLines
+
+	truncatedByLines := actualLines < wantLines || (limit == nil && actualLines < len(collected))
+	truncatedByBytes := byteCount > DefaultMaxBytes
+
+	if truncatedByBytes {
+		nextOffset := endLineDisplay + 1
+		output += fmt.Sprintf("\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
+			startLineDisplay, endLineDisplay, totalLines, FormatSize(DefaultMaxBytes), nextOffset)
+	} else if truncatedByLines || (limit == nil && actualLines >= DefaultMaxLines && endLineDisplay < totalLines) {
+		nextOffset := endLineDisplay + 1
+		output += fmt.Sprintf("\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]",
+			startLineDisplay, endLineDisplay, totalLines, nextOffset)
+	} else if limit != nil && endLineDisplay < totalLines {
+		remaining := totalLines - endLineDisplay
+		nextOffset := endLineDisplay + 1
+		output += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
+	}
+
+	return agent.AgentToolResult{
+		Content: []ai.ToolResultContent{{Type: "text", Text: output}},
+	}, nil
+}
 
 // applyReadFilters applies offset, limit, and truncation to already-loaded text content.
 // This is the text-processing core of executeRead, extracted for reuse.
