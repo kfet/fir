@@ -222,6 +222,7 @@ func NewTUI(terminal Terminal, showHardwareCursor ...bool) *TUI {
 	return t
 }
 
+// FullRedraws returns the count of full redraws (used by cross-package tests).
 func (t *TUI) FullRedraws() int {
 	return t.fullRedrawCount
 }

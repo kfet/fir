@@ -51,6 +51,10 @@ Capture: tm-capture myproject
 | `tm-renamewin NAME OLDNAME NEWNAME` | Rename a window |
 | `tm-kill NAME` | Kill session |
 | `tm-attach NAME` | Print attach command for user |
+| `tm-status NAME` | Compact status of all windows (context %, last activity) |
+| `tm-bulk-rename NAME` | Auto-rename all windows to show last activity |
+| `tm-check-usage` | Check API usage (prints report) |
+| `tm-loop-tick NAME WORKTREE` | One-shot loop tick: git log + status + rename |
 
 ## Multi-Window Sessions
 

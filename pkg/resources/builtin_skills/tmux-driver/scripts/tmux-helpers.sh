@@ -5,6 +5,7 @@
 _TM_SOCKET_DIR="${CLAUDE_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/claude-tmux-sockets}"
 mkdir -p "$_TM_SOCKET_DIR"
 _TM_SOCKET="$_TM_SOCKET_DIR/claude.sock"
+_TM_SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _tm() { tmux -S "$_TM_SOCKET" "$@"; }
 
@@ -117,4 +118,59 @@ tm-renamewin() {
   local oldname="${2:?old window name required}"
   local newname="${3:?new window name required}"
   _tm rename-window -t "$name:$oldname" "$newname"
+}
+
+# --- Bulk / fleet helpers ---
+
+# Sanitize a string for use as a window-name suffix (strip non-printable, truncate).
+_tm_sanitize() {
+  printf '%s' "$1" | tr -cd '[:print:]' | cut -c1-40
+}
+
+# Print a compact status line for every window in a session.
+tm-status() {
+  local name="${1:?usage: tm-status SESSION}"
+  _tm list-windows -t "$name" -F '#{window_name}' | while read -r win; do
+    local last ctx
+    last=$(_tm capture-pane -p -J -t "$name:$win" -S -5 2>/dev/null \
+      | grep -v '^$\|^─\|^⟩\|%/200k' | tail -1)
+    last="$(_tm_sanitize "${last:-idle}")"
+    ctx=$(_tm capture-pane -p -J -t "$name:$win" -S -200 2>/dev/null \
+      | grep -oE '[0-9]+%/200k' | tail -1)
+    printf '%-20s  ctx=%-10s  %s\n' "$win" "${ctx:-?}" "$last"
+  done
+}
+
+# Auto-rename every window to "basename: <last activity>".
+tm-bulk-rename() {
+  local name="${1:?usage: tm-bulk-rename SESSION}"
+  _tm list-windows -t "$name" -F '#{window_name}' | while read -r win; do
+    local base="${win%%:*}"
+    local doing
+    doing=$(_tm capture-pane -p -J -t "$name:$win" -S -5 2>/dev/null \
+      | grep -v '^$\|^─\|^⟩\|%/200k' | tail -1)
+    doing="$(_tm_sanitize "${doing:-idle}")"
+    _tm rename-window -t "$name:$win" "$base: $doing" 2>/dev/null || true
+  done
+}
+
+# Check API usage. Prints the usage report; caller decides thresholds.
+tm-check-usage() {
+  local script_dir="${_TM_SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  local token
+  token=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null \
+    || jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
+  TOKEN="$token" bash "$script_dir/usage.sh"
+}
+
+# One-shot loop tick: git log + worker status + bulk rename.
+tm-loop-tick() {
+  local session="${1:?usage: tm-loop-tick SESSION WORKTREE}"
+  local worktree="${2:?worktree path required}"
+  echo "=== $(date +%H:%M:%S) ==="
+  echo "--- git ---"
+  git -C "$worktree" log --oneline -5 2>/dev/null || echo "(no commits)"
+  echo "--- workers ---"
+  tm-status "$session"
+  tm-bulk-rename "$session"
 }

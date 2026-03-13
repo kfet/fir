@@ -164,25 +164,22 @@ If a feature needs design work, launch a researcher first with a clear goal (pro
 
 Poll every 10 seconds. Each cycle:
 
-1. **Did anything land?** — `git -C "$WORKTREE" log --oneline -5`
-2. **Is anyone stuck?** — Check context % and spinner via `tm-capture`.
-3. **Is the build green?** — Run the project's test command in `$WORKTREE`.
-4. **Update the plan** — Reflect completed/active milestones if the plan tool is available.
-
-Rename windows every cycle to reflect activity:
-
 ```bash
-DOING=$(tm-capture "$SESSION:$WINDOW" 5 \
-  | grep -v '^$\|^─\|^⟩\|%/200k' | tail -1 | cut -c1-40)
-tm-renamewin "$SESSION" "$WINDOW" "$WINDOW: ${DOING:-idle}"
+tm-loop-tick "$SESSION" "$WORKTREE"
 ```
+
+This single command does: `git log`, per-worker status (context % + last activity), and auto-renames all windows. Parse its output to decide next actions.
+
+Additional checks each cycle:
+
+1. **Is anyone stuck?** — Look for high context % or `idle` in `tm-loop-tick` output.
+2. **Is the build green?** — Run the project's test command in `$WORKTREE`.
+3. **Update the plan** — Reflect completed/active milestones if the plan tool is available.
 
 ### Rate Limits — Check Every 5 Cycles
 
 ```bash
-TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null \
-  || jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
-USAGE_OUT=$(TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh")
+USAGE_OUT=$(tm-check-usage)
 FIVE_HR=$(echo "$USAGE_OUT"  | awk '/Five Hour/      {gsub(/%/,"",$3); print int($3)}')
 SEVEN_DAY=$(echo "$USAGE_OUT" | awk '/Seven Day[^a-zA-Z]/ {gsub(/%/,"",$3); print int($3)}')
 ```
