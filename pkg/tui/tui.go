@@ -104,17 +104,6 @@ func (h *OverlayHandle) Hide() {
 	h.tui.removeOverlay(h.entry)
 }
 
-func (h *OverlayHandle) SetHidden(hidden bool) {
-	h.mu.Lock()
-	if h.entry.hidden == hidden {
-		h.mu.Unlock()
-		return
-	}
-	h.entry.hidden = hidden
-	h.mu.Unlock()
-	h.tui.RequestRender(false)
-}
-
 func (h *OverlayHandle) IsHidden() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -249,17 +238,6 @@ func (t *TUI) GetShowHardwareCursor() bool {
 	return t.showHardwareCursor
 }
 
-func (t *TUI) SetShowHardwareCursor(enabled bool) {
-	if t.showHardwareCursor == enabled {
-		return
-	}
-	t.showHardwareCursor = enabled
-	if !enabled {
-		t.Terminal.HideCursor()
-	}
-	t.RequestRender(false)
-}
-
 func (t *TUI) SetClearOnShrink(enabled bool) {
 	t.clearOnShrink = enabled
 }
@@ -272,21 +250,6 @@ func (t *TUI) SetFocus(component Component) {
 	if f, ok := component.(Focusable); ok {
 		f.SetFocused(true)
 	}
-}
-
-func (t *TUI) ShowOverlay(component Component, options *OverlayOptions) *OverlayHandle {
-	entry := &overlayEntry{
-		component: component,
-		options:   options,
-		preFocus:  t.focusedComponent,
-	}
-	t.overlayStack = append(t.overlayStack, entry)
-	if t.isOverlayVisible(entry) {
-		t.SetFocus(component)
-	}
-	t.Terminal.HideCursor()
-	t.RequestRender(false)
-	return &OverlayHandle{tui: t, entry: entry}
 }
 
 func (t *TUI) removeOverlay(entry *overlayEntry) {
@@ -307,32 +270,6 @@ func (t *TUI) removeOverlay(entry *overlayEntry) {
 			return
 		}
 	}
-}
-
-func (t *TUI) HideOverlay() {
-	if len(t.overlayStack) == 0 {
-		return
-	}
-	overlay := t.overlayStack[len(t.overlayStack)-1]
-	t.overlayStack = t.overlayStack[:len(t.overlayStack)-1]
-	if top := t.getTopmostVisibleOverlay(); top != nil {
-		t.SetFocus(top.component)
-	} else {
-		t.SetFocus(overlay.preFocus)
-	}
-	if len(t.overlayStack) == 0 {
-		t.Terminal.HideCursor()
-	}
-	t.RequestRender(false)
-}
-
-func (t *TUI) HasOverlay() bool {
-	for _, o := range t.overlayStack {
-		if t.isOverlayVisible(o) {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *TUI) isOverlayVisible(entry *overlayEntry) bool {

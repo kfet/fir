@@ -150,6 +150,60 @@ func TestResourceList_FilterItems(t *testing.T) {
 	}
 }
 
+func (rl *resourceList) filterItems(query string) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		rl.filtered = make([]flatEntry, len(rl.flatItems))
+		copy(rl.filtered, rl.flatItems)
+		rl.selectFirstItem()
+		return
+	}
+
+	lower := strings.ToLower(query)
+	matchingItems := map[*ResourceItem]bool{}
+	for _, e := range rl.flatItems {
+		if e.entryType == "item" {
+			if strings.Contains(strings.ToLower(e.item.DisplayName), lower) ||
+				strings.Contains(strings.ToLower(string(e.item.ResourceType)), lower) ||
+				strings.Contains(strings.ToLower(e.item.Path), lower) {
+				matchingItems[e.item] = true
+			}
+		}
+	}
+
+	matchingSGs := map[*ResourceSubgroup]bool{}
+	matchingGs := map[*ResourceGroup]bool{}
+	for _, g := range rl.groups {
+		for _, sg := range g.Subgroups {
+			for _, it := range sg.Items {
+				if matchingItems[it] {
+					matchingSGs[sg] = true
+					matchingGs[g] = true
+				}
+			}
+		}
+	}
+
+	rl.filtered = nil
+	for _, e := range rl.flatItems {
+		switch e.entryType {
+		case "group":
+			if matchingGs[e.group] {
+				rl.filtered = append(rl.filtered, e)
+			}
+		case "subgroup":
+			if matchingSGs[e.subgroup] {
+				rl.filtered = append(rl.filtered, e)
+			}
+		case "item":
+			if matchingItems[e.item] {
+				rl.filtered = append(rl.filtered, e)
+			}
+		}
+	}
+	rl.selectFirstItem()
+}
+
 func TestResourceList_Navigation(t *testing.T) {
 	groups := []*ResourceGroup{
 		{

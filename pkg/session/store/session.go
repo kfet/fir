@@ -507,31 +507,10 @@ func (sm *SessionManager) GetLeafID() string {
 	return sm.leafID
 }
 
-func (sm *SessionManager) GetLeafEntry() *SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	if sm.leafID == "" {
-		return nil
-	}
-	return sm.byID[sm.leafID]
-}
-
 func (sm *SessionManager) GetEntry(id string) *SessionEntry {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.byID[id]
-}
-
-func (sm *SessionManager) GetLabel(id string) string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.labelsById[id]
-}
-
-func (sm *SessionManager) GetHeader() *SessionHeader {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.header
 }
 
 func (sm *SessionManager) GetEntries() []*SessionEntry {
@@ -552,18 +531,6 @@ func (sm *SessionManager) GetSessionName() string {
 		}
 	}
 	return ""
-}
-
-func (sm *SessionManager) GetChildren(parentID string) []*SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	var children []*SessionEntry
-	for _, e := range sm.entries {
-		if e.ParentID == parentID {
-			children = append(children, e)
-		}
-	}
-	return children
 }
 
 func (sm *SessionManager) GetTree() []*SessionTreeNode {
@@ -770,12 +737,6 @@ func (sm *SessionManager) Branch(branchFromID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.leafID = branchFromID
-}
-
-func (sm *SessionManager) ResetLeaf() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.leafID = ""
 }
 
 func (sm *SessionManager) BranchWithSummary(branchFromID string, summary string, details json.RawMessage, fromHook bool) string {

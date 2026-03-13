@@ -383,3 +383,170 @@ func TestSettingsManager_InMemoryStorage(t *testing.T) {
 
 func boolPtr(b bool) *bool       { return &b }
 func intPtr(i int) *int          { return &i }
+
+// Test helper methods moved from settings.go — only used in tests.
+
+func (sm *SettingsManager) SetDefaultProvider(provider string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.DefaultProvider = provider
+	sm.markModified("defaultProvider")
+	sm.save()
+}
+
+func (sm *SettingsManager) SetDefaultModel(modelID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.DefaultModel = modelID
+	sm.markModified("defaultModel")
+	sm.save()
+}
+
+func (sm *SettingsManager) GetCompactionReserveTokens() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Compaction != nil {
+		return intDefault(sm.settings.Compaction.ReserveTokens, 16384)
+	}
+	return 16384
+}
+
+func (sm *SettingsManager) GetCompactionKeepRecentTokens() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Compaction != nil {
+		return intDefault(sm.settings.Compaction.KeepRecentTokens, 20000)
+	}
+	return 20000
+}
+
+func (sm *SettingsManager) GetRetryEnabled() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Retry != nil {
+		return boolDefault(sm.settings.Retry.Enabled, true)
+	}
+	return true
+}
+
+func (sm *SettingsManager) SetRetryEnabled(enabled bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.globalSettings.Retry == nil {
+		sm.globalSettings.Retry = &RetrySettings{}
+	}
+	sm.globalSettings.Retry.Enabled = &enabled
+	sm.markModified("retry", "enabled")
+	sm.save()
+}
+
+func (sm *SettingsManager) GetRetrySettings() RetryResult {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	r := RetryResult{
+		Enabled:     true,
+		MaxRetries:  3,
+		BaseDelayMs: 2000,
+		MaxDelayMs:  60000,
+	}
+	if sm.settings.Retry != nil {
+		r.Enabled = boolDefault(sm.settings.Retry.Enabled, true)
+		r.MaxRetries = intDefault(sm.settings.Retry.MaxRetries, 3)
+		r.BaseDelayMs = intDefault(sm.settings.Retry.BaseDelayMs, 2000)
+		r.MaxDelayMs = intDefault(sm.settings.Retry.MaxDelayMs, 60000)
+	}
+	return r
+}
+
+func (sm *SettingsManager) GetHideThinkingBlock() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return boolDefault(sm.settings.HideThinkingBlock, false)
+}
+
+func (sm *SettingsManager) GetShellPath() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.settings.ShellPath
+}
+
+func (sm *SettingsManager) SetShellPath(path string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.ShellPath = path
+	sm.markModified("shellPath")
+	sm.save()
+}
+
+func (sm *SettingsManager) GetQuietStartup() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return boolDefault(sm.settings.QuietStartup, false)
+}
+
+func (sm *SettingsManager) GetSkillPaths() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]string, len(sm.settings.Skills))
+	copy(out, sm.settings.Skills)
+	return out
+}
+
+func (sm *SettingsManager) GetPromptTemplatePaths() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]string, len(sm.settings.Prompts))
+	copy(out, sm.settings.Prompts)
+	return out
+}
+
+func (sm *SettingsManager) GetShowImages() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Terminal != nil {
+		return boolDefault(sm.settings.Terminal.ShowImages, true)
+	}
+	return true
+}
+
+func (sm *SettingsManager) GetClearOnShrink() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Terminal != nil && sm.settings.Terminal.ClearOnShrink != nil {
+		return *sm.settings.Terminal.ClearOnShrink
+	}
+	return os.Getenv("FIR_CLEAR_ON_SHRINK") == "1"
+}
+
+func (sm *SettingsManager) GetImageAutoResize() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Images != nil {
+		return boolDefault(sm.settings.Images.AutoResize, true)
+	}
+	return true
+}
+
+func (sm *SettingsManager) GetBlockImages() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Images != nil {
+		return boolDefault(sm.settings.Images.BlockImages, false)
+	}
+	return false
+}
+
+func (sm *SettingsManager) GetEditorPaddingX() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return intDefault(sm.settings.EditorPaddingX, 0)
+}
+
+func (sm *SettingsManager) GetCodeBlockIndent() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.settings.Markdown != nil && sm.settings.Markdown.CodeBlockIndent != nil {
+		return *sm.settings.Markdown.CodeBlockIndent
+	}
+	return "  "
+}

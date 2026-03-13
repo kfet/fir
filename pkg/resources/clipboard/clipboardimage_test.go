@@ -70,6 +70,16 @@ func TestSelectPreferredImageMimeType(t *testing.T) {
 	}
 }
 
+func isSupportedImageMimeType(mimeType string) bool {
+	base := baseMimeType(mimeType)
+	for _, t := range supportedImageMimeTypes {
+		if t == base {
+			return true
+		}
+	}
+	return false
+}
+
 func TestIsSupportedImageMimeType(t *testing.T) {
 	tests := []struct {
 		mimeType string

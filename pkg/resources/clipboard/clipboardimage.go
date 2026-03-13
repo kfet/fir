@@ -78,16 +78,6 @@ func selectPreferredImageMimeType(mimeTypes []string) string {
 	return ""
 }
 
-func isSupportedImageMimeType(mimeType string) bool {
-	base := baseMimeType(mimeType)
-	for _, t := range supportedImageMimeTypes {
-		if t == base {
-			return true
-		}
-	}
-	return false
-}
-
 // IsWaylandSession returns true if the session is Wayland.
 func IsWaylandSession() bool {
 	return os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("XDG_SESSION_TYPE") == "wayland"

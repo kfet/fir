@@ -350,3 +350,68 @@ type trackingInputHandler struct {
 func (h *trackingInputHandler) Render(width int) []string { return []string{""} }
 func (h *trackingInputHandler) Invalidate()               {}
 func (h *trackingInputHandler) HandleInput(data string)   { *h.received = append(*h.received, data) }
+
+// Test helpers — moved here from tui.go; only used by tests.
+
+func (h *OverlayHandle) SetHidden(hidden bool) {
+	h.mu.Lock()
+	if h.entry.hidden == hidden {
+		h.mu.Unlock()
+		return
+	}
+	h.entry.hidden = hidden
+	h.mu.Unlock()
+	h.tui.RequestRender(false)
+}
+
+func (t *TUI) SetShowHardwareCursor(enabled bool) {
+	if t.showHardwareCursor == enabled {
+		return
+	}
+	t.showHardwareCursor = enabled
+	if !enabled {
+		t.Terminal.HideCursor()
+	}
+	t.RequestRender(false)
+}
+
+func (t *TUI) ShowOverlay(component Component, options *OverlayOptions) *OverlayHandle {
+	entry := &overlayEntry{
+		component: component,
+		options:   options,
+		preFocus:  t.focusedComponent,
+	}
+	t.overlayStack = append(t.overlayStack, entry)
+	if t.isOverlayVisible(entry) {
+		t.SetFocus(component)
+	}
+	t.Terminal.HideCursor()
+	t.RequestRender(false)
+	return &OverlayHandle{tui: t, entry: entry}
+}
+
+func (t *TUI) HideOverlay() {
+	if len(t.overlayStack) == 0 {
+		return
+	}
+	overlay := t.overlayStack[len(t.overlayStack)-1]
+	t.overlayStack = t.overlayStack[:len(t.overlayStack)-1]
+	if top := t.getTopmostVisibleOverlay(); top != nil {
+		t.SetFocus(top.component)
+	} else {
+		t.SetFocus(overlay.preFocus)
+	}
+	if len(t.overlayStack) == 0 {
+		t.Terminal.HideCursor()
+	}
+	t.RequestRender(false)
+}
+
+func (t *TUI) HasOverlay() bool {
+	for _, o := range t.overlayStack {
+		if t.isOverlayVisible(o) {
+			return true
+		}
+	}
+	return false
+}

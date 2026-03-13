@@ -1278,3 +1278,44 @@ func TestBuildSessionContextFromEntries_PlanNotInMessages(t *testing.T) {
 		t.Errorf("expected plan title 'My Plan', got %q", ctx.PlanTitle)
 	}
 }
+
+// Test helper methods — moved from session.go because they are only used in tests.
+
+func (sm *SessionManager) GetLeafEntry() *SessionEntry {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.leafID == "" {
+		return nil
+	}
+	return sm.byID[sm.leafID]
+}
+
+func (sm *SessionManager) GetLabel(id string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.labelsById[id]
+}
+
+func (sm *SessionManager) GetHeader() *SessionHeader {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.header
+}
+
+func (sm *SessionManager) GetChildren(parentID string) []*SessionEntry {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	var children []*SessionEntry
+	for _, e := range sm.entries {
+		if e.ParentID == parentID {
+			children = append(children, e)
+		}
+	}
+	return children
+}
+
+func (sm *SessionManager) ResetLeaf() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.leafID = ""
+}
