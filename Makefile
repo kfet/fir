@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet clean pgo generate-models check-uv lint-python test-python install-uv publish deploy
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -28,7 +28,10 @@ build:
 	go mod tidy
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
-all: test-race build build-all lint-python test-python
+all: fmt test-race build build-all lint-python test-python
+
+fmt:
+	gofmt -s -w .
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/

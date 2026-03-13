@@ -18,6 +18,7 @@
 
 ### Changed
 
+- `make all` now runs `gofmt -s -w .` first, auto-formatting and simplifying all Go files in-place
 - Extension status (e.g. `/schedule` countdown) now displays right-aligned on the pwd line instead of adding a third footer row
 - `/session` command now shows current model and configured MCP servers
 - Bash tool description now includes the current OS/arch (e.g. `darwin/arm64`) so the model knows the platform
