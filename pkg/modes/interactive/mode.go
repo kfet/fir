@@ -20,6 +20,7 @@ import (
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -103,8 +104,8 @@ type InteractiveMode struct {
 	updateCh <-chan string
 
 	// clipboardReader reads an image from the system clipboard.
-	// Defaults to session.ReadClipboardImage; can be replaced in tests.
-	clipboardReader func() *session.ClipboardImage
+	// Defaults to clipboard.ReadClipboardImage; can be replaced in tests.
+	clipboardReader func() *clipboard.ClipboardImage
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -150,7 +151,7 @@ func NewInteractiveMode(
 		ctx:                ctx,
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
-		clipboardReader:    session.ReadClipboardImage,
+		clipboardReader:    clipboard.ReadClipboardImage,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()

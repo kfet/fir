@@ -19,6 +19,7 @@ import (
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )
@@ -1648,7 +1649,7 @@ func TestHandleClipboardImagePaste_NoImage(t *testing.T) {
 	initial := tm.editorText()
 
 	// Override the clipboard reader to return nil (no image available).
-	tm.mode.clipboardReader = func() *session.ClipboardImage { return nil }
+	tm.mode.clipboardReader = func() *clipboard.ClipboardImage { return nil }
 
 	tm.mode.handleClipboardImagePaste()
 	tm.waitRender()
@@ -1663,8 +1664,8 @@ func TestHandleClipboardImagePaste_WithImage(t *testing.T) {
 
 	// Override the clipboard reader to return a fake PNG image.
 	fakeBytes := []byte("\x89PNG\r\n\x1a\n" + string(make([]byte, 100)))
-	tm.mode.clipboardReader = func() *session.ClipboardImage {
-		return &session.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
+	tm.mode.clipboardReader = func() *clipboard.ClipboardImage {
+		return &clipboard.ClipboardImage{Bytes: fakeBytes, MimeType: "image/png"}
 	}
 
 	tm.mode.handleClipboardImagePaste()

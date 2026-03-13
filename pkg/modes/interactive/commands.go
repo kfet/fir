@@ -23,6 +23,7 @@ import (
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
@@ -488,7 +489,7 @@ func (m *InteractiveMode) handleClipboardImagePaste() {
 		return // no image on clipboard, silently ignore
 	}
 
-	ext := session.ExtensionForImageMimeType(img.MimeType)
+	ext := clipboard.ExtensionForImageMimeType(img.MimeType)
 	if ext == "" {
 		ext = "png"
 	}
