@@ -4,6 +4,8 @@
 
 ### Changed
 
+- `/session` command now shows current model and configured MCP servers
+- Bash tool description now includes the current OS/arch (e.g. `darwin/arm64`) so the model knows the platform
 - **Breaking:** `pkg/core` renamed to `pkg/session`; old `pkg/session` (persistence) moved to `pkg/session/store`
 - **Breaking:** `pkg/core/compaction` moved to `pkg/compaction` (top-level)
 - Split `pkg/ai` into sub-packages: `ai/jsonparse`, `ai/ratelimit`, `ai/overflow`, `ai/envkeys`
@@ -17,6 +19,7 @@
 
 ### Added
 
+- `/session` now shows the current model and configured MCP servers
 - Built-in PTY driver (`pkg/ptydriver`) — Go-native terminal multiplexer for agent-to-agent orchestration without requiring tmux
 - `fir pty` subcommand — CLI for managing PTY sessions (serve, new, send, capture, wait, list, kill, etc.)
 - `auto-helpers.sh` for shepherd and tmux-driver skills — auto-selects tmux or built-in PTY driver

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -29,8 +30,8 @@ func NewBashTool(cwd string) agent.AgentTool {
 		Tool: ai.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
-				"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
-				DefaultMaxLines, DefaultMaxBytes/1024,
+				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+				runtime.GOOS, runtime.GOARCH, DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
 				"type": "object",

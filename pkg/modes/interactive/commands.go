@@ -21,9 +21,10 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/resources/clipboard"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
@@ -777,6 +778,19 @@ func (m *InteractiveMode) handleSessionCommand() {
 		enabled := m.extSetup.Manager.EnabledExtensionNames()
 		if len(enabled) > 0 {
 			lines = append(lines, t.Fg("dim", "Extensions: ")+strings.Join(enabled, ", "))
+		}
+	}
+	if model := m.session.Model(); model != nil {
+		lines = append(lines, t.Fg("dim", "Model: ")+model.ID)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if mcpCfg, err := mcp.LoadDefaultConfigs(cwd); err == nil && len(mcpCfg.MCPServers) > 0 {
+			var names []string
+			for name := range mcpCfg.MCPServers {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			lines = append(lines, t.Fg("dim", "MCP Servers: ")+strings.Join(names, ", "))
 		}
 	}
 	lines = append(lines, "")
