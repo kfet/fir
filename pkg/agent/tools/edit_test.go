@@ -2,8 +2,8 @@ package tools
 
 import (
 	"context"
-	"os"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -360,7 +360,7 @@ func TestEditTool_FuzzyMatchPreservesUnrelatedContent(t *testing.T) {
 	tool := NewEditTool(dir)
 	_, err := tool.Execute(context.Background(), "tc1", map[string]any{
 		"path":    "test.txt",
-		"oldText": "it's here",      // ASCII apostrophe matches smart quote via fuzzy
+		"oldText": "it's here", // ASCII apostrophe matches smart quote via fuzzy
 		"newText": "it was replaced",
 	}, nil)
 	if err != nil {
@@ -506,7 +506,7 @@ func TestEditTool_FuzzyMatchMultiByte(t *testing.T) {
 	tool := NewEditTool(dir)
 	_, err := tool.Execute(context.Background(), "tc1", map[string]any{
 		"path":    "test.txt",
-		"oldText": "keep-this",     // ASCII dash matches em dash via fuzzy
+		"oldText": "keep-this", // ASCII dash matches em dash via fuzzy
 		"newText": "keep-replaced",
 	}, nil)
 	if err != nil {

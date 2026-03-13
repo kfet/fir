@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/auth"
 )
 
 func TestModelSelectorComponent_Render(t *testing.T) {

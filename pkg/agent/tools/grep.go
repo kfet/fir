@@ -407,5 +407,3 @@ func grepFallback(ctx context.Context, pattern, searchPath string, isDirectory, 
 		},
 	}, nil
 }
-
-

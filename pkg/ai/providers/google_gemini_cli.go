@@ -26,16 +26,16 @@ import (
 // --- Constants ---
 
 const (
-	geminiCLIDefaultEndpoint      = "https://cloudcode-pa.googleapis.com"
-	antigravityDailyEndpoint      = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	antigravityAutopushEndpoint   = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion     = "1.18.4"
-	claudeThinkingBetaHeader   = "interleaved-thinking-2025-05-14"
-	geminiCLIMaxRetries        = 3
-	geminiCLIBaseDelayMs       = 1000
-	geminiCLIMaxEmptyRetries   = 2
-	geminiCLIEmptyBaseDelayMs  = 500
-	geminiCLIDefaultMaxDelayMs = 60000
+	geminiCLIDefaultEndpoint    = "https://cloudcode-pa.googleapis.com"
+	antigravityDailyEndpoint    = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+	antigravityAutopushEndpoint = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
+	defaultAntigravityVersion   = "1.18.4"
+	claudeThinkingBetaHeader    = "interleaved-thinking-2025-05-14"
+	geminiCLIMaxRetries         = 3
+	geminiCLIBaseDelayMs        = 1000
+	geminiCLIMaxEmptyRetries    = 2
+	geminiCLIEmptyBaseDelayMs   = 500
+	geminiCLIDefaultMaxDelayMs  = 60000
 )
 
 // toolCallCounter generates unique tool call IDs.

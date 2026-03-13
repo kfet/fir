@@ -8,7 +8,7 @@ package agent
 // All read methods are nil-safe: calling them on a nil *ToolSet returns
 // zero values rather than panicking.
 type ToolSet struct {
-	order  []string              // insertion-ordered names
+	order  []string             // insertion-ordered names
 	byName map[string]AgentTool // name → tool
 }
 

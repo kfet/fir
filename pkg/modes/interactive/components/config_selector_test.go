@@ -55,15 +55,15 @@ func TestBuildGroups_Sorting(t *testing.T) {
 	resolved := ResolvedPaths{
 		Extensions: []ResolvedResource{
 			{
-				Path:    "/project/.fir/extensions/foo.ts",
-				Enabled: true,
+				Path:     "/project/.fir/extensions/foo.ts",
+				Enabled:  true,
 				Metadata: resources.PathMetadata{Source: "auto", Scope: "project", Origin: "top-level"},
 			},
 		},
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/.fir/agent/skills/bar/SKILL.md",
-				Enabled: true,
+				Path:     "/home/.fir/agent/skills/bar/SKILL.md",
+				Enabled:  true,
 				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
 		},
@@ -85,8 +85,8 @@ func TestConfigSelectorComponent_Render(t *testing.T) {
 	resolved := ResolvedPaths{
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/.fir/agent/skills/test/SKILL.md",
-				Enabled: true,
+				Path:     "/home/.fir/agent/skills/test/SKILL.md",
+				Enabled:  true,
 				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
 		},

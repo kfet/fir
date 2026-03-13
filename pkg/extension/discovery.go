@@ -10,12 +10,12 @@ import (
 
 // ExtProcConfig describes a discovered external process extension.
 type ExtProcConfig struct {
-	Name     string   // derived from filename or sub-directory name
-	Path     string   // absolute path to the executable
-	Scope    string   // "project", "global", or "builtin"
-	Modes    []string // optional mode allowlist from comment frontmatter
-	Demo     bool     // demo/test extension; skipped unless explicitly allowed
-	Events   []string // event names declared in frontmatter (for lazy loading)
+	Name     string                                  // derived from filename or sub-directory name
+	Path     string                                  // absolute path to the executable
+	Scope    string                                  // "project", "global", or "builtin"
+	Modes    []string                                // optional mode allowlist from comment frontmatter
+	Demo     bool                                    // demo/test extension; skipped unless explicitly allowed
+	Events   []string                                // event names declared in frontmatter (for lazy loading)
 	Commands []resources.ExtensionFrontmatterCommand // commands declared in frontmatter
 }
 

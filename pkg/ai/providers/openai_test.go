@@ -245,7 +245,7 @@ func TestGetCompat_MergesExplicit(t *testing.T) {
 	}
 	c := getCompat(m)
 	assert.Equal(t, ai.MaxTokensFieldMaxTokens, c.MaxTokensField) // overridden
-	assert.True(t, c.SupportsStore)                                // detected default
+	assert.True(t, c.SupportsStore)                               // detected default
 }
 
 func TestGetCompat_NilCompat(t *testing.T) {

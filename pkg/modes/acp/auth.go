@@ -10,10 +10,10 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/oauth"
-	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // providerKeyLinks maps provider IDs to URLs where users can obtain API keys.

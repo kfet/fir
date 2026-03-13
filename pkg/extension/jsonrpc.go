@@ -146,16 +146,16 @@ func (c *Codec) WriteResponse(id any, result any, rpcErr *Error) error {
 	// If this is a success response (no error) and result is nil,
 	// we must emit "result": null rather than omitting the field.
 	type respWithResult struct {
-		JSONRPC string         `json:"jsonrpc"`
-		ID      any            `json:"id"`
-		Result  any            `json:"result"`
-		Error   *Error         `json:"error,omitempty"`
+		JSONRPC string `json:"jsonrpc"`
+		ID      any    `json:"id"`
+		Result  any    `json:"result"`
+		Error   *Error `json:"error,omitempty"`
 	}
 	type respWithError struct {
-		JSONRPC string         `json:"jsonrpc"`
-		ID      any            `json:"id"`
-		Result  any            `json:"result,omitempty"`
-		Error   *Error         `json:"error"`
+		JSONRPC string `json:"jsonrpc"`
+		ID      any    `json:"id"`
+		Result  any    `json:"result,omitempty"`
+		Error   *Error `json:"error"`
 	}
 
 	if rpcErr != nil {

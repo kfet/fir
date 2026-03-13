@@ -7,8 +7,8 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/models"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/models"
 )
 
 const (

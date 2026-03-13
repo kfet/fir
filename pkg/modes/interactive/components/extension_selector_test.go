@@ -52,8 +52,8 @@ func TestExtensionSelectorComponent_VimKeys(t *testing.T) {
 	var selected string
 	comp := NewExtensionSelectorComponent("Pick", options, func(opt string) { selected = opt }, func() {}, nil)
 
-	comp.HandleInput("j") // vim down
-	comp.HandleInput("j") // vim down
+	comp.HandleInput("j")  // vim down
+	comp.HandleInput("j")  // vim down
 	comp.HandleInput("\r") // enter
 
 	if selected != "Third" {

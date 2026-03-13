@@ -12,13 +12,13 @@ func TestIsValidThoughtSignature(t *testing.T) {
 		want bool
 	}{
 		{"", false},
-		{"abc", false},      // not multiple of 4
-		{"abcd", true},      // valid base64
-		{"ab==", true},      // valid with padding
+		{"abc", false}, // not multiple of 4
+		{"abcd", true}, // valid base64
+		{"ab==", true}, // valid with padding
 		{"AAAA", true},
 		{"A+/B", true},
-		{"$$$$", false},     // invalid characters
-		{"ab=d", false},     // = in wrong position (still matches pattern though)
+		{"$$$$", false}, // invalid characters
+		{"ab=d", false}, // = in wrong position (still matches pattern though)
 	}
 	for _, tt := range tests {
 		got := IsValidThoughtSignature(tt.sig)

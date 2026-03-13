@@ -8,8 +8,8 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // ============================================================================

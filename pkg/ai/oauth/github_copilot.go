@@ -107,7 +107,7 @@ func GetGitHubCopilotBaseURL(token, enterpriseDomain string) string {
 // GitHubCopilotProvider implements GitHub Copilot OAuth (device code flow).
 type GitHubCopilotProvider struct{}
 
-func (p *GitHubCopilotProvider) ID() string              { return "github-copilot" }
+func (p *GitHubCopilotProvider) ID() string               { return "github-copilot" }
 func (p *GitHubCopilotProvider) Name() string             { return "GitHub Copilot" }
 func (p *GitHubCopilotProvider) UsesCallbackServer() bool { return false }
 

@@ -424,5 +424,3 @@ func RegisterOpenAICodexResponses(reg *ai.Registry) {
 		StreamSimple: StreamSimpleOpenAICodexResponses,
 	}, "builtin")
 }
-
-

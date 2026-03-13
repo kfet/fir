@@ -7,8 +7,8 @@ import (
 	"sort"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"

@@ -242,8 +242,8 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	const delay = 40 * time.Millisecond // server-side hold time ensures goroutines race
 
 	var (
-		connCount        atomic.Int32 // total connections received by server
-		activeConns      atomic.Int32 // currently connected clients
+		connCount          atomic.Int32 // total connections received by server
+		activeConns        atomic.Int32 // currently connected clients
 		maxConcurrentConns atomic.Int32 // peak concurrent connections during dial window
 	)
 

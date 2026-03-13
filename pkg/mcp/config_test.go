@@ -117,11 +117,11 @@ func TestLoadConfigFile_InvalidJSON(t *testing.T) {
 
 func TestMergeConfigs_OverrideWins(t *testing.T) {
 	base := &ConfigFile{MCPServers: map[string]ServerConfig{
-		"shared": {Command: "base-cmd"},
+		"shared":    {Command: "base-cmd"},
 		"only-base": {Command: "base-only"},
 	}}
 	override := &ConfigFile{MCPServers: map[string]ServerConfig{
-		"shared":       {Command: "override-cmd"},
+		"shared":        {Command: "override-cmd"},
 		"only-override": {Command: "override-only"},
 	}}
 

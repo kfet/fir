@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kfet/fir/pkg/agent"
 )
@@ -40,7 +40,9 @@ func TestManager_StartAndListTools(t *testing.T) {
 			InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}}}`),
 		},
 		func(_ context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			var args struct{ Name string `json:"name"` }
+			var args struct {
+				Name string `json:"name"`
+			}
 			_ = json.Unmarshal(req.Params.Arguments, &args)
 			return &sdk.CallToolResult{
 				Content: []sdk.Content{&sdk.TextContent{Text: "Hello, " + args.Name}},

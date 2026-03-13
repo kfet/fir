@@ -59,8 +59,6 @@ Use a timeout of `<N + 10>` seconds on the bash call. When you see the reminder 
 
 ## Rules
 
-- **Never stop on your own.** Keep looping until the user explicitly says to stop.
-- **One cycle at a time.** Complete each cycle fully before starting the next.
 - **Carry the task verbatim.** Do not paraphrase or simplify the user's prompt between cycles — repeat it exactly as given.
 - **Report every cycle.** Always tell the user what happened, even if the answer is "nothing changed".
 - **Adjust interval on request.** If the user says "slow down" or "speed up", update the interval for the next cycle immediately.

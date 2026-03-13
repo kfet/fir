@@ -97,15 +97,15 @@ func NewAgentMessage(msg ai.Message) AgentMessage {
 
 // AgentState holds the current state of the agent.
 type AgentState struct {
-	SystemPrompt    string
-	Model           *ai.Model
-	ThinkingLevel   ThinkingLevel
-	Tools           *ToolSet
-	Messages        []AgentMessage
+	SystemPrompt     string
+	Model            *ai.Model
+	ThinkingLevel    ThinkingLevel
+	Tools            *ToolSet
+	Messages         []AgentMessage
 	IsStreaming      bool
-	StreamMessage   *AgentMessage
+	StreamMessage    *AgentMessage
 	PendingToolCalls map[string]bool
-	Error           string
+	Error            string
 }
 
 // AgentToolResult is the result of executing a tool.
@@ -152,16 +152,16 @@ type AgentContext struct {
 type AgentEventType string
 
 const (
-	EventAgentStart         AgentEventType = "agent_start"
-	EventAgentEnd           AgentEventType = "agent_end"
-	EventTurnStart          AgentEventType = "turn_start"
-	EventTurnEnd            AgentEventType = "turn_end"
-	EventMessageStart       AgentEventType = "message_start"
-	EventMessageUpdate      AgentEventType = "message_update"
-	EventMessageEnd         AgentEventType = "message_end"
-	EventToolExecutionStart AgentEventType = "tool_execution_start"
+	EventAgentStart          AgentEventType = "agent_start"
+	EventAgentEnd            AgentEventType = "agent_end"
+	EventTurnStart           AgentEventType = "turn_start"
+	EventTurnEnd             AgentEventType = "turn_end"
+	EventMessageStart        AgentEventType = "message_start"
+	EventMessageUpdate       AgentEventType = "message_update"
+	EventMessageEnd          AgentEventType = "message_end"
+	EventToolExecutionStart  AgentEventType = "tool_execution_start"
 	EventToolExecutionUpdate AgentEventType = "tool_execution_update"
-	EventToolExecutionEnd   AgentEventType = "tool_execution_end"
+	EventToolExecutionEnd    AgentEventType = "tool_execution_end"
 )
 
 // AgentEvent represents a lifecycle event from the agent.

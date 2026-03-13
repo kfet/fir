@@ -18,8 +18,8 @@ import (
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/resources/clipboard"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 )

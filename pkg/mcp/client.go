@@ -54,9 +54,9 @@ type Manager struct {
 	verbose  bool
 
 	mu           sync.Mutex
-	reloadMu     sync.Mutex                   // serialises concurrent Reload calls
-	tools        map[string][]agent.AgentTool // per-server tools, guarded by mu
-	serverErrors map[string]error             // per-server connection errors, guarded by mu
+	reloadMu     sync.Mutex                     // serialises concurrent Reload calls
+	tools        map[string][]agent.AgentTool   // per-server tools, guarded by mu
+	serverErrors map[string]error               // per-server connection errors, guarded by mu
 	subscribed   map[string]map[string]struct{} // per-server subscribed resource URIs, guarded by mu
 
 	// OnToolsChanged is called (from a background goroutine) whenever any

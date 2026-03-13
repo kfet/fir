@@ -12,10 +12,10 @@ import (
 // It wraps a Loader and adds abort signaling.
 type CancellableLoader struct {
 	*Loader
-	mu       sync.Mutex
-	aborted  bool
-	OnAbort  func()
-	abortCh  chan struct{}
+	mu      sync.Mutex
+	aborted bool
+	OnAbort func()
+	abortCh chan struct{}
 }
 
 var _ tui.Component = (*CancellableLoader)(nil)

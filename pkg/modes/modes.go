@@ -2,8 +2,8 @@
 package modes
 
 import (
-	"github.com/kfet/fir/pkg/session"
 	printmode "github.com/kfet/fir/pkg/modes/print"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // PrintModeOptions configures print (single-shot) mode.

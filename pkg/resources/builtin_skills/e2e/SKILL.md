@@ -58,11 +58,11 @@ Next reminder command:
 sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read the e2e skill and start the next test cycle."
 ```
 
-### Step 0b: Re-read this skill file
+### Step 1: Re-read this skill file
 
 Re-read this skill to keep instructions in context. Long-running agents drift — this is not optional.
 
-### Step 1: Check for active work
+### Step 2: Check for active work
 
 ```bash
 cd "$PROJECT_ROOT" && find pkg/ cmd/ -name "*.go" -mmin -2 | head -5
@@ -70,14 +70,14 @@ cd "$PROJECT_ROOT" && find pkg/ cmd/ -name "*.go" -mmin -2 | head -5
 
 If many recently modified files, skip the cycle — agents are mid-edit.
 
-### Step 2: Run the test suite
+### Step 3: Run the test suite
 
 ```bash
 cd "$PROJECT_ROOT" && make test-e2e 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 180`.
 
-### Step 3: If all tests pass
+### Step 4: If all tests pass
 
 Run `make all` to confirm nothing is broken:
 
@@ -86,7 +86,7 @@ cd "$PROJECT_ROOT" && make all 2>&1; echo "EXIT:$?"
 ```
 Use `timeout: 300`.
 
-### Step 4: Report results
+### Step 5: Report results
 
 Summarize to the user:
 > E2E cycle complete. Ran X tests: Y passed, Z failed.
@@ -113,7 +113,7 @@ Expected: [what should have happened]
 
 For items that were previously failing but now pass, remove them from the backlog.
 
-### Step 5: Run the reminder command
+### Step 6: Run the reminder command
 
 ```bash
 sleep 30 && echo "=== E2E CYCLE REMINDER === Re-read the e2e skill and start the next test cycle."

@@ -12,7 +12,6 @@ import (
 	"github.com/kfet/fir/pkg/config"
 )
 
-
 // PromptTemplate represents a prompt template loaded from a markdown file.
 type PromptTemplate struct {
 	Name        string `json:"name"`

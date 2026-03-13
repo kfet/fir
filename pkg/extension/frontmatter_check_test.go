@@ -11,12 +11,12 @@ import (
 
 func TestCheckFrontmatter(t *testing.T) {
 	tests := []struct {
-		name     string
-		cfg      ExtProcConfig
-		caps     *InitResult
-		wantEmpty bool
-		wantMissE []string
-		wantMissC []string
+		name       string
+		cfg        ExtProcConfig
+		caps       *InitResult
+		wantEmpty  bool
+		wantMissE  []string
+		wantMissC  []string
 		wantExtraE []string
 	}{
 		{
@@ -67,9 +67,9 @@ func TestCheckFrontmatter(t *testing.T) {
 			wantMissC: []string{"do-thing"},
 		},
 		{
-			name: "no frontmatter no caps",
-			cfg:  ExtProcConfig{Name: "test"},
-			caps: &InitResult{},
+			name:      "no frontmatter no caps",
+			cfg:       ExtProcConfig{Name: "test"},
+			caps:      &InitResult{},
 			wantEmpty: true,
 		},
 	}

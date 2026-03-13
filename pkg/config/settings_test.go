@@ -183,7 +183,7 @@ func TestDeepMergeSettings_NestedMerge(t *testing.T) {
 	result := deepMergeSettings(base, overrides)
 	require.NotNil(t, result.Retry)
 	assert.Equal(t, true, *result.Retry.Enabled) // from base
-	assert.Equal(t, 3, *result.Retry.MaxRetries)  // from overrides
+	assert.Equal(t, 3, *result.Retry.MaxRetries) // from overrides
 }
 
 func TestDeepMergeSettings_CompactionMaxContextTokens(t *testing.T) {
@@ -380,8 +380,8 @@ func TestSettingsManager_InMemoryStorage(t *testing.T) {
 	assert.Equal(t, "gpt-4o", sm.GetDefaultModel())
 }
 
-func boolPtr(b bool) *bool       { return &b }
-func intPtr(i int) *int          { return &i }
+func boolPtr(b bool) *bool { return &b }
+func intPtr(i int) *int    { return &i }
 
 // Test helper methods moved from settings.go — only used in tests.
 

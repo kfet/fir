@@ -14,8 +14,8 @@ type testProvider struct {
 }
 
 func (p *testProvider) ID() string               { return p.id }
-func (p *testProvider) Name() string              { return p.name }
-func (p *testProvider) UsesCallbackServer() bool  { return false }
+func (p *testProvider) Name() string             { return p.name }
+func (p *testProvider) UsesCallbackServer() bool { return false }
 func (p *testProvider) Login(_ LoginCallbacks) (*Credentials, error) {
 	return &Credentials{Access: "test-token"}, nil
 }

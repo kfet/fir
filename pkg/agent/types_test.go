@@ -38,9 +38,9 @@ func TestNewAgentMessage(t *testing.T) {
 
 func TestAgentState_Initial(t *testing.T) {
 	state := AgentState{
-		SystemPrompt:    "You are helpful.",
-		ThinkingLevel:   ThinkingMedium,
-		Messages:        []AgentMessage{},
+		SystemPrompt:     "You are helpful.",
+		ThinkingLevel:    ThinkingMedium,
+		Messages:         []AgentMessage{},
 		PendingToolCalls: make(map[string]bool),
 	}
 	if state.SystemPrompt != "You are helpful." {

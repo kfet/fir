@@ -43,7 +43,10 @@ type msgCall struct {
 	CustomType string
 	Content    any
 }
-type execCall struct{ Command string; Args []string }
+type execCall struct {
+	Command string
+	Args    []string
+}
 
 func newRecorded() *recorded { return &recorded{labels: make(map[string]string)} }
 
@@ -106,13 +109,17 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		result = map[string]any{"ok": true}
 
 	case "set_status":
-		var p struct{ Status string `json:"status"` }
+		var p struct {
+			Status string `json:"status"`
+		}
 		_ = json.Unmarshal(msg.Params, &p)
 		d.rec.statuses = append(d.rec.statuses, p.Status)
 		result = map[string]any{"ok": true}
 
 	case "set_session_name":
-		var p struct{ Name string `json:"name"` }
+		var p struct {
+			Name string `json:"name"`
+		}
 		_ = json.Unmarshal(msg.Params, &p)
 		d.rec.sessionNames = append(d.rec.sessionNames, p.Name)
 		result = map[string]any{"ok": true}
@@ -127,7 +134,9 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		result = map[string]any{"ok": true}
 
 	case "clear_label":
-		var p struct{ EntryID string `json:"entry_id"` }
+		var p struct {
+			EntryID string `json:"entry_id"`
+		}
 		_ = json.Unmarshal(msg.Params, &p)
 		d.rec.labels[p.EntryID] = ""
 		result = map[string]any{"ok": true}
@@ -136,7 +145,9 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		result = d.rec.activeTools
 
 	case "set_active_tools":
-		var p struct{ Names []string `json:"names"` }
+		var p struct {
+			Names []string `json:"names"`
+		}
 		_ = json.Unmarshal(msg.Params, &p)
 		d.rec.activeTools = p.Names
 		result = map[string]any{"ok": true}
@@ -160,7 +171,9 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		result = map[string]any{"ok": true}
 
 	case "send_user_message":
-		var p struct{ Content string `json:"content"` }
+		var p struct {
+			Content string `json:"content"`
+		}
 		_ = json.Unmarshal(msg.Params, &p)
 		d.rec.userMessages = append(d.rec.userMessages, p.Content)
 		result = map[string]any{"ok": true}

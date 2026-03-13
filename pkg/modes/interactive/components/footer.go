@@ -15,28 +15,28 @@ import (
 
 // FooterData provides the data needed to render the footer.
 type FooterData struct {
-	Pwd              string
-	GitBranch        string
-	SessionName      string
-	ModelID          string
-	ModelProvider    string
-	ModelReasoning   bool
-	ThinkingLevel    string
-	ContextWindow    int
-	TotalInput       int
-	TotalOutput      int
-	TotalCacheRead   int
-	TotalCacheWrite  int
-	TotalCost        float64
+	Pwd               string
+	GitBranch         string
+	SessionName       string
+	ModelID           string
+	ModelProvider     string
+	ModelReasoning    bool
+	ThinkingLevel     string
+	ContextWindow     int
+	TotalInput        int
+	TotalOutput       int
+	TotalCacheRead    int
+	TotalCacheWrite   int
+	TotalCost         float64
 	UsingSubscription bool
-	AutoCompactMode  string // "off", "client", "server"
+	AutoCompactMode   string // "off", "client", "server"
 	MultipleProviders bool
 	ExtensionStatuses map[string]string
 	// ContextPercent is the estimated context usage percentage from GetContextUsage.
 	// A negative value means unknown (e.g. right after compaction).
 	ContextPercent float64
 	// ContextTokens is the estimated context tokens. Negative means unknown.
-	ContextTokens  int
+	ContextTokens int
 	// QueuedMessages is the number of follow-up messages waiting in the queue.
 	QueuedMessages int
 	// PlanCompleted is the number of completed plan entries.

@@ -7,8 +7,8 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // createAcpTools creates tools with ACP delegation based on client capabilities.

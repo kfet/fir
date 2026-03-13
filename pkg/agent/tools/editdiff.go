@@ -209,5 +209,3 @@ func simpleDiffParts(oldLines, newLines []string) []diffPart {
 
 	return parts
 }
-
-

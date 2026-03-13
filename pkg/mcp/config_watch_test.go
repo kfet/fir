@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/kfet/fir/pkg/agent"
 )

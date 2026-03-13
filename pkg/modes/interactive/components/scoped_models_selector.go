@@ -21,12 +21,12 @@ type ScopedModelsConfig struct {
 
 // ScopedModelsCallbacks holds callbacks for model selection events.
 type ScopedModelsCallbacks struct {
-	OnModelToggle   func(modelID string, enabled bool)
-	OnPersist       func(enabledModelIDs []string)
-	OnEnableAll     func(allModelIDs []string)
-	OnClearAll      func()
+	OnModelToggle    func(modelID string, enabled bool)
+	OnPersist        func(enabledModelIDs []string)
+	OnEnableAll      func(allModelIDs []string)
+	OnClearAll       func()
 	OnToggleProvider func(provider string, modelIDs []string, enabled bool)
-	OnCancel        func()
+	OnCancel         func()
 }
 
 // scopedModelItem is a view item in the scoped model list.

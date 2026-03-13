@@ -379,7 +379,7 @@ func mapFuzzyToOriginal(original, normalized string, normStart, normEnd int) (or
 			interIdx += runeSize
 		} else {
 			for i := 0; i < runeSize; i++ {
-				interPositions = append(interPositions, interIdx + i)
+				interPositions = append(interPositions, interIdx+i)
 				normIdx++
 			}
 			interIdx += runeSize
@@ -395,7 +395,3 @@ func mapFuzzyToOriginal(original, normalized string, normStart, normEnd int) (or
 	origEnd = origPositions[interEnd]
 	return origStart, origEnd
 }
-
-
-
-

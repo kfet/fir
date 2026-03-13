@@ -154,5 +154,3 @@ func TestSimpleDiffParts_SharedPrefixAndSuffix(t *testing.T) {
 		t.Error("expected both removed and added parts")
 	}
 }
-
-

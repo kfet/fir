@@ -198,8 +198,8 @@ func TestGetJpegDimensions(t *testing.T) {
 	data[2] = 0xff
 	data[3] = 0xc0 // SOF0
 	data[4] = 0x00
-	data[5] = 0x11 // length
-	data[6] = 0x08 // precision
+	data[5] = 0x11                              // length
+	data[6] = 0x08                              // precision
 	binary.BigEndian.PutUint16(data[7:9], 480)  // height
 	binary.BigEndian.PutUint16(data[9:11], 640) // width
 

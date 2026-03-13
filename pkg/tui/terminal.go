@@ -58,13 +58,13 @@ type Terminal interface {
 
 // ProcessTerminal is a real terminal using os.Stdin/os.Stdout.
 type ProcessTerminal struct {
-	mu             sync.Mutex
-	oldState       *term.State
-	inputHandler   func(data string)
-	resizeHandler  func()
-	sigwinchCh     chan os.Signal
-	stopCh         chan struct{}
-	stopped        bool
+	mu            sync.Mutex
+	oldState      *term.State
+	inputHandler  func(data string)
+	resizeHandler func()
+	sigwinchCh    chan os.Signal
+	stopCh        chan struct{}
+	stopped       bool
 }
 
 // isKittyCompatibleTerminal reports whether the current terminal natively
@@ -332,11 +332,11 @@ func (t *ProcessTerminal) SetTitle(title string) {
 
 // MockTerminal is a terminal for testing that captures output.
 type MockTerminal struct {
-	mu           sync.Mutex
-	output       []string
-	cols         int
-	rows         int
-	inputHandler func(data string)
+	mu            sync.Mutex
+	output        []string
+	cols          int
+	rows          int
+	inputHandler  func(data string)
 	resizeHandler func()
 }
 
@@ -371,12 +371,12 @@ func (t *MockTerminal) Columns() int { return t.cols }
 func (t *MockTerminal) Rows() int    { return t.rows }
 
 func (t *MockTerminal) MoveBy(lines int)      {}
-func (t *MockTerminal) HideCursor()            {}
-func (t *MockTerminal) ShowCursor()            {}
-func (t *MockTerminal) ClearLine()             {}
-func (t *MockTerminal) ClearFromCursor()       {}
-func (t *MockTerminal) ClearScreen()           {}
-func (t *MockTerminal) SetTitle(title string)  {}
+func (t *MockTerminal) HideCursor()           {}
+func (t *MockTerminal) ShowCursor()           {}
+func (t *MockTerminal) ClearLine()            {}
+func (t *MockTerminal) ClearFromCursor()      {}
+func (t *MockTerminal) ClearScreen()          {}
+func (t *MockTerminal) SetTitle(title string) {}
 
 // SimulateInput sends input data to the terminal's input handler.
 func (t *MockTerminal) SimulateInput(data string) {

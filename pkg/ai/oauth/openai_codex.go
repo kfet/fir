@@ -21,13 +21,13 @@ import (
 )
 
 const (
-	openAICodexClientID    = "app_EMoamEEZ73f0CkXaXp7hrann"
-	openAICodexAuthorizeURL = "https://auth.openai.com/oauth/authorize"
+	openAICodexClientID        = "app_EMoamEEZ73f0CkXaXp7hrann"
+	openAICodexAuthorizeURL    = "https://auth.openai.com/oauth/authorize"
 	openAICodexDefaultTokenURL = "https://auth.openai.com/oauth/token"
-	openAICodexRedirectURI = "http://localhost:1455/auth/callback"
-	openAICodexScope       = "openid profile email offline_access"
+	openAICodexRedirectURI     = "http://localhost:1455/auth/callback"
+	openAICodexScope           = "openid profile email offline_access"
 	// JWTClaimPath is the JWT claim key for OpenAI auth data.
-	JWTClaimPath           = "https://api.openai.com/auth"
+	JWTClaimPath = "https://api.openai.com/auth"
 )
 
 var openAICodexTokenURL = openAICodexDefaultTokenURL
@@ -38,7 +38,7 @@ func setOpenAICodexTokenURL(u string) { openAICodexTokenURL = u }
 // OpenAICodexProvider implements OpenAI Codex (ChatGPT) OAuth.
 type OpenAICodexProvider struct{}
 
-func (p *OpenAICodexProvider) ID() string              { return "openai-codex" }
+func (p *OpenAICodexProvider) ID() string               { return "openai-codex" }
 func (p *OpenAICodexProvider) Name() string             { return "ChatGPT Plus/Pro (Codex Subscription)" }
 func (p *OpenAICodexProvider) UsesCallbackServer() bool { return true }
 
@@ -220,16 +220,16 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 
 	// Build authorization URL
 	params := url.Values{
-		"response_type":        {"code"},
-		"client_id":            {openAICodexClientID},
-		"redirect_uri":         {openAICodexRedirectURI},
-		"scope":                {openAICodexScope},
-		"code_challenge":       {pkce.Challenge},
-		"code_challenge_method": {"S256"},
-		"state":                {state},
+		"response_type":              {"code"},
+		"client_id":                  {openAICodexClientID},
+		"redirect_uri":               {openAICodexRedirectURI},
+		"scope":                      {openAICodexScope},
+		"code_challenge":             {pkce.Challenge},
+		"code_challenge_method":      {"S256"},
+		"state":                      {state},
 		"id_token_add_organizations": {"true"},
 		"codex_cli_simplified_flow":  {"true"},
-		"originator":           {"fir"},
+		"originator":                 {"fir"},
 	}
 	authURL := openAICodexAuthorizeURL + "?" + params.Encode()
 

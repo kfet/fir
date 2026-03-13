@@ -20,10 +20,10 @@ const defaultAzureAPIVersion = "v1"
 
 // azureToolCallProviders is the set of providers whose tool call IDs need normalization.
 var azureToolCallProviders = map[string]bool{
-	"openai":                    true,
-	"openai-codex":              true,
-	"opencode":                  true,
-	"azure-openai-responses":    true,
+	"openai":                 true,
+	"openai-codex":           true,
+	"opencode":               true,
+	"azure-openai-responses": true,
 }
 
 // parseDeploymentNameMap parses a comma-separated "modelId=deploymentName" map.

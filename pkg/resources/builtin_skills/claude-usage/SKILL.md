@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: claude-usage
-description: Check Anthropic Claude API usage stats using a Claude Code OAuth token
+description: Check Anthropic Claude API usage — queries 5-hour and 7-day rate-limit windows using a local OAuth token from fir or Claude Code.
 ---
 
 # Claude Usage Skill

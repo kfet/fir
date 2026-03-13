@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: monitor
-description: Continually monitor the project for updates
+description: Continuously monitor a project's file activity, build health, and work-tracker progress. Loops every 30 seconds, reports changes, and flags stuck or broken states.
 ---
 
 # Monitor Skill
@@ -72,6 +72,4 @@ Re-read the work tracker every ~10 minutes (every 5th loop iteration) or wheneve
 - **All passing after failures**: Celebrate with ✅
 - **Phase completed**: Highlight with 🎉
 
-## Propose Process Changes
 
-As you monitor the project, consider proposing changes to the process to improve efficiency and reduce errors, conflicts, context, and resource usage.

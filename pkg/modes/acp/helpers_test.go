@@ -7,8 +7,8 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/models"
 )
 
 func TestParseModelID(t *testing.T) {

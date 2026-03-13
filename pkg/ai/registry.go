@@ -21,9 +21,9 @@ type registeredProvider struct {
 
 // Registry manages registered API providers.
 type Registry struct {
-	mu                sync.RWMutex
-	providers         map[Api]*registeredProvider
-	builtInRegistrar  func(*Registry)
+	mu               sync.RWMutex
+	providers        map[Api]*registeredProvider
+	builtInRegistrar func(*Registry)
 }
 
 // DefaultRegistry is the global provider registry.

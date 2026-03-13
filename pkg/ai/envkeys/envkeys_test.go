@@ -136,8 +136,8 @@ func TestProviderEnvVar(t *testing.T) {
 		{"github-copilot", "COPILOT_GITHUB_TOKEN"},
 		{"google", "GEMINI_API_KEY"},
 		{"unknown", ""},
-		{"amazon-bedrock", ""},  // no simple env var mapping
-		{"google-vertex", ""},   // no simple env var mapping
+		{"amazon-bedrock", ""}, // no simple env var mapping
+		{"google-vertex", ""},  // no simple env var mapping
 	}
 	for _, tt := range tests {
 		if got := ProviderEnvVar(tt.provider); got != tt.want {

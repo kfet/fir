@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/models"
 )
 
 func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {

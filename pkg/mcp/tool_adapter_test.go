@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // emptySchema is the minimal valid JSON Schema for tools with no parameters.
@@ -159,7 +159,7 @@ func TestConvertResult_IsError(t *testing.T) {
 //  2. propagates a notifications/cancelled to the MCP server so the server's
 //     context is also cancelled (the server handler unblocks from ctx.Done()).
 func TestAdaptTool_Cancellation(t *testing.T) {
-	started := make(chan struct{})        // closed when server handler begins
+	started := make(chan struct{})         // closed when server handler begins
 	serverCancelled := make(chan struct{}) // closed when server ctx is cancelled
 
 	session := connectTestServer(t, func(s *sdk.Server) {

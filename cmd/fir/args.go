@@ -16,7 +16,7 @@ type Mode string
 const (
 	ModeText Mode = "text"
 	ModeJSON Mode = "json"
-	ModeACP Mode = "acp"
+	ModeACP  Mode = "acp"
 )
 
 // Args holds parsed CLI arguments.
@@ -220,7 +220,7 @@ func ParseArgs(args []string) *Args {
 			i++
 			result.DebugLogFile = args[i]
 
-	case arg == "--login" && i+1 < len(args):
+		case arg == "--login" && i+1 < len(args):
 			i++
 			result.Login = args[i]
 

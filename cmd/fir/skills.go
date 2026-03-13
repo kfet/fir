@@ -63,7 +63,7 @@ func runSkillsList() error {
 	}
 
 	// Compute column widths
-	nameW := 4 // "NAME"
+	nameW := 4   // "NAME"
 	sourceW := 6 // "SOURCE"
 	for _, s := range skills {
 		if len(s.Name) > nameW {

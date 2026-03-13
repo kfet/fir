@@ -2,12 +2,12 @@ package session
 
 import (
 	"encoding/json"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/resources"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
-	"github.com/kfet/fir/pkg/config"
-	"github.com/kfet/fir/pkg/resources"
 )
 
 // TestSelfSkillSettingsExample extracts the settings.json example from the

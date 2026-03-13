@@ -3,17 +3,20 @@
 // with it via the ACP protocol using the ACP SDK's ClientSideConnection.
 //
 // Prerequisites:
-//   FIR_TEST_BINARY   path to the compiled fir binary (required)
-//   FIR_E2E_AGENT_DIR path to an agent dir with a model configured (optional;
-//                     required for session/prompt tests)
+//
+//	FIR_TEST_BINARY   path to the compiled fir binary (required)
+//	FIR_E2E_AGENT_DIR path to an agent dir with a model configured (optional;
+//	                  required for session/prompt tests)
 //
 // Example:
-//   go build -o /tmp/fir-e2e ./cmd/fir/
-//   FIR_TEST_BINARY=/tmp/fir-e2e go test ./pkg/modes/acp/ -run TestACP_E2E -v
+//
+//	go build -o /tmp/fir-e2e ./cmd/fir/
+//	FIR_TEST_BINARY=/tmp/fir-e2e go test ./pkg/modes/acp/ -run TestACP_E2E -v
 //
 // To also run prompt tests, point at a mock or real LLM:
-//   FIR_TEST_BINARY=/tmp/fir-e2e FIR_E2E_AGENT_DIR=/tmp/mock-agent \
-//     go test ./pkg/modes/acp/ -run TestACP_E2E -v -timeout 30s
+//
+//	FIR_TEST_BINARY=/tmp/fir-e2e FIR_E2E_AGENT_DIR=/tmp/mock-agent \
+//	  go test ./pkg/modes/acp/ -run TestACP_E2E -v -timeout 30s
 package acp_test
 
 import (

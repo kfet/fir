@@ -42,11 +42,11 @@ func TestSanitizeStatusText(t *testing.T) {
 func TestFooterComponent_Render(t *testing.T) {
 	f := NewFooterComponent(func() FooterData {
 		return FooterData{
-			Pwd:           "/home/user/project",
-			ModelID:       "claude-3.5-sonnet",
-			TotalInput:    5000,
-			TotalOutput:   1500,
-			ContextWindow: 200000,
+			Pwd:             "/home/user/project",
+			ModelID:         "claude-3.5-sonnet",
+			TotalInput:      5000,
+			TotalOutput:     1500,
+			ContextWindow:   200000,
 			AutoCompactMode: "client",
 		}
 	})
@@ -145,13 +145,13 @@ func TestFooterComponent_WithProvider(t *testing.T) {
 func TestFooterComponent_PlanProgress(t *testing.T) {
 	f := NewFooterComponent(func() FooterData {
 		return FooterData{
-			Pwd:           "/home/user",
-			ModelID:       "test-model",
-			ContextWindow: 128000,
-			PlanTotal:     5,
-			PlanCompleted: 2,
+			Pwd:             "/home/user",
+			ModelID:         "test-model",
+			ContextWindow:   128000,
+			PlanTotal:       5,
+			PlanCompleted:   2,
 			PlanCurrentStep: "Write tests",
-			PlanKeyHint:   "ctrl+r",
+			PlanKeyHint:     "ctrl+r",
 		}
 	})
 
@@ -172,7 +172,7 @@ func TestFooterComponent_PlanProgress(t *testing.T) {
 }
 
 func TestFooterComponent_PlanCompleted(t *testing.T) {
-	f := NewFooterComponent(func() FooterData{
+	f := NewFooterComponent(func() FooterData {
 		return FooterData{
 			Pwd:           "/home/user",
 			ModelID:       "test-model",
@@ -190,7 +190,7 @@ func TestFooterComponent_PlanCompleted(t *testing.T) {
 }
 
 func TestFooterComponent_PlanCompletedWithTitle(t *testing.T) {
-	f := NewFooterComponent(func() FooterData{
+	f := NewFooterComponent(func() FooterData {
 		return FooterData{
 			Pwd:           "/home/user",
 			ModelID:       "test-model",
@@ -212,7 +212,7 @@ func TestFooterComponent_PlanCompletedWithTitle(t *testing.T) {
 }
 
 func TestFooterComponent_NoPlan(t *testing.T) {
-	f := NewFooterComponent(func() FooterData{
+	f := NewFooterComponent(func() FooterData {
 		return FooterData{
 			Pwd:           "/home/user",
 			ModelID:       "test-model",

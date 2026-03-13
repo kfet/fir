@@ -142,4 +142,3 @@ func TestFormatDimensionNote(t *testing.T) {
 		t.Errorf("note missing dimensions: %s", note)
 	}
 }
-

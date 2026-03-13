@@ -12,10 +12,10 @@ import (
 const enableVirtualTerminalInput = 0x0200
 
 var (
-	kernel32              = syscall.NewLazyDLL("kernel32.dll")
-	procGetStdHandle      = kernel32.NewProc("GetStdHandle")
-	procGetConsoleMode    = kernel32.NewProc("GetConsoleMode")
-	procSetConsoleMode    = kernel32.NewProc("SetConsoleMode")
+	kernel32           = syscall.NewLazyDLL("kernel32.dll")
+	procGetStdHandle   = kernel32.NewProc("GetStdHandle")
+	procGetConsoleMode = kernel32.NewProc("GetConsoleMode")
+	procSetConsoleMode = kernel32.NewProc("SetConsoleMode")
 )
 
 // enableWindowsVTInput adds ENABLE_VIRTUAL_TERMINAL_INPUT (0x0200) to the

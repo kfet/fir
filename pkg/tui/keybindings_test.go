@@ -193,7 +193,6 @@ func TestKeybindingsManager_AllDefaultActionsRegistered(t *testing.T) {
 		ActionSelectModel,
 		ActionExpandTools,
 		ActionToggleThinking,
-		ActionToggleSessionNamedFilter,
 		ActionExternalEditor,
 		ActionFollowUp,
 		ActionDequeue,

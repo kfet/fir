@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: shepherd
-description: Shepherd a fleet of coding agents. Uses tmux when available, falls back to built-in PTY driver.
+description: Shepherd a fleet of coding agents — spawn agents in tmux windows, assign tasks, monitor progress, handle rate limits, and coordinate merges.
 ---
 
 # Shepherd

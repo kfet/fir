@@ -282,7 +282,7 @@ type mockOAuthProvider struct {
 	refreshErr   error
 }
 
-func (m *mockOAuthProvider) ID() string              { return m.id }
+func (m *mockOAuthProvider) ID() string               { return m.id }
 func (m *mockOAuthProvider) Name() string             { return "Mock " + m.id }
 func (m *mockOAuthProvider) UsesCallbackServer() bool { return false }
 

@@ -26,11 +26,11 @@ const CurrentSessionVersion = 3
 
 // SessionHeader is the first entry in a session JSONL file.
 type SessionHeader struct {
-	Type          string `json:"type"`              // always "session"
-	Version       int    `json:"version"`           // CurrentSessionVersion
-	ID            string `json:"id"`                //
-	Timestamp     string `json:"timestamp"`         //
-	Cwd           string `json:"cwd"`               //
+	Type          string `json:"type"`                    // always "session"
+	Version       int    `json:"version"`                 // CurrentSessionVersion
+	ID            string `json:"id"`                      //
+	Timestamp     string `json:"timestamp"`               //
+	Cwd           string `json:"cwd"`                     //
 	ParentSession string `json:"parentSession,omitempty"` //
 }
 
@@ -83,8 +83,8 @@ type SessionEntry struct {
 
 	// plan_update
 	PlanEntries  json.RawMessage   `json:"planEntries,omitempty"`
-	PlanTitle    string             `json:"planTitle,omitempty"`
-	PlanMetadata map[string]string  `json:"planMetadata,omitempty"`
+	PlanTitle    string            `json:"planTitle,omitempty"`
+	PlanMetadata map[string]string `json:"planMetadata,omitempty"`
 }
 
 // GetParentID returns the parent entry ID, or empty string for root entries.

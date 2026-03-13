@@ -83,21 +83,21 @@ type DefaultResourceLoader struct {
 	additionalSkillPaths  []string
 	additionalPromptPaths []string
 
-	noSkills    bool
-	noPrompts   bool
+	noSkills  bool
+	noPrompts bool
 
 	systemPromptSource       string
 	appendSystemPromptSource string
 
 	// Loaded state
-	skills           []Skill
-	skillDiagnostics []ResourceDiagnostic
-	prompts          []PromptTemplate
-	promptDiagnostics []ResourceDiagnostic
-	agentsFiles      []AgentsFile
-	systemPrompt     string
+	skills             []Skill
+	skillDiagnostics   []ResourceDiagnostic
+	prompts            []PromptTemplate
+	promptDiagnostics  []ResourceDiagnostic
+	agentsFiles        []AgentsFile
+	systemPrompt       string
 	appendSystemPrompt []string
-	pathMetadata     map[string]PathMetadata
+	pathMetadata       map[string]PathMetadata
 
 	lastSkillPaths  []string
 	lastPromptPaths []string

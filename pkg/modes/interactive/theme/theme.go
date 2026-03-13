@@ -20,6 +20,7 @@ import (
 
 //go:embed themes/*.json
 var embeddedThemesFS embed.FS
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -462,7 +463,7 @@ func createDarkTheme(mode ColorMode) *Theme {
 		"mdHeading": "#f0c674", "mdLink": "#81a2be", "mdLinkUrl": "#666666",
 		"mdCode": "#8abeb7", "mdCodeBlock": "#b5bd68", "mdCodeBlockBorder": "#808080",
 		"mdQuote": "#808080", "mdQuoteBorder": "#808080", "mdHr": "#808080",
-		"mdListBullet": "#8abeb7",
+		"mdListBullet":  "#8abeb7",
 		"toolDiffAdded": "#b5bd68", "toolDiffRemoved": "#cc6666", "toolDiffContext": "#808080",
 		"syntaxComment": "#6A9955", "syntaxKeyword": "#569CD6", "syntaxFunction": "#DCDCAA",
 		"syntaxVariable": "#9CDCFE", "syntaxString": "#CE9178", "syntaxNumber": "#B5CEA8",
@@ -489,7 +490,7 @@ func createLightTheme(mode ColorMode) *Theme {
 		"mdHeading": "#b58900", "mdLink": "#268bd2", "mdLinkUrl": "#b0b0b0",
 		"mdCode": "#2aa198", "mdCodeBlock": "#859900", "mdCodeBlockBorder": "#93a1a1",
 		"mdQuote": "#93a1a1", "mdQuoteBorder": "#93a1a1", "mdHr": "#93a1a1",
-		"mdListBullet": "#2aa198",
+		"mdListBullet":  "#2aa198",
 		"toolDiffAdded": "#859900", "toolDiffRemoved": "#dc322f", "toolDiffContext": "#93a1a1",
 		"syntaxComment": "#93a1a1", "syntaxKeyword": "#268bd2", "syntaxFunction": "#b58900",
 		"syntaxVariable": "#657b83", "syntaxString": "#2aa198", "syntaxNumber": "#d33682",

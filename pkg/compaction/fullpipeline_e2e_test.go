@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	fmsg "github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/models"
-	"github.com/kfet/fir/pkg/auth"
 )
 
 // ============================================================================

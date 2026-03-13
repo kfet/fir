@@ -12,22 +12,22 @@ import (
 
 // providerEnvMap maps provider names to their API key environment variables.
 var providerEnvMap = map[string]string{
-	string(ai.ProviderOpenAI):              "OPENAI_API_KEY",
+	string(ai.ProviderOpenAI):               "OPENAI_API_KEY",
 	string(ai.ProviderAzureOpenAIResponses): "AZURE_OPENAI_API_KEY",
-	string(ai.ProviderGoogle):              "GEMINI_API_KEY",
-	string(ai.ProviderGroq):                "GROQ_API_KEY",
-	string(ai.ProviderCerebras):            "CEREBRAS_API_KEY",
-	string(ai.ProviderXAI):                 "XAI_API_KEY",
-	string(ai.ProviderOpenRouter):          "OPENROUTER_API_KEY",
-	string(ai.ProviderVercelAIGateway):     "AI_GATEWAY_API_KEY",
-	string(ai.ProviderZAI):                 "ZAI_API_KEY",
-	string(ai.ProviderMistral):             "MISTRAL_API_KEY",
-	string(ai.ProviderMinimax):             "MINIMAX_API_KEY",
-	string(ai.ProviderMinimaxCN):           "MINIMAX_CN_API_KEY",
-	string(ai.ProviderHuggingface):         "HF_TOKEN",
-	string(ai.ProviderOpenCode):            "OPENCODE_API_KEY",
-	string(ai.ProviderOpenCodeGo):          "OPENCODE_API_KEY",
-	string(ai.ProviderKimiCoding):          "KIMI_API_KEY",
+	string(ai.ProviderGoogle):               "GEMINI_API_KEY",
+	string(ai.ProviderGroq):                 "GROQ_API_KEY",
+	string(ai.ProviderCerebras):             "CEREBRAS_API_KEY",
+	string(ai.ProviderXAI):                  "XAI_API_KEY",
+	string(ai.ProviderOpenRouter):           "OPENROUTER_API_KEY",
+	string(ai.ProviderVercelAIGateway):      "AI_GATEWAY_API_KEY",
+	string(ai.ProviderZAI):                  "ZAI_API_KEY",
+	string(ai.ProviderMistral):              "MISTRAL_API_KEY",
+	string(ai.ProviderMinimax):              "MINIMAX_API_KEY",
+	string(ai.ProviderMinimaxCN):            "MINIMAX_CN_API_KEY",
+	string(ai.ProviderHuggingface):          "HF_TOKEN",
+	string(ai.ProviderOpenCode):             "OPENCODE_API_KEY",
+	string(ai.ProviderOpenCodeGo):           "OPENCODE_API_KEY",
+	string(ai.ProviderKimiCoding):           "KIMI_API_KEY",
 }
 
 // additionalAuthEnvVars lists env vars used by providers whose auth logic can't

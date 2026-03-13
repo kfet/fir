@@ -39,7 +39,7 @@ type MarkdownTheme struct {
 	Strikethrough   func(string) string
 	Underline       func(string) string
 	HighlightCode   func(code string, lang string) []string // optional
-	CodeBlockIndent string                                   // default "  "
+	CodeBlockIndent string                                  // default "  "
 }
 
 // Markdown renders markdown text as styled terminal output.

@@ -10,22 +10,22 @@ import (
 
 // overflowPatterns are regex patterns to detect context overflow errors.
 var overflowPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)prompt is too long`),                     // Anthropic
-	regexp.MustCompile(`(?i)input is too long for requested model`),  // Amazon Bedrock
-	regexp.MustCompile(`(?i)exceeds the context window`),             // OpenAI
-	regexp.MustCompile(`(?i)input token count.*exceeds the maximum`), // Google
-	regexp.MustCompile(`(?i)maximum prompt length is \d+`),           // xAI
-	regexp.MustCompile(`(?i)reduce the length of the messages`),      // Groq
-	regexp.MustCompile(`(?i)maximum context length is \d+ tokens`),   // OpenRouter
-	regexp.MustCompile(`(?i)exceeds the limit of \d+`),               // GitHub Copilot
-	regexp.MustCompile(`(?i)exceeds the available context size`),     // llama.cpp
-	regexp.MustCompile(`(?i)greater than the context length`),        // LM Studio
-	regexp.MustCompile(`(?i)context window exceeds limit`),           // MiniMax
-	regexp.MustCompile(`(?i)exceeded model token limit`),                                       // Kimi
-	regexp.MustCompile(`(?i)too large for model with \d+ maximum context length`),               // Mistral
-	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),                                     // Generic
-	regexp.MustCompile(`(?i)too many tokens`),                        // Generic
-	regexp.MustCompile(`(?i)token limit exceeded`),                   // Generic
+	regexp.MustCompile(`(?i)prompt is too long`),                                  // Anthropic
+	regexp.MustCompile(`(?i)input is too long for requested model`),               // Amazon Bedrock
+	regexp.MustCompile(`(?i)exceeds the context window`),                          // OpenAI
+	regexp.MustCompile(`(?i)input token count.*exceeds the maximum`),              // Google
+	regexp.MustCompile(`(?i)maximum prompt length is \d+`),                        // xAI
+	regexp.MustCompile(`(?i)reduce the length of the messages`),                   // Groq
+	regexp.MustCompile(`(?i)maximum context length is \d+ tokens`),                // OpenRouter
+	regexp.MustCompile(`(?i)exceeds the limit of \d+`),                            // GitHub Copilot
+	regexp.MustCompile(`(?i)exceeds the available context size`),                  // llama.cpp
+	regexp.MustCompile(`(?i)greater than the context length`),                     // LM Studio
+	regexp.MustCompile(`(?i)context window exceeds limit`),                        // MiniMax
+	regexp.MustCompile(`(?i)exceeded model token limit`),                          // Kimi
+	regexp.MustCompile(`(?i)too large for model with \d+ maximum context length`), // Mistral
+	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),                       // Generic
+	regexp.MustCompile(`(?i)too many tokens`),                                     // Generic
+	regexp.MustCompile(`(?i)token limit exceeded`),                                // Generic
 }
 
 var statusCodePattern = regexp.MustCompile(`(?i)^4(00|13)\s*(status code)?\s*\(no body\)`)

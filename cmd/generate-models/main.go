@@ -1420,7 +1420,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		all = append(all, modelSpec{
 			ID: "gemini-3.1-flash-lite-preview", Name: "Gemini 3.1 Flash Lite Preview",
 			API: "google-generative-ai", Provider: "google",
-			BaseURL: "https://generativelanguage.googleapis.com/v1beta",
+			BaseURL:   "https://generativelanguage.googleapis.com/v1beta",
 			Reasoning: true, Input: []string{"text", "image"},
 			ContextWindow: 1048576, MaxTokens: 65536,
 		})

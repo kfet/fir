@@ -75,18 +75,18 @@ func NormalizeToolCallId(modelID, id string) string {
 
 // GoogleContent is the Gemini API content format.
 type GoogleContent struct {
-	Role  string           `json:"role"`
-	Parts []GooglePart     `json:"parts"`
+	Role  string       `json:"role"`
+	Parts []GooglePart `json:"parts"`
 }
 
 // GooglePart is a part in a Gemini content message.
 type GooglePart struct {
-	Text             string                 `json:"text,omitempty"`
-	InlineData       *GoogleInlineData      `json:"inlineData,omitempty"`
-	FunctionCall     *GoogleFunctionCall    `json:"functionCall,omitempty"`
-	FunctionResponse *GoogleFunctionResp    `json:"functionResponse,omitempty"`
-	Thought          *bool                  `json:"thought,omitempty"`
-	ThoughtSignature string                 `json:"thoughtSignature,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	InlineData       *GoogleInlineData   `json:"inlineData,omitempty"`
+	FunctionCall     *GoogleFunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *GoogleFunctionResp `json:"functionResponse,omitempty"`
+	Thought          *bool               `json:"thought,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
 // GoogleInlineData is inline image data.

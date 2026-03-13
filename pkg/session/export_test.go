@@ -249,4 +249,3 @@ func TestExtractHTMLMessageText_InvalidJSON(t *testing.T) {
 		t.Errorf("expected empty string for invalid JSON, got %q", got)
 	}
 }
-

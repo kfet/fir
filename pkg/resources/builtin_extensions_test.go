@@ -211,11 +211,12 @@ func extractPythonDecorators(src, decorator string) []string {
 
 // extractPythonCommands extracts command names from @fir_ext.command(...) calls.
 // Handles both single-line and multi-line forms:
-//   @fir_ext.command(name="foo", ...)
-//   @fir_ext.command(
-//       name="foo",
-//       ...
-//   )
+//
+//	@fir_ext.command(name="foo", ...)
+//	@fir_ext.command(
+//	    name="foo",
+//	    ...
+//	)
 func extractPythonCommands(src string) []string {
 	var results []string
 	lines := strings.Split(src, "\n")

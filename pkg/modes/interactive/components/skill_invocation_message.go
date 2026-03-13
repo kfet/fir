@@ -3,8 +3,8 @@
 package components
 
 import (
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/session"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 

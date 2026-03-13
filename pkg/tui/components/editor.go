@@ -359,7 +359,7 @@ type EditorTheme struct {
 
 // EditorOptions holds editor configuration.
 type EditorOptions struct {
-	PaddingX              int
+	PaddingX               int
 	AutocompleteMaxVisible int
 }
 
@@ -397,12 +397,12 @@ type Editor struct {
 
 	Focused bool
 
-	tuiRef      *tui.TUI
-	theme       EditorTheme
-	paddingX    int
-	lastWidth   int
+	tuiRef       *tui.TUI
+	theme        EditorTheme
+	paddingX     int
+	lastWidth    int
 	scrollOffset int
-	BorderColor func(string) string
+	BorderColor  func(string) string
 
 	autocompleteProvider AutocompleteProvider
 	autocompleteList     *SelectList
@@ -456,17 +456,17 @@ func NewEditor(t *tui.TUI, theme EditorTheme, opts ...EditorOptions) *Editor {
 		maxVis = 20
 	}
 	return &Editor{
-		state:            editorState{lines: []string{""}},
-		tuiRef:           t,
-		theme:            theme,
-		paddingX:         paddingX,
-		lastWidth:        80,
-		BorderColor:      theme.BorderColor,
+		state:              editorState{lines: []string{""}},
+		tuiRef:             t,
+		theme:              theme,
+		paddingX:           paddingX,
+		lastWidth:          80,
+		BorderColor:        theme.BorderColor,
 		autocompleteMaxVis: maxVis,
-		pastes:           make(map[int]string),
-		historyIndex:     -1,
-		killRing:         NewKillRing(),
-		undoStack:        NewUndoStack[editorState](),
+		pastes:             make(map[int]string),
+		historyIndex:       -1,
+		killRing:           NewKillRing(),
+		undoStack:          NewUndoStack[editorState](),
 	}
 }
 
@@ -2158,5 +2158,3 @@ func isAlnumDotDashUnderscore(s string) bool {
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
-
-

@@ -10,6 +10,7 @@
 
 - Fork feature (`/fork`, double-escape fork action, `ActionFork` keybinding)
 - `doubleEscapeAction` setting — double-escape now always opens the tree selector
+- `ActionToggleSessionNamedFilter` — dead action with no handler
 
 ### Fixed
 

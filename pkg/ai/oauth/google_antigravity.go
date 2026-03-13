@@ -51,7 +51,7 @@ func init() {
 // AntigravityProvider implements Google Antigravity OAuth (Gemini 3, Claude, GPT-OSS via Google Cloud).
 type AntigravityProvider struct{}
 
-func (p *AntigravityProvider) ID() string              { return "google-antigravity" }
+func (p *AntigravityProvider) ID() string               { return "google-antigravity" }
 func (p *AntigravityProvider) Name() string             { return "Antigravity (Gemini 3, Claude, GPT-OSS)" }
 func (p *AntigravityProvider) UsesCallbackServer() bool { return true }
 
@@ -128,14 +128,14 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 	// Build authorization URL
 	params := url.Values{
 		"client_id":             {antigravityClientID},
-		"response_type":        {"code"},
-		"redirect_uri":         {antigravityRedirectURI},
-		"scope":                {strings.Join(antigravityScopes, " ")},
-		"code_challenge":       {pkce.Challenge},
+		"response_type":         {"code"},
+		"redirect_uri":          {antigravityRedirectURI},
+		"scope":                 {strings.Join(antigravityScopes, " ")},
+		"code_challenge":        {pkce.Challenge},
 		"code_challenge_method": {"S256"},
-		"state":                {pkce.Verifier},
-		"access_type":          {"offline"},
-		"prompt":               {"consent"},
+		"state":                 {pkce.Verifier},
+		"access_type":           {"offline"},
+		"prompt":                {"consent"},
 	}
 	authURL := antigravityAuthURL + "?" + params.Encode()
 
@@ -396,9 +396,9 @@ func discoverProject(accessToken string, callbacks LoginCallbacks) string {
 	// Assist API to accept requests. Changing them breaks authentication. This is a
 	// known ToS risk inherited from the original client implementation.
 	headers := map[string]string{
-		"Authorization":   "Bearer " + accessToken,
-		"Content-Type":    "application/json",
-		"User-Agent":      "google-api-nodejs-client/9.15.1",
+		"Authorization":     "Bearer " + accessToken,
+		"Content-Type":      "application/json",
+		"User-Agent":        "google-api-nodejs-client/9.15.1",
 		"X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
 	}
 

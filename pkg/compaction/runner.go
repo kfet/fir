@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/session"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // DefaultRunner implements core.CompactionRunner using the compaction package.

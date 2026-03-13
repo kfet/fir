@@ -275,19 +275,19 @@ var legacySequenceKeyIDs = map[string]string{
 // =============================================================================
 
 type parsedKittySequence struct {
-	codepoint    int
-	shiftedKey   *int
+	codepoint     int
+	shiftedKey    *int
 	baseLayoutKey *int
-	modifier     int
-	eventType    KeyEventType
+	modifier      int
+	eventType     KeyEventType
 }
 
 var (
-	csiURe      = regexp.MustCompile(`^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$`)
-	arrowRe     = regexp.MustCompile(`^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$`)
-	funcRe      = regexp.MustCompile(`^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$`)
-	homeEndRe   = regexp.MustCompile(`^\x1b\[1;(\d+)(?::(\d+))?([HF])$`)
-	modOtherRe  = regexp.MustCompile(`^\x1b\[27;(\d+);(\d+)~$`)
+	csiURe     = regexp.MustCompile(`^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$`)
+	arrowRe    = regexp.MustCompile(`^\x1b\[1;(\d+)(?::(\d+))?([ABCD])$`)
+	funcRe     = regexp.MustCompile(`^\x1b\[(\d+)(?:;(\d+))?(?::(\d+))?~$`)
+	homeEndRe  = regexp.MustCompile(`^\x1b\[1;(\d+)(?::(\d+))?([HF])$`)
+	modOtherRe = regexp.MustCompile(`^\x1b\[27;(\d+);(\d+)~$`)
 )
 
 // IsKeyRelease checks if input data is a key release event.
@@ -1077,4 +1077,3 @@ func SplitKeySequences(data string) []string {
 	}
 	return seqs
 }
-

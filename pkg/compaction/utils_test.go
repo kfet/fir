@@ -181,5 +181,3 @@ func TestSummarizationSystemPrompt(t *testing.T) {
 		t.Error("expected 'summarization' in system prompt")
 	}
 }
-
-

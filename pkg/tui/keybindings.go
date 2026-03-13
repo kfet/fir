@@ -12,50 +12,48 @@ import (
 type AppAction string
 
 const (
-	ActionInterrupt                AppAction = "interrupt"
-	ActionClear                    AppAction = "clear"
-	ActionExit                     AppAction = "exit"
-	ActionSuspend                  AppAction = "suspend"
-	ActionCycleThinkingLevel       AppAction = "cycleThinkingLevel"
-	ActionCycleModelForward        AppAction = "cycleModelForward"
-	ActionCycleModelBackward       AppAction = "cycleModelBackward"
-	ActionSelectModel              AppAction = "selectModel"
-	ActionExpandTools              AppAction = "expandTools"
-	ActionToggleThinking           AppAction = "toggleThinking"
-	ActionToggleSessionNamedFilter AppAction = "toggleSessionNamedFilter"
-	ActionExternalEditor           AppAction = "externalEditor"
-	ActionFollowUp                 AppAction = "followUp"
-	ActionDequeue                  AppAction = "dequeue"
-	ActionPasteImage               AppAction = "pasteImage"
-	ActionSelectThinking           AppAction = "selectThinking"
-	ActionNewSession               AppAction = "newSession"
-	ActionTree                     AppAction = "tree"
-	ActionResume                   AppAction = "resume"
-	ActionTogglePlan               AppAction = "togglePlan"
+	ActionInterrupt          AppAction = "interrupt"
+	ActionClear              AppAction = "clear"
+	ActionExit               AppAction = "exit"
+	ActionSuspend            AppAction = "suspend"
+	ActionCycleThinkingLevel AppAction = "cycleThinkingLevel"
+	ActionCycleModelForward  AppAction = "cycleModelForward"
+	ActionCycleModelBackward AppAction = "cycleModelBackward"
+	ActionSelectModel        AppAction = "selectModel"
+	ActionExpandTools        AppAction = "expandTools"
+	ActionToggleThinking     AppAction = "toggleThinking"
+	ActionExternalEditor     AppAction = "externalEditor"
+	ActionFollowUp           AppAction = "followUp"
+	ActionDequeue            AppAction = "dequeue"
+	ActionPasteImage         AppAction = "pasteImage"
+	ActionSelectThinking     AppAction = "selectThinking"
+	ActionNewSession         AppAction = "newSession"
+	ActionTree               AppAction = "tree"
+	ActionResume             AppAction = "resume"
+	ActionTogglePlan         AppAction = "togglePlan"
 )
 
 // DefaultAppKeybindings maps app actions to their default key bindings.
 var DefaultAppKeybindings = map[AppAction][]string{
-	ActionInterrupt:                {"escape"},
-	ActionClear:                    {"ctrl+c"},
-	ActionExit:                     {"ctrl+d"},
-	ActionSuspend:                  {"ctrl+z"},
-	ActionCycleThinkingLevel:       {"shift+tab"},
-	ActionCycleModelForward:        {"ctrl+p"},
-	ActionCycleModelBackward:       {"shift+ctrl+p"},
-	ActionSelectModel:              {"ctrl+l"},
-	ActionExpandTools:              {"ctrl+o"},
-	ActionToggleThinking:           {"ctrl+t"},
-	ActionToggleSessionNamedFilter: {},
-	ActionExternalEditor:           {"ctrl+g"},
-	ActionFollowUp:                 {"alt+enter"},
-	ActionDequeue:                  {"alt+up"},
-	ActionPasteImage:               {"ctrl+v"},
-	ActionNewSession:               {"ctrl+n"},
-	ActionSelectThinking:           {},
-	ActionTree:                     {},
-	ActionResume:                   {},
-	ActionTogglePlan:               {"ctrl+r"},
+	ActionInterrupt:          {"escape"},
+	ActionClear:              {"ctrl+c"},
+	ActionExit:               {"ctrl+d"},
+	ActionSuspend:            {"ctrl+z"},
+	ActionCycleThinkingLevel: {"shift+tab"},
+	ActionCycleModelForward:  {"ctrl+p"},
+	ActionCycleModelBackward: {"shift+ctrl+p"},
+	ActionSelectModel:        {"ctrl+l"},
+	ActionExpandTools:        {"ctrl+o"},
+	ActionToggleThinking:     {"ctrl+t"},
+	ActionExternalEditor:     {"ctrl+g"},
+	ActionFollowUp:           {"alt+enter"},
+	ActionDequeue:            {"alt+up"},
+	ActionPasteImage:         {"ctrl+v"},
+	ActionNewSession:         {"ctrl+n"},
+	ActionSelectThinking:     {},
+	ActionTree:               {},
+	ActionResume:             {},
+	ActionTogglePlan:         {"ctrl+r"},
 }
 
 // KeybindingsConfig is the JSON config mapping actions to key IDs.

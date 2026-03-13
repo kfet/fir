@@ -54,7 +54,7 @@ func init() {
 // GeminiCLIProvider implements Google Cloud Code Assist (Gemini CLI) OAuth.
 type GeminiCLIProvider struct{}
 
-func (p *GeminiCLIProvider) ID() string              { return "google-gemini-cli" }
+func (p *GeminiCLIProvider) ID() string               { return "google-gemini-cli" }
 func (p *GeminiCLIProvider) Name() string             { return "Google Cloud Code Assist (Gemini CLI)" }
 func (p *GeminiCLIProvider) UsesCallbackServer() bool { return true }
 
@@ -109,14 +109,14 @@ func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {
 	// Build authorization URL
 	params := url.Values{
 		"client_id":             {geminiCLIClientID},
-		"response_type":        {"code"},
-		"redirect_uri":         {geminiCLIRedirectURI},
-		"scope":                {strings.Join(geminiCLIScopes, " ")},
-		"code_challenge":       {pkce.Challenge},
+		"response_type":         {"code"},
+		"redirect_uri":          {geminiCLIRedirectURI},
+		"scope":                 {strings.Join(geminiCLIScopes, " ")},
+		"code_challenge":        {pkce.Challenge},
 		"code_challenge_method": {"S256"},
-		"state":                {pkce.Verifier},
-		"access_type":          {"offline"},
-		"prompt":               {"consent"},
+		"state":                 {pkce.Verifier},
+		"access_type":           {"offline"},
+		"prompt":                {"consent"},
 	}
 	authURL := geminiCLIAuthURL + "?" + params.Encode()
 
@@ -302,10 +302,10 @@ func discoverGeminiProject(accessToken string, callbacks LoginCallbacks) (string
 	// by the Cloud Code Assist API to accept requests. Changing it breaks authentication.
 	// This is a known ToS risk inherited from the original client implementation.
 	headers := map[string]string{
-		"Authorization":      "Bearer " + accessToken,
-		"Content-Type":       "application/json",
-		"User-Agent":         "google-api-nodejs-client/9.15.1",
-		"X-Goog-Api-Client":  "gl-node/22.17.0",
+		"Authorization":     "Bearer " + accessToken,
+		"Content-Type":      "application/json",
+		"User-Agent":        "google-api-nodejs-client/9.15.1",
+		"X-Goog-Api-Client": "gl-node/22.17.0",
 	}
 
 	progress(callbacks, "Checking for existing Cloud Code Assist project...")

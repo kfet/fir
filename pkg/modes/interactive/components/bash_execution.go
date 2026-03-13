@@ -56,10 +56,10 @@ func NewBashExecutionComponent(command string, ui *tui.TUI, excludeFromContext b
 	borderColor := func(s string) string { return t.Fg(colorKey, s) }
 
 	bc := &BashExecutionComponent{
-		command:        command,
-		status:         BashRunning,
-		ui:             ui,
-		borderColorKey: colorKey,
+		command:          command,
+		status:           BashRunning,
+		ui:               ui,
+		borderColorKey:   colorKey,
 		contentContainer: &tui.Container{},
 	}
 

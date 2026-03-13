@@ -20,7 +20,7 @@ import (
 // --- Google Gemini API types ---
 
 type googleResponse struct {
-	Candidates    []googleCandidate  `json:"candidates"`
+	Candidates    []googleCandidate    `json:"candidates"`
 	UsageMetadata *googleUsageMetadata `json:"usageMetadata"`
 }
 
@@ -39,7 +39,7 @@ type googlePart struct {
 	Text             string              `json:"text,omitempty"`
 	Thought          *bool               `json:"thought,omitempty"`
 	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
-	FunctionCall     *googleFunctionCall  `json:"functionCall,omitempty"`
+	FunctionCall     *googleFunctionCall `json:"functionCall,omitempty"`
 }
 
 type googleFunctionCall struct {
@@ -49,11 +49,11 @@ type googleFunctionCall struct {
 }
 
 type googleUsageMetadata struct {
-	PromptTokenCount     int `json:"promptTokenCount"`
-	CandidatesTokenCount int `json:"candidatesTokenCount"`
-	TotalTokenCount      int `json:"totalTokenCount"`
+	PromptTokenCount        int `json:"promptTokenCount"`
+	CandidatesTokenCount    int `json:"candidatesTokenCount"`
+	TotalTokenCount         int `json:"totalTokenCount"`
 	CachedContentTokenCount int `json:"cachedContentTokenCount"`
-	ThinkingTokenCount   int `json:"thinkingTokenCount"`
+	ThinkingTokenCount      int `json:"thinkingTokenCount"`
 }
 
 // StreamGoogle implements streaming for the Google Gemini API.

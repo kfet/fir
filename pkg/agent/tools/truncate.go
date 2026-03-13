@@ -10,24 +10,24 @@ import (
 
 // Default truncation limits.
 const (
-	DefaultMaxLines      = 2000
-	DefaultMaxBytes      = 50 * 1024 // 50KB
-	GrepMaxLineLength    = 500       // Max chars per grep match line
+	DefaultMaxLines   = 2000
+	DefaultMaxBytes   = 50 * 1024 // 50KB
+	GrepMaxLineLength = 500       // Max chars per grep match line
 )
 
 // TruncationResult describes the outcome of a truncation operation.
 type TruncationResult struct {
-	Content              string // The (possibly truncated) content
-	Truncated            bool   // Whether truncation occurred
-	TruncatedBy          string // "lines", "bytes", or "" if not truncated
-	TotalLines           int    // Total lines in original content
-	TotalBytes           int    // Total bytes in original content
-	OutputLines          int    // Lines in truncated output
-	OutputBytes          int    // Bytes in truncated output
-	LastLinePartial      bool   // Whether the first line (tail) was partially truncated
-	FirstLineExceedsLimit bool  // Whether the first line exceeds the byte limit (head)
-	MaxLines             int    // The max lines limit applied
-	MaxBytes             int    // The max bytes limit applied
+	Content               string // The (possibly truncated) content
+	Truncated             bool   // Whether truncation occurred
+	TruncatedBy           string // "lines", "bytes", or "" if not truncated
+	TotalLines            int    // Total lines in original content
+	TotalBytes            int    // Total bytes in original content
+	OutputLines           int    // Lines in truncated output
+	OutputBytes           int    // Bytes in truncated output
+	LastLinePartial       bool   // Whether the first line (tail) was partially truncated
+	FirstLineExceedsLimit bool   // Whether the first line exceeds the byte limit (head)
+	MaxLines              int    // The max lines limit applied
+	MaxBytes              int    // The max bytes limit applied
 }
 
 // TruncationOptions configures truncation limits.

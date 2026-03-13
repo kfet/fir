@@ -13,18 +13,18 @@ import (
 
 // mockBridgeAPI implements BridgeAPI for testing.
 type mockBridgeAPI struct {
-	mu               sync.Mutex
-	execCalled       bool
-	execCmd          string
-	sessionName      string
-	activeTools      []string
-	sentMessages     []CustomMessageSpec
-	sentMsgOpts      []*SendMessageOptions
-	userMessages     []string
-	userMsgOpts      []*SendUserMessageOptions
-	labels           map[string]string
-	modelSet         *ai.Model
-	toolsRegistered  []ToolDefinition
+	mu              sync.Mutex
+	execCalled      bool
+	execCmd         string
+	sessionName     string
+	activeTools     []string
+	sentMessages    []CustomMessageSpec
+	sentMsgOpts     []*SendMessageOptions
+	userMessages    []string
+	userMsgOpts     []*SendUserMessageOptions
+	labels          map[string]string
+	modelSet        *ai.Model
+	toolsRegistered []ToolDefinition
 }
 
 func newMockAPI() *mockBridgeAPI {
@@ -65,9 +65,9 @@ func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
 func (m *mockBridgeAPI) SetLabel(id, label string)     { m.labels[id] = label }
 func (m *mockBridgeAPI) ClearLabel(id string)          { delete(m.labels, id) }
 func (m *mockBridgeAPI) GetActiveTools() []string      { return m.activeTools }
-func (m *mockBridgeAPI) SetActiveTools(names []string)  { m.activeTools = names }
-func (m *mockBridgeAPI) SetModel(model *ai.Model) bool  { m.modelSet = model; return true }
-func (m *mockBridgeAPI) ContinueSession() error         { return nil }
+func (m *mockBridgeAPI) SetActiveTools(names []string) { m.activeTools = names }
+func (m *mockBridgeAPI) SetModel(model *ai.Model) bool { m.modelSet = model; return true }
+func (m *mockBridgeAPI) ContinueSession() error        { return nil }
 func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
 	m.execCalled = true
 	m.execCmd = cmd

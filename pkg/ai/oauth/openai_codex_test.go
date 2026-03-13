@@ -90,7 +90,7 @@ func TestParseAuthorizationInput(t *testing.T) {
 func TestDecodeJWTPayload(t *testing.T) {
 	// Create a fake JWT with a known payload
 	payload := map[string]any{
-		"sub":        "user123",
+		"sub": "user123",
 		JWTClaimPath: map[string]any{
 			"chatgpt_account_id": "acct_abc",
 		},

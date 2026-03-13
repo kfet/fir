@@ -18,11 +18,11 @@ import (
 
 const (
 	// Encoded client ID. Decoded at init time.
-	anthropicClientIDEncoded       = "OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl"
-	anthropicAuthorizeURL          = "https://claude.ai/oauth/authorize"
-	anthropicDefaultTokenURL       = "https://console.anthropic.com/v1/oauth/token"
-	anthropicRedirectURI           = "https://console.anthropic.com/oauth/code/callback"
-	anthropicScopes                = "org:create_api_key user:profile user:inference"
+	anthropicClientIDEncoded = "OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl"
+	anthropicAuthorizeURL    = "https://claude.ai/oauth/authorize"
+	anthropicDefaultTokenURL = "https://console.anthropic.com/v1/oauth/token"
+	anthropicRedirectURI     = "https://console.anthropic.com/oauth/code/callback"
+	anthropicScopes          = "org:create_api_key user:profile user:inference"
 )
 
 // anthropicTokenURL can be overridden in tests.
@@ -48,8 +48,8 @@ func init() {
 type AnthropicProvider struct{}
 
 func (p *AnthropicProvider) ID() string               { return "anthropic" }
-func (p *AnthropicProvider) Name() string              { return "Anthropic (Claude Pro/Max)" }
-func (p *AnthropicProvider) UsesCallbackServer() bool  { return false }
+func (p *AnthropicProvider) Name() string             { return "Anthropic (Claude Pro/Max)" }
+func (p *AnthropicProvider) UsesCallbackServer() bool { return false }
 
 func (p *AnthropicProvider) Login(callbacks LoginCallbacks) (*Credentials, error) {
 	return loginAnthropic(callbacks)
@@ -77,13 +77,13 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 	// Build authorization URL
 	params := url.Values{
 		"code":                  {"true"},
-		"client_id":            {anthropicClientID},
-		"response_type":        {"code"},
-		"redirect_uri":         {anthropicRedirectURI},
-		"scope":                {anthropicScopes},
-		"code_challenge":       {pkce.Challenge},
+		"client_id":             {anthropicClientID},
+		"response_type":         {"code"},
+		"redirect_uri":          {anthropicRedirectURI},
+		"scope":                 {anthropicScopes},
+		"code_challenge":        {pkce.Challenge},
 		"code_challenge_method": {"S256"},
-		"state":                {pkce.Verifier},
+		"state":                 {pkce.Verifier},
 	}
 	authURL := anthropicAuthorizeURL + "?" + params.Encode()
 

@@ -92,6 +92,5 @@ Use timeout 40 on the bash call. When you see the reminder output, immediately g
 
 - **One fix at a time.** Don't batch multiple unrelated changes.
 - **Don't create new issues.** If you spot something else wrong, let the reviewer catch it.
-- **Respect other agents.** Check for recent modifications before editing any file.
 - **Keep the build green.** If your fix breaks something, revert it immediately.
 - **No items left behind.** Every item in the queue must be fixed or genuinely resolved. If an item requires cross-cutting changes, break it down into smaller steps.

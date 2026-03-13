@@ -25,11 +25,11 @@ type ExtensionFrontmatter struct {
 	Name        string
 	Description string
 	Builtin     bool
-	Demo        bool     // demo/test extensions; not loaded unless explicitly allowed
+	Demo        bool // demo/test extensions; not loaded unless explicitly allowed
 	Modes       []string
-	Events      []string // event names this extension subscribes to (for lazy loading)
+	Events      []string                      // event names this extension subscribes to (for lazy loading)
 	Commands    []ExtensionFrontmatterCommand // slash commands (registered as stubs for lazy loading)
-	Present     bool // true when a valid frontmatter block was found
+	Present     bool                          // true when a valid frontmatter block was found
 }
 
 // ExtensionFrontmatterCommand describes a slash command declared in frontmatter.

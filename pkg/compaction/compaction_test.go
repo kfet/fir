@@ -398,9 +398,9 @@ func TestPrepareCompaction_SplitTurn(t *testing.T) {
 	entries := []*store.SessionEntry{
 		makeUserEntry("1", strings.Repeat("x", 400)),
 		makeAssistantEntry("2", strings.Repeat("y", 400), nil),
-		makeUserEntry("3", strings.Repeat("a", 400)),   // turn start
+		makeUserEntry("3", strings.Repeat("a", 400)), // turn start
 		makeAssistantEntry("4", strings.Repeat("b", 400), nil),
-		makeToolResultEntry("5"),                        // mid turn
+		makeToolResultEntry("5"), // mid turn
 		makeAssistantEntry("6", strings.Repeat("c", 400), nil),
 	}
 	settings := CompactionSettings{
@@ -719,9 +719,9 @@ func TestGenerateSummary_ProgressCallback(t *testing.T) {
 					Api:     model.Api, Provider: model.Provider, Model: model.ID,
 				}
 				final := &ai.AssistantMessage{
-					Role:       ai.RoleAssistant,
-					Content:    []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
-					Api:        model.Api, Provider: model.Provider, Model: model.ID,
+					Role:    ai.RoleAssistant,
+					Content: []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
+					Api:     model.Api, Provider: model.Provider, Model: model.ID,
 					StopReason: ai.StopReasonStop,
 				}
 				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: partial1})

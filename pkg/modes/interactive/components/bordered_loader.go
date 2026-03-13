@@ -11,10 +11,10 @@ import (
 // BorderedLoader wraps a loader with borders for extension UI.
 type BorderedLoader struct {
 	tui.Container
-	loader           tui.Component
-	cancellableRef   *tuicomp.CancellableLoader
-	cancellable      bool
-	abortCh          chan struct{} // for non-cancellable mode
+	loader         tui.Component
+	cancellableRef *tuicomp.CancellableLoader
+	cancellable    bool
+	abortCh        chan struct{} // for non-cancellable mode
 }
 
 var _ tui.Component = (*BorderedLoader)(nil)

@@ -13,10 +13,10 @@ import (
 
 // XBM image constants for the Armin easter egg.
 const (
-	arminWidth      = 31
-	arminHeight     = 36
-	arminBytesPerRow = (arminWidth + 7) / 8 // ceil(31/8) = 4
-	arminDisplayHeight = arminHeight / 2     // half-block rendering: 18 rows
+	arminWidth         = 31
+	arminHeight        = 36
+	arminBytesPerRow   = (arminWidth + 7) / 8 // ceil(31/8) = 4
+	arminDisplayHeight = arminHeight / 2      // half-block rendering: 18 rows
 )
 
 // arminBits is the XBM image data: 31×36 pixels, LSB first, 1=background, 0=foreground.
@@ -94,17 +94,17 @@ func arminBuildFinalGrid() [][]string {
 
 // ArminComponent is the "Armin says hi!" easter egg with animated XBM art.
 type ArminComponent struct {
-	ui           *tui.TUI
-	effect       arminEffect
-	finalGrid    [][]string
-	currentGrid  [][]string
-	effectState  map[string]interface{}
-	cachedLines  []string
-	cachedWidth  int
-	gridVersion  int
-	cachedVer    int
-	ticker       *time.Ticker
-	stopCh       chan struct{}
+	ui          *tui.TUI
+	effect      arminEffect
+	finalGrid   [][]string
+	currentGrid [][]string
+	effectState map[string]interface{}
+	cachedLines []string
+	cachedWidth int
+	gridVersion int
+	cachedVer   int
+	ticker      *time.Ticker
+	stopCh      chan struct{}
 }
 
 // NewArminComponent creates and starts the Armin easter egg.

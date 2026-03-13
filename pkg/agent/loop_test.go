@@ -105,7 +105,7 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 	agentCtx := &AgentContext{
 		SystemPrompt: "You are helpful.",
 		Messages:     []AgentMessage{},
-		Tools: ToolSetFrom([]AgentTool{readTool}),
+		Tools:        ToolSetFrom([]AgentTool{readTool}),
 	}
 
 	streamFn := mockStreamFn(
@@ -271,7 +271,7 @@ func TestAgentLoop_SteeringSkipsRemainingTools(t *testing.T) {
 	prompt := NewAgentMessage(ai.NewUserMsg("Run two tools", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
-		Tools: ToolSetFrom([]AgentTool{slowTool}),
+		Tools:    ToolSetFrom([]AgentTool{slowTool}),
 	}
 
 	streamFn := mockStreamFn(
@@ -421,7 +421,7 @@ func TestAgentLoop_ContextCancellationDuringTool(t *testing.T) {
 	prompt := NewAgentMessage(ai.NewUserMsg("Do blocking thing", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
-		Tools: ToolSetFrom([]AgentTool{blockingTool}),
+		Tools:    ToolSetFrom([]AgentTool{blockingTool}),
 	}
 
 	streamFn := mockStreamFn(

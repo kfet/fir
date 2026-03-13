@@ -1,11 +1,11 @@
 package resources
 
 import (
+	"github.com/kfet/fir/pkg/config"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/kfet/fir/pkg/config"
 )
 
 // ============================================================================
