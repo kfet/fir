@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `pkg/core` renamed to `pkg/session`; old `pkg/session` (persistence) moved to `pkg/session/store`
+- **Breaking:** `pkg/core/compaction` moved to `pkg/compaction` (top-level)
+- Split `pkg/ai` into sub-packages: `ai/jsonparse`, `ai/ratelimit`, `ai/overflow`, `ai/envkeys`
+- Moved bash execution to `pkg/exec` (was `pkg/core/bashexec.go`)
+- Moved clipboard image reading to `pkg/resources/clipboard` (was `pkg/core/clipboardimage.go`)
+- Fixed `pkg/tui` test-time dependency on `pkg/modes/interactive/components`
+
 ### Added
 
 - Compaction: `maxContextTokens` setting — hard token cap that triggers compaction regardless of fill ratio
