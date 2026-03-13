@@ -1,16 +1,16 @@
 ---
 builtin: true
 name: tmux-driver
-description: Drive interactive CLIs (python, gdb, etc.) via tmux with named project sessions and multi-window support
+description: Drive interactive CLIs (python, gdb, etc.) via PTY sessions with named project sessions and multi-window support. Uses tmux when available, falls back to built-in PTY driver.
 ---
 
-Drive interactive programs through tmux using a private socket. Works on Linux and macOS with stock tmux.
+Drive interactive programs through named sessions. Automatically uses tmux if installed, otherwise uses fir's built-in PTY driver (no external dependencies needed).
 
 ## Setup
 
 ```bash
-# All commands use a wrapper that handles socket/session boilerplate:
-source "$SKILL_DIR/scripts/tmux-helpers.sh"
+# All commands use a wrapper that handles backend selection:
+source "$SKILL_DIR/scripts/auto-helpers.sh"
 
 # Start a named session (one per project/task):
 tm-new myproject        # creates session "myproject" with window "shell"

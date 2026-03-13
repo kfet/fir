@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: shepherd
-description: Shepherd a fleet of coding agents in tmux. Keep them productive, unstuck, and not stepping on each other.
+description: Shepherd a fleet of coding agents. Uses tmux when available, falls back to built-in PTY driver.
 ---
 
 # Shepherd
@@ -13,7 +13,7 @@ You run the outer loop. You don't write code — you make sure the agents who do
 Source at the top of every shell block:
 
 ```bash
-source "$SKILL_DIR/scripts/tmux-helpers.sh"   # gives tm-* commands
+source "$SKILL_DIR/scripts/auto-helpers.sh"   # gives tm-* commands (tmux or built-in PTY)
 ```
 
 | Command | Purpose |
@@ -96,7 +96,7 @@ If the `plan` tool is available, use it to track overall project progress across
   "metadata": {
     "session": "fir-refactor",
     "worktree": "/path/to/project-wt-refactor",
-    "attach": "tmux -S <socket> attach -t fir-refactor",
+    "attach": "tmux -S <socket> attach -t fir-refactor  (tmux only)",
     "branch": "fleet/fir-refactor"
   },
   "entries": [

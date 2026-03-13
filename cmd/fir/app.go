@@ -270,6 +270,10 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "extensions" {
 		return runExtensions()
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "pty" {
+		runPTY()
+		return nil
+	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
