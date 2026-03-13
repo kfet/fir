@@ -11,6 +11,10 @@
 - Moved clipboard image reading to `pkg/resources/clipboard` (was `pkg/core/clipboardimage.go`)
 - Fixed `pkg/tui` test-time dependency on `pkg/modes/interactive/components`
 
+### Fixed
+
+- ACP: advertise `loadSession: true` in agent capabilities so Zed shows session history for fir
+
 ### Added
 
 - Built-in PTY driver (`pkg/ptydriver`) — Go-native terminal multiplexer for agent-to-agent orchestration without requiring tmux

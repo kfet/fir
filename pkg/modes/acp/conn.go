@@ -76,6 +76,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				return resp, nil // fall back to plain struct (no session capabilities)
 			}
 			if caps, ok := respMap["agentCapabilities"].(map[string]any); ok {
+				caps["loadSession"] = true
 				caps["sessionCapabilities"] = map[string]any{
 					"list":   map[string]any{},
 					"resume": map[string]any{},
