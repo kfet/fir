@@ -39,7 +39,7 @@ func TestSessionSelector_TabThenScroll(t *testing.T) {
 
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 
 	// Start in current-folder scope (showPath=false, few sessions).

@@ -58,12 +58,12 @@ func (m *Manager) NewWindow(session, window, command string) (*Session, error) {
 
 func (m *Manager) newWindow(session, window, command string) (*Session, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	k := key(session, window)
 	if _, exists := m.sessions[k]; exists {
-		m.mu.Unlock()
 		return nil, fmt.Errorf("session %q window %q already exists", session, window)
 	}
-	m.mu.Unlock()
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -108,10 +108,8 @@ func (m *Manager) newWindow(session, window, command string) (*Session, error) {
 		}
 	}()
 
-	m.mu.Lock()
 	m.sessions[k] = s
 	m.groups[session] = append(m.groups[session], window)
-	m.mu.Unlock()
 
 	return s, nil
 }

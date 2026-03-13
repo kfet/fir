@@ -179,7 +179,7 @@ func TestSessionSelector_540_NoDifferentialFullRedraws(t *testing.T) {
 	sessions := make540Sessions()
 
 	term := tui.NewMockTerminal(80, 60)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	comp := NewSessionSelectorComponent(
 		sessions, SessionScopeAll,
 		func() ([]store.SessionListInfo, error) { return sessions, nil },

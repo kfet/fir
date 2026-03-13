@@ -13,6 +13,10 @@
 
 ### Added
 
+- Built-in PTY driver (`pkg/ptydriver`) — Go-native terminal multiplexer for agent-to-agent orchestration without requiring tmux
+- `fir pty` subcommand — CLI for managing PTY sessions (serve, new, send, capture, wait, list, kill, etc.)
+- `auto-helpers.sh` for shepherd and tmux-driver skills — auto-selects tmux or built-in PTY driver
+- `pty-helpers.sh` — drop-in tm-* command replacements using `fir pty` backend
 - Read tool: stream only needed lines when offset/limit are set instead of reading entire file into memory
 - Compaction: `maxContextTokens` setting — hard token cap that triggers compaction regardless of fill ratio
 - Plan nudger reads `next_update_in` from plan metadata — lets the LLM hint how many turns until its next plan update instead of the fixed 5-turn default

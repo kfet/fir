@@ -103,7 +103,7 @@ func TestSessionSelector_540_ExactWriteRows(t *testing.T) {
 	)
 
 	term := tui.NewMockTerminal(80, termHeight)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(aboveVar)
 	ui.AddChild(comp)
 	ui.AddChild(belowVar)
@@ -214,7 +214,7 @@ func TestSessionSelector_540_HeightChangeBeforeScroll(t *testing.T) {
 	)
 
 	term := tui.NewMockTerminal(80, termHeight)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(above)
 	ui.AddChild(comp)
 	ui.AddChild(below)

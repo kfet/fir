@@ -134,7 +134,7 @@ func TestDoRender_CorrectWritePositions(t *testing.T) {
 	selector := &scrollableComp{lines: sel0}
 
 	term := NewMockTerminal(80, termHeight)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(header)
 	ui.AddChild(selector)
 
@@ -237,7 +237,7 @@ func TestDoRender_ViewportBoundary(t *testing.T) {
 	}
 
 	term := NewMockTerminal(80, termHeight)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(comp)
 
 	ui.RequestRender(true)

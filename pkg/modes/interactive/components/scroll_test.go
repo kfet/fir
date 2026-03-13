@@ -231,7 +231,7 @@ func TestSessionSelector_NoDifferentialFullRedraws(t *testing.T) {
 	sessions := makeNSessions(32)
 
 	term := tui.NewMockTerminal(80, 60)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	comp := NewSessionSelectorComponent(
 		sessions, SessionScopeCurrent, nil,
 		func(path string) {}, func() {},

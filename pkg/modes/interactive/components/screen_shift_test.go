@@ -223,7 +223,7 @@ func TestSessionSelector_ScreenShift(t *testing.T) {
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
 
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 
 	comp := components.NewSessionSelectorComponent(
@@ -301,7 +301,7 @@ func TestSessionSelector_ScreenShift_SmallTerminal(t *testing.T) {
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
 
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 
 	comp := components.NewSessionSelectorComponent(
@@ -387,7 +387,7 @@ func TestSessionSelector_NewlineInName_ScreenStability(t *testing.T) {
 
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,
@@ -494,7 +494,7 @@ func TestSessionSelector_UnicodeSeparators_ScreenStability(t *testing.T) {
 
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,
@@ -565,7 +565,7 @@ func TestSessionSelector_CwdWithSeparators_ScreenStability(t *testing.T) {
 
 	term := tui.NewMockTerminal(termW, termH)
 	sc := newScreen(termW, termH)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 	comp := components.NewSessionSelectorComponent(
 		sessions, components.SessionScopeAll,

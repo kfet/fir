@@ -108,7 +108,7 @@ func TestSessionSelector_540_WritePositions(t *testing.T) {
 	}
 
 	term := tui.NewMockTerminal(80, termHeight)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 	ui.AddChild(&rawComp{msgs})
 
 	comp := components.NewSessionSelectorComponent(

@@ -73,7 +73,7 @@ func TestContainer_Clear(t *testing.T) {
 
 func TestTUI_NewTUI(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	if ui.Terminal != term {
 		t.Error("expected terminal to be set")
 	}
@@ -84,7 +84,7 @@ func TestTUI_NewTUI(t *testing.T) {
 
 func TestTUI_SetFocus(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	comp := &interactiveComponent{text: ""}
 	ui.SetFocus(comp)
 	// After input, focused component should receive it
@@ -96,7 +96,7 @@ func TestTUI_SetFocus(t *testing.T) {
 
 func TestTUI_DoRender_Basic(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(&simpleComponent{lines: []string{"line1", "line2"}})
 	ui.DoRender()
 	output := strings.Join(term.GetOutput(), "")
@@ -107,7 +107,7 @@ func TestTUI_DoRender_Basic(t *testing.T) {
 
 func TestTUI_DoRender_DiffUpdate(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	comp := &simpleComponent{lines: []string{"line1", "line2"}}
 	ui.AddChild(comp)
 	ui.DoRender()
@@ -125,7 +125,7 @@ func TestTUI_DoRender_DiffUpdate(t *testing.T) {
 
 func TestTUI_DoRender_NoChange(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(&simpleComponent{lines: []string{"stable"}})
 	ui.DoRender()
 	term.ClearOutput()
@@ -145,7 +145,7 @@ func TestTUI_DoRender_NoChange(t *testing.T) {
 
 func TestTUI_Overlay_Basic(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(&simpleComponent{lines: []string{"background"}})
 
 	overlay := &simpleComponent{lines: []string{"overlay"}}
@@ -162,7 +162,7 @@ func TestTUI_Overlay_Basic(t *testing.T) {
 
 func TestTUI_Overlay_SetHidden(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	overlay := &simpleComponent{lines: []string{"overlay"}}
 	handle := ui.ShowOverlay(overlay, nil)
 
@@ -187,7 +187,7 @@ func TestTUI_Overlay_SetHidden(t *testing.T) {
 
 func TestTUI_ShowHardwareCursor(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.SetShowHardwareCursor(true)
 	if !ui.GetShowHardwareCursor() {
 		t.Error("expected hardware cursor enabled")
@@ -200,7 +200,7 @@ func TestTUI_ShowHardwareCursor(t *testing.T) {
 
 func TestTUI_RequestRender_Force(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.AddChild(&simpleComponent{lines: []string{"test"}})
 	ui.DoRender()
 
@@ -216,7 +216,7 @@ func TestTUI_RequestRender_Force(t *testing.T) {
 
 func TestTUI_HideOverlay(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 	ui.ShowOverlay(&simpleComponent{lines: []string{"o1"}}, nil)
 	ui.ShowOverlay(&simpleComponent{lines: []string{"o2"}}, nil)
 	if !ui.HasOverlay() {
@@ -275,7 +275,7 @@ func TestResolveAnchorCol(t *testing.T) {
 
 func TestExtractCursorPosition(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 
 	lines := []string{
 		"no marker here",
@@ -301,7 +301,7 @@ func TestExtractCursorPosition(t *testing.T) {
 
 func TestCompositeLineAt(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 
 	base := "hello world this is base"
 	overlay := "OVER"
@@ -324,7 +324,7 @@ func TestTUI_HandleInput_BufferedBackspaces(t *testing.T) {
 	// fix, MatchesKey required an exact single-sequence match and silently
 	// dropped all but the first backspace, causing visible "lag".
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term)
+	ui := NewTUI(term, false)
 
 	received := []string{}
 	comp := &trackingInputHandler{received: &received}

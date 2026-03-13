@@ -10,8 +10,9 @@ _PTY_SERVER_PID=""
 
 # Ensure the PTY server is running. Idempotent.
 _pty_ensure_server() {
-  local sock
-  sock=$("$_FIR_BIN" pty list 2>/dev/null && return 0)
+  if "$_FIR_BIN" pty list &>/dev/null; then
+    return 0
+  fi
 
   # Server not running — start it in background.
   "$_FIR_BIN" pty serve &
@@ -89,13 +90,8 @@ tm-killwin() {
 
 tm-attach() {
   local name="${1:?usage: tm-attach NAME}"
-  # Check if tmux is available for real attach.
-  if command -v tmux &>/dev/null; then
-    echo "tmux attach not available with built-in PTY driver."
-    echo "Use: tm-capture $name"
-  else
-    echo "Use: tm-capture $name"
-  fi
+  echo "Attach not available with built-in PTY driver."
+  echo "Use: tm-capture $name"
 }
 
 # Bulk helpers — simplified versions for the PTY driver.

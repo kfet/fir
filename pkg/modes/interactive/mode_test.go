@@ -168,7 +168,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 func newTestModeInternal(t *testing.T, session *session.AgentSession) *testMode {
 	t.Helper()
 	term := tui.NewMockTerminal(80, 24)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 
 	keybindings := tui.NewKeybindingsManager("")
 	m := NewInteractiveMode(nil, keybindings, nil, InteractiveModeOptions{})
@@ -252,7 +252,7 @@ func TestInteractiveMode_EditorReceivesInput(t *testing.T) {
 
 func TestInteractiveMode_NoFocusMeansNoInput(t *testing.T) {
 	term := tui.NewMockTerminal(80, 24)
-	ui := tui.NewTUI(term)
+	ui := tui.NewTUI(term, false)
 
 	editorTheme := itheme.GetEditorTheme()
 	keybindings := tui.NewKeybindingsManager("")
