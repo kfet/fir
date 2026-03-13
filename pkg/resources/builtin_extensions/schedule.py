@@ -172,7 +172,9 @@ def _run_countdown(
         if message:
             ctx.send_user_message(message)
         else:
-            ctx.continue_session()
+            # Use send_user_message instead of continue_session — some models
+            # don't support assistant-last conversations (prefill).
+            ctx.send_user_message("continue")
 
 
 # ---------------------------------------------------------------------------

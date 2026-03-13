@@ -29,12 +29,19 @@ func (m *Manager) WatchAndReload(ctx context.Context, onReload func(error)) (sto
 		return nil, err
 	}
 
-	// Collect directories to watch.
+	// Watch extension directories. When an extensions dir doesn't exist yet,
+	// watch its nearest existing ancestor so we detect when it gets created.
 	dirs := extensionDirs(projectDir)
 	watched := 0
 	for _, d := range dirs {
 		if err := watcher.Add(d); err != nil {
-			m.logger.Debug("cannot watch extension dir", "dir", d, "err", err)
+			// Directory doesn't exist — watch nearest existing ancestor.
+			if parent := nearestExistingDir(d); parent != "" {
+				if addErr := watcher.Add(parent); addErr == nil {
+					watched++
+					m.logger.Debug("watching parent for extension dir creation", "parent", parent, "target", d)
+				}
+			}
 			continue
 		}
 		watched++
@@ -54,7 +61,7 @@ func (m *Manager) WatchAndReload(ctx context.Context, onReload func(error)) (sto
 	}
 
 	watchCtx, cancel := context.WithCancel(ctx)
-	go m.watchLoop(watchCtx, watcher, onReload)
+	go m.watchLoop(watchCtx, watcher, dirs, onReload)
 
 	return func() {
 		cancel()
@@ -75,8 +82,40 @@ func extensionDirs(projectDir string) []string {
 	return dirs
 }
 
-func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, onReload func(error)) {
+// nearestExistingDir walks up from path until it finds a directory that exists.
+// Returns "" if no ancestor exists (shouldn't happen in practice).
+func nearestExistingDir(path string) string {
+	for {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return ""
+		}
+		if info, err := os.Stat(parent); err == nil && info.IsDir() {
+			return parent
+		}
+		path = parent
+	}
+}
+
+// isParentOf reports whether parent is an ancestor directory of child.
+func isParentOf(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	// rel must not start with ".." and must not be "." (same dir).
+	return rel != "." && !filepath.IsAbs(rel) && (len(rel) < 2 || rel[:2] != "..")
+}
+
+func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, extDirs []string, onReload func(error)) {
 	var debounce *time.Timer
+
+	// targetSet for fast lookup of extension dirs we want to watch.
+	targetSet := make(map[string]bool, len(extDirs))
+	for _, d := range extDirs {
+		targetSet[d] = true
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,6 +126,33 @@ func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, onRe
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return
+			}
+
+			// When a directory is created that matches one of our target
+			// extension dirs (or is a parent on the way), start watching it.
+			if event.Has(fsnotify.Create) {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					if targetSet[event.Name] {
+						// The actual extensions dir appeared — watch it.
+						_ = watcher.Add(event.Name)
+						m.logger.Info("extension directory created, now watching", "dir", event.Name)
+					} else {
+						// Could be a parent dir (e.g. .fir/ created, extensions/ coming next)
+						// or a subdirectory extension. Watch it either way.
+						for _, target := range extDirs {
+							if isParentOf(event.Name, target) {
+								_ = watcher.Add(event.Name)
+								m.logger.Debug("watching new parent dir", "dir", event.Name, "target", target)
+								break
+							}
+						}
+						// Sub-directory extension inside an extensions dir.
+						parent := filepath.Dir(event.Name)
+						if targetSet[parent] {
+							_ = watcher.Add(event.Name)
+						}
+					}
+				}
 			}
 			// Ignore __pycache__ and hidden files.
 			base := filepath.Base(event.Name)
@@ -120,13 +186,5 @@ func (m *Manager) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, onRe
 			}
 			m.logger.Warn("extension watcher error", "err", watchErr)
 		}
-	}
-}
-
-// EnsureExtensionDirs creates extension directories if they don't exist,
-// so the watcher has something to watch.
-func EnsureExtensionDirs(projectDir string) {
-	for _, d := range extensionDirs(projectDir) {
-		_ = os.MkdirAll(d, 0755)
 	}
 }

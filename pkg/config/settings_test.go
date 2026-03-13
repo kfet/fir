@@ -31,7 +31,6 @@ func TestNewInMemorySettingsManager_Defaults(t *testing.T) {
 	assert.True(t, sm.GetImageAutoResize())
 	assert.False(t, sm.GetBlockImages())
 	assert.True(t, sm.GetEnableSkillCommands())
-	assert.Equal(t, "tree", sm.GetDoubleEscapeAction())
 	assert.Equal(t, 0, sm.GetEditorPaddingX())
 	assert.Equal(t, 5, sm.GetAutocompleteMaxVisible())
 	assert.Equal(t, "  ", sm.GetCodeBlockIndent())

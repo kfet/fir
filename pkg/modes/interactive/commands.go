@@ -19,9 +19,9 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
@@ -765,6 +765,10 @@ func (m *InteractiveMode) handleSessionCommand() {
 	lines = append(lines, t.Bold("Session Info"))
 	lines = append(lines, "")
 	lines = append(lines, t.Fg("dim", "Version: ")+version)
+	lines = append(lines, t.Fg("dim", "Mode: ")+"interactive")
+	if bin, err := os.Executable(); err == nil {
+		lines = append(lines, t.Fg("dim", "Binary: ")+bin)
+	}
 	if sessionName != "" {
 		lines = append(lines, t.Fg("dim", "Name: ")+sessionName)
 	}
@@ -782,6 +786,7 @@ func (m *InteractiveMode) handleSessionCommand() {
 	}
 	if model := m.session.Model(); model != nil {
 		lines = append(lines, t.Fg("dim", "Model: ")+model.ID)
+		lines = append(lines, t.Fg("dim", "Provider: ")+string(model.Provider))
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		if mcpCfg, err := mcp.LoadDefaultConfigs(cwd); err == nil && len(mcpCfg.MCPServers) > 0 {
@@ -1416,7 +1421,7 @@ func (m *InteractiveMode) showHelp() {
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, and themes
   /skills         - List loaded skills (or /skills install <name>)
-  /reexec [path] - Re-exec into current or specified binary, preserving the session
+  /reexec [path] - Re-exec into specified or current binary (%s), preserving the session
   /quit           - Quit fir
 
 Keyboard shortcuts:
@@ -1436,5 +1441,11 @@ Keyboard shortcuts:
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands
   !<command>      - Run bash command`
-	m.showMessage(helpText)
+	bin, _ := os.Executable()
+	if bin == "" {
+		bin = "(unknown)"
+	} else if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(bin, home+"/") {
+		bin = "~/" + bin[len(home)+1:]
+	}
+	m.showMessage(fmt.Sprintf(helpText, bin))
 }

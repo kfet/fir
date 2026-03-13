@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -14,15 +13,15 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/exec"
-	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/overflow"
-	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/fir/pkg/config"
+	"github.com/kfet/fir/pkg/exec"
+	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/agent/tools"
-	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // ============================================================================
@@ -127,9 +126,9 @@ type AgentSessionEventListener func(AgentSessionEvent)
 
 // PromptOptions configure how a prompt is sent.
 type PromptOptions struct {
-	Images              []ai.ImageContent
-	ExpandTemplates     bool   // default: true
-	StreamingBehavior   string // "steer" or "followUp"
+	Images            []ai.ImageContent
+	ExpandTemplates   bool   // default: true
+	StreamingBehavior string // "steer" or "followUp"
 }
 
 // AgentSessionOptions configures a new AgentSession.
@@ -829,7 +828,7 @@ func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 	if result != nil {
 		state := s.State()
 		msgs := state.Messages
-		
+
 		// If overflow, strip trailing error messages before retry
 		if willRetry {
 			for len(msgs) > 0 {
@@ -843,7 +842,7 @@ func (s *AgentSession) runAutoCompaction(reason string, willRetry bool) {
 				break
 			}
 		}
-		
+
 		// Resume if there's pending work (user message or tool result waiting for response,
 		// or pending tool calls that were in flight when compaction triggered).
 		if len(state.PendingToolCalls) > 0 || (len(msgs) > 0 && (msgs[len(msgs)-1].Role() == "user" || msgs[len(msgs)-1].Role() == "toolResult")) {
@@ -896,12 +895,12 @@ func (s *AgentSession) RunCompaction(ctx context.Context, customInstructions str
 // custom type such as a compaction summary — neither warrants auto-resume.
 func (s *AgentSession) HasPendingWork() bool {
 	state := s.State()
-	
+
 	// Check for pending tool executions (agent is waiting for tool results)
 	if len(state.PendingToolCalls) > 0 {
 		return true
 	}
-	
+
 	// Check for unanswered message waiting for response
 	msgs := state.Messages
 	if len(msgs) == 0 {
@@ -1143,76 +1142,6 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	})
 
 	return nil
-}
-
-// Fork creates a branch at the given entry ID.
-// Returns the selected user message text and whether it was cancelled.
-func (s *AgentSession) Fork(entryID string) (selectedText string, cancelled bool, err error) {
-	previousSessionFile := s.SessionManager.GetSessionFile()
-	entry := s.SessionManager.GetEntry(entryID)
-
-	if entry == nil || entry.Type != "message" {
-		return "", false, fmt.Errorf("invalid entry ID for forking")
-	}
-
-	// Verify it's a user message
-	var probe struct {
-		Role string `json:"role"`
-	}
-	if json.Unmarshal(entry.RawMessage, &probe) != nil || probe.Role != "user" {
-		return "", false, fmt.Errorf("invalid entry ID for forking")
-	}
-
-	selectedText = extractUserMessageText(entry.RawMessage)
-
-	// Create the branched session
-	if entry.ParentID == "" {
-		s.SessionManager.NewSession(&store.NewSessionOptions{ParentSession: previousSessionFile})
-	} else {
-		if _, err := s.SessionManager.CreateBranchedSession(entry.ParentID); err != nil {
-			log.Printf("agentsession: branch failed for entry %s: %v", entry.ParentID, err)
-			s.SessionManager.NewSession(&store.NewSessionOptions{ParentSession: previousSessionFile})
-		}
-	}
-	s.Agent.SetSessionID(s.SessionManager.GetSessionID())
-
-	// Reload messages from entries
-	ctx := s.SessionManager.BuildSessionContext()
-	s.Agent.ReplaceMessages(ctx.Messages)
-	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
-
-	return selectedText, false, nil
-}
-
-// ForkMessageEntry represents a user message available for forking.
-type ForkMessageEntry struct {
-	EntryID string `json:"entryId"`
-	Text    string `json:"text"`
-}
-
-// GetUserMessagesForForking returns all user messages from the session for the fork selector.
-func (s *AgentSession) GetUserMessagesForForking() []ForkMessageEntry {
-	entries := s.SessionManager.GetEntries()
-	var result []ForkMessageEntry
-
-	for _, entry := range entries {
-		if entry.Type != "message" || len(entry.RawMessage) == 0 {
-			continue
-		}
-		var probe struct {
-			Role string `json:"role"`
-		}
-		if json.Unmarshal(entry.RawMessage, &probe) != nil || probe.Role != "user" {
-			continue
-		}
-
-		text := extractUserMessageText(entry.RawMessage)
-		if text != "" {
-			result = append(result, ForkMessageEntry{EntryID: entry.ID, Text: text})
-		}
-	}
-
-	return result
 }
 
 // extractUserMessageText extracts the text content from a user message's raw JSON.

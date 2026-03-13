@@ -19,8 +19,8 @@ import (
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
-	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/resources/clipboard"
+	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -560,22 +560,12 @@ func (m *InteractiveMode) setupEditorHandlers() {
 
 		// Double-escape with empty editor
 		if strings.TrimSpace(m.editor.GetText()) == "" {
-			action := "tree"
-			if m.settings != nil {
-				action = m.settings.GetDoubleEscapeAction()
-			}
-			if action != "none" {
-				now := time.Now()
-				if now.Sub(m.lastEscapeTime) < 500*time.Millisecond {
-					if action == "tree" {
-						m.showTreeSelector()
-					} else {
-						m.showUserMessageSelector()
-					}
-					m.lastEscapeTime = time.Time{}
-				} else {
-					m.lastEscapeTime = now
-				}
+			now := time.Now()
+			if now.Sub(m.lastEscapeTime) < 500*time.Millisecond {
+				m.showTreeSelector()
+				m.lastEscapeTime = time.Time{}
+			} else {
+				m.lastEscapeTime = now
 			}
 		}
 	}
@@ -612,9 +602,6 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	})
 	m.editor.OnAction(tui.ActionTree, func() {
 		m.showTreeSelector()
-	})
-	m.editor.OnAction(tui.ActionFork, func() {
-		m.showUserMessageSelector()
 	})
 	m.editor.OnAction(tui.ActionResume, func() {
 		m.showSessionSelector()
@@ -671,10 +658,21 @@ func (m *InteractiveMode) setupEditorHandlers() {
 func (m *InteractiveMode) setupAutocomplete() {
 	// Build slash command list from builtins
 	var commands []SlashCommand
+	reexecBin := "(current binary)"
+	if bin, err := os.Executable(); err == nil {
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(bin, home+"/") {
+			bin = "~/" + bin[len(home)+1:]
+		}
+		reexecBin = bin
+	}
 	for _, cmd := range resources.BuiltinSlashCommands {
+		desc := cmd.Description
+		if cmd.Name == "reexec" {
+			desc = fmt.Sprintf("Re-exec into %s (or a specified binary), preserving the session", reexecBin)
+		}
 		commands = append(commands, SlashCommand{
 			Name:        cmd.Name,
-			Description: cmd.Description,
+			Description: desc,
 		})
 	}
 

@@ -1,11 +1,11 @@
 ---
 name: review-and-fix
-description: Run a single code review pass over recent changes, then immediately fix all issues found. One-shot review + fix cycle — not continuous.
+description: Run a single code review pass over recent changes, fix all issues found, verify the build passes, then commit the result. One-shot review + fix + commit cycle — not continuous.
 ---
 
-# Review and Fix (One-Shot)
+# Review, Fix, and Commit (One-Shot)
 
-Run one review pass over recent changes, fix every issue found, and verify the build passes.
+Run one review pass over recent changes, fix every issue found, verify the build passes, then commit all changes.
 
 > **`PROJECT_ROOT`** refers to the repository root. Set it at the start of every shell session:
 > ```bash
@@ -41,7 +41,7 @@ Read every changed file fully. Look for:
 
 Collect all issues as a flat list with `file:line` references and severity (urgent / backlog). Print the list to the user.
 
-If no issues are found, say so and stop.
+If no issues are found, say so and skip to Phase 3.
 
 ## Phase 2 — Fix
 
@@ -67,7 +67,28 @@ cd "$PROJECT_ROOT"
 make all
 ```
 
-Confirm the full build and test suite passes. If anything fails, fix it before finishing.
+Confirm the full build and test suite passes. If anything fails, fix it before proceeding to Phase 3.
+
+## Phase 3 — Commit
+
+Stage and commit all changes made during the fix phase.
+
+```bash
+cd "$PROJECT_ROOT"
+git add -A
+```
+
+Write a commit message that summarizes the fixes made. Use a short subject line (≤72 chars) followed by a blank line and a bullet list of changes if there are multiple fixes:
+
+```bash
+GIT_EDITOR=true git commit -m "<subject>
+
+- <fix 1>
+- <fix 2>
+..."
+```
+
+If there were no issues found and nothing was changed, skip the commit.
 
 ## Output
 
@@ -76,3 +97,4 @@ Summarize to the user:
 - How many issues found (by category)
 - How many fixed
 - Final build status
+- Commit hash and message (or "nothing to commit")

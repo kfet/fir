@@ -1810,64 +1810,6 @@ func TestCycleModel_ShowsModelName(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// handleFork tests
-// ---------------------------------------------------------------------------
-
-func TestHandleFork_Error(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	// Empty entryID causes Fork to return an error.
-	tm.mode.handleFork("")
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Fork failed") {
-		t.Errorf("expected 'Fork failed' warning, got:\n%s", output)
-	}
-}
-
-func TestHandleFork_Success(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	// Add a user message entry to the session.
-	entryID := tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("hello from fork", 0))
-	if entryID == "" {
-		t.Fatal("expected non-empty entry ID")
-	}
-
-	tm.mode.handleFork(entryID)
-	tm.waitRender()
-
-	// Should show success status.
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Branched") {
-		t.Errorf("expected 'Branched' status after fork, got:\n%s", output)
-	}
-
-	// Editor should contain the forked message text.
-	if got := tm.editorText(); !strings.Contains(got, "hello from fork") {
-		t.Errorf("expected forked text in editor, got %q", got)
-	}
-}
-
-func TestHandleFork_NonUserMessage(t *testing.T) {
-	tm := newTestModeWithSession(t)
-
-	// Add an assistant message — Fork should reject it because role != "user".
-	entryID := tm.mode.session.SessionManager.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{}))
-	if entryID == "" {
-		t.Fatal("expected non-empty entry ID")
-	}
-
-	tm.mode.handleFork(entryID)
-	tm.waitRender()
-
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "Fork failed") {
-		t.Errorf("expected 'Fork failed' warning for non-user message, got:\n%s", output)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Init() pre-population tests
 // ---------------------------------------------------------------------------

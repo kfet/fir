@@ -227,9 +227,8 @@ func (f *FooterComponent) Render(width int) []string {
 	remainder := statsLine[len(statsLeft):]
 	dimRemainder := t.Fg("dim", remainder)
 
-	lines := []string{dimPwd, dimStatsLeft + dimRemainder}
-
-	// Extension statuses (sort keys for stable ordering to avoid flicker)
+	// Merge extension statuses into the pwd line (right-aligned) to avoid a third row.
+	extStatus := ""
 	if len(data.ExtensionStatuses) > 0 {
 		keys := make([]string, 0, len(data.ExtensionStatuses))
 		for k := range data.ExtensionStatuses {
@@ -240,12 +239,33 @@ func (f *FooterComponent) Render(width int) []string {
 		for _, k := range keys {
 			parts = append(parts, sanitizeStatusText(data.ExtensionStatuses[k]))
 		}
-		statusLine := strings.Join(parts, " ")
-		if tui.VisibleWidth(statusLine) > width {
-			statusLine = tui.TruncateToWidth(statusLine, width, t.Fg("dim", "..."), false)
+		extStatus = strings.Join(parts, " ")
+		if tui.VisibleWidth(extStatus) > width/2 {
+			extStatus = tui.TruncateToWidth(extStatus, width/2, t.Fg("dim", "…"), false)
 		}
-		lines = append(lines, statusLine)
 	}
+
+	if extStatus != "" {
+		pwdWidth := tui.VisibleWidth(pwd)
+		extWidth := tui.VisibleWidth(extStatus)
+		gap := width - pwdWidth - extWidth
+		if gap >= 2 {
+			dimPwd = dimPwd + strings.Repeat(" ", gap) + t.Fg("dim", extStatus)
+		} else {
+			// Not enough room — truncate pwd to make space
+			avail := width - extWidth - 2
+			if avail > 3 {
+				pwd = tui.TruncateToWidth(pwd, avail, "…", false)
+				dimPwd = t.Fg("dim", pwd)
+				pwdWidth = tui.VisibleWidth(pwd)
+				gap = width - pwdWidth - extWidth
+				dimPwd = dimPwd + strings.Repeat(" ", max(1, gap)) + t.Fg("dim", extStatus)
+			}
+			// else: skip extension status, not enough space
+		}
+	}
+
+	lines := []string{dimPwd, dimStatsLeft + dimRemainder}
 
 	return lines
 }

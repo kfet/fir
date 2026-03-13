@@ -20,7 +20,6 @@ func defaultSettingsConfig() SettingsConfig {
 		AvailableThemes:         []string{"dark", "light"},
 		HideThinkingBlock:       false,
 		CollapseChangelog:       false,
-		DoubleEscapeAction:      "tree",
 		ShowHardwareCursor:      false,
 		EditorPaddingX:          1,
 		AutocompleteMaxVisible:  10,

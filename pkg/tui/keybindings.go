@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-
 )
 
 // AppAction is an application-level action.
@@ -31,7 +30,6 @@ const (
 	ActionSelectThinking           AppAction = "selectThinking"
 	ActionNewSession               AppAction = "newSession"
 	ActionTree                     AppAction = "tree"
-	ActionFork                     AppAction = "fork"
 	ActionResume                   AppAction = "resume"
 	ActionTogglePlan               AppAction = "togglePlan"
 )
@@ -48,15 +46,14 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionSelectModel:              {"ctrl+l"},
 	ActionExpandTools:              {"ctrl+o"},
 	ActionToggleThinking:           {"ctrl+t"},
-	ActionToggleSessionNamedFilter: {"ctrl+n"},
+	ActionToggleSessionNamedFilter: {},
 	ActionExternalEditor:           {"ctrl+g"},
 	ActionFollowUp:                 {"alt+enter"},
 	ActionDequeue:                  {"alt+up"},
 	ActionPasteImage:               {"ctrl+v"},
-	ActionNewSession:               {},
+	ActionNewSession:               {"ctrl+n"},
 	ActionSelectThinking:           {},
 	ActionTree:                     {},
-	ActionFork:                     {},
 	ActionResume:                   {},
 	ActionTogglePlan:               {"ctrl+r"},
 }

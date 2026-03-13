@@ -653,6 +653,10 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		name := entry.session.SessionManager.GetSessionName()
 		info := "**Session Info**\n\n"
 		info += fmt.Sprintf("**Version:** %s\n", version)
+		info += "**Mode:** acp\n"
+		if bin, err := os.Executable(); err == nil {
+			info += fmt.Sprintf("**Binary:** %s\n", bin)
+		}
 		if name != "" {
 			info += fmt.Sprintf("**Name:** %s\n", name)
 		}
@@ -662,6 +666,18 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 			if len(enabled) > 0 {
 				info += fmt.Sprintf("**Extensions:** %s\n", strings.Join(enabled, ", "))
 			}
+		}
+		if model := entry.session.Model(); model != nil {
+			info += fmt.Sprintf("**Model:** %s\n", model.ID)
+			info += fmt.Sprintf("**Provider:** %s\n", model.Provider)
+		}
+		if mcpCfg, err := mcp.LoadDefaultConfigs(entry.cwd); err == nil && len(mcpCfg.MCPServers) > 0 {
+			var names []string
+			for n := range mcpCfg.MCPServers {
+				names = append(names, n)
+			}
+			sort.Strings(names)
+			info += fmt.Sprintf("**MCP Servers:** %s\n", strings.Join(names, ", "))
 		}
 		info += "\n"
 		info += fmt.Sprintf("**Messages**\n- User: %d\n- Assistant: %d\n- Tool Calls: %d\n- Total: %d\n\n",

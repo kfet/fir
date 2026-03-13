@@ -349,8 +349,7 @@ class TestCountdownThread(unittest.TestCase):
             stop = threading.Event()
             target = datetime.now(tz=UTC) - timedelta(seconds=1)
             schedule._run_countdown("t1", target, stop, ctx)
-            ctx.continue_session.assert_called_once()
-            ctx.send_user_message.assert_not_called()
+            ctx.send_user_message.assert_called_once_with("continue")
 
     def test_fires_message(self):
         with _Timeout(5):
@@ -387,7 +386,7 @@ class TestIntegration(unittest.TestCase):
         _reset()
 
     def test_schedule_fires_continue(self):
-        """Schedule 1s, wait for the thread to fire continue_session."""
+        """Schedule 1s, wait for the thread to fire send_user_message('continue')."""
         with _Timeout(5):
             ctx = mock.MagicMock()
             result = schedule.cmd_schedule(["1s"], ctx)
@@ -396,12 +395,11 @@ class TestIntegration(unittest.TestCase):
             # Wait for the countdown thread to finish and fire.
             deadline = datetime.now(tz=UTC) + timedelta(seconds=4)
             while datetime.now(tz=UTC) < deadline:
-                if ctx.continue_session.called:
+                if ctx.send_user_message.called:
                     break
                 threading.Event().wait(0.1)
 
-            ctx.continue_session.assert_called_once()
-            ctx.send_user_message.assert_not_called()
+            ctx.send_user_message.assert_called_once_with("continue")
             with schedule._lock:
                 self.assertEqual(len(schedule._schedules), 0)
 
@@ -458,6 +456,7 @@ class TestIntegration(unittest.TestCase):
             # Wait a bit to confirm it doesn't fire.
             threading.Event().wait(1.0)
             ctx.continue_session.assert_not_called()
+            ctx.send_user_message.assert_not_called()
 
 
 if __name__ == "__main__":

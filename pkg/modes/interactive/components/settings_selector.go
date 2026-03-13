@@ -37,7 +37,6 @@ type SettingsConfig struct {
 	AvailableThemes         []string
 	HideThinkingBlock       bool
 	CollapseChangelog       bool
-	DoubleEscapeAction      string // "fork", "tree", "none"
 	ServerTools             string // computed display; not directly used
 	ServerToolWebSearch     bool
 	ServerToolWebFetch      bool
@@ -65,7 +64,6 @@ type SettingsCallbacks struct {
 	OnThemePreview                 func(string)
 	OnHideThinkingBlockChange      func(bool)
 	OnCollapseChangelogChange      func(bool)
-	OnDoubleEscapeActionChange     func(string)
 	OnServerToolsChange            func([]string) // receives full list of enabled tool names
 	OnShowHardwareCursorChange     func(bool)
 	OnEditorPaddingXChange         func(int)
@@ -132,7 +130,6 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "hide-thinking", Label: "Hide thinking", Description: "Hide thinking blocks in assistant responses", CurrentValue: boolStr(config.HideThinkingBlock), Values: []string{"true", "false"}},
 		{ID: "collapse-changelog", Label: "Collapse changelog", Description: "Show condensed changelog after updates", CurrentValue: boolStr(config.CollapseChangelog), Values: []string{"true", "false"}},
 		{ID: "quiet-startup", Label: "Quiet startup", Description: "Disable verbose printing at startup", CurrentValue: boolStr(config.QuietStartup), Values: []string{"true", "false"}},
-		{ID: "double-escape-action", Label: "Double-escape action", Description: "Action when pressing Escape twice with empty editor", CurrentValue: config.DoubleEscapeAction, Values: []string{"tree", "fork", "none"}},
 		{ID: "server-tool-web-search", Label: "Server: web search", Description: "Anthropic server-side web search", CurrentValue: boolStr(config.ServerToolWebSearch), Values: []string{"true", "false"}},
 		{ID: "server-tool-web-fetch", Label: "Server: web fetch", Description: "Anthropic server-side web page/PDF fetching", CurrentValue: boolStr(config.ServerToolWebFetch), Values: []string{"true", "false"}},
 		{ID: "server-tool-code-exec", Label: "Server: code execution", Description: "Anthropic server-side Python sandbox", CurrentValue: boolStr(config.ServerToolCodeExec), Values: []string{"true", "false"}},
@@ -291,10 +288,6 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "quiet-startup":
 		if cb.OnQuietStartupChange != nil {
 			cb.OnQuietStartupChange(value == "true")
-		}
-	case "double-escape-action":
-		if cb.OnDoubleEscapeActionChange != nil {
-			cb.OnDoubleEscapeActionChange(value)
 		}
 	case "server-tool-web-search":
 		c.config.ServerToolWebSearch = value == "true"

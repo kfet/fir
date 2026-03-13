@@ -21,8 +21,8 @@ func TestKeybindingsManager_Defaults(t *testing.T) {
 	}
 
 	keys = m.GetKeys(ActionNewSession)
-	if len(keys) != 0 {
-		t.Errorf("newSession keys = %v, want []", keys)
+	if len(keys) != 1 || keys[0] != "ctrl+n" {
+		t.Errorf("newSession keys = %v, want [ctrl+n]", keys)
 	}
 
 	keys = m.GetKeys(ActionSelectThinking)
@@ -201,7 +201,6 @@ func TestKeybindingsManager_AllDefaultActionsRegistered(t *testing.T) {
 		ActionNewSession,
 		ActionSelectThinking,
 		ActionTree,
-		ActionFork,
 		ActionResume,
 	}
 

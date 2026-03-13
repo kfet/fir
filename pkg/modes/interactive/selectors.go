@@ -163,7 +163,6 @@ func (m *InteractiveMode) showSettingsSelector() {
 			SteeringMode:            m.settings.GetSteeringMode(),
 			FollowUpMode:            m.settings.GetFollowUpMode(),
 			Transport:               m.settings.GetTransport(),
-			DoubleEscapeAction:      m.settings.GetDoubleEscapeAction(),
 			ServerToolWebSearch:     serverToolsHas(m.settings.GetServerTools(), "web_search"),
 			ServerToolWebFetch:      serverToolsHas(m.settings.GetServerTools(), "web_fetch"),
 			ServerToolCodeExec:      serverToolsHas(m.settings.GetServerTools(), "code_execution"),
@@ -697,53 +696,4 @@ func (m *InteractiveMode) handleTreeNavigation(entryID string) {
 		m.editor.SetText(result.EditorText)
 	}
 	m.showStatus("Navigated to selected point")
-}
-
-func (m *InteractiveMode) showUserMessageSelector() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	userMsgs := m.session.GetUserMessagesForForking()
-	if len(userMsgs) == 0 {
-		m.showStatus("No messages to fork from")
-		return
-	}
-
-	items := make([]components.UserMessageItem, len(userMsgs))
-	for i, msg := range userMsgs {
-		items[i] = components.UserMessageItem{
-			ID:   msg.EntryID,
-			Text: msg.Text,
-		}
-	}
-
-	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		selector := components.NewUserMessageSelectorComponent(
-			items,
-			func(entryID string) {
-				done()
-				go m.handleFork(entryID)
-			},
-			func() { done() },
-		)
-		return selector, selector.GetMessageList()
-	})
-}
-
-// handleFork creates a fork from entryID and refreshes the chat display.
-func (m *InteractiveMode) handleFork(entryID string) {
-	selectedText, cancelled, err := m.session.Fork(entryID)
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Fork failed: %s", err))
-		return
-	}
-	if cancelled {
-		return
-	}
-	m.rebuildChatFromMessages()
-	if m.editor != nil && selectedText != "" {
-		m.editor.SetText(selectedText)
-	}
-	m.showStatus("Branched to new session")
 }

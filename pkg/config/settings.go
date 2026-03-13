@@ -31,10 +31,10 @@ type BranchSummarySettings struct {
 
 // RetrySettings controls retry behavior.
 type RetrySettings struct {
-	Enabled    *bool `json:"enabled,omitempty"`
-	MaxRetries *int  `json:"maxRetries,omitempty"`
-	BaseDelayMs *int `json:"baseDelayMs,omitempty"`
-	MaxDelayMs  *int `json:"maxDelayMs,omitempty"`
+	Enabled     *bool `json:"enabled,omitempty"`
+	MaxRetries  *int  `json:"maxRetries,omitempty"`
+	BaseDelayMs *int  `json:"baseDelayMs,omitempty"`
+	MaxDelayMs  *int  `json:"maxDelayMs,omitempty"`
 }
 
 // TerminalSettings controls terminal display behavior.
@@ -64,38 +64,37 @@ type MarkdownSettings struct {
 
 // Settings is the full settings schema.
 type Settings struct {
-	DefaultProvider       string                   `json:"defaultProvider,omitempty"`
-	DefaultModel          string                   `json:"defaultModel,omitempty"`
-	DefaultThinkingLevel  string                   `json:"defaultThinkingLevel,omitempty"`
-	Transport             string                   `json:"transport,omitempty"`
-	SteeringMode          string                   `json:"steeringMode,omitempty"`
-	FollowUpMode          string                   `json:"followUpMode,omitempty"`
-	Theme                 string                   `json:"theme,omitempty"`
-	Compaction            *CompactionSettings       `json:"compaction,omitempty"`
-	BranchSummary         *BranchSummarySettings    `json:"branchSummary,omitempty"`
-	Retry                 *RetrySettings            `json:"retry,omitempty"`
-	HideThinkingBlock     *bool                     `json:"hideThinkingBlock,omitempty"`
-	ShellPath             string                    `json:"shellPath,omitempty"`
-	QuietStartup          *bool                     `json:"quietStartup,omitempty"`
-	ShellCommandPrefix    string                    `json:"shellCommandPrefix,omitempty"`
-	CollapseChangelog     *bool                     `json:"collapseChangelog,omitempty"`
-	Packages              []any                     `json:"packages,omitempty"`
-	Extensions            []string                  `json:"extensions,omitempty"`
-	Skills                []string                  `json:"skills,omitempty"`
-	Prompts               []string                  `json:"prompts,omitempty"`
-	Themes                []string                  `json:"themes,omitempty"`
-	EnableSkillCommands   *bool                     `json:"enableSkillCommands,omitempty"`
-	Terminal              *TerminalSettings          `json:"terminal,omitempty"`
-	Images                *ImageSettings             `json:"images,omitempty"`
-	EnabledModels         []string                  `json:"enabledModels,omitempty"`
-	DoubleEscapeAction    string                    `json:"doubleEscapeAction,omitempty"`
-	ThinkingBudgets       *ThinkingBudgetsSettings   `json:"thinkingBudgets,omitempty"`
-	EditorPaddingX        *int                      `json:"editorPaddingX,omitempty"`
-	AutocompleteMaxVisible *int                     `json:"autocompleteMaxVisible,omitempty"`
-	ShowHardwareCursor    *bool                     `json:"showHardwareCursor,omitempty"`
-	Markdown              *MarkdownSettings          `json:"markdown,omitempty"`
-	ServerTools           []string                  `json:"serverTools,omitempty"`
-	ServerCompaction      *ServerCompactionSettings  `json:"serverCompaction,omitempty"`
+	DefaultProvider        string                    `json:"defaultProvider,omitempty"`
+	DefaultModel           string                    `json:"defaultModel,omitempty"`
+	DefaultThinkingLevel   string                    `json:"defaultThinkingLevel,omitempty"`
+	Transport              string                    `json:"transport,omitempty"`
+	SteeringMode           string                    `json:"steeringMode,omitempty"`
+	FollowUpMode           string                    `json:"followUpMode,omitempty"`
+	Theme                  string                    `json:"theme,omitempty"`
+	Compaction             *CompactionSettings       `json:"compaction,omitempty"`
+	BranchSummary          *BranchSummarySettings    `json:"branchSummary,omitempty"`
+	Retry                  *RetrySettings            `json:"retry,omitempty"`
+	HideThinkingBlock      *bool                     `json:"hideThinkingBlock,omitempty"`
+	ShellPath              string                    `json:"shellPath,omitempty"`
+	QuietStartup           *bool                     `json:"quietStartup,omitempty"`
+	ShellCommandPrefix     string                    `json:"shellCommandPrefix,omitempty"`
+	CollapseChangelog      *bool                     `json:"collapseChangelog,omitempty"`
+	Packages               []any                     `json:"packages,omitempty"`
+	Extensions             []string                  `json:"extensions,omitempty"`
+	Skills                 []string                  `json:"skills,omitempty"`
+	Prompts                []string                  `json:"prompts,omitempty"`
+	Themes                 []string                  `json:"themes,omitempty"`
+	EnableSkillCommands    *bool                     `json:"enableSkillCommands,omitempty"`
+	Terminal               *TerminalSettings         `json:"terminal,omitempty"`
+	Images                 *ImageSettings            `json:"images,omitempty"`
+	EnabledModels          []string                  `json:"enabledModels,omitempty"`
+	ThinkingBudgets        *ThinkingBudgetsSettings  `json:"thinkingBudgets,omitempty"`
+	EditorPaddingX         *int                      `json:"editorPaddingX,omitempty"`
+	AutocompleteMaxVisible *int                      `json:"autocompleteMaxVisible,omitempty"`
+	ShowHardwareCursor     *bool                     `json:"showHardwareCursor,omitempty"`
+	Markdown               *MarkdownSettings         `json:"markdown,omitempty"`
+	ServerTools            []string                  `json:"serverTools,omitempty"`
+	ServerCompaction       *ServerCompactionSettings `json:"serverCompaction,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -114,7 +113,6 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeStr(&r.Theme, overrides.Theme)
 	mergeStr(&r.ShellPath, overrides.ShellPath)
 	mergeStr(&r.ShellCommandPrefix, overrides.ShellCommandPrefix)
-	mergeStr(&r.DoubleEscapeAction, overrides.DoubleEscapeAction)
 
 	// Pointer fields: override wins if non-nil
 	mergeBool(&r.HideThinkingBlock, overrides.HideThinkingBlock)
@@ -832,8 +830,8 @@ func (sm *SettingsManager) GetCompactionSettings() CompactionResult {
 }
 
 type RetryResult struct {
-	Enabled    bool
-	MaxRetries int
+	Enabled     bool
+	MaxRetries  int
 	BaseDelayMs int
 	MaxDelayMs  int
 }
@@ -917,15 +915,6 @@ func (sm *SettingsManager) SetEnabledModels(patterns []string) {
 	sm.globalSettings.EnabledModels = patterns
 	sm.markModified("enabledModels")
 	sm.save()
-}
-
-func (sm *SettingsManager) GetDoubleEscapeAction() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	if sm.settings.DoubleEscapeAction != "" {
-		return sm.settings.DoubleEscapeAction
-	}
-	return "tree"
 }
 
 func (sm *SettingsManager) GetAutocompleteMaxVisible() int {

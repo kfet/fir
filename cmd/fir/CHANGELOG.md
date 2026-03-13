@@ -2,8 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Ctrl+N` keyboard shortcut for starting a new session (equivalent to `/new`)
+
+### Removed
+
+- Fork feature (`/fork`, double-escape fork action, `ActionFork` keybinding)
+- `doubleEscapeAction` setting — double-escape now always opens the tree selector
+
+### Fixed
+
+- `/schedule` now uses `send_user_message("continue")` instead of `continue_session` to avoid errors on models that don't support assistant message prefill
+- No longer creates `.fir/extensions/` directory in every project on startup
+
 ### Changed
 
+- Extension status (e.g. `/schedule` countdown) now displays right-aligned on the pwd line instead of adding a third footer row
 - `/session` command now shows current model and configured MCP servers
 - Bash tool description now includes the current OS/arch (e.g. `darwin/arm64`) so the model knows the platform
 - **Breaking:** `pkg/core` renamed to `pkg/session`; old `pkg/session` (persistence) moved to `pkg/session/store`
@@ -19,7 +34,7 @@
 
 ### Added
 
-- `/session` now shows the current model and configured MCP servers
+- `/session` now shows the current mode, model, and configured MCP servers
 - Built-in PTY driver (`pkg/ptydriver`) — Go-native terminal multiplexer for agent-to-agent orchestration without requiring tmux
 - `fir pty` subcommand — CLI for managing PTY sessions (serve, new, send, capture, wait, list, kill, etc.)
 - `auto-helpers.sh` for shepherd and tmux-driver skills — auto-selects tmux or built-in PTY driver

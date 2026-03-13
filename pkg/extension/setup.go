@@ -91,7 +91,6 @@ func (r *SetupResult) StartWatching(ctx context.Context) {
 	if r.Manager == nil || r.stopWatch != nil {
 		return
 	}
-	EnsureExtensionDirs(r.Manager.projectDir)
 	stop, err := r.Manager.WatchAndReload(ctx, func(reloadErr error) {
 		if r.OnAutoReload != nil {
 			r.OnAutoReload(reloadErr)
@@ -163,7 +162,7 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	confirmFn := opts.ConfirmFn
 	if confirmFn == nil {
 		confirmFn = func(name, path string) bool {
-			fmt.Fprintf(os.Stderr, "fir: trusting project extension %q (%s)\n", name, path)
+			logger.Info("trusting project extension", "ext", name, "path", path)
 			return true
 		}
 	}
