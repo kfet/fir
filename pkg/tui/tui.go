@@ -208,16 +208,11 @@ type TUI struct {
 }
 
 // NewTUI creates a new TUI with the given terminal.
-func NewTUI(terminal Terminal, showHardwareCursor ...bool) *TUI {
-	show := false
-	if len(showHardwareCursor) > 0 {
-		show = showHardwareCursor[0]
-	}
+func NewTUI(terminal Terminal) *TUI {
 	t := &TUI{
-		Terminal:           terminal,
-		showHardwareCursor: show,
-		renderCh:           make(chan struct{}, 1),
-		doneCh:             make(chan struct{}),
+		Terminal:  terminal,
+		renderCh:  make(chan struct{}, 1),
+		doneCh:    make(chan struct{}),
 	}
 	return t
 }

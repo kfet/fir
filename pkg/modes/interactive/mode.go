@@ -225,7 +225,7 @@ func (m *InteractiveMode) Init() error {
 	firlog.Debug("interactive: initializing TUI")
 	// Create terminal and TUI
 	term := tui.NewProcessTerminal()
-	m.ui = tui.NewTUI(term, false)
+	m.ui = tui.NewTUI(term)
 
 	// Create header with keybinding hints
 	t := itheme.GetTheme()

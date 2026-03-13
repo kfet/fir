@@ -187,7 +187,8 @@ func TestTUI_Overlay_SetHidden(t *testing.T) {
 
 func TestTUI_ShowHardwareCursor(t *testing.T) {
 	term := NewMockTerminal(80, 24)
-	ui := NewTUI(term, true)
+	ui := NewTUI(term)
+	ui.SetShowHardwareCursor(true)
 	if !ui.GetShowHardwareCursor() {
 		t.Error("expected hardware cursor enabled")
 	}
