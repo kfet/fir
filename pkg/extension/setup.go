@@ -55,6 +55,18 @@ type SetupOptions struct {
 	// extension handshake. It receives the mismatch and returns true if the
 	// frontmatter should be auto-fixed. When nil, a warning is printed to stderr.
 	OfferFixFn func(mm FrontmatterMismatch) bool
+
+	// ExtraExtensionDirs lists additional directories to scan for extension
+	// scripts. Each directory is scanned with "package" scope, shadowed by
+	// both global and project extensions. Use this to load extensions
+	// contributed by installed fir packages.
+	ExtraExtensionDirs []string
+
+	// ExtraExtensionFiles lists individual extension script paths to load.
+	// Each file is treated as a "package"-scoped extension and is shadowed by
+	// global and project extensions with the same name.
+	// Use this to load individual extension files discovered in installed packages.
+	ExtraExtensionFiles []string
 }
 
 // SetupResult holds the running state of extensions for a session.
@@ -155,6 +167,12 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	}
 	if len(opts.EnabledNames) > 0 {
 		mgr.SetAllowedNames(opts.EnabledNames)
+	}
+	if len(opts.ExtraExtensionDirs) > 0 {
+		mgr.SetExtraExtensionDirs(opts.ExtraExtensionDirs)
+	}
+	if len(opts.ExtraExtensionFiles) > 0 {
+		mgr.SetExtraExtensionFiles(opts.ExtraExtensionFiles)
 	}
 	mgr.ActiveMode = opts.Mode
 

@@ -4,6 +4,13 @@
 
 ### Added
 
+- `pkg/pkg` package: `ParseSource`, `Clone`/`CloneRef`/`Pull`/`CurrentRef`, `ScanPackageResources`, and `Manager` (Install/Uninstall/Update/List/Resolve) for git and local package management
+- `fir install <source> [--local]`, `fir uninstall <source> [--local]`, `fir packages [list|update]` CLI subcommands for external package management
+- `GetGlobalPackages`, `GetProjectPackages`, `SetGlobalPackages` methods on `SettingsManager` for package list persistence
+- `ResourcePackageResolver` interface in `pkg/resources`; installed packages now contribute skills, prompts, extensions, and themes automatically
+- `GetPackageExtensionPaths`/`GetPackageThemePaths` on `ResourceLoader`; package extensions wired into extension discovery, package themes into theme search dirs
+- `ExtraExtensionDirs`/`ExtraExtensionFiles` on `extension.SetupOptions`; `ConfigsFromFiles`/`DiscoverExtra` in `pkg/extension/discovery`
+- `fir.json` package manifest format for declaring which resources a package exports
 - `/btw <question>` slash command — ask a side question using the current session context; the Q&A is never added to history and works even while the agent is streaming
 - `autoresearch` builtin extension: `run_experiment` tool (runs `autoresearch.sh`, parses `METRIC name=value` lines), `log_experiment` tool (appends to `autoresearch.jsonl`), and `/autoresearch` slash command (experiment log summary)
 - `autoresearch-create` builtin skill: sets up and drives an autonomous optimisation loop — benchmark, hypothesis, commit, run, keep/revert, repeat (inspired by [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch))

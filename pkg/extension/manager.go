@@ -44,10 +44,12 @@ type Manager struct {
 	OfferFixFn func(mm FrontmatterMismatch) bool
 
 	// Saved from Start() for Reload().
-	projectDir string
-	cwd        string
-	api        BridgeAPI
-	sdkEnv     []string // cached SDK env vars
+	projectDir          string
+	cwd                 string
+	api                 BridgeAPI
+	sdkEnv              []string // cached SDK env vars
+	extraExtensionDirs  []string // extra dirs from installed packages
+	extraExtensionFiles []string // extra script files from installed packages
 }
 
 type managedBridge struct {
@@ -112,6 +114,24 @@ func (m *Manager) SetAllowedNames(names []string) {
 	m.AllowedNames = append([]string(nil), names...)
 }
 
+// SetExtraExtensionDirs sets additional directories to scan for extension
+// scripts. These are merged at lower priority (shadowed by project/global).
+// Call before Start.
+func (m *Manager) SetExtraExtensionDirs(dirs []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.extraExtensionDirs = append([]string(nil), dirs...)
+}
+
+// SetExtraExtensionFiles sets individual extension script paths contributed
+// by installed packages. These are merged at lower priority.
+// Call before Start.
+func (m *Manager) SetExtraExtensionFiles(files []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.extraExtensionFiles = append([]string(nil), files...)
+}
+
 // Start discovers extensions, spawns processes, performs handshakes, and
 // starts bridge dispatch loops.
 //
@@ -128,6 +148,39 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	configs, err := Discover(projectDir)
 	if err != nil {
 		return err
+	}
+
+	// Merge in package-contributed extension dirs at lower priority.
+	// The byName map from Discover ensures project/global already win.
+	m.mu.Lock()
+	extraDirs := append([]string(nil), m.extraExtensionDirs...)
+	extraFiles := append([]string(nil), m.extraExtensionFiles...)
+	m.mu.Unlock()
+	if len(extraDirs) > 0 || len(extraFiles) > 0 {
+		// Build a name set from existing configs so we don't shadow them.
+		existing := make(map[string]bool, len(configs))
+		for _, c := range configs {
+			existing[c.Name] = true
+		}
+		if len(extraDirs) > 0 {
+			extraConfigs, extraErr := DiscoverExtra(extraDirs)
+			if extraErr == nil {
+				for _, c := range extraConfigs {
+					if !existing[c.Name] {
+						configs = append(configs, c)
+						existing[c.Name] = true
+					}
+				}
+			}
+		}
+		if len(extraFiles) > 0 {
+			for _, c := range ConfigsFromFiles(extraFiles) {
+				if !existing[c.Name] {
+					configs = append(configs, c)
+					existing[c.Name] = true
+				}
+			}
+		}
 	}
 
 	// Extract SDKs and build env.

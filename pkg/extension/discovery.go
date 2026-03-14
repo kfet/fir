@@ -101,6 +101,60 @@ func DiscoverWithDirs(globalDir, projectExtDir string) ([]ExtProcConfig, error) 
 	return result, nil
 }
 
+// DiscoverExtra scans a list of additional directories for extension scripts,
+// returning configs with scope "package". Package extensions are lowest
+// priority — they are shadowed by global and project extensions.
+// Use this to load extensions contributed by installed fir packages.
+func DiscoverExtra(dirs []string) ([]ExtProcConfig, error) {
+	byName := make(map[string]ExtProcConfig)
+	for _, dir := range dirs {
+		if err := scanExtDir(dir, "package", byName); err != nil {
+			return nil, err
+		}
+	}
+	result := make([]ExtProcConfig, 0, len(byName))
+	for _, cfg := range byName {
+		result = append(result, cfg)
+	}
+	return result, nil
+}
+
+// ConfigsFromFiles builds extension configs from individual script file paths.
+// Each file must be executable and have valid comment frontmatter to be included.
+// Files that fail these checks are silently skipped.
+// The resulting configs have scope "package" and are intended to be merged at
+// lower priority than global/project extensions.
+func ConfigsFromFiles(files []string) []ExtProcConfig {
+	byName := make(map[string]ExtProcConfig, len(files))
+	for _, filePath := range files {
+		if !isExecutableFile(filePath) {
+			continue
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		fm := resources.ParseCommentFrontmatter(string(data))
+		if !fm.Present || fm.Builtin {
+			continue
+		}
+		name := stripExt(filepath.Base(filePath))
+		byName[name] = ExtProcConfig{
+			Name:     name,
+			Path:     filePath,
+			Scope:    "package",
+			Modes:    fm.Modes,
+			Events:   fm.Events,
+			Commands: fm.Commands,
+		}
+	}
+	result := make([]ExtProcConfig, 0, len(byName))
+	for _, cfg := range byName {
+		result = append(result, cfg)
+	}
+	return result
+}
+
 // scanExtDir scans a single extensions directory, populating byName.
 // It handles both plain executable files and sub-directories.
 // Files with builtin: true comment frontmatter are skipped when scanning

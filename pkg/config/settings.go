@@ -946,6 +946,33 @@ func (sm *SettingsManager) GetProjectSettings() Settings {
 	return deepCopySettings(sm.projectSettings)
 }
 
+// GetGlobalPackages returns a copy of the global packages list.
+func (sm *SettingsManager) GetGlobalPackages() []any {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]any, len(sm.settings.Packages))
+	copy(out, sm.settings.Packages)
+	return out
+}
+
+// GetProjectPackages returns a copy of the project-scoped packages list.
+func (sm *SettingsManager) GetProjectPackages() []any {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]any, len(sm.projectSettings.Packages))
+	copy(out, sm.projectSettings.Packages)
+	return out
+}
+
+// SetGlobalPackages sets the packages setting in the global settings file.
+func (sm *SettingsManager) SetGlobalPackages(packages []any) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.Packages = packages
+	sm.markModified("packages")
+	sm.save()
+}
+
 // SetProjectPackages sets the packages setting in the project settings file.
 func (sm *SettingsManager) SetProjectPackages(packages []any) {
 	sm.mu.Lock()

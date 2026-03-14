@@ -17,9 +17,17 @@ import (
 
 // PathMetadata describes where a resource came from and how it was discovered.
 type PathMetadata struct {
-	Source string `json:"source"` // "local", "cli", "auto"
+	Source string `json:"source"` // "local", "cli", "auto", "package"
 	Scope  string `json:"scope"`  // "user", "project", "temporary"
 	Origin string `json:"origin"` // "top-level", "package"
+}
+
+// ResourcePackageResolver is implemented by the package manager to contribute
+// resource paths without creating an import cycle between pkg/resources and pkg/pkg.
+type ResourcePackageResolver interface {
+	// ResolvePackageResources returns the paths of extensions, skills, prompts,
+	// and themes contributed by all installed packages.
+	ResolvePackageResources() (extensions, skills, prompts, themes []string, err error)
 }
 
 // ResourceExtensionPaths contains paths provided by extensions to extend resources.
@@ -42,6 +50,13 @@ type ResourceLoader interface {
 	GetSystemPrompt() string
 	GetAppendSystemPrompt() []string
 	GetPathMetadata() map[string]PathMetadata
+	// GetPackageExtensionPaths returns executable extension scripts (.py/.sh)
+	// contributed by installed packages. These are wired into the extension
+	// discovery system, not the resource loader.
+	GetPackageExtensionPaths() []string
+	// GetPackageThemePaths returns theme JSON files contributed by installed
+	// packages. These are added to the TUI theme search dirs.
+	GetPackageThemePaths() []string
 	ExtendResources(paths ResourceExtensionPaths)
 	Reload() error
 }
@@ -63,6 +78,8 @@ type ResourceLoaderOptions struct {
 
 	SettingsManager *config.SettingsManager
 
+	PackageResolver ResourcePackageResolver
+
 	AdditionalSkillPaths          []string
 	AdditionalPromptTemplatePaths []string
 
@@ -79,6 +96,7 @@ type DefaultResourceLoader struct {
 	agentDir string
 
 	settingsManager *config.SettingsManager
+	pkgResolver     ResourcePackageResolver
 
 	additionalSkillPaths  []string
 	additionalPromptPaths []string
@@ -101,6 +119,11 @@ type DefaultResourceLoader struct {
 
 	lastSkillPaths  []string
 	lastPromptPaths []string
+
+	// Package-contributed paths for systems outside the resource loader
+	// (extensions are handled by pkg/extension; themes by the TUI theme loader).
+	pkgExtensionPaths []string
+	pkgThemePaths     []string
 }
 
 // NewResourceLoader creates a new DefaultResourceLoader with the given options.
@@ -124,6 +147,7 @@ func NewResourceLoader(opts ResourceLoaderOptions) *DefaultResourceLoader {
 		cwd:                      cwd,
 		agentDir:                 agentDir,
 		settingsManager:          sm,
+		pkgResolver:              opts.PackageResolver,
 		additionalSkillPaths:     opts.AdditionalSkillPaths,
 		additionalPromptPaths:    opts.AdditionalPromptTemplatePaths,
 		noSkills:                 opts.NoSkills,
@@ -162,6 +186,24 @@ func (r *DefaultResourceLoader) GetPathMetadata() map[string]PathMetadata {
 	return r.pathMetadata
 }
 
+func (r *DefaultResourceLoader) GetPackageExtensionPaths() []string {
+	if r.pkgExtensionPaths == nil {
+		return nil
+	}
+	out := make([]string, len(r.pkgExtensionPaths))
+	copy(out, r.pkgExtensionPaths)
+	return out
+}
+
+func (r *DefaultResourceLoader) GetPackageThemePaths() []string {
+	if r.pkgThemePaths == nil {
+		return nil
+	}
+	out := make([]string, len(r.pkgThemePaths))
+	copy(out, r.pkgThemePaths)
+	return out
+}
+
 func (r *DefaultResourceLoader) ExtendResources(paths ResourceExtensionPaths) {
 	if len(paths.SkillPaths) > 0 {
 		skillPaths := r.normalizeExtensionPaths(paths.SkillPaths)
@@ -194,16 +236,42 @@ func (r *DefaultResourceLoader) Reload() error {
 		// Include default skill paths
 		skillPaths = mergePaths(r.cwd, defaultSkillPaths(r.cwd, r.agentDir), skillPaths)
 	}
-	r.lastSkillPaths = skillPaths
-	r.updateSkillsFromPaths(skillPaths, nil)
 
 	// Load prompt templates
 	promptPaths := r.additionalPromptPaths
 	if !r.noPrompts {
 		promptPaths = mergePaths(r.cwd, defaultPromptPaths(r.cwd, r.agentDir), promptPaths)
 	}
+
+	// Append package resources if a resolver is configured.
+	var pkgSkillEntries, pkgPromptEntries []PathEntry
+	if r.pkgResolver != nil {
+		pkgExtensions, pkgSkills, pkgPrompts, pkgThemes, err := r.pkgResolver.ResolvePackageResources()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: package resources: %v\n", err)
+		} else {
+			// Store extension and theme paths for callers that handle those systems.
+			r.pkgExtensionPaths = pkgExtensions
+			r.pkgThemePaths = pkgThemes
+
+			for _, p := range pkgSkills {
+				meta := PathMetadata{Source: "package", Scope: r.scopeForPath(p), Origin: "package"}
+				pkgSkillEntries = append(pkgSkillEntries, PathEntry{Path: p, Metadata: meta})
+				skillPaths = append(skillPaths, p)
+			}
+			for _, p := range pkgPrompts {
+				meta := PathMetadata{Source: "package", Scope: r.scopeForPath(p), Origin: "package"}
+				pkgPromptEntries = append(pkgPromptEntries, PathEntry{Path: p, Metadata: meta})
+				promptPaths = append(promptPaths, p)
+			}
+		}
+	}
+
+	r.lastSkillPaths = skillPaths
+	r.updateSkillsFromPaths(skillPaths, pkgSkillEntries)
+
 	r.lastPromptPaths = promptPaths
-	r.updatePromptsFromPaths(promptPaths, nil)
+	r.updatePromptsFromPaths(promptPaths, pkgPromptEntries)
 
 	// Load AGENTS.md / CLAUDE.md files
 	r.agentsFiles = loadProjectContextFiles(r.cwd, r.agentDir)
@@ -215,6 +283,15 @@ func (r *DefaultResourceLoader) Reload() error {
 	r.appendSystemPrompt = r.resolveAppendSystemPrompt()
 
 	return nil
+}
+
+// scopeForPath infers whether a path belongs to the project or user scope.
+func (r *DefaultResourceLoader) scopeForPath(p string) string {
+	abs, _ := filepath.Abs(p)
+	if isUnderPath(abs, filepath.Join(r.cwd, config.ConfigDirName)) {
+		return "project"
+	}
+	return "user"
 }
 
 // ============================================================================

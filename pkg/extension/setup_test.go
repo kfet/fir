@@ -50,6 +50,8 @@ func (s *stubResourceLoader) GetAppendSystemPrompt() []string        { return ni
 func (s *stubResourceLoader) GetPathMetadata() map[string]resources.PathMetadata {
 	return nil
 }
+func (s *stubResourceLoader) GetPackageExtensionPaths() []string               { return nil }
+func (s *stubResourceLoader) GetPackageThemePaths() []string                   { return nil }
 func (s *stubResourceLoader) ExtendResources(resources.ResourceExtensionPaths) {}
 func (s *stubResourceLoader) Reload() error                                    { return nil }
 

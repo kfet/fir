@@ -254,6 +254,11 @@ Usage:
   %s extensions [list]           List all builtin extensions
   %s extensions install <name>   Install a builtin extension to project (.fir/extensions/)
                                    Options: --user (install to ~/.fir/agent/extensions/), --force
+  %s install <source> [--local]  Install a package (git repo or local path)
+                                   --local installs to project scope (.fir/packages/)
+  %s uninstall <source> [--local] Remove an installed package
+  %s packages [list]             List installed packages
+  %s packages update [source]    Update one or all installed packages
 
 Options:
   --provider <name>              Provider name (default: google)
@@ -333,5 +338,5 @@ Available Tools (default: read, bash, edit, write):
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
 }

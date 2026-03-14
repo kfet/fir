@@ -156,6 +156,8 @@ func (n noopResourceLoader) GetAgentsFiles() []resources.AgentsFile             
 func (n noopResourceLoader) GetSystemPrompt() string                            { return "" }
 func (n noopResourceLoader) GetAppendSystemPrompt() []string                    { return nil }
 func (n noopResourceLoader) GetPathMetadata() map[string]resources.PathMetadata { return nil }
+func (n noopResourceLoader) GetPackageExtensionPaths() []string                 { return nil }
+func (n noopResourceLoader) GetPackageThemePaths() []string                     { return nil }
 func (n noopResourceLoader) ExtendResources(resources.ResourceExtensionPaths)   {}
 func (n noopResourceLoader) Reload() error                                      { return nil }
 

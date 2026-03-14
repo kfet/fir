@@ -24,6 +24,7 @@ import (
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
+	firpkg "github.com/kfet/fir/pkg/pkg"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
@@ -39,6 +40,7 @@ type sessionSetup struct {
 	settingsManager *config.SettingsManager
 	extSetup        *extension.SetupResult
 	usageTracker    *Tracker
+	resourceLoader  resources.ResourceLoader
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -72,10 +74,12 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	sessionManager := createSessionManager(args, cwd, agentDir)
 
 	// Resource loader
+	pkgMgr := firpkg.New(agentDir, cwd, settingsManager)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:                           cwd,
 		AgentDir:                      agentDir,
 		SettingsManager:               settingsManager,
+		PackageResolver:               pkgMgr,
 		SystemPrompt:                  args.SystemPrompt,
 		AppendSystemPrompt:            args.AppendSystemPrompt,
 		NoSkills:                      args.NoSkills,
@@ -163,10 +167,11 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 	var extSetup *extension.SetupResult
 	if !args.NoExtensions {
 		extSetup, err = extension.Setup(result.Session, extension.SetupOptions{
-			ProjectDir:   cwd,
-			Cwd:          cwd,
-			Mode:         resolveExtensionMode(args),
-			EnabledNames: resolveEnabledExtensions(args, settingsManager),
+			ProjectDir:          cwd,
+			Cwd:                 cwd,
+			Mode:                resolveExtensionMode(args),
+			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
+			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
@@ -197,6 +202,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		settingsManager: settingsManager,
 		extSetup:        extSetup,
 		usageTracker:    usageTracker,
+		resourceLoader:  rl,
 	}, nil
 }
 
@@ -269,6 +275,15 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "extensions" {
 		return runExtensions()
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "install" {
+		return runInstall()
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "uninstall" {
+		return runUninstall()
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "packages" {
+		return runPackages()
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "pty" {
 		runPTY()
@@ -683,6 +698,12 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	if !args.NoThemes {
 		themeSearchDirs = []string{filepath.Join(setup.agentDir, "themes")}
 		themeSearchDirs = append(themeSearchDirs, setup.settingsManager.GetThemePaths()...)
+		// Add directories containing package-contributed theme files.
+		if setup.resourceLoader != nil {
+			for _, p := range setup.resourceLoader.GetPackageThemePaths() {
+				themeSearchDirs = append(themeSearchDirs, filepath.Dir(p))
+			}
+		}
 		for _, p := range args.Themes {
 			info, err := os.Stat(p)
 			if err == nil && info.IsDir() {

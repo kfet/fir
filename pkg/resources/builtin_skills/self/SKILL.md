@@ -132,6 +132,20 @@ The skill guides through:
 `autoresearch.jsonl` is an append-only audit trail of every experiment. The
 `/autoresearch` command (from the `autoresearch` extension) shows a summary table.
 
+## External Packages
+
+Install external packages (git repos or local paths) that contribute skills, extensions, prompts, and themes:
+
+```
+fir install github.com/user/fir-pack        # install to user scope (~/.config/fir/packages/)
+fir install ./local/path --local            # install to project scope (.fir/packages/)
+fir uninstall github.com/user/fir-pack      # remove a package
+fir packages list                           # list installed packages (source, scope, skill/ext counts, path)
+fir packages update [source]               # pull latest for one or all packages
+```
+
+Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, prompts, extensions, and themes are automatically loaded.
+
 ## Key Concepts
 
 - **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; double-Escape or `/tree` navigates branches. Use `/session` for version, IDs, message/token stats, and enabled extensions. Use `/new [name]` to start a fresh session, optionally naming it.
