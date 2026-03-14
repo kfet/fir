@@ -191,6 +191,10 @@ type AgentSession struct {
 	SessionManager  *store.SessionManager
 	SettingsManager *config.SettingsManager
 
+	// BtwStreamFn overrides the stream function used by Btw(). Nil means use ai.StreamSimple.
+	// Set this in tests to inject a fake stream without hitting the network.
+	BtwStreamFn func(ctx context.Context, model *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream
+
 	resourceLoader   resources.ResourceLoader
 	modelRegistry    *models.ModelRegistry
 	compactionRunner CompactionRunner
@@ -1528,6 +1532,64 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	}
 
 	return &NavigateTreeResult{EditorText: editorText}, nil
+}
+
+// Btw makes a one-shot, ephemeral LLM call using the current session context
+// plus the user's side question. The Q&A is NOT added to session history.
+// onChunk is called with each text delta as it arrives. Returns the full response.
+func (s *AgentSession) Btw(ctx context.Context, question string, onChunk func(string)) (string, error) {
+	model := s.Model()
+	if model == nil {
+		return "", fmt.Errorf("no model selected")
+	}
+
+	// Snapshot current messages without touching session state.
+	state := s.Agent.State()
+
+	llmMsgs, err := store.ConvertToLLM(state.Messages)
+	if err != nil {
+		return "", fmt.Errorf("btw: convert messages: %w", err)
+	}
+
+	// Append the side question as a fresh user message.
+	llmMsgs = append(llmMsgs, ai.NewUserMsg(question, time.Now().UnixMilli()))
+
+	apiKey := s.modelRegistry.GetApiKeyForProvider(model.Provider)
+
+	// No tools — pure read-only side conversation.
+	llmCtx := ai.Context{
+		SystemPrompt: state.SystemPrompt,
+		Messages:     llmMsgs,
+	}
+	opts := &ai.SimpleStreamOptions{
+		StreamOptions: ai.StreamOptions{
+			ApiKey: apiKey,
+		},
+	}
+
+	streamFn := s.BtwStreamFn
+	if streamFn == nil {
+		streamFn = func(ctx context.Context, m *ai.Model, c ai.Context, o *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, o)
+		}
+	}
+	stream := streamFn(ctx, model, llmCtx, opts)
+
+	var sb strings.Builder
+	for event := range stream.Events {
+		switch event.Type {
+		case ai.EventTextDelta:
+			sb.WriteString(event.Delta)
+			if onChunk != nil {
+				onChunk(event.Delta)
+			}
+		case ai.EventError:
+			if event.Error != nil && event.Error.ErrorMessage != "" {
+				return sb.String(), fmt.Errorf("%s", event.Error.ErrorMessage)
+			}
+		}
+	}
+	return sb.String(), nil
 }
 
 // Close cleans up the session.

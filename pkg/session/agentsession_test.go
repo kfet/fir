@@ -3051,3 +3051,110 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 		t.Errorf("expected pending, got %s", ctx.PlanEntries[1].Status)
 	}
 }
+
+// ============================================================================
+// Btw
+// ============================================================================
+
+func TestBtw_ReturnsResponse(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+
+	// Inject a fake stream that emits two text deltas.
+	session.BtwStreamFn = func(ctx context.Context, m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, Delta: "Hello, "})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, Delta: "world!"})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	var chunks []string
+	got, err := session.Btw(context.Background(), "what is 2+2?", func(delta string) {
+		chunks = append(chunks, delta)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Hello, world!" {
+		t.Errorf("expected %q, got %q", "Hello, world!", got)
+	}
+	if len(chunks) != 2 {
+		t.Errorf("expected 2 chunks, got %d", len(chunks))
+	}
+}
+
+func TestBtw_DoesNotModifySessionMessages(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+
+	session.BtwStreamFn = func(ctx context.Context, m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	before := len(session.Agent.State().Messages)
+	_, err := session.Btw(context.Background(), "side question", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	after := len(session.Agent.State().Messages)
+	if before != after {
+		t.Errorf("session messages changed: before=%d after=%d", before, after)
+	}
+}
+
+func TestBtw_IncludesExistingContextInCall(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+
+	// Pre-populate the session with one user message.
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewUserMsg("earlier message", 0)))
+
+	var capturedMsgs []ai.Message
+	session.BtwStreamFn = func(ctx context.Context, m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		capturedMsgs = llmCtx.Messages
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone})
+			stream.End(nil)
+		}()
+		return stream
+	}
+
+	_, err := session.Btw(context.Background(), "btw question", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have the existing message plus the btw question appended.
+	if len(capturedMsgs) != 2 {
+		t.Fatalf("expected 2 messages in LLM context, got %d", len(capturedMsgs))
+	}
+}
+
+func TestBtw_ErrorOnNoModel(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	_, err := session.Btw(context.Background(), "question", nil)
+	if err == nil {
+		t.Fatal("expected error when no model set")
+	}
+}
