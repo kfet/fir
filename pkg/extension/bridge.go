@@ -15,7 +15,8 @@ import (
 type NotifyFunc func(level, message string)
 
 // SetStatusFunc is called when an extension sends a "set_status" request.
-type SetStatusFunc func(status string)
+// name is the extension name; status is the text to display (empty = clear).
+type SetStatusFunc func(name, status string)
 
 // Bridge adapts an external process extension to fir's extension system.
 type Bridge struct {
@@ -254,7 +255,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		if b.SetStatusFn != nil {
-			b.SetStatusFn(p.Status)
+			b.SetStatusFn(b.caps.Name, p.Status)
 		}
 		result = map[string]any{"ok": true}
 

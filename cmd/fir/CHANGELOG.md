@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `/schedule` countdown no longer disappears from the footer when other extensions call `set_status` — each extension now has its own status slot keyed by name
 - ACP mode (Zed): inference errors (e.g. Bedrock API failures) are now shown to the user instead of being silently dropped
 
 ## [0.20.0] - 2026-03-13

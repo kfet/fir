@@ -174,9 +174,9 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 				m.showMessage(message)
 			}
 		})
-		setup.Manager.SetSetStatusFn(func(status string) {
+		setup.Manager.SetSetStatusFn(func(name, status string) {
 			if m.footerDataProvider != nil {
-				m.footerDataProvider.SetExtensionStatus("extension", status)
+				m.footerDataProvider.SetExtensionStatus(name, status)
 				if m.ui != nil {
 					m.ui.RequestRender(false)
 				}
