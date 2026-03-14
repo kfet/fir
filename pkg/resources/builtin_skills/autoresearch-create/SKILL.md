@@ -54,38 +54,7 @@ Run it manually to confirm at least one `METRIC` line appears before continuing.
 
 Living memory — re-read this whenever resuming after a context reset.
 
-```markdown
-# Autoresearch: <objective>
-
-## Objective
-<one sentence>
-
-## Primary Metric
-`<name>` — **minimise** | **maximise** — baseline: <value>
-
-## In-Scope Files
-- <path>
-
-## Hard Constraints
-- <constraint>
-
-## Target (optional)
-<metric> < 800
-
-## Hypotheses Queue
-- [ ] <idea>
-
-## Wins
-| # | Description | Δ% | Commit |
-|---|---|---|---|
-
-## Dead Ends
-| # | Description | Why |
-|---|---|---|
-
-## Current Best
-Experiment #1 — baseline — `<metric>` = <value>
-```
+Read the template here: `./autoresearch-template.md`
 
 ### 1d. Run baseline
 
