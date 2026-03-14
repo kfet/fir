@@ -4,7 +4,7 @@
 # description: Review recent git changes and apply simplifications
 # builtin: false
 # modes: tui
-# commands: simplify: Review recent changes and apply simplifications (code reuse, quality, efficiency)
+# commands: simplify: Review recent changes and apply simplifications (code reuse / quality / efficiency)
 # ---
 """Review recent git changes and ask the agent to simplify them.
 
@@ -58,7 +58,7 @@ def _gather_diff() -> tuple[str, str]:
 
 @fir_ext.command(
     name="simplify",
-    description="Review recent changes and apply simplifications (code reuse, quality, efficiency)",
+    description="Review recent changes and apply simplifications (code reuse / quality / efficiency)",
 )
 def cmd_simplify(args: list[str], ctx: fir_ext.Context):
     """Handle /simplify [focus]."""
