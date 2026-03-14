@@ -138,6 +138,7 @@ The skill guides through:
 - **Re-exec for local build testing** — use `/reexec` to restart into the current binary while preserving the active session, or `/reexec <path>` to switch to a specific built binary.
 - **In-place update** — use `/update` to check for, download, and install the latest release, then automatically restart the session.
 - **Compaction** — when context grows large, fir automatically summarizes older messages to stay within the model's context window. Configurable via `settings.json`.
+- **Simplify** — use `/simplify [focus]` to review recent git changes (staged, unstaged, or last commit) and ask the agent to apply simplifications across code reuse, quality, and efficiency. Optional focus text narrows the review (e.g. `/simplify memory allocation`). Provided by the builtin `simplify` extension.
 - **Thinking levels** — control reasoning depth: none, minimal, low, medium, high. Toggle with `Shift+Tab` or `--thinking`.
 - **Scoped models** — use `/scoped-models` to pick which models `Ctrl+P` cycles through.
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
