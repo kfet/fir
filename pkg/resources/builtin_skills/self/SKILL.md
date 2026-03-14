@@ -89,11 +89,48 @@ The `schedule.py` extension in `.fir/extensions/` adds the `/schedule` slash com
 
 Multiple schedules can be active concurrently, each assigned a unique ID (e.g. `[s1]`, `[s2]`). While active, a live countdown is shown in the status bar.
 
+### Builtin extension: `autoresearch`
+
+The `autoresearch` builtin extension provides an autonomous optimisation loop. It
+registers two agent tools and one slash command:
+
+**Tools (called by the agent during a loop):**
+- `run_experiment` — runs `autoresearch.sh` in the repo root, parses every
+  `METRIC name=value` line from stdout, and returns a structured metrics dict.
+- `log_experiment` — appends a JSONL record to `autoresearch.jsonl` (timestamp,
+  description, hypothesis, metrics, delta%, status).
+
+**Slash command:**
+```
+/autoresearch    — print a summary table of all experiments logged so far
+```
+
+Use the `autoresearch-create` skill to set up and run a loop (see Skills below).
+Install a customisable copy with `fir extensions install autoresearch`.
+
 ## Skills
 
 Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML frontmatter. They provide specialized workflows the agent can follow. Skills are auto-discovered from project, user, and builtin directories.
 
 Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills and `fir skills install <name>` to extract a builtin skill for customisation.
+
+### Builtin skill: `autoresearch-create`
+
+Sets up and drives an autonomous optimisation loop (inspired by
+[pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) and
+[karpathy/autoresearch](https://github.com/karpathy/autoresearch)).
+
+Invoke it by telling fir: *"use the autoresearch-create skill to optimise \<goal\>"*
+
+The skill guides through:
+1. **Setup** — create a git branch, write `autoresearch.sh` (benchmark) and
+   `autoresearch.md` (living memory doc), run and log the baseline.
+2. **Loop** — pick hypothesis → edit code → commit → `run_experiment` →
+   `log_experiment` → keep or `git reset --hard HEAD~1` → repeat.
+3. **Wrap-up** — final summary, offer to merge branch.
+
+`autoresearch.jsonl` is an append-only audit trail of every experiment. The
+`/autoresearch` command (from the `autoresearch` extension) shows a summary table.
 
 ## Key Concepts
 
