@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-03-13
+
 ### Added
 
 - `Ctrl+N` keyboard shortcut for starting a new session (equivalent to `/new`)
