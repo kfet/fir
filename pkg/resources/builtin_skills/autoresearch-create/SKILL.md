@@ -1,6 +1,7 @@
 ---
 name: autoresearch-create
 description: Run an autonomous optimisation loop — propose hypotheses, benchmark, log results, keep wins, revert losses. Use this when asked to optimise speed, size, accuracy, or any measurable metric automatically.
+builtin: true
 ---
 
 # Autoresearch — Autonomous Experiment Loop
