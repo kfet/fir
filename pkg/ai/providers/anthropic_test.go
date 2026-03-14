@@ -1966,3 +1966,55 @@ func TestAnthropic_ServerToolsBetaHeaders_AnyModel(t *testing.T) {
 		t.Errorf("expected web-search beta for custom model, got %s", beta)
 	}
 }
+
+// --- OnPayload hook tests ---
+
+func TestAnthropic_OnPayload_Called(t *testing.T) {
+	srv := mockSSEServer(t, "anthropic_simple_response.sse")
+	defer srv.Close()
+
+	var capturedPayload map[string]any
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		OnPayload: func(payload any, _ *ai.Model) any {
+			if m, ok := payload.(map[string]any); ok {
+				capturedPayload = m
+			}
+			return nil // keep original
+		},
+	}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	stream.Result()
+
+	if capturedPayload == nil {
+		t.Fatal("OnPayload was not called")
+	}
+	if capturedPayload["model"] != model.ID {
+		t.Errorf("expected model %q in payload, got %v", model.ID, capturedPayload["model"])
+	}
+}
+
+func TestAnthropic_OnPayload_WrongTypeNoPanic(t *testing.T) {
+	// Returning a wrong type from OnPayload must not panic (checked assertion).
+	srv := mockSSEServer(t, "anthropic_simple_response.sse")
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		OnPayload: func(payload any, _ *ai.Model) any {
+			return "not-a-map" // wrong type — should be silently ignored
+		},
+	}
+
+	// Must not panic.
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected a result")
+	}
+}

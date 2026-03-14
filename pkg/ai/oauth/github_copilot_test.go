@@ -458,5 +458,44 @@ func TestEnableAllCopilotModels_DoesNotPanic(t *testing.T) {
 	enableAllCopilotModels("test_token", "")
 }
 
+// TestPollForGitHubAccessToken_URLEncodedBody verifies that poll requests use
+// application/x-www-form-urlencoded (not JSON) as changed in the sync.
+func TestPollForGitHubAccessToken_URLEncodedBody(t *testing.T) {
+	var capturedContentType string
+	var capturedBody string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedContentType = r.Header.Get("Content-Type")
+		b := make([]byte, 4096)
+		n, _ := r.Body.Read(b)
+		capturedBody = string(b[:n])
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"ghu_urlenc_ok"}`)
+	}))
+	defer ts.Close()
+
+	origURL := githubAccessTokenURLOverride
+	origUnit := pollIntervalUnit
+	githubAccessTokenURLOverride = ts.URL + "/token"
+	pollIntervalUnit = time.Millisecond
+	defer func() {
+		githubAccessTokenURLOverride = origURL
+		pollIntervalUnit = origUnit
+	}()
+
+	_, err := pollForGitHubAccessToken(context.Background(), "github.com", "dev_urlenc", 1, 60)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("Content-Type = %q, want %q", capturedContentType, "application/x-www-form-urlencoded")
+	}
+	if !strings.Contains(capturedBody, "grant_type=") {
+		t.Errorf("body should be URL-encoded form, got: %q", capturedBody)
+	}
+	if strings.HasPrefix(capturedBody, "{") {
+		t.Errorf("body should not be JSON, got: %q", capturedBody)
+	}
+}
+
 // Verify GitHubCopilotProvider implements the Provider interface.
 var _ Provider = (*GitHubCopilotProvider)(nil)

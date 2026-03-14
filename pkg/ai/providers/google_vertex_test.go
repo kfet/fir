@@ -1,9 +1,11 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -141,18 +143,13 @@ func TestLoadADCFromFile_InvalidJSON(t *testing.T) {
 
 func TestStreamGoogleVertex_NoProject(t *testing.T) {
 	model := vertexTestModel()
-	os.Unsetenv("GOOGLE_CLOUD_PROJECT")
-	os.Unsetenv("GCLOUD_PROJECT")
-	os.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-	defer os.Unsetenv("GOOGLE_CLOUD_LOCATION")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+	t.Setenv("GCLOUD_PROJECT", "")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+	// No ApiKey — forces ADC path which requires project.
+	opts := &ai.StreamOptions{Headers: map[string]string{}}
 
-	// Force a valid-looking auth
-	opts := &ai.StreamOptions{
-		ApiKey:  "test-key",
-		Headers: map[string]string{},
-	}
-
-	result := StreamGoogleVertex(nil, model, ai.Context{}, opts)
+	result := StreamGoogleVertex(context.Background(), model, ai.Context{}, opts)
 	var lastEvt *ai.AssistantMessageEvent
 	for evt := range result.Events {
 		e := evt
@@ -161,20 +158,19 @@ func TestStreamGoogleVertex_NoProject(t *testing.T) {
 	if lastEvt == nil || lastEvt.Type != ai.EventError {
 		t.Error("expected error for missing project")
 	}
+	if lastEvt != nil && !strings.Contains(lastEvt.Error.ErrorMessage, "project") {
+		t.Errorf("expected project error, got: %s", lastEvt.Error.ErrorMessage)
+	}
 }
 
 func TestStreamGoogleVertex_NoLocation(t *testing.T) {
 	model := vertexTestModel()
-	os.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
-	os.Unsetenv("GOOGLE_CLOUD_LOCATION")
-	defer os.Unsetenv("GOOGLE_CLOUD_PROJECT")
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+	t.Setenv("GOOGLE_CLOUD_LOCATION", "")
+	// No ApiKey — forces ADC path which requires location.
+	opts := &ai.StreamOptions{Headers: map[string]string{}}
 
-	opts := &ai.StreamOptions{
-		ApiKey:  "test-key",
-		Headers: map[string]string{},
-	}
-
-	result := StreamGoogleVertex(nil, model, ai.Context{}, opts)
+	result := StreamGoogleVertex(context.Background(), model, ai.Context{}, opts)
 	var lastEvt *ai.AssistantMessageEvent
 	for evt := range result.Events {
 		e := evt
@@ -182,6 +178,9 @@ func TestStreamGoogleVertex_NoLocation(t *testing.T) {
 	}
 	if lastEvt == nil || lastEvt.Type != ai.EventError {
 		t.Error("expected error for missing location")
+	}
+	if lastEvt != nil && !strings.Contains(lastEvt.Error.ErrorMessage, "location") {
+		t.Errorf("expected location error, got: %s", lastEvt.Error.ErrorMessage)
 	}
 }
 
@@ -193,4 +192,33 @@ func TestRegisterGoogleVertex(t *testing.T) {
 	if provider == nil {
 		t.Fatal("expected google-vertex provider to be registered")
 	}
+}
+
+func TestResolveVertexAPIKey(t *testing.T) {
+	t.Run("from options", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_API_KEY", "")
+		opts := &ai.StreamOptions{ApiKey: "options-key"}
+		if got := resolveVertexAPIKey(opts); got != "options-key" {
+			t.Errorf("got %q, want %q", got, "options-key")
+		}
+	})
+	t.Run("from env", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_API_KEY", "env-key")
+		if got := resolveVertexAPIKey(nil); got != "env-key" {
+			t.Errorf("got %q, want %q", got, "env-key")
+		}
+	})
+	t.Run("options takes precedence over env", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_API_KEY", "env-key")
+		opts := &ai.StreamOptions{ApiKey: "options-key"}
+		if got := resolveVertexAPIKey(opts); got != "options-key" {
+			t.Errorf("got %q, want %q", got, "options-key")
+		}
+	})
+	t.Run("empty when not set", func(t *testing.T) {
+		t.Setenv("GOOGLE_CLOUD_API_KEY", "")
+		if got := resolveVertexAPIKey(nil); got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
 }

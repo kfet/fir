@@ -116,3 +116,7 @@ func TestGetOverflowPatterns(t *testing.T) {
 func TestIsContextOverflow_Bedrock(t *testing.T) {
 	assert.True(t, IsContextOverflow(makeErrorMsg("input is too long for requested model"), 0))
 }
+
+func TestIsContextOverflow_ZAI(t *testing.T) {
+	assert.True(t, IsContextOverflow(makeErrorMsg("model_context_window_exceeded"), 0))
+}

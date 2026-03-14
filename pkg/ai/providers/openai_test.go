@@ -480,3 +480,79 @@ func TestConvertOpenAITools_NoStrictField(t *testing.T) {
 	_, hasStrict := fn["strict"]
 	assert.False(t, hasStrict)
 }
+
+// --- OnPayload hook tests ---
+
+func TestStreamOpenAI_OnPayload_Called(t *testing.T) {
+	var capturedPayload map[string]any
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write(loadFixture(t, "openai_simple_response.sse"))
+	})
+	defer srv.Close()
+
+	model := openaiTestModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
+		ApiKey: "sk-test",
+		OnPayload: func(payload any, _ *ai.Model) any {
+			if m, ok := payload.(map[string]any); ok {
+				capturedPayload = m
+			}
+			return nil // keep original
+		},
+	})
+	stream.Result()
+
+	assert.NotNil(t, capturedPayload, "OnPayload should have been called")
+	assert.Equal(t, "gpt-4o", capturedPayload["model"])
+}
+
+func TestStreamOpenAI_OnPayload_ReplacesBody(t *testing.T) {
+	var capturedBody map[string]any
+	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write(loadFixture(t, "openai_simple_response.sse"))
+	}))
+	defer srv.Close()
+
+	model := openaiTestModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
+		ApiKey: "sk-test",
+		OnPayload: func(payload any, _ *ai.Model) any {
+			m, _ := payload.(map[string]any)
+			m["x_custom"] = "injected"
+			return m
+		},
+	})
+	stream.Result()
+
+	assert.Equal(t, "injected", capturedBody["x_custom"], "OnPayload replacement should reach the server")
+}
+
+func TestStreamOpenAI_OnPayload_NilKeepsOriginal(t *testing.T) {
+	var capturedBody map[string]any
+	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write(loadFixture(t, "openai_simple_response.sse"))
+	}))
+	defer srv.Close()
+
+	model := openaiTestModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
+		ApiKey:    "sk-test",
+		OnPayload: func(payload any, _ *ai.Model) any { return nil },
+	})
+	stream.Result()
+
+	assert.Equal(t, "gpt-4o", capturedBody["model"], "original model field preserved when OnPayload returns nil")
+}
