@@ -258,6 +258,15 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				case "thinking":
 					output.Content = append(output.Content, ai.NewThinkingContent(""))
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
+				case "redacted_thinking":
+					// Redacted thinking: the full encrypted payload is in cb["data"].
+					// There are no deltas — all content arrives in content_block_start.
+					data, _ := cb["data"].(string)
+					t := ai.NewThinkingContent("")
+					t.Thinking.Redacted = true
+					t.Thinking.ThinkingSignature = data
+					output.Content = append(output.Content, t)
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
 				case "tool_use":
 					toolID, _ := cb["id"].(string)
 					toolName, _ := cb["name"].(string)
@@ -726,10 +735,15 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 					}
 					blocks = append(blocks, map[string]any{"type": "text", "text": c.Text.Text})
 				} else if c.IsThinking() {
-					if strings.TrimSpace(c.Thinking.Thinking) == "" {
+					if c.Thinking.Redacted {
+						// Redacted thinking must be passed back verbatim.
+						blocks = append(blocks, map[string]any{
+							"type": "redacted_thinking",
+							"data": c.Thinking.ThinkingSignature,
+						})
+					} else if strings.TrimSpace(c.Thinking.Thinking) == "" {
 						continue
-					}
-					if c.Thinking.ThinkingSignature == "" {
+					} else if c.Thinking.ThinkingSignature == "" {
 						blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking.Thinking})
 					} else {
 						blocks = append(blocks, map[string]any{

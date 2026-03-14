@@ -176,6 +176,114 @@ func TestAnthropic_Thinking(t *testing.T) {
 	}
 }
 
+func TestAnthropic_RedactedThinking(t *testing.T) {
+	srv := mockSSEServer(t, "anthropic_redacted_thinking.sse")
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{
+		Messages: []ai.Message{ai.NewUserMsg("What is the meaning of life?", 1000)},
+	}
+	opts := &ai.StreamOptions{ApiKey: "test-key"}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	events := collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.Content))
+	}
+	// First block: redacted thinking
+	if !result.Content[0].IsThinking() {
+		t.Error("expected thinking content at index 0")
+	}
+	if !result.Content[0].Thinking.Redacted {
+		t.Error("expected Redacted=true")
+	}
+	if result.Content[0].Thinking.ThinkingSignature != "EncryptedOpaqueBlobABC123==" {
+		t.Errorf("expected encrypted data, got %q", result.Content[0].Thinking.ThinkingSignature)
+	}
+	if result.Content[0].Thinking.Thinking != "" {
+		t.Errorf("expected empty thinking text for redacted block, got %q", result.Content[0].Thinking.Thinking)
+	}
+	// Second block: text
+	if !result.Content[1].IsText() {
+		t.Error("expected text content at index 1")
+	}
+	if result.Content[1].Text.Text != "The answer is 42." {
+		t.Errorf("unexpected text: %q", result.Content[1].Text.Text)
+	}
+
+	var hasThinkingStart, hasThinkingEnd bool
+	for _, evt := range events {
+		if evt.Type == ai.EventThinkingStart {
+			hasThinkingStart = true
+		}
+		if evt.Type == ai.EventThinkingEnd {
+			hasThinkingEnd = true
+		}
+	}
+	if !hasThinkingStart {
+		t.Error("missing thinking_start event")
+	}
+	if !hasThinkingEnd {
+		t.Error("missing thinking_end event")
+	}
+}
+
+func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
+	model := &ai.Model{
+		ID:        "claude-sonnet-4-6",
+		Provider:  ai.ProviderAnthropic,
+		Api:       ai.ApiAnthropicMessages,
+		BaseURL:   "https://api.anthropic.com",
+		MaxTokens: 64000,
+	}
+
+	redacted := ai.NewThinkingContent("")
+	redacted.Thinking.Redacted = true
+	redacted.Thinking.ThinkingSignature = "EncryptedOpaqueBlobABC123=="
+
+	assistantMsg := ai.AssistantMessage{
+		Role:     "assistant",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-sonnet-4-6",
+		Content: []ai.AssistantContent{
+			redacted,
+			ai.NewTextContent("The answer is 42."),
+		},
+	}
+
+	msgs := []ai.Message{
+		ai.NewUserMsg("Question?", 1000),
+		ai.NewAssistantMsg(assistantMsg),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+
+	aBlocks := result[1]["content"].([]map[string]any)
+	if len(aBlocks) != 2 {
+		t.Fatalf("expected 2 assistant blocks, got %d", len(aBlocks))
+	}
+	// Redacted thinking must be sent back as-is with type "redacted_thinking"
+	if aBlocks[0]["type"] != "redacted_thinking" {
+		t.Errorf("expected redacted_thinking block, got %v", aBlocks[0]["type"])
+	}
+	if aBlocks[0]["data"] != "EncryptedOpaqueBlobABC123==" {
+		t.Errorf("expected encrypted data preserved, got %v", aBlocks[0]["data"])
+	}
+	if _, hasThinking := aBlocks[0]["thinking"]; hasThinking {
+		t.Error("redacted_thinking block must not have a 'thinking' field")
+	}
+	if aBlocks[1]["type"] != "text" {
+		t.Errorf("expected text block, got %v", aBlocks[1]["type"])
+	}
+}
+
 func TestAnthropic_StreamingError(t *testing.T) {
 	srv := mockSSEServer(t, "anthropic_error.sse")
 	defer srv.Close()
