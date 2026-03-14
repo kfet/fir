@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent.ts
-// Upstream hash: 9e22d391
+// Upstream hash: f04d9bc4
 package agent
 
 import (
@@ -64,6 +64,10 @@ type AgentOptions struct {
 
 	// Compaction configures Anthropic server-side context compaction.
 	Compaction *ai.AnthropicCompaction
+
+	// OnPayload is an optional callback to inspect or replace provider payloads before sending.
+	// Return nil to keep the original payload unchanged.
+	OnPayload func(payload any, model *ai.Model) any
 }
 
 // Agent orchestrates the agent loop with state management and event dispatch.
@@ -89,6 +93,7 @@ type Agent struct {
 	maxRetryDelayMs *int
 	serverTools     []ai.AnthropicServerTool
 	compaction      *ai.AnthropicCompaction
+	onPayload       func(any, *ai.Model) any
 
 	// idleCh is closed when the agent finishes processing.
 	idleCh chan struct{}
@@ -170,6 +175,9 @@ func NewAgent(opts AgentOptions) *Agent {
 	}
 	if opts.Compaction != nil {
 		a.compaction = opts.Compaction
+	}
+	if opts.OnPayload != nil {
+		a.onPayload = opts.OnPayload
 	}
 
 	return a
@@ -609,6 +617,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 		MaxRetryDelayMs:  a.maxRetryDelayMs,
 		ServerTools:      a.serverTools,
 		Compaction:       a.compaction,
+		OnPayload:        a.onPayload,
 		ConvertToLLM:     a.convertToLLM,
 		TransformContext: a.transformCtx,
 		GetApiKey:        a.getApiKey,

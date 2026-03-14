@@ -1,5 +1,29 @@
 # Sync Log
 
+## 2026-03-13 — Sync to commit f04d9bc4 (tags v0.57.0, v0.57.1)
+
+- `ai/src/types.ts` → `pkg/ai/types.go`: Added `OnPayload` hook to `StreamOptions`; added protocol doc comment to `AssistantMessageEventType`.
+- `ai/src/env-api-keys.ts` → `pkg/ai/envkeys/envkeys.go`: Added `GOOGLE_CLOUD_API_KEY` support for `google-vertex` provider (checked before ADC).
+- `agent/src/types.ts` → `pkg/agent/types.go`: Added `OnPayload` field to `AgentLoopConfig`.
+- `agent/src/agent.ts` → `pkg/agent/agent.go`: Threaded `OnPayload` through `AgentOptions`, `Agent` struct, `NewAgent`, and `AgentLoopConfig` construction.
+- `agent/src/agent-loop.ts` → `pkg/agent/loop.go`: Pass `OnPayload` into `StreamOptions`.
+- `ai/src/providers/anthropic.ts` → `pkg/ai/providers/anthropic.go`: `claudeCodeVersion` bumped to `2.1.75`; added `OnPayload` hook.
+- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: Added `OnPayload` hook.
+- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: Added `OnPayload` hook; added `Usage` to `openaiChoice`; extracted `parseChunkUsage`; Moonshot `choice.Usage` fallback; assistant content always plain string.
+- `ai/src/providers/openai-responses-shared.ts` → `pkg/ai/providers/openai_responses_shared.go`: Improved `response.failed` error with code/detail fields.
+- `ai/src/providers/openai-responses.ts` → `pkg/ai/providers/openai_responses.go`: Tool-result images inlined in `function_call_output`; added `OnPayload` hook.
+- `ai/src/providers/azure-openai-responses.ts` → `pkg/ai/providers/azure_openai_responses.go`: Added `OnPayload` hook.
+- `ai/src/providers/openai-codex-responses.ts` → `pkg/ai/providers/openai_codex_responses.go`: Added `OnPayload` hook.
+- `ai/src/providers/google.ts` → `pkg/ai/providers/google.go`: Added `OnPayload` hook.
+- `ai/src/providers/google-gemini-cli.ts` → `pkg/ai/providers/google_gemini_cli.go`: Added `OnPayload` hook.
+- `ai/src/providers/google-vertex.ts` → `pkg/ai/providers/google_vertex.go`: Added `OnPayload` hook; API-key auth support via `GOOGLE_CLOUD_API_KEY` (uses global Vertex AI Express endpoint, no project/location needed).
+- `ai/src/providers/register-builtins.ts` → `pkg/ai/providers/register_builtins.go`: Hash updated (lazy-loading change N/A in Go).
+- `ai/src/utils/oauth/anthropic.ts` → `pkg/ai/oauth/anthropic.go`: Token URL → `platform.claude.com`; new local callback server on port 53692; manual redirect URI fallback; expanded scopes; `scope` field added to refresh request.
+- `ai/src/utils/oauth/github-copilot.ts` → `pkg/ai/oauth/github_copilot.go`: Device-flow and poll requests use `application/x-www-form-urlencoded`; 1.2× initial / 1.4× slow-down poll multiplier; server-suggested interval on `slow_down`; descriptive error messages.
+- `ai/src/utils/overflow.ts` → `pkg/ai/overflow/overflow.go`: Added `model_context_window_exceeded` pattern (z.ai).
+- `coding-agent/src/core/system-prompt.ts` → `pkg/resources/systemprompt.go`: Full datetime → ISO date-only (`Current date: YYYY-MM-DD`).
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: `claude-opus-4-6` and `claude-sonnet-4-6` context window 200K→1M; Bedrock `anthropic.claude-sonnet-4-6` override added; re-ran `make generate-models`.
+
 ## 2026-03-07 — Sync to commit c99b9940
 
 - `ai/src/types.ts` → `pkg/ai/types.go`: Added `opencode-go` provider, `TextSignatureV1` type, `Redacted` field on ThinkingContent, `ReasoningEffortMap` on OpenAICompletionsCompat, removed `RequiresMistralToolIds`.

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/oauth/github-copilot.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: f04d9bc4
 package oauth
 
 import (
@@ -226,17 +226,17 @@ type deviceCodeResponse struct {
 func startGitHubDeviceFlow(domain string) (*deviceCodeResponse, error) {
 	deviceCodeURL, _, _ := githubURLs(domain)
 
-	body, _ := json.Marshal(map[string]string{
-		"client_id": githubClientID,
-		"scope":     "read:user",
-	})
+	formBody := url.Values{
+		"client_id": {githubClientID},
+		"scope":     {"read:user"},
+	}
 
-	req, err := http.NewRequest("POST", deviceCodeURL, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", deviceCodeURL, strings.NewReader(formBody.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
 	resp, err := oauthHTTPClient.Do(req)
@@ -266,25 +266,42 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 		accessTokenURL = githubAccessTokenURLOverride
 	}
 	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
-	interval := time.Duration(max(1, intervalSec)) * pollIntervalUnit
+	intervalMs := time.Duration(max(1, intervalSec)) * pollIntervalUnit
+	// Apply a multiplier so we don't poll at exactly the server-suggested interval.
+	const initialMultiplier = 1.2
+	const slowDownMultiplier = 1.4
+	multiplier := initialMultiplier
+	slowDownResponses := 0
 
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("login cancelled")
 		}
 
-		body, _ := json.Marshal(map[string]string{
-			"client_id":   githubClientID,
-			"device_code": deviceCode,
-			"grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
-		})
+		remaining := time.Until(deadline)
+		waitDuration := time.Duration(float64(intervalMs) * multiplier)
+		if waitDuration > remaining {
+			waitDuration = remaining
+		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", accessTokenURL, bytes.NewReader(body))
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("login cancelled")
+		case <-time.After(waitDuration):
+		}
+
+		formBody := url.Values{
+			"client_id":   {githubClientID},
+			"device_code": {deviceCode},
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", accessTokenURL, strings.NewReader(formBody.Encode()))
 		if err != nil {
 			return "", err
 		}
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("User-Agent", "GitHubCopilotChat/0.35.0") // see copilotHeaders comment above
 
 		resp, err := oauthHTTPClient.Do(req)
@@ -315,19 +332,30 @@ func pollForGitHubAccessToken(ctx context.Context, domain, deviceCode string, in
 			case "authorization_pending":
 				// Keep polling
 			case "slow_down":
-				interval += 5 * pollIntervalUnit
+				slowDownResponses++
+				// Use server-suggested interval if provided, otherwise add 5 s.
+				if serverInterval, ok := raw["interval"].(float64); ok && serverInterval > 0 {
+					intervalMs = time.Duration(serverInterval) * time.Second
+				} else {
+					intervalMs += 5 * pollIntervalUnit
+					if intervalMs < pollIntervalUnit {
+						intervalMs = pollIntervalUnit
+					}
+				}
+				multiplier = slowDownMultiplier
 			default:
+				description, _ := raw["error_description"].(string)
+				if description != "" {
+					return "", fmt.Errorf("device flow failed: %s: %s", errStr, description)
+				}
 				return "", fmt.Errorf("device flow failed: %s", errStr)
 			}
 		}
-
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("login cancelled")
-		case <-time.After(interval):
-		}
 	}
 
+	if slowDownResponses > 0 {
+		return "", fmt.Errorf("device flow timed out after one or more slow_down responses. This is often caused by clock drift in WSL or VM environments. Please sync or restart the VM clock and try again.")
+	}
 	return "", fmt.Errorf("device flow timed out")
 }
 

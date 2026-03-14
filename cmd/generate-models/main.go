@@ -1277,10 +1277,14 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		if m.Provider == "amazon-bedrock" && strings.Contains(m.ID, "anthropic.claude-opus-4-6-v1") {
 			m.CostCacheRead = 0.5
 			m.CostCacheWrite = 6.25
-			m.ContextWindow = 200000
+			m.ContextWindow = 1000000
 		}
-		if (m.Provider == "anthropic" || m.Provider == "opencode" || m.Provider == "opencode-go") && m.ID == "claude-opus-4-6" {
-			m.ContextWindow = 200000
+		if m.Provider == "amazon-bedrock" && strings.Contains(m.ID, "anthropic.claude-sonnet-4-6") {
+			m.ContextWindow = 1000000
+		}
+		if (m.Provider == "anthropic" || m.Provider == "opencode" || m.Provider == "opencode-go") &&
+			(m.ID == "claude-opus-4-6" || m.ID == "claude-sonnet-4-6") {
+			m.ContextWindow = 1000000
 		}
 		// OpenCode variants list Claude Sonnet 4/4.5 with 1M context, actual limit is 200K
 		if (m.Provider == "opencode" || m.Provider == "opencode-go") && (m.ID == "claude-sonnet-4-5" || m.ID == "claude-sonnet-4") {
@@ -1319,7 +1323,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Reasoning: true,
 			Input:     []string{"text", "image"},
 			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
-			ContextWindow: 200000, MaxTokens: 128000,
+			ContextWindow: 1000000, MaxTokens: 128000,
 		})
 	}
 
@@ -1334,7 +1338,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Reasoning: true,
 			Input:     []string{"text", "image"},
 			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
-			ContextWindow: 200000, MaxTokens: 128000,
+			ContextWindow: 1000000, MaxTokens: 128000,
 		})
 	}
 
@@ -1349,7 +1353,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Reasoning: true,
 			Input:     []string{"text", "image"},
 			CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
-			ContextWindow: 200000, MaxTokens: 64000,
+			ContextWindow: 1000000, MaxTokens: 64000,
 		})
 	}
 

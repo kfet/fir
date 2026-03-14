@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package ai
 
 import (
@@ -182,19 +182,23 @@ type AnthropicCompaction struct {
 
 // StreamOptions are the base options shared by all streaming calls.
 type StreamOptions struct {
-	Temperature     *float64              `json:"temperature,omitempty"`
-	MaxTokens       *int                  `json:"maxTokens,omitempty"`
-	ApiKey          string                `json:"apiKey,omitempty"`
-	Transport       Transport             `json:"transport,omitempty"`
-	CacheRetention  CacheRetention        `json:"cacheRetention,omitempty"`
-	SessionID       string                `json:"sessionId,omitempty"`
-	Headers         map[string]string     `json:"headers,omitempty"`
-	MaxRetryDelayMs *int                  `json:"maxRetryDelayMs,omitempty"`
-	ReasoningEffort ThinkingLevel         `json:"reasoningEffort,omitempty"`
-	ToolChoice      string                `json:"toolChoice,omitempty"`
-	Metadata        map[string]any        `json:"metadata,omitempty"`
-	ServerTools     []AnthropicServerTool `json:"serverTools,omitempty"`
-	Compaction      *AnthropicCompaction  `json:"compaction,omitempty"`
+	Temperature    *float64       `json:"temperature,omitempty"`
+	MaxTokens      *int           `json:"maxTokens,omitempty"`
+	ApiKey         string         `json:"apiKey,omitempty"`
+	Transport      Transport      `json:"transport,omitempty"`
+	CacheRetention CacheRetention `json:"cacheRetention,omitempty"`
+	SessionID      string         `json:"sessionId,omitempty"`
+	// OnPayload is an optional callback to inspect or replace the provider payload
+	// before it is sent. Return nil to keep the original payload unchanged, or
+	// return a non-nil replacement to swap it out.
+	OnPayload       func(payload any, model *Model) any `json:"-"`
+	Headers         map[string]string                   `json:"headers,omitempty"`
+	MaxRetryDelayMs *int                                `json:"maxRetryDelayMs,omitempty"`
+	ReasoningEffort ThinkingLevel                       `json:"reasoningEffort,omitempty"`
+	ToolChoice      string                              `json:"toolChoice,omitempty"`
+	Metadata        map[string]any                      `json:"metadata,omitempty"`
+	ServerTools     []AnthropicServerTool               `json:"serverTools,omitempty"`
+	Compaction      *AnthropicCompaction                `json:"compaction,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.
@@ -521,6 +525,11 @@ type Context struct {
 // --- Assistant message events (streaming) ---
 
 // AssistantMessageEventType enumerates streaming event types.
+// Event protocol for AssistantMessageEventStream:
+// Streams emit "start" before partial updates, then terminate with either
+// "done" (carrying the final successful AssistantMessage) or "error"
+// (carrying the final AssistantMessage with stopReason "error" or "aborted"
+// and errorMessage).
 type AssistantMessageEventType string
 
 const (

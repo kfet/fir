@@ -57,6 +57,10 @@ type AgentLoopConfig struct {
 
 	// Compaction configures Anthropic server-side context compaction.
 	Compaction *ai.AnthropicCompaction
+
+	// OnPayload is an optional callback to inspect or replace provider payloads before sending.
+	// Return nil to keep the original payload unchanged.
+	OnPayload func(payload any, model *ai.Model) any
 }
 
 // ThinkingLevel is an alias for ai.ThinkingLevel so all packages use the same type.

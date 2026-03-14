@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/overflow.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package overflow
 
 import (
@@ -23,6 +23,7 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)context window exceeds limit`),                        // MiniMax
 	regexp.MustCompile(`(?i)exceeded model token limit`),                          // Kimi
 	regexp.MustCompile(`(?i)too large for model with \d+ maximum context length`), // Mistral
+	regexp.MustCompile(`(?i)model_context_window_exceeded`),                       // z.ai non-standard finish_reason surfaced as error text
 	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),                       // Generic
 	regexp.MustCompile(`(?i)too many tokens`),                                     // Generic
 	regexp.MustCompile(`(?i)token limit exceeded`),                                // Generic

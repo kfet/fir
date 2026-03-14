@@ -5,6 +5,23 @@
 ### Added
 
 - `Ctrl+N` keyboard shortcut for starting a new session (equivalent to `/new`)
+- `OnPayload` hook on `StreamOptions` and `AgentLoopConfig` — lets callers intercept and mutate the raw request payload before each LLM call (all providers: Anthropic, Bedrock, OpenAI, Responses, Azure, Codex, Google, Gemini CLI, Vertex)
+- Vertex AI API-key authentication: set `GOOGLE_CLOUD_API_KEY` to skip ADC and use the global Vertex AI Express endpoint
+- Anthropic OAuth now uses a local callback server (port 53692) so the browser redirect is captured automatically; falls back to manual URL/code paste if the port is unavailable
+- Anthropic OAuth scopes expanded: `user:sessions:claude_code`, `user:mcp_servers`, `user:file_upload`
+- GitHub Copilot OAuth device-flow poll interval now applies a 1.2× initial multiplier and 1.4× slow-down multiplier; respects server-suggested intervals and surfaces descriptive errors
+- Context overflow detection now recognises `model_context_window_exceeded` (z.ai non-standard finish reason)
+- `claude-opus-4-6` and `claude-sonnet-4-6` context window corrected to 1 M tokens (was 200 K) across Anthropic, Bedrock, OpenAI-Codex, and OpenCode providers
+
+### Changed
+
+- System prompt now shows ISO date only (`Current date: YYYY-MM-DD`) instead of full local date-and-time string
+- Anthropic OAuth token URL updated to `https://platform.claude.com/v1/oauth/token`
+- GitHub Copilot OAuth device-flow and token-poll requests now use `application/x-www-form-urlencoded` bodies (was JSON)
+- `claudeCodeVersion` bumped to `2.1.75`
+- OpenAI Responses provider: `response.failed` error messages now include error code and detail fields
+- OpenAI Responses provider: tool-result images are now inlined in `function_call_output` (not sent as a separate user message)
+- OpenAI completions provider: assistant content is always a plain string (removed GitHub Copilot special-case array handling)
 
 ### Removed
 

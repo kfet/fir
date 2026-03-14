@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -28,9 +28,10 @@ type openaiChunk struct {
 }
 
 type openaiChoice struct {
-	Index        int         `json:"index"`
-	Delta        openaiDelta `json:"delta"`
-	FinishReason *string     `json:"finish_reason"`
+	Index        int          `json:"index"`
+	Delta        openaiDelta  `json:"delta"`
+	FinishReason *string      `json:"finish_reason"`
+	Usage        *openaiUsage `json:"usage"`
 }
 
 type openaiDelta struct {
@@ -273,6 +274,16 @@ func streamOpenAIHTTP(
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
+	if options != nil && options.OnPayload != nil {
+		var rawBody map[string]any
+		if jsonErr := json.Unmarshal(body, &rawBody); jsonErr == nil {
+			if next := options.OnPayload(rawBody, model); next != nil {
+				if body, err = json.Marshal(next); err != nil {
+					return fmt.Errorf("re-marshaling payload: %w", err)
+				}
+			}
+		}
+	}
 
 	url := openAIChatCompletionsURL(model.BaseURL)
 
@@ -418,23 +429,7 @@ func parseOpenAISSE(
 
 		// Usage
 		if chunk.Usage != nil {
-			cachedTokens := 0
-			if chunk.Usage.PromptTokensDetails != nil {
-				cachedTokens = chunk.Usage.PromptTokensDetails.CachedTokens
-			}
-			reasoningTokens := 0
-			if chunk.Usage.CompletionTokensDetails != nil {
-				reasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
-			}
-			input := chunk.Usage.PromptTokens - cachedTokens
-			outputTokens := chunk.Usage.CompletionTokens + reasoningTokens
-			output.Usage = ai.Usage{
-				Input:       input,
-				Output:      outputTokens,
-				CacheRead:   cachedTokens,
-				TotalTokens: input + outputTokens + cachedTokens,
-			}
-			ai.CalculateCost(model, &output.Usage)
+			output.Usage = parseChunkUsage(chunk.Usage, model)
 		}
 
 		if len(chunk.Choices) == 0 {
@@ -442,6 +437,11 @@ func parseOpenAISSE(
 		}
 
 		choice := chunk.Choices[0]
+
+		// Fallback: some providers (e.g. Moonshot) return usage in choice.usage
+		if chunk.Usage == nil && choice.Usage != nil {
+			output.Usage = parseChunkUsage(choice.Usage, model)
+		}
 
 		if choice.FinishReason != nil {
 			output.StopReason = mapOpenAIStopReason(*choice.FinishReason)
@@ -555,6 +555,29 @@ func parseOpenAISSE(
 
 	finishCurrentBlock()
 	return scanner.Err()
+}
+
+func parseChunkUsage(u *openaiUsage, model *ai.Model) ai.Usage {
+	cachedTokens := 0
+	if u.PromptTokensDetails != nil {
+		cachedTokens = u.PromptTokensDetails.CachedTokens
+	}
+	reasoningTokens := 0
+	if u.CompletionTokensDetails != nil {
+		reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
+	}
+	// OpenAI includes cached tokens in prompt_tokens, subtract to get non-cached input.
+	input := u.PromptTokens - cachedTokens
+	// Add reasoning tokens to output (some providers omit them from total_tokens).
+	outputTokens := u.CompletionTokens + reasoningTokens
+	usage := ai.Usage{
+		Input:       input,
+		Output:      outputTokens,
+		CacheRead:   cachedTokens,
+		TotalTokens: input + outputTokens + cachedTokens,
+	}
+	ai.CalculateCost(model, &usage)
+	return usage
 }
 
 func mapOpenAIStopReason(reason string) ai.StopReason {
@@ -826,15 +849,16 @@ func convertOpenAIMessages(ctx ai.Context, model *ai.Model, compat resolvedCompa
 				}
 			}
 
-			// Copilot needs content as string, not array
-			if model.Provider == "github-copilot" && len(textParts) > 0 {
+			// Always send assistant content as a plain string. Sending as an
+			// array of {type:"text", text:"..."} objects is non-standard and
+			// causes some models (e.g. DeepSeek V3.2 via NVIDIA NIM) to mirror
+			// the content-block structure literally in their output.
+			if len(textParts) > 0 {
 				var sb strings.Builder
 				for _, p := range textParts {
 					sb.WriteString(p["text"].(string))
 				}
 				assistantMsg["content"] = sb.String()
-			} else if len(textParts) > 0 {
-				assistantMsg["content"] = textParts
 			} else if compat.RequiresAssistantAfterToolResult {
 				// Mistral requires non-null content
 				assistantMsg["content"] = ""

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -125,6 +125,16 @@ func streamGoogleHTTP(
 	body, err := buildGoogleRequestBody(model, prompt, options)
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
+	}
+	if options != nil && options.OnPayload != nil {
+		var rawBody map[string]any
+		if jsonErr := json.Unmarshal(body, &rawBody); jsonErr == nil {
+			if next := options.OnPayload(rawBody, model); next != nil {
+				if body, err = json.Marshal(next); err != nil {
+					return fmt.Errorf("re-marshaling payload: %w", err)
+				}
+			}
+		}
 	}
 
 	baseURL := model.BaseURL

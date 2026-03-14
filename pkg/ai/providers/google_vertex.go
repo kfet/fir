@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-vertex.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -172,33 +172,54 @@ func streamVertexHTTP(
 	output *ai.AssistantMessage,
 	stream *ai.AssistantMessageEventStream,
 ) error {
-	// Resolve project and location
-	project := resolveVertexProject(options)
-	if project == "" {
-		return fmt.Errorf("Vertex AI requires a project ID. Set GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT")
-	}
-	location := resolveVertexLocation(options)
-	if location == "" {
-		return fmt.Errorf("Vertex AI requires a location. Set GOOGLE_CLOUD_LOCATION")
-	}
-
-	// Get access token
-	accessToken, err := getVertexAccessToken(ctx)
-	if err != nil {
-		return fmt.Errorf("authentication: %w", err)
-	}
-
 	// Build request body (same format as regular Google)
 	body, err := buildGoogleRequestBody(model, prompt, options)
 	if err != nil {
 		return fmt.Errorf("building request: %w", err)
 	}
+	if options != nil && options.OnPayload != nil {
+		var rawBody map[string]any
+		if jsonErr := json.Unmarshal(body, &rawBody); jsonErr == nil {
+			if next := options.OnPayload(rawBody, model); next != nil {
+				if body, err = json.Marshal(next); err != nil {
+					return fmt.Errorf("re-marshaling payload: %w", err)
+				}
+			}
+		}
+	}
 
-	// Build Vertex AI URL
-	vertexURL := fmt.Sprintf(
-		"https://%s-aiplatform.googleapis.com/%s/projects/%s/locations/%s/publishers/google/models/%s:streamGenerateContent?alt=sse",
-		location, vertexAPIVersion, project, location, model.ID,
-	)
+	apiKey := resolveVertexAPIKey(options)
+
+	var vertexURL string
+	var authHeader string
+
+	if apiKey != "" {
+		// API key auth: use the global Vertex AI Express endpoint (no project/location needed).
+		vertexURL = fmt.Sprintf(
+			"https://aiplatform.googleapis.com/%s/models/%s:streamGenerateContent?alt=sse",
+			vertexAPIVersion, model.ID,
+		)
+		authHeader = "" // API key goes in x-goog-api-key header below
+	} else {
+		// ADC auth: requires project and location.
+		project := resolveVertexProject(options)
+		if project == "" {
+			return fmt.Errorf("Vertex AI requires a project ID. Set GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT")
+		}
+		location := resolveVertexLocation(options)
+		if location == "" {
+			return fmt.Errorf("Vertex AI requires a location. Set GOOGLE_CLOUD_LOCATION")
+		}
+		accessToken, err := getVertexAccessToken(ctx)
+		if err != nil {
+			return fmt.Errorf("authentication: %w", err)
+		}
+		authHeader = "Bearer " + accessToken
+		vertexURL = fmt.Sprintf(
+			"https://%s-aiplatform.googleapis.com/%s/projects/%s/locations/%s/publishers/google/models/%s:streamGenerateContent?alt=sse",
+			location, vertexAPIVersion, project, location, model.ID,
+		)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", vertexURL, bytes.NewReader(body))
 	if err != nil {
@@ -206,7 +227,12 @@ func streamVertexHTTP(
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	if apiKey != "" {
+		req.Header.Set("x-goog-api-key", apiKey)
+	}
 
 	for k, v := range model.Headers {
 		req.Header.Set(k, v)
@@ -235,6 +261,15 @@ func streamVertexHTTP(
 
 	// Reuse the same response parser as the regular Google provider
 	return parseGoogleResponse(resp.Body, model, output, stream)
+}
+
+// resolveVertexAPIKey returns the Vertex AI API key from options or env.
+// When set, API key authentication is used instead of ADC (no project/location needed).
+func resolveVertexAPIKey(options *ai.StreamOptions) string {
+	if options != nil && options.ApiKey != "" {
+		return options.ApiKey
+	}
+	return os.Getenv("GOOGLE_CLOUD_API_KEY")
 }
 
 // resolveVertexProject resolves the GCP project from options or env.

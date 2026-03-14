@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 //
 // Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
 // SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
@@ -68,6 +68,11 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		if err != nil {
 			emitError(fmt.Sprintf("building request: %v", err))
 			return
+		}
+		if options != nil && options.OnPayload != nil {
+			if next := options.OnPayload(input, model); next != nil {
+				input = next.(*bedrockruntime.ConverseStreamInput)
+			}
 		}
 
 		firlog.Debug("bedrock request", "model", model.ID, "messageCount", len(prompt.Messages))

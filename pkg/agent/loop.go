@@ -247,6 +247,7 @@ func streamAssistantResponse(
 			MaxTokens:       config.MaxTokens,
 			ServerTools:     config.ServerTools,
 			Compaction:      config.Compaction,
+			OnPayload:       config.OnPayload,
 		},
 		Reasoning:       config.Reasoning,
 		ThinkingBudgets: config.ThinkingBudgets,

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -161,6 +161,19 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 			output.ErrorMessage = fmt.Sprintf("building request: %v", err)
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 			return
+		}
+		if options != nil && options.OnPayload != nil {
+			var rawBody map[string]any
+			if jsonErr := json.Unmarshal(body, &rawBody); jsonErr == nil {
+				if next := options.OnPayload(rawBody, model); next != nil {
+					if body, err = json.Marshal(next); err != nil {
+						output.StopReason = ai.StopReasonError
+						output.ErrorMessage = fmt.Sprintf("re-marshaling payload: %v", err)
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+						return
+					}
+				}
+			}
 		}
 
 		url := resolveCodexURL(model.BaseURL)

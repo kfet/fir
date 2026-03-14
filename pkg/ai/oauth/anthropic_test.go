@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,8 +17,8 @@ func TestAnthropicProvider_IDAndName(t *testing.T) {
 	if p.Name() != "Anthropic (Claude Pro/Max)" {
 		t.Errorf("Name() = %q", p.Name())
 	}
-	if p.UsesCallbackServer() {
-		t.Error("expected UsesCallbackServer() == false")
+	if !p.UsesCallbackServer() {
+		t.Error("expected UsesCallbackServer() == true")
 	}
 }
 
@@ -49,28 +50,38 @@ func TestAnthropicClientID_Decoded(t *testing.T) {
 	}
 }
 
-func TestAnthropicProvider_LoginRequiresOnPrompt(t *testing.T) {
-	p := &AnthropicProvider{}
-	_, err := p.Login(LoginCallbacks{
+func TestAnthropicProvider_LoginCancelledContext(t *testing.T) {
+	// Cancelling the context shuts down the callback server so login
+	// returns quickly with a "missing authorization code" error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := loginAnthropic(LoginCallbacks{
 		OnAuth: func(info AuthInfo) {},
-		// OnPrompt is nil
+		Ctx:    ctx,
 	})
 	if err == nil {
-		t.Error("expected error when OnPrompt is nil")
+		t.Fatal("expected error with cancelled context")
 	}
-	if !strings.Contains(err.Error(), "OnPrompt") {
-		t.Errorf("expected error about OnPrompt, got: %v", err)
+	// Should report missing code, not a panic or network error.
+	if strings.Contains(err.Error(), "panic") {
+		t.Errorf("unexpected panic: %v", err)
 	}
 }
 
 func TestAnthropicLogin_AuthURLFormat(t *testing.T) {
 	var capturedURL string
+	codeCh := make(chan string, 1)
+	codeCh <- "testcode#teststate"
+
 	callbacks := LoginCallbacks{
 		OnAuth: func(info AuthInfo) {
 			capturedURL = info.URL
 		},
-		OnPrompt: func(prompt Prompt) (string, error) {
-			return "testcode#teststate", nil
+		// Provide code via OnManualCodeInput so it races the callback server
+		// and wins immediately, without needing an actual browser redirect.
+		OnManualCodeInput: func() (string, error) {
+			return <-codeCh, nil
 		},
 	}
 
@@ -85,7 +96,7 @@ func TestAnthropicLogin_AuthURLFormat(t *testing.T) {
 	setAnthropicTokenURL(ts.URL + "/token")
 	defer setAnthropicTokenURL(origURL)
 
-	// Login will fail at the token exchange, but OnAuth should still be called
+	// Login will fail at the token exchange, but OnAuth should still be called.
 	_, _ = loginAnthropic(callbacks)
 
 	if capturedURL == "" {
@@ -133,6 +144,7 @@ func TestAnthropicTokenResponse_Parsing(t *testing.T) {
 }
 
 func TestAnthropicAuthCodeParsing(t *testing.T) {
+	// parseAuthorizationInput is shared across oauth providers (defined in openai_codex.go).
 	tests := []struct {
 		input string
 		code  string
@@ -140,15 +152,13 @@ func TestAnthropicAuthCodeParsing(t *testing.T) {
 	}{
 		{"abc123#mystate", "abc123", "mystate"},
 		{"codeonly", "codeonly", ""},
-		{"a#b#c", "a", "b#c"},
+		// Full redirect URL
+		{"https://platform.claude.com/oauth/code/callback?code=abc&state=xyz", "abc", "xyz"},
+		// Query-string format
+		{"code=abc&state=xyz", "abc", "xyz"},
 	}
 	for _, tt := range tests {
-		parts := strings.SplitN(tt.input, "#", 2)
-		code := parts[0]
-		state := ""
-		if len(parts) > 1 {
-			state = parts[1]
-		}
+		code, state := parseAuthorizationInput(tt.input)
 		if code != tt.code {
 			t.Errorf("input %q: code = %q, want %q", tt.input, code, tt.code)
 		}
@@ -159,10 +169,13 @@ func TestAnthropicAuthCodeParsing(t *testing.T) {
 }
 
 func TestAnthropicLogin_CodeWithoutState(t *testing.T) {
+	codeCh := make(chan string, 1)
+	codeCh <- "justcode" // No # separator
+
 	callbacks := LoginCallbacks{
 		OnAuth: func(_ AuthInfo) {},
-		OnPrompt: func(prompt Prompt) (string, error) {
-			return "justcode", nil // No # separator
+		OnManualCodeInput: func() (string, error) {
+			return <-codeCh, nil
 		},
 	}
 
@@ -180,7 +193,7 @@ func TestAnthropicLogin_CodeWithoutState(t *testing.T) {
 	if err == nil {
 		t.Skip("expected error from test server")
 	}
-	// Error should be about the HTTP request, not about code parsing
+	// Error should be about the HTTP request or state mismatch, not code parsing panic.
 	if strings.Contains(err.Error(), "index out of range") {
 		t.Error("code parsing should not panic on code without state")
 	}

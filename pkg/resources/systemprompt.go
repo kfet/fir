@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/system-prompt.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: f04d9bc4
 package resources
 
 import (
@@ -46,7 +46,7 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 	}
 
 	now := time.Now()
-	dateTime := now.Format("Monday, January 2, 2006 at 3:04:05 PM MST")
+	date := now.Format("2006-01-02")
 
 	appendSection := ""
 	if opts.AppendSystemPrompt != "" {
@@ -54,13 +54,13 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 	}
 
 	if opts.CustomPrompt != "" {
-		return buildCustomPrompt(opts, dateTime, appendSection)
+		return buildCustomPrompt(opts, date, appendSection)
 	}
 
-	return buildDefaultPrompt(opts, dateTime, appendSection)
+	return buildDefaultPrompt(opts, date, appendSection)
 }
 
-func buildCustomPrompt(opts BuildSystemPromptOptions, dateTime, appendSection string) string {
+func buildCustomPrompt(opts BuildSystemPromptOptions, date, appendSection string) string {
 	prompt := opts.CustomPrompt + appendSection
 
 	if len(opts.ContextFiles) > 0 {
@@ -81,12 +81,12 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, dateTime, appendSection st
 		prompt += FormatSkillsForPrompt(opts.Skills)
 	}
 
-	prompt += fmt.Sprintf("\nCurrent date and time: %s", dateTime)
+	prompt += fmt.Sprintf("\nCurrent date: %s", date)
 	prompt += fmt.Sprintf("\nCurrent working directory: %s", opts.Cwd)
 	return prompt
 }
 
-func buildDefaultPrompt(opts BuildSystemPromptOptions, dateTime, appendSection string) string {
+func buildDefaultPrompt(opts BuildSystemPromptOptions, date, appendSection string) string {
 	// Filter to known tools
 	var tools []string
 	for _, t := range opts.SelectedTools {
@@ -165,7 +165,7 @@ Guidelines:
 		prompt += FormatSkillsForPrompt(opts.Skills)
 	}
 
-	prompt += fmt.Sprintf("\nCurrent date and time: %s", dateTime)
+	prompt += fmt.Sprintf("\nCurrent date: %s", date)
 	prompt += fmt.Sprintf("\nCurrent working directory: %s", opts.Cwd)
 	return prompt
 }

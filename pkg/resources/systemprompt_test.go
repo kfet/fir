@@ -22,8 +22,8 @@ func TestBuildSystemPrompt_Default(t *testing.T) {
 	if !strings.Contains(prompt, "/test/dir") {
 		t.Error("should contain cwd")
 	}
-	if !strings.Contains(prompt, "Current date and time:") {
-		t.Error("should contain date/time")
+	if !strings.Contains(prompt, "Current date:") {
+		t.Error("should contain date")
 	}
 }
 

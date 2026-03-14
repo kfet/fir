@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/anthropic.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -18,7 +18,7 @@ import (
 )
 
 // claudeCodeVersion mimics Claude Code's version for OAuth stealth mode.
-const claudeCodeVersion = "2.1.2"
+const claudeCodeVersion = "2.1.75"
 
 // claudeCodeTools are the canonical tool names from Claude Code 2.x.
 var claudeCodeTools = []string{
@@ -191,6 +191,11 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		oauthToken := isOAuthTokenStr(apiKey)
 		params := buildAnthropicParams(model, prompt, oauthToken, options)
+		if options != nil && options.OnPayload != nil {
+			if next := options.OnPayload(params, model); next != nil {
+				params = next.(map[string]any)
+			}
+		}
 
 		payload, err := json.Marshal(params)
 		if err != nil {

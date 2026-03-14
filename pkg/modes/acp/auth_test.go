@@ -241,23 +241,23 @@ func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
 }
 
 func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
-	// Anthropic doesn't use a callback server, so authenticateOAuth should
-	// reject it immediately without making any network calls.
+	// GitHub Copilot uses device-code flow (not a callback server), so
+	// authenticateOAuth should reject it in ACP mode without making network calls.
 	auth := auth.NewInMemoryAuthStorage(nil)
 	pa := &firAgent{
 		sessions:    make(map[string]*firSession),
 		authStorage: auth,
 		authMethods: []ExtendedAuthMethod{
 			{
-				Id:   "oauth-anthropic",
-				Name: "Anthropic",
+				Id:   "oauth-github-copilot",
+				Name: "GitHub Copilot",
 				Type: AuthMethodTypeAgent,
 			},
 		},
 	}
 
 	_, err := pa.handleAuthenticate(context.Background(), acpsdk.AuthenticateRequest{
-		MethodId: "oauth-anthropic",
+		MethodId: "oauth-github-copilot",
 	})
 	if err == nil {
 		t.Fatal("expected error for provider without callback server")

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/env-api-keys.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package envkeys
 
 import (
@@ -53,6 +53,7 @@ var additionalAuthEnvVars = []string{
 	"GCLOUD_PROJECT",
 	"GOOGLE_CLOUD_LOCATION",
 	"GOOGLE_APPLICATION_CREDENTIALS",
+	"GOOGLE_CLOUD_API_KEY",
 }
 
 // KnownApiKeyEnvVars returns the sorted list of all environment variable names
@@ -109,6 +110,10 @@ func GetEnvApiKey(provider string) string {
 		return os.Getenv("ANTHROPIC_API_KEY")
 
 	case string(ai.ProviderGoogleVertex):
+		// Explicit API key takes precedence over ADC
+		if v := os.Getenv("GOOGLE_CLOUD_API_KEY"); v != "" {
+			return v
+		}
 		if hasVertexADCCredentials() &&
 			(os.Getenv("GOOGLE_CLOUD_PROJECT") != "" || os.Getenv("GCLOUD_PROJECT") != "") &&
 			os.Getenv("GOOGLE_CLOUD_LOCATION") != "" {

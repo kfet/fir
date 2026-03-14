@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -98,6 +98,19 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			output.ErrorMessage = fmt.Sprintf("building request: %v", err)
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 			return
+		}
+		if options != nil && options.OnPayload != nil {
+			var rawBody map[string]any
+			if jsonErr := json.Unmarshal(body, &rawBody); jsonErr == nil {
+				if next := options.OnPayload(rawBody, model); next != nil {
+					if body, err = json.Marshal(next); err != nil {
+						output.StopReason = ai.StopReasonError
+						output.ErrorMessage = fmt.Sprintf("re-marshaling payload: %v", err)
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+						return
+					}
+				}
+			}
 		}
 
 		url := openAIResponsesURL(model.BaseURL)
@@ -371,28 +384,24 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 					hasImages = true
 				}
 			}
+			hasText := len(textParts) > 0
 			text := strings.Join(textParts, "\n")
-			if text == "" && hasImages {
-				text = "(see attached image)"
-			}
 			idParts := strings.SplitN(tr.ToolCallID, "|", 2)
 			callID := idParts[0]
-			input = append(input, map[string]any{
-				"type":    "function_call_output",
-				"call_id": callID,
-				"output":  text,
-			})
 
-			// Send images as a follow-up user message
+			// Images go inline in the function_call_output when the model supports them.
+			// Otherwise fall back to a plain text output string.
 			if hasImages && supportsImage {
-				var imageParts []map[string]any
-				imageParts = append(imageParts, map[string]any{
-					"type": "input_text",
-					"text": "Attached image(s) from tool result:",
-				})
+				var contentParts []map[string]any
+				if hasText {
+					contentParts = append(contentParts, map[string]any{
+						"type": "input_text",
+						"text": text,
+					})
+				}
 				for _, c := range tr.Content {
 					if c.IsImage() {
-						imageParts = append(imageParts, map[string]any{
+						contentParts = append(contentParts, map[string]any{
 							"type":      "input_image",
 							"detail":    "auto",
 							"image_url": fmt.Sprintf("data:%s;base64,%s", c.MimeType, c.Data),
@@ -400,8 +409,18 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 					}
 				}
 				input = append(input, map[string]any{
-					"role":    "user",
-					"content": imageParts,
+					"type":    "function_call_output",
+					"call_id": callID,
+					"output":  contentParts,
+				})
+			} else {
+				if text == "" {
+					text = "(see attached image)"
+				}
+				input = append(input, map[string]any{
+					"type":    "function_call_output",
+					"call_id": callID,
+					"output":  text,
 				})
 			}
 		}

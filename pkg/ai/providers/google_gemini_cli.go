@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-gemini-cli.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -447,7 +447,13 @@ func streamGeminiCLI(
 	}
 
 	reqBody := buildGeminiCLIRequest(model, prompt, creds.ProjectID, options, isAntigravity)
-	bodyJSON, err := json.Marshal(reqBody)
+	var reqBodyAny any = reqBody
+	if options != nil && options.OnPayload != nil {
+		if next := options.OnPayload(reqBody, model); next != nil {
+			reqBodyAny = next
+		}
+	}
+	bodyJSON, err := json.Marshal(reqBodyAny)
 	if err != nil {
 		return fmt.Errorf("marshaling request: %w", err)
 	}

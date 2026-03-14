@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses-shared.ts
-// Upstream hash: c99b9940
+// Upstream hash: f04d9bc4
 package providers
 
 import (
@@ -77,7 +77,30 @@ func (p *responsesSSEProcessor) processEvent(data string) (bool, error) {
 		return true, fmt.Errorf("Error Code %s: %s", code, message)
 
 	case "response.failed":
-		return true, fmt.Errorf("Unknown error")
+		respRaw, _ := raw["response"].(map[string]any)
+		var msg string
+		if respRaw != nil {
+			if errRaw, ok := respRaw["error"].(map[string]any); ok && errRaw != nil {
+				code, _ := errRaw["code"].(string)
+				errMsg, _ := errRaw["message"].(string)
+				if code == "" {
+					code = "unknown"
+				}
+				if errMsg == "" {
+					errMsg = "no message"
+				}
+				msg = fmt.Sprintf("%s: %s", code, errMsg)
+			} else if details, ok := respRaw["incomplete_details"].(map[string]any); ok && details != nil {
+				reason, _ := details["reason"].(string)
+				if reason != "" {
+					msg = fmt.Sprintf("incomplete: %s", reason)
+				}
+			}
+		}
+		if msg == "" {
+			msg = "Unknown error (no error details in response)"
+		}
+		return true, fmt.Errorf("%s", msg)
 	}
 
 	return false, nil
