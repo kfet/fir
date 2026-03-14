@@ -562,6 +562,24 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			SessionId: acpsdk.SessionId(sessionID),
 			Update:    acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...),
 		})
+
+	case agent.EventMessageEnd:
+		// Surface inference errors (e.g. Bedrock API failures) to the ACP client.
+		// errorAssistantMessage() produces a message with empty Content and a non-empty
+		// ErrorMessage; without this handler those errors are silently dropped.
+		if ev.Message == nil {
+			return
+		}
+		msg := ev.Message.AsAssistant()
+		if msg == nil || msg.ErrorMessage == "" {
+			return
+		}
+		errText := msg.ErrorMessage
+		// Distinguish aborted (user cancel) from real errors to avoid noise.
+		if msg.StopReason == ai.StopReasonAborted {
+			return
+		}
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ %s", errText))
 	}
 }
 

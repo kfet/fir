@@ -348,6 +348,86 @@ func TestHandleEvent_ToolExecutionEnd_Error(t *testing.T) {
 	}
 }
 
+func TestHandleEvent_MessageEnd_InferenceError(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	// Simulate the errorAssistantMessage produced when Bedrock (or any provider) fails.
+	errMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "bedrock: throttling exception (429)",
+	}))
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageEnd,
+			Message: &errMsg,
+		},
+	})
+
+	updates := mc.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update for inference error, got %d", len(updates))
+	}
+	// The update must carry the error text.
+	raw, _ := json.Marshal(updates[0])
+	if !strings.Contains(string(raw), "bedrock: throttling exception") {
+		t.Errorf("expected error text in update, got %s", raw)
+	}
+}
+
+func TestHandleEvent_MessageEnd_Aborted_Silent(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	// Aborted (user cancel) should not produce any update — it's noisy and expected.
+	abortedMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		StopReason:   ai.StopReasonAborted,
+		ErrorMessage: "Request was aborted",
+	}))
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageEnd,
+			Message: &abortedMsg,
+		},
+	})
+
+	if len(mc.getUpdates()) != 0 {
+		t.Error("expected no updates for aborted message (user cancel)")
+	}
+}
+
+func TestHandleEvent_MessageEnd_NoError_Silent(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	// A normal successful message end (no ErrorMessage) should not produce an extra update.
+	okMsg := agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role:       "assistant",
+		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "done"}}},
+		StopReason: ai.StopReasonStop,
+	}))
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		AgentEvent: &agent.AgentEvent{
+			Type:    agent.EventMessageEnd,
+			Message: &okMsg,
+		},
+	})
+
+	if len(mc.getUpdates()) != 0 {
+		t.Error("expected no updates for successful message end")
+	}
+}
+
 func TestHandleSlashCommand_NameEmpty(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}

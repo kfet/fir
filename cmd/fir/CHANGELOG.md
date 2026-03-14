@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP mode (Zed): inference errors (e.g. Bedrock API failures) are now shown to the user instead of being silently dropped
+
 ## [0.20.0] - 2026-03-13
 
 ### Added
