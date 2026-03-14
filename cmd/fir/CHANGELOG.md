@@ -6,7 +6,6 @@
 
 - `autoresearch` builtin extension: `run_experiment` tool (runs `autoresearch.sh`, parses `METRIC name=value` lines), `log_experiment` tool (appends to `autoresearch.jsonl`), and `/autoresearch` slash command (experiment log summary)
 - `autoresearch-create` builtin skill: sets up and drives an autonomous optimisation loop — benchmark, hypothesis, commit, run, keep/revert, repeat (inspired by [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch))
-- `/simplify [focus]` slash command — reviews recent git changes (staged, unstaged, or last commit) and asks the agent to apply simplifications across code reuse, quality, and efficiency; optional focus text narrows the review
 
 ### Fixed
 

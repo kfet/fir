@@ -48,7 +48,6 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "session", Description: "Show session info and stats"},
 	{Name: "new", Description: "Start a new session (optionally with a name)"},
 	{Name: "compact", Description: "Manually compact the session context"},
-	{Name: "simplify", Description: "Review recent changes and apply simplifications (code reuse, quality, efficiency)"},
 	{Name: "resume", Description: "Resume a different session"},
 	{Name: "tree", Description: "Navigate session tree (switch branches)"},
 	{Name: "export", Description: "Export session to HTML file"},
