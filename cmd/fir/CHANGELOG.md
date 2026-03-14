@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- ACP mode (Zed): auto-compaction failures are now shown to the user instead of being silently dropped
+- builtin-skills test: add `autoresearch-create` to expected-skills allowlist
 - Anthropic: `redacted_thinking` blocks (safety-filtered thinking, returned by Sonnet 4.6 and later) are now stored and passed back verbatim in multi-turn conversations, fixing a 400 error ("thinking blocks cannot be modified")
 - `/schedule` countdown no longer disappears from the footer when other extensions call `set_status` — each extension now has its own status slot keyed by name
 - ACP mode (Zed): inference errors (e.g. Bedrock API failures) are now shown to the user instead of being silently dropped

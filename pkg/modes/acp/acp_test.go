@@ -428,6 +428,42 @@ func TestHandleEvent_MessageEnd_NoError_Silent(t *testing.T) {
 	}
 }
 
+func TestHandleEvent_AutoCompactionEnd_Error(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		Type:         "auto_compaction_end",
+		ErrorMessage: "compaction API error (503)",
+	})
+
+	updates := mc.getUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update for auto_compaction_end error, got %d", len(updates))
+	}
+	raw, _ := json.Marshal(updates[0])
+	if !strings.Contains(string(raw), "compaction API error") {
+		t.Errorf("expected error text in update, got %s", raw)
+	}
+}
+
+func TestHandleEvent_AutoCompactionEnd_Success_Silent(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	entry := &firSession{termState: newTerminalState()}
+
+	// Successful compaction should produce no user-visible message in ACP mode.
+	pa.handleEvent("s1", entry, session.AgentSessionEvent{
+		Type:             "auto_compaction_end",
+		CompactionResult: &session.CompactionResultInfo{TokensBefore: 50000},
+	})
+
+	if len(mc.getUpdates()) != 0 {
+		t.Error("expected no updates for successful auto_compaction_end")
+	}
+}
+
 func TestHandleSlashCommand_NameEmpty(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}

@@ -16,19 +16,20 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"claude-usage":      false,
-		"extension-creator": false,
-		"fix":               false,
-		"loop":              false,
-		"monitor":           false,
-		"notify":            false,
-		"shepherd":          false,
-		"research":          false,
-		"review":            false,
-		"self":              false,
-		"skill-creator":     false,
-		"skill-updater":     false,
-		"tmux-driver":       false,
+		"autoresearch-create": false,
+		"claude-usage":        false,
+		"extension-creator":   false,
+		"fix":                 false,
+		"loop":                false,
+		"monitor":             false,
+		"notify":              false,
+		"research":            false,
+		"review":              false,
+		"self":                false,
+		"shepherd":            false,
+		"skill-creator":       false,
+		"skill-updater":       false,
+		"tmux-driver":         false,
 	}
 
 	for _, s := range result.Skills {

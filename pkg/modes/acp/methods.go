@@ -472,6 +472,11 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 	case "plan_update":
 		entry.plan.update(event.PlanEntries)
 		return
+	case "auto_compaction_end":
+		if event.ErrorMessage != "" {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ Compaction failed: %s", event.ErrorMessage))
+		}
+		return
 	}
 
 	if event.AgentEvent == nil {
