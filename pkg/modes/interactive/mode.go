@@ -182,6 +182,22 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 				}
 			}
 		})
+		setup.Manager.SetBtwFn(func(question string) error {
+			if m.session == nil {
+				return fmt.Errorf("no active session")
+			}
+			comp := components.NewBtwMessageComponent(question, m.ui)
+			m.messageContainer.AddChild(comp)
+			if m.ui != nil {
+				m.ui.RequestRender(false)
+			}
+			ctx := context.Background()
+			_, err := m.session.Btw(ctx, question, func(delta string) {
+				comp.AppendChunk(delta)
+			})
+			comp.SetDone(err != nil)
+			return err
+		})
 	}
 }
 

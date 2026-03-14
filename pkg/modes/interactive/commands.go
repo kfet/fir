@@ -192,13 +192,6 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.Shutdown()
 	case "/plan":
 		m.handlePlanCommand()
-	case "/btw":
-		question := strings.TrimSpace(strings.Join(parts[1:], " "))
-		if question == "" {
-			m.showWarning("Usage: /btw <question>")
-			return
-		}
-		go m.handleBtwCommand(question)
 	default:
 		// Not a builtin command.
 		// Check if it's a skill or prompt template command before declaring unknown.
@@ -1336,32 +1329,6 @@ func (m *InteractiveMode) handlePlanCommand() {
 	m.togglePlanVisibility()
 }
 
-// ============================================================================
-// Btw
-// ============================================================================
-
-// handleBtwCommand runs a one-shot, ephemeral LLM call for a side question.
-// The Q&A is displayed but never saved to session history.
-func (m *InteractiveMode) handleBtwCommand(question string) {
-	if m.session == nil {
-		m.showWarning("No active session")
-		return
-	}
-
-	comp := components.NewBtwMessageComponent(question, m.ui)
-	m.messageContainer.AddChild(comp)
-	m.ui.RequestRender(false)
-
-	ctx := context.Background()
-	_, err := m.session.Btw(ctx, question, func(delta string) {
-		comp.AppendChunk(delta)
-	})
-	comp.SetDone(err != nil)
-	if err != nil {
-		m.showWarning(fmt.Sprintf("btw failed: %v", err))
-	}
-}
-
 func (m *InteractiveMode) togglePlanVisibility() {
 	if m.session == nil {
 		m.showWarning("No active session.")
@@ -1439,7 +1406,6 @@ func (m *InteractiveMode) showHelp() {
   /thinking       - Select thinking level
   /settings       - Open settings menu
   /plan           - Show/hide the current session plan
-  /btw <question> - Ask a side question without adding it to history
   /theme          - Select theme
   /new            - Start a new session
   /compact        - Compact conversation context

@@ -352,6 +352,15 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
+    def btw(self, question: str, timeout: float = 120.0) -> None:
+        """Ask a side question using the current session context.
+
+        The question and response are shown inline in the UI but are never
+        saved to the session history. Blocks until the response is complete.
+        Raises RuntimeError if not supported in the current mode.
+        """
+        self._call("btw", {"question": question}, timeout=timeout)
+
 
 # ---------------------------------------------------------------------------
 # Main loop
