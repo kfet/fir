@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/simplify [focus]` slash command — reviews recent git changes (staged, unstaged, or last commit) and asks the agent to apply simplifications across code reuse, quality, and efficiency; optional focus text narrows the review
+
 ### Fixed
 
 - ACP mode (Zed): inference errors (e.g. Bedrock API failures) are now shown to the user instead of being silently dropped

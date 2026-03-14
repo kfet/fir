@@ -140,6 +140,12 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 			instructions = strings.Join(parts[1:], " ")
 		}
 		go m.handleCompactCommand(instructions)
+	case "/simplify":
+		var focus string
+		if len(parts) > 1 {
+			focus = strings.Join(parts[1:], " ")
+		}
+		m.handleSimplifyCommand(focus)
 	case "/model":
 		var searchTerm string
 		if len(parts) > 1 {
@@ -325,6 +331,70 @@ func compactionFormatTokens(n int) string {
 		return fmt.Sprintf("%dk", n/1000)
 	}
 	return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+}
+
+// ============================================================================
+// Simplify
+// ============================================================================
+
+// handleSimplifyCommand implements /simplify [focus].
+//
+// It captures the current git diff (staged+unstaged vs HEAD, falling back to
+// the diff of the last commit when the working tree is clean), builds a
+// structured review prompt, and sends it to the agent via session.Prompt so
+// the agent applies simplifications directly to the source files.
+//
+// The optional focus argument narrows the review (e.g. "memory allocation").
+func (m *InteractiveMode) handleSimplifyCommand(focus string) {
+	// Gather a git diff that represents recent changes.
+	diff, diffLabel := m.gatherSimplifyDiff()
+	if diff == "" {
+		m.showWarning("Nothing to simplify: no git changes detected.")
+		return
+	}
+
+	// Build the prompt.
+	var sb strings.Builder
+	sb.WriteString("Review the following recent changes and apply simplifications directly to the source files.\n\n")
+	sb.WriteString("Evaluate the changes across three dimensions:\n")
+	sb.WriteString("1. **Code reuse** — eliminate duplication, extract shared helpers\n")
+	sb.WriteString("2. **Code quality** — improve readability, naming, structure, and adherence to project conventions\n")
+	sb.WriteString("3. **Efficiency** — remove unnecessary allocations, redundant work, or slow patterns\n\n")
+	if focus != "" {
+		sb.WriteString(fmt.Sprintf("Focus especially on: %s\n\n", focus))
+	}
+	sb.WriteString("Make only changes that are clearly improvements. Do not add features or change behaviour.\n\n")
+	sb.WriteString(fmt.Sprintf("Recent changes (%s):\n```diff\n%s\n```", diffLabel, diff))
+
+	if err := m.session.Prompt(sb.String()); err != nil {
+		m.showWarning(fmt.Sprintf("Simplify failed: %v", err))
+	}
+}
+
+// gatherSimplifyDiff returns (diff text, label) for the most relevant recent
+// changes.  Priority order:
+//  1. Staged changes (git diff --cached)
+//  2. Unstaged changes (git diff)
+//  3. Last commit (git diff HEAD~1 HEAD)
+func (m *InteractiveMode) gatherSimplifyDiff() (string, string) {
+	run := func(args ...string) string {
+		out, err := exec.Command("git", args...).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	if d := run("diff", "--cached"); d != "" {
+		return d, "staged"
+	}
+	if d := run("diff"); d != "" {
+		return d, "working tree"
+	}
+	if d := run("diff", "HEAD~1", "HEAD"); d != "" {
+		return d, "last commit"
+	}
+	return "", ""
 }
 
 // ============================================================================
@@ -1409,6 +1479,7 @@ func (m *InteractiveMode) showHelp() {
   /theme          - Select theme
   /new            - Start a new session
   /compact        - Compact conversation context
+  /simplify       - Review recent changes and apply simplifications
   /resume         - Resume a different session
   /session        - Show session info and stats
   /name <name>    - Set session display name
