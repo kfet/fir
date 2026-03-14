@@ -4,6 +4,7 @@ package providers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -100,7 +101,7 @@ func (p *responsesSSEProcessor) processEvent(data string) (bool, error) {
 		if msg == "" {
 			msg = "Unknown error (no error details in response)"
 		}
-		return true, fmt.Errorf("%s", msg)
+		return true, errors.New(msg)
 	}
 
 	return false, nil

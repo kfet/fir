@@ -193,7 +193,9 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		params := buildAnthropicParams(model, prompt, oauthToken, options)
 		if options != nil && options.OnPayload != nil {
 			if next := options.OnPayload(params, model); next != nil {
-				params = next.(map[string]any)
+				if m, ok := next.(map[string]any); ok {
+					params = m
+				}
 			}
 		}
 

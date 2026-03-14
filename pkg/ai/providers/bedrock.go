@@ -71,7 +71,9 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		}
 		if options != nil && options.OnPayload != nil {
 			if next := options.OnPayload(input, model); next != nil {
-				input = next.(*bedrockruntime.ConverseStreamInput)
+				if v, ok := next.(*bedrockruntime.ConverseStreamInput); ok {
+					input = v
+				}
 			}
 		}
 
