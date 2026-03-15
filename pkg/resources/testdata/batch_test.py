@@ -125,8 +125,8 @@ class TestRunBatch(unittest.TestCase):
     def setUp(self):
         self.mod = _load_batch()
 
-    def _make_ctx(self, tool_results=None, btw_result="synthesis"):
-        """Create a mock context with call_tool and btw."""
+    def _make_ctx(self, tool_results=None, side_query_result="synthesis"):
+        """Create a mock context with call_tool and side_query."""
         ctx = mock.MagicMock(spec=fir_ext.Context)
         if tool_results is None:
             tool_results = {}
@@ -137,11 +137,11 @@ class TestRunBatch(unittest.TestCase):
             return {"content": [{"text": f"result of {name}"}], "is_error": False}
 
         ctx.call_tool = mock.MagicMock(side_effect=_call_tool)
-        ctx.btw = mock.MagicMock(return_value=btw_result)
+        ctx.side_query = mock.MagicMock(return_value=side_query_result)
         return ctx
 
     def test_basic_flow(self):
-        ctx = self._make_ctx(btw_result="summary of files")
+        ctx = self._make_ctx(side_query_result="summary of files")
         tools = [
             {"name": "Read", "params": {"path": "a.go"}},
             {"name": "Read", "params": {"path": "b.go"}},
@@ -150,7 +150,7 @@ class TestRunBatch(unittest.TestCase):
         self.assertFalse(result["is_error"])
         self.assertEqual(result["content"][0]["text"], "summary of files")
         self.assertEqual(ctx.call_tool.call_count, 2)
-        ctx.btw.assert_called_once()
+        ctx.side_query.assert_called_once()
 
     def test_empty_tools_returns_error(self):
         ctx = self._make_ctx()
@@ -172,18 +172,18 @@ class TestRunBatch(unittest.TestCase):
                     "is_error": True,
                 },
             },
-            btw_result="one file failed",
+            side_query_result="one file failed",
         )
         tools = [{"name": "Read", "params": {"path": "missing.go"}}]
         result = self.mod._run_batch(tools, "summarise", ctx)
         self.assertFalse(result["is_error"])
-        # btw was called with the error output included
-        prompt = ctx.btw.call_args[0][0]
+        # side_query was called with the error output included
+        prompt = ctx.side_query.call_args[0][0]
         self.assertIn("[ERROR]", prompt)
         self.assertIn("file not found", prompt)
 
     def test_call_tool_exception_handled(self):
-        ctx = self._make_ctx(btw_result="partial results")
+        ctx = self._make_ctx(side_query_result="partial results")
         ctx.call_tool = mock.MagicMock(
             side_effect=RuntimeError("connection lost")
         )
@@ -191,31 +191,31 @@ class TestRunBatch(unittest.TestCase):
         result = self.mod._run_batch(tools, "summarise", ctx)
         # Should still succeed — error is included in synthesis
         self.assertFalse(result["is_error"])
-        prompt = ctx.btw.call_args[0][0]
+        prompt = ctx.side_query.call_args[0][0]
         self.assertIn("connection lost", prompt)
 
-    def test_btw_failure_returns_error(self):
+    def test_side_query_failure_returns_error(self):
         ctx = self._make_ctx()
-        ctx.btw = mock.MagicMock(side_effect=RuntimeError("LLM down"))
+        ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
         tools = [{"name": "Read", "params": {"path": "a.go"}}]
         result = self.mod._run_batch(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("synthesis failed", result["content"][0]["text"])
 
     def test_unnamed_tool_produces_error_entry(self):
-        ctx = self._make_ctx(btw_result="handled")
+        ctx = self._make_ctx(side_query_result="handled")
         tools = [{"params": {"path": "a.go"}}]  # no name
         result = self.mod._run_batch(tools, "summarise", ctx)
         self.assertFalse(result["is_error"])
-        prompt = ctx.btw.call_args[0][0]
+        prompt = ctx.side_query.call_args[0][0]
         self.assertIn("unnamed", prompt)
         self.assertIn("name is required", prompt)
 
     def test_synthesis_prompt_has_instructions(self):
-        ctx = self._make_ctx(btw_result="done")
+        ctx = self._make_ctx(side_query_result="done")
         tools = [{"name": "Bash", "params": {"command": "ls"}}]
         self.mod._run_batch(tools, "list all files", ctx)
-        prompt = ctx.btw.call_args[0][0]
+        prompt = ctx.side_query.call_args[0][0]
         self.assertIn("--- Instructions ---", prompt)
         self.assertIn("list all files", prompt)
 
@@ -239,7 +239,7 @@ class TestBatchRunTool(unittest.TestCase):
         ctx.call_tool = mock.MagicMock(
             return_value={"content": [{"text": "ok"}], "is_error": False}
         )
-        ctx.btw = mock.MagicMock(return_value="synthesised")
+        ctx.side_query = mock.MagicMock(return_value="synthesised")
         params = {
             "tools": [{"name": "Bash", "params": {"command": "echo hi"}}],
             "instructions": "summarise",

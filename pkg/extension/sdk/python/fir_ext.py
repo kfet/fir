@@ -372,7 +372,7 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
-    def btw(self, question: str, timeout: float = 120.0) -> str:
+    def side_query(self, question: str, timeout: float = 120.0) -> str:
         """Ask a side question using the current session context.
 
         Makes a one-shot LLM call with no tools and no history persistence.

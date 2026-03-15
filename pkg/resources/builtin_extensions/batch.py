@@ -13,7 +13,7 @@ polluting the main conversation, and synthesise the results via a one-shot
 LLM call.
 
 This is the extension counterpart to the built-in Go `batch` tool.  It
-demonstrates how extensions can use ``ctx.call_tool()`` and ``ctx.btw()``
+demonstrates how extensions can use ``ctx.call_tool()`` and ``ctx.side_query()``
 to build rich orchestration workflows in Python.
 
 Architecture:
@@ -21,7 +21,7 @@ Architecture:
   2. Execute each tool sequentially via ``ctx.call_tool()``.
      - Results are held in local Python memory — never enter history.
   3. Build a synthesis prompt from collected outputs + user instructions.
-  4. Run ``ctx.btw()`` to get an ephemeral LLM summary.
+  4. Run ``ctx.side_query()`` to get an ephemeral LLM summary.
   5. Return only the summary.
 """
 
@@ -56,7 +56,7 @@ def _build_synthesis_prompt(
     results: list[dict],
     instructions: str,
 ) -> str:
-    """Build the prompt sent to btw() for synthesis."""
+    """Build the prompt sent to side_query() for synthesis."""
     parts = [
         "You are processing the outputs of multiple tool calls. "
         "Below are the results, followed by instructions on what "
@@ -84,7 +84,7 @@ def _run_batch(
     ctx: fir_ext.Context,
     description: str = "",
 ) -> dict:
-    """Execute *tools*, collect outputs, synthesise via btw().
+    """Execute *tools*, collect outputs, synthesise via side_query().
 
     Parameters
     ----------
@@ -93,7 +93,7 @@ def _run_batch(
     instructions : str
         Synthesis instructions for the LLM.
     ctx : fir_ext.Context
-        Extension context for call_tool / btw.
+        Extension context for call_tool / side_query.
     description : str, optional
         Human-readable label for progress messages.
 
@@ -143,7 +143,7 @@ def _run_batch(
     # Synthesise collected outputs.
     prompt = _build_synthesis_prompt(results, instructions)
     try:
-        synthesis = ctx.btw(prompt)
+        synthesis = ctx.side_query(prompt)
     except Exception as exc:
         return _error(f"synthesis failed: {exc}")
 

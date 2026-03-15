@@ -490,7 +490,7 @@ class TestDemoTools(DemoTestCase):
         fake.send_init()
         fake.send_tool_call(2, "batch_example", {"directory": "/tmp/proj"})
         msg = fake.wait_for_method("side_query")
-        self.assertIsNotNone(msg, "expected side_query (btw) call")
+        self.assertIsNotNone(msg, "expected side_query call")
         assert msg is not None
         # The synthesis prompt should include instructions
         question = msg["params"]["question"]
@@ -505,9 +505,9 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(resp)
         assert resp is not None
         self.assertIsNone(resp.get("error"))
-        # Result should be a string (the btw synthesis)
+        # Result should be a string (the side_query synthesis)
         result = resp["result"]
-        # The mock btw returns "mock synthesis" — could be wrapped in content
+        # The mock side_query returns "mock synthesis" — could be wrapped in content
         self.assertIsNotNone(result)
         fake.stop()
 

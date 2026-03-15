@@ -15,7 +15,7 @@ Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label · get_active_tools · set_active_tools ·
   set_model · send_message · send_user_message ·
-  set_session_data · get_session_data · continue_session · btw · call_tool
+  set_session_data · get_session_data · continue_session · side_query · call_tool
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
@@ -27,7 +27,7 @@ Inbound surface demonstrated (fir → extension):
 
 Batch tool demonstration:
   The batch_example tool shows how extensions can use ctx.call_tool()
-  and ctx.btw() to orchestrate multi-tool workflows.  It calls tools
+  and ctx.side_query() to orchestrate multi-tool workflows.  It calls tools
   directly (Read, Bash), collects results in local memory, and
   synthesises via an ephemeral LLM call — raw output never enters
   conversation history.
@@ -150,9 +150,9 @@ def inject_message(params, ctx):
 @fir_ext.tool(
     name="batch_example",
     description=(
-        "Demonstrate the call_tool + btw pattern: probe a project directory, "
+        "Demonstrate the call_tool + side_query pattern: probe a project directory, "
         "call Read/Bash tools directly via call_tool(), then synthesise "
-        "results with btw(). Everything stays ephemeral."
+        "results with side_query(). Everything stays ephemeral."
     ),
     parameters={
         "type": "object",
@@ -173,7 +173,7 @@ def batch_example(params, ctx):
     """Probe a project directory, read key files, and synthesise a summary.
 
     Demonstrates how extensions can orchestrate multiple tool calls using
-    ``ctx.call_tool()`` and synthesise with ``ctx.btw()``.  All raw tool
+    ``ctx.call_tool()`` and synthesise with ``ctx.side_query()``.  All raw tool
     output is held in local Python memory — it never enters conversation
     history.
 
@@ -181,7 +181,7 @@ def batch_example(params, ctx):
       1. Use ctx.exec() to discover which files exist.
       2. Use ctx.call_tool() to read each file and run git status.
       3. Build a synthesis prompt from collected outputs.
-      4. Use ctx.btw() for an ephemeral LLM summary.
+      4. Use ctx.side_query() for an ephemeral LLM summary.
       5. Return only the summary.
     """
     directory = params.get("directory", ".")
@@ -231,7 +231,7 @@ def batch_example(params, ctx):
 
     prompt = "\n\n".join(outputs) + f"\n\n--- Instructions ---\n{instructions}"
 
-    return ctx.btw(prompt)
+    return ctx.side_query(prompt)
 
 
 def _extract_text(result):

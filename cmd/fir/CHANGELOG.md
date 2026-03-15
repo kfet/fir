@@ -5,7 +5,7 @@
 ### Added
 
 - `call_tool` bridge method: extensions can now call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)` — results are returned directly and never enter conversation history
-- `batch` builtin extension (`batch.py`): `batch_run` tool and `/batch` slash command for ephemeral multi-tool orchestration from Python — uses `ctx.call_tool()` + `ctx.btw()` to execute tools, collect outputs, and synthesise via a one-shot LLM call
+- `batch` builtin extension (`batch.py`): `batch_run` tool and `/batch` slash command for ephemeral multi-tool orchestration from Python — uses `ctx.call_tool()` + `ctx.side_query()` to execute tools, collect outputs, and synthesise via a one-shot LLM call
 - Built-in `batch` tool: execute multiple tools and synthesise their outputs via an ephemeral one-shot LLM call — raw tool outputs stay ephemeral and only the synthesis is returned to the agent
 - `pkg/pkg` package: `ParseSource`, `Clone`/`CloneRef`/`Pull`/`CurrentRef`, `ScanPackageResources`, and `Manager` (Install/Uninstall/Update/List/Resolve) for git and local package management
 - `fir install <source> [--local]`, `fir uninstall <source> [--local]`, `fir packages [list|update]` CLI subcommands for external package management
@@ -21,6 +21,7 @@
 
 ### Changed
 
+- Rename `ctx.btw()` → `ctx.side_query()` in the Python extension SDK — `side_query` matches the underlying RPC method name
 - Freeze system prompt date per session — the `Current date:` line is now set once when the session starts, preventing cache invalidation at midnight
 - Synthetic tool results for orphaned tool calls now use the assistant message's timestamp instead of `time.Now()`, making `TransformMessages` deterministic
 - User text messages are now always serialized in block form for Anthropic, so `cache_control` breakpoints can be attached to all user messages (not just multi-block ones)

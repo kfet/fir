@@ -75,7 +75,7 @@ fir_ext.run(name="<extension-name>")
 | `ctx.set_active_tools(tools)` | Set active tools |
 | `ctx.set_model(model)` | Change the current model |
 | `ctx.call_tool(name, params=None, timeout=60)` | Call any registered tool by name; returns `{content, is_error}`. Result never enters conversation history. |
-| `ctx.btw(question, timeout=120)` | Ephemeral side-query LLM call using current session context; returns the response text. Nothing is saved to history. |
+| `ctx.side_query(question, timeout=120)` | Ephemeral side-query LLM call using current session context; returns the response text. Nothing is saved to history. |
 | `ctx.continue_session()` | Trigger the agent to continue without injecting a message |
 | `ctx.set_session_data(key, value)` | Store a key/value pair persisted across `/reexec` |
 | `ctx.get_session_data(key)` | Retrieve a previously stored value |

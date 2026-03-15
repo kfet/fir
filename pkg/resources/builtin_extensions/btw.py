@@ -32,7 +32,7 @@ def cmd_btw(args: list[str], ctx: fir_ext.Context):
     if not question:
         return {"message": "Usage: /btw <question>"}
 
-    text = ctx.btw(question)
+    text = ctx.side_query(question)
     return {"message": f"btw: {question}\n\n{text}"}
 
 
