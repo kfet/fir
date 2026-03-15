@@ -46,6 +46,9 @@ type LoginCallbacks struct {
 	OnProgress func(message string)
 	// OnManualCodeInput asks the user to paste an auth code manually.
 	OnManualCodeInput func() (string, error)
+	// OnDismissManualInput is called when the browser callback succeeds
+	// and any visible manual-input prompt should be hidden/cleared.
+	OnDismissManualInput func()
 	// Ctx is used for cancellation.
 	Ctx context.Context
 }

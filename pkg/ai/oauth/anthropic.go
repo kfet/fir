@@ -129,44 +129,70 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 			err   error
 		}
 		manualCh := make(chan manualResult, 1)
-		go func() {
-			input, err := callbacks.OnManualCodeInput()
-			manualCh <- manualResult{input, err}
-		}()
+
+		manualStarted := false
+		startManual := func() {
+			if manualStarted {
+				return
+			}
+			manualStarted = true
+			go func() {
+				input, err := callbacks.OnManualCodeInput()
+				manualCh <- manualResult{input, err}
+			}()
+		}
 
 		if resultCh != nil {
-			select {
-			case result, ok := <-resultCh:
-				if ok && result != nil && result.Code != "" {
-					code, state = result.Code, result.State
-				} else {
-					// Server cancelled; wait for manual
-					mr := <-manualCh
+			// Race: wait briefly for the browser callback before showing the
+			// manual-input prompt. This avoids flashing a paste prompt when
+			// the local callback will arrive momentarily.
+			delay := time.NewTimer(3 * time.Second)
+			defer delay.Stop()
+
+			for {
+				select {
+				case result, ok := <-resultCh:
+					if ok && result != nil && result.Code != "" {
+						code, state = result.Code, result.State
+						// Dismiss the manual-input prompt if it was shown.
+						if manualStarted && callbacks.OnDismissManualInput != nil {
+							callbacks.OnDismissManualInput()
+						}
+					} else {
+						// Server closed without result — fall back to manual.
+						startManual()
+						resultCh = nil // don't select again
+						continue
+					}
+				case <-delay.C:
+					// Browser hasn't responded yet — show manual input prompt.
+					startManual()
+					continue
+				case mr := <-manualCh:
 					if mr.err != nil {
 						return nil, mr.err
 					}
-					code, state = parseAuthorizationInput(mr.input)
-					usedManualRedirect = true
+					if mr.input != "" {
+						code, state = parseAuthorizationInput(mr.input)
+						usedManualRedirect = true
+					}
+				case <-ctx.Done():
+					return nil, fmt.Errorf("login cancelled")
 				}
-			case mr := <-manualCh:
-				if mr.err != nil {
-					return nil, mr.err
-				}
-				if mr.input != "" {
-					code, state = parseAuthorizationInput(mr.input)
-					usedManualRedirect = true
-				}
+				break
 			}
 		} else {
-			// No server; just wait for manual input
+			// No server; just wait for manual input.
+			startManual()
 			mr := <-manualCh
 			if mr.err != nil {
 				return nil, mr.err
 			}
 			code, state = parseAuthorizationInput(mr.input)
+			usedManualRedirect = true
 		}
 	} else if resultCh != nil {
-		// Just wait for the callback server
+		// Just wait for the callback server.
 		result, ok := <-resultCh
 		if ok && result != nil {
 			code, state = result.Code, result.State

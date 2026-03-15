@@ -5,6 +5,7 @@ package interactive
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -403,6 +404,11 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		return
 	}
 
+	// manualInputCancel, when non-nil, dismisses the active manual-input
+	// prompt by simulating Escape. Protected by manualInputMu.
+	var manualInputMu sync.Mutex
+	var manualInputCancel func()
+
 	promptUser := func(prompt oauth.Prompt) (string, error) {
 		type promptResult struct {
 			value string
@@ -435,10 +441,16 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			if !prompt.AllowEmpty && strings.TrimSpace(value) == "" {
 				return // don't accept empty when not allowed
 			}
+			manualInputMu.Lock()
+			manualInputCancel = nil
+			manualInputMu.Unlock()
 			done()
 			ch <- promptResult{value: value}
 		}
 		input.OnEscape = func() {
+			manualInputMu.Lock()
+			manualInputCancel = nil
+			manualInputMu.Unlock()
 			done()
 			ch <- promptResult{err: fmt.Errorf("Login cancelled")}
 		}
@@ -450,6 +462,14 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		m.editorContainer.AddChild(container)
 		m.ui.SetFocus(input)
 		m.ui.RequestRender(true)
+
+		// Register a cancel function so OnDismissManualInput can
+		// programmatically dismiss this prompt when the browser callback wins.
+		manualInputMu.Lock()
+		manualInputCancel = func() {
+			input.OnEscape()
+		}
+		manualInputMu.Unlock()
 
 		// Block until user submits or cancels.
 		result := <-ch
@@ -479,6 +499,15 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			return promptUser(oauth.Prompt{
 				Message: "Paste the redirect URL or authorization code from your browser:",
 			})
+		},
+		OnDismissManualInput: func() {
+			manualInputMu.Lock()
+			cancel := manualInputCancel
+			manualInputCancel = nil
+			manualInputMu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
 		},
 		OnProgress: func(message string) {
 			m.showStatus(message)
