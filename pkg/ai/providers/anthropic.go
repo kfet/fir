@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/jsonparse"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -155,25 +157,37 @@ func normalizeAnthropicToolCallID(id string, _ *ai.Model, _ *ai.AssistantMessage
 	return b.String()
 }
 
+// anthropicRetryDelay returns the wait duration before retry attempt n (0-based).
+// It honours any server-provided delay in the error message, then falls back to
+// exponential backoff (5 s, 10 s, 20 s, …) capped by maxDelayMs when set.
+func anthropicRetryDelay(errMsg string, attempt int, maxDelayMs *int) time.Duration {
+	delay := ratelimit.ExtractRetryDelayFromText(errMsg)
+	if delay == 0 {
+		secs := 5 * math.Pow(2, float64(attempt))
+		delay = time.Duration(secs * float64(time.Second))
+	}
+	cap := 2 * time.Minute
+	if maxDelayMs != nil && *maxDelayMs > 0 {
+		cap = time.Duration(*maxDelayMs) * time.Millisecond
+	}
+	if delay > cap {
+		delay = cap
+	}
+	return delay
+}
+
 // StreamAnthropic is the raw Anthropic streaming function.
+// It automatically retries on overloaded / rate-limit errors (HTTP 529 or SSE
+// overloaded_error) up to maxAnthropicRetries times using exponential backoff.
+// EventStart is withheld until the first successful SSE event so that retried
+// attempts are completely transparent to callers.
+const maxAnthropicRetries = 5
+
 func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
 	stream := ai.NewAssistantMessageEventStream()
 
 	go func() {
-		output := &ai.AssistantMessage{
-			Role:       ai.RoleAssistant,
-			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
-			Provider:   model.Provider,
-			Model:      model.ID,
-			Usage:      ai.ZeroUsage(),
-			StopReason: ai.StopReasonStop,
-			Timestamp:  time.Now().UnixMilli(),
-		}
-
-		defer func() {
-			stream.End(nil)
-		}()
+		defer stream.End(nil)
 
 		apiKey := ""
 		if options != nil {
@@ -183,9 +197,18 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			apiKey = envkeys.GetEnvApiKey(model.Provider)
 		}
 		if apiKey == "" {
-			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options))
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			out := &ai.AssistantMessage{
+				Role:         ai.RoleAssistant,
+				Content:      []ai.AssistantContent{},
+				Api:          model.Api,
+				Provider:     model.Provider,
+				Model:        model.ID,
+				Usage:        ai.ZeroUsage(),
+				StopReason:   ai.StopReasonError,
+				ErrorMessage: noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options)),
+				Timestamp:    time.Now().UnixMilli(),
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: out})
 			return
 		}
 
@@ -201,9 +224,18 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		payload, err := json.Marshal(params)
 		if err != nil {
-			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = fmt.Sprintf("marshal request: %v", err)
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			out := &ai.AssistantMessage{
+				Role:         ai.RoleAssistant,
+				Content:      []ai.AssistantContent{},
+				Api:          model.Api,
+				Provider:     model.Provider,
+				Model:        model.ID,
+				Usage:        ai.ZeroUsage(),
+				StopReason:   ai.StopReasonError,
+				ErrorMessage: fmt.Sprintf("marshal request: %v", err),
+				Timestamp:    time.Now().UnixMilli(),
+			}
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: out})
 			return
 		}
 
@@ -212,206 +244,295 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
-		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(payload))
-
-		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
-
-		// Track block indices from Anthropic to our content array indices
-		type blockInfo struct {
-			contentIdx  int
-			partialJSON string
+		var maxDelayMs *int
+		if options != nil {
+			maxDelayMs = options.MaxRetryDelayMs
 		}
-		blocks := map[int]*blockInfo{}
 
-		for evt := range sseEvents {
-			if evt.Data == "" || evt.Data == "[DONE]" {
-				continue
+		lastErrMsg := ""
+
+		for attempt := 0; attempt < maxAnthropicRetries; attempt++ {
+			if attempt > 0 {
+				delay := anthropicRetryDelay(lastErrMsg, attempt-1, maxDelayMs)
+				firlog.Info("anthropic overloaded, retrying", "attempt", attempt, "delay", delay, "error", lastErrMsg)
+				select {
+				case <-ctx.Done():
+					out := &ai.AssistantMessage{
+						Role: ai.RoleAssistant, Content: []ai.AssistantContent{},
+						Api: model.Api, Provider: model.Provider, Model: model.ID,
+						Usage: ai.ZeroUsage(), StopReason: ai.StopReasonError,
+						ErrorMessage: lastErrMsg, Timestamp: time.Now().UnixMilli(),
+					}
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: out})
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: out})
+					return
+				case <-time.After(delay):
+				}
 			}
-			var raw map[string]any
-			if err := json.Unmarshal([]byte(evt.Data), &raw); err != nil {
-				continue
+
+			output := &ai.AssistantMessage{
+				Role:       ai.RoleAssistant,
+				Content:    []ai.AssistantContent{},
+				Api:        model.Api,
+				Provider:   model.Provider,
+				Model:      model.ID,
+				Usage:      ai.ZeroUsage(),
+				StopReason: ai.StopReasonStop,
+				Timestamp:  time.Now().UnixMilli(),
 			}
 
-			eventType, _ := raw["type"].(string)
+			sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(payload))
 
-			switch eventType {
-			case "message_start":
-				if msg, ok := raw["message"].(map[string]any); ok {
-					if usage, ok := msg["usage"].(map[string]any); ok {
+			// EventStart is emitted only after the first successful SSE event so that
+			// an early overloaded_error can be retried without the caller seeing anything.
+			startEmitted := false
+
+			// Track block indices from Anthropic to our content array indices.
+			type blockInfo struct {
+				contentIdx  int
+				partialJSON string
+			}
+			blocks := map[int]*blockInfo{}
+
+			retryNeeded := false
+
+		sseLoop:
+			for evt := range sseEvents {
+				if evt.Data == "" || evt.Data == "[DONE]" {
+					continue
+				}
+				var raw map[string]any
+				if err := json.Unmarshal([]byte(evt.Data), &raw); err != nil {
+					continue
+				}
+
+				eventType, _ := raw["type"].(string)
+
+				// Emit EventStart on the first non-error event.
+				if !startEmitted && eventType != "error" {
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+					startEmitted = true
+				}
+
+				switch eventType {
+				case "message_start":
+					if msg, ok := raw["message"].(map[string]any); ok {
+						if usage, ok := msg["usage"].(map[string]any); ok {
+							updateAnthropicUsage(output, usage, model)
+						}
+					}
+
+				case "content_block_start":
+					idx := jsonInt(raw, "index")
+					cb, _ := raw["content_block"].(map[string]any)
+					if cb == nil {
+						continue
+					}
+					blockType, _ := cb["type"].(string)
+					contentIdx := len(output.Content)
+
+					switch blockType {
+					case "text":
+						output.Content = append(output.Content, ai.NewTextContent(""))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+					case "thinking":
+						output.Content = append(output.Content, ai.NewThinkingContent(""))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
+					case "redacted_thinking":
+						// Redacted thinking: the full encrypted payload is in cb["data"].
+						// There are no deltas — all content arrives in content_block_start.
+						data, _ := cb["data"].(string)
+						t := ai.NewThinkingContent("")
+						t.Thinking.Redacted = true
+						t.Thinking.ThinkingSignature = data
+						output.Content = append(output.Content, t)
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
+					case "tool_use":
+						toolID, _ := cb["id"].(string)
+						toolName, _ := cb["name"].(string)
+						if oauthToken {
+							toolName = fromClaudeCodeName(toolName, prompt.Tools)
+						}
+						output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
+					case "server_tool_use":
+						// Server-side tool invocation (web_search, code_execution, etc.)
+						// We emit a text block showing the tool is running.
+						output.Content = append(output.Content, ai.NewTextContent(""))
+						blocks[idx] = &blockInfo{contentIdx: contentIdx}
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						continue // skip default blocks[idx] assignment below
+					case "web_search_tool_result":
+						// Server-side web search results — format as text summary.
+						text := formatWebSearchResult(cb)
+						output.Content = append(output.Content, ai.NewTextContent(text))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+					case "code_execution_tool_result":
+						// Server-side code execution results — format as text.
+						text := formatCodeExecutionResult(cb)
+						output.Content = append(output.Content, ai.NewTextContent(text))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+					case "web_fetch_tool_result":
+						// Server-side web fetch results — format as text.
+						text := formatWebFetchResult(cb)
+						output.Content = append(output.Content, ai.NewTextContent(text))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+					case "tool_invocation":
+						// Programmatic tool calling — server-side tool invocation.
+						// These are informational; the API handles execution.
+						toolName, _ := cb["tool_name"].(string)
+						text := fmt.Sprintf("[calling %s]\n", toolName)
+						output.Content = append(output.Content, ai.NewTextContent(text))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+					case "tool_output":
+						// Programmatic tool calling — server-side tool result.
+						text := formatToolOutput(cb)
+						output.Content = append(output.Content, ai.NewTextContent(text))
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
+					}
+					blocks[idx] = &blockInfo{contentIdx: contentIdx}
+
+				case "content_block_delta":
+					idx := jsonInt(raw, "index")
+					bi := blocks[idx]
+					if bi == nil {
+						continue
+					}
+					delta, _ := raw["delta"].(map[string]any)
+					if delta == nil {
+						continue
+					}
+					deltaType, _ := delta["type"].(string)
+					ci := bi.contentIdx
+
+					switch deltaType {
+					case "text_delta":
+						text, _ := delta["text"].(string)
+						if ci < len(output.Content) && output.Content[ci].IsText() {
+							output.Content[ci].Text.Text += text
+						}
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: ci, Delta: text, Partial: output})
+					case "thinking_delta":
+						thinking, _ := delta["thinking"].(string)
+						if ci < len(output.Content) && output.Content[ci].IsThinking() {
+							output.Content[ci].Thinking.Thinking += thinking
+						}
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingDelta, ContentIndex: ci, Delta: thinking, Partial: output})
+					case "input_json_delta":
+						partial, _ := delta["partial_json"].(string)
+						bi.partialJSON += partial
+						if ci < len(output.Content) && output.Content[ci].IsToolCall() {
+							output.Content[ci].ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
+						}
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallDelta, ContentIndex: ci, Delta: partial, Partial: output})
+					case "signature_delta":
+						sig, _ := delta["signature"].(string)
+						if ci < len(output.Content) && output.Content[ci].IsThinking() {
+							output.Content[ci].Thinking.ThinkingSignature += sig
+						}
+					}
+
+				case "content_block_stop":
+					idx := jsonInt(raw, "index")
+					bi := blocks[idx]
+					if bi == nil {
+						continue
+					}
+					ci := bi.contentIdx
+					if ci >= len(output.Content) {
+						continue
+					}
+					c := &output.Content[ci]
+					if c.IsText() {
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextEnd, ContentIndex: ci, Content: c.Text.Text, Partial: output})
+					} else if c.IsThinking() {
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: ci, Content: c.Thinking.Thinking, Partial: output})
+					} else if c.IsToolCall() {
+						c.ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallEnd, ContentIndex: ci, ToolCall: c.ToolCall, Partial: output})
+					}
+
+				case "message_delta":
+					if d, ok := raw["delta"].(map[string]any); ok {
+						if sr, ok := d["stop_reason"].(string); ok {
+							output.StopReason = mapAnthropicStopReason(sr)
+						}
+					}
+					if usage, ok := raw["usage"].(map[string]any); ok {
 						updateAnthropicUsage(output, usage, model)
 					}
-				}
 
-			case "content_block_start":
-				idx := jsonInt(raw, "index")
-				cb, _ := raw["content_block"].(map[string]any)
-				if cb == nil {
+				case "error":
+					errObj, _ := raw["error"].(map[string]any)
+					errMsg, _ := errObj["message"].(string)
+					if errMsg == "" {
+						errMsg = "unknown Anthropic API error"
+					}
+					firlog.Warn("anthropic error", "err", errMsg)
+
+					// Retry transparently if streaming hasn't started yet and the
+					// error is an overload / rate-limit condition.
+					if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRateLimitText(errMsg) {
+						lastErrMsg = errMsg
+						retryNeeded = true
+						break sseLoop
+					}
+
+					// Not retryable (or already streaming): surface the error.
+					output.StopReason = ai.StopReasonError
+					output.ErrorMessage = errMsg
+					if !startEmitted {
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+					}
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+					return
+				}
+			}
+
+			// Drain the SSE error channel (always present, may be nil).
+			sseErrVal := <-sseErr
+
+			if retryNeeded {
+				// Overloaded SSE error before streaming began — loop to next attempt.
+				continue
+			}
+
+			// Check for HTTP-level errors (e.g. 529 Overloaded).
+			if sseErrVal != nil {
+				firlog.Warn("anthropic SSE error", "err", sseErrVal)
+				errMsg := sseErrVal.Error()
+				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRateLimitText(errMsg) {
+					lastErrMsg = errMsg
 					continue
 				}
-				blockType, _ := cb["type"].(string)
-				contentIdx := len(output.Content)
-
-				switch blockType {
-				case "text":
-					output.Content = append(output.Content, ai.NewTextContent(""))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-				case "thinking":
-					output.Content = append(output.Content, ai.NewThinkingContent(""))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
-				case "redacted_thinking":
-					// Redacted thinking: the full encrypted payload is in cb["data"].
-					// There are no deltas — all content arrives in content_block_start.
-					data, _ := cb["data"].(string)
-					t := ai.NewThinkingContent("")
-					t.Thinking.Redacted = true
-					t.Thinking.ThinkingSignature = data
-					output.Content = append(output.Content, t)
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: contentIdx, Partial: output})
-				case "tool_use":
-					toolID, _ := cb["id"].(string)
-					toolName, _ := cb["name"].(string)
-					if oauthToken {
-						toolName = fromClaudeCodeName(toolName, prompt.Tools)
-					}
-					output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
-				case "server_tool_use":
-					// Server-side tool invocation (web_search, code_execution, etc.)
-					// We emit a text block showing the tool is running.
-					output.Content = append(output.Content, ai.NewTextContent(""))
-					blocks[idx] = &blockInfo{contentIdx: contentIdx}
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					continue // skip default blocks[idx] assignment below
-				case "web_search_tool_result":
-					// Server-side web search results — format as text summary.
-					text := formatWebSearchResult(cb)
-					output.Content = append(output.Content, ai.NewTextContent(text))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-				case "code_execution_tool_result":
-					// Server-side code execution results — format as text.
-					text := formatCodeExecutionResult(cb)
-					output.Content = append(output.Content, ai.NewTextContent(text))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-				case "web_fetch_tool_result":
-					// Server-side web fetch results — format as text.
-					text := formatWebFetchResult(cb)
-					output.Content = append(output.Content, ai.NewTextContent(text))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-				case "tool_invocation":
-					// Programmatic tool calling — server-side tool invocation.
-					// These are informational; the API handles execution.
-					toolName, _ := cb["tool_name"].(string)
-					text := fmt.Sprintf("[calling %s]\n", toolName)
-					output.Content = append(output.Content, ai.NewTextContent(text))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-				case "tool_output":
-					// Programmatic tool calling — server-side tool result.
-					text := formatToolOutput(cb)
-					output.Content = append(output.Content, ai.NewTextContent(text))
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-				}
-				blocks[idx] = &blockInfo{contentIdx: contentIdx}
-
-			case "content_block_delta":
-				idx := jsonInt(raw, "index")
-				bi := blocks[idx]
-				if bi == nil {
-					continue
-				}
-				delta, _ := raw["delta"].(map[string]any)
-				if delta == nil {
-					continue
-				}
-				deltaType, _ := delta["type"].(string)
-				ci := bi.contentIdx
-
-				switch deltaType {
-				case "text_delta":
-					text, _ := delta["text"].(string)
-					if ci < len(output.Content) && output.Content[ci].IsText() {
-						output.Content[ci].Text.Text += text
-					}
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: ci, Delta: text, Partial: output})
-				case "thinking_delta":
-					thinking, _ := delta["thinking"].(string)
-					if ci < len(output.Content) && output.Content[ci].IsThinking() {
-						output.Content[ci].Thinking.Thinking += thinking
-					}
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingDelta, ContentIndex: ci, Delta: thinking, Partial: output})
-				case "input_json_delta":
-					partial, _ := delta["partial_json"].(string)
-					bi.partialJSON += partial
-					if ci < len(output.Content) && output.Content[ci].IsToolCall() {
-						output.Content[ci].ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
-					}
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallDelta, ContentIndex: ci, Delta: partial, Partial: output})
-				case "signature_delta":
-					sig, _ := delta["signature"].(string)
-					if ci < len(output.Content) && output.Content[ci].IsThinking() {
-						output.Content[ci].Thinking.ThinkingSignature += sig
-					}
-				}
-
-			case "content_block_stop":
-				idx := jsonInt(raw, "index")
-				bi := blocks[idx]
-				if bi == nil {
-					continue
-				}
-				ci := bi.contentIdx
-				if ci >= len(output.Content) {
-					continue
-				}
-				c := &output.Content[ci]
-				if c.IsText() {
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextEnd, ContentIndex: ci, Content: c.Text.Text, Partial: output})
-				} else if c.IsThinking() {
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: ci, Content: c.Thinking.Thinking, Partial: output})
-				} else if c.IsToolCall() {
-					c.ToolCall.Arguments = jsonparse.ParseStreamingJSON(bi.partialJSON)
-					stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallEnd, ContentIndex: ci, ToolCall: c.ToolCall, Partial: output})
-				}
-
-			case "message_delta":
-				if d, ok := raw["delta"].(map[string]any); ok {
-					if sr, ok := d["stop_reason"].(string); ok {
-						output.StopReason = mapAnthropicStopReason(sr)
-					}
-				}
-				if usage, ok := raw["usage"].(map[string]any); ok {
-					updateAnthropicUsage(output, usage, model)
-				}
-
-			case "error":
-				errObj, _ := raw["error"].(map[string]any)
-				errMsg, _ := errObj["message"].(string)
-				if errMsg == "" {
-					errMsg = "unknown Anthropic API error"
-				}
-				firlog.Warn("anthropic error", "err", errMsg)
 				output.StopReason = ai.StopReasonError
 				output.ErrorMessage = errMsg
+				if !startEmitted {
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+				}
 				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 				return
 			}
-		}
 
-		// Check for SSE-level errors
-		if err := <-sseErr; err != nil {
-			firlog.Warn("anthropic SSE error", "err", err)
-			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = err.Error()
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+			firlog.Debug("anthropic response complete", "model", model.ID, "stopReason", output.StopReason)
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
 			return
 		}
 
-		firlog.Debug("anthropic response complete", "model", model.ID, "stopReason", output.StopReason)
-		stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
+		// All retries exhausted — emit the last error.
+		out := &ai.AssistantMessage{
+			Role: ai.RoleAssistant, Content: []ai.AssistantContent{},
+			Api: model.Api, Provider: model.Provider, Model: model.ID,
+			Usage: ai.ZeroUsage(), StopReason: ai.StopReasonError,
+			ErrorMessage: lastErrMsg, Timestamp: time.Now().UnixMilli(),
+		}
+		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: out})
+		stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: out})
 	}()
 
 	return stream

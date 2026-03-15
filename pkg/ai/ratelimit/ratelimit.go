@@ -32,7 +32,8 @@ func durationFromFloat(val float64, unit string) time.Duration {
 // rateLimitPattern matches well-known rate-limit phrases in error messages.
 var rateLimitPattern = regexp.MustCompile(
 	`(?i)` +
-		`429\b` + // HTTP status code
+		`429\b` + // HTTP 429 Too Many Requests
+		`|529\b` + // HTTP 529 Overloaded (Anthropic)
 		`|rate[_\s-]?limit` + // "rate limit", "rate_limit", "rate-limit"
 		`|resource\s+exhausted` +
 		`|quota\s+exceeded` +

@@ -24,6 +24,8 @@ func TestIsRateLimitText(t *testing.T) {
 		"429 Too Many Requests",
 		"HTTP 429",
 		"Error 429: quota exceeded",
+		"529 Overloaded",
+		"HTTP 529",
 		"rate limit exceeded",
 		"rate_limit exceeded",
 		"rate-limit exceeded",
