@@ -692,6 +692,40 @@ func (m *Manager) CollectSessionData() map[string]map[string]string {
 	return out
 }
 
+// ShutdownAndCollect is the /reexec equivalent of Stop+CollectSessionData.
+// It fires "session_shutdown" to every running extension so their handlers
+// can call ctx.set_session_data(...), waits for a grace period so the
+// bridge's dispatch loop can service those inbound RPC calls, and then
+// returns a snapshot of all per-extension session data.
+//
+// Unlike Stop, it does NOT kill the extension processes — the caller
+// (handleReexecCommand) shuts down the TUI immediately after, and
+// syscall.Exec replaces the process entirely, so no explicit teardown is
+// needed.
+//
+// Note: pending (lazy) extensions that have not yet been started are skipped,
+// consistent with Stop(). In practice this is not an issue: any extension that
+// needs to react to session_shutdown (e.g. the schedule extension) also
+// subscribes to session_start, which causes it to be started eagerly at the
+// beginning of the session — well before /reexec is invoked.
+func (m *Manager) ShutdownAndCollect() map[string]map[string]string {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	for _, mb := range bridges {
+		_ = mb.bridge.EmitEvent("session_shutdown", nil)
+	}
+
+	// Give extensions time to run their session_shutdown handlers and make
+	// the resulting set_session_data RPC calls back to us.  The bridge's
+	// Run goroutine is still alive at this point (the context has not been
+	// cancelled yet), so it can service those inbound requests.
+	time.Sleep(500 * time.Millisecond)
+
+	return m.CollectSessionData()
+}
+
 // SeedSessionData pre-populates per-extension session data from a previously
 // saved snapshot (e.g. a reexec sidecar).  Note: EmitSessionStartWithData
 // already calls Bridge.SeedSessionData internally, so this method is only

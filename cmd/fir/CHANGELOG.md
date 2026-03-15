@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/schedule` entries now survive `/reexec`: `handleReexecCommand` previously called `CollectSessionData()` before emitting `session_shutdown`, so extension handlers that store data on shutdown (like the schedule extension) never ran in time. The new `ShutdownAndCollect()` on `Manager` fires `session_shutdown` first, waits for extensions to respond, then collects — matching the order extensions expect.
+
 ### Added
 
 - `call_tool` bridge method: extensions can now call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)` — results are returned directly and never enter conversation history
