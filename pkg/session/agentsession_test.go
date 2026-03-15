@@ -3053,7 +3053,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 }
 
 // ============================================================================
-// Btw
+// SideQuery
 // ============================================================================
 
 func TestSideQuery_ReturnsResponse(t *testing.T) {

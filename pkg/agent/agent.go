@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -612,7 +613,7 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (stri
 		return "", fmt.Errorf("no response from model")
 	}
 	if msg.ErrorMessage != "" {
-		return "", fmt.Errorf("%s", msg.ErrorMessage)
+		return "", errors.New(msg.ErrorMessage)
 	}
 	var sb strings.Builder
 	for _, c := range msg.Content {

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -414,4 +416,88 @@ func TestAgent_WaitForIdle_WhenNotRunning(t *testing.T) {
 func TestAgent_Abort(t *testing.T) {
 	a := NewAgent(AgentOptions{})
 	a.Abort()
+}
+
+// ============================================================================
+// SimplePrompt
+// ============================================================================
+
+func TestSimplePrompt_ReturnsText(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{
+			SystemPrompt: "you are a test assistant",
+		},
+		StreamFn:     mockStreamFn(simpleResponse("hello from simple prompt")),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	msgs := []AgentMessage{NewAgentMessage(ai.NewUserMsg("test question", 0))}
+	got, err := a.SimplePrompt(context.Background(), msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "hello from simple prompt" {
+		t.Errorf("expected %q, got %q", "hello from simple prompt", got)
+	}
+}
+
+func TestSimplePrompt_ErrorOnNoModel(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	_, err := a.SimplePrompt(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error when no model set")
+	}
+	if !strings.Contains(err.Error(), "no model") {
+		t.Errorf("expected 'no model' error, got: %v", err)
+	}
+}
+
+func TestSimplePrompt_ErrorMessageFromModel(t *testing.T) {
+	errMsg := &ai.AssistantMessage{
+		Role:         "assistant",
+		ErrorMessage: "rate limit exceeded",
+		StopReason:   ai.StopReasonStop,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(errMsg),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	_, err := a.SimplePrompt(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for error message from model")
+	}
+	if !strings.Contains(err.Error(), "rate limit exceeded") {
+		t.Errorf("expected 'rate limit exceeded' error, got: %v", err)
+	}
+}
+
+func TestSimplePrompt_DoesNotMutateAgentState(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{
+			SystemPrompt: "test",
+		},
+		StreamFn:     mockStreamFn(simpleResponse("response")),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+	a.AppendMessage(NewAgentMessage(ai.NewUserMsg("existing", 0)))
+
+	before := len(a.State().Messages)
+	msgs := []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("existing", 0)),
+		NewAgentMessage(ai.NewUserMsg("side question", 0)),
+	}
+	_, err := a.SimplePrompt(context.Background(), msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	after := len(a.State().Messages)
+	if before != after {
+		t.Errorf("agent messages changed: before=%d after=%d", before, after)
+	}
 }
