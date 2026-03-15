@@ -377,13 +377,16 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 // Reexec sidecar restore
 // ============================================================================
 
-// restoreReexecSidecar restores queued messages and pending editor input
-// from a sidecar file written by a previous /reexec invocation.
-func (m *InteractiveMode) restoreReexecSidecar() {
+// preloadReexecSidecar reads and deletes the reexec sidecar file during
+// Init() — before EmitSessionStart fires — and caches its contents on the
+// mode.  This lets the caller pass extension data to EmitSessionStart so
+// extensions receive their saved state in the session_start event params.
+// The actual application of queued messages / editor text happens later in
+// restoreReexecSidecar (called from Run).
+func (m *InteractiveMode) preloadReexecSidecar() {
 	if os.Getenv("FIR_REEXEC_CONTINUE") != "1" {
 		return
 	}
-	os.Unsetenv("FIR_REEXEC_CONTINUE")
 
 	sessionFile := m.session.SessionManager.GetSessionFile()
 	if sessionFile == "" {
@@ -392,12 +395,39 @@ func (m *InteractiveMode) restoreReexecSidecar() {
 
 	sidecar, err := store.ReadReexecSidecar(sessionFile)
 	if err != nil {
-		firlog.Debug("restoreReexecSidecar: read error", "error", err)
+		firlog.Debug("preloadReexecSidecar: read error", "error", err)
 		return
 	}
 	if sidecar == nil {
 		return
 	}
+
+	// Cache the whole sidecar; restoreReexecSidecar will apply the rest.
+	m.reexecSidecar = sidecar
+	m.reexecExtData = sidecar.ExtensionData
+}
+
+// ReexecExtData returns per-extension session data that was saved before the
+// last /reexec.  Non-nil only when this process was started by /reexec and
+// the sidecar contained extension data.  Used by app.go to pass the data to
+// EmitSessionStart before Run() is called.
+func (m *InteractiveMode) ReexecExtData() map[string]map[string]string {
+	return m.reexecExtData
+}
+
+// restoreReexecSidecar applies the queued messages and pending editor text
+// from a sidecar cached by preloadReexecSidecar.
+func (m *InteractiveMode) restoreReexecSidecar() {
+	if os.Getenv("FIR_REEXEC_CONTINUE") != "1" {
+		return
+	}
+	os.Unsetenv("FIR_REEXEC_CONTINUE")
+
+	sidecar := m.reexecSidecar
+	if sidecar == nil {
+		return
+	}
+	m.reexecSidecar = nil // release
 
 	restored := 0
 	for _, msg := range sidecar.QueueMessages {

@@ -25,6 +25,7 @@ type mockBridgeAPI struct {
 	labels          map[string]string
 	modelSet        *ai.Model
 	toolsRegistered []ToolDefinition
+	sessionData     map[string]string
 }
 
 func newMockAPI() *mockBridgeAPI {
@@ -75,6 +76,20 @@ func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
 	m.execCalled = true
 	m.execCmd = cmd
 	return ExecResult{Stdout: "ok", ExitCode: 0}, nil
+}
+func (m *mockBridgeAPI) SetSessionData(key, value string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessionData == nil {
+		m.sessionData = make(map[string]string)
+	}
+	m.sessionData[key] = value
+}
+func (m *mockBridgeAPI) GetSessionData(key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.sessionData[key]
+	return v, ok
 }
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
@@ -392,5 +407,158 @@ func TestBridge_SendUserMessage_DeliverAs(t *testing.T) {
 	}
 	if api.userMsgOpts[0].DeliverAs != "steer" {
 		t.Fatalf("got deliver_as %q, want steer", api.userMsgOpts[0].DeliverAs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session data RPC tests
+// ---------------------------------------------------------------------------
+
+func TestBridge_SetSessionData_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"key":"foo","value":"bar"}`)
+	_ = extCodec.WriteRequest(1, "set_session_data", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %v", resp.Error)
+	}
+
+	// The mock API should have recorded the value.
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		_, ok := api.sessionData["foo"]
+		return ok
+	}, "set_session_data not forwarded to API")
+
+	api.mu.Lock()
+	got := api.sessionData["foo"]
+	api.mu.Unlock()
+	if got != "bar" {
+		t.Fatalf("got %q, want %q", got, "bar")
+	}
+}
+
+func TestBridge_GetSessionData_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	// Pre-populate so get_session_data can return a value.
+	api.SetSessionData("key1", "value1")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"key":"key1"}`)
+	_ = extCodec.WriteRequest(2, "get_session_data", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %v", resp.Error)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(*resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result["value"] != "value1" {
+		t.Errorf("got value %v, want value1", result["value"])
+	}
+	if result["ok"] != true {
+		t.Errorf("got ok=%v, want true", result["ok"])
+	}
+}
+
+func TestBridge_GetSessionData_RPC_Missing(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"key":"nonexistent"}`)
+	_ = extCodec.WriteRequest(3, "get_session_data", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %v", resp.Error)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(*resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result["ok"] != false {
+		t.Errorf("got ok=%v, want false for missing key", result["ok"])
+	}
+}
+
+// TestBridge_SessionDataStore exercises the Bridge's own key/value store
+// methods (used by bridgeScopedAPI to route set/get_session_data).
+func TestBridge_SessionDataStore(t *testing.T) {
+	b, _ := pipePair(&InitResult{})
+
+	// Empty store returns ("", false).
+	v, ok := b.GetSessionData("x")
+	if ok || v != "" {
+		t.Fatalf("expected missing, got (%q, %v)", v, ok)
+	}
+
+	b.SetSessionData("alpha", "one")
+	b.SetSessionData("beta", "two")
+
+	if v, ok := b.GetSessionData("alpha"); !ok || v != "one" {
+		t.Fatalf("alpha: got (%q, %v)", v, ok)
+	}
+	if v, ok := b.GetSessionData("beta"); !ok || v != "two" {
+		t.Fatalf("beta: got (%q, %v)", v, ok)
+	}
+
+	all := b.GetAllSessionData()
+	if len(all) != 2 || all["alpha"] != "one" || all["beta"] != "two" {
+		t.Fatalf("GetAllSessionData: %v", all)
+	}
+
+	// SeedSessionData merges into existing data.
+	b.SeedSessionData(map[string]string{"gamma": "three", "alpha": "overwritten"})
+	if v, _ := b.GetSessionData("alpha"); v != "overwritten" {
+		t.Fatalf("seed overwrite: got %q", v)
+	}
+	if v, _ := b.GetSessionData("gamma"); v != "three" {
+		t.Fatalf("seed new key: got %q", v)
+	}
+
+	// GetAllSessionData snapshot is independent (no shared reference).
+	snap := b.GetAllSessionData()
+	snap["delta"] = "four"
+	if _, ok := b.GetSessionData("delta"); ok {
+		t.Fatal("snapshot modification leaked into store")
 	}
 }

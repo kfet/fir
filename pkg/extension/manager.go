@@ -323,9 +323,14 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		bridge.SetStatusFn = setStatusFn
 	}
 
+	// Wrap the shared api with a per-bridge scoped wrapper so that
+	// set_session_data / get_session_data are routed to this bridge's own
+	// storage rather than the shared SessionBridge.
+	scopedAPI := &bridgeScopedAPI{BridgeAPI: api, b: bridge}
+
 	bCtx, cancel := context.WithCancel(ctx)
 	go func() {
-		if err := bridge.Run(bCtx, api); err != nil && bCtx.Err() == nil {
+		if err := bridge.Run(bCtx, scopedAPI); err != nil && bCtx.Err() == nil {
 			m.logger.Warn("bridge exited", "ext", cfg.Name, "err", err)
 		}
 	}()
@@ -657,4 +662,61 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 	}
 
 	return CommandResult{}, fmt.Errorf("extension: no command %q registered", name)
+}
+
+// CollectSessionData returns a snapshot of every running extension's session
+// data, keyed by extension name.  Used by /reexec to persist data in the
+// sidecar file.
+func (m *Manager) CollectSessionData() map[string]map[string]string {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	out := make(map[string]map[string]string)
+	for _, mb := range bridges {
+		if d := mb.bridge.GetAllSessionData(); len(d) > 0 {
+			out[mb.cfg.Name] = d
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// SeedSessionData pre-populates per-extension session data from a previously
+// saved snapshot (e.g. a reexec sidecar).  Must be called before
+// EmitSessionStartWithData so extensions receive the data in their session_start
+// event params.
+func (m *Manager) SeedSessionData(data map[string]map[string]string) {
+	if len(data) == 0 {
+		return
+	}
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	for _, mb := range bridges {
+		if d, ok := data[mb.cfg.Name]; ok {
+			mb.bridge.SeedSessionData(d)
+		}
+	}
+}
+
+// EmitSessionStartWithData emits "session_start" to every subscribed bridge.
+// Each bridge receives its own saved session data (if any) in the event params
+// under the key "session_data", so extensions can restore state in their
+// session_start handler without a separate get_session_data call.
+func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]string) {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	for _, mb := range bridges {
+		var params map[string]any
+		if d, ok := reexecData[mb.cfg.Name]; ok && len(d) > 0 {
+			params = map[string]any{"session_data": d}
+		}
+		_ = mb.bridge.EmitEvent("session_start", params)
+	}
 }

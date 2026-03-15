@@ -7,10 +7,12 @@ import (
 )
 
 // ReexecSidecar holds state that must survive a reexec: queued follow-up
-// messages and any text the user had typed in the editor.
+// messages, any text the user had typed in the editor, and per-extension
+// key/value data saved by extensions before the exec.
 type ReexecSidecar struct {
-	QueueMessages []string `json:"queue_messages,omitempty"`
-	PendingInput  string   `json:"pending_input,omitempty"`
+	QueueMessages []string                     `json:"queue_messages,omitempty"`
+	PendingInput  string                       `json:"pending_input,omitempty"`
+	ExtensionData map[string]map[string]string `json:"extension_data,omitempty"`
 }
 
 // ReexecSidecarPath returns the sidecar file path for a given session file.

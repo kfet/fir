@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -285,6 +287,11 @@ func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
 }
 
 func TestAnthropic_StreamingError(t *testing.T) {
+	// Use zero retry delay so the test doesn't sleep through 5 backoff windows.
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
 	srv := mockSSEServer(t, "anthropic_error.sse")
 	defer srv.Close()
 
@@ -316,6 +323,73 @@ func TestAnthropic_StreamingError(t *testing.T) {
 	}
 	if !found {
 		t.Error("missing error event")
+	}
+}
+
+// TestAnthropic_OverloadedRetry verifies that StreamAnthropic transparently
+// retries on overloaded_error and succeeds once the server recovers.
+func TestAnthropic_OverloadedRetry(t *testing.T) {
+	// Use zero retry delay so the test doesn't sleep.
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	overloadedData := loadFixture(t, "anthropic_error.sse")
+	successData := loadFixture(t, "anthropic_simple_response.sse")
+
+	attempts := 0
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		attempts++
+		if attempts < 3 {
+			// First two requests return overloaded_error.
+			w.Write(overloadedData)
+		} else {
+			// Third request succeeds.
+			w.Write(successData)
+		}
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+	opts := &ai.StreamOptions{ApiKey: "test-key"}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	events := collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StopReason == ai.StopReasonError {
+		t.Errorf("expected success, got error: %s", result.ErrorMessage)
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts (2 overloaded + 1 success), got %d", attempts)
+	}
+
+	// EventStart and EventDone should be present; no EventError.
+	var hasStart, hasDone, hasErr bool
+	for _, evt := range events {
+		switch evt.Type {
+		case ai.EventStart:
+			hasStart = true
+		case ai.EventDone:
+			hasDone = true
+		case ai.EventError:
+			hasErr = true
+		}
+	}
+	if !hasStart {
+		t.Error("missing EventStart")
+	}
+	if !hasDone {
+		t.Error("missing EventDone")
+	}
+	if hasErr {
+		t.Error("unexpected EventError — retry should have been transparent")
 	}
 }
 

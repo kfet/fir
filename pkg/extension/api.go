@@ -18,6 +18,14 @@ type BridgeAPI interface {
 	ContinueSession() error
 	SideQuery(question string) (string, error)
 	RegisterTool(def ToolDefinition)
+	// SetSessionData stores a key/value pair in the extension's session data
+	// store.  Values are persisted across /reexec via the reexec sidecar and
+	// are handed back to the extension in the session_start event params under
+	// the "session_data" key.
+	SetSessionData(key, value string)
+	// GetSessionData retrieves a previously stored value.  Returns ("", false)
+	// when the key is absent.
+	GetSessionData(key string) (string, bool)
 }
 
 // ExecResult is the result of a shell command.

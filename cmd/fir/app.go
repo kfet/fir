@@ -397,7 +397,7 @@ func run() error {
 
 	// Extension lifecycle for non-interactive modes
 	if setup.extSetup != nil {
-		setup.extSetup.EmitSessionStart()
+		setup.extSetup.EmitSessionStart(nil)
 		defer func() { setup.extSetup.EmitSessionShutdown() }()
 	}
 
@@ -737,9 +737,6 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			}
 			return nil
 		})
-		// Emit session_start after the UI context is wired so that
-		// extension status callbacks are active before session_start fires.
-		setup.extSetup.EmitSessionStart()
 	}
 
 	// Wire the update notice channel so the TUI shows it at startup.
@@ -747,6 +744,13 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 
 	if err := mode.Init(); err != nil {
 		return fmt.Errorf("init interactive mode: %w", err)
+	}
+
+	// Emit session_start after Init() so that:
+	//   1. Extension status callbacks are active (UI is wired).
+	//   2. preloadReexecSidecar has run and ReexecExtData() is populated.
+	if setup.extSetup != nil {
+		setup.extSetup.EmitSessionStart(mode.ReexecExtData())
 	}
 
 	err = mode.Run(interactive.InteractiveModeOptions{

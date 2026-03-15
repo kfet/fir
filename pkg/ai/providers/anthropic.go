@@ -161,10 +161,17 @@ func normalizeAnthropicToolCallID(id string, _ *ai.Model, _ *ai.AssistantMessage
 	return b.String()
 }
 
+// anthropicRetryDelayFn may be replaced in tests to avoid real sleeps.
+// The signature matches anthropicRetryDelay so tests can inject zero delays.
+var anthropicRetryDelayFn func(errMsg string, attempt int, maxDelayMs *int) time.Duration
+
 // anthropicRetryDelay returns the wait duration before retry attempt n (0-based).
 // It honours any server-provided delay in the error message, then falls back to
 // exponential backoff (5 s, 10 s, 20 s, …) capped by maxDelayMs when set.
 func anthropicRetryDelay(errMsg string, attempt int, maxDelayMs *int) time.Duration {
+	if anthropicRetryDelayFn != nil {
+		return anthropicRetryDelayFn(errMsg, attempt, maxDelayMs)
+	}
 	delay := ratelimit.ExtractRetryDelayFromText(errMsg)
 	if delay == 0 {
 		secs := 5 * math.Pow(2, float64(attempt))
@@ -498,7 +505,14 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				}
 			}
 
-			// Drain the SSE error channel (always present, may be nil).
+			// Drain any remaining SSE events so the upstream goroutine can exit
+			// cleanly.  In the normal path the for-range above already drained the
+			// channel; in the early-break (retryNeeded) path this unblocks the
+			// goroutine so it can close errCh and we can receive below.
+			for range sseEvents {
+			}
+
+			// Collect the SSE-layer error (nil on clean end-of-stream).
 			sseErrVal := <-sseErr
 
 			if retryNeeded {

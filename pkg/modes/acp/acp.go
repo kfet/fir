@@ -254,7 +254,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		})
 		if err == nil && extSetup != nil {
 			entry.extSetup = extSetup
-			extSetup.EmitSessionStart()
+			extSetup.EmitSessionStart(nil)
 		}
 	}
 

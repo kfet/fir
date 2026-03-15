@@ -21,6 +21,7 @@ import (
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
@@ -77,6 +78,15 @@ type InteractiveMode struct {
 	reexecBinary   string
 	reexecArgs     []string
 	lastEscapeTime time.Time
+
+	// reexecExtData holds per-extension session data read from the reexec
+	// sidecar during Init().  It is passed to EmitSessionStart so extensions
+	// receive their saved state in the session_start event params.
+	reexecExtData map[string]map[string]string
+
+	// reexecSidecar is the full sidecar read during Init(); consumed by
+	// restoreReexecSidecar in Run().
+	reexecSidecar *store.ReexecSidecar
 
 	// Loading animation
 	loadingAnimation *tuicomp.Loader
@@ -292,6 +302,11 @@ func (m *InteractiveMode) Init() error {
 	if m.updateCh != nil {
 		m.startUpdateNoticeWatcher()
 	}
+
+	// Pre-read the reexec sidecar so that extension data is available to
+	// EmitSessionStart (called by the caller after Init returns).  The full
+	// sidecar restore (queued messages, editor text) still happens inside Run().
+	m.preloadReexecSidecar()
 
 	return nil
 }

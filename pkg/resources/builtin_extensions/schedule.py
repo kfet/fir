@@ -5,6 +5,7 @@
 # builtin: false
 # modes: tui
 # commands: schedule: Schedule the agent to continue at a future time
+# events: session_start, session_shutdown
 # ---
 """Schedule the agent session to resume at a future time.
 
@@ -399,6 +400,105 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
             f"(at {_format_time(target)})."
         )
     }
+
+
+# ---------------------------------------------------------------------------
+# Session persistence (survive /reexec)
+# ---------------------------------------------------------------------------
+
+_SESSION_DATA_KEY = "schedules"
+
+
+def _serialize_schedules() -> str:
+    """Serialize active schedules to a JSON string for session storage."""
+    import json
+    with _lock:
+        entries = list(_schedules.values())
+    records = [
+        {"id": e.id, "target_iso": e.target.isoformat(), "message": e.message}
+        for e in entries
+    ]
+    return json.dumps(records)
+
+
+def _restore_schedules(data: str, ctx: fir_ext.Context) -> int:
+    """Deserialize and restart countdown threads for previously active schedules.
+
+    Returns the number of schedules successfully restored.
+    """
+    import json
+    from datetime import datetime
+    try:
+        records = json.loads(data)
+    except Exception:
+        return 0
+
+    restored = 0
+    max_n = 0
+    for rec in records:
+        try:
+            target = datetime.fromisoformat(rec["target_iso"])
+            message = rec.get("message")
+            sid = rec["id"]
+        except (KeyError, ValueError):
+            continue
+
+        # Skip already-elapsed schedules.
+        if target <= _now():
+            continue
+
+        # Track the highest numeric suffix so we can bump the counter.
+        with contextlib.suppress(ValueError):
+            max_n = max(max_n, int(sid.lstrip("s")))
+
+        stop = threading.Event()
+        entry = _ScheduleEntry(
+            id=sid, target=target, message=message, stop_event=stop,
+        )
+        t = threading.Thread(
+            target=_run_countdown,
+            args=(sid, target, stop, ctx, message),
+            daemon=True,
+        )
+        entry.thread = t
+
+        with _lock:
+            _schedules[sid] = entry
+
+        t.start()
+        restored += 1
+
+    # Advance the global ID counter past all restored IDs so new schedules
+    # don't collide with them.
+    if max_n > 0:
+        global _id_counter
+        _id_counter = itertools.count(max_n + 1)
+
+    return restored
+
+
+@fir_ext.on("session_start")
+def on_session_start(params: dict, ctx: fir_ext.Context) -> None:
+    """Restore schedules that were active before a /reexec."""
+    session_data = (params or {}).get("session_data") or {}
+    serialized = session_data.get(_SESSION_DATA_KEY)
+    if not serialized:
+        return
+
+    restored = _restore_schedules(serialized, ctx)
+    if restored:
+        _update_status(ctx)
+
+
+@fir_ext.on("session_shutdown")
+def on_session_shutdown(params: dict, ctx: fir_ext.Context) -> None:
+    """Save active schedules so they can be restored after /reexec."""
+    with _lock:
+        if not _schedules:
+            return
+    serialized = _serialize_schedules()
+    with contextlib.suppress(Exception):
+        ctx.set_session_data(_SESSION_DATA_KEY, serialized)
 
 
 fir_ext.run(name="schedule")

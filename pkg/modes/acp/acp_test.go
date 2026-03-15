@@ -1218,6 +1218,8 @@ func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                              
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
 func (n *noopBridgeAPI) SideQuery(_ string) (string, error)                                         { return "", nil }
 func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                    {}
+func (n *noopBridgeAPI) SetSessionData(_, _ string)                                                 {}
+func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)                                     { return "", false }
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command

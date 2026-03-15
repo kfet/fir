@@ -146,6 +146,12 @@ func (b *SessionBridge) SideQuery(question string) (string, error) {
 	return b.session.SideQuery(context.Background(), question)
 }
 
+// SetSessionData / GetSessionData on SessionBridge are no-ops: the real
+// per-extension routing is done by bridgeScopedAPI in bridge_api.go, which
+// intercepts these calls before they reach SessionBridge.
+func (b *SessionBridge) SetSessionData(_, _ string)             {}
+func (b *SessionBridge) GetSessionData(_ string) (string, bool) { return "", false }
+
 // RegisterTool adds an externally-defined tool to the session's agent.
 // The tool is wrapped with the session's hook interceptors so that
 // hook/tool_call interception still fires for it.

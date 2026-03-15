@@ -325,6 +325,26 @@ class Context:
         """Set the display name for the session."""
         self._call("set_session_name", {"name": name})
 
+    def set_session_data(self, key: str, value: str) -> None:
+        """Store a key/value pair in this extension's session data store.
+
+        Values are persisted across ``/reexec`` via the reexec sidecar and are
+        handed back to the extension in the ``session_start`` event params
+        under the ``"session_data"`` key, so state can be restored without an
+        explicit ``get_session_data`` call.
+        """
+        self._call("set_session_data", {"key": key, "value": value})
+
+    def get_session_data(self, key: str) -> str | None:
+        """Retrieve a value previously stored with ``set_session_data``.
+
+        Returns the stored string, or ``None`` if the key is absent.
+        """
+        result = self._call("get_session_data", {"key": key})
+        if isinstance(result, dict) and result.get("ok"):
+            return result.get("value")
+        return None
+
     def set_label(self, entry_id: str, label: str) -> None:
         """Set a label on a session entry."""
         self._call("set_label", {"entry_id": entry_id, "label": label})

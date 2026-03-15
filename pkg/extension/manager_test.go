@@ -524,3 +524,68 @@ func TestManager_EnabledExtensionNames_FromRunningExtensions(t *testing.T) {
 		t.Fatalf("EnabledExtensionNames = %v, want [cmd-ext]", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CollectSessionData / SeedSessionData tests
+// ---------------------------------------------------------------------------
+
+func TestManager_CollectSessionData(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cleanup := makeCmdBridge(t, mgr, nil, func(string, []string) CommandResult { return CommandResult{} })
+	defer cleanup()
+
+	// Verify empty store returns nil.
+	if got := mgr.CollectSessionData(); got != nil {
+		t.Fatalf("expected nil for empty store, got %v", got)
+	}
+
+	// Write directly to the bridge's store.
+	mgr.mu.Lock()
+	b := mgr.bridges[0].bridge
+	mgr.mu.Unlock()
+
+	b.SetSessionData("k1", "v1")
+	b.SetSessionData("k2", "v2")
+
+	data := mgr.CollectSessionData()
+	if len(data) != 1 {
+		t.Fatalf("expected 1 extension entry, got %d", len(data))
+	}
+	extData, ok := data["cmd-ext"]
+	if !ok {
+		t.Fatal("expected entry for 'cmd-ext'")
+	}
+	if extData["k1"] != "v1" || extData["k2"] != "v2" {
+		t.Fatalf("unexpected data: %v", extData)
+	}
+}
+
+func TestManager_SeedSessionData(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cleanup := makeCmdBridge(t, mgr, nil, func(string, []string) CommandResult { return CommandResult{} })
+	defer cleanup()
+
+	mgr.SeedSessionData(map[string]map[string]string{
+		"cmd-ext": {"seeded": "yes"},
+	})
+
+	mgr.mu.Lock()
+	b := mgr.bridges[0].bridge
+	mgr.mu.Unlock()
+
+	v, ok := b.GetSessionData("seeded")
+	if !ok || v != "yes" {
+		t.Fatalf("expected seeded=yes, got (%q, %v)", v, ok)
+	}
+}
+
+func TestManager_SeedSessionData_UnknownExtIgnored(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	cleanup := makeCmdBridge(t, mgr, nil, func(string, []string) CommandResult { return CommandResult{} })
+	defer cleanup()
+
+	// Should not panic or error for an extension name not in bridges.
+	mgr.SeedSessionData(map[string]map[string]string{
+		"nonexistent-ext": {"k": "v"},
+	})
+}

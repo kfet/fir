@@ -1160,10 +1160,13 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 
 	sessionBase := filepath.Base(sessionFile)
 
-	// Save queue and pending input to survive the exec.
+	// Save queue, pending input, and extension session data to survive the exec.
 	queueTexts := m.session.PeekFollowUpQueue()
 	sc := &store.ReexecSidecar{
 		QueueMessages: queueTexts,
+	}
+	if m.extSetup != nil && m.extSetup.Manager != nil {
+		sc.ExtensionData = m.extSetup.Manager.CollectSessionData()
 	}
 	if err := store.WriteReexecSidecar(sessionFile, sc); err != nil {
 		// Non-fatal, but warn the user.

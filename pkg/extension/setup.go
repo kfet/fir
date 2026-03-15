@@ -88,9 +88,19 @@ func (r *SetupResult) Stop() {
 // EmitSessionStart emits session_start to all running extensions.
 // If the session has an existing name (e.g. resumed via --session or /reexec),
 // a session_named event follows so extensions can sync with it.
-func (r *SetupResult) EmitSessionStart() {
+// reexecData, when non-nil, is seeded into each extension's session data store
+// before the event fires, and is also passed as "session_data" in the event
+// params so extensions can restore state immediately in their handler.
+func (r *SetupResult) EmitSessionStart(reexecData map[string]map[string]string) {
 	if r.Manager != nil {
-		r.Manager.EmitEvent("session_start", nil)
+		// Seed per-extension data before the event so handlers can call
+		// ctx.get_session_data() and also receive it in params.
+		if len(reexecData) > 0 {
+			r.Manager.SeedSessionData(reexecData)
+		}
+
+		// Build per-extension params: each extension only sees its own data.
+		r.Manager.EmitSessionStartWithData(reexecData)
 
 		// Emit session_named for resumed sessions so extensions like
 		// tmuxspinner can distinguish the session suffix from the

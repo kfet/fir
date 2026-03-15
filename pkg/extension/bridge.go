@@ -38,6 +38,10 @@ type Bridge struct {
 	// pending tracks outbound requests waiting for a response.
 	pendingMu sync.Mutex
 	pending   map[int64]chan *Response
+
+	// sessionData is a per-extension key/value store persisted across /reexec.
+	sessionDataMu sync.RWMutex
+	sessionData   map[string]string
 }
 
 // NewBridge creates a Bridge wrapping the given Process and its capabilities.
@@ -282,6 +286,33 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = map[string]any{"ok": true, "text": text}
 		}
 
+	case "set_session_data":
+		var p struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		api.SetSessionData(p.Key, p.Value)
+		result = map[string]any{"ok": true}
+
+	case "get_session_data":
+		var p struct {
+			Key string `json:"key"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		value, ok := api.GetSessionData(p.Key)
+		result = map[string]any{"value": value, "ok": ok}
+
 	default:
 		rpcErr = &Error{Code: -32601, Message: "method not found: " + req.Method}
 	}
@@ -402,5 +433,57 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 				return result, nil
 			},
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-extension session data (persisted across /reexec via sidecar)
+// ---------------------------------------------------------------------------
+
+// SetSessionData stores key→value in this bridge's session data map.
+// Called by the BridgeAPI implementation when the extension calls set_session_data.
+func (b *Bridge) SetSessionData(key, value string) {
+	b.sessionDataMu.Lock()
+	defer b.sessionDataMu.Unlock()
+	if b.sessionData == nil {
+		b.sessionData = make(map[string]string)
+	}
+	b.sessionData[key] = value
+}
+
+// GetSessionData retrieves a value from this bridge's session data map.
+func (b *Bridge) GetSessionData(key string) (string, bool) {
+	b.sessionDataMu.RLock()
+	defer b.sessionDataMu.RUnlock()
+	v, ok := b.sessionData[key]
+	return v, ok
+}
+
+// GetAllSessionData returns a snapshot of this bridge's entire session data map.
+func (b *Bridge) GetAllSessionData() map[string]string {
+	b.sessionDataMu.RLock()
+	defer b.sessionDataMu.RUnlock()
+	if len(b.sessionData) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(b.sessionData))
+	for k, v := range b.sessionData {
+		out[k] = v
+	}
+	return out
+}
+
+// SeedSessionData pre-populates session data (called on startup with reexec sidecar data).
+func (b *Bridge) SeedSessionData(data map[string]string) {
+	if len(data) == 0 {
+		return
+	}
+	b.sessionDataMu.Lock()
+	defer b.sessionDataMu.Unlock()
+	if b.sessionData == nil {
+		b.sessionData = make(map[string]string, len(data))
+	}
+	for k, v := range data {
+		b.sessionData[k] = v
 	}
 }
