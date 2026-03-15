@@ -8,7 +8,7 @@
 
 Provides two tools the agent uses to drive an iterative optimisation loop:
 
-  run_experiment   Run autoresearch.sh, parse METRIC lines, return results.
+  run_experiment   Run autoresearch_bench.sh, parse METRIC lines, return results.
   log_experiment   Append a JSONL record to autoresearch.jsonl.
 
 And one slash command:
@@ -88,7 +88,7 @@ def _current_commit(cwd: str) -> str:
 @fir_ext.tool(
     name="run_experiment",
     description=(
-        "Run autoresearch.sh (the benchmark script) and return the metrics it reports. "
+        "Run autoresearch_bench.sh (the benchmark script) and return the metrics it reports. "
         "The script must output lines of the form 'METRIC name=value' for each metric. "
         "Returns: metrics (dict), stdout, stderr, exit_code, and success flag."
     ),
@@ -98,7 +98,7 @@ def _current_commit(cwd: str) -> str:
             "cwd": {
                 "type": "string",
                 "description": (
-                    "Working directory containing autoresearch.sh. "
+                    "Working directory containing autoresearch_bench.sh. "
                     "Defaults to the current directory if omitted."
                 ),
             },
@@ -114,11 +114,14 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     cwd = params.get("cwd") or os.getcwd()
     timeout = float(params.get("timeout") or 300)
 
-    script = Path(cwd) / "autoresearch.sh"
+    # Prefer autoresearch_bench.sh, fall back to autoresearch.sh
+    script = Path(cwd) / "autoresearch_bench.sh"
+    if not script.exists():
+        script = Path(cwd) / "autoresearch.sh"
     if not script.exists():
         raise fir_ext.ToolError(
-            f"autoresearch.sh not found in {cwd}. "
-            "Create it with a benchmark that outputs 'METRIC name=value' lines."
+            f"No benchmark script found in {cwd}. "
+            "Create autoresearch_bench.sh with a benchmark that outputs 'METRIC name=value' lines."
         )
 
     ctx.set_status("⚗️  running experiment…")
@@ -250,14 +253,8 @@ def log_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
     baseline_value: float | None = params.get("baseline_value")
 
     delta_pct: float | None = None
-    if (
-        primary_value is not None
-        and baseline_value is not None
-        and baseline_value != 0
-    ):
-        delta_pct = round(
-            (primary_value - baseline_value) / abs(baseline_value) * 100, 2
-        )
+    if primary_value is not None and baseline_value is not None and baseline_value != 0:
+        delta_pct = round((primary_value - baseline_value) / abs(baseline_value) * 100, 2)
 
     record: dict[str, Any] = {
         "timestamp": datetime.now(tz=UTC).isoformat(),
@@ -395,9 +392,7 @@ def cmd_autoresearch(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         else:
             delta_str = "—"
         desc = (e.get("description") or "")[:60]
-        icon = {"baseline": "📏", "keep": "✅", "revert": "❌", "error": "💥"}.get(
-            status, "?"
-        )
+        icon = {"baseline": "📏", "keep": "✅", "revert": "❌", "error": "💥"}.get(status, "?")
         lines.append(f"| {n} | {icon} {status} | {val_str} | {delta_str} | {desc} |")
 
     return {"message": "\n".join(lines)}

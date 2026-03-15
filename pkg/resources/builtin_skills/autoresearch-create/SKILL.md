@@ -32,12 +32,31 @@ Ask (or infer) the following; confirm before proceeding:
 git checkout -b autoresearch/<short-slug>
 ```
 
-### 1b. Write `autoresearch.sh`
+### 1b. Write `autoresearch_bench.sh`
 
-Benchmark script at repo root. Must emit `METRIC name=value` for each metric.
+Create a **project-specific** benchmark script at repo root. You must write this
+fresh for every project — do NOT copy a generic template blindly.
+
+**Requirements:**
+- The script must emit one or more lines matching `METRIC name=value` on stdout.
+- `name` must match the primary metric agreed in Phase 0.
+- `value` must be numeric (integer or float).
+- The script must exit 0 on success, non-zero on failure.
+- It should be fast enough to run repeatedly (ideally < 60 s).
+
+**How to write it:**
+1. Look at the project: What language? What build system? What are you measuring?
+2. Write the simplest possible shell script that runs the relevant command and
+   extracts/computes the metric.
+3. If measuring **time**, wrap the command with epoch-millis math.
+4. If measuring **size**, use `stat`, `wc`, or similar after a build step.
+5. If measuring **accuracy/score**, run the eval command and parse its output.
+
+**Examples for inspiration** (adapt, don't copy):
 
 ```bash
 #!/usr/bin/env bash
+# Timing a Go test suite
 START=$(date +%s%3N)
 go test ./... -count=1 -timeout 120s > /dev/null 2>&1
 END=$(date +%s%3N)
@@ -45,10 +64,43 @@ echo "METRIC test_ms=$((END - START))"
 ```
 
 ```bash
-chmod +x autoresearch.sh
+#!/usr/bin/env bash
+# Binary size after build
+cargo build --release 2>/dev/null
+SIZE=$(stat -f%z target/release/mybin 2>/dev/null || stat -c%s target/release/mybin)
+echo "METRIC binary_bytes=$SIZE"
+```
+
+```bash
+#!/usr/bin/env bash
+# Python test suite timing + pass rate
+START=$(date +%s%3N)
+OUTPUT=$(python -m pytest tests/ -q 2>&1)
+EXIT=$?
+END=$(date +%s%3N)
+echo "METRIC test_ms=$((END - START))"
+PASSED=$(echo "$OUTPUT" | grep -oP '\d+ passed' | grep -oP '\d+')
+TOTAL=$(echo "$OUTPUT" | grep -oP '\d+ (passed|failed)' | grep -oP '\d+' | paste -sd+ | bc)
+[ -n "$TOTAL" ] && [ "$TOTAL" -gt 0 ] && echo "METRIC pass_rate=$(echo "scale=2; $PASSED/$TOTAL*100" | bc)"
+exit $EXIT
+```
+
+```bash
+#!/usr/bin/env bash
+# JS bundle size
+npm run build --silent 2>/dev/null
+SIZE=$(wc -c < dist/index.js | tr -d ' ')
+echo "METRIC bundle_bytes=$SIZE"
+```
+
+After writing the script:
+
+```bash
+chmod +x autoresearch_bench.sh
 ```
 
 Run it manually to confirm at least one `METRIC` line appears before continuing.
+If it fails or emits no metrics, fix it before moving on.
 
 ### 1c. Write `autoresearch.md`
 

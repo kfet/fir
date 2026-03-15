@@ -95,7 +95,7 @@ The `autoresearch` builtin extension provides an autonomous optimisation loop. I
 registers two agent tools and one slash command:
 
 **Tools (called by the agent during a loop):**
-- `run_experiment` — runs `autoresearch.sh` in the repo root, parses every
+- `run_experiment` — runs `autoresearch_bench.sh` in the repo root, parses every
   `METRIC name=value` line from stdout, and returns a structured metrics dict.
 - `log_experiment` — appends a JSONL record to `autoresearch.jsonl` (timestamp,
   description, hypothesis, metrics, delta%, status).
@@ -123,7 +123,7 @@ Sets up and drives an autonomous optimisation loop (inspired by
 Invoke it by telling fir: *"use the autoresearch-create skill to optimise \<goal\>"*
 
 The skill guides through:
-1. **Setup** — create a git branch, write `autoresearch.sh` (benchmark) and
+1. **Setup** — create a git branch, write `autoresearch_bench.sh` (benchmark) and
    `autoresearch.md` (living memory doc), run and log the baseline.
 2. **Loop** — pick hypothesis → edit code → commit → `run_experiment` →
    `log_experiment` → keep or `git reset --hard HEAD~1` → repeat.

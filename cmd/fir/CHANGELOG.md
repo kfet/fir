@@ -19,7 +19,7 @@
 - `ExtraExtensionDirs`/`ExtraExtensionFiles` on `extension.SetupOptions`; `ConfigsFromFiles`/`DiscoverExtra` in `pkg/extension/discovery`
 - `fir.json` package manifest format for declaring which resources a package exports
 - `/btw <question>` slash command — ask a side question using the current session context; the Q&A is never added to history and works even while the agent is streaming
-- `autoresearch` builtin extension: `run_experiment` tool (runs `autoresearch.sh`, parses `METRIC name=value` lines), `log_experiment` tool (appends to `autoresearch.jsonl`), and `/autoresearch` slash command (experiment log summary)
+- `autoresearch` builtin extension: `run_experiment` tool (runs `autoresearch_bench.sh`, parses `METRIC name=value` lines), `log_experiment` tool (appends to `autoresearch.jsonl`), and `/autoresearch` slash command (experiment log summary)
 - `autoresearch-create` builtin skill: sets up and drives an autonomous optimisation loop — benchmark, hypothesis, commit, run, keep/revert, repeat (inspired by [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch))
 - `/simplify [focus]` builtin extension — reviews recent git changes (staged, unstaged, or last commit) and asks the agent to apply simplifications across code reuse, quality, and efficiency; optional focus text narrows the review
 

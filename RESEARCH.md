@@ -21,7 +21,7 @@ Two tools are registered:
 
 | Tool | Purpose |
 |---|---|
-| `run_experiment` | Runs `autoresearch.sh`, captures stdout/stderr, parses every `METRIC name=value` line, returns structured metrics + raw output |
+| `run_experiment` | Runs `autoresearch_bench.sh`, captures stdout/stderr, parses every `METRIC name=value` line, returns structured metrics + raw output |
 | `log_experiment` | Appends a JSONL record to `autoresearch.jsonl` (timestamp, description, metrics, status: `keep`/`revert`/`baseline`) |
 
 Key design choices:
@@ -43,7 +43,7 @@ Instructions that tell the agent:
    - Wins (changes that improved the metric)
    - Dead ends (tried and failed)
    - Current best metric
-4. **Create `autoresearch.sh`**: the benchmark script. Must output `METRIC name=value`
+4. **Create `autoresearch_bench.sh`**: the benchmark script. Must output `METRIC name=value`
    for each metric.
 5. **Run baseline** via `run_experiment`; log via `log_experiment` with `status=baseline`.
 6. **Loop** (until told to stop or target reached):
