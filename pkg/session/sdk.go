@@ -101,6 +101,9 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		modelRegistry = models.NewModelRegistry(authStorage, models.DefaultModelsJsonPath(agentDir))
 	}
 
+	// Start background fetch of live model lists from provider APIs.
+	modelRegistry.StartLiveModelFetch(ctx, filepath.Join(agentDir, "cache"))
+
 	// Settings
 	settingsManager := opts.SettingsManager
 	if settingsManager == nil {
