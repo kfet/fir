@@ -93,13 +93,7 @@ func (r *SetupResult) Stop() {
 // params so extensions can restore state immediately in their handler.
 func (r *SetupResult) EmitSessionStart(reexecData map[string]map[string]string) {
 	if r.Manager != nil {
-		// Seed per-extension data before the event so handlers can call
-		// ctx.get_session_data() and also receive it in params.
-		if len(reexecData) > 0 {
-			r.Manager.SeedSessionData(reexecData)
-		}
-
-		// Build per-extension params: each extension only sees its own data.
+		// EmitSessionStartWithData seeds per-extension data and fires the event.
 		r.Manager.EmitSessionStartWithData(reexecData)
 
 		// Emit session_named for resumed sessions so extensions like

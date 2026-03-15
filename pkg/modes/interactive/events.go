@@ -404,7 +404,6 @@ func (m *InteractiveMode) preloadReexecSidecar() {
 
 	// Cache the whole sidecar; restoreReexecSidecar will apply the rest.
 	m.reexecSidecar = sidecar
-	m.reexecExtData = sidecar.ExtensionData
 }
 
 // ReexecExtData returns per-extension session data that was saved before the
@@ -412,7 +411,10 @@ func (m *InteractiveMode) preloadReexecSidecar() {
 // the sidecar contained extension data.  Used by app.go to pass the data to
 // EmitSessionStart before Run() is called.
 func (m *InteractiveMode) ReexecExtData() map[string]map[string]string {
-	return m.reexecExtData
+	if m.reexecSidecar == nil {
+		return nil
+	}
+	return m.reexecSidecar.ExtensionData
 }
 
 // restoreReexecSidecar applies the queued messages and pending editor text

@@ -666,28 +666,28 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 
 // CollectSessionData returns a snapshot of every running extension's session
 // data, keyed by extension name.  Used by /reexec to persist data in the
-// sidecar file.
+// sidecar file.  Returns nil when no extension has stored any data.
 func (m *Manager) CollectSessionData() map[string]map[string]string {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
 
-	out := make(map[string]map[string]string)
+	var out map[string]map[string]string
 	for _, mb := range bridges {
 		if d := mb.bridge.GetAllSessionData(); len(d) > 0 {
+			if out == nil {
+				out = make(map[string]map[string]string)
+			}
 			out[mb.cfg.Name] = d
 		}
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }
 
 // SeedSessionData pre-populates per-extension session data from a previously
-// saved snapshot (e.g. a reexec sidecar).  Must be called before
-// EmitSessionStartWithData so extensions receive the data in their session_start
-// event params.
+// saved snapshot (e.g. a reexec sidecar).  Note: EmitSessionStartWithData
+// already calls Bridge.SeedSessionData internally, so this method is only
+// needed when seeding data without emitting an event.
 func (m *Manager) SeedSessionData(data map[string]map[string]string) {
 	if len(data) == 0 {
 		return
@@ -707,6 +707,8 @@ func (m *Manager) SeedSessionData(data map[string]map[string]string) {
 // Each bridge receives its own saved session data (if any) in the event params
 // under the key "session_data", so extensions can restore state in their
 // session_start handler without a separate get_session_data call.
+// The data is also seeded into each bridge's store so ctx.get_session_data()
+// works throughout the session.
 func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]string) {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
@@ -715,6 +717,7 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 	for _, mb := range bridges {
 		var params map[string]any
 		if d, ok := reexecData[mb.cfg.Name]; ok && len(d) > 0 {
+			mb.bridge.SeedSessionData(d)
 			params = map[string]any{"session_data": d}
 		}
 		_ = mb.bridge.EmitEvent("session_start", params)

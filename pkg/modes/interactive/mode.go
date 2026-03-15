@@ -79,13 +79,9 @@ type InteractiveMode struct {
 	reexecArgs     []string
 	lastEscapeTime time.Time
 
-	// reexecExtData holds per-extension session data read from the reexec
-	// sidecar during Init().  It is passed to EmitSessionStart so extensions
-	// receive their saved state in the session_start event params.
-	reexecExtData map[string]map[string]string
-
 	// reexecSidecar is the full sidecar read during Init(); consumed by
-	// restoreReexecSidecar in Run().
+	// restoreReexecSidecar in Run().  ReexecExtData() exposes the extension
+	// data portion so app.go can pass it to EmitSessionStart.
 	reexecSidecar *store.ReexecSidecar
 
 	// Loading animation

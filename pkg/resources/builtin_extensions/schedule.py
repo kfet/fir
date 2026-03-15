@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import json
 import re
 import threading
 from datetime import UTC, datetime, timedelta
@@ -411,7 +412,6 @@ _SESSION_DATA_KEY = "schedules"
 
 def _serialize_schedules() -> str:
     """Serialize active schedules to a JSON string for session storage."""
-    import json
     with _lock:
         entries = list(_schedules.values())
     records = [
@@ -426,8 +426,6 @@ def _restore_schedules(data: str, ctx: fir_ext.Context) -> int:
 
     Returns the number of schedules successfully restored.
     """
-    import json
-    from datetime import datetime
     try:
         records = json.loads(data)
     except Exception:
@@ -480,7 +478,9 @@ def _restore_schedules(data: str, ctx: fir_ext.Context) -> int:
 @fir_ext.on("session_start")
 def on_session_start(params: dict, ctx: fir_ext.Context) -> None:
     """Restore schedules that were active before a /reexec."""
-    session_data = (params or {}).get("session_data") or {}
+    session_data = params.get("session_data") if params else None
+    if not session_data:
+        return
     serialized = session_data.get(_SESSION_DATA_KEY)
     if not serialized:
         return

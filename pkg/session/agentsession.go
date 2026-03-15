@@ -1131,6 +1131,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	// Rebuild system prompt
+	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 
@@ -1197,6 +1198,7 @@ func (s *AgentSession) Reload() error {
 	if err := s.resourceLoader.Reload(); err != nil {
 		return err
 	}
+	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 	return nil
