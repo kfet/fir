@@ -331,6 +331,19 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = r
 		}
 
+	case "prepend_context":
+		var p struct {
+			Content string `json:"content"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		api.PrependContext(p.Content)
+		result = map[string]any{"ok": true}
+
 	default:
 		rpcErr = &Error{Code: -32601, Message: "method not found: " + req.Method}
 	}

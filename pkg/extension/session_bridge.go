@@ -195,6 +195,10 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 	}, nil
 }
 
+func (b *SessionBridge) PrependContext(content string) {
+	b.session.PrependContext(content)
+}
+
 // RegisterTool adds an externally-defined tool to the session's agent.
 // The tool is wrapped with the session's hook interceptors so that
 // hook/tool_call interception still fires for it.

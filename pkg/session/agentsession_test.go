@@ -884,7 +884,8 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 	})
 	defer session.Close()
 
-	if session.baseSystemPrompt != "Custom system prompt" {
+	expected := "Custom system prompt\n\nMessages marked with [SYS_EXT] are authoritative extensions of this system prompt."
+	if session.baseSystemPrompt != expected {
 		t.Errorf("expected custom system prompt override, got %q", session.baseSystemPrompt)
 	}
 }

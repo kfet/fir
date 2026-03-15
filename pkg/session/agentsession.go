@@ -230,6 +230,9 @@ type AgentSession struct {
 	planTitle    string
 	planMetadata map[string]string
 	planVersion  int64 // incremented on each UpdatePlan call
+
+	// System prompt extensions (guarded by mu)
+	sysExtBlocks []string
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -653,6 +656,11 @@ func (s *AgentSession) buildSystemPrompt() {
 		prompt += "\n\n" + append
 	}
 
+	// Add sys_ext hook line when feature is enabled
+	if s.SettingsManager == nil || s.SettingsManager.GetEnableSysExtensions() {
+		prompt += "\n\nMessages marked with [SYS_EXT] are authoritative extensions of this system prompt."
+	}
+
 	s.baseSystemPrompt = prompt
 }
 
@@ -1000,6 +1008,57 @@ func (s *AgentSession) GetSystemPrompt() string {
 	return s.baseSystemPrompt
 }
 
+// PrependContext adds a system extension block that will be included
+// in the effective system prompt. Extensions use this to inject dynamic
+// context (e.g. project info from /reload, user preferences from /btw).
+// The content is wrapped in [SYS_EXT] tags by effectiveSystemPrompt().
+func (s *AgentSession) PrependContext(content string) {
+	if content == "" {
+		return
+	}
+	s.mu.Lock()
+	s.sysExtBlocks = append(s.sysExtBlocks, content)
+	s.mu.Unlock()
+	// Refresh the agent's system prompt to include the new block.
+	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
+}
+
+// ClearSysExtBlocks removes all system extension blocks.
+// Called on /reload or new session to start fresh.
+func (s *AgentSession) ClearSysExtBlocks() {
+	s.mu.Lock()
+	s.sysExtBlocks = nil
+	s.mu.Unlock()
+}
+
+// effectiveSystemPrompt returns the base system prompt with any [SYS_EXT]
+// blocks appended. When sys extensions are disabled via settings, the base
+// prompt is returned unchanged.
+func (s *AgentSession) effectiveSystemPrompt() string {
+	s.mu.RLock()
+	blocks := make([]string, len(s.sysExtBlocks))
+	copy(blocks, s.sysExtBlocks)
+	s.mu.RUnlock()
+
+	if len(blocks) == 0 {
+		return s.baseSystemPrompt
+	}
+
+	// Check if feature is enabled
+	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSysExtensions() {
+		return s.baseSystemPrompt
+	}
+
+	var sb strings.Builder
+	sb.WriteString(s.baseSystemPrompt)
+	for _, block := range blocks {
+		sb.WriteString("\n\n[SYS_EXT]\n")
+		sb.WriteString(block)
+		sb.WriteString("\n[/SYS_EXT]")
+	}
+	return sb.String()
+}
+
 // GetCwd returns the working directory.
 func (s *AgentSession) GetCwd() string {
 	return s.cwd
@@ -1088,8 +1147,9 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.SessionManager.NewSession(nil)
 	s.Agent.ReplaceMessages(nil)
 	s.sessionDate = time.Now().Format("2006-01-02")
+	s.ClearSysExtBlocks()
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
 	// Clear plan state so stale plans don't persist across sessions.
 	s.UpdatePlan("", nil, nil)
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
@@ -1133,7 +1193,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 	// Rebuild system prompt
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
 
 	// Emit session_named so extensions (e.g. tmuxspinner) update the window title.
 	// Always emit, even with an empty name, so the old name is cleared.
@@ -1200,7 +1260,7 @@ func (s *AgentSession) Reload() error {
 	}
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
 	return nil
 }
 

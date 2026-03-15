@@ -419,6 +419,20 @@ class Context:
             return result
         return {"content": [{"text": str(result)}], "is_error": False}
 
+    def prepend(self, content: str) -> None:
+        """Add a [SYS_EXT] block to the system prompt.
+
+        Extensions use this to inject dynamic context that the LLM treats
+        as an authoritative extension of the system prompt. The content is
+        wrapped in ``[SYS_EXT]`` tags automatically by the runtime.
+
+        Parameters
+        ----------
+        content : str
+            The context to prepend (e.g. project info, user preferences).
+        """
+        self._call("prepend_context", {"content": content})
+
 
 # ---------------------------------------------------------------------------
 # Main loop

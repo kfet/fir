@@ -85,6 +85,7 @@ type Settings struct {
 	Prompts                []string                  `json:"prompts,omitempty"`
 	Themes                 []string                  `json:"themes,omitempty"`
 	EnableSkillCommands    *bool                     `json:"enableSkillCommands,omitempty"`
+	EnableSysExtensions    *bool                     `json:"enableSysExtensions,omitempty"`
 	Terminal               *TerminalSettings         `json:"terminal,omitempty"`
 	Images                 *ImageSettings            `json:"images,omitempty"`
 	EnabledModels          []string                  `json:"enabledModels,omitempty"`
@@ -119,6 +120,7 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeBool(&r.QuietStartup, overrides.QuietStartup)
 	mergeBool(&r.CollapseChangelog, overrides.CollapseChangelog)
 	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
+	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)
 	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
 	mergeInt(&r.EditorPaddingX, overrides.EditorPaddingX)
 	mergeInt(&r.AutocompleteMaxVisible, overrides.AutocompleteMaxVisible)
@@ -883,6 +885,20 @@ func (sm *SettingsManager) SetEnableSkillCommands(enabled bool) {
 	defer sm.mu.Unlock()
 	sm.globalSettings.EnableSkillCommands = &enabled
 	sm.markModified("enableSkillCommands")
+	sm.save()
+}
+
+func (sm *SettingsManager) GetEnableSysExtensions() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return boolDefault(sm.settings.EnableSysExtensions, true)
+}
+
+func (sm *SettingsManager) SetEnableSysExtensions(enabled bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.globalSettings.EnableSysExtensions = &enabled
+	sm.markModified("enableSysExtensions")
 	sm.save()
 }
 

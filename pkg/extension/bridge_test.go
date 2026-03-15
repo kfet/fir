@@ -96,6 +96,7 @@ func (m *mockBridgeAPI) CallTool(name string, params map[string]any) (ToolResult
 		Content: []ai.ToolResultContent{{Text: "mock tool result for " + name}},
 	}, nil
 }
+func (m *mockBridgeAPI) PrependContext(_ string) {}
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
 var _ BridgeAPI = (*mockBridgeAPI)(nil)

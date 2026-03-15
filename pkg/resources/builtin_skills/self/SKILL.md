@@ -241,6 +241,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "prompts": [],
   "themes": [],
   "enableSkillCommands": true,           // Allow /skills slash commands
+  "enableSysExtensions": true,           // Allow extensions to prepend [SYS_EXT] context blocks
 
   // Agent behavior
   "steeringMode": "one-at-a-time",      // "one-at-a-time" or "auto"

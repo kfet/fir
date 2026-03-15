@@ -30,6 +30,9 @@ type BridgeAPI interface {
 	// Used by extensions that need to call other tools programmatically
 	// (e.g. the batch extension).
 	CallTool(name string, params map[string]any) (ToolResult, error)
+	// PrependContext adds a [SYS_EXT] block to the system prompt.
+	// Extensions use this to inject dynamic context.
+	PrependContext(content string)
 }
 
 // ExecResult is the result of a shell command.

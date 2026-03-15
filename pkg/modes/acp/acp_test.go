@@ -1223,6 +1223,7 @@ func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)                 
 func (n *noopBridgeAPI) CallTool(_ string, _ map[string]any) (extension.ToolResult, error) {
 	return extension.ToolResult{}, nil
 }
+func (n *noopBridgeAPI) PrependContext(_ string) {}
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command
