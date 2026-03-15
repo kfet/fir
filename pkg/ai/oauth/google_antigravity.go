@@ -152,7 +152,7 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 	var code string
 	if callbacks.OnManualCodeInput != nil {
 		// Race between browser callback (if available) and manual input
-		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, pkce.Verifier)
+		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, callbacks.OnDismissManualInput, pkce.Verifier)
 	} else if resultCh != nil {
 		// Just wait for browser callback
 		select {
@@ -210,7 +210,7 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 
 // raceCallbackAndManual waits for either the browser callback or manual code input.
 // If resultCh is nil (no callback server), it falls back to manual input only.
-func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult, manualInput func() (string, error), verifier string) (string, error) {
+func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult, manualInput func() (string, error), dismissManualInput func(), verifier string) (string, error) {
 	if resultCh == nil {
 		return manualCodeInput(manualInput, verifier)
 	}
@@ -246,6 +246,9 @@ func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult,
 			if ok && result != nil {
 				if result.State != verifier {
 					return "", fmt.Errorf("OAuth state mismatch - possible CSRF attack")
+				}
+				if manualStarted && dismissManualInput != nil {
+					dismissManualInput()
 				}
 				return result.Code, nil
 			}

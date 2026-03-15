@@ -55,6 +55,10 @@ func runLogin(args *Args) error {
 			_, err := fmt.Scanln(&input)
 			return input, err
 		},
+		OnDismissManualInput: func() {
+			// Clear the manual-input prompt line (move to start, clear line).
+			fmt.Fprintf(os.Stderr, "\r\033[K")
+		},
 		OnProgress: func(message string) {
 			fmt.Fprintf(os.Stderr, "%s\n", message)
 		},

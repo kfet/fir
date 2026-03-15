@@ -272,6 +272,9 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 			case c := <-codeCh:
 				if c != "" {
 					code = c
+					if manualStarted && callbacks.OnDismissManualInput != nil {
+						callbacks.OnDismissManualInput()
+					}
 				}
 			case <-delay.C:
 				startManual()

@@ -148,7 +148,7 @@ func TestRaceCallbackAndManual_NilChannel(t *testing.T) {
 	ctx := context.Background()
 	code, err := raceCallbackAndManual(ctx, nil, func() (string, error) {
 		return "http://localhost:51121/oauth-callback?code=manual_code&state=v1", nil
-	}, "v1")
+	}, nil, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestRaceCallbackAndManual_BrowserWins(t *testing.T) {
 	code, err := raceCallbackAndManual(ctx, ch, func() (string, error) {
 		manualCalled = true
 		return "", fmt.Errorf("should not be called")
-	}, "v1")
+	}, nil, "v1")
 	if err != nil {
 		t.Fatal(err)
 	}

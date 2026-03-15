@@ -132,7 +132,7 @@ func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {
 	var code string
 	if callbacks.OnManualCodeInput != nil {
 		// Race between browser callback (if available) and manual input
-		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, pkce.Verifier)
+		code, err = raceCallbackAndManual(ctx, resultCh, callbacks.OnManualCodeInput, callbacks.OnDismissManualInput, pkce.Verifier)
 	} else if resultCh != nil {
 		select {
 		case result, ok := <-resultCh:
