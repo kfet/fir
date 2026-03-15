@@ -345,6 +345,11 @@ type ModelRegistry struct {
 	loadError             string
 	authStorage           *auth.AuthStorage
 	modelsJsonPath        string
+
+	// liveModels tracks which models are actually available per provider,
+	// populated by background API calls. Protected by liveModelsMu.
+	liveModelsMu sync.RWMutex
+	liveModels   map[string]*liveModelState
 }
 
 // NewModelRegistry creates a new ModelRegistry.
@@ -355,6 +360,7 @@ func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *Mod
 		registeredProviders:   make(map[string]*ProviderConfigInput),
 		authStorage:           authStorage,
 		modelsJsonPath:        modelsJsonPath,
+		liveModels:            make(map[string]*liveModelState),
 	}
 
 	// Set up fallback resolver for custom provider API keys
@@ -746,13 +752,14 @@ func (r *ModelRegistry) GetAll() []*ai.Model {
 	return result
 }
 
-// GetAvailable returns only models that have auth configured.
+// GetAvailable returns only models that have auth configured and are confirmed
+// available by the provider's live model list (when available).
 func (r *ModelRegistry) GetAvailable() []*ai.Model {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*ai.Model
 	for _, m := range r.models {
-		if r.authStorage.HasAuth(m.Provider) {
+		if r.authStorage.HasAuth(m.Provider) && r.isModelLive(m.Provider, m.ID) {
 			result = append(result, m)
 		}
 	}
