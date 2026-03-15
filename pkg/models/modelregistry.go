@@ -795,6 +795,12 @@ func (r *ModelRegistry) GetApiKeyForProvider(provider string) string {
 	return r.authStorage.GetApiKey(provider)
 }
 
+// GetApiKeyError returns the last error encountered when resolving an API key
+// for the given provider (e.g. an OAuth token refresh failure).
+func (r *ModelRegistry) GetApiKeyError(provider string) error {
+	return r.authStorage.GetApiKeyError(provider)
+}
+
 // IsUsingOAuth checks if a model is using OAuth credentials.
 func (r *ModelRegistry) IsUsingOAuth(model *ai.Model) bool {
 	cred := r.authStorage.Get(model.Provider)

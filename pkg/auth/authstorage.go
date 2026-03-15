@@ -172,6 +172,7 @@ type AuthStorage struct {
 	fallbackResolver func(provider string) string
 	loadError        error
 	errors           []error
+	lastKeyErrors    map[string]error // per-provider last key resolution error
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
@@ -197,6 +198,7 @@ func newAuthStorage(storage AuthStorageBackend) *AuthStorage {
 		storage:          storage,
 		data:             make(AuthStorageData),
 		runtimeOverrides: make(map[string]string),
+		lastKeyErrors:    make(map[string]error),
 	}
 	s.Reload()
 	return s
@@ -353,6 +355,15 @@ func (s *AuthStorage) DrainErrors() []error {
 	return drained
 }
 
+// GetApiKeyError returns the last error encountered when resolving an API key
+// for the given provider (e.g. an OAuth token refresh failure). Returns nil
+// if no error occurred.
+func (s *AuthStorage) GetApiKeyError(provider string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastKeyErrors[provider]
+}
+
 // GetApiKey resolves the API key for a provider.
 // Priority:
 // 1. Runtime override (CLI --api-key)
@@ -438,7 +449,7 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 		oauthCreds := AuthCredToOAuthCreds(&cred)
 		newCreds, err := oauthProvider.RefreshToken(oauthCreds)
 		if err != nil {
-			return refreshResult{updatedData: currentData}, nil, nil
+			return refreshResult{updatedData: currentData}, nil, fmt.Errorf("OAuth token refresh failed for %s: %w", provider, err)
 		}
 
 		currentData[provider] = OAuthCredsToAuthCred(newCreds)
@@ -450,6 +461,9 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 		s.mu.Lock()
 		s.data = r.updatedData
 		s.loadError = nil
+		if err == nil {
+			delete(s.lastKeyErrors, provider)
+		}
 		s.mu.Unlock()
 		if err == nil {
 			return r.apiKey
@@ -458,6 +472,7 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 	if err != nil {
 		s.mu.Lock()
 		s.recordError(err)
+		s.lastKeyErrors[provider] = err
 		s.mu.Unlock()
 		// Refresh failed — re-read to check if another process succeeded.
 		s.Reload()
@@ -465,8 +480,16 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 		cred, ok := s.data[provider]
 		s.mu.RUnlock()
 		if ok && cred.Type == CredentialTypeOAuth {
-			oauthCreds := AuthCredToOAuthCreds(&cred)
-			return oauthProvider.GetAPIKey(oauthCreds)
+			// Check if another process refreshed the token successfully
+			if cred.Expires > 0 && time.Now().UnixMilli() < cred.Expires {
+				s.mu.Lock()
+				delete(s.lastKeyErrors, provider)
+				s.mu.Unlock()
+				oauthCreds := AuthCredToOAuthCreds(&cred)
+				return oauthProvider.GetAPIKey(oauthCreds)
+			}
+			// Return expired token anyway — the API will reject it but
+			// the error will be more informative than "no API key".
 		}
 	}
 	return ""

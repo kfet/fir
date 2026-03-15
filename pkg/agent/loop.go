@@ -228,9 +228,12 @@ func streamAssistantResponse(
 
 	// Resolve API key
 	apiKey := config.ApiKey
+	var apiKeyError string
 	if config.GetApiKey != nil {
 		if resolved, err := config.GetApiKey(config.Model.Provider); err == nil && resolved != "" {
 			apiKey = resolved
+		} else if err != nil {
+			apiKeyError = err.Error()
 		}
 	}
 
@@ -238,6 +241,7 @@ func streamAssistantResponse(
 	opts := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
 			ApiKey:          apiKey,
+			ApiKeyError:     apiKeyError,
 			Transport:       config.Transport,
 			CacheRetention:  config.CacheRetention,
 			SessionID:       config.SessionID,

@@ -220,6 +220,11 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 			}
 			key := modelRegistry.GetApiKeyForProvider(resolvedProvider)
 			if key == "" {
+				if keyErr := modelRegistry.GetApiKeyError(resolvedProvider); keyErr != nil {
+					return "", fmt.Errorf(
+						"authentication failed for %q: %v. Run '/login %s' to re-authenticate",
+						resolvedProvider, keyErr, resolvedProvider)
+				}
 				if model != nil && modelRegistry.IsUsingOAuth(model) {
 					return "", fmt.Errorf(
 						"authentication failed for %q. Credentials may have expired. Run '/login %s' to re-authenticate",

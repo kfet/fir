@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -351,6 +352,11 @@ func TestAuthStorage_GetApiKey_OAuthRefresh(t *testing.T) {
 	if cred.Access != "new-access-token" {
 		t.Errorf("saved access = %q", cred.Access)
 	}
+
+	// Verify no key error after successful refresh
+	if err := s.GetApiKeyError("test-refresh-provider"); err != nil {
+		t.Errorf("GetApiKeyError() = %v, want nil after successful refresh", err)
+	}
 }
 
 func TestAuthStorage_GetApiKey_OAuthNotExpired(t *testing.T) {
@@ -404,6 +410,18 @@ func TestAuthStorage_GetApiKey_OAuthRefreshFails(t *testing.T) {
 	key := s.GetApiKey("test-refresh-fail")
 	if key != "" {
 		t.Errorf("GetApiKey() = %q, want empty on refresh failure", key)
+	}
+
+	// Error should be recorded and retrievable
+	keyErr := s.GetApiKeyError("test-refresh-fail")
+	if keyErr == nil {
+		t.Fatal("GetApiKeyError() = nil, want error after refresh failure")
+	}
+	if !strings.Contains(keyErr.Error(), "refresh failed") {
+		t.Errorf("GetApiKeyError() = %q, want it to contain 'refresh failed'", keyErr)
+	}
+	if !strings.Contains(keyErr.Error(), "test-refresh-fail") {
+		t.Errorf("GetApiKeyError() = %q, want it to contain provider name", keyErr)
 	}
 }
 

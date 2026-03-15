@@ -185,6 +185,7 @@ type StreamOptions struct {
 	Temperature    *float64       `json:"temperature,omitempty"`
 	MaxTokens      *int           `json:"maxTokens,omitempty"`
 	ApiKey         string         `json:"apiKey,omitempty"`
+	ApiKeyError    string         `json:"apiKeyError,omitempty"` // detail about why API key resolution failed (e.g. OAuth refresh error)
 	Transport      Transport      `json:"transport,omitempty"`
 	CacheRetention CacheRetention `json:"cacheRetention,omitempty"`
 	SessionID      string         `json:"sessionId,omitempty"`

@@ -142,7 +142,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 		}
 		if apiKey == "" {
 			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = fmt.Sprintf("no API key for provider: %s", model.Provider)
+			output.ErrorMessage = noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options))
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 			return
 		}
@@ -411,7 +411,7 @@ func StreamSimpleOpenAICodexResponses(ctx context.Context, model *ai.Model, prom
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
-		return errorStreamProvider(model, fmt.Sprintf("no API key for provider: %s", model.Provider))
+		return errorStreamProvider(model, noAPIKeyError(model.Provider, apiKeyErrorFromSimpleOpts(options)))
 	}
 
 	base := BuildBaseOptions(model, options, apiKey)

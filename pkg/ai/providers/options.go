@@ -3,8 +3,35 @@
 package providers
 
 import (
+	"fmt"
+
 	"github.com/kfet/fir/pkg/ai"
 )
+
+// noAPIKeyError builds a descriptive error message when no API key is available.
+// apiKeyError is an optional detail string (e.g. from StreamOptions.ApiKeyError).
+func noAPIKeyError(provider string, apiKeyError string) string {
+	if apiKeyError != "" {
+		return fmt.Sprintf("no API key for provider %q: %s", provider, apiKeyError)
+	}
+	return fmt.Sprintf("no API key for provider %q. Set an API key or run 'fir login %s'", provider, provider)
+}
+
+// apiKeyErrorFromOpts extracts ApiKeyError from options, handling nil.
+func apiKeyErrorFromOpts(options *ai.StreamOptions) string {
+	if options != nil {
+		return options.ApiKeyError
+	}
+	return ""
+}
+
+// apiKeyErrorFromSimpleOpts extracts ApiKeyError from simple options, handling nil.
+func apiKeyErrorFromSimpleOpts(options *ai.SimpleStreamOptions) string {
+	if options != nil {
+		return options.ApiKeyError
+	}
+	return ""
+}
 
 // BuildBaseOptions constructs base StreamOptions from SimpleStreamOptions.
 func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey string) *ai.StreamOptions {
@@ -37,6 +64,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		Temperature:     options.Temperature,
 		MaxTokens:       maxTokens,
 		ApiKey:          key,
+		ApiKeyError:     options.ApiKeyError,
 		CacheRetention:  options.CacheRetention,
 		SessionID:       options.SessionID,
 		Headers:         options.Headers,

@@ -1555,6 +1555,12 @@ func (s *AgentSession) Btw(ctx context.Context, question string, onChunk func(st
 	llmMsgs = append(llmMsgs, ai.NewUserMsg(question, time.Now().UnixMilli()))
 
 	apiKey := s.modelRegistry.GetApiKeyForProvider(model.Provider)
+	var apiKeyError string
+	if apiKey == "" {
+		if err := s.modelRegistry.GetApiKeyError(model.Provider); err != nil {
+			apiKeyError = err.Error()
+		}
+	}
 
 	// No tools — pure read-only side conversation.
 	llmCtx := ai.Context{
@@ -1563,7 +1569,8 @@ func (s *AgentSession) Btw(ctx context.Context, question string, onChunk func(st
 	}
 	opts := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
-			ApiKey: apiKey,
+			ApiKey:      apiKey,
+			ApiKeyError: apiKeyError,
 		},
 	}
 

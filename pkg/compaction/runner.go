@@ -53,7 +53,14 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 
 	apiKey := r.ModelRegistry.GetApiKey(model)
 	if apiKey == "" {
-		return nil, fmt.Errorf("no API key for %s", model.Provider)
+		detail := ""
+		if err := r.ModelRegistry.GetApiKeyError(model.Provider); err != nil {
+			detail = err.Error()
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("no API key for %s: %s", model.Provider, detail)
+		}
+		return nil, fmt.Errorf("no API key for %s. Set an API key or run 'fir login %s'", model.Provider, model.Provider)
 	}
 
 	settings := r.compactionSettings()

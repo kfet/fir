@@ -267,7 +267,7 @@ func streamOpenAIHTTP(
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
-		return fmt.Errorf("no API key for provider: %s", model.Provider)
+		return fmt.Errorf("%s", noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options)))
 	}
 
 	body, err := buildOpenAIRequestBody(model, prompt, options)
@@ -1097,7 +1097,7 @@ func StreamSimpleOpenAICompletions(ctx context.Context, model *ai.Model, prompt 
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
-		return errorStreamProvider(model, fmt.Sprintf("no API key for provider: %s", model.Provider))
+		return errorStreamProvider(model, noAPIKeyError(model.Provider, apiKeyErrorFromSimpleOpts(options)))
 	}
 
 	base := BuildBaseOptions(model, options, apiKey)
