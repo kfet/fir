@@ -228,6 +228,10 @@ var sweModelPatterns = []swePattern{
 	// --- Claude Opus 4.1 (older) ---
 	{"claude-opus-4-1", "claude-opus-4-1", 73.0},
 	{"claude-opus-4.1", "claude-opus-4-1", 73.0},
+	// --- Claude Opus 4 (base) ---
+	{"claude-opus-4-0", "claude-opus-4-0", 72.5},
+	{"claude-opus-4-20250514", "claude-opus-4-0", 72.5},
+	{"claude-opus-4", "claude-opus-4-0", 72.5},
 	// --- Claude Sonnet 4.6 ---
 	{"claude-sonnet-4-6", "claude-sonnet-4-6", 79.6},
 	{"claude-sonnet-4.6", "claude-sonnet-4-6", 79.6},
@@ -300,6 +304,10 @@ var sweLeaderboardPatterns = []struct {
 	{"claude 46 opus", "claude-opus-4-6"},
 	{"claude opus 45", "claude-opus-4-5"},
 	{"claude 45 opus", "claude-opus-4-5"},
+	{"claude opus 41", "claude-opus-4-1"},
+	{"claude 41 opus", "claude-opus-4-1"},
+	{"claude opus 40", "claude-opus-4-0"},
+	{"claude 40 opus", "claude-opus-4-0"},
 	{"claude sonnet 46", "claude-sonnet-4-6"},
 	{"claude 46 sonnet", "claude-sonnet-4-6"},
 	{"claude sonnet 45", "claude-sonnet-4-5"},

@@ -87,7 +87,7 @@ func (c *SSEClient) Stream(ctx context.Context, url string, headers map[string]s
 func parseSSE(r io.Reader, events chan<- SSEEvent) error {
 	scanner := bufio.NewScanner(r)
 	// Allow large lines (some providers send huge JSON in a single data line)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 
 	var current SSEEvent
 	var dataLines []string
