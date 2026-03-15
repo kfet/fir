@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import unittest
+from typing import ClassVar
 
 # Ensure the SDK directory is on sys.path (needed when run directly).
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -158,6 +159,8 @@ class FakeFir:
             }
         elif method == "side_query":
             result = {"ok": True, "text": "mock synthesis"}
+        elif method == "get_session_data":
+            result = {"ok": True, "value": "mock_value"}
         else:
             result = {"ok": True}
         resp = json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n"
@@ -577,7 +580,24 @@ class TestDemoEvents(DemoTestCase):
         assert msg is not None
         self.assertEqual(msg["params"]["status"], "demo ready")
 
+    def test_session_start_calls_set_session_data(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("set_session_data")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected set_session_data after session_start")
+        assert msg is not None
+        self.assertEqual(msg["params"]["key"], "started")
+        self.assertEqual(msg["params"]["value"], "true")
+
     # -- session_shutdown ----------------------------------------------------
+
+    def test_session_shutdown_calls_get_session_data(self) -> None:
+        fake = self._run_event("session_shutdown")
+        msg = fake.wait_for_method("get_session_data")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected get_session_data after session_shutdown")
+        assert msg is not None
+        self.assertEqual(msg["params"]["key"], "started")
 
     def test_session_shutdown_calls_set_status_clear(self) -> None:
         fake = self._run_event("session_shutdown")
@@ -659,14 +679,108 @@ class TestDemoEvents(DemoTestCase):
     def test_turn_start_no_crash(self) -> None:
         self._assert_no_crash("turn_start")
 
-    def test_turn_end_no_crash(self) -> None:
-        self._assert_no_crash("turn_end")
+    def test_turn_end_calls_continue_session(self) -> None:
+        fake = self._run_event("turn_end")
+        msg = fake.wait_for_method("continue_session")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected continue_session after turn_end")
 
     def test_message_start_no_crash(self) -> None:
         self._assert_no_crash("message_start")
 
     def test_message_end_no_crash(self) -> None:
         self._assert_no_crash("message_end")
+
+
+# ---------------------------------------------------------------------------
+# API coverage: ensure demo.py exercises every public ext API
+# ---------------------------------------------------------------------------
+
+
+class TestDemoAPIConverage(DemoTestCase):
+    """Verify that demo.py exercises every public API surface so it stays
+    useful as a comprehensive reference for extension authors."""
+
+    _INTERNAL_METHODS: ClassVar[set[str]] = {"_call"}
+
+    def _public_context_methods(self) -> set[str]:
+        """Return the set of public method names on fir_ext.Context."""
+        return {
+            name
+            for name in dir(fir_ext.Context)
+            if not name.startswith("_")
+            and callable(getattr(fir_ext.Context, name))
+            and name not in self._INTERNAL_METHODS
+        }
+
+    def test_demo_covers_all_context_methods(self) -> None:
+        """Every public Context method should be called somewhere in demo.py."""
+        with open(_DEMO_PATH) as f:
+            source = f.read()
+
+        public_methods = self._public_context_methods()
+        missing = {m for m in public_methods if f"ctx.{m}(" not in source}
+        self.assertSetEqual(
+            missing,
+            set(),
+            f"demo.py does not call these Context methods: {sorted(missing)}. "
+            "Please add usage examples so the demo remains a complete API reference.",
+        )
+
+    def test_demo_covers_all_decorators(self) -> None:
+        """demo.py should use every public decorator: @fir_ext.tool, @fir_ext.on,
+        @fir_ext.command."""
+        with open(_DEMO_PATH) as f:
+            source = f.read()
+
+        expected_decorators = {"@fir_ext.tool", "@fir_ext.on", "@fir_ext.command"}
+        missing = {d for d in expected_decorators if d not in source}
+        self.assertSetEqual(
+            missing,
+            set(),
+            f"demo.py does not use these decorators: {sorted(missing)}. "
+            "Please add examples so the demo remains a complete API reference.",
+        )
+
+    def test_demo_covers_all_events(self) -> None:
+        """demo.py should subscribe to every known event type."""
+        known_events = {
+            "session_start", "session_shutdown",
+            "agent_start", "agent_end",
+            "turn_start", "turn_end",
+            "message_start", "message_end",
+            "tool_execution_start", "tool_execution_end",
+        }
+        registered = set(fir_ext._event_handlers.keys())
+        missing = known_events - registered
+        self.assertSetEqual(
+            missing,
+            set(),
+            f"demo.py does not handle these events: {sorted(missing)}. "
+            "Please add handlers so the demo remains a complete API reference.",
+        )
+
+    def test_demo_registers_hook(self) -> None:
+        """demo.py should register at least the hook/tool_call hook."""
+        self.assertIn(
+            "hook/tool_call",
+            fir_ext._hook_handlers,
+            "demo.py should register a hook/tool_call handler.",
+        )
+
+    def test_tests_cover_all_context_methods(self) -> None:
+        """This test file should reference every public Context method."""
+        with open(__file__) as f:
+            test_source = f.read()
+
+        public_methods = self._public_context_methods()
+        missing = {m for m in public_methods if m not in test_source}
+        self.assertSetEqual(
+            missing,
+            set(),
+            f"This test file does not reference these Context methods: {sorted(missing)}. "
+            "Please add test coverage.",
+        )
 
 
 if __name__ == "__main__":

@@ -710,6 +710,11 @@ func (m *Manager) SeedSessionData(data map[string]map[string]string) {
 // The data is also seeded into each bridge's store so ctx.get_session_data()
 // works throughout the session.
 func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]string) {
+	// Start any lazy extensions that subscribe to session_start before
+	// dispatching, so they don't miss the event.
+	m.startPendingForEvent("session_start")
+
+	// Snapshot bridges *after* lazy start so newly-started bridges are included.
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()

@@ -14,7 +14,8 @@ context method, update this file and its companion test
 Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label · get_active_tools · set_active_tools ·
-  set_model · send_message · send_user_message
+  set_model · send_message · send_user_message ·
+  set_session_data · get_session_data · continue_session · btw · call_tool
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
@@ -275,10 +276,12 @@ def on_hook_tool_call(params, ctx):
 @fir_ext.on("session_start")
 def on_session_start(params, ctx):
     ctx.set_status("demo ready")                      # set_status
+    ctx.set_session_data("started", "true")            # set_session_data
 
 
 @fir_ext.on("session_shutdown")
 def on_session_shutdown(params, ctx):
+    _ = ctx.get_session_data("started")                # get_session_data
     ctx.set_status("")                                 # set_status (clear)
 
 
@@ -300,7 +303,7 @@ def on_turn_start(params, ctx):
 
 @fir_ext.on("turn_end")
 def on_turn_end(params, ctx):
-    pass
+    ctx.continue_session()                             # continue_session
 
 
 @fir_ext.on("message_start")
