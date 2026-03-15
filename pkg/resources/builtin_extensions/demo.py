@@ -13,11 +13,19 @@ Outbound calls demonstrated (extension → fir):
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
-    change_model, inject_message
+    change_model, inject_message, batch_example
   • hook/tool_call: blocks tools whose name starts with "blocked:"
   • All ten events: session_start, session_shutdown, agent_start, agent_end,
     turn_start, turn_end, message_start, message_end,
     tool_execution_start, tool_execution_end
+
+Batch tool demonstration:
+  The batch_example tool shows how extensions can build higher-level
+  orchestration on top of the built-in `batch` tool. It constructs a
+  batch tool-call payload programmatically — gathering files and commands —
+  then asks the agent to call `batch` with the assembled payload.
+  This pattern lets extensions compose multi-tool workflows while keeping
+  raw I/O ephemeral.
 """
 
 import fir_ext
@@ -132,6 +140,108 @@ def inject_message(params, ctx):
     else:
         ctx.send_message("demo_note", params["content"])   # send_message
     return {"ok": True}
+
+
+@fir_ext.tool(
+    name="batch_example",
+    description=(
+        "Demonstrate the batch tool pattern: build a multi-tool payload "
+        "programmatically and return it for the agent to pass to `batch`. "
+        "Give it a directory path and it assembles Read calls for key files "
+        "plus a git-status check, with instructions to summarise the project."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "directory": {
+                "type": "string",
+                "description": "Project directory to analyse",
+            },
+            "extra_instructions": {
+                "type": "string",
+                "description": "Additional instructions for the synthesis (optional)",
+            },
+        },
+        "required": ["directory"],
+    },
+)
+def batch_example(params, ctx):
+    """Build a batch payload that reads common project files + git status.
+
+    This shows how an extension can *compose* tool calls for the built-in
+    batch tool. The extension doesn't execute the tools itself — it returns
+    a ready-made payload the agent feeds to ``batch``.
+
+    The pattern:
+      1. Extension builds the tool list programmatically (can use ctx.exec
+         to discover which files exist, filter, etc.)
+      2. Extension returns the assembled batch payload.
+      3. Agent calls ``batch`` with that payload — raw I/O stays ephemeral.
+    """
+    directory = params.get("directory", ".")
+    extra = params.get("extra_instructions", "")
+
+    # Discover which key files exist so we only read what's there.
+    probe = ctx.exec("sh", [
+        "-c",
+        f'cd {directory} && for f in README.md CHANGELOG.md go.mod package.json '
+        f'Cargo.toml pyproject.toml Makefile; do [ -f "$f" ] && echo "$f"; done',
+    ])
+    found_files = [f for f in probe.get("stdout", "").strip().splitlines() if f]
+
+    # Assemble the tool list.
+    # Read each discovered file (first 40 lines to keep it brief).
+    tool_calls = [
+        {"name": "Read", "params": {"path": f"{directory}/{f}", "limit": 40}}
+        for f in found_files
+    ]
+
+    # Always include a git status check.
+    git_cmd = (
+        f"cd {directory} && git status --short 2>/dev/null"
+        " || echo 'not a git repo'"
+    )
+    tool_calls.append({
+        "name": "Bash",
+        "params": {"command": git_cmd},
+    })
+
+    # Build instructions for the synthesis LLM.
+    instructions = (
+        "You are summarising a software project. Based on the file contents "
+        "and git status above, provide:\n"
+        "1. A one-line project description\n"
+        "2. The language/framework stack\n"
+        "3. Build system (if identifiable)\n"
+        "4. Current git status (clean, dirty, number of changes)\n"
+        "5. Any notable recent changes from the changelog\n"
+        "Keep the summary concise — max 10 lines."
+    )
+    if extra:
+        instructions += f"\n\nAdditional focus: {extra}"
+
+    # Return the assembled payload — the agent should pass this to `batch`.
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "Here is a ready-made payload for the `batch` tool. "
+                    "Call `batch` with these exact parameters:\n\n"
+                    f'{{"description": "project summary for {directory}", '
+                    f'"tools": {_json_compact(tool_calls)}, '
+                    f'"instructions": {_json_compact(instructions)}}}'
+                ),
+            }
+        ],
+        "is_error": False,
+    }
+
+
+def _json_compact(obj):
+    """JSON-encode with no unnecessary whitespace."""
+    import json
+    return json.dumps(obj, separators=(",", ":"))
 
 
 # ---------------------------------------------------------------------------

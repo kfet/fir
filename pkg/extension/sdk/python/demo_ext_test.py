@@ -279,6 +279,7 @@ class TestDemoInit(DemoTestCase):
             {
                 "word_count", "shell_run", "list_tools",
                 "pin_tools", "change_model", "inject_message",
+                "batch_example",
             },
         )
 
@@ -452,6 +453,54 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected send_user_message call")
         assert msg is not None
         self.assertEqual(msg["params"]["content"], "hi agent")
+        fake.stop()
+
+    # -- batch_example -------------------------------------------------------
+
+    def test_batch_example_calls_exec(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "batch_example", {"directory": "/tmp/myproject"})
+        msg = fake.wait_for_method("exec")
+        self.assertIsNotNone(msg, "expected exec call to probe files")
+        assert msg is not None
+        # Should run a shell command to discover key files
+        self.assertEqual(msg["params"]["command"], "sh")
+        fake.stop()
+
+    def test_batch_example_returns_batch_payload(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        resp = fake.send_tool_call(2, "batch_example", {"directory": "/tmp/proj"})
+        self.assertIsNotNone(resp)
+        assert resp is not None
+        self.assertIsNone(resp.get("error"))
+        result = resp["result"]
+        # Result should contain content with batch payload text
+        content = result["content"]
+        self.assertTrue(len(content) > 0)
+        text = content[0]["text"]
+        self.assertIn("batch", text)
+        self.assertIn("tools", text)
+        self.assertIn("instructions", text)
+        # Should always include a Bash tool call for git status
+        self.assertIn("git status", text)
+        fake.stop()
+
+    def test_batch_example_with_extra_instructions(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        resp = fake.send_tool_call(2, "batch_example", {
+            "directory": "/tmp/proj",
+            "extra_instructions": "focus on test coverage",
+        })
+        self.assertIsNotNone(resp)
+        assert resp is not None
+        text = resp["result"]["content"][0]["text"]
+        self.assertIn("focus on test coverage", text)
         fake.stop()
 
 
