@@ -26,6 +26,10 @@ type BridgeAPI interface {
 	// GetSessionData retrieves a previously stored value.  Returns ("", false)
 	// when the key is absent.
 	GetSessionData(key string) (string, bool)
+	// CallTool executes a registered tool by name and returns its result.
+	// Used by extensions that need to call other tools programmatically
+	// (e.g. the batch extension).
+	CallTool(name string, params map[string]any) (ToolResult, error)
 }
 
 // ExecResult is the result of a shell command.

@@ -3,6 +3,7 @@ package extension
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"sync"
 	"time"
@@ -151,6 +152,48 @@ func (b *SessionBridge) SideQuery(question string) (string, error) {
 // intercepts these calls before they reach SessionBridge.
 func (b *SessionBridge) SetSessionData(_, _ string)             {}
 func (b *SessionBridge) GetSessionData(_ string) (string, bool) { return "", false }
+
+// CallTool executes a registered tool by name and returns its result.
+// It looks up the tool in the agent's current tool set and calls its
+// Execute function directly.
+func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult, error) {
+	tools := b.session.GetTools()
+	if tools == nil {
+		return ToolResult{
+			Content: []ai.ToolResultContent{{Text: "no tools available"}},
+			IsError: true,
+		}, nil
+	}
+
+	tool, found := tools.Get(name)
+	if !found {
+		return ToolResult{
+			Content: []ai.ToolResultContent{{Text: fmt.Sprintf("tool %q not found", name)}},
+			IsError: true,
+		}, nil
+	}
+
+	if tool.Execute == nil {
+		return ToolResult{
+			Content: []ai.ToolResultContent{{Text: fmt.Sprintf("tool %q has no execute function", name)}},
+			IsError: true,
+		}, nil
+	}
+
+	if params == nil {
+		params = make(map[string]any)
+	}
+
+	result, err := tool.Execute(context.Background(), fmt.Sprintf("ext-call-%s", name), params, nil)
+	if err != nil {
+		return ToolResult{}, err
+	}
+
+	return ToolResult{
+		Content: result.Content,
+		IsError: result.IsError,
+	}, nil
+}
 
 // RegisterTool adds an externally-defined tool to the session's agent.
 // The tool is wrapped with the session's hook interceptors so that

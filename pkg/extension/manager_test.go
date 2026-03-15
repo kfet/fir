@@ -94,8 +94,8 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
-		t.Fatalf("expected 1 registered tool, got %d", n)
+	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 registered tools, got %d", n)
 	}
 
 	if err := mgr.Stop(); err != nil {
@@ -121,8 +121,8 @@ func TestManager_UntrustedSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := api.toolCount(); n != 0 {
-		t.Fatalf("expected 0 tools (untrusted), got %d", n)
+	if n := api.toolCount(); n != 1 {
+		t.Fatalf("expected 1 tool (untrusted ext skipped, batch builtin only), got %d", n)
 	}
 
 	mgr.Stop()
@@ -148,7 +148,7 @@ func TestManager_EmitEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pollToolCount(api, 1, 5*time.Second)
+	pollToolCount(api, 2, 5*time.Second)
 
 	// EmitEvent should not panic; "session_start" is subscribed.
 	mgr.EmitEvent("session_start", map[string]string{"test": "data"})
@@ -207,8 +207,8 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
-		t.Fatalf("expected 1 tool before reload, got %d", n)
+	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 tools before reload, got %d", n)
 	}
 
 	// Add a second extension before reload.
@@ -226,8 +226,8 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 tools after reload, got %d", n)
+	if n := pollToolCount(api, 3, 5*time.Second); n != 3 {
+		t.Fatalf("expected 3 tools after reload, got %d", n)
 	}
 }
 
@@ -267,8 +267,8 @@ func TestManager_ReloadCallsUnregister(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api.mockBridgeAPI, 1, 5*time.Second); n != 1 {
-		t.Fatalf("expected 1 tool before reload, got %d", n)
+	if n := pollToolCount(api.mockBridgeAPI, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 tools before reload, got %d", n)
 	}
 
 	// Reload without manually clearing tools — UnregisterExtensionTools should handle it.
@@ -283,9 +283,9 @@ func TestManager_ReloadCallsUnregister(t *testing.T) {
 		t.Fatalf("expected UnregisterExtensionTools called once, got %d", api.unregisterCalled)
 	}
 
-	// Should still have exactly 1 tool (not 2 duplicates).
-	if n := pollToolCount(api.mockBridgeAPI, 1, 5*time.Second); n != 1 {
-		t.Fatalf("expected 1 tool after reload (no duplicates), got %d", n)
+	// Should still have exactly 2 tools (not duplicates).
+	if n := pollToolCount(api.mockBridgeAPI, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 tools after reload (no duplicates), got %d", n)
 	}
 }
 
@@ -317,12 +317,12 @@ func TestManager_AllowedNames(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	// Only one tool should be registered (from allowed-ext).
+	// Only one tool should be registered (from allowed-ext; batch builtin filtered by AllowedNames).
 	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
 		t.Fatalf("expected 1 tool (allowed-ext only), got %d", n)
 	}
 
-	// Give a moment for any unexpected second registration.
+	// Give a moment for any unexpected extra registration.
 	time.Sleep(100 * time.Millisecond)
 	if n := api.toolCount(); n != 1 {
 		t.Fatalf("expected exactly 1 tool, got %d (blocked-ext should have been skipped)", n)
@@ -353,12 +353,12 @@ func TestManager_ActiveMode(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
-		t.Fatalf("expected 1 tool in acp mode, got %d", n)
+	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
+		t.Fatalf("expected 2 tools in acp mode, got %d", n)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := api.toolCount(); n != 1 {
-		t.Fatalf("expected exactly 1 tool after filtering by mode, got %d", n)
+	if n := api.toolCount(); n != 2 {
+		t.Fatalf("expected exactly 2 tools after filtering by mode, got %d", n)
 	}
 }
 

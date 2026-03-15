@@ -383,6 +383,42 @@ class Context:
             return result.get("text", "")
         return ""
 
+    def call_tool(
+        self,
+        name: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = 60.0,
+    ) -> dict[str, Any]:
+        """Call a registered tool by name and return its result.
+
+        Executes the tool directly via the bridge — the call does not appear
+        in the agent's conversation history.
+
+        Parameters
+        ----------
+        name : str
+            Name of the tool to call (built-in, extension, or MCP).
+        params : dict, optional
+            Parameters to pass to the tool.
+        timeout : float, optional
+            How long to wait for the tool to finish.
+
+        Returns
+        -------
+        dict
+            Tool result with ``content`` (list of content blocks) and
+            ``is_error`` (bool).  On RPC-level errors a dict with
+            ``is_error=True`` and a text content block is returned.
+        """
+        result = self._call(
+            "call_tool",
+            {"name": name, "params": params or {}},
+            timeout=timeout,
+        )
+        if isinstance(result, dict):
+            return result
+        return {"content": [{"text": str(result)}], "is_error": False}
+
 
 # ---------------------------------------------------------------------------
 # Main loop

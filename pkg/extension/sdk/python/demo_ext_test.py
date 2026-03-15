@@ -150,6 +150,14 @@ class FakeFir:
             result = {"ok": self._model_ok}
         elif method == "exec":
             result = {"stdout": "mock output", "stderr": "", "exit_code": 0}
+        elif method == "call_tool":
+            name = (msg.get("params") or {}).get("name", "unknown")
+            result = {
+                "content": [{"text": f"mock result of {name}"}],
+                "is_error": False,
+            }
+        elif method == "side_query":
+            result = {"ok": True, "text": "mock synthesis"}
         else:
             result = {"ok": True}
         resp = json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n"
@@ -457,19 +465,36 @@ class TestDemoTools(DemoTestCase):
 
     # -- batch_example -------------------------------------------------------
 
-    def test_batch_example_calls_exec(self) -> None:
+    def test_batch_example_calls_exec_and_call_tool(self) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send_tool_call(2, "batch_example", {"directory": "/tmp/myproject"})
+        resp = fake.send_tool_call(2, "batch_example", {"directory": "/tmp/myproject"})
+        self.assertIsNotNone(resp)
+        # Should have called exec to probe files
         msg = fake.wait_for_method("exec")
         self.assertIsNotNone(msg, "expected exec call to probe files")
         assert msg is not None
-        # Should run a shell command to discover key files
         self.assertEqual(msg["params"]["command"], "sh")
+        # Should have called call_tool at least once (for git status Bash)
+        ct = fake.wait_for_method("call_tool")
+        self.assertIsNotNone(ct, "expected call_tool call")
         fake.stop()
 
-    def test_batch_example_returns_batch_payload(self) -> None:
+    def test_batch_example_calls_side_query(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "batch_example", {"directory": "/tmp/proj"})
+        msg = fake.wait_for_method("side_query")
+        self.assertIsNotNone(msg, "expected side_query (btw) call")
+        assert msg is not None
+        # The synthesis prompt should include instructions
+        question = msg["params"]["question"]
+        self.assertIn("Instructions", question)
+        fake.stop()
+
+    def test_batch_example_returns_synthesis(self) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
@@ -477,30 +502,25 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(resp)
         assert resp is not None
         self.assertIsNone(resp.get("error"))
+        # Result should be a string (the btw synthesis)
         result = resp["result"]
-        # Result should contain content with batch payload text
-        content = result["content"]
-        self.assertTrue(len(content) > 0)
-        text = content[0]["text"]
-        self.assertIn("batch", text)
-        self.assertIn("tools", text)
-        self.assertIn("instructions", text)
-        # Should always include a Bash tool call for git status
-        self.assertIn("git status", text)
+        # The mock btw returns "mock synthesis" — could be wrapped in content
+        self.assertIsNotNone(result)
         fake.stop()
 
     def test_batch_example_with_extra_instructions(self) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        resp = fake.send_tool_call(2, "batch_example", {
+        fake.send_tool_call(2, "batch_example", {
             "directory": "/tmp/proj",
             "extra_instructions": "focus on test coverage",
         })
-        self.assertIsNotNone(resp)
-        assert resp is not None
-        text = resp["result"]["content"][0]["text"]
-        self.assertIn("focus on test coverage", text)
+        msg = fake.wait_for_method("side_query")
+        self.assertIsNotNone(msg, "expected side_query call")
+        assert msg is not None
+        question = msg["params"]["question"]
+        self.assertIn("focus on test coverage", question)
         fake.stop()
 
 

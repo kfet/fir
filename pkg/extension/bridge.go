@@ -313,6 +313,24 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		value, ok := api.GetSessionData(p.Key)
 		result = map[string]any{"value": value, "ok": ok}
 
+	case "call_tool":
+		var p struct {
+			Name   string         `json:"name"`
+			Params map[string]any `json:"params"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		r, err := api.CallTool(p.Name, p.Params)
+		if err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = r
+		}
+
 	default:
 		rpcErr = &Error{Code: -32601, Message: "method not found: " + req.Method}
 	}

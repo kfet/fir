@@ -20,12 +20,11 @@ Inbound surface demonstrated (fir → extension):
     tool_execution_start, tool_execution_end
 
 Batch tool demonstration:
-  The batch_example tool shows how extensions can build higher-level
-  orchestration on top of the built-in `batch` tool. It constructs a
-  batch tool-call payload programmatically — gathering files and commands —
-  then asks the agent to call `batch` with the assembled payload.
-  This pattern lets extensions compose multi-tool workflows while keeping
-  raw I/O ephemeral.
+  The batch_example tool shows how extensions can use ctx.call_tool()
+  and ctx.btw() to orchestrate multi-tool workflows.  It calls tools
+  directly (Read, Bash), collects results in local memory, and
+  synthesises via an ephemeral LLM call — raw output never enters
+  conversation history.
 """
 
 import fir_ext
@@ -145,10 +144,9 @@ def inject_message(params, ctx):
 @fir_ext.tool(
     name="batch_example",
     description=(
-        "Demonstrate the batch tool pattern: build a multi-tool payload "
-        "programmatically and return it for the agent to pass to `batch`. "
-        "Give it a directory path and it assembles Read calls for key files "
-        "plus a git-status check, with instructions to summarise the project."
+        "Demonstrate the call_tool + btw pattern: probe a project directory, "
+        "call Read/Bash tools directly via call_tool(), then synthesise "
+        "results with btw(). Everything stays ephemeral."
     ),
     parameters={
         "type": "object",
@@ -166,50 +164,55 @@ def inject_message(params, ctx):
     },
 )
 def batch_example(params, ctx):
-    """Build a batch payload that reads common project files + git status.
+    """Probe a project directory, read key files, and synthesise a summary.
 
-    This shows how an extension can *compose* tool calls for the built-in
-    batch tool. The extension doesn't execute the tools itself — it returns
-    a ready-made payload the agent feeds to ``batch``.
+    Demonstrates how extensions can orchestrate multiple tool calls using
+    ``ctx.call_tool()`` and synthesise with ``ctx.btw()``.  All raw tool
+    output is held in local Python memory — it never enters conversation
+    history.
 
     The pattern:
-      1. Extension builds the tool list programmatically (can use ctx.exec
-         to discover which files exist, filter, etc.)
-      2. Extension returns the assembled batch payload.
-      3. Agent calls ``batch`` with that payload — raw I/O stays ephemeral.
+      1. Use ctx.exec() to discover which files exist.
+      2. Use ctx.call_tool() to read each file and run git status.
+      3. Build a synthesis prompt from collected outputs.
+      4. Use ctx.btw() for an ephemeral LLM summary.
+      5. Return only the summary.
     """
     directory = params.get("directory", ".")
     extra = params.get("extra_instructions", "")
 
-    # Discover which key files exist so we only read what's there.
+    # Discover which key files exist.
     probe = ctx.exec("sh", [
         "-c",
-        f'cd {directory} && for f in README.md CHANGELOG.md go.mod package.json '
-        f'Cargo.toml pyproject.toml Makefile; do [ -f "$f" ] && echo "$f"; done',
+        f'cd {directory} && for f in README.md CHANGELOG.md go.mod '
+        f'package.json Cargo.toml pyproject.toml Makefile; '
+        f'do [ -f "$f" ] && echo "$f"; done',
     ])
-    found_files = [f for f in probe.get("stdout", "").strip().splitlines() if f]
+    found = [f for f in probe.get("stdout", "").strip().splitlines() if f]
 
-    # Assemble the tool list.
-    # Read each discovered file (first 40 lines to keep it brief).
-    tool_calls = [
-        {"name": "Read", "params": {"path": f"{directory}/{f}", "limit": 40}}
-        for f in found_files
-    ]
+    # Collect outputs from tool calls.
+    outputs = []
 
-    # Always include a git status check.
+    for fname in found:
+        result = ctx.call_tool("Read", {
+            "path": f"{directory}/{fname}",
+            "limit": 40,
+        })
+        text = _extract_text(result)
+        outputs.append(f"--- {fname} ---\n{text}")
+
+    # Git status.
     git_cmd = (
         f"cd {directory} && git status --short 2>/dev/null"
         " || echo 'not a git repo'"
     )
-    tool_calls.append({
-        "name": "Bash",
-        "params": {"command": git_cmd},
-    })
+    git_result = ctx.call_tool("Bash", {"command": git_cmd})
+    outputs.append(f"--- git status ---\n{_extract_text(git_result)}")
 
-    # Build instructions for the synthesis LLM.
+    # Synthesise.
     instructions = (
-        "You are summarising a software project. Based on the file contents "
-        "and git status above, provide:\n"
+        "You are summarising a software project. Based on the file "
+        "contents and git status above, provide:\n"
         "1. A one-line project description\n"
         "2. The language/framework stack\n"
         "3. Build system (if identifiable)\n"
@@ -220,22 +223,23 @@ def batch_example(params, ctx):
     if extra:
         instructions += f"\n\nAdditional focus: {extra}"
 
-    # Return the assembled payload — the agent should pass this to `batch`.
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    "Here is a ready-made payload for the `batch` tool. "
-                    "Call `batch` with these exact parameters:\n\n"
-                    f'{{"description": "project summary for {directory}", '
-                    f'"tools": {_json_compact(tool_calls)}, '
-                    f'"instructions": {_json_compact(instructions)}}}'
-                ),
-            }
-        ],
-        "is_error": False,
-    }
+    prompt = "\n\n".join(outputs) + f"\n\n--- Instructions ---\n{instructions}"
+
+    return ctx.btw(prompt)
+
+
+def _extract_text(result):
+    """Pull text content from a call_tool result."""
+    content = result.get("content", [])
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                t = block.get("text") or block.get("Text", "")
+                if t:
+                    parts.append(t)
+        return "\n".join(parts)
+    return str(content)
 
 
 def _json_compact(obj):

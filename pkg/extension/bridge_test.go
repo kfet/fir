@@ -91,6 +91,11 @@ func (m *mockBridgeAPI) GetSessionData(key string) (string, bool) {
 	v, ok := m.sessionData[key]
 	return v, ok
 }
+func (m *mockBridgeAPI) CallTool(name string, params map[string]any) (ToolResult, error) {
+	return ToolResult{
+		Content: []ai.ToolResultContent{{Text: "mock tool result for " + name}},
+	}, nil
+}
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
 var _ BridgeAPI = (*mockBridgeAPI)(nil)
