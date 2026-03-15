@@ -34,6 +34,10 @@ type BuildSystemPromptOptions struct {
 	Cwd                string
 	ContextFiles       []ContextFile
 	Skills             []Skill
+	// Date overrides the "Current date" line in the system prompt.
+	// If empty, defaults to time.Now() formatted as YYYY-MM-DD.
+	// Set this once per session to avoid cache-breaking date changes at midnight.
+	Date string
 }
 
 // BuildSystemPrompt constructs the system prompt with tools, guidelines, and context.
@@ -45,8 +49,10 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 		opts.SelectedTools = []string{"read", "bash", "edit", "write"}
 	}
 
-	now := time.Now()
-	date := now.Format("2006-01-02")
+	date := opts.Date
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
 
 	appendSection := ""
 	if opts.AppendSystemPrompt != "" {

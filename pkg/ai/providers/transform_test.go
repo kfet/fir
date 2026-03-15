@@ -237,3 +237,43 @@ func TestTransformMessages_ThoughtSignatureStripped(t *testing.T) {
 		t.Errorf("expected empty thought signature, got %q", am.Content[0].ToolCall.ThoughtSignature)
 	}
 }
+
+func TestTransformMessages_SyntheticToolResultUsesAssistantTimestamp(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet", Provider: "anthropic", Api: "anthropic-messages"}
+	assistantTS := int64(1700000000000)
+	msgs := []ai.Message{
+		ai.NewAssistantMsg(ai.AssistantMessage{
+			Provider:   "anthropic",
+			Api:        "anthropic-messages",
+			Model:      "claude-sonnet",
+			StopReason: ai.StopReasonToolUse,
+			Content: []ai.AssistantContent{
+				ai.NewToolCallContent("call-1", "bash", map[string]any{"command": "ls"}),
+			},
+			Timestamp: assistantTS,
+		}),
+		// No tool result — orphaned tool call
+		ai.NewUserMsg("next message", 1700000001000),
+	}
+
+	result := TransformMessages(msgs, model, nil)
+
+	// Should have: assistant, synthetic tool result, user
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	tr := result[1].AsToolResult()
+	if tr == nil {
+		t.Fatal("expected message[1] to be a tool result")
+	}
+	if tr.Timestamp != assistantTS {
+		t.Errorf("synthetic tool result should use assistant timestamp %d, got %d", assistantTS, tr.Timestamp)
+	}
+
+	// Run again — timestamp must be identical (deterministic)
+	result2 := TransformMessages(msgs, model, nil)
+	tr2 := result2[1].AsToolResult()
+	if tr2.Timestamp != tr.Timestamp {
+		t.Errorf("synthetic tool result timestamp not deterministic: %d vs %d", tr.Timestamp, tr2.Timestamp)
+	}
+}

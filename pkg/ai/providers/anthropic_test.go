@@ -1075,8 +1075,12 @@ func TestAnthropic_ConvertMessages_UserText(t *testing.T) {
 	if result[0]["role"] != "user" {
 		t.Errorf("expected role=user, got %v", result[0]["role"])
 	}
-	if result[0]["content"] != "Hello world" {
-		t.Errorf("expected content='Hello world', got %v", result[0]["content"])
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected content to be []map with 1 block, got %v", result[0]["content"])
+	}
+	if content[0]["text"] != "Hello world" {
+		t.Errorf("expected text='Hello world', got %v", content[0]["text"])
 	}
 }
 
@@ -1093,8 +1097,12 @@ func TestAnthropic_ConvertMessages_EmptyStringSkipped(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message (empty strings skipped), got %d", len(result))
 	}
-	if result[0]["content"] != "valid" {
-		t.Errorf("expected content='valid', got %v", result[0]["content"])
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected content to be []map with 1 block, got %v", result[0]["content"])
+	}
+	if content[0]["text"] != "valid" {
+		t.Errorf("expected text='valid', got %v", content[0]["text"])
 	}
 }
 
@@ -2124,5 +2132,33 @@ func TestAnthropic_OnPayload_WrongTypeNoPanic(t *testing.T) {
 	result := stream.Result()
 	if result == nil {
 		t.Fatal("expected a result")
+	}
+}
+
+func TestAnthropic_ConvertMessages_StringUserGetsCacheControl(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	msgs := []ai.Message{
+		ai.NewUserMsg("hello", 1000),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheLong)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected block-form content with 1 block, got %v", result[0]["content"])
+	}
+	cc, hasCacheControl := content[0]["cache_control"]
+	if !hasCacheControl {
+		t.Fatal("expected cache_control on last user message block")
+	}
+	ccMap, ok := cc.(map[string]any)
+	if !ok {
+		t.Fatalf("expected cache_control to be map, got %T", cc)
+	}
+	if ccMap["type"] != "ephemeral" {
+		t.Errorf("expected cache_control type=ephemeral, got %v", ccMap["type"])
 	}
 }

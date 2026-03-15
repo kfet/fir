@@ -4,7 +4,6 @@ package providers
 
 import (
 	"strings"
-	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -97,6 +96,7 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 	// Second pass: insert synthetic tool results for orphaned tool calls
 	result := make([]ai.Message, 0, len(transformed))
 	var pendingToolCalls []*ai.ToolCall
+	var pendingTimestamp int64 // timestamp from the assistant message that owns the orphaned tool calls
 	existingToolResultIDs := make(map[string]bool)
 
 	insertSyntheticResults := func() {
@@ -110,7 +110,7 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 						{Type: ai.ContentTypeText, Text: "No result provided"},
 					},
 					IsError:   true,
-					Timestamp: time.Now().UnixMilli(),
+					Timestamp: pendingTimestamp,
 				}))
 			}
 		}
@@ -139,6 +139,7 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 				}
 			}
 			if len(pendingToolCalls) > 0 {
+				pendingTimestamp = m.Timestamp
 				existingToolResultIDs = make(map[string]bool)
 			}
 

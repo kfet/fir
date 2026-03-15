@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -38,6 +39,9 @@ func init() {
 		ccToolLookup[strings.ToLower(t)] = t
 	}
 }
+
+// anthropicPrefixGuards tracks prefix stability per session.
+var anthropicPrefixGuards sync.Map // sessionID → *PrefixGuard
 
 func toClaudeCodeName(name string) string {
 	if cc, ok := ccToolLookup[strings.ToLower(name)]; ok {
@@ -701,7 +705,15 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	}
 
 	// Messages
-	params["messages"] = convertAnthropicMessages(ctx.Messages, model, oauthToken, retention)
+	msgs := convertAnthropicMessages(ctx.Messages, model, oauthToken, retention)
+	params["messages"] = msgs
+
+	// Check prefix stability for cache preservation
+	if options != nil && options.SessionID != "" {
+		v, _ := anthropicPrefixGuards.LoadOrStore(options.SessionID, NewPrefixGuard())
+		guard := v.(*PrefixGuard)
+		guard.Check(systemBlocks, msgs)
+	}
 
 	// Temperature
 	if options != nil && options.Temperature != nil {
@@ -808,9 +820,10 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 				if strings.TrimSpace(content) == "" {
 					continue
 				}
+				// Always use block form so cache_control can be attached to the last block.
 				params = append(params, map[string]any{
 					"role":    "user",
-					"content": content,
+					"content": []map[string]any{{"type": "text", "text": content}},
 				})
 			case []any:
 				var blocks []map[string]any

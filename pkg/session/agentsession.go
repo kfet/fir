@@ -205,6 +205,7 @@ type AgentSession struct {
 
 	// System prompt
 	baseSystemPrompt string
+	sessionDate      string // frozen date for system prompt (YYYY-MM-DD), set once per session
 
 	// Bash execution
 	bashCancel   context.CancelFunc
@@ -244,6 +245,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		scopedModels:     opts.ScopedModels,
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
+		sessionDate:      time.Now().Format("2006-01-02"),
 	}
 
 	// Subscribe to agent events for internal handling
@@ -638,6 +640,7 @@ func (s *AgentSession) buildSystemPrompt() {
 		Skills:       skills,
 		ContextFiles: contextFiles,
 		Cwd:          s.cwd,
+		Date:         s.sessionDate,
 	})
 
 	// Apply custom system prompt override
@@ -1084,6 +1087,7 @@ func (s *AgentSession) GetSessionName() string {
 func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.SessionManager.NewSession(nil)
 	s.Agent.ReplaceMessages(nil)
+	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 	// Clear plan state so stale plans don't persist across sessions.

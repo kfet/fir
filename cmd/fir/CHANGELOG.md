@@ -18,6 +18,10 @@
 
 ### Changed
 
+- Freeze system prompt date per session — the `Current date:` line is now set once when the session starts, preventing cache invalidation at midnight
+- Synthetic tool results for orphaned tool calls now use the assistant message's timestamp instead of `time.Now()`, making `TransformMessages` deterministic
+- User text messages are now always serialized in block form for Anthropic, so `cache_control` breakpoints can be attached to all user messages (not just multi-block ones)
+- Add `PrefixGuard` to the Anthropic provider — logs a debug warning when the serialized prefix changes between turns, helping detect cache-breaking regressions
 - System prompt is no longer rebuilt before every turn — only on session creation and explicit actions (`/reload`, `/skill`), improving LLM provider prompt cache hit rates
 - Extension auto-reload file watcher removed — use `/reload` to pick up extension changes explicitly
 
