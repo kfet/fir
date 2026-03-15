@@ -157,6 +157,7 @@ Packages are stored in `settings.json` under `"packages"`. Each entry is a strin
 - **Thinking levels** — control reasoning depth: none, minimal, low, medium, high. Toggle with `Shift+Tab` or `--thinking`.
 - **Scoped models** — use `/scoped-models` to pick which models `Ctrl+P` cycles through.
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
+- **Batch tool** — the built-in `batch` tool executes multiple tools and synthesises their outputs via an ephemeral one-shot LLM call. Raw tool outputs never enter the main conversation — only the synthesis is returned. Use it to gather large amounts of data from several tools cheaply without polluting the context window.
 
 ## settings.json Reference
 

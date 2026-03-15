@@ -1556,12 +1556,26 @@ func (s *AgentSession) Close() {
 }
 
 // RegisterSessionTools appends tools that require a session reference
-// (e.g. the plan tool) to the agent's current tool set.
+// (e.g. the plan tool, batch tool) to the agent's current tool set.
 func (s *AgentSession) RegisterSessionTools() {
 	state := s.Agent.State()
 	existing := state.Tools.Slice()
-	allTools := make([]agent.AgentTool, len(existing)+1)
+	sessionTools := []agent.AgentTool{
+		tools.NewPlanTool(s),
+		tools.NewBatchTool(s),
+	}
+	allTools := make([]agent.AgentTool, len(existing)+len(sessionTools))
 	copy(allTools, existing)
-	allTools[len(existing)] = tools.NewPlanTool(s)
+	copy(allTools[len(existing):], sessionTools)
 	s.Agent.SetTools(allTools)
+}
+
+// GetTools returns the current tool set. Implements tools.BatchToolProvider.
+func (s *AgentSession) GetTools() *agent.ToolSet {
+	return s.Agent.State().Tools
+}
+
+// SimplePrompt delegates to Agent.SimplePrompt. Implements tools.BatchToolProvider.
+func (s *AgentSession) SimplePrompt(ctx context.Context, messages []agent.AgentMessage) (string, error) {
+	return s.Agent.SimplePrompt(ctx, messages)
 }
