@@ -9,11 +9,10 @@
 """Ask a quick side question without touching session history.
 
 Runs an ephemeral LLM call with the current session context.
-The question and response are shown inline in the UI but are never
-saved to the conversation history.
+The response is shown as a notification. Nothing is saved to history.
 
 Usage:
-  /btw <question>            — ask anything about the current context
+  /btw <question>
   /btw what does that error mean?
   /btw which file defines the Router interface?
 """
@@ -33,7 +32,8 @@ def cmd_btw(args: list[str], ctx: fir_ext.Context):
     if not question:
         return {"message": "Usage: /btw <question>"}
 
-    ctx.btw(question)
+    text = ctx.btw(question)
+    ctx.notify(f"btw: {text}")
     return {}
 
 

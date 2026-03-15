@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -244,6 +245,13 @@ func (a *Agent) SetMaxRetryDelayMs(ms *int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.maxRetryDelayMs = ms
+}
+
+// SetStreamFn overrides the stream function used for LLM calls.
+func (a *Agent) SetStreamFn(fn StreamFn) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.streamFn = fn
 }
 
 // Subscribe registers an event listener. Returns an unsubscribe function.
@@ -534,6 +542,85 @@ func (a *Agent) Continue() error {
 
 	a.runLoop(nil, false)
 	return nil
+}
+
+// SimplePrompt makes a single-turn LLM call with the given messages.
+// It reuses the agent's model, streamFn, api key resolution, and transport
+// config but sends no tools, runs no agent loop, and does not modify the
+// agent's state. The caller provides the full message list (including system
+// prompt via the agent's current state). Returns the assistant's text response.
+// Safe to call concurrently while the agent loop is running.
+func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (string, error) {
+	a.mu.Lock()
+	model := a.state.Model
+	systemPrompt := a.state.SystemPrompt
+	reasoning := ai.ThinkingOff
+	if a.state.ThinkingLevel != ThinkingOff {
+		reasoning = ToAIThinkingLevel(a.state.ThinkingLevel)
+	}
+	streamFn := a.streamFn
+	convertToLLM := a.convertToLLM
+	getApiKey := a.getApiKey
+	transport := a.transport
+	sessionID := a.sessionID
+	thinkingBudgets := a.thinkingBudgets
+	maxRetryDelayMs := a.maxRetryDelayMs
+	a.mu.Unlock()
+
+	if model == nil {
+		return "", fmt.Errorf("no model selected")
+	}
+
+	if streamFn == nil {
+		streamFn = func(m *ai.Model, c ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, opts)
+		}
+	}
+
+	if convertToLLM == nil {
+		return "", fmt.Errorf("no ConvertToLLM function configured")
+	}
+
+	agentCtx := &AgentContext{
+		SystemPrompt: systemPrompt,
+		Messages:     messages,
+		Tools:        NewToolSet(), // empty — no tools
+	}
+
+	config := &AgentLoopConfig{
+		Model:           model,
+		Reasoning:       reasoning,
+		SessionID:       sessionID,
+		Transport:       transport,
+		ThinkingBudgets: thinkingBudgets,
+		MaxRetryDelayMs: maxRetryDelayMs,
+		ConvertToLLM:    convertToLLM,
+		GetApiKey:       getApiKey,
+	}
+
+	// Discard agent events — we don't emit them for simple prompts.
+	events := make(chan AgentEvent, 64)
+	go func() {
+		for range events {
+		}
+	}()
+
+	msg := streamAssistantResponse(ctx, agentCtx, config, streamFn, events)
+	close(events)
+
+	if msg == nil {
+		return "", fmt.Errorf("no response from model")
+	}
+	if msg.ErrorMessage != "" {
+		return "", fmt.Errorf("%s", msg.ErrorMessage)
+	}
+	var sb strings.Builder
+	for _, c := range msg.Content {
+		if c.Text != nil {
+			sb.WriteString(c.Text.Text)
+		}
+	}
+	return sb.String(), nil
 }
 
 func (a *Agent) dequeueSteeringMessages() []AgentMessage {

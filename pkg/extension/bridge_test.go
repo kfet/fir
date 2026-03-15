@@ -68,6 +68,9 @@ func (m *mockBridgeAPI) GetActiveTools() []string      { return m.activeTools }
 func (m *mockBridgeAPI) SetActiveTools(names []string) { m.activeTools = names }
 func (m *mockBridgeAPI) SetModel(model *ai.Model) bool { m.modelSet = model; return true }
 func (m *mockBridgeAPI) ContinueSession() error        { return nil }
+func (m *mockBridgeAPI) SideQuery(question string) (string, error) {
+	return "mock response", nil
+}
 func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
 	m.execCalled = true
 	m.execCmd = cmd

@@ -18,10 +18,6 @@ type NotifyFunc func(level, message string)
 // name is the extension name; status is the text to display (empty = clear).
 type SetStatusFunc func(name, status string)
 
-// BtwFn is called when an extension sends a "btw" request.
-// It runs the ephemeral LLM call, streams the response to the UI, and
-// returns when the call is complete. May block for several seconds.
-type BtwFn func(question string) error
 type Bridge struct {
 	proc *Process
 	caps *InitResult
@@ -34,9 +30,6 @@ type Bridge struct {
 
 	// SetStatusFn is called for inbound "set_status" requests. If nil, an error is returned.
 	SetStatusFn SetStatusFunc
-
-	// BtwFn is called for inbound "btw" requests. If nil, an error is returned.
-	BtwFn BtwFn
 
 	// nextID generates unique request IDs for outbound requests.
 	// Starts at 100 to avoid collision with handshake ID (1).
@@ -272,7 +265,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = map[string]any{"ok": true}
 		}
 
-	case "btw":
+	case "side_query":
 		var p struct {
 			Question string `json:"question"`
 		}
@@ -282,12 +275,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		if b.BtwFn == nil {
-			rpcErr = &Error{Code: -32601, Message: "btw not supported in this mode"}
-		} else if err := b.BtwFn(p.Question); err != nil {
+		text, err := api.SideQuery(p.Question)
+		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
-			result = map[string]any{"ok": true}
+			result = map[string]any{"ok": true, "text": text}
 		}
 
 	default:

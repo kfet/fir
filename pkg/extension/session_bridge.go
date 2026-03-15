@@ -142,6 +142,10 @@ func (b *SessionBridge) ContinueSession() error {
 	return nil
 }
 
+func (b *SessionBridge) SideQuery(question string) (string, error) {
+	return b.session.SideQuery(context.Background(), question)
+}
+
 // RegisterTool adds an externally-defined tool to the session's agent.
 // The tool is wrapped with the session's hook interceptors so that
 // hook/tool_call interception still fires for it.

@@ -1216,6 +1216,7 @@ func (n *noopBridgeAPI) GetActiveTools() []string                               
 func (n *noopBridgeAPI) SetActiveTools(_ []string)                                                  {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
+func (n *noopBridgeAPI) SideQuery(_ string) (string, error)                                         { return "", nil }
 func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                    {}
 
 // writeCommandExtScript writes a Python extension script that:

@@ -352,14 +352,16 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
-    def btw(self, question: str, timeout: float = 120.0) -> None:
+    def btw(self, question: str, timeout: float = 120.0) -> str:
         """Ask a side question using the current session context.
 
-        The question and response are shown inline in the UI but are never
-        saved to the session history. Blocks until the response is complete.
-        Raises RuntimeError if not supported in the current mode.
+        Makes a one-shot LLM call with no tools and no history persistence.
+        Returns the full response text. Blocks until the response is complete.
         """
-        self._call("btw", {"question": question}, timeout=timeout)
+        result = self._call("side_query", {"question": question}, timeout=timeout)
+        if isinstance(result, dict):
+            return result.get("text", "")
+        return ""
 
 
 # ---------------------------------------------------------------------------

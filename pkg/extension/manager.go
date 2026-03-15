@@ -36,7 +36,6 @@ type Manager struct {
 	// Optional UI callbacks, applied to each bridge when it starts.
 	notifyFn    NotifyFunc
 	setStatusFn SetStatusFunc
-	btwFn       BtwFn
 
 	// OfferFixFn is called when a frontmatter mismatch is detected after
 	// handshake. It receives the mismatch details and returns true if the
@@ -95,14 +94,6 @@ func (m *Manager) SetNotifyFn(fn NotifyFunc) {
 func (m *Manager) SetSetStatusFn(fn SetStatusFunc) {
 	m.mu.Lock()
 	m.setStatusFn = fn
-	m.mu.Unlock()
-}
-
-// SetBtwFn sets the btw callback applied to all new bridges.
-// Call before Start() or Reload() to take effect.
-func (m *Manager) SetBtwFn(fn BtwFn) {
-	m.mu.Lock()
-	m.btwFn = fn
 	m.mu.Unlock()
 }
 
@@ -324,16 +315,12 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	m.mu.Lock()
 	notifyFn := m.notifyFn
 	setStatusFn := m.setStatusFn
-	btwFn := m.btwFn
 	m.mu.Unlock()
 	if notifyFn != nil {
 		bridge.NotifyFn = notifyFn
 	}
 	if setStatusFn != nil {
 		bridge.SetStatusFn = setStatusFn
-	}
-	if btwFn != nil {
-		bridge.BtwFn = btwFn
 	}
 
 	bCtx, cancel := context.WithCancel(ctx)
