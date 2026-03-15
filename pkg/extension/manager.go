@@ -398,7 +398,15 @@ func (m *Manager) Reload(ctx context.Context) error {
 	}
 
 	// Re-discover and start.
-	return m.Start(ctx, projectDir, cwd, api)
+	if err := m.Start(ctx, projectDir, cwd, api); err != nil {
+		return err
+	}
+
+	// Re-emit session_named so reloaded extensions pick up the current name.
+	if name := api.GetSessionName(); name != "" {
+		m.EmitEvent("session_named", map[string]any{"name": name})
+	}
+	return nil
 }
 
 // startPendingForEvent starts any pending (lazy) extensions that subscribe to

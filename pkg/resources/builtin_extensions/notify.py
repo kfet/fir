@@ -4,7 +4,7 @@
 # description: Send native terminal notifications when the agent finishes
 # builtin: true
 # modes: tui
-# events: agent_end
+# events: agent_end, session_named
 # ---
 """Send native terminal notifications when the agent finishes.
 
@@ -64,9 +64,19 @@ def notify_terminal(title: str, body: str):
         _notify_osc777(title, body)
 
 
+_session_name = ""
+
+
+@fir_ext.on("session_named")
+def on_session_named(params, ctx):
+    global _session_name
+    _session_name = (params or {}).get("name", "")
+
+
 @fir_ext.on("agent_end")
 def on_agent_end(params, ctx):
-    notify_terminal("fir", "Ready for input")
+    title = f"fir — {_session_name}" if _session_name else "fir"
+    notify_terminal(title, "Ready for input")
 
 
 fir_ext.run(name="notify")

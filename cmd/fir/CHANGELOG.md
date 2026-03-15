@@ -31,6 +31,8 @@
 
 ### Fixed
 
+- Notify extension now includes the session name in the notification title (e.g. "fir — my-session")
+- Extension manager re-emits `session_named` after `/reload` so reloaded extensions pick up the current session name
 - OAuth token refresh errors are now propagated instead of silently swallowed — expired tokens produce actionable error messages (e.g. "OAuth token refresh failed for anthropic: …") instead of the generic "no API key for provider"
 - All "no API key" error messages now include the underlying cause and guidance to run `fir login <provider>`
 - Anthropic OAuth token refresh no longer sends `scope` parameter, which was causing `invalid_scope` errors and preventing auto-refresh
