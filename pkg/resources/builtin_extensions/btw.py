@@ -33,8 +33,7 @@ def cmd_btw(args: list[str], ctx: fir_ext.Context):
         return {"message": "Usage: /btw <question>"}
 
     text = ctx.btw(question)
-    ctx.notify(f"btw: {text}")
-    return {}
+    return {"message": f"btw: {question}\n\n{text}"}
 
 
 fir_ext.run(name="btw")
