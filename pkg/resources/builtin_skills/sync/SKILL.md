@@ -1,6 +1,6 @@
 ---
 name: sync
-description: Sync with the upstream source changes. Detect changed files, apply equivalent changes, and update the baseline.
+description: Sync with an upstream source repo — detect changed files, apply equivalent downstream edits, update the baseline, and report any new features or non-trivial changes picked up.
 ---
 
 # Upstream Sync
@@ -90,7 +90,7 @@ bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
 
 ---
 
-## Step 5 — Log the sync
+## Step 5 — Log the sync and summarise notable changes
 
 Append an entry to the sync log:
 
@@ -98,7 +98,30 @@ Append an entry to the sync log:
 ## YYYY-MM-DD — Sync to commit <short-hash>
 
 - `path/to/changed/file` → `downstream/file`: One-line description of what changed.
+
+### Notable changes
+<!-- Only include this section when there are new features or non-trivial changes. -->
+- **Feature / change title**: One or two sentences explaining what it does and why it matters.
 ```
+
+After writing the log entry, **print a human-readable summary** of any new features or non-trivial behavioural changes that were brought in by this sync. Use the following format:
+
+```
+Sync summary — <short-hash> (<date>)
+
+New features / non-trivial changes:
+  • <Feature or change title>: <What it does and why it matters.>
+  • ...
+
+Trivial / housekeeping changes (skipped in summary):
+  • <file>: <refactor / typo / comment / version bump / etc.>
+```
+
+Guidelines for classifying changes:
+- **Notable** — new user-visible behaviour, new API surface, new CLI flag, changed defaults, performance improvements, security fixes, renamed/removed symbols that callers must update.
+- **Trivial** — whitespace, comments, internal refactors with no external effect, dependency version bumps, test-only changes, log-message tweaks.
+
+If no notable changes were picked up, still print the summary block with `(none)` so it is clear the sync was intentionally reviewed.
 
 ---
 
