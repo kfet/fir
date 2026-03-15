@@ -191,12 +191,6 @@ func (m *InteractiveMode) SetBeforeExtensionReload(fn func() error) {
 	m.beforeExtensionReload = fn
 }
 
-// ShowAutoReloadResult displays a status message in the TUI when extensions
-// are auto-reloaded due to file changes. Safe to call from any goroutine.
-func (m *InteractiveMode) ShowAutoReloadResult(message string) {
-	m.showStatus(message)
-}
-
 // SetUpdateChannel supplies a channel that delivers a single update notice
 // string (or "") once the background version check completes.  When the
 // notice is non-empty it is shown in the TUI message area at startup.

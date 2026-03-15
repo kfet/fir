@@ -740,16 +740,6 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		// Emit session_start after the UI context is wired so that
 		// extension status callbacks are active before session_start fires.
 		setup.extSetup.EmitSessionStart()
-
-		// Start watching extension files for auto-reload.
-		setup.extSetup.OnAutoReload = func(err error) {
-			if err != nil {
-				mode.ShowAutoReloadResult(fmt.Sprintf("Extension auto-reload failed: %v", err))
-			} else {
-				mode.ShowAutoReloadResult("Extensions auto-reloaded")
-			}
-		}
-		setup.extSetup.StartWatching(context.Background())
 	}
 
 	// Wire the update notice channel so the TUI shows it at startup.

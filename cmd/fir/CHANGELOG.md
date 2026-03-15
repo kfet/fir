@@ -16,6 +16,11 @@
 - `autoresearch-create` builtin skill: sets up and drives an autonomous optimisation loop — benchmark, hypothesis, commit, run, keep/revert, repeat (inspired by [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch))
 - `/simplify [focus]` builtin extension — reviews recent git changes (staged, unstaged, or last commit) and asks the agent to apply simplifications across code reuse, quality, and efficiency; optional focus text narrows the review
 
+### Changed
+
+- System prompt is no longer rebuilt before every turn — only on session creation and explicit actions (`/reload`, `/skill`), improving LLM provider prompt cache hit rates
+- Extension auto-reload file watcher removed — use `/reload` to pick up extension changes explicitly
+
 ### Fixed
 
 - OAuth token refresh errors are now propagated instead of silently swallowed — expired tokens produce actionable error messages (e.g. "OAuth token refresh failed for anthropic: …") instead of the generic "no API key for provider"

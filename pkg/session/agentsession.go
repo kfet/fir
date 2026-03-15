@@ -510,10 +510,6 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		planVersionBefore = s.planVersionNum()
 	}
 
-	// Build system prompt before each turn
-	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
-
 	// Expand skill commands (/skill:name args) and prompt templates (/template args)
 	content := s.expandSkillCommand(text)
 	if templates, _ := s.resourceLoader.GetPrompts(); len(templates) > 0 {

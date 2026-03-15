@@ -68,7 +68,7 @@ Extensions can optionally self-restrict by mode using script comment frontmatter
 
 Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
-Extensions auto-reload when their files are created, modified, or removed; interactive mode shows a status message on reload.
+Extensions are reloaded explicitly via `/reload`; there is no automatic file watching.
 
 ### Project extension: `/schedule`
 
