@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,3 +202,41 @@ func TestAnthropicLogin_CodeWithoutState(t *testing.T) {
 
 // Verify AnthropicProvider implements the Provider interface.
 var _ Provider = (*AnthropicProvider)(nil)
+
+func TestAnthropicRefreshToken_NoScopeInRequest(t *testing.T) {
+	// Verify that refresh token requests don't include a "scope" parameter,
+	// which causes "invalid_scope" errors from the Anthropic server.
+	var capturedBody map[string]string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "new-at",
+			"refresh_token": "new-rt",
+			"expires_in":    3600,
+		})
+	}))
+	defer ts.Close()
+
+	origURL := anthropicTokenURL
+	setAnthropicTokenURL(ts.URL + "/token")
+	defer setAnthropicTokenURL(origURL)
+
+	creds, err := refreshAnthropicToken("old-refresh-token")
+	if err != nil {
+		t.Fatalf("refreshAnthropicToken: %v", err)
+	}
+	if creds.Access != "new-at" {
+		t.Errorf("access = %q, want %q", creds.Access, "new-at")
+	}
+
+	// The key assertion: no "scope" in the request body
+	if _, hasScope := capturedBody["scope"]; hasScope {
+		t.Errorf("refresh request should not include 'scope' parameter, got: %v", capturedBody)
+	}
+	if capturedBody["grant_type"] != "refresh_token" {
+		t.Errorf("grant_type = %q, want %q", capturedBody["grant_type"], "refresh_token")
+	}
+}

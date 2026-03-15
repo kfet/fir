@@ -20,6 +20,7 @@
 
 - OAuth token refresh errors are now propagated instead of silently swallowed — expired tokens produce actionable error messages (e.g. "OAuth token refresh failed for anthropic: …") instead of the generic "no API key for provider"
 - All "no API key" error messages now include the underlying cause and guidance to run `fir login <provider>`
+- Anthropic OAuth token refresh no longer sends `scope` parameter, which was causing `invalid_scope` errors and preventing auto-refresh
 - ACP mode (Zed): auto-compaction failures are now shown to the user instead of being silently dropped
 - builtin-skills test: add `autoresearch-create` to expected-skills allowlist
 - Anthropic: `redacted_thinking` blocks (safety-filtered thinking, returned by Sonnet 4.6 and later) are now stored and passed back verbatim in multi-turn conversations, fixing a 400 error ("thinking blocks cannot be modified")

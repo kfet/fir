@@ -228,7 +228,6 @@ func refreshAnthropicToken(refreshToken string) (*Credentials, error) {
 		"grant_type":    "refresh_token",
 		"client_id":     anthropicClientID,
 		"refresh_token": refreshToken,
-		"scope":         anthropicScopes,
 	}
 	return doAnthropicTokenRequest(body)
 }
