@@ -15,7 +15,7 @@ import (
 type liveModelCache struct {
 	Provider  string          `json:"provider"`
 	Models    []LiveModelInfo `json:"models"`
-	FetchedAt time.Time      `json:"fetchedAt"`
+	FetchedAt time.Time       `json:"fetchedAt"`
 }
 
 const liveCacheTTL = 1 * time.Hour

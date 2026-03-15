@@ -210,7 +210,7 @@ func TestApplySWEScores_LiveGapFill(t *testing.T) {
 
 	live := map[string]float64{
 		"claude 4 opus (20250514)": 69.0, // matches claude-opus-4-0 (score=67.6, non-zero → skip)
-		"claude opus 4.1":         75.0,  // matches claude-opus-4-1 (score=73.0, non-zero → skip)
+		"claude opus 4.1":          75.0, // matches claude-opus-4-1 (score=73.0, non-zero → skip)
 	}
 
 	result := applySWEScores(models, live)
