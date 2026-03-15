@@ -372,7 +372,7 @@ func parseOpenAISSE(
 	stream *ai.AssistantMessageEventStream,
 ) error {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
 	var blocks []openaiBlock
 	var currentBlockIdx int = -1
