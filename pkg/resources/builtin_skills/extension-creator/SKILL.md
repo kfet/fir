@@ -74,6 +74,11 @@ fir_ext.run(name="<extension-name>")
 | `ctx.get_active_tools()` | Get list of active tool names |
 | `ctx.set_active_tools(tools)` | Set active tools |
 | `ctx.set_model(model)` | Change the current model |
+| `ctx.call_tool(name, params=None, timeout=60)` | Call any registered tool by name; returns `{content, is_error}`. Result never enters conversation history. |
+| `ctx.btw(question, timeout=120)` | Ephemeral side-query LLM call using current session context; returns the response text. Nothing is saved to history. |
+| `ctx.continue_session()` | Trigger the agent to continue without injecting a message |
+| `ctx.set_session_data(key, value)` | Store a key/value pair persisted across `/reexec` |
+| `ctx.get_session_data(key)` | Retrieve a previously stored value |
 
 ### Event Loop
 
@@ -91,6 +96,11 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 - [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.
 - [ ] Test by running fir with `--debug` and checking for init handshake success.
 - [ ] On first use, fir will prompt to trust the extension (project-local only).
+- [ ] **If you add, remove, or change any extension API surface** (bridge methods, SDK functions, context methods, events, hooks), update the demo extension (`pkg/resources/builtin_extensions/demo.py`) and its test (`pkg/extension/sdk/python/demo_ext_test.py`) to exercise the new surface. The demo is the canonical reference for the full API.
+
+## Reference Extension
+
+`pkg/resources/builtin_extensions/demo.py` is the **canonical reference** for the entire extension API. It exercises every outbound call (`ctx.*`), every event/hook, tool registration, and slash commands. Consult it first when building a new extension. Its companion test (`pkg/extension/sdk/python/demo_ext_test.py`) is the protocol-level test suite.
 
 ## Frontmatter Reference
 

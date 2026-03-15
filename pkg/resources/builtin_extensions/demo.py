@@ -6,6 +6,11 @@
 # ---
 """demo.py — comprehensive example exercising the full fir extension API.
 
+THIS IS THE CANONICAL REFERENCE for the extension API surface.  When you
+add, remove, or change a bridge method, SDK function, event, hook, or
+context method, update this file and its companion test
+(pkg/extension/sdk/python/demo_ext_test.py) to exercise the new surface.
+
 Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label · get_active_tools · set_active_tools ·

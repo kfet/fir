@@ -52,6 +52,8 @@ Every extension script **must** have a comment frontmatter block (`# ---` … `#
 
 **Never place test files in the extensions directory** (`pkg/resources/builtin_extensions/` or `.fir/extensions/`). Extension tests belong in `pkg/resources/testdata/` (Python unit tests) or `pkg/extension/integration/` (Go integration tests). Files in the extensions directory are embedded and discovered at runtime — test files there cause 5-second handshake timeouts on every startup.
 
+**Keep `demo.py` up to date.** The demo extension (`pkg/resources/builtin_extensions/demo.py`) is the canonical reference for the entire extension API surface. When you add, remove, or change a bridge method, SDK function, event, hook, or context method, update `demo.py` to exercise it and update its companion test (`pkg/extension/sdk/python/demo_ext_test.py`). The demo must always reflect the current API — it is the living documentation.
+
 Use `--no-extensions` to disable all extension discovery.
 
 ## Changelog
