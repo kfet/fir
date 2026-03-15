@@ -479,20 +479,15 @@ func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
 
-	type indexedResult struct {
-		idx int
-		raw json.RawMessage
-	}
-
 	var (
 		wg      sync.WaitGroup
 		resMu   sync.Mutex
 		results []json.RawMessage
 	)
 
-	for i, mb := range bridges {
+	for _, mb := range bridges {
 		wg.Add(1)
-		go func(idx int, mb *managedBridge) {
+		go func(mb *managedBridge) {
 			defer wg.Done()
 			raw, err := mb.bridge.CallHook(name, data, timeout)
 			if err != nil {
@@ -504,7 +499,7 @@ func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json
 				results = append(results, raw)
 				resMu.Unlock()
 			}
-		}(i, mb)
+		}(mb)
 	}
 	wg.Wait()
 
