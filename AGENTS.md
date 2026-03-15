@@ -10,6 +10,16 @@ Do not leave incomplete or stubbed code. Ensure all code is functional and teste
 
 When adding or changing user-visible features (CLI flags, subcommands, slash commands, settings), update the `self` skill (`.fir/skills/self/SKILL.md`) to keep it accurate.
 
+## Skills vs Extensions vs Core
+
+Before implementing any new feature or refactoring existing behaviour, ask: **does this need to live in core?**
+
+- **Skill** — pure prompt/instruction content that guides the AI. Use for workflows, personas, task recipes, or domain knowledge that requires no code. Zero compilation, zero risk.
+- **Extension** — a standalone script (Python/shell) that adds tools or reacts to events over JSON-RPC. Use for integrations, automation, or capabilities that a script can handle without touching the Go codebase.
+- **Core (Go)** — only for things that genuinely require it: new transport protocols, performance-critical paths, first-class CLI flags, or capabilities that skills/extensions cannot express.
+
+Default to a skill. If it needs to call external APIs or run commands, make it an extension. Only reach for core changes when skills and extensions are truly insufficient.
+
 ## Git
 
 Git commands that require an editor (e.g. `git rebase --continue`, `git commit`, `git merge --continue`) will open vim non-interactively and hang. Always prefix such commands with `GIT_EDITOR=true` to accept the default message without opening an editor:

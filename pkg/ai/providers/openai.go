@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -267,7 +268,7 @@ func streamOpenAIHTTP(
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
 	}
 	if apiKey == "" {
-		return fmt.Errorf("%s", noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options)))
+		return errors.New(noAPIKeyError(model.Provider, apiKeyErrorFromOpts(options)))
 	}
 
 	body, err := buildOpenAIRequestBody(model, prompt, options)

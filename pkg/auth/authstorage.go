@@ -488,8 +488,8 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 				oauthCreds := AuthCredToOAuthCreds(&cred)
 				return oauthProvider.GetAPIKey(oauthCreds)
 			}
-			// Return expired token anyway — the API will reject it but
-			// the error will be more informative than "no API key".
+			// Token still expired after re-read — another process didn't help.
+			// Fall through to return "".
 		}
 	}
 	return ""
