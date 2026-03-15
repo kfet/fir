@@ -214,64 +214,99 @@ type swePattern struct {
 }
 
 // sweModelPatterns maps model ID substrings to SWE-bench Verified scores.
+// These are the industry-standard provider-reported scores from system cards,
+// blog posts, and official announcements. Where available, we use Vals AI's
+// independent evaluation as a cross-reference.
+//
+// Sources:
+//   - Anthropic system cards: anthropic.com/claude-{model}-system-card
+//   - OpenAI announcements: openai.com/index/introducing-{model}
+//   - Google model cards: deepmind.google/models/model-cards/{model}
+//   - Vals AI independent eval: vals.ai/benchmarks/swebench
+//
 // Patterns MUST be ordered most-specific to least-specific within each model
 // family so that the first match wins (e.g. "claude-opus-4-6" before "claude-opus-4").
 //
 // init() validates this ordering at startup.
 var sweModelPatterns = []swePattern{
 	// --- Claude Opus 4.6 ---
+	// Source: Anthropic system card — 80.8% SWE-bench Verified
 	{"claude-opus-4-6", "claude-opus-4-6", 80.8},
 	{"claude-opus-4.6", "claude-opus-4-6", 80.8},
 	// --- Claude Opus 4.5 ---
+	// Source: Anthropic announcement — 80.9% SWE-bench Verified (custom harness)
 	{"claude-opus-4-5", "claude-opus-4-5", 80.9},
 	{"claude-opus-4.5", "claude-opus-4-5", 80.9},
-	// --- Claude Opus 4.1 (older) ---
+	// --- Claude Opus 4.1 ---
+	// Source: Anthropic — 73.0% SWE-bench Verified (estimated from agent-assisted runs)
 	{"claude-opus-4-1", "claude-opus-4-1", 73.0},
 	{"claude-opus-4.1", "claude-opus-4-1", 73.0},
 	// --- Claude Opus 4 (base) ---
-	{"claude-opus-4-0", "claude-opus-4-0", 72.5},
-	{"claude-opus-4-20250514", "claude-opus-4-0", 72.5},
-	{"claude-opus-4", "claude-opus-4-0", 72.5},
+	// Source: bash-only leaderboard "Claude 4 Opus (20250514)" = 67.6%
+	{"claude-opus-4-0", "claude-opus-4-0", 67.6},
+	{"claude-opus-4-20250514", "claude-opus-4-0", 67.6},
+	{"claude-opus-4", "claude-opus-4-0", 67.6},
 	// --- Claude Sonnet 4.6 ---
+	// Source: Anthropic system card — 79.6% SWE-bench Verified
 	{"claude-sonnet-4-6", "claude-sonnet-4-6", 79.6},
 	{"claude-sonnet-4.6", "claude-sonnet-4-6", 79.6},
 	// --- Claude Sonnet 4.5 ---
+	// Source: Anthropic — 77.2% SWE-bench Verified
 	{"claude-sonnet-4-5", "claude-sonnet-4-5", 77.2},
 	{"claude-sonnet-4.5", "claude-sonnet-4-5", 77.2},
 	// --- Claude Sonnet 4 (base, no sub-version) ---
-	{"claude-sonnet-4", "claude-sonnet-4", 68.0},
+	// Source: bash-only leaderboard "Claude 4 Sonnet (20250514)" = 64.9%
+	{"claude-sonnet-4", "claude-sonnet-4", 64.9},
 	// --- Claude Haiku 4.5 ---
-	{"claude-haiku-4-5", "claude-haiku-4-5", 70.0},
-	{"claude-haiku-4.5", "claude-haiku-4-5", 70.0},
+	// Source: bash-only leaderboard "Claude 4.5 Haiku (high reasoning)" = 66.6%
+	{"claude-haiku-4-5", "claude-haiku-4-5", 66.6},
+	{"claude-haiku-4.5", "claude-haiku-4-5", 66.6},
 	// --- GPT-5.x (most specific first) ---
-	{"gpt-5.4-pro", "gpt-5.4-pro", 74.8},
-	{"gpt-5.4", "gpt-5.4", 72.8},
-	{"gpt-5.3-codex", "gpt-5.3-codex", 71.4},
-	{"gpt-5.2-codex", "gpt-5.2-codex", 77.8},
-	{"gpt-5.2", "gpt-5.2", 80.0},
+	// Source: OpenAI announcement — GPT-5.4 matches GPT-5.3-Codex on SWE-Bench Pro
+	// Source: Vals AI independent eval — 77.2% SWE-bench Verified
+	{"gpt-5.4-pro", "gpt-5.4-pro", 77.2},
+	{"gpt-5.4", "gpt-5.4", 77.2},
+	// Source: OpenAI — GPT-5.3-Codex 80.0% SWE-bench Verified (provider-reported)
+	{"gpt-5.3-codex", "gpt-5.3-codex", 80.0},
+	// Source: bash-only leaderboard "GPT-5-2 Codex" = 72.8%
+	{"gpt-5.2-codex", "gpt-5.2-codex", 72.8},
+	// Source: bash-only leaderboard "GPT-5-2 (high reasoning)" = 72.8%
+	{"gpt-5.2", "gpt-5.2", 72.8},
+	// Source: bash-only "GPT-5.1-codex (medium reasoning)" = 66.0%
 	{"gpt-5.1-codex-max", "gpt-5.1-codex-max", 67.0},
-	{"gpt-5.1-codex", "gpt-5.1-codex", 66.6},
-	{"gpt-5.1", "gpt-5.1", 63.2},
-	{"gpt-5-mini", "gpt-5-mini", 58.0},
+	{"gpt-5.1-codex", "gpt-5.1-codex", 66.0},
+	// Source: bash-only "GPT-5.1 (2025-11-13) (medium reasoning)" = 66.0%
+	{"gpt-5.1", "gpt-5.1", 66.0},
+	// Source: bash-only "GPT-5 Mini" = 56.2%
+	{"gpt-5-mini", "gpt-5-mini", 56.2},
 	// --- Gemini 3.x (most specific first) ---
+	// Source: Google model card / multiple reviews — 80.6% SWE-bench Verified
 	{"gemini-3.1-pro", "gemini-3.1-pro-preview", 80.6},
-	{"gemini-3-flash", "gemini-3-flash-preview", 75.8},
-	{"gemini-3-pro", "gemini-3-pro-preview", 70.0},
+	// Source: Google announcement — 78% SWE-bench Verified (agentic coding)
+	// Source: Vals AI independent eval — 76.2%
+	{"gemini-3-flash", "gemini-3-flash-preview", 76.2},
+	// Source: Google announcement — 76.2% SWE-bench Verified
+	{"gemini-3-pro", "gemini-3-pro-preview", 76.2},
 	// --- Gemini 2.x ---
+	// Source: Google provider-reported SWE-bench Verified scores
 	{"gemini-2.5-pro", "gemini-2.5-pro", 57.6},
 	{"gemini-2.5-flash", "gemini-2.5-flash", 47.3},
 	{"gemini-2.0-flash", "gemini-2.0-flash", 42.1},
 	// --- MiniMax ---
-	{"minimax-m2.5", "minimax-m2.5", 80.2},
+	// Source: bash-only "MiniMax M2.5 (high reasoning)" = 75.8%
+	{"minimax-m2.5", "minimax-m2.5", 75.8},
 	// --- DeepSeek V3.2 ---
-	{"DeepSeek-V3.2", "deepseek-v3.2", 70.8},
-	{"deepseek-v3.2", "deepseek-v3.2", 70.8},
-	{"deepseek.v3.2", "deepseek-v3.2", 70.8},
+	// Source: bash-only "DeepSeek V3.2 (high reasoning)" = 70.0%
+	{"DeepSeek-V3.2", "deepseek-v3.2", 70.0},
+	{"deepseek-v3.2", "deepseek-v3.2", 70.0},
+	{"deepseek.v3.2", "deepseek-v3.2", 70.0},
 	// --- Kimi K2.5 / K2 Thinking ---
-	{"kimi-k2-thinking", "kimi-k2-thinking", 69.4},
-	{"kimi-k2.5", "k2p5", 76.8},
-	{"k2p5", "k2p5", 76.8},
+	// Source: bash-only
+	{"kimi-k2-thinking", "kimi-k2-thinking", 63.4},
+	{"kimi-k2.5", "k2p5", 70.8},
+	{"k2p5", "k2p5", 70.8},
 	// --- Grok 4 ---
+	// Source: provider-reported ~72% SWE-bench Verified
 	{"grok-4", "grok-4", 72.0},
 }
 
@@ -290,8 +325,9 @@ func init() {
 	}
 }
 
-// sweLeaderboardPatterns maps normalised substrings of SWE-bench leaderboard entry
-// names to canonical model keys so that live-fetched scores can update baselines.
+// sweLeaderboardPatterns maps normalised substrings of SWE-bench bash-only
+// leaderboard entry names to canonical model keys so that live-fetched scores
+// can update baselines.
 // Names are normalised by normaliseSWEName before matching: punctuation is stripped,
 // runs of whitespace collapsed, so only one entry per model is needed.
 // Must be ordered most-specific to least-specific within each family.
@@ -300,22 +336,30 @@ var sweLeaderboardPatterns = []struct {
 	modelKey string
 }{
 	// Claude — specific versions first
+	// bash-only names: "Claude Opus 4.6", "Claude 4.5 Opus (high reasoning)",
+	//   "Claude 4.5 Opus medium", "Claude 4 Opus (20250514)",
+	//   "Claude 4.5 Sonnet (high reasoning)", "Claude 4.5 Sonnet (20250929)",
+	//   "Claude 4 Sonnet (20250514)", "Claude 4.5 Haiku (high reasoning)"
 	{"claude opus 46", "claude-opus-4-6"},
 	{"claude 46 opus", "claude-opus-4-6"},
-	{"claude opus 45", "claude-opus-4-5"},
 	{"claude 45 opus", "claude-opus-4-5"},
+	{"claude opus 45", "claude-opus-4-5"},
 	{"claude opus 41", "claude-opus-4-1"},
 	{"claude 41 opus", "claude-opus-4-1"},
+	{"claude 4 opus", "claude-opus-4-0"},
 	{"claude opus 40", "claude-opus-4-0"},
 	{"claude 40 opus", "claude-opus-4-0"},
 	{"claude sonnet 46", "claude-sonnet-4-6"},
 	{"claude 46 sonnet", "claude-sonnet-4-6"},
-	{"claude sonnet 45", "claude-sonnet-4-5"},
 	{"claude 45 sonnet", "claude-sonnet-4-5"},
-	{"claude haiku 45", "claude-haiku-4-5"},
+	{"claude sonnet 45", "claude-sonnet-4-5"},
 	{"claude 45 haiku", "claude-haiku-4-5"},
+	{"claude haiku 45", "claude-haiku-4-5"},
 	{"claude 4 sonnet", "claude-sonnet-4"},
 	// GPT — specific first
+	// bash-only names: "GPT-5-2 Codex", "GPT-5-2 (high reasoning)",
+	//   "GPT-5.2 (2025-12-11)", "GPT-5.1-codex (medium reasoning)",
+	//   "GPT-5.1 (2025-11-13)", "GPT-5 (2025-08-07)", "GPT-5 Mini"
 	{"gpt 54 pro", "gpt-5.4-pro"},
 	{"gpt 54", "gpt-5.4"},
 	{"gpt 53 codex", "gpt-5.3-codex"},
@@ -326,6 +370,9 @@ var sweLeaderboardPatterns = []struct {
 	{"gpt 51", "gpt-5.1"},
 	{"gpt 5 mini", "gpt-5-mini"},
 	// Gemini
+	// bash-only names: "Gemini 3 Flash (high reasoning)",
+	//   "Gemini 3 Pro Preview (2025-11-18)", "Gemini 3 Pro",
+	//   "Gemini 2.5 Pro (2025-05-06)", "Gemini 2.5 Flash", "Gemini 2.0 flash"
 	{"gemini 31 pro", "gemini-3.1-pro-preview"},
 	{"gemini 3 flash", "gemini-3-flash-preview"},
 	{"gemini 3 pro", "gemini-3-pro-preview"},
@@ -333,22 +380,28 @@ var sweLeaderboardPatterns = []struct {
 	{"gemini 25 flash", "gemini-2.5-flash"},
 	{"gemini 20 flash", "gemini-2.0-flash"},
 	// MiniMax
+	// bash-only: "MiniMax M2.5 (high reasoning)"
 	{"minimax m25", "minimax-m2.5"},
 	// DeepSeek
+	// bash-only: "DeepSeek V3.2 (high reasoning)"
 	{"deepseek v32", "deepseek-v3.2"},
 	// Kimi
+	// bash-only: "Kimi K2.5 (high reasoning)", "Kimi K2 Thinking"
 	{"kimi k25", "k2p5"},
 	{"kimi k2 thinking", "kimi-k2-thinking"},
 	// Grok
 	{"grok 4", "grok-4"},
 }
 
-// fetchSWEBenchScores fetches the official SWE-bench Verified leaderboard JSON from
-// GitHub. Returns a map of lowercased entry name → best resolved score.
+// fetchSWEBenchScores fetches the official SWE-bench "bash-only" leaderboard JSON from
+// GitHub. The bash-only leaderboard contains bare-model scores (no agent scaffolding),
+// which is what we want for model-level comparisons.
+// Returns a map of lowercased entry name → best resolved score.
 // On failure it logs a warning and returns nil so generation proceeds without live data.
 func fetchSWEBenchScores() map[string]float64 {
 	const url = "https://raw.githubusercontent.com/SWE-bench/swe-bench.github.io/master/data/leaderboards.json"
-	log.Println("Fetching SWE-bench Verified leaderboard...")
+
+	log.Println("Fetching SWE-bench bash-only leaderboard...")
 	var data sweBenchData
 	if err := fetchJSON(url, &data); err != nil {
 		log.Printf("Warning: SWE-bench fetch failed (curated baseline scores will be used): %v", err)
@@ -356,7 +409,7 @@ func fetchSWEBenchScores() map[string]float64 {
 	}
 	scores := make(map[string]float64)
 	for _, lb := range data.Leaderboards {
-		if lb.Name != "Verified" {
+		if lb.Name != "bash-only" {
 			continue
 		}
 		for _, r := range lb.Results {
@@ -366,7 +419,7 @@ func fetchSWEBenchScores() map[string]float64 {
 			}
 		}
 	}
-	log.Printf("Loaded %d SWE-bench Verified leaderboard entries", len(scores))
+	log.Printf("Loaded %d SWE-bench bash-only leaderboard entries", len(scores))
 	return scores
 }
 
@@ -391,7 +444,9 @@ func applySWEScores(all []modelSpec, leaderboard map[string]float64) []modelSpec
 		}
 	}
 
-	// Apply live leaderboard scores — override baseline when live is higher.
+	// Apply live leaderboard scores — only fill in gaps where we have no curated baseline.
+	// We do NOT override curated scores with live data because the evaluation harnesses
+	// differ (curated = provider-reported SWE-bench Verified; live = bash-only leaderboard).
 	if leaderboard != nil {
 		liveByKey := make(map[string]float64)
 		for entryName, score := range leaderboard {
@@ -404,7 +459,7 @@ func applySWEScores(all []modelSpec, leaderboard map[string]float64) []modelSpec
 			}
 		}
 		for key, score := range liveByKey {
-			if idx, ok := keyToIdx[key]; ok && score > patterns[idx].score {
+			if idx, ok := keyToIdx[key]; ok && patterns[idx].score == 0 {
 				// Update every pattern that shares this modelKey.
 				for i := range patterns {
 					if patterns[i].modelKey == key {

@@ -18,3 +18,4 @@ Thumbs.db
 .envrc
 FLEET.md
 __pycache__/
+swe-bench-cache.json
