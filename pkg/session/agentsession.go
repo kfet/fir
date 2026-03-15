@@ -1031,21 +1031,28 @@ func (s *AgentSession) ClearSysExtBlocks() {
 	s.mu.Unlock()
 }
 
+// refreshSystemPrompt rebuilds the base system prompt from resources and
+// applies any [SYS_EXT] blocks, then pushes the result to the agent.
+func (s *AgentSession) refreshSystemPrompt() {
+	s.buildSystemPrompt()
+	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
+}
+
 // effectiveSystemPrompt returns the base system prompt with any [SYS_EXT]
 // blocks appended. When sys extensions are disabled via settings, the base
 // prompt is returned unchanged.
 func (s *AgentSession) effectiveSystemPrompt() string {
+	// Check feature toggle before acquiring the lock / copying the slice.
+	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSysExtensions() {
+		return s.baseSystemPrompt
+	}
+
 	s.mu.RLock()
 	blocks := make([]string, len(s.sysExtBlocks))
 	copy(blocks, s.sysExtBlocks)
 	s.mu.RUnlock()
 
 	if len(blocks) == 0 {
-		return s.baseSystemPrompt
-	}
-
-	// Check if feature is enabled
-	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSysExtensions() {
 		return s.baseSystemPrompt
 	}
 
@@ -1148,8 +1155,7 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.Agent.ReplaceMessages(nil)
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.ClearSysExtBlocks()
-	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
+	s.refreshSystemPrompt()
 	// Clear plan state so stale plans don't persist across sessions.
 	s.UpdatePlan("", nil, nil)
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
@@ -1192,8 +1198,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 
 	// Rebuild system prompt
 	s.sessionDate = time.Now().Format("2006-01-02")
-	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
+	s.refreshSystemPrompt()
 
 	// Emit session_named so extensions (e.g. tmuxspinner) update the window title.
 	// Always emit, even with an empty name, so the old name is cleared.
@@ -1259,8 +1264,7 @@ func (s *AgentSession) Reload() error {
 		return err
 	}
 	s.sessionDate = time.Now().Format("2006-01-02")
-	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.effectiveSystemPrompt())
+	s.refreshSystemPrompt()
 	return nil
 }
 
