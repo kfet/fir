@@ -15,7 +15,8 @@ Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label · get_active_tools · set_active_tools ·
   set_model · send_message · send_user_message ·
-  set_session_data · get_session_data · continue_session · side_query · call_tool
+  set_session_data · get_session_data · continue_session · side_query · call_tool ·
+  prepend
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
@@ -277,6 +278,7 @@ def on_hook_tool_call(params, ctx):
 def on_session_start(params, ctx):
     ctx.set_status("demo ready")                      # set_status
     ctx.set_session_data("started", "true")            # set_session_data
+    ctx.prepend("Demo extension is active.")           # prepend
 
 
 @fir_ext.on("session_shutdown")

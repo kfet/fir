@@ -115,6 +115,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = cwd
 	cmd.Env = AppendColorEnv(os.Environ())
+	cmd.Env = append(cmd.Env, "GIT_EDITOR=true")
 
 	// Run bash in its own process group so we can kill the entire group
 	// (bash + any child processes it spawns) on cancellation. Without

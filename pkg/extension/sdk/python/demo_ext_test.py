@@ -589,6 +589,14 @@ class TestDemoEvents(DemoTestCase):
         self.assertEqual(msg["params"]["key"], "started")
         self.assertEqual(msg["params"]["value"], "true")
 
+    def test_session_start_calls_prepend(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("prepend_context")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected prepend_context after session_start")
+        assert msg is not None
+        self.assertEqual(msg["params"]["content"], "Demo extension is active.")
+
     # -- session_shutdown ----------------------------------------------------
 
     def test_session_shutdown_calls_get_session_data(self) -> None:
