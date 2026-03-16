@@ -4,6 +4,7 @@ package resources
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -76,13 +77,7 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, date, appendSection string
 		}
 	}
 
-	hasRead := len(opts.SelectedTools) == 0
-	for _, t := range opts.SelectedTools {
-		if t == "read" {
-			hasRead = true
-			break
-		}
-	}
+	hasRead := len(opts.SelectedTools) == 0 || slices.Contains(opts.SelectedTools, "read")
 	if hasRead && len(opts.Skills) > 0 {
 		prompt += FormatSkillsForPrompt(opts.Skills)
 	}

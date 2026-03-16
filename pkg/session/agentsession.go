@@ -1010,7 +1010,7 @@ func (s *AgentSession) GetSystemPrompt() string {
 
 // PrependContext adds a system extension block that will be included
 // in the effective system prompt. Extensions use this to inject dynamic
-// context (e.g. project info from /reload, user preferences from /btw).
+// context (e.g. project info from /reload, user preferences from /aside).
 // The content is wrapped in [SYS_EXT] tags by effectiveSystemPrompt().
 func (s *AgentSession) PrependContext(content string) {
 	if content == "" {

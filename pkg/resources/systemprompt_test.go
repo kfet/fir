@@ -129,3 +129,21 @@ func TestBuildSystemPrompt_Guidelines(t *testing.T) {
 		t.Error("should suggest bash for file ops when it's the only option")
 	}
 }
+
+func TestBuildSystemPrompt_EmptySelectedToolsIncludesSkills(t *testing.T) {
+	// When SelectedTools is empty (no explicit selection), all tools are
+	// available — including read. Skills should still appear.
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
+		Skills: []Skill{
+			{Name: "my-skill", Description: "A test skill", FilePath: "/skills/my-skill/SKILL.md"},
+		},
+		Cwd: "/test",
+	})
+
+	if !strings.Contains(prompt, "<available_skills>") {
+		t.Error("empty SelectedTools should still include skills section")
+	}
+	if !strings.Contains(prompt, "my-skill") {
+		t.Error("empty SelectedTools should still list skill names")
+	}
+}
