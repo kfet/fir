@@ -35,7 +35,10 @@ Read every changed file fully. Look for:
 - **Security** — API key exposure, path traversal, injection, hardcoded secrets
 - **Correctness** — off-by-one, race conditions, wrong logic, serialization mismatches
 - **Test gaps** — untested code paths, error branches, missing assertions
-- **Simplification** — dead code, redundant helpers, duplicate types, verbose patterns
+- **Simplification** — dead code, redundant helpers, duplicate types, verbose patterns. Three dimensions:
+  - *Code reuse* — eliminate duplication, extract shared helpers
+  - *Code quality* — improve readability, naming, structure, adherence to project conventions
+  - *Efficiency* — remove unnecessary allocations, redundant work, or slow patterns
 
 ### 4. Compile a findings list
 
