@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -551,6 +550,15 @@ func (a *Agent) Continue() error {
 // agent's state. The caller provides the full message list (including system
 // prompt via the agent's current state). Returns the assistant's text response.
 // Safe to call concurrently while the agent loop is running.
+//
+// NO-COMPACTION CONTRACT: SimplePrompt MUST NOT trigger auto-compaction, ever.
+// This is guaranteed by two design choices that must be preserved:
+//  1. The AgentLoopConfig built here intentionally omits the Compaction field,
+//     so no server-side compaction is requested.
+//  2. The events channel is a private, local channel drained by a throwaway
+//     goroutine — events never reach AgentSession.checkAutoCompaction.
+//
+// Do not forward these events to the session or add Compaction to the config.
 func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (string, error) {
 	a.mu.Lock()
 	model := a.state.Model
@@ -613,7 +621,7 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (stri
 		return "", fmt.Errorf("no response from model")
 	}
 	if msg.ErrorMessage != "" {
-		return "", errors.New(msg.ErrorMessage)
+		return "", fmt.Errorf("%s", msg.ErrorMessage)
 	}
 	var sb strings.Builder
 	for _, c := range msg.Content {

@@ -110,7 +110,7 @@ def _run_aside(
         try:
             synthesis = ctx.side_query(instructions)
         except Exception as exc:
-            return _error(f"side query failed: {exc}")
+            return _side_query_error(exc)
         return {
             "content": [{"type": "text", "text": synthesis}],
             "is_error": False,
@@ -186,7 +186,7 @@ def _run_aside(
     try:
         synthesis = ctx.side_query(prompt)
     except Exception as exc:
-        return _error(f"synthesis failed: {exc}")
+        return _side_query_error(exc)
 
     return {
         "content": [{"type": "text", "text": synthesis}],
@@ -199,6 +199,34 @@ def _error(msg: str) -> dict:
         "content": [{"type": "text", "text": msg}],
         "is_error": True,
     }
+
+
+def _side_query_error(exc: Exception) -> dict:
+    """Return a structured is_error result for a side_query LLM failure.
+
+    The error message uses the 'side-query: ...' prefix that SideQuery
+    attaches, so the main LLM receives a clear, attributable message rather
+    than a raw API error string.  Context-overflow errors get an extra hint
+    so the LLM knows to simplify the request.
+    """
+    msg = str(exc)
+    hint = ""
+    _overflow_markers = (
+        "context window",
+        "context length",
+        "maximum context",
+        "token limit",
+        "too many tokens",
+        "exceeds",
+    )
+    if any(m in msg.lower() for m in _overflow_markers):
+        hint = " (context window full — try fewer tools or a simpler question)"
+    return _error(f"aside LLM call failed{hint}: {msg}")
+
+
+def _side_query_error_text(exc: Exception) -> str:
+    """Convenience wrapper: return the error text from _side_query_error."""
+    return _side_query_error(exc)["content"][0]["text"]
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +328,7 @@ def cmd_aside(args: list[str], ctx: fir_ext.Context):
         try:
             answer = ctx.side_query(text)
         except Exception as exc:
-            return {"message": f"aside failed: {exc}"}
+            return {"message": _side_query_error_text(exc)}
         return {"message": f"aside: {text}\n\n{answer}"}
 
     # Looks like a multi-tool request — delegate to agent.

@@ -1557,16 +1557,163 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 // context plus the given question. No tools are provided and nothing is added
 // to the session history. Delegates to Agent.SimplePrompt which reuses the
 // agent's streamFn, api key resolution, and transport config.
+//
+// NO-COMPACTION CONTRACT: SideQuery MUST NOT trigger auto-compaction, ever.
+// SimplePrompt guarantees this (see its own contract comment). Do not replace
+// SimplePrompt with a call that emits events to the session.
+//
+// If the internal LLM call fails (e.g. the context is overflowing), the error
+// is returned as a non-nil error with a "side-query: ..." prefix so the caller
+// (the aside extension) can surface it to the main LLM as a meaningful
+// is_error tool result rather than silently swallowing the failure.
 func (s *AgentSession) SideQuery(ctx context.Context, question string) (string, error) {
 	// Snapshot current messages.
 	state := s.Agent.State()
 	msgs := make([]agent.AgentMessage, len(state.Messages))
 	copy(msgs, state.Messages)
 
+	// Trim the context if it is near the model's capacity.  The side query
+	// must not fail with a context-overflow error just because the main
+	// conversation is large; we drop old messages from the front to stay
+	// within a safe budget, leaving headroom for the question and the answer.
+	if model := s.Model(); model != nil && model.ContextWindow > 0 {
+		msgs = trimMessagesForSideQuery(msgs, model.ContextWindow, s.sideQueryContextTokens())
+	}
+
 	// Append the side question.
 	msgs = append(msgs, agent.NewAgentMessage(ai.NewUserMsg(question, time.Now().UnixMilli())))
 
-	return s.Agent.SimplePrompt(ctx, msgs)
+	result, err := s.Agent.SimplePrompt(ctx, msgs)
+	if err != nil {
+		// Prefix with "side-query:" so callers (e.g. the aside extension) can
+		// surface a clear, attributable error to the main LLM instead of a
+		// raw, context-free API error string.
+		return "", fmt.Errorf("side-query: %w", err)
+	}
+	return result, nil
+}
+
+// sideQueryContextTokens returns the best available estimate of the current
+// context token count, using the last assistant message's reported usage.
+// Returns 0 when no usage data is available (triggering a chars/4 fallback
+// inside trimMessagesForSideQuery).
+func (s *AgentSession) sideQueryContextTokens() int {
+	s.mu.Lock()
+	last := s.lastAssistantMessage
+	s.mu.Unlock()
+	if last == nil {
+		return 0
+	}
+	return calculateContextTokens(last.Usage)
+}
+
+// sideQueryFillRatio is the maximum fraction of the model context window that
+// the message history (excluding the side question itself) may occupy before
+// trimming kicks in.  30 % headroom is reserved for the question + response.
+const sideQueryFillRatio = 0.70
+
+// trimMessagesForSideQuery drops the oldest messages until the estimated token
+// count of msgs is within sideQueryFillRatio of contextWindow.
+//
+// knownTokens, when > 0, is used as the token count for the full slice (from
+// real usage data). When 0 the function falls back to a chars/4 heuristic.
+// At least one message is always kept so the context is never empty.
+func trimMessagesForSideQuery(msgs []agent.AgentMessage, contextWindow, knownTokens int) []agent.AgentMessage {
+	budget := int(float64(contextWindow) * sideQueryFillRatio)
+
+	// Fast path: we have real usage data and are already within budget.
+	if knownTokens > 0 && knownTokens <= budget {
+		return msgs
+	}
+
+	// Pre-compute per-message token estimates once (O(n)), then sweep from the
+	// front to find the first index we need to keep (O(n)).  This avoids the
+	// O(n²) cost of re-summing on every loop iteration.
+	estimates := make([]int, len(msgs))
+	total := 0
+	for i, msg := range msgs {
+		estimates[i] = estimateSideQueryMsgTokens(msg)
+		total += estimates[i]
+	}
+
+	// Use real token data for the initial total when available.
+	if knownTokens > 0 {
+		total = knownTokens
+	}
+
+	if total <= budget {
+		return msgs
+	}
+
+	// Drop from the front until within budget, keeping at least one message.
+	for i := 0; i < len(msgs)-1; i++ {
+		total -= estimates[i]
+		if total <= budget {
+			return msgs[i+1:]
+		}
+	}
+	// All messages still exceed budget — return just the last one.
+	return msgs[len(msgs)-1:]
+}
+
+// estimateSideQueryMsgTokens estimates the token count of a single message
+// using the same chars/4 heuristic as the compaction package, avoiding an
+// import cycle (pkg/compaction imports pkg/session).
+func estimateSideQueryMsgTokens(msg agent.AgentMessage) int {
+	chars := 0
+	switch msg.Role() {
+	case "user":
+		u := msg.Message.AsUser()
+		if u == nil {
+			return 0
+		}
+		switch content := u.Content.(type) {
+		case string:
+			chars = len(content)
+		case []any:
+			for _, block := range content {
+				if m, ok := block.(map[string]any); ok {
+					if m["type"] == "text" {
+						if t, ok := m["text"].(string); ok {
+							chars += len(t)
+						}
+					}
+				}
+			}
+		}
+	case "assistant":
+		a := msg.Message.AsAssistant()
+		if a == nil {
+			return 0
+		}
+		for _, block := range a.Content {
+			if block.Text != nil {
+				chars += len(block.Text.Text)
+			} else if block.Thinking != nil {
+				chars += len(block.Thinking.Thinking)
+			} else if block.ToolCall != nil {
+				chars += len(block.ToolCall.Name)
+				if args, err := json.Marshal(block.ToolCall.Arguments); err == nil {
+					chars += len(args)
+				}
+			}
+		}
+	case "toolResult":
+		tr := msg.Message.AsToolResult()
+		if tr == nil {
+			return 0
+		}
+		for _, c := range tr.Content {
+			if c.IsText() {
+				chars += len(c.Text)
+			}
+			if c.IsImage() {
+				chars += 4800
+			}
+		}
+	}
+	const charsPerToken = 4
+	return (chars + charsPerToken - 1) / charsPerToken
 }
 
 // Close cleans up the session.

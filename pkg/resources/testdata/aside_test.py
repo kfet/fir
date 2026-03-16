@@ -218,14 +218,25 @@ class TestRunAside(unittest.TestCase):
         tools = [{"name": "Read", "params": {"path": "a.go"}}]
         result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
-        self.assertIn("synthesis failed", result["content"][0]["text"])
+        self.assertIn("aside LLM call failed", result["content"][0]["text"])
 
     def test_no_tools_side_query_failure_returns_error(self):
         ctx = self._make_ctx()
         ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
         result = self.mod._run_aside([], "some question", ctx)
         self.assertTrue(result["is_error"])
-        self.assertIn("side query failed", result["content"][0]["text"])
+        self.assertIn("aside LLM call failed", result["content"][0]["text"])
+
+    def test_side_query_overflow_includes_hint(self):
+        ctx = self._make_ctx()
+        ctx.side_query = mock.MagicMock(
+            side_effect=RuntimeError("side-query: Input exceeds context window limit")
+        )
+        result = self.mod._run_aside([], "some question", ctx)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("aside LLM call failed", text)
+        self.assertIn("context window full", text)
 
     def test_unnamed_tool_produces_validation_error(self):
         ctx = self._make_ctx(side_query_result="handled")
