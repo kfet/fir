@@ -55,6 +55,13 @@ type InteractiveMode struct {
 	footerComponent        *components.FooterComponent
 	footerDataProvider     *FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
+	// pendingPreemptiveUserMsgs counts user messages that have been added to
+	// the chat display preemptively (before the agent loop fires
+	// EventMessageStart). When onMessageStart sees a user message and this
+	// counter is > 0, it skips rendering to avoid a duplicate. Using an
+	// atomic avoids a data race: AddUserMessage is called from the UI input
+	// goroutine while onMessageStart is called from the agent goroutine.
+	pendingPreemptiveUserMsgs atomic.Int32
 
 	// Streaming state
 	streamingComponent *components.AssistantMessageComponent
@@ -413,6 +420,7 @@ func (m *InteractiveMode) Run(opts InteractiveModeOptions) error {
 
 	// Send initial prompt if provided
 	if opts.InitialPrompt != "" {
+		m.AddUserMessage(opts.InitialPrompt) // Show it instantly as if typed
 		go func() {
 			_ = m.session.Prompt(opts.InitialPrompt)
 		}()
@@ -516,6 +524,10 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		// Add to history and clear
 		m.editor.AddToHistory(text)
 		m.editor.SetText("")
+
+		// Show the user message in the chat immediately so there is no
+		// perceived latency between pressing Enter and seeing the message.
+		m.AddUserMessage(text)
 
 		// Send message
 		if m.session != nil {
@@ -635,6 +647,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		}
 		m.editor.AddToHistory(text)
 		m.editor.SetText("")
+		// Show the user message in the chat immediately so there is no
+		// perceived latency between pressing Alt+Enter and seeing the message.
+		m.AddUserMessage(text)
 		if m.session != nil {
 			go func() {
 				_ = m.session.Prompt(text, &session.PromptOptions{StreamingBehavior: "followUp"})

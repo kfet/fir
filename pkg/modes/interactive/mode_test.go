@@ -1,6 +1,7 @@
 package interactive
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1942,5 +1943,177 @@ func TestStartUpdateNoticeWatcher_ContextCancel(t *testing.T) {
 		// OK — goroutine exited promptly
 	case <-time.After(2 * time.Second):
 		t.Error("goroutine did not exit promptly after context cancellation")
+	}
+}
+
+// ============================================================================
+// userMsgText
+// ============================================================================
+
+func TestUserMsgText_StringContent(t *testing.T) {
+	got := userMsgText("hello world")
+	if got != "hello world" {
+		t.Errorf("expected 'hello world', got %q", got)
+	}
+}
+
+func TestUserMsgText_EmptyString(t *testing.T) {
+	got := userMsgText("")
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestUserMsgText_SliceWithTextBlock(t *testing.T) {
+	content := []any{
+		map[string]any{"type": "text", "text": "slice text"},
+	}
+	got := userMsgText(content)
+	if got != "slice text" {
+		t.Errorf("expected 'slice text', got %q", got)
+	}
+}
+
+// Text block may appear after an image block; the helper must still return it.
+func TestUserMsgText_SliceImageThenText(t *testing.T) {
+	content := []any{
+		map[string]any{"type": "image_url", "url": "data:image/png;base64,..."},
+		map[string]any{"type": "text", "text": "caption"},
+	}
+	got := userMsgText(content)
+	if got != "caption" {
+		t.Errorf("expected 'caption', got %q", got)
+	}
+}
+
+// When only an image block is present, text extraction returns "".
+func TestUserMsgText_SliceNoTextBlock(t *testing.T) {
+	content := []any{
+		map[string]any{"type": "image_url", "url": "data:image/png;base64,..."},
+	}
+	got := userMsgText(content)
+	if got != "" {
+		t.Errorf("expected empty string for image-only slice, got %q", got)
+	}
+}
+
+func TestUserMsgText_EmptySlice(t *testing.T) {
+	got := userMsgText([]any{})
+	if got != "" {
+		t.Errorf("expected empty string for empty slice, got %q", got)
+	}
+}
+
+func TestUserMsgText_UnknownType(t *testing.T) {
+	got := userMsgText(42)
+	if got != "" {
+		t.Errorf("expected empty string for unknown type, got %q", got)
+	}
+}
+
+func TestUserMsgText_NilValue(t *testing.T) {
+	got := userMsgText(nil)
+	if got != "" {
+		t.Errorf("expected empty string for nil, got %q", got)
+	}
+}
+
+// ============================================================================
+// Preemptive-dedup counter: onMessageStart
+// ============================================================================
+
+// makeUserEvent builds a minimal AgentEvent carrying a user message.
+func makeUserMsgEvent(text string) *agent.AgentEvent {
+	msg := agent.NewAgentMessage(ai.NewUserMsg(text, 0))
+	return &agent.AgentEvent{
+		Type:    agent.EventMessageStart,
+		Message: &msg,
+	}
+}
+
+// TestOnMessageStart_SkipsWhenPreemptivePending verifies that when
+// AddUserMessage has already shown a user message (counter > 0), the
+// corresponding EventMessageStart does NOT add a second copy to the
+// message container.
+func TestOnMessageStart_SkipsWhenPreemptivePending(t *testing.T) {
+	tm := newTestMode(t)
+
+	// AddUserMessage increments the counter and adds 1 child.
+	tm.mode.pendingPreemptiveUserMsgs.Add(1)
+	before := tm.messageCount()
+
+	tm.mode.onMessageStart(makeUserMsgEvent("hello"))
+	tm.waitRender()
+
+	// Counter should be back to 0 (consumed by onMessageStart).
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter 0 after skip, got %d", got)
+	}
+	// No new child added.
+	if after := tm.messageCount(); after != before {
+		t.Errorf("expected message count unchanged (%d), got %d", before, after)
+	}
+}
+
+// TestOnMessageStart_RendersWhenNoPreemptivePending verifies that an
+// EventMessageStart user message with no preemptive counter (e.g. from an
+// extension) is rendered and the counter remains at 0.
+func TestOnMessageStart_RendersWhenNoPreemptivePending(t *testing.T) {
+	tm := newTestMode(t)
+
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Fatalf("precondition: expected counter 0, got %d", got)
+	}
+	before := tm.messageCount()
+
+	tm.mode.onMessageStart(makeUserMsgEvent("from extension"))
+	tm.waitRender()
+
+	// Counter must be restored to 0.
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter 0 after render, got %d", got)
+	}
+	// One new child added.
+	if after := tm.messageCount(); after != before+1 {
+		t.Errorf("expected message count %d, got %d", before+1, after)
+	}
+}
+
+// TestOnMessageStart_MultiplePreemptive verifies that N preemptive messages
+// consumed exactly N EventMessageStart events without adding duplicates.
+func TestOnMessageStart_MultiplePreemptive(t *testing.T) {
+	tm := newTestMode(t)
+
+	const n = 3
+	tm.mode.pendingPreemptiveUserMsgs.Add(int32(n))
+	before := tm.messageCount()
+
+	for i := range n {
+		tm.mode.onMessageStart(makeUserMsgEvent(fmt.Sprintf("msg %d", i)))
+	}
+	tm.waitRender()
+
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter 0 after %d skips, got %d", n, got)
+	}
+	if after := tm.messageCount(); after != before {
+		t.Errorf("expected message count unchanged (%d), got %d", before, after)
+	}
+}
+
+// TestOnMessageStart_NilMessageIsNoop ensures a nil Message field is handled
+// gracefully (no panic, no state change).
+func TestOnMessageStart_NilMessageIsNoop(t *testing.T) {
+	tm := newTestMode(t)
+	before := tm.messageCount()
+
+	tm.mode.onMessageStart(&agent.AgentEvent{Type: agent.EventMessageStart, Message: nil})
+	tm.waitRender()
+
+	if after := tm.messageCount(); after != before {
+		t.Errorf("expected no change for nil message, got %d → %d", before, after)
+	}
+	if got := tm.mode.pendingPreemptiveUserMsgs.Load(); got != 0 {
+		t.Errorf("expected counter unchanged at 0, got %d", got)
 	}
 }

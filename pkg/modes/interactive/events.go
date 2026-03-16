@@ -22,8 +22,12 @@ import (
 // Chat message management
 // ============================================================================
 
-// AddUserMessage adds a user message to the display.
+// AddUserMessage adds a user message to the display preemptively (before the
+// agent loop fires EventMessageStart), so the UI updates instantly on submit.
+// It increments pendingPreemptiveUserMsgs so onMessageStart can skip the
+// corresponding event and avoid a duplicate render.
 func (m *InteractiveMode) AddUserMessage(text string) {
+	m.pendingPreemptiveUserMsgs.Add(1)
 	m.addUserMessageToChat(text)
 	m.ui.RequestRender(false)
 }
@@ -44,6 +48,25 @@ func (m *InteractiveMode) addUserMessageToChat(text string) {
 	}
 }
 
+// userMsgText extracts the plain-text portion of a user message's Content,
+// which may be a bare string or a []any slice of content blocks (text+images).
+// Returns "" if no text block is present.
+func userMsgText(content any) string {
+	if s, ok := content.(string); ok {
+		return s
+	}
+	if blocks, ok := content.([]any); ok {
+		for _, b := range blocks {
+			if bm, ok := b.(map[string]any); ok && bm["type"] == "text" {
+				if s, ok := bm["text"].(string); ok {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // AddAssistantMessage adds an assistant message to the display.
 func (m *InteractiveMode) AddAssistantMessage(msg *ai.AssistantMessage) {
 	comp := components.NewAssistantMessageComponent(msg, m.hideThinking, nil)
@@ -59,7 +82,7 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 	state := m.session.State()
 	for _, agentMsg := range state.Messages {
 		if u := agentMsg.Message.AsUser(); u != nil {
-			if txt, ok := u.Content.(string); ok {
+			if txt := userMsgText(u.Content); txt != "" {
 				m.addUserMessageToChat(txt)
 			}
 		} else if a := agentMsg.Message.AsAssistant(); a != nil {
@@ -179,7 +202,16 @@ func (m *InteractiveMode) onMessageStart(ae *agent.AgentEvent) {
 	}
 
 	if u := ae.Message.AsUser(); u != nil {
-		if txt, ok := u.Content.(string); ok {
+		// If this message was already shown preemptively (via AddUserMessage),
+		// skip it to avoid a duplicate — regardless of whether the text was
+		// template-expanded by session.Prompt before reaching the agent.
+		if m.pendingPreemptiveUserMsgs.Add(-1) >= 0 {
+			return
+		}
+		// Counter went negative: no preemptive message was pending (e.g. the
+		// message came from an extension). Restore balance and render it.
+		m.pendingPreemptiveUserMsgs.Add(1)
+		if txt := userMsgText(u.Content); txt != "" {
 			m.addUserMessageToChat(txt)
 		}
 		m.ui.RequestRender(false)
