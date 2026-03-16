@@ -973,7 +973,7 @@ func convertToolResultContent(content []ai.ToolResultContent, model *ai.Model) a
 		// Text-only: return as simple string
 		var parts []string
 		for _, c := range content {
-			if c.IsText() {
+			if c.IsText() || (c.Type == "" && c.Text != "") {
 				parts = append(parts, c.Text)
 			}
 		}

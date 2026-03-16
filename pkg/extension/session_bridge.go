@@ -160,7 +160,7 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 	tools := b.session.GetTools()
 	if tools == nil {
 		return ToolResult{
-			Content: []ai.ToolResultContent{{Text: "no tools available"}},
+			Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: "no tools available"}},
 			IsError: true,
 		}, nil
 	}
@@ -168,14 +168,14 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 	tool, found := tools.Get(name)
 	if !found {
 		return ToolResult{
-			Content: []ai.ToolResultContent{{Text: fmt.Sprintf("tool %q not found", name)}},
+			Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: fmt.Sprintf("tool %q not found", name)}},
 			IsError: true,
 		}, nil
 	}
 
 	if tool.Execute == nil {
 		return ToolResult{
-			Content: []ai.ToolResultContent{{Text: fmt.Sprintf("tool %q has no execute function", name)}},
+			Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: fmt.Sprintf("tool %q has no execute function", name)}},
 			IsError: true,
 		}, nil
 	}

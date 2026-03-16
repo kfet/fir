@@ -444,7 +444,7 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 				raw, err := b.CallHook("tool_call", params, 30*time.Second)
 				if err != nil {
 					return ToolResult{
-						Content: []ai.ToolResultContent{{Text: err.Error()}},
+						Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: err.Error()}},
 						IsError: true,
 					}, nil
 				}
@@ -455,10 +455,16 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 						// Also handles plain strings like "hello".
 						var text string
 						if json.Unmarshal(raw, &text) == nil {
-							result.Content = []ai.ToolResultContent{{Text: text}}
+							result.Content = []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: text}}
 						} else {
-							result.Content = []ai.ToolResultContent{{Text: string(raw)}}
+							result.Content = []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: string(raw)}}
 						}
+					}
+				}
+				// Ensure all content blocks have a type set.
+				for i := range result.Content {
+					if result.Content[i].Type == "" && result.Content[i].Text != "" {
+						result.Content[i].Type = ai.ContentTypeText
 					}
 				}
 				return result, nil
