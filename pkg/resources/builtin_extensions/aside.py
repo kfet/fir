@@ -81,7 +81,7 @@ def _run_aside(
     tools: list[dict],
     instructions: str,
     ctx: fir_ext.Context,
-    description: str = "",
+    title: str = "",
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -94,8 +94,8 @@ def _run_aside(
         Synthesis instructions for the LLM.
     ctx : fir_ext.Context
         Extension context for call_tool / side_query.
-    description : str, optional
-        Human-readable label for progress messages.
+    title : str
+        Human-readable label shown in the UI.
 
     Returns
     -------
@@ -249,7 +249,7 @@ def _side_query_error_text(exc: Exception) -> str:
     parameters={
         "type": "object",
         "properties": {
-            "description": {
+            "title": {
                 "type": "string",
                 "description": "Brief label for this aside (shown in UI).",
             },
@@ -276,17 +276,17 @@ def _side_query_error_text(exc: Exception) -> str:
                 "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask.",
             },
         },
-        "required": ["instructions"],
+        "required": ["title", "instructions"],
     },
     display_hint={
-        "title_args": [{"name": "description", "style": "accent"}],
+        "title_args": [{"name": "title", "style": "accent"}],
     },
 )
 def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])
     instructions = params.get("instructions", "")
-    description = params.get("description", "")
-    return _run_aside(tools, instructions, ctx, description)
+    title = params.get("title", "")
+    return _run_aside(tools, instructions, ctx, title)
 
 
 # ---------------------------------------------------------------------------
