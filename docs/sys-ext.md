@@ -39,21 +39,18 @@ Message history:
 
 The system prompt never changes. The cache for system + all prior messages is preserved.
 
-## Current Implementation (BUG)
+## Implementation
 
-The current code concatenates SYS_EXT blocks into the system prompt string and calls `Agent.SetSystemPrompt()`:
+`PrependContext` injects a `[SYS_EXT]`-tagged **user-role message** into the conversation. The base system prompt contains a static hook line and is never mutated, preserving the Anthropic prompt cache.
 
 ```
 ctx.prepend(content)  →  "prepend_context" RPC  →  PrependContext(content)
                                                       │
-                                                      ├─ appends to sysExtBlocks[]
-                                                      └─ calls effectiveSystemPrompt()  ← BUG
-                                                           │
-                                                           └─ mutates system prompt string
-                                                              → invalidates system + ALL messages
+                                                      └─ Agent.AppendMessage(user: "[SYS_EXT]\n...\n[/SYS_EXT]")
+                                                         → appended to conversation, cache intact
 ```
 
-This directly contradicts the cache-preservation work in `10ff8a1`.
+When `enableSysExtensions` is `false`, `PrependContext` is a no-op and the hook line is omitted from the system prompt.
 
 ## Scope: Internal Only (Skills on /reload)
 

@@ -230,8 +230,6 @@ type AgentSession struct {
 	planTitle    string
 	planMetadata map[string]string
 	planVersion  int64 // incremented on each UpdatePlan call
-
-
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -1014,6 +1012,9 @@ func (s *AgentSession) GetSystemPrompt() string {
 // without invalidating the Anthropic prompt cache.
 func (s *AgentSession) PrependContext(content string) {
 	if content == "" {
+		return
+	}
+	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSysExtensions() {
 		return
 	}
 	msg := fmt.Sprintf("[SYS_EXT]\n%s\n[/SYS_EXT]", content)
