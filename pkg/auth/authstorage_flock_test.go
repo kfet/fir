@@ -30,7 +30,7 @@ func TestFileLockHelper(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	lockPath := filepath.Join(dir, "auth.json.lock")
+	lockPath := filepath.Join(dir, "auth.json")
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatalf("open lock file: %v", err)

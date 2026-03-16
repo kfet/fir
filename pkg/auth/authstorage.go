@@ -5,6 +5,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -66,46 +67,57 @@ func (b *FileAuthStorageBackend) ensureParentDir() error {
 	return os.MkdirAll(dir, 0700)
 }
 
-func (b *FileAuthStorageBackend) readCurrent() []byte {
-	data, err := os.ReadFile(b.authPath)
-	if err != nil {
+// readFromFile reads all content from the locked file descriptor.
+func (b *FileAuthStorageBackend) readFromFile(f *os.File) []byte {
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil
+	}
+	data, err := io.ReadAll(f)
+	if err != nil || len(data) == 0 {
 		return nil
 	}
 	return data
 }
 
-func (b *FileAuthStorageBackend) writeNext(data []byte) error {
-	if err := b.ensureParentDir(); err != nil {
+// writeToFile truncates and writes data to the locked file descriptor.
+func (b *FileAuthStorageBackend) writeToFile(f *os.File, data []byte) error {
+	if _, err := f.Seek(0, 0); err != nil {
 		return err
 	}
-	return os.WriteFile(b.authPath, data, 0600)
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := f.Write(data)
+	return err
 }
 
-func (b *FileAuthStorageBackend) withFileLock(fn func() (any, error)) (any, error) {
-	lockPath := b.authPath + ".lock"
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0600)
+// withFileLock opens the auth data file itself, acquires an exclusive flock on
+// it, and passes the locked file descriptor to fn. No separate .lock file is
+// needed — the advisory lock lives on the data file's inode.
+func (b *FileAuthStorageBackend) withFileLock(fn func(f *os.File) (any, error)) (any, error) {
+	if err := b.ensureParentDir(); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(b.authPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return nil, fmt.Errorf("open auth lock file: %w", err)
+		return nil, fmt.Errorf("open auth file: %w", err)
 	}
 	defer f.Close()
 	if err := flockExclusive(int(f.Fd())); err != nil {
 		return nil, fmt.Errorf("acquire auth file lock: %w", err)
 	}
 	defer flockUnlock(int(f.Fd())) //nolint:errcheck
-	return fn()
+	return fn(f)
 }
 
 func (b *FileAuthStorageBackend) WithLock(fn func(current []byte) (result any, next []byte)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.withFileLock(func() (any, error) {
-		if err := b.ensureParentDir(); err != nil {
-			return nil, err
-		}
-		current := b.readCurrent()
+	return b.withFileLock(func(f *os.File) (any, error) {
+		current := b.readFromFile(f)
 		result, next := fn(current)
 		if next != nil {
-			if err := b.writeNext(next); err != nil {
+			if err := b.writeToFile(f, next); err != nil {
 				return nil, err
 			}
 		}
@@ -116,17 +128,14 @@ func (b *FileAuthStorageBackend) WithLock(fn func(current []byte) (result any, n
 func (b *FileAuthStorageBackend) WithLockFallible(fn func(current []byte) (result any, next []byte, err error)) (any, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.withFileLock(func() (any, error) {
-		if err := b.ensureParentDir(); err != nil {
-			return nil, err
-		}
-		current := b.readCurrent()
+	return b.withFileLock(func(f *os.File) (any, error) {
+		current := b.readFromFile(f)
 		result, next, err := fn(current)
 		if err != nil {
 			return nil, err
 		}
 		if next != nil {
-			if err := b.writeNext(next); err != nil {
+			if err := b.writeToFile(f, next); err != nil {
 				return nil, err
 			}
 		}

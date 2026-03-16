@@ -10,6 +10,9 @@ dist/
 *.swp
 *.swo
 
+# Lock files
+*.lock
+
 # OS
 .DS_Store
 Thumbs.db
