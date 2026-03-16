@@ -61,6 +61,8 @@ The only legitimate use case today is **skills injecting context into the system
 
 For mid-session dynamic context (if ever needed), the correct approach is user-role message injection — a different API that doesn't exist yet.
 
+**Example future use case**: date rollover. The date is frozen per session (`10ff8a1`) to avoid cache-busting, but sessions spanning midnight have a stale date. A `[SYS_EXT]` user-role message like "Current date is now 2026-03-17" would fix it without touching the system prompt. Low priority (niche, low-stakes) but a clean example of the pattern.
+
 ### Extension API Should Be Removed
 
 The following surface area was added prematurely and invites cache-busting misuse:
