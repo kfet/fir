@@ -276,6 +276,8 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 		return tc.formatGrep(t, invalidArg)
 	case "plan":
 		return tc.formatPlan(t)
+	case "batch_run":
+		return tc.formatBatch(t)
 	default:
 		return tc.formatGeneric(t)
 	}
@@ -671,6 +673,39 @@ func (tc *ToolExecutionComponent) formatPlan(t *theme.Theme) string {
 		}
 	}
 	return text
+}
+
+func (tc *ToolExecutionComponent) formatBatch(t *theme.Theme) string {
+	description := strArg(tc.args, "description")
+	header := t.Fg("toolTitle", t.Bold("batch_run"))
+	if description != "" {
+		header += " " + t.Fg("accent", description)
+	}
+
+	toolCalls, _ := tc.args["tools"].([]any)
+	if len(toolCalls) > 0 {
+		names := make([]string, 0, len(toolCalls))
+		for _, raw := range toolCalls {
+			obj, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := obj["name"].(string)
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+		summary := t.Fg("muted", fmt.Sprintf("%d tools: %s", len(names), strings.Join(names, ", ")))
+		header += "  " + summary
+	}
+
+	if tc.result != nil {
+		output := tc.getTextOutput()
+		if output != "" {
+			header += "\n\n" + t.Fg("toolOutput", output)
+		}
+	}
+	return header
 }
 
 func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {

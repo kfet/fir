@@ -159,6 +159,8 @@ class FakeFir:
             }
         elif method == "side_query":
             result = {"ok": True, "text": "mock synthesis"}
+        elif method == "list_tools":
+            result = [{"name": n, "description": "mock"} for n in self._active_tools]
         elif method == "get_session_data":
             result = {"ok": True, "value": "mock_value"}
         else:
@@ -394,14 +396,15 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected get_active_tools call")
         fake.stop()
 
-    def test_list_tools_returns_active_list(self) -> None:
+    def test_list_tools_returns_active_and_all(self) -> None:
         fake = FakeFir(active_tools=["bash", "read"])
         self.start_demo_ext(fake)
         fake.send_init()
         resp = fake.send_tool_call(2, "list_tools")
         self.assertIsNotNone(resp)
         assert resp is not None
-        self.assertEqual(resp["result"]["tools"], ["bash", "read"])
+        self.assertEqual(resp["result"]["active_tools"], ["bash", "read"])
+        self.assertEqual(resp["result"]["all_tools"], ["bash", "read"])
         fake.stop()
 
     # -- pin_tools -----------------------------------------------------------

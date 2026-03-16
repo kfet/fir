@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,7 +169,7 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 	tool, found := tools.Get(name)
 	if !found {
 		return ToolResult{
-			Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: fmt.Sprintf("tool %q not found", name)}},
+			Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: fmt.Sprintf("tool %q not found. Available tools: %s", name, strings.Join(tools.Names(), ", "))}},
 			IsError: true,
 		}, nil
 	}
@@ -193,6 +194,27 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 		Content: result.Content,
 		IsError: result.IsError,
 	}, nil
+}
+
+// ListTools returns info about all registered tools.
+func (b *SessionBridge) ListTools() []ToolInfo {
+	tools := b.session.GetTools()
+	if tools == nil {
+		return nil
+	}
+	var infos []ToolInfo
+	for _, t := range tools.Slice() {
+		var params map[string]any
+		if m, ok := t.Tool.Parameters.(map[string]any); ok {
+			params = m
+		}
+		infos = append(infos, ToolInfo{
+			Name:        t.Tool.Name,
+			Description: t.Tool.Description,
+			Parameters:  params,
+		})
+	}
+	return infos
 }
 
 func (b *SessionBridge) PrependContext(content string) {

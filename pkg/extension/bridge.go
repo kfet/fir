@@ -331,6 +331,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = r
 		}
 
+	case "list_tools":
+		result = api.ListTools()
+
 	case "prepend_context":
 		var p struct {
 			Content string `json:"content"`

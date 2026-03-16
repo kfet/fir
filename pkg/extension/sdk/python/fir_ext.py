@@ -419,6 +419,20 @@ class Context:
             return result
         return {"content": [{"text": str(result)}], "is_error": False}
 
+    def list_tools(self, timeout: float = 10.0) -> list[dict[str, Any]]:
+        """Return info about all registered tools.
+
+        Returns
+        -------
+        list of dict
+            Each dict has ``name`` (str), ``description`` (str, optional),
+            and ``parameters`` (dict, optional — JSON Schema).
+        """
+        result = self._call("list_tools", {}, timeout=timeout)
+        if isinstance(result, list):
+            return result
+        return []
+
     def prepend(self, content: str) -> None:
         """Add a [SYS_EXT] block to the system prompt.
 

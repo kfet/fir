@@ -30,6 +30,8 @@ type BridgeAPI interface {
 	// Used by extensions that need to call other tools programmatically
 	// (e.g. the batch extension).
 	CallTool(name string, params map[string]any) (ToolResult, error)
+	// ListTools returns the names and parameter schemas of all registered tools.
+	ListTools() []ToolInfo
 	// PrependContext adds a [SYS_EXT] block to the system prompt.
 	// Extensions use this to inject dynamic context.
 	PrependContext(content string)
@@ -81,4 +83,11 @@ type ToolContext struct {
 type ToolResult struct {
 	Content []ai.ToolResultContent `json:"content"`
 	IsError bool                   `json:"is_error"`
+}
+
+// ToolInfo describes a registered tool's name and parameter schema.
+type ToolInfo struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
 }

@@ -187,6 +187,17 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		d.rec.execs = append(d.rec.execs, execCall{p.Command, p.Args})
 		result = map[string]any{"stdout": "ok", "stderr": "", "exit_code": 0}
 
+	case "list_tools":
+		// Return tool infos based on activeTools.
+		var infos []map[string]any
+		for _, name := range d.rec.activeTools {
+			infos = append(infos, map[string]any{
+				"name":        name,
+				"description": "test tool " + name,
+			})
+		}
+		result = infos
+
 	default:
 		d.t.Logf("unhandled outbound method: %s", msg.Method)
 		result = map[string]any{"ok": true}
@@ -538,9 +549,13 @@ func TestDemo_Tool_ListTools(t *testing.T) {
 	}
 	var r map[string]any
 	_ = json.Unmarshal(resp.Result, &r)
-	tools, _ := r["tools"].([]any)
-	if len(tools) != 2 {
-		t.Errorf("tools = %v, want 2 items", tools)
+	activeTools, _ := r["active_tools"].([]any)
+	if len(activeTools) != 2 {
+		t.Errorf("active_tools = %v, want 2 items", activeTools)
+	}
+	allTools, _ := r["all_tools"].([]any)
+	if len(allTools) != 2 {
+		t.Errorf("all_tools = %v, want 2 items", allTools)
 	}
 }
 

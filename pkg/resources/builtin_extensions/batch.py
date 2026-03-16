@@ -12,9 +12,7 @@ Provides a `/batch` slash command and a `batch_run` tool that let the agent
 polluting the main conversation, and synthesise the results via a one-shot
 LLM call.
 
-This is the extension counterpart to the built-in Go `batch` tool.  It
-demonstrates how extensions can use ``ctx.call_tool()`` and ``ctx.side_query()``
-to build rich orchestration workflows in Python.
+This is the sole implementation of batch/multi-tool orchestration in fir.
 
 Architecture:
   1. Parse the tool list from the request.
@@ -107,18 +105,41 @@ def _run_batch(
     if not instructions:
         return _error("instructions are required")
 
-    results: list[dict] = []
+    # Validate tool names and params upfront.
+    available = ctx.list_tools()
+    tool_index = {t["name"]: t for t in available}
+    available_names = sorted(tool_index.keys())
 
+    errors = []
     for i, spec in enumerate(tools, 1):
         name = spec.get("name", "")
         if not name:
-            results.append({
-                "name": f"(unnamed tool #{i})",
-                "output": "error: tool name is required",
-                "is_error": True,
-            })
+            errors.append(f"tools[{i}]: name is required")
             continue
+        if name not in tool_index:
+            errors.append(
+                f"tools[{i}]: tool {name!r} not found. "
+                f"Available: {', '.join(available_names)}"
+            )
+            continue
+        # Validate required params against schema.
+        schema = tool_index[name].get("parameters") or {}
+        required = schema.get("required") or []
+        params = spec.get("params") or {}
+        missing = [r for r in required if r not in params]
+        if missing:
+            errors.append(
+                f"tools[{i}] ({name}): missing required params: "
+                + ", ".join(missing)
+            )
 
+    if errors:
+        return _error("Validation failed:\n" + "\n".join(errors))
+
+    results: list[dict] = []
+
+    for spec in tools:
+        name = spec["name"]
         params = spec.get("params") or {}
 
         # Call the tool via the bridge.
@@ -189,7 +210,7 @@ def _error(msg: str) -> dict:
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Tool name.",
+                            "description": "Name of the tool to call. Use tool names from this agent's tool set, not provider built-in tool names.",
                         },
                         "params": {
                             "type": "object",

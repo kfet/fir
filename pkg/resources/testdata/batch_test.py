@@ -125,8 +125,8 @@ class TestRunBatch(unittest.TestCase):
     def setUp(self):
         self.mod = _load_batch()
 
-    def _make_ctx(self, tool_results=None, side_query_result="synthesis"):
-        """Create a mock context with call_tool and side_query."""
+    def _make_ctx(self, tool_results=None, side_query_result="synthesis", available_tools=None):
+        """Create a mock context with call_tool, side_query, and list_tools."""
         ctx = mock.MagicMock(spec=fir_ext.Context)
         if tool_results is None:
             tool_results = {}
@@ -138,6 +138,22 @@ class TestRunBatch(unittest.TestCase):
 
         ctx.call_tool = mock.MagicMock(side_effect=_call_tool)
         ctx.side_query = mock.MagicMock(return_value=side_query_result)
+
+        if available_tools is None:
+            # Default: expose Read and Bash with a required "path"/"command" param.
+            available_tools = [
+                {"name": "Read", "description": "Read a file", "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }},
+                {"name": "Bash", "description": "Run a command", "parameters": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                }},
+            ]
+        ctx.list_tools = mock.MagicMock(return_value=available_tools)
         return ctx
 
     def test_basic_flow(self):
@@ -202,14 +218,14 @@ class TestRunBatch(unittest.TestCase):
         self.assertTrue(result["is_error"])
         self.assertIn("synthesis failed", result["content"][0]["text"])
 
-    def test_unnamed_tool_produces_error_entry(self):
+    def test_unnamed_tool_produces_validation_error(self):
         ctx = self._make_ctx(side_query_result="handled")
         tools = [{"params": {"path": "a.go"}}]  # no name
         result = self.mod._run_batch(tools, "summarise", ctx)
-        self.assertFalse(result["is_error"])
-        prompt = ctx.side_query.call_args[0][0]
-        self.assertIn("unnamed", prompt)
-        self.assertIn("name is required", prompt)
+        self.assertTrue(result["is_error"])
+        self.assertIn("name is required", result["content"][0]["text"])
+        ctx.call_tool.assert_not_called()
+        ctx.side_query.assert_not_called()
 
     def test_synthesis_prompt_has_instructions(self):
         ctx = self._make_ctx(side_query_result="done")
@@ -218,6 +234,25 @@ class TestRunBatch(unittest.TestCase):
         prompt = ctx.side_query.call_args[0][0]
         self.assertIn("--- Instructions ---", prompt)
         self.assertIn("list all files", prompt)
+
+    def test_unknown_tool_returns_validation_error(self):
+        ctx = self._make_ctx()
+        tools = [{"name": "NoSuchTool", "params": {}}]
+        result = self.mod._run_batch(tools, "summarise", ctx)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("NoSuchTool", text)
+        self.assertIn("Available:", text)
+        ctx.call_tool.assert_not_called()
+
+    def test_missing_required_params_returns_validation_error(self):
+        ctx = self._make_ctx()
+        tools = [{"name": "Read", "params": {}}]  # missing required "path"
+        result = self.mod._run_batch(tools, "summarise", ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("missing required params", result["content"][0]["text"])
+        self.assertIn("path", result["content"][0]["text"])
+        ctx.call_tool.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +275,13 @@ class TestBatchRunTool(unittest.TestCase):
             return_value={"content": [{"text": "ok"}], "is_error": False}
         )
         ctx.side_query = mock.MagicMock(return_value="synthesised")
+        ctx.list_tools = mock.MagicMock(return_value=[
+            {"name": "Bash", "description": "Run a command", "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            }},
+        ])
         params = {
             "tools": [{"name": "Bash", "params": {"command": "echo hi"}}],
             "instructions": "summarise",

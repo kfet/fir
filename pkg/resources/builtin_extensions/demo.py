@@ -84,8 +84,9 @@ def shell_run(params, ctx):
     parameters={"type": "object", "properties": {}},
 )
 def list_tools(params, ctx):
-    tools = ctx.get_active_tools()  # get_active_tools
-    return {"tools": tools}
+    active = ctx.get_active_tools()  # get_active_tools
+    all_tools = ctx.list_tools()  # list_tools — names + schemas
+    return {"active_tools": active, "all_tools": [t["name"] for t in all_tools]}
 
 
 @fir_ext.tool(
