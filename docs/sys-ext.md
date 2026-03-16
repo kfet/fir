@@ -77,20 +77,29 @@ When `false`:
 - The hook line is omitted from the base prompt.
 - SYS_EXT blocks are silently ignored (but still accumulated, so re-enabling takes effect immediately).
 
-## Extension SDK Usage
+## Scope: Internal Only (Skills on /reload)
 
-```python
-@hook("session_started")
-def on_start(ctx):
-    ctx.prepend("This project uses Go 1.22. Always use slog for logging.")
-```
+The only legitimate use case is **skills injecting context into the system prompt during `/reload`**. At that point the cache is already invalidated (tool list changes blow everything), so mutating the system prompt is harmless.
 
-Multiple calls append additional blocks; they are not deduplicated. Extensions are responsible for calling `prepend` at the right time (typically on `session_started` or `reloaded` hooks).
+### Extension API Should Be Removed
+
+The following surface area was added prematurely and should be removed:
+
+| Component | Action |
+|-----------|--------|
+| `ctx.prepend()` in `fir_ext.py` | Remove |
+| `"prepend_context"` RPC in `bridge.go` | Remove |
+| `PrependContext` on `BridgeAPI` interface | Remove from interface |
+| `demo.py` usage | Remove |
+
+`AgentSession.PrependContext()` can remain as an internal method for the skill/reload code path, but should not be exposed to extensions. Any extension calling this mid-session is a cache-busting footgun with no workaround.
+
+If we later need extensions to inject dynamic context mid-session, the correct approach is user-role message injection (see "Intended Design" above), which requires a different API.
 
 ## Design Considerations
 
 - **Append-only within a session**: No API to remove/replace a single block. Only reset is `ClearSysExtBlocks()` on new session.
-- **No deduplication**: Extensions must guard against duplicate injection.
+- **No deduplication**: Callers must guard against duplicate injection.
 - **Ordering**: Blocks appear in insertion order.
 - **Prompt size**: No limit on number or size of blocks — they consume context window tokens.
 - **Concurrency**: `sysExtBlocks` is guarded by `AgentSession.mu` (RWMutex).
