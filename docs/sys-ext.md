@@ -6,20 +6,25 @@
 
 Introduced in commit `5d7a066` (2026-03-15), refined in `f38ba6e`.
 
+## Anthropic Cache Hierarchy
+
+Anthropic caches the request prefix in order: **tools → system → messages**. A change at any level invalidates that level **and everything after it**.
+
+| Mutated layer | What gets invalidated |
+|---------------|----------------------|
+| Tools | Tools + system + all messages |
+| System prompt | System + all messages |
+| Append message | Nothing (new content at the end) |
+
+### Current cache safety of each layer
+
+- **Tools**: Safe. Extensions register tools at init/handshake only. `UnregisterExtensionTools` + `RegisterTools` only runs on `/reload`, which already invalidates everything. No mid-session tool mutation.
+- **System prompt**: **Broken by sys_ext** (see below). Otherwise stable — date is frozen per session (`10ff8a1`), prompt only rebuilt on explicit `/reload`.
+- **Messages**: Safe. Deterministic synthetic tool-result timestamps (`10ff8a1`), block-form user messages for `cache_control` attachment. PrefixGuard detects regressions.
+
 ## Intended Design
 
-SYS_EXT blocks should be delivered as **user-role messages**, not by mutating the system prompt. This is critical for Anthropic prompt caching.
-
-### Why: Anthropic Cache Hierarchy
-
-Anthropic caches the request prefix in order: **tools → system → messages**. A change at any level invalidates that level **and everything after it**. This means:
-
-- Mutating the system prompt (even appending a block) **invalidates the cache for all messages** — the expensive part.
-- Appending a user-role message only adds to the end of the prefix — all prior cached content (system prompt + earlier messages) stays cached.
-
-The `[SYS_EXT]` tag convention exists precisely for this: the base system prompt contains a static hook line telling the model to trust `[SYS_EXT]`-tagged content, and the actual dynamic content arrives later in the conversation as a user message, preserving the cache.
-
-### Correct Flow
+SYS_EXT content should be delivered as **user-role messages**, not by mutating the system prompt:
 
 ```
 System prompt (static, cached):
@@ -28,7 +33,7 @@ System prompt (static, cached):
 Message history:
   [user]  "hello"
   [asst]  "hi"
-  [user]  "[SYS_EXT]\nThis project uses Go 1.22.\n[/SYS_EXT]"   ← injected, appended
+  [user]  "[SYS_EXT]\nThis project uses Go 1.22.\n[/SYS_EXT]"   ← appended, cache-safe
   [user]  "now refactor foo.go"
 ```
 
@@ -36,54 +41,29 @@ The system prompt never changes. The cache for system + all prior messages is pr
 
 ## Current Implementation (BUG)
 
-The current code concatenates SYS_EXT blocks into the system prompt string and calls `Agent.SetSystemPrompt()`, which **defeats the purpose**:
+The current code concatenates SYS_EXT blocks into the system prompt string and calls `Agent.SetSystemPrompt()`:
 
 ```
-Extension (Python)          Bridge (Go)              AgentSession (Go)
-─────────────────          ────────────             ──────────────────
 ctx.prepend(content)  →  "prepend_context" RPC  →  PrependContext(content)
                                                       │
                                                       ├─ appends to sysExtBlocks[]
                                                       └─ calls effectiveSystemPrompt()  ← BUG
                                                            │
                                                            └─ mutates system prompt string
-                                                              → blows entire message cache
+                                                              → invalidates system + ALL messages
 ```
 
-Every call to `ctx.prepend()` changes the system prompt, invalidating the Anthropic cache for **all** messages in the session. This directly contradicts the cache-preservation work in `10ff8a1`.
-
-### What Needs to Change
-
-`PrependContext` should inject a `[SYS_EXT]`-tagged **user-role message** into the conversation instead of mutating the system prompt. The base system prompt (with its static hook line) stays untouched.
-
-## Key Components
-
-| File | What it does |
-|------|-------------|
-| `pkg/extension/sdk/python/fir_ext.py` | `ctx.prepend(content)` — Python SDK method |
-| `pkg/extension/bridge.go` | `"prepend_context"` RPC handler |
-| `pkg/extension/api.go` | `PrependContext(content)` on `BridgeAPI` interface |
-| `pkg/extension/session_bridge.go` | Delegates to `AgentSession.PrependContext` |
-| `pkg/session/agentsession.go` | Core logic: `sysExtBlocks`, `effectiveSystemPrompt()`, `ClearSysExtBlocks()` |
-| `pkg/config/settings.go` | `enableSysExtensions` toggle (default: `true`) |
-
-## Settings
-
-```json
-{ "enableSysExtensions": true }
-```
-
-When `false`:
-- The hook line is omitted from the base prompt.
-- SYS_EXT blocks are silently ignored (but still accumulated, so re-enabling takes effect immediately).
+This directly contradicts the cache-preservation work in `10ff8a1`.
 
 ## Scope: Internal Only (Skills on /reload)
 
-The only legitimate use case is **skills injecting context into the system prompt during `/reload`**. At that point the cache is already invalidated (tool list changes blow everything), so mutating the system prompt is harmless.
+The only legitimate use case today is **skills injecting context into the system prompt during `/reload`**. At that point the cache is already invalidated (tool list changes blow everything), so mutating the system prompt is harmless.
+
+For mid-session dynamic context (if ever needed), the correct approach is user-role message injection — a different API that doesn't exist yet.
 
 ### Extension API Should Be Removed
 
-The following surface area was added prematurely and should be removed:
+The following surface area was added prematurely and invites cache-busting misuse:
 
 | Component | Action |
 |-----------|--------|
@@ -92,9 +72,18 @@ The following surface area was added prematurely and should be removed:
 | `PrependContext` on `BridgeAPI` interface | Remove from interface |
 | `demo.py` usage | Remove |
 
-`AgentSession.PrependContext()` can remain as an internal method for the skill/reload code path, but should not be exposed to extensions. Any extension calling this mid-session is a cache-busting footgun with no workaround.
+`AgentSession.PrependContext()` can remain as an internal method for the skill/reload code path.
 
-If we later need extensions to inject dynamic context mid-session, the correct approach is user-role message injection (see "Intended Design" above), which requires a different API.
+## Key Components
+
+| File | What it does |
+|------|-------------|
+| `pkg/config/settings.go` | `enableSysExtensions` toggle (default: `true`) |
+| `pkg/session/agentsession.go` | Core: `sysExtBlocks`, `effectiveSystemPrompt()`, `ClearSysExtBlocks()` |
+| `pkg/extension/session_bridge.go` | Delegates to `AgentSession.PrependContext` |
+| `pkg/extension/bridge.go` | `"prepend_context"` RPC handler (to be removed) |
+| `pkg/extension/api.go` | `PrependContext` on `BridgeAPI` interface (to be removed) |
+| `pkg/extension/sdk/python/fir_ext.py` | `ctx.prepend()` (to be removed) |
 
 ## Design Considerations
 
