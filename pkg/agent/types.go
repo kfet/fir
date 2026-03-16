@@ -134,6 +134,10 @@ type AgentTool struct {
 	// Label is a human-readable label for UI display.
 	Label string
 
+	// DisplayHint tells the TUI how to format this tool's execution.
+	// Nil means use built-in formatting or the generic fallback.
+	DisplayHint *ToolDisplayHint
+
 	// Execute runs the tool. The context can be cancelled for abort.
 	Execute func(
 		ctx context.Context,
@@ -141,6 +145,31 @@ type AgentTool struct {
 		params map[string]any,
 		onUpdate AgentToolUpdateCallback,
 	) (AgentToolResult, error)
+}
+
+// ToolDisplayHint tells the UI how to format a tool's execution display.
+// Extensions provide this when registering tools so the TUI can render them
+// nicely instead of falling back to a raw JSON dump.
+type ToolDisplayHint struct {
+	// TitleArgs lists argument names to show on the header line, in order.
+	TitleArgs []TitleArg `json:"title_args,omitempty"`
+	// ResultMaxLines is the default number of result lines shown when
+	// collapsed.  Zero means use the default (10).
+	ResultMaxLines int `json:"result_max_lines,omitempty"`
+	// UseBox renders the tool output in a bordered box (like bash).
+	UseBox bool `json:"use_box,omitempty"`
+}
+
+// TitleArg describes a single argument to display on the tool header line.
+type TitleArg struct {
+	// Name is the JSON parameter name.
+	Name string `json:"name"`
+	// Style controls how the value is rendered: "path" shortens and accents
+	// it, "pattern" wraps it in /…/, "accent" just colours it.  Empty string
+	// means plain text.
+	Style string `json:"style,omitempty"`
+	// Label is an optional prefix shown before the value (e.g. "in").
+	Label string `json:"label,omitempty"`
 }
 
 // AgentContext is like ai.Context but uses AgentTool.
@@ -186,9 +215,10 @@ type AgentEvent struct {
 	AssistantMessageEvent *ai.AssistantMessageEvent
 
 	// For tool_execution_start, tool_execution_update, tool_execution_end
-	ToolCallID string
-	ToolName   string
-	Args       any
+	ToolCallID  string
+	ToolName    string
+	Args        any
+	DisplayHint *ToolDisplayHint
 
 	// For tool_execution_update
 	PartialResult any

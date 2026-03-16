@@ -74,21 +74,31 @@ def tool(
     name: str,
     description: str,
     parameters: dict[str, Any] | None = None,
+    display_hint: dict[str, Any] | None = None,
 ) -> Callable:
     """Register a tool that fir can invoke via ``tool_call``.
 
     The decorated function receives ``(params: dict, ctx: Context)`` and
     should return a JSON-serialisable result (or raise ``ToolError``).
+
+    *display_hint* tells the TUI how to render the tool execution.  Keys:
+
+    - ``title_args``: list of ``{"name": ..., "style": ..., "label": ...}``
+      dicts controlling which args appear on the header line.  *style* can
+      be ``"path"``, ``"pattern"``, ``"accent"``, or ``""`` (plain).
+    - ``result_max_lines``: default collapsed line count (default 10).
+    - ``use_box``: render output in a bordered box like ``bash``.
     """
 
     def decorator(fn: Callable) -> Callable:
-        _tools.append(
-            {
-                "name": name,
-                "description": description,
-                "parameters": parameters or {"type": "object", "properties": {}},
-            }
-        )
+        spec: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "parameters": parameters or {"type": "object", "properties": {}},
+        }
+        if display_hint is not None:
+            spec["display_hint"] = display_hint
+        _tools.append(spec)
         _tool_handlers[name] = fn
         return fn
 

@@ -250,6 +250,9 @@ def _error(msg: str) -> dict:
         },
         "required": ["instructions"],
     },
+    display_hint={
+        "title_args": [{"name": "description", "style": "accent"}],
+    },
 )
 def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])

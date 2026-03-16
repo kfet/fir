@@ -1,6 +1,9 @@
 package extension
 
-import "github.com/kfet/fir/pkg/ai"
+import (
+	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+)
 
 // BridgeAPI is the subset of the session API that external process
 // extensions can call. Implemented by SessionBridge in session_bridge.go.
@@ -62,11 +65,18 @@ type SendUserMessageOptions struct {
 	DeliverAs string `json:"deliver_as"`
 }
 
+// ToolDisplayHint is an alias for agent.ToolDisplayHint.
+type ToolDisplayHint = agent.ToolDisplayHint
+
+// TitleArg is an alias for agent.TitleArg.
+type TitleArg = agent.TitleArg
+
 // ToolDefinition defines a tool registered by an external extension.
 type ToolDefinition struct {
 	Name        string
 	Description string
 	Parameters  map[string]any
+	DisplayHint *ToolDisplayHint
 	Execute     ToolExecuteFunc
 }
 

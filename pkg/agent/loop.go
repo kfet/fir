@@ -350,18 +350,23 @@ func executeToolCalls(
 	for i, tc := range toolCalls {
 		firlog.Debug("executing tool", "name", tc.Name, "id", tc.ID)
 
+		// Look up the tool early so DisplayHint is available on the start event.
+		tool, found := tools.Get(tc.Name)
+		var displayHint *ToolDisplayHint
+		if found {
+			displayHint = tool.DisplayHint
+		}
+
 		events <- AgentEvent{
-			Type:       EventToolExecutionStart,
-			ToolCallID: tc.ID,
-			ToolName:   tc.Name,
-			Args:       tc.Arguments,
+			Type:        EventToolExecutionStart,
+			ToolCallID:  tc.ID,
+			ToolName:    tc.Name,
+			Args:        tc.Arguments,
+			DisplayHint: displayHint,
 		}
 
 		var result AgentToolResult
 		var isError bool
-
-		// Find the tool
-		tool, found := tools.Get(tc.Name)
 
 		if !found {
 			result = AgentToolResult{
@@ -381,6 +386,7 @@ func executeToolCalls(
 					ToolCallID:    tc.ID,
 					ToolName:      tc.Name,
 					Args:          tc.Arguments,
+					DisplayHint:   displayHint,
 					PartialResult: partial,
 				}
 			})
@@ -396,11 +402,12 @@ func executeToolCalls(
 		}
 
 		events <- AgentEvent{
-			Type:       EventToolExecutionEnd,
-			ToolCallID: tc.ID,
-			ToolName:   tc.Name,
-			Result:     result,
-			IsError:    isError,
+			Type:        EventToolExecutionEnd,
+			ToolCallID:  tc.ID,
+			ToolName:    tc.Name,
+			DisplayHint: displayHint,
+			Result:      result,
+			IsError:     isError,
 		}
 
 		toolResult := ai.ToolResultMessage{

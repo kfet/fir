@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -41,6 +42,7 @@ type ToolExecutionComponent struct {
 	contentBox  *tuicomp.Box
 	toolName    string
 	args        map[string]any
+	displayHint *agent.ToolDisplayHint
 	expanded    bool
 	showImages  bool
 	isPartial   bool
@@ -53,6 +55,7 @@ func NewToolExecutionComponent(
 	toolName string,
 	args map[string]any,
 	opts *ToolExecutionOptions,
+	displayHint *agent.ToolDisplayHint,
 ) *ToolExecutionComponent {
 	t := theme.GetTheme()
 	showImages := true
@@ -60,13 +63,14 @@ func NewToolExecutionComponent(
 		showImages = opts.ShowImages
 	}
 
-	useBox := toolName == "bash"
+	useBox := toolName == "bash" || (displayHint != nil && displayHint.UseBox)
 	tc := &ToolExecutionComponent{
-		toolName:   toolName,
-		args:       args,
-		showImages: showImages,
-		isPartial:  true,
-		useBox:     useBox,
+		toolName:    toolName,
+		args:        args,
+		displayHint: displayHint,
+		showImages:  showImages,
+		isPartial:   true,
+		useBox:      useBox,
 	}
 
 	tc.AddChild(tuicomp.NewSpacer(1))
@@ -276,8 +280,6 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 		return tc.formatGrep(t, invalidArg)
 	case "plan":
 		return tc.formatPlan(t)
-	case "aside":
-		return tc.formatAside(t)
 	default:
 		return tc.formatGeneric(t)
 	}
@@ -675,40 +677,11 @@ func (tc *ToolExecutionComponent) formatPlan(t *theme.Theme) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatAside(t *theme.Theme) string {
-	description := strArg(tc.args, "description")
-	header := t.Fg("toolTitle", t.Bold("aside"))
-	if description != "" {
-		header += " " + t.Fg("accent", description)
-	}
-
-	toolCalls, _ := tc.args["tools"].([]any)
-	if len(toolCalls) > 0 {
-		names := make([]string, 0, len(toolCalls))
-		for _, raw := range toolCalls {
-			obj, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			name, _ := obj["name"].(string)
-			if name != "" {
-				names = append(names, name)
-			}
-		}
-		summary := t.Fg("muted", fmt.Sprintf("%d tools: %s", len(names), strings.Join(names, ", ")))
-		header += "  " + summary
-	}
-
-	if tc.result != nil {
-		output := tc.getTextOutput()
-		if output != "" {
-			header += "\n\n" + t.Fg("toolOutput", output)
-		}
-	}
-	return header
-}
-
 func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {
+	// If a display hint is provided, use it for structured formatting.
+	if tc.displayHint != nil && len(tc.displayHint.TitleArgs) > 0 {
+		return tc.formatWithHint(t)
+	}
 	text := t.Fg("toolTitle", t.Bold(tc.toolName))
 	argsJSON, _ := json.MarshalIndent(tc.args, "", "  ")
 	text += "\n\n" + string(argsJSON)
@@ -719,21 +692,87 @@ func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {
 	return text
 }
 
+func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {
+	hint := tc.displayHint
+	text := t.Fg("toolTitle", t.Bold(tc.toolName))
+
+	// Build title line from TitleArgs
+	for _, ta := range hint.TitleArgs {
+		val, valid := strArgChecked(tc.args, ta.Name)
+		if !valid {
+			// Not a string — try to format as a number or generic value.
+			if raw, exists := tc.args[ta.Name]; exists && raw != nil {
+				val = fmt.Sprintf("%v", raw)
+			} else {
+				continue
+			}
+		}
+		if val == "" {
+			continue
+		}
+		prefix := ""
+		if ta.Label != "" {
+			prefix = t.Fg("toolOutput", ta.Label+" ")
+		}
+		var styled string
+		switch ta.Style {
+		case "path":
+			styled = t.Fg("accent", shortenPath(val))
+		case "pattern":
+			styled = t.Fg("accent", "/"+val+"/")
+		case "accent":
+			styled = t.Fg("accent", val)
+		default:
+			styled = t.Fg("toolOutput", val)
+		}
+		text += " " + prefix + styled
+	}
+
+	// Show result with configurable max lines
+	if tc.result != nil {
+		if tc.result.IsError {
+			errorText := tc.getTextOutput()
+			if errorText != "" {
+				text += "\n\n" + t.Fg("error", errorText)
+			}
+		} else {
+			output := strings.TrimSpace(tc.getTextOutput())
+			if output != "" {
+				lines := strings.Split(output, "\n")
+				maxLines := hint.ResultMaxLines
+				if maxLines <= 0 {
+					maxLines = 10
+				}
+				if tc.expanded {
+					maxLines = len(lines)
+				}
+				displayLines := lines
+				if len(displayLines) > maxLines {
+					displayLines = lines[:maxLines]
+				}
+				remaining := len(lines) - len(displayLines)
+
+				styledLines := make([]string, len(displayLines))
+				for i, line := range displayLines {
+					styledLines[i] = t.Fg("toolOutput", line)
+				}
+				text += "\n\n" + strings.Join(styledLines, "\n")
+				if remaining > 0 {
+					text += t.Fg("muted", fmt.Sprintf("\n... (%d more lines,", remaining)) +
+						" " + KeyHint(tuicomp.ActExpandTools, "to expand") + ")"
+				}
+			}
+		}
+	}
+	return text
+}
+
 // strArg returns the string value of args[key], or "" if missing or wrong type.
 func strArg(args map[string]any, key string) string {
 	if args == nil {
 		return ""
 	}
 	v, _ := args[key].(string)
-	return v
-}
-
-// strArgAlt returns the string value of args[key1], falling back to args[key2].
-func strArgAlt(args map[string]any, key1, key2 string) string {
-	v := strArg(args, key1)
-	if v == "" {
-		v = strArg(args, key2)
-	}
 	return v
 }
 

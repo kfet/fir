@@ -15,9 +15,10 @@ type InitParams struct {
 
 // ToolSpec describes a tool registered by an extension.
 type ToolSpec struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Parameters  map[string]any   `json:"parameters,omitempty"`
+	DisplayHint *ToolDisplayHint `json:"display_hint,omitempty"`
 }
 
 // CommandSpec describes a slash command registered by an extension.

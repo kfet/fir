@@ -109,6 +109,13 @@ def _current_commit(cwd: str) -> str:
         },
         "required": [],
     },
+    display_hint={
+        "title_args": [
+            {"name": "cwd", "style": "path"},
+            {"name": "timeout", "label": "timeout"},
+        ],
+        "result_max_lines": 15,
+    },
 )
 def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
     cwd = params.get("cwd") or os.getcwd()
@@ -238,6 +245,13 @@ def run_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
             },
         },
         "required": ["description", "metrics", "primary_metric", "status"],
+    },
+    display_hint={
+        "title_args": [
+            {"name": "description", "style": "accent"},
+            {"name": "status", "label": "status"},
+            {"name": "primary_metric", "label": "metric"},
+        ],
     },
 )
 def log_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:

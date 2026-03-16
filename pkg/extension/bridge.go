@@ -438,6 +438,7 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  tool.Parameters,
+			DisplayHint: tool.DisplayHint,
 			Execute: func(ctx ToolContext) (ToolResult, error) {
 				params := map[string]any{
 					"tool_call_id": ctx.ToolCallID,

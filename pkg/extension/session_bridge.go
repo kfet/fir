@@ -233,6 +233,7 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 			Description: def.Description,
 			Parameters:  def.Parameters,
 		},
+		DisplayHint: def.DisplayHint,
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
 			r, err := def.Execute(ToolContext{
 				ToolCallID: toolCallID,

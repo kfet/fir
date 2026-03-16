@@ -49,6 +49,9 @@ import fir_ext
         "properties": {"text": {"type": "string", "description": "Text to count"}},
         "required": ["text"],
     },
+    display_hint={
+        "title_args": [{"name": "text", "style": "accent"}],
+    },
 )
 def word_count(params, ctx):
     words = params.get("text", "").split()
@@ -72,6 +75,10 @@ def word_count(params, ctx):
             },
         },
         "required": ["command"],
+    },
+    display_hint={
+        "title_args": [{"name": "command", "style": "accent"}],
+        "result_max_lines": 15,
     },
 )
 def shell_run(params, ctx):
@@ -119,6 +126,12 @@ def pin_tools(params, ctx):
             "model": {"type": "string"},
         },
         "required": ["provider", "model"],
+    },
+    display_hint={
+        "title_args": [
+            {"name": "provider"},
+            {"name": "model", "style": "accent"},
+        ],
     },
 )
 def change_model(params, ctx):
@@ -169,6 +182,9 @@ def inject_message(params, ctx):
             },
         },
         "required": ["directory"],
+    },
+    display_hint={
+        "title_args": [{"name": "directory", "style": "path"}],
     },
 )
 def batch_example(params, ctx):

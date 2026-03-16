@@ -221,7 +221,7 @@ func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
 			args = argMap
 		}
 	}
-	comp := components.NewToolExecutionComponent(ae.ToolName, args, nil)
+	comp := components.NewToolExecutionComponent(ae.ToolName, args, nil, ae.DisplayHint)
 	if m.toolOutputExpanded {
 		comp.SetExpanded(true)
 	}
