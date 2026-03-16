@@ -25,7 +25,7 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 				"Rules:\n" +
 				"- Create the plan BEFORE your first action — not midway through\n" +
 				"- Mark each step \"in_progress\" as you begin it, \"completed\" when done\n" +
-				"- Update the plan after completing each step, before moving to the next\n" +
+				"- Update the plan immediately whenever any item's status changes — do not batch status updates\n" +
 				"- Each call replaces the entire plan — always include all entries\n" +
 				"- Keep steps concrete and actionable, not vague\n" +
 				"- Use metadata for short contextual info (e.g. how to access a fleet, session name, worktree path)\n" +

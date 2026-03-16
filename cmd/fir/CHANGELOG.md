@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-03-16
+
 ### Fixed
 
 - `/schedule` entries now survive `/reexec`: `handleReexecCommand` previously called `CollectSessionData()` before emitting `session_shutdown`, so extension handlers that store data on shutdown (like the schedule extension) never ran in time. The new `ShutdownAndCollect()` on `Manager` fires `session_shutdown` first, waits for extensions to respond, then collects — matching the order extensions expect.
