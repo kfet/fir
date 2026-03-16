@@ -35,7 +35,7 @@ Not file-level sync — just periodic review of releases and changelogs.
 - **Why**: The canonical Anthropic reference implementation
 - **Watch**: [CHANGELOG.md](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md), npm releases
 - **Interesting areas**: Tool definitions, system prompt patterns, permission model
-- **Recent notes**: Opus 4.6 defaults to medium effort, "ultrathink" keyword for high effort. HTTP hooks (POST JSON instead of shell). `/simplify` and `/batch` bundled slash commands. Worktree config sharing. Sandbox mode for BashTool. Plugin ecosystem with marketplace. `/debug` command. `--from-pr` flag. Voice STT in 20 languages. Subagents via `--agents` JSON flag. Tool search for dynamic tool discovery. Compaction preserves images for cache reuse.
+- **Recent notes**: Opus 4.6 defaults to medium effort, "ultrathink" keyword for high effort. HTTP hooks (POST JSON instead of shell). `/simplify` and `/aside` bundled slash commands. Worktree config sharing. Sandbox mode for BashTool. Plugin ecosystem with marketplace. `/debug` command. `--from-pr` flag. Voice STT in 20 languages. Subagents via `--agents` JSON flag. Tool search for dynamic tool discovery. Compaction preserves images for cache reuse.
 
 ## Ideas Worth Exploring
 

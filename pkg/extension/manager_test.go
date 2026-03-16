@@ -122,7 +122,7 @@ func TestManager_UntrustedSkipped(t *testing.T) {
 	}
 
 	if n := api.toolCount(); n != 1 {
-		t.Fatalf("expected 1 tool (untrusted ext skipped, batch builtin only), got %d", n)
+		t.Fatalf("expected 1 tool (untrusted ext skipped, aside builtin only), got %d", n)
 	}
 
 	mgr.Stop()
@@ -317,7 +317,7 @@ func TestManager_AllowedNames(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	// Only one tool should be registered (from allowed-ext; batch builtin filtered by AllowedNames).
+	// Only one tool should be registered (from allowed-ext; aside builtin filtered by AllowedNames).
 	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
 		t.Fatalf("expected 1 tool (allowed-ext only), got %d", n)
 	}

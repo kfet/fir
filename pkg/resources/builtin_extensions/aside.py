@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 # ---
-# name: batch
-# description: Execute multiple tools and synthesise their outputs ephemerally
+# name: aside
+# description: Ephemeral side queries and multi-tool orchestration — off the record
 # builtin: true
-# commands: batch: Run tools and synthesise results (e.g. /batch read 3 files and summarise)
+# commands: aside: Ask a side question or run tools ephemerally (e.g. /aside what does that error mean?)
 # ---
-"""batch.py — ephemeral multi-tool orchestration via the fir extension SDK.
+"""aside.py — ephemeral side queries and multi-tool orchestration.
 
-Provides a `/batch` slash command and a `batch_run` tool that let the agent
-(or user) execute a list of tool calls, collect their outputs without
-polluting the main conversation, and synthesise the results via a one-shot
-LLM call.
+Provides an ``/aside`` slash command and an ``aside`` tool that let the agent
+(or user) ask a side question or execute a list of tool calls, collect their
+outputs without polluting the main conversation, and synthesise the results
+via a one-shot LLM call.
 
-This is the sole implementation of batch/multi-tool orchestration in fir.
+Everything happens *off to the side* — ephemerally, without entering history.
+Whether it's a quick question or a multi-tool data gather, it's an aside.
 
 Architecture:
-  1. Parse the tool list from the request.
-  2. Execute each tool sequentially via ``ctx.call_tool()``.
+  1. If no tools are provided, run a pure side query (like the old /btw).
+  2. Otherwise, execute each tool sequentially via ``ctx.call_tool()``.
      - Results are held in local Python memory — never enter history.
   3. Build a synthesis prompt from collected outputs + user instructions.
   4. Run ``ctx.side_query()`` to get an ephemeral LLM summary.
@@ -72,11 +73,11 @@ def _build_synthesis_prompt(
 
 
 # ---------------------------------------------------------------------------
-# Core: run a batch of tool calls and synthesise
+# Core: run an aside — side query with optional tool calls
 # ---------------------------------------------------------------------------
 
 
-def _run_batch(
+def _run_aside(
     tools: list[dict],
     instructions: str,
     ctx: fir_ext.Context,
@@ -88,6 +89,7 @@ def _run_batch(
     ----------
     tools : list of dict
         Each entry has ``"name"`` (str) and optional ``"params"`` (dict).
+        If empty, runs a pure side query (like the old /btw).
     instructions : str
         Synthesis instructions for the LLM.
     ctx : fir_ext.Context
@@ -100,15 +102,33 @@ def _run_batch(
     dict
         Structured tool result with ``content`` and ``is_error``.
     """
-    if not tools:
-        return _error("tools list is empty")
     if not instructions:
         return _error("instructions are required")
+
+    # No tools — pure ephemeral side query.
+    if not tools:
+        try:
+            synthesis = ctx.side_query(instructions)
+        except Exception as exc:
+            return _error(f"side query failed: {exc}")
+        return {
+            "content": [{"type": "text", "text": synthesis}],
+            "is_error": False,
+        }
 
     # Validate tool names and params upfront.
     available = ctx.list_tools()
     tool_index = {t["name"]: t for t in available}
+    # Build a case-insensitive lookup so that provider-transformed names
+    # (e.g. "Read" from Anthropic OAuth) resolve to internal names ("read").
+    tool_index_lower = {t["name"].lower(): t for t in available}
     available_names = sorted(tool_index.keys())
+
+    # Normalise tool names in-place before validation.
+    for spec in tools:
+        name = spec.get("name", "")
+        if name and name not in tool_index and name.lower() in tool_index_lower:
+            spec["name"] = tool_index_lower[name.lower()]["name"]
 
     errors = []
     for i, spec in enumerate(tools, 1):
@@ -118,8 +138,7 @@ def _run_batch(
             continue
         if name not in tool_index:
             errors.append(
-                f"tools[{i}]: tool {name!r} not found. "
-                f"Available: {', '.join(available_names)}"
+                f"tools[{i}]: tool {name!r} not found. Available: {', '.join(available_names)}"
             )
             continue
         # Validate required params against schema.
@@ -128,10 +147,7 @@ def _run_batch(
         params = spec.get("params") or {}
         missing = [r for r in required if r not in params]
         if missing:
-            errors.append(
-                f"tools[{i}] ({name}): missing required params: "
-                + ", ".join(missing)
-            )
+            errors.append(f"tools[{i}] ({name}): missing required params: " + ", ".join(missing))
 
     if errors:
         return _error("Validation failed:\n" + "\n".join(errors))
@@ -146,20 +162,24 @@ def _run_batch(
         try:
             result = ctx.call_tool(name, params)
         except Exception as exc:
-            results.append({
-                "name": name,
-                "output": f"error calling tool: {exc}",
-                "is_error": True,
-            })
+            results.append(
+                {
+                    "name": name,
+                    "output": f"error calling tool: {exc}",
+                    "is_error": True,
+                }
+            )
             continue
 
         is_error = result.get("is_error", False)
         output = _result_text(result)
-        results.append({
-            "name": name,
-            "output": output,
-            "is_error": is_error,
-        })
+        results.append(
+            {
+                "name": name,
+                "output": output,
+                "is_error": is_error,
+            }
+        )
 
     # Synthesise collected outputs.
     prompt = _build_synthesis_prompt(results, instructions)
@@ -182,35 +202,38 @@ def _error(msg: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool: batch_run
+# Tool: aside
 # ---------------------------------------------------------------------------
 
 
 @fir_ext.tool(
-    name="batch_run",
+    name="aside",
     description=(
-        "Execute multiple tools and synthesise their outputs via an "
-        "ephemeral LLM call. Raw tool outputs never enter conversation "
-        "history — only the synthesis is returned.\n\n"
+        "Ephemeral side query with optional multi-tool orchestration. "
+        "Everything happens off to the side — nothing enters conversation "
+        "history, only the synthesis is returned.\n\n"
+        "With tools: executes them, collects outputs, synthesises via LLM.\n"
+        "Without tools: runs a pure side question against current context.\n\n"
         "Use when you need to gather data from several tools and want "
-        "a concise summary without bloating context."
+        "a concise summary without bloating context, or when you want "
+        "to ask a quick side question."
     ),
     parameters={
         "type": "object",
         "properties": {
             "description": {
                 "type": "string",
-                "description": "Brief label for this batch (shown in UI).",
+                "description": "Brief label for this aside (shown in UI).",
             },
             "tools": {
                 "type": "array",
-                "description": "Ordered list of tool calls.",
+                "description": "Ordered list of tool calls. Omit for a pure side question.",
                 "items": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
-                            "description": "Name of the tool to call. Use tool names from this agent's tool set, not provider built-in tool names.",
+                            "description": "Name of the tool to call.",
                         },
                         "params": {
                             "type": "object",
@@ -222,53 +245,69 @@ def _error(msg: str) -> dict:
             },
             "instructions": {
                 "type": "string",
-                "description": (
-                    "Instructions for the LLM that synthesises "
-                    "collected outputs."
-                ),
+                "description": "Instructions for the LLM that synthesises collected outputs, or the side question to ask.",
             },
         },
-        "required": ["tools", "instructions"],
+        "required": ["instructions"],
     },
 )
-def batch_run(params: dict, ctx: fir_ext.Context):
+def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])
     instructions = params.get("instructions", "")
     description = params.get("description", "")
-    return _run_batch(tools, instructions, ctx, description)
+    return _run_aside(tools, instructions, ctx, description)
 
 
 # ---------------------------------------------------------------------------
-# Command: /batch
+# Command: /aside
 # ---------------------------------------------------------------------------
 
 
 @fir_ext.command(
-    name="batch",
+    name="aside",
     description=(
-        "Run tools and synthesise results. "
-        "Usage: /batch <natural language description of what to do>"
+        "Ask a side question or run tools ephemerally. "
+        "Usage: /aside <question or description of what to do>"
     ),
 )
-def cmd_batch(args: list[str], ctx: fir_ext.Context):
-    """Handle /batch — pass the request to the agent as a user message
-    instructing it to use the batch_run tool."""
+def cmd_aside(args: list[str], ctx: fir_ext.Context):
+    """Handle /aside — either a direct side question or a tool orchestration request."""
     text = " ".join(args).strip()
     if not text:
         return {
             "message": (
-                "Usage: /batch <description>\n"
-                "Example: /batch read the 5 largest .go files "
-                "and summarise their purpose"
+                "Usage: /aside <question or description>\n\n"
+                "Examples:\n"
+                "  /aside what does that error mean?\n"
+                "  /aside read the 5 largest .go files and summarise their purpose"
             ),
         }
+
+    # Heuristic: if the text looks like a direct question (short, no tool
+    # keywords), handle it as a pure side query like the old /btw.
+    # Otherwise, instruct the agent to use the aside tool with tools.
+    words = text.split()
+    looks_like_tool_request = any(
+        kw in text.lower()
+        for kw in ["read ", "file", "grep", "find ", "bash ", "run ", "execute", "search"]
+    )
+
+    if not looks_like_tool_request or len(words) <= 8:
+        # Pure side question — answer directly.
+        try:
+            answer = ctx.side_query(text)
+        except Exception as exc:
+            return {"message": f"aside failed: {exc}"}
+        return {"message": f"aside: {text}\n\n{answer}"}
+
+    # Looks like a multi-tool request — delegate to agent.
     prompt = (
-        f"Use the batch_run tool to accomplish the following. "
+        f"Use the aside tool to accomplish the following. "
         f"Build the appropriate tool list and instructions, "
-        f"then call batch_run:\n\n{text}"
+        f"then call aside:\n\n{text}"
     )
     ctx.send_user_message(prompt)
     return {}
 
 
-fir_ext.run(name="batch")
+fir_ext.run(name="aside")

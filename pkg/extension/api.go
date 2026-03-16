@@ -28,7 +28,7 @@ type BridgeAPI interface {
 	GetSessionData(key string) (string, bool)
 	// CallTool executes a registered tool by name and returns its result.
 	// Used by extensions that need to call other tools programmatically
-	// (e.g. the batch extension).
+	// (e.g. the aside extension).
 	CallTool(name string, params map[string]any) (ToolResult, error)
 	// ListTools returns the names and parameter schemas of all registered tools.
 	ListTools() []ToolInfo

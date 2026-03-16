@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for the batch builtin extension.
+"""Tests for the aside builtin extension.
 
 Exercises:
   - _result_text: extracting text from tool results
   - _build_synthesis_prompt: prompt construction
-  - _run_batch: full orchestration with mocked ctx
-  - batch_run tool handler: parameter validation
-  - cmd_batch command handler: argument handling
+  - _run_aside: full orchestration with mocked ctx
+  - aside tool handler: parameter validation
+  - cmd_aside command handler: argument handling (side questions + tool orchestration)
 """
 
 import os
@@ -29,10 +29,10 @@ sys.path.insert(0, _sdk_dir)
 import fir_ext
 
 
-def _load_batch():
-    """(Re-)import batch.py, resetting registries and capturing handlers."""
-    if "batch" in sys.modules:
-        del sys.modules["batch"]
+def _load_aside():
+    """(Re-)import aside.py, resetting registries and capturing handlers."""
+    if "aside" in sys.modules:
+        del sys.modules["aside"]
     fir_ext._tools.clear()
     fir_ext._tool_handlers.clear()
     fir_ext._event_handlers.clear()
@@ -40,8 +40,8 @@ def _load_batch():
     fir_ext._commands.clear()
     fir_ext._command_handlers.clear()
     with mock.patch.object(fir_ext, "run"):
-        import batch
-    return batch
+        import aside
+    return aside
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def _load_batch():
 
 class TestResultText(unittest.TestCase):
     def setUp(self):
-        self.mod = _load_batch()
+        self.mod = _load_aside()
 
     def test_extracts_text_from_content_list(self):
         result = {"content": [{"text": "hello"}, {"text": "world"}]}
@@ -86,7 +86,7 @@ class TestResultText(unittest.TestCase):
 
 class TestBuildSynthesisPrompt(unittest.TestCase):
     def setUp(self):
-        self.mod = _load_batch()
+        self.mod = _load_aside()
 
     def test_includes_all_tool_outputs(self):
         results = [
@@ -117,13 +117,13 @@ class TestBuildSynthesisPrompt(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _run_batch
+# _run_aside
 # ---------------------------------------------------------------------------
 
 
-class TestRunBatch(unittest.TestCase):
+class TestRunAside(unittest.TestCase):
     def setUp(self):
-        self.mod = _load_batch()
+        self.mod = _load_aside()
 
     def _make_ctx(self, tool_results=None, side_query_result="synthesis", available_tools=None):
         """Create a mock context with call_tool, side_query, and list_tools."""
@@ -162,21 +162,23 @@ class TestRunBatch(unittest.TestCase):
             {"name": "Read", "params": {"path": "a.go"}},
             {"name": "Read", "params": {"path": "b.go"}},
         ]
-        result = self.mod._run_batch(tools, "summarise files", ctx)
+        result = self.mod._run_aside(tools, "summarise files", ctx)
         self.assertFalse(result["is_error"])
         self.assertEqual(result["content"][0]["text"], "summary of files")
         self.assertEqual(ctx.call_tool.call_count, 2)
         ctx.side_query.assert_called_once()
 
-    def test_empty_tools_returns_error(self):
-        ctx = self._make_ctx()
-        result = self.mod._run_batch([], "summarise", ctx)
-        self.assertTrue(result["is_error"])
-        self.assertIn("empty", result["content"][0]["text"])
+    def test_no_tools_runs_pure_side_query(self):
+        ctx = self._make_ctx(side_query_result="the answer is 42")
+        result = self.mod._run_aside([], "what is the meaning of life?", ctx)
+        self.assertFalse(result["is_error"])
+        self.assertEqual(result["content"][0]["text"], "the answer is 42")
+        ctx.call_tool.assert_not_called()
+        ctx.side_query.assert_called_once_with("what is the meaning of life?")
 
     def test_empty_instructions_returns_error(self):
         ctx = self._make_ctx()
-        result = self.mod._run_batch([{"name": "Read"}], "", ctx)
+        result = self.mod._run_aside([{"name": "Read"}], "", ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("instructions", result["content"][0]["text"])
 
@@ -191,7 +193,7 @@ class TestRunBatch(unittest.TestCase):
             side_query_result="one file failed",
         )
         tools = [{"name": "Read", "params": {"path": "missing.go"}}]
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertFalse(result["is_error"])
         # side_query was called with the error output included
         prompt = ctx.side_query.call_args[0][0]
@@ -204,7 +206,7 @@ class TestRunBatch(unittest.TestCase):
             side_effect=RuntimeError("connection lost")
         )
         tools = [{"name": "Read", "params": {"path": "a.go"}}]
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         # Should still succeed — error is included in synthesis
         self.assertFalse(result["is_error"])
         prompt = ctx.side_query.call_args[0][0]
@@ -214,14 +216,21 @@ class TestRunBatch(unittest.TestCase):
         ctx = self._make_ctx()
         ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
         tools = [{"name": "Read", "params": {"path": "a.go"}}]
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("synthesis failed", result["content"][0]["text"])
+
+    def test_no_tools_side_query_failure_returns_error(self):
+        ctx = self._make_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
+        result = self.mod._run_aside([], "some question", ctx)
+        self.assertTrue(result["is_error"])
+        self.assertIn("side query failed", result["content"][0]["text"])
 
     def test_unnamed_tool_produces_validation_error(self):
         ctx = self._make_ctx(side_query_result="handled")
         tools = [{"params": {"path": "a.go"}}]  # no name
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("name is required", result["content"][0]["text"])
         ctx.call_tool.assert_not_called()
@@ -230,7 +239,7 @@ class TestRunBatch(unittest.TestCase):
     def test_synthesis_prompt_has_instructions(self):
         ctx = self._make_ctx(side_query_result="done")
         tools = [{"name": "Bash", "params": {"command": "ls"}}]
-        self.mod._run_batch(tools, "list all files", ctx)
+        self.mod._run_aside(tools, "list all files", ctx)
         prompt = ctx.side_query.call_args[0][0]
         self.assertIn("--- Instructions ---", prompt)
         self.assertIn("list all files", prompt)
@@ -238,7 +247,7 @@ class TestRunBatch(unittest.TestCase):
     def test_unknown_tool_returns_validation_error(self):
         ctx = self._make_ctx()
         tools = [{"name": "NoSuchTool", "params": {}}]
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
         text = result["content"][0]["text"]
         self.assertIn("NoSuchTool", text)
@@ -248,7 +257,7 @@ class TestRunBatch(unittest.TestCase):
     def test_missing_required_params_returns_validation_error(self):
         ctx = self._make_ctx()
         tools = [{"name": "Read", "params": {}}]  # missing required "path"
-        result = self.mod._run_batch(tools, "summarise", ctx)
+        result = self.mod._run_aside(tools, "summarise", ctx)
         self.assertTrue(result["is_error"])
         self.assertIn("missing required params", result["content"][0]["text"])
         self.assertIn("path", result["content"][0]["text"])
@@ -256,20 +265,20 @@ class TestRunBatch(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# batch_run tool handler (registered via @fir_ext.tool)
+# aside tool handler (registered via @fir_ext.tool)
 # ---------------------------------------------------------------------------
 
 
-class TestBatchRunTool(unittest.TestCase):
+class TestAsideTool(unittest.TestCase):
     def setUp(self):
-        self.mod = _load_batch()
+        self.mod = _load_aside()
 
     def test_registered(self):
         names = {t["name"] for t in fir_ext._tools}
-        self.assertIn("batch_run", names)
+        self.assertIn("aside", names)
 
-    def test_handler_delegates_to_run_batch(self):
-        handler = fir_ext._tool_handlers["batch_run"]
+    def test_handler_delegates_to_run_aside(self):
+        handler = fir_ext._tool_handlers["aside"]
         ctx = mock.MagicMock(spec=fir_ext.Context)
         ctx.call_tool = mock.MagicMock(
             return_value={"content": [{"text": "ok"}], "is_error": False}
@@ -293,34 +302,47 @@ class TestBatchRunTool(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# /batch command handler
+# /aside command handler
 # ---------------------------------------------------------------------------
 
 
-class TestBatchCommand(unittest.TestCase):
+class TestAsideCommand(unittest.TestCase):
     def setUp(self):
-        self.mod = _load_batch()
+        self.mod = _load_aside()
 
     def test_registered(self):
         names = {c["name"] for c in fir_ext._commands}
-        self.assertIn("batch", names)
+        self.assertIn("aside", names)
 
     def test_no_args_returns_usage(self):
-        handler = fir_ext._command_handlers["batch"]
+        handler = fir_ext._command_handlers["aside"]
         ctx = mock.MagicMock(spec=fir_ext.Context)
         result = handler([], ctx)
         self.assertIn("Usage", result["message"])
         ctx.send_user_message.assert_not_called()
+        ctx.side_query.assert_not_called()
 
-    def test_with_args_sends_user_message(self):
-        handler = fir_ext._command_handlers["batch"]
+    def test_short_question_runs_side_query(self):
+        """Short text without tool keywords → pure side question."""
+        handler = fir_ext._command_handlers["aside"]
         ctx = mock.MagicMock(spec=fir_ext.Context)
-        result = handler(["read", "files", "and", "summarise"], ctx)
+        ctx.side_query = mock.MagicMock(return_value="it means X")
+        result = handler(["what", "does", "that", "mean?"], ctx)
+        self.assertIn("aside:", result["message"])
+        self.assertIn("it means X", result["message"])
+        ctx.send_user_message.assert_not_called()
+
+    def test_tool_request_sends_user_message(self):
+        """Longer text with tool keywords → delegate to agent."""
+        handler = fir_ext._command_handlers["aside"]
+        ctx = mock.MagicMock(spec=fir_ext.Context)
+        args = "read the 5 largest .go files and summarise their purpose".split()
+        result = handler(args, ctx)
         self.assertEqual(result, {})
         ctx.send_user_message.assert_called_once()
         msg = ctx.send_user_message.call_args[0][0]
-        self.assertIn("batch_run", msg)
-        self.assertIn("read files and summarise", msg)
+        self.assertIn("aside", msg)
+        self.assertIn("read the 5 largest .go files", msg)
 
 
 if __name__ == "__main__":

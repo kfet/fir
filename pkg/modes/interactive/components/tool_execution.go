@@ -276,8 +276,8 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 		return tc.formatGrep(t, invalidArg)
 	case "plan":
 		return tc.formatPlan(t)
-	case "batch_run":
-		return tc.formatBatch(t)
+	case "aside":
+		return tc.formatAside(t)
 	default:
 		return tc.formatGeneric(t)
 	}
@@ -675,9 +675,9 @@ func (tc *ToolExecutionComponent) formatPlan(t *theme.Theme) string {
 	return text
 }
 
-func (tc *ToolExecutionComponent) formatBatch(t *theme.Theme) string {
+func (tc *ToolExecutionComponent) formatAside(t *theme.Theme) string {
 	description := strArg(tc.args, "description")
-	header := t.Fg("toolTitle", t.Bold("batch_run"))
+	header := t.Fg("toolTitle", t.Bold("aside"))
 	if description != "" {
 		header += " " + t.Fg("accent", description)
 	}
