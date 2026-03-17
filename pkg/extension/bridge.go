@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/oauth"
 )
 
 // NotifyFunc is called when an extension sends a "notify" request.
@@ -42,6 +43,14 @@ type Bridge struct {
 	// sessionData is a per-extension key/value store persisted across /reexec.
 	sessionDataMu sync.RWMutex
 	sessionData   map[string]string
+
+	// authCallbacks holds the active login callbacks for UI dispatch during auth/login.
+	authCallbacksMu sync.RWMutex
+	authCallbacks   *oauth.LoginCallbacks
+
+	// authProviders holds the extAuthProvider instances for this bridge.
+	authProvidersMu sync.RWMutex
+	authProviders   []*extAuthProvider
 }
 
 // NewBridge creates a Bridge wrapping the given Process and its capabilities.
@@ -348,6 +357,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		result = map[string]any{"ok": true}
 
 	default:
+		// Try auth helper RPCs.
+		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {
+			_ = codec.WriteResponse(req.ID, result, rpcErr)
+			return
+		}
 		rpcErr = &Error{Code: -32601, Message: "method not found: " + req.Method}
 	}
 

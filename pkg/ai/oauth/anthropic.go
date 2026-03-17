@@ -88,8 +88,8 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 
 	// Try starting local callback server; fall back silently if port unavailable.
 	redirectURI := anthropicRedirectURI
-	var resultCh <-chan *callbackResult
-	srv, ch, serverErr := startOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr)
+	var resultCh <-chan *CallbackResult
+	srv, ch, serverErr := StartOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr)
 	if serverErr == nil {
 		resultCh = ch
 		defer srv.Close()

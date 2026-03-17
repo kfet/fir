@@ -159,8 +159,8 @@ func TestRaceCallbackAndManual_NilChannel(t *testing.T) {
 
 func TestRaceCallbackAndManual_BrowserWins(t *testing.T) {
 	ctx := context.Background()
-	ch := make(chan *callbackResult, 1)
-	ch <- &callbackResult{Code: "browser_code", State: "v1"}
+	ch := make(chan *CallbackResult, 1)
+	ch <- &CallbackResult{Code: "browser_code", State: "v1"}
 
 	manualCalled := false
 	code, err := raceCallbackAndManual(ctx, ch, func() (string, error) {

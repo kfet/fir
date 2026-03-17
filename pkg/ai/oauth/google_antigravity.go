@@ -77,15 +77,15 @@ func (p *AntigravityProvider) ModifyModels(models []*ai.Model, _ *Credentials) [
 	return models
 }
 
-// callbackResult holds the result from the OAuth callback server.
-type callbackResult struct {
+// CallbackResult holds the result from the OAuth callback server.
+type CallbackResult struct {
 	Code  string
 	State string
 }
 
 // startCallbackServer starts a local HTTP server on port 51121 to receive the OAuth callback.
-func startCallbackServer(ctx context.Context) (server *http.Server, resultCh <-chan *callbackResult, err error) {
-	return startOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:51121")
+func startCallbackServer(ctx context.Context) (server *http.Server, resultCh <-chan *CallbackResult, err error) {
+	return StartOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:51121")
 }
 
 // parseRedirectURL extracts code and state from a redirect URL string.
@@ -210,7 +210,7 @@ func loginAntigravity(callbacks LoginCallbacks) (*Credentials, error) {
 
 // raceCallbackAndManual waits for either the browser callback or manual code input.
 // If resultCh is nil (no callback server), it falls back to manual input only.
-func raceCallbackAndManual(ctx context.Context, resultCh <-chan *callbackResult, manualInput func() (string, error), dismissManualInput func(), verifier string) (string, error) {
+func raceCallbackAndManual(ctx context.Context, resultCh <-chan *CallbackResult, manualInput func() (string, error), dismissManualInput func(), verifier string) (string, error) {
 	if resultCh == nil {
 		return manualCodeInput(manualInput, verifier)
 	}

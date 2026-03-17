@@ -29,23 +29,55 @@ type CommandSpec struct {
 	Description string `json:"description"`
 }
 
+// AuthProviderSpec describes an OAuth auth provider registered by an extension.
+type AuthProviderSpec struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	UsesCallbackServer bool   `json:"uses_callback_server"`
+}
+
 // InitResult is the result returned by an extension in response to "init".
 type InitResult struct {
-	Name     string        `json:"name"`
-	Tools    []ToolSpec    `json:"tools,omitempty"`
-	Commands []CommandSpec `json:"commands,omitempty"`
-	Events   []string      `json:"events,omitempty"`
+	Name          string             `json:"name"`
+	Tools         []ToolSpec         `json:"tools,omitempty"`
+	Commands      []CommandSpec      `json:"commands,omitempty"`
+	Events        []string           `json:"events,omitempty"`
+	AuthProviders []AuthProviderSpec `json:"auth_providers,omitempty"`
 }
 
 // commandNameRE validates extension command names: lowercase letters, digits,
 // hyphens; must start with a letter.
 var commandNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// authProviderIDRE validates auth provider IDs: same pattern as command names.
+var authProviderIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// builtinAuthProviderIDs lists IDs reserved for built-in OAuth providers.
+var builtinAuthProviderIDs = map[string]bool{
+	"anthropic":          true,
+	"github-copilot":     true,
+	"gemini-cli":         true,
+	"google-antigravity": true,
+	"openai-codex":       true,
+}
+
 // ValidateCommandName checks that a command name is well-formed. It returns
 // the name unchanged on success.
 func ValidateCommandName(name string) error {
 	if !commandNameRE.MatchString(name) {
 		return fmt.Errorf("extension: command name %q must match [a-z][a-z0-9-]*", name)
+	}
+	return nil
+}
+
+// ValidateAuthProviderID checks that an auth provider ID is well-formed and
+// does not collide with built-in provider IDs.
+func ValidateAuthProviderID(id string) error {
+	if !authProviderIDRE.MatchString(id) {
+		return fmt.Errorf("extension: auth provider ID %q must match [a-z][a-z0-9-]*", id)
+	}
+	if builtinAuthProviderIDs[id] {
+		return fmt.Errorf("extension: auth provider ID %q conflicts with built-in provider", id)
 	}
 	return nil
 }
@@ -109,6 +141,11 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 		result.Name = validName
 		for _, cmd := range result.Commands {
 			if err := ValidateCommandName(cmd.Name); err != nil {
+				return nil, err
+			}
+		}
+		for _, ap := range result.AuthProviders {
+			if err := ValidateAuthProviderID(ap.ID); err != nil {
 				return nil, err
 			}
 		}

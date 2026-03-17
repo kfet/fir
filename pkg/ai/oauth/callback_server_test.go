@@ -14,9 +14,9 @@ func TestStartOAuthCallbackServer_SuccessfulAuth(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv, resultCh, err := startOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:0")
+	srv, resultCh, err := StartOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("startOAuthCallbackServer error: %v", err)
+		t.Fatalf("StartOAuthCallbackServer error: %v", err)
 	}
 	defer srv.Close()
 
@@ -34,7 +34,7 @@ func TestStartOAuthCallbackServer_SuccessfulAuth(t *testing.T) {
 	defer cancel2()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", 51199) // unlikely to conflict
-	srv2, resultCh2, err := startOAuthCallbackServer(ctx2, "/oauth-callback", addr)
+	srv2, resultCh2, err := StartOAuthCallbackServer(ctx2, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s (port in use): %v", addr, err)
 	}
@@ -78,7 +78,7 @@ func TestStartOAuthCallbackServer_ErrorParam(t *testing.T) {
 	defer cancel()
 
 	addr := "127.0.0.1:51198"
-	srv, _, err := startOAuthCallbackServer(ctx, "/oauth-callback", addr)
+	srv, _, err := StartOAuthCallbackServer(ctx, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s: %v", addr, err)
 	}
@@ -108,7 +108,7 @@ func TestStartOAuthCallbackServer_ErrorParamXSSEscaped(t *testing.T) {
 	defer cancel()
 
 	addr := "127.0.0.1:51197"
-	srv, _, err := startOAuthCallbackServer(ctx, "/oauth-callback", addr)
+	srv, _, err := StartOAuthCallbackServer(ctx, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s: %v", addr, err)
 	}
@@ -137,7 +137,7 @@ func TestStartOAuthCallbackServer_MissingCodeOrState(t *testing.T) {
 	defer cancel()
 
 	addr := "127.0.0.1:51196"
-	srv, _, err := startOAuthCallbackServer(ctx, "/oauth-callback", addr)
+	srv, _, err := StartOAuthCallbackServer(ctx, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s: %v", addr, err)
 	}
@@ -165,7 +165,7 @@ func TestStartOAuthCallbackServer_MissingStateOnly(t *testing.T) {
 	defer cancel()
 
 	addr := "127.0.0.1:51195"
-	srv, _, err := startOAuthCallbackServer(ctx, "/oauth-callback", addr)
+	srv, _, err := StartOAuthCallbackServer(ctx, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s: %v", addr, err)
 	}
@@ -186,7 +186,7 @@ func TestStartOAuthCallbackServer_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	addr := "127.0.0.1:51194"
-	srv, resultCh, err := startOAuthCallbackServer(ctx, "/oauth-callback", addr)
+	srv, resultCh, err := StartOAuthCallbackServer(ctx, "/oauth-callback", addr)
 	if err != nil {
 		t.Skipf("could not listen on %s: %v", addr, err)
 	}

@@ -310,6 +310,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
+	bridge.RegisterAuthProviders()
 
 	// Wire optional UI callbacks.
 	m.mu.Lock()
@@ -384,6 +385,7 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	time.Sleep(250 * time.Millisecond)
 
 	for _, mb := range bridges {
+		mb.bridge.UnregisterAuthProviders()
 		mb.cancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = mb.proc.Stop(ctx)

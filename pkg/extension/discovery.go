@@ -10,13 +10,14 @@ import (
 
 // ExtProcConfig describes a discovered external process extension.
 type ExtProcConfig struct {
-	Name     string                                  // derived from filename or sub-directory name
-	Path     string                                  // absolute path to the executable
-	Scope    string                                  // "project", "global", or "builtin"
-	Modes    []string                                // optional mode allowlist from comment frontmatter
-	Demo     bool                                    // demo/test extension; skipped unless explicitly allowed
-	Events   []string                                // event names declared in frontmatter (for lazy loading)
-	Commands []resources.ExtensionFrontmatterCommand // commands declared in frontmatter
+	Name          string                                  // derived from filename or sub-directory name
+	Path          string                                  // absolute path to the executable
+	Scope         string                                  // "project", "global", or "builtin"
+	Modes         []string                                // optional mode allowlist from comment frontmatter
+	Demo          bool                                    // demo/test extension; skipped unless explicitly allowed
+	Events        []string                                // event names declared in frontmatter (for lazy loading)
+	Commands      []resources.ExtensionFrontmatterCommand // commands declared in frontmatter
+	AuthProviders []string                                // auth provider IDs declared in frontmatter
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -36,12 +37,13 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 		for _, b := range builtins {
 			fm := extensionFrontmatterFromPath(b.Path)
 			byName[b.Name] = ExtProcConfig{
-				Name:     b.Name,
-				Path:     b.Path,
-				Scope:    "builtin",
-				Modes:    fm.Modes,
-				Events:   fm.Events,
-				Commands: fm.Commands,
+				Name:          b.Name,
+				Path:          b.Path,
+				Scope:         "builtin",
+				Modes:         fm.Modes,
+				Events:        fm.Events,
+				Commands:      fm.Commands,
+				AuthProviders: fm.AuthProviders,
 			}
 		}
 	}
@@ -140,12 +142,13 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 		}
 		name := stripExt(filepath.Base(filePath))
 		byName[name] = ExtProcConfig{
-			Name:     name,
-			Path:     filePath,
-			Scope:    "package",
-			Modes:    fm.Modes,
-			Events:   fm.Events,
-			Commands: fm.Commands,
+			Name:          name,
+			Path:          filePath,
+			Scope:         "package",
+			Modes:         fm.Modes,
+			Events:        fm.Events,
+			Commands:      fm.Commands,
+			AuthProviders: fm.AuthProviders,
 		}
 	}
 	result := make([]ExtProcConfig, 0, len(byName))
@@ -178,13 +181,14 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			}
 			fm := extensionFrontmatterFromPath(entryPoint)
 			byName[name] = ExtProcConfig{
-				Name:     name,
-				Path:     entryPoint,
-				Scope:    scope,
-				Modes:    fm.Modes,
-				Demo:     fm.Demo,
-				Events:   fm.Events,
-				Commands: fm.Commands,
+				Name:          name,
+				Path:          entryPoint,
+				Scope:         scope,
+				Modes:         fm.Modes,
+				Demo:          fm.Demo,
+				Events:        fm.Events,
+				Commands:      fm.Commands,
+				AuthProviders: fm.AuthProviders,
 			}
 			continue
 		}
@@ -212,13 +216,14 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		}
 
 		byName[name] = ExtProcConfig{
-			Name:     name,
-			Path:     filePath,
-			Scope:    scope,
-			Modes:    fm.Modes,
-			Demo:     fm.Demo,
-			Events:   fm.Events,
-			Commands: fm.Commands,
+			Name:          name,
+			Path:          filePath,
+			Scope:         scope,
+			Modes:         fm.Modes,
+			Demo:          fm.Demo,
+			Events:        fm.Events,
+			Commands:      fm.Commands,
+			AuthProviders: fm.AuthProviders,
 		}
 	}
 	return nil

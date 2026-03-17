@@ -10,11 +10,11 @@ import (
 	"sync"
 )
 
-// startOAuthCallbackServer starts a local HTTP server to receive an OAuth callback.
+// StartOAuthCallbackServer starts a local HTTP server to receive an OAuth callback.
 // route is the path to listen on (e.g., "/oauth-callback").
 // addr is the listener address (e.g., "127.0.0.1:51121").
-func startOAuthCallbackServer(ctx context.Context, route, addr string) (server *http.Server, resultCh <-chan *callbackResult, err error) {
-	ch := make(chan *callbackResult, 1)
+func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *http.Server, resultCh <-chan *CallbackResult, err error) {
+	ch := make(chan *CallbackResult, 1)
 	var once sync.Once
 
 	mux := http.NewServeMux()
@@ -33,7 +33,7 @@ func startOAuthCallbackServer(ctx context.Context, route, addr string) (server *
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, "<html><body><h1>Authentication Successful</h1><p>You can close this window and return to the terminal.</p></body></html>")
 			once.Do(func() {
-				ch <- &callbackResult{Code: code, State: state}
+				ch <- &CallbackResult{Code: code, State: state}
 			})
 		} else {
 			w.Header().Set("Content-Type", "text/html")

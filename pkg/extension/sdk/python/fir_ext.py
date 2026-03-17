@@ -432,6 +432,13 @@ _event_handlers: dict[str, Callable] = {}
 _commands: list[dict[str, Any]] = []
 _command_handlers: dict[str, Callable] = {}
 
+# Auth provider registries
+_auth_providers: list[dict[str, Any]] = []
+_auth_login_handlers: dict[str, Callable] = {}
+_auth_refresh_handlers: dict[str, Callable] = {}
+_auth_api_key_handlers: dict[str, Callable] = {}
+_auth_modify_models_handlers: dict[str, Callable] = {}
+
 # ---------------------------------------------------------------------------
 # Decorators
 # ---------------------------------------------------------------------------
@@ -509,6 +516,93 @@ def on(event_name: str) -> Callable:
             _hook_handlers[event_name] = fn
         else:
             _event_handlers[event_name] = fn
+        return fn
+
+    return decorator
+
+
+def auth_provider(
+    id: str,
+    name: str,
+    uses_callback_server: bool = True,
+) -> Callable:
+    """Register an OAuth auth provider login handler.
+
+    The decorated function receives ``(params: dict, ctx: AuthContext)``
+    where *params* contains ``{"provider_id": "..."}`` and *ctx* provides
+    OAuth helper methods. It should return a dict with ``access``, ``refresh``,
+    and ``expires`` keys.
+
+    Example::
+
+        @fir_ext.auth_provider(id="my-corp", name="My Corp SSO")
+        def login(params, ctx):
+            pkce = ctx.generate_pkce()
+            server = ctx.start_callback_server()
+            ctx.open_url(build_auth_url(pkce, server))
+            result = ctx.await_callback()
+            tokens = exchange_code(result["code"], pkce["verifier"])
+            return {
+                "access": tokens["access_token"],
+                "refresh": tokens["refresh_token"],
+                "expires": int(time.time() * 1000) + tokens["expires_in"] * 1000,
+            }
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_providers.append({
+            "id": id,
+            "name": name,
+            "uses_callback_server": uses_callback_server,
+        })
+        _auth_login_handlers[id] = fn
+        return fn
+
+    return decorator
+
+
+def auth_refresh(provider: str) -> Callable:
+    """Register a token refresh handler for an auth provider.
+
+    The decorated function receives ``(params: dict, ctx: AuthContext)``
+    where *params* contains ``{"provider_id": "...", "credentials": {...}}``.
+    It should return a dict with ``access``, ``refresh``, and ``expires`` keys.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_refresh_handlers[provider] = fn
+        return fn
+
+    return decorator
+
+
+def auth_api_key(provider: str) -> Callable:
+    """Register a custom API key extractor for an auth provider.
+
+    The decorated function receives ``(params: dict, ctx: AuthContext)``
+    where *params* contains ``{"provider_id": "...", "credentials": {...}}``.
+    It should return a string (the API key).
+
+    If not registered, the default behavior returns ``credentials["access"]``.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_api_key_handlers[provider] = fn
+        return fn
+
+    return decorator
+
+
+def auth_modify_models(provider: str) -> Callable:
+    """Register a model modifier for an auth provider.
+
+    The decorated function receives ``(params: dict, ctx: AuthContext)``
+    where *params* contains ``{"provider_id": "...", "credentials": {...}, "models": [...]}``.
+    It should return a list of modified models, or None for no changes.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_modify_models_handlers[provider] = fn
         return fn
 
     return decorator
@@ -825,6 +919,81 @@ class Context:
         self._call("prepend_context", {"content": content})
 
 
+class AuthContext(Context):
+    """Extended context for auth provider handlers with OAuth helper methods.
+
+    Inherits all standard Context methods and adds auth-specific helpers
+    that call back into fir's OAuth infrastructure.
+    """
+
+    def generate_pkce(self, timeout: float = 10.0) -> dict[str, str]:
+        """Generate a PKCE code verifier and challenge.
+
+        Returns
+        -------
+        dict
+            ``{"verifier": "...", "challenge": "..."}``
+        """
+        return self._call("auth/generate_pkce", {}, timeout=timeout)
+
+    def start_callback_server(
+        self, addr: str = "127.0.0.1:0", path: str = "/callback", timeout: float = 10.0
+    ) -> dict[str, str]:
+        """Start a local HTTP server to receive the OAuth callback.
+
+        Parameters
+        ----------
+        addr : str
+            Address to bind (use port 0 for auto-assign).
+        path : str
+            URL path for the callback endpoint.
+
+        Returns
+        -------
+        dict
+            ``{"addr": "127.0.0.1:NNNNN", "redirect_uri": "http://localhost:NNNNN/callback"}``
+        """
+        return self._call("auth/start_callback_server", {"addr": addr, "path": path}, timeout=timeout)
+
+    def await_callback(self, timeout: float = 300.0) -> dict[str, str]:
+        """Block until the callback server receives an auth code.
+
+        Returns
+        -------
+        dict
+            ``{"code": "...", "state": "..."}``
+        """
+        return self._call("auth/await_callback", {}, timeout=timeout)
+
+    def stop_callback_server(self, timeout: float = 10.0) -> None:
+        """Stop the local callback server."""
+        self._call("auth/stop_callback_server", {}, timeout=timeout)
+
+    def open_url(self, url: str, instructions: str = "") -> None:
+        """Ask fir to open a URL in the user's browser and/or display it."""
+        self._call("auth/open_url", {"url": url, "instructions": instructions})
+
+    def progress(self, message: str) -> None:
+        """Show a progress/status message in fir's UI."""
+        self._call("auth/progress", {"message": message})
+
+    def prompt(
+        self, message: str, placeholder: str = "", allow_empty: bool = False, timeout: float = 300.0
+    ) -> str:
+        """Ask the user for text input via fir's TUI.
+
+        Returns the entered value.
+        """
+        result = self._call(
+            "auth/prompt",
+            {"message": message, "placeholder": placeholder, "allow_empty": allow_empty},
+            timeout=timeout,
+        )
+        if isinstance(result, dict):
+            return result.get("value", "")
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -921,6 +1090,62 @@ def run(
                 _write_message(_make_error(msg_id, -32000, str(exc)), out)
             return
 
+    # Auth context for auth handlers
+    auth_ctx = AuthContext(output_stream=out, pending=pending, results=results)
+
+    def _handle_auth_request(method: str, msg_id: Any, params: dict[str, Any], out_stream: WriteStream) -> None:
+        """Handle auth/* RPC methods from fir."""
+        provider_id = params.get("provider_id", "")
+
+        try:
+            if method == "auth/login":
+                handler = _auth_login_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_error(msg_id, -32601, f"No login handler for provider: {provider_id}"), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, dict) and "access" in result:
+                    result = {"credentials": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            elif method == "auth/refresh":
+                handler = _auth_refresh_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_error(msg_id, -32601, f"No refresh handler for provider: {provider_id}"), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, dict) and "access" in result:
+                    result = {"credentials": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            elif method == "auth/api_key":
+                handler = _auth_api_key_handlers.get(provider_id)
+                if handler is None:
+                    # Default: return access token
+                    creds = params.get("credentials", {})
+                    _write_message(_make_response(msg_id, {"api_key": creds.get("access", "")}), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, str):
+                    result = {"api_key": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            elif method == "auth/modify_models":
+                handler = _auth_modify_models_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_response(msg_id, {"models": None}), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, list):
+                    result = {"models": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            else:
+                _write_message(_make_error(msg_id, -32601, f"Unknown auth method: {method}"), out_stream)
+
+        except Exception as exc:
+            _write_message(_make_error(msg_id, -32000, str(exc)), out_stream)
+
     def _dispatch(msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
         msg_id = msg.get("id")
@@ -928,21 +1153,28 @@ def run(
 
         # --- init handshake (always synchronous) ---
         if method == "init":
-            resp = _make_response(
-                msg_id,
-                {
-                    "name": ext_name,
-                    "tools": list(_tools),
-                    "commands": list(_commands),
-                    "events": subscribed_events,
-                },
-            )
+            init_result: dict[str, Any] = {
+                "name": ext_name,
+                "tools": list(_tools),
+                "commands": list(_commands),
+                "events": subscribed_events,
+            }
+            if _auth_providers:
+                init_result["auth_providers"] = list(_auth_providers)
+            resp = _make_response(msg_id, init_result)
             _write_message(resp, out)
             return
 
         # --- tool_call / hooks: run in thread so read loop stays free ---
         if method in ("tool_call",) or method.startswith("hook/"):
             t = threading.Thread(target=_handle_request, args=(method, msg_id, params), daemon=True)
+            t.start()
+            _track_worker(t)
+            return
+
+        # --- auth/* RPCs: run in thread ---
+        if method.startswith("auth/"):
+            t = threading.Thread(target=_handle_auth_request, args=(method, msg_id, params, out), daemon=True)
             t.start()
             _track_worker(t)
             return

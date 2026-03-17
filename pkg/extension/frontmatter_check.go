@@ -14,11 +14,13 @@ type FrontmatterMismatch struct {
 	ExtName string
 	Path    string
 	// Missing lists items present in the handshake but absent from frontmatter.
-	MissingEvents   []string
-	MissingCommands []string
+	MissingEvents        []string
+	MissingCommands      []string
+	MissingAuthProviders []string
 	// Extra lists items in frontmatter but not in the handshake (stale).
-	ExtraEvents   []string
-	ExtraCommands []string
+	ExtraEvents        []string
+	ExtraCommands      []string
+	ExtraAuthProviders []string
 }
 
 // Summary returns a human-readable description of the mismatch.
@@ -30,11 +32,17 @@ func (m FrontmatterMismatch) Summary() string {
 	if len(m.MissingCommands) > 0 {
 		parts = append(parts, fmt.Sprintf("missing commands: %s", strings.Join(m.MissingCommands, ", ")))
 	}
+	if len(m.MissingAuthProviders) > 0 {
+		parts = append(parts, fmt.Sprintf("missing auth_providers: %s", strings.Join(m.MissingAuthProviders, ", ")))
+	}
 	if len(m.ExtraEvents) > 0 {
 		parts = append(parts, fmt.Sprintf("extra events: %s", strings.Join(m.ExtraEvents, ", ")))
 	}
 	if len(m.ExtraCommands) > 0 {
 		parts = append(parts, fmt.Sprintf("extra commands: %s", strings.Join(m.ExtraCommands, ", ")))
+	}
+	if len(m.ExtraAuthProviders) > 0 {
+		parts = append(parts, fmt.Sprintf("extra auth_providers: %s", strings.Join(m.ExtraAuthProviders, ", ")))
 	}
 	return strings.Join(parts, "; ")
 }
@@ -42,7 +50,9 @@ func (m FrontmatterMismatch) Summary() string {
 // Empty returns true if there is no mismatch.
 func (m FrontmatterMismatch) Empty() bool {
 	return len(m.MissingEvents) == 0 && len(m.MissingCommands) == 0 &&
-		len(m.ExtraEvents) == 0 && len(m.ExtraCommands) == 0
+		len(m.MissingAuthProviders) == 0 &&
+		len(m.ExtraEvents) == 0 && len(m.ExtraCommands) == 0 &&
+		len(m.ExtraAuthProviders) == 0
 }
 
 // CheckFrontmatter compares the extension's frontmatter declarations against
@@ -94,10 +104,32 @@ func CheckFrontmatter(cfg ExtProcConfig, caps *InitResult) FrontmatterMismatch {
 		}
 	}
 
+	// Check auth providers from handshake.
+	fmAuthProviders := make(map[string]bool, len(cfg.AuthProviders))
+	for _, ap := range cfg.AuthProviders {
+		fmAuthProviders[ap] = true
+	}
+	for _, ap := range caps.AuthProviders {
+		if !fmAuthProviders[ap.ID] {
+			mm.MissingAuthProviders = append(mm.MissingAuthProviders, ap.ID)
+		}
+	}
+	capsAuthProviders := make(map[string]bool, len(caps.AuthProviders))
+	for _, ap := range caps.AuthProviders {
+		capsAuthProviders[ap.ID] = true
+	}
+	for _, ap := range cfg.AuthProviders {
+		if !capsAuthProviders[ap] {
+			mm.ExtraAuthProviders = append(mm.ExtraAuthProviders, ap)
+		}
+	}
+
 	sort.Strings(mm.MissingEvents)
 	sort.Strings(mm.MissingCommands)
+	sort.Strings(mm.MissingAuthProviders)
 	sort.Strings(mm.ExtraEvents)
 	sort.Strings(mm.ExtraCommands)
+	sort.Strings(mm.ExtraAuthProviders)
 	return mm
 }
 
@@ -149,7 +181,7 @@ func FixFrontmatter(path string, caps *InitResult) error {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key == "events" || key == "event" || key == "commands" {
+		if key == "events" || key == "event" || key == "commands" || key == "auth_providers" || key == "auth_provider" {
 			continue // will be rewritten
 		}
 		newFM = append(newFM, line)
@@ -174,6 +206,16 @@ func FixFrontmatter(path string, caps *InitResult) error {
 			}
 		}
 		newFM = append(newFM, "# commands: "+strings.Join(parts, ", "))
+	}
+
+	// Add auth_providers line if there are registered auth providers.
+	if len(caps.AuthProviders) > 0 {
+		var ids []string
+		for _, ap := range caps.AuthProviders {
+			ids = append(ids, ap.ID)
+		}
+		sort.Strings(ids)
+		newFM = append(newFM, "# auth_providers: "+strings.Join(ids, ", "))
 	}
 
 	// Rebuild the file.
