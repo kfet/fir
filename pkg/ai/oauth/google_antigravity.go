@@ -85,7 +85,8 @@ type CallbackResult struct {
 
 // startCallbackServer starts a local HTTP server on port 51121 to receive the OAuth callback.
 func startCallbackServer(ctx context.Context) (server *http.Server, resultCh <-chan *CallbackResult, err error) {
-	return StartOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:51121")
+	srv, ch, _, listenErr := StartOAuthCallbackServer(ctx, "/oauth-callback", "127.0.0.1:51121")
+	return srv, ch, listenErr
 }
 
 // parseRedirectURL extracts code and state from a redirect URL string.

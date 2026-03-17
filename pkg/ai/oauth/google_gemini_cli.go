@@ -82,7 +82,8 @@ func (p *GeminiCLIProvider) ModifyModels(models []*ai.Model, _ *Credentials) []*
 
 // startGeminiCallbackServer starts a local HTTP server on port 8085 for the OAuth callback.
 func startGeminiCallbackServer(ctx context.Context) (server *http.Server, resultCh <-chan *CallbackResult, err error) {
-	return StartOAuthCallbackServer(ctx, "/oauth2callback", "127.0.0.1:8085")
+	srv, ch, _, listenErr := StartOAuthCallbackServer(ctx, "/oauth2callback", "127.0.0.1:8085")
+	return srv, ch, listenErr
 }
 
 func loginGeminiCLI(callbacks LoginCallbacks) (*Credentials, error) {

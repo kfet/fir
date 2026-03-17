@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -126,16 +127,18 @@ func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path st
 		return "", "", fmt.Errorf("callback server already running")
 	}
 
-	srv, ch, err := oauth.StartOAuthCallbackServer(ctx, path, addr)
+	srv, ch, resolvedAddr, err := oauth.StartOAuthCallbackServer(ctx, path, addr)
 	if err != nil {
 		return "", "", err
 	}
 	p.callbackSrv = srv
 	p.callbackCh = ch
 
-	// The redirect URI uses "localhost" instead of "127.0.0.1" for OAuth compatibility.
-	redirectURI := fmt.Sprintf("http://localhost%s%s", addr, path)
-	return addr, redirectURI, nil
+	// Use the resolved address (which has the actual port if 0 was requested).
+	// The redirect URI uses "localhost" instead of the IP for OAuth compatibility.
+	_, port, _ := net.SplitHostPort(resolvedAddr)
+	redirectURI := fmt.Sprintf("http://localhost:%s%s", port, path)
+	return resolvedAddr, redirectURI, nil
 }
 
 // AwaitCallback waits for the callback server to receive an auth code.
@@ -186,9 +189,13 @@ func (b *Bridge) RegisterAuthProviders() {
 }
 
 // UnregisterAuthProviders removes all auth providers registered by this extension.
+// Also stops any running callback servers.
 func (b *Bridge) UnregisterAuthProviders() {
 	b.authProvidersMu.Lock()
 	defer b.authProvidersMu.Unlock()
+	for _, p := range b.authProviders {
+		p.StopCallbackServer()
+	}
 	for _, spec := range b.caps.AuthProviders {
 		oauth.UnregisterProvider(spec.ID)
 	}
@@ -346,13 +353,25 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 	}
 }
 
-// findActiveAuthProvider returns the first extAuthProvider for this bridge.
-// During login, there's typically only one active provider.
+// findActiveAuthProvider returns the extAuthProvider with the given ID,
+// or the first one if id is empty.
 func (b *Bridge) findActiveAuthProvider() *extAuthProvider {
 	b.authProvidersMu.RLock()
 	defer b.authProvidersMu.RUnlock()
 	if len(b.authProviders) > 0 {
 		return b.authProviders[0]
+	}
+	return nil
+}
+
+// findAuthProviderByID returns the extAuthProvider with the given ID, or nil.
+func (b *Bridge) findAuthProviderByID(id string) *extAuthProvider {
+	b.authProvidersMu.RLock()
+	defer b.authProvidersMu.RUnlock()
+	for _, p := range b.authProviders {
+		if p.spec.ID == id {
+			return p
+		}
 	}
 	return nil
 }

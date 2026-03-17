@@ -13,7 +13,9 @@ import (
 // StartOAuthCallbackServer starts a local HTTP server to receive an OAuth callback.
 // route is the path to listen on (e.g., "/oauth-callback").
 // addr is the listener address (e.g., "127.0.0.1:51121").
-func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *http.Server, resultCh <-chan *CallbackResult, err error) {
+// Returns the server, a channel for the result, and the actual listener address
+// (which may differ from addr if port 0 was used).
+func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *http.Server, resultCh <-chan *CallbackResult, actualAddr string, err error) {
 	ch := make(chan *CallbackResult, 1)
 	var once sync.Once
 
@@ -44,10 +46,12 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *
 
 	srv := &http.Server{Handler: mux}
 
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("starting callback server on %s: %w", addr, err)
+	ln, listenErr := net.Listen("tcp", addr)
+	if listenErr != nil {
+		return nil, nil, "", fmt.Errorf("starting callback server on %s: %w", addr, listenErr)
 	}
+
+	resolvedAddr := ln.Addr().String()
 
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -61,5 +65,5 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *
 		once.Do(func() { close(ch) })
 	}()
 
-	return srv, ch, nil
+	return srv, ch, resolvedAddr, nil
 }
