@@ -100,4 +100,3 @@ func TestBuildToolCallContent_Read(t *testing.T) {
 		t.Error("read should produce text content")
 	}
 }
-
