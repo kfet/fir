@@ -155,6 +155,10 @@ func TestAuthStorage_GetApiKey_OAuth(t *testing.T) {
 }
 
 func TestAuthStorage_GetApiKey_OAuth_Google(t *testing.T) {
+	// Register the Gemini CLI provider (normally provided by builtin extension).
+	oauth.RegisterProvider(&oauth.GeminiCLIProvider{})
+	defer oauth.UnregisterProvider("google-gemini-cli")
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 
@@ -202,6 +206,10 @@ func TestAuthStorage_GetApiKey_OAuth_EmptyAccess(t *testing.T) {
 }
 
 func TestAuthStorage_GetApiKey_OAuth_ReloadFromDisk(t *testing.T) {
+	// Register the Gemini CLI provider (normally provided by builtin extension).
+	oauth.RegisterProvider(&oauth.GeminiCLIProvider{})
+	defer oauth.UnregisterProvider("google-gemini-cli")
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 

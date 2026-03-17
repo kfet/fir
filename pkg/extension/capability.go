@@ -56,7 +56,7 @@ var authProviderIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 var builtinAuthProviderIDs = map[string]bool{
 	"anthropic":          true,
 	"github-copilot":     true,
-	"gemini-cli":         true,
+	"google-gemini-cli":  true,
 	"google-antigravity": true,
 	"openai-codex":       true,
 }
@@ -71,12 +71,12 @@ func ValidateCommandName(name string) error {
 }
 
 // ValidateAuthProviderID checks that an auth provider ID is well-formed and
-// does not collide with built-in provider IDs.
-func ValidateAuthProviderID(id string) error {
+// does not collide with built-in provider IDs (unless allowBuiltinOverride is true).
+func ValidateAuthProviderID(id string, allowBuiltinOverride bool) error {
 	if !authProviderIDRE.MatchString(id) {
 		return fmt.Errorf("extension: auth provider ID %q must match [a-z][a-z0-9-]*", id)
 	}
-	if builtinAuthProviderIDs[id] {
+	if !allowBuiltinOverride && builtinAuthProviderIDs[id] {
 		return fmt.Errorf("extension: auth provider ID %q conflicts with built-in provider", id)
 	}
 	return nil
@@ -145,7 +145,8 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 			}
 		}
 		for _, ap := range result.AuthProviders {
-			if err := ValidateAuthProviderID(ap.ID); err != nil {
+			allowOverride := proc.cfg.Scope == "builtin"
+			if err := ValidateAuthProviderID(ap.ID, allowOverride); err != nil {
 				return nil, err
 			}
 		}

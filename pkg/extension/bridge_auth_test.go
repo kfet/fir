@@ -21,12 +21,12 @@ func TestValidateAuthProviderID(t *testing.T) {
 		// Built-in collisions
 		{"anthropic", true},
 		{"github-copilot", true},
-		{"gemini-cli", true},
+		{"google-gemini-cli", true},
 		{"google-antigravity", true},
 		{"openai-codex", true},
 	}
 	for _, tt := range tests {
-		err := ValidateAuthProviderID(tt.id)
+		err := ValidateAuthProviderID(tt.id, false)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("ValidateAuthProviderID(%q) error=%v, wantErr=%v", tt.id, err, tt.wantErr)
 		}
