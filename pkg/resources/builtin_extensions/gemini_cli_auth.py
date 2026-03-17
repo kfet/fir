@@ -297,8 +297,10 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
 
     # 5. Wait for callback
     if server is not None:
-        result = ctx.await_callback()
-        ctx.stop_callback_server()
+        try:
+            result = ctx.await_callback()
+        finally:
+            ctx.stop_callback_server()
     else:
         # Fallback: ask user to paste the code
         raw = ctx.prompt(

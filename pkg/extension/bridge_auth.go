@@ -353,25 +353,12 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 	}
 }
 
-// findActiveAuthProvider returns the extAuthProvider with the given ID,
-// or the first one if id is empty.
+// findActiveAuthProvider returns the first extAuthProvider for this bridge.
 func (b *Bridge) findActiveAuthProvider() *extAuthProvider {
 	b.authProvidersMu.RLock()
 	defer b.authProvidersMu.RUnlock()
 	if len(b.authProviders) > 0 {
 		return b.authProviders[0]
-	}
-	return nil
-}
-
-// findAuthProviderByID returns the extAuthProvider with the given ID, or nil.
-func (b *Bridge) findAuthProviderByID(id string) *extAuthProvider {
-	b.authProvidersMu.RLock()
-	defer b.authProvidersMu.RUnlock()
-	for _, p := range b.authProviders {
-		if p.spec.ID == id {
-			return p
-		}
 	}
 	return nil
 }
