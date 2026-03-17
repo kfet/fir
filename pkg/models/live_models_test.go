@@ -123,10 +123,10 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	t.Setenv("ANTHROPIC_API_KEY", "test")
 
+	ai.RegisterModel(&ai.Model{ID: "real-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
+	ai.RegisterModel(&ai.Model{ID: "fake-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
+
 	registry := NewModelRegistry(authStore, "")
-	// Add test models
-	registry.AddModel(&ai.Model{ID: "real-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
-	registry.AddModel(&ai.Model{ID: "fake-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
 
 	// Before live fetch, both should appear
 	avail := registry.GetAvailable()
