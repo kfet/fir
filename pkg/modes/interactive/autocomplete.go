@@ -20,11 +20,34 @@ type SlashCommand struct {
 	Description string
 }
 
+// CommandArgCompletionType describes how to complete a command's arguments.
+type CommandArgCompletionType int
+
+const (
+	// ArgCompleteNone means no argument completion.
+	ArgCompleteNone CommandArgCompletionType = iota
+	// ArgCompleteFile means complete with file paths.
+	ArgCompleteFile
+	// ArgCompleteStatic means complete from a fixed list of values.
+	ArgCompleteStatic
+)
+
+// CommandArgSpec describes how to complete arguments for a specific command.
+type CommandArgSpec struct {
+	Type CommandArgCompletionType
+	// Values holds the static completion values (for ArgCompleteStatic).
+	Values []string
+	// SubCommands maps a first argument to a nested spec for the second argument.
+	SubCommands map[string]*CommandArgSpec
+}
+
 // combinedAutocompleteProvider implements tuicomp.AutocompleteProvider and
 // tuicomp.ForceFileSuggestionsProvider with slash-command and file-path completion.
 type combinedAutocompleteProvider struct {
 	commands []SlashCommand
 	basePath string
+	// argSpecs maps command name (without "/") to its argument completion spec.
+	argSpecs map[string]*CommandArgSpec
 }
 
 // Verify interface compliance.
@@ -32,10 +55,14 @@ var _ tuicomp.AutocompleteProvider = (*combinedAutocompleteProvider)(nil)
 var _ tuicomp.ForceFileSuggestionsProvider = (*combinedAutocompleteProvider)(nil)
 
 // NewCombinedAutocompleteProvider creates an autocomplete provider for the editor.
-func NewCombinedAutocompleteProvider(commands []SlashCommand, basePath string) tuicomp.AutocompleteProvider {
+func NewCombinedAutocompleteProvider(commands []SlashCommand, basePath string, argSpecs map[string]*CommandArgSpec) tuicomp.AutocompleteProvider {
+	if argSpecs == nil {
+		argSpecs = make(map[string]*CommandArgSpec)
+	}
 	return &combinedAutocompleteProvider{
 		commands: commands,
 		basePath: basePath,
+		argSpecs: argSpecs,
 	}
 }
 
@@ -105,8 +132,10 @@ func (p *combinedAutocompleteProvider) GetSuggestions(lines []string, cursorLine
 			}
 		}
 
-		// Space found — no command-argument completion yet
-		return nil
+		// Space found — complete command arguments.
+		cmdName := textBeforeCursor[1:spaceIndex] // command name without "/"
+		afterCmd := textBeforeCursor[spaceIndex+1:]
+		return p.getCommandArgSuggestions(cmdName, afterCmd, textBeforeCursor)
 	}
 
 	// Check for file paths
@@ -142,6 +171,22 @@ func (p *combinedAutocompleteProvider) ApplyCompletion(
 	// Slash command completion
 	isSlashCommand := strings.HasPrefix(prefix, "/") && strings.TrimSpace(beforePrefix) == "" && !strings.Contains(prefix[1:], "/")
 	if isSlashCommand {
+		// Check if this is a command argument completion (prefix contains space)
+		if strings.Contains(prefix, " ") {
+			// Command argument: replace the whole prefix, keeping the command
+			// and any preceding subcommand args, then append the selected value.
+			lastSpace := strings.LastIndex(prefix, " ")
+			cmdPart := prefix[:lastSpace+1]
+			newLine := beforePrefix + cmdPart + item.Value + " " + afterCursor
+			newLines := make([]string, len(lines))
+			copy(newLines, lines)
+			newLines[cursorLine] = newLine
+			return tuicomp.ApplyCompletionResult{
+				Lines:      newLines,
+				CursorLine: cursorLine,
+				CursorCol:  len(beforePrefix) + len(cmdPart) + len(item.Value) + 1,
+			}
+		}
 		newLine := beforePrefix + "/" + item.Value + " " + afterCursor
 		newLines := make([]string, len(lines))
 		copy(newLines, lines)
@@ -214,6 +259,95 @@ func (p *combinedAutocompleteProvider) GetForceFileSuggestions(lines []string, c
 // ShouldTriggerFileCompletion returns true if Tab should trigger file completion.
 func (p *combinedAutocompleteProvider) ShouldTriggerFileCompletion(lines []string, cursorLine, cursorCol int) bool {
 	return true // Always allow Tab file completion
+}
+
+// ---------------------------------------------------------------------------
+// Command argument completion
+// ---------------------------------------------------------------------------
+
+// getCommandArgSuggestions returns completion suggestions for command arguments.
+// cmdName is the command without "/", afterCmd is text after "/cmd ", and
+// fullPrefix is the entire text before cursor (used as the suggestion prefix).
+func (p *combinedAutocompleteProvider) getCommandArgSuggestions(cmdName, afterCmd, fullPrefix string) *tuicomp.AutocompleteSuggestions {
+	spec, ok := p.argSpecs[cmdName]
+	if !ok {
+		return nil
+	}
+
+	// If the spec has subcommands, check if we're completing a subcommand
+	// or a nested argument.
+	if spec.SubCommands != nil {
+		parts := strings.SplitN(afterCmd, " ", 2)
+		firstArg := parts[0]
+
+		if len(parts) == 1 {
+			// Still typing the first arg — complete from subcommand names.
+			var candidates []string
+			for k := range spec.SubCommands {
+				candidates = append(candidates, k)
+			}
+			sort.Strings(candidates)
+			return p.filterStaticCandidates(candidates, firstArg, fullPrefix)
+		}
+
+		// First arg is complete, check for nested spec.
+		if nested, ok := spec.SubCommands[firstArg]; ok {
+			nestedAfter := parts[1]
+			return p.completeFromSpec(nested, nestedAfter, fullPrefix)
+		}
+		return nil
+	}
+
+	return p.completeFromSpec(spec, afterCmd, fullPrefix)
+}
+
+// completeFromSpec returns suggestions based on the given spec and current partial input.
+func (p *combinedAutocompleteProvider) completeFromSpec(spec *CommandArgSpec, partial, fullPrefix string) *tuicomp.AutocompleteSuggestions {
+	switch spec.Type {
+	case ArgCompleteStatic:
+		return p.filterStaticCandidates(spec.Values, partial, fullPrefix)
+	case ArgCompleteFile:
+		suggestions := p.getFileSuggestions(partial)
+		if len(suggestions) == 0 {
+			return nil
+		}
+		// The prefix for replacement is the partial path portion only.
+		return &tuicomp.AutocompleteSuggestions{
+			Prefix: partial,
+			Items:  suggestions,
+		}
+	default:
+		return nil
+	}
+}
+
+// filterStaticCandidates filters a list of static values by a partial prefix using fuzzy matching.
+func (p *combinedAutocompleteProvider) filterStaticCandidates(candidates []string, partial, fullPrefix string) *tuicomp.AutocompleteSuggestions {
+	type item struct {
+		value string
+	}
+	items := make([]item, len(candidates))
+	for i, c := range candidates {
+		items[i] = item{value: c}
+	}
+
+	filtered := tui.FuzzyFilter(items, partial, func(it item) string { return it.value })
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	selectItems := make([]tuicomp.SelectItem, len(filtered))
+	for i, it := range filtered {
+		selectItems[i] = tuicomp.SelectItem{
+			Value: it.value,
+			Label: it.value,
+		}
+	}
+
+	return &tuicomp.AutocompleteSuggestions{
+		Prefix: fullPrefix,
+		Items:  selectItems,
+	}
 }
 
 // ---------------------------------------------------------------------------

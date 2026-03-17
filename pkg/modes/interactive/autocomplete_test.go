@@ -25,7 +25,7 @@ func testCommands() []SlashCommand {
 }
 
 func TestAutocomplete_ThemeCommandSuggested(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	// "/th" should match both "theme" and "thinking"
 	result := p.GetSuggestions([]string{"/th"}, 0, 3)
@@ -45,7 +45,7 @@ func TestAutocomplete_ThemeCommandSuggested(t *testing.T) {
 }
 
 func TestAutocomplete_SlashCommandSuggestions(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	// Typing "/" should suggest all commands
 	result := p.GetSuggestions([]string{"/"}, 0, 1)
@@ -61,7 +61,7 @@ func TestAutocomplete_SlashCommandSuggestions(t *testing.T) {
 }
 
 func TestAutocomplete_SlashCommandFuzzy(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	// "/he" should match "help"
 	result := p.GetSuggestions([]string{"/he"}, 0, 3)
@@ -84,7 +84,7 @@ func TestAutocomplete_SlashCommandFuzzy(t *testing.T) {
 }
 
 func TestAutocomplete_SlashCommandNoMatch(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	// "/zzz" should match nothing
 	result := p.GetSuggestions([]string{"/zzz"}, 0, 4)
@@ -94,7 +94,7 @@ func TestAutocomplete_SlashCommandNoMatch(t *testing.T) {
 }
 
 func TestAutocomplete_NormalTextNoSuggestions(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	// Regular text should not trigger suggestions
 	result := p.GetSuggestions([]string{"hello world"}, 0, 11)
@@ -104,7 +104,7 @@ func TestAutocomplete_NormalTextNoSuggestions(t *testing.T) {
 }
 
 func TestAutocomplete_EmptyLineNoSuggestions(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	result := p.GetSuggestions([]string{""}, 0, 0)
 	if result != nil {
@@ -113,7 +113,7 @@ func TestAutocomplete_EmptyLineNoSuggestions(t *testing.T) {
 }
 
 func TestAutocomplete_ApplySlashCommand(t *testing.T) {
-	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp")
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", nil)
 
 	item := tuicomp.SelectItem{Value: "help", Label: "help", Description: "Show help"}
 	result := p.ApplyCompletion(
@@ -139,7 +139,7 @@ func TestAutocomplete_FileSuggestions(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "src"), 0755)
 	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "./R" should match README.md
 	result := p.GetSuggestions([]string{"./R"}, 0, 3)
@@ -162,7 +162,7 @@ func TestAutocomplete_AtFileSuggestions(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("content"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@t" should find test.txt via fuzzy matching
 	result := p.GetSuggestions([]string{"@t"}, 0, 2)
@@ -186,7 +186,7 @@ func TestAutocomplete_DirectorySortedFirst(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "adir"), 0755)
 	os.WriteFile(filepath.Join(dir, "afile.txt"), []byte("x"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	result := p.GetSuggestions([]string{"./a"}, 0, 3)
 	if result == nil {
@@ -216,7 +216,7 @@ func TestAutocomplete_AtFuzzySubdirectory(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "src", "utils", "helpers.go"), []byte("package utils"), 0644)
 	os.WriteFile(filepath.Join(dir, "docs", "readme.md"), []byte("# readme"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@helpers" should find src/utils/helpers.go
 	result := p.GetSuggestions([]string{"@helpers"}, 0, 8)
@@ -241,7 +241,7 @@ func TestAutocomplete_AtFuzzyMatchesFilename(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "pkg", "core", "config.go"), []byte("package core"), 0644)
 	os.WriteFile(filepath.Join(dir, "pkg", "core", "config_test.go"), []byte("package core"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@config" should find both config files
 	result := p.GetSuggestions([]string{"@config"}, 0, 7)
@@ -264,7 +264,7 @@ func TestAutocomplete_AtFuzzyPathSegments(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "pkg", "modes", "interactive"), 0755)
 	os.WriteFile(filepath.Join(dir, "pkg", "modes", "interactive", "autocomplete.go"), []byte("package interactive"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@auto" should fuzzy-match autocomplete.go deep in the tree
 	result := p.GetSuggestions([]string{"@auto"}, 0, 5)
@@ -289,7 +289,7 @@ func TestAutocomplete_AtFuzzySkipsHiddenDirs(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".git", "objects", "secret.go"), []byte("hidden"), 0644)
 	os.WriteFile(filepath.Join(dir, "visible.go"), []byte("package main"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@secret" should NOT find .git/objects/secret.go
 	result := p.GetSuggestions([]string{"@secret"}, 0, 7)
@@ -324,7 +324,7 @@ func TestAutocomplete_AtFuzzySkipsNodeModules(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "node_modules", "lodash", "index.js"), []byte("module.exports"), 0644)
 	os.WriteFile(filepath.Join(dir, "index.ts"), []byte("import"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@index" should find index.ts but not node_modules/lodash/index.js
 	result := p.GetSuggestions([]string{"@index"}, 0, 6)
@@ -354,7 +354,7 @@ func TestAutocomplete_AtDirectoryListsDirect(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("a"), 0644)
 	os.WriteFile(filepath.Join(dir, "src", "b.go"), []byte("b"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@src/" should list direct children only (not recursive)
 	result := p.GetSuggestions([]string{"@src/"}, 0, 5)
@@ -372,7 +372,7 @@ func TestAutocomplete_AtEmptyListsAll(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "root.txt"), []byte("r"), 0644)
 	os.WriteFile(filepath.Join(dir, "sub", "deep.txt"), []byte("d"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// "@" alone should list all files recursively
 	result := p.GetSuggestions([]string{"@"}, 0, 1)
@@ -403,7 +403,7 @@ func TestAutocomplete_NoDoubleSlashes(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "src", "pkg", "main.go"), []byte("package main"), 0644)
 	os.WriteFile(filepath.Join(dir, "src", "app.go"), []byte("package src"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// Test various prefix patterns that could produce "//"
 	tests := []struct {
@@ -438,7 +438,7 @@ func TestAutocomplete_NoDoubleSlashesAbsolutePath(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
 	os.WriteFile(filepath.Join(dir, "sub", "file.go"), []byte("package sub"), 0644)
 
-	p := NewCombinedAutocompleteProvider(testCommands(), dir)
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
 
 	// Absolute path ending with "/" that could produce "//" when name appended
 	absPrefix := dir + "/sub/"
@@ -474,5 +474,118 @@ func TestCleanSlashes(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("cleanSlashes(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestGetSuggestions_CommandArgStaticCompletion(t *testing.T) {
+	argSpecs := map[string]*CommandArgSpec{
+		"skills": {
+			SubCommands: map[string]*CommandArgSpec{
+				"list":    {Type: ArgCompleteNone},
+				"install": {Type: ArgCompleteStatic, Values: []string{"code-review", "testing"}},
+			},
+		},
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
+
+	// Complete subcommand
+	s := p.GetSuggestions([]string{"/skills "}, 0, 8)
+	if s == nil {
+		t.Fatal("expected suggestions for /skills subcommands")
+	}
+	if len(s.Items) != 2 {
+		t.Fatalf("expected 2 subcommand suggestions, got %d", len(s.Items))
+	}
+
+	// Fuzzy filter subcommand
+	s = p.GetSuggestions([]string{"/skills ins"}, 0, 11)
+	if s == nil {
+		t.Fatal("expected suggestions for /skills ins")
+	}
+	if len(s.Items) != 1 || s.Items[0].Value != "install" {
+		t.Fatalf("expected 'install', got %v", s.Items)
+	}
+
+	// Complete nested arg (skill names after /skills install)
+	s = p.GetSuggestions([]string{"/skills install "}, 0, 16)
+	if s == nil {
+		t.Fatal("expected suggestions for /skills install args")
+	}
+	if len(s.Items) != 2 {
+		t.Fatalf("expected 2 skill names, got %d", len(s.Items))
+	}
+
+	// Fuzzy filter nested arg
+	s = p.GetSuggestions([]string{"/skills install test"}, 0, 20)
+	if s == nil {
+		t.Fatal("expected suggestions for /skills install test")
+	}
+	if len(s.Items) != 1 || s.Items[0].Value != "testing" {
+		t.Fatalf("expected 'testing', got %v", s.Items)
+	}
+}
+
+func TestGetSuggestions_CommandArgFileCompletion(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	os.WriteFile(filepath.Join(dir, "output.html"), []byte("x"), 0o644)
+
+	argSpecs := map[string]*CommandArgSpec{
+		"export": {Type: ArgCompleteFile},
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, argSpecs)
+
+	s := p.GetSuggestions([]string{"/export "}, 0, 8)
+	if s == nil {
+		t.Fatal("expected file suggestions for /export")
+	}
+	if len(s.Items) < 1 {
+		t.Fatal("expected at least 1 file suggestion")
+	}
+
+	// Partial file match
+	s = p.GetSuggestions([]string{"/export out"}, 0, 11)
+	if s == nil {
+		t.Fatal("expected file suggestions for /export out")
+	}
+	found := false
+	for _, item := range s.Items {
+		if strings.Contains(item.Value, "output.html") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected output.html in suggestions, got %v", s.Items)
+	}
+}
+
+func TestApplyCompletion_CommandArg(t *testing.T) {
+	argSpecs := map[string]*CommandArgSpec{
+		"skills": {
+			SubCommands: map[string]*CommandArgSpec{
+				"install": {Type: ArgCompleteStatic, Values: []string{"testing"}},
+			},
+		},
+	}
+	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
+
+	// Apply subcommand completion
+	result := p.ApplyCompletion(
+		[]string{"/skills ins"}, 0, 11,
+		tuicomp.SelectItem{Value: "install", Label: "install"},
+		"/skills ins",
+	)
+	if result.Lines[0] != "/skills install " {
+		t.Fatalf("expected '/skills install ', got %q", result.Lines[0])
+	}
+
+	// Apply nested arg completion — must preserve "/skills install "
+	result = p.ApplyCompletion(
+		[]string{"/skills install test"}, 0, 20,
+		tuicomp.SelectItem{Value: "testing", Label: "testing"},
+		"/skills install test",
+	)
+	if result.Lines[0] != "/skills install testing " {
+		t.Fatalf("expected '/skills install testing ', got %q", result.Lines[0])
 	}
 }

@@ -732,6 +732,27 @@ func (m *InteractiveMode) setupAutocomplete() {
 	}
 
 	basePath, _ := os.Getwd()
-	provider := NewCombinedAutocompleteProvider(commands, basePath)
+
+	// Build argument completion specs for commands that accept parameters.
+	argSpecs := map[string]*CommandArgSpec{
+		"export": {Type: ArgCompleteFile},
+		"reexec": {Type: ArgCompleteFile},
+	}
+
+	// /skills has subcommands: list, install; /skills install completes builtin skill names.
+	skillInstallSpec := &CommandArgSpec{Type: ArgCompleteStatic}
+	builtinSkills := resources.LoadBuiltinSkills()
+	for _, s := range builtinSkills.Skills {
+		skillInstallSpec.Values = append(skillInstallSpec.Values, s.Name)
+	}
+	sort.Strings(skillInstallSpec.Values)
+	argSpecs["skills"] = &CommandArgSpec{
+		SubCommands: map[string]*CommandArgSpec{
+			"list":    {Type: ArgCompleteNone},
+			"install": skillInstallSpec,
+		},
+	}
+
+	provider := NewCombinedAutocompleteProvider(commands, basePath, argSpecs)
 	m.editor.SetAutocompleteProvider(provider)
 }
