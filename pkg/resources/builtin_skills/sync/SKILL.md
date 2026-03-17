@@ -19,15 +19,33 @@ Before starting, identify:
 
 ---
 
-## Step 1 — Pull latest upstream
+## Step 1 — Advance upstream to latest release tag
 
-Before detecting changes, pull the latest commits in the upstream repo:
+Sync should only pick up **released** versions of the upstream project — never unreleased commits on the default branch.
 
 ```bash
-git -C <UPSTREAM_PATH> pull --ff-only
+# 1. Fetch all commits and tags without changing the working tree
+git -C <UPSTREAM_PATH> fetch --tags
+
+# 2. Find the latest release tag (strict semver, no pre-release suffix)
+# --sort=-version:refname uses git's built-in version sort (works on macOS and Linux)
+LATEST_TAG=$(git -C <UPSTREAM_PATH> tag --list 'v*' --sort=-version:refname \
+  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+  | head -1)
+
+echo "Latest release tag: $LATEST_TAG"
 ```
 
-If the pull fails (e.g. dirty working tree or diverged history), stop and inform the user.
+If `LATEST_TAG` is empty, no release tags exist — stop and inform the user.
+
+```bash
+# 3. Check out that tag (detached HEAD is fine; we only read upstream files)
+git -C <UPSTREAM_PATH> checkout "$LATEST_TAG"
+```
+
+If the checkout fails (e.g. dirty working tree), stop and inform the user.
+
+> **Note:** If the upstream uses a different tag naming convention (e.g. `release/1.2.3` or `1.2.3` without the `v` prefix), adjust the `grep` pattern accordingly.
 
 ---
 
@@ -95,7 +113,7 @@ bash .fir/skills/sync/scripts/sync-check.sh <UPSTREAM_PATH>
 Append an entry to the sync log:
 
 ```markdown
-## YYYY-MM-DD — Sync to commit <short-hash>
+## YYYY-MM-DD — Sync to <tag> (commit <short-hash>)
 
 - `path/to/changed/file` → `downstream/file`: One-line description of what changed.
 
@@ -107,7 +125,7 @@ Append an entry to the sync log:
 After writing the log entry, **print a human-readable summary** of any new features or non-trivial behavioural changes that were brought in by this sync. Use the following format:
 
 ```
-Sync summary — <short-hash> (<date>)
+Sync summary — <tag> (<date>)
 
 New features / non-trivial changes:
   • <Feature or change title>: <What it does and why it matters.>
