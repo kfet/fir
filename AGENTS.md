@@ -33,6 +33,14 @@ When the user says "rebase to main", they mean local `main`, not `origin/main`.
 
 When merging a feature branch back to main, always use `git merge --ff-only` to keep a linear history and avoid merge commits. Rebase the branch first if needed.
 
+## Stuck loops
+
+If you have run the same command (e.g. `go test`, `go build`) more than 5 times
+since your last file edit, you are in a stuck loop. Stop. Do not read any file
+you have already read this session. Rewrite the problematic file completely from
+scratch. If tests are failing due to API changes, the test file itself needs
+updating — patch it or rewrite it, don't just re-run it.
+
 ## Testing
 
 Run `make test` to verify your changes. Always finish every task with `make all` to confirm the full build and test suite passes.

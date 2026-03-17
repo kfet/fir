@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `plan-nudger`: escalate from plain reminder → warning steer → `[SYS_EXT]` prepend when `plan_completed` stalls across nudge cycles; ignore `next_update_in` hint while stagnating so the agent cannot delay its own intervention.
+
+### Added
+
+- `AGENTS.md`: explicit stuck-loop self-check rule (same command >5× without a file edit = rewrite from scratch).
+- `shepherd/SKILL.md`: read-without-edit loop as a named intervention pattern.
+
 ## [0.21.0] - 2026-03-16
 
 ### Fixed

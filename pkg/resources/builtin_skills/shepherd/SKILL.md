@@ -226,7 +226,8 @@ Only create a new tmux session if the agent process is dead or the window is gon
 **Two agents on the same file** — Redirect the one with less progress.  
 **Build broken** — Fix or assign immediately. Nothing else matters until green.  
 **Deleted files in `git status`** — Restore from git.  
-**Agent going in circles** — `/new` with a smaller, more concrete task.
+**Agent going in circles** — `/new` with a smaller, more concrete task.  
+**Read-without-edit loop** — If `tm-capture` shows the agent repeatedly reading the same file without any `edit` or `write` tool calls appearing, it has analysis paralysis. `/new` naming the exact file to rewrite: *"Rewrite `<file>` completely from scratch to match the new API. Do not read it first. Here is what it needs to do: ..."*
 
 ## Git Conflicts in Shared Worktrees
 
