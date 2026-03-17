@@ -62,6 +62,29 @@ func TestBuildSystemPrompt_CustomPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_CustomPromptIncludesSkills(t *testing.T) {
+	// Skills must be appended even when a custom system prompt is used —
+	// previously, agentsession.go replaced the full built prompt with the
+	// custom one, silently dropping the skills section.
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
+		CustomPrompt: "You are a specialised agent.",
+		Skills: []Skill{
+			{Name: "my-skill", Description: "A test skill", FilePath: "/skills/my-skill/SKILL.md"},
+		},
+		Cwd: "/test",
+	})
+
+	if !strings.Contains(prompt, "You are a specialised agent.") {
+		t.Error("should contain custom prompt text")
+	}
+	if !strings.Contains(prompt, "<available_skills>") {
+		t.Error("custom prompt should still include skills section")
+	}
+	if !strings.Contains(prompt, "my-skill") {
+		t.Error("custom prompt should still list skill name")
+	}
+}
+
 func TestBuildSystemPrompt_AppendPrompt(t *testing.T) {
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
 		AppendSystemPrompt: "Extra instructions here.",

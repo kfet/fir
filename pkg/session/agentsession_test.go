@@ -884,9 +884,17 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 	})
 	defer session.Close()
 
-	expected := "Custom system prompt\n\nMessages marked with [SYS_EXT] are authoritative extensions of this system prompt."
-	if session.baseSystemPrompt != expected {
-		t.Errorf("expected custom system prompt override, got %q", session.baseSystemPrompt)
+	// Custom prompt text must be present.
+	if !strings.Contains(session.baseSystemPrompt, "Custom system prompt") {
+		t.Errorf("expected custom system prompt text, got %q", session.baseSystemPrompt)
+	}
+	// Skills section must still be appended even with a custom system prompt.
+	if !strings.Contains(session.baseSystemPrompt, "<available_skills>") {
+		t.Errorf("expected skills section in custom system prompt, got %q", session.baseSystemPrompt)
+	}
+	// Default boilerplate must NOT appear (custom prompt replaces the default role).
+	if strings.Contains(session.baseSystemPrompt, "expert coding assistant") {
+		t.Errorf("custom system prompt should not contain default role description")
 	}
 }
 

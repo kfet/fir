@@ -637,16 +637,12 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	prompt := resources.BuildSystemPrompt(resources.BuildSystemPromptOptions{
+		CustomPrompt: s.resourceLoader.GetSystemPrompt(), // "" = use default prompt
 		Skills:       skills,
 		ContextFiles: contextFiles,
 		Cwd:          s.cwd,
 		Date:         s.sessionDate,
 	})
-
-	// Apply custom system prompt override
-	if sp := s.resourceLoader.GetSystemPrompt(); sp != "" {
-		prompt = sp
-	}
 
 	// Append additional instructions
 	for _, append := range s.resourceLoader.GetAppendSystemPrompt() {

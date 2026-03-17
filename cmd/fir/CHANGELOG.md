@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills are now included in the system prompt even when a custom system prompt (`SYSTEM.md` / `--system-prompt`) is active; previously the custom override silently dropped the `<available_skills>` block.
+
 ### Added
 
 - `doctor` builtin extension — records tool errors and session failures to `~/.config/fir/doctor.jsonl`; exposes `doctor_query` and `doctor_summary` tools plus `/doctor` slash command for cross-session diagnostics.
