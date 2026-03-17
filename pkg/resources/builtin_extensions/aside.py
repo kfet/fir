@@ -81,7 +81,6 @@ def _run_aside(
     tools: list[dict],
     instructions: str,
     ctx: fir_ext.Context,
-    title: str = "",
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -94,8 +93,6 @@ def _run_aside(
         Synthesis instructions for the LLM.
     ctx : fir_ext.Context
         Extension context for call_tool / side_query.
-    title : str
-        Human-readable label shown in the UI.
 
     Returns
     -------
@@ -285,8 +282,7 @@ def _side_query_error_text(exc: Exception) -> str:
 def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])
     instructions = params.get("instructions", "")
-    title = params.get("title", "")
-    return _run_aside(tools, instructions, ctx, title)
+    return _run_aside(tools, instructions, ctx)
 
 
 # ---------------------------------------------------------------------------
