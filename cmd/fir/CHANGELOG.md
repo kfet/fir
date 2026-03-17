@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-03-17
+
 ### Changed
 
 - `plan-nudger`: escalate from plain reminder → warning steer → `[SYS_EXT]` prepend when `plan_completed` stalls across nudge cycles; ignore `next_update_in` hint while stagnating so the agent cannot delay its own intervention.
