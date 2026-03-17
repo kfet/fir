@@ -2626,8 +2626,9 @@ func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 		Provider: "anthropic",
 		ID:       "claude-opus-4",
 	}
-	// Register model manually via a stub override.
-	activeSession.modelRegistry.AddModel(targetModel)
+	// Register model in the global list so the registry picks it up.
+	ai.RegisterModel(targetModel)
+	activeSession.modelRegistry.Refresh()
 
 	// Switch to the session file.
 	if err := activeSession.SwitchSession(sessionFile); err != nil {

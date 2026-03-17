@@ -5,8 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-
-	"github.com/kfet/fir/pkg/resources"
 )
 
 // FrontmatterMismatch describes a difference between what an extension
@@ -191,17 +189,4 @@ func FixFrontmatter(path string, caps *InitResult) error {
 func FormatFrontmatterWarning(mm FrontmatterMismatch) string {
 	return fmt.Sprintf("Warning: extension %q frontmatter is incomplete (%s)\n  file: %s",
 		mm.ExtName, mm.Summary(), mm.Path)
-}
-
-// FrontmatterFromInitResult builds the frontmatter fields that correspond
-// to an InitResult, useful for comparing with what was declared.
-func FrontmatterFromInitResult(caps *InitResult) (events []string, commands []resources.ExtensionFrontmatterCommand) {
-	events = caps.Events
-	for _, c := range caps.Commands {
-		commands = append(commands, resources.ExtensionFrontmatterCommand{
-			Name:        c.Name,
-			Description: c.Description,
-		})
-	}
-	return
 }

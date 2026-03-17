@@ -5,7 +5,6 @@ package models
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -301,47 +300,11 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 
 // --- ModelRegistry ---
 
-// OAuthProviderInterface allows OAuth providers to modify models.
-// See pkg/ai/oauth/ for the full OAuth flow implementation.
-type OAuthProviderInterface struct {
-	ID           string
-	ModifyModels func(models []*ai.Model, cred *auth.AuthCredential) []*ai.Model
-}
-
-// ProviderConfigInput is the input type for RegisterProvider.
-type ProviderConfigInput struct {
-	BaseURL      string
-	ApiKey       string
-	Api          ai.Api
-	StreamSimple ai.SimpleStreamFunction
-	Headers      map[string]string
-	AuthHeader   bool
-	OAuth        *OAuthProviderInterface
-	Models       []ProviderModelInput
-}
-
-// ProviderModelInput defines a model for dynamic provider registration.
-type ProviderModelInput struct {
-	ID            string
-	Name          string
-	Api           ai.Api
-	Reasoning     bool
-	Input         []string
-	Cost          ai.ModelCost
-	ContextWindow int
-	MaxTokens     int
-	Headers       map[string]string
-	Compat        any
-	ServerTools   []string
-	Compaction    bool
-}
-
 // ModelRegistry loads and manages models, resolves API keys via AuthStorage.
 type ModelRegistry struct {
 	mu                    sync.RWMutex
 	models                []*ai.Model
 	customProviderApiKeys map[string]string
-	registeredProviders   map[string]*ProviderConfigInput
 	loadError             string
 	authStorage           *auth.AuthStorage
 	modelsJsonPath        string
@@ -357,7 +320,6 @@ type ModelRegistry struct {
 func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *ModelRegistry {
 	r := &ModelRegistry{
 		customProviderApiKeys: make(map[string]string),
-		registeredProviders:   make(map[string]*ProviderConfigInput),
 		authStorage:           authStorage,
 		modelsJsonPath:        modelsJsonPath,
 		liveModels:            make(map[string]*liveModelState),
@@ -394,12 +356,6 @@ func (r *ModelRegistry) refresh() {
 	ai.DefaultRegistry.ResetApiProviders()
 
 	r.loadModels()
-
-	for providerName, config := range r.registeredProviders {
-		if err := r.applyProviderConfig(providerName, config); err != nil {
-			log.Printf("modelregistry: provider %q config error: %v", providerName, err)
-		}
-	}
 }
 
 // GetError returns any error from loading models.json (empty string if no error).
@@ -778,20 +734,6 @@ func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 	return nil
 }
 
-// AddModel inserts a model into the registry if one with the same provider and
-// ID does not already exist. This is useful for tests and for dynamically
-// registering models that are not in the built-in list.
-func (r *ModelRegistry) AddModel(m *ai.Model) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, existing := range r.models {
-		if existing.Provider == m.Provider && existing.ID == m.ID {
-			return // already present
-		}
-	}
-	r.models = append(r.models, m)
-}
-
 // GetApiKey returns the API key for a model's provider.
 func (r *ModelRegistry) GetApiKey(model *ai.Model) string {
 	return r.authStorage.GetApiKey(model.Provider)
@@ -817,147 +759,6 @@ func (r *ModelRegistry) IsUsingOAuth(model *ai.Model) bool {
 // AuthStorage returns the auth storage used by this registry.
 func (r *ModelRegistry) AuthStorage() *auth.AuthStorage {
 	return r.authStorage
-}
-
-// RegisterProvider registers a provider dynamically (from extensions).
-// Returns an error if the provider configuration is invalid.
-func (r *ModelRegistry) RegisterProvider(providerName string, config *ProviderConfigInput) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.registeredProviders[providerName] = config
-	return r.applyProviderConfig(providerName, config)
-}
-
-// UnregisterProvider removes a previously registered provider.
-// Removes the provider from the registry and reloads models from disk so that
-// built-in models overridden by this provider are restored to their original state.
-func (r *ModelRegistry) UnregisterProvider(providerName string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.registeredProviders[providerName]; !ok {
-		return
-	}
-	delete(r.registeredProviders, providerName)
-	delete(r.customProviderApiKeys, providerName)
-	r.refresh()
-}
-
-func (r *ModelRegistry) applyProviderConfig(providerName string, config *ProviderConfigInput) error {
-	// Register streamSimple if provided
-	if config.StreamSimple != nil {
-		if config.Api == "" {
-			return fmt.Errorf("provider %s: \"api\" is required when registering streamSimple", providerName)
-		}
-		ai.DefaultRegistry.RegisterApiProvider(&ai.ApiProvider{
-			Api:          config.Api,
-			StreamSimple: config.StreamSimple,
-		}, "modelregistry:"+providerName)
-	}
-
-	// Store API key
-	if config.ApiKey != "" {
-		r.customProviderApiKeys[providerName] = config.ApiKey
-	}
-
-	if len(config.Models) > 0 {
-		// Full replacement: remove existing models for this provider
-		filtered := make([]*ai.Model, 0, len(r.models))
-		for _, m := range r.models {
-			if m.Provider != providerName {
-				filtered = append(filtered, m)
-			}
-		}
-		r.models = filtered
-
-		if config.BaseURL == "" {
-			return fmt.Errorf("provider %s: \"baseUrl\" is required when defining models", providerName)
-		}
-		if config.ApiKey == "" && config.OAuth == nil {
-			return fmt.Errorf("provider %s: \"apiKey\" or \"oauth\" is required when defining models", providerName)
-		}
-
-		for _, modelDef := range config.Models {
-			api := modelDef.Api
-			if api == "" {
-				api = config.Api
-			}
-			if api == "" {
-				return fmt.Errorf("provider %s, model %s: no \"api\" specified", providerName, modelDef.ID)
-			}
-
-			// Merge headers
-			providerHeaders := configpkg.ResolveHeaders(config.Headers)
-			modelHeaders := configpkg.ResolveHeaders(modelDef.Headers)
-			var headers map[string]string
-			if providerHeaders != nil || modelHeaders != nil {
-				headers = make(map[string]string)
-				for k, v := range providerHeaders {
-					headers[k] = v
-				}
-				for k, v := range modelHeaders {
-					headers[k] = v
-				}
-			}
-
-			// If authHeader is true, add Authorization header
-			if config.AuthHeader && config.ApiKey != "" {
-				resolvedKey := configpkg.ResolveConfigValue(config.ApiKey)
-				if resolvedKey != "" {
-					if headers == nil {
-						headers = make(map[string]string)
-					}
-					headers["Authorization"] = "Bearer " + resolvedKey
-				}
-			}
-
-			r.models = append(r.models, &ai.Model{
-				ID:            modelDef.ID,
-				Name:          modelDef.Name,
-				Api:           api,
-				Provider:      providerName,
-				BaseURL:       config.BaseURL,
-				Reasoning:     modelDef.Reasoning,
-				Input:         modelDef.Input,
-				Cost:          modelDef.Cost,
-				ContextWindow: modelDef.ContextWindow,
-				MaxTokens:     modelDef.MaxTokens,
-				Headers:       headers,
-				Compat:        modelDef.Compat,
-				ServerTools:   append([]string(nil), modelDef.ServerTools...),
-				Compaction:    modelDef.Compaction,
-			})
-		}
-
-		// Apply OAuth modifyModels if credentials exist
-		if config.OAuth != nil && config.OAuth.ModifyModels != nil {
-			cred := r.authStorage.Get(providerName)
-			if cred != nil && cred.Type == auth.CredentialTypeOAuth {
-				r.models = config.OAuth.ModifyModels(r.models, cred)
-			}
-		}
-	} else if config.BaseURL != "" {
-		// Override-only: update baseUrl/headers for existing models
-		resolvedHeaders := configpkg.ResolveHeaders(config.Headers)
-		for i, m := range r.models {
-			if m.Provider != providerName {
-				continue
-			}
-			copy := *m
-			copy.BaseURL = config.BaseURL
-			if resolvedHeaders != nil {
-				merged := make(map[string]string)
-				for k, v := range m.Headers {
-					merged[k] = v
-				}
-				for k, v := range resolvedHeaders {
-					merged[k] = v
-				}
-				copy.Headers = merged
-			}
-			r.models[i] = &copy
-		}
-	}
-	return nil
 }
 
 // DefaultModelsJsonPath returns the default path for models.json.
