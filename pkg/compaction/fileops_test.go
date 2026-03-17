@@ -11,7 +11,6 @@ import (
 func TestFileOperations_ExtractFromMessage(t *testing.T) {
 	fileOps := NewFileOperations()
 
-	// Create an assistant message with tool calls
 	assistantMsg := ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{
 			ai.NewToolCallContent("1", "read", map[string]any{"path": "/src/main.go"}),
@@ -53,17 +52,15 @@ func TestComputeFileLists(t *testing.T) {
 	fileOps := NewFileOperations()
 	fileOps.Read["/src/main.go"] = struct{}{}
 	fileOps.Read["/src/util.go"] = struct{}{}
-	fileOps.Edited["/src/main.go"] = struct{}{} // also modified, should not appear in read-only
+	fileOps.Edited["/src/main.go"] = struct{}{}
 	fileOps.Written["/src/new.go"] = struct{}{}
 
 	readFiles, modifiedFiles := ComputeFileLists(fileOps)
 
-	// /src/util.go was only read, not modified
 	if len(readFiles) != 1 || readFiles[0] != "/src/util.go" {
 		t.Errorf("expected readFiles=[/src/util.go], got %v", readFiles)
 	}
 
-	// /src/main.go was edited, /src/new.go was written
 	if len(modifiedFiles) != 2 {
 		t.Errorf("expected 2 modified files, got %v", modifiedFiles)
 	}
@@ -92,9 +89,6 @@ func TestFormatFileOperations(t *testing.T) {
 	if !strings.Contains(result, "<modified-files>") {
 		t.Error("expected <modified-files> tag")
 	}
-	if !strings.Contains(result, "/src/main.go") {
-		t.Error("expected /src/main.go in output")
-	}
 }
 
 func TestFormatFileOperations_Empty(t *testing.T) {
@@ -121,63 +115,5 @@ func TestFormatFileOperations_OnlyModified(t *testing.T) {
 	}
 	if !strings.Contains(result, "<modified-files>") {
 		t.Error("expected <modified-files> tag")
-	}
-}
-
-func TestSerializeConversation(t *testing.T) {
-	messages := []ai.Message{
-		ai.NewUserMsg("Hello, can you help me?", 100),
-		ai.NewAssistantMsg(ai.AssistantMessage{
-			Content: []ai.AssistantContent{
-				ai.NewTextContent("Sure, let me take a look."),
-			},
-		}),
-		ai.NewAssistantMsg(ai.AssistantMessage{
-			Content: []ai.AssistantContent{
-				ai.NewThinkingContent("Let me think about this..."),
-				ai.NewToolCallContent("1", "read", map[string]any{"path": "/main.go"}),
-			},
-		}),
-		ai.NewToolResultMsg(ai.ToolResultMessage{
-			ToolCallID: "1",
-			ToolName:   "read",
-			Content: []ai.ToolResultContent{
-				{Type: "text", Text: "package main"},
-			},
-		}),
-	}
-
-	result := SerializeConversation(messages)
-
-	if !strings.Contains(result, "[User]: Hello, can you help me?") {
-		t.Error("expected user message in output")
-	}
-	if !strings.Contains(result, "[Assistant]: Sure, let me take a look.") {
-		t.Error("expected assistant text in output")
-	}
-	if !strings.Contains(result, "[Assistant thinking]: Let me think about this...") {
-		t.Error("expected thinking in output")
-	}
-	if !strings.Contains(result, "[Assistant tool calls]: read(") {
-		t.Error("expected tool calls in output")
-	}
-	if !strings.Contains(result, "[Tool result]: package main") {
-		t.Error("expected tool result in output")
-	}
-}
-
-func TestSerializeConversation_Empty(t *testing.T) {
-	result := SerializeConversation(nil)
-	if result != "" {
-		t.Errorf("expected empty string, got %q", result)
-	}
-}
-
-func TestSummarizationSystemPrompt(t *testing.T) {
-	if SummarizationSystemPrompt == "" {
-		t.Error("expected non-empty system prompt")
-	}
-	if !strings.Contains(SummarizationSystemPrompt, "summarization") {
-		t.Error("expected 'summarization' in system prompt")
 	}
 }

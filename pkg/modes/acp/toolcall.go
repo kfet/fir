@@ -1,82 +1,13 @@
-// Ported from: packages/coding-agent/src/modes/acp/acp-mode.ts (helper functions)
-// Upstream hash: pi-mono-acp branch
+// ACP tool call mapping, display, and content building.
+// Split from helpers.go.
 package acp
 
 import (
 	"fmt"
-	"path/filepath"
-	"regexp"
 	"strings"
-
-	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/models"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
-
-// ParseModelID splits an ACP model ID "provider/modelId" into its components.
-func ParseModelID(acpModelID string) (provider, modelID string, err error) {
-	idx := strings.Index(acpModelID, "/")
-	if idx == -1 {
-		return "", "", fmt.Errorf("invalid model ID format: %s. Expected \"provider/modelId\"", acpModelID)
-	}
-	return acpModelID[:idx], acpModelID[idx+1:], nil
-}
-
-// shortProvider abbreviates provider names for display.
-func shortProvider(provider string) string {
-	m := map[string]string{
-		"anthropic": "anth", "openai": "oai", "google": "goog",
-		"mistral": "mist", "groq": "groq", "openrouter": "or",
-		"bedrock": "bed", "vertex": "vtx", "azure": "az",
-		"deepseek": "ds", "xai": "xai",
-	}
-	if s, ok := m[provider]; ok {
-		return s
-	}
-	return provider
-}
-
-// BuildModelState creates an ACP SessionModelState from the model registry.
-// Only includes models that have auth configured (API key or OAuth token).
-func BuildModelState(reg *models.ModelRegistry, currentModel *ai.Model) *acpsdk.SessionModelState {
-	if currentModel == nil {
-		return nil
-	}
-	available := reg.GetAvailable()
-	models := make([]acpsdk.ModelInfo, 0, len(available))
-	for _, m := range available {
-		models = append(models, acpsdk.ModelInfo{
-			ModelId: acpsdk.ModelId(fmt.Sprintf("%s/%s", m.Provider, m.ID)),
-			Name:    fmt.Sprintf("%s / %s", m.Name, shortProvider(m.Provider)),
-		})
-	}
-	return &acpsdk.SessionModelState{
-		AvailableModels: models,
-		CurrentModelId:  acpsdk.ModelId(fmt.Sprintf("%s/%s", currentModel.Provider, currentModel.ID)),
-	}
-}
-
-// ExtractPromptContent extracts text and images from ACP content blocks.
-func ExtractPromptContent(blocks []acpsdk.ContentBlock) (text string, images []ai.ImageContent) {
-	var textParts []string
-	for _, block := range blocks {
-		if block.Text != nil {
-			textParts = append(textParts, block.Text.Text)
-		} else if block.Image != nil {
-			images = append(images, ai.ImageContent{
-				Type:     "image",
-				MimeType: block.Image.MimeType,
-				Data:     block.Image.Data,
-			})
-		} else if block.Resource != nil && block.Resource.Resource.TextResourceContents != nil {
-			textParts = append(textParts, block.Resource.Resource.TextResourceContents.Text)
-		} else if block.ResourceLink != nil && strings.HasPrefix(block.ResourceLink.Uri, "file://") {
-			textParts = append(textParts, "@"+block.ResourceLink.Uri[7:])
-		}
-	}
-	return strings.Join(textParts, "\n"), images
-}
 
 // MapToolKind maps a tool name to an ACP ToolKind.
 func MapToolKind(toolName string) acpsdk.ToolKind {
@@ -242,72 +173,6 @@ func BuildToolTitle(toolName string, args map[string]interface{}) string {
 	}
 }
 
-// diffLineRegexp matches pi's diff format: prefix + line number + space + content.
-var diffLineRegexp = regexp.MustCompile(`^([-+ ])(\s*\d+)\s(.*)$`)
-var codeFenceRegexp = regexp.MustCompile("(?m)^`{3,}")
-
-// ParseDiffForAcp parses pi's custom diff format and extracts content and locations for ACP.
-func ParseDiffForAcp(diffText, filePath string, firstChangedLine int) (content []acpsdk.ToolCallContent, locations []acpsdk.ToolCallLocation) {
-	if diffText == "" || filePath == "" {
-		return nil, nil
-	}
-
-	lines := strings.Split(diffText, "\n")
-	var oldLines, newLines []string
-
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "..." {
-			continue
-		}
-		match := diffLineRegexp.FindStringSubmatch(line)
-		if match != nil {
-			prefix := match[1]
-			lineContent := match[3]
-			switch prefix {
-			case "-":
-				oldLines = append(oldLines, lineContent)
-			case "+":
-				newLines = append(newLines, lineContent)
-			default: // space = context
-				oldLines = append(oldLines, lineContent)
-				newLines = append(newLines, lineContent)
-			}
-		}
-	}
-
-	if len(oldLines) > 0 || len(newLines) > 0 {
-		line := firstChangedLine
-		if line == 0 {
-			line = 1
-		}
-		locations = append(locations, acpsdk.ToolCallLocation{Path: filePath, Line: &line})
-		var oldPtr *string
-		if len(oldLines) > 0 {
-			s := strings.Join(oldLines, "\n")
-			oldPtr = &s
-		}
-		newText := strings.Join(newLines, "\n")
-		content = append(content, diffContent(filePath, oldPtr, newText))
-	}
-
-	return content, locations
-}
-
-// MarkdownEscape wraps text in code fences, using enough backticks to avoid conflicts.
-func MarkdownEscape(text string) string {
-	fence := "```"
-	for _, match := range codeFenceRegexp.FindAllString(text, -1) {
-		for len(match) >= len(fence) {
-			fence += "`"
-		}
-	}
-	suffix := ""
-	if !strings.HasSuffix(text, "\n") {
-		suffix = "\n"
-	}
-	return fence + "\n" + text + suffix + fence
-}
-
 // BuildToolCallContent builds the content and locations for a completed tool call.
 func BuildToolCallContent(toolName string, args map[string]interface{}, result interface{}, isError bool) (content []acpsdk.ToolCallContent, locations []acpsdk.ToolCallLocation) {
 	if isError {
@@ -356,17 +221,6 @@ func BuildToolCallContent(toolName string, args map[string]interface{}, result i
 	}
 }
 
-// IsPathWithinDirectory checks that targetPath is within baseDirectory.
-func IsPathWithinDirectory(targetPath, baseDirectory string) bool {
-	normalizedTarget := filepath.Clean(targetPath)
-	normalizedBase := filepath.Clean(baseDirectory)
-	rel, err := filepath.Rel(normalizedBase, normalizedTarget)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
-}
-
 // ============================================================================
 // Internal helpers
 // ============================================================================
@@ -407,29 +261,4 @@ func terminalContent(terminalID string) acpsdk.ToolCallContent {
 			TerminalId: terminalID,
 		},
 	}
-}
-
-// extractResultText extracts text from a tool result's content array.
-func extractResultText(result interface{}) string {
-	resultMap, ok := result.(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	contentArr, ok := resultMap["content"].([]interface{})
-	if !ok {
-		return ""
-	}
-	var parts []string
-	for _, item := range contentArr {
-		m, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if t, _ := m["type"].(string); t == "text" {
-			if text, ok := m["text"].(string); ok && text != "" {
-				parts = append(parts, text)
-			}
-		}
-	}
-	return strings.Join(parts, "\n")
 }
