@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- `docs/extension-protocol.md`: full wire-protocol reference covering transport, init handshake, tool calls, hooks, events, all ext→fir bridge methods, frontmatter, discovery/trust, and process lifecycle.
+- `docs/extensions.md`: removed duplicated Protocol Reference section and stale Context Methods table; added cross-links to `extension-protocol.md` and `fir_ext.py`.
+- `pkg/extension/sdk/python/fir_ext.py`: replaced terse module docstring with a self-contained protocol reference covering every message type, all bridge methods with exact params/responses, event table, and lifecycle notes.
+
 ## [0.22.0] - 2026-03-17
 
 ### Changed

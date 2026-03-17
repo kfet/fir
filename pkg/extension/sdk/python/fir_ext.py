@@ -2,9 +2,10 @@
 fir_ext — Lightweight Python SDK for fir external process extensions.
 
 Speaks JSON-RPC 2.0 over stdin/stdout so extension authors write simple
-handler functions instead of protocol code.
+handler functions instead of protocol code.  The full protocol reference
+lives in ``docs/extension-protocol.md``.
 
-Usage example::
+Quick start::
 
     import fir_ext
 
@@ -27,7 +28,371 @@ Usage example::
 
     fir_ext.run()
 
-Protocol details live in docs/plan/ext-process.md §2.
+See ``pkg/resources/builtin_extensions/demo.py`` for a working example that
+exercises every API surface.
+
+-------------------------------------------------------------------------------
+WIRE PROTOCOL
+-------------------------------------------------------------------------------
+
+Transport
+~~~~~~~~~
+All messages are JSON-RPC 2.0 objects written as a single line of JSON,
+terminated by a newline (``\\n``).  No Content-Length framing.  The extension
+process communicates with fir over its **stdin** (fir → ext) and **stdout**
+(ext → fir).  **stderr** is captured by fir and forwarded to its structured
+log at INFO level.
+
+Message types
+~~~~~~~~~~~~~
+Three JSON-RPC message types are used:
+
+* **Request** - has ``id``, ``method``, and optional ``params``.  Requires a
+  **Response** with the matching ``id``.
+* **Response** - has ``id`` and either ``result`` or ``error``.
+* **Notification** - has ``method`` and optional ``params``, but *no* ``id``.
+  No response is expected.
+
+-------------------------------------------------------------------------------
+INIT HANDSHAKE
+-------------------------------------------------------------------------------
+
+Immediately after spawning the extension process, fir sends an ``init``
+request.  The extension **must** respond within **5 seconds**.
+
+fir → extension::
+
+    {"jsonrpc":"2.0","id":1,"method":"init","params":{"version":"1","cwd":"/project"}}
+
+Params:
+
+* ``version`` - protocol version string (currently ``"1"``).
+* ``cwd`` - the project's working directory.
+
+extension → fir::
+
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "name": "my-ext",
+        "tools": [
+          {
+            "name": "count_words",
+            "description": "Count words in a string",
+            "parameters": {
+              "type": "object",
+              "properties": {"text": {"type": "string"}},
+              "required": ["text"]
+            },
+            "display_hint": {
+              "title_args": [{"name": "text", "style": "accent"}],
+              "result_max_lines": 10,
+              "use_box": false
+            }
+          }
+        ],
+        "commands": [
+          {"name": "my-cmd", "description": "Do something useful"}
+        ],
+        "events": ["session_start", "hook/tool_call"]
+      }
+    }
+
+Result fields:
+
+* ``name`` (str) - display name for the extension.
+* ``tools`` (list) - tool definitions to register (see Tool Definitions below).
+* ``commands`` (list) - slash-command definitions ``{name, description}``.
+  Omit or send ``[]`` if the extension registers no commands.
+* ``events`` (list of str) - event and hook names to subscribe to.  Event
+  names are bare (e.g. ``"session_start"``); hook names carry the ``hook/``
+  prefix (e.g. ``"hook/tool_call"``).  Omit or send ``[]`` to receive nothing.
+
+Tool definition fields:
+
+* ``name`` (str, required) - unique tool name.
+* ``description`` (str) - shown to the LLM.
+* ``parameters`` (dict) - JSON Schema ``object`` describing the tool inputs.
+* ``display_hint`` (dict, optional) - TUI rendering hints:
+
+  * ``title_args`` - list of ``{name, style, label}`` dicts controlling which
+    parameters appear on the header line.  ``style`` may be ``"path"``,
+    ``"pattern"``, ``"accent"``, or ``""`` (plain).
+  * ``result_max_lines`` - default collapsed line count (default 10).
+  * ``use_box`` - render output in a bordered box like the built-in ``bash``
+    tool (default false).
+
+-------------------------------------------------------------------------------
+TOOL CALLS  (fir → extension, Request)
+-------------------------------------------------------------------------------
+
+When the AI invokes a tool that was registered by the extension during init,
+fir sends a ``tool_call`` **request** (timeout: **30 seconds**)::
+
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tool_call",
+      "params": {
+        "tool_call_id": "toolu_abc123",
+        "name": "count_words",
+        "params": {"text": "hello world"}
+      }
+    }
+
+The extension **must** send back a response::
+
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [{"type": "text", "text": "2 words"}],
+        "is_error": false
+      }
+    }
+
+Result fields:
+
+* ``content`` (list) - one or more content blocks.  Each block is
+  ``{"type": "text", "text": "..."}`` (only ``text`` type is used today).
+  Plain strings and non-structured JSON are automatically wrapped by fir.
+* ``is_error`` (bool) - when ``true`` the tool result is reported to the LLM
+  as a tool error.
+
+To return a structured error use a JSON-RPC error response::
+
+    {"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"division by zero"}}
+
+-------------------------------------------------------------------------------
+HOOKS  (fir → extension, Request)
+-------------------------------------------------------------------------------
+
+Hooks are interceptor points.  fir sends them as **requests** (they have an
+``id`` and require a response).  Hook method names begin with ``hook/``.
+
+hook/tool_call
+..............
+Fired before **any** tool call (including built-in tools).  The extension can
+block execution by returning ``{"block": true, "reason": "..."}``; returning
+``null`` or ``{}`` allows the call to proceed.  Timeout: **5 seconds**. ::
+
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "hook/tool_call",
+      "params": {
+        "tool_call_id": "toolu_abc123",
+        "tool_name": "bash",
+        "params": {"command": "rm -rf /"}
+      }
+    }
+
+Allow response::
+
+    {"jsonrpc":"2.0","id":3,"result":null}
+
+Block response::
+
+    {"jsonrpc":"2.0","id":3,"result":{"block":true,"reason":"dangerous command"}}
+
+hook/command
+............
+Fired when a user types a slash command registered by the extension::
+
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "hook/command",
+      "params": {"name": "my-cmd", "args": ["arg1", "arg2"]}
+    }
+
+Response (optional ``message`` shown in the TUI)::
+
+    {"jsonrpc":"2.0","id":4,"result":{"message":"Done!"}}
+
+-------------------------------------------------------------------------------
+EVENTS  (fir → extension, Notification)
+-------------------------------------------------------------------------------
+
+Events are JSON-RPC **notifications** — they have no ``id`` and no response is
+expected.  The method name is ``event/<event_name>``.  Subscribe by listing the
+bare event name (without the ``event/`` prefix) in the ``events`` array of the
+init response.
+
++-------------------------+------------------------------------------------+
+| Event                   | ``params`` shape                               |
++=========================+================================================+
+| ``session_start``       | ``{"session_data": {"key": "value", ...}}``    |
+|                         | ``session_data`` contains values previously    |
+|                         | stored via ``set_session_data``, seeded from   |
+|                         | the reexec sidecar on ``/reexec``.             |
++-------------------------+------------------------------------------------+
+| ``session_shutdown``    | ``null``                                       |
++-------------------------+------------------------------------------------+
+| ``session_named``       | ``{"name": "session-name"}``                   |
+|                         | Fired when the session gets a display name     |
+|                         | (on start if a name already exists, or when    |
+|                         | it is set later).                              |
++-------------------------+------------------------------------------------+
+| ``session_update``      | ``{"type": "session_named"|"plan_update",      |
+|                         |   "session_name": "...",                       |
+|                         |   "plan": {"total":N, "completed":N,           |
+|                         |             "metadata":{...}}}``               |
+|                         | Generic session-state change event.            |
++-------------------------+------------------------------------------------+
+| ``agent_start``         | ``null`` — LLM turn starting                   |
++-------------------------+------------------------------------------------+
+| ``agent_end``           | ``null`` — LLM turn finished                   |
++-------------------------+------------------------------------------------+
+| ``turn_start``          | ``null`` — streaming turn starting             |
++-------------------------+------------------------------------------------+
+| ``turn_end``            | ``null`` — streaming turn finished             |
++-------------------------+------------------------------------------------+
+| ``message_start``       | ``null`` — LLM message block starting          |
++-------------------------+------------------------------------------------+
+| ``message_end``         | ``null`` — LLM message block finished          |
++-------------------------+------------------------------------------------+
+| ``tool_execution_start``| ``{"tool_call_id": "...", "tool_name": "..."}``|
++-------------------------+------------------------------------------------+
+| ``tool_execution_end``  | ``{"tool_call_id": "...", "tool_name": "...",  |
+|                         |   "is_error": false}``                         |
++-------------------------+------------------------------------------------+
+
+-------------------------------------------------------------------------------
+EXTENSION → FIR CALLS  (extension → fir, Request)
+-------------------------------------------------------------------------------
+
+Extensions may call back into fir at any time by writing a JSON-RPC **request**
+to stdout.  fir sends the response on the extension's stdin.  All responses
+include either ``result`` or ``error``.
+
+The default client-side timeout (used by this SDK) is **10 seconds** unless
+otherwise noted.
+
++------------------+---------------------------------------+---------------------------+
+| Method           | Params                                | Result                    |
++==================+=======================================+===========================+
+| ``notify``       | ``{message, level}``                  | ``{ok: true}``            |
+|                  | ``level``: ``"info"``,                |                           |
+|                  | ``"warning"``, ``"error"``            |                           |
++------------------+---------------------------------------+---------------------------+
+| ``exec``         | ``{command, args}``                   | ``{stdout, stderr,        |
+|                  |                                       | exit_code}``              |
++------------------+---------------------------------------+---------------------------+
+| ``send_message`` | ``{custom_type, content, display,     | ``{ok: true}``            |
+|                  |   deliver_as?, trigger_turn?}``       |                           |
+|                  | ``deliver_as``: ``"steer"`` or        |                           |
+|                  | ``"followUp"`` (omit = append only)   |                           |
+|                  | ``trigger_turn``: bool, starts new    |                           |
+|                  | agent turn after injecting.           |                           |
++------------------+---------------------------------------+---------------------------+
+| ``send_user_     | ``{content, deliver_as?}``            | ``{ok: true}``            |
+| message``        | ``deliver_as``: ``"steer"`` or        |                           |
+|                  | ``"followUp"`` (omit = prompt)        |                           |
++------------------+---------------------------------------+---------------------------+
+| ``set_session_   | ``{name}``                            | ``{ok: true}``            |
+| name``           |                                       |                           |
++------------------+---------------------------------------+---------------------------+
+| ``set_label``    | ``{entry_id, label}``                 | ``{ok: true}``            |
++------------------+---------------------------------------+---------------------------+
+| ``clear_label``  | ``{entry_id}``                        | ``{ok: true}``            |
++------------------+---------------------------------------+---------------------------+
+| ``get_active_    | *(none / empty object)*               | ``["tool1", "tool2", …]`` |
+| tools``          |                                       |                           |
++------------------+---------------------------------------+---------------------------+
+| ``set_active_    | ``{names}``                           | ``{ok: true}``            |
+| tools``          |                                       |                           |
++------------------+---------------------------------------+---------------------------+
+| ``set_model``    | ``{provider, id}``                    | ``{ok: bool}``            |
+|                  |                                       | ``false`` if provider has |
+|                  |                                       | no API key configured.    |
++------------------+---------------------------------------+---------------------------+
+| ``set_status``   | ``{status}``                          | ``{ok: true}``            |
+|                  | Empty string clears the status.       |                           |
++------------------+---------------------------------------+---------------------------+
+| ``continue_      | *(none)*                              | ``{ok: true}``            |
+| session``        | Triggers a new agent turn.            | SDK timeout: 60 s         |
++------------------+---------------------------------------+---------------------------+
+| ``side_query``   | ``{question}``                        | ``{ok: true,              |
+|                  | One-shot LLM call, no history.        | text: "..."}``            |
+|                  |                                       | SDK timeout: 120 s        |
++------------------+---------------------------------------+---------------------------+
+| ``set_session_   | ``{key, value}``                      | ``{ok: true}``            |
+| data``           | Persist string K/V; survives          |                           |
+|                  | ``/reexec`` via sidecar.              |                           |
++------------------+---------------------------------------+---------------------------+
+| ``get_session_   | ``{key}``                             | ``{value: "...",          |
+| data``           |                                       | ok: bool}``               |
++------------------+---------------------------------------+---------------------------+
+| ``call_tool``    | ``{name, params}``                    | ``{content: [...],        |
+|                  | Calls any registered tool directly,   | is_error: bool}``         |
+|                  | bypassing conversation history.       | SDK timeout: 60 s         |
++------------------+---------------------------------------+---------------------------+
+| ``list_tools``   | ``{}``                                | ``[{name,                 |
+|                  |                                       | description?,             |
+|                  |                                       | parameters?}, …]``        |
++------------------+---------------------------------------+---------------------------+
+| ``prepend_       | ``{content}``                         | ``{ok: true}``            |
+| context``        | Adds a ``[SYS_EXT]`` block to the     |                           |
+|                  | system prompt (dynamic context).      |                           |
++------------------+---------------------------------------+---------------------------+
+
+-------------------------------------------------------------------------------
+COMMENT FRONTMATTER
+-------------------------------------------------------------------------------
+
+Extension files may include a comment frontmatter block (after an optional
+shebang line) to declare metadata visible to fir before the process is
+started::
+
+    #!/usr/bin/env python3
+    # ---
+    # name: my-ext                        # overrides filename-derived name
+    # events: session_start, hook/tool_call
+    # commands: my-cmd: Brief description
+    # modes: tui, acp                     # restrict to specific fir modes
+    # demo: true                          # mark as demo; not loaded by default
+    # ---
+
+fir checks the frontmatter against the actual init-handshake result and warns
+(or auto-fixes when the user consents) if they diverge.  The ``events`` and
+``commands`` keys must stay in sync with what ``fir_ext.run()`` actually
+registers.
+
+Supported ``modes`` values: ``tui`` (alias ``interactive``), ``text``,
+``json``, ``rpc``, ``acp``.  Omitting the key runs the extension in all modes.
+
+-------------------------------------------------------------------------------
+DISCOVERY & TRUST
+-------------------------------------------------------------------------------
+
+fir searches for extensions in order of decreasing precedence:
+
+1. ``.fir/extensions/`` — project-local (requires explicit trust per file hash)
+2. ``~/.config/fir/extensions/`` — user-global (always trusted)
+3. Extra directories/files supplied by installed fir packages (package scope)
+
+Any executable file in these directories is a candidate.  The extension name
+is the filename without its suffix (``wordcount.py`` → ``wordcount``).  A
+project-local extension with the same name as a global one shadows the global
+one.
+
+Trust records are stored in ``~/.config/fir/trusted-extensions.json`` keyed by
+``<projectDir>:<extensionName>``, each entry holding the approved SHA-256 hash.
+If the file changes after approval, fir re-prompts.
+
+-------------------------------------------------------------------------------
+PROCESS LIFECYCLE
+-------------------------------------------------------------------------------
+
+* fir spawns one process per extension, passing it the project env plus any
+  SDK path variables (``PYTHONPATH`` for Python).
+* On crash, fir restarts the extension with **exponential backoff**:
+  1 s → 2 s → 4 s → … capped at 30 s.
+* After **5 consecutive failures** fir gives up and logs an error.
+* On clean shutdown, fir sends **SIGTERM**, waits up to 2 seconds, then
+  **SIGKILL**.
 """
 
 from __future__ import annotations

@@ -88,122 +88,7 @@ The next time you start fir in this project, it discovers the extension, prompts
 
 fir spawns the extension as a child process. Messages flow over **stdin/stdout** as newline-delimited JSON-RPC 2.0. The extension's **stderr** is captured and forwarded to fir's log.
 
-## Protocol Reference
-
-All messages are JSON-RPC 2.0 objects, one per line (newline-delimited).
-
-### Init Handshake
-
-Immediately after spawning the process, fir sends an `init` request. The extension must respond within **5 seconds**.
-
-**fir → extension:**
-```json
-{"jsonrpc":"2.0","id":1,"method":"init","params":{"version":"1","cwd":"/path/to/project"}}
-```
-
-**extension → fir:**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "name": "my-extension",
-    "tools": [
-      {
-        "name": "count_words",
-        "description": "Count words in a file",
-        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}
-      }
-    ],
-    "events": ["session_start", "hook/tool_call"]
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `name` | Display name for the extension |
-| `tools` | Array of tool definitions (JSON Schema `parameters`) to register |
-| `events` | Event and hook names the extension wants to receive |
-
-### Tool Calls (fir → extension)
-
-When the AI invokes a tool registered by the extension, fir sends a `tool_call` request:
-
-```json
-{"jsonrpc":"2.0","id":2,"method":"tool_call","params":{"tool_call_id":"tc_abc","name":"count_words","params":{"path":"README.md"}}}
-```
-
-The extension responds with a tool result:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": {
-    "content": [{"type": "text", "text": "README.md: 142 words"}],
-    "is_error": false
-  }
-}
-```
-
-Tool calls time out after **30 seconds** by default.
-
-### Hooks (fir → extension)
-
-Hooks are requests that let extensions intercept and optionally modify fir behavior. They are sent as JSON-RPC requests (they have an `id` and expect a response). Hook method names start with `hook/`.
-
-```json
-{"jsonrpc":"2.0","id":3,"method":"hook/tool_call","params":{"tool":"bash","args":{"command":"rm -rf /"}}}
-```
-
-The extension can return data to influence fir's behavior, or return `null` to allow the default:
-
-```json
-{"jsonrpc":"2.0","id":3,"result":{"blocked":true,"reason":"Dangerous command"}}
-```
-
-To subscribe to a hook, include its full name (e.g. `"hook/tool_call"`) in the `events` array during init.
-
-### Events (fir → extension)
-
-Events are JSON-RPC **notifications** (no `id`, no response expected). They are fire-and-forget.
-
-```json
-{"jsonrpc":"2.0","method":"event/session_start","params":{"session_id":"abc123"}}
-```
-
-To receive events, include the event name (without the `event/` prefix) in the `events` array during init. For example, listing `"session_start"` in events causes fir to send `event/session_start` notifications.
-
-### Extension → fir Calls
-
-Extensions can call back into fir by sending JSON-RPC requests on stdout. fir responds on stdin.
-
-| Method | Params | Description |
-|--------|--------|-------------|
-| `notify` | `{message, level}` | Show a notification (`level`: `"info"`, `"warning"`, `"error"`) |
-| `exec` | `{command, args}` | Run a command; returns `{stdout, stderr, exit_code}` |
-| `send_message` | `{custom_type, content, display}` | Inject a custom message into the session |
-| `send_user_message` | `{content}` | Inject a user message into the session |
-| `set_session_name` | `{name}` | Set the session display name |
-| `set_label` | `{entry_id, label}` | Set a label on a session entry |
-| `clear_label` | `{entry_id}` | Clear a label from a session entry |
-| `get_active_tools` | *(none)* | Returns array of active tool names |
-| `set_active_tools` | `{names}` | Set which tools are active |
-| `set_model` | `{provider, id}` | Change the current model; returns `{ok}` |
-| `set_status` | `{key, text}` | Set persistent status text in the UI footer |
-
-**Example — running a command from an extension:**
-
-```json
-{"jsonrpc":"2.0","id":1001,"method":"exec","params":{"command":"wc","args":["-l","README.md"]}}
-```
-
-fir responds:
-
-```json
-{"jsonrpc":"2.0","id":1001,"result":{"stdout":"42 README.md\n","stderr":"","exit_code":0}}
-```
+For the full wire-protocol specification — message framing, init handshake, tool call/hook/event schemas, all bridge methods, and process lifecycle — see [extension-protocol.md](extension-protocol.md).
 
 ## Python SDK Reference
 
@@ -245,6 +130,21 @@ def on_tool_call(params, ctx):
     return None
 ```
 
+### `@fir_ext.command(name, description="")`
+
+Register a slash command that users can type in the TUI as `/name`. The
+decorated function receives `(args: list[str], ctx: Context)` and may return a
+dict with an optional `"message"` key shown in the TUI, or `None`.
+
+```python
+@fir_ext.command(name="summary", description="Summarise project status")
+def cmd_summary(args, ctx):
+    return {"message": "All checks passing."}
+```
+
+The command name must be declared in the `commands` frontmatter key to avoid a
+startup warning.
+
 ### `fir_ext.ToolError(message, code=-32000)`
 
 Raise inside a tool handler to return a structured error:
@@ -263,22 +163,16 @@ Start the event loop. Call this at the end of your script. The `name` parameter 
 
 ### Context Methods
 
-The `ctx` object passed to every handler provides these methods:
+The `ctx` object passed to every handler provides methods for calling back into
+fir: `notify`, `exec`, `set_status`, `set_session_name`, `set_label`,
+`clear_label`, `get_active_tools`, `set_active_tools`, `set_model`,
+`send_message`, `send_user_message`, `set_session_data`, `get_session_data`,
+`continue_session`, `side_query`, `call_tool`, `list_tools`, and `prepend`.
 
-| Method | Description |
-|--------|-------------|
-| `ctx.notify(message, level="info")` | Show a notification in fir |
-| `ctx.exec(command, timeout_sec=30)` | Run a shell command; returns `{stdout, stderr, exit_code}` |
-| `ctx.send_message(role, content)` | Inject a message into the session |
-| `ctx.set_status(text)` | Set footer status text |
-| `ctx.set_session_name(name)` | Set session display name |
-| `ctx.set_label(entry_id, label)` | Set a label on a session entry |
-| `ctx.clear_label(entry_id)` | Clear a label |
-| `ctx.get_active_tools()` | Get list of active tool names |
-| `ctx.set_active_tools(tools)` | Set active tools |
-| `ctx.set_model(model)` | Change the current model |
-
-All context methods are synchronous — they send a JSON-RPC request to fir and block until fir responds (10-second timeout).
+All methods are synchronous — they send a JSON-RPC request to fir and block
+until fir responds. Full signatures, parameters, and return values are
+documented in the `fir_ext.py` module docstring and in
+[extension-protocol.md](extension-protocol.md).
 
 ## Discovery
 
@@ -343,10 +237,6 @@ On first encounter, fir:
 If the extension file changes (different hash), fir will prompt for re-approval.
 
 **Global extensions** (in `~/.config/fir/extensions/`) are always trusted — you installed them yourself.
-
-### Trust Store
-
-Trust records are stored in `~/.config/fir/trusted-extensions.json` and keyed by `projectDir:extensionName`. Each entry records the approved SHA-256 hash and timestamp.
 
 ## Troubleshooting
 
