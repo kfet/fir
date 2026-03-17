@@ -522,7 +522,7 @@ def on(event_name: str) -> Callable:
 
 
 def auth_provider(
-    id: str,
+    provider_id: str,
     name: str,
     uses_callback_server: bool = True,
 ) -> Callable:
@@ -550,12 +550,14 @@ def auth_provider(
     """
 
     def decorator(fn: Callable) -> Callable:
-        _auth_providers.append({
-            "id": id,
-            "name": name,
-            "uses_callback_server": uses_callback_server,
-        })
-        _auth_login_handlers[id] = fn
+        _auth_providers.append(
+            {
+                "id": provider_id,
+                "name": name,
+                "uses_callback_server": uses_callback_server,
+            }
+        )
+        _auth_login_handlers[provider_id] = fn
         return fn
 
     return decorator
@@ -953,7 +955,9 @@ class AuthContext(Context):
         dict
             ``{"addr": "127.0.0.1:NNNNN", "redirect_uri": "http://localhost:NNNNN/callback"}``
         """
-        return self._call("auth/start_callback_server", {"addr": addr, "path": path}, timeout=timeout)
+        return self._call(
+            "auth/start_callback_server", {"addr": addr, "path": path}, timeout=timeout
+        )
 
     def await_callback(self, timeout: float = 300.0) -> dict[str, str]:
         """Block until the callback server receives an auth code.
@@ -1093,7 +1097,9 @@ def run(
     # Auth context for auth handlers
     auth_ctx = AuthContext(output_stream=out, pending=pending, results=results)
 
-    def _handle_auth_request(method: str, msg_id: Any, params: dict[str, Any], out_stream: WriteStream) -> None:
+    def _handle_auth_request(
+        method: str, msg_id: Any, params: dict[str, Any], out_stream: WriteStream
+    ) -> None:
         """Handle auth/* RPC methods from fir."""
         provider_id = params.get("provider_id", "")
 
@@ -1101,7 +1107,12 @@ def run(
             if method == "auth/login":
                 handler = _auth_login_handlers.get(provider_id)
                 if handler is None:
-                    _write_message(_make_error(msg_id, -32601, f"No login handler for provider: {provider_id}"), out_stream)
+                    _write_message(
+                        _make_error(
+                            msg_id, -32601, f"No login handler for provider: {provider_id}"
+                        ),
+                        out_stream,
+                    )
                     return
                 result = handler(params, auth_ctx)
                 if isinstance(result, dict) and "access" in result:
@@ -1111,7 +1122,12 @@ def run(
             elif method == "auth/refresh":
                 handler = _auth_refresh_handlers.get(provider_id)
                 if handler is None:
-                    _write_message(_make_error(msg_id, -32601, f"No refresh handler for provider: {provider_id}"), out_stream)
+                    _write_message(
+                        _make_error(
+                            msg_id, -32601, f"No refresh handler for provider: {provider_id}"
+                        ),
+                        out_stream,
+                    )
                     return
                 result = handler(params, auth_ctx)
                 if isinstance(result, dict) and "access" in result:
@@ -1123,7 +1139,9 @@ def run(
                 if handler is None:
                     # Default: return access token
                     creds = params.get("credentials", {})
-                    _write_message(_make_response(msg_id, {"api_key": creds.get("access", "")}), out_stream)
+                    _write_message(
+                        _make_response(msg_id, {"api_key": creds.get("access", "")}), out_stream
+                    )
                     return
                 result = handler(params, auth_ctx)
                 if isinstance(result, str):
@@ -1141,7 +1159,9 @@ def run(
                 _write_message(_make_response(msg_id, result), out_stream)
 
             else:
-                _write_message(_make_error(msg_id, -32601, f"Unknown auth method: {method}"), out_stream)
+                _write_message(
+                    _make_error(msg_id, -32601, f"Unknown auth method: {method}"), out_stream
+                )
 
         except Exception as exc:
             _write_message(_make_error(msg_id, -32000, str(exc)), out_stream)
@@ -1174,7 +1194,9 @@ def run(
 
         # --- auth/* RPCs: run in thread ---
         if method.startswith("auth/"):
-            t = threading.Thread(target=_handle_auth_request, args=(method, msg_id, params, out), daemon=True)
+            t = threading.Thread(
+                target=_handle_auth_request, args=(method, msg_id, params, out), daemon=True
+            )
             t.start()
             _track_worker(t)
             return

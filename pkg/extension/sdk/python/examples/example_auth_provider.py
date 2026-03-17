@@ -9,19 +9,19 @@ Demonstrates how to implement a custom OAuth provider using the fir_ext SDK.
 Replace the URLs and client ID with your own OAuth application's values.
 """
 
+import json
 import time
 import urllib.parse
 import urllib.request
-import json
 
 import fir_ext
 
 CLIENT_ID = "your-client-id"
 AUTHORIZE_URL = "https://sso.example-corp.com/oauth/authorize"
-TOKEN_URL = "https://sso.example-corp.com/oauth/token"
+TOKEN_URL = "https://sso.example-corp.com/oauth/token"  # noqa: S105
 
 
-@fir_ext.auth_provider(id="example-corp", name="Example Corp SSO")
+@fir_ext.auth_provider(provider_id="example-corp", name="Example Corp SSO")
 def login(params, ctx):
     # 1. Generate PKCE challenge
     pkce = ctx.generate_pkce()
@@ -30,15 +30,21 @@ def login(params, ctx):
     server = ctx.start_callback_server(addr="127.0.0.1:0", path="/callback")
 
     # 3. Build authorization URL
-    auth_url = AUTHORIZE_URL + "?" + urllib.parse.urlencode({
-        "client_id": CLIENT_ID,
-        "response_type": "code",
-        "redirect_uri": server["redirect_uri"],
-        "scope": "openid profile api",
-        "code_challenge": pkce["challenge"],
-        "code_challenge_method": "S256",
-        "state": pkce["verifier"],
-    })
+    auth_url = (
+        AUTHORIZE_URL
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "client_id": CLIENT_ID,
+                "response_type": "code",
+                "redirect_uri": server["redirect_uri"],
+                "scope": "openid profile api",
+                "code_challenge": pkce["challenge"],
+                "code_challenge_method": "S256",
+                "state": pkce["verifier"],
+            }
+        )
+    )
 
     # 4. Ask fir to open the URL in the user's browser
     ctx.open_url(auth_url, "Complete login in your browser.")
@@ -69,11 +75,13 @@ def login(params, ctx):
 @fir_ext.auth_refresh(provider="example-corp")
 def refresh(params, ctx):
     creds = params["credentials"]
-    token_data = _token_request({
-        "grant_type": "refresh_token",
-        "client_id": CLIENT_ID,
-        "refresh_token": creds["refresh"],
-    })
+    token_data = _token_request(
+        {
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "refresh_token": creds["refresh"],
+        }
+    )
     return {
         "access": token_data["access_token"],
         "refresh": token_data["refresh_token"],
@@ -82,23 +90,25 @@ def refresh(params, ctx):
 
 
 def _exchange_code(code: str, redirect_uri: str, verifier: str) -> dict:
-    return _token_request({
-        "grant_type": "authorization_code",
-        "client_id": CLIENT_ID,
-        "code": code,
-        "redirect_uri": redirect_uri,
-        "code_verifier": verifier,
-    })
+    return _token_request(
+        {
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": verifier,
+        }
+    )
 
 
 def _token_request(body: dict) -> dict:
     data = json.dumps(body).encode()
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310
         TOKEN_URL,
         data=data,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req) as resp:  # noqa: S310
         return json.loads(resp.read())
 
 

@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -32,12 +33,10 @@ _CLIENT_ID = base64.b64decode(
     "NjgxMjU1ODA5Mzk1LW9vOGZ0Mm9wcmRybnA5ZTNhcWY2YXYzaG1kaWIxMzVqLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29t"
 ).decode()
 
-_CLIENT_SECRET = base64.b64decode(
-    "R09DU1BYLTR1SGdNUG0tMW83U2stZ2VWNkN1NWNsWEZzeGw="
-).decode()
+_CLIENT_SECRET = base64.b64decode("R09DU1BYLTR1SGdNUG0tMW83U2stZ2VWNkN1NWNsWEZzeGw=").decode()
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
 _CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com"
 _CALLBACK_ADDR = "127.0.0.1:8085"
 _CALLBACK_PATH = "/oauth2callback"
@@ -70,20 +69,26 @@ _API_HEADERS = {
 
 def _http_post_form(url: str, data: dict[str, str]) -> dict:
     """POST form-encoded data and return parsed JSON."""
+    if not url.startswith(("http:", "https:")):
+        raise ValueError("url must start with http or https: " + url)
     encoded = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(url, data=encoded, headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    req = urllib.request.Request(  # noqa: S310
+        url, data=encoded, headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
         return json.loads(resp.read())
 
 
 def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int, dict]:
     """POST JSON data and return (status_code, parsed_json)."""
+    if not url.startswith(("http:", "https:")):
+        raise ValueError("url must start with http or https: " + url)
     encoded = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=encoded)
+    req = urllib.request.Request(url, data=encoded)  # noqa: S310
     for k, v in headers.items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body_bytes = e.read()
@@ -95,11 +100,13 @@ def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int,
 
 def _http_get_json(url: str, headers: dict[str, str]) -> tuple[int, dict]:
     """GET and return (status_code, parsed_json)."""
-    req = urllib.request.Request(url)
+    if not url.startswith(("http:", "https:")):
+        raise ValueError("url must start with http or https: " + url)
+    req = urllib.request.Request(url)  # noqa: S310
     for k, v in headers.items():
         req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body_bytes = e.read()
@@ -150,7 +157,9 @@ def _get_default_tier(allowed_tiers: list[dict]) -> str:
     return _TIER_LEGACY
 
 
-def _poll_operation(op_name: str, headers: dict[str, str], ctx: fir_ext.AuthContext, max_attempts: int = 60) -> dict:
+def _poll_operation(
+    op_name: str, headers: dict[str, str], ctx: fir_ext.AuthContext, max_attempts: int = 60
+) -> dict:
     """Poll a long-running operation until done."""
     for attempt in range(max_attempts):
         if attempt > 0:
@@ -166,7 +175,9 @@ def _poll_operation(op_name: str, headers: dict[str, str], ctx: fir_ext.AuthCont
 
 def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
     """Discover or provision a Google Cloud project for the user."""
-    env_project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT_ID", "")
+    env_project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get(
+        "GOOGLE_CLOUD_PROJECT_ID", ""
+    )
 
     headers = {**_API_HEADERS, "Authorization": f"Bearer {access_token}"}
 
@@ -182,7 +193,9 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         },
     }
 
-    status, data = _http_post_json(f"{_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist", body, headers)
+    status, data = _http_post_json(
+        f"{_CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist", body, headers
+    )
 
     if status != 200:
         if _is_vpc_sc_affected(data):
@@ -193,7 +206,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
     # User already has a current tier and project
     if "currentTier" in data:
         project = data.get("cloudaicompanionProject", "")
-        if project:
+        if project and isinstance(project, str):
             return project
         if env_project:
             return env_project
@@ -204,10 +217,7 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         )
 
     # User needs onboarding
-    allowed_tiers = []
-    for t in data.get("allowedTiers", []):
-        if isinstance(t, dict):
-            allowed_tiers.append(t)
+    allowed_tiers = [t for t in data.get("allowedTiers", []) if isinstance(t, dict)]
     tier_id = _get_default_tier(allowed_tiers)
 
     if tier_id != _TIER_FREE and not env_project:
@@ -231,7 +241,9 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         onboard_body["cloudaicompanionProject"] = env_project
         onboard_body["metadata"]["duetProject"] = env_project
 
-    status, lro_data = _http_post_json(f"{_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser", onboard_body, headers)
+    status, lro_data = _http_post_json(
+        f"{_CODE_ASSIST_ENDPOINT}/v1internal:onboardUser", onboard_body, headers
+    )
     if status != 200:
         raise RuntimeError(f"onboardUser failed ({status}): {json.dumps(lro_data)}")
 
@@ -262,7 +274,9 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
 # ---------------------------------------------------------------------------
 
 
-@fir_ext.auth_provider(id="google-gemini-cli", name="Google Cloud Code Assist (Gemini CLI)")
+@fir_ext.auth_provider(
+    provider_id="google-gemini-cli", name="Google Cloud Code Assist (Gemini CLI)"
+)
 def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     """Run the full Gemini CLI OAuth login flow."""
     # 1. Generate PKCE
@@ -278,17 +292,19 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
         server = None
 
     # 3. Build authorization URL
-    auth_params = urllib.parse.urlencode({
-        "client_id": _CLIENT_ID,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": " ".join(_SCOPES),
-        "code_challenge": pkce["challenge"],
-        "code_challenge_method": "S256",
-        "state": pkce["verifier"],
-        "access_type": "offline",
-        "prompt": "consent",
-    })
+    auth_params = urllib.parse.urlencode(
+        {
+            "client_id": _CLIENT_ID,
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": " ".join(_SCOPES),
+            "code_challenge": pkce["challenge"],
+            "code_challenge_method": "S256",
+            "state": pkce["verifier"],
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+    )
     auth_url = f"{_AUTH_URL}?{auth_params}"
 
     # 4. Open browser
@@ -324,14 +340,17 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
 
     # 6. Exchange code for tokens
     ctx.progress("Exchanging authorization code for tokens...")
-    token_data = _http_post_form(_TOKEN_URL, {
-        "client_id": _CLIENT_ID,
-        "client_secret": _CLIENT_SECRET,
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": redirect_uri,
-        "code_verifier": pkce["verifier"],
-    })
+    token_data = _http_post_form(
+        _TOKEN_URL,
+        {
+            "client_id": _CLIENT_ID,
+            "client_secret": _CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code_verifier": pkce["verifier"],
+        },
+    )
 
     refresh_token = token_data.get("refresh_token", "")
     access_token = token_data.get("access_token", "")
@@ -373,12 +392,15 @@ def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
     if not project_id:
         raise RuntimeError("Google Cloud credentials missing projectId")
 
-    token_data = _http_post_form(_TOKEN_URL, {
-        "client_id": _CLIENT_ID,
-        "client_secret": _CLIENT_SECRET,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    })
+    token_data = _http_post_form(
+        _TOKEN_URL,
+        {
+            "client_id": _CLIENT_ID,
+            "client_secret": _CLIENT_SECRET,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        },
+    )
 
     new_refresh = token_data.get("refresh_token", "") or refresh_token
     new_access = token_data.get("access_token", "")

@@ -22,15 +22,15 @@ var (
 // ExtensionFrontmatter holds metadata parsed from a comment frontmatter block
 // at the top of an extension script.
 type ExtensionFrontmatter struct {
-	Name           string
-	Description    string
-	Builtin        bool
-	Demo           bool // demo/test extensions; not loaded unless explicitly allowed
-	Modes          []string
-	Events         []string                      // event names this extension subscribes to (for lazy loading)
-	Commands       []ExtensionFrontmatterCommand // slash commands (registered as stubs for lazy loading)
-	AuthProviders  []string                      // auth provider IDs this extension registers
-	Present        bool                          // true when a valid frontmatter block was found
+	Name          string
+	Description   string
+	Builtin       bool
+	Demo          bool // demo/test extensions; not loaded unless explicitly allowed
+	Modes         []string
+	Events        []string                      // event names this extension subscribes to (for lazy loading)
+	Commands      []ExtensionFrontmatterCommand // slash commands (registered as stubs for lazy loading)
+	AuthProviders []string                      // auth provider IDs this extension registers
+	Present       bool                          // true when a valid frontmatter block was found
 }
 
 // ExtensionFrontmatterCommand describes a slash command declared in frontmatter.

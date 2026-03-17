@@ -27,8 +27,8 @@ type extAuthProvider struct {
 }
 
 func (p *extAuthProvider) ID() string               { return p.spec.ID }
-func (p *extAuthProvider) Name() string              { return p.spec.Name }
-func (p *extAuthProvider) UsesCallbackServer() bool  { return p.spec.UsesCallbackServer }
+func (p *extAuthProvider) Name() string             { return p.spec.Name }
+func (p *extAuthProvider) UsesCallbackServer() bool { return p.spec.UsesCallbackServer }
 
 func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error) {
 	// Store callbacks so the bridge can dispatch UI requests from the extension.
