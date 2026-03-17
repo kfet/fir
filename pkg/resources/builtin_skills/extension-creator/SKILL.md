@@ -116,7 +116,7 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 
 ## Non-Python Extensions
 
-Any executable works — just implement the JSON-RPC 2.0 protocol on stdio. See `docs/extensions.md` for the full protocol reference. For anything non-trivial, Python with `fir_ext` is recommended.
+Any executable works — just implement the JSON-RPC 2.0 protocol on stdio. See `docs/extension-protocol.md` for the full wire-protocol reference (message shapes, all bridge methods, events, hooks). For anything non-trivial, Python with `fir_ext` is recommended.
 
 ## Troubleshooting
 
