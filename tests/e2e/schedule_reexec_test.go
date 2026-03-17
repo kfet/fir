@@ -116,10 +116,11 @@ func TestScheduleReexec_Tmux(t *testing.T) {
 	}
 
 	// Wait for the fir TUI to be ready.  The TUI enters alternate-screen mode
-	// and renders its input prompt; we wait for the ">" prompt character that
-	// fir always shows in its input area.  Shell prompts (bash $, zsh %) don't
-	// contain ">", so this is specific enough.  20 s covers slow CI machines.
-	if !waitFor(">", 20*time.Second) {
+	// and renders its input prompt; we wait for the "⟩" prompt character that
+	// fir always shows in its input area (set in pkg/modes/interactive/mode.go).
+	// Shell prompts (bash $, zsh %) don't contain "⟩", so this is specific
+	// enough.  20 s covers slow CI machines.
+	if !waitFor("⟩", 20*time.Second) {
 		t.Logf("pane content:\n%s", capturePane())
 		t.Fatal("fir TUI did not appear within 20s")
 	}
