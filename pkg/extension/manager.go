@@ -350,17 +350,33 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 }
 
 // Stop shuts down all bridges and processes.
-// Sends session_shutdown event before stopping.
+// Sends session_end event before stopping.
 func (m *Manager) Stop() error {
+	return m.StopWithReason("normal", "")
+}
+
+// StopWithReason shuts down all bridges, emitting a session_end event that
+// includes the exit reason and optional error message.
+func (m *Manager) StopWithReason(reason, errMsg string) error {
 	m.mu.Lock()
 	bridges := m.bridges
 	m.bridges = nil
 	m.pending = nil // discard any un-triggered lazy extensions
 	m.mu.Unlock()
 
-	// Send shutdown event to all extensions and give them a moment
-	// to handle it (e.g. restore tmux window names) before killing.
+	// Build session_end payload.
+	payload := map[string]any{
+		"reason": reason,
+	}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+
+	// Send session_end event to all extensions and give them a moment
+	// to handle it (e.g. restore tmux window names, record diagnostics)
+	// before killing. Also send legacy session_shutdown for compat.
 	for _, mb := range bridges {
+		_ = mb.bridge.EmitEvent("session_end", payload)
 		_ = mb.bridge.EmitEvent("session_shutdown", nil)
 	}
 
@@ -709,6 +725,7 @@ func (m *Manager) ShutdownAndCollect() map[string]map[string]string {
 	m.mu.Unlock()
 
 	for _, mb := range bridges {
+		_ = mb.bridge.EmitEvent("session_end", map[string]any{"reason": "reexec"})
 		_ = mb.bridge.EmitEvent("session_shutdown", nil)
 	}
 

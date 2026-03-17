@@ -266,11 +266,22 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 				"tool_name":    ae.ToolName,
 			})
 		case agent.EventToolExecutionEnd:
-			mgr.EmitEvent("tool_execution_end", map[string]any{
+			payload := map[string]any{
 				"tool_call_id": ae.ToolCallID,
 				"tool_name":    ae.ToolName,
 				"is_error":     ae.IsError,
-			})
+			}
+			if ae.IsError {
+				if r, ok := ae.Result.(agent.AgentToolResult); ok {
+					for _, c := range r.Content {
+						if c.Text != "" {
+							payload["error_text"] = c.Text
+							break
+						}
+					}
+				}
+			}
+			mgr.EmitEvent("tool_execution_end", payload)
 		}
 	})
 
