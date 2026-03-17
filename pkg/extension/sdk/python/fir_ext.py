@@ -198,7 +198,8 @@ Block response::
 
 hook/command
 ............
-Fired when a user types a slash command registered by the extension::
+Fired when a user types a slash command registered by the extension.
+Timeout: **10 seconds**. ::
 
     {
       "jsonrpc": "2.0",
@@ -227,8 +228,9 @@ init response.
 |                         | ``session_data`` contains values previously    |
 |                         | stored via ``set_session_data``, seeded from   |
 |                         | the reexec sidecar on ``/reexec``.             |
+|                         | ``params`` key absent on a fresh session.      |
 +-------------------------+------------------------------------------------+
-| ``session_shutdown``    | ``null``                                       |
+| ``session_shutdown``    | *(params key absent)*                          |
 +-------------------------+------------------------------------------------+
 | ``session_named``       | ``{"name": "session-name"}``                   |
 |                         | Fired when the session gets a display name     |
@@ -241,17 +243,17 @@ init response.
 |                         |             "metadata":{...}}}``               |
 |                         | Generic session-state change event.            |
 +-------------------------+------------------------------------------------+
-| ``agent_start``         | ``null`` — LLM turn starting                   |
+| ``agent_start``         | *(params key absent)* — LLM turn starting      |
 +-------------------------+------------------------------------------------+
-| ``agent_end``           | ``null`` — LLM turn finished                   |
+| ``agent_end``           | *(params key absent)* — LLM turn finished      |
 +-------------------------+------------------------------------------------+
-| ``turn_start``          | ``null`` — streaming turn starting             |
+| ``turn_start``          | *(params key absent)* — streaming turn starting|
 +-------------------------+------------------------------------------------+
-| ``turn_end``            | ``null`` — streaming turn finished             |
+| ``turn_end``            | *(params key absent)* — streaming turn finished|
 +-------------------------+------------------------------------------------+
-| ``message_start``       | ``null`` — LLM message block starting          |
+| ``message_start``       | *(params key absent)* — LLM message block start|
 +-------------------------+------------------------------------------------+
-| ``message_end``         | ``null`` — LLM message block finished          |
+| ``message_end``         | *(params key absent)* — LLM message block end  |
 +-------------------------+------------------------------------------------+
 | ``tool_execution_start``| ``{"tool_call_id": "...", "tool_name": "..."}``|
 +-------------------------+------------------------------------------------+

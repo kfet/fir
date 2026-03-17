@@ -280,6 +280,7 @@ If multiple extensions are registered, fir collects all responses; any single
 ### hook/command
 
 Fired when a user types a slash command that was registered by the extension.
+Timeout: **10 seconds**.
 
 ```json
 {
@@ -315,16 +316,16 @@ the `events` array of the init response.  For hooks, use the full `hook/` name.
 
 | Event name | `params` |
 |------------|----------|
-| `session_start` | `{"session_data": {"key": "value", ...}}` — `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`.  May be `null` or `{}` on a fresh session. |
-| `session_shutdown` | `null` — session is about to stop; last chance for cleanup. |
+| `session_start` | `{"session_data": {"key": "value", ...}}` — `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`.  `params` key absent on a fresh session (no prior data). |
+| `session_shutdown` | *(params key absent)* — session is about to stop; last chance for cleanup. |
 | `session_named` | `{"name": "..."}` — fired when the session acquires a display name (on start if one already exists, or when it is set later). |
 | `session_update` | `{"type": "session_named"│"plan_update", "session_name": "...", "plan": {"total": N, "completed": N, "metadata": {...}}}` — generic session state change. |
-| `agent_start` | `null` — LLM turn is starting. |
-| `agent_end` | `null` — LLM turn has finished. |
-| `turn_start` | `null` — streaming turn is starting. |
-| `turn_end` | `null` — streaming turn has finished. |
-| `message_start` | `null` — LLM message block is starting. |
-| `message_end` | `null` — LLM message block has finished. |
+| `agent_start` | *(params key absent)* — LLM turn is starting. |
+| `agent_end` | *(params key absent)* — LLM turn has finished. |
+| `turn_start` | *(params key absent)* — streaming turn is starting. |
+| `turn_end` | *(params key absent)* — streaming turn has finished. |
+| `message_start` | *(params key absent)* — LLM message block is starting. |
+| `message_end` | *(params key absent)* — LLM message block has finished. |
 | `tool_execution_start` | `{"tool_call_id": "...", "tool_name": "..."}` |
 | `tool_execution_end` | `{"tool_call_id": "...", "tool_name": "...", "is_error": false}` |
 
