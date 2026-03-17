@@ -54,6 +54,42 @@ func (p *OpenAICodexProvider) GetAPIKey(creds *Credentials) string {
 	return creds.Access
 }
 
+func (p *OpenAICodexProvider) ListModels(ctx context.Context, creds *Credentials) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://chatgpt.com/backend-api/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+creds.Access)
+
+	resp, err := oauthHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("list models: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	ids := make([]string, 0, len(result.Models))
+	for _, m := range result.Models {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids, nil
+}
+
 func (p *OpenAICodexProvider) ModifyModels(models []*ai.Model, _ *Credentials) []*ai.Model {
 	return models
 }

@@ -124,6 +124,10 @@ func (p *GitHubCopilotProvider) GetAPIKey(creds *Credentials) string {
 	return creds.Access
 }
 
+func (p *GitHubCopilotProvider) ListModels(_ context.Context, _ *Credentials) ([]string, error) {
+	return nil, nil // GitHub Copilot exposes available models via its /models endpoint dynamically
+}
+
 func (p *GitHubCopilotProvider) ModifyModels(models []*ai.Model, creds *Credentials) []*ai.Model {
 	enterpriseDomain, _ := creds.Extra["enterpriseUrl"].(string)
 	domain := ""

@@ -69,6 +69,10 @@ func (p *AnthropicProvider) GetAPIKey(creds *Credentials) string {
 	return creds.Access
 }
 
+func (p *AnthropicProvider) ListModels(_ context.Context, _ *Credentials) ([]string, error) {
+	return nil, nil // handled by the API-key lister path; no OAuth-specific listing needed
+}
+
 func (p *AnthropicProvider) ModifyModels(models []*ai.Model, _ *Credentials) []*ai.Model {
 	return models
 }

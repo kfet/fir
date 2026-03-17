@@ -25,6 +25,9 @@ func (p *testProvider) RefreshToken(creds *Credentials) (*Credentials, error) {
 func (p *testProvider) GetAPIKey(creds *Credentials) string {
 	return creds.Access
 }
+func (p *testProvider) ListModels(_ context.Context, _ *Credentials) ([]string, error) {
+	return nil, nil
+}
 func (p *testProvider) ModifyModels(models []*ai.Model, _ *Credentials) []*ai.Model {
 	return models
 }

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/ai/oauth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -63,6 +65,7 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 	providers := r.getProvidersWithAuth()
 	r.mu.RUnlock()
 
+	// API-key providers: use the ModelLister interface.
 	for _, provider := range providers {
 		lister := GetModelLister(provider)
 		if lister == nil {
@@ -82,6 +85,61 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 
 		go r.fetchLiveModels(ctx, provider, lister, state, cacheDir)
 	}
+
+	// OAuth providers: use oauth.Provider.ListModels.
+	for _, oauthProvider := range r.authStorage.GetOAuthProviders() {
+		providerID := oauthProvider.ID()
+		if !r.authStorage.HasAuth(providerID) {
+			continue
+		}
+
+		// Skip if the API-key path already registered a state for this provider.
+		r.liveModelsMu.RLock()
+		_, already := r.liveModels[providerID]
+		r.liveModelsMu.RUnlock()
+		if already {
+			continue
+		}
+
+		cred := r.authStorage.Get(providerID)
+		if cred == nil || cred.Type != auth.CredentialTypeOAuth {
+			continue
+		}
+		creds := auth.AuthCredToOAuthCreds(cred)
+
+		state := &liveModelState{}
+		r.liveModelsMu.Lock()
+		r.liveModels[providerID] = state
+		r.liveModelsMu.Unlock()
+
+		if cached, ok := r.loadLiveCache(cacheDir, providerID); ok {
+			state.set(cached)
+		}
+
+		go r.fetchOAuthModels(ctx, providerID, oauthProvider, creds, state, cacheDir)
+	}
+}
+
+func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string, provider oauth.Provider, creds *oauth.Credentials, state *liveModelState, cacheDir string) {
+	ids, err := provider.ListModels(ctx, creds)
+	if err != nil {
+		firlog.Debug("live model list failed for OAuth provider %s: %v", providerID, err)
+		state.setError(err)
+		return
+	}
+	if ids == nil {
+		// Provider signalled it doesn't support listing — be permissive.
+		state.setError(nil)
+		return
+	}
+
+	infos := make([]LiveModelInfo, len(ids))
+	for i, id := range ids {
+		infos[i] = LiveModelInfo{ID: id}
+	}
+	state.set(infos)
+	r.saveLiveCache(cacheDir, providerID, infos)
+	firlog.Debug("live model list for OAuth provider %s: %d models", providerID, len(infos))
 }
 
 func (r *ModelRegistry) getProvidersWithAuth() []string {

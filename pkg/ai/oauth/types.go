@@ -68,6 +68,10 @@ type Provider interface {
 	RefreshToken(creds *Credentials) (*Credentials, error)
 	// GetAPIKey extracts the API key string from credentials.
 	GetAPIKey(creds *Credentials) string
+	// ListModels returns the model IDs available for the given credentials.
+	// Returns nil, nil if live listing is not supported for this provider
+	// (the caller falls back to permissive mode).
+	ListModels(ctx context.Context, creds *Credentials) ([]string, error)
 	// ModifyModels optionally adjusts models for this provider (e.g., update baseUrl).
 	// Returns nil if no modification is needed.
 	ModifyModels(models []*ai.Model, creds *Credentials) []*ai.Model
