@@ -275,6 +275,27 @@ func (m *InteractiveMode) onToolExecUpdate(ae *agent.AgentEvent) {
 	m.ui.RequestRender(false)
 }
 
+func toolResultDataFromAgent(result *agent.AgentToolResult, isError bool) *components.ToolResultData {
+	rd := &components.ToolResultData{
+		IsError: isError,
+		Details: make(map[string]any),
+	}
+	if result.Details != nil {
+		if detailsMap, ok := result.Details.(map[string]any); ok {
+			rd.Details = detailsMap
+		}
+	}
+	for _, c := range result.Content {
+		rd.Content = append(rd.Content, components.ToolContentBlock{
+			Type:     c.Type,
+			Text:     c.Text,
+			Data:     c.Data,
+			MimeType: c.MimeType,
+		})
+	}
+	return rd
+}
+
 func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 	comp, ok := m.pendingTools[ae.ToolCallID]
 	if !ok {
@@ -283,19 +304,14 @@ func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 	delete(m.pendingTools, ae.ToolCallID)
 
 	if ae.Result != nil {
-		if result, ok := ae.Result.(*agent.AgentToolResult); ok {
-			resultData := &components.ToolResultData{
-				IsError: ae.IsError,
-				Details: make(map[string]any),
-			}
-			for _, c := range result.Content {
-				resultData.Content = append(resultData.Content, components.ToolContentBlock{
-					Type:     c.Type,
-					Text:     c.Text,
-					Data:     c.Data,
-					MimeType: c.MimeType,
-				})
-			}
+		var resultData *components.ToolResultData
+		switch result := ae.Result.(type) {
+		case *agent.AgentToolResult:
+			resultData = toolResultDataFromAgent(result, ae.IsError)
+		case agent.AgentToolResult:
+			resultData = toolResultDataFromAgent(&result, ae.IsError)
+		}
+		if resultData != nil {
 			comp.UpdateResult(resultData, m.toolOutputExpanded)
 		}
 	}
