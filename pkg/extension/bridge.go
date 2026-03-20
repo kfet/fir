@@ -119,6 +119,26 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	var result any
 	var rpcErr *Error
 
+	// keepAlive starts a background goroutine that periodically updates
+	// lastActivity while a long-running bridge call (side_query, call_tool)
+	// is in progress. Returns a stop function.
+	keepAlive := func() func() {
+		ticker := time.NewTicker(5 * time.Second)
+		done := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					b.lastActivity.Store(time.Now().UnixNano())
+				case <-done:
+					ticker.Stop()
+					return
+				}
+			}
+		}()
+		return func() { close(done) }
+	}
+
 	switch req.Method {
 	case "notify":
 		var p struct {
@@ -296,7 +316,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
+		stop := keepAlive()
 		text, err := api.SideQuery(p.Question)
+		stop()
 		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
@@ -341,7 +363,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
+		stop := keepAlive()
 		r, err := api.CallTool(p.Name, p.Params)
+		stop()
 		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
