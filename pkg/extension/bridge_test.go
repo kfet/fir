@@ -264,36 +264,35 @@ func TestBridge_CallHook_ActivityStopsTimeoutFires(t *testing.T) {
 }
 
 func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
-	// Extension sends a side_query RPC. The mock API delays 200ms.
-	// Meanwhile, CallHook has a 100ms timeout. keepAlive (which runs
-	// during side_query processing) should update lastActivity and
-	// prevent the hook from timing out.
-	//
-	// To make this testable with keepAlive's 5s interval, we instead
-	// verify that handleInbound's side_query path calls keepAlive by
-	// checking lastActivity is updated while a side_query is in flight.
+	// Use a fast keepAlive interval so we can observe it in a short test.
+	old := keepAliveInterval
+	keepAliveInterval = 20 * time.Millisecond
+	defer func() { keepAliveInterval = old }()
+
 	b, extCodec := pipePair(&InitResult{})
 
-	// Create a slow API that delays side_query by 200ms.
+	// Slow API: side_query takes 200ms.
 	api := &slowSideQueryAPI{mockBridgeAPI: newMockAPI(), delay: 200 * time.Millisecond}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = b.Run(ctx, api) }()
 
-	// Extension sends a side_query request.
+	// Extension sends a side_query request (simulating what aside does
+	// inside a tool_call hook). The bridge's handleInbound runs keepAlive
+	// during the slow SideQuery call.
 	params := json.RawMessage(`{"question":"test"}`)
 	_ = extCodec.WriteRequest(1, "side_query", &params)
 
-	// While side_query is in flight, lastActivity should be set at the
-	// start (by the Run loop) even if keepAlive hasn't ticked yet.
-	time.Sleep(50 * time.Millisecond)
-	activity := b.lastActivity.Load()
-	if activity == 0 {
-		t.Fatal("expected lastActivity to be set during side_query")
+	// Wait 100ms — keepAlive should have ticked multiple times by now.
+	time.Sleep(100 * time.Millisecond)
+	activity := time.Unix(0, b.lastActivity.Load())
+	age := time.Since(activity)
+	if age > 50*time.Millisecond {
+		t.Fatalf("expected recent lastActivity from keepAlive (age %v), keepAlive may not be running", age)
 	}
 
-	// Wait for the response.
+	// Wait for the response to confirm side_query completed.
 	msg, err := extCodec.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
@@ -307,13 +306,20 @@ func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
 	}
 }
 
-func TestBridge_KeepAlive_StopsCleanly(t *testing.T) {
-	b, _ := pipePair(&InitResult{})
+func TestBridge_KeepAlive_UpdatesLastActivity(t *testing.T) {
+	old := keepAliveInterval
+	keepAliveInterval = 10 * time.Millisecond
+	defer func() { keepAliveInterval = old }()
 
-	// Start and stop keepAlive multiple times — should not panic or leak.
-	for i := 0; i < 10; i++ {
-		stop := b.keepAlive()
-		stop()
+	b, _ := pipePair(&InitResult{})
+	b.lastActivity.Store(0) // clear
+
+	stop := b.keepAlive()
+	time.Sleep(50 * time.Millisecond) // wait for several ticks
+	stop()
+
+	if b.lastActivity.Load() == 0 {
+		t.Fatal("expected keepAlive to update lastActivity")
 	}
 }
 

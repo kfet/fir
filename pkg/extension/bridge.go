@@ -406,11 +406,14 @@ func (b *Bridge) routeResponse(resp *Response) {
 	}
 }
 
+// keepAliveInterval is the ticker interval for keepAlive. Exported for testing.
+var keepAliveInterval = 5 * time.Second
+
 // keepAlive starts a background goroutine that periodically updates
 // lastActivity while a long-running bridge call (side_query, call_tool)
 // is in progress. Returns a stop function that must be called when done.
 func (b *Bridge) keepAlive() func() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(keepAliveInterval)
 	done := make(chan struct{})
 	go func() {
 		defer ticker.Stop()
