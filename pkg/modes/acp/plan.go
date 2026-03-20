@@ -45,6 +45,6 @@ func (p *planTracker) clear() {
 	}
 	_ = p.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: acpsdk.SessionId(p.sessionID),
-		Update:    acpsdk.UpdatePlan(),
+		Update:    acpsdk.UpdatePlan([]acpsdk.PlanEntry{}...),
 	})
 }

@@ -70,6 +70,9 @@ func TestPlanTracker_Clear(t *testing.T) {
 	if got.Update.Plan == nil {
 		t.Fatal("expected plan update, got nil")
 	}
+	if got.Update.Plan.Entries == nil {
+		t.Fatal("entries must not be nil (would serialize as null)")
+	}
 	if len(got.Update.Plan.Entries) != 0 {
 		t.Fatalf("entries = %d, want 0", len(got.Update.Plan.Entries))
 	}
