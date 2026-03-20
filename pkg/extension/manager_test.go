@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// builtinToolCount is the number of tools registered by builtin extensions
+// (aside=1, install=4). Tests must add their own extensions' tool counts on top.
+const builtinToolCount = 5
+
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
 func writeExtScript(t *testing.T, dir, name string) string {
@@ -94,8 +98,8 @@ func TestManager_StartStop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 registered tools, got %d", n)
+	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d registered tools, got %d", builtinToolCount+1, n)
 	}
 
 	if err := mgr.Stop(); err != nil {
@@ -121,8 +125,8 @@ func TestManager_UntrustedSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := api.toolCount(); n != 1 {
-		t.Fatalf("expected 1 tool (untrusted ext skipped, aside builtin only), got %d", n)
+	if n := api.toolCount(); n != builtinToolCount {
+		t.Fatalf("expected %d tool (untrusted ext skipped, builtins only), got %d", builtinToolCount, n)
 	}
 
 	mgr.Stop()
@@ -207,8 +211,8 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 tools before reload, got %d", n)
+	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d tools before reload, got %d", builtinToolCount+1, n)
 	}
 
 	// Add a second extension before reload.
@@ -226,8 +230,8 @@ func TestManager_Reload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api, 3, 5*time.Second); n != 3 {
-		t.Fatalf("expected 3 tools after reload, got %d", n)
+	if n := pollToolCount(api, builtinToolCount+2, 5*time.Second); n != builtinToolCount+2 {
+		t.Fatalf("expected %d tools after reload, got %d", builtinToolCount+2, n)
 	}
 }
 
@@ -267,8 +271,8 @@ func TestManager_ReloadCallsUnregister(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := pollToolCount(api.mockBridgeAPI, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 tools before reload, got %d", n)
+	if n := pollToolCount(api.mockBridgeAPI, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d tools before reload, got %d", builtinToolCount+1, n)
 	}
 
 	// Reload without manually clearing tools — UnregisterExtensionTools should handle it.
@@ -284,8 +288,8 @@ func TestManager_ReloadCallsUnregister(t *testing.T) {
 	}
 
 	// Should still have exactly 2 tools (not duplicates).
-	if n := pollToolCount(api.mockBridgeAPI, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 tools after reload (no duplicates), got %d", n)
+	if n := pollToolCount(api.mockBridgeAPI, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d tools after reload (no duplicates), got %d", builtinToolCount+1, n)
 	}
 }
 
@@ -353,12 +357,12 @@ func TestManager_ActiveMode(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	if n := pollToolCount(api, 2, 5*time.Second); n != 2 {
-		t.Fatalf("expected 2 tools in acp mode, got %d", n)
+	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
+		t.Fatalf("expected %d tools in acp mode, got %d", builtinToolCount+1, n)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := api.toolCount(); n != 2 {
-		t.Fatalf("expected exactly 2 tools after filtering by mode, got %d", n)
+	if n := api.toolCount(); n != builtinToolCount+1 {
+		t.Fatalf("expected exactly %d tools after filtering by mode, got %d", builtinToolCount+1, n)
 	}
 }
 

@@ -8,6 +8,7 @@
 
 ### Added
 
+- `install` builtin extension — exposes package management as in-session slash commands (`/install`, `/uninstall`, `/packages`, `/update`) and AI tools (`install_package`, `uninstall_package`, `list_packages`, `update_packages`).
 - `doctor` builtin extension — records tool errors and session failures to `~/.config/fir/doctor.jsonl`; exposes `doctor_query` and `doctor_summary` tools plus `/doctor` slash command for cross-session diagnostics.
 - `session_end` event with `{reason, error}` payload emitted before `session_shutdown` on all exit paths (normal, error, reexec).
 - `tool_execution_end` event now includes `error_text` when `is_error` is true.
