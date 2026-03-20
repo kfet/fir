@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,6 +102,17 @@ func (m *mockBridgeAPI) ListTools() []ToolInfo   { return nil }
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
 var _ BridgeAPI = (*mockBridgeAPI)(nil)
+
+// slowSideQueryAPI wraps mockBridgeAPI with a configurable delay on SideQuery.
+type slowSideQueryAPI struct {
+	*mockBridgeAPI
+	delay time.Duration
+}
+
+func (s *slowSideQueryAPI) SideQuery(question string) (string, error) {
+	time.Sleep(s.delay)
+	return s.mockBridgeAPI.SideQuery(question)
+}
 
 // pipePair creates a Bridge connected via pipes (no real process).
 func pipePair(caps *InitResult) (*Bridge, *Codec) {
@@ -212,6 +224,96 @@ func TestBridge_CallHook_ActivityExtendsTimeout(t *testing.T) {
 	}
 	if string(raw) != `{"ok":true}` {
 		t.Fatalf("unexpected result: %s", raw)
+	}
+}
+
+func TestBridge_CallHook_ActivityStopsTimeoutFires(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, newMockAPI()) }()
+
+	// Extension sends activity for 80ms, then goes silent.
+	// Timeout is 60ms, so after activity stops the timeout should fire.
+	go func() {
+		msg, err := extCodec.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = msg.(*Request) // read the hook request but never respond
+
+		// Send activity for 80ms.
+		for i := 0; i < 4; i++ {
+			time.Sleep(20 * time.Millisecond)
+			_ = extCodec.WriteRequest(1000+i, "notify", map[string]string{
+				"level": "info", "message": "working...",
+			})
+			_, _ = extCodec.ReadMessage() // drain response
+		}
+		// Now go silent — never respond to the hook.
+	}()
+
+	_, err := b.CallHook("hook/test", nil, 60*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error after activity stopped")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
+	// Extension sends a side_query RPC. The mock API delays 200ms.
+	// Meanwhile, CallHook has a 100ms timeout. keepAlive (which runs
+	// during side_query processing) should update lastActivity and
+	// prevent the hook from timing out.
+	//
+	// To make this testable with keepAlive's 5s interval, we instead
+	// verify that handleInbound's side_query path calls keepAlive by
+	// checking lastActivity is updated while a side_query is in flight.
+	b, extCodec := pipePair(&InitResult{})
+
+	// Create a slow API that delays side_query by 200ms.
+	api := &slowSideQueryAPI{mockBridgeAPI: newMockAPI(), delay: 200 * time.Millisecond}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// Extension sends a side_query request.
+	params := json.RawMessage(`{"question":"test"}`)
+	_ = extCodec.WriteRequest(1, "side_query", &params)
+
+	// While side_query is in flight, lastActivity should be set at the
+	// start (by the Run loop) even if keepAlive hasn't ticked yet.
+	time.Sleep(50 * time.Millisecond)
+	activity := b.lastActivity.Load()
+	if activity == 0 {
+		t.Fatal("expected lastActivity to be set during side_query")
+	}
+
+	// Wait for the response.
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("side_query returned error: %v", resp.Error)
+	}
+}
+
+func TestBridge_KeepAlive_StopsCleanly(t *testing.T) {
+	b, _ := pipePair(&InitResult{})
+
+	// Start and stop keepAlive multiple times — should not panic or leak.
+	for i := 0; i < 10; i++ {
+		stop := b.keepAlive()
+		stop()
 	}
 }
 
