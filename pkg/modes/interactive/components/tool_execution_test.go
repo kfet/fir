@@ -228,6 +228,7 @@ func TestToolExecution_ToolOutputDetails(t *testing.T) {
 			"tool_outputs": []any{
 				map[string]any{
 					"name":     "Read",
+					"title":    "read go.mod contents",
 					"output":   "file contents here\nline2\nline3",
 					"is_error": false,
 				},
@@ -244,8 +245,8 @@ func TestToolExecution_ToolOutputDetails(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 
 	// Should show tool output headers
-	if !strings.Contains(joined, "Read") {
-		t.Errorf("expected Read tool output, got %q", joined)
+	if !strings.Contains(joined, "Read: read go.mod contents") {
+		t.Errorf("expected Read tool output with title, got %q", joined)
 	}
 	if !strings.Contains(joined, "Bash") {
 		t.Errorf("expected Bash tool output, got %q", joined)

@@ -843,8 +843,8 @@ func (tc *ToolExecutionComponent) formatToolOutputDetails(t *theme.Theme) string
 	}
 
 	const (
-		maxLineLen      = 512  // truncate individual lines
-		maxLinesDefault = 10   // collapsed line count per tool output
+		maxLineLen      = 512       // truncate individual lines
+		maxLinesDefault = 10        // collapsed line count per tool output
 		maxTotalBytes   = 50 * 1024 // stop rendering after 50KB total
 	)
 
@@ -860,6 +860,7 @@ func (tc *ToolExecutionComponent) formatToolOutputDetails(t *theme.Theme) string
 			continue
 		}
 		name, _ := entry["name"].(string)
+		title, _ := entry["title"].(string)
 		output, _ := entry["output"].(string)
 		isError, _ := entry["is_error"].(bool)
 
@@ -867,7 +868,11 @@ func (tc *ToolExecutionComponent) formatToolOutputDetails(t *theme.Theme) string
 		if isError {
 			errorTag = " [ERROR]"
 		}
-		header := t.Fg("muted", fmt.Sprintf("--- %s%s ---", name, errorTag))
+		label := name
+		if title != "" {
+			label = name + ": " + title
+		}
+		header := t.Fg("muted", fmt.Sprintf("--- %s%s ---", label, errorTag))
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		maxLines := maxLinesDefault
 		if tc.expanded {

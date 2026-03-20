@@ -153,6 +153,7 @@ def _run_aside(
 
     for spec in tools:
         name = spec["name"]
+        title = spec.get("title", "")
         params = spec.get("params") or {}
 
         # Call the tool via the bridge.
@@ -162,6 +163,7 @@ def _run_aside(
             results.append(
                 {
                     "name": name,
+                    "title": title,
                     "output": f"error calling tool: {exc}",
                     "is_error": True,
                 }
@@ -173,6 +175,7 @@ def _run_aside(
         results.append(
             {
                 "name": name,
+                "title": title,
                 "output": output,
                 "is_error": is_error,
             }
@@ -195,6 +198,7 @@ def _run_aside(
             output = output[:max_output_len] + "\n... (truncated)"
         tool_outputs.append({
             "name": r["name"],
+            "title": r.get("title", ""),
             "output": output,
             "is_error": r.get("is_error", False),
         })
@@ -274,6 +278,10 @@ def _side_query_error_text(exc: Exception) -> str:
                         "name": {
                             "type": "string",
                             "description": "Name of the tool to call.",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Short description of what this tool call does (shown in UI).",
                         },
                         "params": {
                             "type": "object",

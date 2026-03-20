@@ -51,6 +51,11 @@ type Bridge struct {
 	// authProviders holds the extAuthProvider instances for this bridge.
 	authProvidersMu sync.RWMutex
 	authProviders   []*extAuthProvider
+
+	// lastActivity tracks the last time the extension sent us any message
+	// (request or response). Used by CallHook to extend timeouts when the
+	// extension is still alive but busy (e.g. aside making call_tool calls).
+	lastActivity atomic.Int64 // UnixNano
 }
 
 // NewBridge creates a Bridge wrapping the given Process and its capabilities.
@@ -87,10 +92,13 @@ func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 			}
 			switch m := msg.(type) {
 			case *Request:
+				b.lastActivity.Store(time.Now().UnixNano())
 				b.handleInbound(m, codec, api)
 			case *Response:
+				b.lastActivity.Store(time.Now().UnixNano())
 				b.routeResponse(m)
 			case *Notification:
+				b.lastActivity.Store(time.Now().UnixNano())
 				// Extensions shouldn't send us notifications; ignore.
 			}
 		}
@@ -427,20 +435,36 @@ func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.Ra
 		return nil, err
 	}
 
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, resp.Error
+	// Use an activity-aware timeout: reset the deadline whenever the
+	// extension sends us any message (request or response), which means
+	// it's still alive and working (e.g. aside making call_tool calls).
+	b.lastActivity.Store(time.Now().UnixNano())
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for {
+		select {
+		case resp := <-ch:
+			if resp.Error != nil {
+				return nil, resp.Error
+			}
+			if resp.Result != nil {
+				return *resp.Result, nil
+			}
+			return nil, nil
+		case <-deadline.C:
+			// Check if there was recent activity before giving up.
+			since := time.Since(time.Unix(0, b.lastActivity.Load()))
+			if since < timeout {
+				// Extension is still active — extend the deadline.
+				deadline.Reset(timeout - since)
+				continue
+			}
+			b.pendingMu.Lock()
+			delete(b.pending, id)
+			b.pendingMu.Unlock()
+			return nil, fmt.Errorf("extension: hook %s timed out after %s", name, timeout)
 		}
-		if resp.Result != nil {
-			return *resp.Result, nil
-		}
-		return nil, nil
-	case <-time.After(timeout):
-		b.pendingMu.Lock()
-		delete(b.pending, id)
-		b.pendingMu.Unlock()
-		return nil, fmt.Errorf("extension: hook %s timed out after %s", name, timeout)
 	}
 }
 

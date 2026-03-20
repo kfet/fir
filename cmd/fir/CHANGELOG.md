@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Extension `tool_call` hook timeout is now activity-aware — the 30s deadline resets whenever the extension sends any message (request or response), preventing spurious timeouts for long-running tools like `aside` that make multiple bridge calls.
 - Skills are now included in the system prompt even when a custom system prompt (`SYSTEM.md` / `--system-prompt`) is active; previously the custom override silently dropped the `<available_skills>` block.
 
 ### Changed
@@ -12,6 +13,8 @@
 - Remove `google-antigravity` and `google-gemini-cli` from the built-in Go provider registry; both are now provided by builtin extensions.
 
 ### Added
+
+- `aside` tool now accepts an optional `title` field on each tool call entry, shown in the TUI output header (e.g. `--- Bash: check go.mod ---` instead of `--- Bash ---`).
 
 - `install` builtin extension — exposes package management as in-session slash commands (`/install`, `/uninstall`, `/packages`, `/update`) and AI tools (`install_package`, `uninstall_package`, `list_packages`, `update_packages`).
 - `doctor` builtin extension — records tool errors and session failures to `~/.config/fir/doctor.jsonl`; exposes `doctor_query` and `doctor_summary` tools plus `/doctor` slash command for cross-session diagnostics.
