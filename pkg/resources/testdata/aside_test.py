@@ -167,6 +167,12 @@ class TestRunAside(unittest.TestCase):
         self.assertEqual(result["content"][0]["text"], "summary of files")
         self.assertEqual(ctx.call_tool.call_count, 2)
         ctx.side_query.assert_called_once()
+        # details should contain raw tool outputs for TUI display
+        self.assertIn("details", result)
+        tool_outputs = result["details"]["tool_outputs"]
+        self.assertEqual(len(tool_outputs), 2)
+        self.assertEqual(tool_outputs[0]["name"], "Read")
+        self.assertFalse(tool_outputs[0]["is_error"])
 
     def test_no_tools_runs_pure_side_query(self):
         ctx = self._make_ctx(side_query_result="the answer is 42")
@@ -199,6 +205,8 @@ class TestRunAside(unittest.TestCase):
         prompt = ctx.side_query.call_args[0][0]
         self.assertIn("[ERROR]", prompt)
         self.assertIn("file not found", prompt)
+        # details should mark the tool output as an error
+        self.assertTrue(result["details"]["tool_outputs"][0]["is_error"])
 
     def test_call_tool_exception_handled(self):
         ctx = self._make_ctx(side_query_result="partial results")

@@ -278,12 +278,14 @@ func (m *InteractiveMode) onToolExecUpdate(ae *agent.AgentEvent) {
 func toolResultDataFromAgent(result *agent.AgentToolResult, isError bool) *components.ToolResultData {
 	rd := &components.ToolResultData{
 		IsError: isError,
-		Details: make(map[string]any),
 	}
 	if result.Details != nil {
 		if detailsMap, ok := result.Details.(map[string]any); ok {
 			rd.Details = detailsMap
 		}
+	}
+	if rd.Details == nil {
+		rd.Details = make(map[string]any)
 	}
 	for _, c := range result.Content {
 		rd.Content = append(rd.Content, components.ToolContentBlock{

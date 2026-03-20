@@ -881,12 +881,9 @@ func (tc *ToolExecutionComponent) formatToolOutputDetails(t *theme.Theme) string
 
 		styledLines := make([]string, len(displayLines))
 		for i, line := range displayLines {
-			if len(line) > maxLineLen {
-				// Truncate at rune boundary to avoid splitting multi-byte characters.
-				truncated := []rune(line)
-				if len(truncated) > maxLineLen {
-					line = string(truncated[:maxLineLen]) + "…"
-				}
+			runes := []rune(line)
+			if len(runes) > maxLineLen {
+				line = string(runes[:maxLineLen]) + "…"
 			}
 			if isError {
 				styledLines[i] = t.Fg("error", line)
