@@ -6,6 +6,11 @@
 
 - Skills are now included in the system prompt even when a custom system prompt (`SYSTEM.md` / `--system-prompt`) is active; previously the custom override silently dropped the `<available_skills>` block.
 
+### Changed
+
+- Migrate Google Antigravity OAuth provider from Go core to a builtin Python extension (`antigravity_auth.py`), matching the earlier Gemini CLI migration pattern.
+- Remove `google-antigravity` and `google-gemini-cli` from the built-in Go provider registry; both are now provided by builtin extensions.
+
 ### Added
 
 - `install` builtin extension — exposes package management as in-session slash commands (`/install`, `/uninstall`, `/packages`, `/update`) and AI tools (`install_package`, `uninstall_package`, `list_packages`, `update_packages`).

@@ -10,7 +10,7 @@ func TestGetProvider_BuiltIns(t *testing.T) {
 		"anthropic",
 		"github-copilot",
 		// "google-gemini-cli" is now provided by the gemini_cli_auth builtin extension.
-		"google-antigravity",
+		// "google-antigravity" is now provided by the antigravity_auth builtin extension.
 		"openai-codex",
 	}
 	for _, id := range expectedIDs {
@@ -30,15 +30,15 @@ func TestGetProvider_Unknown(t *testing.T) {
 
 func TestGetProviders(t *testing.T) {
 	providers := GetProviders()
-	if len(providers) < 4 {
-		t.Errorf("expected at least 4 providers, got %d", len(providers))
+	if len(providers) < 3 {
+		t.Errorf("expected at least 3 providers, got %d", len(providers))
 	}
 }
 
 func TestGetProviderInfoList(t *testing.T) {
 	infos := GetProviderInfoList()
-	if len(infos) < 4 {
-		t.Errorf("expected at least 4 provider infos, got %d", len(infos))
+	if len(infos) < 3 {
+		t.Errorf("expected at least 3 provider infos, got %d", len(infos))
 	}
 	for _, info := range infos {
 		if info.ID == "" {

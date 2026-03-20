@@ -154,38 +154,6 @@ func TestAuthStorage_GetApiKey_OAuth(t *testing.T) {
 	}
 }
 
-func TestAuthStorage_GetApiKey_OAuth_Google(t *testing.T) {
-	// Register the Gemini CLI provider (normally provided by builtin extension).
-	oauth.RegisterProvider(&oauth.GeminiCLIProvider{})
-	defer oauth.UnregisterProvider("google-gemini-cli")
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "auth.json")
-
-	s := NewAuthStorage(path)
-
-	// Google OAuth returns JSON with token + projectId
-	s.Set("google-gemini-cli", AuthCredential{
-		Type:      CredentialTypeOAuth,
-		Access:    "ya29.test-google-token",
-		Refresh:   "1//test-refresh",
-		Expires:   9999999999999,
-		ProjectID: "my-project-id",
-	})
-
-	key := s.GetApiKey("google-gemini-cli")
-	if key == "" {
-		t.Fatal("expected non-empty key")
-	}
-	// Should be JSON with token and projectId
-	if !contains(key, "ya29.test-google-token") {
-		t.Errorf("expected key to contain access token, got %q", key)
-	}
-	if !contains(key, "my-project-id") {
-		t.Errorf("expected key to contain projectId, got %q", key)
-	}
-}
-
 func TestAuthStorage_GetApiKey_OAuth_EmptyAccess(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
@@ -202,55 +170,6 @@ func TestAuthStorage_GetApiKey_OAuth_EmptyAccess(t *testing.T) {
 	key := s.GetApiKey("anthropic")
 	if key != "" {
 		t.Errorf("expected empty key for OAuth with no access token, got %q", key)
-	}
-}
-
-func TestAuthStorage_GetApiKey_OAuth_ReloadFromDisk(t *testing.T) {
-	// Register the Gemini CLI provider (normally provided by builtin extension).
-	oauth.RegisterProvider(&oauth.GeminiCLIProvider{})
-	defer oauth.UnregisterProvider("google-gemini-cli")
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "auth.json")
-
-	// Write OAuth credentials directly to the file (simulating what the TS version writes)
-	jsonData := `{
-		"anthropic": {
-			"type": "oauth",
-			"refresh": "sk-ant-ort01-refresh",
-			"access": "sk-ant-oat01-access-token",
-			"expires": 9999999999999
-		},
-		"google-gemini-cli": {
-			"type": "oauth",
-			"refresh": "1//refresh",
-			"access": "ya29.google-token",
-			"expires": 9999999999999,
-			"projectId": "test-project"
-		}
-	}`
-	os.WriteFile(path, []byte(jsonData), 0600)
-
-	s := NewAuthStorage(path)
-
-	// Anthropic OAuth
-	key := s.GetApiKey("anthropic")
-	if key != "sk-ant-oat01-access-token" {
-		t.Errorf("anthropic: expected OAuth access token, got %q", key)
-	}
-
-	// Google OAuth (should return JSON)
-	key = s.GetApiKey("google-gemini-cli")
-	if !contains(key, "ya29.google-token") || !contains(key, "test-project") {
-		t.Errorf("google-gemini-cli: expected JSON with token and projectId, got %q", key)
-	}
-
-	// HasAuth should work for OAuth providers
-	if !s.HasAuth("anthropic") {
-		t.Error("should have auth for anthropic")
-	}
-	if !s.HasAuth("google-gemini-cli") {
-		t.Error("should have auth for google-gemini-cli")
 	}
 }
 

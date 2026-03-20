@@ -10,6 +10,12 @@ import (
 	"sync"
 )
 
+// CallbackResult holds the result from the OAuth callback server.
+type CallbackResult struct {
+	Code  string
+	State string
+}
+
 // StartOAuthCallbackServer starts a local HTTP server to receive an OAuth callback.
 // route is the path to listen on (e.g., "/oauth-callback").
 // addr is the listener address (e.g., "127.0.0.1:51121").

@@ -20,8 +20,6 @@ func init() {
 	// Register all built-in OAuth providers.
 	RegisterProvider(&AnthropicProvider{})
 	RegisterProvider(&GitHubCopilotProvider{})
-	// GeminiCLIProvider is now provided by the gemini_cli_auth builtin extension.
-	RegisterProvider(&AntigravityProvider{})
 	RegisterProvider(&OpenAICodexProvider{})
 
 	// Snapshot built-ins after registration.
