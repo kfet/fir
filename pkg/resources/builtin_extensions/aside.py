@@ -185,9 +185,24 @@ def _run_aside(
     except Exception as exc:
         return _side_query_error(exc)
 
+    # Include raw tool outputs in details for TUI display (not sent to LLM).
+    # Truncate individual outputs to avoid bloating the JSON-RPC response.
+    max_output_len = 50 * 1024  # 50KB per tool output
+    tool_outputs = []
+    for r in results:
+        output = r["output"]
+        if len(output) > max_output_len:
+            output = output[:max_output_len] + "\n... (truncated)"
+        tool_outputs.append({
+            "name": r["name"],
+            "output": output,
+            "is_error": r.get("is_error", False),
+        })
+
     return {
         "content": [{"type": "text", "text": synthesis}],
         "is_error": False,
+        "details": {"tool_outputs": tool_outputs},
     }
 
 

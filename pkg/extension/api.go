@@ -93,6 +93,7 @@ type ToolContext struct {
 type ToolResult struct {
 	Content []ai.ToolResultContent `json:"content"`
 	IsError bool                   `json:"is_error"`
+	Details map[string]any         `json:"details,omitempty"`
 }
 
 // ToolInfo describes a registered tool's name and parameter schema.

@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -209,5 +210,86 @@ func TestToolExecution_GenericFallbackWithoutHint(t *testing.T) {
 	// Without hint, should show raw JSON args
 	if !strings.Contains(joined, "foo") {
 		t.Errorf("expected raw args in generic output, got %q", joined)
+	}
+}
+
+func TestToolExecution_ToolOutputDetails(t *testing.T) {
+	hint := &agent.ToolDisplayHint{
+		TitleArgs: []agent.TitleArg{{Name: "title", Style: "accent"}},
+	}
+	args := map[string]any{"title": "check files"}
+	comp := NewToolExecutionComponent("aside", args, nil, hint)
+
+	comp.UpdateResult(&ToolResultData{
+		Content: []ToolContentBlock{
+			{Type: "text", Text: "synthesis result"},
+		},
+		Details: map[string]any{
+			"tool_outputs": []any{
+				map[string]any{
+					"name":     "Read",
+					"output":   "file contents here\nline2\nline3",
+					"is_error": false,
+				},
+				map[string]any{
+					"name":     "Bash",
+					"output":   "command failed",
+					"is_error": true,
+				},
+			},
+		},
+	}, false)
+
+	lines := comp.Render(120)
+	joined := strings.Join(lines, "\n")
+
+	// Should show tool output headers
+	if !strings.Contains(joined, "Read") {
+		t.Errorf("expected Read tool output, got %q", joined)
+	}
+	if !strings.Contains(joined, "Bash") {
+		t.Errorf("expected Bash tool output, got %q", joined)
+	}
+	if !strings.Contains(joined, "[ERROR]") {
+		t.Errorf("expected ERROR tag for failed tool, got %q", joined)
+	}
+	// Should show synthesis
+	if !strings.Contains(joined, "synthesis result") {
+		t.Errorf("expected synthesis in output, got %q", joined)
+	}
+}
+
+func TestToolExecution_ToolOutputDetailsLineTruncation(t *testing.T) {
+	args := map[string]any{"title": "test"}
+	comp := NewToolExecutionComponent("aside", args, nil, nil)
+
+	// Generate 20 lines — should be truncated to 10
+	var lines []string
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("line-%d", i))
+	}
+	comp.UpdateResult(&ToolResultData{
+		Content: []ToolContentBlock{{Type: "text", Text: "done"}},
+		Details: map[string]any{
+			"tool_outputs": []any{
+				map[string]any{
+					"name":     "Read",
+					"output":   strings.Join(lines, "\n"),
+					"is_error": false,
+				},
+			},
+		},
+	}, false)
+
+	rendered := comp.Render(120)
+	joined := strings.Join(rendered, "\n")
+	if !strings.Contains(joined, "line-9") {
+		t.Errorf("expected line-9 visible, got %q", joined)
+	}
+	if strings.Contains(joined, "line-10") {
+		t.Errorf("line-10 should be truncated, got %q", joined)
+	}
+	if !strings.Contains(joined, "10 more lines") {
+		t.Errorf("expected truncation hint, got %q", joined)
 	}
 }

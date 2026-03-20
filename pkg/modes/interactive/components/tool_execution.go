@@ -685,6 +685,7 @@ func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {
 	text := t.Fg("toolTitle", t.Bold(tc.toolName))
 	argsJSON, _ := json.MarshalIndent(tc.args, "", "  ")
 	text += "\n\n" + string(argsJSON)
+	text += tc.formatToolOutputDetails(t)
 	output := tc.getTextOutput()
 	if output != "" {
 		text += "\n" + output
@@ -727,6 +728,9 @@ func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {
 		}
 		text += " " + prefix + styled
 	}
+
+	// Show tool_outputs from details (display-only, not in LLM context).
+	text += tc.formatToolOutputDetails(t)
 
 	// Show result with configurable max lines
 	if tc.result != nil {
@@ -824,4 +828,78 @@ func formatSize(bytes int) string {
 		return fmt.Sprintf("%.1fKB", float64(bytes)/1024)
 	}
 	return fmt.Sprintf("%dB", bytes)
+}
+
+// formatToolOutputDetails renders tool_outputs from Details, which allows
+// extensions to surface raw tool outputs for display without adding them
+// to the LLM context.
+func (tc *ToolExecutionComponent) formatToolOutputDetails(t *theme.Theme) string {
+	if tc.result == nil || tc.result.Details == nil {
+		return ""
+	}
+	outputs, ok := tc.result.Details["tool_outputs"].([]any)
+	if !ok || len(outputs) == 0 {
+		return ""
+	}
+
+	const (
+		maxLineLen      = 512  // truncate individual lines
+		maxLinesDefault = 10   // collapsed line count per tool output
+		maxTotalBytes   = 50 * 1024 // stop rendering after 50KB total
+	)
+
+	var text string
+	totalBytes := 0
+	for _, raw := range outputs {
+		if totalBytes >= maxTotalBytes {
+			text += "\n\n" + t.Fg("muted", "... (remaining tool outputs trimmed)")
+			break
+		}
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := entry["name"].(string)
+		output, _ := entry["output"].(string)
+		isError, _ := entry["is_error"].(bool)
+
+		errorTag := ""
+		if isError {
+			errorTag = " [ERROR]"
+		}
+		header := t.Fg("muted", fmt.Sprintf("--- %s%s ---", name, errorTag))
+		lines := strings.Split(strings.TrimSpace(output), "\n")
+		maxLines := maxLinesDefault
+		if tc.expanded {
+			maxLines = len(lines)
+		}
+		displayLines := lines
+		if len(displayLines) > maxLines {
+			displayLines = lines[:maxLines]
+		}
+		remaining := len(lines) - len(displayLines)
+
+		styledLines := make([]string, len(displayLines))
+		for i, line := range displayLines {
+			if len(line) > maxLineLen {
+				// Truncate at rune boundary to avoid splitting multi-byte characters.
+				truncated := []rune(line)
+				if len(truncated) > maxLineLen {
+					line = string(truncated[:maxLineLen]) + "…"
+				}
+			}
+			if isError {
+				styledLines[i] = t.Fg("error", line)
+			} else {
+				styledLines[i] = t.Fg("toolOutput", line)
+			}
+			totalBytes += len(line)
+		}
+		text += "\n\n" + header + "\n" + strings.Join(styledLines, "\n")
+		if remaining > 0 {
+			text += t.Fg("muted", fmt.Sprintf("\n... (%d more lines,", remaining)) +
+				" " + KeyHint(tuicomp.ActExpandTools, "to expand") + ")"
+		}
+	}
+	return text
 }

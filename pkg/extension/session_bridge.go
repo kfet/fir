@@ -245,6 +245,7 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 			return agent.AgentToolResult{
 				Content: r.Content,
 				IsError: r.IsError,
+				Details: r.Details,
 			}, nil
 		},
 	}
