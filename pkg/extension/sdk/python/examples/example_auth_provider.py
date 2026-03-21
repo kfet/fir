@@ -89,6 +89,25 @@ def refresh(params, ctx):
     }
 
 
+@fir_ext.auth_list_models(provider="example-corp")
+def list_models(params, ctx):
+    """List models available via Example Corp SSO.
+
+    This could call an API endpoint to discover available models dynamically.
+    Return a list of model ID strings, or None if not supported.
+    """
+    # Example: query a models endpoint using the OAuth credentials
+    # creds = params["credentials"]
+    # req = urllib.request.Request(
+    #     "https://api.example-corp.com/v1/models",
+    #     headers={"Authorization": f"Bearer {creds['access']}"},
+    # )
+    # with urllib.request.urlopen(req) as resp:
+    #     data = json.loads(resp.read())
+    #     return [m["id"] for m in data["models"]]
+    return None  # noqa: RET501
+
+
 def _exchange_code(code: str, redirect_uri: str, verifier: str) -> dict:
     return _token_request(
         {

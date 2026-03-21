@@ -420,4 +420,10 @@ def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
     return json.dumps({"token": creds.get("access", ""), "projectId": project_id})
 
 
+@fir_ext.auth_list_models(provider="google-gemini-cli")
+def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
+    """List available models — not supported for Gemini CLI (statically defined)."""
+    return None
+
+
 fir_ext.run(name="gemini-cli-auth")

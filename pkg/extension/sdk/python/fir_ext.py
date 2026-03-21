@@ -437,6 +437,7 @@ _auth_providers: list[dict[str, Any]] = []
 _auth_login_handlers: dict[str, Callable] = {}
 _auth_refresh_handlers: dict[str, Callable] = {}
 _auth_api_key_handlers: dict[str, Callable] = {}
+_auth_list_models_handlers: dict[str, Callable] = {}
 _auth_modify_models_handlers: dict[str, Callable] = {}
 
 # ---------------------------------------------------------------------------
@@ -605,6 +606,21 @@ def auth_modify_models(provider: str) -> Callable:
 
     def decorator(fn: Callable) -> Callable:
         _auth_modify_models_handlers[provider] = fn
+        return fn
+
+    return decorator
+
+
+def auth_list_models(provider: str) -> Callable:
+    """Register a model lister for an auth provider.
+
+    The decorated function receives ``(params: dict, ctx: AuthContext)``
+    where *params* contains ``{"provider_id": "...", "credentials": {...}}``.
+    It should return a list of model ID strings, or None if not supported.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_list_models_handlers[provider] = fn
         return fn
 
     return decorator
@@ -1150,6 +1166,16 @@ def run(
 
             elif method == "auth/modify_models":
                 handler = _auth_modify_models_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_response(msg_id, {"models": None}), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, list):
+                    result = {"models": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            elif method == "auth/list_models":
+                handler = _auth_list_models_handlers.get(provider_id)
                 if handler is None:
                     _write_message(_make_response(msg_id, {"models": None}), out_stream)
                     return

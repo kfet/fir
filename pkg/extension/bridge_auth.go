@@ -56,6 +56,25 @@ func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credenti
 	return result.Credentials, nil
 }
 
+func (p *extAuthProvider) ListModels(_ context.Context, creds *oauth.Credentials) ([]string, error) {
+	params := map[string]any{
+		"provider_id": p.spec.ID,
+		"credentials": creds,
+	}
+	raw, err := p.bridge.CallHook("auth/list_models", params, 30*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("auth/list_models: %w", err)
+	}
+
+	var result struct {
+		Models []string `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("auth/list_models: invalid response: %w", err)
+	}
+	return result.Models, nil
+}
+
 func (p *extAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
 	params := map[string]any{
 		"provider_id": p.spec.ID,

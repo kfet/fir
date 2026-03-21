@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -216,6 +217,10 @@ func (m *mockOAuthProvider) UsesCallbackServer() bool { return false }
 
 func (m *mockOAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error) {
 	return m.loginCreds, nil
+}
+
+func (m *mockOAuthProvider) ListModels(_ context.Context, _ *oauth.Credentials) ([]string, error) {
+	return nil, nil
 }
 
 func (m *mockOAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
