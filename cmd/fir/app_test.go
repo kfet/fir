@@ -494,3 +494,102 @@ func TestRunUpdate_Linux_FetchFails(t *testing.T) {
 		t.Error("expected error when FetchLatest fails, got nil")
 	}
 }
+
+// ============================================================================
+// setupSession — deferExtensions
+// ============================================================================
+
+func TestSetupSession_DeferExtensions_SkipsSetup(t *testing.T) {
+	providers.RegisterDefaultProviders()
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	// Create a project dir with an extension so there's something to discover.
+	projectDir := t.TempDir()
+	extDir := filepath.Join(projectDir, ".fir", "extensions")
+	os.MkdirAll(extDir, 0o755)
+	os.WriteFile(filepath.Join(extDir, "slow.py"), []byte("#!/usr/bin/env python3\n# name: slow\nimport time; time.sleep(10)\n"), 0o755)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	defer os.Chdir(origDir)
+
+	args := &Args{}
+
+	setup, err := setupSession(args, false, true)
+	if err != nil {
+		t.Fatalf("setupSession failed: %v", err)
+	}
+	defer setup.result.Session.Close()
+
+	if setup.extSetup != nil {
+		t.Error("expected extSetup to be nil when deferExtensions=true")
+	}
+	if setup.extensionOpts == nil {
+		t.Error("expected extensionOpts to be populated when deferExtensions=true")
+	}
+	// Resolve symlinks for macOS /var → /private/var.
+	realProjectDir, _ := filepath.EvalSymlinks(projectDir)
+	if setup.extensionOpts.ProjectDir != projectDir && setup.extensionOpts.ProjectDir != realProjectDir {
+		t.Errorf("expected extensionOpts.ProjectDir=%q, got %q", projectDir, setup.extensionOpts.ProjectDir)
+	}
+}
+
+func TestSetupSession_NoDeferExtensions_RunsSetup(t *testing.T) {
+	providers.RegisterDefaultProviders()
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	// Project dir with NO extensions — Setup runs but finds nothing.
+	projectDir := t.TempDir()
+
+	origDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	defer os.Chdir(origDir)
+
+	args := &Args{}
+
+	setup, err := setupSession(args, false, false)
+	if err != nil {
+		t.Fatalf("setupSession failed: %v", err)
+	}
+	defer setup.result.Session.Close()
+
+	// extensionOpts should always be populated.
+	if setup.extensionOpts == nil {
+		t.Error("expected extensionOpts to always be populated")
+	}
+}
+
+func TestSetupSession_DeferExtensions_FasterThanBlocking(t *testing.T) {
+	// This test verifies the performance invariant: deferring extensions
+	// should make setupSession return in well under 500ms, even if there
+	// are extensions that would take seconds to start.
+	providers.RegisterDefaultProviders()
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	// Create a project dir with a deliberately slow extension.
+	projectDir := t.TempDir()
+	extDir := filepath.Join(projectDir, ".fir", "extensions")
+	os.MkdirAll(extDir, 0o755)
+	os.WriteFile(filepath.Join(extDir, "blocker.py"), []byte("#!/usr/bin/env python3\n# name: blocker\nimport time; time.sleep(30)\n"), 0o755)
+
+	origDir, _ := os.Getwd()
+	os.Chdir(projectDir)
+	defer os.Chdir(origDir)
+
+	args := &Args{}
+
+	start := time.Now()
+	setup, err := setupSession(args, false, true)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("setupSession failed: %v", err)
+	}
+	defer setup.result.Session.Close()
+
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("setupSession with deferExtensions=true took %v, expected < 500ms", elapsed)
+	}
+}

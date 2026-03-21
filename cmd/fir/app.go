@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -41,6 +42,10 @@ type sessionSetup struct {
 	extSetup        *extension.SetupResult
 	usageTracker    *Tracker
 	resourceLoader  resources.ResourceLoader
+
+	// extensionOpts is populated when DeferExtensions is true, so the
+	// caller can run setupExtensions later (e.g. after the TUI renders).
+	extensionOpts *extension.SetupOptions
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -49,7 +54,7 @@ type sessionSetup struct {
 // When skipScopedOnContinue is true (print/RPC modes), the scoped-model
 // default is skipped on --continue/--resume so the continued session keeps
 // its original model.
-func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) {
+func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (*sessionSetup, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
@@ -165,16 +170,20 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 
 	// Extensions — discover and start stdio-based extensions in .fir/extensions/
 	var extSetup *extension.SetupResult
+	var extOpts *extension.SetupOptions
 	if !args.NoExtensions {
-		extSetup, err = extension.Setup(result.Session, extension.SetupOptions{
+		extOpts = &extension.SetupOptions{
 			ProjectDir:          cwd,
 			Cwd:                 cwd,
 			Mode:                resolveExtensionMode(args),
 			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
+		}
+		if !deferExtensions {
+			extSetup, err = extension.Setup(result.Session, *extOpts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
+			}
 		}
 	}
 
@@ -203,6 +212,7 @@ func setupSession(args *Args, skipScopedOnContinue bool) (*sessionSetup, error) 
 		extSetup:        extSetup,
 		usageTracker:    usageTracker,
 		resourceLoader:  rl,
+		extensionOpts:   extOpts,
 	}, nil
 }
 
@@ -389,7 +399,7 @@ func run() error {
 		return runInteractiveMode(args, noticeCh)
 	}
 
-	setup, err := setupSession(args, true)
+	setup, err := setupSession(args, true, false)
 	if err != nil {
 		return err
 	}
@@ -505,7 +515,7 @@ func runExport(args *Args) error {
 	if args.Session == "" {
 		return fmt.Errorf("--export requires --session <id> to identify the session to export")
 	}
-	setup, err := setupSession(args, true)
+	setup, err := setupSession(args, true, false)
 	if err != nil {
 		return err
 	}
@@ -659,16 +669,11 @@ func runAcpMode(args *Args) error {
 
 // runInteractiveMode runs the full interactive TUI mode.
 func runInteractiveMode(args *Args, noticeCh <-chan string) error {
-	setup, err := setupSession(args, false)
+	setup, err := setupSession(args, false, true)
 	if err != nil {
 		return err
 	}
 	defer setup.result.Session.Close()
-
-	// Extension lifecycle: shutdown deferred, start happens after UI wiring
-	if setup.extSetup != nil {
-		defer func() { setup.extSetup.EmitSessionShutdown() }()
-	}
 
 	// Load keybindings
 	keybindings := tui.NewKeybindingsManager(setup.agentDir)
@@ -684,21 +689,15 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		if len(args.Messages) > 0 {
 			initialPrompt += strings.Join(args.Messages, "\n")
 		}
-		// Note: images in interactive mode are not yet supported
 	} else if len(args.Messages) > 0 {
 		initialPrompt = strings.Join(args.Messages, "\n")
 	}
 
-	// Build theme search dirs: the user's global themes folder, any paths
-	// from project/global settings.json, and any paths supplied via
-	// --theme flags. A --theme flag may point to a .json file (use its
-	// parent dir) or directly to a directory.
-	// --no-themes disables all discovery; only the built-in dark/light themes remain.
+	// Build theme search dirs
 	var themeSearchDirs []string
 	if !args.NoThemes {
 		themeSearchDirs = []string{filepath.Join(setup.agentDir, "themes")}
 		themeSearchDirs = append(themeSearchDirs, setup.settingsManager.GetThemePaths()...)
-		// Add directories containing package-contributed theme files.
 		if setup.resourceLoader != nil {
 			for _, p := range setup.resourceLoader.GetPackageThemePaths() {
 				themeSearchDirs = append(themeSearchDirs, filepath.Dir(p))
@@ -728,17 +727,6 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	)
 	interactive.SetVersion(version)
 
-	// Wire extension setup into interactive mode (enables /reload for extensions).
-	if setup.extSetup != nil {
-		mode.SetExtensionSetup(setup.extSetup)
-		mode.SetBeforeExtensionReload(func() error {
-			if setup.extSetup.Manager != nil {
-				setup.extSetup.Manager.SetAllowedNames(resolveEnabledExtensions(args, setup.settingsManager))
-			}
-			return nil
-		})
-	}
-
 	// Wire the update notice channel so the TUI shows it at startup.
 	mode.SetUpdateChannel(noticeCh)
 
@@ -746,16 +734,46 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		return fmt.Errorf("init interactive mode: %w", err)
 	}
 
-	// Emit session_start after Init() so that:
-	//   1. Extension status callbacks are active (UI is wired).
-	//   2. preloadReexecSidecar has run and ReexecExtData() is populated.
-	if setup.extSetup != nil {
-		setup.extSetup.EmitSessionStart(mode.ReexecExtData())
+	// Set up extensions AFTER TUI init, in a background goroutine so the
+	// prompt appears immediately. Extensions register their tools async —
+	// they'll be ready before the user finishes typing their first message.
+	//
+	// extDone is closed when the goroutine finishes; extResult holds the
+	// SetupResult so the main goroutine can shut it down race-free.
+	extDone := make(chan struct{})
+	var extResult atomic.Pointer[extension.SetupResult]
+	if !args.NoExtensions && setup.extensionOpts != nil {
+		go func() {
+			defer close(extDone)
+			es, extErr := extension.Setup(setup.result.Session, *setup.extensionOpts)
+			if extErr != nil {
+				firlog.Warn("extension setup failed", "err", extErr)
+			}
+			if es != nil {
+				extResult.Store(es)
+				mode.SetExtensionSetup(es)
+				mode.SetBeforeExtensionReload(func() error {
+					if es.Manager != nil {
+						es.Manager.SetAllowedNames(resolveEnabledExtensions(args, setup.settingsManager))
+					}
+					return nil
+				})
+				es.EmitSessionStart(mode.ReexecExtData())
+			}
+		}()
+	} else {
+		close(extDone)
 	}
 
 	err = mode.Run(interactive.InteractiveModeOptions{
 		InitialPrompt: initialPrompt,
 	})
+	// Wait for the extension goroutine to finish before shutting down,
+	// so we don't race on the SetupResult pointer.
+	<-extDone
+	if es := extResult.Load(); es != nil {
+		es.EmitSessionShutdown()
+	}
 	mode.ReexecIfRequested() // never returns if /reexec was used
 	return err
 }
