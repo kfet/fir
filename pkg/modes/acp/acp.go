@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
@@ -58,6 +59,7 @@ type firSession struct {
 	lastResumeList  []store.SessionListInfo
 	configAccessor  thinkingAccessor // nil → use session (for testing)
 	mcpManager      *mcp.Manager     // nil if no MCP servers configured
+	extReady        chan struct{}    // closed when async extension setup completes
 }
 
 // getThinkingAccessor returns the thinkingAccessor for this session.
@@ -134,6 +136,10 @@ func RunAcpMode(opts Options) error {
 			entry.unsubscribe()
 		}
 		entry.session.Close()
+		// Wait for async extension setup before shutdown to avoid racing.
+		if entry.extReady != nil {
+			<-entry.extReady
+		}
 		if entry.extSetup != nil {
 			entry.extSetup.EmitSessionShutdown()
 		}
@@ -244,18 +250,35 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	})
 	entry.unsubscribe = unsub
 
-	// Extension setup — discover stdio-based extensions in .fir/extensions/
+	// Extension setup — discover and start eager extensions synchronously
+	// (auth extensions must be ready before session/new responds with models).
+	// Lazy extensions (triggered by session_start) are fired asynchronously
+	// since they don't affect auth/models.
+	entry.extReady = make(chan struct{})
 	if !pa.options.NoExtensions {
+		t0 := time.Now()
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
 			Mode:         "acp",
 			EnabledNames: resolveEnabledExtensions(pa.options.EnabledExtensions, settingsManager),
 		})
+		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {
 			entry.extSetup = extSetup
-			extSetup.EmitSessionStart(nil)
+			// Fire session_start async — this triggers lazy extensions
+			// (auto-namer, doctor, plan-nudger) which don't provide auth.
+			go func() {
+				t1 := time.Now()
+				extSetup.EmitSessionStart(nil)
+				firlog.Info("acp createSession: EmitSessionStart (async)", "elapsed_ms", time.Since(t1).Milliseconds())
+				close(entry.extReady)
+			}()
+		} else {
+			close(entry.extReady)
 		}
+	} else {
+		close(entry.extReady)
 	}
 
 	pa.mu.Lock()
@@ -298,6 +321,11 @@ func (pa *firAgent) sendAvailableCommands(sessionID string) {
 	pa.mu.Unlock()
 	if !ok {
 		return
+	}
+
+	// Wait for async extension setup so extension commands are included.
+	if entry.extReady != nil {
+		<-entry.extReady
 	}
 
 	commands := builtInCommands()

@@ -141,6 +141,12 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		return acpsdk.PromptResponse{}, fmt.Errorf("session not found: %s", params.SessionId)
 	}
 
+	// Wait for async extension setup to complete so hooks and event
+	// forwarding are wired before any tool calls execute.
+	if entry.extReady != nil {
+		<-entry.extReady
+	}
+
 	text, images := ExtractPromptContent(params.Prompt)
 
 	// Handle slash commands
@@ -298,6 +304,9 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 			existing.unsubscribe()
 		}
 		existing.session.Close()
+		if existing.extReady != nil {
+			<-existing.extReady
+		}
 		if existing.extSetup != nil {
 			existing.extSetup.EmitSessionShutdown()
 		}

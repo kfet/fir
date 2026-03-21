@@ -1211,9 +1211,12 @@ def run(
                 def _run_event(h=handler, p=params):
                     try:
                         h(p, ctx)
+                    except RuntimeError as exc:
+                        if "shutdown" not in str(exc):
+                            import traceback
+                            traceback.print_exc(file=sys.stderr)
                     except Exception:
                         import traceback
-
                         traceback.print_exc(file=sys.stderr)
 
                 t = threading.Thread(target=_run_event, daemon=True)
@@ -1240,6 +1243,14 @@ def run(
             break
         _dispatch(msg)
 
-    # Wait for any in-flight handlers to finish
+    # Wait for any in-flight handlers to finish.
+    # First, unblock any pending outbound calls so handler threads don't wait
+    # the full timeout after the connection is closed.
+    for rid, evt in list(pending.items()):
+        results[rid] = {
+            "jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32000, "message": "shutdown"},
+        }
+        evt.set()
     for w in _workers:
         w.join(timeout=15)
