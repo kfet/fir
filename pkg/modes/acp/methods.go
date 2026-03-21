@@ -287,6 +287,11 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 		}
 	}
 
+	// Sort all sessions by modification time (most recent first).
+	sort.Slice(allSessions, func(i, j int) bool {
+		return allSessions[i].Modified.After(allSessions[j].Modified)
+	})
+
 	infos := make([]SessionInfo, 0, len(allSessions))
 	for _, s := range allSessions {
 		var title *string
