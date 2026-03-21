@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy tidy _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -23,12 +23,16 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 # Only regenerate when .go files have changed (or the stamp is missing).
 PGO_STAMP := default.pgo.stamp
 
-build:
+build: tidy
 	@mkdir -p $(BINDIR)
-	go mod tidy
 	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
 
-all: fmt test-race build build-all lint-python test-python
+# `make all` runs fmt first, then everything else in parallel via recursive make -j.
+# The _all_parallel target declares independent prerequisites that make -j can schedule.
+all: fmt tidy
+	$(MAKE) -j _all_parallel
+
+_all_parallel: test-race build-all lint-python test-python
 
 fmt:
 	gofmt -s -w .
@@ -36,13 +40,32 @@ fmt:
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
 
-# Cross-compile for all targets
-build-all: build
+# Ensure modules are tidy once; other targets depend on this.
+tidy:
+	go mod tidy
+
+# Cross-compile for all targets (each is an independent phony target for parallelism)
+CROSS_TARGETS := build-darwin-arm64 build-darwin-amd64 build-linux-armv6 build-linux-arm64 build-linux-amd64
+
+build-all: $(CROSS_TARGETS) build
+
+build-darwin-arm64: | $(BINDIR)
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/
+
+build-darwin-amd64: | $(BINDIR)
 	GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/
+
+build-linux-armv6: | $(BINDIR)
 	GOOS=linux GOARCH=arm GOARM=6 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-armv6 ./cmd/fir/
+
+build-linux-arm64: | $(BINDIR)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/fir/
+
+build-linux-amd64: | $(BINDIR)
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/fir/
+
+$(BINDIR):
+	@mkdir -p $(BINDIR)
 
 test:
 	go test ./...
@@ -65,7 +88,7 @@ test-cover:
 	go test -coverprofile=$(BINDIR)/coverage.out ./...
 	go tool cover -func=$(BINDIR)/coverage.out
 
-test-race:
+test-race: tidy
 	go test -race ./...
 
 vet:
