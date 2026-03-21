@@ -216,10 +216,10 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
 			resp, err := pa.ListSessions(ctx, p)
-			firlog.Info("acp dispatch: session/list done", "total_ms", time.Since(methodStart).Milliseconds(), "count", len(resp.Sessions))
 			if err != nil {
 				return nil, toReqErr(err)
 			}
+			firlog.Info("acp dispatch: session/list done", "total_ms", time.Since(methodStart).Milliseconds(), "count", len(resp.Sessions))
 			return resp, nil
 
 		case "session/resume":

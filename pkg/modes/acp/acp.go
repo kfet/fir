@@ -295,7 +295,6 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		} else {
 			close(entry.extReady)
 		}
-		firlog.Info("acp createSession: extension setup", "elapsed_ms", time.Since(t0).Milliseconds(), "hasExtSetup", extSetup != nil)
 	} else {
 		close(entry.extReady)
 	}
