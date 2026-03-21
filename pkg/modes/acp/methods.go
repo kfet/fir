@@ -298,7 +298,13 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 		if s.Name != "" {
 			title = &s.Name
 		} else if s.FirstMessage != "" {
-			title = &s.FirstMessage
+			msg := s.FirstMessage
+			// Collapse whitespace and truncate for UI display.
+			msg = strings.Join(strings.Fields(msg), " ")
+			if len(msg) > 100 {
+				msg = msg[:100] + "…"
+			}
+			title = &msg
 		}
 		infos = append(infos, SessionInfo{
 			SessionId: s.Path,
