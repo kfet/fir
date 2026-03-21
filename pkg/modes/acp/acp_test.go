@@ -500,6 +500,33 @@ func TestListSessions_EmptyCwd(t *testing.T) {
 	_ = err
 }
 
+func TestListSessions_AllDirs(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	// Create two project session dirs with one session file each.
+	for _, name := range []string{"--project-a--", "--project-b--"} {
+		dir := filepath.Join(agentDir, "sessions", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Create a minimal session file.
+		f := filepath.Join(dir, "2026-01-01T00-00-00Z_test-id.jsonl")
+		if err := os.WriteFile(f, []byte(`{"type":"session","version":1,"id":"test","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pa := &firAgent{sessions: make(map[string]*firSession)}
+	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Sessions) != 2 {
+		t.Errorf("expected 2 sessions from 2 dirs, got %d", len(resp.Sessions))
+	}
+}
+
 func TestResumeSession_InvalidPath(t *testing.T) {
 	pa := &firAgent{sessions: make(map[string]*firSession)}
 	_, err := pa.ResumeSession(context.Background(), ResumeSessionRequest{

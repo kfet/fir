@@ -254,7 +254,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				runtime.Gosched()
 				time.Sleep(5 * time.Millisecond)
 				pa.sendAvailableCommands(p.SessionId)
-				if replayHistory {
+				if replayHistory && ok {
 					pa.replaySessionHistory(p.SessionId, entry)
 				}
 			}()

@@ -301,8 +301,9 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 			msg := s.FirstMessage
 			// Collapse whitespace and truncate for UI display.
 			msg = strings.Join(strings.Fields(msg), " ")
-			if len(msg) > 100 {
-				msg = msg[:100] + "…"
+			runes := []rune(msg)
+			if len(runes) > 100 {
+				msg = string(runes[:100]) + "…"
 			}
 			title = &msg
 		}
