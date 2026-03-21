@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-03-21
+
 ### Fixed
 
 - ACP `session/list` now returns sessions from all projects when no `cwd` filter is given, matching the ACP spec. Previously it resolved to an empty/wrong directory.
