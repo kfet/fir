@@ -31,7 +31,7 @@ type acpConn interface {
 var _ acpConn = (*acpsdk.AgentSideConnection)(nil)
 
 // rawMethodHandler builds an acpsdk.MethodHandler that handles ALL inbound methods,
-// including session/list and session/resume which the Go SDK doesn't know about.
+// including session/list, session/load, and session/resume which the Go SDK doesn't know about.
 // It is used by newRawConn below to create a connection that handles these methods.
 //
 // Unfortunately, AgentSideConnection.handle is unexported, so we can't chain
@@ -42,7 +42,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 	sessionCancels := map[string]func(){}
 
 	return func(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
-		firlog.Debug("acp: incoming method", "method", method, "params", truncate(string(params), 200))
+		firlog.Debug("acp: incoming method", "method", method, "params", string(params))
 		switch method {
 		case "authenticate":
 			var p acpsdk.AuthenticateRequest
@@ -68,7 +68,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}
 			// Augment with sessionCapabilities (not in SDK 0.10.7, present in TS SDK 0.14.1).
 			// Marshal to map and inject manually so clients like Zed know we support
-			// session/list and session/resume.
+			// session/list, session/load, and session/resume.
 			rawResp, err := json.Marshal(resp)
 			if err != nil {
 				return resp, nil // fall back to plain struct (no session capabilities)
@@ -222,9 +222,10 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			firlog.Info("acp dispatch: session/list done", "total_ms", time.Since(methodStart).Milliseconds(), "count", len(resp.Sessions))
 			return resp, nil
 
-		case "session/resume":
+		case "session/load", "session/resume":
+			replayHistory := method == "session/load"
 			methodStart := time.Now()
-			firlog.Info("acp dispatch: session/resume start")
+			firlog.Info("acp dispatch: " + method + " start")
 			var p ResumeSessionRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
@@ -233,7 +234,6 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if err != nil {
 				return nil, toReqErr(err)
 			}
-			// Inject configOptions like session/new.
 			rawResp, merr := json.Marshal(resp)
 			if merr != nil {
 				return resp, nil
@@ -243,21 +243,22 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				return resp, nil
 			}
 			pa.mu.Lock()
-			resumeEntry, rok := pa.sessions[p.SessionId]
+			entry, ok := pa.sessions[p.SessionId]
 			pa.mu.Unlock()
-			if rok {
-				respMap["configOptions"] = buildConfigOptions(resumeEntry)
+			if ok {
+				respMap["configOptions"] = buildConfigOptions(entry)
 			}
-			// Send available commands + replay history AFTER the response is written.
 			afterWrite := wn.AfterWrite()
 			go func() {
 				<-afterWrite
 				runtime.Gosched()
 				time.Sleep(5 * time.Millisecond)
 				pa.sendAvailableCommands(p.SessionId)
-				pa.replaySessionHistory(p.SessionId, resumeEntry)
+				if replayHistory {
+					pa.replaySessionHistory(p.SessionId, entry)
+				}
 			}()
-			firlog.Info("acp dispatch: session/resume done", "total_ms", time.Since(methodStart).Milliseconds())
+			firlog.Info("acp dispatch: "+method+" done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
 
 		default:
@@ -268,7 +269,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 
 // rawConn wraps an *acpsdk.Connection and implements acpConn.
 // It is used when we bypass AgentSideConnection and use NewConnection directly
-// so that we can handle session/list and session/resume.
+// so that we can handle session/list, session/load, and session/resume.
 type rawConn struct {
 	conn *acpsdk.Connection
 }
@@ -303,14 +304,6 @@ func (r *rawConn) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRe
 
 func (r *rawConn) WriteTextFile(ctx context.Context, params acpsdk.WriteTextFileRequest) (acpsdk.WriteTextFileResponse, error) {
 	return acpsdk.SendRequest[acpsdk.WriteTextFileResponse](r.conn, ctx, acpsdk.ClientMethodFsWriteTextFile, params)
-}
-
-// truncate returns s truncated to n characters with "…" suffix if needed.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 // toReqErr converts a Go error to a JSON-RPC RequestError.
@@ -355,7 +348,7 @@ func (w *writeNotifier) AfterWrite() <-chan struct{} {
 }
 
 // newRawConn creates a raw connection that handles ALL inbound methods
-// (including unstable session/list and session/resume) and returns
+// (including unstable session/list, session/load, and session/resume) and returns
 // an acpConn for outbound calls plus a done channel.
 func newRawConn(pa *firAgent, stdout io.Writer, stdin io.Reader) (acpConn, <-chan struct{}) {
 	wn := newWriteNotifier(stdout)

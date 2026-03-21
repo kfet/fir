@@ -62,8 +62,10 @@ def _read_records(limit: int = 200) -> list[dict[str, Any]]:
 
 
 @fir_ext.on("session_start")
-def on_session_start(params: dict, ctx: fir_ext.Context) -> None:
+def on_session_start(params, ctx: fir_ext.Context) -> None:
     global _session_end_fired
+    if params is None:
+        params = {}
     _session.update({
         "session_id": params.get("session_id", "unknown"),
         "start_time": time.time(),

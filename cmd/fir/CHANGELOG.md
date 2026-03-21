@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- ACP `session/list` now returns sessions from all projects when no `cwd` filter is given, matching the ACP spec. Previously it resolved to an empty/wrong directory.
+- ACP `session/load` method is now handled, enabling session history loading in Zed. `session/resume` no longer replays history per the ACP spec.
+- ACP debug log now dumps full JSON-RPC params instead of truncating to 200 chars.
+- Doctor extension no longer crashes on `session_start` when params is `None`.
 - Extension `tool_call` hook timeout is now activity-aware — the 30s deadline resets whenever the extension sends any message (request or response), preventing spurious timeouts for long-running tools like `aside` that make multiple bridge calls.
 - Skills are now included in the system prompt even when a custom system prompt (`SYSTEM.md` / `--system-prompt`) is active; previously the custom override silently dropped the `<available_skills>` block.
 

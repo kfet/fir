@@ -251,23 +251,44 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionM
 // ListSessions handles the session/list method.
 // It returns sessions from the caller's working directory.
 func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
-	cwd := params.Cwd
-	if cwd == "" {
-		cwd = os.Getenv("PWD")
-		if cwd == "" {
-			cwd, _ = os.Getwd()
+	agentDir := resolveAgentDir()
+
+	var allSessions []store.SessionListInfo
+
+	if params.Cwd != "" {
+		// Scoped to a specific cwd.
+		sessionDir := store.DefaultSessionDir(agentDir, params.Cwd)
+		sessions, err := store.ListSessions(params.Cwd, sessionDir)
+		if err != nil {
+			return ListSessionsResponse{}, err
+		}
+		allSessions = sessions
+	} else {
+		// No cwd filter — enumerate all session directories.
+		sessionsRoot := filepath.Join(agentDir, "sessions")
+		entries, err := os.ReadDir(sessionsRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return ListSessionsResponse{Sessions: []SessionInfo{}}, nil
+			}
+			return ListSessionsResponse{}, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dir := filepath.Join(sessionsRoot, entry.Name())
+			sessions, err := store.ListSessions("", dir)
+			if err != nil {
+				firlog.Debug("session/list: skipping dir", "dir", dir, "err", err)
+				continue
+			}
+			allSessions = append(allSessions, sessions...)
 		}
 	}
 
-	agentDir := resolveAgentDir()
-	sessionDir := store.DefaultSessionDir(agentDir, cwd)
-	sessions, err := store.ListSessions(cwd, sessionDir)
-	if err != nil {
-		return ListSessionsResponse{}, err
-	}
-
-	infos := make([]SessionInfo, 0, len(sessions))
-	for _, s := range sessions {
+	infos := make([]SessionInfo, 0, len(allSessions))
+	for _, s := range allSessions {
 		var title *string
 		if s.Name != "" {
 			title = &s.Name
