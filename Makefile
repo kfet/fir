@@ -19,30 +19,48 @@ endif
 
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 
+# ---------------------------------------------------------------------------
+# Quiet build helpers — print a short step name, show output only on failure.
+# Usage: $(call RUN,label,command)
+# Set V=1 for verbose output: make all V=1
+# ---------------------------------------------------------------------------
+ifdef V
+  define RUN
+	@printf "  %-28s\n" "$(1)"
+	$(2)
+  endef
+else
+  define RUN
+	@_log=$$(mktemp) && ( $(2) ) > $$_log 2>&1 \
+		&& { printf "  %-28s ✓\n" "$(1)"; rm -f $$_log; } \
+		|| { printf "  %-28s ✗\n" "$(1)"; cat $$_log; rm -f $$_log; exit 1; }
+  endef
+endif
+
 # Stamp file records the Go source-tree hash for which default.pgo was last generated.
 # Only regenerate when .go files have changed (or the stamp is missing).
 PGO_STAMP := default.pgo.stamp
 
 build: tidy
 	@mkdir -p $(BINDIR)
-	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/
+	$(call RUN,build (native),go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/)
 
 # `make all` runs fmt first, then everything else in parallel via recursive make -j.
 # The _all_parallel target declares independent prerequisites that make -j can schedule.
 all: fmt tidy
-	$(MAKE) -j _all_parallel
+	@$(MAKE) -j --no-print-directory _all_parallel
 
 _all_parallel: test-race build-all lint-python test-python
 
 fmt:
-	gofmt -s -w .
+	@gofmt -s -w .
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
 
 # Ensure modules are tidy once; other targets depend on this.
 tidy:
-	go mod tidy
+	@go mod tidy
 
 # Cross-compile for all targets (each is an independent phony target for parallelism)
 CROSS_TARGETS := build-darwin-arm64 build-darwin-amd64 build-linux-armv6 build-linux-arm64 build-linux-amd64
@@ -50,19 +68,19 @@ CROSS_TARGETS := build-darwin-arm64 build-darwin-amd64 build-linux-armv6 build-l
 build-all: $(CROSS_TARGETS) build
 
 build-darwin-arm64: | $(BINDIR)
-	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/
+	$(call RUN,build darwin/arm64,GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-arm64 ./cmd/fir/)
 
 build-darwin-amd64: | $(BINDIR)
-	GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/
+	$(call RUN,build darwin/amd64,GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-darwin-amd64 ./cmd/fir/)
 
 build-linux-armv6: | $(BINDIR)
-	GOOS=linux GOARCH=arm GOARM=6 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-armv6 ./cmd/fir/
+	$(call RUN,build linux/armv6,GOOS=linux GOARCH=arm GOARM=6 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-armv6 ./cmd/fir/)
 
 build-linux-arm64: | $(BINDIR)
-	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/fir/
+	$(call RUN,build linux/arm64,GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-arm64 ./cmd/fir/)
 
 build-linux-amd64: | $(BINDIR)
-	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/fir/
+	$(call RUN,build linux/amd64,GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY)-linux-amd64 ./cmd/fir/)
 
 $(BINDIR):
 	@mkdir -p $(BINDIR)
@@ -89,7 +107,7 @@ test-cover:
 	go tool cover -func=$(BINDIR)/coverage.out
 
 test-race: tidy
-	go test -race ./...
+	$(call RUN,test (race),go test -race ./...)
 
 vet:
 	go vet ./...
@@ -166,9 +184,9 @@ check-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv not found. Run 'make install-uv' first."; exit 1; }
 
 lint-python: check-uv
-	uvx ruff check $(PYTHON_DIRS)
-	uvx ty check $(PYTHON_DIRS)
+	$(call RUN,lint python (ruff),uvx ruff check $(PYTHON_DIRS))
+	$(call RUN,lint python (ty),uvx ty check $(PYTHON_DIRS))
 
 test-python: check-uv
-	PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py' -v
-	PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p '*_test.py' -v
+	$(call RUN,test python (sdk),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py')
+	$(call RUN,test python (resources),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p '*_test.py')
