@@ -54,6 +54,10 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 				Image:           true,
 				EmbeddedContext: true,
 			},
+			McpCapabilities: acpsdk.McpCapabilities{
+				Http: true,
+				Sse:  true,
+			},
 		},
 		AuthMethods: toSDKAuthMethods(authMethods),
 	}, nil
@@ -76,32 +80,40 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 
 	// Merge project-level configs with request-level configs.
 	// Request-level entries take precedence over project-level ones.
-	// Only stdio transport is supported; non-stdio entries are logged and skipped.
 	mcpConfigs := loadProjectMCPConfigs(cwd)
 	if mcpConfigs == nil && len(params.McpServers) > 0 {
 		mcpConfigs = make(map[string]mcp.ServerConfig)
 	}
 	for _, mcpServer := range params.McpServers {
-		if mcpServer.Stdio == nil {
-			// Identify the server by whichever transport the SDK parsed.
-			var serverName string
-			switch {
-			case mcpServer.Http != nil:
-				serverName = mcpServer.Http.Name
-			case mcpServer.Sse != nil:
-				serverName = mcpServer.Sse.Name
+		switch {
+		case mcpServer.Stdio != nil:
+			envs := map[string]string{}
+			for _, v := range mcpServer.Stdio.Env {
+				envs[v.Name] = v.Value
 			}
-			fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q uses unsupported transport (only stdio is supported); skipping\n", serverName)
-			continue
-		}
-		envs := map[string]string{}
-		for _, v := range mcpServer.Stdio.Env {
-			envs[v.Name] = v.Value
-		}
-		mcpConfigs[mcpServer.Stdio.Name] = mcp.ServerConfig{
-			Command: mcpServer.Stdio.Command,
-			Args:    mcpServer.Stdio.Args,
-			Env:     envs,
+			mcpConfigs[mcpServer.Stdio.Name] = mcp.ServerConfig{
+				Command: mcpServer.Stdio.Command,
+				Args:    mcpServer.Stdio.Args,
+				Env:     envs,
+			}
+		case mcpServer.Http != nil:
+			if len(mcpServer.Http.Headers) > 0 {
+				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Http.Name)
+			}
+			mcpConfigs[mcpServer.Http.Name] = mcp.ServerConfig{
+				Transport: "streamable",
+				URL:       mcpServer.Http.Url,
+			}
+		case mcpServer.Sse != nil:
+			if len(mcpServer.Sse.Headers) > 0 {
+				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Sse.Name)
+			}
+			mcpConfigs[mcpServer.Sse.Name] = mcp.ServerConfig{
+				Transport: "sse",
+				URL:       mcpServer.Sse.Url,
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "fir: warning: MCP server has unknown transport; skipping\n")
 		}
 	}
 
