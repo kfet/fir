@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -186,22 +187,60 @@ func parseCommandList(value string) []ExtensionFrontmatterCommand {
 // directory so extension scripts can be executed as subprocesses.
 func extractBuiltinExtensions() (string, error) {
 	builtinExtExtractOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "fir-builtin-extensions-")
+		// Compute a content hash of all embedded extension files so the
+		// cache directory is stable across runs with the same binary but
+		// invalidated when extensions change (new build).
+		h := sha256.New()
+		_ = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			data, err := BuiltinExtensionsFS.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			h.Write([]byte(path))
+			h.Write(data)
+			return nil
+		})
+		hash := fmt.Sprintf("%x", h.Sum(nil))[:16]
+
+		cacheBase := filepath.Join(os.TempDir(), "fir-builtin-extensions")
+		dir := filepath.Join(cacheBase, hash)
+
+		// If the directory already exists, reuse it (includes .pyc caches).
+		if _, err := os.Stat(dir); err == nil {
+			builtinExtExtractDir = dir
+			return
+		}
+
+		if err := os.MkdirAll(cacheBase, 0o755); err != nil {
+			builtinExtExtractErr = fmt.Errorf("create cache dir for builtin extensions: %w", err)
+			return
+		}
+
+		// Extract to a temp dir then rename atomically.
+		tmp, err := os.MkdirTemp(cacheBase, ".extract-")
 		if err != nil {
 			builtinExtExtractErr = fmt.Errorf("create temp dir for builtin extensions: %w", err)
 			return
 		}
-		builtinExtExtractDir = dir
+		success := false
+		defer func() {
+			if !success {
+				os.RemoveAll(tmp)
+			}
+		}()
 
-		err = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
+		err = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
 			rel := strings.TrimPrefix(path, "builtin_extensions/")
 			if rel == "" || path == "builtin_extensions" {
 				return nil
 			}
-			target := filepath.Join(dir, rel)
+			target := filepath.Join(tmp, rel)
 			if d.IsDir() {
 				return os.MkdirAll(target, 0o755)
 			}
@@ -216,7 +255,21 @@ func extractBuiltinExtensions() (string, error) {
 		})
 		if err != nil {
 			builtinExtExtractErr = fmt.Errorf("extract builtin extensions: %w", err)
+			return
 		}
+
+		if err := os.Rename(tmp, dir); err != nil {
+			// Rename may fail if another process created it concurrently.
+			if _, statErr := os.Stat(dir); statErr == nil {
+				os.RemoveAll(tmp)
+				builtinExtExtractDir = dir
+				return
+			}
+			builtinExtExtractErr = fmt.Errorf("rename builtin extensions dir: %w", err)
+			return
+		}
+		success = true
+		builtinExtExtractDir = dir
 	})
 	return builtinExtExtractDir, builtinExtExtractErr
 }

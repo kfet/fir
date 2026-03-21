@@ -56,6 +56,8 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			return resp, nil
 
 		case "initialize":
+			methodStart := time.Now()
+			firlog.Info("acp dispatch: initialize start")
 			var p acpsdk.InitializeRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
@@ -91,6 +93,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			if len(extMethods) > 0 {
 				respMap["authMethods"] = extMethods
 			}
+			firlog.Info("acp dispatch: initialize done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
 
 		case "session/cancel":
@@ -110,6 +113,8 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			return nil, nil
 
 		case "session/new":
+			methodStart := time.Now()
+			firlog.Info("acp dispatch: session/new start")
 			var p acpsdk.NewSessionRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
@@ -148,6 +153,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				time.Sleep(5 * time.Millisecond)
 				pa.sendAvailableCommands(string(resp.SessionId))
 			}()
+			firlog.Info("acp dispatch: session/new done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
 
 		case "session/prompt":
@@ -203,17 +209,22 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			return resp, nil
 
 		case "session/list":
+			methodStart := time.Now()
+			firlog.Info("acp dispatch: session/list start")
 			var p ListSessionsRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
 			resp, err := pa.ListSessions(ctx, p)
+			firlog.Info("acp dispatch: session/list done", "total_ms", time.Since(methodStart).Milliseconds(), "count", len(resp.Sessions))
 			if err != nil {
 				return nil, toReqErr(err)
 			}
 			return resp, nil
 
 		case "session/resume":
+			methodStart := time.Now()
+			firlog.Info("acp dispatch: session/resume start")
 			var p ResumeSessionRequest
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
@@ -246,6 +257,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 				pa.sendAvailableCommands(p.SessionId)
 				pa.replaySessionHistory(p.SessionId, resumeEntry)
 			}()
+			firlog.Info("acp dispatch: session/resume done", "total_ms", time.Since(methodStart).Milliseconds())
 			return respMap, nil
 
 		default:

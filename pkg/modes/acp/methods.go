@@ -31,21 +31,33 @@ import (
 // ============================================================================
 
 func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	initStart := time.Now()
+	firlog.Info("acp initialize: start")
+
 	pa.mu.Lock()
 	pa.clientCaps = params.ClientCapabilities
 	pa.mu.Unlock()
 
 	// Build auth methods from the global agent dir config.
+	t0 := time.Now()
 	agentDir := resolveAgentDir()
 	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	firlog.Info("acp initialize: auth storage created", "elapsed_ms", time.Since(t0).Milliseconds())
+
+	t0 = time.Now()
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	firlog.Info("acp initialize: model registry created", "elapsed_ms", time.Since(t0).Milliseconds())
+
+	t0 = time.Now()
 	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
+	firlog.Info("acp initialize: auth methods built", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	pa.mu.Lock()
 	pa.authMethods = authMethods
 	pa.authStorage = authStorage
 	pa.mu.Unlock()
 
+	firlog.Info("acp initialize: done", "total_ms", time.Since(initStart).Milliseconds())
 	return acpsdk.InitializeResponse{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		AgentInfo:       &acpsdk.Implementation{Name: "fir", Version: version},
@@ -68,8 +80,9 @@ func (pa *firAgent) Authenticate(ctx context.Context, req acpsdk.AuthenticateReq
 }
 
 func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
+	newSessionStart := time.Now()
 	sessionID := uuid.New().String()
-	firlog.Info("acp new session", "sessionID", sessionID)
+	firlog.Info("acp new session: start", "sessionID", sessionID)
 	cwd := os.Getenv("PWD")
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -80,7 +93,9 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 
 	// Merge project-level configs with request-level configs.
 	// Request-level entries take precedence over project-level ones.
+	t0 := time.Now()
 	mcpConfigs := loadProjectMCPConfigs(cwd)
+	firlog.Info("acp new session: loaded project MCP configs", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(mcpConfigs))
 	if mcpConfigs == nil && len(params.McpServers) > 0 {
 		mcpConfigs = make(map[string]mcp.ServerConfig)
 	}
@@ -117,7 +132,9 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 		}
 	}
 
+	t0 = time.Now()
 	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
+	firlog.Info("acp new session: createSession done", "elapsed_ms", time.Since(t0).Milliseconds())
 	if err != nil {
 		return acpsdk.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
@@ -127,6 +144,7 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 		models = BuildModelState(entry.modelRegistry, m)
 	}
 
+	firlog.Info("acp new session: done", "total_ms", time.Since(newSessionStart).Milliseconds())
 	return acpsdk.NewSessionResponse{
 		SessionId: acpsdk.SessionId(sessionID),
 		Models:    models,

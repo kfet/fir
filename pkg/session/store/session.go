@@ -1167,6 +1167,7 @@ func findMostRecentSession(sessionDir string) string {
 
 // ListSessions lists all sessions in a directory, sorted by modified time (most recent first).
 func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
+	listStart := time.Now()
 	dirEntries, err := os.ReadDir(sessionDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1194,6 +1195,8 @@ func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
 		paths = paths[:maxSessions]
 	}
 
+	firlog.Info("ListSessions: readdir done", "files", len(paths), "dir", sessionDir, "elapsed_ms", time.Since(listStart).Milliseconds())
+
 	// Load concurrently with a bounded worker pool.
 	const workers = 8
 	type result struct {
@@ -1212,6 +1215,7 @@ func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
 		}(i, p)
 	}
 	wg.Wait()
+	firlog.Info("ListSessions: workers done", "files", len(paths), "elapsed_ms", time.Since(listStart).Milliseconds())
 
 	var sessions []SessionListInfo
 	for _, r := range results {
@@ -1229,6 +1233,7 @@ func ListSessions(_ /* cwd */, sessionDir string) ([]SessionListInfo, error) {
 }
 
 func buildSessionListInfo(filePath string) *SessionListInfo {
+	buildStart := time.Now()
 	stat, err := os.Stat(filePath)
 	if err != nil {
 		return nil
@@ -1236,6 +1241,10 @@ func buildSessionListInfo(filePath string) *SessionListInfo {
 
 	// Fast path: use the metadata sidecar if it is current.
 	if m := readSidecar(filePath, stat.ModTime()); m != nil {
+		elapsed := time.Since(buildStart).Milliseconds()
+		if elapsed > 50 {
+			firlog.Info("buildSessionListInfo: slow sidecar read", "file", filepath.Base(filePath), "elapsed_ms", elapsed)
+		}
 		return &SessionListInfo{
 			Path:              filePath,
 			ID:                m.ID,
@@ -1250,6 +1259,7 @@ func buildSessionListInfo(filePath string) *SessionListInfo {
 	}
 
 	// Slow path: full parse, then write sidecar for next time.
+	firlog.Info("buildSessionListInfo: slow path (no sidecar)", "file", filepath.Base(filePath))
 	header, entries := loadEntriesFromFile(filePath)
 	if header == nil {
 		return nil

@@ -245,6 +245,7 @@ func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 }
 
 func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
+	startOneBegin := time.Now()
 	// Allowlist check: skip extensions not in AllowedNames when the list is set.
 	m.mu.Lock()
 	allowed := m.AllowedNames
@@ -283,15 +284,19 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 
 	proc := NewProcess(cfg, env, m.logger)
+	t0 := time.Now()
 	if err := proc.Start(); err != nil {
 		return err
 	}
+	m.logger.Info("ext startOne: process started", "ext", cfg.Name, "elapsed_ms", time.Since(t0).Milliseconds())
 
+	t0 = time.Now()
 	caps, err := Handshake(proc, cwd, 0)
 	if err != nil {
 		_ = proc.Stop(context.Background())
 		return err
 	}
+	m.logger.Info("ext startOne: handshake done", "ext", cfg.Name, "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Validate frontmatter against actual handshake capabilities.
 	if mm := CheckFrontmatter(cfg, caps); !mm.Empty() {
@@ -311,6 +316,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
 	bridge.RegisterAuthProviders()
+	m.logger.Info("ext startOne: done", "ext", cfg.Name, "total_ms", time.Since(startOneBegin).Milliseconds())
 
 	// Wire optional UI callbacks.
 	m.mu.Lock()

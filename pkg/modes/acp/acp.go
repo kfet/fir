@@ -106,6 +106,7 @@ func builtInCommands() []acpsdk.AvailableCommand {
 
 // RunAcpMode is the entry point for ACP mode over stdin/stdout.
 func RunAcpMode(opts Options) error {
+	runStart := time.Now()
 	firlog.Info("acp server starting")
 	pa := &firAgent{
 		options:  opts,
@@ -116,6 +117,7 @@ func RunAcpMode(opts Options) error {
 	// session/resume (not in the Go SDK's stable dispatch) are handled correctly.
 	conn, done := newRawConn(pa, os.Stdout, os.Stdin)
 	pa.conn = conn
+	firlog.Info("acp server: connection established", "elapsed_ms", time.Since(runStart).Milliseconds())
 
 	// Block until connection closes
 	<-done
@@ -136,7 +138,6 @@ func RunAcpMode(opts Options) error {
 			entry.unsubscribe()
 		}
 		entry.session.Close()
-		// Wait for async extension setup before shutdown to avoid racing.
 		if entry.extReady != nil {
 			<-entry.extReady
 		}
@@ -156,6 +157,9 @@ func RunAcpMode(opts Options) error {
 // ============================================================================
 
 func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mcpConfigs map[string]mcp.ServerConfig) (*firSession, error) {
+	createStart := time.Now()
+	firlog.Info("acp createSession: start", "sessionID", sessionID, "cwd", cwd)
+
 	agentDir := resolveAgentDir()
 
 	// Reuse the global authStorage created in Initialize so that login/logout
@@ -167,10 +171,18 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		// Fallback for tests or edge cases where Initialize wasn't called.
 		authStorage = auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
 	}
+
+	t0 := time.Now()
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+	firlog.Info("acp createSession: model registry", "elapsed_ms", time.Since(t0).Milliseconds())
+
+	t0 = time.Now()
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
+	firlog.Info("acp createSession: settings manager", "elapsed_ms", time.Since(t0).Milliseconds())
+
 	sessionManager := store.NewSessionManager(cwd, store.DefaultSessionDir(agentDir, cwd))
 
+	t0 = time.Now()
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:                           cwd,
 		AgentDir:                      agentDir,
@@ -183,6 +195,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	if err := rl.Reload(); err != nil {
 		return nil, fmt.Errorf("reload resources: %w", err)
 	}
+	firlog.Info("acp createSession: resource loader + reload", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	// Create tools — use ACP delegation based on client capabilities.
 	pa.mu.Lock()
@@ -194,6 +207,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	// Read settings that affect tool behavior.
 	shellCommandPrefix := settingsManager.GetShellCommandPrefix()
 
+	t0 = time.Now()
 	var toolList []agent.AgentTool
 	if useClientTerminal || useClientFs {
 		toolList = pa.createAcpTools(cwd, sessionID, useClientTerminal, useClientFs, shellCommandPrefix)
@@ -204,18 +218,22 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			toolList = session.DefaultCodingTools(cwd)
 		}
 	}
+	firlog.Info("acp createSession: tools created", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(toolList), "clientTerminal", useClientTerminal, "clientFs", useClientFs)
 
 	// Start MCP servers and append their tools.
 	var mcpMgr *mcp.Manager
 	if len(mcpConfigs) > 0 {
+		t0 = time.Now()
 		mcpMgr = mcp.NewManager(mcpConfigs, false)
 		mcpTools, err := mcpMgr.Start(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("start MCP servers: %w", err)
 		}
 		toolList = append(toolList, mcpTools...)
+		firlog.Info("acp createSession: MCP servers started", "elapsed_ms", time.Since(t0).Milliseconds(), "servers", len(mcpConfigs), "tools", len(mcpTools))
 	}
 
+	t0 = time.Now()
 	result, err := session.CreateAgentSession(ctx, session.CreateAgentSessionOptions{
 		Cwd:             cwd,
 		AgentDir:        agentDir,
@@ -233,6 +251,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
+	firlog.Info("acp createSession: agent session created", "elapsed_ms", time.Since(t0).Milliseconds())
 
 	entry := &firSession{
 		session:         result.Session,
@@ -250,13 +269,12 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	})
 	entry.unsubscribe = unsub
 
-	// Extension setup — discover and start eager extensions synchronously
-	// (auth extensions must be ready before session/new responds with models).
-	// Lazy extensions (triggered by session_start) are fired asynchronously
-	// since they don't affect auth/models.
+	// Extension setup — start eager extensions synchronously (auth extensions
+	// must be ready before session/new responds with models), but fire
+	// session_start (lazy extensions) asynchronously.
 	entry.extReady = make(chan struct{})
 	if !pa.options.NoExtensions {
-		t0 := time.Now()
+		t0 = time.Now()
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:   cwd,
 			Cwd:          cwd,
@@ -266,8 +284,8 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {
 			entry.extSetup = extSetup
-			// Fire session_start async — this triggers lazy extensions
-			// (auto-namer, doctor, plan-nudger) which don't provide auth.
+			// Fire session_start async — triggers lazy extensions
+			// (auto-namer, doctor, plan-nudger) which don't provide auth/models.
 			go func() {
 				t1 := time.Now()
 				extSetup.EmitSessionStart(nil)
@@ -277,6 +295,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		} else {
 			close(entry.extReady)
 		}
+		firlog.Info("acp createSession: extension setup", "elapsed_ms", time.Since(t0).Milliseconds(), "hasExtSetup", extSetup != nil)
 	} else {
 		close(entry.extReady)
 	}
@@ -285,6 +304,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	pa.sessions[sessionID] = entry
 	pa.mu.Unlock()
 
+	firlog.Info("acp createSession: done", "total_ms", time.Since(createStart).Milliseconds(), "sessionID", sessionID)
 	return entry, nil
 }
 
