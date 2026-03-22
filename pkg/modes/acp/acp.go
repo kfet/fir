@@ -307,12 +307,12 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	return entry, nil
 }
 
-// loadProjectMCPConfigs reads `.fir/mcp.json` from the working directory and
-// returns any MCP server configurations found. Returns nil if the file does
-// not exist. Logs a warning to stderr if the file exists but cannot be read
-// or parsed, so the user knows why no MCP servers were started.
+// loadProjectMCPConfigs reads MCP server configurations from both the
+// user-level and project-level config files and merges them (project wins).
+// Returns nil if no configs are found. Logs a warning to stderr if a config
+// file exists but cannot be read or parsed.
 func loadProjectMCPConfigs(cwd string) map[string]mcp.ServerConfig {
-	cfg, err := mcp.LoadConfigFile(filepath.Join(cwd, ".fir", "mcp.json"))
+	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fir: warning: %v — no MCP servers will be started\n", err)
 		return nil

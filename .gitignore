@@ -22,3 +22,4 @@ Thumbs.db
 FLEET.md
 __pycache__/
 swe-bench-cache.json
+cmd/fir/fir

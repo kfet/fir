@@ -38,6 +38,7 @@ type Args struct {
 	Models             []string
 	Tools              []string
 	NoTools            bool
+	NoMCP              bool
 	Extensions         []string
 	NoExtensions       bool
 	Print              bool
@@ -144,6 +145,9 @@ func ParseArgs(args []string) *Args {
 
 		case arg == "--no-tools":
 			result.NoTools = true
+
+		case arg == "--no-mcp":
+			result.NoMCP = true
 
 		case arg == "--tools" && i+1 < len(args):
 			i++
@@ -275,6 +279,7 @@ Options:
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for cycling
   --no-tools                     Disable all built-in tools
+  --no-mcp                       Disable MCP server integration
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh

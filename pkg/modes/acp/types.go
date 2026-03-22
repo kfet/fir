@@ -22,6 +22,8 @@ type Options struct {
 	NoPromptTemplates bool
 	// Disable extension loading (--no-extensions).
 	NoExtensions bool
+	// Disable MCP server integration (--no-mcp).
+	NoMCP bool
 	// EnabledExtensions is an explicit allowlist of extension names from --extension flags.
 	// When non-empty, only extensions in this list are started (merged with settings).
 	EnabledExtensions []string

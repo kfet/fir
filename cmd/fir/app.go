@@ -21,6 +21,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	acpmode "github.com/kfet/fir/pkg/modes/acp"
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
@@ -46,6 +47,10 @@ type sessionSetup struct {
 	// extensionOpts is populated when DeferExtensions is true, so the
 	// caller can run setupExtensions later (e.g. after the TUI renders).
 	extensionOpts *extension.SetupOptions
+
+	// mcpManager holds the MCP server manager (nil if no MCP servers configured).
+	// The caller is responsible for calling Close() when the session ends.
+	mcpManager *mcp.Manager
 }
 
 // setupSession performs the initialization shared by all run modes:
@@ -158,6 +163,29 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		sessionOpts.Tools = cliTools
 	}
 
+	// Load and start MCP servers so their tools are available to the agent.
+	var mcpMgr *mcp.Manager
+	if !args.NoMCP {
+		mcpCfg, mcpErr := mcp.LoadDefaultConfigs(cwd)
+		if mcpErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load MCP config: %v\n", mcpErr)
+		} else if len(mcpCfg.MCPServers) > 0 {
+			mcpMgr = mcp.NewManager(mcpCfg.MCPServers, false)
+			mcpTools, mcpErr := mcpMgr.Start(context.Background())
+			if mcpErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to start MCP servers: %v\n", mcpErr)
+				_ = mcpMgr.Close()
+				mcpMgr = nil
+			} else {
+				if sessionOpts.Tools == nil {
+					sessionOpts.Tools = session.DefaultCodingTools(cwd)
+				}
+				sessionOpts.Tools = append(sessionOpts.Tools, mcpTools...)
+				firlog.Info("MCP servers started", "servers", len(mcpCfg.MCPServers), "tools", len(mcpTools))
+			}
+		}
+	}
+
 	if args.Thinking != "" {
 		sessionOpts.ThinkingLevel = string(args.Thinking)
 	}
@@ -213,6 +241,7 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		usageTracker:    usageTracker,
 		resourceLoader:  rl,
 		extensionOpts:   extOpts,
+		mcpManager:      mcpMgr,
 	}, nil
 }
 
@@ -404,6 +433,11 @@ func run() error {
 		return err
 	}
 	defer setup.result.Session.Close()
+	defer func() {
+		if setup.mcpManager != nil {
+			_ = setup.mcpManager.Close()
+		}
+	}()
 
 	// Extension lifecycle for non-interactive modes
 	if setup.extSetup != nil {
@@ -663,6 +697,7 @@ func runAcpMode(args *Args) error {
 		NoSkills:                      args.NoSkills,
 		NoPromptTemplates:             args.NoPromptTemplates,
 		NoExtensions:                  args.NoExtensions,
+		NoMCP:                         args.NoMCP,
 		EnabledExtensions:             args.Extensions,
 	})
 }
@@ -674,6 +709,11 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		return err
 	}
 	defer setup.result.Session.Close()
+	defer func() {
+		if setup.mcpManager != nil {
+			_ = setup.mcpManager.Close()
+		}
+	}()
 
 	// Load keybindings
 	keybindings := tui.NewKeybindingsManager(setup.agentDir)

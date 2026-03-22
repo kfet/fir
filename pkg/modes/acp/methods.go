@@ -94,7 +94,10 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 	// Merge project-level configs with request-level configs.
 	// Request-level entries take precedence over project-level ones.
 	t0 := time.Now()
-	mcpConfigs := loadProjectMCPConfigs(cwd)
+	var mcpConfigs map[string]mcp.ServerConfig
+	if !pa.options.NoMCP {
+		mcpConfigs = loadProjectMCPConfigs(cwd)
+	}
 	firlog.Info("acp new session: loaded project MCP configs", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(mcpConfigs))
 	if mcpConfigs == nil && len(params.McpServers) > 0 {
 		mcpConfigs = make(map[string]mcp.ServerConfig)
@@ -368,7 +371,11 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		pa.mu.Unlock()
 	}
 
-	entry, err := pa.createSession(ctx, sessionID, cwd, loadProjectMCPConfigs(cwd))
+	var resumeMCPConfigs map[string]mcp.ServerConfig
+	if !pa.options.NoMCP {
+		resumeMCPConfigs = loadProjectMCPConfigs(cwd)
+	}
+	entry, err := pa.createSession(ctx, sessionID, cwd, resumeMCPConfigs)
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
