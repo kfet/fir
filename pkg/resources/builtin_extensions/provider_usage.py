@@ -8,24 +8,42 @@
 # ---
 """Periodically fetch Anthropic and/or Poe usage stats and display in the status bar.
 
-Refreshes every 5 minutes to avoid hitting rate limits on the usage APIs.
+Refreshes every 5 minutes. Uses a shared file cache with flock so multiple
+fir sessions avoid redundant API calls and respect rate limits together.
 """
 
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
+import tempfile
 import threading
+import time
+import urllib.error
 import urllib.request
 from datetime import UTC, datetime
+from pathlib import Path
 
 import fir_ext
 
 REFRESH_INTERVAL = 300  # 5 minutes
+CACHE_TTL = 60  # seconds — shared across all fir sessions
+BACKOFF_BASE = 60  # initial backoff after 429 (seconds)
+BACKOFF_MAX = 900  # max backoff (15 minutes)
 
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
+
+_CACHE_DIR = Path.home() / ".fir" / "agent"
+
+
+class RateLimited(Exception):
+    """Raised when the API returns HTTP 429."""
+
+    def __init__(self, retry_after: float | None = None):
+        self.retry_after = retry_after
 
 
 def _read_json(path: str) -> dict | None:
@@ -35,6 +53,98 @@ def _read_json(path: str) -> dict | None:
             return json.load(f)
     except Exception:
         return None
+
+
+def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
+    """Fetch data using a shared file cache with flock to prevent thundering herd.
+
+    cache_name: unique name for this cache (e.g. 'anthropic-usage')
+    fetch_fn:   callable that returns a dict, or raises RateLimited
+
+    Returns the cached/fresh dict, or None on error.
+    """
+    cache_file = _CACHE_DIR / f"{cache_name}-cache.json"
+    lock_file = _CACHE_DIR / f"{cache_name}-cache.lock"
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _read_cache() -> dict | None:
+        try:
+            with open(cache_file) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _is_fresh(cached: dict) -> bool:
+        return (time.time() - cached.get("fetched_at", 0)) < CACHE_TTL
+
+    def _is_backed_off(cached: dict) -> bool:
+        return time.time() < cached.get("backoff_until", 0)
+
+    def _write_cache(obj: dict) -> None:
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(_CACHE_DIR), suffix=".tmp")
+            with os.fdopen(tmp_fd, "w") as tmp_f:
+                json.dump(obj, tmp_f)
+            os.replace(tmp_path, str(cache_file))
+        except Exception:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+    # Fast path: no lock needed if cache is fresh or backed off
+    cached = _read_cache()
+    if cached:
+        if _is_backed_off(cached):
+            return cached.get("data")  # may be None or stale — best we have
+        if _is_fresh(cached) and cached.get("data") is not None:
+            return cached["data"]
+
+    # Slow path: acquire lock, re-check, fetch if still stale
+    try:
+        with open(lock_file, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                cached = _read_cache()
+                if cached:
+                    if _is_backed_off(cached):
+                        return cached.get("data")
+                    if _is_fresh(cached) and cached.get("data") is not None:
+                        return cached["data"]
+
+                try:
+                    result = fetch_fn()
+                except RateLimited as e:
+                    # Exponential backoff: double the previous backoff, capped
+                    prev = (cached or {}).get("backoff_duration", 0)
+                    duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
+                    if e.retry_after:
+                        duration = max(duration, e.retry_after)
+                    obj = dict(cached or {})
+                    obj["backoff_until"] = time.time() + duration
+                    obj["backoff_duration"] = duration
+                    _write_cache(obj)
+                    return obj.get("data")  # return stale data if available
+                except Exception:
+                    return (cached or {}).get("data")
+
+                # Success — clear any backoff and write fresh data
+                _write_cache({
+                    "fetched_at": time.time(),
+                    "data": result,
+                })
+                return result
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except Exception:
+        # If locking fails, try direct fetch as last resort
+        try:
+            return fetch_fn()
+        except Exception:
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Token / key discovery
+# ---------------------------------------------------------------------------
 
 
 def _find_anthropic_token() -> str | None:
@@ -75,6 +185,11 @@ def _find_poe_key() -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+
 def _fmt_countdown(total_min: int) -> str:
     """Format minutes remaining as a compact countdown string."""
     if total_min < 60:
@@ -87,20 +202,37 @@ def _fmt_countdown(total_min: int) -> str:
     return f"{d}d{h}h"
 
 
-def _fetch_anthropic_usage(token: str) -> str | None:
-    """Fetch Anthropic usage and return a short status string."""
+# ---------------------------------------------------------------------------
+# Provider fetch functions
+# ---------------------------------------------------------------------------
+
+
+def _fetch_anthropic_raw(token: str) -> dict:
+    """Raw API call to Anthropic usage endpoint. Raises RateLimited on 429."""
+    req = urllib.request.Request(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "oauth-2025-04-20",
+            "Accept": "application/json",
+        },
+    )
     try:
-        req = urllib.request.Request(
-            "https://api.anthropic.com/api/oauth/usage",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": "oauth-2025-04-20",
-                "Accept": "application/json",
-            },
-        )
         with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            data = json.loads(resp.read())
-    except Exception:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            retry_after = None
+            with contextlib.suppress(Exception):
+                retry_after = float(e.headers.get("Retry-After", ""))
+            raise RateLimited(retry_after) from e
+        raise
+
+
+def _fetch_anthropic_usage(token: str) -> str | None:
+    """Fetch Anthropic usage (cached) and return a short status string."""
+    data = _cached_fetch("anthropic-usage", lambda: _fetch_anthropic_raw(token))
+    if not data:
         return None
 
     local_tz = datetime.now().astimezone().tzinfo
@@ -138,16 +270,28 @@ def _fetch_anthropic_usage(token: str) -> str | None:
     return f"☁ {display}"
 
 
-def _fetch_poe_usage(api_key: str) -> str | None:
-    """Fetch Poe point balance and return a short status string."""
+def _fetch_poe_raw(api_key: str) -> dict:
+    """Raw API call to Poe balance endpoint. Raises RateLimited on 429."""
+    req = urllib.request.Request(
+        "https://api.poe.com/usage/current_balance",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
     try:
-        req = urllib.request.Request(
-            "https://api.poe.com/usage/current_balance",
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
         with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            data = json.loads(resp.read())
-    except Exception:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            retry_after = None
+            with contextlib.suppress(Exception):
+                retry_after = float(e.headers.get("Retry-After", ""))
+            raise RateLimited(retry_after) from e
+        raise
+
+
+def _fetch_poe_usage(api_key: str) -> str | None:
+    """Fetch Poe point balance (cached) and return a short status string."""
+    data = _cached_fetch("poe-usage", lambda: _fetch_poe_raw(api_key))
+    if not data:
         return None
 
     balance = data.get("current_point_balance")
@@ -162,6 +306,11 @@ def _fetch_poe_usage(api_key: str) -> str | None:
         bal_str = str(balance)
 
     return f"🅿 {bal_str}pts"
+
+
+# ---------------------------------------------------------------------------
+# Extension lifecycle
+# ---------------------------------------------------------------------------
 
 
 def _refresh_loop(ctx: fir_ext.Context) -> None:
