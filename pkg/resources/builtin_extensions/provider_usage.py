@@ -40,6 +40,17 @@ _thread: threading.Thread | None = None
 _CACHE_DIR = Path.home() / ".fir" / "agent"
 
 
+class CacheResult:
+    """Wraps cached data with staleness / rate-limit metadata."""
+
+    __slots__ = ("data", "is_rate_limited", "is_stale")
+
+    def __init__(self, data: dict | None, *, is_stale: bool = False, is_rate_limited: bool = False):
+        self.data = data
+        self.is_stale = is_stale
+        self.is_rate_limited = is_rate_limited
+
+
 class RateLimitedError(Exception):
     """Raised when the API returns HTTP 429."""
 
@@ -56,13 +67,13 @@ def _read_json(path: str) -> dict | None:
         return None
 
 
-def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
+def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
     """Fetch data using a shared file cache with flock to prevent thundering herd.
 
     cache_name: unique name for this cache (e.g. 'anthropic-usage')
     fetch_fn:   callable that returns a dict, or raises RateLimitedError
 
-    Returns the cached/fresh dict, or None on error.
+    Returns a CacheResult with data and staleness/rate-limit metadata.
     """
     cache_file = _CACHE_DIR / f"{cache_name}-cache.json"
     lock_file = _CACHE_DIR / f"{cache_name}-cache.lock"
@@ -109,9 +120,9 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
     cached = _read_cache()
     if cached:
         if _is_backed_off(cached):
-            return cached.get("data")  # may be None or stale — best we have
+            return CacheResult(cached.get("data"), is_stale=True, is_rate_limited=True)
         if _is_fresh(cached) and cached.get("data") is not None:
-            return cached["data"]
+            return CacheResult(cached["data"])
 
     # Slow path: acquire lock, re-check, fetch if still stale
     try:
@@ -121,9 +132,9 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
                 cached = _read_cache()
                 if cached:
                     if _is_backed_off(cached):
-                        return cached.get("data")
+                        return CacheResult(cached.get("data"), is_stale=True, is_rate_limited=True)
                     if _is_fresh(cached) and cached.get("data") is not None:
-                        return cached["data"]
+                        return CacheResult(cached["data"])
 
                 try:
                     result = fetch_fn()
@@ -139,23 +150,25 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
                     obj["backoff_until"] = time.time() + duration
                     obj["backoff_duration"] = duration
                     _write_cache(obj)
-                    return obj.get("data")  # return stale data if available
+                    return CacheResult(obj.get("data"), is_stale=True, is_rate_limited=True)
                 except Exception:
-                    return (cached or {}).get("data")
+                    stale_data = (cached or {}).get("data")
+                    return CacheResult(stale_data, is_stale=stale_data is not None)
 
                 # Success — clear any backoff and write fresh data
                 _write_cache({
                     "fetched_at": time.time(),
                     "data": result,
                 })
-                return result
+                return CacheResult(result)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
     except Exception:
         # If locking fails, return stale cached data rather than
         # hammering the API without backoff protection.
         cached = _read_cache()
-        return (cached or {}).get("data")
+        stale_data = (cached or {}).get("data")
+        return CacheResult(stale_data, is_stale=stale_data is not None)
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +260,11 @@ def _fetch_anthropic_raw(token: str) -> dict:
 
 def _fetch_anthropic_usage(token: str) -> str | None:
     """Fetch Anthropic usage (cached) and return a short status string."""
-    data = _cached_fetch("anthropic-usage", lambda: _fetch_anthropic_raw(token))
+    result = _cached_fetch("anthropic-usage", lambda: _fetch_anthropic_raw(token))
+    data = result.data
     if not data:
+        if result.is_rate_limited:
+            return "☁ (rate-limited)"
         return None
 
     local_tz = datetime.now().astimezone().tzinfo
@@ -283,7 +299,12 @@ def _fetch_anthropic_usage(token: str) -> str | None:
 
     parts.sort(key=lambda x: -x[0])
     display = ", ".join(p[1] for p in parts[:3])
-    return f"☁ {display}"
+    suffix = ""
+    if result.is_rate_limited:
+        suffix = " ⚠ rate-limited"
+    elif result.is_stale:
+        suffix = " ⚠ stale"
+    return f"☁ {display}{suffix}"
 
 
 def _fetch_poe_raw(api_key: str) -> dict:
@@ -306,8 +327,11 @@ def _fetch_poe_raw(api_key: str) -> dict:
 
 def _fetch_poe_usage(api_key: str) -> str | None:
     """Fetch Poe point balance (cached) and return a short status string."""
-    data = _cached_fetch("poe-usage", lambda: _fetch_poe_raw(api_key))
+    result = _cached_fetch("poe-usage", lambda: _fetch_poe_raw(api_key))
+    data = result.data
     if not data:
+        if result.is_rate_limited:
+            return "🅿 (rate-limited)"
         return None
 
     balance = data.get("current_point_balance")
@@ -321,7 +345,12 @@ def _fetch_poe_usage(api_key: str) -> str | None:
     else:
         bal_str = str(balance)
 
-    return f"🅿 {bal_str}pts"
+    suffix = ""
+    if result.is_rate_limited:
+        suffix = " ⚠ rate-limited"
+    elif result.is_stale:
+        suffix = " ⚠ stale"
+    return f"🅿 {bal_str}pts{suffix}"
 
 
 # ---------------------------------------------------------------------------
