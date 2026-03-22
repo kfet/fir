@@ -29,12 +29,12 @@ type ChannelMessage struct {
 }
 
 // Text returns the message text.
-func (cm *ChannelMessage) Text() string {
+func (cm ChannelMessage) Text() string {
 	return cm.Content
 }
 
 // SourceName returns the sender identity from meta.user, or "unknown".
-func (cm *ChannelMessage) SourceName() string {
+func (cm ChannelMessage) SourceName() string {
 	if cm.Meta != nil {
 		if u, ok := cm.Meta["user"].(string); ok && u != "" {
 			return u

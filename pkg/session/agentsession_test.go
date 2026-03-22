@@ -3180,32 +3180,12 @@ func TestAgentSession_InjectChannelMessage_WhenNotStreaming(t *testing.T) {
 
 	session.InjectChannelMessage("test-server", "telegram", "hello from telegram")
 
-	// When idle, InjectChannelMessage auto-triggers a turn via PromptMessages
-	// in a goroutine (which may fail without a model, but that's OK).
-	// Give it a moment to fire.
+	// When idle, InjectChannelMessage calls PromptMessages in a goroutine
+	// (which will fail without a model — that's expected). The message must
+	// NOT appear in the follow-up queue because it takes the direct-prompt path.
 	time.Sleep(50 * time.Millisecond)
-
-	// The message should NOT be in the follow-up queue — it was consumed
-	// by the direct PromptMessages call, not queued as a follow-up.
 	queued := session.Agent.PeekFollowUpQueue()
 	if len(queued) != 0 {
 		t.Errorf("expected empty follow-up queue, got %d", len(queued))
 	}
-}
-
-func TestAgentSession_InjectChannelMessage_WhenStreaming(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
-
-	// Simulate streaming state by setting it directly.
-	state := session.State()
-	state.IsStreaming = true
-	// We can't set IsStreaming directly, so queue a follow-up and check it stays.
-	// Use the Agent's FollowUp directly to simulate streaming context.
-
-	session.InjectChannelMessage("test-server", "discord", "hello from discord")
-
-	// Give the goroutine a moment — but since IsStreaming is false
-	// (we can't easily fake it), this will auto-prompt. That's fine;
-	// the key test is the non-streaming path above.
 }
