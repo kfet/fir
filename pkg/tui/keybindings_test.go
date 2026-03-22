@@ -209,3 +209,38 @@ func TestKeybindingsManager_AllDefaultActionsRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestKeybindingsManager_ProjectOverridesGlobal(t *testing.T) {
+	globalDir := t.TempDir()
+	os.WriteFile(filepath.Join(globalDir, "keybindings.json"),
+		[]byte(`{"exit": "ctrl+q", "clear": "ctrl+k"}`), 0644)
+
+	projectDir := t.TempDir()
+	os.WriteFile(filepath.Join(projectDir, "keybindings.json"),
+		[]byte(`{"exit": "ctrl+x"}`), 0644)
+
+	m := NewKeybindingsManager(globalDir, projectDir)
+
+	exitKeys := m.GetKeys(ActionExit)
+	if len(exitKeys) != 1 || exitKeys[0] != "ctrl+x" {
+		t.Errorf("expected [ctrl+x], got %v", exitKeys)
+	}
+
+	clearKeys := m.GetKeys(ActionClear)
+	if len(clearKeys) != 1 || clearKeys[0] != "ctrl+k" {
+		t.Errorf("expected [ctrl+k], got %v", clearKeys)
+	}
+}
+
+func TestKeybindingsManager_ProjectDirEmpty(t *testing.T) {
+	globalDir := t.TempDir()
+	os.WriteFile(filepath.Join(globalDir, "keybindings.json"),
+		[]byte(`{"exit": "ctrl+q"}`), 0644)
+
+	m := NewKeybindingsManager(globalDir, "")
+
+	exitKeys := m.GetKeys(ActionExit)
+	if len(exitKeys) != 1 || exitKeys[0] != "ctrl+q" {
+		t.Errorf("expected [ctrl+q], got %v", exitKeys)
+	}
+}

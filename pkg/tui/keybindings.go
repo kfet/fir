@@ -65,10 +65,22 @@ type KeybindingsManager struct {
 	appActionKeys map[AppAction][]string
 }
 
-// NewKeybindingsManager creates a keybindings manager from a config file directory.
-func NewKeybindingsManager(agentDir string) *KeybindingsManager {
-	configPath := filepath.Join(agentDir, "keybindings.json")
-	config := loadKeybindingsFile(configPath)
+// NewKeybindingsManager creates a keybindings manager that loads from the
+// global agentDir and optionally merges project-level overrides from projectDir.
+// Project-level keybindings take precedence over global ones.
+func NewKeybindingsManager(agentDir string, projectDirs ...string) *KeybindingsManager {
+	config := loadKeybindingsFile(filepath.Join(agentDir, "keybindings.json"))
+
+	// Merge project-level keybindings (last wins).
+	for _, dir := range projectDirs {
+		if dir == "" {
+			continue
+		}
+		projectConfig := loadKeybindingsFile(filepath.Join(dir, "keybindings.json"))
+		for k, v := range projectConfig {
+			config[k] = v
+		}
+	}
 
 	m := &KeybindingsManager{
 		config:        config,

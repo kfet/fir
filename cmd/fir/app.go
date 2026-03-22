@@ -740,7 +740,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	}()
 
 	// Load keybindings
-	keybindings := tui.NewKeybindingsManager(setup.agentDir)
+	keybindings := tui.NewKeybindingsManager(setup.agentDir, filepath.Join(setup.cwd, config.ConfigDirName))
 
 	// Process @file arguments and build initial prompt
 	var initialPrompt string

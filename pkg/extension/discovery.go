@@ -20,7 +20,7 @@ type ExtProcConfig struct {
 	AuthProviders []string                                // auth provider IDs declared in frontmatter
 }
 
-// Discover scans global (~/.config/fir/extensions/) and project-local
+// Discover scans global (~/.fir/agent/extensions/) and project-local
 // (.fir/extensions/) directories for executable files and sub-directories.
 // Project-local extensions shadow global ones by name.
 //
@@ -52,7 +52,14 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	globalDir := filepath.Join(homeDir, ".config", "fir", "extensions")
+	globalDir := filepath.Join(homeDir, ".fir", "agent", "extensions")
+
+	// Fall back to legacy path (~/.config/fir/extensions/) if the new path
+	// doesn't exist but the legacy one does, so existing users aren't broken.
+	legacyDir := filepath.Join(homeDir, ".config", "fir", "extensions")
+	if !dirExistsExt(globalDir) && dirExistsExt(legacyDir) {
+		globalDir = legacyDir
+	}
 
 	// Global then project-local (each shadows the previous).
 	dirs := []struct {
@@ -280,6 +287,11 @@ func isExecutableFile(path string) bool {
 // This intentionally strips only one extension: "foo.tar.gz" becomes "foo.tar".
 // For extension naming this is sufficient since executable extensions use
 // single extensions like .py, .sh, or no extension at all.
+func dirExistsExt(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 func stripExt(name string) string {
 	ext := filepath.Ext(name)
 	if ext != "" {
