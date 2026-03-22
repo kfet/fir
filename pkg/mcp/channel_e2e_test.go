@@ -46,6 +46,12 @@ func (c *fakeServerConnection) Read(ctx context.Context) (jsonrpc.Message, error
 }
 
 func (c *fakeServerConnection) Write(_ context.Context, msg jsonrpc.Message) error {
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return fmt.Errorf("connection closed")
+	}
 	c.outgoing <- msg
 	return nil
 }

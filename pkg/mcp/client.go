@@ -200,10 +200,14 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 
 	// Wrap the transport to intercept channel notifications before they reach
 	// the SDK's method dispatcher. The callback is resolved lazily so that
-	// OnChannelMessage can be set after Start() returns.
+	// OnChannelMessage can be set after Start() returns. The callback is
+	// dispatched asynchronously to avoid blocking the SDK's read loop.
 	transport = wrapTransportForChannels(transport, name, func(cm ChannelMessage) {
-		if fn := m.OnChannelMessage; fn != nil {
-			fn(cm)
+		m.mu.Lock()
+		fn := m.OnChannelMessage
+		m.mu.Unlock()
+		if fn != nil {
+			go fn(cm)
 		}
 	})
 

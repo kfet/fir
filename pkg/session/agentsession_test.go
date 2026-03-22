@@ -3164,3 +3164,40 @@ func TestSideQuery_ErrorOnNoModel(t *testing.T) {
 		t.Fatal("expected error when no model set")
 	}
 }
+
+// ============================================================================
+// InjectChannelMessage
+// ============================================================================
+
+func TestAgentSession_InjectChannelMessage_WhenNotStreaming(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	if session.IsStreaming() {
+		t.Fatal("expected not streaming initially")
+	}
+
+	session.InjectChannelMessage("test-server", "telegram", "hello from telegram")
+
+	// Should be queued as follow-up since not streaming.
+	queued := session.Agent.PeekFollowUpQueue()
+	if len(queued) != 1 {
+		t.Fatalf("expected 1 follow-up, got %d", len(queued))
+	}
+	msg := queued[0]
+	if u := msg.Message.AsUser(); u == nil {
+		t.Fatal("expected user message")
+	} else if text, ok := u.Content.(string); !ok || text == "" {
+		t.Fatal("expected non-empty text content")
+	} else {
+		if !strings.Contains(text, "telegram") {
+			t.Errorf("expected text to contain 'telegram', got %q", text)
+		}
+		if !strings.Contains(text, "hello from telegram") {
+			t.Errorf("expected text to contain message, got %q", text)
+		}
+		if !strings.Contains(text, "test-server") {
+			t.Errorf("expected text to contain server name, got %q", text)
+		}
+	}
+}
