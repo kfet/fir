@@ -32,7 +32,7 @@ import fir_ext
 REFRESH_INTERVAL = 300  # 5 minutes
 CACHE_TTL = 60  # seconds — shared across all fir sessions
 BACKOFF_BASE = 60  # initial backoff after 429 (seconds)
-BACKOFF_MAX = 900  # max backoff (15 minutes)
+BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
 
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
