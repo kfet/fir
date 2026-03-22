@@ -224,8 +224,9 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 		t.Log("Both notifications received!")
 	case <-ctx.Done():
 		mu.Lock()
-		t.Fatalf("timed out waiting for channel notifications (received %d)", len(received))
+		n := len(received)
 		mu.Unlock()
+		t.Fatalf("timed out waiting for channel notifications (received %d)", n)
 	}
 
 	mu.Lock()

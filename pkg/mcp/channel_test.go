@@ -117,9 +117,11 @@ func TestChannelTransportWrapsConnection(t *testing.T) {
 		"source":  "discord",
 		"message": "hello from discord",
 	}
+	normalNotif := makeNotification("notifications/tools/list_changed", nil)
 	conn := &fakeConnection{
 		msgs: []jsonrpc.Message{
 			makeNotification(channelNotificationMethod, channelParams),
+			normalNotif,
 		},
 	}
 	inner := &fakeTransport{conn: conn}
@@ -129,19 +131,21 @@ func TestChannelTransportWrapsConnection(t *testing.T) {
 		got = cm
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
 	sdkConn, err := wrapped.Connect(ctx)
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 
-	// Read should block after consuming the channel notification.
-	cancel()
-	_, err = sdkConn.Read(ctx)
-	if err == nil {
-		t.Fatal("expected error from cancelled context")
+	// Read should intercept the channel notification and return the normal one.
+	msg, err := sdkConn.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	req := msg.(*jsonrpc.Request)
+	if req.Method != "notifications/tools/list_changed" {
+		t.Fatalf("expected tools/list_changed, got %s", req.Method)
 	}
 
 	if got.Source != "discord" {

@@ -143,3 +143,6 @@ func (m *Manager) ChannelServers() []string {
 
 // Ensure channelTransport implements sdk.Transport.
 var _ sdk.Transport = (*channelTransport)(nil)
+
+// Ensure channelConnection implements sdk.Connection.
+var _ sdk.Connection = (*channelConnection)(nil)
