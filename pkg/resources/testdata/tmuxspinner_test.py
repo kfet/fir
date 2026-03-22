@@ -177,9 +177,23 @@ class TestSpinnerStartStop(unittest.TestCase):
             time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
             s.stop()
             self.assertFalse(s._running)
-            # Last rename should restore the original name.
+            # Last rename should restore the display name (original + session).
             last_call = mock_rn.call_args
             self.assertEqual(last_call[0], ("%1", "fir"))
+
+    def test_stop_restores_display_name_with_session(self):
+        s = tmuxspinner.Spinner()
+        s._pane_id = "%1"
+        s._original_name = "fir"
+        s._session_name = "mysess"
+
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn:
+            s.start()
+            time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
+            s.stop()
+            last_call = mock_rn.call_args
+            # stop() keeps session name in display
+            self.assertEqual(last_call[0], ("%1", "fir mysess"))
 
     def test_start_noop_without_pane(self):
         s = tmuxspinner.Spinner()
@@ -264,6 +278,75 @@ class TestHasControllingTerminal(unittest.TestCase):
     def test_without_tty(self):
         with mock.patch("os.open", side_effect=OSError("no tty")):
             self.assertFalse(tmuxspinner._has_controlling_terminal())
+
+
+class TestSpinnerShutdown(unittest.TestCase):
+    """Test shutdown() restores original name and cleans up stashed state."""
+
+    def test_shutdown_restores_original_name(self):
+        s = tmuxspinner.Spinner()
+        s._pane_id = "%1"
+        s._original_name = "zsh"
+        s._session_name = "mysess"
+
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
+             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset:
+            s.start()
+            time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
+            s.shutdown()
+            self.assertFalse(s._running)
+            # Should restore original name WITHOUT session suffix.
+            last_rename = mock_rn.call_args
+            self.assertEqual(last_rename[0], ("%1", "zsh"))
+            # Should unset the stashed option.
+            mock_unset.assert_called_once_with("%1", "@fir_original_name")
+
+    def test_shutdown_when_not_running(self):
+        s = tmuxspinner.Spinner()
+        s._pane_id = "%1"
+        s._original_name = "zsh"
+        s._session_name = "mysess"
+
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
+             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset:
+            s.shutdown()
+            mock_rn.assert_called_once_with("%1", "zsh")
+            mock_unset.assert_called_once_with("%1", "@fir_original_name")
+
+    def test_shutdown_noop_without_pane(self):
+        s = tmuxspinner.Spinner()
+        # No pane set — should not raise.
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn:
+            s.shutdown()
+            mock_rn.assert_not_called()
+
+
+class TestStashRecovery(unittest.TestCase):
+    """Test that _init_pane recovers stashed name from crashed sessions."""
+
+    def test_recovers_stashed_name(self):
+        s = tmuxspinner.Spinner()
+        with mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}), \
+             mock.patch.object(tmuxspinner, "_disable_auto_rename"), \
+             mock.patch.object(tmuxspinner, "_get_window_option", return_value="zsh"), \
+             mock.patch.object(tmuxspinner, "_set_window_option") as mock_set:
+            with s._lock:
+                s._init_pane()
+            self.assertEqual(s._original_name, "zsh")
+            # Should re-stash.
+            mock_set.assert_called_once_with("%1", "@fir_original_name", "zsh")
+
+    def test_reads_window_name_when_no_stash(self):
+        s = tmuxspinner.Spinner()
+        with mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}), \
+             mock.patch.object(tmuxspinner, "_disable_auto_rename"), \
+             mock.patch.object(tmuxspinner, "_get_window_option", return_value=""), \
+             mock.patch.object(tmuxspinner, "_read_window_name", return_value="bash"), \
+             mock.patch.object(tmuxspinner, "_set_window_option") as mock_set:
+            with s._lock:
+                s._init_pane()
+            self.assertEqual(s._original_name, "bash")
+            mock_set.assert_called_once_with("%1", "@fir_original_name", "bash")
 
 
 if __name__ == "__main__":

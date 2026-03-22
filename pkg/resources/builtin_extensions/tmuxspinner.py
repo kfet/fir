@@ -55,6 +55,18 @@ def _disable_auto_rename(target):
     _run_tmux("set-window-option", "-t", target, "automatic-rename", "off")
 
 
+def _get_window_option(target, option):
+    return _run_tmux("show-window-option", "-t", target, "-v", option)
+
+
+def _set_window_option(target, option, value):
+    _run_tmux("set-window-option", "-t", target, option, value)
+
+
+def _unset_window_option(target, option):
+    _run_tmux("set-window-option", "-t", target, "-u", option)
+
+
 def _strip_spinner_suffix(name):
     """Remove trailing ' <braille>' suffixes."""
     while len(name) >= 2:
@@ -88,9 +100,16 @@ class Spinner:
             self._pane_id = _pane_id()
             if self._pane_id:
                 _disable_auto_rename(self._pane_id)
-                self._original_name = _strip_spinner_suffix(
-                    _read_window_name(self._pane_id) or "fir"
-                )
+                # Recover stashed name from a previous session that crashed/was killed.
+                stashed = _get_window_option(self._pane_id, "@fir_original_name")
+                if stashed:
+                    self._original_name = stashed
+                else:
+                    self._original_name = _strip_spinner_suffix(
+                        _read_window_name(self._pane_id) or "fir"
+                    )
+                # Stash for crash recovery by future sessions.
+                _set_window_option(self._pane_id, "@fir_original_name", self._original_name)
 
     def set_session_name(self, name):
         """Append the fir session name to the window name."""
@@ -146,6 +165,27 @@ class Spinner:
         if pane:
             _rename_window(pane, base)
 
+    def shutdown(self):
+        """Full cleanup: stop spinner, restore original name, remove stashed state."""
+        # Stop the spinner loop first.
+        with self._lock:
+            if self._running:
+                assert self._stop_event is not None
+                self._stop_event.set()
+                self._running = False
+                thread = self._thread
+            else:
+                thread = None
+            pane = self._pane_id
+            original = self._original_name
+
+        if thread:
+            thread.join(timeout=2)
+
+        if pane:
+            _rename_window(pane, original)
+            _unset_window_option(pane, "@fir_original_name")
+
     def _loop(self):
         assert self._stop_event is not None
         i = 0
@@ -192,10 +232,10 @@ if _in_tmux() and _has_controlling_terminal():
     _spinner = Spinner()
 
     # Safety net: restore window name on exit regardless of how we shut down.
-    atexit.register(lambda: _spinner.stop())
+    atexit.register(lambda: _spinner.shutdown())
 
     def _sigterm_handler(signum, frame):
-        _spinner.stop()
+        _spinner.shutdown()
         # Re-raise so the process actually exits
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         os.kill(os.getpid(), signal.SIGTERM)
@@ -212,7 +252,7 @@ if _in_tmux() and _has_controlling_terminal():
 
     @fir_ext.on("session_shutdown")
     def on_session_shutdown(params, ctx):
-        _spinner.stop()
+        _spinner.shutdown()
 
     @fir_ext.on("session_named")
     def on_session_named(params, ctx):
