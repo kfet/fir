@@ -86,11 +86,10 @@ Always call `fir_ext.run(name="<name>")` at the end of the script.
 
 ## Checklist
 
-- [ ] Create `.fir/extensions/<name>.py` with a shebang (`#!/usr/bin/env python3`).
+- [ ] Create `.fir/extensions/<name>.py` with a shebang (`#!/usr/bin/env python3`) **and make it executable immediately**: `chmod +x .fir/extensions/<name>.py`. Discovery silently skips non-executable files. Always `chmod +x` right after creating the file.
 - [ ] Add comment frontmatter (`# ---` / `# ---`) with at least `name:`. Files without frontmatter are ignored by discovery.
 - [ ] Declare **all** subscribed events/hooks in the `events:` frontmatter field (e.g. `events: agent_end, turn_end, hook/tool_call`). This enables lazy loading — the extension process is only started when a matching event fires.
 - [ ] If the extension registers slash commands, declare them in `commands:` frontmatter (e.g. `commands: my-cmd: Run something`). This lets fir show the command in `/help` before the extension is started.
-- [ ] Make it executable: `chmod +x .fir/extensions/<name>.py`.
 - [ ] Define tools with `@fir_ext.tool(...)` and/or event handlers with `@fir_ext.on(...)`.
 - [ ] End with `fir_ext.run(name="<name>")`.
 - [ ] **Never put test files in the extensions directory** — use `pkg/resources/testdata/` for Python tests or `pkg/extension/integration/` for Go integration tests.
