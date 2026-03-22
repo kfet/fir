@@ -40,7 +40,7 @@ _thread: threading.Thread | None = None
 _CACHE_DIR = Path.home() / ".fir" / "agent"
 
 
-class RateLimited(Exception):
+class RateLimitedError(Exception):
     """Raised when the API returns HTTP 429."""
 
     def __init__(self, retry_after: float | None = None):
@@ -60,7 +60,7 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
     """Fetch data using a shared file cache with flock to prevent thundering herd.
 
     cache_name: unique name for this cache (e.g. 'anthropic-usage')
-    fetch_fn:   callable that returns a dict, or raises RateLimited
+    fetch_fn:   callable that returns a dict, or raises RateLimitedError
 
     Returns the cached/fresh dict, or None on error.
     """
@@ -93,14 +93,17 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
         return 0  # expired — next 429 starts fresh
 
     def _write_cache(obj: dict) -> None:
+        tmp_path = None
         try:
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(_CACHE_DIR), suffix=".tmp")
             with os.fdopen(tmp_fd, "w") as tmp_f:
                 json.dump(obj, tmp_f)
             os.replace(tmp_path, str(cache_file))
+            tmp_path = None  # replaced successfully, nothing to clean up
         except Exception:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
+            if tmp_path:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
 
     # Fast path: no lock needed if cache is fresh or backed off
     cached = _read_cache()
@@ -124,14 +127,14 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
 
                 try:
                     result = fetch_fn()
-                except RateLimited as e:
+                except RateLimitedError as e:
                     # Exponential backoff: double the previous backoff, capped
                     prev = _effective_backoff_duration(cached or {})
                     duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
                     if e.retry_after and e.retry_after > 0:
                         duration = max(duration, e.retry_after)
                     # Add jitter (up to 50%) to desynchronize retries across machines
-                    duration += random.uniform(0, duration * 0.5)
+                    duration += random.uniform(0, duration * 0.5)  # noqa: S311
                     obj = dict(cached or {})
                     obj["backoff_until"] = time.time() + duration
                     obj["backoff_duration"] = duration
@@ -149,11 +152,10 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
     except Exception:
-        # If locking fails, try direct fetch as last resort
-        try:
-            return fetch_fn()
-        except Exception:
-            return None
+        # If locking fails, return stale cached data rather than
+        # hammering the API without backoff protection.
+        cached = _read_cache()
+        return (cached or {}).get("data")
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +224,7 @@ def _fmt_countdown(total_min: int) -> str:
 
 
 def _fetch_anthropic_raw(token: str) -> dict:
-    """Raw API call to Anthropic usage endpoint. Raises RateLimited on 429."""
+    """Raw API call to Anthropic usage endpoint. Raises RateLimitedError on 429."""
     req = urllib.request.Request(
         "https://api.anthropic.com/api/oauth/usage",
         headers={
@@ -239,7 +241,7 @@ def _fetch_anthropic_raw(token: str) -> dict:
             retry_after = None
             with contextlib.suppress(Exception):
                 retry_after = float(e.headers.get("Retry-After", ""))
-            raise RateLimited(retry_after) from e
+            raise RateLimitedError(retry_after) from e
         raise
 
 
@@ -285,7 +287,7 @@ def _fetch_anthropic_usage(token: str) -> str | None:
 
 
 def _fetch_poe_raw(api_key: str) -> dict:
-    """Raw API call to Poe balance endpoint. Raises RateLimited on 429."""
+    """Raw API call to Poe balance endpoint. Raises RateLimitedError on 429."""
     req = urllib.request.Request(
         "https://api.poe.com/usage/current_balance",
         headers={"Authorization": f"Bearer {api_key}"},
@@ -298,7 +300,7 @@ def _fetch_poe_raw(api_key: str) -> dict:
             retry_after = None
             with contextlib.suppress(Exception):
                 retry_after = float(e.headers.get("Retry-After", ""))
-            raise RateLimited(retry_after) from e
+            raise RateLimitedError(retry_after) from e
         raise
 
 
