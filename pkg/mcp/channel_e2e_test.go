@@ -240,17 +240,19 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	if len(received) < 2 {
 		t.Fatalf("expected 2 channel messages, got %d", len(received))
 	}
-	if received[0].Source != "telegram" {
-		t.Errorf("first message source = %q, want telegram", received[0].Source)
+	// Order is non-deterministic (async dispatch), so check both are present.
+	sources := map[string]string{}
+	for _, cm := range received {
+		sources[cm.Source] = cm.Message
+		if cm.ServerName != "test-channel" {
+			t.Errorf("server = %q, want test-channel", cm.ServerName)
+		}
 	}
-	if received[0].Message != "Hello from Telegram!" {
-		t.Errorf("first message = %q", received[0].Message)
+	if sources["telegram"] != "Hello from Telegram!" {
+		t.Errorf("telegram message = %q", sources["telegram"])
 	}
-	if received[0].ServerName != "test-channel" {
-		t.Errorf("first message server = %q, want test-channel", received[0].ServerName)
-	}
-	if received[1].Source != "discord" {
-		t.Errorf("second message source = %q, want discord", received[1].Source)
+	if sources["discord"] != "Hello from Discord!" {
+		t.Errorf("discord message = %q", sources["discord"])
 	}
 
 	_ = mgr.Close()

@@ -268,7 +268,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	if mcpMgr != nil {
 		sess := result.Session
 		mcpMgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
-			sess.InjectChannelMessage(cm.ServerName, cm.Source, cm.Message)
+			sess.InjectChannelMessage(cm.ServerName, cm.SourceName(), cm.Text())
 		}
 	}
 

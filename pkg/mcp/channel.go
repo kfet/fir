@@ -23,12 +23,50 @@ const (
 type ChannelMessage struct {
 	// ServerName is the Manager key for the server that sent the message.
 	ServerName string
+
+	// Content is the text content of the inbound message.
+	// Maps to "content" in the notification params.
+	Content string `json:"content"`
+
 	// Source identifies where the message came from (e.g. "telegram", "discord").
+	// Maps to "source" in the notification params (legacy) or meta.user.
 	Source string `json:"source"`
-	// Message is the text content of the inbound message.
+
+	// Message is a legacy alias for Content.
 	Message string `json:"message"`
-	// Metadata carries optional key-value pairs from the channel server.
+
+	// Meta carries structured metadata from the channel server
+	// (chat_id, message_id, user, ts, file_path, etc.)
+	Meta map[string]any `json:"meta,omitempty"`
+
+	// Metadata is a legacy alias for Meta.
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// Text returns the message text, preferring Content over Message.
+func (cm *ChannelMessage) Text() string {
+	if cm.Content != "" {
+		return cm.Content
+	}
+	return cm.Message
+}
+
+// Source returns the sender identity, checking Source field, then meta.user.
+func (cm *ChannelMessage) SourceName() string {
+	if cm.Source != "" {
+		return cm.Source
+	}
+	if cm.Meta != nil {
+		if u, ok := cm.Meta["user"].(string); ok && u != "" {
+			return u
+		}
+	}
+	if cm.Metadata != nil {
+		if u, ok := cm.Metadata["user"].(string); ok && u != "" {
+			return u
+		}
+	}
+	return "unknown"
 }
 
 // hasChannelCapability reports whether the server's initialize result
@@ -106,7 +144,7 @@ func (c *channelConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
 		}
 		cm.ServerName = c.serverName
 		firlog.Info("mcp channel message received",
-			"server", c.serverName, "source", cm.Source)
+			"server", c.serverName, "source", cm.SourceName())
 		if c.onMessage != nil {
 			c.onMessage(cm)
 		}

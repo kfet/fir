@@ -250,7 +250,7 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	if mcpMgr != nil {
 		sess := result.Session
 		mcpMgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
-			sess.InjectChannelMessage(cm.ServerName, cm.Source, cm.Message)
+			sess.InjectChannelMessage(cm.ServerName, cm.SourceName(), cm.Text())
 		}
 	}
 
