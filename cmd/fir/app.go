@@ -232,6 +232,14 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	// Record CLI usage
 	recordCLIFlags(usageTracker, args)
 
+	// Wire channel messages from MCP servers into the agent session.
+	if mcpMgr != nil {
+		sess := result.Session
+		mcpMgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
+			sess.InjectChannelMessage(cm.ServerName, cm.Source, cm.Message)
+		}
+	}
+
 	return &sessionSetup{
 		cwd:             cwd,
 		agentDir:        agentDir,
