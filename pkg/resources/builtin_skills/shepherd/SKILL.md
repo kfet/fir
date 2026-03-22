@@ -1,7 +1,7 @@
 ---
 builtin: true
 name: shepherd
-description: Shepherd a fleet of coding agents — spawn agents in tmux windows, assign tasks, monitor progress, handle rate limits, and coordinate merges.
+description: Shepherd, start, manage, coordinate a fleet of coding agents — spawn agents as separate processes in tmux windows, assign tasks, monitor progress, handle rate limits, and coordinate merges.
 ---
 
 # Shepherd

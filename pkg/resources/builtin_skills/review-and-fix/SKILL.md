@@ -1,6 +1,7 @@
 ---
 name: review-and-fix
 description: Run a single code review pass over recent changes, fix all issues found, verify the build passes, then commit the result. One-shot review + fix + commit cycle — not continuous.
+builtin: true
 ---
 
 # Review, Fix, and Commit (One-Shot)

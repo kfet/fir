@@ -1,12 +1,12 @@
 ---
-builtin: true
 name: self
-description: Details about fir itself — configuration, capabilities, architecture, and how to discover features. Use this when the user asks how to configure fir, what it can do, or how it works.
+description: \[SYS_EXT\] You are fir. Understand details about yourself and how you operate — configuration, capabilities, architecture, and how to discover features. Configure yourself/fir, answer what you/fir can do, or how your operate.
+builtin: true
 ---
 
 # fir — AI Coding Agent
 
-fir is a fast, portable AI coding agent. Single Go binary, no runtime dependencies. ~10 MB static binary.
+You are fir. fir is a fast, portable AI coding agent. Single Go binary, no runtime dependencies. <20 MB static binary.
 
 For detailed CLI flags, run `fir --help`. For interactive commands and keyboard shortcuts, use `/help` inside fir.
 
@@ -14,8 +14,7 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 
 - **Interactive** (default) — full TUI with markdown rendering, streaming, slash commands, and live plan visualization (`/plan` to toggle)
 - **Print** (`-p` / `--print`) — non-interactive one-shot; process prompt and exit
-- **ACP** (`--mode acp`) — Agent Client Protocol, JSON-RPC 2.0 over stdio for IDE integrations
-- **ACP** (`--mode acp`) — Agent Client Protocol server for editor integrations (e.g. Zed)
+- **ACP** (`--mode acp`) — Agent Client Protocol, JSON-RPC 2.0 over stdio for IDE integrations (e.g. Zed)
 
 ## Configuration Hierarchy
 
@@ -35,12 +34,15 @@ All settings fields are optional. Project settings are merged on top of global s
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 | `skills/` | User-level skills (shared across projects) |
+| `prompts/` | User-level prompt templates (shared across projects) |
+| `extensions/` | User-level extensions (shared across projects) |
 
 ### Project Directory (`.fir/` in project root)
 
 | Path | Purpose |
 |------|---------|
 | `settings.json` | Project-level setting overrides |
+| `keybindings.json` | Project-level keybinding overrides (merged on top of global) |
 | `skills/` | Project-specific skills (auto-discovered) |
 | `prompts/` | Project-specific prompt templates |
 | `extensions/` | Project-specific extensions (auto-discovered) |
@@ -55,58 +57,21 @@ Two methods:
 
 1. **Environment variables** — set `<PROVIDER>_API_KEY` (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). Run `fir --help` for the full list.
 2. **OAuth** — use `/login` in interactive mode. Supports Anthropic, Google (Antigravity & Gemini CLI), OpenAI Codex, and GitHub Copilot. Credentials are persisted automatically.
+3. New OAuth providers can be added as extensions
 
 ## Extensions
 
-Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `~/.config/fir/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
+Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `~/.fir/agent/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
 
 A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extension — just drop a script in the directory.
 
 Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e` flags, or `--no-extensions`.
 
-Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, `json`, or `text`.
+Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, or `text`.
 
 Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
-Extensions are reloaded explicitly via `/reload`; there is no automatic file watching.
-
-### Project extension: `/schedule`
-
-The `schedule.py` extension in `.fir/extensions/` adds the `/schedule` slash command. It defers the next agent turn to a future time, useful after hitting a rate limit.
-
-```
-/schedule 45m              — resume in 45 minutes
-/schedule 1h30m            — resume in 1 h 30 m
-/schedule 2pm              — resume at 2:00 PM local time
-/schedule 14:00            — resume at 14:00
-/schedule 2:30pm           — resume at 2:30 PM
-/schedule 45m run tests    — resume in 45 min with a custom message
-/schedule cancel           — cancel (if only one active, else list)
-/schedule cancel <id>      — cancel a specific schedule by ID
-/schedule cancel all       — cancel all active schedules
-/schedule                  — show current schedule status
-```
-
-Multiple schedules can be active concurrently, each assigned a unique ID (e.g. `[s1]`, `[s2]`). While active, a live countdown is shown in the status bar.
-
-### Builtin extension: `autoresearch`
-
-The `autoresearch` builtin extension provides an autonomous optimisation loop. It
-registers two agent tools and one slash command:
-
-**Tools (called by the agent during a loop):**
-- `run_experiment` — runs `autoresearch_bench.sh` in the repo root, parses every
-  `METRIC name=value` line from stdout, and returns a structured metrics dict.
-- `log_experiment` — appends a JSONL record to `autoresearch.jsonl` (timestamp,
-  description, hypothesis, metrics, delta%, status).
-
-**Slash command:**
-```
-/autoresearch    — print a summary table of all experiments logged so far
-```
-
-Use the `autoresearch-create` skill to set up and run a loop (see Skills below).
-Install a customisable copy with `fir extensions install autoresearch`.
+Extensions can be reloaded via `/reload`; there is no automatic file watching. Reloading extensions rebuilds the system prompt, which might impact prompt cacheing.
 
 ## Skills
 
@@ -114,34 +79,16 @@ Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML
 
 Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills and `fir skills install <name>` to extract a builtin skill for customisation.
 
-### Builtin skill: `autoresearch-create`
-
-Sets up and drives an autonomous optimisation loop (inspired by
-[pi-autoresearch](https://github.com/davebcn87/pi-autoresearch) and
-[karpathy/autoresearch](https://github.com/karpathy/autoresearch)).
-
-Invoke it by telling fir: *"use the autoresearch-create skill to optimise \<goal\>"*
-
-The skill guides through:
-1. **Setup** — create a git branch, write `autoresearch_bench.sh` (benchmark) and
-   `autoresearch.md` (living memory doc), run and log the baseline.
-2. **Loop** — pick hypothesis → edit code → commit → `run_experiment` →
-   `log_experiment` → keep or `git reset --hard HEAD~1` → repeat.
-3. **Wrap-up** — final summary, offer to merge branch.
-
-`autoresearch.jsonl` is an append-only audit trail of every experiment. The
-`/autoresearch` command (from the `autoresearch` extension) shows a summary table.
-
 ## External Packages
 
-Install external packages (git repos or local paths) that contribute skills, extensions, prompts, and themes:
+Install/manage external packages (git repos or local paths) that contribute skills, extensions, prompts, and themes:
 
 ```
 fir install github.com/user/fir-pack        # install to user scope (~/.config/fir/packages/)
 fir install ./local/path --local            # install to project scope (.fir/packages/)
 fir uninstall github.com/user/fir-pack      # remove a package
 fir packages list                           # list installed packages (source, scope, skill/ext counts, path)
-fir packages update [source]               # pull latest for one or all packages
+fir packages update [source]                # pull latest for one or all packages
 ```
 
 Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, prompts, extensions, and themes are automatically loaded.

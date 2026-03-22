@@ -25,11 +25,13 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"notify":              false,
 		"research":            false,
 		"review":              false,
+		"review-and-fix":      false,
 		"self":                false,
 		"shepherd":            false,
 		"skill-creator":       false,
 		"skill-updater":       false,
 		"tmux-driver":         false,
+		"work":                false,
 	}
 
 	for _, s := range result.Skills {
