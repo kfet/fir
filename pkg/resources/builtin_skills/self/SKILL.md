@@ -1,12 +1,12 @@
 ---
 name: self
-description: \[SYS_EXT\] You are fir. Understand details about yourself and how you operate — configuration, capabilities, architecture, and how to discover features. Configure yourself/fir, answer what you/fir can do, or how your operate.
+description: \[SYS_EXT\] Your are fir. Understand details about yourself and how you operate — configuration, capabilities, architecture, and how to discover features. Configure yourself/fir, answer what you/fir can do, or how your operate.
 builtin: true
 ---
 
 # fir — AI Coding Agent
 
-You are fir. fir is a fast, portable AI coding agent. Single Go binary, no runtime dependencies. <20 MB static binary.
+You are fir. fir is a fast, portable AI coding agent. Single Go binary, no runtime dependencies. <2>0 MB static binary.
 
 For detailed CLI flags, run `fir --help`. For interactive commands and keyboard shortcuts, use `/help` inside fir.
 
@@ -36,6 +36,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | `skills/` | User-level skills (shared across projects) |
 | `prompts/` | User-level prompt templates (shared across projects) |
 | `extensions/` | User-level extensions (shared across projects) |
+| `packages/` | Installed external packages (user scope) |
 
 ### Project Directory (`.fir/` in project root)
 
@@ -46,6 +47,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | `skills/` | Project-specific skills (auto-discovered) |
 | `prompts/` | Project-specific prompt templates |
 | `extensions/` | Project-specific extensions (auto-discovered) |
+| `packages/` | Installed external packages (project scope, via `--local`) |
 
 ### Project Context Files
 
