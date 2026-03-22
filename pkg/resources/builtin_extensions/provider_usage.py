@@ -18,6 +18,7 @@ import contextlib
 import fcntl
 import json
 import os
+import random
 import tempfile
 import threading
 import time
@@ -127,8 +128,10 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
                     # Exponential backoff: double the previous backoff, capped
                     prev = _effective_backoff_duration(cached or {})
                     duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
-                    if e.retry_after:
+                    if e.retry_after and e.retry_after > 0:
                         duration = max(duration, e.retry_after)
+                    # Add jitter (up to 50%) to desynchronize retries across machines
+                    duration += random.uniform(0, duration * 0.5)
                     obj = dict(cached or {})
                     obj["backoff_until"] = time.time() + duration
                     obj["backoff_duration"] = duration
