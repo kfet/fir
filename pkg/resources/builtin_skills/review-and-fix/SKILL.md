@@ -1,104 +1,61 @@
 ---
 name: review-and-fix
-description: Run a single code review pass over recent changes, fix all issues found, verify the build passes, then commit the result. One-shot review + fix + commit cycle — not continuous.
+description: Review outstanding changes, fix issues, verify the build, and commit. One-shot review + fix + commit cycle.
 builtin: true
 ---
 
-# Review, Fix, and Commit (One-Shot)
+# Review, Fix, and Commit
 
-Run one review pass over recent changes, fix every issue found, verify the build passes, then commit all changes.
-
-> **`PROJECT_ROOT`** refers to the repository root. Set it at the start of every shell session:
-> ```bash
-> PROJECT_ROOT="$(git rev-parse --show-toplevel)"
-> ```
+Review all uncommitted changes, fix every issue found, verify the build passes, then commit everything. The goal is to get work-in-progress committed cleanly.
 
 ## Phase 1 — Review
 
-### 1. Find what changed
+Find changed files:
 
 ```bash
-cd "$PROJECT_ROOT"
+PROJECT_ROOT="$(git rev-parse --show-toplevel)" && cd "$PROJECT_ROOT"
 git diff --cached --name-only
 git diff --name-only
 git diff main --name-only 2>/dev/null
 ```
 
-### 2. Check build health
+Run the project's build/test commands (e.g. `make all`). Note failures.
 
-Run the project's build/test commands (e.g. `make all`). Note any failures.
-
-### 3. Review each changed file
-
-Read every changed file fully. Look for:
+Read every changed file. Look for:
 
 - **Build breaks** — compilation errors, missing imports, broken tests
-- **Security** — API key exposure, path traversal, injection, hardcoded secrets
-- **Correctness** — off-by-one, race conditions, wrong logic, serialization mismatches
-- **Test gaps** — untested code paths, error branches, missing assertions
-- **Simplification** — dead code, redundant helpers, duplicate types, verbose patterns. Three dimensions:
-  - *Code reuse* — eliminate duplication, extract shared helpers
-  - *Code quality* — improve readability, naming, structure, adherence to project conventions
-  - *Efficiency* — remove unnecessary allocations, redundant work, or slow patterns
+- **Security** — key exposure, path traversal, injection, hardcoded secrets
+- **Correctness** — off-by-one, races, wrong logic, serialization mismatches
+- **Test gaps** — untested code paths, missing assertions
+- **Simplification** — dead code, duplication, verbose patterns, unnecessary allocations
 
-### 4. Compile a findings list
+Collect issues as a flat list with `file:line` references and severity (urgent / backlog). Print the list.
 
-Collect all issues as a flat list with `file:line` references and severity (urgent / backlog). Print the list to the user.
-
-If no issues are found, say so and skip to Phase 3.
+If no issues found, skip to Phase 3.
 
 ## Phase 2 — Fix
 
-Work through every issue from the findings list, prioritized:
+Work through findings in priority order: build breaks → security → correctness → test gaps → simplification.
 
-1. Build breaks
-2. Security
-3. Correctness
-4. Test gaps
-5. Simplification
+For each issue: read context, make the fix, run tests. For bugs, write a failing test first, then fix.
 
-For each issue:
-
-1. Read the relevant file and surrounding context.
-2. Make the fix.
-3. If fixing a bug, write a test first that fails, then apply the fix so it passes.
-4. Run the project's test command to confirm nothing broke.
-
-After all issues are fixed:
-
-```bash
-cd "$PROJECT_ROOT"
-make all
-```
-
-Confirm the full build and test suite passes. If anything fails, fix it before proceeding to Phase 3.
+After all fixes, run `make all` and confirm it passes before proceeding.
 
 ## Phase 3 — Commit
 
-Stage and commit all changes made during the fix phase.
+Stage and commit **all** outstanding changes — the original work plus any fixes.
 
 ```bash
 cd "$PROJECT_ROOT"
 git add -A
+GIT_EDITOR=true git commit -m "<subject ≤72 chars>
+
+- <change 1>
+- <change 2>"
 ```
 
-Write a commit message that summarizes the fixes made. Use a short subject line (≤72 chars) followed by a blank line and a bullet list of changes if there are multiple fixes:
-
-```bash
-GIT_EDITOR=true git commit -m "<subject>
-
-- <fix 1>
-- <fix 2>
-..."
-```
-
-If there were no issues found and nothing was changed, skip the commit.
+Always commit. Only skip if the working tree is truly clean.
 
 ## Output
 
-Summarize to the user:
-- How many files reviewed
-- How many issues found (by category)
-- How many fixed
-- Final build status
-- Commit hash and message (or "nothing to commit")
+Summarize: files reviewed, issues found (by category), issues fixed, final build status, commit hash + message.

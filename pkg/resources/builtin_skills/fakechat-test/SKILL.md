@@ -54,7 +54,29 @@ open http://localhost:8787
 
 Should show `"tools":2`. The browser UI is now open — type messages and the agent auto-responds.
 
-### 5. Cleanup (when done)
+### 5. Monitor continuously
+
+Immediately after opening the browser, begin a monitoring loop. Do **not** ask the user whether to monitor — just start. Poll every 10 seconds until the user says to stop or clean up:
+
+```bash
+# Check logs for channel activity
+grep -i 'channel\|inject\|reply\|error\|warn\|fail' ~/.fir/agent/debug.log | tail -20
+```
+
+```bash
+# Check TUI state
+tmux capture-pane -t fakechat -p -S -40
+```
+
+On each poll, report:
+- New channel messages received (with timestamps)
+- Tool calls made (reply, etc.)
+- Any errors or warnings
+- Whether auto-trigger fired (agent started a turn without manual prompt)
+
+Keep monitoring until the user explicitly asks to stop or clean up.
+
+### 6. Cleanup (when user says done)
 
 ```bash
 tmux kill-session -t fakechat 2>/dev/null
@@ -67,27 +89,5 @@ lsof -ti:8787 | xargs kill -9 2>/dev/null; true
 - **Reply tool**: agent uses `mcp__fakechat__reply` to respond
 - **No phantom tools**: no `list_resources` or `list_prompts` errors
 - **Browser UI**: responses appear in the fakechat web UI
-- **TUI**: `tmux attach -t fakechat` to watch the agent side
-- **Logs**: `grep -i 'channel\|inject\|reply' ~/.fir/agent/debug.log | tail -10`
-
-## Monitor the interaction
-
-After opening the browser, watch the logs in real-time while the user chats:
-
-```bash
-tail -f ~/.fir/agent/debug.log | grep -i 'channel\|inject\|reply\|error\|warn\|fail'
-```
-
-Also periodically check the TUI for anything unexpected:
-
-```bash
-tmux capture-pane -t fakechat -p -S -40
-```
-
-Take notes on:
-- Any errors or warnings in the debug log
-- Tool calls that fail or return unexpected results
-- Messages that arrive but don't trigger a response
-- Latency between message received and reply sent (timestamps in the log)
-- Anything the agent does that seems wrong (e.g. calling tools it shouldn't, ignoring messages, replying to the TUI instead of via the reply tool)
-- Ideas for improving the channel message format, system prompt integration, or UX
+- **Latency**: time between message received and reply sent
+- **Errors**: any warnings or failures in debug log
