@@ -249,13 +249,21 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					}
 					updated = append(updated, AdaptTool(session, serverName, tool, &m.progressReg))
 				}
-				// Always include the resource and prompt tools for this server.
-				updated = append(updated,
-					listResourcesTool(session, serverName),
-					readResourceTool(session, serverName),
-					listPromptsTool(session, serverName),
-					getPromptTool(session, serverName),
-				)
+				// Include resource and prompt tools only when the server
+				// advertises the corresponding capability.
+				caps := session.InitializeResult().Capabilities
+				if caps != nil && caps.Resources != nil {
+					updated = append(updated,
+						listResourcesTool(session, serverName),
+						readResourceTool(session, serverName),
+					)
+				}
+				if caps != nil && caps.Prompts != nil {
+					updated = append(updated,
+						listPromptsTool(session, serverName),
+						getPromptTool(session, serverName),
+					)
+				}
 
 				// Subscribe to any resources that appeared since startup.
 				// Use best-effort: ignore errors (server may not support subscriptions).
@@ -382,28 +390,39 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 	firlog.Info("mcp connected", "server", name, "tools", len(tools))
 
-	// Expose MCP resources and prompts as additional tools.
-	tools = append(tools,
-		listResourcesTool(session, name),
-		readResourceTool(session, name),
-		listPromptsTool(session, name),
-		getPromptTool(session, name),
-	)
+	// Expose MCP resources and prompts as additional tools, but only when
+	// the server advertises the corresponding capability.
+	caps := session.InitializeResult().Capabilities
+	if caps != nil && caps.Resources != nil {
+		tools = append(tools,
+			listResourcesTool(session, name),
+			readResourceTool(session, name),
+		)
+	}
+	if caps != nil && caps.Prompts != nil {
+		tools = append(tools,
+			listPromptsTool(session, name),
+			getPromptTool(session, name),
+		)
+	}
 
 	// Subscribe to each resource for push update notifications. Best-effort:
 	// servers that don't support subscriptions return an error which we ignore.
-	m.mu.Lock()
-	subs := make(map[string]struct{})
-	m.subscribed[name] = subs
-	m.mu.Unlock()
-	for res, err := range session.Resources(ctx, nil) {
-		if err != nil {
-			break
-		}
+	// Skip entirely when the server doesn't advertise resources.
+	if caps != nil && caps.Resources != nil {
 		m.mu.Lock()
-		subs[res.URI] = struct{}{}
+		subs := make(map[string]struct{})
+		m.subscribed[name] = subs
 		m.mu.Unlock()
-		_ = session.Subscribe(ctx, &sdk.SubscribeParams{URI: res.URI})
+		for res, err := range session.Resources(ctx, nil) {
+			if err != nil {
+				break
+			}
+			m.mu.Lock()
+			subs[res.URI] = struct{}{}
+			m.mu.Unlock()
+			_ = session.Subscribe(ctx, &sdk.SubscribeParams{URI: res.URI})
+		}
 	}
 
 	m.mu.Lock()

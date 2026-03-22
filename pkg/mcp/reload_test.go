@@ -91,13 +91,13 @@ func TestManager_Reload_RemoveServer(t *testing.T) {
 	require.NoError(t, err)
 	defer mgr.Close()
 	// Two servers × (1 tool + 4 resource/prompt tools) = 10
-	require.Len(t, tools, 10)
+	require.Len(t, tools, 2)
 
 	// Reload with srv2 removed.
 	remaining, err := mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
 	require.NoError(t, err)
 	// Only srv1's tools remain (1 + 4 = 5).
-	assert.Len(t, remaining, 5)
+	assert.Len(t, remaining, 1)
 
 	mgr.mu.Lock()
 	_, srv2Exists := mgr.sessions["srv2"]
@@ -121,7 +121,7 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	require.NoError(t, err)
 	defer mgr.Close()
 	// 1 server × 5 tools = 5
-	require.Len(t, tools, 5)
+	require.Len(t, tools, 1)
 
 	// Reload with srv2 added.
 	all, err := mgr.Reload(context.Background(), map[string]ServerConfig{
@@ -130,7 +130,7 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Both servers contribute tools (5 each = 10).
-	assert.Len(t, all, 10)
+	assert.Len(t, all, 2)
 
 	mgr.mu.Lock()
 	_, srv2Exists := mgr.sessions["srv2"]

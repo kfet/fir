@@ -84,7 +84,9 @@ func TestManager_Resources_ListAndRead(t *testing.T) {
 // TestManager_Resources_EmptyServer verifies that list_resources returns a
 // friendly "no resources" message when the server exposes none.
 func TestManager_Resources_EmptyServer(t *testing.T) {
-	server := sdk.NewServer(&sdk.Implementation{Name: "empty", Version: "0"}, nil)
+	server := sdk.NewServer(&sdk.Implementation{Name: "empty", Version: "0"}, &sdk.ServerOptions{
+		Capabilities: &sdk.ServerCapabilities{Resources: &sdk.ResourceCapabilities{}},
+	})
 	server.AddTool(
 		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -118,7 +120,9 @@ func TestManager_Resources_EmptyServer(t *testing.T) {
 // TestManager_Resources_ReadMissingURI verifies that read_resource returns an
 // IsError result (not a Go error) when no URI is provided.
 func TestManager_Resources_ReadMissingURI(t *testing.T) {
-	server := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, nil)
+	server := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "0"}, &sdk.ServerOptions{
+		Capabilities: &sdk.ServerCapabilities{Resources: &sdk.ResourceCapabilities{}},
+	})
 	server.AddTool(
 		&sdk.Tool{Name: "noop", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)},
 		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
