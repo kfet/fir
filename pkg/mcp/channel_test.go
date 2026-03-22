@@ -55,9 +55,9 @@ func makeNotification(method string, params any) *jsonrpc.Request {
 
 func TestChannelConnectionInterceptsChannelNotifications(t *testing.T) {
 	channelParams := map[string]any{
-		"source":  "telegram",
-		"message": "hello from telegram",
-		"metadata": map[string]any{
+		"content": "hello from telegram",
+		"meta": map[string]any{
+			"user":    "telegram",
 			"chat_id": "123",
 		},
 	}
@@ -104,18 +104,18 @@ func TestChannelConnectionInterceptsChannelNotifications(t *testing.T) {
 	if received[0].ServerName != "test-server" {
 		t.Errorf("ServerName = %q, want %q", received[0].ServerName, "test-server")
 	}
-	if received[0].Source != "telegram" {
-		t.Errorf("Source = %q, want %q", received[0].Source, "telegram")
+	if received[0].SourceName() != "telegram" {
+		t.Errorf("SourceName = %q, want %q", received[0].SourceName(), "telegram")
 	}
-	if received[0].Message != "hello from telegram" {
-		t.Errorf("Message = %q, want %q", received[0].Message, "hello from telegram")
+	if received[0].Content != "hello from telegram" {
+		t.Errorf("Content = %q, want %q", received[0].Content, "hello from telegram")
 	}
 }
 
 func TestChannelTransportWrapsConnection(t *testing.T) {
 	channelParams := map[string]any{
-		"source":  "discord",
-		"message": "hello from discord",
+		"content": "hello from discord",
+		"meta":    map[string]any{"user": "discord"},
 	}
 	normalNotif := makeNotification("notifications/tools/list_changed", nil)
 	conn := &fakeConnection{
@@ -148,8 +148,8 @@ func TestChannelTransportWrapsConnection(t *testing.T) {
 		t.Fatalf("expected tools/list_changed, got %s", req.Method)
 	}
 
-	if got.Source != "discord" {
-		t.Errorf("Source = %q, want %q", got.Source, "discord")
+	if got.SourceName() != "discord" {
+		t.Errorf("SourceName = %q, want %q", got.SourceName(), "discord")
 	}
 	if got.ServerName != "discord-server" {
 		t.Errorf("ServerName = %q, want %q", got.ServerName, "discord-server")

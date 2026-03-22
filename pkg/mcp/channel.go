@@ -21,44 +21,22 @@ type ChannelMessage struct {
 	ServerName string
 
 	// Content is the text content of the inbound message.
-	// Maps to "content" in the notification params.
 	Content string `json:"content"`
-
-	// Source identifies where the message came from (e.g. "telegram", "discord").
-	// Maps to "source" in the notification params (legacy) or meta.user.
-	Source string `json:"source"`
-
-	// Message is a legacy alias for Content.
-	Message string `json:"message"`
 
 	// Meta carries structured metadata from the channel server
 	// (chat_id, message_id, user, ts, file_path, etc.)
 	Meta map[string]any `json:"meta,omitempty"`
-
-	// Metadata is a legacy alias for Meta.
-	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// Text returns the message text, preferring Content over Message.
+// Text returns the message text.
 func (cm *ChannelMessage) Text() string {
-	if cm.Content != "" {
-		return cm.Content
-	}
-	return cm.Message
+	return cm.Content
 }
 
-// Source returns the sender identity, checking Source field, then meta.user.
+// SourceName returns the sender identity from meta.user, or "unknown".
 func (cm *ChannelMessage) SourceName() string {
-	if cm.Source != "" {
-		return cm.Source
-	}
 	if cm.Meta != nil {
 		if u, ok := cm.Meta["user"].(string); ok && u != "" {
-			return u
-		}
-	}
-	if cm.Metadata != nil {
-		if u, ok := cm.Metadata["user"].(string); ok && u != "" {
 			return u
 		}
 	}

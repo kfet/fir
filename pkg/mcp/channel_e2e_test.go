@@ -139,10 +139,10 @@ func (s *channelMCPServer) handleRequest(msg jsonrpc.Message) {
 }
 
 // sendChannelNotification sends a notifications/claude/channel message.
-func (s *channelMCPServer) sendChannelNotification(source, message string) {
+func (s *channelMCPServer) sendChannelNotification(user, content string) {
 	params := mustMarshal(map[string]any{
-		"source":  source,
-		"message": message,
+		"content": content,
+		"meta":    map[string]any{"user": user},
 	})
 	notif := &jsonrpc.Request{
 		Method: channelNotificationMethod,
@@ -175,7 +175,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	var mu sync.Mutex
 	done := make(chan struct{}, 1)
 	mgr.OnChannelMessage = func(cm ChannelMessage) {
-		t.Logf("OnChannelMessage: source=%s message=%s", cm.Source, cm.Message)
+		t.Logf("OnChannelMessage: source=%s content=%s", cm.SourceName(), cm.Content)
 		mu.Lock()
 		received = append(received, cm)
 		count := len(received)
@@ -237,7 +237,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	// Order is non-deterministic (async dispatch), so check both are present.
 	sources := map[string]string{}
 	for _, cm := range received {
-		sources[cm.Source] = cm.Message
+		sources[cm.SourceName()] = cm.Content
 		if cm.ServerName != "test-channel" {
 			t.Errorf("server = %q, want test-channel", cm.ServerName)
 		}
