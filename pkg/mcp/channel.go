@@ -13,10 +13,6 @@ const (
 	// channelNotificationMethod is the JSON-RPC method for channel messages
 	// sent by MCP servers that advertise the "claude/channel" experimental capability.
 	channelNotificationMethod = "notifications/claude/channel"
-
-	// channelCapabilityKey is the key in ServerCapabilities.Experimental
-	// that indicates a server supports the channel protocol.
-	channelCapabilityKey = "claude/channel"
 )
 
 // ChannelMessage represents an inbound message from a channel-capable MCP server.
@@ -67,17 +63,6 @@ func (cm *ChannelMessage) SourceName() string {
 		}
 	}
 	return "unknown"
-}
-
-// hasChannelCapability reports whether the server's initialize result
-// advertises the "claude/channel" experimental capability.
-func hasChannelCapability(session *sdk.ClientSession) bool {
-	res := session.InitializeResult()
-	if res == nil || res.Capabilities == nil {
-		return false
-	}
-	_, ok := res.Capabilities.Experimental[channelCapabilityKey]
-	return ok
 }
 
 // channelTransport wraps an sdk.Transport to intercept channel notifications
@@ -163,20 +148,6 @@ func wrapTransportForChannels(inner sdk.Transport, serverName string, onMessage 
 		serverName: serverName,
 		onMessage:  onMessage,
 	}
-}
-
-// ChannelServers returns the names of connected servers that advertise the
-// "claude/channel" experimental capability.
-func (m *Manager) ChannelServers() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var names []string
-	for name, session := range m.sessions {
-		if hasChannelCapability(session) {
-			names = append(names, name)
-		}
-	}
-	return names
 }
 
 // Ensure channelTransport implements sdk.Transport.

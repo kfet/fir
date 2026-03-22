@@ -211,12 +211,6 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	}
 	t.Logf("Tools: %d", len(tools))
 
-	chServers := mgr.ChannelServers()
-	t.Logf("ChannelServers: %v", chServers)
-	if len(chServers) != 1 || chServers[0] != "test-channel" {
-		t.Fatalf("ChannelServers = %v, want [test-channel]", chServers)
-	}
-
 	// Send channel notifications after a brief delay to ensure the SDK's
 	// internal read loop is running.
 	time.Sleep(100 * time.Millisecond)
