@@ -575,20 +575,14 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 }
 
 // InjectChannelMessage injects a message from an MCP channel server into the
-// agent conversation. If the agent is currently streaming, the message is
-// queued as a steering message (interrupts mid-turn). Otherwise it is queued
-// as a follow-up so the agent processes it on the next run.
+// agent conversation. The message is queued as a follow-up so the agent
+// processes it after the current turn completes.
 func (s *AgentSession) InjectChannelMessage(serverName, source, message string) {
 	text := fmt.Sprintf("[Channel message from %s via %s]\n%s", source, serverName, message)
 	ts := time.Now().UnixMilli()
 	msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
-	if s.IsStreaming() {
-		firlog.Info("injecting channel message as steering", "server", serverName, "source", source)
-		s.Agent.Steer(msg)
-	} else {
-		firlog.Info("injecting channel message as follow-up", "server", serverName, "source", source)
-		s.Agent.FollowUp(msg)
-	}
+	firlog.Info("injecting channel message", "server", serverName, "source", source)
+	s.Agent.FollowUp(msg)
 }
 
 // ClearFollowUpQueue clears and returns all queued follow-up message texts.
