@@ -111,10 +111,15 @@ fetch_and_cache() {
   body=$(sed '$ d' <<< "$response")
 
   if [[ "$http_code" -eq 429 ]]; then
-    # Write backoff: double previous duration, capped at BACKOFF_MAX
-    local prev_duration now duration
-    prev_duration=$(jq -r '.backoff_duration // 0 | floor' "$CACHE_FILE" 2>/dev/null || echo 0)
+    # Write backoff: double previous duration (reset if expired), capped at BACKOFF_MAX
+    local prev_duration backoff_until now duration
     now=$(date +%s)
+    backoff_until=$(jq -r '.backoff_until // 0 | floor' "$CACHE_FILE" 2>/dev/null || echo 0)
+    if (( now >= backoff_until )); then
+      prev_duration=0  # backoff expired — start fresh
+    else
+      prev_duration=$(jq -r '.backoff_duration // 0 | floor' "$CACHE_FILE" 2>/dev/null || echo 0)
+    fi
     duration=$(( prev_duration * 2 ))
     (( duration < BACKOFF_BASE )) && duration=$BACKOFF_BASE
     (( duration > BACKOFF_MAX )) && duration=$BACKOFF_MAX

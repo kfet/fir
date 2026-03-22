@@ -80,6 +80,17 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
     def _is_backed_off(cached: dict) -> bool:
         return time.time() < cached.get("backoff_until", 0)
 
+    def _effective_backoff_duration(cached: dict) -> float:
+        """Return previous backoff duration, but reset to 0 if backoff has expired.
+
+        This ensures that after a backoff window passes and we retry,
+        a subsequent 429 starts fresh at BACKOFF_BASE instead of
+        staying pinned at BACKOFF_MAX forever.
+        """
+        if _is_backed_off(cached):
+            return cached.get("backoff_duration", 0)
+        return 0  # expired — next 429 starts fresh
+
     def _write_cache(obj: dict) -> None:
         try:
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(_CACHE_DIR), suffix=".tmp")
@@ -114,7 +125,7 @@ def _cached_fetch(cache_name: str, fetch_fn) -> dict | None:
                     result = fetch_fn()
                 except RateLimited as e:
                     # Exponential backoff: double the previous backoff, capped
-                    prev = (cached or {}).get("backoff_duration", 0)
+                    prev = _effective_backoff_duration(cached or {})
                     duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
                     if e.retry_after:
                         duration = max(duration, e.retry_after)
