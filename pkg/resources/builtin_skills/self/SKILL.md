@@ -48,6 +48,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | `prompts/` | Project-specific prompt templates |
 | `extensions/` | Project-specific extensions (auto-discovered) |
 | `packages/` | Installed external packages (project scope, via `--local`) |
+| `mcp.json` | MCP server configuration (project-level) |
 
 ### Project Context Files
 
@@ -107,6 +108,7 @@ Packages are stored in `settings.json` under `"packages"`. Each entry is a strin
 - **Scoped models** — use `/scoped-models` to pick which models `Ctrl+P` cycles through.
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
 - **call_tool bridge** — extensions can call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)`. Results are returned directly and never enter conversation history. This enables extensions to build rich orchestration workflows.
+- **MCP channel servers** — MCP servers that advertise the `claude/channel` experimental capability can push messages into the running session via `notifications/claude/channel` notifications. Messages are injected into the agent conversation automatically. The server's `channel_reply` tool is a regular MCP tool. Configure channel servers in `.fir/mcp.json` like any other MCP server — no special config needed.
 
 ## settings.json Reference
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP channel server support: servers that advertise the `claude/channel` experimental capability can now push messages into the running session via `notifications/claude/channel` notifications. Channel messages are automatically injected into the agent conversation. The server's `channel_reply` tool works as a regular MCP tool with no special handling needed.
+
 ## [0.23.0] - 2026-03-21
 
 ### Fixed

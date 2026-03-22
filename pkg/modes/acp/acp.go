@@ -264,6 +264,14 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		mcpManager:      mcpMgr,
 	}
 
+	// Wire channel messages from MCP servers into the agent session.
+	if mcpMgr != nil {
+		sess := result.Session
+		mcpMgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
+			sess.InjectChannelMessage(cm.ServerName, cm.Source, cm.Message)
+		}
+	}
+
 	unsub := result.Session.Subscribe(func(event session.AgentSessionEvent) {
 		pa.handleEvent(sessionID, entry, event)
 	})

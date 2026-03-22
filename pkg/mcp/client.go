@@ -69,6 +69,10 @@ type Manager struct {
 	// May be nil.
 	OnResourceUpdated func(serverName, uri string)
 
+	// OnChannelMessage is called when a channel-capable MCP server sends a
+	// notifications/claude/channel notification. May be nil.
+	OnChannelMessage func(ChannelMessage)
+
 	// SamplingFn is called when an MCP server issues a sampling/createMessage
 	// request (asking fir to call an LLM). If nil, sampling requests are rejected.
 	// Use NewSamplingFn to create a standard implementation.
@@ -193,6 +197,10 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if m.verbose {
 		transport = &sdk.LoggingTransport{Transport: transport, Writer: os.Stderr}
 	}
+
+	// Wrap the transport to intercept channel notifications before they reach
+	// the SDK's method dispatcher.
+	transport = wrapTransportForChannels(transport, name, m.OnChannelMessage)
 
 	// Route MCP server log messages to the process slog logger.
 	serverName := name
