@@ -199,8 +199,13 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 
 	// Wrap the transport to intercept channel notifications before they reach
-	// the SDK's method dispatcher.
-	transport = wrapTransportForChannels(transport, name, m.OnChannelMessage)
+	// the SDK's method dispatcher. The callback is resolved lazily so that
+	// OnChannelMessage can be set after Start() returns.
+	transport = wrapTransportForChannels(transport, name, func(cm ChannelMessage) {
+		if fn := m.OnChannelMessage; fn != nil {
+			fn(cm)
+		}
+	})
 
 	// Route MCP server log messages to the process slog logger.
 	serverName := name
