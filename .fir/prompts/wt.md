@@ -1,5 +1,5 @@
 ---
-description: Create a git worktree + branch, open a tmux window with fir running in it, ready to work on a feature
+description: Start fir in a new git worktree, in a new tmux window, with your prompt
 ---
 
 Create a new feature worktree for: $1
@@ -12,9 +12,9 @@ Steps:
 
 2. Create the worktree and branch using the feature name
 
-3. Open a new tmux window and launch fir inside it with the user's task as the initial prompt. Set the fir session name to the feature name so tmux auto-updates:
+3. Open a new tmux window and launch fir inside it with the user's task as the initial prompt:
 ```bash
-tmux new-window -c "<worktree-name>" "fir 'You are working on feature: <feature-name>. ${USER_CONTEXT}' '/name <feature-name>'"
+tmux new-window -c "<worktree-name>" "fir --session-name '<feature-name>' 'You are working on feature: <feature-name>. ${USER_CONTEXT}'"
 ```
 
 Where `${USER_CONTEXT}` is the additional context from `${@:2}`, if any.
