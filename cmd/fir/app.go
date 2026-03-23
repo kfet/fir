@@ -81,25 +81,6 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
-	sessionManager := createSessionManager(args, cwd, agentDir)
-
-	// Resource loader
-	pkgMgr := firpkg.New(agentDir, cwd, settingsManager)
-	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
-		Cwd:                           cwd,
-		AgentDir:                      agentDir,
-		SettingsManager:               settingsManager,
-		PackageResolver:               pkgMgr,
-		SystemPrompt:                  args.SystemPrompt,
-		AppendSystemPrompt:            args.AppendSystemPrompt,
-		NoSkills:                      args.NoSkills,
-		AdditionalSkillPaths:          args.Skills,
-		AdditionalPromptTemplatePaths: args.PromptTemplates,
-		NoPromptTemplates:             args.NoPromptTemplates,
-	})
-	if err := rl.Reload(); err != nil {
-		return nil, fmt.Errorf("reload resources: %w", err)
-	}
 
 	// Resolve scoped models
 	var scopedModels []models.ScopedModel
@@ -141,30 +122,8 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	// Usage tracking
 	usageTracker := New(DefaultPath(agentDir))
 
-	// Build session options
-	sessionOpts := session.CreateAgentSessionOptions{
-		Cwd:             cwd,
-		AgentDir:        agentDir,
-		AuthStorage:     authStorage,
-		ModelRegistry:   modelRegistry,
-		Model:           model,
-		SessionManager:  sessionManager,
-		SettingsManager: settingsManager,
-		ResourceLoader:  rl,
-		ScopedModels:    scopedModels,
-		UsageTracker:    NewSessionTracker(usageTracker),
-		CompactionRunner: &compaction.DefaultRunner{
-			SettingsManager: settingsManager,
-			ModelRegistry:   modelRegistry,
-		},
-	}
-
-	if cliTools := resolveTools(args, cwd); cliTools != nil {
-		sessionOpts.Tools = cliTools
-	}
-
-	// Load and start MCP servers so their tools are available to the agent.
-	var mcpMgr *mcp.Manager
+	// Load MCP configs
+	var mcpConfigs map[string]mcp.ServerConfig
 	if !args.NoMCP {
 		mcpCfg, mcpErr := mcp.LoadDefaultConfigs(cwd)
 		if mcpErr == nil && args.MCPConfig != "" {
@@ -179,29 +138,54 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		if mcpErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to load MCP config: %v\n", mcpErr)
 		} else if len(mcpCfg.MCPServers) > 0 {
-			mcpMgr = mcp.NewManager(mcpCfg.MCPServers, false)
-			mcpTools, mcpErr := mcpMgr.Start(context.Background())
-			if mcpErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to start MCP servers: %v\n", mcpErr)
-				_ = mcpMgr.Close()
-				mcpMgr = nil
-			} else {
-				if sessionOpts.Tools == nil {
-					sessionOpts.Tools = session.DefaultCodingTools(cwd)
-				}
-				sessionOpts.Tools = append(sessionOpts.Tools, mcpTools...)
-				firlog.Info("MCP servers started", "servers", len(mcpCfg.MCPServers), "tools", len(mcpTools))
-			}
+			mcpConfigs = mcpCfg.MCPServers
 		}
 	}
 
-	if args.Thinking != "" {
-		sessionOpts.ThinkingLevel = string(args.Thinking)
+	// Resource loader
+	pkgMgr := firpkg.New(agentDir, cwd, settingsManager)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
+		Cwd:                           cwd,
+		AgentDir:                      agentDir,
+		SettingsManager:               settingsManager,
+		PackageResolver:               pkgMgr,
+		SystemPrompt:                  args.SystemPrompt,
+		AppendSystemPrompt:            args.AppendSystemPrompt,
+		NoSkills:                      args.NoSkills,
+		AdditionalSkillPaths:          args.Skills,
+		AdditionalPromptTemplatePaths: args.PromptTemplates,
+		NoPromptTemplates:             args.NoPromptTemplates,
+	})
+	if err := rl.Reload(); err != nil {
+		return nil, fmt.Errorf("reload resources: %w", err)
 	}
 
-	result, err := session.CreateAgentSession(context.Background(), sessionOpts)
+	// Build shared setup options
+	opts := session.SetupOptions{
+		Cwd:             cwd,
+		AgentDir:        agentDir,
+		AuthStorage:     authStorage,
+		ModelRegistry:   modelRegistry,
+		SettingsManager: settingsManager,
+		SessionManager:  createSessionManager(args, cwd, agentDir),
+		Model:           model,
+		ScopedModels:    scopedModels,
+		Tools:           resolveTools(args, cwd),
+		ResourceLoader:  rl,
+		UsageTracker:    NewSessionTracker(usageTracker),
+		MCPConfigs:      mcpConfigs,
+		CompactionRunner: &compaction.DefaultRunner{
+			SettingsManager: settingsManager,
+			ModelRegistry:   modelRegistry,
+		},
+	}
+	if args.Thinking != "" {
+		opts.ThinkingLevel = string(args.Thinking)
+	}
+
+	result, err := session.Setup(context.Background(), opts)
 	if err != nil {
-		return nil, fmt.Errorf("create session: %w", err)
+		return nil, err
 	}
 	firlog.Debug("session created")
 
@@ -234,36 +218,27 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		fmt.Fprintln(os.Stderr, result.ModelFallbackMessage)
 	}
 
-	// Check model is available — in non-interactive modes we must fail early,
-	// but in TUI mode we allow starting without a model so the user can /login.
+	// Check model is available
 	if err := checkModelAvailable(result.Session.Model(), args); err != nil {
 		return nil, err
 	}
 
-	// Clamp thinking level to model capabilities
 	clampThinkingLevel(result.Session, args.Thinking)
-
-	// Record CLI usage
 	recordCLIFlags(usageTracker, args)
-
-	// Wire channel messages from MCP servers into the agent session.
-	if mcpMgr != nil {
-		sess := result.Session
-		mcpMgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
-			sess.InjectChannelMessage(cm.ServerName, cm.SourceName(), cm.Text())
-		}
-	}
 
 	return &sessionSetup{
 		cwd:             cwd,
 		agentDir:        agentDir,
-		result:          result,
+		result: &session.CreateAgentSessionResult{
+			Session:              result.Session,
+			ModelFallbackMessage: result.ModelFallbackMessage,
+		},
 		settingsManager: settingsManager,
 		extSetup:        extSetup,
 		usageTracker:    usageTracker,
 		resourceLoader:  rl,
 		extensionOpts:   extOpts,
-		mcpManager:      mcpMgr,
+		mcpManager:      result.MCPManager,
 	}, nil
 }
 

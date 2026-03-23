@@ -574,6 +574,22 @@ func (m *Manager) Close() error {
 	return firstErr
 }
 
+// CallTool programmatically calls a tool on a named MCP server.
+// This is used for infrastructure concerns (e.g. typing indicators) rather
+// than agent-driven tool calls.
+func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, args map[string]any) (*sdk.CallToolResult, error) {
+	m.mu.Lock()
+	session, ok := m.sessions[serverName]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("MCP server %q not connected", serverName)
+	}
+	return session.CallTool(ctx, &sdk.CallToolParams{
+		Name:      toolName,
+		Arguments: args,
+	})
+}
+
 // ServerStatus reports the connection state of a single MCP server.
 type ServerStatus struct {
 	// Name is the key used in the Manager's config map.

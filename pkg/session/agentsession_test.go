@@ -3178,7 +3178,7 @@ func TestAgentSession_InjectChannelMessage_WhenNotStreaming(t *testing.T) {
 		t.Fatal("expected not streaming initially")
 	}
 
-	session.InjectChannelMessage("test-server", "telegram", "hello from telegram")
+	session.InjectChannelMessage("test-server", "telegram", "hello from telegram", nil)
 
 	// When idle, InjectChannelMessage calls PromptMessages in a goroutine
 	// (which will fail without a model — that's expected). The message must
