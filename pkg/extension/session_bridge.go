@@ -27,8 +27,9 @@ type SessionBridge struct {
 	// activeCtx is the context from the currently-executing extension tool call.
 	// Inner call_tool requests (e.g. aside calling Bash) inherit this context
 	// so that cancelling the outer tool also cancels nested tool calls.
-	activeCtxMu sync.Mutex
-	activeCtx   context.Context
+	activeCtxMu    sync.Mutex
+	activeCtx      context.Context
+	activeOnUpdate agent.AgentToolUpdateCallback
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
@@ -250,14 +251,17 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 		},
 		DisplayHint: def.DisplayHint,
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
-			// Store the context so nested call_tool requests from the
-			// extension (e.g. aside calling Bash) inherit cancellation.
+			// Store the context and update callback so nested requests from
+			// the extension (e.g. aside calling Bash) inherit cancellation
+			// and can report progress.
 			b.activeCtxMu.Lock()
 			b.activeCtx = ctx
+			b.activeOnUpdate = onUpdate
 			b.activeCtxMu.Unlock()
 			defer func() {
 				b.activeCtxMu.Lock()
 				b.activeCtx = nil
+				b.activeOnUpdate = nil
 				b.activeCtxMu.Unlock()
 			}()
 
@@ -309,4 +313,14 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 	}
 	b.session.Agent.SetTools(filtered)
 	b.extTools = nil
+}
+
+// ReportProgress sends a transient status message to the UI.
+func (b *SessionBridge) ReportProgress(message string) {
+	b.activeCtxMu.Lock()
+	cb := b.activeOnUpdate
+	b.activeCtxMu.Unlock()
+	if cb != nil {
+		cb(agent.AgentToolResult{StatusMessage: message})
+	}
 }

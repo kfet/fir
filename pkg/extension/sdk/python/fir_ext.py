@@ -872,6 +872,18 @@ class Context:
             return result.get("text", "")
         return ""
 
+    def report_progress(self, message: str) -> None:
+        """Send a transient progress message to the UI.
+
+        Updates the spinner text inside the tool's display component
+        (e.g. "Calling Read..." or "Synthesizing..."). Fire-and-forget —
+        does not wait for a response.
+        """
+        _write_message(
+            {"jsonrpc": "2.0", "method": "report_progress", "params": {"message": message}},
+            self._out,
+        )
+
     def call_tool(
         self,
         name: str,

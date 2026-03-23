@@ -607,6 +607,18 @@ the LLM on every turn.
 
 Response: `{"ok": true}`
 
+#### `report_progress`
+
+Send a transient progress message to the UI.  Updates the spinner text inside
+the tool's display component (e.g. "Calling Read..." or "Synthesizing...").
+Only meaningful while an extension tool is executing; ignored otherwise.
+
+```json
+{"jsonrpc":"2.0","id":1019,"method":"report_progress","params":{"message":"Calling Read..."}}
+```
+
+Response: `{"ok": true}`
+
 ---
 
 ## Comment Frontmatter

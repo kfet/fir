@@ -40,6 +40,9 @@ type BridgeAPI interface {
 	// PrependContext adds a [SYS_EXT] block to the system prompt.
 	// Extensions use this to inject dynamic context.
 	PrependContext(content string)
+	// ReportProgress sends a transient status message to the UI
+	// (e.g. "Calling Read..."). Only meaningful while a tool is executing.
+	ReportProgress(message string)
 }
 
 // ExecResult is the result of a shell command.

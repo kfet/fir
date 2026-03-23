@@ -388,6 +388,7 @@ func executeToolCalls(
 					Args:          tc.Arguments,
 					DisplayHint:   displayHint,
 					PartialResult: partial,
+					StatusMessage: partial.StatusMessage,
 				}
 			})
 			if err != nil {

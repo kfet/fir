@@ -500,6 +500,17 @@ class TestDemoTools(DemoTestCase):
         self.assertIn("Instructions", question)
         fake.stop()
 
+    def test_batch_example_reports_progress(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "batch_example", {"directory": "/tmp/proj"})
+        msg = fake.wait_for_method("report_progress")
+        self.assertIsNotNone(msg, "expected report_progress call")
+        assert msg is not None
+        self.assertIn("message", msg["params"])
+        fake.stop()
+
     def test_batch_example_returns_synthesis(self) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)

@@ -122,6 +122,10 @@ type AgentToolResult struct {
 	// even when Execute returns a nil error. Used by extension hooks
 	// to mark a modified result as an error.
 	IsError bool
+	// StatusMessage is a transient progress label for the UI (e.g.
+	// "Calling Read..."). It is only meaningful on partial-update
+	// results and never persisted.
+	StatusMessage string
 }
 
 // AgentToolUpdateCallback is called during streaming tool execution.
@@ -222,6 +226,7 @@ type AgentEvent struct {
 
 	// For tool_execution_update
 	PartialResult any
+	StatusMessage string // progress message from extensions (e.g. "Calling Read...")
 
 	// For tool_execution_end
 	Result  any

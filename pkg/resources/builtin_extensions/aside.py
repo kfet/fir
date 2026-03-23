@@ -156,6 +156,10 @@ def _run_aside(
         title = spec.get("title", "")
         params = spec.get("params") or {}
 
+        # Report progress to the UI spinner.
+        label = f"Calling {name}" + (f" — {title}" if title else "")
+        ctx.report_progress(label)
+
         # Call the tool via the bridge.
         try:
             result = ctx.call_tool(name, params)
@@ -182,6 +186,7 @@ def _run_aside(
         )
 
     # Synthesise collected outputs.
+    ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
     try:
         synthesis = ctx.side_query(prompt)

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -48,6 +50,15 @@ type ToolExecutionComponent struct {
 	isPartial   bool
 	useBox      bool
 	result      *ToolResultData
+
+	// Inline spinner for hint-based tools while pending.
+	ui            tuicomp.RenderRequester
+	spinnerMu     sync.Mutex
+	spinnerFrames []string
+	spinnerIdx    int
+	spinnerTicker *time.Ticker
+	spinnerDone   chan struct{}
+	statusMsg     string // current progress label, guarded by spinnerMu
 }
 
 // NewToolExecutionComponent creates a new ToolExecutionComponent.
@@ -56,6 +67,7 @@ func NewToolExecutionComponent(
 	args map[string]any,
 	opts *ToolExecutionOptions,
 	displayHint *agent.ToolDisplayHint,
+	ui tuicomp.RenderRequester,
 ) *ToolExecutionComponent {
 	t := theme.GetTheme()
 	showImages := true
@@ -84,6 +96,17 @@ func NewToolExecutionComponent(
 		tc.AddChild(tc.contentText)
 	}
 
+	// Start an inline spinner for hint-based tools (like aside) while pending.
+	// The spinner frame is embedded in the contentText so it appears inside
+	// the tool's colored background box.
+	if displayHint != nil && !useBox && ui != nil {
+		tc.ui = ui
+		tc.spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		tc.spinnerDone = make(chan struct{})
+		tc.spinnerTicker = time.NewTicker(80 * time.Millisecond)
+		go tc.runSpinner()
+	}
+
 	tc.updateDisplay()
 	return tc
 }
@@ -98,12 +121,21 @@ func (tc *ToolExecutionComponent) UpdateArgs(args map[string]any) {
 func (tc *ToolExecutionComponent) UpdateResult(result *ToolResultData, isPartial bool) {
 	tc.result = result
 	tc.isPartial = isPartial
+	tc.stopSpinner()
 	tc.updateDisplay()
 }
 
 // SetExpanded sets the expanded state.
 func (tc *ToolExecutionComponent) SetExpanded(expanded bool) {
 	tc.expanded = expanded
+	tc.updateDisplay()
+}
+
+// SetStatusMessage updates the spinner's status text (e.g. "Calling Read...").
+func (tc *ToolExecutionComponent) SetStatusMessage(msg string) {
+	tc.spinnerMu.Lock()
+	tc.statusMsg = msg
+	tc.spinnerMu.Unlock()
 	tc.updateDisplay()
 }
 
@@ -117,6 +149,55 @@ func (tc *ToolExecutionComponent) SetShowImages(show bool) {
 func (tc *ToolExecutionComponent) Invalidate() {
 	tc.Container.Invalidate()
 	tc.updateDisplay()
+}
+
+// runSpinner ticks the inline spinner and refreshes the display.
+func (tc *ToolExecutionComponent) runSpinner() {
+	for {
+		select {
+		case <-tc.spinnerDone:
+			return
+		case <-tc.spinnerTicker.C:
+			tc.spinnerMu.Lock()
+			tc.spinnerIdx = (tc.spinnerIdx + 1) % len(tc.spinnerFrames)
+			tc.spinnerMu.Unlock()
+			tc.updateDisplay()
+			if tc.ui != nil {
+				tc.ui.RequestRender()
+			}
+		}
+	}
+}
+
+// stopSpinner stops the inline spinner ticker.
+func (tc *ToolExecutionComponent) stopSpinner() {
+	if tc.spinnerDone == nil {
+		return
+	}
+	select {
+	case <-tc.spinnerDone:
+		return // already stopped
+	default:
+		close(tc.spinnerDone)
+	}
+	tc.spinnerTicker.Stop()
+}
+
+// spinnerSuffix returns the current spinner frame + status text,
+// or "" if no spinner is active.
+func (tc *ToolExecutionComponent) spinnerSuffix() string {
+	if tc.spinnerFrames == nil || tc.result != nil {
+		return ""
+	}
+	t := theme.GetTheme()
+	tc.spinnerMu.Lock()
+	frame := tc.spinnerFrames[tc.spinnerIdx]
+	msg := tc.statusMsg
+	tc.spinnerMu.Unlock()
+	if msg == "" {
+		msg = "Working..."
+	}
+	return "\n\n" + t.Fg("accent", frame) + " " + t.Fg("muted", msg)
 }
 
 func (tc *ToolExecutionComponent) updateDisplay() {
@@ -137,7 +218,7 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 		tc.renderBashContent()
 	} else {
 		tc.contentText.SetCustomBgFn(bgFn)
-		tc.contentText.SetText(tc.formatToolExecution())
+		tc.contentText.SetText(tc.formatToolExecution() + tc.spinnerSuffix())
 	}
 }
 

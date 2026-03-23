@@ -253,7 +253,7 @@ func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
 			args = argMap
 		}
 	}
-	comp := components.NewToolExecutionComponent(ae.ToolName, args, nil, ae.DisplayHint)
+	comp := components.NewToolExecutionComponent(ae.ToolName, args, nil, ae.DisplayHint, m.ui.AsRenderRequester())
 	if m.toolOutputExpanded {
 		comp.SetExpanded(true)
 	}
@@ -266,6 +266,9 @@ func (m *InteractiveMode) onToolExecUpdate(ae *agent.AgentEvent) {
 	comp, ok := m.pendingTools[ae.ToolCallID]
 	if !ok {
 		return
+	}
+	if ae.StatusMessage != "" {
+		comp.SetStatusMessage(ae.StatusMessage)
 	}
 	if ae.Args != nil {
 		if args, ok := ae.Args.(map[string]any); ok {

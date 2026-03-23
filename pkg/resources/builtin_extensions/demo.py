@@ -16,6 +16,7 @@ Outbound calls demonstrated (extension → fir):
   set_label · clear_label · get_active_tools · set_active_tools ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · continue_session · side_query · call_tool ·
+  report_progress ·
   prepend
 
 Inbound surface demonstrated (fir → extension):
@@ -27,8 +28,9 @@ Inbound surface demonstrated (fir → extension):
     tool_execution_start, tool_execution_end
 
 Batch tool demonstration:
-  The batch_example tool shows how extensions can use ctx.call_tool()
-  and ctx.side_query() to orchestrate multi-tool workflows.  It calls tools
+  The batch_example tool shows how extensions can use ctx.call_tool(),
+  ctx.report_progress(), and ctx.side_query() to orchestrate multi-tool
+  workflows.  It calls tools
   directly (Read, Bash), collects results in local memory, and
   synthesises via an ephemeral LLM call — raw output never enters
   conversation history.
@@ -218,6 +220,7 @@ def batch_example(params, ctx):
     outputs = []
 
     for fname in found:
+        ctx.report_progress(f"Reading {fname}")
         result = ctx.call_tool("Read", {
             "path": f"{directory}/{fname}",
             "limit": 40,
@@ -226,6 +229,7 @@ def batch_example(params, ctx):
         outputs.append(f"--- {fname} ---\n{text}")
 
     # Git status.
+    ctx.report_progress("Running git status")
     git_cmd = (
         f"cd {directory} && git status --short 2>/dev/null"
         " || echo 'not a git repo'"

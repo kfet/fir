@@ -10,7 +10,7 @@ import (
 
 func TestToolExecution_ReadPending(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.txt"}
-	comp := NewToolExecutionComponent("read", args, nil, nil)
+	comp := NewToolExecutionComponent("read", args, nil, nil, nil)
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "read") {
@@ -23,7 +23,7 @@ func TestToolExecution_ReadPending(t *testing.T) {
 
 func TestToolExecution_ReadWithResult(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.txt"}
-	comp := NewToolExecutionComponent("read", args, nil, nil)
+	comp := NewToolExecutionComponent("read", args, nil, nil, nil)
 	comp.UpdateResult(&ToolResultData{
 		Content: []ToolContentBlock{
 			{Type: "text", Text: "line1\nline2\nline3"},
@@ -38,7 +38,7 @@ func TestToolExecution_ReadWithResult(t *testing.T) {
 
 func TestToolExecution_BashPending(t *testing.T) {
 	args := map[string]any{"command": "echo hello"}
-	comp := NewToolExecutionComponent("bash", args, nil, nil)
+	comp := NewToolExecutionComponent("bash", args, nil, nil, nil)
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "echo hello") {
@@ -48,7 +48,7 @@ func TestToolExecution_BashPending(t *testing.T) {
 
 func TestToolExecution_BashWithResult(t *testing.T) {
 	args := map[string]any{"command": "ls"}
-	comp := NewToolExecutionComponent("bash", args, nil, nil)
+	comp := NewToolExecutionComponent("bash", args, nil, nil, nil)
 	comp.UpdateResult(&ToolResultData{
 		Content: []ToolContentBlock{
 			{Type: "text", Text: "file1.txt\nfile2.txt"},
@@ -63,7 +63,7 @@ func TestToolExecution_BashWithResult(t *testing.T) {
 
 func TestToolExecution_EditWithDiff(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.go", "oldText": "foo", "newText": "bar"}
-	comp := NewToolExecutionComponent("edit", args, nil, nil)
+	comp := NewToolExecutionComponent("edit", args, nil, nil, nil)
 	comp.UpdateResult(&ToolResultData{
 		Content: []ToolContentBlock{
 			{Type: "text", Text: "ok"},
@@ -81,7 +81,7 @@ func TestToolExecution_EditWithDiff(t *testing.T) {
 
 func TestToolExecution_WriteDisplay(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.txt", "content": "hello world"}
-	comp := NewToolExecutionComponent("write", args, nil, nil)
+	comp := NewToolExecutionComponent("write", args, nil, nil, nil)
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "write") {
@@ -94,7 +94,7 @@ func TestToolExecution_WriteDisplay(t *testing.T) {
 
 func TestToolExecution_Expanded(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.txt"}
-	comp := NewToolExecutionComponent("read", args, nil, nil)
+	comp := NewToolExecutionComponent("read", args, nil, nil, nil)
 
 	// Create a long output
 	var lines []string
@@ -158,7 +158,7 @@ func TestToolExecution_DisplayHint(t *testing.T) {
 		ResultMaxLines: 3,
 	}
 	args := map[string]any{"url": "https://example.com", "method": "GET"}
-	comp := NewToolExecutionComponent("http_fetch", args, nil, hint)
+	comp := NewToolExecutionComponent("http_fetch", args, nil, hint, nil)
 	lines := comp.Render(120)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "http_fetch") {
@@ -193,7 +193,7 @@ func TestToolExecution_DisplayHint(t *testing.T) {
 func TestToolExecution_DisplayHintUseBox(t *testing.T) {
 	hint := &agent.ToolDisplayHint{UseBox: true}
 	args := map[string]any{"input": "test"}
-	comp := NewToolExecutionComponent("custom_tool", args, nil, hint)
+	comp := NewToolExecutionComponent("custom_tool", args, nil, hint, nil)
 	if !comp.useBox {
 		t.Error("expected useBox=true when DisplayHint.UseBox is set")
 	}
@@ -201,7 +201,7 @@ func TestToolExecution_DisplayHintUseBox(t *testing.T) {
 
 func TestToolExecution_GenericFallbackWithoutHint(t *testing.T) {
 	args := map[string]any{"foo": "bar"}
-	comp := NewToolExecutionComponent("unknown_tool", args, nil, nil)
+	comp := NewToolExecutionComponent("unknown_tool", args, nil, nil, nil)
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "unknown_tool") {
@@ -218,7 +218,7 @@ func TestToolExecution_ToolOutputDetails(t *testing.T) {
 		TitleArgs: []agent.TitleArg{{Name: "title", Style: "accent"}},
 	}
 	args := map[string]any{"title": "check files"}
-	comp := NewToolExecutionComponent("aside", args, nil, hint)
+	comp := NewToolExecutionComponent("aside", args, nil, hint, nil)
 
 	comp.UpdateResult(&ToolResultData{
 		Content: []ToolContentBlock{
@@ -262,7 +262,7 @@ func TestToolExecution_ToolOutputDetails(t *testing.T) {
 
 func TestToolExecution_ToolOutputDetailsLineTruncation(t *testing.T) {
 	args := map[string]any{"title": "test"}
-	comp := NewToolExecutionComponent("aside", args, nil, nil)
+	comp := NewToolExecutionComponent("aside", args, nil, nil, nil)
 
 	// Generate 20 lines — should be truncated to 10
 	var lines []string
@@ -292,5 +292,54 @@ func TestToolExecution_ToolOutputDetailsLineTruncation(t *testing.T) {
 	}
 	if !strings.Contains(joined, "10 more lines") {
 		t.Errorf("expected truncation hint, got %q", joined)
+	}
+}
+
+type mockRenderReq struct{}
+
+func (m *mockRenderReq) RequestRender() {}
+
+func TestToolExecution_SpinnerShownForHintTools(t *testing.T) {
+	hint := &agent.ToolDisplayHint{
+		TitleArgs: []agent.TitleArg{{Name: "title", Style: "accent"}},
+	}
+	args := map[string]any{"title": "check files"}
+	ui := &mockRenderReq{}
+	comp := NewToolExecutionComponent("aside", args, nil, hint, ui)
+
+	// Spinner should be present while pending
+	lines := comp.Render(80)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Working...") {
+		t.Errorf("expected Working... spinner while pending, got %q", joined)
+	}
+
+	// SetStatusMessage should update the spinner text
+	comp.SetStatusMessage("Calling Read...")
+	lines = comp.Render(80)
+	joined = strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Calling Read...") {
+		t.Errorf("expected 'Calling Read...' after SetStatusMessage, got %q", joined)
+	}
+
+	// After result, spinner should be gone
+	comp.UpdateResult(&ToolResultData{
+		Content: []ToolContentBlock{{Type: "text", Text: "done"}},
+	}, false)
+	lines = comp.Render(80)
+	joined = strings.Join(lines, "\n")
+	if strings.Contains(joined, "Working...") || strings.Contains(joined, "Calling Read...") {
+		t.Errorf("expected spinner removed after result, got %q", joined)
+	}
+}
+
+func TestToolExecution_NoSpinnerForPlainTools(t *testing.T) {
+	args := map[string]any{"path": "/tmp/test.txt"}
+	comp := NewToolExecutionComponent("read", args, nil, nil, nil)
+
+	lines := comp.Render(80)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "Working...") {
+		t.Errorf("plain tools should not have a spinner, got %q", joined)
 	}
 }

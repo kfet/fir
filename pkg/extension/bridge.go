@@ -99,7 +99,7 @@ func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 				b.routeResponse(m)
 			case *Notification:
 				b.lastActivity.Store(time.Now().UnixNano())
-				// Extensions shouldn't send us notifications; ignore.
+				b.handleNotification(m, api)
 			}
 		}
 	}()
@@ -368,6 +368,19 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		api.PrependContext(p.Content)
 		result = map[string]any{"ok": true}
 
+	case "report_progress":
+		var p struct {
+			Message string `json:"message"`
+		}
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		api.ReportProgress(p.Message)
+		result = map[string]any{"ok": true}
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {
@@ -378,6 +391,21 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	}
 
 	_ = codec.WriteResponse(req.ID, result, rpcErr)
+}
+
+// handleNotification processes a JSON-RPC notification (no response expected).
+// Currently only report_progress is handled; other notifications are ignored.
+func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
+	switch n.Method {
+	case "report_progress":
+		var p struct {
+			Message string `json:"message"`
+		}
+		if n.Params != nil {
+			_ = json.Unmarshal(*n.Params, &p)
+		}
+		api.ReportProgress(p.Message)
+	}
 }
 
 // routeResponse delivers an inbound response to the waiting caller.

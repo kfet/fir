@@ -10,6 +10,7 @@
 
 - MCP channel server support: servers that advertise the `claude/channel` experimental capability can now push messages into the running session via `notifications/claude/channel` notifications. Channel messages are automatically injected into the agent conversation. The server's `channel_reply` tool works as a regular MCP tool with no special handling needed.
 - Provider usage status bar now shows `⚠ rate-limited` or `⚠ stale` indicators when usage data cannot be refreshed due to API rate limits or fetch errors.
+- Show a `⠋ Working...` spinner inside aside (and other hint-based extension tool) components while the tool call is in progress. Extensions can update the spinner text via `ctx.report_progress()` (e.g. "Calling Read...", "Synthesizing...").
 
 ## [0.23.0] - 2026-03-21
 

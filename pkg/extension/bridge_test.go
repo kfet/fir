@@ -100,6 +100,7 @@ func (m *mockBridgeAPI) CallTool(name string, params map[string]any) (ToolResult
 }
 func (m *mockBridgeAPI) PrependContext(_ string) {}
 func (m *mockBridgeAPI) ListTools() []ToolInfo   { return nil }
+func (m *mockBridgeAPI) ReportProgress(_ string) {}
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
 var _ BridgeAPI = (*mockBridgeAPI)(nil)
@@ -758,5 +759,29 @@ func TestBridge_SessionDataStore(t *testing.T) {
 	snap["delta"] = "four"
 	if _, ok := b.GetSessionData("delta"); ok {
 		t.Fatal("snapshot modification leaked into store")
+	}
+}
+
+func TestBridge_ReportProgress_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"message":"Calling Read..."}`)
+	_ = extCodec.WriteRequest(1, "report_progress", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected RPC error: %v", resp.Error)
 	}
 }
