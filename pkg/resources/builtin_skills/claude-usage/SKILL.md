@@ -16,7 +16,15 @@ Standard API keys will **not** work — the endpoint rejects them.
 
 ## Step 1 — Run the Script
 
-The script auto-detects your OAuth token from known credential files. In most cases, just run it:
+The script auto-detects your OAuth token from known credential files. The recommended approach is to use `--cached`, which reads from the local cache maintained by the provider-usage extension (refreshed every 5 minutes) — this avoids redundant API calls and rate-limit issues:
+
+```bash
+bash "$SKILL_DIR/scripts/usage.sh" --cached
+```
+
+If no cache is available, it falls back to a live API call automatically.
+
+To force a live API call (bypassing the cache):
 
 ```bash
 bash "$SKILL_DIR/scripts/usage.sh"

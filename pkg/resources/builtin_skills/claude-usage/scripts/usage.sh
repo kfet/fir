@@ -9,6 +9,9 @@
 # Options:
 #   --raw         Print the full JSON response instead of the formatted summary
 #   --verbose     On error, print the full response body for debugging
+#   --cached      Read from the local cache (~/.fir/agent/anthropic-usage-cache.json)
+#                 written by the provider-usage extension, instead of hitting the API.
+#                 Falls back to a live API call if the cache is missing.
 #
 # The token must be an OAuth Bearer token (not a standard sk-ant-... API key).
 # Auto-detection searches ~/.fir/agent/auth.json and ~/.claude/.credentials.json.
@@ -17,6 +20,8 @@ set -euo pipefail
 
 RAW=false
 VERBOSE=false
+CACHED=false
+CACHE_FILE="$HOME/.fir/agent/anthropic-usage-cache.json"
 
 find_token() {
   local entry file filter value
@@ -46,6 +51,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --raw)     RAW=true; shift ;;
     --verbose) VERBOSE=true; shift ;;
+    --cached)  CACHED=true; shift ;;
     *)         POSITIONAL+=("$1"); shift ;;
   esac
 done
@@ -58,37 +64,52 @@ if [[ -z "$TOKEN" ]]; then
   fi
 fi
 
-if [[ -z "$TOKEN" ]]; then
-  echo "Error: no token provided." >&2
-  echo "Usage: TOKEN=<bearer-token> $0" >&2
-  echo "       $0 <bearer-token>" >&2
-  exit 1
-fi
+# --- Obtain BODY: either from cache or live API ---
 
-RESPONSE=$(curl -s -w '\n%{http_code}' \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "anthropic-beta: oauth-2025-04-20" \
-  -H "Accept: application/json" \
-  https://api.anthropic.com/api/oauth/usage)
+BODY=""
 
-HTTP_CODE=$(tail -1 <<< "$RESPONSE")
-BODY=$(sed '$ d' <<< "$RESPONSE")
-
-if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
-  echo "Error: API returned HTTP $HTTP_CODE" >&2
-  if $VERBOSE; then
-    echo "$BODY" >&2
-  else
-    # Try to extract a short error message
-    msg=$(echo "$BODY" | jq -r '.error.message // .error // .message // empty' 2>/dev/null || true)
-    if [[ -n "$msg" ]]; then
-      echo "$msg" >&2
-    else
-      echo "(use --verbose to see the full response)" >&2
-    fi
+if $CACHED && [[ -f "$CACHE_FILE" ]]; then
+  cached_data=$(jq -c '.data // empty' "$CACHE_FILE" 2>/dev/null || true)
+  if [[ -n "$cached_data" && "$cached_data" != "null" ]]; then
+    BODY="$cached_data"
   fi
-  exit 1
 fi
+
+if [[ -z "$BODY" ]]; then
+  # Need a token for the live API call
+  if [[ -z "$TOKEN" ]]; then
+    echo "Error: no token provided and no cached data available." >&2
+    echo "Usage: TOKEN=<bearer-token> $0" >&2
+    echo "       $0 <bearer-token>" >&2
+    exit 1
+  fi
+
+  RESPONSE=$(curl -s -w '\n%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "anthropic-beta: oauth-2025-04-20" \
+    -H "Accept: application/json" \
+    https://api.anthropic.com/api/oauth/usage)
+
+  HTTP_CODE=$(tail -1 <<< "$RESPONSE")
+  BODY=$(sed '$ d' <<< "$RESPONSE")
+
+  if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+    echo "Error: API returned HTTP $HTTP_CODE" >&2
+    if $VERBOSE; then
+      echo "$BODY" >&2
+    else
+      msg=$(echo "$BODY" | jq -r '.error.message // .error // .message // empty' 2>/dev/null || true)
+      if [[ -n "$msg" ]]; then
+        echo "$msg" >&2
+      else
+        echo "(use --verbose to see the full response)" >&2
+      fi
+    fi
+    exit 1
+  fi
+fi
+
+# --- Output ---
 
 if $RAW; then
   echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY"
