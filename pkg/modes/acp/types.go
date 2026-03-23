@@ -29,6 +29,8 @@ type Options struct {
 	// EnabledExtensions is an explicit allowlist of extension names from --extension flags.
 	// When non-empty, only extensions in this list are started (merged with settings).
 	EnabledExtensions []string
+	// DisabledExtensions is a denylist of extension names from --disable-extension flags.
+	DisabledExtensions []string
 }
 
 // ============================================================================

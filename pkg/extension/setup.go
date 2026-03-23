@@ -51,6 +51,11 @@ type SetupOptions struct {
 	// This is populated from the "extensions" settings key and --extension flags.
 	EnabledNames []string
 
+	// DisabledNames is an optional denylist of extension names to skip.
+	// Extensions in this list are not started even if they appear in EnabledNames.
+	// This is populated from --disable-extension flags.
+	DisabledNames []string
+
 	// OfferFixFn is called when a frontmatter mismatch is detected after an
 	// extension handshake. It receives the mismatch and returns true if the
 	// frontmatter should be auto-fixed. When nil, a warning is printed to stderr.
@@ -141,6 +146,9 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	}
 	if len(opts.EnabledNames) > 0 {
 		mgr.SetAllowedNames(opts.EnabledNames)
+	}
+	if len(opts.DisabledNames) > 0 {
+		mgr.SetDisabledNames(opts.DisabledNames)
 	}
 	if len(opts.ExtraExtensionDirs) > 0 {
 		mgr.SetExtraExtensionDirs(opts.ExtraExtensionDirs)

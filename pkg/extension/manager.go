@@ -29,6 +29,10 @@ type Manager struct {
 	// only extensions whose Name appears in this list are started.
 	AllowedNames []string
 
+	// DisabledNames is an optional denylist of extension names. Extensions
+	// whose Name appears in this list are skipped even if in AllowedNames.
+	DisabledNames []string
+
 	// ActiveMode is the currently running fir mode (interactive, text, json, rpc, acp).
 	// Extensions with mode constraints that do not include this mode are skipped.
 	ActiveMode string
@@ -103,6 +107,14 @@ func (m *Manager) SetAllowedNames(names []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.AllowedNames = append([]string(nil), names...)
+}
+
+// SetDisabledNames updates the optional extension denylist.
+// Extensions in this list are skipped even if in AllowedNames.
+func (m *Manager) SetDisabledNames(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.DisabledNames = append([]string(nil), names...)
 }
 
 // SetExtraExtensionDirs sets additional directories to scan for extension
@@ -231,7 +243,11 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 	m.mu.Lock()
 	allowed := m.AllowedNames
+	disabled := m.DisabledNames
 	m.mu.Unlock()
+	if containsString(disabled, cfg.Name) {
+		return true
+	}
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		return true
 	}
@@ -249,7 +265,12 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	// Allowlist check: skip extensions not in AllowedNames when the list is set.
 	m.mu.Lock()
 	allowed := m.AllowedNames
+	disabled := m.DisabledNames
 	m.mu.Unlock()
+	if containsString(disabled, cfg.Name) {
+		m.logger.Debug("skipping extension (disabled)", "ext", cfg.Name)
+		return nil
+	}
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
 		return nil

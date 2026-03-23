@@ -214,6 +214,7 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 			Cwd:                 cwd,
 			Mode:                resolveExtensionMode(args),
 			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
+			DisabledNames:       args.DisabledExtensions,
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
 		}
 		if !deferExtensions {
@@ -717,6 +718,7 @@ func runAcpMode(args *Args) error {
 		NoMCP:                         args.NoMCP,
 		MCPConfig:                     args.MCPConfig,
 		EnabledExtensions:             args.Extensions,
+		DisabledExtensions:            args.DisabledExtensions,
 	})
 }
 
@@ -887,6 +889,9 @@ func recordCLIFlags(tracker *Tracker, args *Args) {
 	}
 	if len(args.Extensions) > 0 {
 		record("--extension")
+	}
+	if len(args.DisabledExtensions) > 0 {
+		record("--disable-extension")
 	}
 	if args.NoSkills {
 		record("--no-skills")
