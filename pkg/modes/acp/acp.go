@@ -319,11 +319,19 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 // user-level and project-level config files and merges them (project wins).
 // Returns nil if no configs are found. Logs a warning to stderr if a config
 // file exists but cannot be read or parsed.
-func loadProjectMCPConfigs(cwd string) map[string]mcp.ServerConfig {
+func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerConfig {
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fir: warning: %v — no MCP servers will be started\n", err)
 		return nil
+	}
+	if extraConfigPath != "" {
+		extra, extraErr := mcp.LoadConfigFile(extraConfigPath)
+		if extraErr != nil {
+			fmt.Fprintf(os.Stderr, "fir: warning: failed to load MCP config %s: %v\n", extraConfigPath, extraErr)
+		} else {
+			cfg = mcp.MergeConfigs(cfg, extra)
+		}
 	}
 	if cfg == nil {
 		return nil

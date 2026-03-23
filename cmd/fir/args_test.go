@@ -335,6 +335,42 @@ func TestParseArgs_Mixed(t *testing.T) {
 	}
 }
 
+func TestParseArgs_MCPConfig(t *testing.T) {
+	args := ParseArgs([]string{"--mcp-config", "/tmp/mcp.json", "hello"})
+	if args.MCPConfig != "/tmp/mcp.json" {
+		t.Errorf("expected MCPConfig '/tmp/mcp.json', got %q", args.MCPConfig)
+	}
+	if args.NoMCP {
+		t.Error("expected NoMCP=false")
+	}
+}
+
+func TestParseArgs_MCPConfigEnvVar(t *testing.T) {
+	t.Setenv("FIR_MCP_CONFIG", "/tmp/env-mcp.json")
+	args := ParseArgs([]string{"hello"})
+	if args.MCPConfig != "/tmp/env-mcp.json" {
+		t.Errorf("expected MCPConfig '/tmp/env-mcp.json', got %q", args.MCPConfig)
+	}
+}
+
+func TestParseArgs_MCPConfigFlagOverridesEnv(t *testing.T) {
+	t.Setenv("FIR_MCP_CONFIG", "/tmp/env-mcp.json")
+	args := ParseArgs([]string{"--mcp-config", "/tmp/flag-mcp.json", "hello"})
+	if args.MCPConfig != "/tmp/flag-mcp.json" {
+		t.Errorf("expected flag to win, got %q", args.MCPConfig)
+	}
+}
+
+func TestParseArgs_NoMCP(t *testing.T) {
+	args := ParseArgs([]string{"--no-mcp", "hello"})
+	if !args.NoMCP {
+		t.Error("expected NoMCP=true")
+	}
+	if args.MCPConfig != "" {
+		t.Errorf("expected empty MCPConfig, got %q", args.MCPConfig)
+	}
+}
+
 func TestIsValidThinkingLevel(t *testing.T) {
 	for _, level := range ValidThinkingLevels {
 		if !IsValidThinkingLevel(level) {

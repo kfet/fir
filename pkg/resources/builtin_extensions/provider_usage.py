@@ -30,7 +30,7 @@ from pathlib import Path
 import fir_ext
 
 REFRESH_INTERVAL = 300  # 5 minutes
-CACHE_TTL = 60  # seconds — shared across all fir sessions
+CACHE_TTL = 120  # seconds — shared across all fir sessions
 BACKOFF_BASE = 60  # initial backoff after 429 (seconds)
 BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
 
@@ -156,10 +156,12 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
                     return CacheResult(stale_data, is_stale=stale_data is not None)
 
                 # Success — clear any backoff and write fresh data
-                _write_cache({
-                    "fetched_at": time.time(),
-                    "data": result,
-                })
+                _write_cache(
+                    {
+                        "fetched_at": time.time(),
+                        "data": result,
+                    }
+                )
                 return CacheResult(result)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)

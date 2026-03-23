@@ -39,6 +39,7 @@ type Args struct {
 	Tools              []string
 	NoTools            bool
 	NoMCP              bool
+	MCPConfig          string
 	Extensions         []string
 	NoExtensions       bool
 	Print              bool
@@ -149,6 +150,10 @@ func ParseArgs(args []string) *Args {
 		case arg == "--no-mcp":
 			result.NoMCP = true
 
+		case arg == "--mcp-config" && i+1 < len(args):
+			i++
+			result.MCPConfig = args[i]
+
 		case arg == "--tools" && i+1 < len(args):
 			i++
 			parts := strings.Split(args[i], ",")
@@ -238,6 +243,13 @@ func ParseArgs(args []string) *Args {
 		}
 	}
 
+	// Environment variable fallback: CLI flag wins over env var.
+	if result.MCPConfig == "" {
+		if v := os.Getenv("FIR_MCP_CONFIG"); v != "" {
+			result.MCPConfig = v
+		}
+	}
+
 	return result
 }
 
@@ -280,6 +292,8 @@ Options:
   --models <patterns>            Comma-separated model patterns for cycling
   --no-tools                     Disable all built-in tools
   --no-mcp                       Disable MCP server integration
+  --mcp-config <path>            Load additional MCP config file (highest precedence)
+                                 Also: FIR_MCP_CONFIG env var (CLI flag wins)
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
@@ -333,6 +347,7 @@ Environment Variables:
   AWS_PROFILE                      - AWS profile for Amazon Bedrock
   FIR_DEBUG                        - Enable debug logging (set to 1)
   FIR_DEBUG_LOG                    - Debug log file path
+  FIR_MCP_CONFIG                   - Extra MCP config file path (--mcp-config flag wins)
   %-32s - Session storage directory (default: ~/%s/agent)
 
 Available Tools (default: read, bash, edit, write):

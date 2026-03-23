@@ -96,7 +96,7 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 	t0 := time.Now()
 	var mcpConfigs map[string]mcp.ServerConfig
 	if !pa.options.NoMCP {
-		mcpConfigs = loadProjectMCPConfigs(cwd)
+		mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
 	}
 	firlog.Info("acp new session: loaded project MCP configs", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(mcpConfigs))
 	if mcpConfigs == nil && len(params.McpServers) > 0 {
@@ -373,7 +373,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 
 	var resumeMCPConfigs map[string]mcp.ServerConfig
 	if !pa.options.NoMCP {
-		resumeMCPConfigs = loadProjectMCPConfigs(cwd)
+		resumeMCPConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
 	}
 	entry, err := pa.createSession(ctx, sessionID, cwd, resumeMCPConfigs)
 	if err != nil {

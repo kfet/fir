@@ -167,6 +167,15 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	var mcpMgr *mcp.Manager
 	if !args.NoMCP {
 		mcpCfg, mcpErr := mcp.LoadDefaultConfigs(cwd)
+		if mcpErr == nil && args.MCPConfig != "" {
+			extra, extraErr := mcp.LoadConfigFile(args.MCPConfig)
+			if extraErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load --mcp-config %s: %v\n", args.MCPConfig, extraErr)
+				mcpErr = extraErr
+			} else {
+				mcpCfg = mcp.MergeConfigs(mcpCfg, extra)
+			}
+		}
 		if mcpErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to load MCP config: %v\n", mcpErr)
 		} else if len(mcpCfg.MCPServers) > 0 {
@@ -706,6 +715,7 @@ func runAcpMode(args *Args) error {
 		NoPromptTemplates:             args.NoPromptTemplates,
 		NoExtensions:                  args.NoExtensions,
 		NoMCP:                         args.NoMCP,
+		MCPConfig:                     args.MCPConfig,
 		EnabledExtensions:             args.Extensions,
 	})
 }

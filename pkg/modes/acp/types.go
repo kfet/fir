@@ -24,6 +24,8 @@ type Options struct {
 	NoExtensions bool
 	// Disable MCP server integration (--no-mcp).
 	NoMCP bool
+	// MCPConfig is an extra MCP config file path from --mcp-config.
+	MCPConfig string
 	// EnabledExtensions is an explicit allowlist of extension names from --extension flags.
 	// When non-empty, only extensions in this list are started (merged with settings).
 	EnabledExtensions []string
