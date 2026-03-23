@@ -196,10 +196,12 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 			}
 		})
 	}
+
+	// Refresh autocomplete so extension commands appear.
+	m.setupAutocomplete()
 }
 
 // SetBeforeExtensionReload installs a hook executed during /reload after
-// session.Reload() and before extension manager reload.
 func (m *InteractiveMode) SetBeforeExtensionReload(fn func() error) {
 	m.beforeExtensionReload = fn
 }
