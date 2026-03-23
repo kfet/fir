@@ -590,6 +590,32 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 	})
 }
 
+// HasServerTools reports whether the named server exposes all of the given
+// tool names. This checks the raw MCP tool names (not the prefixed agent
+// tool names).
+func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
+	m.mu.Lock()
+	serverTools := m.tools[serverName]
+	m.mu.Unlock()
+
+	// Build a set of the raw (unprefixed) tool names this server has.
+	// The agent tool name is "mcp__<server>__<tool>", so strip the prefix.
+	prefix := "mcp__" + serverName + "__"
+	have := make(map[string]struct{}, len(serverTools))
+	for _, t := range serverTools {
+		name := t.Tool.Name
+		if len(name) > len(prefix) && name[:len(prefix)] == prefix {
+			have[name[len(prefix):]] = struct{}{}
+		}
+	}
+	for _, need := range toolNames {
+		if _, ok := have[need]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // ServerStatus reports the connection state of a single MCP server.
 type ServerStatus struct {
 	// Name is the key used in the Manager's config map.

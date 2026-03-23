@@ -619,11 +619,12 @@ func (s *AgentSession) InjectChannelMessage(serverName, source, message string, 
 	msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
 	firlog.Info("injecting channel message", "server", serverName, "source", source)
 
-	// Start typing indicator if MCP manager is available.
+	// Start typing indicator if MCP manager is available and the server
+	// has both "reply" and "edit_message" tools.
 	s.mu.RLock()
 	mgr := s.mcpManager
 	s.mu.RUnlock()
-	if mgr != nil {
+	if mgr != nil && mgr.HasServerTools(serverName, "reply", "edit_message") {
 		ti := mcp.NewTypingIndicator(mgr, serverName, meta)
 		if err := ti.Start(context.Background()); err != nil {
 			firlog.Debug("typing indicator start failed", "err", err)
