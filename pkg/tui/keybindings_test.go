@@ -201,6 +201,7 @@ func TestKeybindingsManager_AllDefaultActionsRegistered(t *testing.T) {
 		ActionSelectThinking,
 		ActionTree,
 		ActionResume,
+		ActionTogglePlan,
 	}
 
 	for _, action := range allActions {

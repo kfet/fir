@@ -283,15 +283,16 @@ func isExecutableFile(path string) bool {
 	return info.Mode().IsRegular() && info.Mode()&0111 != 0
 }
 
-// stripExt removes a single trailing file extension (e.g. ".py", ".sh").
-// This intentionally strips only one extension: "foo.tar.gz" becomes "foo.tar".
-// For extension naming this is sufficient since executable extensions use
-// single extensions like .py, .sh, or no extension at all.
+// dirExistsExt reports whether path exists and is a directory.
 func dirExistsExt(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
+// stripExt removes a single trailing file extension (e.g. ".py", ".sh").
+// This intentionally strips only one extension: "foo.tar.gz" becomes "foo.tar".
+// For extension naming this is sufficient since executable extensions use
+// single extensions like .py, .sh, or no extension at all.
 func stripExt(name string) string {
 	ext := filepath.Ext(name)
 	if ext != "" {
