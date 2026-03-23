@@ -22,8 +22,8 @@ cd /tmp/claude-plugins-official/external_plugins/fakechat && bun install
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && go build -o /tmp/fir-test ./cmd/fir/
-mkdir -p /tmp/fir-fakechat-test/.fir
-cat > /tmp/fir-fakechat-test/.fir/mcp.json << EOF
+mkdir -p /tmp/fir-fakechat-test
+cat > /tmp/fir-fakechat-mcp.json << EOF
 {
   "mcpServers": {
     "fakechat": {
@@ -42,7 +42,7 @@ lsof -ti:8787 | xargs kill -9 2>/dev/null; true
 tmux kill-session -t fakechat 2>/dev/null; true
 truncate -s 0 ~/.fir/agent/debug.log
 tmux new-session -d -s fakechat -x 140 -y 40 \
-  "cd /tmp/fir-fakechat-test && FIR_DEBUG=1 /tmp/fir-test --debug 2>/tmp/fakechat-stderr.log"
+  "cd /tmp/fir-fakechat-test && FIR_DEBUG=1 /tmp/fir-test --debug --mcp-config /tmp/fir-fakechat-mcp.json 2>/tmp/fakechat-stderr.log"
 ```
 
 ### 4. Verify connection and open browser
