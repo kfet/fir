@@ -205,6 +205,10 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	}
 	firlog.Debug("session created")
 
+	if args.SessionName != "" {
+		result.Session.SetSessionName(args.SessionName)
+	}
+
 	// Extensions — discover and start stdio-based extensions in .fir/extensions/
 	var extSetup *extension.SetupResult
 	var extOpts *extension.SetupOptions

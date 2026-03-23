@@ -140,6 +140,13 @@ func TestParseArgs_SessionDir(t *testing.T) {
 	}
 }
 
+func TestParseArgs_SessionName(t *testing.T) {
+	args := ParseArgs([]string{"--session-name", "my cool session"})
+	if args.SessionName != "my cool session" {
+		t.Errorf("expected session name, got %q", args.SessionName)
+	}
+}
+
 func TestParseArgs_Models(t *testing.T) {
 	args := ParseArgs([]string{"--models", "sonnet,haiku,gpt-4o"})
 	if len(args.Models) != 3 {

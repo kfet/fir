@@ -34,6 +34,7 @@ type Args struct {
 	OutputMode         Mode
 	NoSession          bool
 	Session            string
+	SessionName        string
 	SessionDir         string
 	Models             []string
 	Tools              []string
@@ -129,6 +130,10 @@ func ParseArgs(args []string) *Args {
 		case arg == "--session" && i+1 < len(args):
 			i++
 			result.Session = args[i]
+
+		case arg == "--session-name" && i+1 < len(args):
+			i++
+			result.SessionName = args[i]
 
 		case arg == "--session-dir" && i+1 < len(args):
 			i++
@@ -292,6 +297,7 @@ Options:
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
   --session <path>               Use specific session file
+  --session-name <name>          Set display name for the session
   --session-dir <dir>            Directory for session storage and lookup
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for cycling
