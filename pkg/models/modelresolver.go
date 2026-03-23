@@ -37,12 +37,6 @@ var DefaultModelPerProvider = map[ai.Provider]string{
 	"kimi-coding":            "kimi-k2-thinking",
 }
 
-// ScopedModel pairs a model with an optional explicit thinking level.
-type ScopedModel struct {
-	Model         *ai.Model
-	ThinkingLevel string // empty if not explicitly set
-}
-
 // ParsedModelResult is the result of parsing a model pattern.
 type ParsedModelResult struct {
 	Model         *ai.Model
@@ -407,53 +401,6 @@ func buildFallbackModel(provider, modelID string, availableModels []*ai.Model) *
 	return &clone
 }
 
-// ResolveModelScope resolves model patterns to ScopedModels.
-func ResolveModelScope(patterns []string, registry *ModelRegistry) []ScopedModel {
-	available := registry.GetAvailable()
-	var scoped []ScopedModel
-
-	for _, pattern := range patterns {
-		// Glob patterns (contain *, ?, [)
-		if strings.ContainsAny(pattern, "*?[") {
-			var thinkingLevel string
-			globPattern := pattern
-
-			if lastColon := strings.LastIndex(pattern, ":"); lastColon != -1 {
-				suffix := pattern[lastColon+1:]
-				if isValidThinkingLevel(suffix) {
-					thinkingLevel = strings.ToLower(suffix)
-					globPattern = pattern[:lastColon]
-				}
-			}
-
-			var matched []*ai.Model
-			for _, m := range available {
-				fullID := m.Provider + "/" + m.ID
-				if globMatch(fullID, globPattern) || globMatch(m.ID, globPattern) {
-					matched = append(matched, m)
-				}
-			}
-
-			for _, m := range matched {
-				if !hasScopedModel(scoped, m) {
-					scoped = append(scoped, ScopedModel{Model: m, ThinkingLevel: thinkingLevel})
-				}
-			}
-			continue
-		}
-
-		result := ParseModelPattern(pattern, available)
-		if result.Model == nil {
-			continue
-		}
-		if !hasScopedModel(scoped, result.Model) {
-			scoped = append(scoped, ScopedModel{Model: result.Model, ThinkingLevel: result.ThinkingLevel})
-		}
-	}
-
-	return scoped
-}
-
 // FindInitialModel finds the initial model based on priority.
 func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 	defaultTL := string(config.DefaultThinkingLevel)
@@ -476,16 +423,7 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 		}
 	}
 
-	// 2. First scoped model (skip if continuing)
-	if len(opts.ScopedModels) > 0 && !opts.IsContinuing {
-		tl := opts.ScopedModels[0].ThinkingLevel
-		if tl == "" {
-			tl = defaultTL
-		}
-		return InitialModelResult{Model: opts.ScopedModels[0].Model, ThinkingLevel: tl}
-	}
-
-	// 3. Saved default from settings
+	// 2. Saved default from settings
 	if opts.DefaultProvider != "" && opts.DefaultModelID != "" {
 		found := opts.ModelRegistry.Find(opts.DefaultProvider, opts.DefaultModelID)
 		if found != nil {
@@ -493,7 +431,7 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 		}
 	}
 
-	// 4. First available model with valid API key
+	// 3. First available model with valid API key
 	available := opts.ModelRegistry.GetAvailable()
 	if len(available) > 0 {
 		// Try default model per provider
@@ -518,7 +456,6 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 type FindInitialModelOptions struct {
 	CLIProvider          string
 	CLIModel             string
-	ScopedModels         []ScopedModel
 	IsContinuing         bool
 	DefaultProvider      string
 	DefaultModelID       string
@@ -580,15 +517,6 @@ var knownProviderOrder = []ai.Provider{
 	"github-copilot", "openrouter", "vercel-ai-gateway",
 	"xai", "groq", "cerebras", "zai", "mistral",
 	"minimax", "minimax-cn", "huggingface", "opencode", "kimi-coding",
-}
-
-func hasScopedModel(scoped []ScopedModel, model *ai.Model) bool {
-	for _, sm := range scoped {
-		if sm.Model.Provider == model.Provider && sm.Model.ID == model.ID {
-			return true
-		}
-	}
-	return false
 }
 
 // globMatch is a simple glob matcher supporting * and ?.

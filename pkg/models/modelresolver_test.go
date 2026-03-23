@@ -250,7 +250,7 @@ func TestGlobMatch(t *testing.T) {
 	}
 }
 
-// --- ResolveModelScope ---
+// --- Test helpers ---
 
 func newTestRegistry(t *testing.T, models []*ai.Model) *ModelRegistry {
 	t.Helper()
@@ -274,88 +274,6 @@ func newTestRegistry(t *testing.T, models []*ai.Model) *ModelRegistry {
 
 	registry := NewModelRegistry(authStorage, "")
 	return registry
-}
-
-func TestResolveModelScope_SinglePattern(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-opus-4-6"}, registry)
-	if len(scoped) != 1 {
-		t.Fatalf("expected 1 scoped model, got %d", len(scoped))
-	}
-	if scoped[0].Model.ID != "claude-opus-4-6" {
-		t.Errorf("expected claude-opus-4-6, got %s", scoped[0].Model.ID)
-	}
-}
-
-func TestResolveModelScope_WithThinkingLevel(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-opus-4-6:high"}, registry)
-	if len(scoped) != 1 {
-		t.Fatalf("expected 1 scoped model, got %d", len(scoped))
-	}
-	if scoped[0].ThinkingLevel != "high" {
-		t.Errorf("expected thinking level 'high', got %q", scoped[0].ThinkingLevel)
-	}
-}
-
-func TestResolveModelScope_GlobPattern(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-*"}, registry)
-	// Should match claude-sonnet-4-5, claude-sonnet-4-5-20250929, claude-opus-4-6
-	if len(scoped) < 2 {
-		t.Errorf("expected at least 2 scoped models for 'claude-*', got %d", len(scoped))
-	}
-}
-
-func TestResolveModelScope_NoDuplicates(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-opus-4-6", "claude-opus-4-6"}, registry)
-	if len(scoped) != 1 {
-		t.Errorf("expected 1 scoped model (no duplicates), got %d", len(scoped))
-	}
-}
-
-func TestResolveModelScope_NoMatch(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"nonexistent-model-xyz"}, registry)
-	if len(scoped) != 0 {
-		t.Errorf("expected 0 scoped models, got %d", len(scoped))
-	}
-}
-
-func TestResolveModelScope_MultiplePatterns(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-opus-4-6", "gpt-5.1-codex"}, registry)
-	if len(scoped) != 2 {
-		t.Fatalf("expected 2 scoped models, got %d", len(scoped))
-	}
-}
-
-func TestResolveModelScope_GlobWithThinkingLevel(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scoped := ResolveModelScope([]string{"claude-opus-*:high"}, registry)
-	if len(scoped) < 1 {
-		t.Fatalf("expected at least 1 scoped model, got %d", len(scoped))
-	}
-	for _, sm := range scoped {
-		if sm.ThinkingLevel != "high" {
-			t.Errorf("expected thinking level 'high' for all glob matches, got %q for %s", sm.ThinkingLevel, sm.Model.ID)
-		}
-	}
 }
 
 // --- FindInitialModel ---
@@ -385,45 +303,6 @@ func TestFindInitialModel_CLIArgs_NotFound(t *testing.T) {
 	})
 	if result.Model != nil {
 		t.Errorf("expected nil for nonexistent CLI model, got %v", result.Model)
-	}
-}
-
-func TestFindInitialModel_ScopedModels(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scopedModels := []ScopedModel{
-		{Model: models[0], ThinkingLevel: "high"},
-	}
-
-	result := FindInitialModel(FindInitialModelOptions{
-		ScopedModels:  scopedModels,
-		ModelRegistry: registry,
-	})
-	if result.Model == nil || result.Model.ID != models[0].ID {
-		t.Errorf("expected first scoped model, got %v", result.Model)
-	}
-	if result.ThinkingLevel != "high" {
-		t.Errorf("expected thinking level 'high', got %q", result.ThinkingLevel)
-	}
-}
-
-func TestFindInitialModel_ScopedModels_SkippedWhenContinuing(t *testing.T) {
-	models := testModels()
-	registry := newTestRegistry(t, models)
-
-	scopedModels := []ScopedModel{
-		{Model: models[0], ThinkingLevel: "high"},
-	}
-
-	result := FindInitialModel(FindInitialModelOptions{
-		ScopedModels:  scopedModels,
-		IsContinuing:  true,
-		ModelRegistry: registry,
-	})
-	// Should NOT use scoped models when continuing — falls through to available
-	if result.Model == nil {
-		t.Error("expected some model (from available), got nil")
 	}
 }
 

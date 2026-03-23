@@ -55,11 +55,7 @@ type sessionSetup struct {
 
 // setupSession performs the initialization shared by all run modes:
 // working directory, auth, model resolution, session creation, and extensions.
-//
-// When skipScopedOnContinue is true (print/RPC modes), the scoped-model
-// default is skipped on --continue/--resume so the continued session keeps
-// its original model.
-func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (*sessionSetup, error) {
+func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("get working directory: %w", err)
@@ -82,16 +78,6 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 
-	// Resolve scoped models
-	var scopedModels []models.ScopedModel
-	modelPatterns := args.Models
-	if len(modelPatterns) == 0 {
-		modelPatterns = settingsManager.GetEnabledModels()
-	}
-	if len(modelPatterns) > 0 {
-		scopedModels = models.ResolveModelScope(modelPatterns, modelRegistry)
-	}
-
 	// Resolve model from CLI flags
 	var model *ai.Model
 	if args.Model != "" {
@@ -111,11 +97,6 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
 		if args.Thinking == "" && resolved.ThinkingLevel != "" {
 			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
-		}
-	} else if len(scopedModels) > 0 {
-		if !skipScopedOnContinue || (!args.Continue && !args.Resume) {
-			model = scopedModels[0].Model
-			firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "scoped")
 		}
 	}
 
@@ -169,7 +150,6 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 		SettingsManager: settingsManager,
 		SessionManager:  createSessionManager(args, cwd, agentDir),
 		Model:           model,
-		ScopedModels:    scopedModels,
 		Tools:           resolveTools(args, cwd),
 		ResourceLoader:  rl,
 		UsageTracker:    NewSessionTracker(usageTracker),
@@ -425,7 +405,7 @@ func run() error {
 		return runInteractiveMode(args, noticeCh)
 	}
 
-	setup, err := setupSession(args, true, false)
+	setup, err := setupSession(args, false)
 	if err != nil {
 		return err
 	}
@@ -546,7 +526,7 @@ func runExport(args *Args) error {
 	if args.Session == "" {
 		return fmt.Errorf("--export requires --session <id> to identify the session to export")
 	}
-	setup, err := setupSession(args, true, false)
+	setup, err := setupSession(args, false)
 	if err != nil {
 		return err
 	}
@@ -703,7 +683,7 @@ func runAcpMode(args *Args) error {
 
 // runInteractiveMode runs the full interactive TUI mode.
 func runInteractiveMode(args *Args, noticeCh <-chan string) error {
-	setup, err := setupSession(args, false, true)
+	setup, err := setupSession(args, true)
 	if err != nil {
 		return err
 	}

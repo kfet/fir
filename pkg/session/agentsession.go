@@ -176,7 +176,6 @@ type AgentSessionOptions struct {
 	ModelRegistry    *models.ModelRegistry
 	CompactionRunner CompactionRunner
 	Cwd              string
-	ScopedModels     []models.ScopedModel
 	Hooks            *AgentSessionHooks
 	UsageTracker     UsageTracker
 }
@@ -196,7 +195,6 @@ type AgentSession struct {
 	modelRegistry    *models.ModelRegistry
 	compactionRunner CompactionRunner
 	cwd              string
-	scopedModels     []models.ScopedModel
 
 	// Event subscription
 	mu             sync.RWMutex
@@ -246,7 +244,6 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		modelRegistry:    opts.ModelRegistry,
 		compactionRunner: opts.CompactionRunner,
 		cwd:              opts.Cwd,
-		scopedModels:     opts.ScopedModels,
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
@@ -1013,21 +1010,6 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 		levels = append(levels, agent.ThinkingXHigh)
 	}
 	return levels
-}
-
-// ScopedModelsRef returns the scoped models for this session.
-func (s *AgentSession) ScopedModelsRef() []models.ScopedModel {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.scopedModels
-}
-
-// SetScopedModels updates the session-only scoped model list used for Ctrl+P
-// cycling. A nil or empty slice clears the filter (all available models cycle).
-func (s *AgentSession) SetScopedModels(models []models.ScopedModel) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.scopedModels = models
 }
 
 // SetHooks sets the extension hooks and wraps the agent's tools with hook interception.

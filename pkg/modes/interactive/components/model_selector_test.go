@@ -17,7 +17,7 @@ func TestModelSelectorComponent_Render(t *testing.T) {
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
 
-	comp := NewModelSelectorComponent(model, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	comp := NewModelSelectorComponent(model, settings, registry, func(*ai.Model) {}, func() {}, "")
 	lines := comp.Render(80)
 	if len(lines) == 0 {
 		t.Fatal("expected rendered output")

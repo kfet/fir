@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed scoped models feature (`/scoped-models` command, `ScopedModel` type, `ResolveModelScope`). Model cycling with `Ctrl+P` now always cycles through all available models.
+
 ### Added
 
 - MCP channel server support: servers that advertise the `claude/channel` experimental capability can now push messages into the running session via `notifications/claude/channel` notifications. Channel messages are automatically injected into the agent conversation. The server's `channel_reply` tool works as a regular MCP tool with no special handling needed.

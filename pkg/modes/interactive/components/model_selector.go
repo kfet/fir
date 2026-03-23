@@ -21,41 +21,22 @@ type ModelItem struct {
 	Model    *ai.Model
 }
 
-// ScopedModelItem represents a scoped model with thinking level.
-type ScopedModelItem struct {
-	Model         *ai.Model
-	ThinkingLevel string
-}
-
-// ModelScope determines which model list to show.
-type ModelScope string
-
-const (
-	ModelScopeAll    ModelScope = "all"
-	ModelScopeScoped ModelScope = "scoped"
-)
-
 // ModelSelectorComponent renders a model selector with search.
 type ModelSelectorComponent struct {
 	tui.Container
-	searchInput      *tuicomp.Input
-	listContainer    *tui.Container
-	allModels        []ModelItem
-	scopedModelItems []ModelItem
-	activeModels     []ModelItem
-	filteredModels   []ModelItem
-	selectedIndex    int
-	currentModel     *ai.Model
-	settingsManager  *config.SettingsManager
-	modelRegistry    *models.ModelRegistry
-	onSelect         func(model *ai.Model)
-	onCancel         func()
-	errorMessage     string
-	scopedModels     []ScopedModelItem
-	scope            ModelScope
-	scopeText        *tuicomp.Text
-	scopeHintText    *tuicomp.Text
-	focused          bool
+	searchInput     *tuicomp.Input
+	listContainer   *tui.Container
+	allModels       []ModelItem
+	activeModels    []ModelItem
+	filteredModels  []ModelItem
+	selectedIndex   int
+	currentModel    *ai.Model
+	settingsManager *config.SettingsManager
+	modelRegistry   *models.ModelRegistry
+	onSelect        func(model *ai.Model)
+	onCancel        func()
+	errorMessage    string
+	focused         bool
 }
 
 var _ tui.Component = (*ModelSelectorComponent)(nil)
@@ -67,22 +48,14 @@ func NewModelSelectorComponent(
 	currentModel *ai.Model,
 	settingsManager *config.SettingsManager,
 	modelRegistry *models.ModelRegistry,
-	scopedModels []ScopedModelItem,
 	onSelect func(model *ai.Model),
 	onCancel func(),
 	initialSearch string,
 ) *ModelSelectorComponent {
-	scope := ModelScopeAll
-	if len(scopedModels) > 0 {
-		scope = ModelScopeScoped
-	}
-
 	c := &ModelSelectorComponent{
 		currentModel:    currentModel,
 		settingsManager: settingsManager,
 		modelRegistry:   modelRegistry,
-		scopedModels:    scopedModels,
-		scope:           scope,
 		onSelect:        onSelect,
 		onCancel:        onCancel,
 		listContainer:   &tui.Container{},
@@ -94,16 +67,8 @@ func NewModelSelectorComponent(
 	c.AddChild(NewDynamicBorder(nil))
 	c.AddChild(tuicomp.NewSpacer(1))
 
-	// Scope hint or API key note
-	if len(scopedModels) > 0 {
-		c.scopeText = tuicomp.NewText(c.getScopeText(), 0, 0, nil)
-		c.AddChild(c.scopeText)
-		c.scopeHintText = tuicomp.NewText(c.getScopeHintText(), 0, 0, nil)
-		c.AddChild(c.scopeHintText)
-	} else {
-		hintText := "Only showing models with configured API keys (see README for details)"
-		c.AddChild(tuicomp.NewText(t.Fg("warning", hintText), 0, 0, nil))
-	}
+	hintText := "Only showing models with configured API keys (see README for details)"
+	c.AddChild(tuicomp.NewText(t.Fg("warning", hintText), 0, 0, nil))
 	c.AddChild(tuicomp.NewSpacer(1))
 
 	// Search input
@@ -151,24 +116,13 @@ func (c *ModelSelectorComponent) loadModels() {
 	}
 
 	available := c.modelRegistry.GetAvailable()
-	models := make([]ModelItem, len(available))
+	mdls := make([]ModelItem, len(available))
 	for i, m := range available {
-		models[i] = ModelItem{Provider: m.Provider, ID: m.ID, Model: m}
+		mdls[i] = ModelItem{Provider: m.Provider, ID: m.ID, Model: m}
 	}
 
-	c.allModels = c.sortModels(models)
-
-	scopedItems := make([]ModelItem, len(c.scopedModels))
-	for i, s := range c.scopedModels {
-		scopedItems[i] = ModelItem{Provider: s.Model.Provider, ID: s.Model.ID, Model: s.Model}
-	}
-	c.scopedModelItems = c.sortModels(scopedItems)
-
-	if c.scope == ModelScopeScoped {
-		c.activeModels = c.scopedModelItems
-	} else {
-		c.activeModels = c.allModels
-	}
+	c.allModels = c.sortModels(mdls)
+	c.activeModels = c.allModels
 	c.filteredModels = c.activeModels
 	c.clampSelection()
 }
@@ -194,44 +148,6 @@ func (c *ModelSelectorComponent) sortModels(models []ModelItem) []ModelItem {
 		return sorted[i].Provider < sorted[j].Provider
 	})
 	return sorted
-}
-
-func (c *ModelSelectorComponent) getScopeText() string {
-	t := theme.GetTheme()
-	var allText, scopedText string
-	if c.scope == ModelScopeAll {
-		allText = t.Fg("accent", "all")
-	} else {
-		allText = t.Fg("muted", "all")
-	}
-	if c.scope == ModelScopeScoped {
-		scopedText = t.Fg("accent", "scoped")
-	} else {
-		scopedText = t.Fg("muted", "scoped")
-	}
-	return t.Fg("muted", "Scope: ") + allText + t.Fg("muted", " | ") + scopedText
-}
-
-func (c *ModelSelectorComponent) getScopeHintText() string {
-	t := theme.GetTheme()
-	return KeyHint("tab", "scope") + t.Fg("muted", " (all/scoped)")
-}
-
-func (c *ModelSelectorComponent) setScope(scope ModelScope) {
-	if c.scope == scope {
-		return
-	}
-	c.scope = scope
-	if scope == ModelScopeScoped {
-		c.activeModels = c.scopedModelItems
-	} else {
-		c.activeModels = c.allModels
-	}
-	c.selectedIndex = 0
-	c.filterModels(c.searchInput.GetValue())
-	if c.scopeText != nil {
-		c.scopeText.SetText(c.getScopeText())
-	}
 }
 
 func (c *ModelSelectorComponent) filterModels(query string) {
@@ -323,17 +239,6 @@ func (c *ModelSelectorComponent) updateList() {
 // HandleInput handles keyboard input.
 func (c *ModelSelectorComponent) HandleInput(data string) {
 	switch {
-	case tuicomp.MatchesEditorAction(data, "tab"):
-		if len(c.scopedModelItems) > 0 {
-			next := ModelScopeScoped
-			if c.scope == ModelScopeScoped {
-				next = ModelScopeAll
-			}
-			c.setScope(next)
-			if c.scopeHintText != nil {
-				c.scopeHintText.SetText(c.getScopeHintText())
-			}
-		}
 	case tuicomp.MatchesEditorAction(data, tuicomp.ActSelectUp):
 		if len(c.filteredModels) == 0 {
 			return

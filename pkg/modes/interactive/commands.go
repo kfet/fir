@@ -160,8 +160,6 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.showOAuthSelector("login")
 	case "/logout":
 		m.showOAuthSelector("logout")
-	case "/scoped-models":
-		m.showScopedModelsSelector()
 	case "/tree":
 		m.showTreeSelector()
 	case "/export":
@@ -1221,47 +1219,7 @@ func (m *InteractiveMode) cycleThinkingLevel() {
 }
 
 func (m *InteractiveMode) cycleModel(direction string) {
-	// When scoped models are configured, cycle only within that set.
-	scopedModels := m.session.ScopedModelsRef()
-	if len(scopedModels) > 0 {
-		registry := m.session.ModelRegistryRef()
-		// Filter to models that have API keys available.
-		availableSet := make(map[string]bool)
-		for _, model := range registry.GetAvailable() {
-			availableSet[model.Provider+"/"+model.ID] = true
-		}
-		var available []*ai.Model
-		for _, sm := range scopedModels {
-			if availableSet[sm.Model.Provider+"/"+sm.Model.ID] {
-				available = append(available, sm.Model)
-			}
-		}
-		if len(available) <= 1 {
-			m.showStatus("Only one model in scope")
-			return
-		}
-		current := m.session.Model()
-		idx := 0
-		for i, model := range available {
-			if ai.ModelsAreEqual(current, model) {
-				idx = i
-				break
-			}
-		}
-		var nextIdx int
-		if direction == "forward" {
-			nextIdx = (idx + 1) % len(available)
-		} else {
-			nextIdx = (idx - 1 + len(available)) % len(available)
-		}
-		m.session.SetModel(available[nextIdx])
-		m.footerComponent.Invalidate()
-		m.updateEditorBorderColor()
-		m.showStatus(fmt.Sprintf("Model: %s", available[nextIdx].ID))
-		return
-	}
-
-	// Default: cycle through all available models.
+	// Cycle through all available models.
 	registry := m.session.ModelRegistryRef()
 	registry.Refresh()
 	available := registry.GetAvailable()
@@ -1421,7 +1379,6 @@ func (m *InteractiveMode) showHelp() {
   /name <name>    - Set session display name
   /login          - Login with OAuth provider
   /logout         - Logout from OAuth provider
-  /scoped-models  - Enable/disable models for Ctrl+P cycling
   /tree           - Navigate session tree (switch branches)
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist

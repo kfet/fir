@@ -1,5 +1,5 @@
 // selectors.go — selector overlays: model, thinking, theme, settings, session,
-// OAuth, scoped-models, tree, fork, and user-message selectors.
+// OAuth, tree, fork, and user-message selectors.
 package interactive
 
 import (
@@ -11,7 +11,6 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session"
@@ -45,21 +44,10 @@ func (m *InteractiveMode) showSelector(create func(done func()) (component tui.C
 
 func (m *InteractiveMode) showModelSelector(initialSearch string) {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		// Convert ScopedModels to component format
-		scopedModels := m.session.ScopedModelsRef()
-		scopedItems := make([]components.ScopedModelItem, len(scopedModels))
-		for i, sm := range scopedModels {
-			scopedItems[i] = components.ScopedModelItem{
-				Model:         sm.Model,
-				ThinkingLevel: sm.ThinkingLevel,
-			}
-		}
-
 		selector := components.NewModelSelectorComponent(
 			m.session.Model(),
 			m.settings,
 			m.session.ModelRegistryRef(),
-			scopedItems,
 			func(model *ai.Model) {
 				m.session.SetModel(model)
 				m.footerComponent.Invalidate()
@@ -525,138 +513,6 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 
 	registry.Refresh()
 	m.showStatus(fmt.Sprintf("Logged in to %s. Credentials saved.", providerName))
-}
-
-// ============================================================================
-// Scoped models selector
-// ============================================================================
-
-func (m *InteractiveMode) showScopedModelsSelector() {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	registry := m.session.ModelRegistryRef()
-	if registry == nil {
-		m.showWarning("Model registry not available")
-		return
-	}
-	allModels := registry.GetAvailable()
-	if len(allModels) == 0 {
-		m.showStatus("No models available")
-		return
-	}
-
-	// Build initial enabled-model set from session scoped models or settings.
-	enabledModelIDs := make(map[string]bool)
-	hasFilter := false
-	sessionScopedModels := m.session.ScopedModelsRef()
-	if len(sessionScopedModels) > 0 {
-		for _, sm := range sessionScopedModels {
-			enabledModelIDs[sm.Model.Provider+"/"+sm.Model.ID] = true
-		}
-		hasFilter = true
-	} else if patterns := m.settings.GetEnabledModels(); len(patterns) > 0 {
-		hasFilter = true
-		for _, sm := range models.ResolveModelScope(patterns, registry) {
-			enabledModelIDs[sm.Model.Provider+"/"+sm.Model.ID] = true
-		}
-	}
-
-	// Working copies mutated by callbacks while the selector is open.
-	currentEnabledIDs := make(map[string]bool, len(enabledModelIDs))
-	for k := range enabledModelIDs {
-		currentEnabledIDs[k] = true
-	}
-	currentHasFilter := hasFilter
-
-	// applyToSession converts currentEnabledIDs back to scoped-model objects
-	// and updates the live session (session-only, not persisted).
-	applyToSession := func() {
-		if !currentHasFilter || len(currentEnabledIDs) == 0 || len(currentEnabledIDs) >= len(allModels) {
-			m.session.SetScopedModels(nil)
-			m.ui.RequestRender(false)
-			return
-		}
-		patterns := make([]string, 0, len(currentEnabledIDs))
-		for id := range currentEnabledIDs {
-			patterns = append(patterns, id)
-		}
-		resolved := models.ResolveModelScope(patterns, registry)
-		currentThinkingLevel := m.session.ThinkingLevel()
-		scoped := make([]models.ScopedModel, len(resolved))
-		for i, sm := range resolved {
-			level := sm.ThinkingLevel
-			if level == "" {
-				level = currentThinkingLevel
-			}
-			scoped[i] = models.ScopedModel{Model: sm.Model, ThinkingLevel: level}
-		}
-		m.session.SetScopedModels(scoped)
-		m.ui.RequestRender(false)
-	}
-
-	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		selector := components.NewScopedModelsSelectorComponent(
-			components.ScopedModelsConfig{
-				AllModels:              allModels,
-				EnabledModelIDs:        currentEnabledIDs,
-				HasEnabledModelsFilter: currentHasFilter,
-			},
-			components.ScopedModelsCallbacks{
-				OnModelToggle: func(modelID string, enabled bool) {
-					if enabled {
-						currentEnabledIDs[modelID] = true
-					} else {
-						delete(currentEnabledIDs, modelID)
-					}
-					currentHasFilter = true
-					applyToSession()
-				},
-				OnEnableAll: func(allModelIDs []string) {
-					for k := range currentEnabledIDs {
-						delete(currentEnabledIDs, k)
-					}
-					for _, id := range allModelIDs {
-						currentEnabledIDs[id] = true
-					}
-					currentHasFilter = false
-					applyToSession()
-				},
-				OnClearAll: func() {
-					for k := range currentEnabledIDs {
-						delete(currentEnabledIDs, k)
-					}
-					currentHasFilter = true
-					applyToSession()
-				},
-				OnToggleProvider: func(_ string, modelIDs []string, enabled bool) {
-					for _, id := range modelIDs {
-						if enabled {
-							currentEnabledIDs[id] = true
-						} else {
-							delete(currentEnabledIDs, id)
-						}
-					}
-					currentHasFilter = true
-					applyToSession()
-				},
-				OnPersist: func(enabledIDs []string) {
-					if len(enabledIDs) >= len(allModels) {
-						m.settings.SetEnabledModels(nil) // all enabled = clear filter
-					} else {
-						m.settings.SetEnabledModels(enabledIDs)
-					}
-					m.showStatus("Model selection saved to settings")
-				},
-				OnCancel: func() {
-					done()
-					m.ui.RequestRender(false)
-				},
-			},
-		)
-		return selector, selector
-	})
 }
 
 // ============================================================================

@@ -516,7 +516,7 @@ func TestSetupSession_DeferExtensions_SkipsSetup(t *testing.T) {
 
 	args := &Args{}
 
-	setup, err := setupSession(args, false, true)
+	setup, err := setupSession(args, true)
 	if err != nil {
 		t.Fatalf("setupSession failed: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestSetupSession_NoDeferExtensions_RunsSetup(t *testing.T) {
 
 	args := &Args{}
 
-	setup, err := setupSession(args, false, false)
+	setup, err := setupSession(args, false)
 	if err != nil {
 		t.Fatalf("setupSession failed: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestSetupSession_DeferExtensions_FasterThanBlocking(t *testing.T) {
 	args := &Args{}
 
 	start := time.Now()
-	setup, err := setupSession(args, false, true)
+	setup, err := setupSession(args, true)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("setupSession failed: %v", err)

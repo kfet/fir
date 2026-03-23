@@ -43,7 +43,6 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "theme", Description: "Select color theme"},
 	{Name: "thinking", Description: "Select thinking level"},
 	{Name: "model", Description: "Select model (opens selector UI)"},
-	{Name: "scoped-models", Description: "Enable/disable models for Ctrl+P cycling"},
 	{Name: "settings", Description: "Open settings menu"},
 	{Name: "session", Description: "Show session info and stats"},
 	{Name: "new", Description: "Start a new session (optionally with a name)"},

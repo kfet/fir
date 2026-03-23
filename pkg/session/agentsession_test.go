@@ -1353,20 +1353,6 @@ func TestAgentSession_CheckAutoCompaction_SkipsDifferentModel(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// ScopedModelsRef
-// ============================================================================
-
-func TestAgentSession_ScopedModelsRef(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
-
-	models := session.ScopedModelsRef()
-	if models != nil {
-		t.Errorf("expected nil scoped models, got %v", models)
-	}
-}
-
 func TestParseSkillBlock_NoMatch(t *testing.T) {
 	tests := []string{
 		"just a normal message",
@@ -2258,34 +2244,6 @@ func TestAgentSession_NavigateTree(t *testing.T) {
 	}
 	if result.Cancelled || result.Aborted {
 		t.Error("expected neither cancelled nor aborted")
-	}
-}
-
-// ============================================================================
-// SetScopedModels / ScopedModelsRef
-// ============================================================================
-
-func TestAgentSession_SetAndGetScopedModels(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
-
-	// Initially nil.
-	if got := session.ScopedModelsRef(); got != nil {
-		t.Errorf("expected nil scoped models, got %v", got)
-	}
-
-	// Set a slice and read it back.
-	models := []models.ScopedModel{{Model: nil, ThinkingLevel: "high"}}
-	session.SetScopedModels(models)
-	got := session.ScopedModelsRef()
-	if len(got) != 1 || got[0].ThinkingLevel != "high" {
-		t.Errorf("expected [{nil high}], got %v", got)
-	}
-
-	// Clear by setting nil.
-	session.SetScopedModels(nil)
-	if got := session.ScopedModelsRef(); got != nil {
-		t.Errorf("expected nil after clear, got %v", got)
 	}
 }
 

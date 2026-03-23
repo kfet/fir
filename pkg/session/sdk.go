@@ -39,8 +39,6 @@ type CreateAgentSessionOptions struct {
 	Model *ai.Model
 	// ThinkingLevel for reasoning. Default: from settings, else "medium".
 	ThinkingLevel string
-	// ScopedModels available for model cycling.
-	ScopedModels []models.ScopedModel
 
 	// Tools are the built-in tools to use. Default: coding tools [read, bash, edit, write].
 	Tools []agent.AgentTool
@@ -151,7 +149,6 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	if model == nil {
 		result := models.FindInitialModel(models.FindInitialModelOptions{
-			ScopedModels:         opts.ScopedModels,
 			IsContinuing:         hasExistingSession,
 			DefaultProvider:      settingsManager.GetDefaultProvider(),
 			DefaultModelID:       settingsManager.GetDefaultModel(),
@@ -278,7 +275,6 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		CompactionRunner: opts.CompactionRunner,
 		UsageTracker:     opts.UsageTracker,
 		Cwd:              cwd,
-		ScopedModels:     opts.ScopedModels,
 	})
 
 	// Register session-aware tools (plan tool needs a session reference).

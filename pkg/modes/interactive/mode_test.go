@@ -516,7 +516,6 @@ func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 		"/session",
 		"/resume",
 		"/login", "/logout",
-		"/scoped-models",
 		"/tree",
 		"/export",
 		"/share",
@@ -883,7 +882,6 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		{"/name", false, false, true},      // usage warning (no args)
 		{"/changelog", false, true, false}, // shows "No changelog entries found." message
 		{"/tree", false, false, true},
-		{"/scoped-models", false, false, true},
 		{"/session", false, false, true}, // "No session available"
 		{"/reload", false, false, true},  // "No session available"
 	}
@@ -1752,47 +1750,6 @@ func TestCycleModel_Backward(t *testing.T) {
 	got := tm.mode.session.Model()
 	if !ai.ModelsAreEqual(got, first) {
 		t.Errorf("backward cycle: expected model %q, got %q", first.ID, got.ID)
-	}
-}
-
-func TestCycleModel_WithScopedModels(t *testing.T) {
-	tm := newTestModeWithSession(t)
-	available := setupAvailableModels(t, tm)
-
-	// Restrict cycling to the first two available models via scoped models.
-	first := available[0]
-	second := available[1]
-	tm.mode.session.SetScopedModels([]models.ScopedModel{
-		{Model: first},
-		{Model: second},
-	})
-	tm.mode.session.SetModel(first)
-
-	tm.mode.cycleModel("forward")
-
-	got := tm.mode.session.Model()
-	if !ai.ModelsAreEqual(got, second) {
-		t.Errorf("scoped forward cycle: expected model %q, got %q", second.ID, got.ID)
-	}
-}
-
-func TestCycleModel_WithScopedModels_Backward(t *testing.T) {
-	tm := newTestModeWithSession(t)
-	available := setupAvailableModels(t, tm)
-
-	first := available[0]
-	second := available[1]
-	tm.mode.session.SetScopedModels([]models.ScopedModel{
-		{Model: first},
-		{Model: second},
-	})
-	tm.mode.session.SetModel(second)
-
-	tm.mode.cycleModel("backward")
-
-	got := tm.mode.session.Model()
-	if !ai.ModelsAreEqual(got, first) {
-		t.Errorf("scoped backward cycle: expected model %q, got %q", first.ID, got.ID)
 	}
 }
 

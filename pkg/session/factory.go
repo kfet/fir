@@ -38,8 +38,6 @@ type SetupOptions struct {
 	Model *ai.Model
 	// ThinkingLevel for reasoning. Default: from settings.
 	ThinkingLevel string
-	// ScopedModels available for model cycling.
-	ScopedModels []models.ScopedModel
 
 	// Tools are the built-in tools. Default: DefaultCodingTools(cwd).
 	Tools []agent.AgentTool
@@ -176,7 +174,6 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		ModelRegistry:    modelRegistry,
 		Model:            opts.Model,
 		ThinkingLevel:    opts.ThinkingLevel,
-		ScopedModels:     opts.ScopedModels,
 		SessionManager:   sessionManager,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
