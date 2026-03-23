@@ -227,8 +227,7 @@ type AgentSession struct {
 	usageTracker UsageTracker
 
 	// MCP manager (optional; set via SetMCPManager for typing indicators)
-	mcpManager       *mcp.Manager
-	typingIndicators []*mcp.TypingIndicator
+	mcpManager *mcp.Manager
 
 	// Plan entries (guarded by mu)
 	plan         []agent.PlanEntry
@@ -471,22 +470,7 @@ func (s *AgentSession) handleAgentEvent(event agent.AgentEvent) {
 			s.checkAutoCompaction(msg)
 		}
 
-		// Stop all typing indicators with the final assistant text.
-		s.mu.Lock()
-		indicators := s.typingIndicators
-		s.typingIndicators = nil
-		s.mu.Unlock()
-		if len(indicators) > 0 {
-			finalText := extractFinalAssistantText(event.Messages)
-			if finalText == "" {
-				finalText = "(no response)"
-			}
-			for _, ti := range indicators {
-				if err := ti.Stop(context.Background(), finalText); err != nil {
-					firlog.Debug("typing indicator stop failed", "err", err)
-				}
-			}
-		}
+		// (typing indicators are fire-and-forget, no cleanup needed)
 	}
 
 }
@@ -624,14 +608,9 @@ func (s *AgentSession) InjectChannelMessage(serverName, source, message string, 
 	s.mu.RLock()
 	mgr := s.mcpManager
 	s.mu.RUnlock()
-	if mgr != nil && mgr.HasServerTools(serverName, "reply", "edit_message") {
-		ti := mcp.NewTypingIndicator(mgr, serverName, meta)
-		if err := ti.Start(context.Background()); err != nil {
-			firlog.Debug("typing indicator start failed", "err", err)
-		} else {
-			s.mu.Lock()
-			s.typingIndicators = append(s.typingIndicators, ti)
-			s.mu.Unlock()
+	if mgr != nil && mgr.HasServerTools(serverName, "reply") {
+		if err := mcp.SendTypingIndicator(context.Background(), mgr, serverName, meta); err != nil {
+			firlog.Debug("typing indicator failed", "err", err)
 		}
 	}
 
@@ -1808,21 +1787,4 @@ func (s *AgentSession) RegisterSessionTools() {
 // GetTools returns the current tool set.
 func (s *AgentSession) GetTools() *agent.ToolSet {
 	return s.Agent.State().Tools
-}
-
-// extractFinalAssistantText returns the concatenated text content from the
-// last assistant message in a message slice.
-func extractFinalAssistantText(messages []agent.AgentMessage) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if a := messages[i].AsAssistant(); a != nil {
-			var sb strings.Builder
-			for _, c := range a.Content {
-				if c.Text != nil && c.Text.Text != "" {
-					sb.WriteString(c.Text.Text)
-				}
-			}
-			return sb.String()
-		}
-	}
-	return ""
 }

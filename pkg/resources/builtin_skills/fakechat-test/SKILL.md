@@ -5,33 +5,38 @@ description: Set up fakechat MCP plugin for interactive browser-based channel te
 
 Set up the official fakechat MCP plugin so you can chat with fir through the browser UI.
 
-# Build fir and generate MCP config
+# Build fir and install fakechat
 
 ```bash
 cd "$(git rev-parse --show-toplevel)" && make
-MCP_CONFIG=$(mktemp /tmp/fir-fakechat-mcp.XXXXXX.json)
-DEBUG_LOG=$(mktemp /tmp/fir-fakechat-debug.XXXXXX.log)
+if [ ! -d /tmp/claude-plugins-official/external_plugins/fakechat ]; then
+  cd /tmp && git clone --depth 1 https://github.com/anthropics/claude-plugins-official.git
+fi
+cd /tmp/claude-plugins-official/external_plugins/fakechat && bun install
+```
+
+# Generate config and launch
+
+```bash
+MCP_CONFIG=$(mktemp /tmp/fir-fakechat-mcp-XXXXXX)
+DEBUG_LOG=$(mktemp /tmp/fir-fakechat-debug-XXXXXX)
+REPO="$(git rev-parse --show-toplevel)"
 cat > "$MCP_CONFIG" << EOF
 {
   "mcpServers": {
     "fakechat": {
-      "command": "bunx",
-      "args": ["--bun", "github:anthropics/claude-plugins-official/external_plugins/fakechat"]
+      "command": "bun",
+      "args": ["run", "/tmp/claude-plugins-official/external_plugins/fakechat/server.ts"]
     }
   }
 }
 EOF
-echo "MCP config: $MCP_CONFIG"
-echo "Debug log: $DEBUG_LOG"
-```
-
-# Kill stale processes and launch
-
-```bash
 lsof -ti:8787 | xargs kill -9 2>/dev/null; true
 tmux kill-session -t fakechat 2>/dev/null; true
 tmux new-session -d -s fakechat -x 140 -y 40 \
-  "cd /tmp && FIR_DEBUG=1 FIR_DEBUG_FILE=$DEBUG_LOG $(git rev-parse --show-toplevel)/bin/fir --debug --mcp-config $MCP_CONFIG 2>/tmp/fakechat-stderr.log"
+  "cd /tmp && FIR_DEBUG=1 $REPO/bin/fir --debug --debug-log-file $DEBUG_LOG --mcp-config $MCP_CONFIG 2>/tmp/fakechat-stderr.log"
+echo "MCP config: $MCP_CONFIG"
+echo "Debug log: $DEBUG_LOG"
 ```
 
 # Verify connection and open browser

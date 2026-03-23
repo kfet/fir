@@ -600,7 +600,7 @@ func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
 
 	// Build a set of the raw (unprefixed) tool names this server has.
 	// The agent tool name is "mcp__<server>__<tool>", so strip the prefix.
-	prefix := "mcp__" + serverName + "__"
+	prefix := sanitizeToolName("mcp__" + serverName + "__")
 	have := make(map[string]struct{}, len(serverTools))
 	for _, t := range serverTools {
 		name := t.Tool.Name
