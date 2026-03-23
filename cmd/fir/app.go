@@ -227,8 +227,8 @@ func setupSession(args *Args, skipScopedOnContinue bool, deferExtensions bool) (
 	recordCLIFlags(usageTracker, args)
 
 	return &sessionSetup{
-		cwd:             cwd,
-		agentDir:        agentDir,
+		cwd:      cwd,
+		agentDir: agentDir,
 		result: &session.CreateAgentSessionResult{
 			Session:              result.Session,
 			ModelFallbackMessage: result.ModelFallbackMessage,
