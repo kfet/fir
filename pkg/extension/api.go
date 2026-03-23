@@ -1,6 +1,8 @@
 package extension
 
 import (
+	"context"
+
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -85,6 +87,7 @@ type ToolExecuteFunc func(ctx ToolContext) (ToolResult, error)
 
 // ToolContext provides context for tool execution.
 type ToolContext struct {
+	Context    context.Context
 	ToolCallID string
 	Params     map[string]any
 }

@@ -3,6 +3,7 @@ package extension
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -179,9 +180,48 @@ func TestBridge_CallHook_Timeout(t *testing.T) {
 		}
 	}()
 
-	_, err := b.CallHook("hook/test", nil, 50*time.Millisecond)
+	_, err := b.CallHook(context.Background(), "hook/test", nil, 50*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
+	}
+}
+
+func TestBridge_CallHook_ContextCancellation(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	go func() { _ = b.Run(runCtx, newMockAPI()) }()
+
+	// Drain messages but never respond — the hook will block.
+	go func() {
+		for {
+			_, err := extCodec.ReadMessage()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Cancel the hook's context after a short delay.
+	hookCtx, hookCancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		hookCancel()
+	}()
+
+	start := time.Now()
+	_, err := b.CallHook(hookCtx, "hook/test", nil, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	if elapsed > 1*time.Second {
+		t.Fatalf("cancellation took too long: %v", elapsed)
 	}
 }
 
@@ -218,7 +258,7 @@ func TestBridge_CallHook_ActivityExtendsTimeout(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, &result, nil)
 	}()
 
-	raw, err := b.CallHook("hook/test", nil, 100*time.Millisecond)
+	raw, err := b.CallHook(context.Background(), "hook/test", nil, 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("expected activity to extend timeout, got: %v", err)
 	}
@@ -254,7 +294,7 @@ func TestBridge_CallHook_ActivityStopsTimeoutFires(t *testing.T) {
 		// Now go silent — never respond to the hook.
 	}()
 
-	_, err := b.CallHook("hook/test", nil, 60*time.Millisecond)
+	_, err := b.CallHook(context.Background(), "hook/test", nil, 60*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error after activity stopped")
 	}
@@ -340,7 +380,7 @@ func TestBridge_CallHook_Success(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, &result, nil)
 	}()
 
-	raw, err := b.CallHook("hook/tool_call", map[string]string{"x": "y"}, 2*time.Second)
+	raw, err := b.CallHook(context.Background(), "hook/tool_call", map[string]string{"x": "y"}, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,6 +470,7 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 	}()
 
 	toolResult, err := api.toolsRegistered[0].Execute(ToolContext{
+		Context:    context.Background(),
 		ToolCallID: "tc1",
 		Params:     map[string]any{"arg": "val"},
 	})

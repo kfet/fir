@@ -23,6 +23,12 @@ type SessionBridge struct {
 	session  *session.AgentSession
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string   // names of tools registered by extensions
+
+	// activeCtx is the context from the currently-executing extension tool call.
+	// Inner call_tool requests (e.g. aside calling Bash) inherit this context
+	// so that cancelling the outer tool also cancels nested tool calls.
+	activeCtxMu sync.Mutex
+	activeCtx   context.Context
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
@@ -185,7 +191,16 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 		params = make(map[string]any)
 	}
 
-	result, err := tool.Execute(context.Background(), fmt.Sprintf("ext-call-%s", name), params, nil)
+	// Use the active context from the outer tool call (if any) so that
+	// cancellation propagates to nested tool calls (e.g. aside → Bash).
+	b.activeCtxMu.Lock()
+	ctx := b.activeCtx
+	b.activeCtxMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	result, err := tool.Execute(ctx, fmt.Sprintf("ext-call-%s", name), params, nil)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -235,7 +250,19 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 		},
 		DisplayHint: def.DisplayHint,
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+			// Store the context so nested call_tool requests from the
+			// extension (e.g. aside calling Bash) inherit cancellation.
+			b.activeCtxMu.Lock()
+			b.activeCtx = ctx
+			b.activeCtxMu.Unlock()
+			defer func() {
+				b.activeCtxMu.Lock()
+				b.activeCtx = nil
+				b.activeCtxMu.Unlock()
+			}()
+
 			r, err := def.Execute(ToolContext{
+				Context:    ctx,
 				ToolCallID: toolCallID,
 				Params:     params,
 			})

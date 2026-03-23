@@ -39,7 +39,7 @@ func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credenti
 		"provider_id": p.spec.ID,
 	}
 	// Use a long timeout for login (5 minutes) since it's interactive.
-	raw, err := p.bridge.CallHook("auth/login", params, 5*time.Minute)
+	raw, err := p.bridge.CallHook(context.Background(), "auth/login", params, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("auth/login: %w", err)
 	}
@@ -56,12 +56,12 @@ func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credenti
 	return result.Credentials, nil
 }
 
-func (p *extAuthProvider) ListModels(_ context.Context, creds *oauth.Credentials) ([]string, error) {
+func (p *extAuthProvider) ListModels(ctx context.Context, creds *oauth.Credentials) ([]string, error) {
 	params := map[string]any{
 		"provider_id": p.spec.ID,
 		"credentials": creds,
 	}
-	raw, err := p.bridge.CallHook("auth/list_models", params, 30*time.Second)
+	raw, err := p.bridge.CallHook(ctx, "auth/list_models", params, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("auth/list_models: %w", err)
 	}
@@ -80,7 +80,7 @@ func (p *extAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credent
 		"provider_id": p.spec.ID,
 		"credentials": creds,
 	}
-	raw, err := p.bridge.CallHook("auth/refresh", params, 30*time.Second)
+	raw, err := p.bridge.CallHook(context.Background(), "auth/refresh", params, 30*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("auth/refresh: %w", err)
 	}
@@ -102,7 +102,7 @@ func (p *extAuthProvider) GetAPIKey(creds *oauth.Credentials) string {
 		"provider_id": p.spec.ID,
 		"credentials": creds,
 	}
-	raw, err := p.bridge.CallHook("auth/api_key", params, 10*time.Second)
+	raw, err := p.bridge.CallHook(context.Background(), "auth/api_key", params, 10*time.Second)
 	if err != nil {
 		// Fallback: return access token directly.
 		return creds.Access
@@ -123,7 +123,7 @@ func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credenti
 		"credentials": creds,
 		"models":      models,
 	}
-	raw, err := p.bridge.CallHook("auth/modify_models", params, 10*time.Second)
+	raw, err := p.bridge.CallHook(context.Background(), "auth/modify_models", params, 10*time.Second)
 	if err != nil {
 		return nil
 	}

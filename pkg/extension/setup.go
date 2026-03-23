@@ -206,7 +206,7 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	// hook/tool_call. When no extensions are running the hook is a no-op.
 	hooks := &session.AgentSessionHooks{
 		OnToolCall: func(toolCallID, toolName string, input map[string]any) *session.ToolCallBlock {
-			raws, err := mgr.CallHook("hook/tool_call", map[string]any{
+			raws, err := mgr.CallHook(context.Background(), "hook/tool_call", map[string]any{
 				"tool_call_id": toolCallID,
 				"tool_name":    toolName,
 				"params":       input,

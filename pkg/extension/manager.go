@@ -517,7 +517,7 @@ func (m *Manager) EmitEvent(name string, data any) {
 // CallHook calls all bridges with the given hook and collects results concurrently.
 // If any pending (lazy) extensions subscribe to this hook, they are started
 // first so their hook handlers are active.
-func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
+func (m *Manager) CallHook(ctx context.Context, name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
 	m.startPendingForEvent(name)
 
 	m.mu.Lock()
@@ -534,7 +534,7 @@ func (m *Manager) CallHook(name string, data any, timeout time.Duration) ([]json
 		wg.Add(1)
 		go func(mb *managedBridge) {
 			defer wg.Done()
-			raw, err := mb.bridge.CallHook(name, data, timeout)
+			raw, err := mb.bridge.CallHook(ctx, name, data, timeout)
 			if err != nil {
 				m.logger.Warn("hook call failed", "ext", mb.cfg.Name, "hook", name, "err", err)
 				return
@@ -659,7 +659,7 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 					"name": name,
 					"args": args,
 				}
-				raw, err := mb.bridge.CallHook("hook/command", params, timeout)
+				raw, err := mb.bridge.CallHook(context.Background(), "hook/command", params, timeout)
 				if err != nil {
 					return CommandResult{}, fmt.Errorf("extension %s command %q: %w", mb.cfg.Name, name, err)
 				}

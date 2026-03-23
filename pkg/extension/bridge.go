@@ -442,7 +442,7 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 }
 
 // CallHook sends a JSON-RPC request and waits for a response with timeout.
-func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.RawMessage, error) {
+func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout time.Duration) (json.RawMessage, error) {
 	codec := b.proc.GetCodec()
 	if codec == nil {
 		return nil, fmt.Errorf("extension: not connected")
@@ -479,6 +479,11 @@ func (b *Bridge) CallHook(name string, data any, timeout time.Duration) (json.Ra
 				return *resp.Result, nil
 			}
 			return nil, nil
+		case <-ctx.Done():
+			b.pendingMu.Lock()
+			delete(b.pending, id)
+			b.pendingMu.Unlock()
+			return nil, ctx.Err()
 		case <-deadline.C:
 			// Check if there was recent activity before giving up.
 			since := time.Since(time.Unix(0, b.lastActivity.Load()))
@@ -510,7 +515,7 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 					"name":         tool.Name,
 					"params":       ctx.Params,
 				}
-				raw, err := b.CallHook("tool_call", params, 30*time.Second)
+				raw, err := b.CallHook(ctx.Context, "tool_call", params, 30*time.Second)
 				if err != nil {
 					return ToolResult{
 						Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: err.Error()}},
