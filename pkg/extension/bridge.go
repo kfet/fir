@@ -93,7 +93,7 @@ func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 			switch m := msg.(type) {
 			case *Request:
 				b.lastActivity.Store(time.Now().UnixNano())
-				b.handleInbound(m, codec, api)
+				go b.handleInbound(m, codec, api)
 			case *Response:
 				b.lastActivity.Store(time.Now().UnixNano())
 				b.routeResponse(m)
