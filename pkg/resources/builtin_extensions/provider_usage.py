@@ -30,7 +30,7 @@ from pathlib import Path
 import fir_ext
 
 REFRESH_INTERVAL = 300  # 5 minutes
-CACHE_TTL = 240  # seconds — shared across all fir sessions
+CACHE_TTL = 300  # seconds — shared across all fir sessions
 BACKOFF_BASE = 120  # initial backoff after 429 (seconds)
 BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
 
