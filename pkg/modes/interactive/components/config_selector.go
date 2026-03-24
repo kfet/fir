@@ -79,7 +79,7 @@ func getGroupLabel(metadata resources.PathMetadata) string {
 	}
 	if metadata.Source == "auto" {
 		if metadata.Scope == "user" {
-			return "User (~/.fir/agent/)"
+			return "User (~/.config/fir/)"
 		}
 		return "Project (.fir/)"
 	}

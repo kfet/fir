@@ -1,6 +1,6 @@
 // Package main tracks local feature usage counters.
 //
-// Data is stored in a JSON file (default: ~/.fir/agent/usage.json).
+// Data is stored in a JSON file (default: ~/.config/fir/usage.json).
 // All writes are atomic (write-to-temp + rename). Reads tolerate missing
 // or corrupt files gracefully.
 package main

@@ -20,7 +20,7 @@ type ExtProcConfig struct {
 	AuthProviders []string                                // auth provider IDs declared in frontmatter
 }
 
-// Discover scans global (~/.fir/agent/extensions/) and project-local
+// Discover scans global (~/.config/fir/extensions/) and project-local
 // (.fir/extensions/) directories for executable files and sub-directories.
 // Project-local extensions shadow global ones by name.
 //

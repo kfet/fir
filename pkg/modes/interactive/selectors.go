@@ -240,7 +240,7 @@ func (m *InteractiveMode) showSessionSelector() {
 			sessions,
 			components.SessionScopeCurrent,
 			func() ([]store.SessionListInfo, error) {
-				return store.ListAllSessions(session.DefaultAgentDir(), session.PiAgentDir())
+				return store.ListAllSessions(session.DefaultAgentDir(), session.LegacyFirAgentDir(), session.PiAgentDir())
 			},
 			func(sessionPath string) {
 				done()

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ServerConfig describes a single MCP server to connect to.
@@ -64,20 +65,28 @@ func MergeConfigs(base, override *ConfigFile) *ConfigFile {
 }
 
 // DefaultConfigPaths returns the canonical config file paths that LoadDefaultConfigs reads:
-//   - userPath: ~/.fir/mcp.json  (lower precedence)
+//   - userPath: ~/.config/fir/mcp.json  (lower precedence)
 //   - projectPath: <projectDir>/.fir/mcp.json  (higher precedence)
 func DefaultConfigPaths(projectDir string) (userPath, projectPath string) {
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		userPath = home + "/.fir/mcp.json"
-	}
+	userPath = filepath.Join(defaultConfigDir(), "mcp.json")
 	if projectDir != "" {
 		projectPath = projectDir + "/.fir/mcp.json"
 	}
 	return
 }
 
-// LoadDefaultConfigs loads the user-level (~/.fir/mcp.json) and project-level
+// defaultConfigDir returns the global fir config directory (~/.config/fir),
+// respecting $XDG_CONFIG_HOME. Duplicated from session.DefaultAgentDir to
+// avoid circular imports.
+func defaultConfigDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "fir")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "fir")
+}
+
+// LoadDefaultConfigs loads the user-level (~/.config/fir/mcp.json) and project-level
 // (<projectDir>/.fir/mcp.json) config files, merging them so that the project
 // config takes precedence over the user config.
 //

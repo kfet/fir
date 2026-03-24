@@ -256,39 +256,62 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionM
 func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) (ListSessionsResponse, error) {
 	agentDir := resolveAgentDir()
 
+	// When FIR_AGENT_DIR is explicitly set, don't scan legacy dirs.
+	var legacyDirs []string
+	if os.Getenv("FIR_AGENT_DIR") == "" {
+		legacyDirs = []string{session.LegacyFirAgentDir(), session.PiAgentDir()}
+	}
+
 	var allSessions []store.SessionListInfo
 
 	if params.Cwd != "" {
-		// Scoped to a specific cwd.
+		// Scoped to a specific cwd — check primary and legacy dirs.
 		sessionDir := store.DefaultSessionDir(agentDir, params.Cwd)
 		sessions, err := store.ListSessions(params.Cwd, sessionDir)
 		if err != nil {
 			return ListSessionsResponse{}, err
 		}
 		allSessions = sessions
-	} else {
-		// No cwd filter — enumerate all session directories.
-		sessionsRoot := filepath.Join(agentDir, "sessions")
-		entries, err := os.ReadDir(sessionsRoot)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return ListSessionsResponse{Sessions: []SessionInfo{}}, nil
+		for _, legacyDir := range legacyDirs {
+			legacySessionDir := store.DefaultSessionDir(legacyDir, params.Cwd)
+			if legacySessions, err := store.ListSessions(params.Cwd, legacySessionDir); err == nil {
+				allSessions = append(allSessions, legacySessions...)
 			}
-			return ListSessionsResponse{}, err
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			dir := filepath.Join(sessionsRoot, entry.Name())
-			sessions, err := store.ListSessions("", dir)
+	} else {
+		// No cwd filter — enumerate all session directories (primary + legacy).
+		allDirs := append([]string{agentDir}, legacyDirs...)
+		for _, dir := range allDirs {
+			sessionsRoot := filepath.Join(dir, "sessions")
+			entries, err := os.ReadDir(sessionsRoot)
 			if err != nil {
-				firlog.Debug("session/list: skipping dir", "dir", dir, "err", err)
 				continue
 			}
-			allSessions = append(allSessions, sessions...)
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				dir := filepath.Join(sessionsRoot, entry.Name())
+				sessions, err := store.ListSessions("", dir)
+				if err != nil {
+					firlog.Debug("session/list: skipping dir", "dir", dir, "err", err)
+					continue
+				}
+				allSessions = append(allSessions, sessions...)
+			}
 		}
 	}
+
+	// Deduplicate sessions that appear in both new and legacy dirs.
+	seen := make(map[string]bool)
+	deduped := make([]store.SessionListInfo, 0, len(allSessions))
+	for _, s := range allSessions {
+		if !seen[s.Path] {
+			seen[s.Path] = true
+			deduped = append(deduped, s)
+		}
+	}
+	allSessions = deduped
 
 	// Sort all sessions by modification time (most recent first).
 	sort.Slice(allSessions, func(i, j int) bool {

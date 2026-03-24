@@ -27,7 +27,7 @@ import (
 type CreateAgentSessionOptions struct {
 	// Cwd is the working directory. Default: os.Getwd().
 	Cwd string
-	// AgentDir is the global config directory. Default: ~/.fir/agent
+	// AgentDir is the global config directory. Default: ~/.config/fir
 	AgentDir string
 
 	// AuthStorage for credentials. Default: auth.NewAuthStorage(agentDir/auth.json)
@@ -295,8 +295,19 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 // Helpers
 // ============================================================================
 
-// DefaultAgentDir returns the default global config directory (~/.fir/agent).
+// DefaultAgentDir returns the default global config directory (~/.config/fir).
+// Respects $XDG_CONFIG_HOME if set.
 func DefaultAgentDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "fir")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "fir")
+}
+
+// LegacyFirAgentDir returns the old global config directory (~/.fir/agent)
+// so that sessions and data created by older fir versions remain accessible.
+func LegacyFirAgentDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".fir", "agent")
 }
@@ -306,6 +317,86 @@ func DefaultAgentDir() string {
 func PiAgentDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".pi", "agent")
+}
+
+// MigrateConfigFromLegacyDir copies config files (not sessions/cache) from
+// ~/.fir/agent/ to the new config dir (~/.config/fir/) if the new dir doesn't
+// exist yet. This is a one-time copy; the legacy dir is left intact so that
+// older fir versions on other branches continue to work.
+func MigrateConfigFromLegacyDir() {
+	newDir := DefaultAgentDir()
+	legacyDir := LegacyFirAgentDir()
+
+	// If new dir already exists, nothing to do.
+	if _, err := os.Stat(newDir); err == nil {
+		return
+	}
+	// If legacy dir doesn't exist, nothing to migrate.
+	if _, err := os.Stat(legacyDir); err != nil {
+		return
+	}
+
+	// Config files to copy (not sessions/ or cache/ — those stay in legacy).
+	configFiles := []string{
+		"settings.json",
+		"keybindings.json",
+		"auth.json",
+		"models.json",
+		"usage.json",
+	}
+
+	// The legacy mcp.json lived at ~/.fir/mcp.json (not inside agent/).
+	home, _ := os.UserHomeDir()
+	legacyMcpPath := filepath.Join(home, ".fir", "mcp.json")
+
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		return
+	}
+
+	for _, name := range configFiles {
+		src := filepath.Join(legacyDir, name)
+		copyFileIfExists(src, filepath.Join(newDir, name))
+	}
+	// Copy mcp.json from its legacy location (~/.fir/mcp.json).
+	copyFileIfExists(legacyMcpPath, filepath.Join(newDir, "mcp.json"))
+
+	// Copy config subdirectories (skills, extensions, prompts).
+	for _, subdir := range []string{"skills", "extensions", "prompts"} {
+		src := filepath.Join(legacyDir, subdir)
+		if info, err := os.Stat(src); err == nil && info.IsDir() {
+			copyDirRecursive(src, filepath.Join(newDir, subdir))
+		}
+	}
+}
+
+// copyFileIfExists copies src to dst if src exists. Does not overwrite dst.
+func copyFileIfExists(src, dst string) {
+	if _, err := os.Stat(dst); err == nil {
+		return // don't overwrite
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(dst, data, 0o644)
+}
+
+// copyDirRecursive copies a directory tree. Does not overwrite existing files.
+func copyDirRecursive(src, dst string) {
+	_ = os.MkdirAll(dst, 0o755)
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		srcPath := filepath.Join(src, e.Name())
+		dstPath := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			copyDirRecursive(srcPath, dstPath)
+		} else {
+			copyFileIfExists(srcPath, dstPath)
+		}
+	}
 }
 
 // DefaultCodingTools creates the standard set of coding tools for a cwd.

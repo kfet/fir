@@ -276,10 +276,10 @@ Usage:
   %s update                      Self-update to the latest release
   %s skills [list]               List all loaded skills
   %s skills install <name>       Install a builtin skill to project (.fir/skills/)
-                                   Options: --user (install to ~/.fir/agent/skills/), --force
+                                   Options: --user (install to ~/.config/fir/skills/), --force
   %s extensions [list]           List all builtin extensions
   %s extensions install <name>   Install a builtin extension to project (.fir/extensions/)
-                                   Options: --user (install to ~/.fir/agent/extensions/), --force
+                                   Options: --user (install to ~/.config/fir/extensions/), --force
   %s install <source> [--local]  Install a package (git repo or local path)
                                    --local installs to project scope (.fir/packages/)
   %s uninstall <source> [--local] Remove an installed package
@@ -323,7 +323,7 @@ Options:
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup
   --debug                        Enable debug logging to file
-  --debug-log-file <path>        Debug log path (default: ~/.fir/agent/debug.log)
+  --debug-log-file <path>        Debug log path (default: ~/.config/fir/debug.log)
   --help, -h                     Show this help
   --version, -v                  Show version number
 

@@ -17,7 +17,27 @@ import (
 // ============================================================================
 
 func TestDefaultAgentDir(t *testing.T) {
+	// Unset XDG_CONFIG_HOME to test the default path.
+	t.Setenv("XDG_CONFIG_HOME", "")
 	dir := DefaultAgentDir()
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".config", "fir")
+	if dir != expected {
+		t.Errorf("expected %s, got %s", expected, dir)
+	}
+}
+
+func TestDefaultAgentDirXDG(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
+	dir := DefaultAgentDir()
+	expected := filepath.Join("/custom/config", "fir")
+	if dir != expected {
+		t.Errorf("expected %s, got %s", expected, dir)
+	}
+}
+
+func TestLegacyFirAgentDir(t *testing.T) {
+	dir := LegacyFirAgentDir()
 	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, ".fir", "agent")
 	if dir != expected {
