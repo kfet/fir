@@ -321,6 +321,8 @@ func (b *SessionBridge) ReportProgress(message string) {
 	cb := b.activeOnUpdate
 	b.activeCtxMu.Unlock()
 	if cb != nil {
-		cb(agent.AgentToolResult{StatusMessage: message})
+		// Fire in a separate goroutine so we never block the bridge's
+		// read loop — the events channel may be temporarily full.
+		go cb(agent.AgentToolResult{StatusMessage: message})
 	}
 }
