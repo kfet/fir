@@ -139,6 +139,11 @@ func (tc *ToolExecutionComponent) SetStatusMessage(msg string) {
 	tc.updateDisplay()
 }
 
+// HasSpinner returns true if this component has an inline spinner (hint-based tools).
+func (tc *ToolExecutionComponent) HasSpinner() bool {
+	return tc.spinnerFrames != nil
+}
+
 // SetShowImages sets whether images are shown.
 func (tc *ToolExecutionComponent) SetShowImages(show bool) {
 	tc.showImages = show

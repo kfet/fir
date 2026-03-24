@@ -121,6 +121,15 @@ type overlayEntry struct {
 type Container struct {
 	mu       sync.RWMutex
 	Children []Component
+	hidden   bool
+}
+
+// SetVisible controls whether the container renders its children.
+// When visible is false, Render returns nil.
+func (c *Container) SetVisible(visible bool) {
+	c.mu.Lock()
+	c.hidden = !visible
+	c.mu.Unlock()
 }
 
 func (c *Container) AddChild(component Component) {
@@ -163,6 +172,12 @@ func (c *Container) Invalidate() {
 }
 
 func (c *Container) Render(width int) []string {
+	c.mu.RLock()
+	if c.hidden {
+		c.mu.RUnlock()
+		return nil
+	}
+	c.mu.RUnlock()
 	var lines []string
 	for _, child := range c.ChildrenSnapshot() {
 		lines = append(lines, child.Render(width)...)

@@ -259,6 +259,13 @@ func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
 	}
 	m.pendingTools[ae.ToolCallID] = comp
 	m.messageContainer.AddChild(comp)
+
+	// Hide the main "Working..." spinner when a tool has its own inline
+	// spinner (hint-based tools like aside) to avoid visual duplication.
+	if comp.HasSpinner() {
+		m.activityContainer.SetVisible(false)
+	}
+
 	m.ui.RequestRender(false)
 }
 
@@ -306,6 +313,7 @@ func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 	if !ok {
 		return
 	}
+	hadSpinner := comp.HasSpinner()
 	delete(m.pendingTools, ae.ToolCallID)
 
 	if ae.Result != nil {
@@ -320,6 +328,22 @@ func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 			comp.UpdateResult(resultData, m.toolOutputExpanded)
 		}
 	}
+
+	// Restore the main "Working..." spinner if this tool was hiding it
+	// and no other spinner-bearing tools are still pending.
+	if hadSpinner {
+		anySpinner := false
+		for _, c := range m.pendingTools {
+			if c.HasSpinner() {
+				anySpinner = true
+				break
+			}
+		}
+		if !anySpinner {
+			m.activityContainer.SetVisible(true)
+		}
+	}
+
 	m.ui.RequestRender(false)
 }
 
