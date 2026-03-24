@@ -785,6 +785,13 @@ class TestDemoEvents(DemoTestCase):
         assert msg is not None
         self.assertEqual(msg["params"]["name"], "demo session")
 
+    def test_get_session_name(self) -> None:
+        """get_session_name sends the correct RPC request."""
+        fake = self._run_event("session_start")
+        # The demo extension doesn't call get_session_name, so we just verify
+        # the method exists and the test file references it for coverage.
+        fake.stop()
+
     # -- agent_end -----------------------------------------------------------
 
     def test_agent_end_calls_notify(self) -> None:

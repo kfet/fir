@@ -351,6 +351,7 @@ def on_agent_start(
     params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
 ) -> None:
     ctx.set_session_name("demo session")              # set_session_name
+    ctx.get_session_name()                             # get_session_name
 
 
 @fir_ext.on("agent_end")

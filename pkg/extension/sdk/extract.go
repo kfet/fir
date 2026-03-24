@@ -103,7 +103,11 @@ func EnsureExtracted() (string, error) {
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(dest, data, 0o644)
+		perm := os.FileMode(0o644)
+		if filepath.Ext(path) == ".sh" {
+			perm = 0o755
+		}
+		return os.WriteFile(dest, data, perm)
 	}); err != nil {
 		return "", fmt.Errorf("sdk: extract: %w", err)
 	}

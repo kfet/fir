@@ -97,6 +97,16 @@
   turn. `SideQueryStream` now strips unmatched tool calls
   (`agent.StripUnmatchedToolCalls`) before appending the question, yielding a
   well-formed context that ends on a complete turn.
+- Pi-mono (JS/TS) extension compatibility layer. Fir can now run pi-mono
+  extensions without core changes: a Node SDK (`pkg/extension/sdk/node/`) with a
+  `fir_ext.js` shim and a `pi_compat.js` adapter that maps pi-mono's
+  `ExtensionAPI` surface (tools, commands, events/hooks, messaging, `exec`,
+  `setModel`) onto fir's JSON-RPC bridge, plus a generic `run.sh` runtime
+  wrapper (bun → tsx → node, with pi-mono import auto-detection). The `install`
+  post-hook symlinks `main` → `run.sh` for JS/TS packages, and `discovery.go`
+  prefers directly-executable entry points. See `docs/pi-mono-compat-layer.md`
+  and `docs/pi-mono-compat-remaining.md` for the supported surface and known
+  gaps (notably `registerProvider`/interactive UI, still unsupported).
 
 ### Changed
 

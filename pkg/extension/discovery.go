@@ -252,9 +252,13 @@ func findSubdirEntryPoint(subdir, dirname string) (string, bool) {
 		"main",
 		"main.py",
 		"main.sh",
+		"main.ts",
+		"main.js",
 		dirname,
 		dirname + ".py",
 		dirname + ".sh",
+		dirname + ".ts",
+		dirname + ".js",
 	}
 	for _, c := range candidates {
 		p := filepath.Join(subdir, c)
