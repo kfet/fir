@@ -52,11 +52,16 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	globalDir := filepath.Join(homeDir, ".fir", "agent", "extensions")
+	globalDir := filepath.Join(homeDir, ".config", "fir", "extensions")
 
-	// Fall back to legacy path (~/.config/fir/extensions/) if the new path
+	// Respect $XDG_CONFIG_HOME if set.
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		globalDir = filepath.Join(xdg, "fir", "extensions")
+	}
+
+	// Fall back to legacy path (~/.fir/agent/extensions/) if the new path
 	// doesn't exist but the legacy one does, so existing users aren't broken.
-	legacyDir := filepath.Join(homeDir, ".config", "fir", "extensions")
+	legacyDir := filepath.Join(homeDir, ".fir", "agent", "extensions")
 	if !dirExistsExt(globalDir) && dirExistsExt(legacyDir) {
 		globalDir = legacyDir
 	}

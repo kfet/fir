@@ -180,11 +180,16 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
 
 def _find_anthropic_token() -> str | None:
     """Find an OAuth bearer token for the Anthropic usage API."""
-    auth = _read_json(os.path.expanduser("~/.fir/agent/auth.json"))
-    if auth:
-        tok = (auth.get("anthropic") or {}).get("access")
-        if tok:
-            return tok
+    # New canonical path first, then legacy path.
+    for auth_path in [
+        "~/.config/fir/auth.json",
+        "~/.fir/agent/auth.json",
+    ]:
+        auth = _read_json(os.path.expanduser(auth_path))
+        if auth:
+            tok = (auth.get("anthropic") or {}).get("access")
+            if tok:
+                return tok
 
     creds = _read_json(os.path.expanduser("~/.claude/.credentials.json"))
     if creds:
@@ -201,17 +206,25 @@ def _find_poe_key() -> str | None:
     if key:
         return key
 
-    models = _read_json(os.path.expanduser("~/.fir/agent/models.json"))
-    if models:
-        k = (models.get("providers") or {}).get("Poe", {}).get("apiKey")
-        if k:
-            return k
+    for models_path in [
+        "~/.config/fir/models.json",
+        "~/.fir/agent/models.json",
+    ]:
+        models = _read_json(os.path.expanduser(models_path))
+        if models:
+            k = (models.get("providers") or {}).get("Poe", {}).get("apiKey")
+            if k:
+                return k
 
-    auth = _read_json(os.path.expanduser("~/.fir/agent/auth.json"))
-    if auth:
-        k = (auth.get("poe") or {}).get("key")
-        if k:
-            return k
+    for auth_path in [
+        "~/.config/fir/auth.json",
+        "~/.fir/agent/auth.json",
+    ]:
+        auth = _read_json(os.path.expanduser(auth_path))
+        if auth:
+            k = (auth.get("poe") or {}).get("key")
+            if k:
+                return k
 
     return None
 

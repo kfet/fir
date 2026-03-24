@@ -24,12 +24,17 @@ type SessionBridge struct {
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string   // names of tools registered by extensions
 
-	// activeCtx is the context from the currently-executing extension tool call.
-	// Inner call_tool requests (e.g. aside calling Bash) inherit this context
-	// so that cancelling the outer tool also cancels nested tool calls.
-	activeCtxMu    sync.Mutex
-	activeCtx      context.Context
-	activeOnUpdate agent.AgentToolUpdateCallback
+	// activeCalls tracks per-tool-call context and update callbacks so that
+	// concurrent extension tool executions don't clobber each other.
+	// Key: toolCallID (string) → *activeCall.
+	activeCalls sync.Map
+}
+
+// activeCall holds the context and update callback for a single in-flight
+// extension tool execution.
+type activeCall struct {
+	ctx      context.Context
+	onUpdate agent.AgentToolUpdateCallback
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
@@ -194,9 +199,12 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 
 	// Use the active context from the outer tool call (if any) so that
 	// cancellation propagates to nested tool calls (e.g. aside → Bash).
-	b.activeCtxMu.Lock()
-	ctx := b.activeCtx
-	b.activeCtxMu.Unlock()
+	// Pick the first active call's context (typically there's only one).
+	var ctx context.Context
+	b.activeCalls.Range(func(_, v any) bool {
+		ctx = v.(*activeCall).ctx
+		return false // stop after first
+	})
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -251,19 +259,10 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 		},
 		DisplayHint: def.DisplayHint,
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
-			// Store the context and update callback so nested requests from
-			// the extension (e.g. aside calling Bash) inherit cancellation
-			// and can report progress.
-			b.activeCtxMu.Lock()
-			b.activeCtx = ctx
-			b.activeOnUpdate = onUpdate
-			b.activeCtxMu.Unlock()
-			defer func() {
-				b.activeCtxMu.Lock()
-				b.activeCtx = nil
-				b.activeOnUpdate = nil
-				b.activeCtxMu.Unlock()
-			}()
+			// Store per-call context and callback so nested requests and
+			// ReportProgress can find them without races between concurrent calls.
+			b.activeCalls.Store(toolCallID, &activeCall{ctx: ctx, onUpdate: onUpdate})
+			defer b.activeCalls.Delete(toolCallID)
 
 			r, err := def.Execute(ToolContext{
 				Context:    ctx,
@@ -317,9 +316,12 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 
 // ReportProgress sends a transient status message to the UI.
 func (b *SessionBridge) ReportProgress(message string) {
-	b.activeCtxMu.Lock()
-	cb := b.activeOnUpdate
-	b.activeCtxMu.Unlock()
+	// Find any active call's update callback.
+	var cb agent.AgentToolUpdateCallback
+	b.activeCalls.Range(func(_, v any) bool {
+		cb = v.(*activeCall).onUpdate
+		return false // stop after first
+	})
 	if cb != nil {
 		// Fire in a separate goroutine so we never block the bridge's
 		// read loop — the events channel may be temporarily full.
