@@ -1343,11 +1343,18 @@ func extractTextFromAny(content any) string {
 
 // DefaultSessionDir computes the default session directory for a cwd.
 func DefaultSessionDir(agentDir, cwd string) string {
-	safePath := "--" + strings.TrimLeft(cwd, "/\\")
-	safePath = strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(safePath) + "--"
-	dir := filepath.Join(agentDir, "sessions", safePath)
+	dir := SessionDirForCwd(agentDir, cwd)
 	os.MkdirAll(dir, 0755)
 	return dir
+}
+
+// SessionDirForCwd computes the session directory path for a cwd without
+// creating it. Use this when you only need the path for listing/checking
+// (e.g. legacy directory lookups) and don't want the mkdir side effect.
+func SessionDirForCwd(agentDir, cwd string) string {
+	safePath := "--" + strings.TrimLeft(cwd, "/\\")
+	safePath = strings.NewReplacer("/", "-", "\\", "-", ":", "-").Replace(safePath) + "--"
+	return filepath.Join(agentDir, "sessions", safePath)
 }
 
 // ForkFrom creates a new session from a source session file, copying all entries.
@@ -1397,6 +1404,37 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error)
 // SessionsDir returns the parent directory that contains all per-project session directories.
 func SessionsDir(agentDir string) string {
 	return filepath.Join(agentDir, "sessions")
+}
+
+// MergeSessions merges two session lists, deduplicating by path, and returns
+// the result sorted by modified time (most recent first).
+func MergeSessions(a, b []SessionListInfo) []SessionListInfo {
+	seen := make(map[string]bool, len(a))
+	merged := make([]SessionListInfo, 0, len(a)+len(b))
+	for _, s := range a {
+		key := s.Path
+		if resolved, err := filepath.EvalSymlinks(key); err == nil {
+			key = resolved
+		}
+		if !seen[key] {
+			seen[key] = true
+			merged = append(merged, s)
+		}
+	}
+	for _, s := range b {
+		key := s.Path
+		if resolved, err := filepath.EvalSymlinks(key); err == nil {
+			key = resolved
+		}
+		if !seen[key] {
+			seen[key] = true
+			merged = append(merged, s)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].Modified.After(merged[j].Modified)
+	})
+	return merged
 }
 
 // ListAllSessions lists sessions across all project directories, sorted by modified time.

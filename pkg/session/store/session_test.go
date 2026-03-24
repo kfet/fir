@@ -1319,3 +1319,33 @@ func (sm *SessionManager) ResetLeaf() {
 	defer sm.mu.Unlock()
 	sm.leafID = ""
 }
+
+func TestMergeSessions(t *testing.T) {
+	now := time.Now()
+	a := []SessionListInfo{
+		{Path: "/a/1.jsonl", ID: "a1", Modified: now.Add(-1 * time.Minute)},
+		{Path: "/a/2.jsonl", ID: "a2", Modified: now.Add(-3 * time.Minute)},
+	}
+	b := []SessionListInfo{
+		{Path: "/b/1.jsonl", ID: "b1", Modified: now.Add(-2 * time.Minute)},
+		{Path: "/a/1.jsonl", ID: "a1", Modified: now.Add(-1 * time.Minute)}, // duplicate
+	}
+
+	merged := MergeSessions(a, b)
+
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 merged sessions, got %d", len(merged))
+	}
+	// Should be sorted most-recent first.
+	if merged[0].ID != "a1" || merged[1].ID != "b1" || merged[2].ID != "a2" {
+		t.Errorf("unexpected order: %s, %s, %s", merged[0].ID, merged[1].ID, merged[2].ID)
+	}
+}
+
+func TestSessionDirForCwd(t *testing.T) {
+	dir := SessionDirForCwd("/home/user/.config/fir", "/Users/dev/myproject")
+	expected := DefaultSessionDir("/home/user/.config/fir", "/Users/dev/myproject")
+	if dir != expected {
+		t.Errorf("SessionDirForCwd = %q, want %q", dir, expected)
+	}
+}

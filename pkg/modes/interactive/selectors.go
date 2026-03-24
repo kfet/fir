@@ -236,6 +236,18 @@ func (m *InteractiveMode) showSessionSelector() {
 			sessionDir = m.session.SessionManager.GetSessionDir()
 		}
 		sessions, _ := store.ListSessions(cwd, sessionDir)
+
+		// Also include sessions from legacy dirs for the same project so
+		// that old sessions created under ~/.fir/agent or ~/.pi/agent show
+		// up in the default "current" scope without requiring a Tab press.
+		for _, legacyAgent := range []string{session.LegacyFirAgentDir(), session.PiAgentDir()} {
+			legacyDir := store.SessionDirForCwd(legacyAgent, cwd)
+			if legacyDir != sessionDir {
+				if extra, _ := store.ListSessions(cwd, legacyDir); len(extra) > 0 {
+					sessions = store.MergeSessions(sessions, extra)
+				}
+			}
+		}
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
