@@ -205,10 +205,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
+	tools := startAndWait(t, mgr, ctx)
 	t.Logf("Tools: %d", len(tools))
 
 	// Send channel notifications after a brief delay to ensure the SDK's

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -151,16 +152,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	var mcpMgr *mcp.Manager
 	if len(opts.MCPConfigs) > 0 {
 		mcpMgr = mcp.NewManager(opts.MCPConfigs, false)
-		mcpTools, err := mcpMgr.Start(ctx)
-		if err != nil {
-			_ = mcpMgr.Close()
-			return nil, fmt.Errorf("start MCP servers: %w", err)
-		}
 		if toolList == nil {
 			toolList = DefaultCodingTools(cwd)
 		}
-		toolList = append(toolList, mcpTools...)
-		firlog.Info("MCP servers started", "servers", len(opts.MCPConfigs), "tools", len(mcpTools))
 	}
 
 	// --- Compaction ---
@@ -191,6 +185,23 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// --- Wire MCP channels ---
 	if mcpMgr != nil {
 		result.Session.SetMCPManager(mcpMgr)
+
+		// Snapshot base tools before MCP tools arrive.
+		baseTools := slices.Clone(toolList)
+
+		mcpMgr.OnToolsChanged = func(mcpTools []agent.AgentTool) {
+			merged := append(slices.Clone(baseTools), mcpTools...)
+
+			// If hooks with tool interception are active, wrap before delivering.
+			if hooks := result.Session.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
+				merged = result.Session.WrapToolsWithHooks(merged)
+			}
+
+			result.Session.Agent.SetTools(merged)
+		}
+
+		mcpMgr.Start(ctx)
+		firlog.Info("MCP servers starting", "servers", len(opts.MCPConfigs))
 	}
 
 	return &SetupResult{

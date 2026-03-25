@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,8 +48,7 @@ func TestManager_Resources_ListAndRead(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Locate the resource tools by name.
@@ -98,8 +98,7 @@ func TestManager_Resources_EmptyServer(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	var listTool *toolEntry
@@ -134,8 +133,7 @@ func TestManager_Resources_ReadMissingURI(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	var readTool *toolEntry
@@ -175,8 +173,7 @@ func TestManager_ResourceListChanged(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Adding a resource triggers notifications/resources/list_changed.
@@ -252,9 +249,10 @@ func TestConvertResourceResult(t *testing.T) {
 	})
 }
 
-// TestManager_ResourceSubscription verifies that when a server pushes a
-// resources/updated notification the OnResourceUpdated callback is called
-// with the correct server name and URI.
+// TestManager_ResourceSubscription verifies that when a resource is read
+// (triggering a lazy subscription) and the server pushes a resources/updated
+// notification, the OnResourceUpdated callback is called with the correct
+// server name and URI.
 func TestManager_ResourceSubscription(t *testing.T) {
 	const resURI = "file:///watch.txt"
 
@@ -283,13 +281,29 @@ func TestManager_ResourceSubscription(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
+	// Find and call read_resource to trigger a lazy subscription.
+	var readTool *agent.AgentTool
+	for i := range tools {
+		if strings.Contains(tools[i].Name, "read_resource") {
+			readTool = &tools[i]
+			break
+		}
+	}
+	require.NotNil(t, readTool, "read_resource tool must be present")
+
+	result, readErr := readTool.Execute(ctx, "r1", map[string]any{"uri": resURI}, nil)
+	require.NoError(t, readErr)
+	require.False(t, result.IsError)
+
+	// Give the lazy subscribe goroutine time to complete.
+	time.Sleep(200 * time.Millisecond)
+
 	// Trigger a resource update from the server side.
-	err = server.ResourceUpdated(ctx, &sdk.ResourceUpdatedNotificationParams{URI: resURI})
-	require.NoError(t, err)
+	updateErr := server.ResourceUpdated(ctx, &sdk.ResourceUpdatedNotificationParams{URI: resURI})
+	require.NoError(t, updateErr)
 
 	select {
 	case uri := <-updated:

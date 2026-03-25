@@ -95,8 +95,7 @@ func TestManager_ElicitationFn(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Find the collect_name tool.
@@ -151,8 +150,7 @@ func TestManager_ElicitationFn_Default(t *testing.T) {
 	// Leave ElicitationFn nil — should default to decline.
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	var tool *agent.AgentTool

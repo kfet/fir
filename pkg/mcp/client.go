@@ -146,25 +146,43 @@ func commandTransport(cfg ServerConfig) (sdk.Transport, error) {
 	return &sdk.CommandTransport{Command: cmd}, nil
 }
 
-// Start connects to all configured MCP servers and returns the aggregate tool list.
-// If any server fails to start, already-started sessions are closed before returning
-// the error.
-func (m *Manager) Start(ctx context.Context) ([]agent.AgentTool, error) {
+// Start launches async connections to all configured MCP servers. It returns
+// immediately. As each server finishes connecting, its tools are stored and
+// OnToolsChanged is called with the aggregate tool list. Failures are recorded
+// in serverErrors and logged but do not prevent other servers from starting.
+func (m *Manager) Start(ctx context.Context) {
 	firlog.Info("mcp starting", "servers", len(m.configs))
-	var tools []agent.AgentTool
 	for name, cfg := range m.configs {
-		sessionTools, err := m.startServer(ctx, name, cfg)
-		if err != nil {
-			firlog.Warn("mcp connection failed", "server", name, "err", err)
+		go func(name string, cfg ServerConfig) {
+			_, err := m.startServer(ctx, name, cfg)
+			if err != nil {
+				firlog.Warn("mcp connection failed", "server", name, "err", err)
+				m.mu.Lock()
+				m.serverErrors[name] = err
+				// Clean up any orphaned session that startServer may have
+				// stored before failing (e.g. Connect succeeded but Tools
+				// listing failed).
+				if sess, ok := m.sessions[name]; ok {
+					delete(m.sessions, name)
+					delete(m.tools, name)
+					delete(m.subscribed, name)
+					m.mu.Unlock()
+					_ = sess.Close()
+				} else {
+					m.mu.Unlock()
+				}
+			}
+			// Notify with the updated aggregate tool list (even on error, so
+			// the callback sees tools from other servers that succeeded).
 			m.mu.Lock()
-			m.serverErrors[name] = err
+			all := m.allTools()
+			notify := m.OnToolsChanged
 			m.mu.Unlock()
-			_ = m.Close()
-			return nil, fmt.Errorf("MCP server %q: %w", name, err)
-		}
-		tools = append(tools, sessionTools...)
+			if notify != nil {
+				notify(all)
+			}
+		}(name, cfg)
 	}
-	return tools, nil
 }
 
 // loggingLevel returns the MCP logging level to request from servers.
@@ -183,6 +201,27 @@ func (m *Manager) allTools() []agent.AgentTool {
 		out = append(out, ts...)
 	}
 	return out
+}
+
+// subscribeOnce returns a subscribeFunc that subscribes to a resource URI at
+// most once per server. It uses the Manager's subscribed map and mutex.
+func (m *Manager) subscribeOnce(session *sdk.ClientSession, serverName string) subscribeFunc {
+	return func(uri string) {
+		m.mu.Lock()
+		subs, ok := m.subscribed[serverName]
+		if !ok {
+			subs = make(map[string]struct{})
+			m.subscribed[serverName] = subs
+		}
+		_, already := subs[uri]
+		if !already {
+			subs[uri] = struct{}{}
+		}
+		m.mu.Unlock()
+		if !already {
+			_ = session.Subscribe(context.Background(), &sdk.SubscribeParams{URI: uri})
+		}
+	}
 }
 
 // startServer connects to a single MCP server and returns its adapted tools.
@@ -255,7 +294,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 				if caps != nil && caps.Resources != nil {
 					updated = append(updated,
 						listResourcesTool(session, serverName),
-						readResourceTool(session, serverName),
+						readResourceTool(session, serverName, m.subscribeOnce(session, serverName)),
 					)
 				}
 				if caps != nil && caps.Prompts != nil {
@@ -263,32 +302,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 						listPromptsTool(session, serverName),
 						getPromptTool(session, serverName),
 					)
-				}
-
-				// Subscribe to any resources that appeared since startup.
-				// Use best-effort: ignore errors (server may not support subscriptions).
-				var newURIs []string
-				for res, err := range session.Resources(context.Background(), nil) {
-					if err != nil {
-						break
-					}
-					m.mu.Lock()
-					subs, ok := m.subscribed[serverName]
-					if !ok {
-						subs = make(map[string]struct{})
-						m.subscribed[serverName] = subs
-					}
-					_, alreadySubscribed := subs[res.URI]
-					if !alreadySubscribed {
-						subs[res.URI] = struct{}{}
-					}
-					m.mu.Unlock()
-					if !alreadySubscribed {
-						newURIs = append(newURIs, res.URI)
-					}
-				}
-				for _, uri := range newURIs {
-					_ = session.Subscribe(context.Background(), &sdk.SubscribeParams{URI: uri})
 				}
 
 				m.mu.Lock()
@@ -396,7 +409,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if caps != nil && caps.Resources != nil {
 		tools = append(tools,
 			listResourcesTool(session, name),
-			readResourceTool(session, name),
+			readResourceTool(session, name, m.subscribeOnce(session, name)),
 		)
 	}
 	if caps != nil && caps.Prompts != nil {
@@ -404,25 +417,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 			listPromptsTool(session, name),
 			getPromptTool(session, name),
 		)
-	}
-
-	// Subscribe to each resource for push update notifications. Best-effort:
-	// servers that don't support subscriptions return an error which we ignore.
-	// Skip entirely when the server doesn't advertise resources.
-	if caps != nil && caps.Resources != nil {
-		m.mu.Lock()
-		subs := make(map[string]struct{})
-		m.subscribed[name] = subs
-		m.mu.Unlock()
-		for res, err := range session.Resources(ctx, nil) {
-			if err != nil {
-				break
-			}
-			m.mu.Lock()
-			subs[res.URI] = struct{}{}
-			m.mu.Unlock()
-			_ = session.Subscribe(ctx, &sdk.SubscribeParams{URI: res.URI})
-		}
 	}
 
 	m.mu.Lock()

@@ -87,8 +87,7 @@ func TestManager_Reload_RemoveServer(t *testing.T) {
 	}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 	// Two servers × (1 tool + 4 resource/prompt tools) = 10
 	require.Len(t, tools, 2)
@@ -117,8 +116,7 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 	// 1 server × 5 tools = 5
 	require.Len(t, tools, 1)
@@ -154,14 +152,13 @@ func TestManager_Reload_Unchanged(t *testing.T) {
 		return realDial(cfg)
 	}
 
-	_, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 	require.Equal(t, 1, connectCount)
 
 	// Reload with identical config — srv1 must NOT be reconnected.
-	_, err = mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
-	require.NoError(t, err)
+	_, reloadErr := mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
+	require.NoError(t, reloadErr)
 	assert.Equal(t, 1, connectCount, "unchanged server should not be reconnected")
 }
 
@@ -186,8 +183,7 @@ func TestManager_Reload_Concurrent_ConfigChange(t *testing.T) {
 	mgr := NewManager(cfgA, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	_, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
 	const goroutines = 6
@@ -227,8 +223,7 @@ func TestManager_Reload_Concurrent(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	_, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
 	cfg := map[string]ServerConfig{"srv1": {}}

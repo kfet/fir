@@ -31,6 +31,34 @@ func inMemoryDial(t *testing.T, server *sdk.Server) func(ServerConfig) (sdk.Tran
 	}
 }
 
+// startAndWait is a test helper that wires OnToolsChanged, calls Start(),
+// and blocks until all servers have reported their tools (or timeout).
+func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.AgentTool {
+	t.Helper()
+	if len(mgr.configs) == 0 {
+		mgr.Start(ctx)
+		return nil
+	}
+	ch := make(chan []agent.AgentTool, 10)
+	prev := mgr.OnToolsChanged
+	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
+		if prev != nil {
+			prev(tools)
+		}
+		ch <- tools
+	}
+	mgr.Start(ctx)
+	var last []agent.AgentTool
+	for i := 0; i < len(mgr.configs); i++ {
+		select {
+		case last = <-ch:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", i, len(mgr.configs))
+		}
+	}
+	return last
+}
+
 func TestManager_StartAndListTools(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(
@@ -53,8 +81,7 @@ func TestManager_StartAndListTools(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"myserver": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	require.Len(t, tools, 1) // 1 MCP tool (no resources/prompts capability)
 
 	assert.Equal(t, "mcp__myserver__greet", tools[0].Name)
@@ -85,8 +112,7 @@ func TestManager_ToolCallable(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"calc": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	require.Len(t, tools, 1) // 1 MCP tool (no resources/prompts capability)
 
 	result, err := tools[0].Execute(context.Background(), "id1", map[string]any{"a": 3.0, "b": 4.0}, nil)
@@ -130,8 +156,7 @@ func TestManager_MultipleServers(t *testing.T) {
 		return clientTransport, nil
 	}
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	assert.Len(t, tools, 2) // 1 MCP tool per server (no resources/prompts capability)
 }
 
@@ -147,8 +172,7 @@ func TestManager_Close(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"s": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	_, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	startAndWait(t, mgr, context.Background())
 	assert.Len(t, mgr.sessions, 1)
 
 	require.NoError(t, mgr.Close())
@@ -160,8 +184,7 @@ func TestManager_Close(t *testing.T) {
 
 func TestManager_EmptyConfigs(t *testing.T) {
 	mgr := NewManager(nil, false)
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	assert.Empty(t, tools)
 	require.NoError(t, mgr.Close())
 }
@@ -192,8 +215,7 @@ func TestManager_PaginatedToolList(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"paged": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	// Both tools must be present despite the page size of 1.
 	require.Len(t, tools, 2) // 2 MCP tools (no resources/prompts capability)
 
@@ -224,8 +246,7 @@ func TestManager_RootsAdvertised(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Retrieve the active server-side session and ask the client for its roots.
@@ -258,8 +279,7 @@ func TestManager_RootsDefaultToCWD(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	var ss *sdk.ServerSession
@@ -320,15 +340,20 @@ func TestManager_ToolListChanged(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	changed := make(chan []agent.AgentTool, 1)
+	changed := make(chan []agent.AgentTool, 10)
 	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
 		changed <- tools
 	}
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
-	// Server has no MCP tools yet but resource tools are always present.
-	assert.Empty(t, tools, "expect no tools before any are added (no resources/prompts capability)")
+	mgr.Start(context.Background())
+
+	// Wait for initial connection (server has no tools yet).
+	select {
+	case tools := <-changed:
+		assert.Empty(t, tools, "expect no tools before any are added (no resources/prompts capability)")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for initial connection")
+	}
 
 	// Adding a tool after connection sends a tool-list-changed notification.
 	server.AddTool(
@@ -371,8 +396,7 @@ func TestManager_ProgressNotification(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	require.Len(t, tools, 1) // 1 MCP tool (no resources/prompts capability)
 
 	updates := make(chan string, 10)
@@ -440,8 +464,7 @@ func TestManager_LoggingHandler(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Get the server-side session and send a warning log notification to the client.
@@ -569,8 +592,7 @@ func TestManager_StreamableTransport_Integration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	require.Len(t, tools, 1) // 1 MCP tool (no resources/prompts capability)
@@ -598,8 +620,7 @@ func TestManager_Status_Connected(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, makeServer())
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	statuses := mgr.Status()
@@ -622,8 +643,7 @@ func TestManager_Status_AfterClose(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, s)
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 
 	// Close the manager — sessions map cleared.
 	require.NoError(t, mgr.Close())
@@ -639,9 +659,18 @@ func TestManager_Status_ConnectError(t *testing.T) {
 		return nil, errors.New("no such binary")
 	}
 
-	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.Error(t, err)
+	ch := make(chan []agent.AgentTool, 1)
+	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
+		ch <- tools
+	}
+	mgr.Start(context.Background())
+
+	// Wait for the async failure to be recorded.
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for failed server notification")
+	}
 
 	statuses := mgr.Status()
 	require.Len(t, statuses, 1)
@@ -663,8 +692,7 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 
 	// Confirm connected initially.
 	statuses := mgr.Status()
@@ -710,8 +738,7 @@ func TestManager_VerboseLoggingTransport(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"verbose-srv": {}}, true /* verbose */)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	tools, err := mgr.Start(context.Background())
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
 	require.Len(t, tools, 1)

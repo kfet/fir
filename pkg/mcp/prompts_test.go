@@ -81,8 +81,7 @@ func TestManager_Prompts_ListAndGet(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	listTool, getTool := findPromptTools(t, tools, "psrv")
@@ -120,8 +119,7 @@ func TestManager_Prompts_GetNoArgs(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	_, getTool := findPromptTools(t, tools, "psrv")
@@ -140,8 +138,7 @@ func TestManager_Prompts_GetMissingName(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	_, getTool := findPromptTools(t, tools, "psrv")

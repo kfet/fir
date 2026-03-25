@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kfet/fir/pkg/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,8 +48,7 @@ func TestMCP_E2E_ListTools(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 
 	// The test server registers echo, add, and slow; plus list_resources and read_resource.
 	require.Len(t, tools, 3, "expected 3 MCP tools from test server")
@@ -73,8 +73,7 @@ func TestMCP_E2E_CallTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 
 	// Index by name for easy lookup.
 	byName := make(map[string]int, len(tools))
@@ -113,8 +112,7 @@ func TestMCP_E2E_ToolNamePrefixing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	require.NotEmpty(t, tools)
 
 	wantPrefix := "mcp__" + serverName + "__"
@@ -146,8 +144,7 @@ func TestMCP_E2E_MultipleServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 
 	// Each server has 3 MCP tools (no resources/prompts capability).
 	require.Len(t, tools, 6, "expected 3 tools × 2 servers = 6")
@@ -183,13 +180,27 @@ func TestMCP_E2E_ServerExit(t *testing.T) {
 	}, false)
 	defer mgr.Close()
 
+	ch := make(chan []agent.AgentTool, 1)
+	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
+		ch <- tools
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	_, err := mgr.Start(ctx)
-	require.Error(t, err, "expected error when server exits immediately")
-	// The server name should appear in the error for debuggability.
-	assert.Contains(t, err.Error(), "gone")
+	mgr.Start(ctx)
+
+	// Wait for the async failure to be recorded.
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for server exit notification")
+	}
+
+	statuses := mgr.Status()
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].Connected)
+	assert.Error(t, statuses[0].Error)
 }
 
 // TestMCP_E2E_ContextCancellation verifies that a context deadline imposed by
@@ -204,8 +215,7 @@ func TestMCP_E2E_ContextCancellation(t *testing.T) {
 	startCtx, startCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer startCancel()
 
-	tools, err := mgr.Start(startCtx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, startCtx)
 
 	// Find the slow tool.
 	var slowIdx = -1
@@ -222,6 +232,6 @@ func TestMCP_E2E_ContextCancellation(t *testing.T) {
 	callCtx, callCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer callCancel()
 
-	_, err = tools[slowIdx].Execute(callCtx, "slow-call", nil, nil)
-	assert.Error(t, err, "Execute must return an error when context expires")
+	_, execErr := tools[slowIdx].Execute(callCtx, "slow-call", nil, nil)
+	assert.Error(t, execErr, "Execute must return an error when context expires")
 }

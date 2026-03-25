@@ -145,8 +145,7 @@ func TestWatchAndReload_AddServer(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	startAndWait(t, mgr, ctx)
 	t.Cleanup(func() { _ = mgr.Close() })
 
 	toolsUpdated := make(chan []agent.AgentTool, 1)
@@ -205,8 +204,7 @@ func TestWatchAndReload_RemoveServer(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	initialTools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	initialTools := startAndWait(t, mgr, ctx)
 	t.Cleanup(func() { _ = mgr.Close() })
 
 	// Verify server A started with its tool.
@@ -282,8 +280,7 @@ func TestWatchAndReload_SwapServer(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	initial, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	initial := startAndWait(t, mgr, ctx)
 	t.Cleanup(func() { _ = mgr.Close() })
 	assert.Contains(t, toolNames(initial), "mcp__svc__tool-a")
 

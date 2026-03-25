@@ -132,8 +132,7 @@ func TestManager_SamplingFn(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tools, err := mgr.Start(ctx)
-	require.NoError(t, err)
+	tools := startAndWait(t, mgr, ctx)
 	defer mgr.Close()
 
 	// Find the ping_llm tool.

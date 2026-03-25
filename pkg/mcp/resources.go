@@ -47,9 +47,15 @@ func listResourcesTool(session *sdk.ClientSession, serverName string) agent.Agen
 	}
 }
 
+// subscribeFunc is called to lazily subscribe to a resource URI after it is
+// first read. Implementations should be safe for concurrent use.
+type subscribeFunc func(uri string)
+
 // readResourceTool creates an agent tool that reads a resource by URI.
 // Use list_resources to discover available URIs.
-func readResourceTool(session *sdk.ClientSession, serverName string) agent.AgentTool {
+// When subscribe is non-nil, the tool subscribes lazily to each URI on first
+// read so the server can push update notifications for it later.
+func readResourceTool(session *sdk.ClientSession, serverName string, subscribe subscribeFunc) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name:        sanitizeToolName("mcp__" + serverName + "__read_resource"),
@@ -68,6 +74,10 @@ func readResourceTool(session *sdk.ClientSession, serverName string) agent.Agent
 			result, err := session.ReadResource(ctx, &sdk.ReadResourceParams{URI: uri})
 			if err != nil {
 				return agent.AgentToolResult{}, err
+			}
+			// Subscribe lazily — best-effort, non-blocking.
+			if subscribe != nil {
+				go subscribe(uri)
 			}
 			return convertResourceResult(result), nil
 		},
