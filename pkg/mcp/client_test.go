@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,14 +140,14 @@ func TestManager_MultipleServers(t *testing.T) {
 	configs := map[string]ServerConfig{"srvA": {}, "srvB": {}}
 	mgr := NewManager(configs, false)
 
-	dialCalls := 0
+	var dialCalls atomic.Int32
 	serverMap := map[string]*sdk.Server{"srvA": serverA, "srvB": serverB}
 	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
 		// We can't easily map config→server by name here, so round-robin
 		// between the two. The actual tool names identify which server answered.
-		dialCalls++
+		n := dialCalls.Add(1)
 		var s *sdk.Server
-		if dialCalls == 1 {
+		if n == 1 {
 			s = serverMap["srvA"]
 		} else {
 			s = serverMap["srvB"]
