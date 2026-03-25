@@ -1187,6 +1187,17 @@ func (m *InteractiveMode) ReexecIfRequested() {
 	if m.reexecBinary == "" {
 		return
 	}
+
+	// Restore stdin to blocking mode before exec.  Go's runtime sets
+	// stdin to O_NONBLOCK for its internal I/O poller and only restores
+	// blocking mode during a normal process exit for fds that *it*
+	// changed.  syscall.Exec replaces the process without runtime
+	// cleanup, so stdin stays non-blocking.  The new Go process sees
+	// stdin is already non-blocking and won't restore it on *its* exit
+	// either, leaving the parent shell's stdin permanently non-blocking.
+	// The shell then reads EAGAIN, interprets it as EOF, and exits.
+	restoreStdinBlocking()
+
 	env := append(os.Environ(), "FIR_REEXEC_CONTINUE=1")
 	if err := syscall.Exec(m.reexecBinary, m.reexecArgs, env); err != nil {
 		fmt.Fprintf(os.Stderr, "reexec failed: exec %s: %v\n", m.reexecBinary, err)
