@@ -49,15 +49,29 @@ func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.Agent
 		ch <- tools
 	}
 	mgr.Start(ctx)
+	// Wait for len(configs) callbacks, then keep draining briefly in case
+	// a callback fired before all tools were aggregated (race between
+	// concurrent startServer goroutines on slow CI runners).
 	var last []agent.AgentTool
-	for i := 0; i < len(mgr.configs); i++ {
+	received := 0
+	timeout := time.After(10 * time.Second)
+	for received < len(mgr.configs) {
 		select {
 		case last = <-ch:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", i, len(mgr.configs))
+			received++
+		case <-timeout:
+			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, len(mgr.configs))
 		}
 	}
-	return last
+	// Drain any extra notifications that arrive within a short window so we
+	// return the most up-to-date aggregate tool list.
+	for {
+		select {
+		case last = <-ch:
+		case <-time.After(200 * time.Millisecond):
+			return last
+		}
+	}
 }
 
 func TestManager_StartAndListTools(t *testing.T) {
