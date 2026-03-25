@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-03-25
+
 ### Removed
 
 - Removed scoped models feature (`/scoped-models` command, `ScopedModel` type, `ResolveModelScope`). Model cycling with `Ctrl+P` now always cycles through all available models.
