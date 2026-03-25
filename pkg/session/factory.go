@@ -184,7 +184,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	// --- Wire MCP channels ---
 	if mcpMgr != nil {
-		result.Session.SetMCPManager(mcpMgr)
+		sess := result.Session
+		mcp.WireChannelInjection(mcpMgr, func(text string, ts int64) {
+			msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
+			sess.InjectMessage(msg)
+		})
 
 		// Snapshot base tools before MCP tools arrive.
 		baseTools := slices.Clone(toolList)
@@ -193,11 +197,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			merged := append(slices.Clone(baseTools), mcpTools...)
 
 			// If hooks with tool interception are active, wrap before delivering.
-			if hooks := result.Session.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
-				merged = result.Session.WrapToolsWithHooks(merged)
+			if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
+				merged = sess.WrapToolsWithHooks(merged)
 			}
 
-			result.Session.Agent.SetTools(merged)
+			sess.Agent.SetTools(merged)
 		}
 
 		mcpMgr.Start(ctx)

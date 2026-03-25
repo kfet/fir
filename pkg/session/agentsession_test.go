@@ -3125,10 +3125,10 @@ func TestSideQuery_ErrorOnNoModel(t *testing.T) {
 }
 
 // ============================================================================
-// InjectChannelMessage
+// InjectMessage
 // ============================================================================
 
-func TestAgentSession_InjectChannelMessage_WhenNotStreaming(t *testing.T) {
+func TestAgentSession_InjectMessage_WhenNotStreaming(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
@@ -3136,9 +3136,10 @@ func TestAgentSession_InjectChannelMessage_WhenNotStreaming(t *testing.T) {
 		t.Fatal("expected not streaming initially")
 	}
 
-	session.InjectChannelMessage("test-server", "telegram", "hello from telegram", nil)
+	msg := agent.NewAgentMessage(ai.NewUserMsg("hello from telegram", time.Now().UnixMilli()))
+	session.InjectMessage(msg)
 
-	// When idle, InjectChannelMessage calls PromptMessages in a goroutine
+	// When idle, InjectMessage calls PromptMessages in a goroutine
 	// (which will fail without a model — that's expected). The message must
 	// NOT appear in the follow-up queue because it takes the direct-prompt path.
 	time.Sleep(50 * time.Millisecond)

@@ -19,7 +19,6 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/exec"
 	firlog "github.com/kfet/fir/pkg/log"
-	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session/store"
@@ -223,9 +222,6 @@ type AgentSession struct {
 
 	// Usage tracking (optional; nil disables tracking)
 	usageTracker UsageTracker
-
-	// MCP manager (optional; set via SetMCPManager for typing indicators)
-	mcpManager *mcp.Manager
 
 	// Plan entries (guarded by mu)
 	plan         []agent.PlanEntry
@@ -577,46 +573,16 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 	return nil
 }
 
-// SetMCPManager sets the MCP manager for typing indicators on channel replies
-// and wires channel message notifications to InjectChannelMessage.
-func (s *AgentSession) SetMCPManager(mgr *mcp.Manager) {
-	s.mu.Lock()
-	s.mcpManager = mgr
-	s.mu.Unlock()
-
-	mgr.OnChannelMessage = func(cm mcp.ChannelMessage) {
-		s.InjectChannelMessage(cm.ServerName, cm.SourceName(), cm.Text(), cm.Meta)
-	}
-}
-
-// InjectChannelMessage injects a message from an MCP channel server into the
-// agent conversation. If the agent is idle, the message triggers a new turn
-// immediately. If the agent is streaming, it is queued as a follow-up.
-// When an MCP manager is set, a "Thinking..." placeholder is sent first and
-// replaced with the final response when the agent finishes.
-func (s *AgentSession) InjectChannelMessage(serverName, source, message string, meta map[string]any) {
-	text := fmt.Sprintf("[Channel message from %s via %s]\n%s", source, serverName, message)
-	ts := time.Now().UnixMilli()
-	msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
-	firlog.Info("injecting channel message", "server", serverName, "source", source)
-
-	// Start typing indicator if MCP manager is available and the server
-	// has both "reply" and "edit_message" tools.
-	s.mu.RLock()
-	mgr := s.mcpManager
-	s.mu.RUnlock()
-	if mgr != nil && mgr.HasServerTools(serverName, "reply") {
-		if err := mcp.SendTypingIndicator(context.Background(), mgr, serverName, meta); err != nil {
-			firlog.Debug("typing indicator failed", "err", err)
-		}
-	}
-
+// InjectMessage injects a pre-built message into the agent conversation.
+// If the agent is currently streaming, the message is queued as a follow-up.
+// Otherwise it triggers a new turn immediately.
+func (s *AgentSession) InjectMessage(msg agent.AgentMessage) {
 	if s.IsStreaming() {
 		s.Agent.FollowUp(msg)
 	} else {
 		go func() {
 			if err := s.Agent.PromptMessages([]agent.AgentMessage{msg}); err != nil {
-				firlog.Debug("channel message auto-prompt failed", "err", err)
+				firlog.Debug("injected message auto-prompt failed", "err", err)
 			}
 		}()
 	}
