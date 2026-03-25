@@ -25,8 +25,9 @@ def _load_extension(name: str):
     fake_fir_ext.on = lambda _event: (lambda fn: fn)
     with patch.dict(sys.modules, {"fir_ext": fake_fir_ext}):
         spec = importlib.util.spec_from_file_location(name, path)
-        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
     return mod
 
 

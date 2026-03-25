@@ -60,7 +60,7 @@ def _load_demo() -> None:
         name_val = kw.get("name") or (a[0] if a else None)
         _DEMO_EXT_NAME = name_val if isinstance(name_val, str) else None
 
-    fir_ext.run = _capture_run  # type: ignore[assignment]
+    fir_ext.run = _capture_run  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     try:
         spec = importlib.util.spec_from_file_location("_demo_ext", _DEMO_PATH)
         assert spec and spec.loader
