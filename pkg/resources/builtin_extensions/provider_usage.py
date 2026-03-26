@@ -29,8 +29,8 @@ from pathlib import Path
 
 import fir_ext
 
-REFRESH_INTERVAL = 300  # 5 minutes
-CACHE_TTL = 300  # seconds — shared across all fir sessions
+REFRESH_INTERVAL_SECONDS = 30  # how frequently to refresh stats from cache
+CACHE_SECONDS_TTL = 300  # seconds — shared across all fir sessions
 BACKOFF_BASE = 120  # initial backoff after 429 (seconds)
 BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
 
@@ -87,7 +87,7 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
             return None
 
     def _is_fresh(cached: dict) -> bool:
-        return (time.time() - cached.get("fetched_at", 0)) < CACHE_TTL
+        return (time.time() - cached.get("fetched_at", 0)) < CACHE_SECONDS_TTL
 
     def _is_backed_off(cached: dict) -> bool:
         return time.time() < cached.get("backoff_until", 0)
@@ -398,7 +398,7 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
             with contextlib.suppress(Exception):
                 ctx.set_status(" │ ".join(parts))
 
-        _stop_event.wait(REFRESH_INTERVAL)
+        _stop_event.wait(REFRESH_INTERVAL_SECONDS)
 
 
 @fir_ext.on("session_start")
