@@ -34,10 +34,23 @@ CACHE_SECONDS_TTL = 300  # seconds — shared across all fir sessions
 BACKOFF_BASE = 120  # initial backoff after 429 (seconds)
 BACKOFF_MAX = 3600  # max backoff (60 minutes — oauth/usage can 429 for 30min+)
 
+# Cache dict keys
+_K_FETCHED_AT = "fetched_at"
+_K_BACKOFF_UNTIL = "backoff_until"
+_K_BACKOFF_DURATION = "backoff_duration"
+_K_DATA = "data"
+
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
 
 _CACHE_DIR = Path.home() / ".fir" / "agent"
+
+_CONFIG_PATHS = ["~/.config/fir", "~/.fir/agent"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 class CacheResult:
@@ -50,6 +63,13 @@ class CacheResult:
         self.is_stale = is_stale
         self.is_rate_limited = is_rate_limited
 
+    def status_suffix(self) -> str:
+        if self.is_rate_limited:
+            return " ⚠ rate-limited"
+        if self.is_stale:
+            return " ⚠ stale"
+        return ""
+
 
 class RateLimitedError(Exception):
     """Raised when the API returns HTTP 429."""
@@ -58,7 +78,7 @@ class RateLimitedError(Exception):
         self.retry_after = retry_after
 
 
-def _read_json(path: str) -> dict | None:
+def _read_json(path: Path) -> dict | None:
     """Read a JSON file, returning None on any error."""
     try:
         with open(path) as f:
@@ -67,41 +87,58 @@ def _read_json(path: str) -> dict | None:
         return None
 
 
+def _get_nested(d: dict | None, *keys) -> str | None:
+    """Traverse nested dicts, returning None if any key is missing."""
+    for k in keys:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    return d if isinstance(d, str) else None
+
+
+def _search_configs(filename: str, *keys) -> str | None:
+    """Search config paths for a nested key."""
+    for base in _CONFIG_PATHS:
+        val = _get_nested(_read_json(Path(f"{base}/{filename}").expanduser()), *keys)
+        if val:
+            return val
+    return None
+
+
+def _http_get_json(url: str, headers: dict) -> dict:
+    """Make HTTP GET request, raising RateLimitedError on 429."""
+    req = urllib.request.Request(url, headers=headers)  # noqa: S310
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            retry_after = None
+            with contextlib.suppress(Exception):
+                retry_after = float(e.headers.get("Retry-After", ""))
+            raise RateLimitedError(retry_after) from e
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Caching
+# ---------------------------------------------------------------------------
+
+
 def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
-    """Fetch data using a shared file cache with flock to prevent thundering herd.
-
-    cache_name: unique name for this cache (e.g. 'anthropic-usage')
-    fetch_fn:   callable that returns a dict, or raises RateLimitedError
-
-    Returns a CacheResult with data and staleness/rate-limit metadata.
-    """
+    """Fetch data using a shared file cache with flock to prevent thundering herd."""
     cache_file = _CACHE_DIR / f"{cache_name}-cache.json"
     lock_file = _CACHE_DIR / f"{cache_name}-cache.lock"
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    def _read_cache() -> dict | None:
-        try:
-            with open(cache_file) as f:
-                return json.load(f)
-        except Exception:
-            return None
-
     def _is_fresh(cached: dict) -> bool:
-        return (time.time() - cached.get("fetched_at", 0)) < CACHE_SECONDS_TTL
+        return (time.time() - cached.get(_K_FETCHED_AT, 0)) < CACHE_SECONDS_TTL
 
     def _is_backed_off(cached: dict) -> bool:
-        return time.time() < cached.get("backoff_until", 0)
+        return time.time() < cached.get(_K_BACKOFF_UNTIL, 0)
 
     def _effective_backoff_duration(cached: dict) -> float:
-        """Return previous backoff duration, but reset to 0 if backoff has expired.
-
-        This ensures that after a backoff window passes and we retry,
-        a subsequent 429 starts fresh at BACKOFF_BASE instead of
-        staying pinned at BACKOFF_MAX forever.
-        """
-        if _is_backed_off(cached):
-            return cached.get("backoff_duration", 0)
-        return 0  # expired — next 429 starts fresh
+        return cached.get(_K_BACKOFF_DURATION, 0) if _is_backed_off(cached) else 0
 
     def _write_cache(obj: dict) -> None:
         tmp_path = None
@@ -110,67 +147,62 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
             with os.fdopen(tmp_fd, "w") as tmp_f:
                 json.dump(obj, tmp_f)
             os.replace(tmp_path, str(cache_file))
-            tmp_path = None  # replaced successfully, nothing to clean up
+            tmp_path = None
         except Exception:
             if tmp_path:
                 with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
 
-    # Fast path: no lock needed if cache is fresh or backed off
-    cached = _read_cache()
-    if cached:
+    def _cache_to_result(cached: dict | None) -> CacheResult | None:
+        """Convert cached dict to CacheResult if usable, else None to signal refetch needed."""
+        if not cached:
+            return None
         if _is_backed_off(cached):
-            return CacheResult(cached.get("data"), is_stale=True, is_rate_limited=True)
-        if _is_fresh(cached) and cached.get("data") is not None:
-            return CacheResult(cached["data"])
+            return CacheResult(cached.get(_K_DATA), is_stale=True, is_rate_limited=True)
+        if _is_fresh(cached) and cached.get(_K_DATA) is not None:
+            return CacheResult(cached[_K_DATA])
+        return None
+
+    def _stale_result(cached: dict | None) -> CacheResult:
+        """Return stale data as a fallback."""
+        stale_data = (cached or {}).get(_K_DATA)
+        return CacheResult(stale_data, is_stale=stale_data is not None)
+
+    # Fast path: no lock needed if cache is fresh or backed off
+    if result := _cache_to_result(_read_json(cache_file)):
+        return result
 
     # Slow path: acquire lock, re-check, fetch if still stale
     try:
         with open(lock_file, "w") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
             try:
-                cached = _read_cache()
-                if cached:
-                    if _is_backed_off(cached):
-                        return CacheResult(cached.get("data"), is_stale=True, is_rate_limited=True)
-                    if _is_fresh(cached) and cached.get("data") is not None:
-                        return CacheResult(cached["data"])
+                cached = _read_json(cache_file)
+                if result := _cache_to_result(cached):
+                    return result
 
                 try:
-                    result = fetch_fn()
+                    data = fetch_fn()
                 except RateLimitedError as e:
-                    # Exponential backoff: double the previous backoff, capped
                     prev = _effective_backoff_duration(cached or {})
                     duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
                     if e.retry_after and e.retry_after > 0:
                         duration = max(duration, e.retry_after)
-                    # Add jitter (up to 50%) to desynchronize retries across machines
-                    duration += random.uniform(0, duration * 0.5)  # noqa: S311
+                    duration += random.uniform(0, duration * 0.5)  # jitter  # noqa: S311
                     obj = dict(cached or {})
-                    obj["backoff_until"] = time.time() + duration
-                    obj["backoff_duration"] = duration
+                    obj[_K_BACKOFF_UNTIL] = time.time() + duration
+                    obj[_K_BACKOFF_DURATION] = duration
                     _write_cache(obj)
-                    return CacheResult(obj.get("data"), is_stale=True, is_rate_limited=True)
+                    return CacheResult(obj.get(_K_DATA), is_stale=True, is_rate_limited=True)
                 except Exception:
-                    stale_data = (cached or {}).get("data")
-                    return CacheResult(stale_data, is_stale=stale_data is not None)
+                    return _stale_result(cached)
 
-                # Success — clear any backoff and write fresh data
-                _write_cache(
-                    {
-                        "fetched_at": time.time(),
-                        "data": result,
-                    }
-                )
-                return CacheResult(result)
+                _write_cache({_K_FETCHED_AT: time.time(), _K_DATA: data})
+                return CacheResult(data)
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
     except Exception:
-        # If locking fails, return stale cached data rather than
-        # hammering the API without backoff protection.
-        cached = _read_cache()
-        stale_data = (cached or {}).get("data")
-        return CacheResult(stale_data, is_stale=stale_data is not None)
+        return _stale_result(_read_json(cache_file))
 
 
 # ---------------------------------------------------------------------------
@@ -180,53 +212,19 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
 
 def _find_anthropic_token() -> str | None:
     """Find an OAuth bearer token for the Anthropic usage API."""
-    # New canonical path first, then legacy path.
-    for auth_path in [
-        "~/.config/fir/auth.json",
-        "~/.fir/agent/auth.json",
-    ]:
-        auth = _read_json(os.path.expanduser(auth_path))
-        if auth:
-            tok = (auth.get("anthropic") or {}).get("access")
-            if tok:
-                return tok
-
-    creds = _read_json(os.path.expanduser("~/.claude/.credentials.json"))
-    if creds:
-        tok = creds.get("claudeAiOauthToken") or creds.get("access_token")
-        if tok:
-            return tok
-
-    return None
+    if tok := _search_configs("auth.json", "anthropic", "access"):
+        return tok
+    creds = _read_json(Path("~/.claude/.credentials.json").expanduser())
+    return _get_nested(creds, "claudeAiOauthToken") or _get_nested(creds, "access_token")
 
 
 def _find_poe_key() -> str | None:
     """Find a Poe API key."""
-    key = os.environ.get("POE_API_KEY")
-    if key:
+    if key := os.environ.get("POE_API_KEY"):
         return key
-
-    for models_path in [
-        "~/.config/fir/models.json",
-        "~/.fir/agent/models.json",
-    ]:
-        models = _read_json(os.path.expanduser(models_path))
-        if models:
-            k = (models.get("providers") or {}).get("Poe", {}).get("apiKey")
-            if k:
-                return k
-
-    for auth_path in [
-        "~/.config/fir/auth.json",
-        "~/.fir/agent/auth.json",
-    ]:
-        auth = _read_json(os.path.expanduser(auth_path))
-        if auth:
-            k = (auth.get("poe") or {}).get("key")
-            if k:
-                return k
-
-    return None
+    if key := _search_configs("models.json", "providers", "Poe", "apiKey"):
+        return key
+    return _search_configs("auth.json", "poe", "key")
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +239,8 @@ def _fmt_countdown(total_min: int) -> str:
     if total_min < 1440:
         h, m = divmod(total_min, 60)
         return f"{h}h{m:02d}m"
-    d = total_min // 1440
-    h = (total_min % 1440) // 60
-    return f"{d}d{h}h"
+    d, rem = divmod(total_min, 1440)
+    return f"{d}d{rem // 60}h"
 
 
 # ---------------------------------------------------------------------------
@@ -251,105 +248,64 @@ def _fmt_countdown(total_min: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_anthropic_raw(token: str) -> dict:
-    """Raw API call to Anthropic usage endpoint. Raises RateLimitedError on 429."""
-    req = urllib.request.Request(
-        "https://api.anthropic.com/api/oauth/usage",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "anthropic-beta": "oauth-2025-04-20",
-            "Accept": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 429:
-            retry_after = None
-            with contextlib.suppress(Exception):
-                retry_after = float(e.headers.get("Retry-After", ""))
-            raise RateLimitedError(retry_after) from e
-        raise
-
-
 def _fetch_anthropic_usage(token: str) -> str | None:
     """Fetch Anthropic usage (cached) and return a short status string."""
-    result = _cached_fetch("anthropic-usage", lambda: _fetch_anthropic_raw(token))
-    data = result.data
-    if not data:
-        if result.is_rate_limited:
-            return "☁ (rate-limited)"
-        return None
+    result = _cached_fetch(
+        "anthropic-usage",
+        lambda: _http_get_json(
+            "https://api.anthropic.com/api/oauth/usage",
+            {
+                "Authorization": f"Bearer {token}",
+                "anthropic-beta": "oauth-2025-04-20",
+                "Accept": "application/json",
+            },
+        ),
+    )
+    if not result.data:
+        return "☁ (rate-limited)" if result.is_rate_limited else None
 
     local_tz = datetime.now().astimezone().tzinfo
     now = datetime.now(UTC).astimezone(local_tz)
 
     parts: list[tuple[float, str]] = []
-    for key, val in data.items():
+    for key, val in result.data.items():
         if key == "extra_usage" or not isinstance(val, dict):
             continue
         util = val.get("utilization")
         if util is None:
             continue
 
-        label = key.replace("_", " ").title()
-        label = label.replace("Five Hour", "5h").replace("Seven Day", "7d")
+        label = key.replace("_", " ").title().replace("Five Hour", "5h").replace("Seven Day", "7d")
 
         reset_str = ""
-        resets_at = val.get("resets_at")
-        if resets_at:
+        if resets_at := val.get("resets_at"):
             with contextlib.suppress(Exception):
                 dt = datetime.fromisoformat(resets_at).astimezone(local_tz)
-                total_min = max(0, int((dt - now).total_seconds()) // 60)
-                reset_str = _fmt_countdown(total_min)
+                reset_str = _fmt_countdown(max(0, int((dt - now).total_seconds()) // 60))
 
-        if reset_str:
-            parts.append((util, f"{label} {util:.0f}% ({reset_str})"))
-        else:
-            parts.append((util, f"{label} {util:.0f}%"))
+        parts.append(
+            (util, f"{label} {util:.0f}% ({reset_str})" if reset_str else f"{label} {util:.0f}%")
+        )
 
     if not parts:
         return None
 
     parts.sort(key=lambda x: -x[0])
-    display = ", ".join(p[1] for p in parts[:3])
-    suffix = ""
-    if result.is_rate_limited:
-        suffix = " ⚠ rate-limited"
-    elif result.is_stale:
-        suffix = " ⚠ stale"
-    return f"☁ {display}{suffix}"
-
-
-def _fetch_poe_raw(api_key: str) -> dict:
-    """Raw API call to Poe balance endpoint. Raises RateLimitedError on 429."""
-    req = urllib.request.Request(
-        "https://api.poe.com/usage/current_balance",
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        if e.code == 429:
-            retry_after = None
-            with contextlib.suppress(Exception):
-                retry_after = float(e.headers.get("Retry-After", ""))
-            raise RateLimitedError(retry_after) from e
-        raise
+    return f"☁ {', '.join(p[1] for p in parts[:3])}{result.status_suffix()}"
 
 
 def _fetch_poe_usage(api_key: str) -> str | None:
     """Fetch Poe point balance (cached) and return a short status string."""
-    result = _cached_fetch("poe-usage", lambda: _fetch_poe_raw(api_key))
-    data = result.data
-    if not data:
-        if result.is_rate_limited:
-            return "🅿 (rate-limited)"
-        return None
+    result = _cached_fetch(
+        "poe-usage",
+        lambda: _http_get_json(
+            "https://api.poe.com/usage/current_balance", {"Authorization": f"Bearer {api_key}"}
+        ),
+    )
+    if not result.data:
+        return "🅿 (rate-limited)" if result.is_rate_limited else None
 
-    balance = data.get("current_point_balance")
+    balance = result.data.get("current_point_balance")
     if balance is None:
         return None
 
@@ -360,12 +316,7 @@ def _fetch_poe_usage(api_key: str) -> str | None:
     else:
         bal_str = str(balance)
 
-    suffix = ""
-    if result.is_rate_limited:
-        suffix = " ⚠ rate-limited"
-    elif result.is_stale:
-        suffix = " ⚠ stale"
-    return f"🅿 {bal_str}pts{suffix}"
+    return f"🅿 {bal_str}pts{result.status_suffix()}"
 
 
 # ---------------------------------------------------------------------------
@@ -383,21 +334,13 @@ def _refresh_loop(ctx: fir_ext.Context) -> None:
 
     while not _stop_event.is_set():
         parts = []
-
-        if anthropic_token:
-            s = _fetch_anthropic_usage(anthropic_token)
-            if s:
-                parts.append(s)
-
-        if poe_key:
-            s = _fetch_poe_usage(poe_key)
-            if s:
-                parts.append(s)
-
+        if anthropic_token and (s := _fetch_anthropic_usage(anthropic_token)):
+            parts.append(s)
+        if poe_key and (s := _fetch_poe_usage(poe_key)):
+            parts.append(s)
         if parts:
             with contextlib.suppress(Exception):
                 ctx.set_status(" │ ".join(parts))
-
         _stop_event.wait(REFRESH_INTERVAL_SECONDS)
 
 
