@@ -55,6 +55,9 @@ func (a *AssistantMessageComponent) SetHideThinkingBlock(hide bool) {
 
 // UpdateContent updates the rendered content from an assistant message.
 func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) {
+	if message == nil {
+		return
+	}
 	a.lastMessage = message
 	a.contentContainer.Clear()
 

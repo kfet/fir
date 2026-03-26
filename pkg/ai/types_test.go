@@ -4,6 +4,7 @@ package ai
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -234,5 +235,23 @@ func TestNewToolResultMsg(t *testing.T) {
 	}
 	if msg.AsToolResult().ToolCallID != "tc1" {
 		t.Error("expected toolCallId 'tc1'")
+	}
+}
+
+func TestAssistantContentDeepCopyCoversAllFields(t *testing.T) {
+	covered := map[string]bool{
+		"Text":     true,
+		"Thinking": true,
+		"ToolCall": true,
+	}
+	typ := reflect.TypeOf(AssistantContent{})
+	if typ.NumField() != len(covered) {
+		t.Fatalf("expected %d fields, got %d", len(covered), typ.NumField())
+	}
+	for i := range typ.NumField() {
+		name := typ.Field(i).Name
+		if !covered[name] {
+			t.Fatalf("AssistantContent field %q not handled in DeepCopy -- update DeepCopy and this test", name)
+		}
 	}
 }

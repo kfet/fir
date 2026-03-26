@@ -29,6 +29,9 @@ func NewAssistantMessageEventStream() *AssistantMessageEventStream {
 
 // Push sends an event to the stream. If the event is a "done" or "error" event,
 // the final result is captured. It's safe to call from any goroutine.
+//
+// If the event carries a Partial message, it is snapshotted so that consumers
+// can safely read it without racing against subsequent producer mutations.
 func (s *AssistantMessageEventStream) Push(event AssistantMessageEvent) {
 	s.mu.Lock()
 	if s.done {
@@ -44,6 +47,13 @@ func (s *AssistantMessageEventStream) Push(event AssistantMessageEvent) {
 		}
 	}
 	s.mu.Unlock()
+
+	// Snapshot the partial message so the consumer gets an immutable copy.
+	// The producer (provider goroutine) will continue mutating the original
+	// for subsequent deltas; without this copy the consumer would race.
+	if event.Partial != nil {
+		event.Partial = event.Partial.SnapshotContent()
+	}
 
 	s.Events <- event
 }

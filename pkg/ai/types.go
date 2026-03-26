@@ -309,12 +309,41 @@ type AssistantMessage struct {
 	Timestamp    int64              `json:"timestamp"` // Unix ms
 }
 
+// SnapshotContent returns a shallow copy of the AssistantMessage with deep-copied
+// Content blocks. This produces an immutable snapshot safe to read while the
+// original is being mutated by a streaming provider goroutine.
+func (m *AssistantMessage) SnapshotContent() *AssistantMessage {
+	cp := *m
+	cp.Content = make([]AssistantContent, len(m.Content))
+	for i, c := range m.Content {
+		cp.Content[i] = c.DeepCopy()
+	}
+	return &cp
+}
+
 // AssistantContent is a discriminated union: TextContent | ThinkingContent | ToolCall.
 // Exactly one of Text, Thinking, or ToolCall will be non-nil.
 type AssistantContent struct {
 	Text     *TextContent     `json:"text,omitempty"`
 	Thinking *ThinkingContent `json:"thinking,omitempty"`
 	ToolCall *ToolCall        `json:"toolCall,omitempty"`
+}
+
+// DeepCopy returns a deep copy of the content block.
+func (c AssistantContent) DeepCopy() AssistantContent {
+	if c.Text != nil {
+		t := *c.Text
+		c.Text = &t
+	}
+	if c.Thinking != nil {
+		t := *c.Thinking
+		c.Thinking = &t
+	}
+	if c.ToolCall != nil {
+		t := *c.ToolCall
+		c.ToolCall = &t
+	}
+	return c
 }
 
 // ContentType returns the type string for this content block.
