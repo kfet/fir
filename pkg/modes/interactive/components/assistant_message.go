@@ -103,12 +103,13 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 					a.contentContainer.AddChild(tuicomp.NewSpacer(1))
 				}
 			} else {
-				a.contentContainer.AddChild(tuicomp.NewMarkdown(
-					strings.TrimSpace(content.Thinking.Thinking), 1, 0, a.markdownThm,
-					&tuicomp.DefaultTextStyle{
-						Color:  func(s string) string { return t.Fg("thinkingText", s) },
-						Italic: true,
-					}))
+				border := tuicomp.NewRoundedBorder(
+					func(s string) string { return t.Fg("borderMuted", s) },
+					1, // inner horizontal padding
+				)
+				border.AddChild(tuicomp.NewMarkdown(
+					strings.TrimSpace(content.Thinking.Thinking), 0, 0, a.markdownThm, nil))
+				a.contentContainer.AddChild(tuicomp.NewIndented(border, 1))
 				if hasVisibleAfter {
 					a.contentContainer.AddChild(tuicomp.NewSpacer(1))
 				}
