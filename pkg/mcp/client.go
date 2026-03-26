@@ -621,6 +621,18 @@ type ServerStatus struct {
 	Error error
 }
 
+// StatusString returns a human-readable status label: "connected",
+// "disconnected", or "error: <message>".
+func (s ServerStatus) StatusString() string {
+	if s.Error != nil {
+		return "error: " + s.Error.Error()
+	}
+	if s.Connected {
+		return "connected"
+	}
+	return "disconnected"
+}
+
 // Status returns a snapshot of the health of each configured server.
 // The slice is ordered by server name for deterministic output.
 func (m *Manager) Status() []ServerStatus {

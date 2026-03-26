@@ -19,7 +19,6 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
@@ -786,14 +785,18 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, t.Fg("dim", "Model: ")+model.ID)
 		lines = append(lines, t.Fg("dim", "Provider: ")+string(model.Provider))
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		if mcpCfg, err := mcp.LoadDefaultConfigs(cwd); err == nil && len(mcpCfg.MCPServers) > 0 {
-			var names []string
-			for name := range mcpCfg.MCPServers {
-				names = append(names, name)
+	if m.mcpManager != nil {
+		statuses := m.mcpManager.Status()
+		if len(statuses) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, t.Bold("MCP Servers"))
+			for _, s := range statuses {
+				stStr := t.Fg("success", s.StatusString())
+				if !s.Connected || s.Error != nil {
+					stStr = t.Fg("error", s.StatusString())
+				}
+				lines = append(lines, fmt.Sprintf("  %s %s", t.Fg("dim", s.Name+":"), stStr))
 			}
-			sort.Strings(names)
-			lines = append(lines, t.Fg("dim", "MCP Servers: ")+strings.Join(names, ", "))
 		}
 	}
 	lines = append(lines, "")

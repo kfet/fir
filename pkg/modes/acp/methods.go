@@ -796,13 +796,14 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 			info += fmt.Sprintf("**Model:** %s\n", model.ID)
 			info += fmt.Sprintf("**Provider:** %s\n", model.Provider)
 		}
-		if mcpCfg, err := mcp.LoadDefaultConfigs(entry.cwd); err == nil && len(mcpCfg.MCPServers) > 0 {
-			var names []string
-			for n := range mcpCfg.MCPServers {
-				names = append(names, n)
+		if entry.mcpManager != nil {
+			statuses := entry.mcpManager.Status()
+			if len(statuses) > 0 {
+				info += "\n**MCP Servers**\n"
+				for _, s := range statuses {
+					info += fmt.Sprintf("- %s: %s\n", s.Name, s.StatusString())
+				}
 			}
-			sort.Strings(names)
-			info += fmt.Sprintf("**MCP Servers:** %s\n", strings.Join(names, ", "))
 		}
 		info += "\n"
 		info += fmt.Sprintf("**Messages**\n- User: %d\n- Assistant: %d\n- Tool Calls: %d\n- Total: %d\n\n",

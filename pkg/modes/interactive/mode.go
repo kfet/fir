@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
@@ -119,6 +120,9 @@ type InteractiveMode struct {
 	// clipboardReader reads an image from the system clipboard.
 	// Defaults to clipboard.ReadClipboardImage; can be replaced in tests.
 	clipboardReader func() *clipboard.ClipboardImage
+
+	// mcpManager is the MCP server manager (optional).
+	mcpManager *mcp.Manager
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -129,6 +133,8 @@ type InteractiveModeOptions struct {
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
 	ThemeSearchDirs []string
+	// MCPManager is the MCP server manager (optional; nil if no MCP servers configured).
+	MCPManager *mcp.Manager
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -165,6 +171,7 @@ func NewInteractiveMode(
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
 		clipboardReader:    clipboard.ReadClipboardImage,
+		mcpManager:         opts.MCPManager,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()

@@ -745,6 +745,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			InitialPrompt:   initialPrompt,
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
+			MCPManager:      setup.mcpManager,
 		},
 	)
 	interactive.SetVersion(version)
