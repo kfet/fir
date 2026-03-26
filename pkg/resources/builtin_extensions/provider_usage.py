@@ -185,13 +185,13 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
                     data = fetch_fn()
                 except RateLimitedError as e:
                     prev = _effective_backoff_duration(cached or {})
-                    duration = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
+                    base = min(max(prev * 2, BACKOFF_BASE), BACKOFF_MAX)
                     if e.retry_after and e.retry_after > 0:
-                        duration = max(duration, e.retry_after)
-                    duration += random.uniform(0, duration * 0.5)  # jitter  # noqa: S311
+                        base = max(base, e.retry_after)
+                    jitter = random.uniform(0, base * 0.5)  # noqa: S311
                     obj = dict(cached or {})
-                    obj[_K_BACKOFF_UNTIL] = time.time() + duration
-                    obj[_K_BACKOFF_DURATION] = duration
+                    obj[_K_BACKOFF_UNTIL] = time.time() + base + jitter
+                    obj[_K_BACKOFF_DURATION] = base  # store base, not jittered
                     _write_cache(obj)
                     return CacheResult(obj.get(_K_DATA), is_stale=True, is_rate_limited=True)
                 except Exception:
