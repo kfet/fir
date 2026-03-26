@@ -60,6 +60,11 @@ func (p *OpenAICodexProvider) ListModels(ctx context.Context, creds *Credentials
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+creds.Access)
+	if creds.Extra != nil {
+		if accountID, ok := creds.Extra["accountId"].(string); ok && accountID != "" {
+			req.Header.Set("Chatgpt-Account-Id", accountID)
+		}
+	}
 
 	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
