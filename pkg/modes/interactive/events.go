@@ -80,6 +80,10 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 	m.commandStatusContainer.Clear()
 
 	state := m.session.State()
+
+	// Track tool execution components by their call ID so we can attach results.
+	toolComps := make(map[string]*components.ToolExecutionComponent)
+
 	for _, agentMsg := range state.Messages {
 		if u := agentMsg.Message.AsUser(); u != nil {
 			if txt := userMsgText(u.Content); txt != "" {
@@ -88,6 +92,48 @@ func (m *InteractiveMode) rebuildChatFromMessages() {
 		} else if a := agentMsg.Message.AsAssistant(); a != nil {
 			comp := components.NewAssistantMessageComponent(a, m.hideThinking, nil)
 			m.messageContainer.AddChild(comp)
+
+			// Render tool calls from the assistant message.
+			for _, content := range a.Content {
+				if content.ToolCall != nil {
+					tc := content.ToolCall
+					toolComp := components.NewToolExecutionComponent(
+						tc.Name,
+						tc.Arguments,
+						nil, // opts
+						nil, // displayHint (not persisted)
+						nil, // ui (no spinner needed for replay)
+					)
+					toolComps[tc.ID] = toolComp
+					m.messageContainer.AddChild(toolComp)
+				}
+			}
+		} else if tr := agentMsg.Message.AsToolResult(); tr != nil {
+			// Update the corresponding tool execution component with the result.
+			if toolComp, ok := toolComps[tr.ToolCallID]; ok {
+				resultData := &components.ToolResultData{
+					IsError: tr.IsError,
+				}
+				// Convert details if present.
+				if tr.Details != nil {
+					if detailsMap, ok := tr.Details.(map[string]any); ok {
+						resultData.Details = detailsMap
+					}
+				}
+				if resultData.Details == nil {
+					resultData.Details = make(map[string]any)
+				}
+				// Convert content blocks.
+				for _, c := range tr.Content {
+					resultData.Content = append(resultData.Content, components.ToolContentBlock{
+						Type:     c.Type,
+						Text:     c.Text,
+						Data:     c.Data,
+						MimeType: c.MimeType,
+					})
+				}
+				toolComp.UpdateResult(resultData, false)
+			}
 		}
 	}
 	m.ui.RequestRender(true)
