@@ -74,8 +74,9 @@ func (s *firSession) getThinkingAccessor() thinkingAccessor {
 
 // firAgent implements the ACP Agent interface.
 type firAgent struct {
-	conn    acpConn
-	options Options
+	conn     acpConn
+	options  Options
+	commands *commandRegistry
 
 	mu          sync.Mutex
 	sessions    map[string]*firSession
@@ -87,22 +88,10 @@ type firAgent struct {
 // Compile-time interface check: firAgent must implement Agent.
 var _ acpsdk.Agent = (*firAgent)(nil)
 
-// builtInCommands returns the slash commands available in ACP mode.
+// builtInCommands returns the slash commands available in ACP mode
+// by reading them from the global command registry.
 func builtInCommands() []acpsdk.AvailableCommand {
-	return []acpsdk.AvailableCommand{
-		{Name: "compact", Description: "Compact the session history to save tokens"},
-		{Name: "resume", Description: "List or resume a session (usage: /resume [number|path])"},
-		{Name: "continue", Description: "Continue the most recent session"},
-		{Name: "name", Description: "Rename the current session (usage: /name <new name>)"},
-		{Name: "session", Description: "Show session statistics"},
-		{Name: "changelog", Description: "Show changelog"},
-		{Name: "share", Description: "Share session as a secret GitHub Gist with a preview link"},
-		{Name: "export", Description: "Export session to an HTML file (usage: /export [path])"},
-		{Name: "login", Description: "Login with OAuth provider (usage: /login [provider-id])"},
-		{Name: "logout", Description: "Log out from provider (usage: /logout [provider-id|all])"},
-		{Name: "reload", Description: "Reload extensions, skills, prompts"},
-		{Name: "skills", Description: "List loaded skills (or /skills install <name>)"},
-	}
+	return newCommandRegistry().availableCommands()
 }
 
 // RunAcpMode is the entry point for ACP mode over stdin/stdout.
@@ -112,6 +101,7 @@ func RunAcpMode(opts Options) error {
 	pa := &firAgent{
 		options:  opts,
 		sessions: make(map[string]*firSession),
+		commands: newCommandRegistry(),
 	}
 
 	// Use newRawConn instead of AgentSideConnection so that session/list and

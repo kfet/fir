@@ -1,0 +1,633 @@
+// commands.go — slash command registry and dispatch for ACP mode.
+package acp
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/resources"
+	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
+)
+
+// ============================================================================
+// Command infrastructure
+// ============================================================================
+
+// slashCommand represents a registered slash command.
+type slashCommand struct {
+	Name        string
+	Description string
+	Handler     func(ctx *commandContext, args string)
+}
+
+// commandContext bundles everything a command handler needs.
+type commandContext struct {
+	sessionID string
+	entry     *firSession
+	agent     *firAgent
+}
+
+// sendMessage is a convenience shorthand for sending a message to the client.
+func (c *commandContext) sendMessage(msg string) {
+	c.agent.sendAgentMessage(c.sessionID, msg)
+}
+
+// commandRegistry maps command names to handlers.
+type commandRegistry struct {
+	commands map[string]slashCommand
+	order    []string
+}
+
+func newCommandRegistry() *commandRegistry {
+	r := &commandRegistry{commands: make(map[string]slashCommand)}
+	r.register(slashCommand{"compact", "Compact the session history to save tokens", cmdCompact})
+	r.register(slashCommand{"resume", "List or resume a session (usage: /resume [number|path])", cmdResume})
+	r.register(slashCommand{"continue", "Continue the most recent session", cmdContinue})
+	r.register(slashCommand{"name", "Rename the current session (usage: /name <new name>)", cmdName})
+	r.register(slashCommand{"session", "Show session statistics", cmdSession})
+	r.register(slashCommand{"changelog", "Show changelog", cmdChangelog})
+	r.register(slashCommand{"share", "Share session as a secret GitHub Gist with a preview link", cmdShare})
+	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
+	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
+	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
+	r.register(slashCommand{"reload", "Reload extensions, skills, prompts", cmdReload})
+	r.register(slashCommand{"skills", "List loaded skills (or /skills install <name>)", cmdSkills})
+	return r
+}
+
+func (r *commandRegistry) register(cmd slashCommand) {
+	r.commands[cmd.Name] = cmd
+	r.order = append(r.order, cmd.Name)
+}
+
+func (r *commandRegistry) lookup(name string) (slashCommand, bool) {
+	cmd, ok := r.commands[name]
+	return cmd, ok
+}
+
+// availableCommands returns the ACP command list from the registry.
+func (r *commandRegistry) availableCommands() []acpsdk.AvailableCommand {
+	cmds := make([]acpsdk.AvailableCommand, 0, len(r.order))
+	for _, name := range r.order {
+		cmd := r.commands[name]
+		cmds = append(cmds, acpsdk.AvailableCommand{Name: cmd.Name, Description: cmd.Description})
+	}
+	return cmds
+}
+
+// ============================================================================
+// Dispatch
+// ============================================================================
+
+func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, command, args string) bool {
+	ctx := &commandContext{sessionID: sessionID, entry: entry, agent: pa}
+
+	// Lazily initialize the command registry (supports tests that don't set it).
+	cmds := pa.commands
+	if cmds == nil {
+		cmds = newCommandRegistry()
+	}
+
+	// 1. Built-in commands.
+	if cmd, ok := cmds.lookup(command); ok {
+		cmd.Handler(ctx, args)
+		return true
+	}
+
+	// 2. Extension commands.
+	if entry.extSetup != nil && entry.extSetup.Manager != nil {
+		for _, ec := range entry.extSetup.Manager.GetCommands() {
+			if ec.Spec.Name == command {
+				var argList []string
+				if args != "" {
+					argList = strings.Fields(args)
+				}
+				result, err := entry.extSetup.Manager.DispatchCommand(command, argList, 0)
+				if err != nil {
+					ctx.sendMessage(fmt.Sprintf("Extension command /%s failed: %v", command, err))
+				} else if result.Message != "" {
+					ctx.sendMessage(result.Message)
+				}
+				return true
+			}
+		}
+	}
+
+	// 3. Prompt templates.
+	templates, _ := entry.session.ResourceLoader().GetPrompts()
+	for _, t := range templates {
+		if t.Name == command {
+			fullCmd := "/" + command
+			if args != "" {
+				fullCmd += " " + args
+			}
+			if expanded := resources.ExpandPromptTemplate(fullCmd, templates); expanded != fullCmd {
+				_ = entry.session.Prompt(expanded)
+			}
+			return true
+		}
+	}
+
+	// 4. Skill commands.
+	if strings.HasPrefix(command, "skill:") && (entry.settingsManager == nil || entry.settingsManager.GetEnableSkillCommands()) {
+		skillName := strings.TrimPrefix(command, "skill:")
+		skills, _ := entry.session.ResourceLoader().GetSkills()
+		for _, s := range skills {
+			if s.Name == skillName {
+				_ = entry.session.Prompt(fmt.Sprintf("/skill:%s %s", s.Name, args))
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// ============================================================================
+// Command handlers
+// ============================================================================
+
+func cmdCompact(ctx *commandContext, args string) {
+	if _, err := ctx.entry.session.RunCompaction(context.Background(), args); err != nil {
+		ctx.sendMessage(fmt.Sprintf("Compaction failed: %v", err))
+		return
+	}
+	if ctx.entry.session.HasPendingWork() {
+		go func() { _ = ctx.entry.session.Agent.Continue() }()
+		ctx.sendMessage("Session compacted successfully. Resuming.")
+	} else {
+		ctx.sendMessage("Session compacted successfully.")
+	}
+}
+
+func cmdResume(ctx *commandContext, args string) {
+	if args == "" {
+		entry := ctx.entry
+		sessionDir := store.DefaultSessionDir(entry.agentDir, entry.cwd)
+		sessions, _ := store.ListSessions(entry.cwd, sessionDir)
+		if len(sessions) > 10 {
+			sessions = sessions[:10]
+		}
+		entry.resumeMu.Lock()
+		entry.lastResumeList = sessions
+		entry.resumeMu.Unlock()
+		var lines []string
+		for i, s := range sessions {
+			name := s.Name
+			if name == "" {
+				name = s.FirstMessage
+			}
+			if name == "" {
+				name = "(unnamed)"
+			}
+			lines = append(lines, fmt.Sprintf("%d. %s (%s)", i+1, name, s.Path))
+		}
+		ctx.sendMessage(fmt.Sprintf("Available sessions (top 10):\n%s\n\nTo resume: /resume <number> or /resume <path>", strings.Join(lines, "\n")))
+	} else {
+		ctx.agent.handleResumeArg(ctx.sessionID, ctx.entry, args)
+	}
+}
+
+func cmdContinue(ctx *commandContext, _ string) {
+	entry := ctx.entry
+	sessionDir := store.DefaultSessionDir(entry.agentDir, entry.cwd)
+	sessions, _ := store.ListSessions(entry.cwd, sessionDir)
+	if len(sessions) == 0 {
+		ctx.sendMessage("No sessions available to continue.")
+		return
+	}
+	sessionsDir := store.SessionsDir(entry.agentDir)
+	if !IsPathWithinDirectory(sessions[0].Path, sessionsDir) {
+		ctx.sendMessage("Invalid session path: must be within sessions directory")
+		return
+	}
+	if err := entry.session.SwitchSession(sessions[0].Path); err != nil {
+		ctx.sendMessage(fmt.Sprintf("Failed to continue session: %v", err))
+		return
+	}
+	name := sessions[0].Name
+	if name == "" {
+		name = sessions[0].FirstMessage
+	}
+	if name == "" {
+		name = sessions[0].Path
+	}
+	ctx.sendMessage(fmt.Sprintf("Continued session: %s", name))
+	ctx.agent.replaySessionHistory(ctx.sessionID, entry)
+}
+
+func cmdName(ctx *commandContext, args string) {
+	if args == "" {
+		ctx.sendMessage("Usage: /name <new name>")
+		return
+	}
+	ctx.entry.session.SessionManager.AppendSessionInfo(args)
+	ctx.sendMessage(fmt.Sprintf("Session renamed to: %s", args))
+}
+
+func cmdSession(ctx *commandContext, _ string) {
+	entry := ctx.entry
+	stats := entry.session.GetSessionStats()
+	name := entry.session.SessionManager.GetSessionName()
+	info := "**Session Info**\n\n"
+	info += fmt.Sprintf("**Version:** %s\n", version)
+	info += "**Mode:** acp\n"
+	if bin, err := os.Executable(); err == nil {
+		info += fmt.Sprintf("**Binary:** %s\n", bin)
+	}
+	if name != "" {
+		info += fmt.Sprintf("**Name:** %s\n", name)
+	}
+	info += fmt.Sprintf("**ID:** %s\n", stats.SessionID)
+	if entry.extSetup != nil && entry.extSetup.Manager != nil {
+		enabled := entry.extSetup.Manager.EnabledExtensionNames()
+		if len(enabled) > 0 {
+			info += fmt.Sprintf("**Extensions:** %s\n", strings.Join(enabled, ", "))
+		}
+	}
+	if model := entry.session.Model(); model != nil {
+		info += fmt.Sprintf("**Model:** %s\n", model.ID)
+		info += fmt.Sprintf("**Provider:** %s\n", model.Provider)
+	}
+	if entry.mcpManager != nil {
+		statuses := entry.mcpManager.Status()
+		if len(statuses) > 0 {
+			info += "\n**MCP Servers**\n"
+			for _, s := range statuses {
+				info += fmt.Sprintf("- %s: %s\n", s.Name, s.StatusString())
+			}
+		}
+	}
+	info += "\n"
+	info += fmt.Sprintf("**Messages**\n- User: %d\n- Assistant: %d\n- Tool Calls: %d\n- Total: %d\n\n",
+		stats.UserMessages, stats.AssistantMessages, stats.ToolCalls, stats.TotalMessages)
+	info += fmt.Sprintf("**Tokens**\n- Input: %d\n- Output: %d\n- Total: %d\n",
+		stats.Tokens.Input, stats.Tokens.Output, stats.Tokens.Total)
+	if stats.Cost > 0 {
+		info += fmt.Sprintf("\n**Cost**: $%.4f", stats.Cost)
+	}
+	ctx.sendMessage(info)
+}
+
+func cmdChangelog(ctx *commandContext, _ string) {
+	entries := session.GetChangelogEntries()
+	if len(entries) == 0 {
+		ctx.sendMessage("No changelog entries found.")
+		return
+	}
+	var texts []string
+	for i := len(entries) - 1; i >= 0; i-- {
+		texts = append(texts, entries[i].Content)
+	}
+	ctx.sendMessage("**What's New**\n\n" + strings.Join(texts, "\n\n"))
+}
+
+func cmdShare(ctx *commandContext, _ string) {
+	go ctx.agent.performShare(ctx.sessionID, ctx.entry)
+}
+
+func cmdExport(ctx *commandContext, args string) {
+	go func() {
+		filePath, err := ctx.entry.session.ExportToHTML(args)
+		if err != nil {
+			ctx.sendMessage(fmt.Sprintf("Failed to export session: %v", err))
+			return
+		}
+		ctx.sendMessage(fmt.Sprintf("Session exported to: %s", filePath))
+	}()
+}
+
+func cmdLogin(ctx *commandContext, args string) {
+	entry := ctx.entry
+	authStorage := entry.modelRegistry.AuthStorage()
+	providers := authStorage.GetOAuthProviders()
+	if len(providers) == 0 {
+		ctx.sendMessage("No OAuth providers available.")
+		return
+	}
+
+	if args == "" {
+		var lines []string
+		for _, p := range providers {
+			lines = append(lines, "- "+p.ID())
+		}
+		ctx.sendMessage(fmt.Sprintf("Available OAuth providers:\n%s\n\nTo login, run: /login <provider-id>", strings.Join(lines, "\n")))
+		return
+	}
+
+	if !providerIDRegex.MatchString(args) {
+		ctx.sendMessage(fmt.Sprintf("Invalid provider ID: %s", args))
+		return
+	}
+
+	var found bool
+	for _, p := range providers {
+		if p.ID() == args {
+			found = true
+			break
+		}
+	}
+	if !found {
+		ctx.sendMessage(fmt.Sprintf("Provider not found: %s", args))
+		return
+	}
+
+	loginCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	err := authStorage.Login(args, oauth.LoginCallbacks{
+		OnAuth: func(info oauth.AuthInfo) {
+			formattedURL := session.FormatAuthURL(info.URL)
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formattedURL)
+			if info.Instructions != "" {
+				msg += "\n\n" + info.Instructions
+			}
+			ctx.sendMessage(msg)
+		},
+		OnProgress: func(message string) {
+			ctx.sendMessage(message)
+		},
+		OnPrompt: func(prompt oauth.Prompt) (string, error) {
+			ctx.sendMessage(prompt.Message + " (using default)")
+			return "", nil
+		},
+		Ctx: loginCtx,
+	})
+	if err != nil {
+		if loginCtx.Err() != nil {
+			ctx.sendMessage("Login timed out after 5 minutes.")
+		} else {
+			ctx.sendMessage(fmt.Sprintf("Login failed: %v", err))
+		}
+		return
+	}
+	entry.modelRegistry.Refresh()
+	ctx.sendMessage(fmt.Sprintf("Successfully logged in to %s.", args))
+}
+
+func cmdLogout(ctx *commandContext, args string) {
+	entry := ctx.entry
+	authStorage := entry.modelRegistry.AuthStorage()
+	creds := authStorage.GetAll()
+	loggedIn := make([]string, 0, len(creds))
+	for k := range creds {
+		loggedIn = append(loggedIn, k)
+	}
+	sort.Strings(loggedIn)
+
+	if len(loggedIn) == 0 {
+		ctx.sendMessage("No providers currently logged in.")
+		return
+	}
+
+	if args == "" {
+		var lines []string
+		for _, p := range loggedIn {
+			lines = append(lines, "- "+p)
+		}
+		ctx.sendMessage(fmt.Sprintf("Logged in providers:\n%s\n\nTo logout: /logout <provider-id> or /logout all", strings.Join(lines, "\n")))
+	} else if args == "all" {
+		for _, p := range loggedIn {
+			authStorage.Logout(p)
+		}
+		entry.modelRegistry.Refresh()
+		ctx.sendMessage("Logged out from all providers.")
+	} else {
+		if !providerIDRegex.MatchString(args) {
+			ctx.sendMessage(fmt.Sprintf("Invalid provider ID: %s", args))
+			return
+		}
+		found := false
+		for _, p := range loggedIn {
+			if p == args {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ctx.sendMessage(fmt.Sprintf("Provider not logged in: %s", args))
+			return
+		}
+		authStorage.Logout(args)
+		entry.modelRegistry.Refresh()
+		ctx.sendMessage(fmt.Sprintf("Logged out from %s.", args))
+	}
+}
+
+func cmdReload(ctx *commandContext, _ string) {
+	entry := ctx.entry
+	if err := entry.session.Reload(); err != nil {
+		ctx.sendMessage(fmt.Sprintf("Reload failed: %v", err))
+		return
+	}
+	if entry.extSetup != nil {
+		if entry.extSetup.Manager != nil {
+			entry.extSetup.Manager.SetAllowedNames(resolveEnabledExtensions(ctx.agent.options.EnabledExtensions, entry.settingsManager))
+		}
+		_ = entry.extSetup.Reload(context.Background())
+	}
+	ctx.agent.sendAvailableCommands(ctx.sessionID)
+	ctx.sendMessage("Reload completed successfully.")
+}
+
+func cmdSkills(ctx *commandContext, args string) {
+	parts := strings.Fields(args)
+	if len(parts) == 0 || parts[0] == "list" {
+		cmdSkillsList(ctx)
+		return
+	}
+	if parts[0] == "install" {
+		if len(parts) < 2 {
+			ctx.sendMessage("Usage: /skills install <name> [--user] [--force]")
+			return
+		}
+		cmdSkillsInstall(ctx, parts[1:])
+		return
+	}
+	ctx.sendMessage(fmt.Sprintf("Unknown skills subcommand: %s. Usage: /skills [list | install <name> [--user] [--force]]", parts[0]))
+}
+
+func cmdSkillsList(ctx *commandContext) {
+	skills, _ := ctx.entry.session.ResourceLoader().GetSkills()
+	if len(skills) == 0 {
+		ctx.sendMessage("No skills loaded.")
+		return
+	}
+	sorted := make([]resources.Skill, len(skills))
+	copy(sorted, skills)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	var sb strings.Builder
+	sb.WriteString("| Name | Source | Description |\n")
+	sb.WriteString("|------|--------|-------------|\n")
+	for _, s := range sorted {
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", s.Name, s.Source, s.Description))
+	}
+	ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
+}
+
+func cmdSkillsInstall(ctx *commandContext, parts []string) {
+	name := parts[0]
+	var toUser, force bool
+	for _, p := range parts[1:] {
+		switch p {
+		case "--user":
+			toUser = true
+		case "--force":
+			force = true
+		}
+	}
+
+	builtins := resources.LoadBuiltinSkills()
+	var found bool
+	for _, s := range builtins.Skills {
+		if s.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		available := make([]string, 0, len(builtins.Skills))
+		for _, s := range builtins.Skills {
+			available = append(available, s.Name)
+		}
+		sort.Strings(available)
+		ctx.sendMessage(fmt.Sprintf("Unknown builtin skill %q. Available: %s", name, strings.Join(available, ", ")))
+		return
+	}
+
+	var targetDir string
+	if toUser {
+		home, _ := os.UserHomeDir()
+		targetDir = filepath.Join(home, ".fir", "agent", "skills", name)
+	} else {
+		targetDir = filepath.Join(ctx.entry.cwd, ".fir", "skills", name)
+	}
+
+	if _, err := os.Stat(targetDir); err == nil && !force {
+		ctx.sendMessage(fmt.Sprintf("Skill %q already exists at %s. Use --force to overwrite.", name, targetDir))
+		return
+	}
+
+	prefix := "builtin_skills/" + name
+	err := fs.WalkDir(resources.BuiltinSkillsFS, prefix, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel := strings.TrimPrefix(path, prefix)
+		if rel == "" {
+			return nil
+		}
+		dest := filepath.Join(targetDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dest, 0o755)
+		}
+		data, err := fs.ReadFile(resources.BuiltinSkillsFS, path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0o644)
+	})
+	if err != nil {
+		ctx.sendMessage(fmt.Sprintf("Failed to install skill: %v", err))
+		return
+	}
+	ctx.sendMessage(fmt.Sprintf("Installed skill %q to %s", name, targetDir))
+}
+
+
+
+// ============================================================================
+// Command helpers
+// ============================================================================
+
+func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args string) {
+	var sessionPath string
+	if n := parseInt(args); n > 0 {
+		entry.resumeMu.Lock()
+		list := entry.lastResumeList
+		entry.resumeMu.Unlock()
+		if n <= len(list) {
+			sessionPath = list[n-1].Path
+		} else {
+			hint := "Run /resume first to see available sessions."
+			if len(list) > 0 {
+				hint = fmt.Sprintf("Pick 1-%d, or run /resume to refresh the list.", len(list))
+			}
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Invalid session number: %s. %s", args, hint))
+			return
+		}
+	} else {
+		sessionPath, _ = filepath.Abs(args)
+	}
+
+	sessionsDir := store.SessionsDir(entry.agentDir)
+	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
+		pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
+		return
+	}
+
+	if err := entry.session.SwitchSession(sessionPath); err != nil {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to resume session: %v", err))
+	} else {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s", sessionPath))
+		pa.replaySessionHistory(sessionID, entry)
+	}
+}
+
+// performShare creates a secret GitHub Gist from the session HTML export and
+// sends back both the raw gist URL and a gistpreview.github.io preview link.
+func (pa *firAgent) performShare(sessionID string, entry *firSession) {
+	// Verify gh CLI is installed and authenticated.
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		if isNotFound(err) {
+			pa.sendAgentMessage(sessionID, "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/")
+		} else {
+			pa.sendAgentMessage(sessionID, "GitHub CLI is not logged in. Run 'gh auth login' first.")
+		}
+		return
+	}
+
+	// Export session to a temp HTML file.
+	tmpPath, err := entry.session.ExportToHTML("")
+	if err != nil {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to export session: %v", err))
+		return
+	}
+	defer os.Remove(tmpPath)
+
+	out, err := exec.Command("gh", "gist", "create", "--public=false", tmpPath).Output()
+	if err != nil {
+		pa.sendAgentMessage(sessionID, "Failed to create gist. Check that 'gh' is installed and authenticated.")
+		return
+	}
+
+	gistURL := strings.TrimSpace(string(out))
+	if gistURL == "" {
+		pa.sendAgentMessage(sessionID, "Gist created but no URL returned.")
+		return
+	}
+
+	// Extract the gist ID — last path component of the URL.
+	gistID := gistURL[strings.LastIndex(gistURL, "/")+1:]
+	if !gistIDRegex.MatchString(gistID) {
+		pa.sendAgentMessage(sessionID, fmt.Sprintf("Gist created but could not parse ID from URL: %s", gistURL))
+		return
+	}
+
+	previewURL := "https://gistpreview.github.io/?" + gistID
+	pa.sendAgentMessage(sessionID, fmt.Sprintf("Session shared (secret gist):\nGist: %s\nPreview: %s", gistURL, previewURL))
+}
