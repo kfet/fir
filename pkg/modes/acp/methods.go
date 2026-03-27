@@ -1198,7 +1198,8 @@ func (pa *firAgent) handleLogin(sessionID string, entry *firSession, args string
 
 	err := authStorage.Login(args, oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
-			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", info.URL)
+			formattedURL := session.FormatAuthURL(info.URL)
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formattedURL)
 			if info.Instructions != "" {
 				msg += "\n\n" + info.Instructions
 			}

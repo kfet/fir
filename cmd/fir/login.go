@@ -34,10 +34,11 @@ func runLogin(args *Args) error {
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
 			browserOpened := session.OpenBrowser(info.URL) == nil
+			formattedURL := session.FormatAuthURL(info.URL)
 			if browserOpened {
-				fmt.Fprintf(os.Stderr, "Opening browser… if it doesn't appear, visit:\n%s\n", info.URL)
+				fmt.Fprintf(os.Stderr, "Opening browser… if it doesn't appear:\n%s\n", formattedURL)
 			} else {
-				fmt.Fprintf(os.Stderr, "Open this URL to authenticate:\n%s\n", info.URL)
+				fmt.Fprintf(os.Stderr, "Open this URL to authenticate:\n%s\n", formattedURL)
 			}
 			if info.Instructions != "" {
 				fmt.Fprintf(os.Stderr, "%s\n", info.Instructions)

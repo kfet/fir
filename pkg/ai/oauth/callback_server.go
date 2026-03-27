@@ -2,13 +2,33 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
-	"html"
+	"html/template"
 	"net"
 	"net/http"
 	"sync"
 )
+
+//go:embed callback_page.html
+var callbackPageHTML string
+
+var callbackPageTmpl = template.Must(template.New("callback").Parse(callbackPageHTML))
+
+type callbackPageData struct {
+	Title   string
+	Icon    string
+	Heading string
+	Message string
+}
+
+func renderAuthPage(title, icon, heading, message string) string {
+	var buf bytes.Buffer
+	_ = callbackPageTmpl.Execute(&buf, callbackPageData{title, icon, heading, message})
+	return buf.String()
+}
 
 // CallbackResult holds the result from the OAuth callback server.
 type CallbackResult struct {
@@ -29,11 +49,17 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr, expectedState st
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
 		errParam := r.URL.Query().Get("error")
 		if errParam != "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(400)
-			fmt.Fprintf(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>", html.EscapeString(errParam))
+			fmt.Fprint(w, renderAuthPage(
+				"Authentication Failed",
+				"⚠️",
+				"Authentication Failed",
+				"Error: "+errParam,
+			))
 			return
 		}
 
@@ -41,22 +67,34 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr, expectedState st
 		state := r.URL.Query().Get("state")
 
 		if expectedState != "" && state != expectedState {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(400)
-			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>State mismatch — possible CSRF attack. Please try again.</p></body></html>")
+			fmt.Fprint(w, renderAuthPage(
+				"Authentication Failed",
+				"🚫",
+				"Authentication Failed",
+				"State mismatch — please try again.",
+			))
 			return
 		}
 
 		if code != "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Successful</h1><p>You can close this window and return to the terminal.</p></body></html>")
+			fmt.Fprint(w, renderAuthPage(
+				"Authentication Successful",
+				"✓",
+				"You're all set",
+				"You can close this window and return to the terminal.",
+			))
 			once.Do(func() {
 				ch <- &CallbackResult{Code: code, State: state}
 			})
 		} else {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(400)
-			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>Missing authorization code.</p></body></html>")
+			fmt.Fprint(w, renderAuthPage(
+				"Authentication Failed",
+				"⚠️",
+				"Authentication Failed",
+				"Missing authorization code.",
+			))
 		}
 	})
 

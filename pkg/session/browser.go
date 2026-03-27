@@ -33,3 +33,13 @@ func OpenBrowser(url string) error {
 func Hyperlink(url, text string) string {
 	return fmt.Sprintf("\x1b]8;;%s\x07%s\x1b]8;;\x07", url, text)
 }
+
+// FormatAuthURL formats an auth URL for terminal display.
+// For short URLs (like device flow), returns just the URL.
+// For long URLs, returns instructions + URL on separate line.
+func FormatAuthURL(url string) string {
+	if len(url) < 60 {
+		return url
+	}
+	return "Copy this URL and open in browser:\n" + url
+}

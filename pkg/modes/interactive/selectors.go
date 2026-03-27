@@ -481,13 +481,13 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			// Try to auto-open the browser.
 			browserOpened := session.OpenBrowser(info.URL) == nil
 
-			// Show a clickable OSC 8 hyperlink so the URL stays on one line.
-			link := session.Hyperlink(info.URL, info.URL)
+			// Format the URL for terminal display (handles long URLs gracefully)
+			formattedURL := session.FormatAuthURL(info.URL)
 			var msg string
 			if browserOpened {
-				msg = fmt.Sprintf("Opening browser… if it doesn't appear, visit:\n%s", link)
+				msg = fmt.Sprintf("Opening browser… if it doesn't appear:\n%s", formattedURL)
 			} else {
-				msg = fmt.Sprintf("Open this URL to authenticate:\n%s", link)
+				msg = fmt.Sprintf("Open this URL to authenticate:\n%s", formattedURL)
 			}
 			if info.Instructions != "" {
 				msg += "\n" + info.Instructions
