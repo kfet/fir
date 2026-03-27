@@ -78,6 +78,7 @@ type InteractiveMode struct {
 	hideThinking    bool
 	autoCompactMode string // "off", "client", "server"
 	isBashMode      atomic.Bool
+	initialPrompt   string // stored from InteractiveModeOptions for use in Run()
 
 	// Theme
 	themeSearchDirs []string
@@ -121,8 +122,8 @@ type InteractiveMode struct {
 	// Defaults to clipboard.ReadClipboardImage; can be replaced in tests.
 	clipboardReader func() *clipboard.ClipboardImage
 
-	// mcpManager is the MCP server manager (optional).
-	mcpManager *mcp.Manager
+	// mcpStatus returns MCP server status for /session display (optional).
+	mcpStatus func() []mcp.ServerStatus
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -133,8 +134,8 @@ type InteractiveModeOptions struct {
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
 	ThemeSearchDirs []string
-	// MCPManager is the MCP server manager (optional; nil if no MCP servers configured).
-	MCPManager *mcp.Manager
+	// MCPStatus returns MCP server status for /session display (optional).
+	MCPStatus func() []mcp.ServerStatus
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -171,7 +172,8 @@ func NewInteractiveMode(
 		cancel:             cancel,
 		themeSearchDirs:    opts.ThemeSearchDirs,
 		clipboardReader:    clipboard.ReadClipboardImage,
-		mcpManager:         opts.MCPManager,
+		initialPrompt:      opts.InitialPrompt,
+		mcpStatus:          opts.MCPStatus,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -408,7 +410,7 @@ func formatDiagnostics(t *itheme.Theme, header string, diags []resources.Resourc
 }
 
 // Run starts the main event loop.
-func (m *InteractiveMode) Run(opts InteractiveModeOptions) error {
+func (m *InteractiveMode) Run() error {
 	m.running = true
 
 	// Handle SIGINT/SIGTERM for clean shutdown (e.g. kill from another terminal).
@@ -428,10 +430,10 @@ func (m *InteractiveMode) Run(opts InteractiveModeOptions) error {
 	m.restoreReexecSidecar()
 
 	// Send initial prompt if provided
-	if opts.InitialPrompt != "" {
-		m.AddUserMessage(opts.InitialPrompt) // Show it instantly as if typed
+	if m.initialPrompt != "" {
+		m.AddUserMessage(m.initialPrompt) // Show it instantly as if typed
 		go func() {
-			_ = m.session.Prompt(opts.InitialPrompt)
+			_ = m.session.Prompt(m.initialPrompt)
 		}()
 	}
 
@@ -469,6 +471,24 @@ func (m *InteractiveMode) shutdown() {
 		m.ui.Stop()
 	}
 }
+
+// Send pushes a message into the running UI event loop. Safe to call from any
+// goroutine. For InteractiveMode the message is currently used only to trigger
+// a re-render; callers that need typed dispatch should use the concrete type.
+func (m *InteractiveMode) Send(_ any) {
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
+}
+
+// Cleanup releases TUI resources and subscriptions. Always call after Run
+// returns. It is safe to call multiple times.
+func (m *InteractiveMode) Cleanup() {
+	m.shutdown()
+}
+
+// Compile-time assertion: InteractiveMode must satisfy tui.UI.
+var _ tui.UI = (*InteractiveMode)(nil)
 
 // ============================================================================
 // Editor handlers

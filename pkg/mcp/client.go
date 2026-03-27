@@ -655,6 +655,16 @@ func (m *Manager) Status() []ServerStatus {
 	return out
 }
 
+// StatusFunc returns a callback that returns server status from mgr, or nil
+// if mgr is nil.  Useful for passing status to components that should not
+// depend on the full Manager.
+func StatusFunc(mgr *Manager) func() []ServerStatus {
+	if mgr == nil {
+		return nil
+	}
+	return mgr.Status
+}
+
 // WatchAndReload watches path for changes to the MCP config file and
 // incrementally applies the diff:
 //   - New servers are started.

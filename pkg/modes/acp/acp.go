@@ -57,9 +57,10 @@ type firSession struct {
 	pendingArgs     sync.Map // toolCallID → map[string]any
 	resumeMu        sync.Mutex
 	lastResumeList  []store.SessionListInfo
-	configAccessor  thinkingAccessor // nil → use session (for testing)
-	mcpManager      *mcp.Manager     // nil if no MCP servers configured
-	extReady        chan struct{}    // closed when async extension setup completes
+	configAccessor  thinkingAccessor          // nil → use session (for testing)
+	mcpManager      *mcp.Manager              // nil if no MCP servers configured; used for Close()
+	mcpStatus       func() []mcp.ServerStatus // status callback for /session display
+	extReady        chan struct{}             // closed when async extension setup completes
 }
 
 // getThinkingAccessor returns the thinkingAccessor for this session.
@@ -230,6 +231,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		plan:            &planTracker{conn: pa.conn, sessionID: sessionID},
 		termState:       newTerminalState(),
 		mcpManager:      result.MCPManager,
+		mcpStatus:       mcp.StatusFunc(result.MCPManager),
 	}
 
 	unsub := result.Session.Subscribe(func(event session.AgentSessionEvent) {

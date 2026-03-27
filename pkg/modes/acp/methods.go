@@ -796,8 +796,8 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 			info += fmt.Sprintf("**Model:** %s\n", model.ID)
 			info += fmt.Sprintf("**Provider:** %s\n", model.Provider)
 		}
-		if entry.mcpManager != nil {
-			statuses := entry.mcpManager.Status()
+		if entry.mcpStatus != nil {
+			statuses := entry.mcpStatus()
 			if len(statuses) > 0 {
 				info += "\n**MCP Servers**\n"
 				for _, s := range statuses {

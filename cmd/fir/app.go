@@ -737,6 +737,8 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 
 	themeName := setup.settingsManager.GetTheme()
 
+	// mode is the concrete type; used for extension-specific calls that are
+	// not part of the tui.UI interface (SetExtensionSetup, ReexecExtData, etc.).
 	mode := interactive.NewInteractiveMode(
 		setup.result.Session,
 		keybindings,
@@ -745,15 +747,18 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			InitialPrompt:   initialPrompt,
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
-			MCPManager:      setup.mcpManager,
+			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
 		},
 	)
 	interactive.SetVersion(version)
 
-	// Wire the update notice channel so the TUI shows it at startup.
-	mode.SetUpdateChannel(noticeCh)
+	// ui is the stable interface contract used for all lifecycle calls.
+	var ui tui.UI = mode
 
-	if err := mode.Init(); err != nil {
+	// Wire the update notice channel so the TUI shows it at startup.
+	ui.SetUpdateChannel(noticeCh)
+
+	if err := ui.Init(); err != nil {
 		return fmt.Errorf("init interactive mode: %w", err)
 	}
 
@@ -788,16 +793,15 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		close(extDone)
 	}
 
-	err = mode.Run(interactive.InteractiveModeOptions{
-		InitialPrompt: initialPrompt,
-	})
+	err = ui.Run()
 	// Wait for the extension goroutine to finish before shutting down,
 	// so we don't race on the SetupResult pointer.
 	<-extDone
 	if es := extResult.Load(); es != nil {
 		es.EmitSessionShutdown()
 	}
-	mode.ReexecIfRequested() // never returns if /reexec was used
+	ui.Cleanup()
+	ui.ReexecIfRequested() // never returns if /reexec was used
 	return err
 }
 

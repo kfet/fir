@@ -785,8 +785,8 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, t.Fg("dim", "Model: ")+model.ID)
 		lines = append(lines, t.Fg("dim", "Provider: ")+string(model.Provider))
 	}
-	if m.mcpManager != nil {
-		statuses := m.mcpManager.Status()
+	if m.mcpStatus != nil {
+		statuses := m.mcpStatus()
 		if len(statuses) > 0 {
 			lines = append(lines, "")
 			lines = append(lines, t.Bold("MCP Servers"))
