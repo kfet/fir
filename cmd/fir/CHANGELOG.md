@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-03-27
+
+### Added
+
+- Render thinking blocks in a rounded border frame instead of plain indented text.
+- Unified OAuth callback server with server-side state validation, replacing per-provider callback implementations.
+- MCP server status now shown in `/session` output.
+- `merge-to-main` builtin skill.
+- `tui.UI` interface extracted from interactive mode for cleaner abstraction.
+
+### Fixed
+
+- Session replay now renders tool calls and matches results to calls by ID.
+- Show manual paste prompt immediately during OAuth login instead of waiting for callback timeout.
+- Send `Chatgpt-Account-Id` header in OpenAI Codex `ListModels` requests.
+- Provider usage backoff no longer compounds jitter, fixing ~2.5× growth per 429 instead of intended 2×.
+- Snapshot streaming `AssistantMessage` in `Push` to prevent data race.
+- Flaky OAuth callback server tests now use port 0 instead of hardcoded ports.
+
+### Changed
+
+- OAuth callback HTML page now has dark mode support and improved styling.
+- Worktree prompt simplified for launching fir in new tmux windows.
+
 ## [0.24.0] - 2026-03-25
 
 ### Removed
