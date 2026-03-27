@@ -146,11 +146,10 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 		}
 
 		if resultCh != nil {
-			// Race: wait briefly for the browser callback before showing the
-			// manual-input prompt. This avoids flashing a paste prompt when
-			// the local callback will arrive momentarily.
-			delay := time.NewTimer(3 * time.Second)
-			defer delay.Stop()
+			// Race: wait for browser callback vs manual input.
+			// Show the manual-input prompt immediately so users who need
+			// to paste a URL don't have to wait.
+			startManual()
 
 			for {
 				select {
@@ -167,16 +166,12 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 						resultCh = nil // don't select again
 						continue
 					}
-				case <-delay.C:
-					// Browser hasn't responded yet — show manual input prompt.
-					startManual()
-					continue
 				case mr := <-manualCh:
 					if mr.err != nil {
 						return nil, mr.err
 					}
 					if mr.input != "" {
-						code, state = parseAuthorizationInput(mr.input)
+						code, state = ParseAuthorizationInput(mr.input)
 					}
 				case <-ctx.Done():
 					return nil, fmt.Errorf("login cancelled")
@@ -190,7 +185,7 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 			if mr.err != nil {
 				return nil, mr.err
 			}
-			code, state = parseAuthorizationInput(mr.input)
+			code, state = ParseAuthorizationInput(mr.input)
 		}
 	} else if resultCh != nil {
 		// Just wait for the callback server.
@@ -212,7 +207,7 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 		if err != nil {
 			return nil, fmt.Errorf("prompting for code: %w", err)
 		}
-		code, state = parseAuthorizationInput(input)
+		code, state = ParseAuthorizationInput(input)
 	}
 
 	if code == "" {

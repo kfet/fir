@@ -145,7 +145,7 @@ func TestAnthropicTokenResponse_Parsing(t *testing.T) {
 }
 
 func TestAnthropicAuthCodeParsing(t *testing.T) {
-	// parseAuthorizationInput is shared across oauth providers (defined in openai_codex.go).
+	// ParseAuthorizationInput is shared across oauth providers (defined in openai_codex.go).
 	tests := []struct {
 		input string
 		code  string
@@ -159,7 +159,7 @@ func TestAnthropicAuthCodeParsing(t *testing.T) {
 		{"code=abc&state=xyz", "abc", "xyz"},
 	}
 	for _, tt := range tests {
-		code, state := parseAuthorizationInput(tt.input)
+		code, state := ParseAuthorizationInput(tt.input)
 		if code != tt.code {
 			t.Errorf("input %q: code = %q, want %q", tt.input, code, tt.code)
 		}

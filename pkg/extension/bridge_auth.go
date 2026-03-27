@@ -294,17 +294,48 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 		}
 
 		ctx := context.Background()
-		if cb := b.getAuthCallbacks(); cb != nil && cb.Ctx != nil {
+		cb := b.getAuthCallbacks()
+		if cb != nil && cb.Ctx != nil {
 			ctx = cb.Ctx
 		}
 
-		code, state, err := provider.AwaitCallback(ctx)
-		if err != nil {
-			return nil, &Error{Code: -32000, Message: err.Error()}, true
+		// Race the callback server against a manual paste prompt.
+		// If the browser can't reach localhost the user can paste the
+		// redirect URL instead of waiting forever.
+		type result struct {
+			code, state string
+			err         error
+		}
+		resCh := make(chan result, 2)
+
+		go func() {
+			code, state, err := provider.AwaitCallback(ctx)
+			resCh <- result{code, state, err}
+		}()
+
+		if cb != nil && cb.OnManualCodeInput != nil {
+			go func() {
+				input, err := cb.OnManualCodeInput()
+				if err != nil {
+					resCh <- result{err: err}
+					return
+				}
+				code, state := oauth.ParseAuthorizationInput(input)
+				resCh <- result{code: code, state: state}
+			}()
+		}
+
+		r := <-resCh
+		// Dismiss the manual-input prompt if the callback won.
+		if cb != nil && cb.OnDismissManualInput != nil {
+			cb.OnDismissManualInput()
+		}
+		if r.err != nil {
+			return nil, &Error{Code: -32000, Message: r.err.Error()}, true
 		}
 		return map[string]any{
-			"code":  code,
-			"state": state,
+			"code":  r.code,
+			"state": r.state,
 		}, nil, true
 
 	case "auth/stop_callback_server":

@@ -106,9 +106,9 @@ func createOAuthState() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// parseAuthorizationInput extracts code and state from various input formats:
+// ParseAuthorizationInput extracts code and state from various input formats:
 // full redirect URL, "code#state", "code=x&state=y" query, or bare code.
-func parseAuthorizationInput(input string) (code, state string) {
+func ParseAuthorizationInput(input string) (code, state string) {
 	value := strings.TrimSpace(input)
 	if value == "" {
 		return "", ""
@@ -240,14 +240,15 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	var code string
 
 	if callbacks.OnManualCodeInput != nil && codeCh != nil {
-		// Race: browser callback vs manual input (delayed)
+		// Race: browser callback vs manual input.
 		type manualResult struct {
 			input string
 			err   error
 		}
 		manualCh := make(chan manualResult, 1)
 
-		// Defer manual prompt so the browser callback has a chance to arrive first.
+		// Show the manual-input prompt immediately so users who need to
+		// paste a URL don't have to wait.
 		manualStarted := false
 		startManual := func() {
 			if manualStarted {
@@ -261,8 +262,7 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 			}()
 		}
 
-		delay := time.NewTimer(3 * time.Second)
-		defer delay.Stop()
+		startManual()
 
 		for code == "" {
 			select {
@@ -277,13 +277,11 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 						callbacks.OnDismissManualInput()
 					}
 				}
-			case <-delay.C:
-				startManual()
 			case mr := <-manualCh:
 				if mr.err != nil {
 					return nil, mr.err
 				}
-				c, s := parseAuthorizationInput(mr.input)
+				c, s := ParseAuthorizationInput(mr.input)
 				if s != "" && s != state {
 					return nil, fmt.Errorf("state mismatch")
 				}
@@ -312,7 +310,7 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 		if err != nil {
 			return nil, err
 		}
-		c, s := parseAuthorizationInput(input)
+		c, s := ParseAuthorizationInput(input)
 		if s != "" && s != state {
 			return nil, fmt.Errorf("state mismatch")
 		}

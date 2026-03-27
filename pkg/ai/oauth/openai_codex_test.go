@@ -80,12 +80,12 @@ func TestParseAuthorizationInput(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		code, state := parseAuthorizationInput(tt.input)
+		code, state := ParseAuthorizationInput(tt.input)
 		if code != tt.wantCode {
-			t.Errorf("parseAuthorizationInput(%q) code = %q, want %q", tt.input, code, tt.wantCode)
+			t.Errorf("ParseAuthorizationInput(%q) code = %q, want %q", tt.input, code, tt.wantCode)
 		}
 		if state != tt.wantState {
-			t.Errorf("parseAuthorizationInput(%q) state = %q, want %q", tt.input, state, tt.wantState)
+			t.Errorf("ParseAuthorizationInput(%q) state = %q, want %q", tt.input, state, tt.wantState)
 		}
 	}
 }
