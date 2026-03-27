@@ -282,7 +282,7 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
 
     # 2. Start callback server
     try:
-        server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH)
+        server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
         redirect_uri = server["redirect_uri"]
     except Exception:
         # Port unavailable — use the fixed redirect URI

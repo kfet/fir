@@ -10,11 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -179,47 +177,6 @@ func getAccountID(accessToken string) string {
 	return accountID
 }
 
-// startOpenAICallbackServer starts a local HTTP server on port 1455 for the OAuth callback.
-func startOpenAICallbackServer(ctx context.Context, expectedState string) (result <-chan string, closeServer func(), err error) {
-	ch := make(chan string, 1)
-	var once sync.Once
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("state") != expectedState {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "State mismatch")
-			return
-		}
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, "Missing authorization code")
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `<!doctype html><html><body><p>Authentication successful. Return to your terminal to continue.</p></body></html>`)
-		once.Do(func() { ch <- code })
-	})
-
-	listener, err := net.Listen("tcp", "127.0.0.1:1455")
-	if err != nil {
-		return nil, nil, fmt.Errorf("starting callback server: %w", err)
-	}
-
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(listener)
-
-	go func() {
-		<-ctx.Done()
-		once.Do(func() { close(ch) })
-		srv.Close()
-	}()
-
-	return ch, func() { srv.Close() }, nil
-}
-
 // loginOpenAICodex runs the full OpenAI Codex OAuth flow.
 func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	ctx := callbacks.Ctx
@@ -251,13 +208,12 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	callbackCtx, cancelCallback := context.WithCancel(ctx)
 	defer cancelCallback()
 
-	codeCh, closeServer, err := startOpenAICallbackServer(callbackCtx, state)
-	if err != nil {
-		// Server failed — fall back to manual paste only
-		codeCh = nil
-		closeServer = func() {}
+	var codeCh <-chan *CallbackResult
+	srv, ch, _, srvErr := StartOAuthCallbackServer(callbackCtx, "/auth/callback", "127.0.0.1:1455", state)
+	if srvErr == nil {
+		codeCh = ch
+		defer srv.Close()
 	}
-	defer closeServer()
 
 	// Build authorization URL
 	params := url.Values{
@@ -310,9 +266,13 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 
 		for code == "" {
 			select {
-			case c := <-codeCh:
-				if c != "" {
-					code = c
+			case result, ok := <-codeCh:
+				if !ok {
+					codeCh = nil // channel closed, stop selecting on it
+					continue
+				}
+				if result != nil && result.Code != "" {
+					code = result.Code
 					if manualStarted && callbacks.OnDismissManualInput != nil {
 						callbacks.OnDismissManualInput()
 					}
@@ -335,9 +295,9 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	} else if codeCh != nil {
 		// Wait for callback with timeout
 		select {
-		case c := <-codeCh:
-			if c != "" {
-				code = c
+		case result, ok := <-codeCh:
+			if ok && result != nil {
+				code = result.Code
 			}
 		case <-ctx.Done():
 			return nil, ctx.Err()

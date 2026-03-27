@@ -93,7 +93,7 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 	// Try starting local callback server; fall back silently if port unavailable.
 	redirectURI := anthropicRedirectURI
 	var resultCh <-chan *CallbackResult
-	srv, ch, _, serverErr := StartOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr)
+	srv, ch, _, serverErr := StartOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr, pkce.Verifier)
 	if serverErr == nil {
 		resultCh = ch
 		defer srv.Close()
@@ -125,7 +125,6 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 	}
 
 	var code, state string
-	usedManualRedirect := serverErr != nil // already on manual path if server failed
 
 	if callbacks.OnManualCodeInput != nil {
 		type manualResult struct {
@@ -178,7 +177,6 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 					}
 					if mr.input != "" {
 						code, state = parseAuthorizationInput(mr.input)
-						usedManualRedirect = true
 					}
 				case <-ctx.Done():
 					return nil, fmt.Errorf("login cancelled")
@@ -193,7 +191,6 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 				return nil, mr.err
 			}
 			code, state = parseAuthorizationInput(mr.input)
-			usedManualRedirect = true
 		}
 	} else if resultCh != nil {
 		// Just wait for the callback server.
@@ -216,7 +213,6 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 			return nil, fmt.Errorf("prompting for code: %w", err)
 		}
 		code, state = parseAuthorizationInput(input)
-		usedManualRedirect = true
 	}
 
 	if code == "" {
@@ -233,9 +229,6 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 		callbacks.OnProgress("Exchanging authorization code for tokens...")
 	}
 
-	if usedManualRedirect {
-		redirectURI = anthropicManualRedirectURI
-	}
 	return exchangeAnthropicCode(code, state, pkce.Verifier, redirectURI)
 }
 

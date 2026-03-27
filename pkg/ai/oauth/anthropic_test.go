@@ -203,6 +203,42 @@ func TestAnthropicLogin_CodeWithoutState(t *testing.T) {
 // Verify AnthropicProvider implements the Provider interface.
 var _ Provider = (*AnthropicProvider)(nil)
 
+func TestAnthropicLogin_ManualPasteLocalhostURL_PreservesRedirectURI(t *testing.T) {
+	// When the local callback server starts successfully but the user pastes
+	// the localhost callback URL manually, the token exchange must use the
+	// original localhost redirect_uri — not the manual (hosted) one.
+	// Since we can't match the PKCE verifier, we verify that the auth URL
+	// was built with the localhost redirect_uri (proving redirectURI is never
+	// switched to the manual URI).
+	codeCh := make(chan string, 1)
+	codeCh <- "http://localhost:53692/callback?code=testcode&state=VERIFIER"
+
+	var capturedAuthURL string
+	callbacks := LoginCallbacks{
+		OnAuth: func(info AuthInfo) {
+			capturedAuthURL = info.URL
+		},
+		OnManualCodeInput: func() (string, error) {
+			return <-codeCh, nil
+		},
+	}
+
+	// Token exchange will never be reached (state mismatch), so no test server needed.
+	_, err := loginAnthropic(callbacks)
+	if err == nil {
+		t.Fatal("expected state mismatch error")
+	}
+	if !strings.Contains(err.Error(), "state mismatch") {
+		t.Fatalf("expected state mismatch, got: %v", err)
+	}
+	if !strings.Contains(capturedAuthURL, "redirect_uri=http") {
+		t.Fatalf("auth URL missing redirect_uri: %s", capturedAuthURL)
+	}
+	if !strings.Contains(capturedAuthURL, "localhost") {
+		t.Fatalf("auth URL should use localhost redirect_uri: %s", capturedAuthURL)
+	}
+}
+
 func TestAnthropicRefreshToken_NoScopeInRequest(t *testing.T) {
 	// Verify that refresh token requests don't include a "scope" parameter,
 	// which causes "invalid_scope" errors from the Anthropic server.

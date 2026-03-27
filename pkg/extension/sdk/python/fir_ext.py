@@ -967,7 +967,11 @@ class AuthContext(Context):
         return self._call("auth/generate_pkce", {}, timeout=timeout)
 
     def start_callback_server(
-        self, addr: str = "127.0.0.1:0", path: str = "/callback", timeout: float = 10.0
+        self,
+        addr: str = "127.0.0.1:0",
+        path: str = "/callback",
+        state: str = "",
+        timeout: float = 10.0,
     ) -> dict[str, str]:
         """Start a local HTTP server to receive the OAuth callback.
 
@@ -977,6 +981,9 @@ class AuthContext(Context):
             Address to bind (use port 0 for auto-assign).
         path : str
             URL path for the callback endpoint.
+        state : str
+            Expected OAuth state parameter. If provided, requests with a
+            mismatched state receive a 400 error instead of being forwarded.
 
         Returns
         -------
@@ -984,7 +991,9 @@ class AuthContext(Context):
             ``{"addr": "127.0.0.1:NNNNN", "redirect_uri": "http://localhost:NNNNN/callback"}``
         """
         return self._call(
-            "auth/start_callback_server", {"addr": addr, "path": path}, timeout=timeout
+            "auth/start_callback_server",
+            {"addr": addr, "path": path, "state": state},
+            timeout=timeout,
         )
 
     def await_callback(self, timeout: float = 300.0) -> dict[str, str]:

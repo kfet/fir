@@ -138,7 +138,7 @@ func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credenti
 }
 
 // StartCallbackServer starts a local OAuth callback server for the extension.
-func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path string) (string, string, error) {
+func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path, state string) (string, string, error) {
 	p.callbackMu.Lock()
 	defer p.callbackMu.Unlock()
 
@@ -146,7 +146,7 @@ func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path st
 		return "", "", fmt.Errorf("callback server already running")
 	}
 
-	srv, ch, resolvedAddr, err := oauth.StartOAuthCallbackServer(ctx, path, addr)
+	srv, ch, resolvedAddr, err := oauth.StartOAuthCallbackServer(ctx, path, addr, state)
 	if err != nil {
 		return "", "", err
 	}
@@ -251,8 +251,9 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 
 	case "auth/start_callback_server":
 		var p struct {
-			Addr string `json:"addr"`
-			Path string `json:"path"`
+			Addr  string `json:"addr"`
+			Path  string `json:"path"`
+			State string `json:"state"`
 		}
 		if params != nil {
 			if err := json.Unmarshal(*params, &p); err != nil {
@@ -277,7 +278,7 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 			ctx = cb.Ctx
 		}
 
-		addr, redirectURI, err := provider.StartCallbackServer(ctx, p.Addr, p.Path)
+		addr, redirectURI, err := provider.StartCallbackServer(ctx, p.Addr, p.Path, p.State)
 		if err != nil {
 			return nil, &Error{Code: -32000, Message: err.Error()}, true
 		}

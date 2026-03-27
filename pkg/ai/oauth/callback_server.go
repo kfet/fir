@@ -1,4 +1,4 @@
-// Shared OAuth callback server used by multiple Google OAuth providers.
+// Shared OAuth callback server used by multiple OAuth providers.
 package oauth
 
 import (
@@ -19,9 +19,11 @@ type CallbackResult struct {
 // StartOAuthCallbackServer starts a local HTTP server to receive an OAuth callback.
 // route is the path to listen on (e.g., "/oauth-callback").
 // addr is the listener address (e.g., "127.0.0.1:51121").
+// expectedState, if non-empty, is validated server-side: requests with a
+// mismatched state parameter receive a 400 response and are not forwarded.
 // Returns the server, a channel for the result, and the actual listener address
 // (which may differ from addr if port 0 was used).
-func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *http.Server, resultCh <-chan *CallbackResult, actualAddr string, err error) {
+func StartOAuthCallbackServer(ctx context.Context, route, addr, expectedState string) (server *http.Server, resultCh <-chan *CallbackResult, actualAddr string, err error) {
 	ch := make(chan *CallbackResult, 1)
 	var once sync.Once
 
@@ -29,24 +31,32 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr string) (server *
 	mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 		errParam := r.URL.Query().Get("error")
 		if errParam != "" {
-			w.Header().Set("Content-Type", "text/html")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(400)
-			fmt.Fprintf(w, "<html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>", html.EscapeString(errParam))
+			fmt.Fprintf(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>", html.EscapeString(errParam))
 			return
 		}
 
 		code := r.URL.Query().Get("code")
 		state := r.URL.Query().Get("state")
-		if code != "" && state != "" {
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<html><body><h1>Authentication Successful</h1><p>You can close this window and return to the terminal.</p></body></html>")
+
+		if expectedState != "" && state != expectedState {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(400)
+			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>State mismatch — possible CSRF attack. Please try again.</p></body></html>")
+			return
+		}
+
+		if code != "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Successful</h1><p>You can close this window and return to the terminal.</p></body></html>")
 			once.Do(func() {
 				ch <- &CallbackResult{Code: code, State: state}
 			})
 		} else {
-			w.Header().Set("Content-Type", "text/html")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(400)
-			fmt.Fprint(w, "<html><body><h1>Authentication Failed</h1><p>Missing code or state parameter.</p></body></html>")
+			fmt.Fprint(w, "<!doctype html><html><body><h1>Authentication Failed</h1><p>Missing authorization code.</p></body></html>")
 		}
 	})
 
