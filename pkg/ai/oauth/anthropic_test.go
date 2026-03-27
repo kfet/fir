@@ -3,11 +3,14 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAnthropicProvider_IDAndName(t *testing.T) {
@@ -274,5 +277,153 @@ func TestAnthropicRefreshToken_NoScopeInRequest(t *testing.T) {
 	}
 	if capturedBody["grant_type"] != "refresh_token" {
 		t.Errorf("grant_type = %q, want %q", capturedBody["grant_type"], "refresh_token")
+	}
+}
+
+// TestAnthropicLogin_EndToEnd exercises the full login flow:
+// 1. Callback server starts
+// 2. Browser redirects with code+state
+// 3. Token endpoint returns valid credentials
+// 4. Credentials are returned to caller
+func TestAnthropicLogin_EndToEnd(t *testing.T) {
+	// Set up mock token server that validates the request and returns tokens.
+	var capturedTokenRequest map[string]string
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedTokenRequest)
+
+		// Validate required fields are present
+		if capturedTokenRequest["grant_type"] != "authorization_code" {
+			http.Error(w, "invalid grant_type", http.StatusBadRequest)
+			return
+		}
+		if capturedTokenRequest["code"] == "" {
+			http.Error(w, "missing code", http.StatusBadRequest)
+			return
+		}
+		if capturedTokenRequest["code_verifier"] == "" {
+			http.Error(w, "missing code_verifier", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "sk-ant-oat-test-access-token",
+			"refresh_token": "sk-ant-ort-test-refresh-token",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	origURL := anthropicTokenURL
+	setAnthropicTokenURL(tokenServer.URL + "/token")
+	defer setAnthropicTokenURL(origURL)
+
+	// Track callback flow
+	var capturedAuthURL string
+	var progressMessages []string
+
+	// We need to extract the state (PKCE verifier) from the auth URL to simulate
+	// a valid browser redirect. The callback server validates state server-side.
+	stateCh := make(chan string, 1)
+
+	callbacks := LoginCallbacks{
+		OnAuth: func(info AuthInfo) {
+			capturedAuthURL = info.URL
+			// Extract state from the auth URL
+			if u, err := url.Parse(info.URL); err == nil {
+				stateCh <- u.Query().Get("state")
+			}
+		},
+		OnProgress: func(msg string) {
+			progressMessages = append(progressMessages, msg)
+		},
+		// Don't provide OnManualCodeInput — we'll use the callback server path
+	}
+
+	// Run login in a goroutine since it blocks waiting for callback
+	type loginResult struct {
+		creds *Credentials
+		err   error
+	}
+	resultCh := make(chan loginResult, 1)
+
+	go func() {
+		creds, err := loginAnthropic(callbacks)
+		resultCh <- loginResult{creds, err}
+	}()
+
+	// Wait for auth URL to be generated
+	var state string
+	select {
+	case state = <-stateCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for OnAuth callback")
+	}
+
+	if state == "" {
+		t.Fatal("state not found in auth URL")
+	}
+
+	// Simulate browser redirect to callback server
+	// The callback server listens on anthropicCallbackAddr (127.0.0.1:53692)
+	callbackURL := fmt.Sprintf("http://%s%s?code=test-auth-code&state=%s",
+		anthropicCallbackAddr, anthropicCallbackPath, state)
+
+	resp, err := http.Get(callbackURL)
+	if err != nil {
+		t.Fatalf("callback request failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("callback returned status %d, want 200", resp.StatusCode)
+	}
+
+	// Wait for login to complete
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("login failed: %v", result.err)
+		}
+		if result.creds == nil {
+			t.Fatal("expected credentials, got nil")
+		}
+		if result.creds.Access != "sk-ant-oat-test-access-token" {
+			t.Errorf("access token = %q, want %q", result.creds.Access, "sk-ant-oat-test-access-token")
+		}
+		if result.creds.Refresh != "sk-ant-ort-test-refresh-token" {
+			t.Errorf("refresh token = %q, want %q", result.creds.Refresh, "sk-ant-ort-test-refresh-token")
+		}
+		if result.creds.Expires == 0 {
+			t.Error("expected non-zero expiry")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for login result")
+	}
+
+	// Verify auth URL format
+	if !strings.HasPrefix(capturedAuthURL, anthropicAuthorizeURL) {
+		t.Errorf("auth URL prefix wrong: %s", capturedAuthURL)
+	}
+
+	// Verify token request had correct fields
+	if capturedTokenRequest["code"] != "test-auth-code" {
+		t.Errorf("token request code = %q, want %q", capturedTokenRequest["code"], "test-auth-code")
+	}
+	if capturedTokenRequest["redirect_uri"] != anthropicRedirectURI {
+		t.Errorf("token request redirect_uri = %q, want %q", capturedTokenRequest["redirect_uri"], anthropicRedirectURI)
+	}
+
+	// Verify progress callback was called
+	found := false
+	for _, msg := range progressMessages {
+		if strings.Contains(msg, "Exchanging") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected progress message about exchanging code, got: %v", progressMessages)
 	}
 }

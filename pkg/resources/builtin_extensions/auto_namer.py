@@ -3,11 +3,11 @@
 # name: auto-namer
 # description: Automatically name unnamed sessions after the first interaction
 # builtin: true
-# events: session_start, session_named, agent_end
+# events: session_start, session_named, tool_execution_start
 # ---
 """auto_namer.py — derive a short session name from the first user message.
 
-On the first agent_end, if the session still has no name, this extension uses
+On the first tool call, if the session still has no name, this extension uses
 a side_query to distil the conversation into a three-word kebab-case slug
 (e.g. "fix-login-bug", "add-search-api") and sets it as the session name.
 """
@@ -19,15 +19,15 @@ import re
 import fir_ext
 
 _already_named = False
-_first_turn_done = False
+_naming_attempted = False
 
 
 @fir_ext.on("session_start")
 def on_session_start(params, ctx):
     """Reset state at session start."""
-    global _already_named, _first_turn_done
+    global _already_named, _naming_attempted
     _already_named = False
-    _first_turn_done = False
+    _naming_attempted = False
 
 
 @fir_ext.on("session_named")
@@ -37,13 +37,13 @@ def on_session_named(params, ctx):
     _already_named = True
 
 
-@fir_ext.on("agent_end")
-def on_agent_end(params, ctx):
-    """After the first agent turn, auto-name the session if still unnamed."""
-    global _first_turn_done, _already_named
-    if _first_turn_done or _already_named:
+@fir_ext.on("tool_execution_start")
+def on_tool_execution_start(params, ctx):
+    """On first tool call, auto-name the session if still unnamed."""
+    global _naming_attempted, _already_named
+    if _naming_attempted or _already_named:
         return
-    _first_turn_done = True
+    _naming_attempted = True
 
     try:
         raw = ctx.side_query(
