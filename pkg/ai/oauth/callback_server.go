@@ -15,15 +15,27 @@ import (
 //go:embed callback_page.html
 var callbackPageHTML string
 
+// Placeholder tokens used in callback_page.html.
+const (
+	phTitle   = "__TITLE__"
+	phIcon    = "__ICON__"
+	phHeading = "__HEADING__"
+	phMessage = "__MESSAGE__"
+)
+
+// allPlaceholders is the complete set of tokens that renderAuthPage replaces.
+// Tests verify this stays in sync with the HTML template.
+var allPlaceholders = []string{phTitle, phIcon, phHeading, phMessage}
+
 // renderAuthPage renders the callback page with the given content.
 // Uses simple string replacement to avoid html/template (which adds ~6MB to
 // the binary due to reflect-driven linker retention of large indirect deps).
 func renderAuthPage(title, icon, heading, message string) string {
 	r := strings.NewReplacer(
-		"__TITLE__", html.EscapeString(title),
-		"__ICON__", icon,
-		"__HEADING__", html.EscapeString(heading),
-		"__MESSAGE__", html.EscapeString(message),
+		phTitle, html.EscapeString(title),
+		phIcon, icon,
+		phHeading, html.EscapeString(heading),
+		phMessage, html.EscapeString(message),
 	)
 	return r.Replace(callbackPageHTML)
 }

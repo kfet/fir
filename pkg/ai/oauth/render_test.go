@@ -12,26 +12,23 @@ import (
 var placeholderRe = regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`)
 
 func TestRenderAuthPage_AllPlaceholdersReplaced(t *testing.T) {
-	// Verify the raw template has the placeholders we expect.
-	rawPlaceholders := placeholderRe.FindAllString(callbackPageHTML, -1)
-	if len(rawPlaceholders) == 0 {
-		t.Fatal("template has no __PLACEHOLDER__ tokens — test is broken")
+	// Build lookup from the authoritative list in callback_server.go.
+	known := make(map[string]bool, len(allPlaceholders))
+	for _, p := range allPlaceholders {
+		known[p] = true
 	}
 
-	expected := map[string]bool{
-		"__TITLE__":   true,
-		"__ICON__":    true,
-		"__HEADING__": true,
-		"__MESSAGE__": true,
-	}
-	for _, p := range rawPlaceholders {
-		if !expected[p] {
-			t.Errorf("template contains unknown placeholder %q — add it to renderAuthPage", p)
+	// Every placeholder in the HTML template must be in allPlaceholders.
+	for _, p := range placeholderRe.FindAllString(callbackPageHTML, -1) {
+		if !known[p] {
+			t.Errorf("template contains placeholder %q not in allPlaceholders — add it to callback_server.go", p)
 		}
 	}
-	for p := range expected {
+
+	// Every entry in allPlaceholders must appear in the template.
+	for _, p := range allPlaceholders {
 		if !strings.Contains(callbackPageHTML, p) {
-			t.Errorf("expected placeholder %q not found in template", p)
+			t.Errorf("allPlaceholders lists %q but it does not appear in the template", p)
 		}
 	}
 
