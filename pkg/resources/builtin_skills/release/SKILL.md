@@ -45,4 +45,16 @@ If any step fails, stop and report the error. Do not push or publish unless the 
 
 ## Post-publish: Track CI
 
-After `make publish` succeeds, monitor the GitHub Actions workflows until they complete.
+After `make publish` succeeds, poll GitHub Actions until every triggered workflow finishes:
+
+```bash
+gh run list --branch main --limit 5 --json status,conclusion,name,headSha,createdAt 2>&1
+```
+
+Loop every 30 seconds. Stop when all runs for the release commit are `completed`. If any conclude with `failure` or `cancelled`, report the failure details:
+
+```bash
+gh run view <run-id> --log-failed 2>&1 | tail -40
+```
+
+Do not ask the user whether to monitor — always do it automatically after a successful publish.

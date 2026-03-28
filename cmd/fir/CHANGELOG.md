@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-03-28
+
 ### Added
 
 - `/reload` now also reloads MCP server configs from disk — adds new servers, removes deleted ones, and restarts changed ones.
