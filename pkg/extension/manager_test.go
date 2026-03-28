@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -592,4 +593,47 @@ func TestManager_SeedSessionData_UnknownExtIgnored(t *testing.T) {
 	mgr.SeedSessionData(map[string]map[string]string{
 		"nonexistent-ext": {"k": "v"},
 	})
+}
+
+func TestManager_checkCommandClashes_builtin(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	err := mgr.checkCommandClashes("test-ext", []CommandSpec{
+		{Name: "help", Description: "clash with builtin"},
+	})
+	if err == nil {
+		t.Fatal("expected error for builtin clash, got nil")
+	}
+	if !strings.Contains(err.Error(), "built-in") {
+		t.Errorf("error should mention built-in: %v", err)
+	}
+}
+
+func TestManager_checkCommandClashes_extension(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	// Register an extension with command "hello"
+	cleanup := makeCmdBridge(t, mgr, []CommandSpec{
+		{Name: "hello", Description: "first"},
+	}, func(name string, args []string) CommandResult { return CommandResult{} })
+	defer cleanup()
+
+	// A second extension trying to register "hello" should fail
+	err := mgr.checkCommandClashes("other-ext", []CommandSpec{
+		{Name: "hello", Description: "second"},
+	})
+	if err == nil {
+		t.Fatal("expected error for extension clash, got nil")
+	}
+	if !strings.Contains(err.Error(), "cmd-ext") {
+		t.Errorf("error should mention owning extension: %v", err)
+	}
+}
+
+func TestManager_checkCommandClashes_noConflict(t *testing.T) {
+	mgr := NewManager(slog.Default())
+	err := mgr.checkCommandClashes("test-ext", []CommandSpec{
+		{Name: "my-unique-cmd", Description: "no clash"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }

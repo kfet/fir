@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/extension/sdk"
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // ConfirmFunc asks the user whether to trust an extension.
@@ -319,6 +320,12 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 	m.logger.Info("ext startOne: handshake done", "ext", cfg.Name, "elapsed_ms", time.Since(t0).Milliseconds())
 
+	// Reject extension commands that clash with builtins or other extensions.
+	if err := m.checkCommandClashes(cfg.Name, caps.Commands); err != nil {
+		_ = proc.Stop(context.Background())
+		return err
+	}
+
 	// Validate frontmatter against actual handshake capabilities.
 	if mm := CheckFrontmatter(cfg, caps); !mm.Empty() {
 		m.logger.Warn(FormatFrontmatterWarning(mm))
@@ -601,6 +608,41 @@ func (m *Manager) EnabledExtensionNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// checkCommandClashes returns an error if any command in cmds conflicts with a
+// builtin slash command or a command already registered by another extension.
+// Must be called before adding the bridge to m.bridges.
+func (m *Manager) checkCommandClashes(extName string, cmds []CommandSpec) error {
+	for _, cmd := range cmds {
+		if resources.IsBuiltinSlashCommandName(cmd.Name) {
+			return fmt.Errorf("extension %q: command /%s conflicts with a built-in slash command", extName, cmd.Name)
+		}
+	}
+
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	pending := append([]*pendingExtension(nil), m.pending...)
+	m.mu.Unlock()
+
+	existing := make(map[string]string) // command name -> owning extension
+	for _, mb := range bridges {
+		for _, spec := range mb.bridge.caps.Commands {
+			existing[spec.Name] = mb.cfg.Name
+		}
+	}
+	for _, pe := range pending {
+		for _, cmd := range pe.cfg.Commands {
+			existing[cmd.Name] = pe.cfg.Name
+		}
+	}
+
+	for _, cmd := range cmds {
+		if owner, ok := existing[cmd.Name]; ok {
+			return fmt.Errorf("extension %q: command /%s conflicts with command from extension %q", extName, cmd.Name, owner)
+		}
+	}
+	return nil
 }
 
 // ExtCommand holds a slash command declared by an extension.

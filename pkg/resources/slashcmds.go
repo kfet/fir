@@ -2,6 +2,8 @@
 // Upstream hash: 1caadb2e
 package resources
 
+import "fmt"
+
 // SlashCommandSource identifies where a slash command came from.
 type SlashCommandSource string
 
@@ -75,9 +77,15 @@ var builtinAliases = map[string]bool{
 var builtinSlashCommandSet = func() map[string]bool {
 	m := make(map[string]bool, len(BuiltinSlashCommands)+len(builtinAliases))
 	for _, cmd := range BuiltinSlashCommands {
+		if m[cmd.Name] {
+			panic(fmt.Sprintf("duplicate builtin slash command: %q", cmd.Name))
+		}
 		m[cmd.Name] = true
 	}
 	for name := range builtinAliases {
+		if m[name] {
+			panic(fmt.Sprintf("builtin alias %q conflicts with an existing slash command", name))
+		}
 		m[name] = true
 	}
 	return m

@@ -3,7 +3,7 @@
 # name: install
 # description: Install, uninstall, update, and list fir packages (skills, extensions, themes) from git repos or local paths.
 # builtin: true
-# commands: install: Install a package, uninstall: Uninstall a package, packages: List installed packages, update: Update packages
+# commands: install: Install a package, uninstall: Uninstall a package, packages: List installed packages, update-packages: Update packages
 # ---
 """
 Builtin extension that exposes fir's package management as slash-commands
@@ -86,11 +86,11 @@ def cmd_packages(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
 
 
 @fir_ext.command(
-    name="update",
+    name="update-packages",
     description="Update installed packages",
 )
 def cmd_update(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
-    """Usage: /update [source]"""
+    """Usage: /update-packages [source]"""
     try:
         out = _run(["update", *args])
         return {"message": out or "All packages up to date."}
