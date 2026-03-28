@@ -23,6 +23,3 @@ FLEET.md
 __pycache__/
 swe-bench-cache.json
 cmd/fir/fir
-
-# Python virtualenv
-.venv/

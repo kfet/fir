@@ -4,6 +4,8 @@
 
 ### Added
 
+- `/reload` now also reloads MCP server configs from disk — adds new servers, removes deleted ones, and restarts changed ones.
+- `/mcp` slash command to inspect configured MCP servers: shows connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Available in both TUI and ACP modes.
 - ACP: `session/resume` with a bare UUID (sent by Zed when opening a new window) now resolves the UUID to a session file and uses `flock` to detect if the session is active in another process; if locked, creates a fresh session instead of failing.
 
 ### Fixed

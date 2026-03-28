@@ -27,7 +27,7 @@ import json
 import os
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -271,7 +271,7 @@ def log_experiment(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, An
         delta_pct = round((primary_value - baseline_value) / abs(baseline_value) * 100, 2)
 
     record: dict[str, Any] = {
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "experiment": experiment_number,
         "description": params["description"],
         "hypothesis": params.get("hypothesis", ""),

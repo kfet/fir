@@ -34,7 +34,7 @@ import itertools
 import json
 import re
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import fir_ext
 
@@ -79,7 +79,7 @@ def _next_id() -> str:
 
 def _now() -> datetime:
     """Return the current local time (timezone-aware)."""
-    return datetime.now(tz=timezone.utc).astimezone()
+    return datetime.now(tz=UTC).astimezone()
 
 
 def _format_time(dt: datetime) -> str:

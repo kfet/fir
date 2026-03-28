@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import unittest
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 # Ensure the SDK directory is on sys.path (needed when run directly).
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +35,7 @@ _DEMO_PATH = os.path.join(_PROJECT_ROOT, ".fir", "extensions", "demo.py")
 # ---------------------------------------------------------------------------
 
 
-_DEMO_EXT_NAME: Optional[str] = None
+_DEMO_EXT_NAME: str | None = None
 
 
 def _load_demo() -> None:
@@ -89,7 +89,7 @@ class FakeFir:
         fake.stop()
     """
 
-    def __init__(self, *, active_tools: Optional[list[str]] = None, model_ok: bool = True):
+    def __init__(self, *, active_tools: list[str] | None = None, model_ok: bool = True):
         # Queue for fir → extension messages
         self._to_ext: queue.SimpleQueue[str] = queue.SimpleQueue()
         # All messages received from extension
@@ -97,7 +97,7 @@ class FakeFir:
         self._from_ext_lock = threading.Lock()
         self._from_ext_event = threading.Event()
         # Extension thread handle
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
         # Default auto-response data
         self._active_tools: list[str] = active_tools or ["bash", "read", "write"]
@@ -170,7 +170,7 @@ class FakeFir:
 
     # -- test helpers -------------------------------------------------------
 
-    def start_extension(self, name: Optional[str] = None) -> "FakeFir":
+    def start_extension(self, name: str | None = None) -> "FakeFir":
         """Spawn fir_ext.run() in a background daemon thread."""
         self._thread = threading.Thread(
             target=fir_ext.run,
@@ -201,12 +201,12 @@ class FakeFir:
         assert resp is not None, "no init response"
         return resp.get("result", {})
 
-    def send_event(self, event_name: str, params: Optional[dict] = None) -> None:
+    def send_event(self, event_name: str, params: dict | None = None) -> None:
         self.send({"jsonrpc": "2.0", "method": f"event/{event_name}", "params": params or {}})
 
     def send_tool_call(
-        self, msg_id: int, tool_name: str, params: Optional[dict] = None
-    ) -> Optional[dict]:
+        self, msg_id: int, tool_name: str, params: dict | None = None
+    ) -> dict | None:
         self.send({
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -215,9 +215,7 @@ class FakeFir:
         })
         return self.wait_for_response(msg_id)
 
-    def send_hook(
-        self, msg_id: int, hook_name: str, params: Optional[dict] = None
-    ) -> Optional[dict]:
+    def send_hook(self, msg_id: int, hook_name: str, params: dict | None = None) -> dict | None:
         self.send({
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -226,7 +224,7 @@ class FakeFir:
         })
         return self.wait_for_response(msg_id)
 
-    def wait_for_method(self, method: str, timeout: float = 3.0) -> Optional[dict]:
+    def wait_for_method(self, method: str, timeout: float = 3.0) -> dict | None:
         """Block until a message with the given outbound method is seen."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -239,7 +237,7 @@ class FakeFir:
             self._from_ext_event.clear()
         return None
 
-    def wait_for_response(self, msg_id: int, timeout: float = 3.0) -> Optional[dict]:
+    def wait_for_response(self, msg_id: int, timeout: float = 3.0) -> dict | None:
         """Block until a response with the given id is seen."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -579,7 +577,7 @@ class TestDemoHook(DemoTestCase):
 
 
 class TestDemoEvents(DemoTestCase):
-    def _run_event(self, event_name: str, params: Optional[dict] = None) -> "FakeFir":
+    def _run_event(self, event_name: str, params: dict | None = None) -> "FakeFir":
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()

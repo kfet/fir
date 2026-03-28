@@ -14,6 +14,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
@@ -62,6 +63,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
 	r.register(slashCommand{"reload", "Reload extensions, skills, prompts", cmdReload})
 	r.register(slashCommand{"skills", "List loaded skills (or /skills install <name>)", cmdSkills})
+	r.register(slashCommand{"mcp", "Show MCP servers summary, or /mcp <name> for full tool details", cmdMCP})
 	return r
 }
 
@@ -554,6 +556,98 @@ func cmdSkillsInstall(ctx *commandContext, parts []string) {
 		return
 	}
 	ctx.sendMessage(fmt.Sprintf("Installed skill %q to %s", name, targetDir))
+}
+
+func cmdMCP(ctx *commandContext, args string) {
+	entry := ctx.entry
+	if entry.mcpManager == nil {
+		ctx.sendMessage("No MCP servers configured.")
+		return
+	}
+	details := entry.mcpManager.Details()
+	if len(details) == 0 {
+		ctx.sendMessage("No MCP servers configured.")
+		return
+	}
+
+	serverName := strings.TrimSpace(args)
+
+	// If a server name is given, show full details for that server.
+	if serverName != "" {
+		var found *mcp.ServerDetail
+		for i := range details {
+			if details[i].Name == serverName {
+				found = &details[i]
+				break
+			}
+		}
+		if found == nil {
+			ctx.sendMessage(fmt.Sprintf("MCP server %q not found.", serverName))
+			return
+		}
+		d := found
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("### %s (%s)\n\n", d.Name, d.Status))
+		if d.Error != "" {
+			sb.WriteString(fmt.Sprintf("- **Error:** %s\n", d.Error))
+		}
+		transport := d.Config.Transport
+		if transport == "" {
+			transport = "stdio"
+		}
+		sb.WriteString(fmt.Sprintf("- **Transport:** %s\n", transport))
+		if d.Config.Command != "" {
+			cmd := d.Config.Command
+			if len(d.Config.Args) > 0 {
+				cmd += " " + strings.Join(d.Config.Args, " ")
+			}
+			sb.WriteString(fmt.Sprintf("- **Command:** `%s`\n", cmd))
+		}
+		if d.Config.URL != "" {
+			sb.WriteString(fmt.Sprintf("- **URL:** %s\n", d.Config.URL))
+		}
+		var caps []string
+		if d.HasResources {
+			caps = append(caps, "resources")
+		}
+		if d.HasPrompts {
+			caps = append(caps, "prompts")
+		}
+		if len(caps) > 0 {
+			sb.WriteString(fmt.Sprintf("- **Capabilities:** %s\n", strings.Join(caps, ", ")))
+		}
+		if len(d.Tools) > 0 {
+			sb.WriteString(fmt.Sprintf("\n**Tools (%d):**\n\n", len(d.Tools)))
+			for _, tool := range d.Tools {
+				if tool.Description != "" {
+					sb.WriteString(fmt.Sprintf("- `%s` — %s\n", tool.Name, tool.Description))
+				} else {
+					sb.WriteString(fmt.Sprintf("- `%s`\n", tool.Name))
+				}
+			}
+		} else {
+			sb.WriteString("- **Tools:** none\n")
+		}
+		ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
+		return
+	}
+
+	// Summary view: no full tool list.
+	var sb strings.Builder
+	sb.WriteString("**MCP Servers**\n\n")
+	for _, d := range details {
+		transport := d.Config.Transport
+		if transport == "" {
+			transport = "stdio"
+		}
+		sb.WriteString(fmt.Sprintf("- **%s** (%s) — %s, %d tools", d.Name, d.Status, transport, len(d.Tools)))
+		if d.Error != "" {
+			sb.WriteString(fmt.Sprintf(" — error: %s", d.Error))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nUse `/mcp <server-name>` to see full tool details.")
+	ctx.sendMessage(sb.String())
 }
 
 // ============================================================================

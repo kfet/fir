@@ -29,7 +29,7 @@ def _load_hello():
     before_handlers = {k: id(v) for k, v in fir_ext._event_handlers.items()}
     before_tools = list(fir_ext._tools)
     with mock.patch.object(fir_ext, "run"):
-        import hello
+        import hello  # noqa: F401
     new_handlers = {
         k: v for k, v in fir_ext._event_handlers.items()
         if k not in before_handlers or id(v) != before_handlers[k]

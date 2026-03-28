@@ -19,6 +19,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/resources"
@@ -189,6 +190,12 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.Shutdown()
 	case "/plan":
 		m.handlePlanCommand()
+	case "/mcp":
+		if len(parts) > 1 {
+			m.handleMCPDetailCommand(parts[1])
+		} else {
+			m.handleMCPCommand()
+		}
 	default:
 		// Not a builtin command.
 		// Check if it's a skill or prompt template command before declaring unknown.
@@ -924,7 +931,7 @@ func (m *InteractiveMode) handleReloadCommand() {
 		return
 	}
 
-	m.showStatus("Reloading extensions, skills, prompts, and themes...")
+	m.showStatus("Reloading extensions, skills, prompts, themes, and MCP servers...")
 
 	// Reload session (re-reads settings.json, skills, prompts, system prompt).
 	if err := m.session.Reload(); err != nil {
@@ -945,9 +952,16 @@ func (m *InteractiveMode) handleReloadCommand() {
 		}
 	}
 
+	// Reload MCP servers if available.
+	if m.mcpReload != nil {
+		if err := m.mcpReload(); err != nil {
+			m.showWarning(fmt.Sprintf("MCP reload failed: %v", err))
+		}
+	}
+
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
-	m.showStatus("Reloaded extensions, skills, prompts, themes")
+	m.showStatus("Reloaded extensions, skills, prompts, themes, MCP servers")
 }
 
 func (m *InteractiveMode) handleSkillsCommand(args []string) {
@@ -1301,6 +1315,119 @@ func (m *InteractiveMode) IsBashMode() bool {
 }
 
 // ============================================================================
+// MCP command
+// ============================================================================
+
+// renderServerDetail appends the common header lines for an MCP server detail
+// (status, transport, command, URL, capabilities) and returns the updated slice.
+func renderServerDetail(lines []string, d *mcp.ServerDetail, t *itheme.Theme) []string {
+	stStr := t.Fg("success", d.Status)
+	if d.Status == "connecting" {
+		stStr = t.Fg("warn", d.Status)
+	} else if d.Status != "connected" {
+		stStr = t.Fg("error", d.Status)
+	}
+	lines = append(lines, t.Bold(t.Fg("accent", d.Name))+" "+t.Fg("dim", "(")+stStr+t.Fg("dim", ")"))
+
+	if d.Error != "" {
+		lines = append(lines, "  "+t.Fg("error", "Error: "+d.Error))
+	}
+
+	transport := d.Config.Transport
+	if transport == "" {
+		transport = "stdio"
+	}
+	lines = append(lines, "  "+t.Fg("dim", "Transport: ")+transport)
+	if d.Config.Command != "" {
+		cmd := d.Config.Command
+		if len(d.Config.Args) > 0 {
+			cmd += " " + strings.Join(d.Config.Args, " ")
+		}
+		lines = append(lines, "  "+t.Fg("dim", "Command: ")+cmd)
+	}
+	if d.Config.URL != "" {
+		lines = append(lines, "  "+t.Fg("dim", "URL: ")+d.Config.URL)
+	}
+
+	var caps []string
+	if d.HasResources {
+		caps = append(caps, "resources")
+	}
+	if d.HasPrompts {
+		caps = append(caps, "prompts")
+	}
+	if len(caps) > 0 {
+		lines = append(lines, "  "+t.Fg("dim", "Capabilities: ")+strings.Join(caps, ", "))
+	}
+	return lines
+}
+
+func (m *InteractiveMode) handleMCPCommand() {
+	if m.mcpDetails == nil {
+		m.showWarning("No MCP servers configured.")
+		return
+	}
+	details := m.mcpDetails()
+	if len(details) == 0 {
+		m.showStatus("No MCP servers configured.")
+		return
+	}
+
+	t := itheme.GetTheme()
+	var lines []string
+	lines = append(lines, t.Bold("MCP Servers"))
+
+	for i := range details {
+		lines = append(lines, "")
+		lines = renderServerDetail(lines, &details[i], t)
+		lines = append(lines, fmt.Sprintf("  "+t.Fg("dim", "Tools: ")+"%d", len(details[i].Tools)))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, t.Fg("dim", "Use /mcp <server-name> to see full tool details."))
+
+	m.showMessage(strings.Join(lines, "\n"))
+}
+
+func (m *InteractiveMode) handleMCPDetailCommand(serverName string) {
+	if m.mcpDetails == nil {
+		m.showWarning("No MCP servers configured.")
+		return
+	}
+	details := m.mcpDetails()
+	var found *mcp.ServerDetail
+	for i := range details {
+		if details[i].Name == serverName {
+			found = &details[i]
+			break
+		}
+	}
+	if found == nil {
+		m.showWarning(fmt.Sprintf("MCP server %q not found.", serverName))
+		return
+	}
+
+	t := itheme.GetTheme()
+	var lines []string
+	lines = renderServerDetail(lines, found, t)
+
+	if len(found.Tools) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, t.Bold(fmt.Sprintf("  Tools (%d)", len(found.Tools))))
+		for _, tool := range found.Tools {
+			lines = append(lines, fmt.Sprintf("    %s", t.Fg("accent", tool.Name)))
+			if tool.Description != "" {
+				lines = append(lines, fmt.Sprintf("      %s", t.Fg("dim", tool.Description)))
+			}
+		}
+	} else {
+		lines = append(lines, "  "+t.Fg("dim", "Tools: none"))
+	}
+
+	m.showMessage(strings.Join(lines, "\n"))
+}
+
+// ============================================================================
 // Plan commands
 // ============================================================================
 
@@ -1397,8 +1524,9 @@ func (m *InteractiveMode) showHelp() {
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist
   /changelog      - Show changelog entries
-  /reload         - Reload extensions, skills, prompts, and themes
+  /reload         - Reload extensions, skills, prompts, themes, and MCP servers
   /skills         - List loaded skills (or /skills install <name>)
+  /mcp            - Show MCP servers (or /mcp <name> for full details)
   /reexec [path] - Re-exec into specified or current binary (%s), preserving the session
   /quit           - Quit fir
 

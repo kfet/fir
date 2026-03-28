@@ -9,7 +9,6 @@ require (
 	github.com/coder/acp-go-sdk v0.6.3
 	github.com/creack/pty v1.1.24
 	github.com/creativeprojects/go-selfupdate v1.5.2
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.8.0
 	github.com/mattn/go-runewidth v0.0.20

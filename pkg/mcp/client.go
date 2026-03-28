@@ -692,27 +692,75 @@ func StatusFunc(mgr *Manager) func() []ServerStatus {
 	return mgr.Status
 }
 
-// WatchAndReload watches path for changes to the MCP config file and
-// incrementally applies the diff:
-//   - New servers are started.
-//   - Removed servers are stopped.
-//   - Changed servers are stopped then restarted.
-//   - Unchanged servers are left alone.
-//
-// ctx is used when connecting to newly added or changed servers.
-// Returns a stop function that terminates the file watcher.
-func (m *Manager) WatchAndReload(ctx context.Context, path string) (stop func(), err error) {
-	return WatchConfig(path, func(newCfg *ConfigFile) {
-		tools, reloadErr := m.Reload(ctx, newCfg.MCPServers)
-		if reloadErr != nil {
-			slog.Warn("mcp: config reload failed", "path", path, "err", reloadErr)
-			return
+// ServerDetail provides detailed information about a single MCP server,
+// including its configuration, connection status, and the tools it exposes.
+type ServerDetail struct {
+	Name         string       `json:"name"`
+	Status       string       `json:"status"`
+	Config       ServerConfig `json:"config"`
+	Tools        []ToolInfo   `json:"tools,omitempty"`
+	HasResources bool         `json:"has_resources,omitempty"`
+	HasPrompts   bool         `json:"has_prompts,omitempty"`
+	Error        string       `json:"error,omitempty"`
+}
+
+// ToolInfo is a summary of a tool exposed by an MCP server.
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  any    `json:"parameters,omitempty"`
+}
+
+// Details returns detailed information about each configured MCP server,
+// including config, tools, and capability flags.
+func (m *Manager) Details() []ServerDetail {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var out []ServerDetail
+	for name, cfg := range m.configs {
+		d := ServerDetail{
+			Name:   name,
+			Config: cfg,
 		}
-		m.mu.Lock()
-		notify := m.onToolsChanged
-		m.mu.Unlock()
-		if notify != nil {
-			notify(tools)
+		sess := m.sessions[name]
+		if connErr, ok := m.serverErrors[name]; ok && connErr != nil {
+			d.Status = "error"
+			d.Error = connErr.Error()
+		} else if sess != nil {
+			d.Status = "connected"
+		} else {
+			d.Status = "connecting"
 		}
+		if tools, ok := m.tools[name]; ok {
+			for _, t := range tools {
+				d.Tools = append(d.Tools, ToolInfo{
+					Name:        t.Name,
+					Description: t.Description,
+					Parameters:  t.Parameters,
+				})
+			}
+		}
+		if sess != nil {
+			caps := sess.InitializeResult().Capabilities
+			if caps != nil {
+				d.HasResources = caps.Resources != nil
+				d.HasPrompts = caps.Prompts != nil
+			}
+		}
+		out = append(out, d)
+	}
+	slices.SortFunc(out, func(a, b ServerDetail) int {
+		return strings.Compare(a.Name, b.Name)
 	})
+	return out
+}
+
+// DetailsFunc returns a callback that returns detailed server info from mgr,
+// or nil if mgr is nil.
+func DetailsFunc(mgr *Manager) func() []ServerDetail {
+	if mgr == nil {
+		return nil
+	}
+	return mgr.Details
 }

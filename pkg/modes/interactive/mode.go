@@ -124,6 +124,10 @@ type InteractiveMode struct {
 
 	// mcpStatus returns MCP server status for /session display (optional).
 	mcpStatus func() []mcp.ServerStatus
+	// mcpDetails returns detailed MCP server info for /mcp display (optional).
+	mcpDetails func() []mcp.ServerDetail
+	// mcpReload reloads MCP server configs (optional).
+	mcpReload func() error
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -136,6 +140,10 @@ type InteractiveModeOptions struct {
 	ThemeSearchDirs []string
 	// MCPStatus returns MCP server status for /session display (optional).
 	MCPStatus func() []mcp.ServerStatus
+	// MCPDetails returns detailed MCP server info for /mcp display (optional).
+	MCPDetails func() []mcp.ServerDetail
+	// MCPReload reloads MCP server configs from disk (optional).
+	MCPReload func() error
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -174,6 +182,8 @@ func NewInteractiveMode(
 		clipboardReader:    clipboard.ReadClipboardImage,
 		initialPrompt:      opts.InitialPrompt,
 		mcpStatus:          opts.MCPStatus,
+		mcpDetails:         opts.MCPDetails,
+		mcpReload:          opts.MCPReload,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -780,6 +790,16 @@ func (m *InteractiveMode) setupAutocomplete() {
 			"list":    {Type: ArgCompleteNone},
 			"install": skillInstallSpec,
 		},
+	}
+
+	// /mcp completes with server names for detailed inspection.
+	if m.mcpDetails != nil {
+		mcpSpec := &CommandArgSpec{Type: ArgCompleteStatic}
+		for _, d := range m.mcpDetails() {
+			mcpSpec.Values = append(mcpSpec.Values, d.Name)
+		}
+		sort.Strings(mcpSpec.Values)
+		argSpecs["mcp"] = mcpSpec
 	}
 
 	provider := NewCombinedAutocompleteProvider(commands, basePath, argSpecs)

@@ -280,6 +280,29 @@ func reportSettingsErrors(settingsManager *config.SettingsManager, context strin
 	}
 }
 
+// mcpReloadFunc returns a callback that re-reads MCP configs from disk and
+// applies the diff to the running manager. Returns nil if mgr is nil.
+func mcpReloadFunc(mgr *mcp.Manager, cwd string, args *Args) func() error {
+	if mgr == nil {
+		return nil
+	}
+	return func() error {
+		cfg, err := mcp.LoadDefaultConfigs(cwd)
+		if err != nil {
+			return fmt.Errorf("load MCP config: %w", err)
+		}
+		if args.MCPConfig != "" {
+			extra, extraErr := mcp.LoadConfigFile(args.MCPConfig)
+			if extraErr != nil {
+				return fmt.Errorf("load --mcp-config %s: %w", args.MCPConfig, extraErr)
+			}
+			cfg = mcp.MergeConfigs(cfg, extra)
+		}
+		_, err = mgr.Reload(context.Background(), cfg.MCPServers)
+		return err
+	}
+}
+
 // run is the main application logic.
 func run() error {
 	// Migrate config from legacy ~/.fir/agent/ to ~/.config/fir/ on first run.
@@ -756,6 +779,8 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
 			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
+			MCPDetails:      mcp.DetailsFunc(setup.mcpManager),
+			MCPReload:       mcpReloadFunc(setup.mcpManager, setup.cwd, args),
 		},
 	)
 	interactive.SetVersion(version)
