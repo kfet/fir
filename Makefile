@@ -1,9 +1,11 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy tidy _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy tidy check-size _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
 BINARY    := $(BINDIR)/fir
 BINARY_PGO := $(BINDIR)/fir.pgo
+BINARY_MAX_SIZE := 20971520
+BINARY_SIZE_BASELINE := $(shell cat BINARY_SIZE_BASELINE 2>/dev/null || echo 0)
 VERSION   := $(shell cat VERSION 2>/dev/null || echo dev)
 
 # Compute a rich version: if HEAD is the exact release tag, use VERSION as-is.
@@ -44,6 +46,7 @@ PGO_STAMP := default.pgo.stamp
 build: tidy
 	@mkdir -p $(BINDIR)
 	$(call RUN,build (native),go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINARY) ./cmd/fir/)
+	@$(MAKE) --no-print-directory check-size
 
 # `make all` runs fmt first, then everything else in parallel via recursive make -j.
 # The _all_parallel target declares independent prerequisites that make -j can schedule.
@@ -57,6 +60,23 @@ fmt:
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
+
+# Binary size guard — runs after every native build.
+# Fails on: absolute cap (20 MB) exceeded OR >5% growth vs BINARY_SIZE_BASELINE.
+check-size:
+	@size=$$(stat -f%z $(BINARY) 2>/dev/null || stat -c%s $(BINARY)); \
+	baseline=$(BINARY_SIZE_BASELINE); \
+	max=$(BINARY_MAX_SIZE); \
+	mb=$$((size / 1048576)); \
+	if [ "$$size" -gt "$$max" ]; then \
+		printf "  %-28s FAIL ($$mb MB exceeds %d MB cap)\n" "check-size" $$((max / 1048576)); exit 1; \
+	fi; \
+	if [ "$$baseline" -gt 0 ]; then \
+		pct=$$(( (size - baseline) * 100 / baseline )); \
+		if [ "$$pct" -gt 5 ]; then \
+			printf "  %-28s FAIL ($$mb MB, +$$pct%% vs baseline — update BINARY_SIZE_BASELINE if intended)\n" "check-size"; exit 1; \
+		fi; \
+	fi
 
 # Ensure modules are tidy once; other targets depend on this.
 tidy:
