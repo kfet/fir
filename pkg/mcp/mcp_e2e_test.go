@@ -181,7 +181,7 @@ func TestMCP_E2E_ServerExit(t *testing.T) {
 	defer mgr.Close()
 
 	ch := make(chan []agent.AgentTool, 1)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		ch <- tools
 	})
 
@@ -199,8 +199,8 @@ func TestMCP_E2E_ServerExit(t *testing.T) {
 
 	statuses := mgr.Status()
 	require.Len(t, statuses, 1)
-	assert.NotEqual(t, "connected", statuses[0].Status)
-	assert.Contains(t, statuses[0].Status, "error")
+	assert.False(t, statuses[0].Connected)
+	assert.Error(t, statuses[0].Error)
 }
 
 // TestMCP_E2E_ContextCancellation verifies that a context deadline imposed by

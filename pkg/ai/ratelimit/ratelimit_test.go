@@ -346,3 +346,44 @@ func TestDetectRateLimit_ToolUseStopReason(t *testing.T) {
 		t.Error("ToolUseStopReason should not be treated as rate limit")
 	}
 }
+
+func TestIsTransientServerError(t *testing.T) {
+	positives := []string{
+		"Internal server error",
+		"internal server error",
+		"500 Internal server error",
+		"502 Bad Gateway",
+		"503 Service Unavailable",
+	}
+	for _, tc := range positives {
+		if !IsTransientServerError(tc) {
+			t.Errorf("IsTransientServerError(%q) = false, want true", tc)
+		}
+	}
+
+	negatives := []string{
+		"invalid_api_key",
+		"bad request",
+		"context canceled",
+	}
+	for _, tc := range negatives {
+		if IsTransientServerError(tc) {
+			t.Errorf("IsTransientServerError(%q) = true, want false", tc)
+		}
+	}
+}
+
+func TestIsRetryableError(t *testing.T) {
+	// Rate limits
+	if !IsRetryableError("429 Too Many Requests") {
+		t.Error("expected rate limit to be retryable")
+	}
+	// Transient server errors
+	if !IsRetryableError("Internal server error") {
+		t.Error("expected server error to be retryable")
+	}
+	// Not retryable
+	if IsRetryableError("invalid_api_key") {
+		t.Error("expected invalid_api_key to NOT be retryable")
+	}
+}

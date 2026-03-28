@@ -41,7 +41,7 @@ you have already read this session. Rewrite the problematic file completely from
 scratch. If tests are failing due to API changes, the test file itself needs
 updating — patch it or rewrite it, don't just re-run it.
 
-## Testing
+## Build and test
 
 Run `make test` to verify your changes. Always finish every task with `make all` to confirm the full build and test suite passes.
 
@@ -66,7 +66,12 @@ Every extension script **must** have a comment frontmatter block (`# ---` … `#
 - Update `docs/extension-protocol.md` — the wire-protocol reference (message shapes, params, return values, timeouts).
 - Update the module docstring in `pkg/extension/sdk/python/fir_ext.py` — it mirrors the protocol reference for SDK users reading source.
 
-Use `--no-extensions` to disable all extension discovery.
+You can also only enable specific extensions per-invocation with `--extension` / `-e`,or disable all of them with `--no-extensions`:
+
+```bash
+fir -e demo -e hello "do something"   # only these two
+fir --no-extensions "do something"     # none at all
+```
 
 ## Changelog
 

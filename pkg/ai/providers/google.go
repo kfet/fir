@@ -15,6 +15,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -77,19 +78,43 @@ func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, optio
 
 		err := streamGoogleHTTP(ctx, model, prompt, options, output, stream)
 		if err != nil {
-			if ctx.Err() != nil {
-				output.StopReason = ai.StopReasonAborted
-			} else {
-				output.StopReason = ai.StopReasonError
+			// Retry transient server errors before surfacing
+			if ctx.Err() == nil && ratelimit.IsRetryableError(err.Error()) {
+				for retry := 1; retry <= 2; retry++ {
+					firlog.Debug("google transient error, retrying", "attempt", retry, "err", err)
+					select {
+					case <-ctx.Done():
+						err = ctx.Err()
+					case <-time.After(time.Duration(retry) * time.Second):
+					}
+					if ctx.Err() != nil {
+						break
+					}
+					output.Content = nil
+					output.Usage = ai.ZeroUsage()
+					output.StopReason = ai.StopReasonStop
+					output.ErrorMessage = ""
+					err = streamGoogleHTTP(ctx, model, prompt, options, output, stream)
+					if err == nil || ctx.Err() != nil || !ratelimit.IsRetryableError(err.Error()) {
+						break
+					}
+				}
 			}
-			output.ErrorMessage = err.Error()
-			stream.Push(ai.AssistantMessageEvent{
-				Type:   ai.EventError,
-				Reason: output.StopReason,
-				Error:  output,
-			})
-			stream.End(nil)
-			return
+			if err != nil {
+				if ctx.Err() != nil {
+					output.StopReason = ai.StopReasonAborted
+				} else {
+					output.StopReason = ai.StopReasonError
+				}
+				output.ErrorMessage = err.Error()
+				stream.Push(ai.AssistantMessageEvent{
+					Type:   ai.EventError,
+					Reason: output.StopReason,
+					Error:  output,
+				})
+				stream.End(nil)
+				return
+			}
 		}
 
 		firlog.Debug("google response complete", "model", model.ID, "stopReason", output.StopReason)

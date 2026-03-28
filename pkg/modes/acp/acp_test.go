@@ -741,7 +741,7 @@ func TestHandleSlashCommand_Session(t *testing.T) {
 	if !strings.Contains(chunk.Content.Text.Text, "Messages") || !strings.Contains(chunk.Content.Text.Text, "Tokens") {
 		t.Errorf("expected Messages and Tokens sections in session info, got: %q", chunk.Content.Text.Text)
 	}
-	if !strings.Contains(chunk.Content.Text.Text, "- **Extensions:** demo, tmuxspinner") {
+	if !strings.Contains(chunk.Content.Text.Text, "**Extensions:** demo, tmuxspinner") {
 		t.Errorf("expected enabled extensions in session info, got: %q", chunk.Content.Text.Text)
 	}
 }

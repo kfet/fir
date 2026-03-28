@@ -12,6 +12,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -128,15 +129,47 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 		}
 
 		firlog.Debug("openai-responses request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
-		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))
 
-		stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+		const maxRetries = 3
+		var lastErr error
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			if attempt > 0 {
+				firlog.Debug("openai-responses retry", "attempt", attempt, "lastErr", lastErr)
+				select {
+				case <-ctx.Done():
+					lastErr = ctx.Err()
+				case <-time.After(time.Duration(attempt) * time.Second):
+				}
+				if ctx.Err() != nil {
+					break
+				}
+			}
+			sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))
 
-		proc := &responsesSSEProcessor{output: output, stream: stream, model: model}
-		errFromSSE := processResponsesSSEStream(proc, sseEvents, sseErr)
-		if errFromSSE != nil {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+
+			proc := &responsesSSEProcessor{output: output, stream: stream, model: model}
+			errFromSSE := processResponsesSSEStream(proc, sseEvents, sseErr)
+			if errFromSSE == nil {
+				lastErr = nil
+				break
+			}
+			lastErr = errFromSSE
+
+			// Only retry if it's a transient server error
+			if attempt < maxRetries-1 && ctx.Err() == nil && ratelimit.IsRetryableError(errFromSSE.Error()) {
+				// Reset output for retry
+				output.Content = nil
+				output.Usage = ai.ZeroUsage()
+				output.StopReason = ""
+				output.ErrorMessage = ""
+				continue
+			}
+			break
+		}
+		if lastErr != nil {
 			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = errFromSSE.Error()
+			output.ErrorMessage = lastErr.Error()
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 			return
 		}

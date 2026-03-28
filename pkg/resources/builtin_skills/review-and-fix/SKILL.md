@@ -1,12 +1,12 @@
 ---
 name: review-and-fix
-description: Review outstanding changes, fix issues, verify the build, and commit. One-shot review + fix + commit cycle.
+description: Review all branch changes, fix issues in a loop until clean, then commit. Iterates review→fix→recheck until no issues remain.
 builtin: true
 ---
 
 # Review, Fix, and Commit
 
-Review all uncommitted changes, fix every issue found, verify the build passes, then commit everything. The goal is to get work-in-progress committed cleanly.
+Review all changes on the branch, fix every issue found, re-review until clean, then commit.
 
 ## Phase 1 — Review
 
@@ -39,9 +39,13 @@ Work through findings in priority order: build breaks → security → correctne
 
 For each issue: read context, make the fix, run tests. For bugs, write a failing test first, then fix.
 
-After all fixes, run `make all` and confirm it passes before proceeding.
+After all fixes, run `make all` and confirm it passes.
+
+**Return to Phase 1.** Fixes can introduce new issues. Re-review all changed files (including newly modified ones) and repeat until a review pass finds zero issues.
 
 ## Phase 3 — Commit
+
+Only entered when Phase 1 finds no issues.
 
 Stage and commit **all** outstanding changes — the original work plus any fixes.
 
@@ -58,4 +62,4 @@ Always commit. Only skip if the working tree is truly clean.
 
 ## Output
 
-Summarize: files reviewed, issues found (by category), issues fixed, final build status, commit hash + message.
+Summarize: files reviewed, review iterations, issues found (by category), issues fixed, final build status, commit hash + message.

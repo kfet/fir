@@ -484,11 +484,15 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					if errMsg == "" {
 						errMsg = "unknown Anthropic API error"
 					}
-					firlog.Warn("anthropic error", "err", errMsg)
+					errType, _ := errObj["type"].(string)
+					if errType != "" {
+						errMsg = fmt.Sprintf("%s (%s)", errMsg, errType)
+					}
+					firlog.Warn("anthropic error", "type", errType, "err", errMsg)
 
 					// Retry transparently if streaming hasn't started yet and the
-					// error is an overload / rate-limit condition.
-					if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRateLimitText(errMsg) {
+					// error is retryable (rate-limit or transient server error).
+					if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
 						lastErrMsg = errMsg
 						retryNeeded = true
 						break sseLoop
@@ -524,7 +528,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			if sseErrVal != nil {
 				firlog.Warn("anthropic SSE error", "err", sseErrVal)
 				errMsg := sseErrVal.Error()
-				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRateLimitText(errMsg) {
+				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
 					lastErrMsg = errMsg
 					continue
 				}

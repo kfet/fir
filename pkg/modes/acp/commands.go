@@ -268,7 +268,7 @@ func cmdSession(ctx *commandContext, _ string) {
 		if len(statuses) > 0 {
 			info += "\n**MCP Servers**\n\n"
 			for _, s := range statuses {
-				info += fmt.Sprintf("- **%s:** %s\n", s.Name, s.Status)
+				info += fmt.Sprintf("- %s: %s\n", s.Name, s.StatusString())
 			}
 		}
 	}

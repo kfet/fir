@@ -193,7 +193,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// Snapshot base tools before MCP tools arrive.
 		baseTools := slices.Clone(toolList)
 
-		mcpMgr.OnToolsChanged.Store(func(mcpTools []agent.AgentTool) {
+		mcpMgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
 			merged := append(slices.Clone(baseTools), mcpTools...)
 
 			// If hooks with tool interception are active, wrap before delivering.

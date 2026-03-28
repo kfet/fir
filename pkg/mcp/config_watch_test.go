@@ -149,7 +149,7 @@ func TestWatchAndReload_AddServer(t *testing.T) {
 	t.Cleanup(func() { _ = mgr.Close() })
 
 	toolsUpdated := make(chan []agent.AgentTool, 1)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		toolsUpdated <- tools
 	})
 
@@ -211,7 +211,7 @@ func TestWatchAndReload_RemoveServer(t *testing.T) {
 	assert.Contains(t, toolNames(initialTools), "mcp__a__tool-a")
 
 	toolsUpdated := make(chan []agent.AgentTool, 1)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		toolsUpdated <- tools
 	})
 
@@ -285,7 +285,7 @@ func TestWatchAndReload_SwapServer(t *testing.T) {
 	assert.Contains(t, toolNames(initial), "mcp__svc__tool-a")
 
 	toolsUpdated := make(chan []agent.AgentTool, 1)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		toolsUpdated <- tools
 	})
 

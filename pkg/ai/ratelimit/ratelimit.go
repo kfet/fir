@@ -57,6 +57,28 @@ func IsRateLimitText(text string) bool {
 	return rateLimitPattern.MatchString(text)
 }
 
+// transientServerErrorPattern matches well-known transient server error phrases.
+var transientServerErrorPattern = regexp.MustCompile(
+	`(?i)` +
+		`internal\s+server\s+error` +
+		`|502\b` + // Bad Gateway
+		`|503\b`, // Service Unavailable
+)
+
+// IsTransientServerError returns true if the error text indicates a transient
+// server-side failure (e.g. "Internal server error", HTTP 502/503) that is
+// worth retrying, especially when no tokens have been consumed.
+func IsTransientServerError(text string) bool {
+	return transientServerErrorPattern.MatchString(text)
+}
+
+// IsRetryableError returns true if the error text is either a rate-limit
+// condition or a transient server error — i.e. safe to retry when streaming
+// has not yet begun.
+func IsRetryableError(text string) bool {
+	return IsRateLimitText(text) || IsTransientServerError(text)
+}
+
 // ExtractRetryDelayFromText parses a retry delay from the error message text alone
 // (no HTTP headers). It returns 0 if no recognisable pattern is found.
 //

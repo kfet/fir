@@ -311,8 +311,8 @@ func TestAnthropic_StreamingError(t *testing.T) {
 	if result.StopReason != ai.StopReasonError {
 		t.Errorf("expected error, got %s", result.StopReason)
 	}
-	if result.ErrorMessage != "Overloaded" {
-		t.Errorf("expected 'Overloaded', got %q", result.ErrorMessage)
+	if result.ErrorMessage != "Overloaded (overloaded_error)" {
+		t.Errorf("expected 'Overloaded (overloaded_error)', got %q", result.ErrorMessage)
 	}
 
 	found := false

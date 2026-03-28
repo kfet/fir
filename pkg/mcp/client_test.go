@@ -36,16 +36,12 @@ func inMemoryDial(t *testing.T, server *sdk.Server) func(ServerConfig) (sdk.Tran
 // and blocks until all servers have reported their tools (or timeout).
 func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.AgentTool {
 	t.Helper()
-	if mgr.configsLen() == 0 {
+	if len(mgr.configs) == 0 {
 		mgr.Start(ctx)
 		return nil
 	}
 	ch := make(chan []agent.AgentTool, 10)
-	prev := mgr.loadOnToolsChanged()
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
-		if prev != nil {
-			prev(tools)
-		}
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		ch <- tools
 	})
 	mgr.Start(ctx)
@@ -55,12 +51,12 @@ func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.Agent
 	var last []agent.AgentTool
 	received := 0
 	timeout := time.After(10 * time.Second)
-	for received < mgr.configsLen() {
+	for received < len(mgr.configs) {
 		select {
 		case last = <-ch:
 			received++
 		case <-timeout:
-			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, mgr.configsLen())
+			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, len(mgr.configs))
 		}
 	}
 	// Drain any extra notifications that arrive within a short window so we
@@ -188,10 +184,10 @@ func TestManager_Close(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	startAndWait(t, mgr, context.Background())
-	assert.True(t, mgr.hasSession("s"))
+	assert.Len(t, mgr.sessions, 1)
 
 	require.NoError(t, mgr.Close())
-	assert.False(t, mgr.hasSession("s"))
+	assert.Empty(t, mgr.sessions)
 
 	// Double-close is safe.
 	require.NoError(t, mgr.Close())
@@ -356,7 +352,7 @@ func TestManager_ToolListChanged(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	changed := make(chan []agent.AgentTool, 10)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		changed <- tools
 	})
 
@@ -642,10 +638,10 @@ func TestManager_Status_Connected(t *testing.T) {
 	require.Len(t, statuses, 2)
 	// Sorted by name.
 	assert.Equal(t, "alpha", statuses[0].Name)
-	assert.Equal(t, "connected", statuses[0].Status)
-	assert.False(t, strings.HasPrefix(statuses[0].Status, "error"))
+	assert.True(t, statuses[0].Connected)
+	assert.NoError(t, statuses[0].Error)
 	assert.Equal(t, "beta", statuses[1].Name)
-	assert.Equal(t, "connected", statuses[1].Status)
+	assert.True(t, statuses[1].Connected)
 }
 
 func TestManager_Status_AfterClose(t *testing.T) {
@@ -665,7 +661,7 @@ func TestManager_Status_AfterClose(t *testing.T) {
 
 	statuses := mgr.Status()
 	require.Len(t, statuses, 1)
-	assert.NotEqual(t, "connected", statuses[0].Status)
+	assert.False(t, statuses[0].Connected)
 }
 
 func TestManager_Status_ConnectError(t *testing.T) {
@@ -675,7 +671,7 @@ func TestManager_Status_ConnectError(t *testing.T) {
 	}
 
 	ch := make(chan []agent.AgentTool, 1)
-	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
 		ch <- tools
 	})
 	mgr.Start(context.Background())
@@ -689,8 +685,8 @@ func TestManager_Status_ConnectError(t *testing.T) {
 
 	statuses := mgr.Status()
 	require.Len(t, statuses, 1)
-	assert.NotEqual(t, "connected", statuses[0].Status)
-	assert.True(t, strings.HasPrefix(statuses[0].Status, "error"))
+	assert.False(t, statuses[0].Connected)
+	assert.Error(t, statuses[0].Error)
 }
 
 // TestManager_Status_AfterServerDisconnect verifies that when a server
@@ -712,8 +708,8 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	// Confirm connected initially.
 	statuses := mgr.Status()
 	require.Len(t, statuses, 1)
-	assert.Equal(t, "connected", statuses[0].Status)
-	assert.False(t, strings.HasPrefix(statuses[0].Status, "error"))
+	assert.True(t, statuses[0].Connected)
+	assert.NoError(t, statuses[0].Error)
 
 	// Close the server-side session to simulate a server-initiated disconnect.
 	var ss *sdk.ServerSession
@@ -727,14 +723,14 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	// The Wait goroutine should detect the disconnect and update Status().
 	require.Eventually(t, func() bool {
 		st := mgr.Status()
-		return len(st) == 1 && st[0].Status != "connected"
+		return len(st) == 1 && !st[0].Connected
 	}, 3*time.Second, 25*time.Millisecond, "Status() must show disconnected after server closes")
 
 	// After a clean server close, Status correctly shows not connected.
 	// Error may be nil (clean close) or non-nil (error close) depending on
 	// how the server terminated — either way Connected is false.
 	statuses = mgr.Status()
-	assert.NotEqual(t, "connected", statuses[0].Status)
+	assert.False(t, statuses[0].Connected)
 }
 
 func TestManager_VerboseLoggingTransport(t *testing.T) {

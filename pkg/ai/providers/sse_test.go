@@ -288,3 +288,68 @@ func TestSSEClient_Stream_Headers(t *testing.T) {
 		t.Errorf("missing Accept header")
 	}
 }
+
+func TestSSEClient_Stream_HTTPError_JSONBody(t *testing.T) {
+	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-abc123")
+		w.WriteHeader(500)
+		io.WriteString(w, `{"error":{"message":"Internal server error","type":"server_error"}}`)
+	}))
+	defer srv.Close()
+
+	client := &SSEClient{HTTPClient: srv.Client()}
+	events, errCh := client.Stream(context.Background(), srv.URL, nil, strings.NewReader("{}"))
+
+	for range events {
+	}
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	sseErr, ok := err.(*SSEError)
+	if !ok {
+		t.Fatalf("expected *SSEError, got %T", err)
+	}
+	if sseErr.StatusCode != 500 {
+		t.Errorf("expected status 500, got %d", sseErr.StatusCode)
+	}
+	if sseErr.Message != "Internal server error" {
+		t.Errorf("expected cleaned message, got %q", sseErr.Message)
+	}
+	if sseErr.RequestID != "req-abc123" {
+		t.Errorf("expected request-id 'req-abc123', got %q", sseErr.RequestID)
+	}
+	// Error() should include all info
+	errStr := err.Error()
+	if !strings.Contains(errStr, "500") || !strings.Contains(errStr, "Internal server error") || !strings.Contains(errStr, "req-abc123") {
+		t.Errorf("Error() missing expected parts: %q", errStr)
+	}
+}
+
+func TestSSEClient_Stream_HTTPError_PlainBody(t *testing.T) {
+	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(502)
+		io.WriteString(w, "Bad Gateway")
+	}))
+	defer srv.Close()
+
+	client := &SSEClient{HTTPClient: srv.Client()}
+	events, errCh := client.Stream(context.Background(), srv.URL, nil, strings.NewReader("{}"))
+
+	for range events {
+	}
+
+	err := <-errCh
+	sseErr, ok := err.(*SSEError)
+	if !ok {
+		t.Fatalf("expected *SSEError, got %T", err)
+	}
+	if sseErr.Message != "Bad Gateway" {
+		t.Errorf("expected 'Bad Gateway', got %q", sseErr.Message)
+	}
+	if sseErr.RequestID != "" {
+		t.Errorf("expected empty request-id, got %q", sseErr.RequestID)
+	}
+}

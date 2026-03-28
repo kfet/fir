@@ -6,6 +6,7 @@ package providers
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,55 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 )
+
+// SSEError is a structured error from an HTTP-level SSE failure.
+// It captures the status code, a human-readable message (extracted from JSON
+// bodies when possible), and the request-id header for provider support.
+type SSEError struct {
+	StatusCode int
+	Message    string // cleaned message (from JSON body or raw body)
+	RequestID  string // from x-request-id or request-id response header
+	RawBody    string // original response body
+}
+
+func (e *SSEError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s", e.StatusCode, e.Message)
+	if e.RequestID != "" {
+		fmt.Fprintf(&b, " (request-id: %s)", e.RequestID)
+	}
+	return b.String()
+}
+
+// extractRequestID reads the request-id from common response headers.
+func extractRequestID(h http.Header) string {
+	if v := h.Get("X-Request-Id"); v != "" {
+		return v
+	}
+	return h.Get("Request-Id")
+}
+
+// extractHTTPErrorMessage tries to pull a human-readable message from a JSON error
+// body. Falls back to the raw body string.
+func extractHTTPErrorMessage(body string) string {
+	// Try {"error":{"message":"..."}} (OpenAI / Anthropic style)
+	var wrapper struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &wrapper) == nil && wrapper.Error.Message != "" {
+		return wrapper.Error.Message
+	}
+	// Try {"message":"..."} (simpler style)
+	var simple struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &simple) == nil && simple.Message != "" {
+		return simple.Message
+	}
+	return body
+}
 
 // SSEEvent represents a single Server-Sent Event.
 type SSEEvent struct {
@@ -71,7 +121,12 @@ func (c *SSEClient) Stream(ctx context.Context, url string, headers map[string]s
 			if bodyStr == "" {
 				bodyStr = "(no body)"
 			}
-			errCh <- fmt.Errorf("%d %s", resp.StatusCode, bodyStr)
+			errCh <- &SSEError{
+				StatusCode: resp.StatusCode,
+				Message:    extractHTTPErrorMessage(bodyStr),
+				RequestID:  extractRequestID(resp.Header),
+				RawBody:    bodyStr,
+			}
 			return
 		}
 
