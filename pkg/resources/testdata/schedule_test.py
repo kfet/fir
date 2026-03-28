@@ -8,7 +8,7 @@ import signal
 import sys
 import threading
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 # Add the extension dir and SDK to the path so we can import schedule helpers.
@@ -21,9 +21,9 @@ sys.path.insert(0, os.path.normpath(_sdk_dir))
 
 # We need to prevent fir_ext.run() from blocking when schedule.py is imported.
 # Import the real fir_ext SDK first, then import schedule with run() patched.
-import fir_ext  # noqa: E402
+import importlib
 
-import importlib  # noqa: E402
+import fir_ext
 
 with mock.patch.object(fir_ext, "run"):
     schedule = importlib.import_module("schedule")
@@ -104,25 +104,25 @@ class TestFormatCountdown(unittest.TestCase):
 
 class TestFormatTime(unittest.TestCase):
     def test_am(self):
-        dt = datetime(2026, 3, 9, 9, 5, tzinfo=UTC)
+        dt = datetime(2026, 3, 9, 9, 5, tzinfo=timezone.utc)
         self.assertEqual(schedule._format_time(dt), "9:05 AM")
 
     def test_pm(self):
-        dt = datetime(2026, 3, 9, 14, 30, tzinfo=UTC)
+        dt = datetime(2026, 3, 9, 14, 30, tzinfo=timezone.utc)
         self.assertEqual(schedule._format_time(dt), "2:30 PM")
 
     def test_noon(self):
-        dt = datetime(2026, 3, 9, 12, 0, tzinfo=UTC)
+        dt = datetime(2026, 3, 9, 12, 0, tzinfo=timezone.utc)
         self.assertEqual(schedule._format_time(dt), "12:00 PM")
 
     def test_midnight(self):
-        dt = datetime(2026, 3, 9, 0, 0, tzinfo=UTC)
+        dt = datetime(2026, 3, 9, 0, 0, tzinfo=timezone.utc)
         self.assertEqual(schedule._format_time(dt), "12:00 AM")
 
 
 class TestParseTarget(unittest.TestCase):
     def setUp(self):
-        self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
+        self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc)
         self._patch = mock.patch.object(
             schedule, "_now", return_value=self._fixed,
         )
@@ -226,7 +226,7 @@ class _FakeThread:
 
 class TestCmdSchedule(unittest.TestCase):
     def setUp(self):
-        self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=UTC)
+        self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc)
         self._now_patch = mock.patch.object(
             schedule, "_now", return_value=self._fixed,
         )
@@ -347,7 +347,7 @@ class TestCountdownThread(unittest.TestCase):
         with _Timeout(5):
             ctx = mock.MagicMock()
             stop = threading.Event()
-            target = datetime.now(tz=UTC) - timedelta(seconds=1)
+            target = datetime.now(tz=timezone.utc) - timedelta(seconds=1)
             schedule._run_countdown("t1", target, stop, ctx)
             ctx.send_user_message.assert_called_once_with("continue")
 
@@ -355,7 +355,7 @@ class TestCountdownThread(unittest.TestCase):
         with _Timeout(5):
             ctx = mock.MagicMock()
             stop = threading.Event()
-            target = datetime.now(tz=UTC) - timedelta(seconds=1)
+            target = datetime.now(tz=timezone.utc) - timedelta(seconds=1)
             schedule._run_countdown("t2", target, stop, ctx, message="do it")
             ctx.send_user_message.assert_called_once_with("do it")
             ctx.continue_session.assert_not_called()
@@ -365,7 +365,7 @@ class TestCountdownThread(unittest.TestCase):
             ctx = mock.MagicMock()
             stop = threading.Event()
             stop.set()
-            target = datetime.now(tz=UTC) + timedelta(hours=1)
+            target = datetime.now(tz=timezone.utc) + timedelta(hours=1)
             schedule._run_countdown("t3", target, stop, ctx)
             ctx.continue_session.assert_not_called()
             ctx.send_user_message.assert_not_called()
@@ -393,8 +393,8 @@ class TestIntegration(unittest.TestCase):
             self.assertIn("Scheduled", result["message"])
 
             # Wait for the countdown thread to finish and fire.
-            deadline = datetime.now(tz=UTC) + timedelta(seconds=4)
-            while datetime.now(tz=UTC) < deadline:
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=4)
+            while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.called:
                     break
                 threading.Event().wait(0.1)
@@ -410,8 +410,8 @@ class TestIntegration(unittest.TestCase):
             result = schedule.cmd_schedule(["1s", "hello", "world"], ctx)
             self.assertIn("send message", result["message"])
 
-            deadline = datetime.now(tz=UTC) + timedelta(seconds=4)
-            while datetime.now(tz=UTC) < deadline:
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=4)
+            while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.called:
                     break
                 threading.Event().wait(0.1)
@@ -429,8 +429,8 @@ class TestIntegration(unittest.TestCase):
                 self.assertEqual(len(schedule._schedules), 2)
 
             # Wait for both to fire.
-            deadline = datetime.now(tz=UTC) + timedelta(seconds=5)
-            while datetime.now(tz=UTC) < deadline:
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=5)
+            while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.call_count >= 2:
                     break
                 threading.Event().wait(0.1)

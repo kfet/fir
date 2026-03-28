@@ -50,9 +50,10 @@ def _read_records(limit: int = 200) -> list[dict[str, Any]]:
     records = []
     for line in lines[-limit:]:
         try:
-            records.append(json.loads(line))
+            parsed = json.loads(line)
         except json.JSONDecodeError:
             continue
+        records.append(parsed)
     return records
 
 

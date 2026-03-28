@@ -13,15 +13,18 @@ _tmpdir = tempfile.mkdtemp()
 os.environ["FIR_CONFIG_DIR"] = _tmpdir
 
 # Add SDK and builtin_extensions to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "extension", "sdk", "python"))
+_sdk_path = os.path.join(
+    os.path.dirname(__file__), "..", "..", "extension", "sdk", "python",
+)
+sys.path.insert(0, _sdk_path)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "builtin_extensions"))
 
-from unittest import mock as _mock  # noqa: E402
+from unittest import mock as _mock
 
-import fir_ext  # noqa: E402
+import fir_ext
 
 with _mock.patch.object(fir_ext, "run"):
-    import doctor  # noqa: E402
+    import doctor
 
 
 class TestDoctor(unittest.TestCase):

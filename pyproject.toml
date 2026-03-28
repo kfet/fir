@@ -2,7 +2,9 @@
 # Covers the SDK (pkg/extension/sdk/python) and bundled extensions (.fir/extensions).
 
 [project]
-requires-python = ">=3.12"
+name = "fir"
+version = "0.0.0"
+requires-python = ">=3.9"
 
 # --- ruff (linter + formatter) ------------------------------------------------
 # Run: uvx ruff check
@@ -41,10 +43,11 @@ ignore = [
 "*_test.py" = ["S101", "S106", "S108", "S603", "PLR2004"]
 "**/tests/**" = ["S101", "S106", "S108", "S603", "PLR2004"]
 ".fir/extensions/*.py" = ["E501", "S101", "T201", "S603", "S607"]
+"pkg/resources/testdata/*_test.py" = ["E402", "SIM117"]
 
 # --- ty (type checker) --------------------------------------------------------
 # Run: uvx ty check
 
 [tool.ty.environment]
-extra-paths = ["pkg/extension/sdk/python"]
-python-version = "3.12"
+extra-paths = ["pkg/extension/sdk/python", "pkg/resources/builtin_extensions", "pkg/resources/testdata"]
+python-version = "3.9"

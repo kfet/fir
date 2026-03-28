@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import fir_ext
@@ -265,7 +265,7 @@ def _fetch_anthropic_usage(token: str) -> str | None:
         return "☁ (rate-limited)" if result.is_rate_limited else None
 
     local_tz = datetime.now().astimezone().tzinfo
-    now = datetime.now(UTC).astimezone(local_tz)
+    now = datetime.now(timezone.utc).astimezone(local_tz)
 
     parts: list[tuple[float, str]] = []
     for key, val in result.data.items():

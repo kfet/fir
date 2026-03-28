@@ -57,7 +57,7 @@ class TestResultText(unittest.TestCase):
         result = {"content": [{"text": "hello"}, {"text": "world"}]}
         self.assertEqual(self.mod._result_text(result), "hello\nworld")
 
-    def test_extracts_Text_key(self):
+    def test_extracts_text_key(self):
         """Go JSON marshals to uppercase Text."""
         result = {"content": [{"Text": "from Go"}]}
         self.assertEqual(self.mod._result_text(result), "from Go")
@@ -355,7 +355,10 @@ class TestAsideCommand(unittest.TestCase):
         """Longer text with tool keywords → delegate to agent."""
         handler = fir_ext._command_handlers["aside"]
         ctx = mock.MagicMock(spec=fir_ext.Context)
-        args = "read the 5 largest .go files and summarise their purpose".split()
+        args = [
+            "read", "the", "5", "largest", ".go", "files",
+            "and", "summarise", "their", "purpose",
+        ]
         result = handler(args, ctx)
         self.assertEqual(result, {})
         ctx.send_user_message.assert_called_once()

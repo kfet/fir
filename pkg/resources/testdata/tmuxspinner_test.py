@@ -3,7 +3,6 @@
 
 import os
 import sys
-import threading
 import time
 import unittest
 from unittest import mock
@@ -258,8 +257,7 @@ class TestModuleLevelGuard(unittest.TestCase):
                 del sys.modules["tmuxspinner"]
             with mock.patch.dict(os.environ, {}, clear=True):
                 with mock.patch.object(fir_ext, "run"):
-                    import importlib
-                    import tmuxspinner as _
+                    pass
             # No event handlers should be registered.
             for key in ("agent_start", "agent_end", "session_shutdown", "session_named"):
                 self.assertNotIn(key, fir_ext._event_handlers,
@@ -271,9 +269,8 @@ class TestModuleLevelGuard(unittest.TestCase):
 
 class TestHasControllingTerminal(unittest.TestCase):
     def test_with_tty(self):
-        with mock.patch("os.open", return_value=3):
-            with mock.patch("os.close"):
-                self.assertTrue(tmuxspinner._has_controlling_terminal())
+        with mock.patch("os.open", return_value=3), mock.patch("os.close"):
+            self.assertTrue(tmuxspinner._has_controlling_terminal())
 
     def test_without_tty(self):
         with mock.patch("os.open", side_effect=OSError("no tty")):
