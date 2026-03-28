@@ -19,15 +19,16 @@ If the user provides a version, use it. Otherwise, auto-determine:
 
 ## Steps
 
-1. **Full build & test** — execute `make all` and confirm everything passes.
-2. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.
-3. **Determine version** — follow the rules above if the user didn't specify one. State the version and proceed.
-4. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it. Keep reverse-chronological order.
-5. **Update VERSION** — write the new version to the `VERSION` file (no trailing newline beyond one).
-6. **Commit** — stage **all** uncommitted changes with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first.
-7. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid opening an editor).
-8. **Install** — `make install` to install the new version.
-9. **Verify** — run the binary with `--version` and confirm it prints the new version.
+1. **Regenerate models** — run `make generate-models` to pull the latest model definitions. If this produces changes, they will be included in the release commit automatically.
+2. **Full build & test** — execute `make all` and confirm everything passes.
+3. **Check CHANGELOG** — read `CHANGELOG.md` and confirm there are entries under `## [Unreleased]`. If empty, ask the user.
+4. **Determine version** — follow the rules above if the user didn't specify one. State the version and proceed.
+5. **Update CHANGELOG** — rename `## [Unreleased]` to `## [VERSION] - YYYY-MM-DD` (today's date) and add a fresh empty `## [Unreleased]` section above it. Keep reverse-chronological order.
+6. **Update VERSION** — write the new version to the `VERSION` file (no trailing newline beyond one).
+7. **Commit** — stage **all** uncommitted changes with `git add -A`, then commit with `git commit -m "release: vVERSION"`. Check `git status` first.
+8. **Tag** — use `git tag -a vVERSION -m "release: vVERSION"` (pass `-m` to avoid opening an editor).
+9. **Install** — `make install` to install the new version.
+10. **Verify** — run the binary with `--version` and confirm it prints the new version.
 
 ## Important notes
 
