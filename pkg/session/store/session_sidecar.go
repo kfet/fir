@@ -50,6 +50,11 @@ func ReadReexecSidecar(sessionFile string) (*ReexecSidecar, error) {
 	return &sc, nil
 }
 
+// metaPath returns the .meta.json path for a session .jsonl path.
+func metaPath(sessionPath string) string {
+	return sessionPath + ".meta.json"
+}
+
 // MetaSidecar caches session metadata to speed up listing.
 type MetaSidecar struct {
 	Name              string    `json:"name"`
@@ -62,12 +67,8 @@ type MetaSidecar struct {
 	ModTime           time.Time `json:"mod_time"` // mtime of the .jsonl when this was written
 }
 
-func metaSidecarPath(jsonlPath string) string {
-	return jsonlPath + ".meta.json"
-}
-
 func readSidecar(jsonlPath string, jsonlMtime time.Time) *MetaSidecar {
-	path := metaSidecarPath(jsonlPath)
+	path := metaPath(jsonlPath)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -83,7 +84,7 @@ func readSidecar(jsonlPath string, jsonlMtime time.Time) *MetaSidecar {
 }
 
 func writeSidecar(jsonlPath string, m *MetaSidecar) {
-	path := metaSidecarPath(jsonlPath)
+	path := metaPath(jsonlPath)
 	data, err := json.Marshal(m)
 	if err != nil {
 		return

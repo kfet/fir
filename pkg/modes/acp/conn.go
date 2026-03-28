@@ -121,6 +121,7 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}
 			resp, err := pa.NewSession(ctx, p)
 			if err != nil {
+				firlog.Error("acp dispatch: session/new failed", "err", err, "cwd", p.Cwd)
 				return nil, toReqErr(err)
 			}
 			// Inject configOptions (not in SDK v0.6.3, present in upstream schema).
@@ -228,10 +229,13 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			firlog.Info("acp dispatch: " + method + " start")
 			var p ResumeSessionRequest
 			if err := json.Unmarshal(params, &p); err != nil {
+				firlog.Error("acp dispatch: "+method+" unmarshal failed", "err", err, "raw", string(params))
 				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
 			}
+			firlog.Info("acp dispatch: "+method+" params", "sessionId", p.SessionId, "cwd", p.Cwd)
 			resp, err := pa.ResumeSession(ctx, p)
 			if err != nil {
+				firlog.Error("acp dispatch: "+method+" failed", "err", err, "sessionId", p.SessionId, "cwd", p.Cwd)
 				return nil, toReqErr(err)
 			}
 			rawResp, merr := json.Marshal(resp)

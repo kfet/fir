@@ -1116,13 +1116,14 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	return true, nil
 }
 
-// SwitchSession switches to a different session file, reloading messages.
-func (s *AgentSession) SwitchSession(sessionPath string) error {
+// SwitchSession switches to a different session file. If the session is locked
+// by another process, it forks it to preserve history. Returns (forked, error).
+func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Abort any in-progress streaming
 	s.Agent.Abort()
 
-	// Switch the session file (loads entries)
-	s.SessionManager.SetSessionFile(sessionPath)
+	// Switch the session file (loads entries, forks if locked)
+	forked := s.SessionManager.SetSessionFile(sessionPath)
 
 	// Rebuild agent messages from session context
 	ctx := s.SessionManager.BuildSessionContext()
@@ -1158,7 +1159,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) error {
 		SessionName: s.SessionManager.GetSessionName(),
 	})
 
-	return nil
+	return forked, nil
 }
 
 // extractUserMessageText extracts the text content from a user message's raw JSON.
@@ -1715,6 +1716,9 @@ func estimateSideQueryMsgTokens(msg agent.AgentMessage) int {
 func (s *AgentSession) Close() {
 	if s.unsubAgent != nil {
 		s.unsubAgent()
+	}
+	if s.SessionManager != nil {
+		s.SessionManager.Close()
 	}
 }
 

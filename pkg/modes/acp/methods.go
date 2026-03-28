@@ -350,15 +350,57 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		}
 	}
 
-	// Validate session path is within the sessions directory to prevent traversal.
+	// Validate session path is within any known sessions directory to prevent traversal.
+	// If the sessionId is a bare UUID (from session/new), resolve it to the actual
+	// session file path by searching known session directories.
 	agentDir := resolveAgentDir()
-	sessionsDir := store.SessionsDir(agentDir)
-	sessionPath, err := filepath.Abs(params.SessionId)
+	sessionPath := params.SessionId
+	createFreshInstead := false
+
+	// Check if sessionId looks like a UUID (not a file path).
+	if !strings.Contains(params.SessionId, string(filepath.Separator)) && !strings.Contains(params.SessionId, ".jsonl") {
+		// Try to find the session file by UUID in known session directories.
+		resolved := resolveSessionByUUID(params.SessionId, agentDir, cwd)
+		if resolved == "" {
+			// No matching session file — create a fresh session instead.
+			firlog.Info("session/resume: UUID not found, creating fresh session",
+				"sessionId", params.SessionId, "cwd", cwd)
+			createFreshInstead = true
+		} else {
+			sessionPath = resolved
+		}
+	}
+
+	if createFreshInstead {
+		var mcpConfigs map[string]mcp.ServerConfig
+		if !pa.options.NoMCP {
+			mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
+		}
+		entry, err := pa.createSession(ctx, params.SessionId, cwd, mcpConfigs)
+		if err != nil {
+			return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
+		}
+		var mdls interface{}
+		if m := entry.session.Model(); m != nil {
+			mdls = BuildModelState(entry.modelRegistry, m)
+		}
+		return ResumeSessionResponse{Models: mdls}, nil
+	}
+
+	absPath, err := filepath.Abs(sessionPath)
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("invalid session path %q: %w", params.SessionId, err)
 	}
-	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
-		return ResumeSessionResponse{}, fmt.Errorf("invalid session path: must be within sessions directory")
+	sessionPath = absPath
+
+	if !isValidSessionPath(sessionPath, agentDir) {
+		firlog.Warn("session/resume: path validation failed",
+			"sessionId", params.SessionId,
+			"resolvedPath", sessionPath,
+			"agentDir", agentDir,
+			"sessionsDir", store.SessionsDir(agentDir),
+		)
+		return ResumeSessionResponse{}, fmt.Errorf("invalid session path: must be within sessions directory (sessionId=%q, resolved=%q, sessionsDir=%q)", params.SessionId, sessionPath, store.SessionsDir(agentDir))
 	}
 
 	// Use params.SessionId as the new session's ID so the client can reference it.
@@ -400,8 +442,12 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	}
 
 	// Switch to the requested session file.
-	if err := entry.session.SwitchSession(sessionPath); err != nil {
+	forked, err := entry.session.SwitchSession(sessionPath)
+	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("switch session: %w", err)
+	}
+	if forked {
+		pa.sendAgentMessage(sessionID, "Session is active in another window — branched with history preserved.")
 	}
 
 	var models interface{}
@@ -684,4 +730,73 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		}
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ %s", errText))
 	}
+}
+
+// isValidSessionPath checks whether sessionPath is within any known sessions
+// directory (primary + legacy). This prevents path-traversal while still
+// allowing resume of sessions created under legacy agent directories.
+func isValidSessionPath(sessionPath, agentDir string) bool {
+	dirs := []string{agentDir}
+	if os.Getenv("FIR_AGENT_DIR") == "" {
+		dirs = append(dirs, session.LegacyFirAgentDir(), session.PiAgentDir())
+	}
+	for _, d := range dirs {
+		if IsPathWithinDirectory(sessionPath, store.SessionsDir(d)) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSessionByUUID searches known session directories for a session file
+// whose name contains the given UUID. Returns the full path if found, or "".
+func resolveSessionByUUID(uuid, agentDir, cwd string) string {
+	// Build list of directories to search: cwd-specific dir first, then all dirs.
+	dirs := []string{agentDir}
+	if os.Getenv("FIR_AGENT_DIR") == "" {
+		dirs = append(dirs, session.LegacyFirAgentDir(), session.PiAgentDir())
+	}
+
+	// First check the cwd-specific session directory for each agent dir.
+	if cwd != "" {
+		for _, d := range dirs {
+			sessionDir := store.DefaultSessionDir(d, cwd)
+			if path := findSessionFileByUUID(sessionDir, uuid); path != "" {
+				return path
+			}
+		}
+	}
+
+	// Fall back to scanning all session subdirectories.
+	for _, d := range dirs {
+		sessionsRoot := store.SessionsDir(d)
+		entries, err := os.ReadDir(sessionsRoot)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dir := filepath.Join(sessionsRoot, entry.Name())
+			if path := findSessionFileByUUID(dir, uuid); path != "" {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
+// findSessionFileByUUID looks for a .jsonl file containing the UUID in the given directory.
+func findSessionFileByUUID(dir, uuid string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.Contains(e.Name(), uuid) && strings.HasSuffix(e.Name(), ".jsonl") {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return ""
 }

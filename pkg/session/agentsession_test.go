@@ -372,7 +372,7 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 		}
 	})
 
-	err := session.SwitchSession(newPath)
+	_, err := session.SwitchSession(newPath)
 	if err != nil {
 		t.Fatalf("SwitchSession failed: %v", err)
 	}
@@ -1927,7 +1927,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 	os.WriteFile(newSessionPath, []byte{}, 0o600)
 
 	// Switch to the new (empty) session
-	err := session.SwitchSession(newSessionPath)
+	_, err := session.SwitchSession(newSessionPath)
 	if err != nil {
 		t.Fatalf("SwitchSession failed: %v", err)
 	}
@@ -2500,7 +2500,7 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 	agentDir := t.TempDir()
 
 	dir := filepath.Dir(sessionFile)
-	sm := sessionpkg.OpenSessionManager(sessionFile, dir)
+	sm, _ := sessionpkg.OpenSessionManager(sessionFile, dir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
@@ -2549,7 +2549,7 @@ func TestAgentSession_SwitchSession_RestoresThinkingLevel_NoSpuriousEntry(t *tes
 	activeSession := newTestAgentSessionFromFile(t, sessionFile)
 	defer activeSession.Close()
 
-	if err := activeSession.SwitchSession(sessionFile); err != nil {
+	if _, err := activeSession.SwitchSession(sessionFile); err != nil {
 		t.Fatalf("SwitchSession failed: %v", err)
 	}
 
@@ -2598,7 +2598,7 @@ func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 	activeSession.modelRegistry.Refresh()
 
 	// Switch to the session file.
-	if err := activeSession.SwitchSession(sessionFile); err != nil {
+	if _, err := activeSession.SwitchSession(sessionFile); err != nil {
 		t.Fatalf("SwitchSession failed: %v", err)
 	}
 
@@ -3007,7 +3007,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	}
 
 	// Reload the session from disk and check the plan is in context
-	sm2 := sessionpkg.OpenSessionManager(sessionFile)
+	sm2, _ := sessionpkg.OpenSessionManager(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 2 {

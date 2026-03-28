@@ -206,14 +206,18 @@ func cmdContinue(ctx *commandContext, _ string) {
 		ctx.sendMessage("No sessions available to continue.")
 		return
 	}
-	sessionsDir := store.SessionsDir(entry.agentDir)
-	if !IsPathWithinDirectory(sessions[0].Path, sessionsDir) {
+	if !isValidSessionPath(sessions[0].Path, entry.agentDir) {
 		ctx.sendMessage("Invalid session path: must be within sessions directory")
 		return
 	}
-	if err := entry.session.SwitchSession(sessions[0].Path); err != nil {
+	sessionPath := sessions[0].Path
+	forked, err := entry.session.SwitchSession(sessionPath)
+	if err != nil {
 		ctx.sendMessage(fmt.Sprintf("Failed to continue session: %v", err))
 		return
+	}
+	if forked {
+		ctx.sendMessage("Session is active in another window — branched with history preserved.")
 	}
 	name := sessions[0].Name
 	if name == "" {
@@ -576,15 +580,18 @@ func (pa *firAgent) handleResumeArg(sessionID string, entry *firSession, args st
 		sessionPath, _ = filepath.Abs(args)
 	}
 
-	sessionsDir := store.SessionsDir(entry.agentDir)
-	if !IsPathWithinDirectory(sessionPath, sessionsDir) {
+	if !isValidSessionPath(sessionPath, entry.agentDir) {
 		pa.sendAgentMessage(sessionID, "Invalid session path: must be within sessions directory")
 		return
 	}
 
-	if err := entry.session.SwitchSession(sessionPath); err != nil {
+	forked, err := entry.session.SwitchSession(sessionPath)
+	if err != nil {
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Failed to resume session: %v", err))
 	} else {
+		if forked {
+			pa.sendAgentMessage(sessionID, "Session is active in another window — branched with history preserved.")
+		}
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("Resumed session: %s", sessionPath))
 		pa.replaySessionHistory(sessionID, entry)
 	}

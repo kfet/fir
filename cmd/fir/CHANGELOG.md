@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- ACP: `session/resume` with a bare UUID (sent by Zed when opening a new window) now resolves the UUID to a session file and uses `flock` to detect if the session is active in another process; if locked, creates a fresh session instead of failing.
+
+### Fixed
+
+- ACP: `session/resume` rejected sessions stored in legacy directories (`~/.fir/agent`, `~/.pi/agent`) with "must be within sessions directory" error.
+
 ### Changed
 
 - ACP `/session` command now uses Markdown lists for cleaner, more readable formatting.

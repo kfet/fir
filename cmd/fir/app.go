@@ -554,10 +554,18 @@ func createSessionManager(args *Args, cwd, agentDir string) *store.SessionManage
 		return store.InMemorySessionManager()
 	}
 	if args.Session != "" {
-		return store.OpenSessionManager(filepath.Join(sessionDir, args.Session))
+		sm, forked := store.OpenSessionManager(filepath.Join(sessionDir, args.Session))
+		if forked {
+			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
+		}
+		return sm
 	}
 	if args.Continue {
-		return store.ContinueRecentSession(cwd, sessionDir)
+		sm, forked := store.ContinueRecentSession(cwd, sessionDir)
+		if forked {
+			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
+		}
+		return sm
 	}
 	return store.NewSessionManager(cwd, sessionDir)
 }

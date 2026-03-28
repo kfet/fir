@@ -283,10 +283,14 @@ func (m *InteractiveMode) handleResumeSession(sessionPath string) {
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
 
-	// Switch session
-	if err := m.session.SwitchSession(sessionPath); err != nil {
+	// Switch session (forks internally if locked by another process)
+	forked, err := m.session.SwitchSession(sessionPath)
+	if err != nil {
 		m.showWarning(fmt.Sprintf("Failed to resume session: %s", err))
 		return
+	}
+	if forked {
+		m.showStatus("Session is active in another window — branched with history preserved")
 	}
 
 	// Rebuild the chat display

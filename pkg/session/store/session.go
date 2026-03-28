@@ -156,7 +156,8 @@ type SessionManager struct {
 	entries     []*SessionEntry
 	byID        map[string]*SessionEntry
 	labelsById  map[string]string
-	leafID      string // empty = before first entry
+	leafID      string       // empty = before first entry
+	lock        *sessionLock // flock on .meta.json; nil if in-memory or lock failed
 }
 
 // NewSessionManager creates a persisted session.
@@ -191,8 +192,9 @@ func InMemorySessionManager(cwd ...string) *SessionManager {
 	return sm
 }
 
-// OpenSessionManager opens a specific session file.
-func OpenSessionManager(filePath string, sessionDir ...string) *SessionManager {
+// OpenSessionManager opens a specific session file. Returns the SessionManager
+// and whether the session was forked (because it was active in another process).
+func OpenSessionManager(filePath string, sessionDir ...string) (*SessionManager, bool) {
 	dir := ""
 	if len(sessionDir) > 0 {
 		dir = sessionDir[0]
@@ -206,12 +208,14 @@ func OpenSessionManager(filePath string, sessionDir ...string) *SessionManager {
 		byID:       make(map[string]*SessionEntry),
 		labelsById: make(map[string]string),
 	}
-	sm.setSessionFile(filePath)
-	return sm
+	forked := sm.setSessionFile(filePath)
+	return sm, forked
 }
 
 // ContinueRecentSession continues the most recent session, or creates new.
-func ContinueRecentSession(cwd, sessionDir string) *SessionManager {
+// Returns the SessionManager and whether the session was forked (because it
+// was active in another process).
+func ContinueRecentSession(cwd, sessionDir string) (*SessionManager, bool) {
 	if most := findMostRecentSession(sessionDir); most != "" {
 		sm := &SessionManager{
 			cwd:        cwd,
@@ -220,19 +224,53 @@ func ContinueRecentSession(cwd, sessionDir string) *SessionManager {
 			byID:       make(map[string]*SessionEntry),
 			labelsById: make(map[string]string),
 		}
-		sm.setSessionFile(most)
-		return sm
+		forked := sm.setSessionFile(most)
+		return sm, forked
 	}
-	return NewSessionManager(cwd, sessionDir)
+	return NewSessionManager(cwd, sessionDir), false
 }
 
 // SetSessionFile switches to a different session file, loading its entries.
-func (sm *SessionManager) SetSessionFile(filePath string) {
-	sm.setSessionFile(filePath)
+// If the session is locked by another process, it forks the session to
+// preserve history. Returns true if the session was forked.
+func (sm *SessionManager) SetSessionFile(filePath string) bool {
+	return sm.setSessionFile(filePath)
 }
 
-func (sm *SessionManager) setSessionFile(filePath string) {
+// setSessionFile loads a session file, forking if locked by another process.
+// Returns true if the session was forked.
+func (sm *SessionManager) setSessionFile(filePath string) bool {
 	absPath, _ := filepath.Abs(filePath)
+
+	// Release any previously held lock before switching files.
+	if sm.lock != nil {
+		sm.lock.Close()
+		sm.lock = nil
+	}
+
+	// Try to acquire the flock. If locked by another process, fork.
+	forked := false
+	if sm.persist {
+		lock, ok := tryLockSession(absPath)
+		if ok {
+			sm.lock = lock
+		} else if sm.sessionDir != "" {
+			// Session is active in another process — fork it.
+			forkSM, err := ForkFrom(absPath, sm.cwd, sm.sessionDir)
+			if err == nil {
+				absPath = forkSM.GetSessionFile()
+				forked = true
+				firlog.Info("session forked from locked file", "original", filePath, "forked", absPath)
+				// Acquire lock on the forked file.
+				if lock, ok := tryLockSession(absPath); ok {
+					sm.lock = lock
+				}
+			} else {
+				firlog.Warn("session fork failed, proceeding without lock", "err", err)
+			}
+		}
+	}
+
 	sm.sessionFile = absPath
 	firlog.Debug("loading session file", "path", absPath)
 
@@ -245,7 +283,7 @@ func (sm *SessionManager) setSessionFile(filePath string) {
 			sm.sessionFile = absPath
 			sm.rewriteFile()
 			sm.flushed = true
-			return
+			return forked
 		}
 
 		sm.header = header
@@ -259,6 +297,7 @@ func (sm *SessionManager) setSessionFile(filePath string) {
 		sm.newSession(nil)
 		sm.sessionFile = absPath
 	}
+	return forked
 }
 
 // NewSession starts a new session. Returns the session file path (empty if in-memory).
@@ -290,8 +329,17 @@ func (sm *SessionManager) newSession(opts *NewSessionOptions) string {
 	sm.flushed = false
 
 	if sm.persist && sm.sessionDir != "" {
+		// Release any previously held lock before creating a new session file.
+		if sm.lock != nil {
+			sm.lock.Close()
+			sm.lock = nil
+		}
 		fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
 		sm.sessionFile = filepath.Join(sm.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, sm.sessionID))
+		// Acquire flock on the new session file.
+		if lock, ok := tryLockSession(sm.sessionFile); ok {
+			sm.lock = lock
+		}
 	}
 
 	firlog.Debug("new session created", "sessionID", sm.sessionID, "file", sm.sessionFile)
@@ -486,6 +534,17 @@ func (sm *SessionManager) GetSessionDir() string {
 	defer sm.mu.RUnlock()
 	return sm.sessionDir
 }
+
+// Close releases the session lock. Safe to call multiple times.
+func (sm *SessionManager) Close() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.lock != nil {
+		sm.lock.Close()
+		sm.lock = nil
+	}
+}
+
 func (sm *SessionManager) GetSessionID() string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1398,7 +1457,8 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error)
 		return nil, fmt.Errorf("cannot write forked session: %w", err)
 	}
 
-	return OpenSessionManager(newSessionFile, sessionDir), nil
+	sm, _ := OpenSessionManager(newSessionFile, sessionDir)
+	return sm, nil
 }
 
 // SessionsDir returns the parent directory that contains all per-project session directories.

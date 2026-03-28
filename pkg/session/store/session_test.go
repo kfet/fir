@@ -323,10 +323,14 @@ func TestSessionManagerOpenExisting(t *testing.T) {
 		Model:    "test",
 	}))
 	sessionFile := sm1.GetSessionFile()
+	origID := sm1.GetSessionID()
+
+	// Close sm1 to release the flock before reopening.
+	sm1.Close()
 
 	// Open it again
-	sm2 := OpenSessionManager(sessionFile)
-	if sm2.GetSessionID() != sm1.GetSessionID() {
+	sm2, _ := OpenSessionManager(sessionFile)
+	if sm2.GetSessionID() != origID {
 		t.Errorf("session IDs should match: %s != %s", sm2.GetSessionID(), sm1.GetSessionID())
 	}
 
@@ -350,8 +354,11 @@ func TestSessionManagerContinueRecent(t *testing.T) {
 	}))
 	origID := sm1.GetSessionID()
 
+	// Close sm1 to release the flock before continuing.
+	sm1.Close()
+
 	// Continue recent should find it
-	sm2 := ContinueRecentSession(tmpDir, sessDir)
+	sm2, _ := ContinueRecentSession(tmpDir, sessDir)
 	if sm2.GetSessionID() != origID {
 		t.Errorf("should continue existing session: %s != %s", sm2.GetSessionID(), origID)
 	}
@@ -634,7 +641,7 @@ func TestSessionManagerCorruptFileRecovery(t *testing.T) {
 	os.WriteFile(sessionFile, []byte(content), 0600)
 
 	// Should load successfully, skipping corrupt lines
-	sm := OpenSessionManager(sessionFile, sessDir)
+	sm, _ := OpenSessionManager(sessionFile, sessDir)
 	if sm.GetSessionID() != "test-corrupt" {
 		t.Errorf("expected session ID 'test-corrupt', got %q", sm.GetSessionID())
 	}
@@ -660,7 +667,7 @@ func TestSessionManagerEmptyFile(t *testing.T) {
 	sessionFile := filepath.Join(sessDir, "empty.jsonl")
 	os.WriteFile(sessionFile, []byte(""), 0600)
 
-	sm := OpenSessionManager(sessionFile, sessDir)
+	sm, _ := OpenSessionManager(sessionFile, sessDir)
 	entries := sm.GetEntries()
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries for empty file, got %d", len(entries))
@@ -1112,7 +1119,7 @@ func TestSessionManagerCommandEntryRoundTrip(t *testing.T) {
 	}
 
 	// Read it back.
-	sm2 := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionManager(sessionFile)
 	entries := sm2.GetEntries()
 
 	var cmdEntry *SessionEntry
@@ -1200,7 +1207,7 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 	}
 
 	// Reload the session from disk and verify plan is in context
-	sm2 := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionManager(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 2 {
@@ -1235,7 +1242,7 @@ func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
 	sm.AppendPlanUpdate("", nil, nil) // clear
 
 	sessionFile := sm.GetSessionFile()
-	sm2 := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionManager(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 0 {
