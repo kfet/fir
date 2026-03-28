@@ -2,32 +2,30 @@
 package oauth
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"html/template"
+	"html"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 )
 
 //go:embed callback_page.html
 var callbackPageHTML string
 
-var callbackPageTmpl = template.Must(template.New("callback").Parse(callbackPageHTML))
-
-type callbackPageData struct {
-	Title   string
-	Icon    string
-	Heading string
-	Message string
-}
-
+// renderAuthPage renders the callback page with the given content.
+// Uses simple string replacement to avoid html/template (which adds ~6MB to
+// the binary due to reflect-driven linker retention of large indirect deps).
 func renderAuthPage(title, icon, heading, message string) string {
-	var buf bytes.Buffer
-	_ = callbackPageTmpl.Execute(&buf, callbackPageData{title, icon, heading, message})
-	return buf.String()
+	r := strings.NewReplacer(
+		"__TITLE__", html.EscapeString(title),
+		"__ICON__", icon,
+		"__HEADING__", html.EscapeString(heading),
+		"__MESSAGE__", html.EscapeString(message),
+	)
+	return r.Replace(callbackPageHTML)
 }
 
 // CallbackResult holds the result from the OAuth callback server.
@@ -54,12 +52,7 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr, expectedState st
 		errParam := r.URL.Query().Get("error")
 		if errParam != "" {
 			w.WriteHeader(400)
-			fmt.Fprint(w, renderAuthPage(
-				"Authentication Failed",
-				"⚠️",
-				"Authentication Failed",
-				"Error: "+errParam,
-			))
+			fmt.Fprint(w, renderAuthPage("Authentication Failed", "⚠️", "Authentication Failed", "Error: "+errParam))
 			return
 		}
 
@@ -68,33 +61,18 @@ func StartOAuthCallbackServer(ctx context.Context, route, addr, expectedState st
 
 		if expectedState != "" && state != expectedState {
 			w.WriteHeader(400)
-			fmt.Fprint(w, renderAuthPage(
-				"Authentication Failed",
-				"🚫",
-				"Authentication Failed",
-				"State mismatch — please try again.",
-			))
+			fmt.Fprint(w, renderAuthPage("Authentication Failed", "🚫", "Authentication Failed", "State mismatch — please try again."))
 			return
 		}
 
 		if code != "" {
-			fmt.Fprint(w, renderAuthPage(
-				"Authentication Successful",
-				"✓",
-				"You're all set",
-				"You can close this window and return to the terminal.",
-			))
+			fmt.Fprint(w, renderAuthPage("Authentication Successful", "✓", "You're all set", "You can close this window and return to the terminal."))
 			once.Do(func() {
 				ch <- &CallbackResult{Code: code, State: state}
 			})
 		} else {
 			w.WriteHeader(400)
-			fmt.Fprint(w, renderAuthPage(
-				"Authentication Failed",
-				"⚠️",
-				"Authentication Failed",
-				"Missing authorization code.",
-			))
+			fmt.Fprint(w, renderAuthPage("Authentication Failed", "⚠️", "Authentication Failed", "Missing authorization code."))
 		}
 	})
 

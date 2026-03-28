@@ -66,7 +66,7 @@ func sanitizeBinaryOutput(s string) string {
 //   - Streams raw output (ANSI preserved) via OnChunk callback for display
 //   - Injects color-forcing env vars when streaming for display
 //   - Writes large output to temp file
-//   - Supports cancellation via context
+//   - Supports cancellation via context — kills entire process group
 //   - Sanitizes stored output (strips ANSI, removes binary, normalizes newlines)
 //   - Truncates output if exceeds default max bytes
 func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions) (BashResult, error) {
@@ -77,6 +77,9 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 
 	cmd := exec.CommandContext(ctx, shell, "-c", command)
 	cmd.Env = os.Environ()
+
+	// Run in its own process group so cancellation kills all children.
+	setProcGroup(cmd)
 
 	// When streaming for display, inject env vars that tell CLI tools to
 	// emit ANSI colors even when stdout is not a TTY.
