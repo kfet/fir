@@ -168,9 +168,9 @@ func TestManager_ResourceListChanged(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	changed := make(chan []agent.AgentTool, 2)
-	mgr.OnToolsChanged = func(tools []agent.AgentTool) {
+	mgr.OnToolsChanged.Store(func(tools []agent.AgentTool) {
 		changed <- tools
-	}
+	})
 
 	ctx := context.Background()
 	startAndWait(t, mgr, ctx)
@@ -276,9 +276,9 @@ func TestManager_ResourceSubscription(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	updated := make(chan string, 1)
-	mgr.OnResourceUpdated = func(_, uri string) {
+	mgr.OnResourceUpdated.Store(func(_, uri string) {
 		updated <- uri
-	}
+	})
 
 	ctx := context.Background()
 	tools := startAndWait(t, mgr, ctx)

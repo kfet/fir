@@ -174,7 +174,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	var received []ChannelMessage
 	var mu sync.Mutex
 	done := make(chan struct{}, 1)
-	mgr.OnChannelMessage = func(cm ChannelMessage) {
+	mgr.OnChannelMessage.Store(func(cm ChannelMessage) {
 		t.Logf("OnChannelMessage: source=%s content=%s", cm.SourceName(), cm.Content)
 		mu.Lock()
 		received = append(received, cm)
@@ -186,7 +186,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 			default:
 			}
 		}
-	}
+	})
 
 	// Start request handler in background. Use a context to stop it.
 	serverCtx, serverCancel := context.WithCancel(context.Background())

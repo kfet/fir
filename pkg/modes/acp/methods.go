@@ -685,4 +685,3 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ %s", errText))
 	}
 }
-

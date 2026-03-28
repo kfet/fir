@@ -791,9 +791,11 @@ func (m *InteractiveMode) handleSessionCommand() {
 			lines = append(lines, "")
 			lines = append(lines, t.Bold("MCP Servers"))
 			for _, s := range statuses {
-				stStr := t.Fg("success", s.StatusString())
-				if !s.Connected || s.Error != nil {
-					stStr = t.Fg("error", s.StatusString())
+				stStr := t.Fg("success", s.Status)
+				if strings.HasPrefix(s.Status, "connecting") {
+					stStr = t.Fg("warn", s.Status)
+				} else if s.Status != "connected" {
+					stStr = t.Fg("error", s.Status)
 				}
 				lines = append(lines, fmt.Sprintf("  %s %s", t.Fg("dim", s.Name+":"), stStr))
 			}

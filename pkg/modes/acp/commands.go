@@ -240,41 +240,45 @@ func cmdSession(ctx *commandContext, _ string) {
 	stats := entry.session.GetSessionStats()
 	name := entry.session.SessionManager.GetSessionName()
 	info := "**Session Info**\n\n"
-	info += fmt.Sprintf("**Version:** %s\n", version)
-	info += "**Mode:** acp\n"
+	info += fmt.Sprintf("- **Version:** %s\n", version)
+	info += "- **Mode:** acp\n"
 	if bin, err := os.Executable(); err == nil {
-		info += fmt.Sprintf("**Binary:** %s\n", bin)
+		info += fmt.Sprintf("- **Binary:** %s\n", bin)
 	}
 	if name != "" {
-		info += fmt.Sprintf("**Name:** %s\n", name)
+		info += fmt.Sprintf("- **Name:** %s\n", name)
 	}
-	info += fmt.Sprintf("**ID:** %s\n", stats.SessionID)
+	info += fmt.Sprintf("- **ID:** %s\n", stats.SessionID)
+	if model := entry.session.Model(); model != nil {
+		info += fmt.Sprintf("- **Model:** %s\n", model.ID)
+		info += fmt.Sprintf("- **Provider:** %s\n", model.Provider)
+	}
 	if entry.extSetup != nil && entry.extSetup.Manager != nil {
 		enabled := entry.extSetup.Manager.EnabledExtensionNames()
 		if len(enabled) > 0 {
-			info += fmt.Sprintf("**Extensions:** %s\n", strings.Join(enabled, ", "))
+			info += fmt.Sprintf("- **Extensions:** %s\n", strings.Join(enabled, ", "))
 		}
-	}
-	if model := entry.session.Model(); model != nil {
-		info += fmt.Sprintf("**Model:** %s\n", model.ID)
-		info += fmt.Sprintf("**Provider:** %s\n", model.Provider)
 	}
 	if entry.mcpManager != nil {
 		statuses := entry.mcpManager.Status()
 		if len(statuses) > 0 {
-			info += "\n**MCP Servers**\n"
+			info += "\n**MCP Servers**\n\n"
 			for _, s := range statuses {
-				info += fmt.Sprintf("- %s: %s\n", s.Name, s.StatusString())
+				info += fmt.Sprintf("- **%s:** %s\n", s.Name, s.Status)
 			}
 		}
 	}
-	info += "\n"
-	info += fmt.Sprintf("**Messages**\n- User: %d\n- Assistant: %d\n- Tool Calls: %d\n- Total: %d\n\n",
-		stats.UserMessages, stats.AssistantMessages, stats.ToolCalls, stats.TotalMessages)
-	info += fmt.Sprintf("**Tokens**\n- Input: %d\n- Output: %d\n- Total: %d\n",
-		stats.Tokens.Input, stats.Tokens.Output, stats.Tokens.Total)
+	info += "\n**Messages**\n\n"
+	info += fmt.Sprintf("- **User:** %d\n", stats.UserMessages)
+	info += fmt.Sprintf("- **Assistant:** %d\n", stats.AssistantMessages)
+	info += fmt.Sprintf("- **Tool Calls:** %d\n", stats.ToolCalls)
+	info += fmt.Sprintf("- **Total:** %d\n", stats.TotalMessages)
+	info += "\n**Tokens**\n\n"
+	info += fmt.Sprintf("- **Input:** %d\n", stats.Tokens.Input)
+	info += fmt.Sprintf("- **Output:** %d\n", stats.Tokens.Output)
+	info += fmt.Sprintf("- **Total:** %d\n", stats.Tokens.Total)
 	if stats.Cost > 0 {
-		info += fmt.Sprintf("\n**Cost**: $%.4f", stats.Cost)
+		info += fmt.Sprintf("\n**Cost:** $%.4f\n", stats.Cost)
 	}
 	ctx.sendMessage(info)
 }
@@ -547,8 +551,6 @@ func cmdSkillsInstall(ctx *commandContext, parts []string) {
 	}
 	ctx.sendMessage(fmt.Sprintf("Installed skill %q to %s", name, targetDir))
 }
-
-
 
 // ============================================================================
 // Command helpers

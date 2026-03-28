@@ -98,10 +98,7 @@ func TestManager_Reload_RemoveServer(t *testing.T) {
 	// Only srv1's tools remain (1 + 4 = 5).
 	assert.Len(t, remaining, 1)
 
-	mgr.mu.Lock()
-	_, srv2Exists := mgr.sessions["srv2"]
-	mgr.mu.Unlock()
-	assert.False(t, srv2Exists, "srv2 session should be closed after Reload")
+	assert.False(t, mgr.hasSession("srv2"), "srv2 session should be closed after Reload")
 }
 
 // TestManager_Reload_AddServer verifies that Reload starts a new server that
@@ -130,10 +127,7 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	// Both servers contribute tools (5 each = 10).
 	assert.Len(t, all, 2)
 
-	mgr.mu.Lock()
-	_, srv2Exists := mgr.sessions["srv2"]
-	mgr.mu.Unlock()
-	assert.True(t, srv2Exists, "srv2 session should exist after Reload")
+	assert.True(t, mgr.hasSession("srv2"), "srv2 session should exist after Reload")
 }
 
 // TestManager_Reload_Unchanged verifies that an unchanged server is not reconnected.
@@ -203,10 +197,7 @@ func TestManager_Reload_Concurrent_ConfigChange(t *testing.T) {
 	wg.Wait()
 
 	// Manager must be in a consistent state: srv1 session must exist.
-	mgr.mu.Lock()
-	_, exists := mgr.sessions["srv1"]
-	mgr.mu.Unlock()
-	assert.True(t, exists, "srv1 session must exist after concurrent config-changing Reloads")
+	assert.True(t, mgr.hasSession("srv1"), "srv1 session must exist after concurrent config-changing Reloads")
 }
 
 // TestManager_Reload_Concurrent verifies that concurrent Reload calls do not
@@ -241,8 +232,5 @@ func TestManager_Reload_Concurrent(t *testing.T) {
 
 	// After all concurrent Reloads complete, Manager must be consistent:
 	// exactly one session for srv1 and its tools must be present.
-	mgr.mu.Lock()
-	_, exists := mgr.sessions["srv1"]
-	mgr.mu.Unlock()
-	assert.True(t, exists, "srv1 session must exist after concurrent Reloads")
+	assert.True(t, mgr.hasSession("srv1"), "srv1 session must exist after concurrent Reloads")
 }

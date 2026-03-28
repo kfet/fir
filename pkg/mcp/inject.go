@@ -17,7 +17,7 @@ type MessageInjector func(text string, ts int64)
 // to format inbound channel messages, send a typing indicator when
 // appropriate, and call inject to deliver the message to the agent.
 func WireChannelInjection(mgr *Manager, inject MessageInjector) {
-	mgr.OnChannelMessage = func(cm ChannelMessage) {
+	mgr.OnChannelMessage.Store(func(cm ChannelMessage) {
 		serverName := cm.ServerName
 		source := cm.SourceName()
 		text := fmt.Sprintf("[Channel message from %s via %s]\n%s", source, serverName, cm.Text())
@@ -32,5 +32,5 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 		}
 
 		inject(text, ts)
-	}
+	})
 }

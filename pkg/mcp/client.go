@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -47,31 +48,57 @@ func (r *progressRegistry) dispatch(token string, result agent.AgentToolResult) 
 	}
 }
 
-// Manager owns the lifecycle of all MCP client sessions for one fir session.
-type Manager struct {
-	configs  map[string]ServerConfig
-	sessions map[string]*sdk.ClientSession
-	verbose  bool
+// serverEntry holds all per-server state in a single struct, stored in
+// Manager.servers as a sync.Map value. Fields are guarded by mu;
+// subscribed has its own lock-free sync.Map and does not require mu.
+type serverEntry struct {
+	mu         sync.Mutex
+	config     ServerConfig
+	session    *sdk.ClientSession // nil while connecting or after disconnect
+	tools      []agent.AgentTool  // tools exposed by this server
+	err        error              // last connection/disconnect error
+	connecting bool               // true while initial connect is in progress
+	subscribed sync.Map           // uri (string) → struct{}
+}
 
-	mu           sync.Mutex
-	reloadMu     sync.Mutex                     // serialises concurrent Reload calls
-	tools        map[string][]agent.AgentTool   // per-server tools, guarded by mu
-	serverErrors map[string]error               // per-server connection errors, guarded by mu
-	subscribed   map[string]map[string]struct{} // per-server subscribed resource URIs, guarded by mu
+// with locks the entry, calls fn, and unlocks.
+func (e *serverEntry) with(fn func(e *serverEntry)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fn(e)
+}
+
+// forEachServer iterates all server entries, locking each for the duration
+// of fn. Iteration stops if fn returns false.
+func (m *Manager) forEachServer(fn func(name string, e *serverEntry) bool) {
+	m.servers.Range(func(key, value any) bool {
+		entry := value.(*serverEntry)
+		var cont bool
+		entry.with(func(e *serverEntry) {
+			cont = fn(key.(string), e)
+		})
+		return cont
+	})
+}
+
+type Manager struct {
+	servers  sync.Map // string → *serverEntry
+	verbose  bool
+	reloadMu sync.Mutex // serialises concurrent Reload calls
 
 	// OnToolsChanged is called (from a background goroutine) whenever any
 	// server's tool list changes. The argument is the new complete tool list
 	// across all servers. May be nil.
-	OnToolsChanged func([]agent.AgentTool)
+	OnToolsChanged atomic.Value // func([]agent.AgentTool)
 
 	// OnResourceUpdated is called when a subscribed resource is updated on a
 	// server. serverName is the Manager key; uri is the resource that changed.
 	// May be nil.
-	OnResourceUpdated func(serverName, uri string)
+	OnResourceUpdated atomic.Value // func(serverName, uri string)
 
 	// OnChannelMessage is called when a channel-capable MCP server sends a
 	// notifications/claude/channel notification. May be nil.
-	OnChannelMessage func(ChannelMessage)
+	OnChannelMessage atomic.Value // func(ChannelMessage)
 
 	// SamplingFn is called when an MCP server issues a sampling/createMessage
 	// request (asking fir to call an LLM). If nil, sampling requests are rejected.
@@ -97,15 +124,92 @@ type Manager struct {
 // and the logging level sent to each server is "debug"; otherwise only
 // warnings and above are requested.
 func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
-	return &Manager{
-		configs:      configs,
-		sessions:     make(map[string]*sdk.ClientSession),
-		verbose:      verbose,
-		tools:        make(map[string][]agent.AgentTool),
-		serverErrors: make(map[string]error),
-		subscribed:   make(map[string]map[string]struct{}),
-		dialFn:       createTransport,
+	mgr := &Manager{
+		verbose: verbose,
+		dialFn:  createTransport,
 	}
+	for k, v := range configs {
+		mgr.servers.Store(k, &serverEntry{config: v})
+	}
+	return mgr
+}
+
+// loadEntry returns the serverEntry for name, or nil.
+func (m *Manager) loadEntry(name string) *serverEntry {
+	if v, ok := m.servers.Load(name); ok {
+		return v.(*serverEntry)
+	}
+	return nil
+}
+
+// withEntry looks up the entry for name, locks it, calls fn, and unlocks.
+// Returns false if the entry does not exist.
+func (m *Manager) withEntry(name string, fn func(e *serverEntry)) bool {
+	entry := m.loadEntry(name)
+	if entry == nil {
+		return false
+	}
+	entry.with(fn)
+	return true
+}
+
+// loadOnToolsChanged returns the current OnToolsChanged callback, or nil.
+func (m *Manager) loadOnToolsChanged() func([]agent.AgentTool) {
+	if v := m.OnToolsChanged.Load(); v != nil {
+		return v.(func([]agent.AgentTool))
+	}
+	return nil
+}
+
+// loadOnChannelMessage returns the current OnChannelMessage callback, or nil.
+func (m *Manager) loadOnChannelMessage() func(ChannelMessage) {
+	if v := m.OnChannelMessage.Load(); v != nil {
+		return v.(func(ChannelMessage))
+	}
+	return nil
+}
+
+// loadOnResourceUpdated returns the current OnResourceUpdated callback, or nil.
+func (m *Manager) loadOnResourceUpdated() func(string, string) {
+	if v := m.OnResourceUpdated.Load(); v != nil {
+		return v.(func(string, string))
+	}
+	return nil
+}
+
+// configsLen returns the number of configured servers.
+func (m *Manager) configsLen() int {
+	n := 0
+	m.forEachServer(func(_ string, _ *serverEntry) bool { n++; return true })
+	return n
+}
+
+// configsSnapshot returns a plain map of server name → ServerConfig.
+func (m *Manager) configsSnapshot() map[string]ServerConfig {
+	out := make(map[string]ServerConfig)
+	m.forEachServer(func(name string, e *serverEntry) bool {
+		out[name] = e.config
+		return true
+	})
+	return out
+}
+
+// allTools returns a flat snapshot of all tools across all servers.
+func (m *Manager) allTools() []agent.AgentTool {
+	var out []agent.AgentTool
+	m.forEachServer(func(_ string, e *serverEntry) bool {
+		out = append(out, e.tools...)
+		return true
+	})
+	return out
+}
+
+// hasSession reports whether the named server has an active session.
+// Intended for tests; production code should use withEntry.
+func (m *Manager) hasSession(name string) bool {
+	var connected bool
+	m.withEntry(name, func(e *serverEntry) { connected = e.session != nil })
+	return connected
 }
 
 // createTransport builds a Transport from a ServerConfig based on the
@@ -149,40 +253,38 @@ func commandTransport(cfg ServerConfig) (sdk.Transport, error) {
 // Start launches async connections to all configured MCP servers. It returns
 // immediately. As each server finishes connecting, its tools are stored and
 // OnToolsChanged is called with the aggregate tool list. Failures are recorded
-// in serverErrors and logged but do not prevent other servers from starting.
+// and logged but do not prevent other servers from starting.
 func (m *Manager) Start(ctx context.Context) {
-	firlog.Info("mcp starting", "servers", len(m.configs))
-	for name, cfg := range m.configs {
-		go func(name string, cfg ServerConfig) {
+	firlog.Info("mcp starting", "servers", m.configsLen())
+	m.forEachServer(func(name string, e *serverEntry) bool {
+		e.connecting = true
+		cfg := e.config
+		go func() {
 			_, err := m.startServer(ctx, name, cfg)
+			m.withEntry(name, func(e *serverEntry) {
+				e.connecting = false
+			})
 			if err != nil {
 				firlog.Warn("mcp connection failed", "server", name, "err", err)
-				m.mu.Lock()
-				m.serverErrors[name] = err
-				// Clean up any orphaned session that startServer may have
-				// stored before failing (e.g. Connect succeeded but Tools
-				// listing failed).
-				if sess, ok := m.sessions[name]; ok {
-					delete(m.sessions, name)
-					delete(m.tools, name)
-					delete(m.subscribed, name)
-					m.mu.Unlock()
+				var sess *sdk.ClientSession
+				m.withEntry(name, func(e *serverEntry) {
+					e.err = err
+					if e.session != nil {
+						sess = e.session
+						e.session = nil
+						e.tools = nil
+					}
+				})
+				if sess != nil {
 					_ = sess.Close()
-				} else {
-					m.mu.Unlock()
 				}
 			}
-			// Notify with the updated aggregate tool list (even on error, so
-			// the callback sees tools from other servers that succeeded).
-			m.mu.Lock()
-			all := m.allTools()
-			notify := m.OnToolsChanged
-			m.mu.Unlock()
-			if notify != nil {
-				notify(all)
+			if notify := m.loadOnToolsChanged(); notify != nil {
+				notify(m.allTools())
 			}
-		}(name, cfg)
-	}
+		}()
+		return true
+	})
 }
 
 // loggingLevel returns the MCP logging level to request from servers.
@@ -193,32 +295,15 @@ func (m *Manager) loggingLevel() sdk.LoggingLevel {
 	return "warning"
 }
 
-// allTools returns a flat snapshot of all tools across all servers. Caller
-// must hold m.mu.
-func (m *Manager) allTools() []agent.AgentTool {
-	var out []agent.AgentTool
-	for _, ts := range m.tools {
-		out = append(out, ts...)
-	}
-	return out
-}
-
 // subscribeOnce returns a subscribeFunc that subscribes to a resource URI at
-// most once per server. It uses the Manager's subscribed map and mutex.
+// most once per server. It uses the serverEntry's subscribed map.
 func (m *Manager) subscribeOnce(session *sdk.ClientSession, serverName string) subscribeFunc {
 	return func(uri string) {
-		m.mu.Lock()
-		subs, ok := m.subscribed[serverName]
-		if !ok {
-			subs = make(map[string]struct{})
-			m.subscribed[serverName] = subs
+		entry := m.loadEntry(serverName)
+		if entry == nil {
+			return
 		}
-		_, already := subs[uri]
-		if !already {
-			subs[uri] = struct{}{}
-		}
-		m.mu.Unlock()
-		if !already {
+		if _, already := entry.subscribed.LoadOrStore(uri, struct{}{}); !already {
 			_ = session.Subscribe(context.Background(), &sdk.SubscribeParams{URI: uri})
 		}
 	}
@@ -242,10 +327,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	// OnChannelMessage can be set after Start() returns. The callback is
 	// dispatched asynchronously to avoid blocking the SDK's read loop.
 	transport = wrapTransportForChannels(transport, name, func(cm ChannelMessage) {
-		m.mu.Lock()
-		fn := m.OnChannelMessage
-		m.mu.Unlock()
-		if fn != nil {
+		if fn := m.loadOnChannelMessage(); fn != nil {
 			go fn(cm)
 		}
 	})
@@ -275,9 +357,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 			if req.Session == nil {
 				return
 			}
-			// Re-list tools for this server in a background goroutine.
-			// Use context.Background() — the notification handler's context is
-			// cancelled when the handler returns, before the goroutine finishes.
 			session := req.Session
 			go func() {
 				var updated []agent.AgentTool
@@ -288,8 +367,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					}
 					updated = append(updated, AdaptTool(session, serverName, tool, &m.progressReg))
 				}
-				// Include resource and prompt tools only when the server
-				// advertises the corresponding capability.
 				caps := session.InitializeResult().Capabilities
 				if caps != nil && caps.Resources != nil {
 					updated = append(updated,
@@ -304,22 +381,21 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					)
 				}
 
-				m.mu.Lock()
-				// Guard against stale updates: only overwrite m.tools if this
-				// session is still the active session for this server. A reload
-				// may have closed the session and removed it from m.sessions
-				// between when the notification arrived and now.
-				current, stillActive := m.sessions[serverName]
-				if !stillActive || current != session {
-					m.mu.Unlock()
+				// Guard against stale updates: only overwrite tools if this
+				// session is still the active session for this server.
+				active := false
+				m.withEntry(serverName, func(e *serverEntry) {
+					if e.session != session {
+						return
+					}
+					active = true
+					e.tools = updated
+				})
+				if !active {
 					return
 				}
-				m.tools[serverName] = updated
-				all := m.allTools()
-				notify := m.OnToolsChanged
-				m.mu.Unlock()
-				if notify != nil {
-					notify(all)
+				if notify := m.loadOnToolsChanged(); notify != nil {
+					notify(m.allTools())
 				}
 			}()
 		},
@@ -339,10 +415,9 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		},
 		// Notify caller when a subscribed resource is updated.
 		ResourceUpdatedHandler: func(_ context.Context, req *sdk.ResourceUpdatedNotificationRequest) {
-			if m.OnResourceUpdated == nil {
-				return
+			if fn := m.loadOnResourceUpdated(); fn != nil {
+				fn(serverName, req.Params.URI)
 			}
-			m.OnResourceUpdated(serverName, req.Params.URI)
 		},
 		// Log prompt-list change notifications (our prompt tools use live queries
 		// so no re-enumeration is needed).
@@ -352,8 +427,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		// Forward sampling/createMessage requests to the configured handler.
 		CreateMessageHandler: m.SamplingFn,
 		// Forward elicitation/create requests to the configured handler.
-		// Fall back to DefaultElicitFn so the server always gets a proper
-		// decline response rather than a JSON-RPC "not supported" error.
 		ElicitationHandler: elicitHandler(m.ElicitationFn),
 		// Ping the server periodically to detect dead connections.
 		KeepAlive: 30 * time.Second,
@@ -361,9 +434,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "fir", Version: "dev"}, opts)
 
-	// Advertise filesystem roots. Use the configured roots when present;
-	// fall back to the process working directory so the server always knows
-	// its operating scope.
+	// Advertise filesystem roots.
 	rootURIs := cfg.Roots
 	if len(rootURIs) == 0 {
 		if cwd, err := os.Getwd(); err == nil {
@@ -382,12 +453,17 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
-	m.mu.Lock()
-	m.sessions[name] = session
-	m.mu.Unlock()
+
+	entry := m.loadEntry(name)
+	if entry == nil {
+		_ = session.Close()
+		return nil, fmt.Errorf("server %q removed during connect", name)
+	}
+	m.withEntry(name, func(e *serverEntry) {
+		e.session = session
+	})
 
 	// Request the server to send log messages at the appropriate level.
-	// Best-effort: ignore errors (e.g. server may not support logging).
 	if lerr := session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
 		Level: m.loggingLevel(),
 	}); lerr != nil {
@@ -403,8 +479,6 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 	firlog.Info("mcp connected", "server", name, "tools", len(tools))
 
-	// Expose MCP resources and prompts as additional tools, but only when
-	// the server advertises the corresponding capability.
 	caps := session.InitializeResult().Capabilities
 	if caps != nil && caps.Resources != nil {
 		tools = append(tools,
@@ -419,37 +493,30 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 		)
 	}
 
-	m.mu.Lock()
-	m.tools[name] = tools
-	m.mu.Unlock()
+	m.withEntry(name, func(e *serverEntry) {
+		e.tools = tools
+	})
 
 	// Detect post-startup disconnections so Status() stays accurate.
-	// session.Wait() blocks until the underlying connection is closed (by
-	// either side). When it returns, if this session is still the active
-	// session for this server we clear it from m.sessions and record the
-	// error so callers see Connected:false. If the session was already
-	// replaced or removed (by Reload or Close) the stale-session check exits
-	// early without clobbering the new state.
 	go func() {
 		waitErr := session.Wait()
-		m.mu.Lock()
-		current, ok := m.sessions[name]
-		if !ok || current != session {
-			// Already replaced/removed — nothing to do.
-			m.mu.Unlock()
+		active := false
+		m.withEntry(name, func(e *serverEntry) {
+			if e.session != session {
+				return
+			}
+			active = true
+			e.session = nil
+			e.tools = nil
+			if waitErr != nil {
+				e.err = fmt.Errorf("disconnected: %w", waitErr)
+			}
+		})
+		if !active {
 			return
 		}
-		delete(m.sessions, name)
-		delete(m.tools, name)
-		delete(m.subscribed, name)
-		if waitErr != nil {
-			m.serverErrors[name] = fmt.Errorf("disconnected: %w", waitErr)
-		}
-		notify := m.OnToolsChanged
-		all := m.allTools()
-		m.mu.Unlock()
-		if notify != nil {
-			notify(all)
+		if notify := m.loadOnToolsChanged(); notify != nil {
+			notify(m.allTools())
 		}
 	}()
 
@@ -467,31 +534,31 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig) ([]agent.AgentTool, error) {
 	m.reloadMu.Lock()
 	defer m.reloadMu.Unlock()
-	// Determine which servers to stop (removed or changed) and which to start
-	// (new or changed). We compare configs by JSON serialisation to avoid a
-	// custom equality function.
-	m.mu.Lock()
-	oldConfigs := m.configs
-	m.mu.Unlock()
 
-	toStop := make(map[string]*sdk.ClientSession) // sessions to close
-	toStart := make(map[string]ServerConfig)      // configs to connect
+	oldConfigs := m.configsSnapshot()
+
+	type stopItem struct {
+		name string
+		sess *sdk.ClientSession
+	}
+	var toStop []stopItem
+	toStart := make(map[string]ServerConfig)
 
 	for name, oldCfg := range oldConfigs {
 		if newCfg, exists := newConfigs[name]; !exists {
 			// Server removed.
-			m.mu.Lock()
-			if sess, ok := m.sessions[name]; ok {
-				toStop[name] = sess
+			var sess *sdk.ClientSession
+			m.withEntry(name, func(e *serverEntry) { sess = e.session })
+			if sess != nil {
+				toStop = append(toStop, stopItem{name, sess})
 			}
-			m.mu.Unlock()
 		} else if !configsEqual(oldCfg, newCfg) {
 			// Server config changed — reconnect.
-			m.mu.Lock()
-			if sess, ok := m.sessions[name]; ok {
-				toStop[name] = sess
+			var sess *sdk.ClientSession
+			m.withEntry(name, func(e *serverEntry) { sess = e.session })
+			if sess != nil {
+				toStop = append(toStop, stopItem{name, sess})
 			}
-			m.mu.Unlock()
 			toStart[name] = newCfg
 		}
 	}
@@ -501,42 +568,40 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 		}
 	}
 
-	// Stop removed/changed sessions (outside the lock — Close may block).
-	for name, sess := range toStop {
-		// Remove from m.sessions before closing so the Wait goroutine's
-		// stale-session check (current != session) fires correctly and does
-		// not overwrite the state that Reload is about to establish.
-		m.mu.Lock()
-		delete(m.sessions, name)
-		delete(m.tools, name)
-		delete(m.serverErrors, name)
-		delete(m.subscribed, name)
-		m.mu.Unlock()
-		if err := sess.Close(); err != nil {
-			slog.Warn("MCP Reload: error closing session", "server", name, "err", err)
+	// Stop removed/changed servers.
+	for _, item := range toStop {
+		m.servers.Delete(item.name)
+		if err := item.sess.Close(); err != nil {
+			slog.Warn("MCP Reload: error closing session", "server", item.name, "err", err)
 		}
 	}
 
-	// Update the config map.
-	m.mu.Lock()
-	m.configs = newConfigs
-	m.mu.Unlock()
+	for name, cfg := range newConfigs {
+		if _, starting := toStart[name]; starting {
+			m.servers.Store(name, &serverEntry{config: cfg})
+		} else {
+			m.withEntry(name, func(e *serverEntry) { e.config = cfg })
+		}
+	}
+
+	// Remove entries for servers no longer in newConfigs.
+	m.servers.Range(func(key, _ any) bool {
+		if _, exists := newConfigs[key.(string)]; !exists {
+			m.servers.Delete(key)
+		}
+		return true
+	})
 
 	// Start new/changed servers.
 	for name, cfg := range toStart {
 		_, err := m.startServer(ctx, name, cfg)
 		if err != nil {
-			m.mu.Lock()
-			m.serverErrors[name] = err
-			m.mu.Unlock()
+			m.withEntry(name, func(e *serverEntry) { e.err = err })
 			slog.Warn("MCP Reload: failed to start server", "server", name, "err", err)
 		}
 	}
 
-	m.mu.Lock()
-	all := m.allTools()
-	m.mu.Unlock()
-	return all, nil
+	return m.allTools(), nil
 }
 
 // configsEqual reports whether two ServerConfigs are functionally identical
@@ -550,14 +615,16 @@ func configsEqual(a, b ServerConfig) bool {
 // Close closes all active MCP sessions. Returns the first error encountered,
 // but always attempts to close every session.
 func (m *Manager) Close() error {
-	firlog.Debug("mcp shutting down", "servers", len(m.sessions))
-	m.mu.Lock()
-	sessions := make(map[string]*sdk.ClientSession, len(m.sessions))
-	for k, v := range m.sessions {
-		sessions[k] = v
-		delete(m.sessions, k)
-	}
-	m.mu.Unlock()
+	var sessions []*sdk.ClientSession
+	m.forEachServer(func(_ string, e *serverEntry) bool {
+		if e.session != nil {
+			sessions = append(sessions, e.session)
+			e.session = nil
+			e.tools = nil
+		}
+		return true
+	})
+	firlog.Debug("mcp shutting down", "servers", len(sessions))
 
 	var firstErr error
 	for _, session := range sessions {
@@ -572,10 +639,8 @@ func (m *Manager) Close() error {
 // This is used for infrastructure concerns (e.g. typing indicators) rather
 // than agent-driven tool calls.
 func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, args map[string]any) (*sdk.CallToolResult, error) {
-	m.mu.Lock()
-	session, ok := m.sessions[serverName]
-	m.mu.Unlock()
-	if !ok {
+	var session *sdk.ClientSession
+	if !m.withEntry(serverName, func(e *serverEntry) { session = e.session }) || session == nil {
 		return nil, fmt.Errorf("MCP server %q not connected", serverName)
 	}
 	return session.CallTool(ctx, &sdk.CallToolParams{
@@ -588,18 +653,17 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 // tool names. This checks the raw MCP tool names (not the prefixed agent
 // tool names).
 func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
-	m.mu.Lock()
-	serverTools := m.tools[serverName]
-	m.mu.Unlock()
+	var serverTools []agent.AgentTool
+	if !m.withEntry(serverName, func(e *serverEntry) { serverTools = e.tools }) {
+		return false
+	}
 
-	// Build a set of the raw (unprefixed) tool names this server has.
-	// The agent tool name is "mcp__<server>__<tool>", so strip the prefix.
 	prefix := sanitizeToolName("mcp__" + serverName + "__")
 	have := make(map[string]struct{}, len(serverTools))
 	for _, t := range serverTools {
-		name := t.Tool.Name
-		if len(name) > len(prefix) && name[:len(prefix)] == prefix {
-			have[name[len(prefix):]] = struct{}{}
+		tname := t.Tool.Name
+		if len(tname) > len(prefix) && tname[:len(prefix)] == prefix {
+			have[tname[len(prefix):]] = struct{}{}
 		}
 	}
 	for _, need := range toolNames {
@@ -614,41 +678,30 @@ func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
 type ServerStatus struct {
 	// Name is the key used in the Manager's config map.
 	Name string
-	// Connected is true when the session is currently active.
-	Connected bool
-	// Error is non-nil when the server failed to connect or has disconnected
-	// with an error.
-	Error error
-}
-
-// StatusString returns a human-readable status label: "connected",
-// "disconnected", or "error: <message>".
-func (s ServerStatus) StatusString() string {
-	if s.Error != nil {
-		return "error: " + s.Error.Error()
-	}
-	if s.Connected {
-		return "connected"
-	}
-	return "disconnected"
+	// Status is a human-readable label: "connected", "connecting",
+	// "disconnected", or "error: <message>".
+	Status string
 }
 
 // Status returns a snapshot of the health of each configured server.
 // The slice is ordered by server name for deterministic output.
 func (m *Manager) Status() []ServerStatus {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	out := make([]ServerStatus, 0, len(m.configs))
-	for name := range m.configs {
-		_, connected := m.sessions[name]
-		out = append(out, ServerStatus{
-			Name:      name,
-			Connected: connected,
-			Error:     m.serverErrors[name],
-		})
-	}
-	// Sort by name for deterministic output.
+	var out []ServerStatus
+	m.forEachServer(func(name string, e *serverEntry) bool {
+		var status string
+		switch {
+		case e.err != nil:
+			status = "error: " + e.err.Error()
+		case e.session != nil:
+			status = "connected"
+		case e.connecting:
+			status = "connecting"
+		default:
+			status = "disconnected"
+		}
+		out = append(out, ServerStatus{Name: name, Status: status})
+		return true
+	})
 	slices.SortFunc(out, func(a, b ServerStatus) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -681,10 +734,7 @@ func (m *Manager) WatchAndReload(ctx context.Context, path string) (stop func(),
 			slog.Warn("mcp: config reload failed", "path", path, "err", reloadErr)
 			return
 		}
-		m.mu.Lock()
-		notify := m.OnToolsChanged
-		m.mu.Unlock()
-		if notify != nil {
+		if notify := m.loadOnToolsChanged(); notify != nil {
 			notify(tools)
 		}
 	})

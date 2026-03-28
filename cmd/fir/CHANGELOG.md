@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- ACP `/session` command now uses Markdown lists for cleaner, more readable formatting.
+- MCP server status now shows "connecting" instead of "disconnected" while a server is still establishing its connection.
+
 ## [0.25.0] - 2026-03-27
 
 ### Added
