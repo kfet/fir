@@ -3,12 +3,13 @@
 # name: auto-namer
 # description: Automatically name unnamed sessions after the first interaction
 # builtin: true
-# events: session_start, session_named, tool_execution_start
+# events: session_start, session_named, tool_execution_start, turn_end
 # ---
 """auto_namer.py — derive a short session name from the first user message.
 
-On the first tool call, if the session still has no name, this extension uses
-a side_query to distil the conversation into a three-word kebab-case slug
+On the first tool call or at the end of the first assistant turn (whichever
+comes first), if the session still has no name, this extension uses a
+side_query to distil the conversation into a three-word kebab-case slug
 (e.g. "fix-login-bug", "add-search-api") and sets it as the session name.
 """
 
@@ -37,9 +38,8 @@ def on_session_named(params, ctx):
     _already_named = True
 
 
-@fir_ext.on("tool_execution_start")
-def on_tool_execution_start(params, ctx):
-    """On first tool call, auto-name the session if still unnamed."""
+def _try_name(ctx):
+    """Attempt to auto-name the session exactly once."""
     global _naming_attempted, _already_named
     if _naming_attempted or _already_named:
         return
@@ -68,6 +68,18 @@ def on_tool_execution_start(params, ctx):
 
     if name:
         ctx.set_session_name(name)
+
+
+@fir_ext.on("tool_execution_start")
+def on_tool_execution_start(params, ctx):
+    """Early path: auto-name on first tool call."""
+    _try_name(ctx)
+
+
+@fir_ext.on("turn_end")
+def on_turn_end(params, ctx):
+    """Fallback: auto-name after first turn if no tool triggered naming."""
+    _try_name(ctx)
 
 
 fir_ext.run(name="auto-namer")

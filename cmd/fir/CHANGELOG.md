@@ -12,7 +12,6 @@
 
 - Fixed nil pointer dereference in MCP tool re-listing when `InitializeResult()` returns nil during a race with session initialization.
 - Fixed data race between MCP `Connect()` and `ToolListChangedHandler` calling `InitializeResult()` concurrently; capabilities are now cached after connect.
-- Fixed flaky `TestHandleQueueCommand_ShowsQueuedMessages` in CI by increasing render wait time.
 
 ## [0.26.1] - 2026-03-28
 
