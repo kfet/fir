@@ -87,12 +87,23 @@ func (fp *FirPTY) Output() string {
 	return fp.output.String()
 }
 
-// Send types a string followed by Enter into the PTY.
+// Send types a string followed by Enter (carriage return) into the PTY.
+// Characters are sent with a small inter-key delay so the TUI's event loop
+// can process them reliably (bubbletea reads from the PTY in a goroutine
+// and rapid bulk writes can be coalesced into a single Read).
 func (fp *FirPTY) Send(input string) {
 	fp.t.Helper()
-	_, err := fp.ptmx.Write([]byte(input + "\n"))
-	if err != nil {
-		fp.t.Logf("FirPTY.Send %q: %v", input, err)
+	for _, ch := range input {
+		_, err := fp.ptmx.Write([]byte(string(ch)))
+		if err != nil {
+			fp.t.Logf("FirPTY.Send char %q: %v", ch, err)
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// Send carriage return (Enter) — terminals send \r, not \n.
+	if _, err := fp.ptmx.Write([]byte("\r")); err != nil {
+		fp.t.Logf("FirPTY.Send CR: %v", err)
 	}
 }
 
