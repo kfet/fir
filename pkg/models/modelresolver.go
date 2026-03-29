@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
-// Upstream hash: c99b9940
+// Upstream hash: 41039e8d
 package models
 
 import (
@@ -26,11 +26,11 @@ var DefaultModelPerProvider = map[ai.Provider]string{
 	"vercel-ai-gateway":      "anthropic/claude-opus-4-6",
 	"xai":                    "grok-4-fast-non-reasoning",
 	"groq":                   "openai/gpt-oss-120b",
-	"cerebras":               "zai-glm-4.6",
-	"zai":                    "glm-4.6",
+	"cerebras":               "zai-glm-4.7",
+	"zai":                    "glm-5",
 	"mistral":                "devstral-medium-latest",
-	"minimax":                "MiniMax-M2.1",
-	"minimax-cn":             "MiniMax-M2.1",
+	"minimax":                "MiniMax-M2.7",
+	"minimax-cn":             "MiniMax-M2.7",
 	"huggingface":            "moonshotai/Kimi-K2.5",
 	"opencode":               "claude-opus-4-6",
 	"opencode-go":            "kimi-k2.5",
@@ -99,7 +99,7 @@ func tryMatchModel(pattern string, available []*ai.Model) *ai.Model {
 		}
 	}
 
-	// Exact ID match (case-insensitive)
+	// Exact ID match (case-insensitive) — first match wins
 	for _, m := range available {
 		if strings.ToLower(m.ID) == lp {
 			return m
@@ -468,15 +468,14 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 	restored := registry.Find(savedProvider, savedModelID)
 
 	if restored != nil {
-		apiKey := registry.GetApiKey(restored)
-		if apiKey != "" {
+		if registry.HasConfiguredAuth(restored) {
 			return restored, ""
 		}
 	}
 
 	reason := "model no longer exists"
 	if restored != nil {
-		reason = "no API key available"
+		reason = "no auth configured"
 	}
 
 	if currentModel != nil {

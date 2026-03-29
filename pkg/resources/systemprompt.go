@@ -1,25 +1,14 @@
 // Ported from: packages/coding-agent/src/core/system-prompt.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package resources
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 )
-
-// ToolDescriptions maps built-in tool names to descriptions for the system prompt.
-var ToolDescriptions = map[string]string{
-	"read":  "Read file contents",
-	"bash":  "Execute bash commands (ls, grep, find, etc.)",
-	"edit":  "Make surgical edits to files (find exact text and replace)",
-	"write": "Create or overwrite files",
-	"grep":  "Search file contents for patterns (respects .gitignore)",
-	"find":  "Find files by glob pattern (respects .gitignore)",
-	"ls":    "List directory contents",
-	"plan":  "Create and track a step-by-step plan for complex tasks",
-}
 
 // ContextFile is a pre-loaded context file for the system prompt.
 type ContextFile struct {
@@ -31,6 +20,7 @@ type ContextFile struct {
 type BuildSystemPromptOptions struct {
 	CustomPrompt       string
 	SelectedTools      []string
+	ToolSnippets       map[string]string // one-line snippets for tools to show in "Available tools"
 	AppendSystemPrompt string
 	Cwd                string
 	ContextFiles       []ContextFile
@@ -46,6 +36,9 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 	if opts.Cwd == "" {
 		opts.Cwd = "."
 	}
+	// Normalize backslashes to forward slashes (Windows paths).
+	promptCwd := filepath.ToSlash(opts.Cwd)
+
 	if opts.SelectedTools == nil {
 		opts.SelectedTools = []string{"read", "bash", "edit", "write"}
 	}
@@ -61,13 +54,13 @@ func BuildSystemPrompt(opts BuildSystemPromptOptions) string {
 	}
 
 	if opts.CustomPrompt != "" {
-		return buildCustomPrompt(opts, date, appendSection)
+		return buildCustomPrompt(opts, promptCwd, date, appendSection)
 	}
 
-	return buildDefaultPrompt(opts, date, appendSection)
+	return buildDefaultPrompt(opts, promptCwd, date, appendSection)
 }
 
-func buildCustomPrompt(opts BuildSystemPromptOptions, date, appendSection string) string {
+func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSection string) string {
 	prompt := opts.CustomPrompt + appendSection
 
 	if len(opts.ContextFiles) > 0 {
@@ -83,24 +76,28 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, date, appendSection string
 	}
 
 	prompt += fmt.Sprintf("\nCurrent date: %s", date)
-	prompt += fmt.Sprintf("\nCurrent working directory: %s", opts.Cwd)
+	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
 	return prompt
 }
 
-func buildDefaultPrompt(opts BuildSystemPromptOptions, date, appendSection string) string {
-	// Filter to known tools
-	var tools []string
-	for _, t := range opts.SelectedTools {
-		if _, ok := ToolDescriptions[t]; ok {
-			tools = append(tools, t)
+func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSection string) string {
+	tools := opts.SelectedTools
+
+	// A tool appears in Available tools only when the caller provides a one-line snippet.
+	var visibleTools []string
+	for _, t := range tools {
+		if opts.ToolSnippets != nil {
+			if _, ok := opts.ToolSnippets[t]; ok {
+				visibleTools = append(visibleTools, t)
+			}
 		}
 	}
 
 	toolsList := "(none)"
-	if len(tools) > 0 {
+	if len(visibleTools) > 0 {
 		var lines []string
-		for _, t := range tools {
-			lines = append(lines, fmt.Sprintf("- %s: %s", t, ToolDescriptions[t]))
+		for _, t := range visibleTools {
+			lines = append(lines, fmt.Sprintf("- %s: %s", t, opts.ToolSnippets[t]))
 		}
 		toolsList = strings.Join(lines, "\n")
 	}
@@ -119,18 +116,6 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, date, appendSection strin
 		guidelines = append(guidelines, "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)")
 	}
 
-	if toolSet["read"] && toolSet["edit"] {
-		guidelines = append(guidelines, "Use read to examine files before editing. You must use this tool instead of cat or sed.")
-	}
-	if toolSet["edit"] {
-		guidelines = append(guidelines, "Use edit for precise changes (old text must match exactly)")
-	}
-	if toolSet["write"] {
-		guidelines = append(guidelines, "Use write only for new files or complete rewrites")
-	}
-	if toolSet["edit"] || toolSet["write"] {
-		guidelines = append(guidelines, "When summarizing your actions, output plain text directly - do NOT use cat or bash to display what you did")
-	}
 	guidelines = append(guidelines, "Be concise in your responses")
 	guidelines = append(guidelines, "Show file paths clearly when working with files")
 	if toolSet["plan"] {
@@ -167,6 +152,6 @@ Guidelines:
 	}
 
 	prompt += fmt.Sprintf("\nCurrent date: %s", date)
-	prompt += fmt.Sprintf("\nCurrent working directory: %s", opts.Cwd)
+	prompt += fmt.Sprintf("\nCurrent working directory: %s", promptCwd)
 	return prompt
 }

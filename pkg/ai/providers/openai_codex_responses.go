@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -179,7 +179,8 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 		url := resolveCodexURL(model.BaseURL)
 		firlog.Debug("codex request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
-		headers := buildCodexHeaders(model.Headers, options, accountID, apiKey)
+		sseHeaders := buildCodexSSEHeaders(model.Headers, options, accountID, apiKey)
+		wsHeaders := buildCodexWebSocketHeaders(model.Headers, options, accountID, apiKey)
 
 		// Determine transport preference
 		transport := ai.TransportSSE
@@ -190,7 +191,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 		// Try WebSocket transport if requested
 		if transport != ai.TransportSSE {
 			wsURL := resolveCodexWebSocketURL(model.BaseURL)
-			wsStarted, wsErr := processWebSocketStream(ctx, wsURL, body, headers, output, stream, model, options)
+			wsStarted, wsErr := processWebSocketStream(ctx, wsURL, body, wsHeaders, output, stream, model, options)
 			if wsStarted || transport == ai.TransportWebSocket {
 				if wsErr != nil {
 					output.StopReason = ai.StopReasonError
@@ -231,7 +232,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 				}
 			}
 
-			sseEvents, sseErr = DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))
+			sseEvents, sseErr = DefaultSSEClient.Stream(ctx, url, sseHeaders, bytes.NewReader(body))
 
 			// Check if SSE setup succeeded by trying to read first event
 			// For now, we proceed and handle errors in the event loop
@@ -374,28 +375,40 @@ func convertResponsesInputNoSystem(model *ai.Model, ctx ai.Context) []any {
 
 // --- Headers ---
 
-func buildCodexHeaders(modelHeaders map[string]string, options *ai.StreamOptions, accountID, apiKey string) map[string]string {
+func buildCodexBaseHeaders(modelHeaders map[string]string, options *ai.StreamOptions, accountID, apiKey string) map[string]string {
 	headers := make(map[string]string)
 	for k, v := range modelHeaders {
 		headers[k] = v
 	}
-	headers["Authorization"] = "Bearer " + apiKey
-	headers["chatgpt-account-id"] = accountID
-	headers["OpenAI-Beta"] = "responses=experimental"
-	headers["originator"] = "fir"
-	headers["User-Agent"] = fmt.Sprintf("fir (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
-	headers["accept"] = "text/event-stream"
-	headers["content-type"] = "application/json"
-
 	if options != nil {
 		for k, v := range options.Headers {
 			headers[k] = v
 		}
-		if options.SessionID != "" {
-			headers["session_id"] = options.SessionID
-		}
 	}
+	headers["Authorization"] = "Bearer " + apiKey
+	headers["chatgpt-account-id"] = accountID
+	headers["originator"] = "fir"
+	headers["User-Agent"] = fmt.Sprintf("fir (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
+	headers["accept"] = "text/event-stream"
+	headers["content-type"] = "application/json"
+	return headers
+}
 
+func buildCodexSSEHeaders(modelHeaders map[string]string, options *ai.StreamOptions, accountID, apiKey string) map[string]string {
+	headers := buildCodexBaseHeaders(modelHeaders, options, accountID, apiKey)
+	headers["OpenAI-Beta"] = "responses=experimental"
+	if options != nil && options.SessionID != "" {
+		headers["session_id"] = options.SessionID
+	}
+	return headers
+}
+
+func buildCodexWebSocketHeaders(modelHeaders map[string]string, options *ai.StreamOptions, accountID, apiKey string) map[string]string {
+	headers := buildCodexBaseHeaders(modelHeaders, options, accountID, apiKey)
+	// WebSocket requests must NOT include OpenAI-Beta header
+	if options != nil && options.SessionID != "" {
+		headers["session_id"] = options.SessionID
+	}
 	return headers
 }
 

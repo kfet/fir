@@ -6,5 +6,5 @@ import "embed"
 // Fir extracts these to ~/.cache/fir/sdks/<version>/ at runtime so that
 // extension processes can import them without bundling protocol code.
 //
-//go:embed python/*
+//go:embed python
 var EmbeddedSDKs embed.FS

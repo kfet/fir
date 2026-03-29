@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -453,6 +453,11 @@ func parseOpenAISSE(
 			continue
 		}
 
+		// Track response ID (same across all chunks in a single completion)
+		if chunk.ID != "" && output.ResponseID == "" {
+			output.ResponseID = chunk.ID
+		}
+
 		// Usage
 		if chunk.Usage != nil {
 			output.Usage = parseChunkUsage(chunk.Usage, model)
@@ -470,7 +475,11 @@ func parseOpenAISSE(
 		}
 
 		if choice.FinishReason != nil {
-			output.StopReason = mapOpenAIStopReason(*choice.FinishReason)
+			result := mapOpenAIStopReason(*choice.FinishReason)
+			output.StopReason = result.StopReason
+			if result.ErrorMessage != "" {
+				output.ErrorMessage = result.ErrorMessage
+			}
 		}
 
 		delta := choice.Delta
@@ -606,18 +615,30 @@ func parseChunkUsage(u *openaiUsage, model *ai.Model) ai.Usage {
 	return usage
 }
 
-func mapOpenAIStopReason(reason string) ai.StopReason {
+type openaiStopResult struct {
+	StopReason   ai.StopReason
+	ErrorMessage string
+}
+
+func mapOpenAIStopReason(reason string) openaiStopResult {
 	switch reason {
-	case "stop":
-		return ai.StopReasonStop
+	case "stop", "end":
+		return openaiStopResult{StopReason: ai.StopReasonStop}
 	case "length":
-		return ai.StopReasonLength
+		return openaiStopResult{StopReason: ai.StopReasonLength}
 	case "tool_calls", "function_call":
-		return ai.StopReasonToolUse
+		return openaiStopResult{StopReason: ai.StopReasonToolUse}
 	case "content_filter":
-		return ai.StopReasonError
+		return openaiStopResult{StopReason: ai.StopReasonError}
 	default:
-		return ai.StopReasonStop
+		// Unknown finish reason: treat as error with diagnostic
+		if reason != "" {
+			return openaiStopResult{
+				StopReason:   ai.StopReasonError,
+				ErrorMessage: fmt.Sprintf("Unknown finish_reason: %s", reason),
+			}
+		}
+		return openaiStopResult{StopReason: ai.StopReasonStop}
 	}
 }
 
@@ -684,9 +705,18 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	// Thinking / reasoning format
 	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
 		switch compat.ThinkingFormat {
-		case ai.ThinkingFormatZAI, ai.ThinkingFormatQwen:
-			// Both Z.ai and Qwen use enable_thinking: boolean
+		case ai.ThinkingFormatZAI:
 			body["enable_thinking"] = true
+		case ai.ThinkingFormatQwen:
+			body["enable_thinking"] = true
+		case ai.ThinkingFormatQwenChatTpl:
+			body["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
+		case ai.ThinkingFormatOpenRouter:
+			effort := string(options.ReasoningEffort)
+			if mapped, ok := compat.ReasoningEffortMap[effort]; ok {
+				effort = mapped
+			}
+			body["reasoning"] = map[string]any{"effort": effort}
 		default:
 			if compat.SupportsReasoningEffort {
 				effort := string(options.ReasoningEffort)
@@ -696,9 +726,14 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 				body["reasoning_effort"] = effort
 			}
 		}
-	} else if (compat.ThinkingFormat == ai.ThinkingFormatZAI || compat.ThinkingFormat == ai.ThinkingFormatQwen) && model.Reasoning {
-		// Must explicitly disable since z.ai/qwen default to thinking enabled
+	} else if compat.ThinkingFormat == ai.ThinkingFormatZAI && model.Reasoning {
 		body["enable_thinking"] = false
+	} else if compat.ThinkingFormat == ai.ThinkingFormatQwen && model.Reasoning {
+		body["enable_thinking"] = false
+	} else if compat.ThinkingFormat == ai.ThinkingFormatQwenChatTpl && model.Reasoning {
+		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	} else if compat.ThinkingFormat == ai.ThinkingFormatOpenRouter && model.Reasoning {
+		body["reasoning"] = map[string]any{"effort": "none"}
 	}
 
 	// OpenRouter provider routing preferences

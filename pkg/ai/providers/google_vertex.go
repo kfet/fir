@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-vertex.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -305,6 +305,14 @@ func StreamSimpleGoogleVertex(ctx context.Context, model *ai.Model, prompt ai.Co
 
 	if options == nil || options.Reasoning == "" {
 		// No reasoning requested
+		return StreamGoogleVertex(ctx, model, prompt, base)
+	}
+
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
+		if base.Headers == nil {
+			base.Headers = make(map[string]string)
+		}
+		base.Headers["x-google-thinking-disabled"] = "true"
 		return StreamGoogleVertex(ctx, model, prompt, base)
 	}
 

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-gemini-cli.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -271,7 +271,9 @@ func buildGeminiCLIRequest(
 
 	// Thinking config (passed via headers)
 	if options != nil && options.Headers != nil {
-		if options.Headers["x-gemini-thinking-enabled"] == "true" && model.Reasoning {
+		if options.Headers["x-gemini-thinking-disabled"] == "true" && model.Reasoning {
+			genConfig["thinkingConfig"] = getGeminiCLIDisabledThinkingConfig(model.ID)
+		} else if options.Headers["x-gemini-thinking-enabled"] == "true" && model.Reasoning {
 			thinkingConfig := map[string]any{"includeThoughts": true}
 			if level := options.Headers["x-gemini-thinking-level"]; level != "" {
 				thinkingConfig["thinkingLevel"] = level
@@ -917,6 +919,13 @@ func StreamSimpleGoogleGeminiCLI(
 		return StreamGoogleGeminiCLI(ctx, model, prompt, base)
 	}
 
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
+		base.Headers = mergeHeaders(base.Headers, map[string]string{
+			"x-gemini-thinking-disabled": "true",
+		})
+		return StreamGoogleGeminiCLI(ctx, model, prompt, base)
+	}
+
 	effort := ClampReasoning(options.Reasoning)
 	if isGemini3ModelID(model.ID) {
 		level := getGeminiCLIThinkingLevel(effort, model.ID)
@@ -975,6 +984,18 @@ func derefInt(p *int, def int) int {
 		return *p
 	}
 	return def
+}
+
+// getGeminiCLIDisabledThinkingConfig returns the thinking config to disable thinking.
+// Mirrors the logic in getDisabledThinkingConfig but works with model ID strings.
+func getGeminiCLIDisabledThinkingConfig(modelID string) map[string]any {
+	if isGemini3ProModel(modelID) {
+		return map[string]any{"thinkingLevel": "LOW"}
+	}
+	if isGemini3FlashModel(modelID) {
+		return map[string]any{"thinkingLevel": "MINIMAL"}
+	}
+	return map[string]any{"thinkingBudget": 0}
 }
 
 // --- Registration ---

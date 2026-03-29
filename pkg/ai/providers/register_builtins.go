@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/register-builtins.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import "github.com/kfet/fir/pkg/ai"

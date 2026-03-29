@@ -8,6 +8,12 @@ import (
 func TestBuildSystemPrompt_Default(t *testing.T) {
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
 		Cwd: "/test/dir",
+		ToolSnippets: map[string]string{
+			"read":  "Read file contents",
+			"bash":  "Execute bash commands",
+			"edit":  "Make surgical edits",
+			"write": "Create or overwrite files",
+		},
 	})
 
 	if !strings.Contains(prompt, "expert coding assistant") {
@@ -27,10 +33,25 @@ func TestBuildSystemPrompt_Default(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_NoSnippets(t *testing.T) {
+	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
+		Cwd: "/test/dir",
+	})
+
+	// Without ToolSnippets, tools section shows "(none)"
+	if !strings.Contains(prompt, "(none)") {
+		t.Error("should show (none) when no tool snippets provided")
+	}
+}
+
 func TestBuildSystemPrompt_CustomTools(t *testing.T) {
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
 		SelectedTools: []string{"read", "write"},
 		Cwd:           "/test",
+		ToolSnippets: map[string]string{
+			"read":  "Read file contents",
+			"write": "Create or overwrite files",
+		},
 	})
 
 	if !strings.Contains(prompt, "read: Read file contents") {
@@ -138,9 +159,6 @@ func TestBuildSystemPrompt_Guidelines(t *testing.T) {
 
 	if !strings.Contains(prompt, "Prefer grep/find/ls") {
 		t.Error("should suggest preferring grep/find/ls over bash")
-	}
-	if !strings.Contains(prompt, "Use read to examine files before editing") {
-		t.Error("should suggest reading before editing")
 	}
 
 	// With only bash

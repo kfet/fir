@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package ai
 
 import (
@@ -305,6 +305,7 @@ type AssistantMessage struct {
 	Model        string             `json:"model"`
 	Usage        Usage              `json:"usage"`
 	StopReason   StopReason         `json:"stopReason"`
+	ResponseID   string             `json:"responseId,omitempty"` // Provider-specific response/message identifier when the upstream API exposes one
 	ErrorMessage string             `json:"errorMessage,omitempty"`
 	Timestamp    int64              `json:"timestamp"` // Unix ms
 }
@@ -612,9 +613,11 @@ func (e *AssistantMessageEvent) FinalMessage() *AssistantMessage {
 type ThinkingFormat string
 
 const (
-	ThinkingFormatOpenAI ThinkingFormat = "openai"
-	ThinkingFormatZAI    ThinkingFormat = "zai"
-	ThinkingFormatQwen   ThinkingFormat = "qwen"
+	ThinkingFormatOpenAI      ThinkingFormat = "openai"
+	ThinkingFormatOpenRouter  ThinkingFormat = "openrouter"
+	ThinkingFormatZAI         ThinkingFormat = "zai"
+	ThinkingFormatQwen        ThinkingFormat = "qwen"
+	ThinkingFormatQwenChatTpl ThinkingFormat = "qwen-chat-template"
 )
 
 // MaxTokensField controls which JSON field name is used for max tokens.

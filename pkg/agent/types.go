@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/types.ts
-// Upstream hash: 9e22d391
+// Upstream hash: 41039e8d
 package agent
 
 import (
@@ -30,7 +30,10 @@ type AgentLoopConfig struct {
 	GetApiKey func(provider string) (string, error)
 
 	// GetSteeringMessages returns steering messages to inject mid-run.
-	// Called after each tool execution to check for user interruptions.
+	// Called after the current assistant turn finishes executing its tool calls.
+	// Tool calls from the current assistant message are not skipped.
+	//
+	// Contract: must not return an error. Return nil/empty when no steering messages are available.
 	GetSteeringMessages func() ([]AgentMessage, error)
 
 	// GetFollowUpMessages returns follow-up messages after the agent would otherwise stop.

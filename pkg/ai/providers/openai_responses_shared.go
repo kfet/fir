@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses-shared.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -45,6 +45,13 @@ func (p *responsesSSEProcessor) processEvent(data string) (bool, error) {
 	eventType, _ := raw["type"].(string)
 
 	switch eventType {
+	case "response.created":
+		if respRaw, ok := raw["response"].(map[string]any); ok {
+			if id, ok := respRaw["id"].(string); ok && p.output.ResponseID == "" {
+				p.output.ResponseID = id
+			}
+		}
+
 	case "response.output_item.added":
 		p.handleOutputItemAdded(raw)
 
@@ -446,6 +453,9 @@ func (p *responsesSSEProcessor) handleResponseCompleted(raw map[string]any) {
 	if respRaw == nil {
 		return
 	}
+	if id, ok := respRaw["id"].(string); ok && p.output.ResponseID == "" {
+		p.output.ResponseID = id
+	}
 	if usageRaw, ok := respRaw["usage"].(map[string]any); ok {
 		cachedTokens := 0
 		if details, ok := usageRaw["input_tokens_details"].(map[string]any); ok {
@@ -505,35 +515,53 @@ var responsesToolCallProviders = map[string]bool{
 	"azure-openai-responses": true,
 }
 
+// normalizeIdPart sanitizes and truncates an ID part for the Responses API.
+func normalizeIdPart(s string) string {
+	sanitized := sanitizeIDChars(s)
+	if len(sanitized) > 64 {
+		sanitized = sanitized[:64]
+	}
+	return strings.TrimRight(sanitized, "_")
+}
+
+// buildForeignResponsesItemId creates a normalized item ID for tool calls
+// originating from a different provider/API than the current model.
+func buildForeignResponsesItemId(itemID string) string {
+	normalized := "fc_" + shortHash(itemID)
+	if len(normalized) > 64 {
+		normalized = normalized[:64]
+	}
+	return normalized
+}
+
 // normalizeResponsesToolCallID normalizes tool call IDs for the OpenAI Responses API.
 // IDs with "|" are split into callId|itemId and each part is sanitized.
-func normalizeResponsesToolCallID(id string, model *ai.Model, _ *ai.AssistantMessage) string {
+// When the source assistant message came from a different provider/API, item IDs
+// are hashed to avoid conflicts.
+func normalizeResponsesToolCallID(id string, model *ai.Model, source *ai.AssistantMessage) string {
 	if !responsesToolCallProviders[string(model.Provider)] {
-		return id
+		return normalizeIdPart(id)
 	}
 	if !strings.Contains(id, "|") {
-		return id
+		return normalizeIdPart(id)
 	}
 	parts := strings.SplitN(id, "|", 2)
-	callID := sanitizeIDChars(parts[0])
-	itemID := sanitizeIDChars(parts[1])
+	callID := normalizeIdPart(parts[0])
 
-	// OpenAI Responses API requires item id to start with "fc"
-	if !strings.HasPrefix(itemID, "fc") {
-		itemID = "fc_" + itemID
+	// Detect foreign tool calls (originating from a different provider/API)
+	isForeign := source != nil && (source.Provider != model.Provider || source.Api != model.Api)
+
+	var itemID string
+	if isForeign {
+		itemID = buildForeignResponsesItemId(parts[1])
+	} else {
+		itemID = normalizeIdPart(parts[1])
 	}
 
-	// Truncate to 64 chars
-	if len(callID) > 64 {
-		callID = callID[:64]
+	// OpenAI Responses API requires item id to start with "fc_"
+	if !strings.HasPrefix(itemID, "fc_") {
+		itemID = normalizeIdPart("fc_" + itemID)
 	}
-	if len(itemID) > 64 {
-		itemID = itemID[:64]
-	}
-
-	// Strip trailing underscores (OpenAI Codex rejects them)
-	callID = strings.TrimRight(callID, "_")
-	itemID = strings.TrimRight(itemID, "_")
 
 	return callID + "|" + itemID
 }

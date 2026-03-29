@@ -218,7 +218,7 @@ func TestAgentLoop_ToolNotFound(t *testing.T) {
 	}
 }
 
-func TestAgentLoop_SteeringSkipsRemainingTools(t *testing.T) {
+func TestAgentLoop_SteeringAfterAllToolCalls(t *testing.T) {
 	events := make(chan AgentEvent, 200)
 
 	var toolExecutions []string
@@ -258,8 +258,9 @@ func TestAgentLoop_SteeringSkipsRemainingTools(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 		GetSteeringMessages: func() ([]AgentMessage, error) {
 			steeringCalled++
-			// After the first tool call, inject a steering message
-			if steeringCalled == 2 { // first call is at loop start, second is after first tool
+			// Steering is checked after the full turn (all tool calls),
+			// not after each individual tool call.
+			if steeringCalled == 2 {
 				return []AgentMessage{
 					NewAgentMessage(ai.NewUserMsg("Stop! New instruction.", time.Now().UnixMilli())),
 				}, nil
@@ -286,20 +287,9 @@ func TestAgentLoop_SteeringSkipsRemainingTools(t *testing.T) {
 
 	allEvents := collectEvents(events)
 
-	// Only the first tool should have actually executed
-	if len(toolExecutions) != 1 {
-		t.Errorf("expected 1 tool execution, got %d: %v", len(toolExecutions), toolExecutions)
-	}
-
-	// The second tool should have been skipped with an error result
-	skippedCount := 0
-	for _, e := range allEvents {
-		if e.Type == EventToolExecutionEnd && e.IsError && e.ToolCallID == "call-2" {
-			skippedCount++
-		}
-	}
-	if skippedCount != 1 {
-		t.Errorf("expected 1 skipped tool, got %d", skippedCount)
+	// Both tools should have executed (no skipping)
+	if len(toolExecutions) != 2 {
+		t.Errorf("expected 2 tool executions, got %d: %v", len(toolExecutions), toolExecutions)
 	}
 
 	// Should end with agent_end

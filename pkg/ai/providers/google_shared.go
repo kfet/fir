@@ -1,13 +1,41 @@
 // Ported from: packages/ai/src/providers/google-shared.ts
-// Upstream hash: c99b9940
+// Upstream hash: 41039e8d
 package providers
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
 )
+
+// getGeminiMajorVersion extracts the major version number from a Gemini model ID.
+// Returns -1 if the model ID doesn't match the expected pattern.
+func getGeminiMajorVersion(modelID string) int {
+	lower := strings.ToLower(modelID)
+	re := regexp.MustCompile(`^gemini(?:-live)?-(\d+)`)
+	match := re.FindStringSubmatch(lower)
+	if match == nil {
+		return -1
+	}
+	v, err := strconv.Atoi(match[1])
+	if err != nil {
+		return -1
+	}
+	return v
+}
+
+// supportsMultimodalFunctionResponse returns true if the model supports
+// images nested inside functionResponse.parts (Gemini 3+ and non-Gemini models).
+func supportsMultimodalFunctionResponse(modelID string) bool {
+	v := getGeminiMajorVersion(modelID)
+	if v >= 0 {
+		return v >= 3
+	}
+	// Non-Gemini models (e.g. Claude behind Antigravity) support it
+	return true
+}
 
 // --- Thinking support ---
 
@@ -256,7 +284,10 @@ func convertToolResultParts(model *ai.Model, tr *ai.ToolResultMessage, contents 
 		responseValue = "(see attached image)"
 	}
 
-	supportsMultimodal := strings.Contains(model.ID, "gemini-3")
+	// Gemini 3+ models support multimodal function responses with images nested inside
+	// functionResponse.parts. Claude and other non-Gemini models behind Cloud Code Assist /
+	// Antigravity also accept this shape. Gemini < 3 still needs a separate user image turn.
+	supportsMultimodal := supportsMultimodalFunctionResponse(model.ID)
 
 	respKey := "output"
 	if tr.IsError {

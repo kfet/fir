@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent-loop.ts
-// Upstream hash: 9e22d391
+// Upstream hash: 41039e8d
 package agent
 
 import (
@@ -93,7 +93,6 @@ func runLoop(
 	// Outer loop: continues when follow-up messages arrive
 	for {
 		hasMoreToolCalls := true
-		var steeringAfterTools []AgentMessage
 
 		// Inner loop: process tool calls and steering
 		for hasMoreToolCalls || len(pendingMessages) > 0 {
@@ -140,9 +139,7 @@ func runLoop(
 
 			var toolResults []ai.ToolResultMessage
 			if hasMoreToolCalls {
-				results, steering := executeToolCalls(ctx, currentCtx.Tools, message, events, config.GetSteeringMessages)
-				toolResults = results
-				steeringAfterTools = steering
+				toolResults = executeToolCalls(ctx, currentCtx, message, events)
 
 				for _, result := range toolResults {
 					currentCtx.Messages = append(currentCtx.Messages, NewAgentMessage(ai.NewToolResultMsg(result)))
@@ -157,11 +154,8 @@ func runLoop(
 				ToolResults: toolResults,
 			}
 
-			// Get steering messages after turn
-			if len(steeringAfterTools) > 0 {
-				pendingMessages = steeringAfterTools
-				steeringAfterTools = nil
-			} else if config.GetSteeringMessages != nil {
+			// Get steering messages after turn completes
+			if config.GetSteeringMessages != nil {
 				var err error
 				pendingMessages, err = config.GetSteeringMessages()
 				if err != nil {
@@ -332,11 +326,10 @@ func streamAssistantResponse(
 // executeToolCalls executes tool calls from an assistant message.
 func executeToolCalls(
 	ctx context.Context,
-	tools *ToolSet,
+	agentCtx *AgentContext,
 	assistantMsg *ai.AssistantMessage,
 	events chan<- AgentEvent,
-	getSteeringMessages func() ([]AgentMessage, error),
-) ([]ai.ToolResultMessage, []AgentMessage) {
+) []ai.ToolResultMessage {
 	var toolCalls []ai.ToolCall
 	for _, c := range assistantMsg.Content {
 		if c.IsToolCall() {
@@ -345,13 +338,12 @@ func executeToolCalls(
 	}
 
 	var results []ai.ToolResultMessage
-	var steeringMessages []AgentMessage
 
-	for i, tc := range toolCalls {
+	for _, tc := range toolCalls {
 		firlog.Debug("executing tool", "name", tc.Name, "id", tc.ID)
 
 		// Look up the tool early so DisplayHint is available on the start event.
-		tool, found := tools.Get(tc.Name)
+		tool, found := agentCtx.Tools.Get(tc.Name)
 		var displayHint *ToolDisplayHint
 		if found {
 			displayHint = tool.DisplayHint
@@ -425,59 +417,9 @@ func executeToolCalls(
 		trMsg := NewAgentMessage(ai.NewToolResultMsg(toolResult))
 		events <- AgentEvent{Type: EventMessageStart, Message: &trMsg}
 		events <- AgentEvent{Type: EventMessageEnd, Message: &trMsg}
-
-		// Check for steering messages after each tool
-		if getSteeringMessages != nil {
-			steering, err := getSteeringMessages()
-			if err == nil && len(steering) > 0 {
-				steeringMessages = steering
-				// Skip remaining tools
-				for _, skipped := range toolCalls[i+1:] {
-					results = append(results, skipToolCall(skipped, events))
-				}
-				break
-			}
-		}
 	}
 
-	return results, steeringMessages
-}
-
-// skipToolCall creates a skipped tool result.
-func skipToolCall(tc ai.ToolCall, events chan<- AgentEvent) ai.ToolResultMessage {
-	events <- AgentEvent{
-		Type:       EventToolExecutionStart,
-		ToolCallID: tc.ID,
-		ToolName:   tc.Name,
-		Args:       tc.Arguments,
-	}
-
-	result := AgentToolResult{
-		Content: []ai.ToolResultContent{{Type: "text", Text: "Skipped due to queued user message."}},
-	}
-
-	events <- AgentEvent{
-		Type:       EventToolExecutionEnd,
-		ToolCallID: tc.ID,
-		ToolName:   tc.Name,
-		Result:     result,
-		IsError:    true,
-	}
-
-	toolResult := ai.ToolResultMessage{
-		Role:       "toolResult",
-		ToolCallID: tc.ID,
-		ToolName:   tc.Name,
-		Content:    result.Content,
-		IsError:    true,
-		Timestamp:  time.Now().UnixMilli(),
-	}
-
-	trMsg := NewAgentMessage(ai.NewToolResultMsg(toolResult))
-	events <- AgentEvent{Type: EventMessageStart, Message: &trMsg}
-	events <- AgentEvent{Type: EventMessageEnd, Message: &trMsg}
-
-	return toolResult
+	return results
 }
 
 // errorAssistantMessage creates an error assistant message.

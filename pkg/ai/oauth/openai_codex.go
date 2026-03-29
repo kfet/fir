@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/oauth/openai-codex.ts
-// Upstream hash: 7b3c9f1a
+// Upstream hash: 41039e8d
 package oauth
 
 import (

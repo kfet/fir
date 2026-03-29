@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/anthropic.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -76,7 +76,8 @@ func isOAuthTokenStr(apiKey string) bool {
 }
 
 func supportsAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6")
+	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 
 func matchesServerToolCapability(model *ai.Model, toolType string) bool {
@@ -328,6 +329,9 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				switch eventType {
 				case "message_start":
 					if msg, ok := raw["message"].(map[string]any); ok {
+						if id, ok := msg["id"].(string); ok && output.ResponseID == "" {
+							output.ResponseID = id
+						}
 						if usage, ok := msg["usage"].(map[string]any); ok {
 							updateAnthropicUsage(output, usage, model)
 						}
@@ -576,6 +580,15 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
+	// Explicitly disable thinking when requested on a reasoning model
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
+		if base.Headers == nil {
+			base.Headers = map[string]string{}
+		}
+		base.Headers["x-anthropic-thinking-disabled"] = "true"
+		return StreamAnthropic(ctx, model, prompt, base)
+	}
+
 	// For Opus 4.6+: adaptive thinking
 	if supportsAdaptiveThinking(model.ID) {
 		// Pass effort via header (custom extension)
@@ -758,7 +771,9 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 
 	// Thinking (from internal headers)
 	if options != nil && options.Headers != nil {
-		if options.Headers["x-anthropic-thinking-enabled"] == "true" {
+		if options.Headers["x-anthropic-thinking-disabled"] == "true" {
+			params["thinking"] = map[string]any{"type": "disabled"}
+		} else if options.Headers["x-anthropic-thinking-enabled"] == "true" {
 			budgetStr := options.Headers["x-anthropic-thinking-budget"]
 			budget := 1024
 			if budgetStr != "" {

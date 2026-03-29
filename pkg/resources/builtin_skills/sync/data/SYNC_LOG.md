@@ -1,5 +1,45 @@
 # Sync Log
 
+## 2025-07-18 — Sync to v0.63.2 (commit 41039e8d)
+
+- `ai/src/types.ts` → `pkg/ai/types.go`: Added `ResponseID` field to `AssistantMessage`; expanded `ThinkingFormat` with `openrouter` and `qwen-chat-template` variants; added contract docs to `StreamFunction` and `AssistantMessageEventType`.
+- `ai/src/providers/anthropic.ts` → `pkg/ai/providers/anthropic.go`: `supportsAdaptiveThinking` now includes `sonnet-4-6`/`sonnet-4.6`; added `ResponseID` extraction from `message_start`; added `thinking: disabled` support for reasoning models when thinking is explicitly off.
+- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: `mapOpenAIStopReason` now returns struct with `ErrorMessage`; added `ResponseID` tracking from chunk ID; added `"end"` as stop reason alias for `"stop"`; unknown finish reasons now produce error with diagnostic; added `openrouter`, `qwen-chat-template` thinking formats.
+- `ai/src/providers/openai-responses.ts` → `pkg/ai/providers/openai_responses.go`: Replaced GPT-5 "Juice: 0" hack with proper `reasoning: {effort: "none"}`; GitHub Copilot excluded from reasoning disable.
+- `ai/src/providers/openai-responses-shared.ts` → `pkg/ai/providers/openai_responses_shared.go`: Added `response.created` event for `ResponseID`; improved tool call ID normalization with `normalizeIdPart` and `buildForeignResponsesItemId` for cross-provider tool call replay; added `ResponseID` to `response.completed`.
+- `ai/src/providers/azure-openai-responses.ts` → `pkg/ai/providers/azure_openai_responses.go`: Replaced GPT-5 "Juice: 0" hack with `reasoning: {effort: "none"}`.
+- `ai/src/providers/openai-codex-responses.ts` → `pkg/ai/providers/openai_codex_responses.go`: Hash updated (upstream split SSE/WebSocket headers, N/A in Go SSE-only impl).
+- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: Cache detection now uses `AWS_BEDROCK_FORCE_CACHE=1` env for application inference profiles; thinking signature fallback to plain text when signature is missing (prevents Bedrock rejection).
+- `ai/src/providers/google.ts` → `pkg/ai/providers/google.go`: Subtract cached tokens from input usage; added disabled thinking config (`thinkingBudget: 0` or lowest `thinkingLevel`); added `isGemini3ProModel`/`isGemini3FlashModel` helpers.
+- `ai/src/providers/google-shared.ts` → `pkg/ai/providers/google_shared.go`: Multimodal function response support now version-based (`getGeminiMajorVersion >= 3`) instead of string check; non-Gemini models also supported.
+- `ai/src/providers/google-vertex.ts` → `pkg/ai/providers/google_vertex.go`: Added disabled thinking support.
+- `ai/src/providers/google-gemini-cli.ts` → `pkg/ai/providers/google_gemini_cli.go`: Added disabled thinking config; added `getGeminiCLIDisabledThinkingConfig` helper.
+- `ai/src/providers/register-builtins.ts` → `pkg/ai/providers/register_builtins.go`: Hash updated (upstream refactored to full lazy loading, N/A in Go).
+- `ai/src/utils/overflow.ts` → `pkg/ai/overflow/overflow.go`: Added Ollama explicit overflow error pattern.
+- `ai/src/utils/oauth/anthropic.ts` → `pkg/ai/oauth/anthropic.go`: Hash updated (upstream refactored callback server internals, Go already uses proper callback server).
+- `ai/src/utils/oauth/openai-codex.ts` → `pkg/ai/oauth/openai_codex.go`: Hash updated (upstream refactored to promise-based waiting, N/A in Go).
+- `agent/src/types.ts` → `pkg/agent/types.go`: Added `ToolExecutionMode`, `BeforeToolCallContext`/`Result`, `AfterToolCallContext`/`Result` types; added `ToolExecution`, `BeforeToolCall`, `AfterToolCall` fields to `AgentLoopConfig`; updated `GetSteeringMessages` docs (called after full turn, not per-tool).
+- `agent/src/agent-loop.ts` → `pkg/agent/loop.go`: Steering messages now checked after full turn (all tool calls complete) instead of after each tool; tool calls are no longer skipped when steering arrives; added `BeforeToolCall`/`AfterToolCall` hook invocations; removed `skipToolCall`.
+- `agent/src/agent.ts` → `pkg/agent/agent.go`: Hash updated.
+- `coding-agent/src/core/system-prompt.ts` → `pkg/resources/systemprompt.go`: Removed built-in `ToolDescriptions`; "Available tools" now only shows tools with caller-provided `ToolSnippets`; removed hardcoded edit/write/read-before-edit guidelines; added backslash→forward-slash cwd normalization.
+- `coding-agent/src/core/model-resolver.ts` → `pkg/models/modelresolver.go`: Added `FindExactModelReferenceMatch` (strict, rejects ambiguous bare IDs); default model updates: cerebras→`zai-glm-4.7`, zai→`glm-5`, minimax→`MiniMax-M2.7`; `RestoreModelFromSession` uses `HasConfiguredAuth` instead of `GetApiKey`.
+- `coding-agent/src/core/model-registry.ts` → `pkg/models/modelregistry.go`: Added `HasConfiguredAuth` method (checks auth storage + custom provider API keys).
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: Added `gpt-5.4-mini` codex model; github-copilot and dot-notation context window overrides for opus/sonnet-4-6; MiniMax filtering (only M2.7/M2.7-highspeed kept); added Vertex `gemini-3.1-pro-preview-customtools`; google-antigravity opus/sonnet context window overrides.
+
+### Notable changes
+
+- **ResponseID tracking**: All providers now extract and store the upstream response/message ID, enabling response-level tracing and replay.
+- **Disabled thinking support**: Reasoning models can now have thinking explicitly disabled (Anthropic: `type: disabled`; Google: lowest `thinkingLevel` or `thinkingBudget: 0`).
+- **New thinking formats**: `openrouter` (uses `reasoning: {effort}`) and `qwen-chat-template` (uses `chat_template_kwargs.enable_thinking`).
+- **Steering behaviour change**: Steering messages are now delivered after the complete assistant turn (all tool calls finish), not after each individual tool call. Tool calls are no longer skipped.
+- **BeforeToolCall/AfterToolCall hooks**: New extension points for blocking tool execution or overriding tool results.
+- **FindExactModelReferenceMatch**: Strict model lookup that rejects ambiguous bare IDs across providers.
+- **GPT-5 reasoning disable**: Replaced the `Juice: 0` hack with proper `reasoning: {effort: "none"}`.
+- **Bedrock thinking signature fallback**: Missing signatures now fall back to plain text instead of being rejected.
+- **Bedrock cache for app inference profiles**: `AWS_BEDROCK_FORCE_CACHE=1` env var enables cache points for application inference profiles.
+- **MiniMax model pruning**: Only M2.7 and M2.7-highspeed models are kept; deprecated models removed.
+- **System prompt simplification**: Built-in tool descriptions removed; only caller-provided tool snippets shown.
+
 ## 2026-03-13 — Sync to commit f04d9bc4 (tags v0.57.0, v0.57.1)
 
 - `ai/src/types.ts` → `pkg/ai/types.go`: Added `OnPayload` hook to `StreamOptions`; added protocol doc comment to `AssistantMessageEventType`.

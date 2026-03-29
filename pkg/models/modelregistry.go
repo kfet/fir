@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-registry.ts
-// Upstream hash: c99b9940
+// Upstream hash: 41039e8d
 package models
 
 import (
@@ -737,6 +737,18 @@ func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 // GetApiKey returns the API key for a model's provider.
 func (r *ModelRegistry) GetApiKey(model *ai.Model) string {
 	return r.authStorage.GetApiKey(model.Provider)
+}
+
+// HasConfiguredAuth returns true if the model has any configured authentication
+// (either via auth storage or a custom provider API key config).
+func (r *ModelRegistry) HasConfiguredAuth(model *ai.Model) bool {
+	if r.authStorage.HasAuth(model.Provider) {
+		return true
+	}
+	r.mu.RLock()
+	_, hasCustomKey := r.customProviderApiKeys[model.Provider]
+	r.mu.RUnlock()
+	return hasCustomKey
 }
 
 // GetApiKeyForProvider returns the API key for a provider.

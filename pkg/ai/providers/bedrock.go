@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 //
 // Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
 // SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
@@ -487,17 +487,24 @@ func convertBedrockMessages(messages []ai.Message, model *ai.Model, canCache boo
 					})
 				case block.IsThinking():
 					if strings.TrimSpace(block.Thinking.Thinking) != "" {
-						reasoning := brtypes.ReasoningTextBlock{
-							Text: strPtr(block.Thinking.Thinking),
+						// Signatures arrive after thinking deltas. If a partial or externally
+						// persisted message lacks a signature, Bedrock rejects the replayed
+						// reasoning block. Fall back to plain text, matching Anthropic.
+						if !supportsBedrockThinkingSignature(model) || strings.TrimSpace(block.Thinking.ThinkingSignature) == "" {
+							blocks = append(blocks, &brtypes.ContentBlockMemberText{
+								Value: block.Thinking.Thinking,
+							})
+						} else {
+							reasoning := brtypes.ReasoningTextBlock{
+								Text:      strPtr(block.Thinking.Thinking),
+								Signature: strPtr(block.Thinking.ThinkingSignature),
+							}
+							blocks = append(blocks, &brtypes.ContentBlockMemberReasoningContent{
+								Value: &brtypes.ReasoningContentBlockMemberReasoningText{
+									Value: reasoning,
+								},
+							})
 						}
-						if supportsBedrockThinkingSignature(model) {
-							reasoning.Signature = strPtr(block.Thinking.ThinkingSignature)
-						}
-						blocks = append(blocks, &brtypes.ContentBlockMemberReasoningContent{
-							Value: &brtypes.ReasoningContentBlockMemberReasoningText{
-								Value: reasoning,
-							},
-						})
 					}
 				}
 			}
@@ -654,13 +661,27 @@ func bedrockCachePoint(retention ai.CacheRetention) brtypes.CachePointBlock {
 	return cp
 }
 
-// supportsBedrockPromptCaching checks if the model supports prompt caching.
+// supportsBedrockPromptCaching determines whether cache points should be added.
+//
+// For base models and system-defined inference profiles the model ID / ARN
+// contains the model name, so we can decide locally.
+//
+// For application inference profiles (whose ARNs don't contain the model name),
+// set AWS_BEDROCK_FORCE_CACHE=1 to enable cache points. Amazon Nova models
+// have automatic caching and don't need explicit cache points.
 func supportsBedrockPromptCaching(model *ai.Model) bool {
-	if model.Cost.CacheRead > 0 || model.Cost.CacheWrite > 0 {
-		return true
-	}
 	id := strings.ToLower(model.ID)
-	if strings.Contains(id, "claude") && (strings.Contains(id, "-4-") || strings.Contains(id, "-4.")) {
+
+	if !strings.Contains(id, "claude") {
+		// Application inference profiles don't contain the model name in the ARN.
+		// Allow users to force cache points via environment variable.
+		if os.Getenv("AWS_BEDROCK_FORCE_CACHE") == "1" {
+			return true
+		}
+		return false
+	}
+
+	if strings.Contains(id, "-4-") || strings.Contains(id, "-4.") {
 		return true
 	}
 	if strings.Contains(id, "claude-3-7-sonnet") {

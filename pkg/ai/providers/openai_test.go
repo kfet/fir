@@ -157,11 +157,14 @@ func TestStreamOpenAI_HTTPError(t *testing.T) {
 }
 
 func TestMapOpenAIStopReason(t *testing.T) {
-	assert.Equal(t, ai.StopReasonStop, mapOpenAIStopReason("stop"))
-	assert.Equal(t, ai.StopReasonLength, mapOpenAIStopReason("length"))
-	assert.Equal(t, ai.StopReasonToolUse, mapOpenAIStopReason("tool_calls"))
-	assert.Equal(t, ai.StopReasonError, mapOpenAIStopReason("content_filter"))
-	assert.Equal(t, ai.StopReasonStop, mapOpenAIStopReason("unknown"))
+	assert.Equal(t, openaiStopResult{StopReason: ai.StopReasonStop}, mapOpenAIStopReason("stop"))
+	assert.Equal(t, openaiStopResult{StopReason: ai.StopReasonStop}, mapOpenAIStopReason("end"))
+	assert.Equal(t, openaiStopResult{StopReason: ai.StopReasonLength}, mapOpenAIStopReason("length"))
+	assert.Equal(t, openaiStopResult{StopReason: ai.StopReasonToolUse}, mapOpenAIStopReason("tool_calls"))
+	assert.Equal(t, openaiStopResult{StopReason: ai.StopReasonError}, mapOpenAIStopReason("content_filter"))
+	result := mapOpenAIStopReason("unknown")
+	assert.Equal(t, ai.StopReasonError, result.StopReason)
+	assert.Contains(t, result.ErrorMessage, "Unknown finish_reason")
 }
 
 func TestStreamSimpleOpenAI_NoApiKey(t *testing.T) {

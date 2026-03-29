@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -258,16 +258,8 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 				"summary": "auto",
 			}
 			body["include"] = []string{"reasoning.encrypted_content"}
-		} else if strings.HasPrefix(model.Name, "gpt-5") {
-			// GPT-5 requires explicit reasoning disable
-			// https://community.openai.com/t/need-reasoning-false-option-for-gpt-5/1351588/7
-			input = append(input, map[string]any{
-				"role": "developer",
-				"content": []map[string]any{
-					{"type": "input_text", "text": "# Juice: 0 !important"},
-				},
-			})
-			body["input"] = input
+		} else if model.Provider != ai.ProviderGitHubCopilot {
+			body["reasoning"] = map[string]any{"effort": "none"}
 		}
 	}
 

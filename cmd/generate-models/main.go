@@ -1,5 +1,5 @@
 // Ported from: packages/ai/scripts/generate-models.ts
-// Upstream hash: 3a3e37d3
+// Upstream hash: 41039e8d
 //
 // Command generate-models fetches model data from external APIs and generates
 // pkg/ai/models_generated.go. It is a Go port of scripts/generate-models.ts.
@@ -1326,6 +1326,25 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	}
 	all = filtered
 
+	// Filter MiniMax: only keep supported direct models
+	minimaxDirectSupported := map[string]bool{"MiniMax-M2.7": true, "MiniMax-M2.7-highspeed": true}
+	filtered = all[:0]
+	for _, m := range all {
+		if (m.Provider == "minimax" || m.Provider == "minimax-cn") && !minimaxDirectSupported[m.ID] {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	all = filtered
+
+	// Set MiniMax M2.7 context/max tokens
+	for i := range all {
+		if (all[i].Provider == "minimax" || all[i].Provider == "minimax-cn") && minimaxDirectSupported[all[i].ID] {
+			all[i].ContextWindow = 204800
+			all[i].MaxTokens = 131072
+		}
+	}
+
 	// Fix incorrect cache pricing for Claude Opus 4.5 from models.dev
 	for i := range all {
 		if all[i].Provider == "anthropic" && all[i].ID == "claude-opus-4-5" {
@@ -1345,8 +1364,12 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		if m.Provider == "amazon-bedrock" && strings.Contains(m.ID, "anthropic.claude-sonnet-4-6") {
 			m.ContextWindow = 1000000
 		}
-		if (m.Provider == "anthropic" || m.Provider == "opencode" || m.Provider == "opencode-go") &&
-			(m.ID == "claude-opus-4-6" || m.ID == "claude-sonnet-4-6") {
+		if (m.Provider == "anthropic" || m.Provider == "opencode" || m.Provider == "opencode-go" || m.Provider == "github-copilot") &&
+			(m.ID == "claude-opus-4-6" || m.ID == "claude-sonnet-4-6" || m.ID == "claude-opus-4.6" || m.ID == "claude-sonnet-4.6") {
+			m.ContextWindow = 1000000
+		}
+		if m.Provider == "google-antigravity" &&
+			(m.ID == "claude-opus-4-6-thinking" || m.ID == "claude-sonnet-4-6") {
 			m.ContextWindow = 1000000
 		}
 		// OpenCode variants list Claude Sonnet 4/4.5 with 1M context, actual limit is 200K
@@ -1539,6 +1562,10 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
 			CostInput: 2.5, CostOutput: 15, CostCacheRead: 0.25, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: codexMaxTokens},
+		{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", API: "openai-codex-responses", Provider: "openai-codex",
+			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
+			CostInput: 0.75, CostOutput: 4.5, CostCacheRead: 0.075, CostCacheWrite: 0,
+			ContextWindow: codexContext, MaxTokens: codexMaxTokens},
 	}
 	all = append(all, codexModels...)
 
@@ -1625,6 +1652,19 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			Reasoning: true,
 			Input:     []string{"text", "image"},
 			CostInput: 0.1, CostOutput: 0.4, CostCacheRead: 0.01, CostCacheWrite: 0,
+			ContextWindow: 1048576, MaxTokens: 65536,
+		})
+	}
+
+	if !hasModel(all, "google-vertex", "gemini-3.1-pro-preview-customtools") {
+		all = append(all, modelSpec{
+			ID:        "gemini-3.1-pro-preview-customtools",
+			Name:      "Gemini 3.1 Pro Preview Custom Tools (Vertex)",
+			API:       "google-vertex",
+			Provider:  "google-vertex",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: 65536,
 		})
 	}

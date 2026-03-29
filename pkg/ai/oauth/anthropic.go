@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/oauth/anthropic.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package oauth
 
 import (

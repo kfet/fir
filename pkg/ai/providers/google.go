@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 41039e8d
 package providers
 
 import (
@@ -241,7 +241,7 @@ func parseGoogleResponse(
 
 		// Process usage
 		if resp.UsageMetadata != nil {
-			output.Usage.Input = resp.UsageMetadata.PromptTokenCount
+			output.Usage.Input = resp.UsageMetadata.PromptTokenCount - resp.UsageMetadata.CachedContentTokenCount
 			output.Usage.Output = resp.UsageMetadata.CandidatesTokenCount + resp.UsageMetadata.ThinkingTokenCount
 			output.Usage.CacheRead = resp.UsageMetadata.CachedContentTokenCount
 			output.Usage.TotalTokens = resp.UsageMetadata.TotalTokenCount
@@ -482,7 +482,9 @@ func buildGoogleRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 
 	// Thinking config (passed via headers from StreamSimple)
 	if options != nil && options.Headers != nil {
-		if options.Headers["x-google-thinking-enabled"] == "true" {
+		if options.Headers["x-google-thinking-disabled"] == "true" {
+			genConfig["thinkingConfig"] = getDisabledThinkingConfig(model)
+		} else if options.Headers["x-google-thinking-enabled"] == "true" {
 			thinkingConfig := map[string]any{
 				"includeThoughts": true,
 			}
@@ -536,15 +538,38 @@ func StreamSimpleGoogle(ctx context.Context, model *ai.Model, prompt ai.Context,
 			budget := getGoogleBudget(model, effort, options.ThinkingBudgets)
 			base.Headers["x-google-thinking-budget"] = fmt.Sprintf("%d", budget)
 		}
+	} else if options != nil && options.Reasoning == ai.ThinkingOff && model.Reasoning {
+		base.Headers["x-google-thinking-disabled"] = "true"
 	}
 
 	return StreamGoogle(ctx, model, prompt, base)
 }
 
-// isGemini3Model returns true for Gemini 3 models (pro or flash).
+// isGemini3Model returns true for Gemini 3+ models (pro or flash).
 func isGemini3Model(model *ai.Model) bool {
 	id := strings.ToLower(model.ID)
 	return strings.Contains(id, "gemini-3")
+}
+
+// isGemini3ProModelByRef returns true for Gemini 3 Pro models (takes *ai.Model).
+func isGemini3ProModelByRef(model *ai.Model) bool {
+	return isGemini3ProModel(model.ID)
+}
+
+// isGemini3FlashModelByRef returns true for Gemini 3 Flash/Flash-Lite models (takes *ai.Model).
+func isGemini3FlashModelByRef(model *ai.Model) bool {
+	return isGemini3FlashModel(model.ID)
+}
+
+// getDisabledThinkingConfig returns the thinking config to disable thinking for a model.
+func getDisabledThinkingConfig(model *ai.Model) map[string]any {
+	if isGemini3ProModelByRef(model) {
+		return map[string]any{"thinkingLevel": "LOW"}
+	}
+	if isGemini3FlashModelByRef(model) {
+		return map[string]any{"thinkingLevel": "MINIMAL"}
+	}
+	return map[string]any{"thinkingBudget": 0}
 }
 
 // mapGeminiThinkingLevel maps our thinking levels to Gemini's thinking levels.

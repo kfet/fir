@@ -265,7 +265,7 @@ func TestBuildCodexRequestBody_WithReasoning(t *testing.T) {
 }
 
 func TestBuildCodexHeaders(t *testing.T) {
-	headers := buildCodexHeaders(
+	headers := buildCodexSSEHeaders(
 		map[string]string{"X-Custom": "value"},
 		&ai.StreamOptions{SessionID: "sess-123", Headers: map[string]string{}},
 		"acc_test",
