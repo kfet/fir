@@ -36,7 +36,8 @@ func inMemoryDial(t *testing.T, server *sdk.Server) func(ServerConfig) (sdk.Tran
 // and blocks until all servers have reported their tools (or timeout).
 func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.AgentTool {
 	t.Helper()
-	if len(mgr.configs) == 0 {
+	nConfigs := mgr.configsLen()
+	if nConfigs == 0 {
 		mgr.Start(ctx)
 		return nil
 	}
@@ -45,18 +46,18 @@ func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.Agent
 		ch <- tools
 	})
 	mgr.Start(ctx)
-	// Wait for len(configs) callbacks, then keep draining briefly in case
+	// Wait for nConfigs callbacks, then keep draining briefly in case
 	// a callback fired before all tools were aggregated (race between
 	// concurrent startServer goroutines on slow CI runners).
 	var last []agent.AgentTool
 	received := 0
 	timeout := time.After(10 * time.Second)
-	for received < len(mgr.configs) {
+	for received < nConfigs {
 		select {
 		case last = <-ch:
 			received++
 		case <-timeout:
-			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, len(mgr.configs))
+			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, nConfigs)
 		}
 	}
 	// Drain any extra notifications that arrive within a short window so we
@@ -184,10 +185,10 @@ func TestManager_Close(t *testing.T) {
 	mgr.dialFn = inMemoryDial(t, server)
 
 	startAndWait(t, mgr, context.Background())
-	assert.Len(t, mgr.sessions, 1)
+	assert.True(t, mgr.hasSession("s"))
 
 	require.NoError(t, mgr.Close())
-	assert.Empty(t, mgr.sessions)
+	assert.False(t, mgr.hasSession("s"))
 
 	// Double-close is safe.
 	require.NoError(t, mgr.Close())
