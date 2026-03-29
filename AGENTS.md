@@ -4,6 +4,10 @@ Prefer `sync/atomic`, `sync.Once`, and channels over manual mutex management whe
 
 `.fir/skills` is a symlink to `pkg/core/builtin_skills/`. They are the same directory — don't treat them as separate copies.
 
+## Python 3.9 minimum
+
+All Python code (SDK, extensions, tests) **must** remain compatible with Python 3.9. macOS ships with Python 3.9 and we want everything to work out of the box on a fresh macOS install — no Homebrew, no pyenv, no extra steps. Do not bump `requires-python` in `pyproject.toml` or `python-version` in the ty config.
+
 Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks.
 
 Do not leave incomplete or stubbed code. Ensure all code is functional and tested.

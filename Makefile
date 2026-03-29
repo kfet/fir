@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python install-uv publish deploy tidy check-size _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -53,7 +53,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel
 
-_all_parallel: test-race build-all lint-python test-python
+_all_parallel: test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
 
 fmt:
 	@gofmt -s -w .
@@ -192,9 +192,11 @@ deploy: build-all
 
 # ---------------------------------------------------------------------------
 # Python SDK & extensions
+# Python 3.9 minimum — macOS ships with 3.9 and we want out-of-the-box
+# compatibility on a fresh install. See AGENTS.md and pyproject.toml.
 # ---------------------------------------------------------------------------
 
-PYTHON_DIRS := pkg/extension/sdk/python .fir/extensions
+PYTHON_DIRS := pkg/extension/sdk/python pkg/resources/testdata .fir/extensions
 
 install-uv:
 	@echo "Installing uv via Astral installer..."
@@ -207,6 +209,21 @@ lint-python: check-uv
 	$(call RUN,lint python (ruff),uvx ruff check $(PYTHON_DIRS))
 	$(call RUN,lint python (ty),uvx ty check $(PYTHON_DIRS))
 
-test-python: check-uv
+test-python: test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
+
+test-python-sdk: check-uv
 	$(call RUN,test python (sdk),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py')
-	$(call RUN,test python (resources),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p '*_test.py')
+
+# Fast extension tests (bundled) — everything except the slow ones.
+_SLOW_EXT_TESTS := schedule_test.py tmuxspinner_test.py
+_ALL_EXT_TESTS  := $(notdir $(wildcard pkg/resources/testdata/*_test.py))
+_FAST_EXT_TESTS := $(filter-out $(_SLOW_EXT_TESTS),$(_ALL_EXT_TESTS))
+test-python-ext: check-uv
+	$(call RUN,test python (extensions),cd pkg/resources/testdata && PYTHONPATH=../../../pkg/extension/sdk/python python3 -m unittest $(_FAST_EXT_TESTS))
+
+# Slow extension tests (separate targets so make -j can parallelise them).
+test-python-schedule: check-uv
+	$(call RUN,test python (schedule),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p 'schedule_test.py')
+
+test-python-tmuxspinner: check-uv
+	$(call RUN,test python (tmuxspinner),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p 'tmuxspinner_test.py')
