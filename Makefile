@@ -111,16 +111,6 @@ test: tidy
 test-e2e: tidy
 	go test -v -count=1 -tags=e2e -timeout 120s ./tests/e2e/
 
-# Build test binaries for end-to-end testing
-test-bins: tidy
-	@mkdir -p $(BINDIR)
-	go test -c -o $(BINDIR)/acp.test ./pkg/modes/acp/
-	go test -c -o $(BINDIR)/mcp.test ./pkg/mcp/
-
-# Build fir binary for end-to-end testing
-e2e-binary:
-	go build -trimpath -ldflags="$(LDFLAGS)" -o $(BINDIR)/fir-e2e ./cmd/fir/
-
 test-cover: tidy
 	@mkdir -p $(BINDIR)
 	go test -coverprofile=$(BINDIR)/coverage.out ./...

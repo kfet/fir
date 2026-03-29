@@ -172,11 +172,8 @@ fir --no-extensions "do something"     # none at all
 ```bash
 make build          # build to ./bin/fir
 make install        # install to $GOPATH/bin
-make build-all      # cross-compile for all targets
-make test           # run tests
-make test-race      # run tests with race detector
+make all            # build for all targets with all tests
 make test-cover     # run tests with coverage
-make vet            # static analysis
 make clean          # remove build artifacts
 ```
 
