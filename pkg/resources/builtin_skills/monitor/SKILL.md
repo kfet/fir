@@ -10,7 +10,7 @@ Continually monitor the project for progress updates and report changes to the u
 
 > **`PROJECT_ROOT`** refers to the repository root. Set it at the start of every shell session:
 > ```bash
-> PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+> PROJECT_ROOT="$PWD"
 > ```
 
 ## Configuration

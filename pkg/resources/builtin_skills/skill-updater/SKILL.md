@@ -24,6 +24,8 @@ description: Release a new version. Confirms reviews and tests pass, updates VER
 
 Cut anything vague, redundant, incomplete, or longer than necessary. Instructions must target the executing agent, not the user.
 
+**No project-root boilerplate.** The shell already starts in the project root. Remove any `git rev-parse --show-toplevel` calls and any `PROJECT_ROOT` / `PROJECT` preambles that exist only to locate the repo. Use `$PWD` or relative paths directly.
+
 ## Checklist
 
 - `name` matches the directory name

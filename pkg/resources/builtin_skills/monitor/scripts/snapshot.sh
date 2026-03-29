@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-ROOT="${1:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+ROOT="${1:-$PWD}"
 cd "$ROOT"
 
 echo "=== SNAPSHOT @ $(date '+%H:%M:%S') ==="

@@ -10,7 +10,7 @@ You are the fixer agent. The review agent writes issues to `docs/review/URGENT.m
 
 > **`PROJECT_ROOT`** refers to the repository root. Set it at the start of every shell session:
 > ```bash
-> PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+> PROJECT_ROOT="$PWD"
 > ```
 
 ## Fix Loop

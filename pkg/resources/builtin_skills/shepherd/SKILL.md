@@ -38,7 +38,7 @@ source "$SKILL_DIR/scripts/auto-helpers.sh"   # gives tm-* commands (tmux or bui
 If a new worktree is needed, follow the [work skill](../work/SKILL.md) to create one. Use `fleet/` as the branch prefix instead of `work/`:
 
 ```bash
-PROJECT=$(git rev-parse --show-toplevel)
+PROJECT="$PWD"
 SESSION="<project>-<feature>"        # e.g. myproject-auth
 FEATURE=${SESSION#*-}
 BRANCH="fleet/${SESSION}"

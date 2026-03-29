@@ -13,7 +13,7 @@ All non-trivial work happens in a **git worktree** on a feature branch. Never ed
 ## Starting Work
 
 ```bash
-PROJECT=$(git rev-parse --show-toplevel)
+PROJECT="$PWD"
 FEATURE="<short-kebab-name>"          # e.g. acp-auth-methods
 BRANCH="work/${FEATURE}"
 WORKTREE="${PROJECT}-wt-${FEATURE}"

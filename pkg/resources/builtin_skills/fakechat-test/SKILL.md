@@ -8,7 +8,7 @@ Set up the official fakechat MCP plugin so you can chat with fir through the bro
 # Build fir and install fakechat
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && make
+make
 if [ ! -d /tmp/claude-plugins-official/external_plugins/fakechat ]; then
   cd /tmp && git clone --depth 1 https://github.com/anthropics/claude-plugins-official.git
 fi
@@ -20,7 +20,7 @@ cd /tmp/claude-plugins-official/external_plugins/fakechat && bun install
 ```bash
 MCP_CONFIG=$(mktemp /tmp/fir-fakechat-mcp-XXXXXX)
 DEBUG_LOG=$(mktemp /tmp/fir-fakechat-debug-XXXXXX)
-REPO="$(git rev-parse --show-toplevel)"
+REPO="$PWD"
 cat > "$MCP_CONFIG" << EOF
 {
   "mcpServers": {

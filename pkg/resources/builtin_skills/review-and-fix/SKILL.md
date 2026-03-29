@@ -13,10 +13,8 @@ Review all changes on the branch, fix every issue found, re-review until clean, 
 Find changed files:
 
 ```bash
-PROJECT_ROOT="$(git rev-parse --show-toplevel)" && cd "$PROJECT_ROOT"
-git diff --cached --name-only
-git diff --name-only
 git diff main --name-only 2>/dev/null
+git ls-files --others --exclude-standard
 ```
 
 Run the project's build/test commands (e.g. `make all`). Note failures.
@@ -35,6 +33,8 @@ If no issues found, skip to Phase 3.
 
 ## Phase 2 — Fix
 
+Fix all issues.
+
 Work through findings in priority order: build breaks → security → correctness → test gaps → simplification.
 
 For each issue: read context, make the fix, run tests. For bugs, write a failing test first, then fix.
@@ -50,7 +50,6 @@ Only entered when Phase 1 finds no issues.
 Stage and commit **all** outstanding changes — the original work plus any fixes.
 
 ```bash
-cd "$PROJECT_ROOT"
 git add -A
 GIT_EDITOR=true git commit -m "<subject ≤72 chars>
 
