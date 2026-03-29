@@ -53,7 +53,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel
 
-_all_parallel: test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
+_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
 
 fmt:
 	@gofmt -s -w .
@@ -130,7 +130,7 @@ test-race: tidy
 	$(call RUN,test (race),go test -race ./...)
 
 vet:
-	go vet ./...
+	$(call RUN,vet,go vet ./...)
 
 pgo:
 	@mkdir -p $(BINDIR)

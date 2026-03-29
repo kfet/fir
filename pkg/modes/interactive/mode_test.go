@@ -225,7 +225,7 @@ func (tm *testMode) editorText() string {
 }
 
 func (tm *testMode) waitRender() {
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 }
 
 func (tm *testMode) renderedOutput() string {

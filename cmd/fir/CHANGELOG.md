@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Pinned GitHub Actions to commit SHAs for supply-chain security: `actions/checkout` v6.0.2, `actions/setup-go` v6.3.0, `goreleaser/goreleaser-action` v7.0.0, `astral-sh/setup-uv` v7.3.0.
+- CI and release workflows now run `make all` instead of individual commands, ensuring CI matches local dev exactly.
+- `make all` now includes `go vet` in its parallel targets.
+
+### Fixed
+
+- Fixed nil pointer dereference in MCP tool re-listing when `InitializeResult()` returns nil during a race with session initialization.
+- Fixed data race between MCP `Connect()` and `ToolListChangedHandler` calling `InitializeResult()` concurrently; capabilities are now cached after connect.
+- Fixed flaky `TestHandleQueueCommand_ShowsQueuedMessages` in CI by increasing render wait time.
+
 ## [0.26.1] - 2026-03-28
 
 ### Changed

@@ -276,6 +276,12 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 
 	// Route MCP server log messages to the process slog logger.
 	serverName := name
+
+	// serverCaps is set after Connect() returns and read by the
+	// ToolListChangedHandler goroutine. Protected by capsMu.
+	var capsMu sync.Mutex
+	var serverCaps *sdk.ServerCapabilities
+
 	opts := &sdk.ClientOptions{
 		LoggingMessageHandler: func(_ context.Context, req *sdk.LoggingMessageRequest) {
 			p := req.Params
@@ -313,8 +319,11 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 					updated = append(updated, AdaptTool(session, serverName, tool, &m.progressReg))
 				}
 				// Include resource and prompt tools only when the server
-				// advertises the corresponding capability.
-				caps := session.InitializeResult().Capabilities
+				// advertises the corresponding capability. Use cached caps
+				// (set after Connect) to avoid a data race with Connect().
+				capsMu.Lock()
+				caps := serverCaps
+				capsMu.Unlock()
 				if caps != nil && caps.Resources != nil {
 					updated = append(updated,
 						listResourcesTool(session, serverName),
@@ -432,7 +441,15 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 
 	// Expose MCP resources and prompts as additional tools, but only when
 	// the server advertises the corresponding capability.
-	caps := session.InitializeResult().Capabilities
+	// Cache server capabilities for the ToolListChangedHandler goroutine.
+	initResult := session.InitializeResult()
+	capsMu.Lock()
+	if initResult != nil {
+		serverCaps = initResult.Capabilities
+	}
+	capsMu.Unlock()
+
+	caps := serverCaps
 	if caps != nil && caps.Resources != nil {
 		tools = append(tools,
 			listResourcesTool(session, name),
