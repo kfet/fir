@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-03-29
+
 ### Changed
 
 - Pinned GitHub Actions to commit SHAs for supply-chain security: `actions/checkout` v6.0.2, `actions/setup-go` v6.3.0, `goreleaser/goreleaser-action` v7.0.0, `astral-sh/setup-uv` v7.3.0.
