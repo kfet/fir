@@ -359,7 +359,6 @@ func startDemo(t *testing.T) (*demoProc, context.CancelFunc) {
 	})
 
 	rec := newRecorded()
-
 	proc := &demoProc{
 		t:       t,
 		enc:     json.NewEncoder(stdin),

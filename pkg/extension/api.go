@@ -32,7 +32,7 @@ type BridgeAPI interface {
 	// CallTool executes a registered tool by name and returns its result.
 	// Used by extensions that need to call other tools programmatically
 	// (e.g. the aside extension).
-	CallTool(name string, params map[string]any) (ToolResult, error)
+	CallTool(ctx context.Context, name string, params map[string]any) (ToolResult, error)
 	// ListTools returns the names and parameter schemas of all registered tools.
 	ListTools() []ToolInfo
 	// PrependContext adds a [SYS_EXT] block to the system prompt.
@@ -81,6 +81,9 @@ type ToolDefinition struct {
 	Parameters  map[string]any
 	DisplayHint *ToolDisplayHint
 	Execute     ToolExecuteFunc
+	// Bridge is the owning Bridge (set by Bridge.RegisterTools).
+	// Used by SessionBridge to wire per-call progress reporting.
+	Bridge *Bridge
 }
 
 // ToolExecuteFunc executes a tool.

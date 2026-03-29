@@ -23,18 +23,6 @@ type SessionBridge struct {
 	session  *session.AgentSession
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string   // names of tools registered by extensions
-
-	// activeCalls tracks per-tool-call context and update callbacks so that
-	// concurrent extension tool executions don't clobber each other.
-	// Key: toolCallID (string) → *activeCall.
-	activeCalls sync.Map
-}
-
-// activeCall holds the context and update callback for a single in-flight
-// extension tool execution.
-type activeCall struct {
-	ctx      context.Context
-	onUpdate agent.AgentToolUpdateCallback
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
@@ -141,15 +129,15 @@ func (b *SessionBridge) SideQuery(question string) (string, error) {
 }
 
 // SetSessionData / GetSessionData on SessionBridge are no-ops: the real
-// per-extension routing is done by bridgeScopedAPI in bridge_api.go, which
-// intercepts these calls before they reach SessionBridge.
+// per-extension routing is done by Bridge.handleInbound, which calls
+// Bridge.SetSessionData / Bridge.GetSessionData directly.
 func (b *SessionBridge) SetSessionData(_, _ string)             {}
 func (b *SessionBridge) GetSessionData(_ string) (string, bool) { return "", false }
 
 // CallTool executes a registered tool by name and returns its result.
 // It looks up the tool in the agent's current tool set and calls its
 // Execute function directly.
-func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult, error) {
+func (b *SessionBridge) CallTool(ctx context.Context, name string, params map[string]any) (ToolResult, error) {
 	tools := b.session.GetTools()
 	if tools == nil {
 		return ToolResult{
@@ -175,18 +163,6 @@ func (b *SessionBridge) CallTool(name string, params map[string]any) (ToolResult
 
 	if params == nil {
 		params = make(map[string]any)
-	}
-
-	// Use the active context from the outer tool call (if any) so that
-	// cancellation propagates to nested tool calls (e.g. aside → Bash).
-	// Pick the first active call's context (typically there's only one).
-	var ctx context.Context
-	b.activeCalls.Range(func(_, v any) bool {
-		ctx = v.(*activeCall).ctx
-		return false // stop after first
-	})
-	if ctx == nil {
-		ctx = context.Background()
 	}
 
 	result, err := tool.Execute(ctx, fmt.Sprintf("ext-call-%s", name), params, nil)
@@ -239,10 +215,15 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 		},
 		DisplayHint: def.DisplayHint,
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
-			// Store per-call context and callback so nested requests and
-			// ReportProgress can find them without races between concurrent calls.
-			b.activeCalls.Store(toolCallID, &activeCall{ctx: ctx, onUpdate: onUpdate})
-			defer b.activeCalls.Delete(toolCallID)
+			// Wire the agent's progress callback to the Bridge so that
+			// inbound report_progress calls reach the right place.
+			if def.Bridge != nil && onUpdate != nil {
+				fn := func(msg string) {
+					go onUpdate(agent.AgentToolResult{StatusMessage: msg})
+				}
+				def.Bridge.activeReportProgress.Store(&fn)
+				defer def.Bridge.activeReportProgress.Store(nil)
+			}
 
 			r, err := def.Execute(ToolContext{
 				Context:    ctx,
@@ -287,17 +268,6 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 	b.extTools = nil
 }
 
-// ReportProgress sends a transient status message to the UI.
-func (b *SessionBridge) ReportProgress(message string) {
-	// Find any active call's update callback.
-	var cb agent.AgentToolUpdateCallback
-	b.activeCalls.Range(func(_, v any) bool {
-		cb = v.(*activeCall).onUpdate
-		return false // stop after first
-	})
-	if cb != nil {
-		// Fire in a separate goroutine so we never block the bridge's
-		// read loop — the events channel may be temporarily full.
-		go cb(agent.AgentToolResult{StatusMessage: message})
-	}
-}
+// ReportProgress is a no-op on the shared SessionBridge.
+// Bridge.handleInbound calls the active progress reporter directly.
+func (b *SessionBridge) ReportProgress(message string) {}

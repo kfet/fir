@@ -358,14 +358,9 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		bridge.SetStatusFn = setStatusFn
 	}
 
-	// Wrap the shared api with a per-bridge scoped wrapper so that
-	// set_session_data / get_session_data are routed to this bridge's own
-	// storage rather than the shared SessionBridge.
-	scopedAPI := &bridgeScopedAPI{BridgeAPI: api, b: bridge}
-
 	bCtx, cancel := context.WithCancel(ctx)
 	go func() {
-		if err := bridge.Run(bCtx, scopedAPI); err != nil && bCtx.Err() == nil {
+		if err := bridge.Run(bCtx, api); err != nil && bCtx.Err() == nil {
 			m.logger.Warn("bridge exited", "ext", cfg.Name, "err", err)
 		}
 	}()

@@ -90,7 +90,7 @@ func (m *mockBridgeAPI) GetSessionData(key string) (string, bool) {
 	v, ok := m.sessionData[key]
 	return v, ok
 }
-func (m *mockBridgeAPI) CallTool(name string, params map[string]any) (ToolResult, error) {
+func (m *mockBridgeAPI) CallTool(_ context.Context, name string, params map[string]any) (ToolResult, error) {
 	return ToolResult{
 		Content: []ai.ToolResultContent{{Text: "mock tool result for " + name}},
 	}, nil
@@ -633,17 +633,13 @@ func TestBridge_SetSessionData_RPC(t *testing.T) {
 		t.Fatalf("unexpected RPC error: %v", resp.Error)
 	}
 
-	// The mock API should have recorded the value.
+	// The bridge should have stored the value directly.
 	waitFor(t, func() bool {
-		api.mu.Lock()
-		defer api.mu.Unlock()
-		_, ok := api.sessionData["foo"]
+		_, ok := b.GetSessionData("foo")
 		return ok
-	}, "set_session_data not forwarded to API")
+	}, "set_session_data not stored on bridge")
 
-	api.mu.Lock()
-	got := api.sessionData["foo"]
-	api.mu.Unlock()
+	got, _ := b.GetSessionData("foo")
 	if got != "bar" {
 		t.Fatalf("got %q, want %q", got, "bar")
 	}
@@ -653,8 +649,8 @@ func TestBridge_GetSessionData_RPC(t *testing.T) {
 	b, extCodec := pipePair(&InitResult{})
 	api := newMockAPI()
 
-	// Pre-populate so get_session_data can return a value.
-	api.SetSessionData("key1", "value1")
+	// Pre-populate on the bridge so get_session_data can return a value.
+	b.SetSessionData("key1", "value1")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -717,7 +713,7 @@ func TestBridge_GetSessionData_RPC_Missing(t *testing.T) {
 }
 
 // TestBridge_SessionDataStore exercises the Bridge's own key/value store
-// methods (used by bridgeScopedAPI to route set/get_session_data).
+// methods (used by handleInbound to route set/get_session_data).
 func TestBridge_SessionDataStore(t *testing.T) {
 	b, _ := pipePair(&InitResult{})
 

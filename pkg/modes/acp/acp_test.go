@@ -1245,7 +1245,7 @@ func (n *noopBridgeAPI) SideQuery(_ string) (string, error)                     
 func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                    {}
 func (n *noopBridgeAPI) SetSessionData(_, _ string)                                                 {}
 func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)                                     { return "", false }
-func (n *noopBridgeAPI) CallTool(_ string, _ map[string]any) (extension.ToolResult, error) {
+func (n *noopBridgeAPI) CallTool(_ context.Context, _ string, _ map[string]any) (extension.ToolResult, error) {
 	return extension.ToolResult{}, nil
 }
 func (n *noopBridgeAPI) PrependContext(_ string)         {}

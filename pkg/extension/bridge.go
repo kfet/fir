@@ -56,6 +56,12 @@ type Bridge struct {
 	// (request or response). Used by CallHook to extend timeouts when the
 	// extension is still alive but busy (e.g. aside making call_tool calls).
 	lastActivity atomic.Int64 // UnixNano
+
+	// activeCtx holds the context of the single in-flight tool_call.
+	// Set by the Execute closure before CallHook, cleared after.
+	// Only one tool_call is ever in-flight per extension (agent loop is serial).
+	activeCtx            atomic.Pointer[context.Context]
+	activeReportProgress atomic.Pointer[func(string)]
 }
 
 // NewBridge creates a Bridge wrapping the given Process and its capabilities.
@@ -300,7 +306,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		api.SetSessionData(p.Key, p.Value)
+		b.SetSessionData(p.Key, p.Value)
 		result = map[string]any{"ok": true}
 
 	case "get_session_data":
@@ -313,7 +319,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		value, ok := api.GetSessionData(p.Key)
+		value, ok := b.GetSessionData(p.Key)
 		result = map[string]any{"value": value, "ok": ok}
 
 	case "call_tool":
@@ -328,7 +334,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		stop := b.keepAlive()
-		r, err := api.CallTool(p.Name, p.Params)
+		ctx := context.Background()
+		if active := b.activeCtx.Load(); active != nil {
+			ctx = *active
+		}
+		r, err := api.CallTool(ctx, p.Name, p.Params)
 		stop()
 		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
@@ -362,7 +372,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		api.ReportProgress(p.Message)
+		b.reportProgress(p.Message, api)
 		result = map[string]any{"ok": true}
 
 	default:
@@ -379,6 +389,16 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 
 // handleNotification processes a JSON-RPC notification (no response expected).
 // Currently only report_progress is handled; other notifications are ignored.
+// reportProgress dispatches a progress message to the active tool call's
+// reporter, falling back to api.ReportProgress if none is active.
+func (b *Bridge) reportProgress(message string, api BridgeAPI) {
+	if fn := b.activeReportProgress.Load(); fn != nil {
+		(*fn)(message)
+	} else {
+		api.ReportProgress(message)
+	}
+}
+
 func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
 	switch n.Method {
 	case "report_progress":
@@ -388,7 +408,7 @@ func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
 		if n.Params != nil {
 			_ = json.Unmarshal(*n.Params, &p)
 		}
-		api.ReportProgress(p.Message)
+		b.reportProgress(p.Message, api)
 	}
 }
 
@@ -521,7 +541,12 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 			Description: tool.Description,
 			Parameters:  tool.Parameters,
 			DisplayHint: tool.DisplayHint,
+			Bridge:      b,
 			Execute: func(ctx ToolContext) (ToolResult, error) {
+				// Store context so inbound call_tool requests use it.
+				b.activeCtx.Store(&ctx.Context)
+				defer b.activeCtx.Store(nil)
+
 				params := map[string]any{
 					"tool_call_id": ctx.ToolCallID,
 					"name":         tool.Name,
