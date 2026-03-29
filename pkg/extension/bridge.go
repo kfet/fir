@@ -234,22 +234,6 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		api.ClearLabel(p.EntryID)
 		result = map[string]any{"ok": true}
 
-	case "get_active_tools":
-		result = api.GetActiveTools()
-
-	case "set_active_tools":
-		var p struct {
-			Names []string `json:"names"`
-		}
-		if req.Params != nil {
-			if err := json.Unmarshal(*req.Params, &p); err != nil {
-				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
-				break
-			}
-		}
-		api.SetActiveTools(p.Names)
-		result = map[string]any{"ok": true}
-
 	case "set_model":
 		var p struct {
 			Provider string `json:"provider"`

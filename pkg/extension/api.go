@@ -17,8 +17,6 @@ type BridgeAPI interface {
 	GetSessionName() string
 	SetLabel(entryID string, label string)
 	ClearLabel(entryID string)
-	GetActiveTools() []string
-	SetActiveTools(names []string)
 	SetModel(model *ai.Model) bool
 	ContinueSession() error
 	SideQuery(question string) (string, error)

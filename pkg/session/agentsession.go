@@ -984,9 +984,13 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 func (s *AgentSession) SetHooks(hooks *AgentSessionHooks) {
 	s.hooks = hooks
 	if hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
-		state := s.Agent.State()
-		wrapped := s.WrapToolsWithHooks(state.Tools.Slice())
-		s.Agent.SetTools(wrapped)
+		s.Agent.UpdateTools(func(ts *agent.ToolSet) {
+			for _, name := range ts.Names() {
+				if t, ok := ts.Get(name); ok {
+					ts.Add(s.wrapTool(t))
+				}
+			}
+		})
 	}
 }
 
@@ -1725,15 +1729,9 @@ func (s *AgentSession) Close() {
 // RegisterSessionTools appends tools that require a session reference
 // (e.g. the plan tool) to the agent's current tool set.
 func (s *AgentSession) RegisterSessionTools() {
-	state := s.Agent.State()
-	existing := state.Tools.Slice()
-	sessionTools := []agent.AgentTool{
-		tools.NewPlanTool(s),
-	}
-	allTools := make([]agent.AgentTool, len(existing)+len(sessionTools))
-	copy(allTools, existing)
-	copy(allTools[len(existing):], sessionTools)
-	s.Agent.SetTools(allTools)
+	s.Agent.UpdateTools(func(ts *agent.ToolSet) {
+		ts.Add(tools.NewPlanTool(s))
+	})
 }
 
 // GetTools returns the current tool set.

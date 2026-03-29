@@ -30,7 +30,6 @@ type recorded struct {
 	statuses     []string
 	sessionNames []string
 	labels       map[string]string // entry_id → label ("" = cleared)
-	activeTools  []string          // last set by set_active_tools
 	models       []modelCall
 	messages     []msgCall
 	userMessages []string
@@ -141,17 +140,6 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		d.rec.labels[p.EntryID] = ""
 		result = map[string]any{"ok": true}
 
-	case "get_active_tools":
-		result = d.rec.activeTools
-
-	case "set_active_tools":
-		var p struct {
-			Names []string `json:"names"`
-		}
-		_ = json.Unmarshal(msg.Params, &p)
-		d.rec.activeTools = p.Names
-		result = map[string]any{"ok": true}
-
 	case "set_model":
 		var p struct {
 			Provider string `json:"provider"`
@@ -188,15 +176,12 @@ func (d *demoProc) handleOutbound(msg jrpcMsg) {
 		result = map[string]any{"stdout": "ok", "stderr": "", "exit_code": 0}
 
 	case "list_tools":
-		// Return tool infos based on activeTools.
-		var infos []map[string]any
-		for _, name := range d.rec.activeTools {
-			infos = append(infos, map[string]any{
-				"name":        name,
-				"description": "test tool " + name,
-			})
+		// Return some mock tool infos.
+		result = []map[string]any{
+			{"name": "bash", "description": "test tool bash"},
+			{"name": "read", "description": "test tool read"},
+			{"name": "write", "description": "test tool write"},
 		}
-		result = infos
 
 	default:
 		d.t.Logf("unhandled outbound method: %s", msg.Method)
@@ -374,7 +359,6 @@ func startDemo(t *testing.T) (*demoProc, context.CancelFunc) {
 	})
 
 	rec := newRecorded()
-	rec.activeTools = []string{"bash", "read", "write"} // initial active tools
 
 	proc := &demoProc{
 		t:       t,
@@ -427,7 +411,7 @@ func TestDemo_Init(t *testing.T) {
 		t.Errorf("name = %q, want demo", result.Name)
 	}
 
-	wantTools := []string{"word_count", "shell_run", "list_tools", "pin_tools", "change_model", "inject_message"}
+	wantTools := []string{"word_count", "shell_run", "change_model", "inject_message"}
 	gotTools := make([]string, len(result.Tools))
 	for i, ti := range result.Tools {
 		gotTools[i] = ti.Name
@@ -530,51 +514,6 @@ func TestDemo_Tool_ShellRun(t *testing.T) {
 	_ = json.Unmarshal(resp.Result, &r)
 	if r["stdout"] == nil {
 		t.Error("shell_run result missing stdout")
-	}
-	proc.rec.mu.Unlock()
-}
-
-func TestDemo_Tool_ListTools(t *testing.T) {
-	proc, cancel := startDemo(t)
-	defer cancel()
-	doInit(proc)
-
-	proc.rec.mu.Lock()
-	proc.rec.activeTools = []string{"bash", "read"}
-	proc.rec.mu.Unlock()
-
-	resp := proc.callTool("list_tools", nil)
-	if resp.Error != nil {
-		t.Fatalf("list_tools error: %s", resp.Error)
-	}
-	var r map[string]any
-	_ = json.Unmarshal(resp.Result, &r)
-	activeTools, _ := r["active_tools"].([]any)
-	if len(activeTools) != 2 {
-		t.Errorf("active_tools = %v, want 2 items", activeTools)
-	}
-	allTools, _ := r["all_tools"].([]any)
-	if len(allTools) != 2 {
-		t.Errorf("all_tools = %v, want 2 items", allTools)
-	}
-}
-
-func TestDemo_Tool_PinTools(t *testing.T) {
-	proc, cancel := startDemo(t)
-	defer cancel()
-	doInit(proc)
-
-	resp := proc.callTool("pin_tools", map[string]any{"tools": []string{"bash"}})
-	if resp.Error != nil {
-		t.Fatalf("pin_tools error: %s", resp.Error)
-	}
-	waitOutbound(t, proc.rec, func(r *recorded) bool {
-		return slices.Equal(r.activeTools, []string{"bash"})
-	}, 3*time.Second)
-
-	proc.rec.mu.Lock()
-	if !slices.Equal(proc.rec.activeTools, []string{"bash"}) {
-		t.Errorf("activeTools = %v, want [bash]", proc.rec.activeTools)
 	}
 	proc.rec.mu.Unlock()
 }
@@ -808,7 +747,7 @@ func testNoActionEvent(t *testing.T, eventName string) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Extension should still be alive — a subsequent tool call must succeed.
-	resp := proc.callTool("list_tools", nil)
+	resp := proc.callTool("word_count", map[string]any{"text": "hello"})
 	if resp.Error != nil {
 		t.Errorf("process unresponsive after event %q: %s", eventName, resp.Error)
 	}

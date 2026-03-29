@@ -87,6 +87,13 @@ func handleCompletions(w http.ResponseWriter, r *http.Request) {
 			cmd = strings.TrimSpace(userText[idx+1:])
 		}
 		writeSSEToolCall(w, "call_bash_1", "bash", map[string]any{"command": cmd})
+	case strings.HasPrefix(upper, "LIST_TOOLS"):
+		// Return the names of all tools the LLM can see.
+		names := make([]string, 0, len(availableTools))
+		for name := range availableTools {
+			names = append(names, name)
+		}
+		writeSSETextResponse(w, "TOOLS: "+strings.Join(names, ","))
 	default:
 		writeSSETextResponse(w, "MOCK_RESPONSE: "+userText)
 	}

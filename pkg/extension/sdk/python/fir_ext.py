@@ -842,14 +842,6 @@ class Context:
         """Clear a label from a session entry."""
         self._call("clear_label", {"entry_id": entry_id})
 
-    def get_active_tools(self) -> list[str]:
-        """Return the list of currently active tool names."""
-        return self._call("get_active_tools")
-
-    def set_active_tools(self, tools: list[str]) -> None:
-        """Set which tools are active."""
-        self._call("set_active_tools", {"names": tools})
-
     def set_model(self, provider: str, model_id: str) -> bool:
         """Change the current model. Returns True on success."""
         result = self._call("set_model", {"provider": provider, "id": model_id})

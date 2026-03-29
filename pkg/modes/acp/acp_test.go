@@ -1239,8 +1239,6 @@ func (n *noopBridgeAPI) SetSessionName(_ string)                                
 func (n *noopBridgeAPI) GetSessionName() string                                                     { return "" }
 func (n *noopBridgeAPI) SetLabel(_ string, _ string)                                                {}
 func (n *noopBridgeAPI) ClearLabel(_ string)                                                        {}
-func (n *noopBridgeAPI) GetActiveTools() []string                                                   { return nil }
-func (n *noopBridgeAPI) SetActiveTools(_ []string)                                                  {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
 func (n *noopBridgeAPI) SideQuery(_ string) (string, error)                                         { return "", nil }

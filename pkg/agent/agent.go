@@ -317,7 +317,6 @@ func (a *Agent) GetFollowUpMode() string {
 	return a.followUpMode
 }
 
-// SetTools sets the available tools.
 // SetServerTools updates the Anthropic server-side tools (web search, code execution, etc.).
 func (a *Agent) SetServerTools(tools []ai.AnthropicServerTool) {
 	a.mu.Lock()
@@ -332,10 +331,16 @@ func (a *Agent) SetCompaction(c *ai.AnthropicCompaction) {
 	a.compaction = c
 }
 
-func (a *Agent) SetTools(tools []AgentTool) {
+// UpdateTools applies fn to the agent's ToolSet under the agent lock.
+// This is the safe way to mutate tools — the callback sees the current
+// state and all changes are atomic. No stale snapshots, no clobbering.
+func (a *Agent) UpdateTools(fn func(ts *ToolSet)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.state.Tools = ToolSetFrom(tools)
+	if a.state.Tools == nil {
+		a.state.Tools = NewToolSet()
+	}
+	fn(a.state.Tools)
 }
 
 // ReplaceMessages replaces all messages.

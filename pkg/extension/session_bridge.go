@@ -122,26 +122,6 @@ func (b *SessionBridge) ClearLabel(entryID string) {
 	b.session.SessionManager.AppendLabelChange(entryID, "")
 }
 
-func (b *SessionBridge) GetActiveTools() []string {
-	state := b.session.Agent.State()
-	return state.Tools.Names()
-}
-
-func (b *SessionBridge) SetActiveTools(names []string) {
-	nameSet := make(map[string]bool, len(names))
-	for _, n := range names {
-		nameSet[n] = true
-	}
-	state := b.session.Agent.State()
-	filtered := make([]agent.AgentTool, 0, len(names))
-	for _, t := range state.Tools.Slice() {
-		if nameSet[t.Name] {
-			filtered = append(filtered, t)
-		}
-	}
-	b.session.Agent.SetTools(filtered)
-}
-
 func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	mr := b.session.ModelRegistryRef()
 	if mr != nil && mr.GetApiKey(model) == "" {
@@ -283,10 +263,9 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 	// Wrap with session hooks so the hook/tool_call interceptor fires.
 	wrapped := b.session.WrapToolsWithHooks([]agent.AgentTool{at})
 
-	state := b.session.Agent.State()
-	allTools := state.Tools.Slice()
-	allTools = append(allTools, wrapped[0])
-	b.session.Agent.SetTools(allTools)
+	b.session.Agent.UpdateTools(func(ts *agent.ToolSet) {
+		ts.Add(wrapped[0])
+	})
 
 	b.extTools = append(b.extTools, def.Name)
 }
@@ -299,18 +278,12 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 	if len(b.extTools) == 0 {
 		return
 	}
-	remove := make(map[string]struct{}, len(b.extTools))
-	for _, name := range b.extTools {
-		remove[name] = struct{}{}
-	}
-	state := b.session.Agent.State()
-	var filtered []agent.AgentTool
-	for _, t := range state.Tools.Slice() {
-		if _, ok := remove[t.Name]; !ok {
-			filtered = append(filtered, t)
+	names := b.extTools
+	b.session.Agent.UpdateTools(func(ts *agent.ToolSet) {
+		for _, name := range names {
+			ts.Remove(name)
 		}
-	}
-	b.session.Agent.SetTools(filtered)
+	})
 	b.extTools = nil
 }
 

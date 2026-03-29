@@ -13,7 +13,7 @@ context method, update this file and its companion test
 
 Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
-  set_label · clear_label · get_active_tools · set_active_tools ·
+  set_label · clear_label ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · continue_session · side_query · call_tool ·
   report_progress ·
@@ -85,37 +85,6 @@ def word_count(params, ctx):
 )
 def shell_run(params, ctx):
     return ctx.exec(params["command"], params.get("args", []))
-
-
-@fir_ext.tool(
-    name="list_tools",
-    description="Return the names of currently active tools. Calls get_active_tools.",
-    parameters={"type": "object", "properties": {}},
-)
-def list_tools(params, ctx):
-    active = ctx.get_active_tools()  # get_active_tools
-    all_tools = ctx.list_tools()  # list_tools — names + schemas
-    return {"active_tools": active, "all_tools": [t["name"] for t in all_tools]}
-
-
-@fir_ext.tool(
-    name="pin_tools",
-    description="Restrict active tools to the given list. Calls set_active_tools.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "tools": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Tool names to keep active",
-            }
-        },
-        "required": ["tools"],
-    },
-)
-def pin_tools(params, ctx):
-    ctx.set_active_tools(params["tools"])  # set_active_tools
-    return {"ok": True}
 
 
 @fir_ext.tool(
@@ -299,6 +268,7 @@ def on_hook_tool_call(params, ctx):
 def on_session_start(params, ctx):
     ctx.set_status("demo ready")                      # set_status
     ctx.set_session_data("started", "true")            # set_session_data
+    ctx.list_tools()                                   # list_tools (read-only discovery)
     ctx.prepend("Demo extension is active.")           # prepend
 
 

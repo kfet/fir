@@ -89,7 +89,7 @@ class FakeFir:
         fake.stop()
     """
 
-    def __init__(self, *, active_tools: Optional[list[str]] = None, model_ok: bool = True):
+    def __init__(self, *, model_ok: bool = True):
         # Queue for fir → extension messages
         self._to_ext: queue.SimpleQueue[str] = queue.SimpleQueue()
         # All messages received from extension
@@ -100,7 +100,6 @@ class FakeFir:
         self._thread: Optional[threading.Thread] = None
 
         # Default auto-response data
-        self._active_tools: list[str] = active_tools or ["bash", "read", "write"]
         self._model_ok: bool = model_ok
 
         self.input = self._InputStream(self)
@@ -145,10 +144,8 @@ class FakeFir:
         # No id → notification or response; nothing to respond to.
         if rid is None or not method:
             return
-        if method == "get_active_tools":
-            result: object = self._active_tools
-        elif method == "set_model":
-            result = {"ok": self._model_ok}
+        if method == "set_model":
+            result: object = {"ok": self._model_ok}
         elif method == "exec":
             result = {"stdout": "mock output", "stderr": "", "exit_code": 0}
         elif method == "call_tool":
@@ -160,7 +157,10 @@ class FakeFir:
         elif method == "side_query":
             result = {"ok": True, "text": "mock synthesis"}
         elif method == "list_tools":
-            result = [{"name": n, "description": "mock"} for n in self._active_tools]
+            result = [
+                {"name": "bash", "description": "mock"},
+                {"name": "read", "description": "mock"},
+            ]
         elif method == "get_session_data":
             result = {"ok": True, "value": "mock_value"}
         else:
@@ -292,8 +292,8 @@ class TestDemoInit(DemoTestCase):
         self.assertSetEqual(
             tool_names,
             {
-                "word_count", "shell_run", "list_tools",
-                "pin_tools", "change_model", "inject_message",
+                "word_count", "shell_run",
+                "change_model", "inject_message",
                 "batch_example",
             },
         )
@@ -385,41 +385,6 @@ class TestDemoTools(DemoTestCase):
         result = resp["result"]
         self.assertEqual(result["stdout"], "mock output")
         self.assertEqual(result["exit_code"], 0)
-        fake.stop()
-
-    # -- list_tools ----------------------------------------------------------
-
-    def test_list_tools_calls_get_active_tools(self) -> None:
-        fake = FakeFir(active_tools=["bash", "read"])
-        self.start_demo_ext(fake)
-        fake.send_init()
-        fake.send_tool_call(2, "list_tools")
-        msg = fake.wait_for_method("get_active_tools")
-        self.assertIsNotNone(msg, "expected get_active_tools call")
-        fake.stop()
-
-    def test_list_tools_returns_active_and_all(self) -> None:
-        fake = FakeFir(active_tools=["bash", "read"])
-        self.start_demo_ext(fake)
-        fake.send_init()
-        resp = fake.send_tool_call(2, "list_tools")
-        self.assertIsNotNone(resp)
-        assert resp is not None
-        self.assertEqual(resp["result"]["active_tools"], ["bash", "read"])
-        self.assertEqual(resp["result"]["all_tools"], ["bash", "read"])
-        fake.stop()
-
-    # -- pin_tools -----------------------------------------------------------
-
-    def test_pin_tools_calls_set_active_tools(self) -> None:
-        fake = FakeFir()
-        self.start_demo_ext(fake)
-        fake.send_init()
-        fake.send_tool_call(2, "pin_tools", {"tools": ["bash"]})
-        msg = fake.wait_for_method("set_active_tools")
-        self.assertIsNotNone(msg, "expected set_active_tools call")
-        assert msg is not None
-        self.assertEqual(msg["params"]["names"], ["bash"])
         fake.stop()
 
     # -- change_model --------------------------------------------------------
@@ -696,7 +661,7 @@ class TestDemoEvents(DemoTestCase):
         # Give handlers time to run, then verify the process is still alive
         time.sleep(0.1)
         # Confirm we can still get a tool response (process alive)
-        resp = fake.send_tool_call(2, "list_tools")
+        resp = fake.send_tool_call(2, "word_count", {"text": "hello"})
         fake.stop()
         self.assertIsNotNone(resp, f"process died after event {event_name}")
 

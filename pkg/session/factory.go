@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -190,18 +189,29 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			sess.InjectMessage(msg)
 		})
 
-		// Snapshot base tools before MCP tools arrive.
-		baseTools := slices.Clone(toolList)
+		// Track previous MCP tool names so we can remove them atomically.
+		var prevMCPNames []string
 
 		mcpMgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
-			merged := append(slices.Clone(baseTools), mcpTools...)
-
 			// If hooks with tool interception are active, wrap before delivering.
 			if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
-				merged = sess.WrapToolsWithHooks(merged)
+				mcpTools = sess.WrapToolsWithHooks(mcpTools)
 			}
 
-			sess.Agent.SetTools(merged)
+			sess.Agent.UpdateTools(func(ts *agent.ToolSet) {
+				for _, name := range prevMCPNames {
+					ts.Remove(name)
+				}
+				for _, t := range mcpTools {
+					ts.Add(t)
+				}
+			})
+
+			names := make([]string, len(mcpTools))
+			for i, t := range mcpTools {
+				names[i] = t.Name
+			}
+			prevMCPNames = names
 		})
 
 		mcpMgr.Start(ctx)
