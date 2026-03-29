@@ -44,15 +44,17 @@ Alternatively, `make deploy` pushes binaries directly to remote hosts via scp (n
 
 If any step fails, stop and report the error. Do not push or publish unless the user confirms.
 
-## Post-publish: Track CI
+## Post-publish: Track All GitHub Actions
 
 After `make publish` succeeds, poll GitHub Actions until every triggered workflow finishes:
 
 ```bash
-gh run list --branch main --limit 5 --json status,conclusion,name,headSha,createdAt 2>&1
+gh run list --limit 10 --json status,conclusion,name,headSha,createdAt,databaseId 2>&1
 ```
 
-Loop every 30 seconds. Stop when all runs for the release commit are `completed`. If any conclude with `failure` or `cancelled`, report the failure details:
+This must **not** use `--branch` filtering — tag-triggered workflows (like `release`) don't appear under a branch filter. Instead, match runs by `headSha` against the release commit.
+
+Loop every 30 seconds. Stop when all runs for the release commit SHA are `completed`. If any conclude with `failure` or `cancelled`, report the failure details:
 
 ```bash
 gh run view <run-id> --log-failed 2>&1 | tail -40

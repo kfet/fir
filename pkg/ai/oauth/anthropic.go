@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"time"
 
@@ -23,16 +24,21 @@ const (
 	// anthropicManualRedirectURI is used when the user pastes the final redirect URL manually
 	// (e.g., browser is on a different machine).
 	anthropicManualRedirectURI = "https://platform.claude.com/oauth/code/callback"
-	// anthropicCallbackAddr is the local address for the OAuth callback server.
-	anthropicCallbackAddr = "127.0.0.1:53692"
+	// anthropicCallbackPath is the path for the local OAuth callback server.
 	anthropicCallbackPath = "/callback"
-	// anthropicRedirectURI is the local callback URI registered with Anthropic.
-	anthropicRedirectURI = "http://localhost:53692/callback"
-	anthropicScopes      = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+	anthropicScopes       = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 )
 
-// anthropicTokenURL can be overridden in tests.
-var anthropicTokenURL = anthropicDefaultTokenURL
+var (
+	// anthropicTokenURL can be overridden in tests.
+	anthropicTokenURL = anthropicDefaultTokenURL
+	// anthropicCallbackAddr is the local address for the OAuth callback server.
+	// Override in tests with ":0" to avoid port conflicts.
+	anthropicCallbackAddr = "127.0.0.1:53692"
+	// anthropicRedirectURI is the local callback URI registered with Anthropic.
+	// When anthropicCallbackAddr is ":0", loginAnthropic rebuilds this from the actual port.
+	anthropicRedirectURI = "http://localhost:53692/callback"
+)
 
 // setAnthropicTokenURL overrides the token URL (for testing).
 func setAnthropicTokenURL(u string) {
@@ -93,9 +99,12 @@ func loginAnthropic(callbacks LoginCallbacks) (*Credentials, error) {
 	// Try starting local callback server; fall back silently if port unavailable.
 	redirectURI := anthropicRedirectURI
 	var resultCh <-chan *CallbackResult
-	srv, ch, _, serverErr := StartOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr, pkce.Verifier)
+	srv, ch, actualAddr, serverErr := StartOAuthCallbackServer(ctx, anthropicCallbackPath, anthropicCallbackAddr, pkce.Verifier)
 	if serverErr == nil {
 		resultCh = ch
+		// Rebuild redirect URI from the actual listening address so that ":0"
+		// (random port, used in tests) works correctly.
+		redirectURI = "http://localhost:" + portFromAddr(actualAddr) + anthropicCallbackPath
 		defer srv.Close()
 	} else {
 		// Port unavailable — use the manual (hosted) redirect URI so the browser
@@ -289,4 +298,13 @@ func doAnthropicTokenRequest(body map[string]string) (*Credentials, error) {
 		Access:  tokenData.AccessToken,
 		Expires: expiresAt,
 	}, nil
+}
+
+// portFromAddr extracts the port from a "host:port" address string.
+func portFromAddr(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return port
 }

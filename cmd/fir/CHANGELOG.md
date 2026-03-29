@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-03-28
+
+### Changed
+
+- Regenerated model definitions with latest upstream data.
+- Restored Python build optimizations: parallel test targets, lint coverage for testdata, and per-file-ignores in pyproject.toml.
+
+### Fixed
+
+- Fixed flaky `TestAnthropicLogin_EndToEnd` in CI: OAuth callback server now uses a dynamic port to avoid conflicts.
+- Fixed Python 3.9 compatibility: replaced `datetime.UTC` with `datetime.timezone.utc` and `X | Y` type unions with `Optional[X]` across extensions and tests.
+- Enforced Python ≥3.9 floor in pyproject.toml and documented the requirement.
+
 ## [0.26.0] - 2026-03-28
 
 ### Added

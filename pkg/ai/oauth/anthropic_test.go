@@ -323,16 +323,27 @@ func TestAnthropicLogin_EndToEnd(t *testing.T) {
 	var capturedAuthURL string
 	var progressMessages []string
 
-	// We need to extract the state (PKCE verifier) from the auth URL to simulate
+	// Use a random port to avoid conflicts in CI.
+	origAddr := anthropicCallbackAddr
+	anthropicCallbackAddr = "127.0.0.1:0"
+	defer func() { anthropicCallbackAddr = origAddr }()
+
+	// We need to extract the state and redirect_uri from the auth URL to simulate
 	// a valid browser redirect. The callback server validates state server-side.
-	stateCh := make(chan string, 1)
+	type authURLParams struct {
+		state       string
+		redirectURI string
+	}
+	paramsCh := make(chan authURLParams, 1)
 
 	callbacks := LoginCallbacks{
 		OnAuth: func(info AuthInfo) {
 			capturedAuthURL = info.URL
-			// Extract state from the auth URL
 			if u, err := url.Parse(info.URL); err == nil {
-				stateCh <- u.Query().Get("state")
+				paramsCh <- authURLParams{
+					state:       u.Query().Get("state"),
+					redirectURI: u.Query().Get("redirect_uri"),
+				}
 			}
 		},
 		OnProgress: func(msg string) {
@@ -354,21 +365,20 @@ func TestAnthropicLogin_EndToEnd(t *testing.T) {
 	}()
 
 	// Wait for auth URL to be generated
-	var state string
+	var ap authURLParams
 	select {
-	case state = <-stateCh:
+	case ap = <-paramsCh:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for OnAuth callback")
 	}
 
-	if state == "" {
+	if ap.state == "" {
 		t.Fatal("state not found in auth URL")
 	}
 
-	// Simulate browser redirect to callback server
-	// The callback server listens on anthropicCallbackAddr (127.0.0.1:53692)
-	callbackURL := fmt.Sprintf("http://%s%s?code=test-auth-code&state=%s",
-		anthropicCallbackAddr, anthropicCallbackPath, state)
+	// Simulate browser redirect to callback server using the actual redirect URI
+	// (which contains the dynamically assigned port).
+	callbackURL := fmt.Sprintf("%s?code=test-auth-code&state=%s", ap.redirectURI, ap.state)
 
 	resp, err := http.Get(callbackURL)
 	if err != nil {
@@ -411,8 +421,8 @@ func TestAnthropicLogin_EndToEnd(t *testing.T) {
 	if capturedTokenRequest["code"] != "test-auth-code" {
 		t.Errorf("token request code = %q, want %q", capturedTokenRequest["code"], "test-auth-code")
 	}
-	if capturedTokenRequest["redirect_uri"] != anthropicRedirectURI {
-		t.Errorf("token request redirect_uri = %q, want %q", capturedTokenRequest["redirect_uri"], anthropicRedirectURI)
+	if capturedTokenRequest["redirect_uri"] != ap.redirectURI {
+		t.Errorf("token request redirect_uri = %q, want %q", capturedTokenRequest["redirect_uri"], ap.redirectURI)
 	}
 
 	// Verify progress callback was called
