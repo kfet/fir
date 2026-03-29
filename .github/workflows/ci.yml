@@ -2,7 +2,6 @@ name: ci
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -22,3 +21,5 @@ jobs:
             git diff
             exit 1
           fi
+      - name: Run e2e tests
+        run: make test-e2e
