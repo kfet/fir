@@ -715,13 +715,6 @@ const (
 	aiGatewayBaseURL   = "https://ai-gateway.vercel.sh"
 )
 
-var copilotStaticHeaders = map[string]string{
-	"User-Agent":             "GitHubCopilotChat/0.35.0",
-	"Editor-Version":         "vscode/1.107.0",
-	"Editor-Plugin-Version":  "copilot-chat/0.35.0",
-	"Copilot-Integration-Id": "vscode-chat",
-}
-
 func fetchOpenRouterModels() ([]modelSpec, error) {
 	log.Println("Fetching models from OpenRouter API...")
 	var resp openRouterResponse
@@ -1208,7 +1201,6 @@ func loadModelsDevData() ([]modelSpec, error) {
 				CostCacheWrite: m.Cost.CacheWrite,
 				ContextWindow:  intOr(m.Limit.Context, 128000),
 				MaxTokens:      intOr(m.Limit.Output, 8192),
-				Headers:        copilotStaticHeaders,
 				Compat:         compat,
 			})
 		}

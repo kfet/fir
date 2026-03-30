@@ -2,9 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `copilot-auth` extension: GitHub Copilot OAuth provider using the device code flow, ported from the Go implementation to a Python extension.
+
 ### Fixed
 
 - Fixed `✓` (U+2713) and other dingbats being miscounted as width 2 instead of 1, causing rendering artifacts (ghost ANSI codes, truncated text) in the plan widget. Replaced hand-curated `couldBeEmoji` heuristic with `uniseg.StringWidth` which uses Unicode Emoji_Presentation property tables.
+
+### Removed
+
+- Removed Go-side `GitHubCopilotProvider` (`pkg/ai/oauth/github_copilot.go`); login, refresh, token exchange, and `ModifyModels` are now handled entirely by the `copilot-auth` builtin extension.
 
 ## [0.26.2] - 2026-03-29
 

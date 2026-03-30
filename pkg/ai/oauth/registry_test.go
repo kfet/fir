@@ -8,7 +8,7 @@ import (
 func TestGetProvider_BuiltIns(t *testing.T) {
 	expectedIDs := []string{
 		"anthropic",
-		"github-copilot",
+		// "github-copilot" is now provided by the copilot_auth builtin extension.
 		// "google-gemini-cli" is now provided by the gemini_cli_auth builtin extension.
 		// "google-antigravity" is now provided by the antigravity_auth builtin extension.
 		// "openai-codex" is now provided by the codex_auth builtin extension.
@@ -30,15 +30,15 @@ func TestGetProvider_Unknown(t *testing.T) {
 
 func TestGetProviders(t *testing.T) {
 	providers := GetProviders()
-	if len(providers) < 2 {
-		t.Errorf("expected at least 2 providers, got %d", len(providers))
+	if len(providers) < 1 {
+		t.Errorf("expected at least 1 provider, got %d", len(providers))
 	}
 }
 
 func TestGetProviderInfoList(t *testing.T) {
 	infos := GetProviderInfoList()
-	if len(infos) < 2 {
-		t.Errorf("expected at least 2 provider infos, got %d", len(infos))
+	if len(infos) < 1 {
+		t.Errorf("expected at least 1 provider info, got %d", len(infos))
 	}
 	for _, info := range infos {
 		if info.ID == "" {

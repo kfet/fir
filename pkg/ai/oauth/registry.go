@@ -19,7 +19,7 @@ var builtInProviders = map[string]Provider{}
 func init() {
 	// Register all built-in OAuth providers.
 	RegisterProvider(&AnthropicProvider{})
-	RegisterProvider(&GitHubCopilotProvider{})
+	// GitHub Copilot is now handled by the copilot_auth.py builtin extension.
 	// OpenAI Codex is now handled by the codex_auth.py builtin extension.
 
 	// Snapshot built-ins after registration.

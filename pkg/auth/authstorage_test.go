@@ -412,8 +412,8 @@ func TestAuthStorage_GetOAuthProviders(t *testing.T) {
 	s := NewAuthStorage(path)
 
 	providers := s.GetOAuthProviders()
-	if len(providers) < 5 {
-		t.Errorf("GetOAuthProviders() returned %d, want at least 5", len(providers))
+	if len(providers) < 1 {
+		t.Errorf("GetOAuthProviders() returned %d, want at least 1", len(providers))
 	}
 }
 

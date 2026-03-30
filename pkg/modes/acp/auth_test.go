@@ -2,10 +2,13 @@ package acp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/models"
 )
@@ -241,23 +244,28 @@ func TestBuildAuthMethods_TerminalAuthCapability(t *testing.T) {
 }
 
 func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
-	// GitHub Copilot uses device-code flow (not a callback server), so
-	// authenticateOAuth should reject it in ACP mode without making network calls.
-	auth := auth.NewInMemoryAuthStorage(nil)
+	// Providers that don't use a callback server (e.g. device-code flow) should be
+	// rejected in ACP mode without making network calls.
+	// Register a temporary fake provider that returns UsesCallbackServer=false.
+	fake := &fakeNoCallbackProvider{}
+	oauth.RegisterProvider(fake)
+	t.Cleanup(func() { oauth.UnregisterProvider(fake.ID()) })
+
+	authStore := auth.NewInMemoryAuthStorage(nil)
 	pa := &firAgent{
 		sessions:    make(map[string]*firSession),
-		authStorage: auth,
+		authStorage: authStore,
 		authMethods: []ExtendedAuthMethod{
 			{
-				Id:   "oauth-github-copilot",
-				Name: "GitHub Copilot",
+				Id:   "oauth-fake-device-code",
+				Name: "Fake Device Code",
 				Type: AuthMethodTypeAgent,
 			},
 		},
 	}
 
 	_, err := pa.handleAuthenticate(context.Background(), acpsdk.AuthenticateRequest{
-		MethodId: "oauth-github-copilot",
+		MethodId: "oauth-fake-device-code",
 	})
 	if err == nil {
 		t.Fatal("expected error for provider without callback server")
@@ -265,6 +273,26 @@ func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
 	if !strings.Contains(err.Error(), "interactive input") {
 		t.Errorf("expected error about interactive input, got: %v", err)
 	}
+}
+
+// fakeNoCallbackProvider is a test-only OAuth provider that doesn't use a callback server.
+type fakeNoCallbackProvider struct{}
+
+func (f *fakeNoCallbackProvider) ID() string               { return "fake-device-code" }
+func (f *fakeNoCallbackProvider) Name() string             { return "Fake Device Code" }
+func (f *fakeNoCallbackProvider) UsesCallbackServer() bool { return false }
+func (f *fakeNoCallbackProvider) Login(_ oauth.LoginCallbacks) (*oauth.Credentials, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (f *fakeNoCallbackProvider) RefreshToken(_ *oauth.Credentials) (*oauth.Credentials, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (f *fakeNoCallbackProvider) GetAPIKey(_ *oauth.Credentials) string { return "" }
+func (f *fakeNoCallbackProvider) ListModels(_ context.Context, _ *oauth.Credentials) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeNoCallbackProvider) ModifyModels(models []*ai.Model, _ *oauth.Credentials) []*ai.Model {
+	return models
 }
 
 func TestAuthenticateOAuth_NilAuthStorage(t *testing.T) {
