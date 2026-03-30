@@ -60,9 +60,16 @@ func (m *Manager) Install(source string, local bool) error {
 	if src.Type == "git" {
 		dest := m.gitInstallPath(src, local)
 		if _, err := os.Stat(dest); os.IsNotExist(err) {
-			fmt.Printf("Cloning %s...\n", src.URL)
-			if err := CloneRef(src.URL, src.Ref, dest); err != nil {
-				return err
+			if src.SubDir != "" {
+				fmt.Printf("Sparse-cloning %s (subdir: %s)...\n", src.URL, src.SubDir)
+				if err := SparseCloneRef(src.URL, src.Ref, src.SubDir, dest); err != nil {
+					return err
+				}
+			} else {
+				fmt.Printf("Cloning %s...\n", src.URL)
+				if err := CloneRef(src.URL, src.Ref, dest); err != nil {
+					return err
+				}
 			}
 		} else {
 			fmt.Printf("Already cloned at %s, pulling...\n", dest)
@@ -195,11 +202,16 @@ func (m *Manager) gitInstallPath(src *Source, projectScope bool) string {
 }
 
 // installPath returns the effective directory for a parsed source.
+// For git sources with a SubDir, this points into the subdirectory within the clone.
 func (m *Manager) installPath(src *Source, projectScope bool) string {
 	if src.Type == "local" {
 		return src.Local
 	}
-	return m.gitInstallPath(src, projectScope)
+	base := m.gitInstallPath(src, projectScope)
+	if src.SubDir != "" {
+		return filepath.Join(base, src.SubDir)
+	}
+	return base
 }
 
 // addPackage appends a source string to the appropriate settings scope,
@@ -262,10 +274,14 @@ func containsPackage(pkgs []any, source string) bool {
 }
 
 // sourceIdentity returns a canonical string for deduplication.
-// For git: "git:host/path". For local: "local:<abs-path>".
+// For git: "git:host/path[/subdir]". For local: "local:<abs-path>".
 func sourceIdentity(src *Source) string {
 	if src.Type == "git" {
-		return "git:" + src.Host + "/" + src.Path
+		id := "git:" + src.Host + "/" + src.Path
+		if src.SubDir != "" {
+			id += "/" + src.SubDir
+		}
+		return id
 	}
 	return "local:" + src.Local
 }

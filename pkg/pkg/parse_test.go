@@ -18,6 +18,7 @@ func TestParseSource(t *testing.T) {
 		wantURL    string
 		wantRef    string
 		wantPinned bool
+		wantSubDir string
 		// For local: just check the suffix of the resolved path.
 		wantLocalSuffix string
 	}{
@@ -139,6 +140,63 @@ func TestParseSource(t *testing.T) {
 			wantURL:  "https://gitlab.com/org/sub/repo",
 		},
 
+		// ---- subdirectory (sparse checkout) ----
+		{
+			name:       "https-github-subdir",
+			input:      "https://github.com/anthropics/claude-plugins/external_plugins/telegram",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "anthropics/claude-plugins",
+			wantSubDir: "external_plugins/telegram",
+			wantURL:    "https://github.com/anthropics/claude-plugins",
+		},
+		{
+			name:       "bare-github-subdir",
+			input:      "github.com/anthropics/claude-plugins/external_plugins/telegram",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "anthropics/claude-plugins",
+			wantSubDir: "external_plugins/telegram",
+			wantURL:    "https://github.com/anthropics/claude-plugins",
+		},
+		{
+			name:       "bare-github-subdir-with-ref",
+			input:      "github.com/anthropics/claude-plugins/external_plugins/telegram@main",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "anthropics/claude-plugins",
+			wantSubDir: "external_plugins/telegram",
+			wantURL:    "https://github.com/anthropics/claude-plugins",
+			wantRef:    "main",
+			wantPinned: true,
+		},
+		{
+			name:       "ssh-github-subdir",
+			input:      "git@github.com:anthropics/claude-plugins/external_plugins/telegram",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "anthropics/claude-plugins",
+			wantSubDir: "external_plugins/telegram",
+			wantURL:    "https://github.com/anthropics/claude-plugins",
+		},
+		{
+			name:       "bitbucket-subdir",
+			input:      "https://bitbucket.org/team/repo/plugins/myplugin",
+			wantType:   "git",
+			wantHost:   "bitbucket.org",
+			wantPath:   "team/repo",
+			wantSubDir: "plugins/myplugin",
+			wantURL:    "https://bitbucket.org/team/repo",
+		},
+		{
+			name:     "gitlab-deep-path-no-subdir",
+			input:    "gitlab.com/org/group/subgroup/repo",
+			wantType: "git",
+			wantHost: "gitlab.com",
+			wantPath: "org/group/subgroup/repo",
+			wantURL:  "https://gitlab.com/org/group/subgroup/repo",
+		},
+
 		// ---- no-dot host → local fallback ----
 		{
 			name:            "no-dot-host-treated-local",
@@ -198,6 +256,12 @@ func TestParseSource(t *testing.T) {
 			}
 			if !tc.wantPinned && got.Pinned {
 				t.Errorf("Pinned: got true, want false")
+			}
+			if tc.wantSubDir != "" && got.SubDir != tc.wantSubDir {
+				t.Errorf("SubDir: got %q, want %q", got.SubDir, tc.wantSubDir)
+			}
+			if tc.wantSubDir == "" && got.SubDir != "" {
+				t.Errorf("SubDir: got %q, want empty", got.SubDir)
 			}
 			if tc.wantLocalSuffix != "" {
 				want := filepath.FromSlash(tc.wantLocalSuffix)

@@ -13,6 +13,7 @@ type Source struct {
 	Raw    string // original user input
 	Host   string // e.g. "github.com"
 	Path   string // e.g. "user/repo"
+	SubDir string // subdirectory within repo (e.g. "external_plugins/telegram")
 	URL    string // canonical HTTPS clone URL (empty for local)
 	Ref    string // optional branch/tag/commit
 	Pinned bool   // true if ref was explicitly specified
@@ -122,11 +123,14 @@ func parseSSH(src *Source, s string) (*Source, error) {
 	// Normalise: strip trailing ".git"
 	repoPath = strings.TrimSuffix(repoPath, ".git")
 
+	repo, subDir := splitRepoSubDir(src.Host, repoPath)
+
 	src.Type = "git"
-	src.Path = repoPath
+	src.Path = repo
+	src.SubDir = subDir
 	src.Ref = ref
 	src.Pinned = ref != ""
-	src.URL = "https://" + src.Host + "/" + repoPath
+	src.URL = "https://" + src.Host + "/" + repo
 	return src, nil
 }
 
@@ -144,11 +148,14 @@ func parseHTTPS(src *Source, s string) (*Source, error) {
 	repoPath, ref := splitRef(pathAndRef)
 	repoPath = strings.TrimSuffix(repoPath, ".git")
 
+	repo, subDir := splitRepoSubDir(src.Host, repoPath)
+
 	src.Type = "git"
-	src.Path = repoPath
+	src.Path = repo
+	src.SubDir = subDir
 	src.Ref = ref
 	src.Pinned = ref != ""
-	src.URL = "https://" + src.Host + "/" + repoPath
+	src.URL = "https://" + src.Host + "/" + repo
 	return src, nil
 }
 
@@ -161,11 +168,14 @@ func parseBare(src *Source, s string) (*Source, error) {
 	repoPath, ref := splitRef(pathAndRef)
 	repoPath = strings.TrimSuffix(repoPath, ".git")
 
+	repo, subDir := splitRepoSubDir(src.Host, repoPath)
+
 	src.Type = "git"
-	src.Path = repoPath
+	src.Path = repo
+	src.SubDir = subDir
 	src.Ref = ref
 	src.Pinned = ref != ""
-	src.URL = "https://" + src.Host + "/" + repoPath
+	src.URL = "https://" + src.Host + "/" + repo
 	return src, nil
 }
 
@@ -177,4 +187,27 @@ func splitRef(s string) (path, ref string) {
 		return s, ""
 	}
 	return s[:atIdx], s[atIdx+1:]
+}
+
+// knownTwoComponentHosts lists git hosting services where the repo path is
+// always exactly two components (owner/repo). Extra path components are
+// treated as a subdirectory within the repo.
+var knownTwoComponentHosts = map[string]bool{
+	"github.com":    true,
+	"bitbucket.org": true,
+}
+
+// splitRepoSubDir splits a full path like "org/repo/sub/dir" into the repo
+// path ("org/repo") and subdirectory ("sub/dir") based on the host.
+// For known two-component hosts, the first two segments are the repo.
+// For other hosts, the entire path is treated as the repo (no subdir).
+func splitRepoSubDir(host, fullPath string) (repoPath, subDir string) {
+	if !knownTwoComponentHosts[host] {
+		return fullPath, ""
+	}
+	parts := strings.SplitN(fullPath, "/", 3)
+	if len(parts) <= 2 {
+		return fullPath, ""
+	}
+	return parts[0] + "/" + parts[1], parts[2]
 }

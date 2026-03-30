@@ -3,6 +3,7 @@ package pkg
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -50,6 +51,49 @@ func Pull(dir string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("git pull in %s: %w\n%s", dir, err, stderr.String())
+	}
+	return nil
+}
+
+// SparseCloneRef clones only a subdirectory of a repo using sparse checkout.
+// The full repo metadata is fetched but only the files under subDir are checked out.
+// When ref is empty the default branch is used.
+func SparseCloneRef(url, ref, subDir, dest string) error {
+	if strings.HasPrefix(url, "-") {
+		return fmt.Errorf("invalid git URL %q: must not start with '-'", url)
+	}
+	if strings.HasPrefix(subDir, "-") {
+		return fmt.Errorf("invalid subdirectory %q: must not start with '-'", subDir)
+	}
+
+	// 1. git clone --no-checkout [--branch ref] -- url dest
+	args := []string{"clone", "--no-checkout", "--filter=blob:none"}
+	if ref != "" {
+		args = append(args, "--branch", ref)
+	}
+	args = append(args, "--", url, dest)
+	cmd := exec.Command("git", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone (sparse) %s: %w\n%s", url, err, stderr.String())
+	}
+
+	// 2. Enable sparse checkout with cone mode
+	cmds := [][]string{
+		{"git", "-C", dest, "sparse-checkout", "init", "--cone"},
+		{"git", "-C", dest, "sparse-checkout", "set", subDir},
+		{"git", "-C", dest, "checkout"},
+	}
+	for _, c := range cmds {
+		cmd = exec.Command(c[0], c[1:]...)
+		stderr.Reset()
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			// Clean up on failure
+			_ = os.RemoveAll(dest)
+			return fmt.Errorf("sparse checkout %s/%s: %w\n%s", url, subDir, err, stderr.String())
+		}
 	}
 	return nil
 }
