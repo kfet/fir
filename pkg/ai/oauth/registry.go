@@ -20,7 +20,7 @@ func init() {
 	// Register all built-in OAuth providers.
 	RegisterProvider(&AnthropicProvider{})
 	RegisterProvider(&GitHubCopilotProvider{})
-	RegisterProvider(&OpenAICodexProvider{})
+	// OpenAI Codex is now handled by the codex_auth.py builtin extension.
 
 	// Snapshot built-ins after registration.
 	registryMu.RLock()
