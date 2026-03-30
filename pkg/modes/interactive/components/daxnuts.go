@@ -129,8 +129,7 @@ func (d *DaxnutsComponent) Render(width int) []string {
 	t := theme.GetTheme()
 
 	center := func(s string) string {
-		visible := tui.StripAnsi(s)
-		visLen := tui.VisibleWidth(visible)
+		visLen := tui.VisibleWidth(s)
 		left := (width - visLen) / 2
 		if left < 0 {
 			left = 0

@@ -5,9 +5,8 @@ package tui
 import (
 	"strings"
 	"sync"
-	"unicode"
+	"sync/atomic"
 
-	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
 )
 
@@ -19,55 +18,31 @@ func VisibleWidth(s string) int {
 	}
 
 	// Fast path: pure ASCII printable (no ANSI escapes)
-	isPureASCII := true
-	for i := range len(s) {
-		c := s[i]
-		if c < 0x20 || c > 0x7e {
-			isPureASCII = false
-			break
-		}
-	}
-	if isPureASCII {
+	if isPureASCIIPrintable(s) {
 		return len(s)
 	}
 
 	// Check cache
-	widthCacheMu.RLock()
-	if w, ok := widthCache[s]; ok {
-		widthCacheMu.RUnlock()
-		return w
+	if w, ok := widthCache.Load(s); ok {
+		return w.(int)
 	}
-	widthCacheMu.RUnlock()
 
 	// Normalize
-	clean := s
-	if strings.Contains(clean, "\t") {
-		clean = strings.ReplaceAll(clean, "\t", "   ")
-	}
+	clean := strings.ReplaceAll(s, "\t", "   ")
 	if strings.Contains(clean, "\x1b") {
 		clean = StripAnsi(clean)
 	}
 
-	// Calculate width using grapheme clusters
-	width := 0
-	state := -1
-	for len(clean) > 0 {
-		cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(clean, state)
-		width += graphemeWidth(cluster)
-		clean = rest
-		state = newState
-	}
+	// Calculate width — uniseg.StringWidth handles grapheme clusters and emoji.
+	width := uniseg.StringWidth(clean)
 
-	// Cache result
-	widthCacheMu.Lock()
-	if len(widthCache) >= widthCacheSize {
-		for k := range widthCache {
-			delete(widthCache, k)
-			break
-		}
+	// Cache result (evict all if too large, since sync.Map has no Len)
+	widthCacheN.Add(1)
+	if widthCacheN.Load() > widthCacheSize {
+		widthCache.Clear()
+		widthCacheN.Store(1)
 	}
-	widthCache[s] = width
-	widthCacheMu.Unlock()
+	widthCache.Store(s, width)
 
 	return width
 }
@@ -75,48 +50,21 @@ func VisibleWidth(s string) int {
 const widthCacheSize = 512
 
 var (
-	widthCache   = make(map[string]int, widthCacheSize)
-	widthCacheMu sync.RWMutex
+	widthCache  sync.Map
+	widthCacheN atomic.Int64
 )
 
 // graphemeWidth returns the terminal display width of a grapheme cluster.
+// Uses uniseg which embeds Unicode Emoji_Presentation property tables,
+// so emoji vs text-presentation is determined from spec data, not heuristics.
 func graphemeWidth(cluster string) int {
-	if len(cluster) == 0 {
-		return 0
-	}
-
-	r, _ := firstRune(cluster)
-
-	if couldBeEmoji(r, cluster) {
-		return 2
-	}
-
-	return runewidth.RuneWidth(r)
-}
-
-func firstRune(s string) (rune, int) {
-	for i, r := range s {
-		return r, i
-	}
-	return 0, 0
-}
-
-func couldBeEmoji(r rune, cluster string) bool {
-	return (r >= 0x1f000 && r <= 0x1fbff) ||
-		(r >= 0x2300 && r <= 0x23ff) ||
-		(r >= 0x2600 && r <= 0x27bf) ||
-		(r >= 0x2b50 && r <= 0x2b55) ||
-		strings.Contains(cluster, "\uFE0F") ||
-		len([]rune(cluster)) > 2
+	return uniseg.StringWidth(cluster)
 }
 
 // ApplyBackgroundToLine applies a background color function to a line, padding to full width.
 func ApplyBackgroundToLine(line string, width int, bgFn func(string) string) string {
 	visibleLen := VisibleWidth(line)
-	paddingNeeded := width - visibleLen
-	if paddingNeeded < 0 {
-		paddingNeeded = 0
-	}
+	paddingNeeded := max(width-visibleLen, 0)
 	return bgFn(line + strings.Repeat(" ", paddingNeeded))
 }
 
@@ -140,52 +88,41 @@ func TruncateToWidth(text string, maxWidth int, ellipsis string, pad bool) strin
 		return ellipsis[:maxWidth]
 	}
 
-	type seg struct {
-		isAnsi bool
-		value  string
-	}
-	var segments []seg
-
+	var result strings.Builder
+	currentWidth := 0
 	i := 0
 	for i < len(text) {
 		code, length := ExtractAnsiCode(text, i)
 		if length > 0 {
-			segments = append(segments, seg{isAnsi: true, value: code})
+			result.WriteString(code)
 			i += length
-		} else {
-			end := i
-			for end < len(text) {
-				if _, l := ExtractAnsiCode(text, end); l > 0 {
-					break
-				}
-				end++
-			}
-			textPortion := text[i:end]
-			state := -1
-			for len(textPortion) > 0 {
-				cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(textPortion, state)
-				segments = append(segments, seg{isAnsi: false, value: cluster})
-				textPortion = rest
-				state = newState
-			}
-			i = end
-		}
-	}
-
-	var result strings.Builder
-	currentWidth := 0
-	for _, s := range segments {
-		if s.isAnsi {
-			result.WriteString(s.value)
 			continue
 		}
-		gw := graphemeWidth(s.value)
-		if currentWidth+gw > targetWidth {
-			break
+
+		// Find end of non-ANSI text
+		end := i
+		for end < len(text) {
+			if _, l := ExtractAnsiCode(text, end); l > 0 {
+				break
+			}
+			end++
 		}
-		result.WriteString(s.value)
-		currentWidth += gw
+		textPortion := text[i:end]
+		state := -1
+		for len(textPortion) > 0 {
+			cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(textPortion, state)
+			gw := graphemeWidth(cluster)
+			if currentWidth+gw > targetWidth {
+				goto done
+			}
+			result.WriteString(cluster)
+			currentWidth += gw
+			textPortion = rest
+			state = newState
+		}
+		i = end
 	}
+done:
 
 	truncated := result.String() + "\x1b[0m" + ellipsis
 	if pad {
@@ -364,30 +301,4 @@ func ExtractSegments(line string, beforeEnd, afterStart, afterLen int, strictAft
 		After:       after.String(),
 		AfterWidth:  afterWidth,
 	}
-}
-
-// SliceWithWidthResult holds text and its visible width.
-type SliceWithWidthResult struct {
-	Text  string
-	Width int
-}
-
-// IsWhitespaceChar returns true if the rune is whitespace.
-func IsWhitespaceChar(r rune) bool {
-	return unicode.IsSpace(r)
-}
-
-// IsPunctuationChar returns true if the rune is a punctuation character.
-func IsPunctuationChar(r rune) bool {
-	return strings.ContainsRune(`(){}[]<>.,;:'"!?+-=*/\|&%^$#@~`+"`", r)
-}
-
-func parseInt(s string) int {
-	n := 0
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
-		}
-	}
-	return n
 }

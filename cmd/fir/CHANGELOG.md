@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `✓` (U+2713) and other dingbats being miscounted as width 2 instead of 1, causing rendering artifacts (ghost ANSI codes, truncated text) in the plan widget. Replaced hand-curated `couldBeEmoji` heuristic with `uniseg.StringWidth` which uses Unicode Emoji_Presentation property tables.
+
 ## [0.26.2] - 2026-03-29
 
 ### Changed

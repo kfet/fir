@@ -121,22 +121,34 @@ func TestSliceByColumn_ZeroLength(t *testing.T) {
 	}
 }
 
-// --- Helpers ---
-
-func TestIsWhitespaceChar(t *testing.T) {
-	if !IsWhitespaceChar(' ') {
-		t.Error("space should be whitespace")
+func TestVisibleWidth_CheckmarkIsWidth1(t *testing.T) {
+	// ✓ (U+2713) is a dingbat, not an emoji — it should be width 1.
+	// Previously couldBeEmoji matched the 0x2600-0x27bf range too broadly.
+	if w := VisibleWidth("✓"); w != 1 {
+		t.Errorf("expected ✓ width 1, got %d", w)
 	}
-	if IsWhitespaceChar('a') {
-		t.Error("'a' should not be whitespace")
+	// ✓ inside a styled plan line
+	line := "\x1b[32m  ✓ Update documentation\x1b[0m"
+	if w := VisibleWidth(line); w != 24 {
+		t.Errorf("expected styled checkmark line width 24, got %d", w)
 	}
 }
 
-func TestIsPunctuationChar(t *testing.T) {
-	if !IsPunctuationChar('.') {
-		t.Error("'.' should be punctuation")
+func TestVisibleWidth_EmojiStillWidth2(t *testing.T) {
+	// ✅ (U+2705) has Emoji_Presentation=Yes → width 2
+	if w := VisibleWidth("✅"); w != 2 {
+		t.Errorf("expected ✅ width 2, got %d", w)
 	}
-	if IsPunctuationChar('a') {
-		t.Error("'a' should not be punctuation")
+	// ⭐ (U+2B50) has Emoji_Presentation=Yes → width 2
+	if w := VisibleWidth("⭐"); w != 2 {
+		t.Errorf("expected ⭐ width 2, got %d", w)
+	}
+	// ✓ with VS16 — U+2713 is not Emoji-capable per Unicode, stays width 1
+	if w := VisibleWidth("✓\uFE0F"); w != 1 {
+		t.Errorf("expected ✓+VS16 width 1, got %d", w)
+	}
+	// ✔ (U+2714) WITH VS16 is emoji-capable → width 2
+	if w := VisibleWidth("✔\uFE0F"); w != 2 {
+		t.Errorf("expected ✔+VS16 width 2, got %d", w)
 	}
 }
