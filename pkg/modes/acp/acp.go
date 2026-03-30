@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -110,8 +112,17 @@ func RunAcpMode(opts Options) error {
 	pa.conn = conn
 	firlog.Info("acp server: connection established", "elapsed_ms", time.Since(runStart).Milliseconds())
 
-	// Block until connection closes
-	<-done
+	// Catch SIGTERM/SIGINT so we still run cleanup when the host kills us.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
+	// Block until connection closes or we receive a signal.
+	select {
+	case <-done:
+	case sig := <-sigCh:
+		firlog.Info("acp received signal, shutting down", "signal", sig)
+	}
+	signal.Stop(sigCh)
 
 	// Clean up all sessions
 	pa.mu.Lock()
