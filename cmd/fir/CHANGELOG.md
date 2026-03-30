@@ -5,10 +5,13 @@
 ### Added
 
 - `copilot-auth` extension: GitHub Copilot OAuth provider using the device code flow, ported from the Go implementation to a Python extension.
+- `codex-auth` extension: OpenAI Codex OAuth provider ported to a Python builtin extension.
+- Support sparse checkout for subdirectory package installs.
 
 ### Fixed
 
 - Fixed `✓` (U+2713) and other dingbats being miscounted as width 2 instead of 1, causing rendering artifacts (ghost ANSI codes, truncated text) in the plan widget. Replaced hand-curated `couldBeEmoji` heuristic with `uniseg.StringWidth` which uses Unicode Emoji_Presentation property tables.
+- Added signal handler to ACP mode for clean extension shutdown.
 
 ### Removed
 

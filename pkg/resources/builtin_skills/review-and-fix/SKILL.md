@@ -26,6 +26,7 @@ Read every changed file. Look for:
 - **Correctness** — off-by-one, races, wrong logic, serialization mismatches
 - **Test gaps** — untested code paths, missing assertions
 - **Simplification** — dead code, duplication, verbose patterns, unnecessary allocations
+- **Changelog** — commits on the branch missing from the `[Unreleased]` section of `CHANGELOG.md`
 
 Collect issues as a flat list with `file:line` references and severity (urgent / backlog). Print the list.
 
