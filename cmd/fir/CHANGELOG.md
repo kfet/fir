@@ -10,8 +10,14 @@
 - Support sparse checkout for subdirectory package installs.
 - Settings-based resource lookup paths: `"skills"`, `"prompts"`, and `"themes"` arrays in `settings.json` now add extra directories to the resource search. Relative paths resolve against the working directory, so a global `"skills": ["skills"]` discovers `./skills/` in every project automatically.
 
+### Changed
+
+- Unified Authorization header construction across all 8 providers with a shared `BuildRequestHeaders` helper enforcing canonical 3-layer merge order (auth < model.Headers < options.Headers).
+
 ### Fixed
 
+- `openai_codex_responses`: auth headers were set last, preventing user config overrides via model/options headers.
+- `google_gemini_cli`: model.Headers were previously ignored entirely.
 - Auto-clear transient command status messages (e.g. "No plan entries.") on the next turn or Escape instead of on a timer.
 - Fixed sporadic `Error: 400` from Anthropic API when using the `aside` tool on long conversations by removing `trimMessagesForSideQuery` entirely. The old trimming dropped messages from the front of the conversation, which invalidated the provider's prompt cache and caused cache thrashing. Side queries now send the full conversation prefix (preserving cache hits) and let context-overflow errors surface gracefully.
 - Fixed `Error: 401 invalid x-api-key` after `/reexec` when using OAuth auth. OAuth provider extensions now auto-refresh the model registry on registration, and the session model is re-resolved to pick up Bearer token headers.
