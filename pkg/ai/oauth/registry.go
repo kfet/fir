@@ -17,10 +17,8 @@ var (
 var builtInProviders = map[string]Provider{}
 
 func init() {
-	// Register all built-in OAuth providers.
-	RegisterProvider(&AnthropicProvider{})
-	// GitHub Copilot is now handled by the copilot_auth.py builtin extension.
-	// OpenAI Codex is now handled by the codex_auth.py builtin extension.
+	// Built-in OAuth providers are handled by Python builtin extensions
+	// (anthropic_auth.py, copilot_auth.py, codex_auth.py).
 
 	// Snapshot built-ins after registration.
 	registryMu.RLock()

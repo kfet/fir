@@ -541,20 +541,21 @@ func TestAnthropic_FromClaudeCodeNameFallback(t *testing.T) {
 	}
 }
 
-func TestAnthropic_IsOAuthToken(t *testing.T) {
+func TestAnthropic_IsOAuthModel(t *testing.T) {
 	tests := []struct {
-		key  string
-		want bool
+		name  string
+		model *ai.Model
+		want  bool
 	}{
-		{"sk-ant-api03-xxx", false},
-		{"sk-ant-oat-xxx", true},
-		{"sk-ant-oat01-prefix-xxx", true},
-		{"regular-key", false},
-		{"", false},
+		{"nil model", nil, false},
+		{"no headers", &ai.Model{}, false},
+		{"non-oauth", &ai.Model{Headers: map[string]string{"x-api-key": "sk-xxx"}}, false},
+		{"oauth with beta prefix", &ai.Model{Headers: map[string]string{"x-anthropic-oauth-beta-prefix": "claude-code-20250219,oauth-2025-04-20"}}, true},
+		{"empty beta prefix", &ai.Model{Headers: map[string]string{"x-anthropic-oauth-beta-prefix": ""}}, false},
 	}
 	for _, tt := range tests {
-		if got := isOAuthTokenStr(tt.key); got != tt.want {
-			t.Errorf("isOAuthToken(%q) = %v, want %v", tt.key, got, tt.want)
+		if got := isOAuthModel(tt.model); got != tt.want {
+			t.Errorf("isOAuthModel(%s) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
@@ -617,7 +618,20 @@ func TestAnthropic_AnthropicVersionHeader(t *testing.T) {
 }
 
 func TestAnthropic_OAuthHeaders(t *testing.T) {
-	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
+	// OAuth headers (authorization, user-agent, x-app) are now set by the
+	// anthropic_auth extension via model.Headers. The provider reads the
+	// beta prefix from x-anthropic-oauth-beta-prefix.
+	model := &ai.Model{
+		ID:      "claude-sonnet",
+		BaseURL: "https://api.anthropic.com",
+		Headers: map[string]string{
+			"authorization":                   "Bearer sk-ant-oat-test",
+			"user-agent":                      "claude-cli/2.1.75 (external, cli)",
+			"x-app":                           "cli",
+			"x-anthropic-oauth-beta-prefix":   "claude-code-20250219,oauth-2025-04-20",
+			"x-anthropic-oauth-system-prefix": "You are Claude Code, Anthropic's official CLI for Claude.",
+		},
+	}
 	headers := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil)
 
 	if headers["authorization"] != "Bearer sk-ant-oat-test" {
@@ -803,13 +817,19 @@ func TestAnthropic_BuildParams_Temperature(t *testing.T) {
 }
 
 func TestAnthropic_BuildParams_OAuthSystemPrompt(t *testing.T) {
-	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	model := &ai.Model{
+		ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
+		Headers: map[string]string{
+			"x-anthropic-oauth-beta-prefix":   "claude-code-20250219,oauth-2025-04-20",
+			"x-anthropic-oauth-system-prefix": "You are Claude Code, Anthropic's official CLI for Claude.",
+		},
+	}
 	ctx := ai.Context{
 		SystemPrompt: "Be helpful.",
 		Messages:     []ai.Message{ai.NewUserMsg("test", 1000)},
 	}
 
-	// OAuth mode: should prepend Claude Code system prompt
+	// OAuth mode: should prepend Claude Code system prompt from model headers
 	params := buildAnthropicParams(model, ctx, true, nil)
 	system, ok := params["system"].([]map[string]any)
 	if !ok {
@@ -826,7 +846,8 @@ func TestAnthropic_BuildParams_OAuthSystemPrompt(t *testing.T) {
 	}
 
 	// Non-OAuth: only user system prompt
-	params = buildAnthropicParams(model, ctx, false, nil)
+	modelPlain := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	params = buildAnthropicParams(modelPlain, ctx, false, nil)
 	system = params["system"].([]map[string]any)
 	if len(system) != 1 {
 		t.Fatalf("expected 1 system block, got %d", len(system))

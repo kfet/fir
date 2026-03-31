@@ -4,6 +4,7 @@
 
 ### Added
 
+- `anthropic-auth` extension: Anthropic (Claude Pro/Max) OAuth provider ported from Go to a Python builtin extension, with OAuth-specific headers (authorization, beta prefix, system prompt, user-agent) injected via `modify_models`.
 - `copilot-auth` extension: GitHub Copilot OAuth provider using the device code flow, ported from the Go implementation to a Python extension.
 - `codex-auth` extension: OpenAI Codex OAuth provider ported to a Python builtin extension.
 - Support sparse checkout for subdirectory package installs.
@@ -16,6 +17,7 @@
 ### Removed
 
 - Removed Go-side `GitHubCopilotProvider` (`pkg/ai/oauth/github_copilot.go`); login, refresh, token exchange, and `ModifyModels` are now handled entirely by the `copilot-auth` builtin extension.
+- Removed Go-side `AnthropicProvider` (`pkg/ai/oauth/anthropic.go`); login, refresh, token exchange, and OAuth header injection are now handled entirely by the `anthropic-auth` builtin extension.
 
 ## [0.26.2] - 2026-03-29
 

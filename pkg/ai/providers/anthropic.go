@@ -20,9 +20,6 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// claudeCodeVersion mimics Claude Code's version for OAuth stealth mode.
-const claudeCodeVersion = "2.1.75"
-
 // claudeCodeTools are the canonical tool names from Claude Code 2.x.
 var claudeCodeTools = []string{
 	"Read", "Write", "Edit", "Bash", "Grep", "Glob",
@@ -71,8 +68,10 @@ func resolveCacheRetention(cr ai.CacheRetention) ai.CacheRetention {
 	return ai.CacheShort
 }
 
-func isOAuthTokenStr(apiKey string) bool {
-	return strings.Contains(apiKey, "sk-ant-oat")
+// isOAuthModel returns true if the model has been tagged with OAuth headers
+// by the anthropic auth extension (via auth_modify_models).
+func isOAuthModel(model *ai.Model) bool {
+	return model != nil && model.Headers != nil && model.Headers["x-anthropic-oauth-beta-prefix"] != ""
 }
 
 func supportsAdaptiveThinking(modelID string) bool {
@@ -224,7 +223,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			return
 		}
 
-		oauthToken := isOAuthTokenStr(apiKey)
+		oauthToken := isOAuthModel(model)
 		params := buildAnthropicParams(model, prompt, oauthToken, options)
 		if options != nil && options.OnPayload != nil {
 			if next := options.OnPayload(params, model); next != nil {
@@ -666,17 +665,24 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	}
 
 	if oauthToken {
-		headers["anthropic-beta"] = fmt.Sprintf("claude-code-20250219,oauth-2025-04-20,%s", betaFeatures)
-		headers["user-agent"] = fmt.Sprintf("claude-cli/%s (external, cli)", claudeCodeVersion)
-		headers["x-app"] = "cli"
-		headers["authorization"] = "Bearer " + apiKey
+		// OAuth beta prefix is set by the auth extension via model headers.
+		oauthBetaPrefix := model.Headers["x-anthropic-oauth-beta-prefix"]
+		if oauthBetaPrefix != "" {
+			headers["anthropic-beta"] = oauthBetaPrefix + "," + betaFeatures
+		} else {
+			headers["anthropic-beta"] = betaFeatures
+		}
 	} else {
 		headers["anthropic-beta"] = betaFeatures
 		headers["x-api-key"] = apiKey
 	}
 
-	// Merge model headers
+	// Merge model headers (includes OAuth auth headers set by the extension)
 	for k, v := range model.Headers {
+		// Skip internal marker headers
+		if k == "x-anthropic-oauth-beta-prefix" || k == "x-anthropic-oauth-system-prefix" {
+			continue
+		}
 		headers[k] = v
 	}
 
@@ -711,10 +717,11 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 
 	// System prompt
 	var systemBlocks []map[string]any
-	if oauthToken {
+	// OAuth models require the Claude Code identity prefix (set by the auth extension).
+	if oauthSystemPrefix, ok := model.Headers["x-anthropic-oauth-system-prefix"]; ok && oauthSystemPrefix != "" {
 		block := map[string]any{
 			"type": "text",
-			"text": "You are Claude Code, Anthropic's official CLI for Claude.",
+			"text": oauthSystemPrefix,
 		}
 		if retention != ai.CacheNone {
 			block["cache_control"] = cacheControlBlock(model.BaseURL, retention)

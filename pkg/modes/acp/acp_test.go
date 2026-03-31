@@ -1786,7 +1786,7 @@ func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
 		t.Error("expected handleSlashCommand to return true for login")
 	}
 	msg := getLastAgentMessage(mc.getUpdates())
-	if !strings.Contains(msg, "Invalid provider ID") {
-		t.Errorf("expected 'Invalid provider ID' message, got: %q", msg)
+	if !strings.Contains(msg, "Invalid provider ID") && !strings.Contains(msg, "No OAuth providers available") {
+		t.Errorf("expected 'Invalid provider ID' or 'No OAuth providers available' message, got: %q", msg)
 	}
 }

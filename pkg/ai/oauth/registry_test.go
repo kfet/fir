@@ -6,8 +6,10 @@ import (
 )
 
 func TestGetProvider_BuiltIns(t *testing.T) {
+	// All built-in OAuth providers are now handled by Python builtin extensions.
+	// The Go registry starts empty; providers are registered dynamically by extensions.
 	expectedIDs := []string{
-		"anthropic",
+		// "anthropic" is now provided by the anthropic_auth builtin extension.
 		// "github-copilot" is now provided by the copilot_auth builtin extension.
 		// "google-gemini-cli" is now provided by the gemini_cli_auth builtin extension.
 		// "google-antigravity" is now provided by the antigravity_auth builtin extension.
@@ -30,16 +32,14 @@ func TestGetProvider_Unknown(t *testing.T) {
 
 func TestGetProviders(t *testing.T) {
 	providers := GetProviders()
-	if len(providers) < 1 {
-		t.Errorf("expected at least 1 provider, got %d", len(providers))
-	}
+	// All providers are now registered by extensions; Go registry may be empty.
+	_ = providers
 }
 
 func TestGetProviderInfoList(t *testing.T) {
 	infos := GetProviderInfoList()
-	if len(infos) < 1 {
-		t.Errorf("expected at least 1 provider info, got %d", len(infos))
-	}
+	// All providers are now registered by extensions; Go registry may be empty.
+	_ = infos
 	for _, info := range infos {
 		if info.ID == "" {
 			t.Error("provider info has empty ID")
