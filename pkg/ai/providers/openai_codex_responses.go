@@ -376,21 +376,19 @@ func convertResponsesInputNoSystem(model *ai.Model, ctx ai.Context) []any {
 // --- Headers ---
 
 func buildCodexBaseHeaders(modelHeaders map[string]string, options *ai.StreamOptions, accountID, apiKey string) map[string]string {
-	headers := make(map[string]string)
-	for k, v := range modelHeaders {
-		headers[k] = v
-	}
-	if options != nil {
-		for k, v := range options.Headers {
-			headers[k] = v
-		}
-	}
-	headers["Authorization"] = "Bearer " + apiKey
-	headers["chatgpt-account-id"] = accountID
-	headers["originator"] = "fir"
-	headers["User-Agent"] = fmt.Sprintf("fir (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version())
-	headers["accept"] = "text/event-stream"
-	headers["content-type"] = "application/json"
+	// Use a temporary model to leverage BuildRequestHeaders merge order.
+	tmpModel := &ai.Model{Headers: modelHeaders}
+	headers := BuildRequestHeaders(
+		map[string]string{
+			"Authorization":      "Bearer " + apiKey,
+			"chatgpt-account-id": accountID,
+			"originator":         "fir",
+			"User-Agent":         fmt.Sprintf("fir (%s %s; %s)", runtime.GOOS, runtime.GOARCH, runtime.Version()),
+			"accept":             "text/event-stream",
+			"content-type":       "application/json",
+		},
+		tmpModel, options,
+	)
 	return headers
 }
 

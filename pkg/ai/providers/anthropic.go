@@ -667,7 +667,8 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		}
 	}
 
-	headers := map[string]string{
+	// Build auth headers based on auth type
+	authHeaders := map[string]string{
 		"accept":            "application/json",
 		"anthropic-version": "2023-06-01",
 		"anthropic-dangerous-direct-browser-access": "true",
@@ -677,34 +678,27 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		// OAuth beta prefix is set by the auth extension via model headers.
 		oauthBetaPrefix := model.Headers["x-anthropic-oauth-beta-prefix"]
 		if oauthBetaPrefix != "" {
-			headers["anthropic-beta"] = oauthBetaPrefix + "," + betaFeatures
+			authHeaders["anthropic-beta"] = oauthBetaPrefix + "," + betaFeatures
 		} else {
-			headers["anthropic-beta"] = betaFeatures
+			authHeaders["anthropic-beta"] = betaFeatures
 		}
 	} else {
-		headers["anthropic-beta"] = betaFeatures
-		headers["x-api-key"] = apiKey
+		authHeaders["anthropic-beta"] = betaFeatures
+		authHeaders["x-api-key"] = apiKey
 	}
 
-	// Merge model headers (includes OAuth auth headers set by the extension)
+	// Build final headers using the standard merge order, but filter
+	// internal marker headers from model and thinking headers from options.
+	// We create a filtered copy of model headers to exclude internal markers.
+	filteredModel := &ai.Model{Headers: make(map[string]string, len(model.Headers))}
 	for k, v := range model.Headers {
-		// Skip internal marker headers
 		if k == "x-anthropic-oauth-beta-prefix" || k == "x-anthropic-oauth-system-prefix" {
 			continue
 		}
-		headers[k] = v
+		filteredModel.Headers[k] = v
 	}
 
-	// Merge option headers (but skip our internal x-anthropic-* ones)
-	if options != nil {
-		for k, v := range options.Headers {
-			if !strings.HasPrefix(k, "x-anthropic-thinking-") {
-				headers[k] = v
-			}
-		}
-	}
-
-	return headers
+	return BuildRequestHeaders(authHeaders, filteredModel, options, "x-anthropic-thinking-")
 }
 
 func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, options *ai.StreamOptions) map[string]any {

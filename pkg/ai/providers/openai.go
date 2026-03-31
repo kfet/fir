@@ -322,12 +322,13 @@ func streamOpenAIHTTP(
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// Model-level headers
-	for k, v := range model.Headers {
-		req.Header.Set(k, v)
-	}
+	// Build auth + model headers (options merged after provider-specific logic below)
+	baseHeaders := BuildRequestHeaders(
+		map[string]string{"Authorization": "Bearer " + apiKey},
+		model, nil,
+	)
+	ApplyHeaders(req, baseHeaders)
 
 	// Copilot-specific headers
 	if model.Provider == "github-copilot" {

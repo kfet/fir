@@ -116,17 +116,10 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 
 		url := openAIResponsesURL(model.BaseURL)
 
-		headers := map[string]string{
-			"Authorization": "Bearer " + apiKey,
-		}
-		for k, v := range model.Headers {
-			headers[k] = v
-		}
-		if options != nil {
-			for k, v := range options.Headers {
-				headers[k] = v
-			}
-		}
+		headers := BuildRequestHeaders(
+			map[string]string{"Authorization": "Bearer " + apiKey},
+			model, options,
+		)
 
 		firlog.Debug("openai-responses request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 

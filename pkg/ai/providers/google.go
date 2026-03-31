@@ -178,16 +178,12 @@ func streamGoogleHTTP(
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", apiKey)
 
-	for k, v := range model.Headers {
-		req.Header.Set(k, v)
-	}
-	if options != nil {
-		for k, v := range options.Headers {
-			req.Header.Set(k, v)
-		}
-	}
+	hdrs := BuildRequestHeaders(
+		map[string]string{"x-goog-api-key": apiKey},
+		model, options,
+	)
+	ApplyHeaders(req, hdrs)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

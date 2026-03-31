@@ -184,17 +184,10 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 
 		url := baseURL + "/responses"
 
-		headers := map[string]string{
-			"api-key": apiKey,
-		}
-		for k, v := range model.Headers {
-			headers[k] = v
-		}
-		if options != nil {
-			for k, v := range options.Headers {
-				headers[k] = v
-			}
-		}
+		headers := BuildRequestHeaders(
+			map[string]string{"api-key": apiKey},
+			model, options,
+		)
 
 		firlog.Debug("azure-openai request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 		sseEvents, sseErr := DefaultSSEClient.Stream(ctx, url, headers, bytes.NewReader(body))

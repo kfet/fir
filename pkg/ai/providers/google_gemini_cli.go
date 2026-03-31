@@ -460,21 +460,18 @@ func streamGeminiCLI(
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	hdrs := geminiCLIHeaders()
+	baseHdrs := geminiCLIHeaders()
 	if isAntigravity {
-		hdrs = antigravityHeaders()
+		baseHdrs = antigravityHeaders()
 	}
-	hdrs["Authorization"] = "Bearer " + creds.Token
-	hdrs["Content-Type"] = "application/json"
-	hdrs["Accept"] = "text/event-stream"
+	baseHdrs["Authorization"] = "Bearer " + creds.Token
+	baseHdrs["Content-Type"] = "application/json"
+	baseHdrs["Accept"] = "text/event-stream"
 	if needsClaudeThinkingBetaHeader(model) {
-		hdrs["anthropic-beta"] = claudeThinkingBetaHeader
+		baseHdrs["anthropic-beta"] = claudeThinkingBetaHeader
 	}
-	if options != nil {
-		for k, v := range options.Headers {
-			hdrs[k] = v
-		}
-	}
+
+	hdrs := BuildRequestHeaders(baseHdrs, model, options)
 
 	// Retry loop with endpoint fallback.
 	// On 403/404, immediately try the next endpoint (no delay).
