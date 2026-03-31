@@ -32,6 +32,11 @@ func (e *SSEError) Error() string {
 	if e.RequestID != "" {
 		fmt.Fprintf(&b, " (request-id: %s)", e.RequestID)
 	}
+	// Include raw body when the extracted message is too vague (e.g. just
+	// "Error") so the user/logs get the actual API error details.
+	if e.RawBody != "" && e.RawBody != e.Message && len(e.Message) < 20 {
+		fmt.Fprintf(&b, "\n%s", e.RawBody)
+	}
 	return b.String()
 }
 

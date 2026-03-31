@@ -529,7 +529,16 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 			// Check for HTTP-level errors (e.g. 529 Overloaded).
 			if sseErrVal != nil {
-				firlog.Warn("anthropic SSE error", "err", sseErrVal)
+				if sseErr, ok := sseErrVal.(*SSEError); ok {
+					firlog.Warn("anthropic HTTP error",
+						"status", sseErr.StatusCode,
+						"message", sseErr.Message,
+						"request_id", sseErr.RequestID,
+						"body", sseErr.RawBody,
+					)
+				} else {
+					firlog.Warn("anthropic SSE error", "err", sseErrVal)
+				}
 				errMsg := sseErrVal.Error()
 				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
 					lastErrMsg = errMsg
