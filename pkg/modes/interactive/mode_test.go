@@ -2076,3 +2076,25 @@ func TestOnMessageStart_NilMessageIsNoop(t *testing.T) {
 		t.Errorf("expected counter unchanged at 0, got %d", got)
 	}
 }
+
+func TestInteractiveMode_StatusClearsOnNextTurn(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.mode.showStatus("Compacted: 1000 tokens")
+
+	if len(tm.mode.commandStatusContainer.ChildrenSnapshot()) == 0 {
+		t.Fatal("expected commandStatusContainer to have children immediately after showStatus")
+	}
+
+	// Status should persist (no auto-clear timer).
+	time.Sleep(100 * time.Millisecond)
+	if len(tm.mode.commandStatusContainer.ChildrenSnapshot()) == 0 {
+		t.Error("expected commandStatusContainer to still have children — no auto-clear")
+	}
+
+	// Simulate clearing on Escape.
+	tm.mode.commandStatusContainer.Clear()
+	if len(tm.mode.commandStatusContainer.ChildrenSnapshot()) != 0 {
+		t.Error("expected commandStatusContainer to be cleared after Escape")
+	}
+}

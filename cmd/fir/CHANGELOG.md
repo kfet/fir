@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Auto-clear transient command status messages (e.g. "No plan entries.") on the next turn or Escape instead of on a timer.
 - Fixed sporadic `Error: 400` from Anthropic API when using the `aside` tool on long conversations. `trimMessagesForSideQuery` could cut mid-turn, leaving orphaned `tool_result` messages that reference trimmed-away `tool_use` IDs. The trimmed slice now snaps forward to the next `user` message boundary.
 - Fixed `Error: 401 invalid x-api-key` after `/reexec` when using OAuth auth. OAuth provider extensions now auto-refresh the model registry on registration, and the session model is re-resolved to pick up Bearer token headers.
 - Fixed vague `Error: 400 Error (request-id: ...)` messages from Anthropic by surfacing the full API error body when the extracted message is too short.
