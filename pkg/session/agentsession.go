@@ -1646,14 +1646,30 @@ func trimMessagesForSideQuery(msgs []agent.AgentMessage, contextWindow, knownTok
 	}
 
 	// Drop from the front until within budget, keeping at least one message.
+	startIdx := len(msgs) - 1 // fallback: just the last message
 	for i := 0; i < len(msgs)-1; i++ {
 		total -= estimates[i]
 		if total <= budget {
-			return msgs[i+1:]
+			startIdx = i + 1
+			break
 		}
 	}
-	// All messages still exceed budget — return just the last one.
-	return msgs[len(msgs)-1:]
+
+	// Snap forward so the slice starts with a user-role message.  Without
+	// this, the Anthropic API rejects the request (400) because orphaned
+	// tool_result blocks reference tool_use IDs that were trimmed away and
+	// messages must begin with a user role.
+	for startIdx < len(msgs) && msgs[startIdx].Role() != "user" {
+		startIdx++
+	}
+	if startIdx >= len(msgs) {
+		// No user message found — keep the original last message as a
+		// best-effort fallback (the provider's TransformMessages will
+		// clean up any remaining structural issues).
+		return msgs[len(msgs)-1:]
+	}
+
+	return msgs[startIdx:]
 }
 
 // estimateSideQueryMsgTokens estimates the token count of a single message
