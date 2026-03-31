@@ -190,6 +190,12 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
 			}
+			// Re-resolve the session's model from the registry so it
+			// picks up any headers set by auth extension ModifyModels
+			// hooks (e.g. OAuth Bearer token).  The debounced auto-
+			// refresh updates the registry; we just need to swap the
+			// session's stale pointer.
+			refreshSessionModel(result.Session, modelRegistry)
 		}
 	}
 
@@ -819,6 +825,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 					}
 					return nil
 				})
+				refreshSessionModel(setup.result.Session, setup.result.Session.ModelRegistryRef())
 				es.EmitSessionStart(mode.ReexecExtData())
 			}
 		}()
@@ -836,6 +843,18 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	ui.Cleanup()
 	ui.ReexecIfRequested() // never returns if /reexec was used
 	return err
+}
+
+// refreshSessionModel ensures the model registry has applied any pending
+// auth-extension ModifyModels hooks, then re-resolves the session's model
+// pointer from the registry.
+func refreshSessionModel(sess *session.AgentSession, registry *models.ModelRegistry) {
+	registry.Refresh()
+	if cur := sess.Model(); cur != nil {
+		if updated := registry.Find(cur.Provider, cur.ID); updated != nil {
+			sess.SetModel(updated)
+		}
+	}
 }
 
 // recordCLIFlags records which CLI flags were used for usage tracking.

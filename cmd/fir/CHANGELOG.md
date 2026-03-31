@@ -13,6 +13,9 @@
 ### Fixed
 
 - Fixed sporadic `Error: 400` from Anthropic API when using the `aside` tool on long conversations. `trimMessagesForSideQuery` could cut mid-turn, leaving orphaned `tool_result` messages that reference trimmed-away `tool_use` IDs. The trimmed slice now snaps forward to the next `user` message boundary.
+- Fixed `Error: 401 invalid x-api-key` after `/reexec` when using OAuth auth. OAuth provider extensions now auto-refresh the model registry on registration, and the session model is re-resolved to pick up Bearer token headers.
+- Fixed vague `Error: 400 Error (request-id: ...)` messages from Anthropic by surfacing the full API error body when the extracted message is too short.
+- Show spinner ("Running /aside...") during extension slash command dispatch so the user sees progress while the command runs.
 - Fixed `✓` (U+2713) and other dingbats being miscounted as width 2 instead of 1, causing rendering artifacts (ghost ANSI codes, truncated text) in the plan widget. Replaced hand-curated `couldBeEmoji` heuristic with `uniseg.StringWidth` which uses Unicode Emoji_Presentation property tables.
 - Added signal handler to ACP mode for clean extension shutdown.
 

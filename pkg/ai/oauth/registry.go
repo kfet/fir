@@ -9,47 +9,34 @@ import (
 )
 
 var (
-	registryMu sync.RWMutex
-	registry   = map[string]Provider{}
+	// registry stores Provider values keyed by provider ID.
+	registry sync.Map // string → Provider
+
+	// builtInProviders stores the original built-in providers for reset.
+	builtInProviders sync.Map // string → Provider
 )
-
-// builtInProviders holds the original built-in providers for reset.
-var builtInProviders = map[string]Provider{}
-
-func init() {
-	// Built-in OAuth providers are handled by Python builtin extensions
-	// (anthropic_auth.py, copilot_auth.py, codex_auth.py).
-
-	// Snapshot built-ins after registration.
-	registryMu.RLock()
-	for k, v := range registry {
-		builtInProviders[k] = v
-	}
-	registryMu.RUnlock()
-}
 
 // RegisterProvider registers a custom OAuth provider.
 func RegisterProvider(p Provider) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry[p.ID()] = p
+	registry.Store(p.ID(), p)
 }
 
 // GetProvider returns the OAuth provider with the given ID, or nil.
 func GetProvider(id string) Provider {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return registry[id]
+	v, ok := registry.Load(id)
+	if !ok {
+		return nil
+	}
+	return v.(Provider)
 }
 
 // GetProviders returns all registered OAuth providers, sorted by ID for stable ordering.
 func GetProviders() []Provider {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	result := make([]Provider, 0, len(registry))
-	for _, p := range registry {
-		result = append(result, p)
-	}
+	var result []Provider
+	registry.Range(func(_, v any) bool {
+		result = append(result, v.(Provider))
+		return true
+	})
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].ID() < result[j].ID()
 	})
@@ -59,23 +46,25 @@ func GetProviders() []Provider {
 // UnregisterProvider removes a custom OAuth provider.
 // If the provider is built-in, restores the built-in implementation.
 func UnregisterProvider(id string) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if p, ok := builtInProviders[id]; ok {
-		registry[id] = p
-		return
+	if p, ok := builtInProviders.Load(id); ok {
+		registry.Store(id, p)
+	} else {
+		registry.Delete(id)
 	}
-	delete(registry, id)
 }
 
 // ResetProviders resets the registry to built-in providers only.
 func ResetProviders() {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry = make(map[string]Provider, len(builtInProviders))
-	for k, v := range builtInProviders {
-		registry[k] = v
-	}
+	// Delete all entries.
+	registry.Range(func(k, _ any) bool {
+		registry.Delete(k)
+		return true
+	})
+	// Restore built-ins.
+	builtInProviders.Range(func(k, v any) bool {
+		registry.Store(k, v)
+		return true
+	})
 }
 
 // GetProviderInfoList returns info for all registered OAuth providers.

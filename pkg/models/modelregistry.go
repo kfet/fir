@@ -338,6 +338,7 @@ func NewModelRegistry(authStorage *auth.AuthStorage, modelsJsonPath string) *Mod
 
 	// Load models
 	r.loadModels()
+
 	return r
 }
 
@@ -391,6 +392,7 @@ func (r *ModelRegistry) loadModels() {
 			}
 		}
 	}
+
 	r.models = combined
 }
 
