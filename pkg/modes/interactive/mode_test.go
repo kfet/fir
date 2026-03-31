@@ -225,7 +225,9 @@ func (tm *testMode) editorText() string {
 }
 
 func (tm *testMode) waitRender() {
-	time.Sleep(200 * time.Millisecond)
+	// Give the TUI event loop time to process — poll quickly rather than
+	// sleeping a fixed 200ms.  Most events settle within a few ms.
+	time.Sleep(10 * time.Millisecond)
 }
 
 func (tm *testMode) renderedOutput() string {
@@ -700,7 +702,7 @@ func TestInteractiveMode_BashCommandExecution(t *testing.T) {
 	tm.typeText("!echo hello_from_bash")
 	tm.pressEnter()
 	// Wait for goroutine to complete
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	tm.waitRender()
 
 	// Editor should be cleared
@@ -720,7 +722,7 @@ func TestInteractiveMode_DoubleBangCommandExecution(t *testing.T) {
 	// Submit a !! command (excluded from context)
 	tm.typeText("!!echo excluded")
 	tm.pressEnter()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	tm.waitRender()
 
 	// Editor should be cleared

@@ -39,15 +39,15 @@ func TestCountdownTimer_Dispose(t *testing.T) {
 func TestCountdownTimer_Expiry(t *testing.T) {
 	var mu sync.Mutex
 	expired := false
-	ct := NewCountdownTimer(1500, nil, func(s int) {}, func() {
+	ct := NewCountdownTimer(500, nil, func(s int) {}, func() {
 		mu.Lock()
 		defer mu.Unlock()
 		expired = true
 	})
 	_ = ct
 
-	// Wait for expiry (1.5s timeout → ceil = 2 seconds until expire)
-	time.Sleep(3 * time.Second)
+	// Wait for expiry (500ms → ceil = 1 second, expires after 1 tick)
+	time.Sleep(1500 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
