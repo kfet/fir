@@ -207,7 +207,6 @@ def modify_models(params: dict, ctx: fir_ext.AuthContext) -> list[dict] | None:
         return None
 
     oauth_headers = {
-        "authorization": f"Bearer {access_token}",
         "user-agent": f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)",
         "x-app": "cli",
         "x-anthropic-oauth-beta-prefix": "claude-code-20250219,oauth-2025-04-20",

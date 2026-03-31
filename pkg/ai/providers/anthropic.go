@@ -682,6 +682,10 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		} else {
 			authHeaders["anthropic-beta"] = betaFeatures
 		}
+		// Use the apiKey (resolved fresh via GetApiKey with auto-refresh)
+		// as a Bearer token. This avoids using a stale token baked into
+		// model.Headers at startup.
+		authHeaders["authorization"] = "Bearer " + apiKey
 	} else {
 		authHeaders["anthropic-beta"] = betaFeatures
 		authHeaders["x-api-key"] = apiKey
@@ -693,6 +697,11 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	filteredModel := &ai.Model{Headers: make(map[string]string, len(model.Headers))}
 	for k, v := range model.Headers {
 		if k == "x-anthropic-oauth-beta-prefix" || k == "x-anthropic-oauth-system-prefix" {
+			continue
+		}
+		// Skip authorization from model headers — it's set fresh from
+		// GetApiKey above to ensure token refresh is honoured.
+		if oauthToken && strings.EqualFold(k, "authorization") {
 			continue
 		}
 		filteredModel.Headers[k] = v

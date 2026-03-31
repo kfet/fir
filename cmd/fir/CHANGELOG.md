@@ -17,6 +17,7 @@
 ### Fixed
 
 - Interactive mode: initial prompt (CLI `fir 'task'`) no longer races against extension startup — waits for auth extensions to apply OAuth headers before making the first API call, fixing 400 errors on launch.
+- Anthropic OAuth: token is now fetched fresh on every API call via `GetApiKey()` (with auto-refresh) instead of using a stale token baked into model headers at startup, fixing 401 errors after token expiry.
 - `plan-nudger` extension: rewrote nudge messages to be directive ("Call the plan tool now… Do not reply with text") instead of conversational ("Reminder: update your plan") — prevents the model from responding with plain text instead of actually calling the plan tool.
 - `plan-nudger` extension: `agent_end` nudge now asks the model whether it intended to stop instead of unconditionally commanding it to continue, avoiding hijacking one-off user questions mid-plan.
 - `plan-nudger` extension: nudge messages now visible in UI (`display=True`) so users can see when nudges fire.
