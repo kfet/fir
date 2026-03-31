@@ -78,7 +78,8 @@ type InteractiveMode struct {
 	hideThinking    bool
 	autoCompactMode string // "off", "client", "server"
 	isBashMode      atomic.Bool
-	initialPrompt   string // stored from InteractiveModeOptions for use in Run()
+	initialPrompt   string          // stored from InteractiveModeOptions for use in Run()
+	extReadyCh      <-chan struct{} // closed when extensions are ready
 
 	// Theme
 	themeSearchDirs []string
@@ -134,6 +135,10 @@ type InteractiveMode struct {
 type InteractiveModeOptions struct {
 	// InitialPrompt is sent as the first message if non-empty.
 	InitialPrompt string
+	// ExtReady is closed when extensions have finished loading and the
+	// session model has been refreshed with auth headers. The initial
+	// prompt waits on this before making the first API call.
+	ExtReady <-chan struct{}
 	// ThemeName is "dark", "light", or a custom theme path.
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
@@ -181,6 +186,7 @@ func NewInteractiveMode(
 		themeSearchDirs:    opts.ThemeSearchDirs,
 		clipboardReader:    clipboard.ReadClipboardImage,
 		initialPrompt:      opts.InitialPrompt,
+		extReadyCh:         opts.ExtReady,
 		mcpStatus:          opts.MCPStatus,
 		mcpDetails:         opts.MCPDetails,
 		mcpReload:          opts.MCPReload,
@@ -443,6 +449,16 @@ func (m *InteractiveMode) Run() error {
 	if m.initialPrompt != "" {
 		m.AddUserMessage(m.initialPrompt) // Show it instantly as if typed
 		go func() {
+			// Wait for extensions to finish loading so auth headers
+			// (e.g. OAuth) are applied to the model before the first
+			// API call.
+			if m.extReadyCh != nil {
+				select {
+				case <-m.extReadyCh:
+				case <-m.ctx.Done():
+					return
+				}
+			}
 			_ = m.session.Prompt(m.initialPrompt)
 		}()
 	}

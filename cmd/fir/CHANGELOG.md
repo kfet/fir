@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Interactive mode: initial prompt (CLI `fir 'task'`) no longer races against extension startup — waits for auth extensions to apply OAuth headers before making the first API call, fixing 400 errors on launch.
 - `openai_codex_responses`: auth headers were set last, preventing user config overrides via model/options headers.
 - `google_gemini_cli`: model.Headers were previously ignored entirely.
 - Auto-clear transient command status messages (e.g. "No plan entries.") on the next turn or Escape instead of on a timer.

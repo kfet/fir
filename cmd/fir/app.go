@@ -48,6 +48,12 @@ type sessionSetup struct {
 	// caller can run setupExtensions later (e.g. after the TUI renders).
 	extensionOpts *extension.SetupOptions
 
+	// ExtReady is closed once extensions have finished loading and the
+	// session model has been refreshed with any auth headers (e.g. OAuth).
+	// Code that needs a fully-initialised model before making API calls
+	// (e.g. the initial prompt) should wait on this channel.
+	ExtReady chan struct{}
+
 	// mcpManager holds the MCP server manager (nil if no MCP servers configured).
 	// The caller is responsible for calling Close() when the session ends.
 	mcpManager *mcp.Manager
@@ -225,6 +231,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		resourceLoader:  rl,
 		extensionOpts:   extOpts,
 		mcpManager:      result.MCPManager,
+		ExtReady:        make(chan struct{}),
 	}, nil
 }
 
@@ -441,6 +448,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	close(setup.ExtReady) // extensions loaded synchronously
 	defer setup.result.Session.Close()
 	defer func() {
 		if setup.mcpManager != nil {
@@ -562,6 +570,7 @@ func runExport(args *Args) error {
 	if err != nil {
 		return err
 	}
+	close(setup.ExtReady) // extensions loaded synchronously
 	defer setup.result.Session.Close()
 
 	path, err := setup.result.Session.ExportToHTML(args.Export)
@@ -782,6 +791,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		setup.settingsManager,
 		interactive.InteractiveModeOptions{
 			InitialPrompt:   initialPrompt,
+			ExtReady:        setup.ExtReady,
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
 			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
@@ -812,6 +822,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	if !args.NoExtensions && setup.extensionOpts != nil {
 		go func() {
 			defer close(extDone)
+			defer close(setup.ExtReady)
 			es, extErr := extension.Setup(setup.result.Session, *setup.extensionOpts)
 			if extErr != nil {
 				firlog.Warn("extension setup failed", "err", extErr)
@@ -831,6 +842,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		}()
 	} else {
 		close(extDone)
+		close(setup.ExtReady)
 	}
 
 	err = ui.Run()

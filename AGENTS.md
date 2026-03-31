@@ -8,9 +8,17 @@ Prefer `sync/atomic`, `sync.Once`, and channels over manual mutex management whe
 
 All Python code (SDK, extensions, tests) **must** remain compatible with Python 3.9. macOS ships with Python 3.9 and we want everything to work out of the box on a fresh macOS install — no Homebrew, no pyenv, no extra steps. Do not bump `requires-python` in `pyproject.toml` or `python-version` in the ty config.
 
-Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks.
+Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks. **Never dismiss a problem as "pre-existing" or "out of scope" — you own this entire codebase. If you see it, you fix it.**
 
 Do not leave incomplete or stubbed code. Ensure all code is functional and tested.
+
+## Modes — think before you specialise
+
+Fir has multiple modes (CLI, ACP, etc. under `pkg/modes/`). Before implementing a fix or feature inside a specific mode, stop and ask: **is this actually unique to this mode, or does it belong in core?**
+
+- If the behaviour is useful across modes, put it in core (`pkg/core/`, `pkg/ai/`, etc.) and have each mode reuse it.
+- Only put logic inside a mode package when it is genuinely mode-specific (e.g. ACP JSON-RPC handling, CLI-only flags).
+- When fixing a bug found in one mode, check whether the same bug exists in other modes. Fix it at the root, not per-mode.
 
 When adding or changing user-visible features (CLI flags, subcommands, slash commands, settings), update the `self` skill (`.fir/skills/self/SKILL.md`) to keep it accurate.
 
