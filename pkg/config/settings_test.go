@@ -357,7 +357,7 @@ func TestSettingsManager_ProjectSetters(t *testing.T) {
 	assert.Equal(t, []string{"/skills/a"}, sm.GetSkillPaths())
 
 	sm.SetProjectPromptTemplatePaths([]string{"/prompts/a"})
-	assert.Equal(t, []string{"/prompts/a"}, sm.GetPromptTemplatePaths())
+	assert.Equal(t, []string{"/prompts/a"}, sm.GetPromptPaths())
 
 	sm.SetProjectThemePaths([]string{"/themes/a"})
 	assert.Equal(t, []string{"/themes/a"}, sm.GetThemePaths())
@@ -481,22 +481,6 @@ func (sm *SettingsManager) GetQuietStartup() bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return boolDefault(sm.settings.QuietStartup, false)
-}
-
-func (sm *SettingsManager) GetSkillPaths() []string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.Skills))
-	copy(out, sm.settings.Skills)
-	return out
-}
-
-func (sm *SettingsManager) GetPromptTemplatePaths() []string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.Prompts))
-	copy(out, sm.settings.Prompts)
-	return out
 }
 
 func (sm *SettingsManager) GetShowImages() bool {

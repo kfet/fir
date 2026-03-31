@@ -874,6 +874,24 @@ func (sm *SettingsManager) GetThemePaths() []string {
 	return out
 }
 
+// GetSkillPaths returns extra skill directories/files from settings.
+func (sm *SettingsManager) GetSkillPaths() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]string, len(sm.settings.Skills))
+	copy(out, sm.settings.Skills)
+	return out
+}
+
+// GetPromptPaths returns extra prompt template directories/files from settings.
+func (sm *SettingsManager) GetPromptPaths() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]string, len(sm.settings.Prompts))
+	copy(out, sm.settings.Prompts)
+	return out
+}
+
 func (sm *SettingsManager) GetEnableSkillCommands() bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

@@ -96,6 +96,41 @@ fir packages update [source]                # pull latest for one or all package
 
 Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, prompts, extensions, and themes are automatically loaded.
 
+## Resource Lookup Paths
+
+Skills, prompts, and themes are discovered from multiple locations, merged in priority order (earlier wins on name collisions):
+
+1. **CLI flags** — `--skill <path>`, `--prompt-template <path>`, etc.
+2. **Project directory** — `.fir/skills/`, `.fir/prompts/`, `.fir/extensions/`
+3. **User directory** — `~/.fir/agent/skills/`, `~/.fir/agent/prompts/`, `~/.fir/agent/extensions/`
+4. **Settings paths** — the `"skills"`, `"prompts"`, and `"themes"` arrays in `settings.json`
+5. **Installed packages** — skills/prompts/extensions/themes contributed by `fir install`-ed packages
+6. **Builtins** — embedded in the binary
+
+### Settings Path Resolution
+
+Paths in `"skills"`, `"prompts"`, and `"themes"` settings arrays support three forms:
+
+| Form | Example | Resolves to |
+|------|---------|-------------|
+| Absolute | `"/opt/shared/skills"` | `/opt/shared/skills` |
+| Home-relative | `"~/my-skills"` | `$HOME/my-skills` |
+| Relative | `"skills"` | `$CWD/skills` (resolved at startup) |
+
+**Relative paths are resolved against the current working directory**, not against the settings file. This is intentional — it makes relative paths portable across projects:
+
+```jsonc
+// In ~/.fir/agent/settings.json (global):
+{
+  "skills": ["skills"],       // → finds ./skills/ in any project that has one
+  "prompts": ["prompts"]      // → finds ./prompts/ in any project that has one
+}
+```
+
+This lets you establish a convention (e.g. "every project keeps skills in `./skills/`") and have fir discover them automatically without per-project configuration. Paths that don't exist are silently skipped.
+
+For project-specific settings (`.fir/settings.json`), relative paths also resolve against cwd (the project root), which is the natural expectation.
+
 ## Key Concepts
 
 - **Sessions** — conversations are persisted and can be continued (`-c`) or resumed (`-r`). Sessions form a tree; double-Escape or `/tree` navigates branches. Use `/session` for version, IDs, message/token stats, and enabled extensions. Use `/new [name]` to start a fresh session, optionally naming it.
@@ -221,6 +256,12 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
 
   // Extension/skill/prompt/theme allowlists (empty = all)
   "extensions": [],
+
+  // Additional resource lookup paths (resolved per-invocation relative to cwd)
+  // Use absolute paths, ~/... paths, or relative paths.
+  // Relative paths resolve against the working directory, making them portable:
+  //   "skills": ["skills"]  → looks for ./skills/ in every project you open
+  //   "skills": ["~/shared-skills"]  → always points to the same directory
   "skills": [],
   "prompts": [],
   "themes": [],

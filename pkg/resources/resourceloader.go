@@ -230,17 +230,22 @@ func (r *DefaultResourceLoader) ExtendResources(paths ResourceExtensionPaths) {
 func (r *DefaultResourceLoader) Reload() error {
 	r.pathMetadata = make(map[string]PathMetadata)
 
-	// Load skills
+	// Load skills — merge defaults, settings paths, and CLI paths.
 	skillPaths := r.additionalSkillPaths
 	if !r.noSkills {
-		// Include default skill paths
 		skillPaths = mergePaths(r.cwd, defaultSkillPaths(r.cwd, r.agentDir), skillPaths)
 	}
+	if r.settingsManager != nil {
+		skillPaths = mergePaths(r.cwd, skillPaths, r.settingsManager.GetSkillPaths())
+	}
 
-	// Load prompt templates
+	// Load prompt templates — merge defaults, settings paths, and CLI paths.
 	promptPaths := r.additionalPromptPaths
 	if !r.noPrompts {
 		promptPaths = mergePaths(r.cwd, defaultPromptPaths(r.cwd, r.agentDir), promptPaths)
+	}
+	if r.settingsManager != nil {
+		promptPaths = mergePaths(r.cwd, promptPaths, r.settingsManager.GetPromptPaths())
 	}
 
 	// Append package resources if a resolver is configured.

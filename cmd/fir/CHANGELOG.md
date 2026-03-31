@@ -8,6 +8,7 @@
 - `copilot-auth` extension: GitHub Copilot OAuth provider using the device code flow, ported from the Go implementation to a Python extension.
 - `codex-auth` extension: OpenAI Codex OAuth provider ported to a Python builtin extension.
 - Support sparse checkout for subdirectory package installs.
+- Settings-based resource lookup paths: `"skills"`, `"prompts"`, and `"themes"` arrays in `settings.json` now add extra directories to the resource search. Relative paths resolve against the working directory, so a global `"skills": ["skills"]` discovers `./skills/` in every project automatically.
 
 ### Fixed
 
