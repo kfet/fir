@@ -108,6 +108,41 @@ Packages are stored in `settings.json` under `"packages"`. Each entry is a strin
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
 - **call_tool bridge** — extensions can call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)`. Results are returned directly and never enter conversation history. This enables extensions to build rich orchestration workflows.
 - **MCP channel servers** — MCP servers that advertise the `claude/channel` experimental capability can push messages into the running session via `notifications/claude/channel` notifications. Messages are injected into the agent conversation automatically. The server's `channel_reply` tool is a regular MCP tool. Configure channel servers in `.fir/mcp.json` like any other MCP server — no special config needed.
+- **MCP configuration** — configure MCP servers in `.fir/mcp.json` (project) or `~/.config/fir/mcp.json` (global). Three transports are supported:
+  - **stdio** (default) — launches a local subprocess:
+    ```json
+    {
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"],
+          "env": { "NODE_PATH": "/usr/local/lib/node_modules" }
+        }
+      }
+    }
+    ```
+  - **streamable** (recommended for remote) — connects to a remote HTTP MCP server:
+    ```json
+    {
+      "mcpServers": {
+        "my-remote": {
+          "transport": "streamable",
+          "url": "https://my-server.example.com/mcp"
+        }
+      }
+    }
+    ```
+  - **sse** — connects via Server-Sent Events (legacy HTTP transport):
+    ```json
+    {
+      "mcpServers": {
+        "legacy": {
+          "transport": "sse",
+          "url": "https://old-server.example.com/sse"
+        }
+      }
+    }
+    ```
 - **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions.
 
 ## settings.json Reference

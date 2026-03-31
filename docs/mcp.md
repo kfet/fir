@@ -12,6 +12,8 @@ with any MCP-compatible tool server without modifying fir itself.
 Place a `mcp.json` file in the `.fir/` directory at the root of your project. fir reads it
 automatically when starting a session.
 
+### Stdio servers (local subprocess)
+
 ```json
 {
   "mcpServers": {
@@ -30,13 +32,36 @@ automatically when starting a session.
 }
 ```
 
+### HTTP servers (remote)
+
+Use `"transport": "streamable"` (recommended) or `"transport": "sse"` to connect to
+a remote MCP server over HTTP. No `command` is needed — only `url`.
+
+```json
+{
+  "mcpServers": {
+    "my-remote": {
+      "transport": "streamable",
+      "url": "https://my-server.example.com/mcp"
+    },
+    "legacy-sse": {
+      "transport": "sse",
+      "url": "https://old-server.example.com/sse"
+    }
+  }
+}
+```
+
 ### Fields
 
-| Field     | Type              | Required | Description |
-|-----------|-------------------|----------|-------------|
-| `command` | string            | yes      | Executable to launch (looked up on `PATH`) |
-| `args`    | array of strings  | no       | Command-line arguments passed to the server |
-| `env`     | map string→string | no       | Environment variable overrides for the subprocess; the parent process environment is always inherited first |
+| Field       | Type              | Required | Description |
+|-------------|-------------------|----------|-------------|
+| `transport` | string            | no       | `"stdio"` (default), `"sse"`, or `"streamable"` |
+| `url`       | string            | for `sse`/`streamable` | HTTP endpoint of the remote MCP server |
+| `command`   | string            | for `stdio` | Executable to launch (looked up on `PATH`) |
+| `args`      | array of strings  | no       | Command-line arguments passed to a stdio server |
+| `env`       | map string→string | no       | Environment variable overrides for a stdio subprocess; the parent process environment is always inherited first |
+| `roots`     | array of strings  | no       | `file://` URIs advertised to the server as filesystem roots; defaults to the working directory |
 
 Each top-level key under `mcpServers` is the **server name** — choose something short and
 descriptive, as it appears in every tool name the server exposes.
@@ -93,9 +118,6 @@ supplement project defaults without modifying files on disk.
 
 ## Limitations
 
-- **stdio transport only.** fir currently launches every MCP server as a local subprocess and
-  communicates over stdin/stdout. Remote servers using SSE (HTTP transport) are not yet
-  supported.
 - **No hot-reload.** MCP servers are started once at session creation. Adding or removing
   servers requires starting a new session.
 - **No per-server authentication UI.** If an MCP server requires credentials, pass them via
