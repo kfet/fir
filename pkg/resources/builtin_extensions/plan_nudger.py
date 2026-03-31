@@ -61,6 +61,44 @@ def on_session_update(params, ctx):
         turn_threshold = DEFAULT_TURN_THRESHOLD
 
 
+# The nudge message must be phrased as a directive that the model can act on
+# purely via a tool call.  Earlier versions used conversational language like
+# "Reminder: update your plan" which caused the model to reply with plain
+# text ("yeah, plan is already updated") instead of actually calling the plan
+# tool.  The messages below are deliberately terse, imperative, and end with
+# an explicit instruction to call the plan tool — nothing else.
+
+NUDGE_MILD = (
+    "Your plan has not been updated recently. "
+    "Call the plan tool now to mark completed steps and set in_progress on your current step. "
+    "Do not reply with text — respond only with a plan tool call."
+)
+
+NUDGE_WARN = (
+    "You have been reminded multiple times without completing any plan tasks. "
+    "You may be stuck in a loop. Stop re-analyzing. "
+    "Commit to a change now — even if it means rewriting a file completely rather than patching it.\n\n"
+    "Your plan has incomplete steps. Continue working until all steps are completed or cancelled."
+)
+
+NUDGE_CRIT = (
+    "STUCK LOOP DETECTED — you have been reminded {n} times "
+    "without completing a single plan item.\n\n"
+    "You are in an analysis-paralysis loop. Take a completely different approach:\n"
+    "- STOP re-reading files you have already read.\n"
+    "- STOP running the same commands.\n"
+    "- Pick the most problematic file and REWRITE IT COMPLETELY FROM SCRATCH.\n"
+    "- If tests are failing due to API changes, the test file itself needs updating.\n"
+    "- Do not analyze further. Make the change now."
+)
+
+AGENT_END_NUDGE = (
+    "You still have incomplete plan steps. "
+    "Did you intend to stop, or should you continue? "
+    "Update your plan to reflect current status."
+)
+
+
 @fir_ext.on("turn_end")
 def on_turn_end(params, ctx):
     global turns_since_update, last_update_time, nudges_without_progress
@@ -77,28 +115,19 @@ def on_turn_end(params, ctx):
 
     if nudges_without_progress >= STAGNATION_CRIT_THRESHOLD:
         # Inject with system-prompt authority so it cannot be rationalized away.
-        ctx.prepend(
-            f"STUCK LOOP DETECTED — you have been reminded {nudges_without_progress} times "
-            "without completing a single plan item.\n\n"
-            "You are in an analysis-paralysis loop. Take a completely different approach:\n"
-            "- STOP re-reading files you have already read.\n"
-            "- STOP running the same commands.\n"
-            "- Pick the most problematic file and REWRITE IT COMPLETELY FROM SCRATCH.\n"
-            "- If tests are failing due to API changes, the test file itself needs updating.\n"
-            "- Do not analyze further. Make the change now."
-        )
+        ctx.prepend(NUDGE_CRIT.format(n=nudges_without_progress))
     elif nudges_without_progress >= STAGNATION_WARN_THRESHOLD:
         ctx.send_message(
             "nudge",
-            "You have been reminded multiple times without completing any plan tasks. "
-            "You may be stuck in a loop. Stop re-analyzing. "
-            "Commit to a change now — even if it means rewriting a file completely rather than patching it.",
+            NUDGE_WARN,
+            display=True,
             deliver_as="steer",
         )
     else:
         ctx.send_message(
             "nudge",
-            "Reminder: update your plan to reflect current progress.",
+            NUDGE_MILD,
+            display=True,
             deliver_as="steer",
         )
 
@@ -108,8 +137,8 @@ def on_agent_end(params, ctx):
     if plan_total > plan_completed:
         ctx.send_message(
             "nudge",
-            "Your plan has incomplete steps. "
-            "Continue working until all steps are completed or cancelled.",
+            AGENT_END_NUDGE,
+            display=True,
             deliver_as="steer",
         )
 

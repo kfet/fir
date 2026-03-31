@@ -17,6 +17,9 @@
 ### Fixed
 
 - Interactive mode: initial prompt (CLI `fir 'task'`) no longer races against extension startup — waits for auth extensions to apply OAuth headers before making the first API call, fixing 400 errors on launch.
+- `plan-nudger` extension: rewrote nudge messages to be directive ("Call the plan tool now… Do not reply with text") instead of conversational ("Reminder: update your plan") — prevents the model from responding with plain text instead of actually calling the plan tool.
+- `plan-nudger` extension: `agent_end` nudge now asks the model whether it intended to stop instead of unconditionally commanding it to continue, avoiding hijacking one-off user questions mid-plan.
+- `plan-nudger` extension: nudge messages now visible in UI (`display=True`) so users can see when nudges fire.
 - `openai_codex_responses`: auth headers were set last, preventing user config overrides via model/options headers.
 - `google_gemini_cli`: model.Headers were previously ignored entirely.
 - Auto-clear transient command status messages (e.g. "No plan entries.") on the next turn or Escape instead of on a timer.
