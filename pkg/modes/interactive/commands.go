@@ -86,7 +86,33 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 		m.session.RecordCommand("ext:"+name, strings.Join(args, " "))
 	}
 
+	// Show a spinner while the command runs so the user sees progress.
+	t := itheme.GetTheme()
+	var loader *tuicomp.Loader
+	if m.commandStatusContainer != nil {
+		m.commandStatusContainer.Clear()
+		loader = tuicomp.NewLoader(
+			m.ui.AsRenderRequester(),
+			func(s string) string { return t.Fg("accent", s) },
+			func(s string) string { return s },
+			fmt.Sprintf("Running /%s...", name),
+		)
+		m.commandStatusContainer.AddChild(loader)
+		if m.ui != nil {
+			m.ui.RequestRender(false)
+		}
+	}
+
 	result, err := m.extSetup.Manager.DispatchCommand(name, args, 0)
+
+	// Clear the spinner.
+	if loader != nil {
+		loader.Stop()
+	}
+	if m.commandStatusContainer != nil {
+		m.commandStatusContainer.Clear()
+	}
+
 	if err != nil {
 		m.showWarning(fmt.Sprintf("Extension command /%s failed: %v", name, err))
 		return
