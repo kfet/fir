@@ -6,14 +6,14 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 )
 
 // PlanComponent renders the current session plan entries.
 type PlanComponent struct {
-	*tuicomp.Box
-
 	mu       sync.Mutex
+	box      *tuicomp.Box
 	title    string
 	metadata map[string]string
 	entries  []agent.PlanEntry
@@ -23,12 +23,12 @@ type PlanComponent struct {
 func NewPlanComponent(title string, entries []agent.PlanEntry, metadata map[string]string) *PlanComponent {
 	t := theme.GetTheme()
 	c := &PlanComponent{
-		Box:      tuicomp.NewBox(1, 1, func(s string) string { return t.Bg("customMessageBg", s) }),
+		box:      tuicomp.NewBox(1, 1, func(s string) string { return t.Bg("customMessageBg", s) }),
 		title:    title,
 		metadata: metadata,
 		entries:  entries,
 	}
-	c.updateDisplay()
+	c.rebuildBox()
 	return c
 }
 
@@ -38,44 +38,53 @@ func (c *PlanComponent) SetEntries(title string, entries []agent.PlanEntry, meta
 	c.title = title
 	c.metadata = metadata
 	c.entries = entries
+	c.rebuildBox()
 	c.mu.Unlock()
-	c.updateDisplay()
 }
 
 // Invalidate rebuilds the display.
 func (c *PlanComponent) Invalidate() {
-	c.Box.Invalidate()
-	c.updateDisplay()
+	c.mu.Lock()
+	c.box.Invalidate()
+	c.rebuildBox()
+	c.mu.Unlock()
 }
 
-func (c *PlanComponent) updateDisplay() {
-	c.Clear()
+// Render renders the plan component. Thread-safe.
+func (c *PlanComponent) Render(width int) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.box.Render(width)
+}
+
+// rebuildBox rebuilds all Box children from current state.
+// Must be called with c.mu held.
+func (c *PlanComponent) rebuildBox() {
+	c.box.Clear()
 	t := theme.GetTheme()
 
-	c.mu.Lock()
 	title := c.title
 	metadata := c.metadata
-	entries := make([]agent.PlanEntry, len(c.entries))
-	copy(entries, c.entries)
-	c.mu.Unlock()
+	entries := c.entries
 
 	labelText := "[plan]"
 	if title != "" {
 		labelText = "[plan: " + title + "]"
 	}
 	label := t.Fg("customMessageLabel", "\x1b[1m"+labelText+"\x1b[22m")
-	c.AddChild(tuicomp.NewText(label, 0, 0, nil))
+	c.box.AddChild(tuicomp.NewText(label, 0, 0, nil))
 
-	// Render metadata key-value pairs
+	// Render metadata key-value pairs in stable order.
 	if len(metadata) > 0 {
-		for k, v := range metadata {
-			line := t.Fg("muted", fmt.Sprintf("  %s: %s", k, v))
-			c.AddChild(tuicomp.NewText(line, 0, 0, nil))
+		keys := sortedKeys(metadata)
+		for _, k := range keys {
+			line := t.Fg("muted", fmt.Sprintf("  %s: %s", k, metadata[k]))
+			c.box.AddChild(tuicomp.NewText(line, 0, 0, nil))
 		}
 	}
 
 	if len(entries) == 0 {
-		c.AddChild(tuicomp.NewText(t.Fg("muted", "  No plan entries."), 0, 0, nil))
+		c.box.AddChild(tuicomp.NewText(t.Fg("muted", "  No plan entries."), 0, 0, nil))
 		return
 	}
 
@@ -98,8 +107,8 @@ func (c *PlanComponent) updateDisplay() {
 	if pending > 0 {
 		summary += fmt.Sprintf(", %d pending", pending)
 	}
-	c.AddChild(tuicomp.NewText(t.Fg("muted", summary), 0, 0, nil))
-	c.AddChild(tuicomp.NewSpacer(1))
+	c.box.AddChild(tuicomp.NewText(t.Fg("muted", summary), 0, 0, nil))
+	c.box.AddChild(tuicomp.NewSpacer(1))
 
 	for _, e := range entries {
 		icon, color := planEntryStyle(e)
@@ -108,8 +117,23 @@ func (c *PlanComponent) updateDisplay() {
 			priorityTag = t.Fg("warning", " !")
 		}
 		line := t.Fg(color, fmt.Sprintf("  %s %s", icon, e.Content)) + priorityTag
-		c.AddChild(tuicomp.NewText(line, 0, 0, nil))
+		c.box.AddChild(tuicomp.NewText(line, 0, 0, nil))
 	}
+}
+
+// sortedKeys returns map keys in sorted order for stable rendering.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	// Simple insertion sort for small maps (typically 3-5 keys).
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	return keys
 }
 
 // planEntryStyle returns an icon and theme color for a plan entry.
@@ -123,3 +147,6 @@ func planEntryStyle(e agent.PlanEntry) (icon string, color string) {
 		return "○", "muted"
 	}
 }
+
+// Ensure PlanComponent implements tui.Component.
+var _ tui.Component = (*PlanComponent)(nil)

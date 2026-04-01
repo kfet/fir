@@ -2257,3 +2257,145 @@ func TestAnthropic_ConvertMessages_StringUserGetsCacheControl(t *testing.T) {
 		t.Errorf("expected cache_control type=ephemeral, got %v", ccMap["type"])
 	}
 }
+
+// TestAnthropic_AuthErrorRefreshRetry verifies that a 401/authentication_error
+// triggers a token refresh via RefreshApiKey and retries successfully.
+func TestAnthropic_AuthErrorRefreshRetry(t *testing.T) {
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	authErrorData := loadFixture(t, "anthropic_auth_error.sse")
+	successData := loadFixture(t, "anthropic_simple_response.sse")
+
+	attempts := 0
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		attempts++
+		if attempts == 1 {
+			w.Write(authErrorData)
+		} else {
+			w.Write(successData)
+		}
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+
+	refreshCalled := false
+	opts := &ai.StreamOptions{
+		ApiKey: "expired-token",
+		RefreshApiKey: func(provider string) string {
+			refreshCalled = true
+			return "fresh-token"
+		},
+	}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	_ = collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StopReason == ai.StopReasonError {
+		t.Errorf("expected success after refresh, got error: %s", result.ErrorMessage)
+	}
+	if !refreshCalled {
+		t.Error("expected RefreshApiKey to be called on auth error")
+	}
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts (1 auth error + 1 success), got %d", attempts)
+	}
+}
+
+// TestAnthropic_AuthErrorHTTP401RefreshRetry verifies that an HTTP-level 401
+// triggers token refresh and retry.
+func TestAnthropic_AuthErrorHTTP401RefreshRetry(t *testing.T) {
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	successData := loadFixture(t, "anthropic_simple_response.sse")
+
+	attempts := 0
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}`))
+		} else {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write(successData)
+		}
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+
+	refreshCalled := false
+	opts := &ai.StreamOptions{
+		ApiKey: "expired-token",
+		RefreshApiKey: func(provider string) string {
+			refreshCalled = true
+			return "fresh-token"
+		},
+	}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	_ = collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StopReason == ai.StopReasonError {
+		t.Errorf("expected success after refresh, got error: %s", result.ErrorMessage)
+	}
+	if !refreshCalled {
+		t.Error("expected RefreshApiKey to be called on HTTP 401")
+	}
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts (1 HTTP 401 + 1 success), got %d", attempts)
+	}
+}
+
+// TestAnthropic_AuthErrorNoRefreshFails verifies that without RefreshApiKey,
+// an auth error is surfaced to the caller.
+func TestAnthropic_AuthErrorNoRefreshFails(t *testing.T) {
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	authErrorData := loadFixture(t, "anthropic_auth_error.sse")
+
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write(authErrorData)
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+	opts := &ai.StreamOptions{ApiKey: "expired-token"}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	_ = collectEvents(t, stream)
+
+	result := stream.Result()
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.StopReason != ai.StopReasonError {
+		t.Errorf("expected error without refresh, got %s", result.StopReason)
+	}
+	if !strings.Contains(result.ErrorMessage, "authentication_error") {
+		t.Errorf("expected authentication_error in message, got %q", result.ErrorMessage)
+	}
+}

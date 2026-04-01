@@ -74,6 +74,19 @@ func isOAuthModel(model *ai.Model) bool {
 	return model != nil && model.Headers != nil && model.Headers["x-anthropic-oauth-beta-prefix"] != ""
 }
 
+// isAuthError returns true if the error indicates an authentication failure
+// (e.g. expired OAuth token) that may be resolved by refreshing credentials.
+func isAuthError(errType, errMsg string) bool {
+	if errType == "authentication_error" || errType == "permission_error" {
+		return true
+	}
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "401") ||
+		strings.Contains(lower, "invalid authentication") ||
+		strings.Contains(lower, "invalid x-api-key") ||
+		strings.Contains(lower, "invalid api key")
+}
+
 func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
 		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
@@ -493,6 +506,25 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					}
 					firlog.Warn("anthropic error", "type", errType, "err", errMsg)
 
+					// Auth error (e.g. expired OAuth token) — refresh the key and retry.
+					if !startEmitted && attempt < maxAnthropicRetries-1 && isAuthError(errType, errMsg) {
+						refreshed := ""
+						if options != nil && options.RefreshApiKey != nil {
+							refreshed = options.RefreshApiKey(model.Provider)
+						}
+						if refreshed == "" {
+							refreshed = envkeys.GetEnvApiKey(model.Provider)
+						}
+						if refreshed != "" && refreshed != apiKey {
+							firlog.Info("anthropic auth error, refreshed token", "attempt", attempt)
+							apiKey = refreshed
+							headers = buildAnthropicHeaders(model, apiKey, oauthToken, options)
+							lastErrMsg = errMsg
+							retryNeeded = true
+							break sseLoop
+						}
+					}
+
 					// Retry transparently if streaming hasn't started yet and the
 					// error is retryable (rate-limit or transient server error).
 					if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
@@ -527,9 +559,11 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				continue
 			}
 
-			// Check for HTTP-level errors (e.g. 529 Overloaded).
+			// Check for HTTP-level errors (e.g. 529 Overloaded, 401 Auth).
 			if sseErrVal != nil {
+				sseStatusCode := 0
 				if sseErr, ok := sseErrVal.(*SSEError); ok {
+					sseStatusCode = sseErr.StatusCode
 					firlog.Warn("anthropic HTTP error",
 						"status", sseErr.StatusCode,
 						"message", sseErr.Message,
@@ -540,6 +574,25 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					firlog.Warn("anthropic SSE error", "err", sseErrVal)
 				}
 				errMsg := sseErrVal.Error()
+
+				// Auth error at HTTP level — refresh token and retry.
+				if !startEmitted && attempt < maxAnthropicRetries-1 && (sseStatusCode == 401 || sseStatusCode == 403) {
+					refreshed := ""
+					if options != nil && options.RefreshApiKey != nil {
+						refreshed = options.RefreshApiKey(model.Provider)
+					}
+					if refreshed == "" {
+						refreshed = envkeys.GetEnvApiKey(model.Provider)
+					}
+					if refreshed != "" && refreshed != apiKey {
+						firlog.Info("anthropic HTTP auth error, refreshed token", "status", sseStatusCode, "attempt", attempt)
+						apiKey = refreshed
+						headers = buildAnthropicHeaders(model, apiKey, oauthToken, options)
+						lastErrMsg = errMsg
+						continue
+					}
+				}
+
 				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
 					lastErrMsg = errMsg
 					continue

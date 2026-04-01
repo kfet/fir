@@ -232,6 +232,15 @@ func streamAssistantResponse(
 	}
 
 	// Stream
+	var refreshApiKey func(string) string
+	if config.GetApiKey != nil {
+		refreshApiKey = func(provider string) string {
+			if resolved, err := config.GetApiKey(provider); err == nil && resolved != "" {
+				return resolved
+			}
+			return ""
+		}
+	}
 	opts := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
 			ApiKey:          apiKey,
@@ -246,6 +255,7 @@ func streamAssistantResponse(
 			ServerTools:     config.ServerTools,
 			Compaction:      config.Compaction,
 			OnPayload:       config.OnPayload,
+			RefreshApiKey:   refreshApiKey,
 		},
 		Reasoning:       config.Reasoning,
 		ThinkingBudgets: config.ThinkingBudgets,

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-03-31
+
 ### Added
 
 - `anthropic-auth` extension: Anthropic (Claude Pro/Max) OAuth provider ported from Go to a Python builtin extension, with OAuth-specific headers (authorization, beta prefix, system prompt, user-agent) injected via `modify_models`.
@@ -29,6 +31,10 @@
 - Fixed vague `Error: 400 Error (request-id: ...)` messages from Anthropic by surfacing the full API error body when the extracted message is too short.
 - Show spinner ("Running /aside...") during extension slash command dispatch so the user sees progress while the command runs.
 - Fixed `✓` (U+2713) and other dingbats being miscounted as width 2 instead of 1, causing rendering artifacts (ghost ANSI codes, truncated text) in the plan widget. Replaced hand-curated `couldBeEmoji` heuristic with `uniseg.StringWidth` which uses Unicode Emoji_Presentation property tables.
+- Fixed plan widget data race: `updateDisplay` modified Box children without synchronization while `Render` read them concurrently from the TUI goroutine, causing ghost ANSI fragments (e.g. `250;123m`) from inconsistent line counts during diff rendering. Plan children are now rebuilt atomically under a mutex.
+- Fixed plan widget metadata key ordering: map iteration produced random key order, causing unnecessary diff redraws on every plan update. Metadata keys are now sorted for stable rendering.
+- Removed redundant double-padding in `Box.applyBg` → `ApplyBackgroundToLine` pipeline.
+- Fixed 401 `Invalid authentication credentials` error when OAuth token expires mid-session: Anthropic provider now detects auth errors (401/403, `authentication_error`), calls `RefreshApiKey` to obtain a fresh token from the auth extension, and retries the request transparently.
 - Added signal handler to ACP mode for clean extension shutdown.
 
 ### Removed

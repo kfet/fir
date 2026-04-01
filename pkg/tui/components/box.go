@@ -142,15 +142,13 @@ func (b *Box) matchChildLines(lines []string) bool {
 }
 
 func (b *Box) applyBg(line string, width int) string {
+	if b.bgFn != nil {
+		return tui.ApplyBackgroundToLine(line, width, b.bgFn)
+	}
 	visLen := tui.VisibleWidth(line)
 	padNeeded := width - visLen
 	if padNeeded < 0 {
 		padNeeded = 0
 	}
-	padded := line + strings.Repeat(" ", padNeeded)
-
-	if b.bgFn != nil {
-		return tui.ApplyBackgroundToLine(padded, width, b.bgFn)
-	}
-	return padded
+	return line + strings.Repeat(" ", padNeeded)
 }

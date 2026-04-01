@@ -192,14 +192,17 @@ type StreamOptions struct {
 	// OnPayload is an optional callback to inspect or replace the provider payload
 	// before it is sent. Return nil to keep the original payload unchanged, or
 	// return a non-nil replacement to swap it out.
-	OnPayload       func(payload any, model *Model) any `json:"-"`
-	Headers         map[string]string                   `json:"headers,omitempty"`
-	MaxRetryDelayMs *int                                `json:"maxRetryDelayMs,omitempty"`
-	ReasoningEffort ThinkingLevel                       `json:"reasoningEffort,omitempty"`
-	ToolChoice      string                              `json:"toolChoice,omitempty"`
-	Metadata        map[string]any                      `json:"metadata,omitempty"`
-	ServerTools     []AnthropicServerTool               `json:"serverTools,omitempty"`
-	Compaction      *AnthropicCompaction                `json:"compaction,omitempty"`
+	OnPayload func(payload any, model *Model) any `json:"-"`
+	// RefreshApiKey is called on 401/auth errors to obtain a fresh API key
+	// (e.g. after OAuth token refresh). Returns "" if no refresh is available.
+	RefreshApiKey   func(provider string) string `json:"-"`
+	Headers         map[string]string            `json:"headers,omitempty"`
+	MaxRetryDelayMs *int                         `json:"maxRetryDelayMs,omitempty"`
+	ReasoningEffort ThinkingLevel                `json:"reasoningEffort,omitempty"`
+	ToolChoice      string                       `json:"toolChoice,omitempty"`
+	Metadata        map[string]any               `json:"metadata,omitempty"`
+	ServerTools     []AnthropicServerTool        `json:"serverTools,omitempty"`
+	Compaction      *AnthropicCompaction         `json:"compaction,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.
