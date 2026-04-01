@@ -238,25 +238,30 @@ func TestMapCodexEventFromMap_StatusNormalization(t *testing.T) {
 // TestAcquireWebSocket_InflightCoalescing verifies that two goroutines racing to
 // acquire a WebSocket connection for the same sessionID coalesce: at most one
 // dial is in progress at any moment during the inflight window.
+//
+// Deterministic ordering via channels (no sleeps):
+//  1. Server signals when it receives the first connection (firstConnReceived)
+//  2. Only then does the second goroutine call acquireWebSocket
+//  3. Server blocks until we release it (holdConn)
+//  4. Both goroutines complete; we assert peak concurrency ≤ 1
 func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
-	const delay = 40 * time.Millisecond // server-side hold time ensures goroutines race
-
 	var (
 		connCount          atomic.Int32 // total connections received by server
 		activeConns        atomic.Int32 // currently connected clients
-		maxConcurrentConns atomic.Int32 // peak concurrent connections during dial window
+		maxConcurrentConns atomic.Int32 // peak concurrent connections
 	)
 
-	// Create a WebSocket test server.
+	firstConnReceived := make(chan struct{}, 1) // signalled on first server accept
+	holdConn := make(chan struct{})             // closed to release all server connections
+
 	srv := tryNewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		connCount.Add(1)
+		n := connCount.Add(1)
 		active := activeConns.Add(1)
-		// Track peak concurrency.
 		for {
 			cur := maxConcurrentConns.Load()
 			if active <= cur || maxConcurrentConns.CompareAndSwap(cur, active) {
@@ -264,15 +269,22 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 			}
 		}
 
-		// Hold the connection long enough that concurrent dials overlap.
-		time.Sleep(delay)
+		// Signal that the first connection has been received.
+		if n == 1 {
+			select {
+			case firstConnReceived <- struct{}{}:
+			default:
+			}
+		}
+
+		// Hold until test releases.
+		<-holdConn
 
 		activeConns.Add(-1)
 		c.Close(websocket.StatusNormalClosure, "done")
 	}))
 	defer srv.Close()
 
-	// Convert http:// → ws:// for WebSocket dial.
 	wsURL := "ws" + srv.URL[4:]
 
 	resetWSCache()
@@ -282,23 +294,38 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	const numGoroutines = 2
 	var wg sync.WaitGroup
-	start := make(chan struct{})
 
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
-			if err == nil && conn != nil {
-				release(false)
-			}
-		}()
+	// Goroutine 1: start dialing immediately.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
+		if err == nil && conn != nil {
+			release(false)
+		}
+	}()
+
+	// Wait until the server has accepted the first connection — the inflight
+	// entry is now guaranteed to exist.
+	select {
+	case <-firstConnReceived:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for first connection")
 	}
 
-	close(start)
+	// Goroutine 2: starts while goroutine 1's dial is in-flight.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
+		if err == nil && conn != nil {
+			release(false)
+		}
+	}()
+
+	// Release server connections so both goroutines can complete.
+	close(holdConn)
 	wg.Wait()
 
 	total := connCount.Load()
@@ -307,8 +334,6 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	if total == 0 {
 		t.Fatal("expected at least one connection to be established")
 	}
-	// The coalescing path ensures at most one connection is in progress at a time
-	// during the inflight window. Verify peak concurrent connections never exceeded 1.
 	if peak > 1 {
 		t.Errorf("coalescing failed: peak concurrent connections = %d, want ≤ 1", peak)
 	}
