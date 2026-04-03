@@ -70,8 +70,8 @@ def on_session_update(params, ctx):
 
 NUDGE_MILD = (
     "Your plan has not been updated recently. "
-    "Call the plan tool now to mark completed steps and set in_progress on your current step. "
-    "Do not reply with text — respond only with a plan tool call."
+    "Use the plan tool now to mark completed steps and set in_progress on your current step. "
+    "Continue working after that if not fully finished."
 )
 
 NUDGE_WARN = (
@@ -95,7 +95,8 @@ NUDGE_CRIT = (
 AGENT_END_NUDGE = (
     "You still have incomplete plan steps. "
     "Did you intend to stop, or should you continue? "
-    "Update your plan to reflect current status."
+    "Update your plan to reflect current status. "
+    "Make sure the user has been informed of the work done."
 )
 
 

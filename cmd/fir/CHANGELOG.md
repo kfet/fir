@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `plan-nudger` extension: softened mild nudge to say "Use the plan tool" and encourage continuing work, instead of forbidding text replies. Added reminder to inform the user of work done on agent exit.
+
 ## [0.27.0] - 2026-03-31
 
 ### Added
