@@ -30,7 +30,7 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -53,7 +53,7 @@ func newTestAgentSession(t *testing.T) (*AgentSession, string) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   modelRegistry,
@@ -74,7 +74,7 @@ func TestNewAgentSession(t *testing.T) {
 	if session.Agent == nil {
 		t.Fatal("expected non-nil agent")
 	}
-	if session.SessionManager == nil {
+	if session.SessionStore == nil {
 		t.Fatal("expected non-nil session manager")
 	}
 	if session.SettingsManager == nil {
@@ -329,7 +329,7 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionsDir := filepath.Join(agentDir, "sessions")
 
-	sm := sessionpkg.NewSessionManager(cwd, sessionsDir)
+	sm := sessionpkg.NewSessionStore(cwd, sessionsDir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
@@ -345,7 +345,7 @@ func TestAgentSession_SwitchSession_EmitsSessionNamedEmpty(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -823,7 +823,7 @@ func TestAgentSession_BuildSystemPrompt_WithAgentsFile(t *testing.T) {
 
 	os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Custom project instructions"), 0o644)
 
-	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
@@ -839,7 +839,7 @@ func TestAgentSession_BuildSystemPrompt_WithAgentsFile(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   modelRegistry,
@@ -861,7 +861,7 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 	os.MkdirAll(filepath.Join(cwd, config.ConfigDirName), 0o755)
 	os.WriteFile(filepath.Join(cwd, config.ConfigDirName, "SYSTEM.md"), []byte("Custom system prompt"), 0o644)
 
-	sm := sessionpkg.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := sessionpkg.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	rl.Reload()
@@ -877,7 +877,7 @@ func TestAgentSession_BuildSystemPrompt_CustomOverride(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   modelRegistry,
@@ -990,7 +990,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionStore()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -1040,7 +1040,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -1481,7 +1481,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.InMemorySessionManager(cwd)
+	sm := sessionpkg.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
@@ -1505,7 +1505,7 @@ func newTestAgentSessionWithModel(t *testing.T, runner CompactionRunner) *AgentS
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -1846,7 +1846,7 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
-	sm := sessionpkg.InMemorySessionManager(cwd)
+	sm := sessionpkg.InMemorySessionStore(cwd)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
@@ -1862,7 +1862,7 @@ func TestCheckAutoCompaction_NilModel(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  config.NewSettingsManager(cwd, agentDir),
 		ResourceLoader:   rl,
 		CompactionRunner: runner,
@@ -1892,7 +1892,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionsDir := filepath.Join(agentDir, "sessions")
 
-	sm := sessionpkg.NewSessionManager(cwd, sessionsDir)
+	sm := sessionpkg.NewSessionStore(cwd, sessionsDir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
@@ -1908,7 +1908,7 @@ func TestAgentSession_SwitchSession(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -1999,7 +1999,7 @@ func TestAgentSession_PersistMessage_User(t *testing.T) {
 	session.persistMessage(msg)
 
 	// Verify message was persisted to session manager
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	if len(ctx.Messages) != 1 {
 		t.Fatalf("expected 1 persisted message, got %d", len(ctx.Messages))
 	}
@@ -2015,7 +2015,7 @@ func TestAgentSession_PersistMessage_Assistant(t *testing.T) {
 	}))
 	session.persistMessage(msg)
 
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	if len(ctx.Messages) != 1 {
 		t.Fatalf("expected 1 persisted message, got %d", len(ctx.Messages))
 	}
@@ -2041,7 +2041,7 @@ func TestAgentSession_ExecuteBash(t *testing.T) {
 	}
 
 	// Verify it was recorded in the session
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	if len(ctx.Messages) == 0 {
 		t.Fatal("expected bash execution to be recorded in session")
 	}
@@ -2149,15 +2149,15 @@ func TestAgentSession_GetSessionStats_WithMessages(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{
 			ai.NewTextContent("hi"),
 			ai.NewToolCallContent("tc1", "read", map[string]any{}),
 		},
 		Usage: ai.Usage{Input: 100, Output: 50, CacheRead: 10, Cost: ai.UsageCost{Total: 0.005}},
 	})))
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	session.Agent.ReplaceMessages(ctx.Messages)
 
 	stats := session.GetSessionStats()
@@ -2202,15 +2202,15 @@ func TestAgentSession_GetLastAssistantText(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q", 0)))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q", 0)))
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("first reply")},
 	})))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("second reply")},
 	})))
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	session.Agent.ReplaceMessages(ctx.Messages)
 
 	text := session.GetLastAssistantText()
@@ -2227,13 +2227,13 @@ func TestAgentSession_NavigateTree(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q1", 0)))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q1", 0)))
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "a1"}}},
 	})))
-	session.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
+	session.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("q2", 0)))
 
-	entries := session.SessionManager.GetEntries()
+	entries := session.SessionStore.GetEntries()
 	if len(entries) < 1 {
 		t.Fatal("expected entries")
 	}
@@ -2455,7 +2455,7 @@ func TestAgentSession_RecordCommand(t *testing.T) {
 
 	session.RecordCommand("compact", "summarize recent work")
 
-	entries := session.SessionManager.GetEntries()
+	entries := session.SessionStore.GetEntries()
 	var found *sessionpkg.SessionEntry
 	for _, e := range entries {
 		if e.Type == "command" {
@@ -2479,10 +2479,10 @@ func TestAgentSession_RecordCommand_NotInContext(t *testing.T) {
 	defer session.Close()
 
 	// Seed a user message so context is non-empty.
-	session.SessionManager.AppendAIMessage(ai.NewUserMsg("hello", 0))
+	session.SessionStore.AppendAIMessage(ai.NewUserMsg("hello", 0))
 	session.RecordCommand("reload", "")
 
-	ctx := session.SessionManager.BuildSessionContext()
+	ctx := session.SessionStore.BuildSessionContext()
 	// Only the user message should appear — the command must be excluded.
 	if len(ctx.Messages) != 1 {
 		t.Errorf("expected 1 message in context (command must be excluded), got %d", len(ctx.Messages))
@@ -2500,7 +2500,7 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 	agentDir := t.TempDir()
 
 	dir := filepath.Dir(sessionFile)
-	sm, _ := sessionpkg.OpenSessionManager(sessionFile, dir)
+	sm, _ := sessionpkg.OpenSessionStore(sessionFile, dir)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
@@ -2517,7 +2517,7 @@ func newTestAgentSessionFromFile(t *testing.T, sessionFile string) *AgentSession
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   modelRegistry,
@@ -2531,7 +2531,7 @@ func TestAgentSession_SwitchSession_RestoresThinkingLevel_NoSpuriousEntry(t *tes
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
-	sm := sessionpkg.NewSessionManager(tmpDir, sessDir)
+	sm := sessionpkg.NewSessionStore(tmpDir, sessDir)
 	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
 	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
@@ -2559,7 +2559,7 @@ func TestAgentSession_SwitchSession_RestoresThinkingLevel_NoSpuriousEntry(t *tes
 	}
 
 	// No new entries should have been appended to the session file.
-	entryCountAfter := len(activeSession.SessionManager.GetEntries())
+	entryCountAfter := len(activeSession.SessionStore.GetEntries())
 	if entryCountAfter != entryCountBefore {
 		t.Errorf("SwitchSession wrote %d new session entries (want 0); spurious entries break idempotent resume",
 			entryCountAfter-entryCountBefore)
@@ -2571,7 +2571,7 @@ func TestAgentSession_SwitchSession_RestoresModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
-	sm := sessionpkg.NewSessionManager(tmpDir, sessDir)
+	sm := sessionpkg.NewSessionStore(tmpDir, sessDir)
 	sm.AppendAIMessage(ai.NewUserMsg("question", 0))
 	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("answer")},
@@ -2682,7 +2682,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionStore()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -2736,7 +2736,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -2765,7 +2765,7 @@ func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionStore()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -2819,7 +2819,7 @@ func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -2845,7 +2845,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 	tmpDir := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := sessionpkg.InMemorySessionManager()
+	sm := sessionpkg.InMemorySessionStore()
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -2893,7 +2893,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -2935,7 +2935,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	agentDir := t.TempDir()
 	sessionDir := filepath.Join(agentDir, "sessions")
 
-	sm := sessionpkg.NewSessionManager(tmpDir, sessionDir)
+	sm := sessionpkg.NewSessionStore(tmpDir, sessionDir)
 	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -2983,7 +2983,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -3007,7 +3007,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	}
 
 	// Reload the session from disk and check the plan is in context
-	sm2, _ := sessionpkg.OpenSessionManager(sessionFile)
+	sm2, _ := sessionpkg.OpenSessionStore(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 2 {

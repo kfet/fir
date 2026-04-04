@@ -131,7 +131,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := store.NewSessionStore(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -152,7 +152,7 @@ func newTestModeWithSession(t *testing.T) *testMode {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),
@@ -457,7 +457,7 @@ func TestInteractiveMode_ReexecCommand_CustomBinary(t *testing.T) {
 	tm := newTestModeWithSession(t)
 
 	// Ensure the session is persisted so /reexec can resume it.
-	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("persist", 0))
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
 
 	bin := filepath.Join(t.TempDir(), "fir-test-bin")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -479,7 +479,7 @@ func TestInteractiveMode_ReexecCommand_NonExecutablePath(t *testing.T) {
 	tm := newTestModeWithSession(t)
 
 	// Ensure the session is persisted so validation reaches executable checks.
-	tm.mode.session.SessionManager.AppendAIMessage(ai.NewUserMsg("persist", 0))
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
 
 	nonExec := filepath.Join(t.TempDir(), "not-exec")
 	if err := os.WriteFile(nonExec, []byte("nope"), 0o644); err != nil {
@@ -1781,7 +1781,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.NewSessionManager(cwd, agentDir+"/sessions")
+	sm := store.NewSessionStore(cwd, agentDir+"/sessions")
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -1813,7 +1813,7 @@ func TestInteractiveMode_Init_PrePopulatesHistoryFromSession(t *testing.T) {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   models.NewModelRegistry(auth.NewAuthStorage(agentDir+"/auth.json"), ""),

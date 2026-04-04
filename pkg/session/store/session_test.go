@@ -13,63 +13,63 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 )
 
-func TestSessionManagerNewSession(t *testing.T) {
+func TestSessionStoreNewSession(t *testing.T) {
 	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir, filepath.Join(tmpDir, "sessions"))
+	ss := NewSessionStore(tmpDir, filepath.Join(tmpDir, "sessions"))
 
-	if sm.GetSessionID() == "" {
+	if ss.GetSessionID() == "" {
 		t.Fatal("session ID should not be empty")
 	}
-	if sm.GetCwd() != tmpDir {
-		t.Errorf("cwd should be %s, got %s", tmpDir, sm.GetCwd())
+	if ss.GetCwd() != tmpDir {
+		t.Errorf("cwd should be %s, got %s", tmpDir, ss.GetCwd())
 	}
-	if sm.GetLeafID() != "" {
+	if ss.GetLeafID() != "" {
 		t.Error("leaf should be empty for new session")
 	}
-	if sm.GetSessionFile() == "" {
+	if ss.GetSessionFile() == "" {
 		t.Error("session file should be set for persisted session")
 	}
 }
 
-func TestSessionManagerInMemory(t *testing.T) {
-	sm := InMemorySessionManager("/tmp/test")
+func TestSessionStoreInMemory(t *testing.T) {
+	ss := InMemorySessionStore("/tmp/test")
 
-	if sm.IsPersisted() {
+	if ss.IsPersisted() {
 		t.Error("in-memory session should not be persisted")
 	}
-	if sm.GetSessionFile() != "" {
+	if ss.GetSessionFile() != "" {
 		t.Error("in-memory session should have no file")
 	}
 
 	// Should still be able to append messages
 	msg := ai.NewUserMsg("hello", time.Now().UnixMilli())
-	id := sm.AppendAIMessage(msg)
+	id := ss.AppendAIMessage(msg)
 	if id == "" {
 		t.Error("expected entry id")
 	}
-	if sm.GetLeafID() != id {
-		t.Errorf("leaf should be %s, got %s", id, sm.GetLeafID())
+	if ss.GetLeafID() != id {
+		t.Errorf("leaf should be %s, got %s", id, ss.GetLeafID())
 	}
 }
 
-func TestSessionManagerAppendMessage(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreAppendMessage(t *testing.T) {
+	ss := InMemorySessionStore()
 
 	msg1 := ai.NewUserMsg("first message", time.Now().UnixMilli())
-	id1 := sm.AppendAIMessage(msg1)
+	id1 := ss.AppendAIMessage(msg1)
 
 	msg2 := ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response")},
 		Provider: "anthropic",
 		Model:    "claude-3",
 	})
-	id2 := sm.AppendAIMessage(msg2)
+	id2 := ss.AppendAIMessage(msg2)
 
-	if sm.GetLeafID() != id2 {
+	if ss.GetLeafID() != id2 {
 		t.Errorf("leaf should be %s", id2)
 	}
 
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
@@ -89,25 +89,25 @@ func TestSessionManagerAppendMessage(t *testing.T) {
 	}
 }
 
-func TestSessionManagerThinkingLevelChange(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreThinkingLevelChange(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendThinkingLevelChange("high")
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendThinkingLevelChange("high")
 
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	if ctx.ThinkingLevel != "high" {
 		t.Errorf("expected thinking level 'high', got %q", ctx.ThinkingLevel)
 	}
 }
 
-func TestSessionManagerModelChange(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreModelChange(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendModelChange("anthropic", "claude-4")
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendModelChange("anthropic", "claude-4")
 
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	if ctx.Model == nil {
 		t.Fatal("expected model reference")
 	}
@@ -116,24 +116,24 @@ func TestSessionManagerModelChange(t *testing.T) {
 	}
 }
 
-func TestSessionManagerBranching(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreBranching(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	id2 := sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	id2 := ss.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
 	_ = id2
 
 	// Branch from first entry
-	sm.Branch(id1)
-	if sm.GetLeafID() != id1 {
+	ss.Branch(id1)
+	if ss.GetLeafID() != id1 {
 		t.Errorf("leaf should be %s after branch", id1)
 	}
 
 	// Append new branch
-	id3 := sm.AppendAIMessage(ai.NewUserMsg("branch", time.Now().UnixMilli()))
+	id3 := ss.AppendAIMessage(ai.NewUserMsg("branch", time.Now().UnixMilli()))
 
 	// Verify tree structure
-	entry3 := sm.GetEntry(id3)
+	entry3 := ss.GetEntry(id3)
 	if entry3 == nil {
 		t.Fatal("expected entry")
 	}
@@ -142,42 +142,42 @@ func TestSessionManagerBranching(t *testing.T) {
 	}
 
 	// Build context should use branch path
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	if len(ctx.Messages) != 2 {
 		t.Errorf("expected 2 messages in branch, got %d", len(ctx.Messages))
 	}
 }
 
-func TestSessionManagerResetLeaf(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreResetLeaf(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	sm.ResetLeaf()
-	if sm.GetLeafID() != "" {
+	ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	ss.ResetLeaf()
+	if ss.GetLeafID() != "" {
 		t.Error("leaf should be empty after reset")
 	}
 
 	// Append should create new root
-	id := sm.AppendAIMessage(ai.NewUserMsg("new root", time.Now().UnixMilli()))
-	entry := sm.GetEntry(id)
+	id := ss.AppendAIMessage(ai.NewUserMsg("new root", time.Now().UnixMilli()))
+	entry := ss.GetEntry(id)
 	if entry.GetParentID() != "" {
 		t.Error("new entry after reset should have no parent")
 	}
 }
 
-func TestSessionManagerBranchWithSummary(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreBranchWithSummary(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
 
-	summaryID := sm.BranchWithSummary(id1, "Summary of abandoned branch", nil, false)
-	if sm.GetLeafID() != summaryID {
+	summaryID := ss.BranchWithSummary(id1, "Summary of abandoned branch", nil, false)
+	if ss.GetLeafID() != summaryID {
 		t.Errorf("leaf should be summary entry %s", summaryID)
 	}
 
 	// Context should include branch summary
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	found := false
 	for _, m := range ctx.Messages {
 		if m.Custom != nil {
@@ -193,18 +193,18 @@ func TestSessionManagerBranchWithSummary(t *testing.T) {
 	}
 }
 
-func TestSessionManagerCompaction(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreCompaction(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("message 1", time.Now().UnixMilli()))
-	id2 := sm.AppendAIMessage(ai.NewUserMsg("message 2", time.Now().UnixMilli()))
-	id3 := sm.AppendAIMessage(ai.NewUserMsg("message 3", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("message 1", time.Now().UnixMilli()))
+	id2 := ss.AppendAIMessage(ai.NewUserMsg("message 2", time.Now().UnixMilli()))
+	id3 := ss.AppendAIMessage(ai.NewUserMsg("message 3", time.Now().UnixMilli()))
 	_ = id3
 
 	// Compact, keeping from id2 onward
-	sm.AppendCompaction("Summary of old messages", id2, 5000, nil, false)
+	ss.AppendCompaction("Summary of old messages", id2, 5000, nil, false)
 
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	// Should have: compaction summary + kept messages (id2, id3) = 3
 	if len(ctx.Messages) < 2 {
 		t.Errorf("expected at least 2 messages after compaction, got %d", len(ctx.Messages))
@@ -222,45 +222,45 @@ func TestSessionManagerCompaction(t *testing.T) {
 	_ = id1
 }
 
-func TestSessionManagerLabels(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreLabels(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("labeled", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("labeled", time.Now().UnixMilli()))
 
-	sm.AppendLabelChange(id1, "important")
-	if sm.GetLabel(id1) != "important" {
-		t.Errorf("expected label 'important', got %q", sm.GetLabel(id1))
+	ss.AppendLabelChange(id1, "important")
+	if ss.GetLabel(id1) != "important" {
+		t.Errorf("expected label 'important', got %q", ss.GetLabel(id1))
 	}
 
 	// Clear label
-	sm.AppendLabelChange(id1, "")
-	if sm.GetLabel(id1) != "" {
+	ss.AppendLabelChange(id1, "")
+	if ss.GetLabel(id1) != "" {
 		t.Error("label should be cleared")
 	}
 }
 
-func TestSessionManagerSessionName(t *testing.T) {
-	sm := InMemorySessionManager()
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendSessionInfo("My Session")
+func TestSessionStoreSessionName(t *testing.T) {
+	ss := InMemorySessionStore()
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendSessionInfo("My Session")
 
-	name := sm.GetSessionName()
+	name := ss.GetSessionName()
 	if name != "My Session" {
 		t.Errorf("expected 'My Session', got %q", name)
 	}
 }
 
-func TestSessionManagerGetTree(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreGetTree(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("root", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewUserMsg("child1", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("root", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewUserMsg("child1", time.Now().UnixMilli()))
 
 	// Branch from root
-	sm.Branch(id1)
-	sm.AppendAIMessage(ai.NewUserMsg("child2", time.Now().UnixMilli()))
+	ss.Branch(id1)
+	ss.AppendAIMessage(ai.NewUserMsg("child2", time.Now().UnixMilli()))
 
-	tree := sm.GetTree()
+	tree := ss.GetTree()
 	if len(tree) != 1 {
 		t.Fatalf("expected 1 root, got %d", len(tree))
 	}
@@ -269,19 +269,19 @@ func TestSessionManagerGetTree(t *testing.T) {
 	}
 }
 
-func TestSessionManagerPersistence(t *testing.T) {
+func TestSessionStorePersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
-	sm := NewSessionManager(tmpDir, sessDir)
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss := NewSessionStore(tmpDir, sessDir)
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("hi there")},
 		Provider: "test",
 		Model:    "test-model",
 	}))
 
-	sessionFile := sm.GetSessionFile()
+	sessionFile := ss.GetSessionFile()
 	if sessionFile == "" {
 		t.Fatal("expected session file")
 	}
@@ -310,12 +310,12 @@ func TestSessionManagerPersistence(t *testing.T) {
 	}
 }
 
-func TestSessionManagerOpenExisting(t *testing.T) {
+func TestSessionStoreOpenExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
 	// Create and populate session
-	sm1 := NewSessionManager(tmpDir, sessDir)
+	sm1 := NewSessionStore(tmpDir, sessDir)
 	sm1.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response")},
@@ -329,7 +329,7 @@ func TestSessionManagerOpenExisting(t *testing.T) {
 	sm1.Close()
 
 	// Open it again
-	sm2, _ := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionStore(sessionFile)
 	if sm2.GetSessionID() != origID {
 		t.Errorf("session IDs should match: %s != %s", sm2.GetSessionID(), sm1.GetSessionID())
 	}
@@ -340,12 +340,12 @@ func TestSessionManagerOpenExisting(t *testing.T) {
 	}
 }
 
-func TestSessionManagerContinueRecent(t *testing.T) {
+func TestSessionStoreContinueRecent(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
 	// Create session with content
-	sm1 := NewSessionManager(tmpDir, sessDir)
+	sm1 := NewSessionStore(tmpDir, sessDir)
 	sm1.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response")},
@@ -364,28 +364,28 @@ func TestSessionManagerContinueRecent(t *testing.T) {
 	}
 }
 
-func TestSessionManagerNewSessionAfterExisting(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreNewSessionAfterExisting(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("old", time.Now().UnixMilli()))
-	oldID := sm.GetSessionID()
+	ss.AppendAIMessage(ai.NewUserMsg("old", time.Now().UnixMilli()))
+	oldID := ss.GetSessionID()
 
-	sm.NewSession(nil)
-	if sm.GetSessionID() == oldID {
+	ss.NewSession(nil)
+	if ss.GetSessionID() == oldID {
 		t.Error("new session should have different ID")
 	}
-	if sm.GetLeafID() != "" {
+	if ss.GetLeafID() != "" {
 		t.Error("new session should have no leaf")
 	}
-	if len(sm.GetEntries()) != 0 {
+	if len(ss.GetEntries()) != 0 {
 		t.Error("new session should have no entries")
 	}
 }
 
-func TestSessionManagerGetHeader(t *testing.T) {
-	sm := InMemorySessionManager("/test/cwd")
+func TestSessionStoreGetHeader(t *testing.T) {
+	ss := InMemorySessionStore("/test/cwd")
 
-	header := sm.GetHeader()
+	header := ss.GetHeader()
 	if header == nil {
 		t.Fatal("expected header")
 	}
@@ -400,18 +400,18 @@ func TestSessionManagerGetHeader(t *testing.T) {
 	}
 }
 
-func TestSessionManagerGetChildren(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreGetChildren(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("root", time.Now().UnixMilli()))
-	id2 := sm.AppendAIMessage(ai.NewUserMsg("child1", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("root", time.Now().UnixMilli()))
+	id2 := ss.AppendAIMessage(ai.NewUserMsg("child1", time.Now().UnixMilli()))
 	_ = id2
 
-	sm.Branch(id1)
-	id3 := sm.AppendAIMessage(ai.NewUserMsg("child2", time.Now().UnixMilli()))
+	ss.Branch(id1)
+	id3 := ss.AppendAIMessage(ai.NewUserMsg("child2", time.Now().UnixMilli()))
 	_ = id3
 
-	children := sm.GetChildren(id1)
+	children := ss.GetChildren(id1)
 	if len(children) != 2 {
 		t.Fatalf("expected 2 children, got %d", len(children))
 	}
@@ -431,16 +431,16 @@ func TestBuildSessionContextEmpty(t *testing.T) {
 }
 
 func TestBuildSessionContextModelFromAssistant(t *testing.T) {
-	sm := InMemorySessionManager()
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response")},
 		Provider: "anthropic",
 		Model:    "claude-3.5-sonnet",
 	}))
 
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	if ctx.Model == nil {
 		t.Fatal("expected model from assistant message")
 	}
@@ -468,7 +468,7 @@ func TestSessionListWithSessions(t *testing.T) {
 	sessDir := filepath.Join(tmpDir, "sessions")
 
 	// Create two sessions
-	sm1 := NewSessionManager(tmpDir, sessDir)
+	sm1 := NewSessionStore(tmpDir, sessDir)
 	sm1.AppendAIMessage(ai.NewUserMsg("session 1", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response 1")},
@@ -478,7 +478,7 @@ func TestSessionListWithSessions(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond) // ensure different timestamps
 
-	sm2 := NewSessionManager(tmpDir, sessDir)
+	sm2 := NewSessionStore(tmpDir, sessDir)
 	sm2.AppendAIMessage(ai.NewUserMsg("session 2", time.Now().UnixMilli()))
 	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("response 2")},
@@ -500,13 +500,13 @@ func TestSessionListWithSessions(t *testing.T) {
 	}
 }
 
-func TestSessionManagerCustomEntry(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreCustomEntry(t *testing.T) {
+	ss := InMemorySessionStore()
 
 	data, _ := json.Marshal(map[string]string{"key": "value"})
-	id := sm.AppendCustomEntry("my-extension", data)
+	id := ss.AppendCustomEntry("my-extension", data)
 
-	entry := sm.GetEntry(id)
+	entry := ss.GetEntry(id)
 	if entry == nil {
 		t.Fatal("expected entry")
 	}
@@ -526,9 +526,9 @@ func TestFindMostRecentSessionEmpty(t *testing.T) {
 	}
 }
 
-func TestSessionManagerConcurrentAppendAndRead(t *testing.T) {
+func TestSessionStoreConcurrentAppendAndRead(t *testing.T) {
 	// This test should be run with -race to detect data races.
-	sm := InMemorySessionManager()
+	ss := InMemorySessionStore()
 
 	done := make(chan struct{})
 
@@ -536,31 +536,31 @@ func TestSessionManagerConcurrentAppendAndRead(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 50; i++ {
-			sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+			ss.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
 		}
 	}()
 
 	// Reader goroutine: read state concurrently
 	for i := 0; i < 50; i++ {
-		_ = sm.GetLeafID()
-		_ = sm.GetEntries()
-		_ = sm.GetSessionName()
-		_ = sm.GetSessionID()
-		_ = sm.GetCwd()
-		_ = sm.GetTree()
-		_ = sm.BuildSessionContext()
+		_ = ss.GetLeafID()
+		_ = ss.GetEntries()
+		_ = ss.GetSessionName()
+		_ = ss.GetSessionID()
+		_ = ss.GetCwd()
+		_ = ss.GetTree()
+		_ = ss.BuildSessionContext()
 	}
 
 	<-done
 
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 50 {
 		t.Errorf("expected 50 entries, got %d", len(entries))
 	}
 }
 
-func TestSessionManagerConcurrentMultipleWriters(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreConcurrentMultipleWriters(t *testing.T) {
+	ss := InMemorySessionStore()
 
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
@@ -568,7 +568,7 @@ func TestSessionManagerConcurrentMultipleWriters(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+				ss.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
 			}
 		}()
 	}
@@ -579,23 +579,23 @@ func TestSessionManagerConcurrentMultipleWriters(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				_ = sm.GetEntries()
-				_ = sm.GetLeafID()
-				_ = sm.GetLeafEntry()
-				_ = sm.BuildSessionContext()
+				_ = ss.GetEntries()
+				_ = ss.GetLeafID()
+				_ = ss.GetLeafEntry()
+				_ = ss.BuildSessionContext()
 			}
 		}()
 	}
 
 	wg.Wait()
 
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 50 {
 		t.Errorf("expected 50 entries, got %d", len(entries))
 	}
 }
 
-func TestSessionManagerCorruptFileRecovery(t *testing.T) {
+func TestSessionStoreCorruptFileRecovery(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 	os.MkdirAll(sessDir, 0755)
@@ -641,12 +641,12 @@ func TestSessionManagerCorruptFileRecovery(t *testing.T) {
 	os.WriteFile(sessionFile, []byte(content), 0600)
 
 	// Should load successfully, skipping corrupt lines
-	sm, _ := OpenSessionManager(sessionFile, sessDir)
-	if sm.GetSessionID() != "test-corrupt" {
-		t.Errorf("expected session ID 'test-corrupt', got %q", sm.GetSessionID())
+	ss, _ := OpenSessionStore(sessionFile, sessDir)
+	if ss.GetSessionID() != "test-corrupt" {
+		t.Errorf("expected session ID 'test-corrupt', got %q", ss.GetSessionID())
 	}
 
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 valid entries (skipping corrupt lines), got %d", len(entries))
 	}
@@ -658,7 +658,7 @@ func TestSessionManagerCorruptFileRecovery(t *testing.T) {
 	}
 }
 
-func TestSessionManagerEmptyFile(t *testing.T) {
+func TestSessionStoreEmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 	os.MkdirAll(sessDir, 0755)
@@ -667,33 +667,33 @@ func TestSessionManagerEmptyFile(t *testing.T) {
 	sessionFile := filepath.Join(sessDir, "empty.jsonl")
 	os.WriteFile(sessionFile, []byte(""), 0600)
 
-	sm, _ := OpenSessionManager(sessionFile, sessDir)
-	entries := sm.GetEntries()
+	ss, _ := OpenSessionStore(sessionFile, sessDir)
+	entries := ss.GetEntries()
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries for empty file, got %d", len(entries))
 	}
 }
 
-func TestSessionManagerCreateBranchedSession_InMemory(t *testing.T) {
-	sm := InMemorySessionManager("test-cwd")
+func TestSessionStoreCreateBranchedSession_InMemory(t *testing.T) {
+	ss := InMemorySessionStore("test-cwd")
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	id2 := sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewUserMsg("third", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	id2 := ss.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewUserMsg("third", time.Now().UnixMilli()))
 
 	_ = id2
-	originalID := sm.GetSessionID()
-	if _, err := sm.CreateBranchedSession(id1); err != nil {
+	originalID := ss.GetSessionID()
+	if _, err := ss.CreateBranchedSession(id1); err != nil {
 		t.Fatalf("CreateBranchedSession: %v", err)
 	}
 
 	// Should have a new session ID
-	if sm.GetSessionID() == originalID {
+	if ss.GetSessionID() == originalID {
 		t.Error("expected new session ID after branching")
 	}
 
 	// Only the branch up to id1 should remain
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
@@ -702,19 +702,19 @@ func TestSessionManagerCreateBranchedSession_InMemory(t *testing.T) {
 	}
 }
 
-func TestSessionManagerCreateBranchedSession_Persisted(t *testing.T) {
+func TestSessionStoreCreateBranchedSession_Persisted(t *testing.T) {
 	dir := t.TempDir()
-	sm := NewSessionManager("test-cwd", dir)
+	ss := NewSessionStore("test-cwd", dir)
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
 	// Need an assistant to trigger write
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{{Text: &ai.TextContent{Text: "reply"}}},
 	}))
 
-	oldFile := sm.GetSessionFile()
-	newFile, err := sm.CreateBranchedSession(id1)
+	oldFile := ss.GetSessionFile()
+	newFile, err := ss.CreateBranchedSession(id1)
 	if err != nil {
 		t.Fatalf("CreateBranchedSession: %v", err)
 	}
@@ -732,7 +732,7 @@ func TestSessionManagerCreateBranchedSession_Persisted(t *testing.T) {
 	}
 
 	// Entries should only contain the branch
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry after branch, got %d", len(entries))
 	}
@@ -741,21 +741,21 @@ func TestSessionManagerCreateBranchedSession_Persisted(t *testing.T) {
 	}
 }
 
-func TestSessionManagerCreateBranchedSession_WithLabels(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreCreateBranchedSession_WithLabels(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	id1 := sm.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
+	id1 := ss.AppendAIMessage(ai.NewUserMsg("first", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewUserMsg("second", time.Now().UnixMilli()))
 
 	// Add a label to id1
-	sm.AppendLabelChange(id1, "important")
+	ss.AppendLabelChange(id1, "important")
 
-	if _, err := sm.CreateBranchedSession(id1); err != nil {
+	if _, err := ss.CreateBranchedSession(id1); err != nil {
 		t.Fatalf("CreateBranchedSession: %v", err)
 	}
 
 	// Label should be preserved
-	label := sm.GetLabel(id1)
+	label := ss.GetLabel(id1)
 	if label != "important" {
 		t.Errorf("expected label 'important', got %q", label)
 	}
@@ -801,7 +801,7 @@ func TestForkFrom(t *testing.T) {
 	sessionsDir := filepath.Join(dstDir, "sessions")
 
 	// Create a source session
-	srcSM := NewSessionManager(srcDir, filepath.Join(srcDir, "sessions"))
+	srcSM := NewSessionStore(srcDir, filepath.Join(srcDir, "sessions"))
 	srcSM.AppendAgentMessage(newTestAgentMsg(t, "user", "hello"))
 	srcSM.AppendAgentMessage(newTestAgentMsg(t, "assistant", "world"))
 	srcFile := srcSM.GetSessionFile()
@@ -847,13 +847,13 @@ func TestListAllSessions(t *testing.T) {
 	project2Dir := filepath.Join(agentDir, "sessions", "project2")
 
 	// Create sessions in each (session file is written only after an assistant message)
-	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1 := NewSessionStore("/proj1", project1Dir)
 	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
 	}))
 
-	sm2 := NewSessionManager("/proj2", project2Dir)
+	sm2 := NewSessionStore("/proj2", project2Dir)
 	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
 	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
@@ -894,14 +894,14 @@ func TestListAllSessions_MultipleDirs(t *testing.T) {
 
 	// Create a session in each agent dir
 	project1Dir := filepath.Join(agentDir1, "sessions", "project1")
-	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1 := NewSessionStore("/proj1", project1Dir)
 	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
 	}))
 
 	project2Dir := filepath.Join(agentDir2, "sessions", "project2")
-	sm2 := NewSessionManager("/proj2", project2Dir)
+	sm2 := NewSessionStore("/proj2", project2Dir)
 	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
 	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
@@ -922,9 +922,9 @@ func TestListAllSessions_ExtraDirMissing(t *testing.T) {
 
 	// Create a session in the main dir
 	projectDir := filepath.Join(agentDir, "sessions", "project1")
-	sm := NewSessionManager("/proj1", projectDir)
-	sm.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss := NewSessionStore("/proj1", projectDir)
+	ss.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
 	}))
 
@@ -946,13 +946,13 @@ func TestListAllSessions_DeduplicatesOverlappingPaths(t *testing.T) {
 
 	// Create a session directory under agentDir1
 	projectDir := filepath.Join(agentDir1, "sessions", "project1")
-	sm := NewSessionManager("/proj1", projectDir)
-	sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss := NewSessionStore("/proj1", projectDir)
+	ss.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply")},
 	}))
 
-	sessionFile := sm.GetSessionFile()
+	sessionFile := ss.GetSessionFile()
 	if sessionFile == "" {
 		t.Fatal("session file not written")
 	}
@@ -986,7 +986,7 @@ func TestListAllSessions_DeduplicatesCopiedFiles(t *testing.T) {
 
 	// Session in agentDir1
 	project1Dir := filepath.Join(agentDir1, "sessions", "project1")
-	sm1 := NewSessionManager("/proj1", project1Dir)
+	sm1 := NewSessionStore("/proj1", project1Dir)
 	sm1.AppendAIMessage(ai.NewUserMsg("msg1", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply1")},
@@ -994,7 +994,7 @@ func TestListAllSessions_DeduplicatesCopiedFiles(t *testing.T) {
 
 	// Different session in agentDir2 under the same project name
 	project2Dir := filepath.Join(agentDir2, "sessions", "project1")
-	sm2 := NewSessionManager("/proj1", project2Dir)
+	sm2 := NewSessionStore("/proj1", project2Dir)
 	sm2.AppendAIMessage(ai.NewUserMsg("msg2", time.Now().UnixMilli()))
 	sm2.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply2")},
@@ -1015,9 +1015,9 @@ func TestListAllSessions_SameAgentDirPassedTwice(t *testing.T) {
 	agentDir := t.TempDir()
 
 	projectDir := filepath.Join(agentDir, "sessions", "project1")
-	sm := NewSessionManager("/proj1", projectDir)
-	sm.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss := NewSessionStore("/proj1", projectDir)
+	ss.AppendAIMessage(ai.NewUserMsg("msg", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("reply")},
 	}))
 
@@ -1035,19 +1035,19 @@ func TestListAllSessions_SameAgentDirPassedTwice(t *testing.T) {
 // Command entry tests
 // ============================================================================
 
-// TestSessionManagerCommandEntry verifies that AppendCommandEntry records a
+// TestSessionStoreCommandEntry verifies that AppendCommandEntry records a
 // "command" entry and that it is NOT included in the LLM context.
-func TestSessionManagerCommandEntry(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreCommandEntry(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	id := sm.AppendCommandEntry("model", "claude-opus-4")
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	id := ss.AppendCommandEntry("model", "claude-opus-4")
 
 	if id == "" {
 		t.Fatal("expected non-empty entry ID")
 	}
 
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	var found *SessionEntry
 	for _, e := range entries {
 		if e.ID == id {
@@ -1070,20 +1070,20 @@ func TestSessionManagerCommandEntry(t *testing.T) {
 
 	// Command entries must not appear in the LLM context.
 	// The sole meaningful check: only the user message should be in context.
-	ctx := sm.BuildSessionContext()
+	ctx := ss.BuildSessionContext()
 	if len(ctx.Messages) != 1 {
 		t.Errorf("expected 1 message in context (command entry must be excluded), got %d", len(ctx.Messages))
 	}
 }
 
-// TestSessionManagerCommandEntryNoArgs verifies AppendCommandEntry works with empty args.
-func TestSessionManagerCommandEntryNoArgs(t *testing.T) {
-	sm := InMemorySessionManager()
-	id := sm.AppendCommandEntry("reload", "")
+// TestSessionStoreCommandEntryNoArgs verifies AppendCommandEntry works with empty args.
+func TestSessionStoreCommandEntryNoArgs(t *testing.T) {
+	ss := InMemorySessionStore()
+	id := ss.AppendCommandEntry("reload", "")
 	if id == "" {
 		t.Fatal("expected non-empty entry ID")
 	}
-	entries := sm.GetEntries()
+	entries := ss.GetEntries()
 	var found *SessionEntry
 	for _, e := range entries {
 		if e.ID == id {
@@ -1098,14 +1098,14 @@ func TestSessionManagerCommandEntryNoArgs(t *testing.T) {
 	}
 }
 
-// TestSessionManagerCommandEntryRoundTrip verifies that command entries survive
+// TestSessionStoreCommandEntryRoundTrip verifies that command entries survive
 // a write-to-disk / read-from-disk cycle and remain correctly typed.
-func TestSessionManagerCommandEntryRoundTrip(t *testing.T) {
+func TestSessionStoreCommandEntryRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessDir := filepath.Join(tmpDir, "sessions")
 
 	// Write session with a command entry (need an assistant message to flush).
-	sm1 := NewSessionManager(tmpDir, sessDir)
+	sm1 := NewSessionStore(tmpDir, sessDir)
 	sm1.AppendAIMessage(ai.NewUserMsg("hi", time.Now().UnixMilli()))
 	sm1.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("hello")},
@@ -1119,7 +1119,7 @@ func TestSessionManagerCommandEntryRoundTrip(t *testing.T) {
 	}
 
 	// Read it back.
-	sm2, _ := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionStore(sessionFile)
 	entries := sm2.GetEntries()
 
 	var cmdEntry *SessionEntry
@@ -1152,17 +1152,17 @@ func TestSessionManagerCommandEntryRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSessionManagerCommandEntryParentChain verifies that command entries are
+// TestSessionStoreCommandEntryParentChain verifies that command entries are
 // linked into the entry parent chain correctly (each entry's parent is the
 // previous leaf, so commands don't break the chain for subsequent messages).
-func TestSessionManagerCommandEntryParentChain(t *testing.T) {
-	sm := InMemorySessionManager()
+func TestSessionStoreCommandEntryParentChain(t *testing.T) {
+	ss := InMemorySessionStore()
 
-	userID := sm.AppendAIMessage(ai.NewUserMsg("question", time.Now().UnixMilli()))
-	cmdID := sm.AppendCommandEntry("thinking", "high")
+	userID := ss.AppendAIMessage(ai.NewUserMsg("question", time.Now().UnixMilli()))
+	cmdID := ss.AppendCommandEntry("thinking", "high")
 
 	// Command's parent should be the user message.
-	cmdEntry := sm.GetEntry(cmdID)
+	cmdEntry := ss.GetEntry(cmdID)
 	if cmdEntry == nil {
 		t.Fatal("command entry not found")
 	}
@@ -1171,10 +1171,10 @@ func TestSessionManagerCommandEntryParentChain(t *testing.T) {
 	}
 
 	// Subsequent message should have the command as parent.
-	assistantID := sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	assistantID := ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("response")},
 	}))
-	assistantEntry := sm.GetEntry(assistantID)
+	assistantEntry := ss.GetEntry(assistantID)
 	if assistantEntry == nil {
 		t.Fatal("assistant entry not found")
 	}
@@ -1183,13 +1183,13 @@ func TestSessionManagerCommandEntryParentChain(t *testing.T) {
 	}
 }
 
-func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
+func TestSessionStore_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir, filepath.Join(tmpDir, "sessions"))
+	ss := NewSessionStore(tmpDir, filepath.Join(tmpDir, "sessions"))
 
 	// Need an assistant message first so the session flushes to disk
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("hi")},
 		Provider: "test",
 		Model:    "test-model",
@@ -1199,15 +1199,15 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 		{Content: "Step 2", Status: agent.PlanEntryStatusPending, Priority: agent.PlanEntryPriorityMedium},
 	}
-	sm.AppendPlanUpdate("Test Plan", entries, nil)
+	ss.AppendPlanUpdate("Test Plan", entries, nil)
 
-	sessionFile := sm.GetSessionFile()
+	sessionFile := ss.GetSessionFile()
 	if sessionFile == "" {
 		t.Fatal("expected a session file to be written")
 	}
 
 	// Reload the session from disk and verify plan is in context
-	sm2, _ := OpenSessionManager(sessionFile)
+	sm2, _ := OpenSessionStore(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 2 {
@@ -1224,25 +1224,25 @@ func TestSessionManager_AppendPlanUpdate_PersistedAndRestored(t *testing.T) {
 	}
 }
 
-func TestSessionManager_AppendPlanUpdate_ClearRestored(t *testing.T) {
+func TestSessionStore_AppendPlanUpdate_ClearRestored(t *testing.T) {
 	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir, filepath.Join(tmpDir, "sessions"))
+	ss := NewSessionStore(tmpDir, filepath.Join(tmpDir, "sessions"))
 
-	sm.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
-	sm.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	ss.AppendAIMessage(ai.NewUserMsg("hello", time.Now().UnixMilli()))
+	ss.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:  []ai.AssistantContent{ai.NewTextContent("hi")},
 		Provider: "test",
 		Model:    "test-model",
 	}))
 
 	// Set a plan then clear it
-	sm.AppendPlanUpdate("Temp Plan", []agent.PlanEntry{
+	ss.AppendPlanUpdate("Temp Plan", []agent.PlanEntry{
 		{Content: "Step 1", Status: agent.PlanEntryStatusInProgress, Priority: agent.PlanEntryPriorityHigh},
 	}, nil)
-	sm.AppendPlanUpdate("", nil, nil) // clear
+	ss.AppendPlanUpdate("", nil, nil) // clear
 
-	sessionFile := sm.GetSessionFile()
-	sm2, _ := OpenSessionManager(sessionFile)
+	sessionFile := ss.GetSessionFile()
+	sm2, _ := OpenSessionStore(sessionFile)
 	ctx := sm2.BuildSessionContext()
 
 	if len(ctx.PlanEntries) != 0 {
@@ -1288,32 +1288,32 @@ func TestBuildSessionContextFromEntries_PlanNotInMessages(t *testing.T) {
 
 // Test helper methods — moved from session.go because they are only used in tests.
 
-func (sm *SessionManager) GetLeafEntry() *SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	if sm.leafID == "" {
+func (ss *SessionStore) GetLeafEntry() *SessionEntry {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	if ss.leafID == "" {
 		return nil
 	}
-	return sm.byID[sm.leafID]
+	return ss.byID[ss.leafID]
 }
 
-func (sm *SessionManager) GetLabel(id string) string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.labelsById[id]
+func (ss *SessionStore) GetLabel(id string) string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.labelsById[id]
 }
 
-func (sm *SessionManager) GetHeader() *SessionHeader {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.header
+func (ss *SessionStore) GetHeader() *SessionHeader {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.header
 }
 
-func (sm *SessionManager) GetChildren(parentID string) []*SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+func (ss *SessionStore) GetChildren(parentID string) []*SessionEntry {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
 	var children []*SessionEntry
-	for _, e := range sm.entries {
+	for _, e := range ss.entries {
 		if e.ParentID == parentID {
 			children = append(children, e)
 		}
@@ -1321,10 +1321,10 @@ func (sm *SessionManager) GetChildren(parentID string) []*SessionEntry {
 	return children
 }
 
-func (sm *SessionManager) ResetLeaf() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.leafID = ""
+func (ss *SessionStore) ResetLeaf() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.leafID = ""
 }
 
 func TestMergeSessions(t *testing.T) {

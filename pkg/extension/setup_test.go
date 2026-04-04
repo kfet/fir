@@ -17,7 +17,7 @@ import (
 // newSetupTestSession creates a minimal AgentSession for setup tests.
 func newSetupTestSession(t *testing.T, cwd string) *session.AgentSession {
 	t.Helper()
-	sm := store.InMemorySessionManager()
+	sm := store.InMemorySessionStore()
 	dummyModel := &ai.Model{
 		Provider:      "test",
 		ID:            "test-model",
@@ -29,7 +29,7 @@ func newSetupTestSession(t *testing.T, cwd string) *session.AgentSession {
 	})
 	return session.NewAgentSession(session.AgentSessionOptions{
 		Agent:          a,
-		SessionManager: sm,
+		SessionStore:   sm,
 		ResourceLoader: &stubResourceLoader{},
 		Cwd:            cwd,
 	})

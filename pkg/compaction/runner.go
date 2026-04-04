@@ -33,7 +33,7 @@ func (r *DefaultRunner) ShouldCompact(contextTokens, contextWindow int) bool {
 // without running any LLM calls. Returns nil if there is nothing to compact.
 func (r *DefaultRunner) GetStats(sess *session.AgentSession) *session.CompactionInfo {
 	settings := r.compactionSettings()
-	pathEntries := sess.SessionManager.GetBranch("")
+	pathEntries := sess.SessionStore.GetBranch("")
 	prep := PrepareCompaction(pathEntries, settings)
 	if prep == nil {
 		return nil
@@ -64,7 +64,7 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 	}
 
 	settings := r.compactionSettings()
-	pathEntries := sess.SessionManager.GetBranch("")
+	pathEntries := sess.SessionStore.GetBranch("")
 	firlog.Info("compaction starting", "entries", len(pathEntries), "model", model.ID)
 
 	preparation := PrepareCompaction(pathEntries, settings)
@@ -93,7 +93,7 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 	if result.Details != nil {
 		detailsJSON, _ = json.Marshal(result.Details)
 	}
-	sess.SessionManager.AppendCompaction(
+	sess.SessionStore.AppendCompaction(
 		result.Summary,
 		result.FirstKeptEntryID,
 		result.TokensBefore,
@@ -102,7 +102,7 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 	)
 
 	// Rebuild messages from compacted session
-	sessionCtx := sess.SessionManager.BuildSessionContext()
+	sessionCtx := sess.SessionStore.BuildSessionContext()
 	sess.Agent.ReplaceMessages(sessionCtx.Messages)
 
 	firlog.Info("compaction complete", "tokensBefore", result.TokensBefore)

@@ -52,7 +52,7 @@ func (b *SessionBridge) SendMessage(spec CustomMessageSpec, opts *SendMessageOpt
 	if err != nil {
 		return
 	}
-	b.session.SessionManager.AppendCustomEntry(spec.CustomType, raw)
+	b.session.SessionStore.AppendCustomEntry(spec.CustomType, raw)
 
 	if opts != nil && opts.DeliverAs != "" {
 		cm := &store.CustomMessage{
@@ -103,11 +103,11 @@ func (b *SessionBridge) GetSessionName() string {
 }
 
 func (b *SessionBridge) SetLabel(entryID, label string) {
-	b.session.SessionManager.AppendLabelChange(entryID, label)
+	b.session.SessionStore.AppendLabelChange(entryID, label)
 }
 
 func (b *SessionBridge) ClearLabel(entryID string) {
-	b.session.SessionManager.AppendLabelChange(entryID, "")
+	b.session.SessionStore.AppendLabelChange(entryID, "")
 }
 
 func (b *SessionBridge) SetModel(model *ai.Model) bool {

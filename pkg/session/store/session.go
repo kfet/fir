@@ -141,10 +141,10 @@ type NewSessionOptions struct {
 	ParentSession string
 }
 
-// --- SessionManager ---
+// --- SessionStore ---
 
-// SessionManager manages conversation sessions as append-only trees stored in JSONL files.
-type SessionManager struct {
+// SessionStore manages conversation sessions as append-only trees stored in JSONL files.
+type SessionStore struct {
 	mu          sync.RWMutex
 	sessionID   string
 	sessionFile string
@@ -160,9 +160,9 @@ type SessionManager struct {
 	lock        *sessionLock // flock on .meta.json; nil if in-memory or lock failed
 }
 
-// NewSessionManager creates a persisted session.
-func NewSessionManager(cwd, sessionDir string) *SessionManager {
-	sm := &SessionManager{
+// NewSessionStore creates a persisted session.
+func NewSessionStore(cwd, sessionDir string) *SessionStore {
+	ss := &SessionStore{
 		cwd:        cwd,
 		sessionDir: sessionDir,
 		persist:    true,
@@ -172,29 +172,29 @@ func NewSessionManager(cwd, sessionDir string) *SessionManager {
 	if sessionDir != "" {
 		os.MkdirAll(sessionDir, 0755)
 	}
-	sm.newSession(nil)
-	return sm
+	ss.newSession(nil)
+	return ss
 }
 
-// InMemorySessionManager creates a non-persisted session.
-func InMemorySessionManager(cwd ...string) *SessionManager {
+// InMemorySessionStore creates a non-persisted session.
+func InMemorySessionStore(cwd ...string) *SessionStore {
 	c := ""
 	if len(cwd) > 0 {
 		c = cwd[0]
 	}
-	sm := &SessionManager{
+	ss := &SessionStore{
 		cwd:        c,
 		persist:    false,
 		byID:       make(map[string]*SessionEntry),
 		labelsById: make(map[string]string),
 	}
-	sm.newSession(nil)
-	return sm
+	ss.newSession(nil)
+	return ss
 }
 
-// OpenSessionManager opens a specific session file. Returns the SessionManager
+// OpenSessionStore opens a specific session file. Returns the SessionStore
 // and whether the session was forked (because it was active in another process).
-func OpenSessionManager(filePath string, sessionDir ...string) (*SessionManager, bool) {
+func OpenSessionStore(filePath string, sessionDir ...string) (*SessionStore, bool) {
 	dir := ""
 	if len(sessionDir) > 0 {
 		dir = sessionDir[0]
@@ -202,68 +202,68 @@ func OpenSessionManager(filePath string, sessionDir ...string) (*SessionManager,
 		dir = filepath.Dir(filePath)
 	}
 
-	sm := &SessionManager{
+	ss := &SessionStore{
 		sessionDir: dir,
 		persist:    true,
 		byID:       make(map[string]*SessionEntry),
 		labelsById: make(map[string]string),
 	}
-	forked := sm.setSessionFile(filePath)
-	return sm, forked
+	forked := ss.setSessionFile(filePath)
+	return ss, forked
 }
 
 // ContinueRecentSession continues the most recent session, or creates new.
-// Returns the SessionManager and whether the session was forked (because it
+// Returns the SessionStore and whether the session was forked (because it
 // was active in another process).
-func ContinueRecentSession(cwd, sessionDir string) (*SessionManager, bool) {
+func ContinueRecentSession(cwd, sessionDir string) (*SessionStore, bool) {
 	if most := findMostRecentSession(sessionDir); most != "" {
-		sm := &SessionManager{
+		ss := &SessionStore{
 			cwd:        cwd,
 			sessionDir: sessionDir,
 			persist:    true,
 			byID:       make(map[string]*SessionEntry),
 			labelsById: make(map[string]string),
 		}
-		forked := sm.setSessionFile(most)
-		return sm, forked
+		forked := ss.setSessionFile(most)
+		return ss, forked
 	}
-	return NewSessionManager(cwd, sessionDir), false
+	return NewSessionStore(cwd, sessionDir), false
 }
 
 // SetSessionFile switches to a different session file, loading its entries.
 // If the session is locked by another process, it forks the session to
 // preserve history. Returns true if the session was forked.
-func (sm *SessionManager) SetSessionFile(filePath string) bool {
-	return sm.setSessionFile(filePath)
+func (ss *SessionStore) SetSessionFile(filePath string) bool {
+	return ss.setSessionFile(filePath)
 }
 
 // setSessionFile loads a session file, forking if locked by another process.
 // Returns true if the session was forked.
-func (sm *SessionManager) setSessionFile(filePath string) bool {
+func (ss *SessionStore) setSessionFile(filePath string) bool {
 	absPath, _ := filepath.Abs(filePath)
 
 	// Release any previously held lock before switching files.
-	if sm.lock != nil {
-		sm.lock.Close()
-		sm.lock = nil
+	if ss.lock != nil {
+		ss.lock.Close()
+		ss.lock = nil
 	}
 
 	// Try to acquire the flock. If locked by another process, fork.
 	forked := false
-	if sm.persist {
+	if ss.persist {
 		lock, ok := tryLockSession(absPath)
 		if ok {
-			sm.lock = lock
-		} else if sm.sessionDir != "" {
+			ss.lock = lock
+		} else if ss.sessionDir != "" {
 			// Session is active in another process — fork it.
-			forkSM, err := ForkFrom(absPath, sm.cwd, sm.sessionDir)
+			forkSS, err := ForkFrom(absPath, ss.cwd, ss.sessionDir)
 			if err == nil {
-				absPath = forkSM.GetSessionFile()
+				absPath = forkSS.GetSessionFile()
 				forked = true
 				firlog.Info("session forked from locked file", "original", filePath, "forked", absPath)
 				// Acquire lock on the forked file.
 				if lock, ok := tryLockSession(absPath); ok {
-					sm.lock = lock
+					ss.lock = lock
 				}
 			} else {
 				firlog.Warn("session fork failed, proceeding without lock", "err", err)
@@ -271,7 +271,7 @@ func (sm *SessionManager) setSessionFile(filePath string) bool {
 		}
 	}
 
-	sm.sessionFile = absPath
+	ss.sessionFile = absPath
 	firlog.Debug("loading session file", "path", absPath)
 
 	if _, err := os.Stat(absPath); err == nil {
@@ -279,96 +279,96 @@ func (sm *SessionManager) setSessionFile(filePath string) bool {
 
 		if header == nil {
 			// Corrupted - start fresh at this path
-			sm.newSession(nil)
-			sm.sessionFile = absPath
-			sm.rewriteFile()
-			sm.flushed = true
+			ss.newSession(nil)
+			ss.sessionFile = absPath
+			ss.rewriteFile()
+			ss.flushed = true
 			return forked
 		}
 
-		sm.header = header
-		sm.sessionID = header.ID
-		sm.cwd = header.Cwd
-		sm.entries = entries
-		sm.buildIndex()
-		sm.flushed = true
+		ss.header = header
+		ss.sessionID = header.ID
+		ss.cwd = header.Cwd
+		ss.entries = entries
+		ss.buildIndex()
+		ss.flushed = true
 		firlog.Debug("session loaded", "sessionID", header.ID, "entries", len(entries))
 	} else {
-		sm.newSession(nil)
-		sm.sessionFile = absPath
+		ss.newSession(nil)
+		ss.sessionFile = absPath
 	}
 	return forked
 }
 
 // NewSession starts a new session. Returns the session file path (empty if in-memory).
-func (sm *SessionManager) NewSession(opts *NewSessionOptions) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	return sm.newSession(opts)
+func (ss *SessionStore) NewSession(opts *NewSessionOptions) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.newSession(opts)
 }
 
-func (sm *SessionManager) newSession(opts *NewSessionOptions) string {
-	sm.sessionID = uuid.New().String()
+func (ss *SessionStore) newSession(opts *NewSessionOptions) string {
+	ss.sessionID = uuid.New().String()
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
 
-	sm.header = &SessionHeader{
+	ss.header = &SessionHeader{
 		Type:      "session",
 		Version:   CurrentSessionVersion,
-		ID:        sm.sessionID,
+		ID:        ss.sessionID,
 		Timestamp: ts,
-		Cwd:       sm.cwd,
+		Cwd:       ss.cwd,
 	}
 	if opts != nil {
-		sm.header.ParentSession = opts.ParentSession
+		ss.header.ParentSession = opts.ParentSession
 	}
 
-	sm.entries = nil
-	sm.byID = make(map[string]*SessionEntry)
-	sm.labelsById = make(map[string]string)
-	sm.leafID = ""
-	sm.flushed = false
+	ss.entries = nil
+	ss.byID = make(map[string]*SessionEntry)
+	ss.labelsById = make(map[string]string)
+	ss.leafID = ""
+	ss.flushed = false
 
-	if sm.persist && sm.sessionDir != "" {
+	if ss.persist && ss.sessionDir != "" {
 		// Release any previously held lock before creating a new session file.
-		if sm.lock != nil {
-			sm.lock.Close()
-			sm.lock = nil
+		if ss.lock != nil {
+			ss.lock.Close()
+			ss.lock = nil
 		}
 		fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
-		sm.sessionFile = filepath.Join(sm.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, sm.sessionID))
+		ss.sessionFile = filepath.Join(ss.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, ss.sessionID))
 		// Acquire flock on the new session file.
-		if lock, ok := tryLockSession(sm.sessionFile); ok {
-			sm.lock = lock
+		if lock, ok := tryLockSession(ss.sessionFile); ok {
+			ss.lock = lock
 		}
 	}
 
-	firlog.Debug("new session created", "sessionID", sm.sessionID, "file", sm.sessionFile)
-	return sm.sessionFile
+	firlog.Debug("new session created", "sessionID", ss.sessionID, "file", ss.sessionFile)
+	return ss.sessionFile
 }
 
-func (sm *SessionManager) buildIndex() {
-	sm.byID = make(map[string]*SessionEntry)
-	sm.labelsById = make(map[string]string)
-	sm.leafID = ""
+func (ss *SessionStore) buildIndex() {
+	ss.byID = make(map[string]*SessionEntry)
+	ss.labelsById = make(map[string]string)
+	ss.leafID = ""
 
-	for _, entry := range sm.entries {
-		sm.byID[entry.ID] = entry
-		sm.leafID = entry.ID
+	for _, entry := range ss.entries {
+		ss.byID[entry.ID] = entry
+		ss.leafID = entry.ID
 
 		if entry.Type == "label" {
 			if entry.Label != "" {
-				sm.labelsById[entry.TargetID] = entry.Label
+				ss.labelsById[entry.TargetID] = entry.Label
 			} else {
-				delete(sm.labelsById, entry.TargetID)
+				delete(ss.labelsById, entry.TargetID)
 			}
 		}
 	}
 }
 
-func (sm *SessionManager) generateID() string {
+func (ss *SessionStore) generateID() string {
 	for i := 0; i < 100; i++ {
 		id := uuid.New().String()[:12]
-		if _, ok := sm.byID[id]; !ok {
+		if _, ok := ss.byID[id]; !ok {
 			return id
 		}
 	}
@@ -377,18 +377,18 @@ func (sm *SessionManager) generateID() string {
 	return uuid.New().String()[:12]
 }
 
-func (sm *SessionManager) rewriteFile() {
-	if !sm.persist || sm.sessionFile == "" {
+func (ss *SessionStore) rewriteFile() {
+	if !ss.persist || ss.sessionFile == "" {
 		return
 	}
 	var lines []string
-	data, err := json.Marshal(sm.header)
+	data, err := json.Marshal(ss.header)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "session: marshal header: %v\n", err)
 		return
 	}
 	lines = append(lines, string(data))
-	for _, e := range sm.entries {
+	for _, e := range ss.entries {
 		data, err := json.Marshal(e)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "session: marshal entry %s: %v\n", e.ID, err)
@@ -396,33 +396,33 @@ func (sm *SessionManager) rewriteFile() {
 		}
 		lines = append(lines, string(data))
 	}
-	if err := os.WriteFile(sm.sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "session: write %s: %v\n", sm.sessionFile, err)
+	if err := os.WriteFile(ss.sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write %s: %v\n", ss.sessionFile, err)
 	}
-	sm.updateSidecar()
+	ss.updateSidecar()
 }
 
 // ForceFlush writes the session to disk regardless of whether an assistant
 // message exists. Used before /reexec to ensure metadata (e.g. session name)
 // survives across process replacement.
-func (sm *SessionManager) ForceFlush() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if !sm.persist || sm.sessionFile == "" || len(sm.entries) == 0 {
+func (ss *SessionStore) ForceFlush() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if !ss.persist || ss.sessionFile == "" || len(ss.entries) == 0 {
 		return
 	}
-	sm.rewriteFile()
-	sm.flushed = true
+	ss.rewriteFile()
+	ss.flushed = true
 }
 
-func (sm *SessionManager) persistEntry(entry *SessionEntry) {
-	if !sm.persist || sm.sessionFile == "" {
+func (ss *SessionStore) persistEntry(entry *SessionEntry) {
+	if !ss.persist || ss.sessionFile == "" {
 		return
 	}
 
 	// Don't write until we have an assistant message
 	hasAssistant := false
-	for _, e := range sm.entries {
+	for _, e := range ss.entries {
 		if e.Type == "message" && len(e.RawMessage) > 0 {
 			var probe struct {
 				Role string `json:"role"`
@@ -435,17 +435,17 @@ func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 	}
 
 	if !hasAssistant {
-		sm.flushed = false
+		ss.flushed = false
 		return
 	}
 
-	if !sm.flushed {
-		sm.rewriteFile()
-		sm.flushed = true
+	if !ss.flushed {
+		ss.rewriteFile()
+		ss.flushed = true
 	} else {
-		f, err := os.OpenFile(sm.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		f, err := os.OpenFile(ss.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "session: open %s: %v\n", sm.sessionFile, err)
+			fmt.Fprintf(os.Stderr, "session: open %s: %v\n", ss.sessionFile, err)
 			return
 		}
 		defer f.Close()
@@ -460,7 +460,7 @@ func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 		if _, err := f.WriteString("\n"); err != nil {
 			fmt.Fprintf(os.Stderr, "session: write newline: %v\n", err)
 		}
-		sm.updateSidecar()
+		ss.updateSidecar()
 	}
 }
 
@@ -468,18 +468,18 @@ func (sm *SessionManager) persistEntry(entry *SessionEntry) {
 // session file. Called after every disk write so listing never needs a full
 // parse on warm runs. Errors are silently ignored — listing must never fail
 // because of a sidecar write failure.
-func (sm *SessionManager) updateSidecar() {
-	if !sm.persist || sm.sessionFile == "" || sm.header == nil {
+func (ss *SessionStore) updateSidecar() {
+	if !ss.persist || ss.sessionFile == "" || ss.header == nil {
 		return
 	}
-	stat, err := os.Stat(sm.sessionFile)
+	stat, err := os.Stat(ss.sessionFile)
 	if err != nil {
 		return
 	}
 	var messageCount int
 	var firstMessage string
 	var name string
-	for _, e := range sm.entries {
+	for _, e := range ss.entries {
 		if e.Type == "session_info" && e.Name != "" {
 			name = e.Name
 		}
@@ -500,91 +500,91 @@ func (sm *SessionManager) updateSidecar() {
 	if firstMessage == "" {
 		firstMessage = "(no messages)"
 	}
-	created, _ := time.Parse(time.RFC3339Nano, sm.header.Timestamp)
-	writeSidecar(sm.sessionFile, &MetaSidecar{
+	created, _ := time.Parse(time.RFC3339Nano, ss.header.Timestamp)
+	writeSidecar(ss.sessionFile, &MetaSidecar{
 		Name:              name,
 		FirstMessage:      firstMessage,
-		Cwd:               sm.header.Cwd,
-		ID:                sm.header.ID,
-		ParentSessionPath: sm.header.ParentSession,
+		Cwd:               ss.header.Cwd,
+		ID:                ss.header.ID,
+		ParentSessionPath: ss.header.ParentSession,
 		Created:           created,
 		MessageCount:      messageCount,
 		ModTime:           stat.ModTime(),
 	})
 }
 
-func (sm *SessionManager) appendEntry(entry *SessionEntry) string {
-	sm.entries = append(sm.entries, entry)
-	sm.byID[entry.ID] = entry
-	sm.leafID = entry.ID
-	sm.persistEntry(entry)
+func (ss *SessionStore) appendEntry(entry *SessionEntry) string {
+	ss.entries = append(ss.entries, entry)
+	ss.byID[entry.ID] = entry
+	ss.leafID = entry.ID
+	ss.persistEntry(entry)
 	return entry.ID
 }
 
 // --- Accessors ---
 // All read accessors hold RLock to prevent data races with Append* methods.
 
-func (sm *SessionManager) GetCwd() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.cwd
+func (ss *SessionStore) GetCwd() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.cwd
 }
-func (sm *SessionManager) GetSessionDir() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.sessionDir
+func (ss *SessionStore) GetSessionDir() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.sessionDir
 }
 
 // Close releases the session lock. Safe to call multiple times.
-func (sm *SessionManager) Close() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if sm.lock != nil {
-		sm.lock.Close()
-		sm.lock = nil
+func (ss *SessionStore) Close() {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.lock != nil {
+		ss.lock.Close()
+		ss.lock = nil
 	}
 }
 
-func (sm *SessionManager) GetSessionID() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.sessionID
+func (ss *SessionStore) GetSessionID() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.sessionID
 }
-func (sm *SessionManager) GetSessionFile() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.sessionFile
+func (ss *SessionStore) GetSessionFile() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.sessionFile
 }
-func (sm *SessionManager) IsPersisted() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.persist
+func (ss *SessionStore) IsPersisted() bool {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.persist
 }
-func (sm *SessionManager) GetLeafID() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.leafID
-}
-
-func (sm *SessionManager) GetEntry(id string) *SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.byID[id]
+func (ss *SessionStore) GetLeafID() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.leafID
 }
 
-func (sm *SessionManager) GetEntries() []*SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	result := make([]*SessionEntry, len(sm.entries))
-	copy(result, sm.entries)
+func (ss *SessionStore) GetEntry(id string) *SessionEntry {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.byID[id]
+}
+
+func (ss *SessionStore) GetEntries() []*SessionEntry {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	result := make([]*SessionEntry, len(ss.entries))
+	copy(result, ss.entries)
 	return result
 }
 
-func (sm *SessionManager) GetSessionName() string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	for i := len(sm.entries) - 1; i >= 0; i-- {
-		e := sm.entries[i]
+func (ss *SessionStore) GetSessionName() string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	for i := len(ss.entries) - 1; i >= 0; i-- {
+		e := ss.entries[i]
 		if e.Type == "session_info" && e.Name != "" {
 			return e.Name
 		}
@@ -592,18 +592,18 @@ func (sm *SessionManager) GetSessionName() string {
 	return ""
 }
 
-func (sm *SessionManager) GetTree() []*SessionTreeNode {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+func (ss *SessionStore) GetTree() []*SessionTreeNode {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
 	nodeMap := make(map[string]*SessionTreeNode)
 	var roots []*SessionTreeNode
 
-	for _, e := range sm.entries {
-		label := sm.labelsById[e.ID]
+	for _, e := range ss.entries {
+		label := ss.labelsById[e.ID]
 		nodeMap[e.ID] = &SessionTreeNode{Entry: e, Label: label}
 	}
 
-	for _, e := range sm.entries {
+	for _, e := range ss.entries {
 		node := nodeMap[e.ID]
 		if e.ParentID == "" || e.ParentID == e.ID {
 			roots = append(roots, node)
@@ -620,74 +620,74 @@ func (sm *SessionManager) GetTree() []*SessionTreeNode {
 // --- Append methods ---
 
 // AppendAIMessage appends an agent message. Returns entry ID.
-func (sm *SessionManager) AppendAIMessage(msg ai.Message) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendAIMessage(msg ai.Message) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	rawMsg, _ := json.Marshal(msg)
 	entry := &SessionEntry{
 		Type:       "message",
-		ID:         sm.generateID(),
-		ParentID:   sm.leafID,
+		ID:         ss.generateID(),
+		ParentID:   ss.leafID,
 		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
 		RawMessage: rawMsg,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
 // AppendAgentMessage appends an agent message (with custom support). Returns entry ID.
-func (sm *SessionManager) AppendAgentMessage(msg agent.AgentMessage) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendAgentMessage(msg agent.AgentMessage) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	rawMsg, _ := json.Marshal(msg)
 	entry := &SessionEntry{
 		Type:       "message",
-		ID:         sm.generateID(),
-		ParentID:   sm.leafID,
+		ID:         ss.generateID(),
+		ParentID:   ss.leafID,
 		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
 		RawMessage: rawMsg,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendThinkingLevelChange(thinkingLevel string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendThinkingLevelChange(thinkingLevel string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:          "thinking_level_change",
-		ID:            sm.generateID(),
-		ParentID:      sm.leafID,
+		ID:            ss.generateID(),
+		ParentID:      ss.leafID,
 		Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
 		ThinkingLevel: thinkingLevel,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendModelChange(provider, modelID string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendModelChange(provider, modelID string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:      "model_change",
-		ID:        sm.generateID(),
-		ParentID:  sm.leafID,
+		ID:        ss.generateID(),
+		ParentID:  ss.leafID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Provider:  provider,
 		ModelID:   modelID,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int, details json.RawMessage, fromHook bool) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int, details json.RawMessage, fromHook bool) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:             "compaction",
-		ID:               sm.generateID(),
-		ParentID:         sm.leafID,
+		ID:               ss.generateID(),
+		ParentID:         ss.leafID,
 		Timestamp:        time.Now().UTC().Format(time.RFC3339Nano),
 		Summary:          summary,
 		FirstKeptEntryID: firstKeptEntryID,
@@ -695,56 +695,56 @@ func (sm *SessionManager) AppendCompaction(summary, firstKeptEntryID string, tok
 		Details:          details,
 		FromHook:         fromHook,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendCustomEntry(customType string, data json.RawMessage) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendCustomEntry(customType string, data json.RawMessage) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:       "custom",
-		ID:         sm.generateID(),
-		ParentID:   sm.leafID,
+		ID:         ss.generateID(),
+		ParentID:   ss.leafID,
 		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
 		CustomType: customType,
 		Data:       data,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendSessionInfo(name string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendSessionInfo(name string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:      "session_info",
-		ID:        sm.generateID(),
-		ParentID:  sm.leafID,
+		ID:        ss.generateID(),
+		ParentID:  ss.leafID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Name:      strings.TrimSpace(name),
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
-func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendLabelChange(targetID, label string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:      "label",
-		ID:        sm.generateID(),
-		ParentID:  sm.leafID,
+		ID:        ss.generateID(),
+		ParentID:  ss.leafID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		TargetID:  targetID,
 		Label:     label,
 	}
-	sm.appendEntry(entry)
+	ss.appendEntry(entry)
 
 	if label != "" {
-		sm.labelsById[targetID] = label
+		ss.labelsById[targetID] = label
 	} else {
-		delete(sm.labelsById, targetID)
+		delete(ss.labelsById, targetID)
 	}
 	return entry.ID
 }
@@ -752,21 +752,21 @@ func (sm *SessionManager) AppendLabelChange(targetID, label string) string {
 // AppendPlanUpdate records the current plan state. These entries are never
 // included in the LLM context but are used to restore the plan on resume.
 // An empty/nil entries slice records a cleared plan.
-func (sm *SessionManager) AppendPlanUpdate(title string, entries []agent.PlanEntry, metadata map[string]string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendPlanUpdate(title string, entries []agent.PlanEntry, metadata map[string]string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	data, _ := json.Marshal(entries)
 	entry := &SessionEntry{
 		Type:         "plan_update",
-		ID:           sm.generateID(),
-		ParentID:     sm.leafID,
+		ID:           ss.generateID(),
+		ParentID:     ss.leafID,
 		Timestamp:    time.Now().UTC().Format(time.RFC3339Nano),
 		PlanEntries:  data,
 		PlanTitle:    title,
 		PlanMetadata: metadata,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
 // AppendCommandEntry records a user-initiated command (slash command or bash
@@ -775,37 +775,37 @@ func (sm *SessionManager) AppendPlanUpdate(title string, entries []agent.PlanEnt
 //
 // command is the command name without the leading slash (e.g. "model", "compact").
 // args is any additional argument string relevant for metering (may be empty).
-func (sm *SessionManager) AppendCommandEntry(command, args string) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) AppendCommandEntry(command, args string) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
 	entry := &SessionEntry{
 		Type:      "command",
-		ID:        sm.generateID(),
-		ParentID:  sm.leafID,
+		ID:        ss.generateID(),
+		ParentID:  ss.leafID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Command:   command,
 		Args:      args,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
 // --- Branching ---
 
-func (sm *SessionManager) Branch(branchFromID string) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.leafID = branchFromID
+func (ss *SessionStore) Branch(branchFromID string) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.leafID = branchFromID
 }
 
-func (sm *SessionManager) BranchWithSummary(branchFromID string, summary string, details json.RawMessage, fromHook bool) string {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) BranchWithSummary(branchFromID string, summary string, details json.RawMessage, fromHook bool) string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
-	sm.leafID = branchFromID
+	ss.leafID = branchFromID
 	entry := &SessionEntry{
 		Type:      "branch_summary",
-		ID:        sm.generateID(),
+		ID:        ss.generateID(),
 		ParentID:  branchFromID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		FromID:    branchFromID,
@@ -813,17 +813,17 @@ func (sm *SessionManager) BranchWithSummary(branchFromID string, summary string,
 		Details:   details,
 		FromHook:  fromHook,
 	}
-	return sm.appendEntry(entry)
+	return ss.appendEntry(entry)
 }
 
 // CreateBranchedSession creates a new session file by copying the branch from root to leafId.
 // Returns the new session file path (empty if in-memory) and any error.
-func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 
-	previousSessionFile := sm.sessionFile
-	path := sm.getBranchUnlocked(leafId)
+	previousSessionFile := ss.sessionFile
+	path := ss.getBranchUnlocked(leafId)
 	if len(path) == 0 {
 		return "", fmt.Errorf("entry %s not found", leafId)
 	}
@@ -844,9 +844,9 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 		Version:   CurrentSessionVersion,
 		ID:        newSessionID,
 		Timestamp: ts,
-		Cwd:       sm.cwd,
+		Cwd:       ss.cwd,
 	}
-	if sm.persist {
+	if ss.persist {
 		header.ParentSession = previousSessionFile
 	}
 
@@ -860,7 +860,7 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 		label    string
 	}
 	var labelsToWrite []labelPair
-	for targetID, label := range sm.labelsById {
+	for targetID, label := range ss.labelsById {
 		if pathEntryIDs[targetID] {
 			labelsToWrite = append(labelsToWrite, labelPair{targetID, label})
 		}
@@ -874,7 +874,7 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 	parentID := lastEntryID
 	var labelEntries []*SessionEntry
 	for _, lp := range labelsToWrite {
-		id := sm.generateIDExcluding(pathEntryIDs)
+		id := ss.generateIDExcluding(pathEntryIDs)
 		labelEntry := &SessionEntry{
 			Type:      "label",
 			ID:        id,
@@ -888,9 +888,9 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 		parentID = id
 	}
 
-	if sm.persist && sm.sessionDir != "" {
+	if ss.persist && ss.sessionDir != "" {
 		fileTs := strings.NewReplacer(":", "-", ".", "-").Replace(ts)
-		newSessionFile := filepath.Join(sm.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, newSessionID))
+		newSessionFile := filepath.Join(ss.sessionDir, fmt.Sprintf("%s_%s.jsonl", fileTs, newSessionID))
 
 		// Write header + entries + labels
 		var lines []string
@@ -908,46 +908,46 @@ func (sm *SessionManager) CreateBranchedSession(leafId string) (string, error) {
 			log.Printf("session: failed to write branched session file %s: %v", newSessionFile, err)
 		}
 
-		sm.header = header
-		sm.sessionID = newSessionID
-		sm.sessionFile = newSessionFile
-		sm.entries = append(pathWithoutLabels, labelEntries...)
-		sm.flushed = true
-		sm.buildIndex()
+		ss.header = header
+		ss.sessionID = newSessionID
+		ss.sessionFile = newSessionFile
+		ss.entries = append(pathWithoutLabels, labelEntries...)
+		ss.flushed = true
+		ss.buildIndex()
 		return newSessionFile, nil
 	}
 
 	// In-memory mode
-	sm.header = header
-	sm.sessionID = newSessionID
-	sm.entries = append(pathWithoutLabels, labelEntries...)
-	sm.buildIndex()
+	ss.header = header
+	ss.sessionID = newSessionID
+	ss.entries = append(pathWithoutLabels, labelEntries...)
+	ss.buildIndex()
 	return "", nil
 }
 
 // getBranchUnlocked is the non-locking version of GetBranch for internal use.
-func (sm *SessionManager) getBranchUnlocked(fromID string) []*SessionEntry {
+func (ss *SessionStore) getBranchUnlocked(fromID string) []*SessionEntry {
 	startID := fromID
 	if startID == "" {
-		startID = sm.leafID
+		startID = ss.leafID
 	}
 	var path []*SessionEntry
-	current := sm.byID[startID]
+	current := ss.byID[startID]
 	for current != nil {
 		path = append([]*SessionEntry{current}, path...)
 		if current.ParentID == "" {
 			break
 		}
-		current = sm.byID[current.ParentID]
+		current = ss.byID[current.ParentID]
 	}
 	return path
 }
 
 // generateIDExcluding generates a unique ID not in the exclude set.
-func (sm *SessionManager) generateIDExcluding(exclude map[string]bool) string {
+func (ss *SessionStore) generateIDExcluding(exclude map[string]bool) string {
 	for i := 0; i < 100; i++ {
 		id := uuid.New().String()[:12]
-		if _, ok := sm.byID[id]; !ok && !exclude[id] {
+		if _, ok := ss.byID[id]; !ok && !exclude[id] {
 			return id
 		}
 	}
@@ -956,16 +956,16 @@ func (sm *SessionManager) generateIDExcluding(exclude map[string]bool) string {
 
 // --- Context building ---
 
-func (sm *SessionManager) GetBranch(fromID string) []*SessionEntry {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.getBranchUnlocked(fromID)
+func (ss *SessionStore) GetBranch(fromID string) []*SessionEntry {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.getBranchUnlocked(fromID)
 }
 
-func (sm *SessionManager) BuildSessionContext() SessionContext {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return BuildSessionContextFromEntries(sm.entries, sm.leafID, sm.byID)
+func (ss *SessionStore) BuildSessionContext() SessionContext {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return BuildSessionContextFromEntries(ss.entries, ss.leafID, ss.byID)
 }
 
 // BuildSessionContextFromEntries builds session context from entries.
@@ -1418,7 +1418,7 @@ func SessionDirForCwd(agentDir, cwd string) string {
 
 // ForkFrom creates a new session from a source session file, copying all entries.
 // The new session is created in the targetCwd's session directory.
-func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error) {
+func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionStore, error) {
 	header, entries := loadEntriesFromFile(sourcePath)
 	if header == nil {
 		return nil, fmt.Errorf("cannot fork: source session file is empty or invalid: %s", sourcePath)
@@ -1457,8 +1457,8 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionManager, error)
 		return nil, fmt.Errorf("cannot write forked session: %w", err)
 	}
 
-	sm, _ := OpenSessionManager(newSessionFile, sessionDir)
-	return sm, nil
+	ss, _ := OpenSessionStore(newSessionFile, sessionDir)
+	return ss, nil
 }
 
 // SessionsDir returns the parent directory that contains all per-project session directories.

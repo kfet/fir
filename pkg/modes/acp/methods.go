@@ -461,7 +461,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 // to the ACP client as session update notifications. This allows the client
 // to display the full conversation history from previous turns.
 func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
-	ctx := entry.session.SessionManager.BuildSessionContext()
+	ctx := entry.session.SessionStore.BuildSessionContext()
 	sid := acpsdk.SessionId(sessionID)
 
 	// Track tool calls from assistant messages so we can match them with results.

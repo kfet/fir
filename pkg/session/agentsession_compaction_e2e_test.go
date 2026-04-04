@@ -25,7 +25,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -92,7 +92,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -168,7 +168,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -229,7 +229,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -274,7 +274,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -342,7 +342,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -411,7 +411,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -469,7 +469,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),
@@ -514,7 +514,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	enabled := false
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
@@ -572,7 +572,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
@@ -632,7 +632,7 @@ func (r *rebuildingMockCompactionRunner) RunCompaction(_ context.Context, sessio
 	// BuildSessionContext includes the user message in the rebuilt context —
 	// this is what the real compaction runner does (recent messages are kept).
 	firstKeptEntryID := ""
-	for _, e := range session.SessionManager.GetBranch("") {
+	for _, e := range session.SessionStore.GetBranch("") {
 		if e.Type == "message" {
 			var probe struct {
 				Role string `json:"role"`
@@ -642,14 +642,14 @@ func (r *rebuildingMockCompactionRunner) RunCompaction(_ context.Context, sessio
 			}
 		}
 	}
-	session.SessionManager.AppendCompaction(
+	session.SessionStore.AppendCompaction(
 		r.runResult.Summary,
 		firstKeptEntryID,
 		r.runResult.TokensBefore,
 		nil,
 		false,
 	)
-	sessionCtx := session.SessionManager.BuildSessionContext()
+	sessionCtx := session.SessionStore.BuildSessionContext()
 	session.Agent.ReplaceMessages(sessionCtx.Messages)
 	return &CompactionResultInfo{
 		Summary:          r.runResult.Summary,
@@ -666,7 +666,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	model := &ai.Model{
@@ -744,7 +744,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), ""),

@@ -90,7 +90,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -164,7 +164,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 
 	agentSess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    modelRegistry,
@@ -324,7 +324,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -434,7 +434,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 
 	agentSess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    modelRegistry,
@@ -541,7 +541,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -610,7 +610,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 
 	agentSess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    modelRegistry,
@@ -756,13 +756,13 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 		ModelRegistry:   models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
 	}
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	_ = rl.Reload()
 
 	agentSess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    models.NewModelRegistry(auth.NewInMemoryAuthStorage(nil), ""),
@@ -807,7 +807,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 	registerFakeProvider(ai.DefaultRegistry, apiName, summaryText)
 	defer ai.DefaultRegistry.UnregisterApiProviders("test-compaction-e2e")
 
-	sm := store.InMemorySessionManager(cwd)
+	sm := store.InMemorySessionStore(cwd)
 	settingsManager := config.NewInMemorySettingsManager(config.Settings{
 		Compaction: &config.CompactionSettings{
 			ReserveTokens:    ptrInt(5000),
@@ -882,7 +882,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 
 	agentSess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sm,
+		SessionStore:     sm,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		ModelRegistry:    modelRegistry,

@@ -31,8 +31,8 @@ type SetupOptions struct {
 	ModelRegistry *models.ModelRegistry
 	// SettingsManager. Default: created from Cwd + AgentDir.
 	SettingsManager *config.SettingsManager
-	// SessionManager. Default: NewSessionManager(cwd, defaultSessionDir).
-	SessionManager *store.SessionManager
+	// SessionStore. Default: NewSessionStore(cwd, defaultSessionDir).
+	SessionStore *store.SessionStore
 
 	// Model to use. Default: from settings, else first available.
 	Model *ai.Model
@@ -115,9 +115,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		settingsManager = config.NewSettingsManager(cwd, agentDir)
 	}
 
-	sessionManager := opts.SessionManager
-	if sessionManager == nil {
-		sessionManager = store.NewSessionManager(cwd, store.DefaultSessionDir(agentDir, cwd))
+	sessionStore := opts.SessionStore
+	if sessionStore == nil {
+		sessionStore = store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd))
 	}
 
 	// --- Resource loader ---
@@ -171,7 +171,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		ModelRegistry:    modelRegistry,
 		Model:            opts.Model,
 		ThinkingLevel:    opts.ThinkingLevel,
-		SessionManager:   sessionManager,
+		SessionStore:     sessionStore,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   rl,
 		Tools:            toolList,

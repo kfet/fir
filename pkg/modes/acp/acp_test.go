@@ -669,12 +669,12 @@ func newMinimalSession(t *testing.T) *session.AgentSession {
 	t.Helper()
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
-	sm := store.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := store.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
 	a := agent.NewAgent(agent.AgentOptions{})
 	return session.NewAgentSession(session.AgentSessionOptions{
 		Agent:          a,
-		SessionManager: sm,
+		SessionStore:   sm,
 		ResourceLoader: rl,
 		Cwd:            cwd,
 	})
@@ -1136,8 +1136,8 @@ func TestReplaySessionHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a SessionManager and populate it with messages.
-	sm := store.NewSessionManager(tmpDir, sessionDir)
+	// Create a SessionStore and populate it with messages.
+	sm := store.NewSessionStore(tmpDir, sessionDir)
 
 	// User message
 	sm.AppendAIMessage(ai.NewUserMsg("Hello, how are you?", time.Now().UnixMilli()))
@@ -1165,9 +1165,9 @@ func TestReplaySessionHistory(t *testing.T) {
 		Content: []ai.AssistantContent{ai.NewTextContent("The command executed successfully.")},
 	}))
 
-	// Create a mock agent session with the SessionManager.
+	// Create a mock agent session with the SessionStore.
 	entry := &firSession{
-		session:   &session.AgentSession{SessionManager: sm},
+		session:   &session.AgentSession{SessionStore: sm},
 		termState: newTerminalState(),
 	}
 

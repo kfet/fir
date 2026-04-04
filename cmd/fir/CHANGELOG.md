@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Ctrl+N (new session) now cancels any in-progress LLM stream before starting a new session.
+- `AgentSession.Close()` now aborts any in-flight LLM stream before tearing down, preventing leaked goroutines in ACP session cleanup and shutdown.
+
 ### Changed
 
+- Renamed `SessionManager` to `SessionStore` throughout the codebase to better reflect its role as a persistence/storage layer.
 - `plan-nudger` extension: softened mild nudge to say "Use the plan tool" and encourage continuing work, instead of forbidding text replies. Added reminder to inform the user of work done on agent exit.
 
 ## [0.27.0] - 2026-03-31

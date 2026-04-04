@@ -154,7 +154,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		AuthStorage:     authStorage,
 		ModelRegistry:   modelRegistry,
 		SettingsManager: settingsManager,
-		SessionManager:  createSessionManager(args, cwd, agentDir),
+		SessionStore:    createSessionStore(args, cwd, agentDir),
 		Model:           model,
 		Tools:           resolveTools(args, cwd),
 		ResourceLoader:  rl,
@@ -638,18 +638,18 @@ func runExport(args *Args) error {
 	return nil
 }
 
-// createSessionManager creates the appropriate session manager based on CLI args.
-func createSessionManager(args *Args, cwd, agentDir string) *store.SessionManager {
+// createSessionStore creates the appropriate session manager based on CLI args.
+func createSessionStore(args *Args, cwd, agentDir string) *store.SessionStore {
 	sessionDir := args.SessionDir
 	if sessionDir == "" {
 		sessionDir = store.DefaultSessionDir(agentDir, cwd)
 	}
 
 	if args.NoSession {
-		return store.InMemorySessionManager()
+		return store.InMemorySessionStore()
 	}
 	if args.Session != "" {
-		sm, forked := store.OpenSessionManager(filepath.Join(sessionDir, args.Session))
+		sm, forked := store.OpenSessionStore(filepath.Join(sessionDir, args.Session))
 		if forked {
 			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
 		}
@@ -662,7 +662,7 @@ func createSessionManager(args *Args, cwd, agentDir string) *store.SessionManage
 		}
 		return sm
 	}
-	return store.NewSessionManager(cwd, sessionDir)
+	return store.NewSessionStore(cwd, sessionDir)
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.

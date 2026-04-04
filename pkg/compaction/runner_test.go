@@ -119,8 +119,8 @@ func TestDefaultRunner_GetStats_WithMessages(t *testing.T) {
 
 	// Add a user → assistant exchange with real usage data so that
 	// EstimateContextTokens uses the production (usage-based) path.
-	session.SessionManager.AppendAIMessage(ai.NewUserMsg("Hello, world!", 1000))
-	session.SessionManager.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	session.SessionStore.AppendAIMessage(ai.NewUserMsg("Hello, world!", 1000))
+	session.SessionStore.AppendAIMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content:    []ai.AssistantContent{{Text: &ai.TextContent{Text: "Hi there!"}}},
 		StopReason: ai.StopReasonStop,
 		Usage:      ai.Usage{Input: 10, Output: 3},
@@ -173,11 +173,11 @@ func makeTestSession(t *testing.T, model *ai.Model) *session.AgentSession {
 			Model: model,
 		},
 	})
-	smgr := store.NewSessionManager(tmpDir, sessionDir)
+	smgr := store.NewSessionStore(tmpDir, sessionDir)
 
 	return session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           ag,
-		SessionManager:  smgr,
+		SessionStore:    smgr,
 		SettingsManager: config.NewInMemorySettingsManager(config.Settings{}),
 		ResourceLoader:  noopResourceLoader{},
 		Cwd:             tmpDir,

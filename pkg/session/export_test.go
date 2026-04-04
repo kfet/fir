@@ -32,8 +32,8 @@ func TestExportToHTML_TempFile(t *testing.T) {
 	defer agentSess.Close()
 
 	// Add a couple of messages so there's content to export.
-	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
-	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+	agentSess.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("hello", 0)))
+	agentSess.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 		Content: []ai.AssistantContent{ai.NewTextContent("world")},
 	})))
 
@@ -68,7 +68,7 @@ func TestExportToHTML_ExplicitPath(t *testing.T) {
 	agentSess, _ := newTestAgentSession(t)
 	defer agentSess.Close()
 
-	agentSess.SessionManager.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("question", 0)))
+	agentSess.SessionStore.AppendAgentMessage(agent.NewAgentMessage(ai.NewUserMsg("question", 0)))
 
 	out := filepath.Join(t.TempDir(), "export.html")
 	gotPath, err := agentSess.ExportToHTML(out)

@@ -11,7 +11,7 @@ import (
 )
 
 // FooterDataProvider provides git branch and extension statuses for the footer.
-// Token stats and model info are available via SessionManager and Model.
+// Token stats and model info are available via SessionStore and Model.
 type FooterDataProvider struct {
 	mu                     sync.RWMutex
 	extensionStatuses      map[string]string

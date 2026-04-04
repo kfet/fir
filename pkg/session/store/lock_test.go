@@ -70,21 +70,21 @@ func TestSetSessionFile_ForksLockedSession(t *testing.T) {
 	defer lock.Close()
 
 	// setSessionFile should fork when the file is locked.
-	sm := &SessionManager{
+	ss := &SessionStore{
 		cwd:        "/tmp",
 		sessionDir: sessionDir,
 		persist:    true,
 		byID:       make(map[string]*SessionEntry),
 		labelsById: make(map[string]string),
 	}
-	forked := sm.setSessionFile(sessionPath)
+	forked := ss.setSessionFile(sessionPath)
 	if !forked {
 		t.Fatal("expected setSessionFile to fork locked session")
 	}
-	if sm.GetSessionFile() == sessionPath {
+	if ss.GetSessionFile() == sessionPath {
 		t.Error("forked session file should differ from original")
 	}
-	if _, err := os.Stat(sm.GetSessionFile()); err != nil {
+	if _, err := os.Stat(ss.GetSessionFile()); err != nil {
 		t.Errorf("forked file should exist: %v", err)
 	}
 }
@@ -97,14 +97,14 @@ func TestSetSessionFile_NoForkWhenUnlocked(t *testing.T) {
 	sessionPath := filepath.Join(sessionDir, "2026-01-01T00-00-00Z_test.jsonl")
 	os.WriteFile(sessionPath, []byte(`{"type":"session","version":1,"id":"test","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`+"\n"), 0644)
 
-	sm := &SessionManager{
+	ss := &SessionStore{
 		cwd:        "/tmp",
 		sessionDir: sessionDir,
 		persist:    true,
 		byID:       make(map[string]*SessionEntry),
 		labelsById: make(map[string]string),
 	}
-	forked := sm.setSessionFile(sessionPath)
+	forked := ss.setSessionFile(sessionPath)
 	if forked {
 		t.Fatal("expected no fork for unlocked session")
 	}

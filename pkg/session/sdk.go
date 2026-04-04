@@ -46,8 +46,8 @@ type CreateAgentSessionOptions struct {
 	// ResourceLoader. When nil, DefaultResourceLoader is created and Reload'd.
 	ResourceLoader resources.ResourceLoader
 
-	// SessionManager. Default: SessionManager.Create(cwd).
-	SessionManager *store.SessionManager
+	// SessionStore. Default: SessionStore.Create(cwd).
+	SessionStore *store.SessionStore
 
 	// SettingsManager. Default: SettingsManager.Create(cwd, agentDir).
 	SettingsManager *config.SettingsManager
@@ -115,9 +115,9 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	}
 
 	// Session
-	sessionManager := opts.SessionManager
-	if sessionManager == nil {
-		sessionManager = store.NewSessionManager(cwd, store.DefaultSessionDir(agentDir, cwd))
+	sessionStore := opts.SessionStore
+	if sessionStore == nil {
+		sessionStore = store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd))
 	}
 
 	// Resources
@@ -135,7 +135,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	}
 
 	// Build session context to check for existing data
-	existingSession := sessionManager.BuildSessionContext()
+	existingSession := sessionStore.BuildSessionContext()
 	hasExistingSession := len(existingSession.Messages) > 0
 
 	// Resolve model
@@ -212,7 +212,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		ConvertToLLM: func(messages []agent.AgentMessage) ([]ai.Message, error) {
 			return store.ConvertToLLM(messages)
 		},
-		SessionID:    sessionManager.GetSessionID(),
+		SessionID:    sessionStore.GetSessionID(),
 		SteeringMode: settingsManager.GetSteeringMode(),
 		FollowUpMode: settingsManager.GetFollowUpMode(),
 		Transport:    ai.Transport(settingsManager.GetTransport()),
@@ -266,15 +266,15 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		a.ReplaceMessages(existingSession.Messages)
 	} else {
 		if model != nil {
-			sessionManager.AppendModelChange(model.Provider, model.ID)
+			sessionStore.AppendModelChange(model.Provider, model.ID)
 		}
-		sessionManager.AppendThinkingLevelChange(thinkingLevel)
+		sessionStore.AppendThinkingLevelChange(thinkingLevel)
 	}
 
 	// Create AgentSession
 	session := NewAgentSession(AgentSessionOptions{
 		Agent:            a,
-		SessionManager:   sessionManager,
+		SessionStore:     sessionStore,
 		SettingsManager:  settingsManager,
 		ResourceLoader:   resourceLoader,
 		ModelRegistry:    modelRegistry,

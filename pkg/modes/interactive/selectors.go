@@ -231,9 +231,9 @@ func serverToolsHas(names []string, name string) bool {
 func (m *InteractiveMode) showSessionSelector() {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
 		var cwd, sessionDir string
-		if m.session != nil && m.session.SessionManager != nil {
-			cwd = m.session.SessionManager.GetCwd()
-			sessionDir = m.session.SessionManager.GetSessionDir()
+		if m.session != nil && m.session.SessionStore != nil {
+			cwd = m.session.SessionStore.GetCwd()
+			sessionDir = m.session.SessionStore.GetSessionDir()
 		}
 		sessions, _ := store.ListSessions(cwd, sessionDir)
 
@@ -546,13 +546,13 @@ func (m *InteractiveMode) showTreeSelectorAt(initialSelectedID string) {
 		m.showWarning("No session available")
 		return
 	}
-	tree := m.session.SessionManager.GetTree()
+	tree := m.session.SessionStore.GetTree()
 	if len(tree) == 0 {
 		m.showStatus("No entries in session")
 		return
 	}
 
-	leafID := m.session.SessionManager.GetLeafID()
+	leafID := m.session.SessionStore.GetLeafID()
 
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
 		selector := components.NewTreeSelectorComponent(
@@ -570,7 +570,7 @@ func (m *InteractiveMode) showTreeSelectorAt(initialSelectedID string) {
 		)
 		selector.SetOnLabelEdit(func(entryID, label string) {
 			if m.session != nil {
-				m.session.SessionManager.AppendLabelChange(entryID, label)
+				m.session.SessionStore.AppendLabelChange(entryID, label)
 				m.ui.RequestRender(false)
 			}
 		})

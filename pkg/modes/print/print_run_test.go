@@ -26,7 +26,7 @@ func newPrintTestSession(t *testing.T) *session.AgentSession {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
-	sm := store.NewSessionManager(cwd, filepath.Join(agentDir, "sessions"))
+	sm := store.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
 	settingsManager := config.NewSettingsManager(cwd, agentDir)
 
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
@@ -49,7 +49,7 @@ func newPrintTestSession(t *testing.T) *session.AgentSession {
 
 	sess := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sm,
+		SessionStore:    sm,
 		SettingsManager: settingsManager,
 		ResourceLoader:  rl,
 		ModelRegistry:   modelRegistry,

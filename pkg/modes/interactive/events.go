@@ -472,7 +472,7 @@ func (m *InteractiveMode) getFooterData() components.FooterData {
 		data.MultipleProviders = m.footerDataProvider.GetAvailableProviderCount() > 1
 	}
 
-	data.SessionName = m.session.SessionManager.GetSessionName()
+	data.SessionName = m.session.SessionStore.GetSessionName()
 	data.QueuedMessages = m.session.Agent.FollowUpQueueLen()
 
 	if entries := m.session.PlanEntries(); len(entries) > 0 {
@@ -511,7 +511,7 @@ func (m *InteractiveMode) preloadReexecSidecar() {
 		return
 	}
 
-	sessionFile := m.session.SessionManager.GetSessionFile()
+	sessionFile := m.session.SessionStore.GetSessionFile()
 	if sessionFile == "" {
 		return
 	}

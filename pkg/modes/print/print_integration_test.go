@@ -67,7 +67,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := store.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionStore()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -78,7 +78,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sessionMgr,
+		SessionStore:    sessionMgr,
 		SettingsManager: settingsMgr,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -147,7 +147,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := store.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionStore()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -158,7 +158,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sessionMgr,
+		SessionStore:    sessionMgr,
 		SettingsManager: settingsMgr,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -218,7 +218,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := store.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionStore()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -229,7 +229,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sessionMgr,
+		SessionStore:    sessionMgr,
 		SettingsManager: settingsMgr,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,
@@ -297,7 +297,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 	})
 
 	tmpDir := t.TempDir()
-	sessionMgr := store.InMemorySessionManager()
+	sessionMgr := store.InMemorySessionStore()
 	settingsMgr := config.NewSettingsManager(tmpDir, tmpDir)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
 		Cwd:             tmpDir,
@@ -308,7 +308,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 
 	session := session.NewAgentSession(session.AgentSessionOptions{
 		Agent:           a,
-		SessionManager:  sessionMgr,
+		SessionStore:    sessionMgr,
 		SettingsManager: settingsMgr,
 		ResourceLoader:  rl,
 		Cwd:             tmpDir,

@@ -15,41 +15,41 @@ import (
 )
 
 // ============================================================================
-// createSessionManager
+// createSessionStore
 // ============================================================================
 
-func TestCreateSessionManager_Default(t *testing.T) {
+func TestCreateSessionStore_Default(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
 	args := &Args{}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("default session manager should be persisted")
 	}
 }
 
-func TestCreateSessionManager_NoSession(t *testing.T) {
+func TestCreateSessionStore_NoSession(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 
 	args := &Args{NoSession: true}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if sm.IsPersisted() {
 		t.Error("--no-session should create non-persisted session manager")
 	}
 }
 
-func TestCreateSessionManager_NamedSession(t *testing.T) {
+func TestCreateSessionStore_NamedSession(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 	sessionDir := filepath.Join(agentDir, "sessions")
 	os.MkdirAll(sessionDir, 0o755)
 
 	args := &Args{Session: "my-session.jsonl"}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("named session should be persisted")
@@ -60,13 +60,13 @@ func TestCreateSessionManager_NamedSession(t *testing.T) {
 	}
 }
 
-func TestCreateSessionManager_CustomSessionDir(t *testing.T) {
+func TestCreateSessionStore_CustomSessionDir(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 	customDir := t.TempDir()
 
 	args := &Args{SessionDir: customDir, Session: "test.jsonl"}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("custom session dir should still persist")
@@ -77,7 +77,7 @@ func TestCreateSessionManager_CustomSessionDir(t *testing.T) {
 	}
 }
 
-func TestCreateSessionManager_Continue(t *testing.T) {
+func TestCreateSessionStore_Continue(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 	sessionDir := filepath.Join(agentDir, "sessions")
@@ -88,20 +88,20 @@ func TestCreateSessionManager_Continue(t *testing.T) {
 	os.Chtimes(sessionFile, time.Now(), time.Now())
 
 	args := &Args{Continue: true, SessionDir: sessionDir}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("continue session should be persisted")
 	}
 }
 
-func TestCreateSessionManager_Continue_NoExisting(t *testing.T) {
+func TestCreateSessionStore_Continue_NoExisting(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()
 	sessionDir := filepath.Join(agentDir, "sessions-empty")
 
 	args := &Args{Continue: true, SessionDir: sessionDir}
-	sm := createSessionManager(args, cwd, agentDir)
+	sm := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("continue with no existing session should still create persisted session")

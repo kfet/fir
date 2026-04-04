@@ -234,7 +234,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 // ============================================================================
 
 func (m *InteractiveMode) handleCompactCommand(customInstructions string) {
-	entries := m.session.SessionManager.GetEntries()
+	entries := m.session.SessionStore.GetEntries()
 	messageCount := 0
 	for _, e := range entries {
 		if e.Type == "message" {
@@ -596,6 +596,10 @@ func (m *InteractiveMode) handleExternalEditor() {
 
 func (m *InteractiveMode) handleClearCommand(newName string) {
 	if m.session != nil {
+		// Cancel any in-progress LLM stream before starting a new session.
+		if m.session.IsStreaming() {
+			m.session.Agent.Abort()
+		}
 		_, err := m.session.NewSessionCmd()
 		if err != nil {
 			m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
@@ -768,7 +772,7 @@ func (m *InteractiveMode) handleNameCommand(text string) {
 	}
 	name := strings.TrimSpace(strings.TrimPrefix(text, "/name"))
 	if name == "" {
-		currentName := m.session.SessionManager.GetSessionName()
+		currentName := m.session.SessionStore.GetSessionName()
 		if currentName != "" {
 			t := itheme.GetTheme()
 			m.showMessage(t.Fg("dim", "Session name: "+currentName))
@@ -788,7 +792,7 @@ func (m *InteractiveMode) handleSessionCommand() {
 		return
 	}
 	stats := m.session.GetSessionStats()
-	sessionName := m.session.SessionManager.GetSessionName()
+	sessionName := m.session.SessionStore.GetSessionName()
 	t := itheme.GetTheme()
 
 	var lines []string
@@ -1188,8 +1192,8 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 		binary = abs
 	}
 
-	sessionFile := m.session.SessionManager.GetSessionFile()
-	sessionDir := m.session.SessionManager.GetSessionDir()
+	sessionFile := m.session.SessionStore.GetSessionFile()
+	sessionDir := m.session.SessionStore.GetSessionDir()
 	if sessionFile == "" {
 		m.showWarning("No persisted session to resume after reexec")
 		return
@@ -1197,7 +1201,7 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 
 	// Force-flush the session file so metadata (e.g. session name) that
 	// hasn't been written yet (no assistant message) survives the reexec.
-	m.session.SessionManager.ForceFlush()
+	m.session.SessionStore.ForceFlush()
 
 	sessionBase := filepath.Base(sessionFile)
 

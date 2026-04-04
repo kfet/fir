@@ -169,7 +169,7 @@ type AgentSessionHooks struct {
 
 type AgentSessionOptions struct {
 	Agent            *agent.Agent
-	SessionManager   *store.SessionManager
+	SessionStore     *store.SessionStore
 	SettingsManager  *config.SettingsManager
 	ResourceLoader   resources.ResourceLoader
 	ModelRegistry    *models.ModelRegistry
@@ -187,7 +187,7 @@ type AgentSessionOptions struct {
 // It wraps the Agent with session persistence, compaction, tool management, and event routing.
 type AgentSession struct {
 	Agent           *agent.Agent
-	SessionManager  *store.SessionManager
+	SessionStore    *store.SessionStore
 	SettingsManager *config.SettingsManager
 
 	resourceLoader   resources.ResourceLoader
@@ -234,7 +234,7 @@ type AgentSession struct {
 func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	s := &AgentSession{
 		Agent:            opts.Agent,
-		SessionManager:   opts.SessionManager,
+		SessionStore:     opts.SessionStore,
 		SettingsManager:  opts.SettingsManager,
 		resourceLoader:   opts.ResourceLoader,
 		modelRegistry:    opts.ModelRegistry,
@@ -252,7 +252,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	s.buildSystemPrompt()
 
 	firlog.Debug("agent session created",
-		"sessionID", opts.SessionManager.GetSessionID(),
+		"sessionID", opts.SessionStore.GetSessionID(),
 		"hasCompaction", opts.CompactionRunner != nil,
 	)
 
@@ -273,7 +273,7 @@ func (s *AgentSession) UpdatePlan(title string, entries []agent.PlanEntry, metad
 	s.plan = entries
 	s.planVersion++
 	s.mu.Unlock()
-	s.SessionManager.AppendPlanUpdate(title, entries, metadata)
+	s.SessionStore.AppendPlanUpdate(title, entries, metadata)
 	snapshot := make([]agent.PlanEntry, len(entries))
 	copy(snapshot, entries)
 	s.emit(AgentSessionEvent{
@@ -474,12 +474,12 @@ func (s *AgentSession) persistMessage(msg agent.AgentMessage) {
 
 	switch role {
 	case "user", "assistant", "toolResult":
-		s.SessionManager.AppendAgentMessage(msg)
+		s.SessionStore.AppendAgentMessage(msg)
 	case "custom":
 		if msg.Custom != nil {
 			if cm, ok := msg.Custom.(*store.CustomMessage); ok {
 				data, _ := json.Marshal(cm.Content)
-				s.SessionManager.AppendCustomEntry(cm.CustomType, data)
+				s.SessionStore.AppendCustomEntry(cm.CustomType, data)
 			}
 		}
 	}
@@ -746,7 +746,7 @@ func (s *AgentSession) checkAutoCompaction(assistantMessage *ai.AssistantMessage
 	// Skip overflow check if the error is from before a compaction in the current path.
 	// This handles the case where an error was kept after compaction (in the "kept" region).
 	errorIsFromBeforeCompaction := false
-	compactionEntry := GetLatestCompactionEntry(s.SessionManager.GetBranch(""))
+	compactionEntry := GetLatestCompactionEntry(s.SessionStore.GetBranch(""))
 	if compactionEntry != nil {
 		if ts, err := time.Parse(time.RFC3339Nano, compactionEntry.Timestamp); err == nil {
 			errorIsFromBeforeCompaction = assistantMessage.Timestamp < ts.UnixMilli()
@@ -941,13 +941,13 @@ func (s *AgentSession) GetCompactionStats() *CompactionInfo {
 // SetModel changes the current model.
 func (s *AgentSession) SetModel(model *ai.Model) {
 	s.Agent.SetModel(model)
-	s.SessionManager.AppendModelChange(model.Provider, model.ID)
+	s.SessionStore.AppendModelChange(model.Provider, model.ID)
 }
 
 // SetThinkingLevel changes the thinking level.
 func (s *AgentSession) SetThinkingLevel(level string) {
 	s.Agent.SetThinkingLevel(agent.ThinkingLevel(level))
-	s.SessionManager.AppendThinkingLevelChange(level)
+	s.SessionStore.AppendThinkingLevelChange(level)
 }
 
 // RecordCommand records a user-initiated command for audit/metering purposes.
@@ -955,7 +955,7 @@ func (s *AgentSession) SetThinkingLevel(level string) {
 // args captures any relevant argument for metering (may be empty).
 // These entries are never included in the LLM context.
 func (s *AgentSession) RecordCommand(command, args string) {
-	s.SessionManager.AppendCommandEntry(command, args)
+	s.SessionStore.AppendCommandEntry(command, args)
 }
 
 // GetAvailableThinkingLevels returns the thinking levels available for the current model.
@@ -1087,7 +1087,7 @@ func (s *AgentSession) wrapTool(t agent.AgentTool) agent.AgentTool {
 
 // SetSessionName sets the display name for the current session.
 func (s *AgentSession) SetSessionName(name string) {
-	s.SessionManager.AppendSessionInfo(name)
+	s.SessionStore.AppendSessionInfo(name)
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",
 		SessionName: name,
@@ -1096,7 +1096,7 @@ func (s *AgentSession) SetSessionName(name string) {
 
 // GetSessionName returns the display name for the current session.
 func (s *AgentSession) GetSessionName() string {
-	return s.SessionManager.GetSessionName()
+	return s.SessionStore.GetSessionName()
 }
 
 // ============================================================================
@@ -1105,7 +1105,7 @@ func (s *AgentSession) GetSessionName() string {
 
 // NewSession creates a new session.
 func (s *AgentSession) NewSessionCmd() (bool, error) {
-	s.SessionManager.NewSession(nil)
+	s.SessionStore.NewSession(nil)
 	s.Agent.ReplaceMessages(nil)
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
@@ -1127,10 +1127,10 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	s.Agent.Abort()
 
 	// Switch the session file (loads entries, forks if locked)
-	forked := s.SessionManager.SetSessionFile(sessionPath)
+	forked := s.SessionStore.SetSessionFile(sessionPath)
 
 	// Rebuild agent messages from session context
-	ctx := s.SessionManager.BuildSessionContext()
+	ctx := s.SessionStore.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
 
 	// Restore session model if recorded and still available.
@@ -1160,7 +1160,7 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Always emit, even with an empty name, so the old name is cleared.
 	s.emit(AgentSessionEvent{
 		Type:        "session_named",
-		SessionName: s.SessionManager.GetSessionName(),
+		SessionName: s.SessionStore.GetSessionName(),
 	})
 
 	return forked, nil
@@ -1279,7 +1279,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 
 	agentMsg := agent.AgentMessage{Custom: bashMsg}
 	s.Agent.AppendMessage(agentMsg)
-	s.SessionManager.AppendAgentMessage(agentMsg)
+	s.SessionStore.AppendAgentMessage(agentMsg)
 
 	return result, nil
 }
@@ -1326,7 +1326,7 @@ func (s *AgentSession) GetContextUsage() *ContextUsage {
 	// After compaction, the last assistant usage reflects pre-compaction context size.
 	// We can only trust usage from an assistant that responded after the latest compaction.
 	// If no such assistant exists, context token count is unknown until the next LLM response.
-	branchEntries := s.SessionManager.GetBranch("")
+	branchEntries := s.SessionStore.GetBranch("")
 	latestCompaction := GetLatestCompactionEntry(branchEntries)
 
 	if latestCompaction != nil {
@@ -1470,8 +1470,8 @@ type SessionStats struct {
 func (s *AgentSession) GetSessionStats() SessionStats {
 	state := s.State()
 	var stats SessionStats
-	stats.SessionFile = s.SessionManager.GetSessionFile()
-	stats.SessionID = s.SessionManager.GetSessionID()
+	stats.SessionFile = s.SessionStore.GetSessionFile()
+	stats.SessionID = s.SessionStore.GetSessionID()
 	stats.TotalMessages = len(state.Messages)
 
 	for _, msg := range state.Messages {
@@ -1525,26 +1525,26 @@ type NavigateTreeResult struct {
 // NavigateTree navigates to a specific entry in the session tree.
 // If summarize is true, it creates a branch summary before navigating.
 func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstructions string) (*NavigateTreeResult, error) {
-	leafID := s.SessionManager.GetLeafID()
+	leafID := s.SessionStore.GetLeafID()
 	if entryID == leafID {
 		return &NavigateTreeResult{}, nil
 	}
 
 	if summarize {
 		// Create branch with summary
-		s.SessionManager.BranchWithSummary(leafID, "", nil, false)
+		s.SessionStore.BranchWithSummary(leafID, "", nil, false)
 	}
 
 	// Branch to the new entry
-	s.SessionManager.Branch(entryID)
+	s.SessionStore.Branch(entryID)
 
 	// Rebuild messages from the new branch
-	ctx := s.SessionManager.BuildSessionContext()
+	ctx := s.SessionStore.BuildSessionContext()
 	s.Agent.ReplaceMessages(ctx.Messages)
 	s.restorePlan(ctx.PlanTitle, ctx.PlanEntries, ctx.PlanMetadata)
 
 	// Find user message text at this entry for editor pre-fill
-	entry := s.SessionManager.GetEntry(entryID)
+	entry := s.SessionStore.GetEntry(entryID)
 	var editorText string
 	if entry != nil && entry.Type == "message" {
 		editorText = extractUserMessageText(entry.RawMessage)
@@ -1587,11 +1587,15 @@ func (s *AgentSession) SideQuery(ctx context.Context, question string) (string, 
 
 // Close cleans up the session.
 func (s *AgentSession) Close() {
+	// Cancel any in-flight LLM stream before tearing down.
+	if s.Agent != nil {
+		s.Agent.Abort()
+	}
 	if s.unsubAgent != nil {
 		s.unsubAgent()
 	}
-	if s.SessionManager != nil {
-		s.SessionManager.Close()
+	if s.SessionStore != nil {
+		s.SessionStore.Close()
 	}
 }
 

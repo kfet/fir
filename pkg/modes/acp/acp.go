@@ -202,7 +202,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		AuthStorage:     authStorage,
 		ModelRegistry:   modelRegistry,
 		SettingsManager: settingsManager,
-		SessionManager:  store.NewSessionManager(cwd, store.DefaultSessionDir(agentDir, cwd)),
+		SessionStore:    store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
 		Tools:           toolList,
 		MCPConfigs:      mcpConfigs,
 		ResourceLoaderOptions: &resources.ResourceLoaderOptions{

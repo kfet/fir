@@ -237,14 +237,14 @@ func cmdName(ctx *commandContext, args string) {
 		ctx.sendMessage("Usage: /name <new name>")
 		return
 	}
-	ctx.entry.session.SessionManager.AppendSessionInfo(args)
+	ctx.entry.session.SessionStore.AppendSessionInfo(args)
 	ctx.sendMessage(fmt.Sprintf("Session renamed to: %s", args))
 }
 
 func cmdSession(ctx *commandContext, _ string) {
 	entry := ctx.entry
 	stats := entry.session.GetSessionStats()
-	name := entry.session.SessionManager.GetSessionName()
+	name := entry.session.SessionStore.GetSessionName()
 	info := "**Session Info**\n\n"
 	info += fmt.Sprintf("- **Version:** %s\n", version)
 	info += "- **Mode:** acp\n"

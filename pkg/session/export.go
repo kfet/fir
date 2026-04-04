@@ -16,7 +16,7 @@ import (
 // ExportToHTML exports the current session branch to an HTML file.
 // If path is empty a temp file is created and its path returned.
 func (s *AgentSession) ExportToHTML(path string) (string, error) {
-	entries := s.SessionManager.GetBranch("")
+	entries := s.SessionStore.GetBranch("")
 	sessionID := s.GetSessionStats().SessionID
 
 	var f *os.File
