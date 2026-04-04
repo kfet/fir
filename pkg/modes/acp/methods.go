@@ -95,41 +95,7 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 		mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
 	}
 	firlog.Info("acp new session: loaded project MCP configs", "elapsed_ms", time.Since(t0).Milliseconds(), "count", len(mcpConfigs))
-	if mcpConfigs == nil && len(params.McpServers) > 0 {
-		mcpConfigs = make(map[string]mcp.ServerConfig)
-	}
-	for _, mcpServer := range params.McpServers {
-		switch {
-		case mcpServer.Stdio != nil:
-			envs := map[string]string{}
-			for _, v := range mcpServer.Stdio.Env {
-				envs[v.Name] = v.Value
-			}
-			mcpConfigs[mcpServer.Stdio.Name] = mcp.ServerConfig{
-				Command: mcpServer.Stdio.Command,
-				Args:    mcpServer.Stdio.Args,
-				Env:     envs,
-			}
-		case mcpServer.Http != nil:
-			if len(mcpServer.Http.Headers) > 0 {
-				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Http.Name)
-			}
-			mcpConfigs[mcpServer.Http.Name] = mcp.ServerConfig{
-				Transport: "streamable",
-				URL:       mcpServer.Http.Url,
-			}
-		case mcpServer.Sse != nil:
-			if len(mcpServer.Sse.Headers) > 0 {
-				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Sse.Name)
-			}
-			mcpConfigs[mcpServer.Sse.Name] = mcp.ServerConfig{
-				Transport: "sse",
-				URL:       mcpServer.Sse.Url,
-			}
-		default:
-			fmt.Fprintf(os.Stderr, "fir: warning: MCP server has unknown transport; skipping\n")
-		}
-	}
+	mcpConfigs = mergeRequestMCPServers(mcpConfigs, params.McpServers)
 
 	t0 = time.Now()
 	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
@@ -376,6 +342,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		if !pa.options.NoMCP {
 			mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
 		}
+		mcpConfigs = mergeRequestMCPServers(mcpConfigs, params.McpServers)
 		entry, err := pa.createSession(ctx, params.SessionId, cwd, mcpConfigs)
 		if err != nil {
 			return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
@@ -436,6 +403,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	if !pa.options.NoMCP {
 		resumeMCPConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
 	}
+	resumeMCPConfigs = mergeRequestMCPServers(resumeMCPConfigs, params.McpServers)
 	entry, err := pa.createSession(ctx, sessionID, cwd, resumeMCPConfigs)
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)

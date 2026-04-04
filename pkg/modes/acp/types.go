@@ -6,6 +6,8 @@
 // Ported from: packages/coding-agent/src/modes/acp/acp-mode.ts
 package acp
 
+import acpsdk "github.com/coder/acp-go-sdk"
+
 // ============================================================================
 // ACP mode configuration
 // ============================================================================
@@ -67,6 +69,9 @@ type ResumeSessionRequest struct {
 	SessionId string `json:"sessionId"`
 	// Cwd is the working directory to use.
 	Cwd string `json:"cwd,omitempty"`
+	// McpServers are MCP server configurations provided by the client.
+	// These are merged with project-level configs (client entries take precedence).
+	McpServers []acpsdk.McpServer `json:"mcpServers,omitempty"`
 }
 
 // ResumeSessionResponse is the response for session/resume.

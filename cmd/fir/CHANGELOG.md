@@ -17,6 +17,12 @@
 - Renamed `SessionManager` to `SessionStore` throughout the codebase to better reflect its role as a persistence/storage layer.
 - `plan-nudger` extension: softened mild nudge to say "Use the plan tool" and encourage continuing work, instead of forbidding text replies. Added reminder to inform the user of work done on agent exit.
 
+### Fixed
+
+- ACP `session/resume`: MCP servers from project config and client request are now loaded (previously no MCPs were started on resume).
+- `/reload` command: MCP servers are now reloaded from disk in both interactive and ACP modes. If no MCP servers existed at startup but configs are added later, `/reload` creates and wires them.
+- Extracted shared `session.StartMCPManager` and `session.ReloadMCP` helpers to deduplicate MCP wiring across all modes.
+
 ## [0.27.0] - 2026-03-31
 
 ### Added

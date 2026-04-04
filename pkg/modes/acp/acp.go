@@ -305,6 +305,51 @@ func loadProjectMCPConfigs(cwd, extraConfigPath string) map[string]mcp.ServerCon
 // Helpers
 // ============================================================================
 
+// mergeRequestMCPServers merges ACP request-level MCP server configurations
+// into an existing config map. Request entries take precedence. Returns the
+// merged map (creating one if configs is nil and servers is non-empty).
+func mergeRequestMCPServers(configs map[string]mcp.ServerConfig, servers []acpsdk.McpServer) map[string]mcp.ServerConfig {
+	if len(servers) == 0 {
+		return configs
+	}
+	if configs == nil {
+		configs = make(map[string]mcp.ServerConfig)
+	}
+	for _, mcpServer := range servers {
+		switch {
+		case mcpServer.Stdio != nil:
+			envs := map[string]string{}
+			for _, v := range mcpServer.Stdio.Env {
+				envs[v.Name] = v.Value
+			}
+			configs[mcpServer.Stdio.Name] = mcp.ServerConfig{
+				Command: mcpServer.Stdio.Command,
+				Args:    mcpServer.Stdio.Args,
+				Env:     envs,
+			}
+		case mcpServer.Http != nil:
+			if len(mcpServer.Http.Headers) > 0 {
+				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Http.Name)
+			}
+			configs[mcpServer.Http.Name] = mcp.ServerConfig{
+				Transport: "streamable",
+				URL:       mcpServer.Http.Url,
+			}
+		case mcpServer.Sse != nil:
+			if len(mcpServer.Sse.Headers) > 0 {
+				fmt.Fprintf(os.Stderr, "fir: warning: MCP server %q specifies HTTP headers which are not yet supported; headers will be ignored\n", mcpServer.Sse.Name)
+			}
+			configs[mcpServer.Sse.Name] = mcp.ServerConfig{
+				Transport: "sse",
+				URL:       mcpServer.Sse.Url,
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "fir: warning: MCP server has unknown transport; skipping\n")
+		}
+	}
+	return configs
+}
+
 func (pa *firAgent) sendAgentMessage(sessionID, text string) {
 	_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 		SessionId: acpsdk.SessionId(sessionID),

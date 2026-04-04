@@ -152,12 +152,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	toolList := opts.Tools
 
 	// --- MCP ---
-	var mcpMgr *mcp.Manager
-	if len(opts.MCPConfigs) > 0 {
-		mcpMgr = mcp.NewManager(opts.MCPConfigs, false)
-		if toolList == nil {
-			toolList = DefaultCodingTools(cwd)
-		}
+	// Ensure tools exist when MCP servers need to register their tools.
+	if len(opts.MCPConfigs) > 0 && toolList == nil {
+		toolList = DefaultCodingTools(cwd)
 	}
 
 	// --- Compaction ---
@@ -180,48 +177,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		ExtReady:         opts.ExtReady,
 	})
 	if err != nil {
-		if mcpMgr != nil {
-			_ = mcpMgr.Close()
-		}
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	// --- Wire MCP channels ---
-	if mcpMgr != nil {
-		sess := result.Session
-		mcp.WireChannelInjection(mcpMgr, func(text string, ts int64) {
-			msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
-			sess.InjectMessage(msg)
-		})
-
-		// Track previous MCP tool names so we can remove them atomically.
-		var prevMCPNames []string
-
-		mcpMgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
-			// If hooks with tool interception are active, wrap before delivering.
-			if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
-				mcpTools = sess.WrapToolsWithHooks(mcpTools)
-			}
-
-			sess.Agent.UpdateTools(func(ts *agent.ToolSet) {
-				for _, name := range prevMCPNames {
-					ts.Remove(name)
-				}
-				for _, t := range mcpTools {
-					ts.Add(t)
-				}
-			})
-
-			names := make([]string, len(mcpTools))
-			for i, t := range mcpTools {
-				names[i] = t.Name
-			}
-			prevMCPNames = names
-		})
-
-		mcpMgr.Start(ctx)
-		firlog.Info("MCP servers starting", "servers", len(opts.MCPConfigs))
-	}
+	// --- Wire and start MCP servers ---
+	mcpMgr := StartMCPManager(ctx, result.Session, opts.MCPConfigs)
 
 	return &SetupResult{
 		Session:              result.Session,
@@ -233,4 +193,72 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		AgentDir:             agentDir,
 		Cwd:                  cwd,
 	}, nil
+}
+
+// StartMCPManager creates a new MCP Manager, wires it to the given session
+// (channel injection + tool-change callback), and starts it.  This is the
+// same wiring that Setup performs internally and is exported so that callers
+// (interactive /reload, ACP /reload) can spin up MCP after initial setup.
+func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string]mcp.ServerConfig) *mcp.Manager {
+	if len(configs) == 0 {
+		return nil
+	}
+	mgr := mcp.NewManager(configs, false)
+
+	mcp.WireChannelInjection(mgr, func(text string, ts int64) {
+		msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
+		sess.InjectMessage(msg)
+	})
+
+	var prevMCPNames []string
+	mgr.SetOnToolsChanged(func(mcpTools []agent.AgentTool) {
+		if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
+			mcpTools = sess.WrapToolsWithHooks(mcpTools)
+		}
+		sess.Agent.UpdateTools(func(ts *agent.ToolSet) {
+			for _, name := range prevMCPNames {
+				ts.Remove(name)
+			}
+			for _, t := range mcpTools {
+				ts.Add(t)
+			}
+		})
+		names := make([]string, len(mcpTools))
+		for i, t := range mcpTools {
+			names[i] = t.Name
+		}
+		prevMCPNames = names
+	})
+
+	mgr.Start(ctx)
+	firlog.Info("MCP servers starting", "servers", len(configs))
+	return mgr
+}
+
+// ReloadMCP re-reads MCP configs from disk, merges an optional extra config
+// file, and either reloads an existing manager or creates+wires a new one.
+// mgrPtr is updated in place so callers see the new manager.  cwd is the
+// project working directory; extraConfigPath is an additional config file
+// (e.g. from --mcp-config), pass "" to skip.
+func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cwd, extraConfigPath string) error {
+	cfg, err := mcp.LoadDefaultConfigs(cwd)
+	if err != nil {
+		return fmt.Errorf("load MCP config: %w", err)
+	}
+	if extraConfigPath != "" {
+		extra, extraErr := mcp.LoadConfigFile(extraConfigPath)
+		if extraErr != nil {
+			return fmt.Errorf("load extra MCP config %s: %w", extraConfigPath, extraErr)
+		}
+		cfg = mcp.MergeConfigs(cfg, extra)
+	}
+	if *mgrPtr != nil {
+		_, err = (*mgrPtr).Reload(ctx, cfg.MCPServers)
+		return err
+	}
+	// No manager yet — create one if configs appeared.
+	if len(cfg.MCPServers) > 0 {
+		*mgrPtr = StartMCPManager(ctx, sess, cfg.MCPServers)
+	}
+	return nil
 }
