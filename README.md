@@ -110,7 +110,7 @@ export MISTRAL_API_KEY="..."
 export AWS_PROFILE="..."           # for Bedrock
 ```
 
-### Global config (`~/.fir/agent/`)
+### Global config (`~/.config/fir/`)
 
 The global config directory (override with `FIR_AGENT_DIR`) holds:
 
@@ -150,7 +150,7 @@ Extensions placed in `.fir/extensions/` (project) or `~/.config/fir/extensions/`
 set `extensions` in your settings file as a **name allowlist**:
 
 ```jsonc
-// .fir/settings.json (project) or ~/.fir/agent/settings.json (global)
+// .fir/settings.json (project) or ~/.config/fir/settings.json (global)
 {
   "extensions": ["demo", "hello"]
 }

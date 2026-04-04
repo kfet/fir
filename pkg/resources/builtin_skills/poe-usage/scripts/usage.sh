@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Poe Usage API poller
-# Resolves API key from: POE_API_KEY env → ~/.fir/agent/models.json → ~/.fir/agent/auth.json
+# Resolves API key from: POE_API_KEY env → ~/.config/fir/models.json → ~/.config/fir/auth.json
 
 API_BASE="https://api.poe.com/usage"
 
@@ -13,8 +13,8 @@ find_api_key() {
     return 0
   fi
 
-  # 2. fir models config (~/.fir/agent/models.json) — custom provider "Poe"
-  local models_file="$HOME/.fir/agent/models.json"
+  # 2. fir models config (~/.config/fir/models.json) — custom provider "Poe"
+  local models_file="$HOME/.config/fir/models.json"
   if [[ -f "$models_file" ]]; then
     local key
     key=$(jq -r '.providers.Poe.apiKey // empty' "$models_file" 2>/dev/null)
@@ -24,8 +24,8 @@ find_api_key() {
     fi
   fi
 
-  # 3. fir auth storage (~/.fir/agent/auth.json) — "poe" provider with api_key type
-  local auth_file="$HOME/.fir/agent/auth.json"
+  # 3. fir auth storage (~/.config/fir/auth.json) — "poe" provider with api_key type
+  local auth_file="$HOME/.config/fir/auth.json"
   if [[ -f "$auth_file" ]]; then
     local key
     key=$(jq -r '.poe.key // empty' "$auth_file" 2>/dev/null)
@@ -43,8 +43,8 @@ POE_API_KEY=$(find_api_key) || {
   echo "" >&2
   echo "Set it via one of:" >&2
   echo "  1. POE_API_KEY environment variable" >&2
-  echo "  2. fir models config: .providers.Poe.apiKey in ~/.fir/agent/models.json" >&2
-  echo "  3. fir auth storage: add a 'poe' entry to ~/.fir/agent/auth.json" >&2
+  echo "  2. fir models config: .providers.Poe.apiKey in ~/.config/fir/models.json" >&2
+  echo "  3. fir auth storage: add a 'poe' entry to ~/.config/fir/auth.json" >&2
   echo "" >&2
   echo "Get your API key at https://poe.com/api/keys" >&2
   exit 1

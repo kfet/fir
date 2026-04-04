@@ -9,24 +9,24 @@
 # Options:
 #   --raw         Print the full JSON response instead of the formatted summary
 #   --verbose     On error, print the full response body for debugging
-#   --cached      Read from the local cache (~/.fir/agent/anthropic-usage-cache.json)
+#   --cached      Read from the local cache (~/.config/fir/anthropic-usage-cache.json)
 #                 written by the provider-usage extension, instead of hitting the API.
 #                 Falls back to a live API call if the cache is missing.
 #
 # The token must be an OAuth Bearer token (not a standard sk-ant-... API key).
-# Auto-detection searches ~/.fir/agent/auth.json and ~/.claude/.credentials.json.
+# Auto-detection searches ~/.config/fir/auth.json and ~/.claude/.credentials.json.
 
 set -euo pipefail
 
 RAW=false
 VERBOSE=false
 CACHED=false
-CACHE_FILE="$HOME/.fir/agent/anthropic-usage-cache.json"
+CACHE_FILE="$HOME/.config/fir/anthropic-usage-cache.json"
 
 find_token() {
   local entry file filter value
   local search_entries=(
-    "$HOME/.fir/agent/auth.json:.anthropic.access // empty"
+    "$HOME/.config/fir/auth.json:.anthropic.access // empty"
     "$HOME/.claude/.credentials.json:.claudeAiOauthToken // .access_token // empty"
   )
 

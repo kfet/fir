@@ -18,7 +18,7 @@ func TestBuildGroups_SingleItem(t *testing.T) {
 	resolved := ResolvedPaths{
 		Skills: []ResolvedResource{
 			{
-				Path:    "/home/user/.fir/agent/skills/test/SKILL.md",
+				Path:    "/home/user/.config/fir/skills/test/SKILL.md",
 				Enabled: true,
 				Metadata: resources.PathMetadata{
 					Source: "auto",
@@ -62,7 +62,7 @@ func TestBuildGroups_Sorting(t *testing.T) {
 		},
 		Skills: []ResolvedResource{
 			{
-				Path:     "/home/.fir/agent/skills/bar/SKILL.md",
+				Path:     "/home/.config/fir/skills/bar/SKILL.md",
 				Enabled:  true,
 				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},
@@ -85,7 +85,7 @@ func TestConfigSelectorComponent_Render(t *testing.T) {
 	resolved := ResolvedPaths{
 		Skills: []ResolvedResource{
 			{
-				Path:     "/home/.fir/agent/skills/test/SKILL.md",
+				Path:     "/home/.config/fir/skills/test/SKILL.md",
 				Enabled:  true,
 				Metadata: resources.PathMetadata{Source: "auto", Scope: "user", Origin: "top-level"},
 			},

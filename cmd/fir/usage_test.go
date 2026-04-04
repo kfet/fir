@@ -96,6 +96,6 @@ func TestTracker_All(t *testing.T) {
 }
 
 func TestDefaultPath(t *testing.T) {
-	p := DefaultPath("/home/user/.fir/agent")
-	assert.Equal(t, "/home/user/.fir/agent/usage.json", p)
+	p := DefaultPath("/home/user/.config/fir")
+	assert.Equal(t, "/home/user/.config/fir/usage.json", p)
 }

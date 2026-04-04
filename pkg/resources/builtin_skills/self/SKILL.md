@@ -20,13 +20,13 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 
 Settings merge in order (later wins):
 
-1. **Global config** — `~/.fir/agent/settings.json` (override dir with `FIR_AGENT_DIR`)
+1. **Global config** — `~/.config/fir/settings.json` (override dir with `FIR_AGENT_DIR`)
 2. **Project config** — `.fir/settings.json` in project root
 3. **CLI flags** — override everything
 
 All settings fields are optional. Project settings are merged on top of global settings field-by-field; nested objects merge recursively, arrays and primitives from the override win.
 
-### Global Directory (`~/.fir/agent/`)
+### Global Directory (`~/.config/fir/`)
 
 | File | Purpose |
 |------|---------|
@@ -64,7 +64,7 @@ Two methods:
 
 ## Extensions
 
-Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `~/.fir/agent/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
+Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `~/.config/fir/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
 
 A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extension — just drop a script in the directory.
 
@@ -102,7 +102,7 @@ Skills, prompts, and themes are discovered from multiple locations, merged in pr
 
 1. **CLI flags** — `--skill <path>`, `--prompt-template <path>`, etc.
 2. **Project directory** — `.fir/skills/`, `.fir/prompts/`, `.fir/extensions/`
-3. **User directory** — `~/.fir/agent/skills/`, `~/.fir/agent/prompts/`, `~/.fir/agent/extensions/`
+3. **User directory** — `~/.config/fir/skills/`, `~/.config/fir/prompts/`, `~/.config/fir/extensions/`
 4. **Settings paths** — the `"skills"`, `"prompts"`, and `"themes"` arrays in `settings.json`
 5. **Installed packages** — skills/prompts/extensions/themes contributed by `fir install`-ed packages
 6. **Builtins** — embedded in the binary
@@ -120,7 +120,7 @@ Paths in `"skills"`, `"prompts"`, and `"themes"` settings arrays support three f
 **Relative paths are resolved against the current working directory**, not against the settings file. This is intentional — it makes relative paths portable across projects:
 
 ```jsonc
-// In ~/.fir/agent/settings.json (global):
+// In ~/.config/fir/settings.json (global):
 {
   "skills": ["skills"],       // → finds ./skills/ in any project that has one
   "prompts": ["prompts"]      // → finds ./prompts/ in any project that has one

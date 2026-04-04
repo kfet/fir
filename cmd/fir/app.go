@@ -321,9 +321,6 @@ func mcpReloadFunc(mgr *mcp.Manager, cwd string, args *Args) func() error {
 
 // run is the main application logic.
 func run() error {
-	// Migrate config from legacy ~/.fir/agent/ to ~/.config/fir/ on first run.
-	session.MigrateConfigFromLegacyDir()
-
 	// Standalone subcommands — handle before normal parsing.
 	if len(os.Args) >= 2 && os.Args[1] == "update" {
 		return runUpdate()

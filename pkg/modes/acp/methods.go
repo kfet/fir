@@ -255,7 +255,7 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 	// When FIR_AGENT_DIR is explicitly set, don't scan legacy dirs.
 	var legacyDirs []string
 	if os.Getenv("FIR_AGENT_DIR") == "" {
-		legacyDirs = []string{session.LegacyFirAgentDir(), session.PiAgentDir()}
+		legacyDirs = []string{session.PiAgentDir()}
 	}
 
 	var allSessions []store.SessionListInfo
@@ -738,7 +738,7 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 func isValidSessionPath(sessionPath, agentDir string) bool {
 	dirs := []string{agentDir}
 	if os.Getenv("FIR_AGENT_DIR") == "" {
-		dirs = append(dirs, session.LegacyFirAgentDir(), session.PiAgentDir())
+		dirs = append(dirs, session.PiAgentDir())
 	}
 	for _, d := range dirs {
 		if IsPathWithinDirectory(sessionPath, store.SessionsDir(d)) {
@@ -754,7 +754,7 @@ func resolveSessionByUUID(uuid, agentDir, cwd string) string {
 	// Build list of directories to search: cwd-specific dir first, then all dirs.
 	dirs := []string{agentDir}
 	if os.Getenv("FIR_AGENT_DIR") == "" {
-		dirs = append(dirs, session.LegacyFirAgentDir(), session.PiAgentDir())
+		dirs = append(dirs, session.PiAgentDir())
 	}
 
 	// First check the cwd-specific session directory for each agent dir.

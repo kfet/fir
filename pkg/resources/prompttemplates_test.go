@@ -303,7 +303,7 @@ func TestExpandPromptTemplate_AllArgs(t *testing.T) {
 // --- inferPromptSource ---
 
 func TestInferPromptSource_User(t *testing.T) {
-	source, label := inferPromptSource("/home/user/.fir/agent/prompts/fix.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
+	source, label := inferPromptSource("/home/user/.config/fir/prompts/fix.md", "/home/user/.config/fir/prompts", "/project/.fir/prompts")
 	if source != "user" {
 		t.Errorf("source = %q, want user", source)
 	}
@@ -313,7 +313,7 @@ func TestInferPromptSource_User(t *testing.T) {
 }
 
 func TestInferPromptSource_Project(t *testing.T) {
-	source, label := inferPromptSource("/project/.fir/prompts/review.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
+	source, label := inferPromptSource("/project/.fir/prompts/review.md", "/home/user/.config/fir/prompts", "/project/.fir/prompts")
 	if source != "project" {
 		t.Errorf("source = %q, want project", source)
 	}
@@ -323,7 +323,7 @@ func TestInferPromptSource_Project(t *testing.T) {
 }
 
 func TestInferPromptSource_Path(t *testing.T) {
-	source, label := inferPromptSource("/custom/dir/something.md", "/home/user/.fir/agent/prompts", "/project/.fir/prompts")
+	source, label := inferPromptSource("/custom/dir/something.md", "/home/user/.config/fir/prompts", "/project/.fir/prompts")
 	if source != "path" {
 		t.Errorf("source = %q, want path", source)
 	}
@@ -333,7 +333,7 @@ func TestInferPromptSource_Path(t *testing.T) {
 }
 
 func TestInferPromptSource_DirMatch(t *testing.T) {
-	source, _ := inferPromptSource("/home/user/.fir/agent/prompts", "/home/user/.fir/agent/prompts", "")
+	source, _ := inferPromptSource("/home/user/.config/fir/prompts", "/home/user/.config/fir/prompts", "")
 	if source != "user" {
 		t.Errorf("source = %q, want user (exact dir match)", source)
 	}

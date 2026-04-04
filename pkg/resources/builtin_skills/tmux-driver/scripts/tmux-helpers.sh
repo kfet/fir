@@ -158,7 +158,7 @@ tm-bulk-rename() {
 tm-check-usage() {
   local script_dir="${_TM_SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
   local token
-  token=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null \
+  token=$(jq -r '.anthropic.access' ~/.config/fir/auth.json 2>/dev/null \
     || jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
   TOKEN="$token" bash "$script_dir/usage.sh"
 }

@@ -42,7 +42,7 @@ TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh"
 
 | Tool | File | Key |
 |------|------|-----|
-| fir | `~/.fir/agent/auth.json` | `.anthropic.access` |
+| fir | `~/.config/fir/auth.json` | `.anthropic.access` |
 | Claude Code | `~/.claude/.credentials.json` | `"claudeAiOauthToken"` or `"access_token"` |
 
 ### Manual fallback
@@ -50,7 +50,7 @@ TOKEN="$TOKEN" bash "$SKILL_DIR/scripts/usage.sh"
 If auto-detection fails (e.g. non-standard install), extract the token yourself:
 
 ```bash
-TOKEN=$(jq -r '.anthropic.access' ~/.fir/agent/auth.json 2>/dev/null)
+TOKEN=$(jq -r '.anthropic.access' ~/.config/fir/auth.json 2>/dev/null)
 # or
 TOKEN=$(jq -r '.claudeAiOauthToken // .access_token' ~/.claude/.credentials.json 2>/dev/null)
 ```

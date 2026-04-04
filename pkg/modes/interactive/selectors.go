@@ -237,10 +237,8 @@ func (m *InteractiveMode) showSessionSelector() {
 		}
 		sessions, _ := store.ListSessions(cwd, sessionDir)
 
-		// Also include sessions from legacy dirs for the same project so
-		// that old sessions created under ~/.fir/agent or ~/.pi/agent show
-		// up in the default "current" scope without requiring a Tab press.
-		for _, legacyAgent := range []string{session.LegacyFirAgentDir(), session.PiAgentDir()} {
+		// Also include sessions from legacy pi agent dir for the same project.
+		for _, legacyAgent := range []string{session.PiAgentDir()} {
 			legacyDir := store.SessionDirForCwd(legacyAgent, cwd)
 			if legacyDir != sessionDir {
 				if extra, _ := store.ListSessions(cwd, legacyDir); len(extra) > 0 {
@@ -252,7 +250,7 @@ func (m *InteractiveMode) showSessionSelector() {
 			sessions,
 			components.SessionScopeCurrent,
 			func() ([]store.SessionListInfo, error) {
-				return store.ListAllSessions(session.DefaultAgentDir(), session.LegacyFirAgentDir(), session.PiAgentDir())
+				return store.ListAllSessions(session.DefaultAgentDir(), session.PiAgentDir())
 			},
 			func(sessionPath string) {
 				done()

@@ -12,10 +12,10 @@ Query the Poe Usage API to check your point balance and see per-bot usage histor
 The script resolves your Poe API key from (in order):
 
 1. **`POE_API_KEY` environment variable** — set it in your shell
-2. **fir models config** — `~/.fir/agent/models.json` at `.providers.Poe.apiKey`
-3. **fir auth storage** — `~/.fir/agent/auth.json` under the `"poe"` provider key
+2. **fir models config** — `~/.config/fir/models.json` at `.providers.Poe.apiKey`
+3. **fir auth storage** — `~/.config/fir/auth.json` under the `"poe"` provider key
 
-To store the key in fir's auth storage, add a `poe` entry to `~/.fir/agent/auth.json`:
+To store the key in fir's auth storage, add a `poe` entry to `~/.config/fir/auth.json`:
 
 ```json
 {

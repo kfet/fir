@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Legacy `~/.fir/agent/` config path support: removed `LegacyFirAgentDir()`, `MigrateConfigFromLegacyDir()`, legacy extension discovery fallback, and legacy session directory scanning. All users should already be on `~/.config/fir/`. The `~/.pi/agent` fallback for Claude Code sessions is retained.
+
 ### Fixed
 
 - Ctrl+N (new session) now cancels any in-progress LLM stream before starting a new session.

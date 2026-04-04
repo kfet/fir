@@ -59,13 +59,6 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 		globalDir = filepath.Join(xdg, "fir", "extensions")
 	}
 
-	// Fall back to legacy path (~/.fir/agent/extensions/) if the new path
-	// doesn't exist but the legacy one does, so existing users aren't broken.
-	legacyDir := filepath.Join(homeDir, ".fir", "agent", "extensions")
-	if !dirExistsExt(globalDir) && dirExistsExt(legacyDir) {
-		globalDir = legacyDir
-	}
-
 	// Global then project-local (each shadows the previous).
 	dirs := []struct {
 		path  string
@@ -286,12 +279,6 @@ func isExecutableFile(path string) bool {
 		return false
 	}
 	return info.Mode().IsRegular() && info.Mode()&0111 != 0
-}
-
-// dirExistsExt reports whether path exists and is a directory.
-func dirExistsExt(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
 }
 
 // stripExt removes a single trailing file extension (e.g. ".py", ".sh").

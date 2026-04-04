@@ -36,15 +36,6 @@ func TestDefaultAgentDirXDG(t *testing.T) {
 	}
 }
 
-func TestLegacyFirAgentDir(t *testing.T) {
-	dir := LegacyFirAgentDir()
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".fir", "agent")
-	if dir != expected {
-		t.Errorf("expected %s, got %s", expected, dir)
-	}
-}
-
 // ============================================================================
 // DefaultCodingTools
 // ============================================================================

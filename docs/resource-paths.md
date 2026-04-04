@@ -10,7 +10,7 @@ Resources are discovered in priority order. On name collisions, earlier sources 
 |----------|--------|--------|---------|------------|--------|
 | 1 | CLI flags | `--skill <path>` | `--prompt-template <path>` | `--extension <name>` | `--theme <path>` |
 | 2 | Project dir | `.fir/skills/` | `.fir/prompts/` | `.fir/extensions/` | — |
-| 3 | User dir | `~/.fir/agent/skills/` | `~/.fir/agent/prompts/` | `~/.fir/agent/extensions/` | — |
+| 3 | User dir | `~/.config/fir/skills/` | `~/.config/fir/prompts/` | `~/.config/fir/extensions/` | — |
 | 4 | Settings paths | `"skills"` array | `"prompts"` array | `"extensions"` array* | `"themes"` array |
 | 5 | Packages | installed via `fir install` | installed via `fir install` | installed via `fir install` | installed via `fir install` |
 | 6 | Builtins | embedded in binary | — | embedded in binary | — |
@@ -22,7 +22,7 @@ Resources are discovered in priority order. On name collisions, earlier sources 
 Add paths to `"skills"`, `"prompts"`, or `"themes"` in `settings.json` (global or project):
 
 ```jsonc
-// ~/.fir/agent/settings.json (global)
+// ~/.config/fir/settings.json (global)
 {
   "skills": ["skills", "~/shared-skills"],
   "prompts": ["prompts"],
@@ -54,7 +54,7 @@ Three forms are supported:
 Relative paths resolve against the **current working directory** at startup — not against the settings file location. This is intentional and enables a powerful pattern:
 
 ```jsonc
-// Global settings: ~/.fir/agent/settings.json
+// Global settings: ~/.config/fir/settings.json
 {
   "skills": ["skills"]
 }
@@ -77,7 +77,7 @@ If `$XDG_CONFIG_HOME` is set, the global config directory is `$XDG_CONFIG_HOME/f
 ### Shared team skills across all projects
 
 ```jsonc
-// ~/.fir/agent/settings.json
+// ~/.config/fir/settings.json
 { "skills": ["skills"] }
 ```
 
@@ -86,7 +86,7 @@ Any project with a `skills/` directory will have those skills auto-loaded.
 ### Mix of global and project-specific skills
 
 ```jsonc
-// ~/.fir/agent/settings.json
+// ~/.config/fir/settings.json
 { "skills": ["~/company-skills"] }
 
 // .fir/settings.json (in a specific project)
@@ -98,7 +98,7 @@ The project config replaces the global `skills` array, so include all desired pa
 ### Custom prompt templates
 
 ```jsonc
-// ~/.fir/agent/settings.json
+// ~/.config/fir/settings.json
 { "prompts": ["prompts", "~/shared-prompts"] }
 ```
 
