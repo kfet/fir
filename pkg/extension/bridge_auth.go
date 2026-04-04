@@ -66,6 +66,11 @@ func (p *extAuthProvider) ListModels(ctx context.Context, creds *oauth.Credentia
 		return nil, fmt.Errorf("auth/list_models: %w", err)
 	}
 
+	if len(raw) == 0 {
+		// Extension returned empty response — treat as "not supported".
+		return nil, nil
+	}
+
 	var result struct {
 		Models []string `json:"models"`
 	}

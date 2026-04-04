@@ -306,6 +306,30 @@ func TestParseArgs_ListModelsBeforeFlag(t *testing.T) {
 	}
 }
 
+func TestParseArgs_ListAvailableModelsNoPattern(t *testing.T) {
+	args := ParseArgs([]string{"--list-available-models"})
+	if args.ListAvailModels != true {
+		t.Errorf("expected ListAvailModels=true, got %v", args.ListAvailModels)
+	}
+}
+
+func TestParseArgs_ListAvailableModelsWithPattern(t *testing.T) {
+	args := ParseArgs([]string{"--list-available-models", "gemini"})
+	if args.ListAvailModels != "gemini" {
+		t.Errorf("expected ListAvailModels='gemini', got %v", args.ListAvailModels)
+	}
+}
+
+func TestParseArgs_ListAvailableModelsBeforeFlag(t *testing.T) {
+	args := ParseArgs([]string{"--list-available-models", "--verbose"})
+	if args.ListAvailModels != true {
+		t.Errorf("expected ListAvailModels=true, got %v", args.ListAvailModels)
+	}
+	if !args.Verbose {
+		t.Error("expected Verbose=true")
+	}
+}
+
 func TestParseArgs_Verbose(t *testing.T) {
 	args := ParseArgs([]string{"--verbose"})
 	if !args.Verbose {

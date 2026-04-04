@@ -319,7 +319,13 @@ def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
 
 @fir_ext.auth_list_models(provider="google-antigravity")
 def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
-    """List available models — not supported for Antigravity (statically defined)."""
+    """List available models.
+
+    The Cloud Code Assist API exposes retrieveUserQuota which returns quota
+    buckets per base model ID, but antigravity uses different model IDs
+    (e.g. gemini-3-pro-high, claude-sonnet-4-5) that don't appear in quota.
+    Returning None keeps permissive mode so no valid models are filtered out.
+    """
     return None
 
 

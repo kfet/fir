@@ -57,6 +57,11 @@ type CreateAgentSessionOptions struct {
 
 	// UsageTracker records feature usage events. When nil, tracking is disabled.
 	UsageTracker UsageTracker
+
+	// ExtReady is closed when extensions finish loading. Live model fetching
+	// for OAuth providers waits on this before querying extension-based auth.
+	// When nil, OAuth model fetching proceeds immediately.
+	ExtReady <-chan struct{}
 }
 
 // CreateAgentSessionResult is returned by CreateAgentSession.
@@ -100,7 +105,8 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	}
 
 	// Start background fetch of live model lists from provider APIs.
-	modelRegistry.StartLiveModelFetch(ctx, filepath.Join(agentDir, "cache"))
+	// extReady is provided by the caller and closed once extensions finish loading.
+	modelRegistry.StartLiveModelFetch(ctx, filepath.Join(agentDir, "cache"), opts.ExtReady)
 
 	// Settings
 	settingsManager := opts.SettingsManager

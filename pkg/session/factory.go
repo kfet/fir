@@ -55,6 +55,10 @@ type SetupOptions struct {
 
 	// MCPConfigs are the MCP server configurations to start. When empty, no MCP.
 	MCPConfigs map[string]mcp.ServerConfig
+
+	// ExtReady is closed when extensions finish loading. Live model fetching
+	// for OAuth providers waits on this. When nil, OAuth fetching starts immediately.
+	ExtReady <-chan struct{}
 }
 
 // SetupResult is returned by Setup.
@@ -173,6 +177,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		Tools:            toolList,
 		CompactionRunner: compactionRunner,
 		UsageTracker:     opts.UsageTracker,
+		ExtReady:         opts.ExtReady,
 	})
 	if err != nil {
 		if mcpMgr != nil {

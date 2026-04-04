@@ -28,6 +28,11 @@ type liveModelState struct {
 	modelIDs map[string]bool // set of model IDs available from the API
 	fetched  bool            // true once the first fetch completes (success or fail)
 	err      error           // last fetch error, if any
+	done     chan struct{}   // closed when fetch completes
+}
+
+func newLiveModelState() *liveModelState {
+	return &liveModelState{done: make(chan struct{})}
 }
 
 func (s *liveModelState) set(ids []LiveModelInfo) {
@@ -37,14 +42,20 @@ func (s *liveModelState) set(ids []LiveModelInfo) {
 	for _, m := range ids {
 		s.modelIDs[m.ID] = true
 	}
-	s.fetched = true
+	if !s.fetched {
+		s.fetched = true
+		close(s.done)
+	}
 	s.err = nil
 }
 
 func (s *liveModelState) setError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.fetched = true
+	if !s.fetched {
+		s.fetched = true
+		close(s.done)
+	}
 	s.err = err
 }
 
@@ -60,7 +71,9 @@ func (s *liveModelState) has(modelID string) bool {
 // StartLiveModelFetch kicks off background goroutines to fetch live model lists
 // from provider APIs. It populates liveModels which GetAvailable uses to filter.
 // cacheDir is where disk caches are stored (e.g. ~/.config/fir/cache/).
-func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string) {
+// extReady, if non-nil, is waited on before fetching OAuth provider models
+// (extension-based auth providers are not registered until extensions load).
+func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string, extReady <-chan struct{}) {
 	r.mu.RLock()
 	providers := r.getProvidersWithAuth()
 	r.mu.RUnlock()
@@ -72,7 +85,7 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 			continue
 		}
 
-		state := &liveModelState{}
+		state := newLiveModelState()
 		r.liveModelsMu.Lock()
 		r.liveModels[provider] = state
 		r.liveModelsMu.Unlock()
@@ -84,6 +97,21 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 		}
 
 		go r.fetchLiveModels(ctx, provider, lister, state, cacheDir)
+	}
+
+	// OAuth providers: wait for extensions to register, then fetch.
+	go r.startOAuthModelFetch(ctx, cacheDir, extReady)
+}
+
+// startOAuthModelFetch waits for extensions to be ready, then fetches live
+// model lists for all OAuth providers.
+func (r *ModelRegistry) startOAuthModelFetch(ctx context.Context, cacheDir string, extReady <-chan struct{}) {
+	if extReady != nil {
+		select {
+		case <-extReady:
+		case <-ctx.Done():
+			return
+		}
 	}
 
 	// OAuth providers: use oauth.Provider.ListModels.
@@ -107,7 +135,7 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 		}
 		creds := auth.AuthCredToOAuthCreds(cred)
 
-		state := &liveModelState{}
+		state := newLiveModelState()
 		r.liveModelsMu.Lock()
 		r.liveModels[providerID] = state
 		r.liveModelsMu.Unlock()
@@ -121,6 +149,13 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 }
 
 func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string, provider oauth.Provider, creds *oauth.Credentials, state *liveModelState, cacheDir string) {
+	// Ensure the token is fresh — GetApiKey auto-refreshes expired OAuth tokens.
+	_ = r.authStorage.GetApiKey(providerID)
+	// Re-read credentials after potential refresh.
+	if freshCred := r.authStorage.Get(providerID); freshCred != nil && freshCred.Type == auth.CredentialTypeOAuth {
+		creds = auth.AuthCredToOAuthCreds(freshCred)
+	}
+
 	ids, err := provider.ListModels(ctx, creds)
 	if err != nil {
 		firlog.Debug("live model list failed for OAuth provider %s: %v", providerID, err)
@@ -238,4 +273,29 @@ func (r *ModelRegistry) isModelLive(provider, modelID string) bool {
 		return true // no live data for this provider, be permissive
 	}
 	return state.has(modelID)
+}
+
+// WaitForLiveFetch blocks until all in-flight live model fetches complete
+// or the timeout expires. Returns true if all fetches finished in time.
+func (r *ModelRegistry) WaitForLiveFetch(timeout time.Duration) bool {
+	r.liveModelsMu.RLock()
+	states := make([]*liveModelState, 0, len(r.liveModels))
+	for _, s := range r.liveModels {
+		states = append(states, s)
+	}
+	r.liveModelsMu.RUnlock()
+
+	if len(states) == 0 {
+		return true
+	}
+
+	deadline := time.After(timeout)
+	for _, s := range states {
+		select {
+		case <-s.done:
+		case <-deadline:
+			return false
+		}
+	}
+	return true
 }

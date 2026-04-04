@@ -95,7 +95,7 @@ func TestGoogleModelLister(t *testing.T) {
 }
 
 func TestLiveModelState_Permissive(t *testing.T) {
-	s := &liveModelState{}
+	s := newLiveModelState()
 	// Before fetch, should be permissive
 	if !s.has("anything") {
 		t.Error("expected permissive before fetch")
@@ -108,7 +108,7 @@ func TestLiveModelState_Permissive(t *testing.T) {
 }
 
 func TestLiveModelState_Filters(t *testing.T) {
-	s := &liveModelState{}
+	s := newLiveModelState()
 	s.set([]LiveModelInfo{{ID: "model-a"}, {ID: "model-b"}})
 
 	if !s.has("model-a") {
@@ -144,7 +144,7 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 	}
 
 	// Simulate live fetch completing with only real-model
-	state := &liveModelState{}
+	state := newLiveModelState()
 	state.set([]LiveModelInfo{{ID: "real-model"}})
 	registry.liveModelsMu.Lock()
 	registry.liveModels["anthropic"] = state

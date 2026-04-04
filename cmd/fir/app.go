@@ -169,6 +169,9 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		opts.ThinkingLevel = string(args.Thinking)
 	}
 
+	extReady := make(chan struct{})
+	opts.ExtReady = extReady
+
 	result, err := session.Setup(context.Background(), opts)
 	if err != nil {
 		return nil, err
@@ -231,7 +234,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		resourceLoader:  rl,
 		extensionOpts:   extOpts,
 		mcpManager:      result.MCPManager,
-		ExtReady:        make(chan struct{}),
+		ExtReady:        extReady,
 	}, nil
 }
 
@@ -380,6 +383,10 @@ func run() error {
 
 	if args.ListModels != nil {
 		return runListModels(args)
+	}
+
+	if args.ListAvailModels != nil {
+		return runListAvailableModels(args)
 	}
 
 	if args.Export != "" {
@@ -548,6 +555,56 @@ func runListModels(args *Args) error {
 	}
 
 	for _, m := range models {
+		if pattern != "" {
+			name := strings.ToLower(m.Provider + "/" + m.ID)
+			if !strings.Contains(name, pattern) {
+				continue
+			}
+		}
+		fmt.Printf("%s/%s\n", m.Provider, m.ID)
+	}
+
+	return nil
+}
+
+// runListAvailableModels lists models that are authenticated and confirmed
+// available by the provider's live model list, then exits.
+func runListAvailableModels(args *Args) error {
+	if args.Debug {
+		debugPath := args.DebugLogFile
+		if debugPath == "" {
+			debugPath = filepath.Join(resolveAgentDir(), "debug.log")
+		}
+		cleanup, _ := firlog.Init(true, debugPath)
+		if cleanup != nil {
+			defer cleanup()
+		}
+	}
+
+	agentDir := resolveAgentDir()
+	cacheDir := filepath.Join(agentDir, "cache")
+
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
+
+	if args.ApiKey != "" && args.Provider != "" {
+		authStorage.SetRuntimeApiKey(args.Provider, args.ApiKey)
+	}
+
+	// Kick off live model fetches and wait up to 10s for them to finish.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	modelRegistry.StartLiveModelFetch(ctx, cacheDir, nil)
+	modelRegistry.WaitForLiveFetch(10 * time.Second)
+
+	available := modelRegistry.GetAvailable()
+
+	pattern := ""
+	if s, ok := args.ListAvailModels.(string); ok {
+		pattern = strings.ToLower(s)
+	}
+
+	for _, m := range available {
 		if pattern != "" {
 			name := strings.ToLower(m.Provider + "/" + m.ID)
 			if !strings.Contains(name, pattern) {
@@ -941,6 +998,9 @@ func recordCLIFlags(tracker *Tracker, args *Args) {
 	}
 	if args.ListModels != nil {
 		record("--list-models")
+	}
+	if args.ListAvailModels != nil {
+		record("--list-available-models")
 	}
 	if len(args.FileArgs) > 0 {
 		record("@file")

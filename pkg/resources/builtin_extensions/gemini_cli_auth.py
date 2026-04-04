@@ -422,7 +422,14 @@ def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
 
 @fir_ext.auth_list_models(provider="google-gemini-cli")
 def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
-    """List available models — not supported for Gemini CLI (statically defined)."""
+    """List available models.
+
+    The Cloud Code Assist API exposes retrieveUserQuota which returns quota
+    buckets per model, but only for the user's tier — models outside the
+    tier (e.g. gemini-2.0-flash, gemini-3.1-*) are omitted even though
+    they may still work. Returning None keeps permissive mode so no valid
+    models are accidentally filtered out.
+    """
     return None
 
 

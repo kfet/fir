@@ -53,6 +53,7 @@ type Args struct {
 	Themes             []string
 	NoThemes           bool
 	ListModels         any // true (bool) or string (search pattern)
+	ListAvailModels    any // true (bool) or string (search pattern)
 	Verbose            bool
 	Debug              bool
 	DebugLogFile       string
@@ -227,6 +228,14 @@ func ParseArgs(args []string) *Args {
 				result.ListModels = args[i]
 			} else {
 				result.ListModels = true
+			}
+
+		case arg == "--list-available-models":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "@") {
+				i++
+				result.ListAvailModels = args[i]
+			} else {
+				result.ListAvailModels = true
 			}
 
 		case arg == "--verbose":
