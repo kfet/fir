@@ -71,6 +71,7 @@ def on_session_update(params, ctx):
 NUDGE_MILD = (
     "Your plan has not been updated recently. "
     "Use the plan tool now to mark completed steps and set in_progress on your current step. "
+    "If you already called the plan tool in this response, do NOT call it again. "
     "Continue working after that if not fully finished."
 )
 
@@ -78,7 +79,8 @@ NUDGE_WARN = (
     "You have been reminded multiple times without completing any plan tasks. "
     "You may be stuck in a loop. Stop re-analyzing. "
     "Commit to a change now — even if it means rewriting a file completely rather than patching it.\n\n"
-    "Your plan has incomplete steps. Continue working until all steps are completed or cancelled."
+    "Your plan has incomplete steps. If you already called the plan tool in this response, do NOT call it again. "
+    "Continue working until all steps are completed or cancelled."
 )
 
 NUDGE_CRIT = (
@@ -89,6 +91,7 @@ NUDGE_CRIT = (
     "- STOP running the same commands.\n"
     "- Pick the most problematic file and REWRITE IT COMPLETELY FROM SCRATCH.\n"
     "- If tests are failing due to API changes, the test file itself needs updating.\n"
+    "- If you already called the plan tool in this response, do NOT call it again.\n"
     "- Do not analyze further. Make the change now."
 )
 

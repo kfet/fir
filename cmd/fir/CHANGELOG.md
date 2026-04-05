@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `plan-nudger` extension: added "do not call plan again if you already did" guard to all nudge levels, preventing duplicate plan tool calls when a nudge races with an in-flight plan update.
 - Ctrl+N (new session) now cancels any in-progress LLM stream before starting a new session.
 - `AgentSession.Close()` now aborts any in-flight LLM stream before tearing down, preventing leaked goroutines in ACP session cleanup and shutdown.
 
