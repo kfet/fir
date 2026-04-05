@@ -1,5 +1,10 @@
 package agent
 
+import (
+	"sort"
+	"strings"
+)
+
 // ToolSet is an ordered, name-unique collection of AgentTool values.
 // Adding a tool with a name that already exists overwrites the previous entry
 // (keeping insertion order of the *first* occurrence). This makes duplicate
@@ -115,4 +120,45 @@ func (ts *ToolSet) Clone() *ToolSet {
 		c.byName[k] = v
 	}
 	return c
+}
+
+// ToolClassification holds tools grouped into built-in and per-extension buckets.
+// MCP tools (prefixed "mcp__") are excluded.
+type ToolClassification struct {
+	Builtin    []string            // sorted built-in tool names
+	Extensions map[string][]string // extension name → sorted tool names
+}
+
+// ClassifyTools partitions the tool set into built-in and per-extension groups,
+// excluding MCP tools. extensionTools maps extension name → tool names and is
+// used to attribute tools to their owning extension; any non-MCP tool not in
+// the map is considered built-in. Both the built-in list and per-extension
+// lists are sorted alphabetically.
+func (ts *ToolSet) ClassifyTools(extensionTools map[string][]string) ToolClassification {
+	// Invert extensionTools to tool name → extension name.
+	extToolMap := make(map[string]string)
+	for ext, names := range extensionTools {
+		for _, n := range names {
+			extToolMap[n] = ext
+		}
+	}
+
+	var builtin []string
+	extGrouped := make(map[string][]string)
+	for _, t := range ts.Slice() {
+		if strings.HasPrefix(t.Name, "mcp__") {
+			continue
+		}
+		if ext, ok := extToolMap[t.Name]; ok {
+			extGrouped[ext] = append(extGrouped[ext], t.Name)
+		} else {
+			builtin = append(builtin, t.Name)
+		}
+	}
+
+	sort.Strings(builtin)
+	for ext := range extGrouped {
+		sort.Strings(extGrouped[ext])
+	}
+	return ToolClassification{Builtin: builtin, Extensions: extGrouped}
 }

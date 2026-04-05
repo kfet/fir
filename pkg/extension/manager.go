@@ -52,6 +52,7 @@ type Manager struct {
 	cwd                 string
 	api                 BridgeAPI
 	sdkEnv              []string // cached SDK env vars
+	sdkDir              string   // extracted SDK directory
 	extraExtensionDirs  []string // extra dirs from installed packages
 	extraExtensionFiles []string // extra script files from installed packages
 }
@@ -198,6 +199,7 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 
 	m.mu.Lock()
 	m.sdkEnv = sdkEnv
+	m.sdkDir = sdkPath
 	m.mu.Unlock()
 
 	// Partition into eager (no frontmatter events) and lazy (has frontmatter events).
@@ -603,6 +605,38 @@ func (m *Manager) EnabledExtensionNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ExtensionToolNames returns a map of extension name → tool names for all
+// running (not pending) extensions that have registered tools.
+func (m *Manager) ExtensionToolNames() map[string][]string {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	result := make(map[string][]string)
+	for _, mb := range bridges {
+		if mb.bridge == nil || mb.bridge.caps == nil {
+			continue
+		}
+		name := mb.bridge.caps.Name
+		for _, t := range mb.bridge.caps.Tools {
+			result[name] = append(result[name], t.Name)
+		}
+	}
+	return result
+}
+
+// ManagerPaths holds the filesystem paths used by the extension manager.
+type ManagerPaths struct {
+	SDKDir string // extracted SDK directory (empty if extraction failed)
+}
+
+// Paths returns the filesystem paths used by the extension manager.
+func (m *Manager) Paths() ManagerPaths {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return ManagerPaths{SDKDir: m.sdkDir}
 }
 
 // checkCommandClashes returns an error if any command in cmds conflicts with a

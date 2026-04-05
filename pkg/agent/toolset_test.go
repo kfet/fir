@@ -206,3 +206,64 @@ func TestUpdateTools_ConcurrentMutations(t *testing.T) {
 	// Base tools must survive all mutations.
 	assertHasTools(t, a, base...)
 }
+
+func TestClassifyTools(t *testing.T) {
+	ts := ToolSetFrom([]AgentTool{
+		makeTool("Read"),
+		makeTool("Bash"),
+		makeTool("Edit"),
+		makeTool("aside"),
+		makeTool("doctor_query"),
+		makeTool("doctor_summary"),
+		makeTool("mcp__demo__echo"),
+		makeTool("mcp__gh__pr_list"),
+	})
+
+	extMap := map[string][]string{
+		"aside":  {"aside"},
+		"doctor": {"doctor_query", "doctor_summary"},
+	}
+
+	cls := ts.ClassifyTools(extMap)
+
+	// Built-in: only non-MCP, non-extension tools, sorted.
+	wantBuiltin := []string{"Bash", "Edit", "Read"}
+	if len(cls.Builtin) != len(wantBuiltin) {
+		t.Fatalf("builtin: got %v, want %v", cls.Builtin, wantBuiltin)
+	}
+	for i, name := range wantBuiltin {
+		if cls.Builtin[i] != name {
+			t.Fatalf("builtin[%d]: got %q, want %q", i, cls.Builtin[i], name)
+		}
+	}
+
+	// Extensions: grouped and sorted.
+	if len(cls.Extensions) != 2 {
+		t.Fatalf("extensions: got %d groups, want 2", len(cls.Extensions))
+	}
+	if tools := cls.Extensions["aside"]; len(tools) != 1 || tools[0] != "aside" {
+		t.Fatalf("aside tools: got %v", tools)
+	}
+	if tools := cls.Extensions["doctor"]; len(tools) != 2 || tools[0] != "doctor_query" || tools[1] != "doctor_summary" {
+		t.Fatalf("doctor tools: got %v", tools)
+	}
+}
+
+func TestClassifyTools_NilExtMap(t *testing.T) {
+	ts := ToolSetFrom([]AgentTool{makeTool("Read"), makeTool("mcp__x__y")})
+	cls := ts.ClassifyTools(nil)
+	if len(cls.Builtin) != 1 || cls.Builtin[0] != "Read" {
+		t.Fatalf("got %v, want [Read]", cls.Builtin)
+	}
+	if len(cls.Extensions) != 0 {
+		t.Fatalf("expected no extensions, got %v", cls.Extensions)
+	}
+}
+
+func TestClassifyTools_NilToolSet(t *testing.T) {
+	var ts *ToolSet
+	cls := ts.ClassifyTools(nil)
+	if len(cls.Builtin) != 0 || len(cls.Extensions) != 0 {
+		t.Fatal("expected empty classification for nil ToolSet")
+	}
+}

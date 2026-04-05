@@ -274,6 +274,49 @@ func cmdSession(ctx *commandContext, _ string) {
 			}
 		}
 	}
+	// Tools (exclude MCP tools — those are shown via /mcp)
+	if tools := entry.session.Agent.State().Tools; tools != nil && tools.Len() > 0 {
+		var extToolNames map[string][]string
+		if entry.extSetup != nil && entry.extSetup.Manager != nil {
+			extToolNames = entry.extSetup.Manager.ExtensionToolNames()
+		}
+		cls := tools.ClassifyTools(extToolNames)
+		if len(cls.Builtin) > 0 || len(cls.Extensions) > 0 {
+			info += "\n**Tools**\n\n"
+			if len(cls.Builtin) > 0 {
+				info += fmt.Sprintf("- **Built-in:** %s\n", strings.Join(cls.Builtin, ", "))
+			}
+			extNames := make([]string, 0, len(cls.Extensions))
+			for ext := range cls.Extensions {
+				extNames = append(extNames, ext)
+			}
+			sort.Strings(extNames)
+			for _, ext := range extNames {
+				info += fmt.Sprintf("- **%s:** %s\n", ext, strings.Join(cls.Extensions[ext], ", "))
+			}
+		}
+	}
+
+	// Paths (for debugging)
+	{
+		var pathLines []string
+		if entry.extSetup != nil && entry.extSetup.Manager != nil {
+			paths := entry.extSetup.Manager.Paths()
+			if paths.SDKDir != "" {
+				pathLines = append(pathLines, fmt.Sprintf("- **SDK:** %s\n", paths.SDKDir))
+			}
+		}
+		if dir := resources.BuiltinSkillsDir(); dir != "" {
+			pathLines = append(pathLines, fmt.Sprintf("- **Skills:** %s\n", dir))
+		}
+		if len(pathLines) > 0 {
+			info += "\n**Paths**\n\n"
+			for _, l := range pathLines {
+				info += l
+			}
+		}
+	}
+
 	info += "\n**Messages**\n\n"
 	info += fmt.Sprintf("- **User:** %d\n", stats.UserMessages)
 	info += fmt.Sprintf("- **Assistant:** %d\n", stats.AssistantMessages)

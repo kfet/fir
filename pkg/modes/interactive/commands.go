@@ -836,6 +836,49 @@ func (m *InteractiveMode) handleSessionCommand() {
 			}
 		}
 	}
+	// Tools (exclude MCP tools — those are shown via /mcp)
+	if tools := m.session.Agent.State().Tools; tools != nil && tools.Len() > 0 {
+		var extToolNames map[string][]string
+		if m.extSetup != nil && m.extSetup.Manager != nil {
+			extToolNames = m.extSetup.Manager.ExtensionToolNames()
+		}
+		cls := tools.ClassifyTools(extToolNames)
+		if len(cls.Builtin) > 0 || len(cls.Extensions) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, t.Bold("Tools"))
+			if len(cls.Builtin) > 0 {
+				lines = append(lines, fmt.Sprintf("  %s %s", t.Fg("dim", "Built-in:"), strings.Join(cls.Builtin, ", ")))
+			}
+			extNames := make([]string, 0, len(cls.Extensions))
+			for ext := range cls.Extensions {
+				extNames = append(extNames, ext)
+			}
+			sort.Strings(extNames)
+			for _, ext := range extNames {
+				lines = append(lines, fmt.Sprintf("  %s %s", t.Fg("dim", ext+":"), strings.Join(cls.Extensions[ext], ", ")))
+			}
+		}
+	}
+
+	// Paths (for debugging)
+	{
+		var pathItems []string
+		if m.extSetup != nil && m.extSetup.Manager != nil {
+			paths := m.extSetup.Manager.Paths()
+			if paths.SDKDir != "" {
+				pathItems = append(pathItems, fmt.Sprintf("  %s %s", t.Fg("dim", "SDK:"), paths.SDKDir))
+			}
+		}
+		if dir := resources.BuiltinSkillsDir(); dir != "" {
+			pathItems = append(pathItems, fmt.Sprintf("  %s %s", t.Fg("dim", "Skills:"), dir))
+		}
+		if len(pathItems) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, t.Bold("Paths"))
+			lines = append(lines, pathItems...)
+		}
+	}
+
 	lines = append(lines, "")
 	lines = append(lines, t.Bold("Messages"))
 	lines = append(lines, fmt.Sprintf("%s %d", t.Fg("dim", "User:"), stats.UserMessages))

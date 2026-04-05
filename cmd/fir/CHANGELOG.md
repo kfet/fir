@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/session` command now shows a **Tools** section listing built-in tools and extension tools grouped by extension name. MCP tools are excluded (use `/mcp` instead).
+- `/session` command now shows a **Paths** section with SDK and skills extraction directories for debugging.
+
 ### Removed
 
 - Legacy `~/.fir/agent/` config path support: removed `LegacyFirAgentDir()`, `MigrateConfigFromLegacyDir()`, legacy extension discovery fallback, and legacy session directory scanning. All users should already be on `~/.config/fir/`. The `~/.pi/agent` fallback for Claude Code sessions is retained.

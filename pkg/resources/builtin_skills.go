@@ -61,6 +61,13 @@ func extractBuiltinSkills() (string, error) {
 	return builtinExtractDir, builtinExtractErr
 }
 
+// BuiltinSkillsDir returns the directory where builtin skills are extracted.
+// Returns empty string if extraction hasn't happened or failed.
+func BuiltinSkillsDir() string {
+	dir, _ := extractBuiltinSkills()
+	return dir
+}
+
 // LoadBuiltinSkills loads skills from the embedded builtin_skills/ filesystem.
 func LoadBuiltinSkills() LoadSkillsResult {
 	var skills []Skill
