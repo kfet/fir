@@ -236,11 +236,13 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 }
 
 // ReloadMCP re-reads MCP configs from disk, merges an optional extra config
-// file, and either reloads an existing manager or creates+wires a new one.
-// mgrPtr is updated in place so callers see the new manager.  cwd is the
-// project working directory; extraConfigPath is an additional config file
-// (e.g. from --mcp-config), pass "" to skip.
-func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cwd, extraConfigPath string) error {
+// file and additional in-memory overrides, then either reloads an existing
+// manager or creates+wires a new one.  mgrPtr is updated in place so callers
+// see the new manager.  cwd is the project working directory; extraConfigPath
+// is an additional config file (e.g. from --mcp-config), pass "" to skip.
+// extraConfigs are additional server configs (e.g. client-provided via ACP)
+// that are merged last (highest precedence).
+func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cwd, extraConfigPath string, extraConfigs map[string]mcp.ServerConfig) error {
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {
 		return fmt.Errorf("load MCP config: %w", err)
@@ -252,13 +254,21 @@ func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cw
 		}
 		cfg = mcp.MergeConfigs(cfg, extra)
 	}
+	servers := cfg.MCPServers
+	// Merge in-memory overrides (e.g. ACP client-provided MCP servers).
+	for name, sc := range extraConfigs {
+		if servers == nil {
+			servers = make(map[string]mcp.ServerConfig)
+		}
+		servers[name] = sc
+	}
 	if *mgrPtr != nil {
-		_, err = (*mgrPtr).Reload(ctx, cfg.MCPServers)
+		_, err = (*mgrPtr).Reload(ctx, servers)
 		return err
 	}
 	// No manager yet — create one if configs appeared.
-	if len(cfg.MCPServers) > 0 {
-		*mgrPtr = StartMCPManager(ctx, sess, cfg.MCPServers)
+	if len(servers) > 0 {
+		*mgrPtr = StartMCPManager(ctx, sess, servers)
 	}
 	return nil
 }

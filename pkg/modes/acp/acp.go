@@ -47,22 +47,23 @@ func resolveAgentDir() string {
 
 // firSession holds per-session state.
 type firSession struct {
-	session         *session.AgentSession
-	modelRegistry   *models.ModelRegistry
-	settingsManager *config.SettingsManager
-	extSetup        *extension.SetupResult
-	unsubscribe     func()
-	cwd             string
-	agentDir        string
-	plan            *planTracker
-	termState       *terminalState
-	pendingArgs     sync.Map // toolCallID → map[string]any
-	resumeMu        sync.Mutex
-	lastResumeList  []store.SessionListInfo
-	configAccessor  thinkingAccessor          // nil → use session (for testing)
-	mcpManager      *mcp.Manager              // nil if no MCP servers configured; used for Close()
-	mcpStatus       func() []mcp.ServerStatus // status callback for /session display
-	extReady        chan struct{}             // closed when async extension setup completes
+	session          *session.AgentSession
+	modelRegistry    *models.ModelRegistry
+	settingsManager  *config.SettingsManager
+	extSetup         *extension.SetupResult
+	unsubscribe      func()
+	cwd              string
+	agentDir         string
+	plan             *planTracker
+	termState        *terminalState
+	pendingArgs      sync.Map // toolCallID → map[string]any
+	resumeMu         sync.Mutex
+	lastResumeList   []store.SessionListInfo
+	configAccessor   thinkingAccessor            // nil → use session (for testing)
+	mcpManager       *mcp.Manager                // nil if no MCP servers configured; used for Close()
+	mcpStatus        func() []mcp.ServerStatus   // status callback for /session display
+	extReady         chan struct{}               // closed when async extension setup completes
+	clientMCPConfigs map[string]mcp.ServerConfig // MCP configs from ACP client request, re-merged on reload
 }
 
 // getThinkingAccessor returns the thinkingAccessor for this session.

@@ -103,6 +103,8 @@ func (pa *firAgent) NewSession(ctx context.Context, params acpsdk.NewSessionRequ
 	if err != nil {
 		return acpsdk.NewSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
+	// Store client-provided MCP configs so /reload can re-merge them.
+	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 
 	var models *acpsdk.SessionModelState
 	if m := entry.session.Model(); m != nil {
@@ -347,6 +349,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		if err != nil {
 			return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
 		}
+		entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 		var mdls interface{}
 		if m := entry.session.Model(); m != nil {
 			mdls = BuildModelState(entry.modelRegistry, m)
@@ -408,6 +411,7 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	if err != nil {
 		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
 	}
+	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 
 	// Switch to the requested session file.
 	forked, err := entry.session.SwitchSession(sessionPath)

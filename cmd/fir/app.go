@@ -302,7 +302,7 @@ func reportSettingsErrors(settingsManager *config.SettingsManager, context strin
 // new manager is created, wired to the session, and started.
 func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string, args *Args) func() error {
 	return func() error {
-		return session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig)
+		return session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
 	}
 }
 
