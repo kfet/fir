@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/envvars"
 )
 
 // Mode is the output mode for fir.
@@ -275,8 +276,6 @@ func ParseArgs(args []string) *Args {
 // PrintHelp prints the CLI usage information.
 func PrintHelp() {
 	appName := "fir"
-	configDir := ".fir"
-	envAgentDir := "FIR_AGENT_DIR"
 
 	fmt.Printf(`%s - AI coding assistant with read, bash, edit, write tools
 
@@ -359,18 +358,7 @@ Examples:
   %s update
 
 Environment Variables:
-  ANTHROPIC_API_KEY                - Anthropic Claude API key
-  OPENAI_API_KEY                   - OpenAI GPT API key
-  GEMINI_API_KEY                   - Google Gemini API key
-  GROQ_API_KEY                     - Groq API key
-  XAI_API_KEY                      - xAI Grok API key
-  OPENROUTER_API_KEY               - OpenRouter API key
-  MISTRAL_API_KEY                  - Mistral API key
-  AWS_PROFILE                      - AWS profile for Amazon Bedrock
-  FIR_DEBUG                        - Enable debug logging (set to 1)
-  FIR_DEBUG_LOG                    - Debug log file path
-  FIR_MCP_CONFIG                   - Extra MCP config file path (--mcp-config flag wins)
-  %-32s - Session storage directory (default: ~/%s/agent)
+%s
 
 Available Tools (default: read, bash, edit, write):
   read   - Read file contents
@@ -380,5 +368,5 @@ Available Tools (default: read, bash, edit, write):
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envAgentDir, configDir)
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
 }

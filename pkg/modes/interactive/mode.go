@@ -511,6 +511,16 @@ func (m *InteractiveMode) Send(_ any) {
 // returns. It is safe to call multiple times.
 func (m *InteractiveMode) Cleanup() {
 	m.shutdown()
+
+	// Restore stdin to blocking mode.  Go's runtime sets stdin to
+	// O_NONBLOCK for its internal I/O poller, and in some scenarios
+	// (notably after syscall.Exec from /reexec) the runtime's own
+	// cleanup on exit fails to restore blocking mode.  This leaves
+	// the parent shell's stdin non-blocking, which causes it to
+	// read EAGAIN, interpret it as EOF, and exit — closing the
+	// terminal.  Explicitly clearing the flag here is harmless when
+	// unnecessary and prevents the shell from dying.
+	restoreStdinBlocking()
 }
 
 // Compile-time assertion: InteractiveMode must satisfy tui.UI.

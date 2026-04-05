@@ -6,6 +6,9 @@
 
 - `/session` command now shows a **Tools** section listing built-in tools and extension tools grouped by extension name. MCP tools are excluded (use `/mcp` instead).
 - `/session` command now shows a **Paths** section with SDK and skills extraction directories for debugging.
+- `FIR_EXT_TIMEOUT` environment variable: configurable extension init handshake timeout in seconds (default: 5). Useful for slow hardware (e.g. Raspberry Pi) where extensions need more time to start.
+- `pkg/envvars` registry: single source of truth for all `FIR_*` environment variables. Both CLI `--help` and the `self` skill now read from the same registry, so documentation can never drift.
+- `self` skill: added `## Environment Variables` section with full table of all public env vars, auto-generated from the registry via `{{FIR_ENV_VARS_TABLE}}` placeholder.
 
 ### Removed
 
@@ -13,6 +16,7 @@
 
 ### Fixed
 
+- After `/reexec`, closing the session no longer kills the parent terminal (restore stdin blocking mode on every exit path, not just before exec).
 - `plan-nudger` extension: added "do not call plan again if you already did" guard to all nudge levels, preventing duplicate plan tool calls when a nudge races with an in-flight plan update.
 - Ctrl+N (new session) now cancels any in-progress LLM stream before starting a new session.
 - `AgentSession.Close()` now aborts any in-flight LLM stream before tearing down, preventing leaked goroutines in ACP session cleanup and shutdown.

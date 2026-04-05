@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/kfet/fir/pkg/envvars"
 )
 
 //go:embed builtin_skills
@@ -51,6 +53,10 @@ func extractBuiltinSkills() (string, error) {
 			perm := os.FileMode(0o644)
 			if strings.HasSuffix(path, ".sh") {
 				perm = 0o755
+			}
+			// Expand template placeholders in SKILL.md files.
+			if d.Name() == "SKILL.md" {
+				data = expandSkillPlaceholders(data)
 			}
 			return os.WriteFile(target, data, perm)
 		})
@@ -122,4 +128,18 @@ func LoadBuiltinSkills() LoadSkillsResult {
 	})
 
 	return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+}
+
+// expandSkillPlaceholders replaces known template markers in builtin SKILL.md
+// files so that documentation stays in sync with the code.
+//
+// Supported placeholders:
+//
+//	{{FIR_ENV_VARS_TABLE}} — Markdown table of all public environment variables.
+func expandSkillPlaceholders(data []byte) []byte {
+	s := string(data)
+	if strings.Contains(s, "{{FIR_ENV_VARS_TABLE}}") {
+		s = strings.ReplaceAll(s, "{{FIR_ENV_VARS_TABLE}}", envvars.FormatMarkdownTable())
+	}
+	return []byte(s)
 }
