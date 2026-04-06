@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- Extension shutdown is now parallelised: event emission and process stopping happen concurrently instead of sequentially, significantly reducing exit latency on low-powered hardware (e.g. Raspberry Pi) with multiple extensions.
 - Model selector no longer calls `Refresh()` synchronously when opened, eliminating a slow full reload of models.json, built-in models, and OAuth hooks on every open. Dramatically improves model selector responsiveness on low-power devices like Raspberry Pi.
 - Fixed flaky `TestHandleQueueCommand_ShowsQueuedMessages` test by replacing fixed sleep with polling.
 - After `/reexec`, closing the session no longer kills the parent terminal (restore stdin blocking mode on every exit path, not just before exec). AST-based regression test added to prevent this from regressing again.

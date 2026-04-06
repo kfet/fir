@@ -431,24 +431,40 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 		payload["error"] = errMsg
 	}
 
-	// Send session_end event to all extensions and give them a moment
-	// to handle it (e.g. restore tmux window names, record diagnostics)
-	// before killing. Also send legacy session_shutdown for compat.
+	// Send session_end event to all extensions concurrently so slow
+	// extensions on low-powered hardware (e.g. RPi) don't serialise the
+	// shutdown path.  Also send legacy session_shutdown for compat.
+	var wg sync.WaitGroup
 	for _, mb := range bridges {
-		_ = mb.bridge.EmitEvent("session_end", payload)
-		_ = mb.bridge.EmitEvent("session_shutdown", nil)
+		wg.Add(1)
+		go func(mb *managedBridge) {
+			defer wg.Done()
+			_ = mb.bridge.EmitEvent("session_end", payload)
+			_ = mb.bridge.EmitEvent("session_shutdown", nil)
+		}(mb)
 	}
+	wg.Wait()
 
 	// Brief grace period so extensions can process the shutdown event.
 	time.Sleep(250 * time.Millisecond)
 
+	// Stop all processes concurrently — each Stop already has its own
+	// SIGTERM→SIGKILL escalation with timeouts, so parallel teardown is
+	// safe and avoids O(n) sequential waits on slow hardware.
 	for _, mb := range bridges {
 		mb.bridge.UnregisterAuthProviders()
 		mb.cancel()
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = mb.proc.Stop(ctx)
-		cancel()
 	}
+	for _, mb := range bridges {
+		wg.Add(1)
+		go func(mb *managedBridge) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = mb.proc.Stop(ctx)
+			cancel()
+		}(mb)
+	}
+	wg.Wait()
 	return nil
 }
 
