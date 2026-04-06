@@ -234,6 +234,18 @@ func (tm *testMode) renderedOutput() string {
 	return strings.Join(tm.term.GetOutput(), "")
 }
 
+// waitForOutput polls until the rendered output contains substr or 500ms elapses.
+func (tm *testMode) waitForOutput(substr string) bool {
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if strings.Contains(tm.renderedOutput(), substr) {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
 func (tm *testMode) messageCount() int {
 	return len(tm.mode.messageContainer.ChildrenSnapshot())
 }
@@ -1470,14 +1482,12 @@ func TestHandleQueueCommand_ShowsQueuedMessages(t *testing.T) {
 	tm.mode.session.Agent.FollowUp(agent.NewAgentMessage(ai.NewUserMsg("second message", 0)))
 
 	tm.mode.handleQueueCommand()
-	tm.waitRender()
 
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "hello world") {
-		t.Errorf("expected 'hello world' in queue listing, got:\n%s", output)
+	if !tm.waitForOutput("hello world") {
+		t.Errorf("expected 'hello world' in queue listing, got:\n%s", tm.renderedOutput())
 	}
-	if !strings.Contains(output, "second message") {
-		t.Errorf("expected 'second message' in queue listing, got:\n%s", output)
+	if !tm.waitForOutput("second message") {
+		t.Errorf("expected 'second message' in queue listing, got:\n%s", tm.renderedOutput())
 	}
 	// Queue must be preserved.
 	if tm.mode.session.Agent.FollowUpQueueLen() != 2 {

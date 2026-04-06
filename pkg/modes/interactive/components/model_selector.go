@@ -109,7 +109,11 @@ func (c *ModelSelectorComponent) SetFocused(focused bool) {
 }
 
 func (c *ModelSelectorComponent) loadModels() {
-	c.modelRegistry.Refresh()
+	// Don't call modelRegistry.Refresh() here — it synchronously re-reads
+	// models.json, rebuilds all built-in models, and runs OAuth hooks, which
+	// is expensive on low-power devices (e.g. Raspberry Pi). The registry is
+	// already populated at startup and kept current by background live-model
+	// fetches and login/logout flows.
 
 	if err := c.modelRegistry.GetError(); err != "" {
 		c.errorMessage = err
