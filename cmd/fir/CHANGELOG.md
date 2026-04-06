@@ -4,6 +4,7 @@
 
 ### Added
 
+- MCP server initialization notifications: the TUI and ACP mode now show a message when each MCP server finishes connecting (or fails), so users know when tools are ready.
 - `/session` command now shows a **Tools** section listing built-in tools and extension tools grouped by extension name. MCP tools are excluded (use `/mcp` instead).
 - `/session` command now shows a **Paths** section with SDK and skills extraction directories for debugging.
 - `FIR_EXT_TIMEOUT` environment variable: configurable extension init handshake timeout in seconds (default: 5). Useful for slow hardware (e.g. Raspberry Pi) where extensions need more time to start.

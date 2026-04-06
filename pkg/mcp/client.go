@@ -98,6 +98,12 @@ type Manager struct {
 	// May be nil.
 	onResourceUpdated atomic.Value // func(serverName, uri string)
 
+	// onServerReady is called (from a background goroutine) when an individual
+	// MCP server finishes its initial connection attempt. The first argument is
+	// the server name; the second is nil on success or the connection error.
+	// May be nil.
+	onServerReady atomic.Value // func(name string, err error)
+
 	// onChannelMessage is called when a channel-capable MCP server sends a
 	// notifications/claude/channel notification. May be nil.
 	onChannelMessage atomic.Value // func(ChannelMessage)
@@ -169,6 +175,22 @@ func (m *Manager) loadOnChannelMessage() func(ChannelMessage) {
 		return v.(func(ChannelMessage))
 	}
 	return nil
+}
+
+// loadOnServerReady returns the current onServerReady callback, or nil.
+func (m *Manager) loadOnServerReady() func(string, error) {
+	if v := m.onServerReady.Load(); v != nil {
+		return v.(func(string, error))
+	}
+	return nil
+}
+
+// SetOnServerReady sets the callback invoked when an individual MCP server
+// finishes its initial connection attempt. The callback receives the server
+// name and nil on success, or a non-nil error on failure.
+// Safe to call concurrently with running servers.
+func (m *Manager) SetOnServerReady(fn func(name string, err error)) {
+	m.onServerReady.Store(fn)
 }
 
 // loadOnResourceUpdated returns the current onResourceUpdated callback, or nil.
@@ -301,6 +323,9 @@ func (m *Manager) Start(ctx context.Context) {
 			}
 			if notify := m.loadOnToolsChanged(); notify != nil {
 				notify(m.allTools())
+			}
+			if ready := m.loadOnServerReady(); ready != nil {
+				ready(name, err)
 			}
 		}()
 		return true

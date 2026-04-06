@@ -247,6 +247,16 @@ func (m *InteractiveMode) NotifyExtensionFailures(failures []extension.StartFail
 	}
 }
 
+// NotifyMCPServerReady shows UI feedback when an MCP server finishes its
+// initial connection attempt. Safe to call from any goroutine.
+func (m *InteractiveMode) NotifyMCPServerReady(name string, err error) {
+	if err != nil {
+		m.showWarning(fmt.Sprintf("MCP server %q failed to connect: %v", name, err))
+	} else {
+		m.showMessage(fmt.Sprintf("MCP server %q connected", name))
+	}
+}
+
 // SetUpdateChannel supplies a channel that delivers a single update notice
 // string (or "") once the background version check completes.  When the
 // notice is non-empty it is shown in the TUI message area at startup.

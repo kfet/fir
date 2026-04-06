@@ -206,6 +206,13 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		SessionStore:    store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
 		Tools:           toolList,
 		MCPConfigs:      mcpConfigs,
+		OnMCPServerReady: func(name string, err error) {
+			if err != nil {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q failed to connect: %v", name, err))
+			} else {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connected", name))
+			}
+		},
 		ResourceLoaderOptions: &resources.ResourceLoaderOptions{
 			Cwd:                           cwd,
 			AgentDir:                      agentDir,

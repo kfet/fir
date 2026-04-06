@@ -56,6 +56,11 @@ type SetupOptions struct {
 	// MCPConfigs are the MCP server configurations to start. When empty, no MCP.
 	MCPConfigs map[string]mcp.ServerConfig
 
+	// OnMCPServerReady is called when each MCP server finishes its initial
+	// connection attempt. Receives the server name and nil on success, or
+	// a non-nil error. Optional.
+	OnMCPServerReady func(name string, err error)
+
 	// ExtReady is closed when extensions finish loading. Live model fetching
 	// for OAuth providers waits on this. When nil, OAuth fetching starts immediately.
 	ExtReady <-chan struct{}
@@ -181,7 +186,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// --- Wire and start MCP servers ---
-	mcpMgr := StartMCPManager(ctx, result.Session, opts.MCPConfigs)
+	mcpMgr := StartMCPManagerWithOptions(ctx, result.Session, opts.MCPConfigs, MCPManagerOptions{
+		OnServerReady: opts.OnMCPServerReady,
+	})
 
 	return &SetupResult{
 		Session:              result.Session,
@@ -195,11 +202,25 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	}, nil
 }
 
+// MCPManagerOptions configures optional callbacks for a new MCP Manager.
+type MCPManagerOptions struct {
+	// OnServerReady is called when each MCP server finishes its initial
+	// connection attempt. The callback receives the server name and nil on
+	// success, or a non-nil error on failure.
+	OnServerReady func(name string, err error)
+}
+
 // StartMCPManager creates a new MCP Manager, wires it to the given session
 // (channel injection + tool-change callback), and starts it.  This is the
 // same wiring that Setup performs internally and is exported so that callers
 // (interactive /reload, ACP /reload) can spin up MCP after initial setup.
 func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string]mcp.ServerConfig) *mcp.Manager {
+	return StartMCPManagerWithOptions(ctx, sess, configs, MCPManagerOptions{})
+}
+
+// StartMCPManagerWithOptions is like StartMCPManager but accepts additional
+// callbacks via MCPManagerOptions.
+func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs map[string]mcp.ServerConfig, opts MCPManagerOptions) *mcp.Manager {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -229,6 +250,10 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 		}
 		prevMCPNames = names
 	})
+
+	if opts.OnServerReady != nil {
+		mgr.SetOnServerReady(opts.OnServerReady)
+	}
 
 	mgr.Start(ctx)
 	firlog.Info("MCP servers starting", "servers", len(configs))

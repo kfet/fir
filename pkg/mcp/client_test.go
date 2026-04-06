@@ -690,6 +690,74 @@ func TestManager_Status_ConnectError(t *testing.T) {
 	assert.Error(t, statuses[0].Error)
 }
 
+func TestManager_OnServerReady_Success(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	type readyEvent struct {
+		name string
+		err  error
+	}
+	readyCh := make(chan readyEvent, 1)
+	mgr.SetOnServerReady(func(name string, err error) {
+		readyCh <- readyEvent{name, err}
+	})
+	startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+
+	select {
+	case ev := <-readyCh:
+		assert.Equal(t, "srv", ev.name)
+		assert.NoError(t, ev.err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for onServerReady callback")
+	}
+}
+
+func TestManager_OnServerReady_Error(t *testing.T) {
+	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
+	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+		return nil, errors.New("dial failed")
+	}
+
+	type readyEvent struct {
+		name string
+		err  error
+	}
+	readyCh := make(chan readyEvent, 1)
+	mgr.SetOnServerReady(func(name string, err error) {
+		readyCh <- readyEvent{name, err}
+	})
+
+	toolsCh := make(chan []agent.AgentTool, 1)
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
+		toolsCh <- tools
+	})
+	mgr.Start(context.Background())
+
+	// Wait for the failure to propagate.
+	select {
+	case <-toolsCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for tools notification")
+	}
+
+	select {
+	case ev := <-readyCh:
+		assert.Equal(t, "bad", ev.name)
+		assert.Error(t, ev.err)
+		assert.Contains(t, ev.err.Error(), "dial failed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for onServerReady callback")
+	}
+}
+
 // TestManager_Status_AfterServerDisconnect verifies that when a server
 // disconnects after the initial connection is established, Status() updates to
 // reflect Connected:false and a non-nil Error.

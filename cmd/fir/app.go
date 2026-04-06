@@ -852,6 +852,13 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	)
 	interactive.SetVersion(version)
 
+	// Notify the TUI when MCP servers finish initializing.
+	if setup.mcpManager != nil {
+		setup.mcpManager.SetOnServerReady(func(name string, err error) {
+			mode.NotifyMCPServerReady(name, err)
+		})
+	}
+
 	// ui is the stable interface contract used for all lifecycle calls.
 	var ui tui.UI = mode
 
