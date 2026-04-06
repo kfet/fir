@@ -12,7 +12,7 @@ Use the `aside` tool to do all the work ephemerally. The aside should:
 
 3. Open a new tmux window and launch fir inside it with the user's task as the initial prompt. Make sure to pass the FULL task description (from "Task:" above) into the fir command, properly escaped for the shell:
 ```bash
-tmux new-window -c "<project-parent>/<project>-wt-<feature-name>" "fir --session-name '<feature-name>' '<full task description>'"
+tmux new-window -c "<project-parent>/<project>-wt-<feature-name>" "fir --session-name '<feature-name>' '<full task description>'; exec \$SHELL"
 ```
 
 4. Return a summary of what was done: worktree path, branch, and the tmux window where fir is running.
