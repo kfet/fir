@@ -49,9 +49,9 @@ build: tidy
 	@$(MAKE) --no-print-directory check-size
 
 # `make all` runs fmt first, then everything else in parallel via recursive make -j.
-# The _all_parallel target declares independent prerequisites that make -j can schedule.
+# TIDY_DONE=1 tells sub-targets to skip redundant go-mod-tidy (already ran here).
 all: fmt tidy
-	@$(MAKE) -j --no-print-directory _all_parallel
+	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
 _all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
 
@@ -79,8 +79,11 @@ check-size:
 	fi
 
 # Ensure modules are tidy once; other targets depend on this.
+# Skipped when TIDY_DONE=1 (set by `make all` after running tidy upfront).
 tidy:
+ifndef TIDY_DONE
 	@go mod tidy
+endif
 
 # Cross-compile for all targets (each is an independent phony target for parallelism)
 CROSS_TARGETS := build-darwin-arm64 build-darwin-amd64 build-linux-armv6 build-linux-arm64 build-linux-amd64

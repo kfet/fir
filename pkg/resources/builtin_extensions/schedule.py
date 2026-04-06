@@ -38,6 +38,9 @@ from datetime import datetime, timedelta, timezone
 
 import fir_ext
 
+# Tick interval for countdown loop (seconds). Tests may override for speed.
+_TICK = 1.0
+
 # ---------------------------------------------------------------------------
 # Module-level schedule state (protected by _lock)
 # ---------------------------------------------------------------------------
@@ -154,7 +157,7 @@ def _run_countdown(
             break
         with contextlib.suppress(Exception):
             _update_status(ctx)
-        stop.wait(1.0)
+        stop.wait(_TICK)
 
     if stop.is_set():
         with _lock:

@@ -372,18 +372,38 @@ class TestCountdownThread(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Integration test — real threads, real timers (short durations).
+# Integration test — real threads, accelerated clock for speed.
 # ---------------------------------------------------------------------------
 
 
+class _FastClock:
+    """Clock that runs *speed*x faster than real time."""
+
+    def __init__(self, speed: int = 50):
+        self._start_real = datetime.now(tz=timezone.utc)
+        self._start_virt = datetime.now(tz=timezone.utc)
+        self._speed = speed
+
+    def __call__(self) -> datetime:
+        elapsed = datetime.now(tz=timezone.utc) - self._start_real
+        return self._start_virt + elapsed * self._speed
+
+
 class TestIntegration(unittest.TestCase):
-    """End-to-end test using real threads with short timers."""
+    """End-to-end test using real threads with accelerated clock."""
 
     def setUp(self):
         _reset()
+        self._clock = _FastClock(speed=50)
+        self._now_patch = mock.patch.object(schedule, "_now", self._clock)
+        self._tick_patch = mock.patch.object(schedule, "_TICK", 0.02)
+        self._now_patch.start()
+        self._tick_patch.start()
 
     def tearDown(self):
         _reset()
+        self._tick_patch.stop()
+        self._now_patch.stop()
 
     def test_schedule_fires_continue(self):
         """Schedule 1s, wait for the thread to fire send_user_message('continue')."""
@@ -393,11 +413,11 @@ class TestIntegration(unittest.TestCase):
             self.assertIn("Scheduled", result["message"])
 
             # Wait for the countdown thread to finish and fire.
-            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=4)
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=3)
             while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.called:
                     break
-                threading.Event().wait(0.1)
+                threading.Event().wait(0.02)
 
             ctx.send_user_message.assert_called_once_with("continue")
             with schedule._lock:
@@ -410,30 +430,33 @@ class TestIntegration(unittest.TestCase):
             result = schedule.cmd_schedule(["1s", "hello", "world"], ctx)
             self.assertIn("send message", result["message"])
 
-            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=4)
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=3)
             while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.called:
                     break
-                threading.Event().wait(0.1)
+                threading.Event().wait(0.02)
 
             ctx.send_user_message.assert_called_once_with("hello world")
             ctx.continue_session.assert_not_called()
 
     def test_multiple_schedules_fire_independently(self):
         """Two schedules at different times both fire."""
-        with _Timeout(10):
+        with _Timeout(5):
             ctx = mock.MagicMock()
-            schedule.cmd_schedule(["1s", "first"], ctx)
-            schedule.cmd_schedule(["2s", "second"], ctx)
-            with schedule._lock:
-                self.assertEqual(len(schedule._schedules), 2)
+            # Pause the fast clock so both schedules are created before
+            # the countdown threads can fire.
+            with mock.patch.object(schedule, "_TICK", 0.5):
+                schedule.cmd_schedule(["1s", "first"], ctx)
+                schedule.cmd_schedule(["2s", "second"], ctx)
+                with schedule._lock:
+                    self.assertEqual(len(schedule._schedules), 2)
 
-            # Wait for both to fire.
-            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=5)
+            # Restore fast tick and wait for both to fire.
+            deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=3)
             while datetime.now(tz=timezone.utc) < deadline:
                 if ctx.send_user_message.call_count >= 2:
                     break
-                threading.Event().wait(0.1)
+                threading.Event().wait(0.02)
 
             self.assertEqual(ctx.send_user_message.call_count, 2)
             calls = [c.args[0] for c in ctx.send_user_message.call_args_list]
@@ -454,7 +477,7 @@ class TestIntegration(unittest.TestCase):
             self.assertIn("cancelled", result["message"])
 
             # Wait a bit to confirm it doesn't fire.
-            threading.Event().wait(1.0)
+            threading.Event().wait(0.15)
             ctx.continue_session.assert_not_called()
             ctx.send_user_message.assert_not_called()
 
