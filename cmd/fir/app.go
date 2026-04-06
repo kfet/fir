@@ -199,6 +199,16 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: extension setup failed: %v\n", err)
 			}
+			// Report extension startup failures to stderr.
+			if extSetup != nil {
+				for _, f := range extSetup.StartFailures() {
+					if f.IsAuth {
+						fmt.Fprintf(os.Stderr, "Error: auth extension %q failed to start: %v\n", f.Name, f.Err)
+					} else {
+						fmt.Fprintf(os.Stderr, "Warning: extension %q failed to start: %v\n", f.Name, f.Err)
+					}
+				}
+			}
 			// Re-resolve the session's model from the registry so it
 			// picks up any headers set by auth extension ModifyModels
 			// hooks (e.g. OAuth Bearer token).  The debounced auto-
@@ -879,6 +889,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 				})
 				refreshSessionModel(setup.result.Session, setup.result.Session.ModelRegistryRef())
 				es.EmitSessionStart(mode.ReexecExtData())
+				mode.NotifyExtensionFailures(es.StartFailures())
 			}
 		}()
 	} else {

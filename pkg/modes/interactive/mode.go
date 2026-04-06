@@ -231,6 +231,22 @@ func (m *InteractiveMode) SetBeforeExtensionReload(fn func() error) {
 	m.beforeExtensionReload = fn
 }
 
+// NotifyExtensionFailures shows UI feedback for extensions that failed to
+// start. Auth-provider extensions get a prominent warning; other extensions
+// get a subtle muted message so the user knows without being interrupted.
+func (m *InteractiveMode) NotifyExtensionFailures(failures []extension.StartFailure) {
+	if len(failures) == 0 {
+		return
+	}
+	for _, f := range failures {
+		if f.IsAuth {
+			m.showWarning(fmt.Sprintf("Auth extension %q failed to start: %v", f.Name, f.Err))
+		} else {
+			m.showMessage(fmt.Sprintf("Extension %q failed to start: %v", f.Name, f.Err))
+		}
+	}
+}
+
 // SetUpdateChannel supplies a channel that delivers a single update notice
 // string (or "") once the background version check completes.  When the
 // notice is non-empty it is shown in the TUI message area at startup.

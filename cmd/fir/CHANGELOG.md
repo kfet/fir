@@ -9,6 +9,8 @@
 - `FIR_EXT_TIMEOUT` environment variable: configurable extension init handshake timeout in seconds (default: 5). Useful for slow hardware (e.g. Raspberry Pi) where extensions need more time to start.
 - `pkg/envvars` registry: single source of truth for all `FIR_*` environment variables. Both CLI `--help` and the `self` skill now read from the same registry, so documentation can never drift.
 - `self` skill: added `## Environment Variables` section with full table of all public env vars, auto-generated from the registry via `{{FIR_ENV_VARS_TABLE}}` placeholder.
+- Extension startup failure notifications: when an extension fails to start, a warning is shown. Auth extensions get a prominent warning; regular extensions get a subtle muted message.
+- Deterministic auth provider conflict resolution: when multiple extensions register the same auth provider ID, the highest-scope extension wins (project > global > package > builtin). Same-scope ties are broken alphabetically and produce a user-visible warning.
 
 ### Removed
 

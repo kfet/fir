@@ -47,6 +47,9 @@ type Manager struct {
 	// user wants the frontmatter auto-fixed. When nil, only a warning is logged.
 	OfferFixFn func(mm FrontmatterMismatch) bool
 
+	// startFailures records extensions that failed during Start.
+	startFailures []StartFailure
+
 	// Saved from Start() for Reload().
 	projectDir          string
 	cwd                 string
@@ -62,6 +65,13 @@ type managedBridge struct {
 	proc   *Process
 	bridge *Bridge
 	cancel context.CancelFunc
+}
+
+// StartFailure records an extension that failed to start.
+type StartFailure struct {
+	Name   string // extension name
+	IsAuth bool   // true when the extension provides auth providers
+	Err    error  // the error that prevented startup
 }
 
 // pendingExtension is an extension that declared its events/commands in
@@ -226,6 +236,8 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	// Start eager extensions concurrently — handshakes involve spawning
 	// Python interpreters and are I/O-bound, so parallelism helps a lot.
 	var wg sync.WaitGroup
+	var failMu sync.Mutex
+	var failures []StartFailure
 	for _, cfg := range eager {
 		wg.Add(1)
 		go func(cfg ExtProcConfig) {
@@ -233,10 +245,25 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 			if err := m.startOne(ctx, cfg, cwd, sdkEnv, api, projectDir); err != nil {
 				m.logger.Warn("failed to start extension",
 					"ext", cfg.Name, "err", err)
+				failMu.Lock()
+				failures = append(failures, StartFailure{
+					Name:   cfg.Name,
+					IsAuth: len(cfg.AuthProviders) > 0,
+					Err:    err,
+				})
+				failMu.Unlock()
 			}
 		}(cfg)
 	}
 	wg.Wait()
+
+	m.mu.Lock()
+	m.startFailures = failures
+	m.mu.Unlock()
+
+	// Resolve auth provider ID collisions deterministically by scope priority.
+	m.resolveAuthConflicts()
+
 	return nil
 }
 
@@ -499,6 +526,10 @@ func (m *Manager) startPendingForEvent(name string) {
 		}(cfg)
 	}
 	wg.Wait()
+
+	// A lazy-started extension may have registered auth providers that
+	// conflict with an already-running extension. Resolve deterministically.
+	m.resolveAuthConflicts()
 }
 
 // EmitEvent fans out a notification to all bridges.
@@ -563,6 +594,93 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// scopePriority returns a numeric priority for an extension scope.
+// Higher values win when two extensions register the same auth provider ID.
+func scopePriority(scope string) int {
+	switch scope {
+	case "builtin":
+		return 0
+	case "package":
+		return 1
+	case "global":
+		return 2
+	case "project":
+		return 3
+	default:
+		return -1
+	}
+}
+
+// resolveAuthConflicts detects auth provider ID collisions across running
+// bridges and keeps only the highest-scope-priority registration for each ID.
+// Lower-priority duplicates are unregistered from the global oauth registry
+// and a warning is logged. Must be called with m.mu NOT held.
+func (m *Manager) resolveAuthConflicts() {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	notifyFn := m.notifyFn
+	m.mu.Unlock()
+
+	// Map auth provider ID → best bridge so far.
+	type winner struct {
+		mb       *managedBridge
+		priority int
+	}
+	best := make(map[string]*winner)
+
+	for _, mb := range bridges {
+		if mb.bridge == nil || mb.bridge.caps == nil {
+			continue
+		}
+		pri := scopePriority(mb.cfg.Scope)
+		for _, ap := range mb.bridge.caps.AuthProviders {
+			w, exists := best[ap.ID]
+			if !exists {
+				best[ap.ID] = &winner{mb: mb, priority: pri}
+				continue
+			}
+			// Conflict — keep higher priority, evict the other.
+			var loser *managedBridge
+			if pri > w.priority {
+				loser = w.mb
+				best[ap.ID] = &winner{mb: mb, priority: pri}
+			} else if pri == w.priority {
+				// Same scope — deterministic tie-break by extension name.
+				if mb.cfg.Name < w.mb.cfg.Name {
+					loser = w.mb
+					best[ap.ID] = &winner{mb: mb, priority: pri}
+				} else {
+					loser = mb
+				}
+				m.logger.Warn("auth provider conflict: two same-scope extensions register the same ID; keeping alphabetically first",
+					"auth_provider", ap.ID,
+					"scope", mb.cfg.Scope,
+					"kept", best[ap.ID].mb.cfg.Name,
+					"dropped", loser.cfg.Name,
+				)
+				if notifyFn != nil {
+					notifyFn("warning", fmt.Sprintf(
+						"Auth provider %q conflict: extensions %q and %q (both %s scope) register the same ID. Keeping %q.",
+						ap.ID, best[ap.ID].mb.cfg.Name, loser.cfg.Name, mb.cfg.Scope, best[ap.ID].mb.cfg.Name,
+					))
+				}
+			} else {
+				loser = mb
+				m.logger.Warn("auth provider conflict: higher-scope extension wins",
+					"auth_provider", ap.ID,
+					"kept", best[ap.ID].mb.cfg.Name,
+					"dropped", loser.cfg.Name,
+				)
+			}
+			// Unregister the loser's registration from the global registry.
+			loser.bridge.UnregisterAuthProvider(ap.ID)
+			// Re-register the winner to ensure it owns the slot, since
+			// the concurrent RegisterProvider calls may have overwritten it.
+			best[ap.ID].mb.bridge.ReregisterAuthProvider(ap.ID)
+		}
+	}
 }
 
 // EnabledExtensionNames returns the enabled extension names for this manager.
@@ -637,6 +755,14 @@ func (m *Manager) Paths() ManagerPaths {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return ManagerPaths{SDKDir: m.sdkDir}
+}
+
+// StartFailures returns extensions that failed during the most recent Start
+// or Reload. The slice is cleared on each Start call.
+func (m *Manager) StartFailures() []StartFailure {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]StartFailure(nil), m.startFailures...)
 }
 
 // checkCommandClashes returns an error if any command in cmds conflicts with a

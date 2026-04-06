@@ -119,6 +119,15 @@ func (r *SetupResult) EmitSessionShutdown() {
 	r.Stop()
 }
 
+// StartFailures returns extensions that failed during the most recent startup.
+// Returns nil when the Manager is nil or no failures occurred.
+func (r *SetupResult) StartFailures() []StartFailure {
+	if r.Manager == nil {
+		return nil
+	}
+	return r.Manager.StartFailures()
+}
+
 // Reload stops all running extensions, re-discovers them, and starts fresh.
 func (r *SetupResult) Reload(ctx context.Context) error {
 	if r.Manager == nil {

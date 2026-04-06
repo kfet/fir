@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai/oauth"
 )
 
 // builtinToolCount is the number of tools registered by builtin extensions
@@ -635,5 +637,247 @@ func TestManager_checkCommandClashes_noConflict(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestManager_StartFailures_BadScript(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a script that exits immediately (handshake will fail).
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, "bad-ext")
+	content := "#!/bin/sh\n# ---\n# name: bad-ext\n# ---\nexit 1\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	hash, _ := ComputeHash(script)
+	_ = ts.RecordTrust(dir, "bad-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start should not return an error itself — failures are collected.
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	failures := mgr.StartFailures()
+	found := false
+	for _, f := range failures {
+		if f.Name == "bad-ext" {
+			found = true
+			if f.Err == nil {
+				t.Error("expected non-nil error for bad-ext")
+			}
+			if f.IsAuth {
+				t.Error("bad-ext should not be marked as auth")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected bad-ext in StartFailures, got %v", failures)
+	}
+}
+
+func TestManager_StartFailures_AuthExt(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write a script with auth_providers in frontmatter that exits immediately.
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, "auth-bad")
+	content := "#!/bin/sh\n# ---\n# name: auth-bad\n# auth_providers: my-auth\n# ---\nexit 1\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	hash, _ := ComputeHash(script)
+	_ = ts.RecordTrust(dir, "auth-bad", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	failures := mgr.StartFailures()
+	found := false
+	for _, f := range failures {
+		if f.Name == "auth-bad" {
+			found = true
+			if !f.IsAuth {
+				t.Error("auth-bad should be marked as auth extension")
+			}
+			if f.Err == nil {
+				t.Error("expected non-nil error for auth-bad")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected auth-bad in StartFailures, got %v", failures)
+	}
+}
+
+func TestManager_StartFailures_Empty(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeExtScript(t, dir, "good-ext")
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	hash, _ := ComputeHash(scriptPath)
+	_ = ts.RecordTrust(dir, "good-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	// Wait for extension to register
+	pollToolCount(api, builtinToolCount+1, 5*time.Second)
+
+	failures := mgr.StartFailures()
+	if len(failures) != 0 {
+		t.Errorf("expected no failures, got %v", failures)
+	}
+}
+
+// writeAuthExtScript writes an extension that registers an auth provider during handshake.
+func writeAuthExtScript(t *testing.T, dir, name, scope, authProviderID string) string {
+	t.Helper()
+	var extDir string
+	switch scope {
+	case "project":
+		extDir = filepath.Join(dir, ".fir", "extensions")
+	case "global":
+		extDir = filepath.Join(dir, "global-extensions")
+	default:
+		t.Fatalf("unsupported scope %q in writeAuthExtScript", scope)
+	}
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, name)
+	content := `#!/bin/sh
+# ---
+# name: ` + name + `
+# auth_providers: ` + authProviderID + `
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[],"events":[],"auth_providers":[{"id":"` + authProviderID + `","name":"` + name + `"}]}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func TestManager_AuthProviderConflict_ProjectWins(t *testing.T) {
+	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global-extensions")
+
+	// Global-scope extension registering "test-auth"
+	globalScript := writeAuthExtScript(t, dir, "global-auth", "global", "test-auth")
+	// Project-scope extension registering the same "test-auth"
+	projectScript := writeAuthExtScript(t, dir, "project-auth", "project", "test-auth")
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	for _, s := range []string{globalScript, projectScript} {
+		hash, _ := ComputeHash(s)
+		_ = ts.RecordTrust(dir, filepath.Base(s), hash)
+	}
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+	mgr.SetExtraExtensionDirs([]string{globalDir})
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	// Wait for both auth extensions to register (builtins + 2 auth exts have 0 tools each,
+	// so poll for the builtin tool count which means all extensions finished starting).
+	pollToolCount(api, builtinToolCount, 5*time.Second)
+
+	// The project-scope extension should win the auth provider registration.
+	provider := oauth.GetProvider("test-auth")
+	if provider == nil {
+		t.Fatal("expected test-auth provider to be registered")
+	}
+	// The provider's Name() should be from the project extension.
+	if provider.Name() != "project-auth" {
+		t.Errorf("expected project-auth to win conflict, got %q", provider.Name())
+	}
+}
+
+func TestManager_AuthProviderConflict_SameScopeTiebreak(t *testing.T) {
+	dir := t.TempDir()
+
+	// Two project-scope extensions registering the same auth provider ID.
+	// "aaa-auth" < "zzz-auth" alphabetically, so aaa-auth should win.
+	scriptA := writeAuthExtScript(t, dir, "aaa-auth", "project", "tie-auth")
+	scriptZ := writeAuthExtScript(t, dir, "zzz-auth", "project", "tie-auth")
+
+	trustPath := filepath.Join(dir, "trust.json")
+	ts := NewTrustStoreWithPath(trustPath)
+	for _, s := range []string{scriptA, scriptZ} {
+		hash, _ := ComputeHash(s)
+		_ = ts.RecordTrust(dir, filepath.Base(s), hash)
+	}
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop()
+
+	pollToolCount(api, builtinToolCount, 5*time.Second)
+
+	provider := oauth.GetProvider("tie-auth")
+	if provider == nil {
+		t.Fatal("expected tie-auth provider to be registered")
+	}
+	if provider.Name() != "aaa-auth" {
+		t.Errorf("expected aaa-auth to win tie-break, got %q", provider.Name())
 	}
 }

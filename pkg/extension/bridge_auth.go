@@ -226,6 +226,37 @@ func (b *Bridge) UnregisterAuthProviders() {
 	b.authProviders = nil
 }
 
+// UnregisterAuthProvider removes a single auth provider by ID from this
+// bridge's registrations and the global oauth registry.
+func (b *Bridge) UnregisterAuthProvider(id string) {
+	b.authProvidersMu.Lock()
+	defer b.authProvidersMu.Unlock()
+	oauth.UnregisterProvider(id)
+	kept := b.authProviders[:0]
+	for _, p := range b.authProviders {
+		if p.spec.ID == id {
+			p.StopCallbackServer()
+			continue
+		}
+		kept = append(kept, p)
+	}
+	b.authProviders = kept
+}
+
+// ReregisterAuthProvider re-registers a specific auth provider owned by this
+// bridge into the global oauth registry. Used after conflict resolution to
+// ensure the winning bridge's provider is the active registration.
+func (b *Bridge) ReregisterAuthProvider(id string) {
+	b.authProvidersMu.RLock()
+	defer b.authProvidersMu.RUnlock()
+	for _, p := range b.authProviders {
+		if p.spec.ID == id {
+			oauth.RegisterProvider(p)
+			return
+		}
+	}
+}
+
 // setAuthCallbacks stores/clears the login callbacks for UI dispatch.
 func (b *Bridge) setAuthCallbacks(cb *oauth.LoginCallbacks) {
 	b.authCallbacksMu.Lock()
