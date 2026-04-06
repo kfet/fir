@@ -54,7 +54,7 @@ func assertFuncCallsHelper(t *testing.T, filename, outerFunc, callee string) {
 		t.Fatalf("parse %s: %v", filename, err)
 	}
 
-	// Find the function declaration.
+	// Find the function (or method) declaration by name.
 	var funcDecl *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
@@ -62,11 +62,6 @@ func assertFuncCallsHelper(t *testing.T, filename, outerFunc, callee string) {
 			continue
 		}
 		if fd.Name.Name == outerFunc {
-			funcDecl = fd
-			break
-		}
-		// Also match method receivers: (*InteractiveMode).Cleanup etc.
-		if fd.Recv != nil && fd.Name.Name == outerFunc {
 			funcDecl = fd
 			break
 		}
