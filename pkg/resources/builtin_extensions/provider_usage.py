@@ -43,9 +43,9 @@ _K_DATA = "data"
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
 
-_CACHE_DIR = Path.home() / ".fir" / "agent"
+_CACHE_DIR = Path.home() / ".config" / "fir"
 
-_CONFIG_PATHS = ["~/.config/fir", "~/.fir/agent"]
+_CONFIG_PATHS = ["~/.config/fir"]
 
 
 # ---------------------------------------------------------------------------

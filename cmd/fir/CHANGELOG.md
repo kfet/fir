@@ -12,7 +12,7 @@
 
 ### Removed
 
-- Legacy `~/.fir/agent/` config path support: removed `LegacyFirAgentDir()`, `MigrateConfigFromLegacyDir()`, legacy extension discovery fallback, and legacy session directory scanning. All users should already be on `~/.config/fir/`. The `~/.pi/agent` fallback for Claude Code sessions is retained.
+- Legacy `~/.fir/agent/` config path support: removed `LegacyFirAgentDir()`, `MigrateConfigFromLegacyDir()`, legacy extension discovery fallback, legacy session directory scanning, and `provider-usage` extension cache/config paths. All users should already be on `~/.config/fir/`. The `~/.pi/agent` fallback for Claude Code sessions is retained.
 
 ### Fixed
 
