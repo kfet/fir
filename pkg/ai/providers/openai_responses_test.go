@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/stretchr/testify/assert"
@@ -100,6 +101,10 @@ func TestStreamOpenAIResponses_ToolCall(t *testing.T) {
 }
 
 func TestStreamOpenAIResponses_Error(t *testing.T) {
+	prev := openaiRetryDelayFn
+	openaiRetryDelayFn = func(_ int) time.Duration { return 0 }
+	t.Cleanup(func() { openaiRetryDelayFn = prev })
+
 	srv := mockSSEServer(t, "openai_responses_error.sse")
 	defer srv.Close()
 

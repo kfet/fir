@@ -22,6 +22,10 @@ type CountdownTimer struct {
 	stopped          bool
 }
 
+// countdownTickInterval is the tick interval for countdown timers.
+// Tests may override this for speed.
+var countdownTickInterval = time.Second
+
 // NewCountdownTimer creates and starts a countdown timer.
 func NewCountdownTimer(timeoutMs int, tuiRef *tui.TUI, onTick func(int), onExpire func()) *CountdownTimer {
 	ct := &CountdownTimer{
@@ -35,7 +39,7 @@ func NewCountdownTimer(timeoutMs int, tuiRef *tui.TUI, onTick func(int), onExpir
 	// Initial tick
 	ct.onTick(ct.remainingSeconds)
 
-	ct.ticker = time.NewTicker(time.Second)
+	ct.ticker = time.NewTicker(countdownTickInterval)
 	go ct.run()
 	return ct
 }

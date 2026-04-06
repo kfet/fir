@@ -131,7 +131,7 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 				select {
 				case <-ctx.Done():
 					lastErr = ctx.Err()
-				case <-time.After(time.Duration(attempt) * time.Second):
+				case <-time.After(openaiRetryDelay(attempt)):
 				}
 				if ctx.Err() != nil {
 					break

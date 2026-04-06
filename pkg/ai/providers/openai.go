@@ -208,6 +208,16 @@ func hasToolHistory(messages []ai.Message) bool {
 	return false
 }
 
+// openaiRetryDelayFn may be replaced in tests to avoid real sleeps.
+var openaiRetryDelayFn func(attempt int) time.Duration
+
+func openaiRetryDelay(attempt int) time.Duration {
+	if openaiRetryDelayFn != nil {
+		return openaiRetryDelayFn(attempt)
+	}
+	return time.Duration(attempt) * time.Second
+}
+
 // StreamOpenAICompletions implements SSE streaming for OpenAI Chat Completions API.
 func StreamOpenAICompletions(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
 	stream := ai.NewAssistantMessageEventStream()
@@ -233,7 +243,7 @@ func StreamOpenAICompletions(ctx context.Context, model *ai.Model, prompt ai.Con
 					select {
 					case <-ctx.Done():
 						err = ctx.Err()
-					case <-time.After(time.Duration(retry) * time.Second):
+					case <-time.After(openaiRetryDelay(retry)):
 					}
 					if ctx.Err() != nil {
 						break

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/stretchr/testify/assert"
@@ -143,6 +144,10 @@ func TestStreamOpenAI_Headers(t *testing.T) {
 }
 
 func TestStreamOpenAI_HTTPError(t *testing.T) {
+	prev := openaiRetryDelayFn
+	openaiRetryDelayFn = func(_ int) time.Duration { return 0 }
+	t.Cleanup(func() { openaiRetryDelayFn = prev })
+
 	srv := mockJSONServer(t, 429, []byte(`{"error":{"message":"rate limited"}}`))
 	defer srv.Close()
 

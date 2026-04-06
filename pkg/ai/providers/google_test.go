@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/stretchr/testify/assert"
@@ -186,6 +187,10 @@ func TestStreamGoogle_Thinking(t *testing.T) {
 }
 
 func TestStreamGoogle_HTTPError(t *testing.T) {
+	prev := googleRetryDelayFn
+	googleRetryDelayFn = func(_ int) time.Duration { return 0 }
+	t.Cleanup(func() { googleRetryDelayFn = prev })
+
 	srv := mockJSONServer(t, 500, []byte(`{"error":"internal server error"}`))
 	defer srv.Close()
 

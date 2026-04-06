@@ -61,6 +61,17 @@ type googleUsageMetadata struct {
 // StreamGoogle implements streaming for the Google Gemini API.
 // Note: Gemini uses a single JSON response with streaming (not SSE),
 // or the streamGenerateContent endpoint which returns line-delimited JSON.
+
+// googleRetryDelayFn may be replaced in tests to avoid real sleeps.
+var googleRetryDelayFn func(attempt int) time.Duration
+
+func googleRetryDelay(attempt int) time.Duration {
+	if googleRetryDelayFn != nil {
+		return googleRetryDelayFn(attempt)
+	}
+	return time.Duration(attempt) * time.Second
+}
+
 func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.StreamOptions) *ai.AssistantMessageEventStream {
 	stream := ai.NewAssistantMessageEventStream()
 
@@ -85,7 +96,7 @@ func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, optio
 					select {
 					case <-ctx.Done():
 						err = ctx.Err()
-					case <-time.After(time.Duration(retry) * time.Second):
+					case <-time.After(googleRetryDelay(retry)):
 					}
 					if ctx.Err() != nil {
 						break

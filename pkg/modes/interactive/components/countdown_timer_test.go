@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+func init() {
+	// Speed up all countdown timer tests: 10ms ticks instead of 1s.
+	countdownTickInterval = 10 * time.Millisecond
+}
+
 func TestCountdownTimer_InitialTick(t *testing.T) {
 	var mu sync.Mutex
 	var ticks []int
@@ -46,8 +51,8 @@ func TestCountdownTimer_Expiry(t *testing.T) {
 	})
 	_ = ct
 
-	// Wait for expiry (500ms → ceil = 1 second, expires after 1 tick)
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for expiry (500ms → ceil = 1 remaining second, expires after 1 tick = 10ms)
+	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -66,8 +71,8 @@ func TestCountdownTimer_TickSequence(t *testing.T) {
 	}, func() {})
 	_ = ct
 
-	// Wait for all ticks (2s timeout → initial tick of 2, then 1, then 0 + expire)
-	time.Sleep(3 * time.Second)
+	// Wait for all ticks (2 remaining seconds → 2 ticks at 10ms each + initial)
+	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()

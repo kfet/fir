@@ -40,7 +40,7 @@ func TestResizeImage_SmallImage_NoResize(t *testing.T) {
 }
 
 func TestResizeImage_LargeImage_Resized(t *testing.T) {
-	b64 := createTestImage(3000, 2000)
+	b64 := createTestImage(2100, 1400)
 	result := ResizeImage(b64, "image/png", nil)
 
 	if !result.WasResized {
@@ -52,7 +52,7 @@ func TestResizeImage_LargeImage_Resized(t *testing.T) {
 	if result.Height > 2000 {
 		t.Errorf("height %d exceeds max 2000", result.Height)
 	}
-	if result.OriginalWidth != 3000 || result.OriginalHeight != 2000 {
+	if result.OriginalWidth != 2100 || result.OriginalHeight != 1400 {
 		t.Errorf("wrong original dimensions: %dx%d", result.OriginalWidth, result.OriginalHeight)
 	}
 	if result.Data == "" {
