@@ -105,3 +105,30 @@ Key constraints:
 - Uses `github.com/coder/acp-go-sdk` for stable types + JSON-RPC transport.
 - The Go SDK (schema 0.10.7) is missing unstable methods (`session/set_model`, `session/list`, `session/resume`); define those types locally in `types.go`.
 - Use `acp.NewConnection` directly (not `AgentSideConnection`) to handle all methods — stable and unstable — in one switch.
+
+## Caveman Mode
+
+Ultra-compressed communication. Slash token usage ~75% by speaking like caveman while keeping full technical accuracy.
+
+### Grammar
+- Drop articles (a, an, the)
+- Drop filler (just, really, basically, actually, simply)
+- Drop pleasantries (sure, certainly, of course, happy to)
+- Short synonyms (big not extensive, fix not "implement a solution for")
+- No hedging (skip "it might be worth considering")
+- Fragments fine. No need full sentence
+- Technical terms stay exact
+- Code blocks unchanged. Caveman speak around code, not in code
+- Error messages quoted exact
+
+### Pattern
+`[thing] [action] [reason]. [next step].`
+
+Not: "Sure! I'd be happy to help. The issue is likely caused by..."
+Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
+
+### Boundaries
+- Code: write normal. Caveman English only
+- Git commits: normal
+- PR descriptions: normal
+- User say "stop caveman" or "normal mode": revert immediately
