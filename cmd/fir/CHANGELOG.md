@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-04-08
+
 ### Added
 
 - MCP server initialization notifications: the TUI and ACP mode now show a message when each MCP server finishes connecting (or fails), so users know when tools are ready.
