@@ -26,3 +26,6 @@ cmd/fir/fir
 
 # Python virtualenv
 .venv/
+
+# per-project telegram bot state (contains token)
+.fir/telegram/

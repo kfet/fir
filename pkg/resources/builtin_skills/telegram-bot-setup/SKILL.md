@@ -11,7 +11,10 @@ Goal: bind one Telegram bot to one fir project worktree with isolated state (tok
 
 - `bun` installed (`/Users/kfet/.bun/bin/bun` or `/opt/homebrew/bin/bun`).
 - Telegram bot token from @BotFather.
-- The `claude-plugins-official` package installed under `~/.config/fir/packages/...`. If missing: `fir install github.com/anthropics/claude-plugins-official`. After install, run `bun install` once inside `external_plugins/telegram` so its node_modules exist.
+- The telegram bridge installed under `~/.config/fir/packages/...`. If missing, install just the subdirectory (sparse checkout, ~v0.27.0+):
+  `fir install github.com/anthropics/claude-plugins-official/external_plugins/telegram`
+  Or the whole repo: `fir install github.com/anthropics/claude-plugins-official`.
+  Either way, after install run `bun install` once inside the package's `external_plugins/telegram` directory so its node_modules exist. The on-disk path is identical either way: `~/.config/fir/packages/git/github.com/anthropics/claude-plugins-official/external_plugins/telegram`.
 
 ## Steps
 
