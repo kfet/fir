@@ -484,3 +484,128 @@ func TestAgentLoopContinue_AssistantMessage(t *testing.T) {
 		t.Error("expected messages from continued loop")
 	}
 }
+
+func TestAgentLoop_FollowUpAfterError(t *testing.T) {
+	// Regression test: when the LLM returns an error (e.g. 429), the agent
+	// loop must still drain follow-up messages that arrived during the failed
+	// turn. Previously, the loop did an early return on StopReasonError
+	// without checking GetFollowUpMessages, silently dropping channel
+	// messages that were queued via FollowUp().
+	events := make(chan AgentEvent, 100)
+
+	errorMsg := &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "429 rate_limit_error",
+		Timestamp:    time.Now().UnixMilli(),
+	}
+
+	followUpDelivered := false
+	followUpMsg := NewAgentMessage(ai.NewUserMsg("follow-up after error", time.Now().UnixMilli()))
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+		GetFollowUpMessages: func() ([]AgentMessage, error) {
+			if !followUpDelivered {
+				followUpDelivered = true
+				return []AgentMessage{followUpMsg}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	// First call returns error, second call (after follow-up) returns success.
+	streamFn := mockStreamFn(errorMsg, simpleResponse("recovered after error"))
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{
+		Messages: []AgentMessage{},
+	}
+
+	go func() {
+		AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+	}()
+
+	allEvents := collectEvents(events)
+
+	// The follow-up message must appear in the event stream.
+	var sawFollowUp bool
+	var sawRecovery bool
+	for _, e := range allEvents {
+		if e.Type == EventMessageEnd && e.Message != nil {
+			if u := e.Message.Message.AsUser(); u != nil {
+				if text, ok := u.Content.(string); ok && text == "follow-up after error" {
+					sawFollowUp = true
+				}
+			}
+			if a := e.Message.Message.AsAssistant(); a != nil {
+				for _, c := range a.Content {
+					if c.IsText() && c.Text.Text == "recovered after error" {
+						sawRecovery = true
+					}
+				}
+			}
+		}
+	}
+
+	if !sawFollowUp {
+		t.Error("follow-up message was not processed after error — it was silently dropped")
+	}
+	if !sawRecovery {
+		t.Error("agent did not continue with a new turn after processing the follow-up")
+	}
+
+	// Last event must be agent_end
+	last := allEvents[len(allEvents)-1]
+	if last.Type != EventAgentEnd {
+		t.Errorf("last event = %s, want agent_end", last.Type)
+	}
+}
+
+func TestAgentLoop_NoFollowUpAfterError(t *testing.T) {
+	// When there are no follow-up messages after an error, the loop should
+	// still exit cleanly (no hang, no panic).
+	events := make(chan AgentEvent, 100)
+
+	errorMsg := &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "429 rate_limit_error",
+		Timestamp:    time.Now().UnixMilli(),
+	}
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+		GetFollowUpMessages: func() ([]AgentMessage, error) {
+			return nil, nil
+		},
+	}
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{
+		Messages: []AgentMessage{},
+	}
+
+	go func() {
+		AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, mockStreamFn(errorMsg), events)
+		close(events)
+	}()
+
+	allEvents := collectEvents(events)
+
+	last := allEvents[len(allEvents)-1]
+	if last.Type != EventAgentEnd {
+		t.Errorf("last event = %s, want agent_end", last.Type)
+	}
+}

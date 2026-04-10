@@ -124,6 +124,19 @@ func runLoop(
 					TurnMessage: &am,
 					ToolResults: nil,
 				}
+
+				// Before exiting, check for follow-up messages (e.g. channel
+				// messages that arrived during the failed turn). Without this,
+				// injected messages are silently dropped after an error.
+				if config.GetFollowUpMessages != nil {
+					followUp, err := config.GetFollowUpMessages()
+					if err == nil && len(followUp) > 0 {
+						pendingMessages = followUp
+						hasMoreToolCalls = false
+						continue
+					}
+				}
+
 				events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
 				return newMessages
 			}
