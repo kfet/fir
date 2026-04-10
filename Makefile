@@ -220,3 +220,31 @@ test-python-schedule: check-uv
 
 test-python-tmuxspinner: check-uv
 	$(call RUN,test python (tmuxspinner),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/resources/testdata -p 'tmuxspinner_test.py')
+
+# ---------------------------------------------------------------------------
+# External bridges (opt-in, not part of default `all`)
+# Each bridge has its own go.mod and Makefile under external/.
+# `make bridges` builds all of them. `make bridges-test` tests all.
+# ---------------------------------------------------------------------------
+
+BRIDGE_DIRS := external/poe
+
+.PHONY: bridges bridges-test bridges-all
+
+bridges: ## build all external bridges (opt-in)
+	@for d in $(BRIDGE_DIRS); do \
+		printf "  %-28s" "bridge: $$d"; \
+		$(MAKE) -C $$d build BINDIR=$(abspath $(BINDIR)) --no-print-directory && printf " ✓\n" || { printf " ✗\n"; exit 1; }; \
+	done
+
+bridges-test: ## test all external bridges
+	@for d in $(BRIDGE_DIRS); do \
+		printf "  %-28s" "bridge-test: $$d"; \
+		$(MAKE) -C $$d test-race --no-print-directory && printf " ✓\n" || { printf " ✗\n"; exit 1; }; \
+	done
+
+bridges-all: ## full pipeline for all external bridges
+	@for d in $(BRIDGE_DIRS); do \
+		printf "  bridge-all: $$d\n"; \
+		$(MAKE) -C $$d all BINDIR=$(abspath $(BINDIR)) --no-print-directory || exit 1; \
+	done

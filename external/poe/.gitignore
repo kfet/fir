@@ -1,0 +1,8 @@
+# build output
+/bin/
+/poe-bridge
+/cmd/poe-bridge/poe-bridge
+
+# coverage
+/coverage.out
+/coverage.html
