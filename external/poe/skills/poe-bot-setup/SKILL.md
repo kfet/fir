@@ -81,6 +81,15 @@ multiple projects can run independent bots.
 
 ## Notes
 
+- **Do NOT use `--no-extensions`** when launching fir with a Poe bot.
+  The `anthropic-auth` builtin extension handles OAuth token refresh and
+  model header injection. Without it, OAuth tokens are sent incorrectly
+  and every request returns 429. If you need to limit extensions, use
+  `-e anthropic-auth` to keep auth working.
+- **Do NOT set `--model` without `--provider`** — some model IDs exist
+  under multiple providers. Without an explicit provider, fir may resolve
+  to the wrong one. Prefer using global defaults (`defaultModel` +
+  `defaultProvider` in settings.json).
 - **One access key = one poller.** Each Poe bot must have its own access
   key and endpoint URL. Multiple worktrees = multiple bots.
 - **POE_STATE_DIR** controls pairing state, permission queue, and tsnet
