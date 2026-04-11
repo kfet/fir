@@ -30,22 +30,26 @@ const (
 
 // AgentMsg is a message from agent → relay.
 type AgentMsg struct {
-	Type      string `json:"type"`                 // register, reply
+	Type      string `json:"type"`                 // register, reply, oauth_register, oauth_result
 	ConvID    string `json:"conv_id,omitempty"`    // for register
 	MessageID string `json:"message_id,omitempty"` // for reply
 	Text      string `json:"text,omitempty"`       // for reply
 	Final     bool   `json:"final,omitempty"`      // for reply
+	SessionID string `json:"session_id,omitempty"` // for oauth_register
 }
 
 // RelayMsg is a message from relay → agent.
 type RelayMsg struct {
-	Type      string          `json:"type"` // query, pending, register_ok, register_rejected
+	Type      string          `json:"type"` // query, pending, register_ok, register_rejected, oauth_callback
 	ConvID    string          `json:"conv_id,omitempty"`
 	MessageID string          `json:"message_id,omitempty"`
 	UserID    string          `json:"user_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	Query     json.RawMessage `json:"query,omitempty"`  // raw Poe query array
 	Reason    string          `json:"reason,omitempty"` // for register_rejected
+	SessionID string          `json:"session_id,omitempty"`          // for oauth_callback
+	OAuthParams map[string]string `json:"oauth_params,omitempty"`   // for oauth_callback
+	CallbackURL string        `json:"callback_url,omitempty"`       // for oauth_registered
 }
 
 // --- Registration map ---
@@ -82,6 +86,7 @@ type Hub struct {
 	agents        map[*agentConn]bool        // all connected agents
 	lobby         map[string]*pendingQuery   // conv_id → waiting query
 	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
+	oauthAgents   map[string]*agentConn     // oauth session_id → agent that registered it
 }
 
 // NewHub creates a ready-to-use Hub.
@@ -91,7 +96,36 @@ func NewHub() *Hub {
 		agents:        make(map[*agentConn]bool),
 		lobby:         make(map[string]*pendingQuery),
 		pending:       make(map[string]chan ReplyChunk),
+		oauthAgents:   make(map[string]*agentConn),
 	}
+}
+
+// RegisterOAuth records which agent owns an OAuth session so the relay
+// can route the callback result back to the right agent.
+func (h *Hub) RegisterOAuth(conn *agentConn, sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.oauthAgents[sessionID] = conn
+}
+
+// DeliverOAuthCallback sends an OAuth callback result to the agent that
+// registered the session. Returns false if the session is unknown.
+func (h *Hub) DeliverOAuthCallback(sessionID string, params map[string]string) bool {
+	h.mu.Lock()
+	conn, ok := h.oauthAgents[sessionID]
+	if ok {
+		delete(h.oauthAgents, sessionID)
+	}
+	h.mu.Unlock()
+	if !ok {
+		return false
+	}
+	_ = conn.sendMsg(RelayMsg{
+		Type:        "oauth_callback",
+		SessionID:   sessionID,
+		OAuthParams: params,
+	})
+	return true
 }
 
 // --- Agent connection ---
@@ -235,6 +269,12 @@ func (h *Hub) RemoveAgent(conn *agentConn) {
 			freedConvs = append(freedConvs, convID)
 		}
 	}
+	// Clean up OAuth sessions owned by this agent.
+	for sid, ac := range h.oauthAgents {
+		if ac == conn {
+			delete(h.oauthAgents, sid)
+		}
+	}
 	h.mu.Unlock()
 
 	for _, convID := range freedConvs {
@@ -352,6 +392,12 @@ func (c *agentConn) readPump() {
 		handleReply:
 			if err := c.hub.HandleReply(msg.MessageID, msg.Text, msg.Final); err != nil {
 				log.Printf("[relay] reply error: %v", err)
+			}
+
+		case "oauth_register":
+			if msg.SessionID != "" {
+				c.hub.RegisterOAuth(c, msg.SessionID)
+				log.Printf("[relay] oauth session %s registered by agent", msg.SessionID)
 			}
 
 		default:

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -362,6 +363,29 @@ func runRelay() {
 		fmt.Fprintf(w, "poe-bridge %s relay ok\n", version)
 	})
 	poeMux.Handle("/poe", poeHandler)
+	// OAuth callback route — receives redirects from OAuth providers,
+	// forwards the result to the agent that registered the session.
+	poeMux.HandleFunc("/oauth/cb/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract session_id from path: /oauth/cb/{session_id}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 {
+			http.Error(w, "missing session_id", http.StatusBadRequest)
+			return
+		}
+		sessionID := parts[2]
+		params := make(map[string]string)
+		for k, v := range r.URL.Query() {
+			if len(v) > 0 {
+				params[k] = v[0]
+			}
+		}
+		if hub.DeliverOAuthCallback(sessionID, params) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>✅ Authorization complete</h2><p>You can close this tab and return to your chat.</p></body></html>`)
+		} else {
+			http.Error(w, "unknown or expired session", http.StatusNotFound)
+		}
+	})
 	poeSrv := &http.Server{Addr: httpAddr, Handler: poeMux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		log.Printf("relay: poe http on %s", httpAddr)
