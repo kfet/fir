@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	firlog "github.com/kfet/fir/pkg/log"
@@ -20,7 +21,8 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 	mgr.SetOnChannelMessage(func(cm ChannelMessage) {
 		serverName := cm.ServerName
 		source := cm.SourceName()
-		text := fmt.Sprintf("[Channel message from %s via %s]\n%s", source, serverName, cm.Text())
+		meta := formatMeta(cm.Meta)
+		text := fmt.Sprintf("[Channel message from %s via %s%s]\n%s", source, serverName, meta, cm.Text())
 		ts := time.Now().UnixMilli()
 		firlog.Info("injecting channel message", "server", serverName, "source", source)
 
@@ -33,4 +35,26 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 
 		inject(text, ts)
 	})
+}
+
+// formatMeta renders channel metadata as key=value pairs for inclusion in
+// the message header. Keys are sorted for deterministic output. The "user"
+// key is excluded since it's already in the "from" field.
+func formatMeta(meta map[string]any) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
+		if k == "user" {
+			continue // already in the "from" field
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var s string
+	for _, k := range keys {
+		s += fmt.Sprintf(" %s=%q", k, fmt.Sprint(meta[k]))
+	}
+	return s
 }
