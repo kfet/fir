@@ -26,6 +26,7 @@ import (
 	"github.com/kfet/fir/external/poe/internal/access"
 	agentPkg "github.com/kfet/fir/external/poe/internal/agent"
 	"github.com/kfet/fir/external/poe/internal/funnel"
+	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
 	"github.com/kfet/fir/external/poe/internal/permq"
 	"github.com/kfet/fir/external/poe/internal/poe"
@@ -427,10 +428,39 @@ func runAgent() {
 	notif := mcpnotify.NewNotifier()
 	mcpSrv := newMCPServer(rt)
 
+	// Track which conv_ids have received their history preamble.
+	seededConvs := &sync.Map{}
+
 	// When relay delivers a query, forward to fir via MCP channel notification.
+	// On first query for a conv_id, replay the Poe conversation history as a
+	// preamble so the new fir agent has context from prior turns.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
+		preamble, latestUserMsg := history.FormatPreamble(msg.Query)
+
+		// Only inject history preamble on the first message for this conv.
+		if preamble != "" {
+			if _, loaded := seededConvs.LoadOrStore(msg.ConvID, true); !loaded {
+				// Send the history as a system notification before the user message.
+				_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
+					Content: fmt.Sprintf("[Channel message from %s via poe]\n%s\nThe above is prior conversation history being resumed. The user's new message follows.", msg.UserID, preamble),
+					Meta: map[string]any{
+						"source":          "poe",
+						"type":            "history",
+						"conversation_id": msg.ConvID,
+						"user_id":         msg.UserID,
+					},
+				})
+			}
+		}
+
+		// Use latestUserMsg if we parsed it; fall back to msg.Content.
+		userText := latestUserMsg
+		if userText == "" {
+			userText = msg.Content
+		}
+
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
-			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
+			msg.MessageID, msg.ConvID, msg.UserID, userText)
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
 			Meta: map[string]any{

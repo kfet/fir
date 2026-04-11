@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	"github.com/kfet/fir/external/poe/internal/relay"
 )
@@ -145,4 +146,133 @@ func TestE2E_PoeQueryThroughRelayToAgent(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("SSE response timed out")
 	}
+}
+
+// TestE2E_HistoryReplayOnFirstQuery verifies that when a Poe query carries
+// conversation history (multiple messages in query[]), the relay forwards
+// the full query JSON to the agent, and the history package correctly
+// parses it into a preamble + latest message.
+func TestE2E_HistoryReplayOnFirstQuery(t *testing.T) {
+	hub := relay.NewHub()
+
+	// Poe handler that passes full queryJSON through the relay.
+	poeHandler := &poe.Handler{
+		AccessKey: "test-key",
+		OnQuery: func(ctx context.Context, q *poe.QueryRequest, sse *poe.SSEWriter) error {
+			userText := ""
+			if len(q.Query) > 0 {
+				userText = q.Query[len(q.Query)-1].Content
+			}
+			queryJSON, _ := json.Marshal(q.Query)
+			replyCh, _ := hub.RouteQuery(q.ConversationID, q.MessageID, q.UserID, userText, queryJSON)
+			for c := range replyCh {
+				if c.Text != "" {
+					_ = sse.WriteEvent("text", map[string]any{"text": c.Text})
+				}
+				if c.Final {
+					return sse.WriteEvent("done", map[string]any{})
+				}
+			}
+			return nil
+		},
+	}
+
+	poeSrv := httptest.NewServer(poeHandler)
+	defer poeSrv.Close()
+
+	agentSrv := httptest.NewServer(http.HandlerFunc(hub.HandleAgentWS))
+	defer agentSrv.Close()
+
+	// Connect agent.
+	wsURL := "ws" + strings.TrimPrefix(agentSrv.URL, "http")
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+
+	queryCh := make(chan relay.RelayMsg, 1)
+	go func() {
+		for {
+			_, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg relay.RelayMsg
+			json.Unmarshal(data, &msg)
+			if msg.Type == "query" {
+				queryCh <- msg
+			}
+		}
+	}()
+
+	// Register.
+	regMsg, _ := json.Marshal(relay.AgentMsg{Type: "register", ConvID: "c-hist"})
+	ws.WriteMessage(websocket.TextMessage, regMsg)
+	time.Sleep(100 * time.Millisecond)
+
+	// POST a query with 3 prior messages + 1 new.
+	go func() {
+		body := `{
+			"version":"1.0","type":"query",
+			"query":[
+				{"role":"user","content":"what is 2+2?","message_id":"m-1"},
+				{"role":"bot","content":"4","message_id":"m-2"},
+				{"role":"user","content":"what about 3+3?","message_id":"m-3"},
+				{"role":"bot","content":"6","message_id":"m-4"},
+				{"role":"user","content":"and 10+10?","message_id":"m-5"}
+			],
+			"user_id":"u-hist","conversation_id":"c-hist","message_id":"m-hist"
+		}`
+		req, _ := http.NewRequest(http.MethodPost, poeSrv.URL, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer test-key")
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		if resp != nil {
+			io.ReadAll(resp.Body)
+			resp.Body.Close()
+		}
+	}()
+
+	// Wait for query at agent.
+	var q relay.RelayMsg
+	select {
+	case q = <-queryCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent never received query")
+	}
+
+	// Verify the relay forwarded the full query JSON.
+	if len(q.Query) == 0 {
+		t.Fatal("query JSON not forwarded to agent")
+	}
+
+	// Use the history package to parse — simulates what the agent does.
+	preamble, latest := history.FormatPreamble(q.Query)
+
+	if latest != "and 10+10?" {
+		t.Errorf("latest: got %q, want %q", latest, "and 10+10?")
+	}
+	if !strings.Contains(preamble, "[Prior conversation history]") {
+		t.Errorf("missing preamble header")
+	}
+	if !strings.Contains(preamble, "user: what is 2+2?") {
+		t.Errorf("missing first user msg in preamble")
+	}
+	if !strings.Contains(preamble, "bot: 4") {
+		t.Errorf("missing first bot reply in preamble")
+	}
+	if !strings.Contains(preamble, "user: what about 3+3?") {
+		t.Errorf("missing second user msg in preamble")
+	}
+	if !strings.Contains(preamble, "bot: 6") {
+		t.Errorf("missing second bot reply in preamble")
+	}
+	if strings.Contains(preamble, "and 10+10?") {
+		t.Errorf("preamble should NOT contain the latest message")
+	}
+
+	// Reply to unblock the HTTP handler.
+	replyMsg, _ := json.Marshal(relay.AgentMsg{Type: "reply", MessageID: "m-hist", Text: "20", Final: true})
+	ws.WriteMessage(websocket.TextMessage, replyMsg)
 }
