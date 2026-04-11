@@ -26,7 +26,6 @@ import (
 	"github.com/kfet/fir/external/poe/internal/access"
 	agentPkg "github.com/kfet/fir/external/poe/internal/agent"
 	"github.com/kfet/fir/external/poe/internal/funnel"
-	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
 	"github.com/kfet/fir/external/poe/internal/permq"
 	"github.com/kfet/fir/external/poe/internal/poe"
@@ -432,16 +431,8 @@ func runAgent() {
 	// History from Poe's query[] is passed as meta["history"] — fir decides
 	// whether and how to use it.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
-		_, latestUserMsg := history.FormatPreamble(msg.Query)
-
-		// Use latestUserMsg if we parsed it; fall back to msg.Content.
-		userText := latestUserMsg
-		if userText == "" {
-			userText = msg.Content
-		}
-
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
-			msg.MessageID, msg.ConvID, msg.UserID, userText)
+			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
 
 		meta := map[string]any{
 			"source":          "poe",

@@ -12,7 +12,6 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	"github.com/kfet/fir/external/poe/internal/relay"
 )
@@ -247,29 +246,29 @@ func TestE2E_HistoryReplayOnFirstQuery(t *testing.T) {
 		t.Fatal("query JSON not forwarded to agent")
 	}
 
-	// Use the history package to parse — simulates what the agent does.
-	preamble, latest := history.FormatPreamble(q.Query)
-
-	if latest != "and 10+10?" {
-		t.Errorf("latest: got %q, want %q", latest, "and 10+10?")
+	// Parse the raw query JSON and verify all messages came through.
+	var msgs []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
 	}
-	if !strings.Contains(preamble, "[Prior conversation history]") {
-		t.Errorf("missing preamble header")
+	if err := json.Unmarshal(q.Query, &msgs); err != nil {
+		t.Fatalf("unmarshal query: %v", err)
 	}
-	if !strings.Contains(preamble, "user: what is 2+2?") {
-		t.Errorf("missing first user msg in preamble")
+	if len(msgs) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(msgs))
 	}
-	if !strings.Contains(preamble, "bot: 4") {
-		t.Errorf("missing first bot reply in preamble")
+	if msgs[0].Content != "what is 2+2?" {
+		t.Errorf("msg[0]: %q", msgs[0].Content)
 	}
-	if !strings.Contains(preamble, "user: what about 3+3?") {
-		t.Errorf("missing second user msg in preamble")
+	if msgs[1].Content != "4" || msgs[1].Role != "bot" {
+		t.Errorf("msg[1]: %+v", msgs[1])
 	}
-	if !strings.Contains(preamble, "bot: 6") {
-		t.Errorf("missing second bot reply in preamble")
+	if msgs[4].Content != "and 10+10?" {
+		t.Errorf("msg[4] (latest): %q", msgs[4].Content)
 	}
-	if strings.Contains(preamble, "and 10+10?") {
-		t.Errorf("preamble should NOT contain the latest message")
+	// Verify latest user message matches msg.Content.
+	if q.Content != "and 10+10?" {
+		t.Errorf("msg.Content: got %q, want %q", q.Content, "and 10+10?")
 	}
 
 	// Reply to unblock the HTTP handler.
