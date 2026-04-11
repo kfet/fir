@@ -428,30 +428,11 @@ func runAgent() {
 	notif := mcpnotify.NewNotifier()
 	mcpSrv := newMCPServer(rt)
 
-	// Track which conv_ids have received their history preamble.
-	seededConvs := &sync.Map{}
-
 	// When relay delivers a query, forward to fir via MCP channel notification.
-	// On first query for a conv_id, replay the Poe conversation history as a
-	// preamble so the new fir agent has context from prior turns.
+	// History from Poe's query[] is passed as meta["history"] — fir decides
+	// whether and how to use it.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
-		preamble, latestUserMsg := history.FormatPreamble(msg.Query)
-
-		// Only inject history preamble on the first message for this conv.
-		if preamble != "" {
-			if _, loaded := seededConvs.LoadOrStore(msg.ConvID, true); !loaded {
-				// Send the history as a system notification before the user message.
-				_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-					Content: fmt.Sprintf("[Channel message from %s via poe]\n%s\nThe above is prior conversation history being resumed. The user's new message follows.", msg.UserID, preamble),
-					Meta: map[string]any{
-						"source":          "poe",
-						"type":            "history",
-						"conversation_id": msg.ConvID,
-						"user_id":         msg.UserID,
-					},
-				})
-			}
-		}
+		_, latestUserMsg := history.FormatPreamble(msg.Query)
 
 		// Use latestUserMsg if we parsed it; fall back to msg.Content.
 		userText := latestUserMsg
@@ -461,14 +442,20 @@ func runAgent() {
 
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
 			msg.MessageID, msg.ConvID, msg.UserID, userText)
+
+		meta := map[string]any{
+			"source":          "poe",
+			"user_id":         msg.UserID,
+			"conversation_id": msg.ConvID,
+			"message_id":      msg.MessageID,
+		}
+		if len(msg.Query) > 0 {
+			meta["history"] = msg.Query
+		}
+
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
-			Meta: map[string]any{
-				"source":          "poe",
-				"user_id":         msg.UserID,
-				"conversation_id": msg.ConvID,
-				"message_id":      msg.MessageID,
-			},
+			Meta:    meta,
 		})
 	}
 
