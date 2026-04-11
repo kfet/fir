@@ -428,17 +428,25 @@ func runAgent() {
 	mcpSrv := newMCPServer(rt)
 
 	// When relay delivers a query, forward to fir via MCP channel notification.
+	// History from Poe's query[] is passed as meta["history"] — fir decides
+	// whether and how to use it.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
 			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
+
+		meta := map[string]any{
+			"source":          "poe",
+			"user_id":         msg.UserID,
+			"conversation_id": msg.ConvID,
+			"message_id":      msg.MessageID,
+		}
+		if len(msg.Query) > 0 {
+			meta["history"] = msg.Query
+		}
+
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
-			Meta: map[string]any{
-				"source":          "poe",
-				"user_id":         msg.UserID,
-				"conversation_id": msg.ConvID,
-				"message_id":      msg.MessageID,
-			},
+			Meta:    meta,
 		})
 	}
 
