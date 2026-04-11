@@ -250,3 +250,29 @@ Poe HTTP frontend (:8080) + agent websocket listener (:9090). Routes by conversa
 poe-bridge --agent ws://relay:9090/ws
 ```
 Connects to relay, registers for `POE_CONV_ID` (or catch-all if empty). Bridges relay ↔ fir MCP. Env: `POE_RELAY_URL`, `POE_CONV_ID`.
+
+## Conversation history
+
+When Poe sends a query, it includes the full conversation history (up to 1000
+messages) in `query[]`. The bridge handles this at two levels:
+
+### Bridge side (agent mode)
+
+The agent always passes `query[]` as `meta["history"]` in the channel
+notification to fir. The bridge is a dumb pipe — it makes no decisions about
+whether or how to use history. The latest user message is extracted and sent
+as the notification content; everything else rides in meta.
+
+### Fir side
+
+Fir's `formatMeta` in `pkg/mcp/inject.go` excludes `history` from the
+message header (it would be too large). The raw history is available in
+`cm.Meta["history"]` for any fir code or skill that wants to inspect it.
+
+**Session continuity model:**
+
+- Each Poe conversation maps to a fir agent in its own directory
+- `fir -c` (continue) resumes the session from disk after restart
+- `meta.history` from Poe is a **fallback** for when no local session exists
+  (e.g. first start, or new box without shared storage)
+- Cross-box session sharing is a future enhancement

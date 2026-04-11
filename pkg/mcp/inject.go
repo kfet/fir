@@ -39,15 +39,17 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 
 // formatMeta renders channel metadata as key=value pairs for inclusion in
 // the message header. Keys are sorted for deterministic output. The "user"
-// key is excluded since it's already in the "from" field.
+// key is excluded since it's already in the "from" field. The "history"
+// key is excluded since it carries bulk conversation history (handled
+// separately by the caller).
 func formatMeta(meta map[string]any) string {
 	if len(meta) == 0 {
 		return ""
 	}
 	keys := make([]string, 0, len(meta))
 	for k := range meta {
-		if k == "user" {
-			continue // already in the "from" field
+		if k == "user" || k == "history" {
+			continue
 		}
 		keys = append(keys, k)
 	}
