@@ -38,6 +38,12 @@ type Agent struct {
 
 	// OnPending is called when the relay broadcasts a pending conv_id.
 	OnPending func(msg relay.RelayMsg)
+
+	// oauthCallbacks maps session_id → channel for OAuth callback results.
+	oauthCallbacks sync.Map // string → chan relay.RelayMsg
+
+	// registerCallbacks maps conv_id → channel for register responses.
+	registerCallbacks sync.Map // string → chan relay.RelayMsg
 }
 
 // Connect dials the relay and starts the read pump. If cfg.ConvID is
@@ -60,7 +66,7 @@ func Connect(ctx context.Context, cfg Config) (*Agent, error) {
 	go a.readPump()
 
 	if cfg.ConvID != "" {
-		if err := a.Register(cfg.ConvID); err != nil {
+		if err := a.Register(cfg.ConvID, false); err != nil {
 			ws.Close()
 			return nil, fmt.Errorf("agent: auto-register %s: %w", cfg.ConvID, err)
 		}
@@ -71,8 +77,30 @@ func Connect(ctx context.Context, cfg Config) (*Agent, error) {
 }
 
 // Register sends a registration for a conv_id to the relay.
-func (a *Agent) Register(convID string) error {
-	return a.sendJSON(relay.AgentMsg{Type: "register", ConvID: convID})
+// If claim is true, this is a race gate (no queries delivered).
+// If claim is false, this is the real agent taking ownership.
+func (a *Agent) Register(convID string, claim bool) error {
+	return a.sendJSON(relay.AgentMsg{Type: "register", ConvID: convID, Claim: claim})
+}
+
+// RegisterSync sends a registration and waits for the relay's response.
+// Returns the relay response (register_ok or register_rejected).
+// Times out after 5 seconds.
+func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) {
+	ch := make(chan relay.RelayMsg, 1)
+	a.registerCallbacks.Store(convID, ch)
+	defer a.registerCallbacks.Delete(convID)
+
+	if err := a.sendJSON(relay.AgentMsg{Type: "register", ConvID: convID, Claim: claim}); err != nil {
+		return relay.RelayMsg{}, err
+	}
+
+	select {
+	case msg := <-ch:
+		return msg, nil
+	case <-time.After(5 * time.Second):
+		return relay.RelayMsg{}, fmt.Errorf("register timeout for %s", convID)
+	}
 }
 
 // Reply sends a reply chunk to the relay for a given message_id.
@@ -136,8 +164,19 @@ func (a *Agent) readPump() {
 			}
 		case "register_ok":
 			log.Printf("[agent] registered for conv=%s", msg.ConvID)
+			if ch, ok := a.registerCallbacks.LoadAndDelete(msg.ConvID); ok {
+				ch.(chan relay.RelayMsg) <- msg
+			}
 		case "register_rejected":
 			log.Printf("[agent] register rejected for conv=%s: %s", msg.ConvID, msg.Reason)
+			if ch, ok := a.registerCallbacks.LoadAndDelete(msg.ConvID); ok {
+				ch.(chan relay.RelayMsg) <- msg
+			}
+		case "oauth_callback":
+			log.Printf("[agent] oauth callback for session=%s", msg.SessionID)
+			if ch, ok := a.oauthCallbacks.LoadAndDelete(msg.SessionID); ok {
+				ch.(chan relay.RelayMsg) <- msg
+			}
 		default:
 			log.Printf("[agent] unknown msg type: %s", msg.Type)
 		}
@@ -151,4 +190,17 @@ func (a *Agent) ListPending() []string {
 	// In the current design, pending notifications are pushed by the
 	// relay. An agent tracks them locally if it wants a list.
 	return nil
+}
+
+// OAuthRegister tells the relay to register an OAuth session and returns
+// a channel that will receive the callback result.
+func (a *Agent) OAuthRegister(sessionID string) (chan relay.RelayMsg, error) {
+	ch := make(chan relay.RelayMsg, 1)
+	a.oauthCallbacks.Store(sessionID, ch)
+	err := a.sendJSON(relay.AgentMsg{Type: "oauth_register", SessionID: sessionID})
+	if err != nil {
+		a.oauthCallbacks.Delete(sessionID)
+		return nil, err
+	}
+	return ch, nil
 }

@@ -49,10 +49,15 @@ Agent connections. No bearer auth — tailnet identity is sufficient.
 **Agent → relay messages (JSON over ws):**
 
 ```json
-{"type": "register", "conv_id": "c-alpha"}
+{"type": "register", "conv_id": "c-alpha", "claim": true}   // race gate — no queries forwarded
+{"type": "register", "conv_id": "c-alpha"}                   // real agent — gets queries
 {"type": "reply", "message_id": "m-xyz", "text": "hello", "final": false}
 {"type": "reply", "message_id": "m-xyz", "text": "", "final": true}
 ```
+
+The `claim` flag on register controls whether this is a lightweight
+claim (race gate for spawning) or a real registration (takes ownership
+and receives queries). See "Registration state machine" below.
 
 **Relay → agent messages (JSON over ws):**
 
@@ -60,6 +65,7 @@ Agent connections. No bearer auth — tailnet identity is sufficient.
 {"type": "query", "conv_id": "c-alpha", "message_id": "m-xyz", "user_id": "u-...", "content": "hello", "query": [...]}
 {"type": "pending", "conv_id": "c-gamma", "user_id": "u-...", "content": "first msg"}
 {"type": "register_ok", "conv_id": "c-alpha"}
+{"type": "register_rejected", "conv_id": "c-alpha", "reason": "claimed"}
 {"type": "register_rejected", "conv_id": "c-alpha", "reason": "active"}
 ```
 
@@ -72,16 +78,54 @@ Agent connections. No bearer auth — tailnet identity is sufficient.
 
 ## Registration state machine
 
-Each conv_id has one of three states:
+Each conv_id has one of two states: `provisional` or `active`.
+The `register` message carries an optional `claim` flag that controls
+behaviour.
 
 ```
-(unregistered) ──register──▶ provisional ──first reply──▶ active
-       ▲                         │                          │
-       │                         │ override by              │ conn dies
-       │                         │ another agent            │
-       │                         ▼                          │
-       └─────────────────── (unregistered) ◀────────────────┘
+                  register(claim=true)                register(claim=false)          first reply
+(unregistered) ─────────────────────▶ provisional ──────────────────────▶ provisional* ──────────▶ active
+       ▲                                   │                                  │                      │
+       │                        timeout /  │                       conn dies  │               conn dies│
+       │                        conn dies  │                                  │                      │
+       └───────────────────────────────────┘──────────────────────────────────┘──────────────────────┘
+
+* same state, but conn replaced by the spawned agent
 ```
+
+### register(claim=true) — race gate
+
+- **Purpose:** claim a conv_id so only one agent spawns a new fir for it.
+- **(none) → provisional:** accepted. Conn recorded. **No lobby queries
+  delivered.** Lobby stays intact until a real agent takes over.
+- **provisional → rejected:** already claimed. Returns `register_rejected`
+  with `reason: "claimed"`.
+- **active → rejected:** conv is locked. Returns `register_rejected`
+  with `reason: "active"`.
+
+### register(claim=false) — real agent takes ownership
+
+- **Purpose:** the spawned fir's agent takes ownership and receives queries.
+- **(none) → provisional:** accepted. Conn recorded. **Lobby queries
+  delivered immediately.**
+- **provisional → provisional (override):** accepted. New conn replaces
+  the claimer's conn. **Lobby queries delivered to the new agent.**
+  Queries arriving while provisional are also forwarded to this agent.
+- **active → rejected:** conv is locked. Returns `register_rejected`
+  with `reason: "active"`.
+
+### First reply write → active
+
+When an agent sends its first `reply` for a conv_id, the registration
+transitions from provisional to **active**. The conv is now locked to
+this agent's conn. No further register attempts (claim or otherwise)
+are accepted until the conn dies.
+
+### Conn death → unregistered
+
+When a conn dies (disconnect, ping timeout), all its registrations are
+removed. Affected conv_ids return to unregistered. If queries were
+in-flight, they time out on the Poe SSE side.
 
 **Unregistered:**
 - No agent handling this conv_id
@@ -89,16 +133,9 @@ Each conv_id has one of three states:
 - Relay emits SSE `meta` + "connecting to agent..." text + holds stream open
 - Relay broadcasts `pending` notification to all connected agents
 
-**Provisional:**
-- An agent has registered but hasn't written a reply yet
-- Inbound queries are forwarded to the registered agent
-- Another agent CAN override by registering the same conv_id
-  (first-write-wins: the pre-registering agent wanted to hand off)
-- If the agent writes a reply → transitions to `active`
-
 **Active:**
 - Agent is actively handling this conv_id (has written at least one reply)
-- Locked to this agent's conn. Other register attempts are rejected.
+- Locked to this agent's conn. All register attempts are rejected.
 - Remains active until the conn dies (disconnect, ping timeout)
 - On conn death → returns to unregistered
 
@@ -107,10 +144,14 @@ Each conv_id has one of three states:
 1. Poe POST arrives with conv_id + message_id
 2. Relay emits SSE `meta` event immediately (5-second rule)
 3. Lookup conv_id in registration map:
-   - **Registered (provisional or active):** forward query to agent's ws conn.
-     Hold SSE stream open. Agent sends reply chunks back via ws. Relay
-     streams them as SSE text events. Agent sends final=true → relay
-     emits SSE done.
+   - **Active:** forward query to agent's ws conn. Hold SSE stream open.
+     Agent sends reply chunks back via ws. Relay streams them as SSE
+     text events. Agent sends final=true → relay emits SSE done.
+   - **Provisional (claimed, no real agent yet):** queue in lobby. Hold
+     SSE stream open. When a real agent registers (claim=false), lobby
+     queries are delivered.
+   - **Provisional (real agent):** forward query to agent's ws conn.
+     Same streaming as active.
    - **Unregistered:** queue in lobby. Emit "connecting to an agent..."
      as SSE text. Broadcast `pending` to all agents. Hold SSE stream
      open (up to 60s). If an agent registers within that window and
@@ -132,48 +173,79 @@ Each fir spawns poe-bridge in agent mode as its MCP server:
 }
 ```
 
+### Dedicated agent (POE_CONV_ID set)
+
 On startup:
 1. Connect to relay via ws
-2. If POE_CONV_ID is set: send `register` for that conv_id
-3. Expose MCP tools to fir: `reply`, `register`, `list_pending`
-4. Forward inbound queries from relay → fir via notifications/claude/channel
-5. Forward fir's reply tool calls → relay as reply messages
+2. Send `register` (claim=false) for that conv_id → gets lobby queries
+3. Forward inbound queries from relay → fir via notifications/claude/channel
+4. Forward fir's reply tool calls → relay as reply messages
+
+### Catch-all agent (POE_CONV_ID empty)
+
+A catch-all agent participates in the claim race for new conversations
+and spawns dedicated fir instances.
+
+On startup:
+1. Connect to relay via ws (no auto-register)
+2. Wait for `pending` notifications from the relay
+
+On receiving `pending`:
+1. Send `register(claim=true)` for the conv_id — race gate
+2. If accepted: spawn a new fir instance (via bash/tmux) with
+   `POE_CONV_ID=<conv_id>`. The new fir's agent will `register(claim=false)`
+   and take ownership.
+3. If rejected (`reason: "claimed"`): another agent won the race. Do nothing.
 
 MCP tools available to fir:
 - `reply(message_id, text, final)` — same as v1
 - `register(conv_id)` — register this agent for a new conv_id
-- `list_pending()` — returns conv_ids in the relay's lobby
-- `spawn(conv_id, session_name)` — convenience: calls register (provisional),
-  then the fir model uses bash+tmux to spawn a new fir
 
-## Spawn skill
+## Spawn flow
 
-When a connected fir sees a `pending` notification, its model (guided
-by the poe-spawn skill) does:
+When a catch-all agent receives a `pending` notification, the bridge
+claims the conv and posts a channel notification to the LLM. The
+**LLM/skill** handles the actual spawn — this decouples the harness
+(tmux, directory layout, fir flags) from the poe channel/relay.
+
+### Bridge side (automatic)
+
+1. Receive `pending` for conv_id
+2. Send `register(conv_id, claim=true)` — race gate
+3. If accepted: post channel notification with `type: "spawn"` containing
+   conv_id, user_id, and first message content
+4. If rejected: another agent won the race. Do nothing.
+
+### LLM/skill side (harness-specific)
+
+On receiving a `spawn` notification, the LLM (guided by a skill like
+`poe-spawn`) executes the harness-specific spawn steps:
 
 ```bash
-# Create per-conv directory
-mkdir -p ~/fir-poe/convs/c-gamma/.fir
+mkdir -p ~/.local/state/fir/agents/<conv_id>/.fir
 
-# Write mcp.json
-cat > ~/fir-poe/convs/c-gamma/.fir/mcp.json << 'EOF'
+cat > ~/.local/state/fir/agents/<conv_id>/.fir/mcp.json << 'EOF'
 {
   "mcpServers": {
     "poe": {
       "command": "poe-bridge",
-      "args": ["--agent", "--relay", "ws://krpi2one:9090"],
-      "env": { "POE_CONV_ID": "c-gamma" }
+      "args": ["--agent", "ws://relay:9090/ws"],
+      "env": { "POE_CONV_ID": "<conv_id>" }
     }
   }
 }
 EOF
 
-# Spawn in tmux
-tmux new-window -t poe "fir --session poe-c-gamma ~/fir-poe/convs/c-gamma"
+tmux new-window -t agents "fir -c --session-name '<conv_id>' ~/.local/state/fir/agents/<conv_id>"
 ```
 
-Optionally pre-registers via the `register` tool first for low latency,
-then the new fir's agent overrides (since pre-registration is provisional).
+The new fir’s agent sends `register(conv_id, claim=false)`, overrides
+the claim, gets lobby queries, and handles them.
+
+**Crash recovery:** if the spawned fir dies, its conn dies, the
+registration is removed, and the conv returns to unregistered. The next
+Poe query re-triggers lobby → pending → claim → spawn. Poe provides
+full history in each query, so the new fir has full context.
 
 ## What the relay does NOT do
 

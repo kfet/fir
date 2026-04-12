@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -362,9 +363,36 @@ func runRelay() {
 		fmt.Fprintf(w, "poe-bridge %s relay ok\n", version)
 	})
 	poeMux.Handle("/poe", poeHandler)
-	poeSrv := &http.Server{Addr: httpAddr, Handler: poeMux, ReadHeaderTimeout: 5 * time.Second}
+	// OAuth callback route — receives redirects from OAuth providers,
+	// forwards the result to the agent that registered the session.
+	poeMux.HandleFunc("/oauth/cb/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract session_id from path: /oauth/cb/{session_id}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 {
+			http.Error(w, "missing session_id", http.StatusBadRequest)
+			return
+		}
+		sessionID := parts[2]
+		params := make(map[string]string)
+		for k, v := range r.URL.Query() {
+			if len(v) > 0 {
+				params[k] = v[0]
+			}
+		}
+		if hub.DeliverOAuthCallback(sessionID, params) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>✅ Authorization complete</h2><p>You can close this tab and return to your chat.</p></body></html>`)
+		} else {
+			http.Error(w, "unknown or expired session", http.StatusNotFound)
+		}
+	})
+	poeAddr := os.Getenv("POE_HTTP_ADDR")
+	if poeAddr == "" {
+		poeAddr = httpAddr
+	}
+	poeSrv := &http.Server{Addr: poeAddr, Handler: poeMux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		log.Printf("relay: poe http on %s", httpAddr)
+		log.Printf("relay: poe http on %s", poeAddr)
 		if err := poeSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("poe http: %v", err)
 		}
@@ -453,22 +481,50 @@ func runAgent() {
 	// Track registered conv_ids to avoid double-registration.
 	registeredConvs := &sync.Map{}
 
-	// When relay broadcasts a pending conv, auto-register if no specific
-	// conv_id was configured (catch-all agent), then forward as notification.
+	// When relay broadcasts a pending conv, attempt to claim it (race gate).
+	// If claim succeeds, post a channel notification so the LLM/skill can
+	// spawn a new fir agent. The bridge does NOT spawn — that's the LLM's
+	// job, decoupling the harness from the relay.
 	ag.OnPending = func(msg relayPkg.RelayMsg) {
-		if convID == "" {
-			if _, loaded := registeredConvs.LoadOrStore(msg.ConvID, true); !loaded {
-				log.Printf("[agent] auto-registering for pending conv=%s", msg.ConvID)
-				_ = ag.Register(msg.ConvID)
+		if convID != "" {
+			return // dedicated agent — ignore pending for other convs
+		}
+		if _, loaded := registeredConvs.LoadOrStore(msg.ConvID, true); loaded {
+			return // already claimed
+		}
+
+		// Race gate: claim the conv.
+		log.Printf("[agent] claiming conv=%s", msg.ConvID)
+		resp, err := ag.RegisterSync(msg.ConvID, true)
+		if err != nil || resp.Type != "register_ok" {
+			if err != nil {
+				log.Printf("[agent] claim failed for conv=%s: %v", msg.ConvID, err)
+			} else {
+				log.Printf("[agent] claim rejected for conv=%s: %s", msg.ConvID, resp.Reason)
 			}
+			registeredConvs.Delete(msg.ConvID)
+			return
+		}
+
+		// Notify fir/LLM to spawn a new agent for this conv.
+		// Include the MCP config so a generic spawn skill can write it.
+		mcpConfig := map[string]any{
+			"mcpServers": map[string]any{
+				"poe": map[string]any{
+					"command": "poe-bridge",
+					"args":    []string{"--agent", relayURL},
+					"env":     map[string]string{"POE_CONV_ID": msg.ConvID},
+				},
+			},
 		}
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-			Content: fmt.Sprintf("🔔 [System notification — do not reply to this message]\nNew Poe conversation started (conv=%s). The relay has auto-registered for it. The next message will contain the actual user query with a valid message_id you can reply to.", msg.ConvID),
+			Content: fmt.Sprintf("🔔 **New Poe conversation claimed: %s**\nSpawn a new fir agent for this conversation. The relay is holding queries until the new agent registers.\n\nUser: %s\nFirst message: %s", msg.ConvID, msg.UserID, msg.Content),
 			Meta: map[string]any{
 				"source":          "poe",
-				"type":            "pending",
+				"type":            "spawn",
 				"conversation_id": msg.ConvID,
 				"user_id":         msg.UserID,
+				"mcp_config":      mcpConfig,
 			},
 		})
 	}
@@ -532,7 +588,7 @@ func newMCPServerWithRelay(ag *agentPkg.Agent, registeredConvs *sync.Map) *mcp.S
 		if _, loaded := registeredConvs.LoadOrStore(args.ConvID, true); loaded {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "already registered for " + args.ConvID}}}, nil, nil
 		}
-		if err := ag.Register(args.ConvID); err != nil {
+		if err := ag.Register(args.ConvID, false); err != nil {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "registered for " + args.ConvID}}}, nil, nil
