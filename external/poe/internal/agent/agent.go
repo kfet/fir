@@ -160,7 +160,7 @@ func (a *Agent) readPump() {
 		case "pending":
 			log.Printf("[agent] pending: conv=%s", msg.ConvID)
 			if a.OnPending != nil {
-				a.OnPending(msg)
+				go a.OnPending(msg)
 			}
 		case "register_ok":
 			log.Printf("[agent] registered for conv=%s", msg.ConvID)
