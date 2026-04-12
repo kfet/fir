@@ -359,7 +359,6 @@ func TestStreamingReply_MultipleChunks(t *testing.T) {
 	}
 }
 
-
 func TestRegister_ClaimCreatesProvisional(t *testing.T) {
 	env := newTestEnv(t)
 	ws := env.connect(t)

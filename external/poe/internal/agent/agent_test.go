@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -256,5 +257,85 @@ func TestAgent_DisconnectCleansUp(t *testing.T) {
 	}
 	if hub.RegistrationState("c-1") != "" {
 		t.Errorf("still registered: %q", hub.RegistrationState("c-1"))
+	}
+}
+
+func TestOnPending_RegisterSyncDoesNotDeadlock(t *testing.T) {
+	hub, url := startRelay(t)
+
+	// Connect a catch-all agent (no ConvID).
+	a, err := Connect(context.Background(), Config{RelayURL: url})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer a.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Set OnPending to call RegisterSync — this previously deadlocked
+	// because OnPending was called synchronously from readPump.
+	claimed := make(chan string, 1)
+	a.OnPending = func(msg relay.RelayMsg) {
+		resp, err := a.RegisterSync(msg.ConvID, true)
+		if err != nil {
+			t.Errorf("RegisterSync: %v", err)
+			return
+		}
+		claimed <- resp.Type
+	}
+
+	// Trigger a pending by routing a query for an unregistered conv.
+	hub.RouteQuery("c-pending1", "m-1", "u-1", "hello", nil)
+
+	select {
+	case typ := <-claimed:
+		if typ != "register_ok" {
+			t.Errorf("expected register_ok, got %s", typ)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnPending + RegisterSync deadlocked (timed out)")
+	}
+
+	// Verify the registration landed.
+	if hub.RegistrationState("c-pending1") != relay.StateProvisional {
+		t.Errorf("state: %q", hub.RegistrationState("c-pending1"))
+	}
+}
+
+func TestOnPending_SendChannelAfterClaim(t *testing.T) {
+	hub, url := startRelay(t)
+
+	a, err := Connect(context.Background(), Config{RelayURL: url})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer a.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Simulate the full flow: claim + send channel notification.
+	done := make(chan error, 1)
+	a.OnPending = func(msg relay.RelayMsg) {
+		resp, err := a.RegisterSync(msg.ConvID, true)
+		if err != nil {
+			done <- err
+			return
+		}
+		if resp.Type != "register_ok" {
+			done <- fmt.Errorf("register: %s %s", resp.Type, resp.Reason)
+			return
+		}
+		// In production, SendChannel would be called here.
+		// We just verify we got past RegisterSync without deadlock.
+		done <- nil
+	}
+
+	hub.RouteQuery("c-pending2", "m-2", "u-2", "world", nil)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("OnPending flow: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock: OnPending never completed")
 	}
 }
