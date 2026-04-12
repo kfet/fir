@@ -35,6 +35,9 @@ type AgentMsg struct {
 	MessageID string `json:"message_id,omitempty"` // for reply
 	Text      string `json:"text,omitempty"`       // for reply
 	Final     bool   `json:"final,omitempty"`      // for reply
+	Replace   bool   `json:"replace,omitempty"`    // for reply: replace_response instead of text
+	IsError   bool   `json:"is_error,omitempty"`   // for reply: emit error event
+	ErrorType string `json:"error_type,omitempty"` // for reply: error type
 	SessionID string `json:"session_id,omitempty"` // for oauth_register
 }
 
@@ -74,8 +77,11 @@ type pendingQuery struct {
 
 // ReplyChunk is a chunk from an agent for an in-flight query.
 type ReplyChunk struct {
-	Text  string
-	Final bool
+	Text      string
+	Final     bool
+	Replace   bool
+	IsError   bool
+	ErrorType string
 }
 
 // --- Hub: the core relay state ---
@@ -247,19 +253,19 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 }
 
 // HandleReply processes a reply chunk from an agent.
-func (h *Hub) HandleReply(messageID, text string, final bool) error {
+func (h *Hub) HandleReply(msg AgentMsg) error {
 	h.mu.Lock()
-	ch, ok := h.pending[messageID]
-	if final && ok {
-		delete(h.pending, messageID)
+	ch, ok := h.pending[msg.MessageID]
+	if msg.Final && ok {
+		delete(h.pending, msg.MessageID)
 	}
 	h.mu.Unlock()
 
 	if !ok {
-		return fmt.Errorf("unknown message_id %s", messageID)
+		return fmt.Errorf("unknown message_id %s", msg.MessageID)
 	}
 
-	ch <- ReplyChunk{Text: text, Final: final}
+	ch <- ReplyChunk{Text: msg.Text, Final: msg.Final, Replace: msg.Replace, IsError: msg.IsError, ErrorType: msg.ErrorType}
 	return nil
 }
 
@@ -396,7 +402,7 @@ func (c *agentConn) readPump() {
 			c.hub.mu.Unlock()
 
 		handleReply:
-			if err := c.hub.HandleReply(msg.MessageID, msg.Text, msg.Final); err != nil {
+			if err := c.hub.HandleReply(msg); err != nil {
 				log.Printf("[relay] reply error: %v", err)
 				_ = c.sendMsg(RelayMsg{Type: "reply_error", MessageID: msg.MessageID, Reason: err.Error()})
 			} else {

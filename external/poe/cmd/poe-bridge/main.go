@@ -56,6 +56,9 @@ type replyArgs struct {
 	MessageID string `json:"message_id" jsonschema:"the Poe message_id from the inbound channel notification"`
 	Text      string `json:"text" jsonschema:"text chunk to append to the reply; may be empty on a final=true call"`
 	Final     bool   `json:"final,omitempty" jsonschema:"set true to mark the last chunk; closes the SSE stream on the Poe side"`
+	Replace   bool   `json:"replace,omitempty" jsonschema:"if true, replace all prior text instead of appending"`
+	Error     bool   `json:"error,omitempty" jsonschema:"if true, emit as error event (shows error UI with retry button)"`
+	ErrorType string `json:"error_type,omitempty" jsonschema:"error type: user_caused_error or user_message_too_long"`
 }
 
 // --- HTTP surface ---------------------------------------------------------
@@ -171,9 +174,21 @@ func newOnQuery(rt *router.Router, notif channelSender, botName string, acl *acc
 				log.Printf("[onquery] timeout for msg=%s", msgID)
 				return deadline.Err()
 			case chunk := <-ch:
-				log.Printf("[onquery] chunk for msg=%s len=%d final=%v", msgID, len(chunk.Text), chunk.Final)
-				// a clean end-of-stream.
-				if chunk.Text != "" {
+				log.Printf("[onquery] chunk for msg=%s len=%d final=%v replace=%v error=%v", msgID, len(chunk.Text), chunk.Final, chunk.Replace, chunk.IsError)
+				// Emit the appropriate SSE event type.
+				if chunk.IsError {
+					data := map[string]any{"allow_retry": true, "text": chunk.Text}
+					if chunk.ErrorType != "" {
+						data["error_type"] = chunk.ErrorType
+					}
+					if err := sse.WriteEvent("error", data); err != nil {
+						return err
+					}
+				} else if chunk.Replace {
+					if err := sse.WriteEvent("replace_response", map[string]any{"text": chunk.Text}); err != nil {
+						return err
+					}
+				} else if chunk.Text != "" {
 					if err := sse.WriteEvent("text", map[string]any{"text": chunk.Text}); err != nil {
 						return err
 					}
@@ -221,7 +236,7 @@ func newMCPServer(rt *router.Router) *mcp.Server {
 			}, nil, nil
 		}
 		log.Printf("[reply] push msg=%s len=%d final=%v", args.MessageID, len(args.Text), args.Final)
-		if err := rt.Push(args.MessageID, router.Chunk{Text: args.Text, Final: args.Final}); err != nil {
+		if err := rt.Push(args.MessageID, router.Chunk{Text: args.Text, Final: args.Final, Replace: args.Replace, IsError: args.Error, ErrorType: args.ErrorType}); err != nil {
 			return &mcp.CallToolResult{
 				IsError: true,
 				Content: []mcp.Content{&mcp.TextContent{Text: "reply: " + err.Error()}},
@@ -345,7 +360,19 @@ func runRelay() {
 
 			replyCh, _ := hub.RouteQuery(q.ConversationID, q.MessageID, q.UserID, userText, queryJSON)
 			for c := range replyCh {
-				if c.Text != "" {
+				if c.IsError {
+					data := map[string]any{"allow_retry": true, "text": c.Text}
+					if c.ErrorType != "" {
+						data["error_type"] = c.ErrorType
+					}
+					if err := sse.WriteEvent("error", data); err != nil {
+						return err
+					}
+				} else if c.Replace {
+					if err := sse.WriteEvent("replace_response", map[string]any{"text": c.Text}); err != nil {
+						return err
+					}
+				} else if c.Text != "" {
 					if err := sse.WriteEvent("text", map[string]any{"text": c.Text}); err != nil {
 						return err
 					}
@@ -568,7 +595,7 @@ func newMCPServerWithRelay(ag *agentPkg.Agent) *mcp.Server {
 		if args.MessageID == "" {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "reply: message_id required"}}}, nil, nil
 		}
-		if err := ag.Reply(args.MessageID, args.Text, args.Final); err != nil {
+		if err := ag.Reply(args.MessageID, args.Text, args.Final, args.Replace, args.Error, args.ErrorType); err != nil {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "reply: " + err.Error()}}}, nil, nil
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil

@@ -113,7 +113,7 @@ func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) 
 
 // Reply sends a reply chunk to the relay and waits for ack.
 // Returns nil on success, error on relay rejection (e.g. unknown message_id).
-func (a *Agent) Reply(messageID, text string, final bool) error {
+func (a *Agent) Reply(messageID, text string, final, replace, isError bool, errorType string) error {
 	ch := make(chan error, 1)
 	a.replyCallbacks.Store(messageID, ch)
 
@@ -122,6 +122,9 @@ func (a *Agent) Reply(messageID, text string, final bool) error {
 		MessageID: messageID,
 		Text:      text,
 		Final:     final,
+		Replace:   replace,
+		IsError:   isError,
+		ErrorType: errorType,
 	})
 	if err != nil {
 		a.replyCallbacks.Delete(messageID)

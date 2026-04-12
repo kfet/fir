@@ -20,8 +20,11 @@ import (
 
 // Chunk is a single unit of reply text from fir.
 type Chunk struct {
-	Text  string
-	Final bool
+	Text      string
+	Final     bool
+	Replace   bool   // emit replace_response instead of text
+	IsError   bool   // emit error event instead of text
+	ErrorType string // e.g. "user_caused_error", "user_message_too_long"
 }
 
 // ErrUnknownMessage is returned by Push when no handler is waiting for

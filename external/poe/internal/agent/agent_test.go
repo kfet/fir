@@ -82,7 +82,7 @@ func TestAgent_ReplyRoutesToRelay(t *testing.T) {
 	replyCh, _ := hub.RouteQuery("c-1", "m-1", "u-1", "hi", nil)
 	time.Sleep(50 * time.Millisecond)
 
-	if err := a.Reply("m-1", "world", true); err != nil {
+	if err := a.Reply("m-1", "world", true, false, false, ""); err != nil {
 		t.Fatalf("Reply: %v", err)
 	}
 
@@ -154,8 +154,8 @@ func TestTwoAgents_IsolatedRouting(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	_ = aA.Reply("m-a", "from A", true)
-	_ = aB.Reply("m-b", "from B", true)
+	_ = aA.Reply("m-a", "from A", true, false, false, "")
+	_ = aB.Reply("m-b", "from B", true, false, false, "")
 
 	select {
 	case c := <-replyCh1:
@@ -224,8 +224,8 @@ func TestAgent_StreamingReply(t *testing.T) {
 	replyCh, _ := hub.RouteQuery("c-1", "m-1", "u-1", "hi", nil)
 	time.Sleep(50 * time.Millisecond)
 
-	_ = a.Reply("m-1", "part1 ", false)
-	_ = a.Reply("m-1", "part2", true)
+	_ = a.Reply("m-1", "part1 ", false, false, false, "")
+	_ = a.Reply("m-1", "part2", true, false, false, "")
 
 	var texts []string
 	for c := range replyCh {
