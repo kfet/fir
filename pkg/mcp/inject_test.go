@@ -111,3 +111,64 @@ func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
 		t.Errorf("message content missing: %q", injectedText)
 	}
 }
+
+func TestWireChannelInjection_HistoryPreambleOnEmptySession(t *testing.T) {
+	mgr := NewManager(nil, false)
+	var injected []string
+	WireChannelInjection(mgr, func(text string, ts int64) {
+		injected = append(injected, text)
+	}, func() int { return 0 }) // empty session
+
+	fn := mgr.loadOnChannelMessage()
+	if fn == nil {
+		t.Fatal("onChannelMessage not set")
+	}
+
+	fn(ChannelMessage{
+		Content:    "and 3+3?",
+		ServerName: "poe",
+		Meta: map[string]any{
+			"source":  "poe",
+			"history": json.RawMessage(`[{"role":"user","content":"what is 2+2?"},{"role":"bot","content":"4"},{"role":"user","content":"and 3+3?"}]`),
+		},
+	})
+
+	if len(injected) != 2 {
+		t.Fatalf("expected 2 injections (preamble + message), got %d", len(injected))
+	}
+	if !strings.Contains(injected[0], "conversation history") {
+		t.Errorf("first injection should be history preamble, got: %s", injected[0])
+	}
+	if !strings.Contains(injected[0], "what is 2+2?") {
+		t.Errorf("preamble should contain prior messages, got: %s", injected[0])
+	}
+	if !strings.Contains(injected[1], "and 3+3?") {
+		t.Errorf("second injection should be current message, got: %s", injected[1])
+	}
+}
+
+func TestWireChannelInjection_NoHistoryOnExistingSession(t *testing.T) {
+	mgr := NewManager(nil, false)
+	var injected []string
+	WireChannelInjection(mgr, func(text string, ts int64) {
+		injected = append(injected, text)
+	}, func() int { return 5 }) // existing session with messages
+
+	fn := mgr.loadOnChannelMessage()
+
+	fn(ChannelMessage{
+		Content:    "hello",
+		ServerName: "poe",
+		Meta: map[string]any{
+			"source":  "poe",
+			"history": json.RawMessage(`[{"role":"user","content":"old"},{"role":"bot","content":"reply"},{"role":"user","content":"hello"}]`),
+		},
+	})
+
+	if len(injected) != 1 {
+		t.Fatalf("expected 1 injection (message only, no preamble), got %d", len(injected))
+	}
+	if strings.Contains(injected[0], "conversation history") {
+		t.Errorf("should not inject history on existing session, got: %s", injected[0])
+	}
+}

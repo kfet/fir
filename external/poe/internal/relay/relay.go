@@ -21,8 +21,8 @@ const (
 
 // Timeouts.
 const (
-	PingInterval   = 30 * time.Second
-	PingTimeout    = 60 * time.Second
+	PingInterval = 30 * time.Second
+	PingTimeout  = 60 * time.Second
 )
 
 // --- Messages between relay and agents ---

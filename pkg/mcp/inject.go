@@ -2,11 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/mcp/history"
 )
 
 // MessageInjector is a function that injects a formatted text message into
@@ -14,15 +17,28 @@ import (
 // AgentMessage; this package only provides the text.
 type MessageInjector func(text string, ts int64)
 
+// SessionLengthFunc returns the number of messages in the current session.
+// Used to decide whether to inject conversation history on the first message.
+type SessionLengthFunc func() int
+
 // WireChannelInjection configures the manager's OnChannelMessage callback
 // to format inbound channel messages, send a typing indicator when
 // appropriate, and call inject to deliver the message to the agent.
-func WireChannelInjection(mgr *Manager, inject MessageInjector) {
+//
+// If sessionLen is non-nil and returns 0 when the first channel message
+// with meta["history"] arrives, the conversation history is formatted and
+// injected as a preamble before the user's message.
+func WireChannelInjection(mgr *Manager, inject MessageInjector, sessionLen ...SessionLengthFunc) {
+	var getSessionLen SessionLengthFunc
+	if len(sessionLen) > 0 {
+		getSessionLen = sessionLen[0]
+	}
+	var historyInjected atomic.Bool
+
 	mgr.SetOnChannelMessage(func(cm ChannelMessage) {
 		serverName := cm.ServerName
 		source := cm.SourceName()
 		meta := formatMeta(cm.Meta)
-		text := fmt.Sprintf("[Channel message from %s via %s%s]\n%s", source, serverName, meta, cm.Text())
 		ts := time.Now().UnixMilli()
 		firlog.Info("injecting channel message", "server", serverName, "source", source)
 
@@ -33,6 +49,32 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 			}
 		}
 
+		// On first message, inject conversation history preamble if the
+		// session is empty and history is available in meta.
+		if !historyInjected.Swap(true) {
+			if rawHistory := cm.Meta["history"]; rawHistory != nil {
+				empty := getSessionLen == nil || getSessionLen() == 0
+				if empty {
+					var queryJSON json.RawMessage
+					switch v := rawHistory.(type) {
+					case json.RawMessage:
+						queryJSON = v
+					case []byte:
+						queryJSON = v
+					default:
+						// meta["history"] might be pre-parsed; re-marshal it
+						queryJSON, _ = json.Marshal(v)
+					}
+					if preamble, _ := history.FormatPreamble(queryJSON); preamble != "" {
+						preambleText := fmt.Sprintf("[Channel message from %s via %s — conversation history]\n%s", source, serverName, preamble)
+						inject(preambleText, ts)
+						firlog.Info("injected conversation history preamble", "server", serverName)
+					}
+				}
+			}
+		}
+
+		text := fmt.Sprintf("[Channel message from %s via %s%s]\n%s", source, serverName, meta, cm.Text())
 		inject(text, ts)
 	})
 }
@@ -41,7 +83,7 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector) {
 // the message header. Keys are sorted for deterministic output. The "user"
 // key is excluded since it's already in the "from" field. The "history"
 // key is excluded since it carries bulk conversation history (handled
-// separately by the caller).
+// separately above).
 func formatMeta(meta map[string]any) string {
 	if len(meta) == 0 {
 		return ""

@@ -239,6 +239,8 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 		}
 		msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
 		sess.InjectMessage(msg)
+	}, func() int {
+		return len(sess.SessionStore.BuildSessionContext().Messages)
 	})
 
 	var prevMCPNames []string

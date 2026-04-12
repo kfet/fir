@@ -29,7 +29,6 @@ import (
 	agentPkg "github.com/kfet/fir/external/poe/internal/agent"
 	"github.com/kfet/fir/external/poe/internal/funnel"
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
-	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/permq"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	relayPkg "github.com/kfet/fir/external/poe/internal/relay"
@@ -459,42 +458,23 @@ func runAgent() {
 
 	// When relay delivers a query, forward to fir via MCP channel notification.
 	// History from Poe's query[] is passed as meta["history"] — fir decides
-	// whether and how to use it.
-	firstQuery := true
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
-		preamble, latestUserMsg := history.FormatPreamble(msg.Query)
-
-		// Inject history preamble only on the first query (bootstraps the
-		// new session). Subsequent queries use the fir session's own context.
-		if firstQuery && preamble != "" {
-			_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-				Content: fmt.Sprintf("[Prior conversation history from Poe]\n%s\nThe user's new message follows.", preamble),
-				Meta: map[string]any{
-					"source":          "poe",
-					"type":            "history",
-					"conversation_id": msg.ConvID,
-					"user_id":         msg.UserID,
-				},
-			})
-		}
-		firstQuery = false
-
-		userText := latestUserMsg
-		if userText == "" {
-			userText = msg.Content
-		}
-
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
-			msg.MessageID, msg.ConvID, msg.UserID, userText)
+			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
+
+		meta := map[string]any{
+			"source":          "poe",
+			"user_id":         msg.UserID,
+			"conversation_id": msg.ConvID,
+			"message_id":      msg.MessageID,
+		}
+		if len(msg.Query) > 0 {
+			meta["history"] = msg.Query
+		}
 
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
-			Meta: map[string]any{
-				"source":          "poe",
-				"user_id":         msg.UserID,
-				"conversation_id": msg.ConvID,
-				"message_id":      msg.MessageID,
-			},
+			Meta:    meta,
 		})
 	}
 
@@ -596,6 +576,7 @@ func newMCPServerWithRelay(ag *agentPkg.Agent) *mcp.Server {
 
 	return srv
 }
+
 // runV1 is the original single-bridge mode (no relay).
 func runV1() {
 
