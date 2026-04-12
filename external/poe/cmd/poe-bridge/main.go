@@ -459,22 +459,27 @@ func runAgent() {
 	// When relay delivers a query, forward to fir via MCP channel notification.
 	// History from Poe's query[] is passed as meta["history"] — fir decides
 	// whether and how to use it.
+	firstQuery := true
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
-		// Build content with conversation history from Poe's query array.
+		// Include conversation history only on first query (bootstraps the
+		// new fir session with context). Subsequent queries arrive in a
+		// session that already has the conversation.
 		var history string
-		if len(msg.Query) > 0 {
+		if firstQuery && len(msg.Query) > 0 {
+			firstQuery = false
 			var messages []struct {
 				Role    string `json:"role"`
 				Content string `json:"content"`
 			}
 			if err := json.Unmarshal(msg.Query, &messages); err == nil && len(messages) > 1 {
 				history = "\n<conversation_history>\n"
-				// All messages except the last (which is the current query)
 				for _, m := range messages[:len(messages)-1] {
 					history += fmt.Sprintf("[%s]: %s\n", m.Role, m.Content)
 				}
 				history += "</conversation_history>\n"
 			}
+		} else {
+			firstQuery = false
 		}
 
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s%s\n</poe>",
