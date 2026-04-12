@@ -75,9 +75,11 @@ func (t *fakeTransport) Connect(context.Context) (mcp.Connection, error) {
 
 func TestNotifier_NotConnected(t *testing.T) {
 	n := NewNotifier()
-	err := n.SendChannel(context.Background(), ChannelMessage{Content: "hi"})
-	if err != ErrNotConnected {
-		t.Errorf("err: got %v, want ErrNotConnected", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // immediately cancelled — SendChannel should return ctx.Err()
+	err := n.SendChannel(ctx, ChannelMessage{Content: "hi"})
+	if err != context.Canceled {
+		t.Errorf("err: got %v, want context.Canceled", err)
 	}
 }
 
@@ -140,9 +142,11 @@ func TestNotifier_WrapConnectError(t *testing.T) {
 	if _, err := wrapped.Connect(context.Background()); err == nil {
 		t.Fatal("expected Connect error")
 	}
-	// Still not connected → SendChannel must report ErrNotConnected.
-	if err := n.SendChannel(context.Background(), ChannelMessage{}); err != ErrNotConnected {
-		t.Errorf("err: got %v, want ErrNotConnected", err)
+	// Still not connected → SendChannel must return ctx error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := n.SendChannel(ctx, ChannelMessage{}); err != context.Canceled {
+		t.Errorf("err: got %v, want context.Canceled", err)
 	}
 }
 

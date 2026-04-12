@@ -43,14 +43,15 @@ var ErrNotConnected = errors.New("mcpnotify: no active connection")
 // Notifier holds a reference to the live MCP Connection and exposes a
 // SendChannel method that writes a channel notification on it.
 type Notifier struct {
-	mu   sync.RWMutex
-	conn mcp.Connection
+	mu    sync.RWMutex
+	conn  mcp.Connection
+	ready chan struct{} // closed when conn is set
 }
 
 // NewNotifier returns an empty Notifier. The connection is captured lazily
 // when the MCP server connects via a Transport returned by Wrap.
 func NewNotifier() *Notifier {
-	return &Notifier{}
+	return &Notifier{ready: make(chan struct{})}
 }
 
 // setConn is called by the capturing Transport once the underlying
@@ -58,6 +59,11 @@ func NewNotifier() *Notifier {
 func (n *Notifier) setConn(c mcp.Connection) {
 	n.mu.Lock()
 	n.conn = c
+	select {
+	case <-n.ready:
+	default:
+		close(n.ready)
+	}
 	n.mu.Unlock()
 }
 
@@ -65,11 +71,22 @@ func (n *Notifier) setConn(c mcp.Connection) {
 // on the captured connection. Returns ErrNotConnected if Wrap's Transport
 // has not yet been used to Connect, or any underlying Write error.
 func (n *Notifier) SendChannel(ctx context.Context, msg ChannelMessage) error {
+	// Wait for connection if not yet established (blocks until Connect or ctx cancel).
 	n.mu.RLock()
 	c := n.conn
 	n.mu.RUnlock()
 	if c == nil {
-		return ErrNotConnected
+		select {
+		case <-n.ready:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		n.mu.RLock()
+		c = n.conn
+		n.mu.RUnlock()
+		if c == nil {
+			return ErrNotConnected
+		}
 	}
 	params, err := json.Marshal(msg)
 	if err != nil {
