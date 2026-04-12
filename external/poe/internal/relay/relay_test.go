@@ -314,6 +314,7 @@ func TestMultipleQueriesSameConv(t *testing.T) {
 		t.Errorf("q1: %s", q1.MessageID)
 	}
 	sendJSON(t, ws, AgentMsg{Type: "reply", MessageID: "m-1", Text: "r1", Final: true})
+	readMsg(t, ws) // reply_ok
 	c1 := <-reply1
 	if c1.Text != "r1" {
 		t.Errorf("reply1: %q", c1.Text)
@@ -326,6 +327,7 @@ func TestMultipleQueriesSameConv(t *testing.T) {
 		t.Errorf("q2: %s", q2.MessageID)
 	}
 	sendJSON(t, ws, AgentMsg{Type: "reply", MessageID: "m-2", Text: "r2", Final: true})
+	readMsg(t, ws) // reply_ok
 	c2 := <-reply2
 	if c2.Text != "r2" {
 		t.Errorf("reply2: %q", c2.Text)

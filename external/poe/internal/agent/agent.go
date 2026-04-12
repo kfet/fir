@@ -42,6 +42,9 @@ type Agent struct {
 	// OnReplyError is called when the relay rejects a reply (e.g. unknown message_id).
 	OnReplyError func(msg relay.RelayMsg)
 
+	// replyCallbacks maps message_id → channel for reply ack/error.
+	replyCallbacks sync.Map // string → chan error
+
 	// oauthCallbacks maps session_id → channel for OAuth callback results.
 	oauthCallbacks sync.Map // string → chan relay.RelayMsg
 
@@ -109,12 +112,27 @@ func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) 
 // Reply sends a reply chunk to the relay for a given message_id.
 // This is called by the MCP reply tool handler.
 func (a *Agent) Reply(messageID, text string, final bool) error {
-	return a.sendJSON(relay.AgentMsg{
+	ch := make(chan error, 1)
+	a.replyCallbacks.Store(messageID, ch)
+
+	err := a.sendJSON(relay.AgentMsg{
 		Type:      "reply",
 		MessageID: messageID,
 		Text:      text,
 		Final:     final,
 	})
+	if err != nil {
+		a.replyCallbacks.Delete(messageID)
+		return err
+	}
+
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(5 * time.Second):
+		a.replyCallbacks.Delete(messageID)
+		return nil // timeout = assume ok (relay may not ack non-final chunks)
+	}
 }
 
 // Router returns the agent's local router (for bridging the MCP reply
@@ -182,8 +200,15 @@ func (a *Agent) readPump() {
 			}
 		case "reply_error":
 			log.Printf("[agent] reply error for msg=%s: %s", msg.MessageID, msg.Reason)
+			if ch, ok := a.replyCallbacks.LoadAndDelete(msg.MessageID); ok {
+				ch.(chan error) <- fmt.Errorf("%s", msg.Reason)
+			}
 			if a.OnReplyError != nil {
 				a.OnReplyError(msg)
+			}
+		case "reply_ok":
+			if ch, ok := a.replyCallbacks.LoadAndDelete(msg.MessageID); ok {
+				ch.(chan error) <- nil
 			}
 		default:
 			log.Printf("[agent] unknown msg type: %s", msg.Type)
