@@ -585,12 +585,10 @@ func newMCPServerWithRelay(ag *agentPkg.Agent, registeredConvs *sync.Map) *mcp.S
 	}, func(_ context.Context, _ *mcp.CallToolRequest, args struct {
 		ConvID string `json:"conv_id" jsonschema:"conversation_id to register for"`
 	}) (*mcp.CallToolResult, any, error) {
-		if _, loaded := registeredConvs.LoadOrStore(args.ConvID, true); loaded {
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "already registered for " + args.ConvID}}}, nil, nil
-		}
 		if err := ag.Register(args.ConvID, false); err != nil {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
 		}
+		registeredConvs.Store(args.ConvID, true)
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "registered for " + args.ConvID}}}, nil, nil
 	})
 
