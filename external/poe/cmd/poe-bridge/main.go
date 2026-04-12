@@ -478,6 +478,19 @@ func runAgent() {
 		})
 	}
 
+	// Surface relay reply errors to the LLM so it can recover.
+	ag.OnReplyError = func(msg relayPkg.RelayMsg) {
+		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
+			Content: fmt.Sprintf("[System error] Reply failed for message_id=%s: %s", msg.MessageID, msg.Reason),
+			Meta: map[string]any{
+				"source":     "poe",
+				"type":       "error",
+				"message_id": msg.MessageID,
+				"error":      msg.Reason,
+			},
+		})
+	}
+
 	// Track registered conv_ids to avoid double-registration.
 	registeredConvs := &sync.Map{}
 

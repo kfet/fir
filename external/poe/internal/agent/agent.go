@@ -39,6 +39,9 @@ type Agent struct {
 	// OnPending is called when the relay broadcasts a pending conv_id.
 	OnPending func(msg relay.RelayMsg)
 
+	// OnReplyError is called when the relay rejects a reply (e.g. unknown message_id).
+	OnReplyError func(msg relay.RelayMsg)
+
 	// oauthCallbacks maps session_id → channel for OAuth callback results.
 	oauthCallbacks sync.Map // string → chan relay.RelayMsg
 
@@ -176,6 +179,11 @@ func (a *Agent) readPump() {
 			log.Printf("[agent] oauth callback for session=%s", msg.SessionID)
 			if ch, ok := a.oauthCallbacks.LoadAndDelete(msg.SessionID); ok {
 				ch.(chan relay.RelayMsg) <- msg
+			}
+		case "reply_error":
+			log.Printf("[agent] reply error for msg=%s: %s", msg.MessageID, msg.Reason)
+			if a.OnReplyError != nil {
+				a.OnReplyError(msg)
 			}
 		default:
 			log.Printf("[agent] unknown msg type: %s", msg.Type)

@@ -414,6 +414,7 @@ func (c *agentConn) readPump() {
 		handleReply:
 			if err := c.hub.HandleReply(msg.MessageID, msg.Text, msg.Final); err != nil {
 				log.Printf("[relay] reply error: %v", err)
+				_ = c.sendMsg(RelayMsg{Type: "reply_error", MessageID: msg.MessageID, Reason: err.Error()})
 			}
 
 		case "oauth_register":
