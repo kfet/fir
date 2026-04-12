@@ -31,6 +31,7 @@ type Agent struct {
 	ws     *websocket.Conn
 	router *router.Router
 	mu     sync.Mutex
+	done   chan struct{} // closed when readPump exits (ws dies)
 
 	// OnQuery is called when the relay delivers a query. The agent
 	// should forward it to fir via MCP channel notification.
@@ -67,6 +68,7 @@ func Connect(ctx context.Context, cfg Config) (*Agent, error) {
 		cfg:    cfg,
 		ws:     ws,
 		router: router.New(),
+		done:   make(chan struct{}),
 	}
 
 	go a.readPump()
@@ -109,8 +111,8 @@ func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) 
 	}
 }
 
-// Reply sends a reply chunk to the relay for a given message_id.
-// This is called by the MCP reply tool handler.
+// Reply sends a reply chunk to the relay and waits for ack.
+// Returns nil on success, error on relay rejection (e.g. unknown message_id).
 func (a *Agent) Reply(messageID, text string, final bool) error {
 	ch := make(chan error, 1)
 	a.replyCallbacks.Store(messageID, ch)
@@ -129,9 +131,9 @@ func (a *Agent) Reply(messageID, text string, final bool) error {
 	select {
 	case err := <-ch:
 		return err
-	case <-time.After(5 * time.Second):
+	case <-a.done:
 		a.replyCallbacks.Delete(messageID)
-		return nil // timeout = assume ok (relay may not ack non-final chunks)
+		return fmt.Errorf("agent disconnected")
 	}
 }
 
@@ -158,6 +160,7 @@ func (a *Agent) sendJSON(v any) error {
 
 func (a *Agent) readPump() {
 	defer a.ws.Close()
+	defer close(a.done)
 
 	for {
 		_, data, err := a.ws.ReadMessage()
