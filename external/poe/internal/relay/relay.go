@@ -32,6 +32,7 @@ const (
 type AgentMsg struct {
 	Type      string `json:"type"`                 // register, reply, oauth_register, oauth_result
 	ConvID    string `json:"conv_id,omitempty"`    // for register
+	Claim     bool   `json:"claim,omitempty"`      // for register: true = race gate (no queries), false = real agent
 	MessageID string `json:"message_id,omitempty"` // for reply
 	Text      string `json:"text,omitempty"`       // for reply
 	Final     bool   `json:"final,omitempty"`      // for reply
@@ -40,23 +41,24 @@ type AgentMsg struct {
 
 // RelayMsg is a message from relay → agent.
 type RelayMsg struct {
-	Type      string          `json:"type"` // query, pending, register_ok, register_rejected, oauth_callback
-	ConvID    string          `json:"conv_id,omitempty"`
-	MessageID string          `json:"message_id,omitempty"`
-	UserID    string          `json:"user_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	Query     json.RawMessage `json:"query,omitempty"`  // raw Poe query array
-	Reason    string          `json:"reason,omitempty"` // for register_rejected
-	SessionID string          `json:"session_id,omitempty"`          // for oauth_callback
-	OAuthParams map[string]string `json:"oauth_params,omitempty"`   // for oauth_callback
-	CallbackURL string        `json:"callback_url,omitempty"`       // for oauth_registered
+	Type        string            `json:"type"` // query, pending, register_ok, register_rejected, oauth_callback
+	ConvID      string            `json:"conv_id,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	UserID      string            `json:"user_id,omitempty"`
+	Content     string            `json:"content,omitempty"`
+	Query       json.RawMessage   `json:"query,omitempty"`        // raw Poe query array
+	Reason      string            `json:"reason,omitempty"`       // for register_rejected
+	SessionID   string            `json:"session_id,omitempty"`   // for oauth_callback
+	OAuthParams map[string]string `json:"oauth_params,omitempty"` // for oauth_callback
+	CallbackURL string            `json:"callback_url,omitempty"` // for oauth_registered
 }
 
 // --- Registration map ---
 
 type registration struct {
-	conn  *agentConn
-	state string // StateProvisional or StateActive
+	conn    *agentConn
+	state   string // StateProvisional or StateActive
+	claimed bool   // true if this is a claim-only (no queries forwarded)
 }
 
 // --- Pending query waiting for an agent ---
@@ -86,7 +88,7 @@ type Hub struct {
 	agents        map[*agentConn]bool        // all connected agents
 	lobby         map[string]*pendingQuery   // conv_id → waiting query
 	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
-	oauthAgents   map[string]*agentConn     // oauth session_id → agent that registered it
+	oauthAgents   map[string]*agentConn      // oauth session_id → agent that registered it
 }
 
 // NewHub creates a ready-to-use Hub.
@@ -154,23 +156,43 @@ func (c *agentConn) sendMsg(msg RelayMsg) error {
 // --- Hub methods ---
 
 // Register handles an agent's registration for a conv_id.
-func (h *Hub) Register(conn *agentConn, convID string) RelayMsg {
+// claim=true is a race gate: creates provisional but does NOT deliver lobby queries.
+// claim=false is a real agent taking ownership: overrides provisional, delivers lobby queries.
+func (h *Hub) Register(conn *agentConn, convID string, claim bool) RelayMsg {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	existing, ok := h.registrations[convID]
-	if ok {
-		if existing.state == StateActive {
-			return RelayMsg{Type: "register_rejected", ConvID: convID, Reason: "active"}
+
+	if claim {
+		// Race gate: first claim wins, rest rejected.
+		if ok {
+			if existing.state == StateActive {
+				return RelayMsg{Type: "register_rejected", ConvID: convID, Reason: "active"}
+			}
+			// Already claimed (provisional).
+			return RelayMsg{Type: "register_rejected", ConvID: convID, Reason: "claimed"}
 		}
-		// Provisional — allow override.
-		log.Printf("[relay] conv %s: override provisional (old conn replaced)", convID)
+		// No existing — claim it. No lobby delivery.
+		h.registrations[convID] = &registration{conn: conn, state: StateProvisional, claimed: true}
+		log.Printf("[relay] conv %s: claimed (provisional, no queries)", convID)
+		return RelayMsg{Type: "register_ok", ConvID: convID}
 	}
 
-	h.registrations[convID] = &registration{conn: conn, state: StateProvisional}
-	log.Printf("[relay] conv %s: registered (provisional)", convID)
+	// Real agent (claim=false): takes ownership, gets queries.
+	if ok && existing.state == StateActive {
+		return RelayMsg{Type: "register_rejected", ConvID: convID, Reason: "active"}
+	}
 
-	// If there's a lobby query waiting for this conv, deliver it.
+	// Override provisional (claimed) or fresh registration.
+	h.registrations[convID] = &registration{conn: conn, state: StateProvisional}
+	if ok {
+		log.Printf("[relay] conv %s: override claim → real agent", convID)
+	} else {
+		log.Printf("[relay] conv %s: registered (real agent)", convID)
+	}
+
+	// Deliver lobby queries to the real agent.
 	if pq, ok := h.lobby[convID]; ok {
 		delete(h.lobby, convID)
 		go h.deliverToAgent(conn, pq)
@@ -198,8 +220,8 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 	h.mu.Lock()
 	reg, ok := h.registrations[convID]
 
-	if ok {
-		// Registered — deliver to agent.
+	if ok && !reg.claimed {
+		// Registered with a real agent — deliver to agent.
 		h.pending[messageID] = replyCh
 		h.mu.Unlock()
 
@@ -374,7 +396,7 @@ func (c *agentConn) readPump() {
 
 		switch msg.Type {
 		case "register":
-			resp := c.hub.Register(c, msg.ConvID)
+			resp := c.hub.Register(c, msg.ConvID, msg.Claim)
 			_ = c.sendMsg(resp)
 
 		case "reply":

@@ -202,7 +202,7 @@ func TestAgent_RegisterDynamically(t *testing.T) {
 	}
 
 	// Register dynamically.
-	if err := a.Register("c-dyn"); err != nil {
+	if err := a.Register("c-dyn", false); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
