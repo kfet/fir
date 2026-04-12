@@ -1,34 +1,29 @@
 ---
 name: spawn-agent
-description: Spawn a new fir session for a channel conversation. Triggered by channel notifications with meta type "spawn".
+description: Spawn a dedicated fir session for a new Poe conversation. Runs when a channel notification arrives with meta type "spawn".
 ---
 
 # spawn-agent
 
-When you receive a channel message with `type: "spawn"` in the meta,
-spawn a new fir session by running bash commands. Do NOT reply to the
-user yourself.
+A channel notification with `meta.type == "spawn"` means the bridge
+claimed a new conversation. Create a dedicated fir process for it.
 
 ## Steps
 
-Extract `conversation_id` and `mcp_config` from the notification meta,
-then run:
+1. Read `conversation_id` and `mcp_config` from the notification meta.
+
+2. Run this bash block (substitute values):
 
 ```bash
-CONV_ID="<conversation_id>"
-AGENT_DIR="$HOME/.local/state/fir/agents/$CONV_ID"
-mkdir -p "$AGENT_DIR/.fir"
-
-cat > "$AGENT_DIR/.fir/mcp.json" << 'MCPEOF'
-<mcp_config JSON from meta>
+CONV="<conversation_id>"
+DIR="$HOME/.local/state/fir/agents/$CONV"
+mkdir -p "$DIR/.fir"
+cat > "$DIR/.fir/mcp.json" << 'MCPEOF'
+<mcp_config from meta, as JSON>
 MCPEOF
-
-tmux new-window -t agents \
-  "fir -c --session-name '$CONV_ID' '$AGENT_DIR'" 2>/dev/null || \
-tmux new-session -d -s agents \
-  "fir -c --session-name '$CONV_ID' '$AGENT_DIR'"
+tmux new-window -t agents "fir -c --session-name '$CONV' '$DIR'" 2>/dev/null || \
+  tmux new-session -d -s agents "fir -c --session-name '$CONV' '$DIR'"
 ```
 
-That's it. Do NOT pass a system prompt or first message to fir.
-The new fir will receive the user's message automatically via its
-channel bridge and reply on its own.
+3. Done. The new fir receives the user's message automatically via its
+   bridge and replies on its own. Move on and wait for the next spawn.
