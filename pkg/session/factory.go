@@ -188,6 +188,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// --- Wire and start MCP servers ---
 	mcpMgr := StartMCPManagerWithOptions(ctx, result.Session, opts.MCPConfigs, MCPManagerOptions{
 		OnServerReady: opts.OnMCPServerReady,
+		ExtReady:      opts.ExtReady,
 	})
 
 	return &SetupResult{
@@ -208,6 +209,10 @@ type MCPManagerOptions struct {
 	// connection attempt. The callback receives the server name and nil on
 	// success, or a non-nil error on failure.
 	OnServerReady func(name string, err error)
+
+	// ExtReady is closed when extensions finish loading. Channel injection
+	// waits on this before injecting messages so auth is ready.
+	ExtReady <-chan struct{}
 }
 
 // StartMCPManager creates a new MCP Manager, wires it to the given session
@@ -227,6 +232,11 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 	mgr := mcp.NewManager(configs, false)
 
 	mcp.WireChannelInjection(mgr, func(text string, ts int64) {
+		// Wait for extensions (auth etc.) before injecting, so the first
+		// LLM call has valid credentials.
+		if opts.ExtReady != nil {
+			<-opts.ExtReady
+		}
 		msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
 		sess.InjectMessage(msg)
 	})
