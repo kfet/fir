@@ -517,8 +517,8 @@ func runAgent() {
 				},
 			},
 		}
-		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-			Content: fmt.Sprintf("🔔 **New Poe conversation claimed: %s**\nSpawn a new fir agent for this conversation. The relay is holding queries until the new agent registers.\n\nUser: %s\nFirst message: %s", msg.ConvID, msg.UserID, msg.Content),
+		err = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
+			Content: fmt.Sprintf("[System — spawn-agent]\nA new conversation needs a dedicated fir agent. Follow the spawn-agent skill to create one.\n\nconversation_id: %s\nuser_id: %s\nfirst_message: %s\n\nRun the bash commands from the spawn-agent skill NOW. Use the mcp_config from meta.", msg.ConvID, msg.UserID, msg.Content),
 			Meta: map[string]any{
 				"source":          "poe",
 				"type":            "spawn",
@@ -527,6 +527,9 @@ func runAgent() {
 				"mcp_config":      mcpConfig,
 			},
 		})
+		if err != nil {
+			log.Printf("[agent] SendChannel spawn failed for conv=%s: %v", msg.ConvID, err)
+		}
 	}
 
 	// Override the reply tool: instead of using the local router, send
