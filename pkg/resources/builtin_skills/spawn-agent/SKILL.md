@@ -21,8 +21,8 @@ mkdir -p "$DIR/.fir"
 cat > "$DIR/.fir/mcp.json" << 'MCPEOF'
 <mcp_config from meta, as JSON>
 MCPEOF
-tmux new-window -t agents "fir -c --session-name '$CONV' '$DIR'" 2>/dev/null || \
-  tmux new-session -d -s agents "fir -c --session-name '$CONV' '$DIR'"
+tmux new-window -t agents "cd '$DIR' && fir -c --session-name '$CONV'" 2>/dev/null || \
+  tmux new-session -d -s agents "cd '$DIR' && fir -c --session-name '$CONV'"
 ```
 
 3. Done. The new fir receives the user's message automatically via its
