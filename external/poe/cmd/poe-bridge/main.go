@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -506,9 +507,8 @@ func runAgent() {
 			return
 		}
 
-		// Notify fir/LLM to spawn a new agent for this conv.
-		// Include the MCP config so a generic spawn skill can write it.
-		mcpConfig := map[string]any{
+		// Spawn a dedicated agent directly.
+		mcpJSON, _ := json.Marshal(map[string]any{
 			"mcpServers": map[string]any{
 				"poe": map[string]any{
 					"command": "poe-bridge",
@@ -516,19 +516,12 @@ func runAgent() {
 					"env":     map[string]string{"POE_CONV_ID": msg.ConvID},
 				},
 			},
-		}
-		err = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-			Content: fmt.Sprintf("[System — spawn-agent]\nA new conversation needs a dedicated fir agent. Follow the spawn-agent skill to create one.\n\nconversation_id: %s\nuser_id: %s\nfirst_message: %s\n\nRun the bash commands from the spawn-agent skill NOW. Use the mcp_config from meta.", msg.ConvID, msg.UserID, msg.Content),
-			Meta: map[string]any{
-				"source":          "poe",
-				"type":            "spawn",
-				"conversation_id": msg.ConvID,
-				"user_id":         msg.UserID,
-				"mcp_config":      mcpConfig,
-			},
 		})
-		if err != nil {
-			log.Printf("[agent] SendChannel spawn failed for conv=%s: %v", msg.ConvID, err)
+		cmd := exec.CommandContext(ctx, "spawn-poe-agent", msg.ConvID, string(mcpJSON))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("[agent] spawn failed for conv=%s: %v\n%s", msg.ConvID, err, out)
+		} else {
+			log.Printf("[agent] spawned agent for conv=%s", msg.ConvID)
 		}
 	}
 
