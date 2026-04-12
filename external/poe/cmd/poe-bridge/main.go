@@ -29,6 +29,7 @@ import (
 	agentPkg "github.com/kfet/fir/external/poe/internal/agent"
 	"github.com/kfet/fir/external/poe/internal/funnel"
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
+	"github.com/kfet/fir/external/poe/internal/history"
 	"github.com/kfet/fir/external/poe/internal/permq"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	relayPkg "github.com/kfet/fir/external/poe/internal/relay"
@@ -461,40 +462,39 @@ func runAgent() {
 	// whether and how to use it.
 	firstQuery := true
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
-		// Include conversation history only on first query (bootstraps the
-		// new fir session with context). Subsequent queries arrive in a
-		// session that already has the conversation.
-		var history string
-		if firstQuery && len(msg.Query) > 0 {
-			firstQuery = false
-			var messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}
-			if err := json.Unmarshal(msg.Query, &messages); err == nil && len(messages) > 1 {
-				history = "\n<conversation_history>\n"
-				for _, m := range messages[:len(messages)-1] {
-					history += fmt.Sprintf("[%s]: %s\n", m.Role, m.Content)
-				}
-				history += "</conversation_history>\n"
-			}
-		} else {
-			firstQuery = false
+		preamble, latestUserMsg := history.FormatPreamble(msg.Query)
+
+		// Inject history preamble only on the first query (bootstraps the
+		// new session). Subsequent queries use the fir session's own context.
+		if firstQuery && preamble != "" {
+			_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
+				Content: fmt.Sprintf("[Prior conversation history from Poe]\n%s\nThe user's new message follows.", preamble),
+				Meta: map[string]any{
+					"source":          "poe",
+					"type":            "history",
+					"conversation_id": msg.ConvID,
+					"user_id":         msg.UserID,
+				},
+			})
+		}
+		firstQuery = false
+
+		userText := latestUserMsg
+		if userText == "" {
+			userText = msg.Content
 		}
 
-		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s%s\n</poe>",
-			msg.MessageID, msg.ConvID, msg.UserID, history, msg.Content)
-
-		meta := map[string]any{
-			"source":          "poe",
-			"user_id":         msg.UserID,
-			"conversation_id": msg.ConvID,
-			"message_id":      msg.MessageID,
-		}
+		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
+			msg.MessageID, msg.ConvID, msg.UserID, userText)
 
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
-			Meta:    meta,
+			Meta: map[string]any{
+				"source":          "poe",
+				"user_id":         msg.UserID,
+				"conversation_id": msg.ConvID,
+				"message_id":      msg.MessageID,
+			},
 		})
 	}
 
