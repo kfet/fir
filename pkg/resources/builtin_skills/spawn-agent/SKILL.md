@@ -6,24 +6,15 @@ description: Spawn a dedicated fir session for a new Poe conversation. Runs when
 # spawn-agent
 
 A channel notification with `meta.type == "spawn"` means the bridge
-claimed a new conversation. Create a dedicated fir process for it.
+claimed a new conversation. Launch a dedicated fir agent for it.
 
-## Steps
-
-1. Read `conversation_id` and `mcp_config` from the notification meta.
-
-2. Run this bash block (substitute values):
+Run the bundled script with the conversation_id and mcp_config from
+the notification meta:
 
 ```bash
-CONV="<conversation_id>"
-DIR="$HOME/.local/state/fir/agents/$CONV"
-mkdir -p "$DIR/.fir"
-cat > "$DIR/.fir/mcp.json" << 'MCPEOF'
-<mcp_config from meta, as JSON>
-MCPEOF
-tmux new-window -t agents "cd '$DIR' && fir -c --session-name '$CONV'" 2>/dev/null || \
-  tmux new-session -d -s agents "cd '$DIR' && fir -c --session-name '$CONV'"
+spawn-poe-agent '<conversation_id>' '<mcp_config JSON from meta>'
 ```
 
-3. Done. The new fir receives the user's message automatically via its
-   bridge and replies on its own. Move on and wait for the next spawn.
+The script creates the agent directory, writes mcp.json, and launches
+fir in a tmux session. The new fir receives the user's message
+automatically via its bridge.

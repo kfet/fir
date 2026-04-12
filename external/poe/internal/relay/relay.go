@@ -23,7 +23,6 @@ const (
 const (
 	PingInterval   = 30 * time.Second
 	PingTimeout    = 60 * time.Second
-	PendingTimeout = 60 * time.Second // how long to hold a Poe SSE stream for unregistered conv
 )
 
 // --- Messages between relay and agents ---
@@ -242,21 +241,6 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 
 		log.Printf("[relay] conv %s: queued in lobby", convID)
 		h.broadcastPending(convID, userID, content)
-
-		// Timeout: if still in lobby after PendingTimeout, give up.
-		go func() {
-			time.Sleep(PendingTimeout)
-			h.mu.Lock()
-			if _, stillInLobby := h.lobby[convID]; stillInLobby {
-				delete(h.lobby, convID)
-				delete(h.pending, messageID)
-				h.mu.Unlock()
-				replyCh <- ReplyChunk{Text: "No agent available. Please try again.", Final: true}
-				close(done)
-			} else {
-				h.mu.Unlock()
-			}
-		}()
 	}
 
 	return replyCh, done
