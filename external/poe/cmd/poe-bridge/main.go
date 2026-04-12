@@ -534,7 +534,7 @@ func runAgent() {
 
 	// Override the reply tool: instead of using the local router, send
 	// replies back to the relay.
-	mcpSrv = newMCPServerWithRelay(ag, registeredConvs)
+	mcpSrv = newMCPServerWithRelay(ag)
 
 	transport := notif.Wrap(&mcp.StdioTransport{})
 
@@ -551,7 +551,7 @@ func runAgent() {
 
 // newMCPServerWithRelay creates an MCP server where the reply tool sends
 // chunks to the relay agent instead of a local router.
-func newMCPServerWithRelay(ag *agentPkg.Agent, registeredConvs *sync.Map) *mcp.Server {
+func newMCPServerWithRelay(ag *agentPkg.Agent) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name: "poe-bridge", Version: version,
 	}, &mcp.ServerOptions{
@@ -582,22 +582,8 @@ func newMCPServerWithRelay(ag *agentPkg.Agent, registeredConvs *sync.Map) *mcp.S
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil
 	})
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "register",
-		Description: "Register this agent for a conversation_id on the relay.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, args struct {
-		ConvID string `json:"conv_id" jsonschema:"conversation_id to register for"`
-	}) (*mcp.CallToolResult, any, error) {
-		if err := ag.Register(args.ConvID, false); err != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
-		}
-		registeredConvs.Store(args.ConvID, true)
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "registered for " + args.ConvID}}}, nil, nil
-	})
-
 	return srv
 }
-
 // runV1 is the original single-bridge mode (no relay).
 func runV1() {
 
