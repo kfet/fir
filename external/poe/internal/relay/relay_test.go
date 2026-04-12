@@ -358,3 +358,116 @@ func TestStreamingReply_MultipleChunks(t *testing.T) {
 		t.Errorf("chunks: %v", texts)
 	}
 }
+
+
+func TestRegister_ClaimCreatesProvisional(t *testing.T) {
+	env := newTestEnv(t)
+	ws := env.connect(t)
+
+	sendJSON(t, ws, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	msg := readMsg(t, ws)
+	if msg.Type != "register_ok" {
+		t.Fatalf("expected register_ok, got %s", msg.Type)
+	}
+	if env.hub.RegistrationState("c-1") != StateProvisional {
+		t.Fatalf("expected provisional, got %s", env.hub.RegistrationState("c-1"))
+	}
+}
+
+func TestRegister_ClaimRejectsDuplicate(t *testing.T) {
+	env := newTestEnv(t)
+	ws1 := env.connect(t)
+	ws2 := env.connect(t)
+
+	sendJSON(t, ws1, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	msg := readMsg(t, ws1)
+	if msg.Type != "register_ok" {
+		t.Fatalf("ws1: expected register_ok, got %s", msg.Type)
+	}
+
+	sendJSON(t, ws2, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	msg = readMsg(t, ws2)
+	if msg.Type != "register_rejected" || msg.Reason != "claimed" {
+		t.Fatalf("ws2: expected rejected/claimed, got %s/%s", msg.Type, msg.Reason)
+	}
+}
+
+func TestRegister_RealAgentOverridesClaim(t *testing.T) {
+	env := newTestEnv(t)
+	ws1 := env.connect(t)
+	ws2 := env.connect(t)
+
+	// Claim
+	sendJSON(t, ws1, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	readMsg(t, ws1) // register_ok
+
+	// Real agent overrides
+	sendJSON(t, ws2, AgentMsg{Type: "register", ConvID: "c-1"})
+	msg := readMsg(t, ws2)
+	if msg.Type != "register_ok" {
+		t.Fatalf("expected register_ok, got %s", msg.Type)
+	}
+}
+
+func TestRouteQuery_ClaimedConv_QueuesInLobby(t *testing.T) {
+	env := newTestEnv(t)
+	ws := env.connect(t)
+
+	// Claim only — no queries should be delivered
+	sendJSON(t, ws, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	readMsg(t, ws) // register_ok
+
+	env.hub.RouteQuery("c-1", "m-1", "u-1", "hello", nil)
+
+	// Query should be in lobby, not delivered to claimer
+	if env.hub.LobbyCount() != 1 {
+		t.Fatalf("expected lobby count 1, got %d", env.hub.LobbyCount())
+	}
+}
+
+func TestRegister_RealAgentGetsLobbyQueries(t *testing.T) {
+	env := newTestEnv(t)
+	ws1 := env.connect(t)
+
+	// Claim
+	sendJSON(t, ws1, AgentMsg{Type: "register", ConvID: "c-1", Claim: true})
+	readMsg(t, ws1) // register_ok
+
+	// Query arrives — queued in lobby (claimed, not delivered)
+	replyCh, _ := env.hub.RouteQuery("c-1", "m-1", "u-1", "hello", nil)
+
+	// pending broadcast to ws1
+	pmsg := readMsg(t, ws1)
+	if pmsg.Type != "pending" {
+		t.Fatalf("ws1: expected pending, got %s", pmsg.Type)
+	}
+
+	// Real agent connects and registers (no claim) — should get lobby query
+	ws2 := env.connect(t)
+	sendJSON(t, ws2, AgentMsg{Type: "register", ConvID: "c-1"})
+
+	// ws2 may receive: register_ok, then query (from lobby delivery)
+	// Read messages until we get the query
+	var qmsg RelayMsg
+	for i := 0; i < 5; i++ {
+		msg := readMsg(t, ws2)
+		if msg.Type == "query" {
+			qmsg = msg
+			break
+		}
+	}
+	if qmsg.Type != "query" || qmsg.MessageID != "m-1" {
+		t.Fatalf("expected query/m-1, got %s/%s", qmsg.Type, qmsg.MessageID)
+	}
+
+	// Reply flows back through SSE
+	sendJSON(t, ws2, AgentMsg{Type: "reply", MessageID: "m-1", Text: "world", Final: true})
+	select {
+	case chunk := <-replyCh:
+		if chunk.Text != "world" || !chunk.Final {
+			t.Fatalf("unexpected chunk: %+v", chunk)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("reply not received")
+	}
+}
