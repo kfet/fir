@@ -229,7 +229,7 @@ test-python-tmuxspinner: check-uv
 
 BRIDGE_DIRS := external/poe
 
-.PHONY: bridges bridges-test bridges-all
+.PHONY: bridges bridges-test bridges-all bridges-install
 
 bridges: ## build all external bridges (opt-in)
 	@for d in $(BRIDGE_DIRS); do \
@@ -247,4 +247,10 @@ bridges-all: ## full pipeline for all external bridges
 	@for d in $(BRIDGE_DIRS); do \
 		printf "  bridge-all: $$d\n"; \
 		$(MAKE) -C $$d all BINDIR=$(abspath $(BINDIR)) --no-print-directory || exit 1; \
+	done
+
+bridges-install: bridges ## install all external bridges to GOBIN
+	@for d in $(BRIDGE_DIRS); do \
+		printf "  %-28s" "bridge-install: $$d"; \
+		$(MAKE) -C $$d install BINDIR=$(abspath $(BINDIR)) --no-print-directory && printf " ✓\n" || { printf " ✗\n"; exit 1; }; \
 	done

@@ -110,3 +110,6 @@ tidy: ## go mod tidy
 clean: ## remove build + coverage artifacts
 	rm -f $(BINDIR)/$(BIN) $(BINDIR)/$(BIN)-*
 	rm -f $(COVER_OUT) $(COVER_HTML)
+
+install: build ## install poe-bridge to GOBIN / ~/go/bin
+	$(call RUN,install,cp $(BINDIR)/$(BIN) $(shell go env GOPATH)/bin/$(BIN))
