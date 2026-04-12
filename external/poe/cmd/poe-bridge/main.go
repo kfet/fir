@@ -1,11 +1,8 @@
 // Command poe-bridge is a Poe server-bot ↔ fir MCP channel bridge.
 //
-// It runs two I/O surfaces in one process: an MCP stdio server (talking
-// to fir) and an HTTPS endpoint (talking to Poe). Inbound Poe queries
-// are forwarded to fir as notifications/claude/channel messages; fir
-// replies by calling the `reply` MCP tool, whose handler pushes chunks
-// through a router into the SSE response stream back to Poe.
-// See external/poe/README.md for the full design.
+// Two modes:
+//   - --relay: Poe HTTP frontend + agent websocket listener
+//   - --agent: connects to relay via ws, bridges MCP stdio to fir
 package main
 
 import (
@@ -17,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,23 +23,18 @@ import (
 
 	"github.com/kfet/fir/external/poe/internal/access"
 	agentPkg "github.com/kfet/fir/external/poe/internal/agent"
-	"github.com/kfet/fir/external/poe/internal/funnel"
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
-	"github.com/kfet/fir/external/poe/internal/permq"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	relayPkg "github.com/kfet/fir/external/poe/internal/relay"
-	"github.com/kfet/fir/external/poe/internal/router"
 	"github.com/kfet/fir/external/poe/internal/selfupdate"
 )
 
 const (
-	version  = "0.2.0"
+	version  = "0.3.0"
 	httpAddr = ":8080"
 
 	// queryTimeout bounds how long a single Poe query may occupy the SSE
-	// stream while waiting for fir chunks. The Poe protocol itself caps
-	// responses at 3600s; we stay well under that to leave slack for the
-	// final `done` event to flush.
+	// stream while waiting for agent chunks.
 	queryTimeout = 50 * time.Minute
 )
 
@@ -61,195 +52,6 @@ type replyArgs struct {
 	ErrorType string `json:"error_type,omitempty" jsonschema:"error type: user_caused_error or user_message_too_long"`
 }
 
-// --- HTTP surface ---------------------------------------------------------
-
-func newHTTPHandler(poeHandler http.Handler) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", rootHandler)
-	mux.Handle("/poe", poeHandler)
-	return mux
-}
-
-func rootHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "poe-bridge %s ok\n", version)
-}
-
-func newHTTPServer(addr string, h http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-}
-
-// --- OnQuery: the core fir handoff ---------------------------------------
-
-// channelSender is the subset of *mcpnotify.Notifier that newOnQuery
-// needs. Extracted as an interface so tests can substitute a stub.
-type channelSender interface {
-	SendChannel(ctx context.Context, msg mcpnotify.ChannelMessage) error
-}
-
-// newOnQuery returns a poe.Handler.OnQuery hook that:
-//  1. Registers the incoming message_id with the router.
-//  2. Emits a `notifications/claude/channel` notification to fir carrying
-//     the user's message text + meta (user_id, conversation_id, message_id).
-//  3. Loops reading chunks from the router channel, writing each as an SSE
-//     `text` event, until a Final chunk arrives, the request context is
-//     cancelled, or the per-query timeout expires.
-//  4. Always emits a `done` event on normal completion and always
-//     unregisters the message_id.
-func newOnQuery(rt *router.Router, notif channelSender, botName string, acl *access.Store, pq *permq.Queue) func(context.Context, *poe.QueryRequest, *poe.SSEWriter) error {
-	return func(ctx context.Context, q *poe.QueryRequest, sse *poe.SSEWriter) error {
-		msgID := q.MessageID
-		if msgID == "" {
-			return fmt.Errorf("poe query missing message_id")
-		}
-
-		// --- Access check / pairing gate ---
-		if acl != nil && !acl.IsAllowed(q.UserID) {
-			code, err := acl.GenerateCode(q.UserID)
-			if err != nil {
-				return fmt.Errorf("pairing: %w", err)
-			}
-			pairMsg := fmt.Sprintf(
-				"🔑 **Not paired.** In your fir terminal session, run:\n\n```\n/poe:access pair %s\n```\n\nThis code expires in 10 minutes.",
-				code,
-			)
-			if err := sse.WriteEvent("text", map[string]any{"text": pairMsg}); err != nil {
-				return err
-			}
-			return sse.WriteEvent("done", map[string]any{})
-		}
-
-		ch := rt.Register(msgID)
-		defer rt.Unregister(msgID)
-		log.Printf("[onquery] registered msg=%s user=%s conv=%s", msgID, q.UserID, q.ConversationID)
-
-		// Drain any pending permission requests for this user.
-		if pq != nil {
-			if permText := pq.FormatDrain(q.UserID); permText != "" {
-				if err := sse.WriteEvent("text", map[string]any{"text": permText}); err != nil {
-					return err
-				}
-			}
-		}
-
-		// Pull the latest user message text out of the query history.
-		userText := ""
-		if len(q.Query) > 0 {
-			userText = q.Query[len(q.Query)-1].Content
-		}
-
-		// Include message_id and conversation_id in the content so the model
-		// can extract them for the reply tool call. Fir's channel injection
-		// only shows Content + source/server in the header; meta fields are
-		// not surfaced to the model.
-		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
-			msgID, q.ConversationID, q.UserID, userText)
-
-		if err := notif.SendChannel(ctx, mcpnotify.ChannelMessage{
-			Content: content,
-			Meta: map[string]any{
-				"source":          "poe",
-				"bot":             botName,
-				"user":            q.UserID,
-				"user_id":         q.UserID,
-				"conversation_id": q.ConversationID,
-				"message_id":      msgID,
-			},
-		}); err != nil {
-			log.Printf("[onquery] notify fir failed: %v", err)
-			return fmt.Errorf("notify fir: %w", err)
-		}
-
-		deadline, cancel := context.WithTimeout(ctx, queryTimeout)
-		defer cancel()
-
-		for {
-			select {
-			case <-deadline.Done():
-				log.Printf("[onquery] timeout for msg=%s", msgID)
-				return deadline.Err()
-			case chunk := <-ch:
-				log.Printf("[onquery] chunk for msg=%s len=%d final=%v replace=%v error=%v", msgID, len(chunk.Text), chunk.Final, chunk.Replace, chunk.IsError)
-				// Emit the appropriate SSE event type.
-				if chunk.IsError {
-					data := map[string]any{"allow_retry": true, "text": chunk.Text}
-					if chunk.ErrorType != "" {
-						data["error_type"] = chunk.ErrorType
-					}
-					if err := sse.WriteEvent("error", data); err != nil {
-						return err
-					}
-				} else if chunk.Replace {
-					if err := sse.WriteEvent("replace_response", map[string]any{"text": chunk.Text}); err != nil {
-						return err
-					}
-				} else if chunk.Text != "" {
-					if err := sse.WriteEvent("text", map[string]any{"text": chunk.Text}); err != nil {
-						return err
-					}
-				}
-				if chunk.Final {
-					_ = sse.WriteEvent("done", map[string]any{})
-					return nil
-				}
-			}
-		}
-	}
-}
-
-// --- MCP server ----------------------------------------------------------
-
-func newMCPServer(rt *router.Router) *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{
-		Name:    "poe-bridge",
-		Version: version,
-	}, &mcp.ServerOptions{
-		Capabilities: func() *mcp.ServerCapabilities {
-			c := &mcp.ServerCapabilities{}
-			// Advertise the experimental claude/channel capability so fir
-			// knows this server speaks the channel notification protocol.
-			c.AddExtension("claude/channel", map[string]any{})
-			return c
-		}(),
-	})
-
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "ping",
-		Description: "Smoke-test tool. Returns 'pong' and the bridge version.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, _ pingArgs) (*mcp.CallToolResult, any, error) {
-		return pingResult(), nil, nil
-	})
-
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "reply",
-		Description: "Append a chunk to the reply for a live Poe query. Set final=true on the last chunk to close the stream.",
-	}, func(_ context.Context, _ *mcp.CallToolRequest, args replyArgs) (*mcp.CallToolResult, any, error) {
-		if args.MessageID == "" {
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: "reply: message_id is required"}},
-			}, nil, nil
-		}
-		log.Printf("[reply] push msg=%s len=%d final=%v", args.MessageID, len(args.Text), args.Final)
-		if err := rt.Push(args.MessageID, router.Chunk{Text: args.Text, Final: args.Final, Replace: args.Replace, IsError: args.Error, ErrorType: args.ErrorType}); err != nil {
-			return &mcp.CallToolResult{
-				IsError: true,
-				Content: []mcp.Content{&mcp.TextContent{Text: "reply: " + err.Error()}},
-			}, nil, nil
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: "ok"}},
-		}, nil, nil
-	})
-
-	return srv
-}
-
 func pingResult() *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
@@ -258,23 +60,22 @@ func pingResult() *mcp.CallToolResult {
 	}
 }
 
-// --- shutdown helpers -----------------------------------------------------
-
-func installShutdown(ctx context.Context, cancel context.CancelFunc, httpSrv *http.Server, sigCh <-chan os.Signal) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		select {
-		case sig := <-sigCh:
-			log.Printf("received %s, shutting down", sig)
-		case <-ctx.Done():
+// writeChunkSSE emits the correct SSE event for a relay ReplyChunk.
+func writeChunkSSE(sse *poe.SSEWriter, c relayPkg.ReplyChunk) error {
+	if c.IsError {
+		data := map[string]any{"allow_retry": true, "text": c.Text}
+		if c.ErrorType != "" {
+			data["error_type"] = c.ErrorType
 		}
-		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutCancel()
-		_ = httpSrv.Shutdown(shutCtx)
-		cancel()
-	}()
-	return done
+		return sse.WriteEvent("error", data)
+	}
+	if c.Replace {
+		return sse.WriteEvent("replace_response", map[string]any{"text": c.Text})
+	}
+	if c.Text != "" {
+		return sse.WriteEvent("text", map[string]any{"text": c.Text})
+	}
+	return nil
 }
 
 // --- main -----------------------------------------------------------------
@@ -294,8 +95,6 @@ func main() {
 		return
 	}
 
-	// Mode dispatch: --relay starts relay mode, --agent starts agent mode,
-	// default is v1 single-bridge mode.
 	if len(os.Args) > 1 && os.Args[1] == "--relay" {
 		runRelay()
 		return
@@ -305,10 +104,12 @@ func main() {
 		return
 	}
 
-	runV1()
+	fmt.Fprintf(os.Stderr, "poe-bridge %s\nUsage: poe-bridge --relay | --agent [relay-url]\n", version)
+	os.Exit(1)
 }
 
-// runRelay starts the relay: Poe HTTP frontend + agent websocket listener.
+// --- relay mode -----------------------------------------------------------
+
 func runRelay() {
 	log.Printf("poe-bridge %s relay mode", version)
 
@@ -340,61 +141,17 @@ func runRelay() {
 	poeHandler := &poe.Handler{
 		AccessKey: os.Getenv("POE_ACCESS_KEY"),
 		BotName:   os.Getenv("POE_BOT_NAME"),
-		OnQuery: func(ctx context.Context, q *poe.QueryRequest, sse *poe.SSEWriter) error {
-			// Access check.
-			if acl != nil && !acl.IsAllowed(q.UserID) {
-				code, err := acl.GenerateCode(q.UserID)
-				if err != nil {
-					return fmt.Errorf("pairing: %w", err)
-				}
-				msg := fmt.Sprintf("🔑 **Not paired.** Run in your fir terminal:\n\n```\n/poe:access pair %s\n```", code)
-				_ = sse.WriteEvent("text", map[string]any{"text": msg})
-				return sse.WriteEvent("done", map[string]any{})
-			}
-
-			userText := ""
-			if len(q.Query) > 0 {
-				userText = q.Query[len(q.Query)-1].Content
-			}
-			queryJSON, _ := json.Marshal(q.Query)
-
-			replyCh, _ := hub.RouteQuery(q.ConversationID, q.MessageID, q.UserID, userText, queryJSON)
-			for c := range replyCh {
-				if c.IsError {
-					data := map[string]any{"allow_retry": true, "text": c.Text}
-					if c.ErrorType != "" {
-						data["error_type"] = c.ErrorType
-					}
-					if err := sse.WriteEvent("error", data); err != nil {
-						return err
-					}
-				} else if c.Replace {
-					if err := sse.WriteEvent("replace_response", map[string]any{"text": c.Text}); err != nil {
-						return err
-					}
-				} else if c.Text != "" {
-					if err := sse.WriteEvent("text", map[string]any{"text": c.Text}); err != nil {
-						return err
-					}
-				}
-				if c.Final {
-					return sse.WriteEvent("done", map[string]any{})
-				}
-			}
-			return sse.WriteEvent("done", map[string]any{})
-		},
+		OnQuery:   newRelayOnQuery(hub, acl),
 	}
 
-	// Poe HTTP on :8080.
+	// Poe HTTP mux.
 	poeMux := http.NewServeMux()
 	poeMux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "poe-bridge %s relay ok\n", version)
 	})
 	poeMux.Handle("/poe", poeHandler)
-	// OAuth callback route — receives redirects from OAuth providers,
-	// forwards the result to the agent that registered the session.
+	// OAuth callback route.
 	poeMux.HandleFunc("/oauth/cb/", func(w http.ResponseWriter, r *http.Request) {
-		// Extract session_id from path: /oauth/cb/{session_id}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) < 3 {
 			http.Error(w, "missing session_id", http.StatusBadRequest)
@@ -414,6 +171,7 @@ func runRelay() {
 			http.Error(w, "unknown or expired session", http.StatusNotFound)
 		}
 	})
+
 	poeAddr := os.Getenv("POE_HTTP_ADDR")
 	if poeAddr == "" {
 		poeAddr = httpAddr
@@ -426,7 +184,7 @@ func runRelay() {
 		}
 	}()
 
-	// Agent websocket on agentPort.
+	// Agent websocket listener.
 	agentMux := http.NewServeMux()
 	agentMux.HandleFunc("/ws", hub.HandleAgentWS)
 	agentSrv := &http.Server{Addr: ":" + agentPort, Handler: agentMux, ReadHeaderTimeout: 5 * time.Second}
@@ -446,7 +204,41 @@ func runRelay() {
 	_ = agentSrv.Shutdown(shutCtx)
 }
 
-// runAgent starts agent mode: connects to relay via ws, bridges MCP stdio.
+// newRelayOnQuery returns the OnQuery hook for relay mode.
+func newRelayOnQuery(hub *relayPkg.Hub, acl *access.Store) func(context.Context, *poe.QueryRequest, *poe.SSEWriter) error {
+	return func(ctx context.Context, q *poe.QueryRequest, sse *poe.SSEWriter) error {
+		// Access check.
+		if acl != nil && !acl.IsAllowed(q.UserID) {
+			code, err := acl.GenerateCode(q.UserID)
+			if err != nil {
+				return fmt.Errorf("pairing: %w", err)
+			}
+			msg := fmt.Sprintf("🔑 **Not paired.** Run in your fir terminal:\n\n```\n/poe:access pair %s\n```", code)
+			_ = sse.WriteEvent("text", map[string]any{"text": msg})
+			return sse.WriteEvent("done", map[string]any{})
+		}
+
+		userText := ""
+		if len(q.Query) > 0 {
+			userText = q.Query[len(q.Query)-1].Content
+		}
+		queryJSON, _ := json.Marshal(q.Query)
+
+		replyCh, _ := hub.RouteQuery(q.ConversationID, q.MessageID, q.UserID, userText, queryJSON)
+		for c := range replyCh {
+			if err := writeChunkSSE(sse, c); err != nil {
+				return err
+			}
+			if c.Final {
+				return sse.WriteEvent("done", map[string]any{})
+			}
+		}
+		return sse.WriteEvent("done", map[string]any{})
+	}
+}
+
+// --- agent mode -----------------------------------------------------------
+
 func runAgent() {
 	log.Printf("poe-bridge %s agent mode", version)
 
@@ -458,7 +250,6 @@ func runAgent() {
 
 	relayURL := os.Getenv("POE_RELAY_URL")
 	if relayURL == "" {
-		// Check args: --agent ws://host:port
 		if len(os.Args) > 2 {
 			relayURL = os.Args[2]
 		}
@@ -478,13 +269,9 @@ func runAgent() {
 	}
 	defer ag.Close()
 
-	// MCP server for fir.
-	rt := router.New()
 	notif := mcpnotify.NewNotifier()
-	mcpSrv := newMCPServer(rt)
 
 	// When relay delivers a query, forward to fir via MCP channel notification.
-	// History from Poe's query[] is passed as meta["history"] — fir decides
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
 			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
@@ -508,19 +295,15 @@ func runAgent() {
 	// Track registered conv_ids to avoid double-registration.
 	registeredConvs := &sync.Map{}
 
-	// When relay broadcasts a pending conv, attempt to claim it (race gate).
-	// If claim succeeds, post a channel notification so the LLM/skill can
-	// spawn a new fir agent. The bridge does NOT spawn — that's the LLM's
-	// job, decoupling the harness from the relay.
+	// When relay broadcasts a pending conv, attempt to claim + spawn.
 	ag.OnPending = func(msg relayPkg.RelayMsg) {
 		if convID != "" {
 			return // dedicated agent — ignore pending for other convs
 		}
 		if _, loaded := registeredConvs.LoadOrStore(msg.ConvID, true); loaded {
-			return // already claimed
+			return
 		}
 
-		// Race gate: claim the conv.
 		log.Printf("[agent] claiming conv=%s", msg.ConvID)
 		resp, err := ag.RegisterSync(msg.ConvID, true)
 		if err != nil || resp.Type != "register_ok" {
@@ -533,7 +316,6 @@ func runAgent() {
 			return
 		}
 
-		// Spawn a dedicated agent directly.
 		mcpJSON, _ := json.Marshal(map[string]any{
 			"mcpServers": map[string]any{
 				"poe": map[string]any{
@@ -551,10 +333,7 @@ func runAgent() {
 		}
 	}
 
-	// Override the reply tool: instead of using the local router, send
-	// replies back to the relay.
-	mcpSrv = newMCPServerWithRelay(ag)
-
+	mcpSrv := newAgentMCPServer(ag)
 	transport := notif.Wrap(&mcp.StdioTransport{})
 
 	go func() {
@@ -568,9 +347,9 @@ func runAgent() {
 	}
 }
 
-// newMCPServerWithRelay creates an MCP server where the reply tool sends
-// chunks to the relay agent instead of a local router.
-func newMCPServerWithRelay(ag *agentPkg.Agent) *mcp.Server {
+// newAgentMCPServer creates an MCP server where the reply tool sends
+// chunks to the relay via the agent connection.
+func newAgentMCPServer(ag *agentPkg.Agent) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name: "poe-bridge", Version: version,
 	}, &mcp.ServerOptions{
@@ -602,114 +381,4 @@ func newMCPServerWithRelay(ag *agentPkg.Agent) *mcp.Server {
 	})
 
 	return srv
-}
-
-// runV1 is the original single-bridge mode (no relay).
-func runV1() {
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Background update check — logs if a newer version is available.
-	go selfupdate.LogIfAvailable(ctx, version)
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// Shared state: router (bridging reply tool → SSE) and notifier
-	// (bridging poe handler → fir channel notifications).
-	rt := router.New()
-	notif := mcpnotify.NewNotifier()
-
-	// Access control: if POE_STATE_DIR is set, load or create access.json
-	// there for pairing. If unset, all users are allowed (dev mode).
-	var acl *access.Store
-	if stateDir := os.Getenv("POE_STATE_DIR"); stateDir != "" {
-		var err error
-		acl, err = access.NewStore(stateDir)
-		if err != nil {
-			log.Fatalf("access store: %v", err)
-		}
-		log.Printf("access store loaded from %s (%d allowed)", stateDir, len(acl.AllowFrom()))
-	} else {
-		log.Printf("POE_STATE_DIR not set — all users allowed (dev mode)")
-	}
-
-	// Permission-request queue: uses POE_STATE_DIR for persistence if set.
-	var pq *permq.Queue
-	if stateDir := os.Getenv("POE_STATE_DIR"); stateDir != "" {
-		pq = permq.New(stateDir)
-	} else {
-		pq = permq.New("")
-	}
-
-	botName := os.Getenv("POE_BOT_NAME")
-	poeHandler := &poe.Handler{
-		AccessKey: os.Getenv("POE_ACCESS_KEY"),
-		BotName:   botName,
-		OnQuery:   newOnQuery(rt, notif, botName, acl, pq),
-	}
-
-	handler := newHTTPHandler(poeHandler)
-
-	// If TS_HOSTNAME is set (and either TS_AUTHKEY or existing tsnet state
-	// exists), start a Funnel listener for public HTTPS. Otherwise fall back
-	// to plain HTTP on httpAddr.
-	var httpSrv *http.Server
-	var funnelLn *funnel.Listener
-	if tsHostname := os.Getenv("TS_HOSTNAME"); tsHostname != "" {
-		stateDir := os.Getenv("POE_STATE_DIR")
-		if stateDir == "" {
-			stateDir = "."
-		}
-		var err error
-		funnelLn, err = funnel.Listen(ctx, funnel.Config{
-			Hostname: tsHostname,
-			StateDir: filepath.Join(stateDir, "tsnet"),
-		})
-		if err != nil {
-			log.Fatalf("funnel: %v", err)
-		}
-		go func() {
-			if err := funnelLn.Serve(handler); err != nil {
-				log.Printf("funnel serve error: %v", err)
-			}
-		}()
-		// Also start plain HTTP for local health checks.
-		httpSrv = newHTTPServer(httpAddr, handler)
-		go func() {
-			log.Printf("http (local) listening on %s", httpAddr)
-			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("http server error: %v", err)
-			}
-		}()
-	} else {
-		httpSrv = newHTTPServer(httpAddr, handler)
-		go func() {
-			log.Printf("http listening on %s", httpAddr)
-			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("http server error: %v", err)
-			}
-		}()
-	}
-
-	mcpSrv := newMCPServer(rt)
-	_ = installShutdown(ctx, cancel, httpSrv, sigCh)
-
-	// If funnel is running, shut it down on context cancel too.
-	if funnelLn != nil {
-		go func() {
-			<-ctx.Done()
-			funnelLn.Close()
-		}()
-	}
-
-	// Wrap the stdio transport so the notifier captures the live Connection
-	// and can send custom JSON-RPC notifications on it.
-	transport := notif.Wrap(&mcp.StdioTransport{})
-
-	if err := mcpSrv.Run(ctx, transport); err != nil && ctx.Err() == nil {
-		log.Fatalf("mcp stdio server error: %v", err)
-	}
-	log.Printf("poe-bridge exited cleanly")
 }
