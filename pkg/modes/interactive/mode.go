@@ -456,13 +456,18 @@ func (m *InteractiveMode) Run() error {
 	m.running = true
 
 	// Handle SIGINT/SIGTERM for clean shutdown (e.g. kill from another terminal).
+	// Handle SIGHUP for graceful restart (re-exec with new binary).
 	// Note: in raw mode Ctrl+C is handled as input (\x03), not as SIGINT.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		select {
-		case <-sigCh:
-			m.Shutdown()
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				m.handleReexecCommand("/reexec")
+			} else {
+				m.Shutdown()
+			}
 		case <-m.ctx.Done():
 		}
 		signal.Stop(sigCh)
