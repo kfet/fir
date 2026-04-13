@@ -56,13 +56,17 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 
 		// Send typing indicator if the server has a "reply" tool.
 		if mgr.HasServerTools(serverName, "reply") {
+			firlog.Info("channel message from reply-capable server", "server", serverName, "hasMsgID", cm.Meta["message_id"] != nil)
 			if err := SendTypingIndicator(context.Background(), mgr, serverName, cm.Meta); err != nil {
 				firlog.Debug("typing indicator failed", "err", err)
 			}
 			// Notify reply hook with message_id for auto-reply wiring.
 			if replyHook != nil {
 				if msgID, ok := cm.Meta["message_id"].(string); ok && msgID != "" {
+					firlog.Info("calling replyHook", "msgID", msgID)
 					replyHook(serverName, msgID)
+				} else {
+					firlog.Info("replyHook skipped: no message_id in meta", "meta_keys", fmt.Sprintf("%v", metaKeys(cm.Meta)))
 				}
 			}
 		}
@@ -119,4 +123,12 @@ func formatMeta(meta map[string]any) string {
 		s += fmt.Sprintf(" %s=%q", k, fmt.Sprint(meta[k]))
 	}
 	return s
+}
+
+func metaKeys(meta map[string]any) []string {
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
+		keys = append(keys, k)
+	}
+	return keys
 }

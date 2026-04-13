@@ -237,12 +237,17 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 	// so LLM output goes directly to the bridge without manual reply() calls.
 	var ar *autoreply.State
 	replyHook := func(serverName, messageID string) {
+		firlog.Info("auto-reply: replyHook fired", "server", serverName, "messageID", messageID)
 		if ar == nil {
 			ar = autoreply.New(func(ctx context.Context, args map[string]any) error {
 				_, err := mgr.CallTool(ctx, serverName, "reply", args)
+				if err != nil {
+					firlog.Info("auto-reply: CallTool error", "err", err)
+				}
 				return err
 			})
 			ar.Wire(sess.Agent)
+			firlog.Info("auto-reply: wired to agent")
 		}
 		ar.SetMessageID(messageID)
 	}
