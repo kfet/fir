@@ -2,14 +2,22 @@
 // session to the relay via websocket. Each fir process spawns poe-bridge in
 // agent mode; it connects to the relay, optionally registers a conv_id, and
 // translates between relay JSON messages and MCP tools/notifications.
+//
+// The agent maintains a persistent reconnect loop: if the relay websocket
+// drops (relay restart, network blip), the agent automatically redials with
+// exponential backoff and re-registers its conv_id. The MCP stdio connection
+// to fir is unaffected — tool calls simply return transient errors while
+// disconnected.
 package agent
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,30 +26,67 @@ import (
 	"github.com/kfet/fir/external/poe/internal/router"
 )
 
+// Backoff parameters for reconnect.
+const (
+	backoffMin = 500 * time.Millisecond
+	backoffMax = 15 * time.Second
+	backoffMul = 2
+)
+
+// ErrDisconnected is returned by Reply/Register/sendJSON when the agent
+// has no active websocket connection to the relay.
+var ErrDisconnected = errors.New("agent: relay disconnected, reconnecting")
+
 // Config for agent mode.
 type Config struct {
-	RelayURL string // ws://host:port
+	RelayURL string // ws://host:port/ws
 	ConvID   string // optional: auto-register on connect
+}
+
+// DialFunc dials a websocket. Replaceable in tests.
+type DialFunc func(ctx context.Context, url string) (*websocket.Conn, error)
+
+// DefaultDial is the production dialer.
+func DefaultDial(ctx context.Context, url string) (*websocket.Conn, error) {
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	ws, _, err := dialer.DialContext(ctx, url, nil)
+	return ws, err
 }
 
 // Agent holds the relay websocket connection and a local router for
 // bridging reply tool calls back to the relay.
 type Agent struct {
 	cfg    Config
-	ws     *websocket.Conn
+	dial   DialFunc
 	router *router.Router
-	mu     sync.Mutex
-	done   chan struct{} // closed when readPump exits (ws dies)
 
-	// OnQuery is called when the relay delivers a query. The agent
-	// should forward it to fir via MCP channel notification.
+	// ws and connected are protected by mu.
+	mu        sync.Mutex
+	ws        *websocket.Conn
+	connected atomic.Bool
+
+	// done is closed when the reconnect loop exits (ctx cancelled).
+	done chan struct{}
+
+	// wsDone is closed when the current readPump exits, signalling
+	// the reconnect loop to redial. Recreated on each new connection.
+	wsDone chan struct{}
+
+	// OnQuery is called when the relay delivers a query.
 	OnQuery func(msg relay.RelayMsg)
 
 	// OnPending is called when the relay broadcasts a pending conv_id.
 	OnPending func(msg relay.RelayMsg)
 
-	// OnReplyError is called when the relay rejects a reply (e.g. unknown message_id).
+	// OnReplyError is called when the relay rejects a reply.
 	OnReplyError func(msg relay.RelayMsg)
+
+	// OnConnect is called each time the agent (re)connects to the relay.
+	// Useful for logging or status updates.
+	OnConnect func()
+
+	// OnDisconnect is called each time the ws connection drops.
+	OnDisconnect func(err error)
 
 	// replyCallbacks maps message_id → channel for reply ack/error.
 	replyCallbacks sync.Map // string → chan error
@@ -53,47 +98,138 @@ type Agent struct {
 	registerCallbacks sync.Map // string → chan relay.RelayMsg
 }
 
-// Connect dials the relay and starts the read pump. If cfg.ConvID is
-// set, it auto-registers for that conversation.
+// Connect dials the relay, starts the reconnect loop, and returns after
+// the first successful connection. If the initial dial fails, it retries
+// in the background and returns immediately with a disconnected agent.
 func Connect(ctx context.Context, cfg Config) (*Agent, error) {
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-	ws, _, err := dialer.DialContext(ctx, cfg.RelayURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("agent: dial %s: %w", cfg.RelayURL, err)
-	}
+	return ConnectWithDial(ctx, cfg, DefaultDial)
+}
 
+// ConnectWithDial is like Connect but accepts a custom dialer (for testing).
+func ConnectWithDial(ctx context.Context, cfg Config, dial DialFunc) (*Agent, error) {
 	a := &Agent{
 		cfg:    cfg,
-		ws:     ws,
+		dial:   dial,
 		router: router.New(),
 		done:   make(chan struct{}),
+		wsDone: make(chan struct{}),
 	}
 
-	go a.readPump()
-
-	if cfg.ConvID != "" {
-		if err := a.Register(cfg.ConvID, false); err != nil {
-			ws.Close()
-			return nil, fmt.Errorf("agent: auto-register %s: %w", cfg.ConvID, err)
-		}
+	// Try first connection synchronously so callers know it worked.
+	err := a.dialOnce(ctx)
+	if err != nil {
+		log.Printf("[agent] initial dial failed: %v (will retry in background)", err)
 	}
 
-	log.Printf("[agent] connected to %s", cfg.RelayURL)
+	// Start reconnect loop in background.
+	go a.reconnectLoop(ctx)
+
 	return a, nil
 }
 
+// Connected returns true if the agent has an active ws connection.
+func (a *Agent) Connected() bool {
+	return a.connected.Load()
+}
+
+// dialOnce attempts a single ws dial + register. Returns nil on success.
+func (a *Agent) dialOnce(ctx context.Context) error {
+	ws, err := a.dial(ctx, a.cfg.RelayURL)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", a.cfg.RelayURL, err)
+	}
+
+	a.mu.Lock()
+	a.ws = ws
+	a.wsDone = make(chan struct{})
+	a.mu.Unlock()
+	a.connected.Store(true)
+
+	go a.readPump(ws, a.wsDone)
+
+	// Re-register conv_id on every (re)connect.
+	if a.cfg.ConvID != "" {
+		if err := a.Register(a.cfg.ConvID, false); err != nil {
+			ws.Close()
+			a.connected.Store(false)
+			return fmt.Errorf("auto-register %s: %w", a.cfg.ConvID, err)
+		}
+	}
+
+	log.Printf("[agent] connected to %s", a.cfg.RelayURL)
+	if a.OnConnect != nil {
+		a.OnConnect()
+	}
+	return nil
+}
+
+// reconnectLoop runs until ctx is cancelled. It waits for the current
+// ws to die, then redials with backoff.
+func (a *Agent) reconnectLoop(ctx context.Context) {
+	defer close(a.done)
+
+	backoff := backoffMin
+
+	for {
+		// Wait for current connection to drop (or if never connected, proceed immediately).
+		a.mu.Lock()
+		wsDone := a.wsDone
+		a.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			a.closeWS()
+			return
+		case <-wsDone:
+			// ws died — reconnect.
+		}
+
+		// Drain any pending reply callbacks with errors.
+		a.failPendingCallbacks()
+
+		if a.OnDisconnect != nil {
+			a.OnDisconnect(nil)
+		}
+
+		// Backoff-retry loop.
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+
+			err := a.dialOnce(ctx)
+			if err == nil {
+				backoff = backoffMin // reset on success
+				break
+			}
+
+			log.Printf("[agent] reconnect failed: %v (retry in %v)", err, backoff)
+			backoff = min(backoff*backoffMul, backoffMax)
+		}
+	}
+}
+
+// failPendingCallbacks sends ErrDisconnected to all waiting reply callbacks.
+func (a *Agent) failPendingCallbacks() {
+	a.replyCallbacks.Range(func(key, value any) bool {
+		ch := value.(chan error)
+		select {
+		case ch <- ErrDisconnected:
+		default:
+		}
+		a.replyCallbacks.Delete(key)
+		return true
+	})
+}
+
 // Register sends a registration for a conv_id to the relay.
-// If claim is true, this is a race gate (no queries delivered).
-// If claim is false, this is the real agent taking ownership.
 func (a *Agent) Register(convID string, claim bool) error {
 	return a.sendJSON(relay.AgentMsg{Type: "register", ConvID: convID, Claim: claim})
 }
 
 // RegisterSync sends a registration and waits for the relay's response.
-// Returns the relay response (register_ok or register_rejected).
-// Times out after 5 seconds.
 func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) {
 	ch := make(chan relay.RelayMsg, 1)
 	a.registerCallbacks.Store(convID, ch)
@@ -103,17 +239,26 @@ func (a *Agent) RegisterSync(convID string, claim bool) (relay.RelayMsg, error) 
 		return relay.RelayMsg{}, err
 	}
 
+	a.mu.Lock()
+	wsDone := a.wsDone
+	a.mu.Unlock()
+
 	select {
 	case msg := <-ch:
 		return msg, nil
+	case <-wsDone:
+		return relay.RelayMsg{}, ErrDisconnected
 	case <-time.After(5 * time.Second):
 		return relay.RelayMsg{}, fmt.Errorf("register timeout for %s", convID)
 	}
 }
 
 // Reply sends a reply chunk to the relay and waits for ack.
-// Returns nil on success, error on relay rejection (e.g. unknown message_id).
 func (a *Agent) Reply(messageID, text string, final, replace, isError bool, errorType string) error {
+	if !a.connected.Load() {
+		return ErrDisconnected
+	}
+
 	ch := make(chan error, 1)
 	a.replyCallbacks.Store(messageID, ch)
 
@@ -131,42 +276,78 @@ func (a *Agent) Reply(messageID, text string, final, replace, isError bool, erro
 		return err
 	}
 
+	a.mu.Lock()
+	wsDone := a.wsDone
+	a.mu.Unlock()
+
 	select {
 	case err := <-ch:
 		return err
-	case <-a.done:
+	case <-wsDone:
 		a.replyCallbacks.Delete(messageID)
-		return fmt.Errorf("agent disconnected")
+		return ErrDisconnected
 	}
 }
 
-// Router returns the agent's local router (for bridging the MCP reply
-// tool in v1-compatible mode if needed).
+// Router returns the agent's local router.
 func (a *Agent) Router() *router.Router {
 	return a.router
 }
 
-// Close shuts down the websocket connection.
+// Done returns a channel that's closed when the reconnect loop exits.
+func (a *Agent) Done() <-chan struct{} {
+	return a.done
+}
+
+// Close cancels the agent. Callers should cancel the context passed to Connect instead.
 func (a *Agent) Close() error {
-	return a.ws.Close()
+	a.closeWS()
+	return nil
+}
+
+func (a *Agent) closeWS() {
+	a.mu.Lock()
+	ws := a.ws
+	a.ws = nil
+	a.mu.Unlock()
+	a.connected.Store(false)
+	if ws != nil {
+		ws.Close()
+	}
 }
 
 func (a *Agent) sendJSON(v any) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	ws := a.ws
+	a.mu.Unlock()
+
+	if ws == nil {
+		return ErrDisconnected
+	}
+
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.ws == nil {
+		return ErrDisconnected
+	}
 	return a.ws.WriteMessage(websocket.TextMessage, data)
 }
 
-func (a *Agent) readPump() {
-	defer a.ws.Close()
-	defer close(a.done)
+// readPump reads from ws until error, then closes wsDone to signal reconnect.
+func (a *Agent) readPump(ws *websocket.Conn, wsDone chan struct{}) {
+	defer func() {
+		ws.Close()
+		a.connected.Store(false)
+		close(wsDone)
+	}()
 
 	for {
-		_, data, err := a.ws.ReadMessage()
+		_, data, err := ws.ReadMessage()
 		if err != nil {
 			log.Printf("[agent] read error: %v", err)
 			return
@@ -224,10 +405,7 @@ func (a *Agent) readPump() {
 
 // ListPending returns pending conv_ids. Currently a stub — the relay
 // pushes pending notifications rather than supporting a pull query.
-// This is here as a placeholder for the MCP tool interface.
 func (a *Agent) ListPending() []string {
-	// In the current design, pending notifications are pushed by the
-	// relay. An agent tracks them locally if it wants a list.
 	return nil
 }
 

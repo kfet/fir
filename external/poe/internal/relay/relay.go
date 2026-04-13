@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -467,4 +468,54 @@ func (h *Hub) LobbyCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.lobby)
+}
+
+// HasAgent returns true if a conv_id has a registered agent.
+func (h *Hub) HasAgent(convID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.registrations[convID]
+	return ok
+}
+
+// CloseAllAgents forcibly closes all agent websocket connections.
+// Used during shutdown to ensure agents detect disconnect promptly.
+func (h *Hub) CloseAllAgents() {
+	h.mu.Lock()
+	agents := make([]*agentConn, 0, len(h.agents))
+	for c := range h.agents {
+		agents = append(agents, c)
+	}
+	h.mu.Unlock()
+	for _, c := range agents {
+		c.ws.Close()
+	}
+}
+
+// InjectQuery delivers a query message directly to the agent registered
+// for convID. Used in tests to simulate relay-originated queries.
+func (h *Hub) InjectQuery(convID string, msg RelayMsg) bool {
+	h.mu.Lock()
+	reg, ok := h.registrations[convID]
+	if !ok {
+		h.mu.Unlock()
+		return false
+	}
+	conn := reg.conn
+	h.mu.Unlock()
+	return conn.sendMsg(msg) == nil
+}
+
+// StartOnAddr starts the hub's ws handler on a specific address.
+// Returns the listener address and an http.Server for shutdown.
+func (h *Hub) StartOnAddr(addr string) (*http.Server, error) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", h.HandleAgentWS)
+	srv := &http.Server{Addr: addr, Handler: mux}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	go srv.Serve(ln)
+	return srv, nil
 }
