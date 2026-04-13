@@ -459,15 +459,11 @@ func (m *InteractiveMode) Run() error {
 	// Handle SIGHUP for graceful restart (re-exec with new binary).
 	// Note: in raw mode Ctrl+C is handled as input (\x03), not as SIGINT.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		select {
-		case sig := <-sigCh:
-			if sig == syscall.SIGHUP {
-				m.handleReexecCommand("/reexec")
-			} else {
-				m.Shutdown()
-			}
+		case <-sigCh:
+			m.Shutdown()
 		case <-m.ctx.Done():
 		}
 		signal.Stop(sigCh)

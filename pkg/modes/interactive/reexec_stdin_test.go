@@ -26,10 +26,10 @@ import (
 // immediately fail CI.
 // ==========================================================================
 
-// TestRestoreStdinBlocking_CalledInReexecIfRequested parses commands.go and
-// asserts that ReexecIfRequested contains a call to restoreStdinBlocking.
+// TestRestoreStdinBlocking_CalledInReexecIfRequested verifies that
+// ReexecIfRequested uses the shared reexec.Exec (which handles stdin).
 func TestRestoreStdinBlocking_CalledInReexecIfRequested(t *testing.T) {
-	assertFuncCallsHelper(t, "commands.go", "ReexecIfRequested", "restoreStdinBlocking")
+	assertFuncCallsSelectorHelper(t, "commands.go", "ReexecIfRequested", "reexec", "Exec")
 }
 
 // TestRestoreStdinBlocking_CalledInCleanup parses mode.go and asserts that
@@ -92,6 +92,65 @@ func assertFuncCallsHelper(t *testing.T, filename, outerFunc, callee string) {
 				"(causes terminal to close after /reexec). "+
 				"See commit 4dc2f21 and 24d50f9 for context.",
 			outerFunc, filename, callee,
+		)
+	}
+}
+
+// assertFuncCallsSelectorHelper checks that outerFunc calls pkg.method
+// (a selector expression like reexec.Exec).
+func assertFuncCallsSelectorHelper(t *testing.T, filename, outerFunc, pkg, method string) {
+	t.Helper()
+
+	src, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("read %s: %v", filename, err)
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filename, src, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+
+	var funcDecl *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fd.Name.Name == outerFunc {
+			funcDecl = fd
+			break
+		}
+	}
+	if funcDecl == nil {
+		t.Fatalf("function %s not found in %s", outerFunc, filename)
+	}
+
+	found := false
+	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if ok && ident.Name == pkg && sel.Sel.Name == method {
+			found = true
+			return false
+		}
+		return true
+	})
+
+	if !found {
+		t.Errorf(
+			"REGRESSION: %s() in %s must call %s.%s() which handles "+
+				"stdin O_NONBLOCK restoration before exec. "+
+				"See commit 4dc2f21 and 24d50f9 for context.",
+			outerFunc, filename, pkg, method,
 		)
 	}
 }

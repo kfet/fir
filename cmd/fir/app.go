@@ -27,6 +27,7 @@ import (
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	firpkg "github.com/kfet/fir/pkg/pkg"
+	firReexec "github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
@@ -793,6 +794,12 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			_ = setup.mcpManager.Close()
 		}
 	}()
+
+	// Register session with the shared SIGHUP reexec handler.
+	reexecHandler := firReexec.NewHandler()
+	reexecHandler.Register(firReexec.SessionInfo{
+		Session: setup.result.Session,
+	})
 
 	// Load keybindings
 	keybindings := tui.NewKeybindingsManager(setup.agentDir, filepath.Join(setup.cwd, config.ConfigDirName))

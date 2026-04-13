@@ -114,6 +114,7 @@ func RunAcpMode(opts Options) error {
 	firlog.Info("acp server: connection established", "elapsed_ms", time.Since(runStart).Milliseconds())
 
 	// Catch SIGTERM/SIGINT so we still run cleanup when the host kills us.
+	// SIGHUP is handled by the shared reexec.Handler registered at app level.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 

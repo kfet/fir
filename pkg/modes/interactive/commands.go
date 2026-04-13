@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -25,6 +24,7 @@ import (
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/resources/clipboard"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
 	"github.com/kfet/fir/pkg/update"
@@ -1278,21 +1278,10 @@ func (m *InteractiveMode) ReexecIfRequested() {
 		return
 	}
 
-	// Restore stdin to blocking mode before exec.  Go's runtime sets
-	// stdin to O_NONBLOCK for its internal I/O poller and only restores
-	// blocking mode during a normal process exit for fds that *it*
-	// changed.  syscall.Exec replaces the process without runtime
-	// cleanup, so stdin stays non-blocking.  The new Go process sees
-	// stdin is already non-blocking and won't restore it on *its* exit
-	// either, leaving the parent shell's stdin permanently non-blocking.
-	// The shell then reads EAGAIN, interprets it as EOF, and exits.
-	restoreStdinBlocking()
-
-	env := append(os.Environ(), "FIR_REEXEC_CONTINUE=1")
-	if err := syscall.Exec(m.reexecBinary, m.reexecArgs, env); err != nil {
-		fmt.Fprintf(os.Stderr, "reexec failed: exec %s: %v\n", m.reexecBinary, err)
-		os.Exit(1)
-	}
+	reexec.Exec(m.reexecBinary, m.reexecArgs)
+	// Exec never returns on success. If we get here, it failed.
+	fmt.Fprintf(os.Stderr, "reexec failed: exec %s\n", m.reexecBinary)
+	os.Exit(1)
 }
 
 // ============================================================================
