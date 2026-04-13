@@ -264,27 +264,33 @@ bridges-install: bridges ## install all external bridges to GOBIN
 
 poe-deploy: test bridges-test install bridges-install ## deploy poe: test → install → restart relay + agents
 	@echo ""
-	@echo "=== Poe deploy: re-signing binaries (macOS adhoc) ==="
-	@codesign -f -s - "$$(go env GOPATH)/bin/fir" 2>/dev/null || true
-	@codesign -f -s - "$$(go env GOPATH)/bin/poe-bridge" 2>/dev/null || true
 	@echo "=== Poe deploy: restarting relay ==="
 	@RELAY_PID=$$(pgrep -f 'poe-bridge --relay' 2>/dev/null); \
 	if [ -n "$$RELAY_PID" ]; then \
+		echo "  killing old relay ($$RELAY_PID)"; \
 		kill $$RELAY_PID; \
 		sleep 1; \
 	fi; \
-	echo "Starting new relay..."; \
+	echo "  starting new relay..."; \
 	tmux send-keys -t poe-air:1 'poe-bridge --relay' Enter; \
 	sleep 2
 	@echo "=== Poe deploy: restarting agents ==="
-	@for pid in $$(tmux list-panes -t agents -F '#{pane_pid}' 2>/dev/null); do \
-		echo "  SIGHUP agent $$pid"; \
+	@for pid in $$(pgrep -f 'fir.*-s.*agents' 2>/dev/null; \
+		tmux list-panes -t agents -F '#{pane_pid}' 2>/dev/null | while read ppid; do \
+			pgrep -P $$ppid fir 2>/dev/null; \
+		done); do \
+		echo "  SIGHUP fir $$pid"; \
 		kill -HUP $$pid 2>/dev/null || true; \
 	done
 	@echo "=== Poe deploy: restarting catch-all ==="
-	@for pid in $$(tmux list-panes -t poe-air:0 -F '#{pane_pid}' 2>/dev/null); do \
-		echo "  SIGHUP catch-all $$pid"; \
-		kill -HUP $$pid 2>/dev/null || true; \
+	@for ppid in $$(tmux list-panes -t poe-air:0 -F '#{pane_pid}' 2>/dev/null); do \
+		FIR_PID=$$(pgrep -P $$ppid fir 2>/dev/null); \
+		if [ -n "$$FIR_PID" ]; then \
+			echo "  SIGHUP catch-all fir $$FIR_PID (child of shell $$ppid)"; \
+			kill -HUP $$FIR_PID 2>/dev/null || true; \
+		else \
+			echo "  WARN: no fir child of shell $$ppid in poe-air:0"; \
+		fi; \
 	done
 	@echo ""
 	@echo "Deploy complete. Agents will reconnect automatically."
