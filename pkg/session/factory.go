@@ -12,6 +12,7 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
+	"github.com/kfet/fir/pkg/mcp/autoreply"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session/store"
@@ -231,7 +232,21 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 	}
 	mgr := mcp.NewManager(configs, false)
 
-	mcp.WireChannelInjection(mgr, func(text string, ts int64) {
+	// Auto-reply: when a poe channel message arrives, set up streaming
+	// so LLM output goes directly to the bridge without manual reply() calls.
+	var ar *autoreply.State
+	replyHook := func(serverName, messageID string) {
+		if ar == nil {
+			ar = autoreply.New(func(ctx context.Context, args map[string]any) error {
+				_, err := mgr.CallTool(ctx, serverName, "reply", args)
+				return err
+			})
+			ar.Wire(sess.Agent)
+		}
+		ar.SetMessageID(messageID)
+	}
+
+	mcp.WireChannelInjectionWithReplyHook(mgr, func(text string, ts int64) {
 		// Wait for extensions (auth etc.) before injecting, so the first
 		// LLM call has valid credentials.
 		if opts.ExtReady != nil {
@@ -239,7 +254,7 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 		}
 		msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
 		sess.InjectMessage(msg)
-	}, func() int {
+	}, replyHook, func() int {
 		return len(sess.SessionStore.BuildSessionContext().Messages)
 	})
 

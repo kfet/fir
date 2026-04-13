@@ -21,6 +21,11 @@ type MessageInjector func(text string, ts int64)
 // Used to decide whether to inject conversation history on the first message.
 type SessionLengthFunc func() int
 
+// ChannelReplyHook is called when a channel message arrives from a server
+// that has a "reply" tool. It receives the server name and message_id.
+// Used to wire auto-reply streaming.
+type ChannelReplyHook func(serverName, messageID string)
+
 // WireChannelInjection configures the manager's OnChannelMessage callback
 // to format inbound channel messages, send a typing indicator when
 // appropriate, and call inject to deliver the message to the agent.
@@ -29,6 +34,13 @@ type SessionLengthFunc func() int
 // with meta["history"] arrives, the conversation history is formatted and
 // injected as a preamble before the user's message.
 func WireChannelInjection(mgr *Manager, inject MessageInjector, sessionLen ...SessionLengthFunc) {
+	WireChannelInjectionWithReplyHook(mgr, inject, nil, sessionLen...)
+}
+
+// WireChannelInjectionWithReplyHook is like WireChannelInjection but accepts
+// an optional hook that's called with the server name and message_id when a
+// reply-capable channel message arrives.
+func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, replyHook ChannelReplyHook, sessionLen ...SessionLengthFunc) {
 	var getSessionLen SessionLengthFunc
 	if len(sessionLen) > 0 {
 		getSessionLen = sessionLen[0]
@@ -46,6 +58,12 @@ func WireChannelInjection(mgr *Manager, inject MessageInjector, sessionLen ...Se
 		if mgr.HasServerTools(serverName, "reply") {
 			if err := SendTypingIndicator(context.Background(), mgr, serverName, cm.Meta); err != nil {
 				firlog.Debug("typing indicator failed", "err", err)
+			}
+			// Notify reply hook with message_id for auto-reply wiring.
+			if replyHook != nil {
+				if msgID, ok := cm.Meta["message_id"].(string); ok && msgID != "" {
+					replyHook(serverName, msgID)
+				}
 			}
 		}
 
