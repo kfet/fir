@@ -315,8 +315,8 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 		PID=$$(ps -p $$PID -o ppid= 2>/dev/null | tr -d ' '); \
 	done; \
 	if [ -n "$$FIR_ANCESTOR" ]; then \
-		echo "  SIGHUP self (fir $$FIR_ANCESTOR) — reexec"; \
-		kill -HUP $$FIR_ANCESTOR; \
+		echo "  self-restart scheduled (fir $$FIR_ANCESTOR) — reexec in 2s"; \
+		nohup sh -c "sleep 2 && kill -HUP $$FIR_ANCESTOR" >/dev/null 2>&1 & \
 	else \
 		echo "  not running inside fir — skipping self-restart"; \
 	fi
