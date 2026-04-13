@@ -31,11 +31,31 @@ type State struct {
 	messageID string
 	started   bool
 	closed    bool
+	sendCh    chan sendReq
+}
+
+type sendReq struct {
+	args map[string]any
 }
 
 // New creates an auto-reply state bound to the given reply function.
 func New(reply ReplyFunc) *State {
-	return &State{reply: reply}
+	s := &State{
+		reply:  reply,
+		sendCh: make(chan sendReq, 64),
+	}
+	go s.sendLoop()
+	return s
+}
+
+func (s *State) sendLoop() {
+	for req := range s.sendCh {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := s.reply(ctx, req.args); err != nil {
+			firlog.Debug("auto-reply chunk failed", "err", err)
+		}
+		cancel()
+	}
 }
 
 // SetMessageID sets the Poe message_id for the current reply stream.
@@ -87,17 +107,15 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 		s.mu.Unlock()
 		return
 	}
+	msgID := s.messageID
 	s.started = true
 	if final {
 		s.closed = true
 	}
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	args := map[string]any{
-		"message_id": s.messageID,
+		"message_id": msgID,
 		"text":       text,
 		"final":      final,
 	}
@@ -105,8 +123,11 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 		args["replace"] = true
 	}
 
-	if err := s.reply(ctx, args); err != nil {
-		firlog.Debug("auto-reply chunk failed", "err", err)
+	// Non-blocking send to the ordered queue. Drop if full (backpressure).
+	select {
+	case s.sendCh <- sendReq{args: args}:
+	default:
+		firlog.Debug("auto-reply send queue full, dropping chunk")
 	}
 }
 
