@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
@@ -263,6 +264,25 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 		if hooks := sess.Hooks(); hooks != nil && (hooks.OnToolCall != nil || hooks.OnToolResult != nil) {
 			mcpTools = sess.WrapToolsWithHooks(mcpTools)
 		}
+
+		// Wrap reply tools to intercept manual calls when auto-reply is active.
+		for i, t := range mcpTools {
+			if !strings.HasSuffix(t.Name, "reply") {
+				continue
+			}
+			origExec := t.Execute
+			mcpTools[i].Execute = func(ctx context.Context, toolCallID string, params map[string]any, onUpdate agent.AgentToolUpdateCallback) (agent.AgentToolResult, error) {
+				if ar != nil {
+					if absorbed, _ := ar.InterceptReply(ctx, params); absorbed {
+						return agent.AgentToolResult{Content: []ai.ToolResultContent{{Type: "text", Text: "ok (auto-reply active)"}}}, nil
+					}
+				}
+				return origExec(ctx, toolCallID, params, onUpdate)
+			}
+			// Update description to inform LLM that auto-reply is active.
+			mcpTools[i].Description += "\n\nNOTE: Auto-reply is active — your text output streams to the user automatically. Do NOT call this tool for normal responses. Only use for replace=true (progress updates) or error=true (error signalling)."
+		}
+
 		sess.Agent.UpdateTools(func(ts *agent.ToolSet) {
 			for _, name := range prevMCPNames {
 				ts.Remove(name)

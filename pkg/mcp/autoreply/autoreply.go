@@ -58,6 +58,38 @@ func (s *State) sendLoop() {
 	}
 }
 
+// IsActive returns true if auto-reply is currently streaming for a message.
+func (s *State) IsActive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.messageID != "" && !s.closed
+}
+
+// InterceptReply checks if a manual reply() call should be absorbed.
+// Returns true if the call was handled (absorbed or forwarded for replace/error).
+// Returns false if auto-reply is not active and the call should proceed normally.
+func (s *State) InterceptReply(ctx context.Context, args map[string]any) (bool, error) {
+	s.mu.Lock()
+	active := s.messageID != "" && !s.closed
+	s.mu.Unlock()
+
+	if !active {
+		return false, nil // not active, let the call through
+	}
+
+	// Allow replace and error calls through — those are intentional overrides
+	if replace, _ := args["replace"].(bool); replace {
+		return false, nil
+	}
+	if isErr, _ := args["error"].(bool); isErr {
+		return false, nil
+	}
+
+	// Absorb normal text/final calls — auto-reply handles these
+	firlog.Debug("auto-reply intercepted manual reply()", "message_id", args["message_id"])
+	return true, nil
+}
+
 // SetMessageID sets the Poe message_id for the current reply stream.
 func (s *State) SetMessageID(msgID string) {
 	s.mu.Lock()
