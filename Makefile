@@ -264,6 +264,9 @@ bridges-install: bridges ## install all external bridges to GOBIN
 
 poe-deploy: test bridges-test install bridges-install ## deploy poe: test → install → restart relay + agents
 	@echo ""
+	@echo "=== Poe deploy: re-signing binaries (macOS adhoc) ==="
+	@codesign -f -s - "$$(go env GOPATH)/bin/fir" 2>/dev/null || true
+	@codesign -f -s - "$$(go env GOPATH)/bin/poe-bridge" 2>/dev/null || true
 	@echo "=== Poe deploy: restarting relay ==="
 	@RELAY_PID=$$(pgrep -f 'poe-bridge --relay' 2>/dev/null); \
 	if [ -n "$$RELAY_PID" ]; then \
