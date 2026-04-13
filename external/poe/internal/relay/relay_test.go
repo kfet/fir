@@ -20,7 +20,7 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	hub := NewHub()
+	hub := NewHubNoGrace()
 	ts := httptest.NewServer(http.HandlerFunc(hub.HandleAgentWS))
 	t.Cleanup(func() {
 		// Close all agent conns by shutting the server; give goroutines time to drain.

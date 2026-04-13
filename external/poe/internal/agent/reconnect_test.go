@@ -19,7 +19,7 @@ import (
 // Returns the hub and a stop func that closes all agents and shuts down.
 func startRelayOnAddr(t *testing.T, addr string) (*relay.Hub, func()) {
 	t.Helper()
-	hub := relay.NewHub()
+	hub := relay.NewHubNoGrace()
 	srv, err := hub.StartOnAddr(addr)
 	require.NoError(t, err)
 	return hub, func() {

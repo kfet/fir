@@ -15,7 +15,7 @@ import (
 
 func startRelay(t *testing.T) (*relay.Hub, string) {
 	t.Helper()
-	hub := relay.NewHub()
+	hub := relay.NewHubNoGrace()
 	ts := httptest.NewServer(http.HandlerFunc(hub.HandleAgentWS))
 	t.Cleanup(func() {
 		ts.Close()

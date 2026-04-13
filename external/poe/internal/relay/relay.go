@@ -87,6 +87,11 @@ type ReplyChunk struct {
 
 // --- Hub: the core relay state ---
 
+// GracePeriod is how long the relay waits after startup before broadcasting
+// lobby items to newly connected agents. Gives existing agents time to
+// reconnect and re-register after a relay restart.
+const GracePeriod = 5 * time.Second
+
 // Hub manages agent connections, the registration map, and the lobby.
 type Hub struct {
 	mu            sync.Mutex
@@ -95,6 +100,7 @@ type Hub struct {
 	lobby         map[string]*pendingQuery   // conv_id → waiting query
 	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
 	oauthAgents   map[string]*agentConn      // oauth session_id → agent that registered it
+	startedAt     time.Time                  // when the hub was created
 }
 
 // NewHub creates a ready-to-use Hub.
@@ -105,7 +111,20 @@ func NewHub() *Hub {
 		lobby:         make(map[string]*pendingQuery),
 		pending:       make(map[string]chan ReplyChunk),
 		oauthAgents:   make(map[string]*agentConn),
+		startedAt:     time.Now(),
 	}
+}
+
+// NewHubNoGrace creates a Hub with grace period already expired. For tests.
+func NewHubNoGrace() *Hub {
+	h := NewHub()
+	h.startedAt = time.Now().Add(-GracePeriod - time.Second)
+	return h
+}
+
+// InGracePeriod returns true if the relay is still in the startup grace period.
+func (h *Hub) InGracePeriod() bool {
+	return time.Since(h.startedAt) < GracePeriod
 }
 
 // RegisterOAuth records which agent owns an OAuth session so the relay
@@ -310,6 +329,28 @@ func (h *Hub) deliverToAgent(conn *agentConn, pq *pendingQuery) {
 }
 
 func (h *Hub) broadcastPending(convID, userID, content string) {
+	// During grace period, delay broadcast to let agents reconnect first.
+	if h.InGracePeriod() {
+		go func() {
+			remaining := GracePeriod - time.Since(h.startedAt)
+			log.Printf("[relay] grace period: delaying pending broadcast for %s by %v", convID, remaining)
+			time.Sleep(remaining)
+			// Re-check: if someone registered during grace, skip broadcast.
+			h.mu.Lock()
+			_, claimed := h.registrations[convID]
+			h.mu.Unlock()
+			if claimed {
+				log.Printf("[relay] conv %s: claimed during grace period, skipping broadcast", convID)
+				return
+			}
+			h.doBroadcastPending(convID, userID, content)
+		}()
+		return
+	}
+	h.doBroadcastPending(convID, userID, content)
+}
+
+func (h *Hub) doBroadcastPending(convID, userID, content string) {
 	h.mu.Lock()
 	agents := make([]*agentConn, 0, len(h.agents))
 	for c := range h.agents {
@@ -360,14 +401,31 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[relay] agent connected (%d total)", h.AgentCount())
 
-	// Send pending notifications for lobby items so catch-all can claim them.
-	for _, pq := range lobbyConvs {
-		_ = conn.sendMsg(RelayMsg{
-			Type:    "pending",
-			ConvID:  pq.convID,
-			UserID:  pq.userID,
-			Content: pq.content,
-		})
+	// Replay pending lobby items — but only after grace period expires,
+	// giving existing agents time to reconnect and re-register first.
+	if len(lobbyConvs) > 0 {
+		go func() {
+			if h.InGracePeriod() {
+				remaining := GracePeriod - time.Since(h.startedAt)
+				log.Printf("[relay] grace period: waiting %v before replaying %d lobby items", remaining, len(lobbyConvs))
+				time.Sleep(remaining)
+			}
+			for _, pq := range lobbyConvs {
+				// Skip if already claimed during grace period.
+				h.mu.Lock()
+				_, claimed := h.registrations[pq.convID]
+				h.mu.Unlock()
+				if claimed {
+					continue
+				}
+				_ = conn.sendMsg(RelayMsg{
+					Type:    "pending",
+					ConvID:  pq.convID,
+					UserID:  pq.userID,
+					Content: pq.content,
+				})
+			}
+		}()
 	}
 
 	go conn.writePump()
