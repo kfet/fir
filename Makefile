@@ -254,3 +254,34 @@ bridges-install: bridges ## install all external bridges to GOBIN
 		printf "  %-28s" "bridge-install: $$d"; \
 		$(MAKE) -C $$d install BINDIR=$(abspath $(BINDIR)) --no-print-directory && printf " ✓\n" || { printf " ✗\n"; exit 1; }; \
 	done
+
+# ---------------------------------------------------------------------------
+# Poe deploy: test, install, and rolling-restart relay + all agents.
+# Usage: make poe-deploy
+# ---------------------------------------------------------------------------
+
+.PHONY: poe-deploy
+
+poe-deploy: test bridges-test install bridges-install ## deploy poe: test → install → restart relay + agents
+	@echo ""
+	@echo "=== Poe deploy: restarting relay ==="
+	@RELAY_PID=$$(pgrep -f 'poe-bridge --relay' 2>/dev/null); \
+	if [ -n "$$RELAY_PID" ]; then \
+		kill $$RELAY_PID; \
+		sleep 1; \
+	fi; \
+	echo "Starting new relay..."; \
+	tmux send-keys -t poe-air:1 'poe-bridge --relay' Enter; \
+	sleep 2
+	@echo "=== Poe deploy: restarting agents ==="
+	@for pid in $$(tmux list-panes -t agents -F '#{pane_pid}' 2>/dev/null); do \
+		echo "  SIGHUP agent $$pid"; \
+		kill -HUP $$pid 2>/dev/null || true; \
+	done
+	@echo "=== Poe deploy: restarting catch-all ==="
+	@for pid in $$(tmux list-panes -t poe-air:0 -F '#{pane_pid}' 2>/dev/null); do \
+		echo "  SIGHUP catch-all $$pid"; \
+		kill -HUP $$pid 2>/dev/null || true; \
+	done
+	@echo ""
+	@echo "Deploy complete. Agents will reconnect automatically."
