@@ -351,9 +351,24 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.Lock()
 	h.agents[conn] = true
+	// Replay pending lobby items to the new agent.
+	lobbyConvs := make([]pendingQuery, 0, len(h.lobby))
+	for _, pq := range h.lobby {
+		lobbyConvs = append(lobbyConvs, *pq)
+	}
 	h.mu.Unlock()
 
 	log.Printf("[relay] agent connected (%d total)", h.AgentCount())
+
+	// Send pending notifications for lobby items so catch-all can claim them.
+	for _, pq := range lobbyConvs {
+		_ = conn.sendMsg(RelayMsg{
+			Type:    "pending",
+			ConvID:  pq.convID,
+			UserID:  pq.userID,
+			Content: pq.content,
+		})
+	}
 
 	go conn.writePump()
 	conn.readPump() // blocks
