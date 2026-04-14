@@ -297,6 +297,10 @@ func (h *Hub) Register(conn *agentConn, convID string, claim bool) RelayMsg {
 	// Deliver lobby queries to the real agent.
 	if pq, ok := h.lobby[convID]; ok {
 		delete(h.lobby, convID)
+		// Update pending entry's conn so RemoveAgent can orphan it on crash.
+		if pe, ok := h.pending[pq.messageID]; ok {
+			pe.conn = conn
+		}
 		go h.deliverToAgent(conn, pq)
 	}
 

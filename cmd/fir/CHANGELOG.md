@@ -7,6 +7,12 @@
 - `/new [prompt]` now accepts an optional initial prompt instead of a session name. The prompt is submitted atomically after the session clears, fixing a race condition in self-handoff where `/new` and the follow-up message were sent as separate inputs.
 - Self-handoff skill updated to use `/new <prompt>` instead of two-step `tmux send-keys`.
 
+### Fixed
+
+- Auto-reply: prevent `send on closed channel` panic — `finalize()` now sets closed flag and closes the channel atomically, preventing concurrent event handlers from sending on a closed channel.
+- Poe relay: send error message ("Agent crashed or disconnected") to Poe user when an agent's websocket drops mid-query, instead of hanging silently.
+- Poe spawn: use `respawn-window -k` when a dead agent tmux window already exists, instead of silently failing to create a duplicate.
+
 ## [0.28.0] - 2026-04-08
 
 ### Added
