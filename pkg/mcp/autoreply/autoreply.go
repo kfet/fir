@@ -31,7 +31,7 @@ type State struct {
 	messageID string
 	started   bool
 	closed    bool
-	sendCh    chan sendReq
+	sendCh    chan sendReq // never closed; lives for the lifetime of State
 }
 
 type sendReq struct {
@@ -49,6 +49,7 @@ func New(reply ReplyFunc) *State {
 }
 
 func (s *State) sendLoop() {
+	// Channel is never closed — this goroutine lives as long as the State.
 	for req := range s.sendCh {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := s.reply(ctx, req.args); err != nil {
@@ -148,7 +149,6 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 	if final {
 		s.closed = true
 	}
-	ch := s.sendCh
 	s.mu.Unlock()
 
 	args := map[string]any{
@@ -161,11 +161,8 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 	}
 
 	// Non-blocking send to the ordered queue. Drop if full (backpressure).
-	// Use recover to guard against sending on a closed channel — finalize()
-	// may close it concurrently after we released the lock.
-	defer func() { recover() }()
 	select {
-	case ch <- sendReq{args: args}:
+	case s.sendCh <- sendReq{args: args}:
 	default:
 		firlog.Debug("auto-reply send queue full, dropping chunk")
 	}
@@ -179,21 +176,19 @@ func (s *State) finalize() {
 	}
 	s.closed = true
 	msgID := s.messageID
-	ch := s.sendCh
 	s.mu.Unlock()
 
-	// Send the final empty chunk, then close the channel.
-	// The recover guard in sendChunk handles any concurrent senders.
-	defer func() { recover() }()
+	// Send the final empty chunk. Channel is never closed — it's reused
+	// across messages. The closed flag prevents further sends.
 	select {
-	case ch <- sendReq{args: map[string]any{
+	case s.sendCh <- sendReq{args: map[string]any{
 		"message_id": msgID,
 		"text":       "",
 		"final":      true,
 	}}:
 	default:
+		firlog.Debug("auto-reply finalize: send queue full")
 	}
-	close(ch)
 }
 
 func formatToolArgs(toolName string, args any) string {
