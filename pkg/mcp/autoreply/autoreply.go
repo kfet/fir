@@ -175,6 +175,7 @@ func (s *State) finalize() {
 	}
 	s.mu.Unlock()
 	s.sendChunk("", true, false)
+	close(s.sendCh)
 }
 
 func formatToolArgs(toolName string, args any) string {

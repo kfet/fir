@@ -107,9 +107,8 @@ type Hub struct {
 	lobby         map[string]*pendingQuery   // conv_id → waiting query
 	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
 	oauthAgents   map[string]*agentConn      // oauth session_id → agent that registered it
-	startedAt     time.Time                  // when the hub was created
 	graceTimer    *time.Timer                // quiet-window timer, fires lobby broadcast
-	graceDone     chan struct{}               // closed when grace period ends
+	graceDone     chan struct{}              // closed when grace period ends
 }
 
 // NewHub creates a ready-to-use Hub.
@@ -120,7 +119,6 @@ func NewHub() *Hub {
 		lobby:         make(map[string]*pendingQuery),
 		pending:       make(map[string]chan ReplyChunk),
 		oauthAgents:   make(map[string]*agentConn),
-		startedAt:     time.Now(),
 		graceDone:     make(chan struct{}),
 	}
 	// Start quiet-window timer. Reset on each agent registration.

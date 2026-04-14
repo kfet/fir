@@ -27,9 +27,9 @@ import (
 	interactive "github.com/kfet/fir/pkg/modes/interactive"
 	printmode "github.com/kfet/fir/pkg/modes/print"
 	firpkg "github.com/kfet/fir/pkg/pkg"
-	firReexec "github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	firReexec "github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/update"
@@ -769,6 +769,9 @@ func resolveEnabledExtensions(args *Args, sm *config.SettingsManager) []string {
 // runAcpMode runs ACP mode over stdin/stdout.
 func runAcpMode(args *Args) error {
 	acpmode.SetVersion(version)
+	// Start shared SIGHUP reexec handler. ACP sessions are registered
+	// dynamically via acpmode's session lifecycle.
+	_ = firReexec.NewHandler()
 	return acpmode.RunAcpMode(acpmode.Options{
 		AdditionalSkillPaths:          args.Skills,
 		AdditionalPromptTemplatePaths: args.PromptTemplates,

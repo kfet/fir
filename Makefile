@@ -298,17 +298,12 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 		fi; \
 	done
 	@echo "=== Poe deploy: self-restart (last step) ==="
-	@SELF_FIR=$$(ps -o ppid=,pid=,comm= | awk '$$3 == "fir" { print $$2 }' | while read pid; do \
-		if [ -d /proc/$$pid ] 2>/dev/null || kill -0 $$pid 2>/dev/null; then \
-			grep -l "poe-deploy" /proc/$$pid/cmdline 2>/dev/null && echo $$pid && break; \
-		fi; \
-	done); \
-	CALLER_PID=$$(ps -p $$$$ -o ppid= | tr -d ' '); \
+	@CALLER_PID=$$(ps -p $$$$ -o ppid= | tr -d ' '); \
 	FIR_ANCESTOR=""; \
 	PID=$$CALLER_PID; \
 	while [ -n "$$PID" ] && [ "$$PID" != "1" ]; do \
-		COMM=$$(ps -p $$PID -o comm= 2>/dev/null); \
-		if echo "$$COMM" | grep -q fir; then \
+		COMM=$$(ps -p $$PID -o comm= 2>/dev/null | tr -d ' '); \
+		if [ "$$COMM" = "fir" ]; then \
 			FIR_ANCESTOR=$$PID; \
 			break; \
 		fi; \
