@@ -220,10 +220,10 @@ func TestAutoReply_DoubleFinalize(t *testing.T) {
 }
 
 func TestFormatToolArgs(t *testing.T) {
-	if got := formatToolArgs("bash", map[string]any{"command": "echo hi"}); got != ": echo hi" {
+	if got := formatToolArgs("bash", map[string]any{"command": "echo hi"}); got != "\n$ echo hi" {
 		t.Errorf("bash: got %q", got)
 	}
-	if got := formatToolArgs("read", map[string]any{"path": "/tmp/f"}); got != ": /tmp/f" {
+	if got := formatToolArgs("read", map[string]any{"path": "/tmp/f"}); got != " /tmp/f" {
 		t.Errorf("read: got %q", got)
 	}
 	if got := formatToolArgs("unknown", nil); got != "" {

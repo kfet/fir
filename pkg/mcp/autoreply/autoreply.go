@@ -26,12 +26,13 @@ type EventSubscriber interface {
 
 // State tracks the auto-reply stream for one Poe message.
 type State struct {
-	mu        sync.Mutex
-	reply     ReplyFunc
-	messageID string
-	started   bool
-	closed    bool
-	sendCh    chan sendReq // never closed; lives for the lifetime of State
+	mu         sync.Mutex
+	reply      ReplyFunc
+	messageID  string
+	started    bool
+	closed     bool
+	sendCh     chan sendReq // never closed; lives for the lifetime of State
+	inThinking bool // currently inside a thinking block
 }
 
 type sendReq struct {
@@ -98,6 +99,7 @@ func (s *State) SetMessageID(msgID string) {
 	s.messageID = msgID
 	s.started = false
 	s.closed = false
+	s.inThinking = false
 }
 
 // Wire subscribes to agent events and streams them to Poe.
@@ -108,14 +110,32 @@ func (s *State) Wire(sub EventSubscriber) func() {
 		firlog.Debug("auto-reply: event received", "type", ae.Type)
 		switch ae.Type {
 		case agent.EventMessageUpdate:
-			if ae.AssistantMessageEvent != nil && ae.AssistantMessageEvent.Type == ai.EventTextDelta {
+			if ae.AssistantMessageEvent == nil {
+				return
+			}
+			switch ae.AssistantMessageEvent.Type {
+			case ai.EventTextDelta:
+				s.endThinkingIfNeeded()
 				s.sendChunk(ae.AssistantMessageEvent.Delta, false, false)
+			case ai.EventThinkingStart:
+				s.mu.Lock()
+				s.inThinking = true
+				s.mu.Unlock()
+				s.sendChunk("\n\n*Thinking...*\n> *", false, false)
+			case ai.EventThinkingDelta:
+				delta := ae.AssistantMessageEvent.Delta
+				// In blockquote, newlines need "> " prefix to continue the quote
+				delta = strings.ReplaceAll(delta, "\n", "*\n> *")
+				s.sendChunk(delta, false, false)
+			case ai.EventThinkingEnd:
+				s.endThinkingIfNeeded()
 			}
 
 		case agent.EventToolExecutionStart:
 			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
+				lang := toolLang(ae.ToolName)
 				argStr := formatToolArgs(ae.ToolName, ae.Args)
-				text := fmt.Sprintf("\n\n⚙️ `%s%s`\n", ae.ToolName, argStr)
+				text := fmt.Sprintf("\n\n```%s\n%s%s\n```\n", lang, ae.ToolName, argStr)
 				s.sendChunk(text, false, false)
 			}
 
@@ -191,6 +211,31 @@ func (s *State) finalize() {
 	}
 }
 
+func (s *State) endThinkingIfNeeded() {
+	s.mu.Lock()
+	was := s.inThinking
+	s.inThinking = false
+	s.mu.Unlock()
+	if was {
+		s.sendChunk("*\n\n", false, false)
+	}
+}
+
+// toolLang returns a markdown code-fence language hint for a tool name.
+func toolLang(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case lower == "bash":
+		return "bash"
+	case lower == "read" || lower == "write" || lower == "edit":
+		return "text"
+	case strings.HasPrefix(lower, "mcp__"):
+		return "tool"
+	default:
+		return "tool"
+	}
+}
+
 func formatToolArgs(toolName string, args any) string {
 	if args == nil {
 		return ""
@@ -202,22 +247,26 @@ func formatToolArgs(toolName string, args any) string {
 	switch {
 	case strings.EqualFold(toolName, "bash"):
 		if cmd, ok := m["command"].(string); ok {
-			if len(cmd) > 80 {
-				cmd = cmd[:77] + "..."
+			if len(cmd) > 120 {
+				cmd = cmd[:117] + "..."
 			}
-			return ": " + cmd
+			return "\n$ " + cmd
 		}
 	case strings.EqualFold(toolName, "read"):
 		if p, ok := m["path"].(string); ok {
-			return ": " + p
+			return " " + p
 		}
 	case strings.EqualFold(toolName, "write") || strings.EqualFold(toolName, "edit"):
 		if p, ok := m["path"].(string); ok {
-			return ": " + p
+			return " " + p
 		}
 	}
 	return ""
 }
+
+// collapsibleThreshold is the line count above which tool output is wrapped
+// in a <details> block so it doesn't dominate the chat.
+const collapsibleThreshold = 8
 
 func formatToolResult(result any, isError bool) string {
 	if result == nil {
@@ -246,16 +295,34 @@ func formatToolResult(result any, isError bool) string {
 	}
 
 	lines := strings.Split(text, "\n")
-	if len(lines) > 20 {
-		text = strings.Join(lines[:20], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-20)
+	totalLines := len(lines)
+	truncated := false
+	if totalLines > 40 {
+		text = strings.Join(lines[:40], "\n") + fmt.Sprintf("\n... (%d more lines)", totalLines-40)
+		lines = lines[:40]
+		truncated = true
 	}
-	if len(text) > 2000 {
-		text = text[:1997] + "..."
+	if len(text) > 3000 {
+		text = text[:2997] + "..."
+		truncated = true
 	}
 
 	prefix := ""
 	if isError {
 		prefix = "❌ "
 	}
-	return fmt.Sprintf("```\n%s%s\n```\n", prefix, text)
+
+	codeBlock := fmt.Sprintf("```\n%s%s\n```\n", prefix, text)
+
+	// Wrap long output in a collapsible <details> block.
+	if len(lines) > collapsibleThreshold && !isError {
+		summary := fmt.Sprintf("output (%d lines", totalLines)
+		if truncated {
+			summary += ", truncated"
+		}
+		summary += ")"
+		return fmt.Sprintf("<details>\n<summary>%s</summary>\n\n%s\n</details>\n", summary, codeBlock)
+	}
+
+	return codeBlock
 }
