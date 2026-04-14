@@ -59,6 +59,15 @@ Run `make test` to verify your changes. Always finish every task with `make all`
 
 When fixing a regression, **write the test first** so it fails before your fix, then make it pass. This confirms the test actually catches the bug.
 
+## Testing — avoid wall-clock timeouts
+
+Prefer deterministic synchronization over `time.Sleep` and wall-clock polling:
+
+- **Channels over polling** — use `chan struct{}` signals, `sync.WaitGroup`, or callbacks instead of `require.Eventually` with arbitrary timeouts. When testing async behaviour (reconnects, event delivery), wire callbacks or subscribe to events and wait on channels.
+- **No `time.Sleep` in tests** — sleep-based tests are flaky under CI load and the race detector. If you need to wait for a goroutine, use a channel or sync primitive.
+- **`require.Eventually` is a last resort** — only for checking external state you can't subscribe to (e.g. polling a server's registration map). Use short poll intervals (10ms) and generous timeouts (3-5s) when unavoidable.
+- **Callbacks in Config, not after init** — if a struct spawns goroutines on creation, callbacks must be set via the config/options struct *before* construction, not after. Setting callbacks after init races with the goroutine.
+
 ## Extensions
 
 Extensions are standalone scripts (Python, shell, etc.) that run as subprocesses
