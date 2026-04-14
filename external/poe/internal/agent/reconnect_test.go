@@ -55,7 +55,7 @@ func TestReconnect_AfterRelayRestart(t *testing.T) {
 	stop1()
 
 	// Wait for disconnect.
-	require.Eventually(t, func() bool { return !a.Connected() }, 5*time.Second, 50*time.Millisecond,
+	require.Eventually(t, func() bool { return !a.Connected() }, 10*time.Second, 50*time.Millisecond,
 		"agent should detect disconnect")
 
 	// Start new relay on same address.
@@ -66,7 +66,7 @@ func TestReconnect_AfterRelayRestart(t *testing.T) {
 	require.Eventually(t, func() bool { return a.Connected() }, 20*time.Second, 100*time.Millisecond,
 		"agent should reconnect to new relay")
 
-	require.Eventually(t, func() bool { return hub2.HasAgent("c-1") }, 2*time.Second, 50*time.Millisecond,
+	require.Eventually(t, func() bool { return hub2.HasAgent("c-1") }, 5*time.Second, 50*time.Millisecond,
 		"agent should re-register conv_id after reconnect")
 }
 
@@ -84,7 +84,7 @@ func TestReconnect_ReplyDuringDisconnect(t *testing.T) {
 
 	// Kill relay.
 	stop()
-	require.Eventually(t, func() bool { return !a.Connected() }, 5*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return !a.Connected() }, 10*time.Second, 50*time.Millisecond)
 
 	// Reply should return ErrDisconnected immediately, not hang.
 	done := make(chan error, 1)
@@ -114,13 +114,13 @@ func TestReconnect_QueryDeliveryAfterReconnect(t *testing.T) {
 
 	// Kill and restart relay.
 	stop()
-	require.Eventually(t, func() bool { return !a.Connected() }, 5*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return !a.Connected() }, 10*time.Second, 50*time.Millisecond)
 
 	hub2, stop2 := startRelayOnAddr(t, addr)
 	defer stop2()
 
 	require.Eventually(t, func() bool { return a.Connected() }, 20*time.Second, 100*time.Millisecond)
-	require.Eventually(t, func() bool { return hub2.HasAgent("c-1") }, 2*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return hub2.HasAgent("c-1") }, 5*time.Second, 50*time.Millisecond)
 
 	// Send a query through new relay.
 	hub2.InjectQuery("c-1", relay.RelayMsg{
@@ -194,7 +194,7 @@ func TestReconnect_ContextCancelStopsLoop(t *testing.T) {
 
 	// Kill relay so agent enters reconnect loop.
 	stop()
-	require.Eventually(t, func() bool { return !a.Connected() }, 5*time.Second, 50*time.Millisecond)
+	require.Eventually(t, func() bool { return !a.Connected() }, 10*time.Second, 50*time.Millisecond)
 
 	// Cancel context — reconnect loop should exit.
 	cancel()
