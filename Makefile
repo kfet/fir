@@ -305,6 +305,8 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 	@echo "=== Poe deploy: respawning agents ==="
 	@for win in $$(tmux list-windows -t $(POE_SESSION) -F '#{window_name}' 2>/dev/null); do \
 		case "$$win" in relay) continue ;; esac; \
+		pid=$$(tmux display-message -t "$(POE_SESSION):$$win" -p '#{pane_pid}' 2>/dev/null); \
+		if [ -n "$$pid" ]; then pkill -TERM -P "$$pid" 2>/dev/null; sleep 0.2; fi; \
 		tmux respawn-window -k -t "$(POE_SESSION):$$win" 2>/dev/null && \
 			echo "  $$win ✓" || echo "  $$win: respawn failed"; \
 	done
