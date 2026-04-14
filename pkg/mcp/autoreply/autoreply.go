@@ -148,6 +148,7 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 	if final {
 		s.closed = true
 	}
+	ch := s.sendCh
 	s.mu.Unlock()
 
 	args := map[string]any{
@@ -161,7 +162,7 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 
 	// Non-blocking send to the ordered queue. Drop if full (backpressure).
 	select {
-	case s.sendCh <- sendReq{args: args}:
+	case ch <- sendReq{args: args}:
 	default:
 		firlog.Debug("auto-reply send queue full, dropping chunk")
 	}
@@ -173,9 +174,21 @@ func (s *State) finalize() {
 		s.mu.Unlock()
 		return
 	}
+	s.closed = true
+	msgID := s.messageID
+	ch := s.sendCh
 	s.mu.Unlock()
-	s.sendChunk("", true, false)
-	close(s.sendCh)
+
+	// Send the final empty chunk, then close the channel.
+	select {
+	case ch <- sendReq{args: map[string]any{
+		"message_id": msgID,
+		"text":       "",
+		"final":      true,
+	}}:
+	default:
+	}
+	close(ch)
 }
 
 func formatToolArgs(toolName string, args any) string {
