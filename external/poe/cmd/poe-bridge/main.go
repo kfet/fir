@@ -279,6 +279,19 @@ func runAgent() {
 
 	notif := mcpnotify.NewNotifier()
 
+	ag.OnRegisterRejected = func(convID, reason string) {
+		log.Printf("[bridge] register rejected for conv=%s: %s — this agent is orphaned", convID, reason)
+		// Notify fir so the LLM knows it's been replaced.
+		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
+			Content: fmt.Sprintf("[system] This agent's registration for conversation %s was rejected (reason: %s). Another agent has taken over this conversation. This session is now idle.", convID, reason),
+			Meta: map[string]any{
+				"source": "poe",
+				"type":   "register_rejected",
+				"reason": reason,
+			},
+		})
+	}
+
 	// When relay delivers a query, forward to fir via MCP channel notification.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",

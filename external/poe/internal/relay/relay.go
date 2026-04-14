@@ -87,10 +87,17 @@ type ReplyChunk struct {
 
 // --- Hub: the core relay state ---
 
-// GracePeriod is how long the relay waits after startup before broadcasting
-// lobby items to newly connected agents. Gives existing agents time to
-// reconnect and re-register after a relay restart.
-const GracePeriod = 5 * time.Second
+// Grace period: after relay restart, wait for a quiet window (no new agent
+// registrations) before broadcasting lobby items. This lets existing agents
+// reconnect and re-register before the catch-all spawns duplicates.
+const (
+	// GraceQuietWindow is how long the relay waits after the last agent
+	// registration before broadcasting unclaimed lobby items.
+	GraceQuietWindow = 1 * time.Second
+
+	// GraceHardTimeout is the maximum grace period regardless of activity.
+	GraceHardTimeout = 5 * time.Second
+)
 
 // Hub manages agent connections, the registration map, and the lobby.
 type Hub struct {
@@ -101,30 +108,93 @@ type Hub struct {
 	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
 	oauthAgents   map[string]*agentConn      // oauth session_id → agent that registered it
 	startedAt     time.Time                  // when the hub was created
+	graceTimer    *time.Timer                // quiet-window timer, fires lobby broadcast
+	graceDone     chan struct{}               // closed when grace period ends
 }
 
 // NewHub creates a ready-to-use Hub.
 func NewHub() *Hub {
-	return &Hub{
+	h := &Hub{
 		registrations: make(map[string]*registration),
 		agents:        make(map[*agentConn]bool),
 		lobby:         make(map[string]*pendingQuery),
 		pending:       make(map[string]chan ReplyChunk),
 		oauthAgents:   make(map[string]*agentConn),
 		startedAt:     time.Now(),
+		graceDone:     make(chan struct{}),
+	}
+	// Start quiet-window timer. Reset on each agent registration.
+	h.graceTimer = time.AfterFunc(GraceQuietWindow, h.endGrace)
+	// Hard timeout ensures grace ends even if agents keep reconnecting.
+	time.AfterFunc(GraceHardTimeout, h.endGrace)
+	return h
+}
+
+// endGrace ends the grace period and broadcasts all unclaimed lobby items.
+func (h *Hub) endGrace() {
+	h.mu.Lock()
+	select {
+	case <-h.graceDone:
+		h.mu.Unlock()
+		return // already ended
+	default:
+		close(h.graceDone)
+	}
+
+	// Collect unclaimed lobby items.
+	var unclaimed []pendingQuery
+	for convID, pq := range h.lobby {
+		if _, claimed := h.registrations[convID]; !claimed {
+			unclaimed = append(unclaimed, *pq)
+		}
+	}
+	agents := make([]*agentConn, 0, len(h.agents))
+	for c := range h.agents {
+		agents = append(agents, c)
+	}
+	h.mu.Unlock()
+
+	if len(unclaimed) == 0 {
+		log.Printf("[relay] grace period ended, no unclaimed lobby items")
+		return
+	}
+
+	log.Printf("[relay] grace period ended, broadcasting %d unclaimed lobby items", len(unclaimed))
+	for _, pq := range unclaimed {
+		msg := RelayMsg{Type: "pending", ConvID: pq.convID, UserID: pq.userID, Content: pq.content}
+		for _, c := range agents {
+			_ = c.sendMsg(msg)
+		}
+	}
+}
+
+// resetGraceTimer resets the quiet-window timer. Called on each agent registration.
+func (h *Hub) resetGraceTimer() {
+	select {
+	case <-h.graceDone:
+		return // grace already ended
+	default:
+	}
+	h.graceTimer.Reset(GraceQuietWindow)
+}
+
+// InGracePeriod returns true if the grace period has not yet ended.
+func (h *Hub) InGracePeriod() bool {
+	select {
+	case <-h.graceDone:
+		return false
+	default:
+		return true
 	}
 }
 
 // NewHubNoGrace creates a Hub with grace period already expired. For tests.
 func NewHubNoGrace() *Hub {
 	h := NewHub()
-	h.startedAt = time.Now().Add(-GracePeriod - time.Second)
+	// Force grace to end immediately.
+	h.graceTimer.Stop()
+	h.endGrace()
 	return h
-}
-
-// InGracePeriod returns true if the relay is still in the startup grace period.
-func (h *Hub) InGracePeriod() bool {
-	return time.Since(h.startedAt) < GracePeriod
 }
 
 // RegisterOAuth records which agent owns an OAuth session so the relay
@@ -186,6 +256,9 @@ func (c *agentConn) sendMsg(msg RelayMsg) error {
 func (h *Hub) Register(conn *agentConn, convID string, claim bool) RelayMsg {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// An agent registered — reset the grace quiet-window timer.
+	h.resetGraceTimer()
 
 	existing, ok := h.registrations[convID]
 
@@ -329,28 +402,13 @@ func (h *Hub) deliverToAgent(conn *agentConn, pq *pendingQuery) {
 }
 
 func (h *Hub) broadcastPending(convID, userID, content string) {
-	// During grace period, delay broadcast to let agents reconnect first.
+	// During grace period, don't broadcast — endGrace() will broadcast
+	// all unclaimed lobby items when the quiet window expires.
 	if h.InGracePeriod() {
-		go func() {
-			remaining := GracePeriod - time.Since(h.startedAt)
-			log.Printf("[relay] grace period: delaying pending broadcast for %s by %v", convID, remaining)
-			time.Sleep(remaining)
-			// Re-check: if someone registered during grace, skip broadcast.
-			h.mu.Lock()
-			_, claimed := h.registrations[convID]
-			h.mu.Unlock()
-			if claimed {
-				log.Printf("[relay] conv %s: claimed during grace period, skipping broadcast", convID)
-				return
-			}
-			h.doBroadcastPending(convID, userID, content)
-		}()
+		log.Printf("[relay] grace period active, deferring broadcast for %s", convID)
 		return
 	}
-	h.doBroadcastPending(convID, userID, content)
-}
 
-func (h *Hub) doBroadcastPending(convID, userID, content string) {
 	h.mu.Lock()
 	agents := make([]*agentConn, 0, len(h.agents))
 	for c := range h.agents {
@@ -392,41 +450,9 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.Lock()
 	h.agents[conn] = true
-	// Replay pending lobby items to the new agent.
-	lobbyConvs := make([]pendingQuery, 0, len(h.lobby))
-	for _, pq := range h.lobby {
-		lobbyConvs = append(lobbyConvs, *pq)
-	}
 	h.mu.Unlock()
 
 	log.Printf("[relay] agent connected (%d total)", h.AgentCount())
-
-	// Replay pending lobby items — but only after grace period expires,
-	// giving existing agents time to reconnect and re-register first.
-	if len(lobbyConvs) > 0 {
-		go func() {
-			if h.InGracePeriod() {
-				remaining := GracePeriod - time.Since(h.startedAt)
-				log.Printf("[relay] grace period: waiting %v before replaying %d lobby items", remaining, len(lobbyConvs))
-				time.Sleep(remaining)
-			}
-			for _, pq := range lobbyConvs {
-				// Skip if already claimed during grace period.
-				h.mu.Lock()
-				_, claimed := h.registrations[pq.convID]
-				h.mu.Unlock()
-				if claimed {
-					continue
-				}
-				_ = conn.sendMsg(RelayMsg{
-					Type:    "pending",
-					ConvID:  pq.convID,
-					UserID:  pq.userID,
-					Content: pq.content,
-				})
-			}
-		}()
-	}
 
 	go conn.writePump()
 	conn.readPump() // blocks

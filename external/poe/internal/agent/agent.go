@@ -28,7 +28,7 @@ import (
 
 // Backoff parameters for reconnect.
 const (
-	backoffMin = 500 * time.Millisecond
+	backoffMin = 100 * time.Millisecond
 	backoffMax = 15 * time.Second
 	backoffMul = 2
 )
@@ -87,6 +87,10 @@ type Agent struct {
 
 	// OnDisconnect is called each time the ws connection drops.
 	OnDisconnect func(err error)
+
+	// OnRegisterRejected is called when re-registration after reconnect
+	// is rejected (e.g. another agent claimed the conv during grace).
+	OnRegisterRejected func(convID, reason string)
 
 	// replyCallbacks maps message_id → channel for reply ack/error.
 	replyCallbacks sync.Map // string → chan error
@@ -379,6 +383,8 @@ func (a *Agent) readPump(ws *websocket.Conn, wsDone chan struct{}) {
 			log.Printf("[agent] register rejected for conv=%s: %s", msg.ConvID, msg.Reason)
 			if ch, ok := a.registerCallbacks.LoadAndDelete(msg.ConvID); ok {
 				ch.(chan relay.RelayMsg) <- msg
+			} else if a.OnRegisterRejected != nil {
+				a.OnRegisterRejected(msg.ConvID, msg.Reason)
 			}
 		case "oauth_callback":
 			log.Printf("[agent] oauth callback for session=%s", msg.SessionID)
