@@ -23,6 +23,9 @@ CMD="cd '$DIR' && exec fir -c --session-name '$CONV'"
 
 if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux new-session -d -s "$SESSION" -n "$CONV" "$CMD"
+elif tmux list-windows -t "$SESSION" -F '#{window_name}' | grep -qx "$CONV"; then
+  # Window exists (possibly dead from a crash) — respawn it.
+  tmux respawn-window -k -t "$SESSION:$CONV" "$CMD"
 else
   tmux new-window -t "$SESSION" -n "$CONV" "$CMD"
 fi
