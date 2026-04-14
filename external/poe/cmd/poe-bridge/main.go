@@ -26,6 +26,7 @@ import (
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	relayPkg "github.com/kfet/fir/external/poe/internal/relay"
+	"github.com/kfet/fir/external/poe/scripts"
 	"github.com/kfet/fir/external/poe/internal/selfupdate"
 )
 
@@ -345,7 +346,13 @@ func runAgent() {
 				},
 			},
 		})
-		cmd := exec.CommandContext(ctx, "spawn-poe-agent", msg.ConvID, string(mcpJSON))
+		spawnBin, err := scripts.SpawnPoeAgentPath()
+		if err != nil {
+			log.Printf("[agent] spawn script extract failed: %v", err)
+			registeredConvs.Delete(msg.ConvID)
+			return
+		}
+		cmd := exec.CommandContext(ctx, spawnBin, msg.ConvID, string(mcpJSON))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("[agent] spawn failed for conv=%s: %v\n%s", msg.ConvID, err, out)
 		} else {
