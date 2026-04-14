@@ -85,6 +85,12 @@ type ReplyChunk struct {
 	ErrorType string
 }
 
+// pendingEntry tracks a reply channel and the agent conn serving it.
+type pendingEntry struct {
+	ch   chan ReplyChunk
+	conn *agentConn // nil for lobby-queued (not yet assigned)
+}
+
 // --- Hub: the core relay state ---
 
 // Grace period: after relay restart, wait for a quiet window (no new agent
@@ -102,13 +108,13 @@ const (
 // Hub manages agent connections, the registration map, and the lobby.
 type Hub struct {
 	mu            sync.Mutex
-	registrations map[string]*registration   // conv_id → registration
-	agents        map[*agentConn]bool        // all connected agents
-	lobby         map[string]*pendingQuery   // conv_id → waiting query
-	pending       map[string]chan ReplyChunk // message_id → reply channel (for active queries)
-	oauthAgents   map[string]*agentConn      // oauth session_id → agent that registered it
-	graceTimer    *time.Timer                // quiet-window timer, fires lobby broadcast
-	graceDone     chan struct{}              // closed when grace period ends
+	registrations map[string]*registration // conv_id → registration
+	agents        map[*agentConn]bool      // all connected agents
+	lobby         map[string]*pendingQuery // conv_id → waiting query
+	pending       map[string]*pendingEntry // message_id → reply entry (for active queries)
+	oauthAgents   map[string]*agentConn    // oauth session_id → agent that registered it
+	graceTimer    *time.Timer              // quiet-window timer, fires lobby broadcast
+	graceDone     chan struct{}            // closed when grace period ends
 }
 
 // NewHub creates a ready-to-use Hub.
@@ -117,7 +123,7 @@ func NewHub() *Hub {
 		registrations: make(map[string]*registration),
 		agents:        make(map[*agentConn]bool),
 		lobby:         make(map[string]*pendingQuery),
-		pending:       make(map[string]chan ReplyChunk),
+		pending:       make(map[string]*pendingEntry),
 		oauthAgents:   make(map[string]*agentConn),
 		graceDone:     make(chan struct{}),
 	}
@@ -318,7 +324,7 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 
 	if ok && !reg.claimed {
 		// Registered with a real agent — deliver to agent.
-		h.pending[messageID] = replyCh
+		h.pending[messageID] = &pendingEntry{ch: replyCh, conn: reg.conn}
 		h.mu.Unlock()
 
 		pq := &pendingQuery{
@@ -333,7 +339,7 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 			content: content, query: query, replyCh: replyCh, done: done,
 		}
 		h.lobby[convID] = pq
-		h.pending[messageID] = replyCh
+		h.pending[messageID] = &pendingEntry{ch: replyCh} // conn assigned later
 		h.mu.Unlock()
 
 		log.Printf("[relay] conv %s: queued in lobby", convID)
@@ -346,7 +352,7 @@ func (h *Hub) RouteQuery(convID, messageID, userID, content string, query json.R
 // HandleReply processes a reply chunk from an agent.
 func (h *Hub) HandleReply(msg AgentMsg) error {
 	h.mu.Lock()
-	ch, ok := h.pending[msg.MessageID]
+	pe, ok := h.pending[msg.MessageID]
 	if msg.Final && ok {
 		delete(h.pending, msg.MessageID)
 	}
@@ -356,14 +362,17 @@ func (h *Hub) HandleReply(msg AgentMsg) error {
 		return fmt.Errorf("unknown message_id %s", msg.MessageID)
 	}
 
-	ch <- ReplyChunk{Text: msg.Text, Final: msg.Final, Replace: msg.Replace, IsError: msg.IsError, ErrorType: msg.ErrorType}
+	pe.ch <- ReplyChunk{Text: msg.Text, Final: msg.Final, Replace: msg.Replace, IsError: msg.IsError, ErrorType: msg.ErrorType}
 	return nil
 }
 
 // RemoveAgent removes an agent and all its registrations.
+// Any in-flight queries for conversations owned by this agent receive an
+// error reply so the Poe SSE handler doesn't hang.
 func (h *Hub) RemoveAgent(conn *agentConn) {
 	h.mu.Lock()
 	delete(h.agents, conn)
+
 	// Find and remove all registrations for this conn.
 	freedConvs := []string{}
 	for convID, reg := range h.registrations {
@@ -372,6 +381,16 @@ func (h *Hub) RemoveAgent(conn *agentConn) {
 			freedConvs = append(freedConvs, convID)
 		}
 	}
+
+	// Find pending reply channels owned by this agent.
+	var orphaned []chan ReplyChunk
+	for msgID, pe := range h.pending {
+		if pe.conn == conn {
+			orphaned = append(orphaned, pe.ch)
+			delete(h.pending, msgID)
+		}
+	}
+
 	// Clean up OAuth sessions owned by this agent.
 	for sid, ac := range h.oauthAgents {
 		if ac == conn {
@@ -382,6 +401,21 @@ func (h *Hub) RemoveAgent(conn *agentConn) {
 
 	for _, convID := range freedConvs {
 		log.Printf("[relay] conv %s: freed (agent disconnected)", convID)
+	}
+
+	// Send error to orphaned reply channels so Poe gets a response.
+	for _, ch := range orphaned {
+		select {
+		case ch <- ReplyChunk{
+			Text:    "⚠️ Agent crashed or disconnected. Please try again.",
+			Final:   true,
+			IsError: true,
+		}:
+		default:
+		}
+	}
+	if len(orphaned) > 0 {
+		log.Printf("[relay] sent crash error for %d orphaned queries", len(orphaned))
 	}
 }
 
