@@ -33,6 +33,14 @@ const ChannelMethod = "notifications/claude/channel"
 type ChannelMessage struct {
 	Content string         `json:"content"`
 	Meta    map[string]any `json:"meta,omitempty"`
+	Images  []ChannelImage `json:"images,omitempty"`
+}
+
+// ChannelImage is a base64-encoded image attached to a channel message.
+type ChannelImage struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+	Name     string `json:"name,omitempty"`
 }
 
 // ErrNotConnected is returned by Notifier.SendChannel when no transport

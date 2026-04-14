@@ -26,6 +26,17 @@ type ChannelMessage struct {
 	// Meta carries structured metadata from the channel server
 	// (chat_id, message_id, user, ts, file_path, etc.)
 	Meta map[string]any `json:"meta,omitempty"`
+
+	// Images holds base64-encoded images attached to this message.
+	// Each entry has MimeType and Data fields (matching ai.ImageContent).
+	Images []ChannelImage `json:"images,omitempty"`
+}
+
+// ChannelImage is a base64-encoded image attached to a channel message.
+type ChannelImage struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64-encoded
+	Name     string `json:"name,omitempty"`
 }
 
 // Text returns the message text.

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -50,8 +51,8 @@ func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
 	var injectedText string
 	var injectedTS int64
 
-	WireChannelInjection(mgr, func(text string, ts int64) {
-		injectedText = text
+	WireChannelInjection(mgr, func(content any, ts int64) {
+		injectedText = fmt.Sprint(content)
 		injectedTS = ts
 	})
 
@@ -115,8 +116,8 @@ func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
 func TestWireChannelInjection_HistoryPreambleOnEmptySession(t *testing.T) {
 	mgr := NewManager(nil, false)
 	var injected []string
-	WireChannelInjection(mgr, func(text string, ts int64) {
-		injected = append(injected, text)
+	WireChannelInjection(mgr, func(content any, ts int64) {
+		injected = append(injected, fmt.Sprint(content))
 	}, func() int { return 0 }) // empty session
 
 	fn := mgr.loadOnChannelMessage()
@@ -150,8 +151,8 @@ func TestWireChannelInjection_HistoryPreambleOnEmptySession(t *testing.T) {
 func TestWireChannelInjection_NoHistoryOnExistingSession(t *testing.T) {
 	mgr := NewManager(nil, false)
 	var injected []string
-	WireChannelInjection(mgr, func(text string, ts int64) {
-		injected = append(injected, text)
+	WireChannelInjection(mgr, func(content any, ts int64) {
+		injected = append(injected, fmt.Sprint(content))
 	}, func() int { return 5 }) // existing session with messages
 
 	fn := mgr.loadOnChannelMessage()
