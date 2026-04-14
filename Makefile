@@ -303,12 +303,13 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 		echo "  relay ✓" || echo "  relay: window not found (run poe-start)"
 	@sleep 2
 	@echo "=== Poe deploy: respawning agents ==="
-	@for win in $$(tmux list-windows -t $(POE_SESSION) -F '#{window_name}' 2>/dev/null); do \
-		case "$$win" in relay) continue ;; esac; \
-		pid=$$(tmux display-message -t "$(POE_SESSION):$$win" -p '#{pane_pid}' 2>/dev/null); \
+	@tmux list-windows -t $(POE_SESSION) -F '#{window_index} #{window_name}' 2>/dev/null | \
+	while read idx name; do \
+		case "$$idx" in 0) continue ;; esac; \
+		pid=$$(tmux display-message -t "$(POE_SESSION):$$idx" -p '#{pane_pid}' 2>/dev/null); \
 		if [ -n "$$pid" ]; then pkill -TERM -P "$$pid" 2>/dev/null; sleep 0.2; fi; \
-		tmux respawn-window -k -t "$(POE_SESSION):$$win" 2>/dev/null && \
-			echo "  $$win ✓" || echo "  $$win: respawn failed"; \
+		tmux respawn-window -k -t "$(POE_SESSION):$$idx" 2>/dev/null && \
+			echo "  $$name ✓" || echo "  $$name: respawn failed"; \
 	done
 	@echo ""
 	@echo "Deploy complete. All windows respawned with new binaries."
