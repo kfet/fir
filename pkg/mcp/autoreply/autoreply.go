@@ -32,7 +32,12 @@ type State struct {
 	started    bool
 	closed     bool
 	sendCh     chan sendReq // never closed; lives for the lifetime of State
-	inThinking bool // currently inside a thinking block
+	inThinking bool        // currently inside a thinking block
+
+	// Plan rendering: track plan tool args so we can render rich markdown
+	// instead of the generic "Plan updated" text.
+	planArgs        map[string]any // captured at ToolExecutionStart
+	planUpdateCount int            // how many plan updates this message
 }
 
 type sendReq struct {
@@ -100,6 +105,8 @@ func (s *State) SetMessageID(msgID string) {
 	s.started = false
 	s.closed = false
 	s.inThinking = false
+	s.planArgs = nil
+	s.planUpdateCount = 0
 }
 
 // Wire subscribes to agent events and streams them to Poe.
@@ -133,17 +140,39 @@ func (s *State) Wire(sub EventSubscriber) func() {
 
 		case agent.EventToolExecutionStart:
 			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
-				lang := toolLang(ae.ToolName)
-				argStr := formatToolArgs(ae.ToolName, ae.Args)
-				text := fmt.Sprintf("\n\n```%s\n%s%s\n```\n", lang, ae.ToolName, argStr)
-				s.sendChunk(text, false, false)
+				// Capture plan args for rich rendering; skip the generic code block.
+				if isPlanTool(ae.ToolName) {
+					s.mu.Lock()
+					if m, ok := ae.Args.(map[string]any); ok {
+						s.planArgs = m
+					}
+					s.mu.Unlock()
+				} else {
+					lang := toolLang(ae.ToolName)
+					argStr := formatToolArgs(ae.ToolName, ae.Args)
+					text := fmt.Sprintf("\n\n```%s\n%s%s\n```\n", lang, ae.ToolName, argStr)
+					s.sendChunk(text, false, false)
+				}
 			}
 
 		case agent.EventToolExecutionEnd:
 			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
-				text := formatToolResult(ae.Result, ae.IsError)
-				if text != "" {
-					s.sendChunk(text, false, false)
+				if isPlanTool(ae.ToolName) {
+					s.mu.Lock()
+					args := s.planArgs
+					s.planArgs = nil
+					s.planUpdateCount++
+					count := s.planUpdateCount
+					s.mu.Unlock()
+					if args != nil {
+						text := formatPlanMarkdown(args, count, ae.IsError)
+						s.sendChunk(text, false, false)
+					}
+				} else {
+					text := formatToolResult(ae.Result, ae.IsError)
+					if text != "" {
+						s.sendChunk(text, false, false)
+					}
 				}
 			}
 
@@ -264,9 +293,10 @@ func formatToolArgs(toolName string, args any) string {
 	return ""
 }
 
-// collapsibleThreshold is the line count above which tool output is wrapped
-// in a <details> block so it doesn't dominate the chat.
-const collapsibleThreshold = 8
+// truncateThreshold is the line count above which tool output is
+// truncated to keep the chat readable. Poe doesn't support <details>
+// so we truncate and show a line count instead.
+const truncateThreshold = 8
 
 func formatToolResult(result any, isError bool) string {
 	if result == nil {
@@ -312,17 +342,217 @@ func formatToolResult(result any, isError bool) string {
 		prefix = "❌ "
 	}
 
-	codeBlock := fmt.Sprintf("```\n%s%s\n```\n", prefix, text)
-
-	// Wrap long output in a collapsible <details> block.
-	if len(lines) > collapsibleThreshold && !isError {
-		summary := fmt.Sprintf("output (%d lines", totalLines)
+	// For long output, show just a summary + first/last few lines
+	// to keep the chat readable without relying on HTML collapsibles.
+	if len(lines) > truncateThreshold && !isError {
+		head := strings.Join(lines[:3], "\n")
+		tail := strings.Join(lines[len(lines)-2:], "\n")
+		note := fmt.Sprintf("(%d lines", totalLines)
 		if truncated {
-			summary += ", truncated"
+			note += ", truncated"
 		}
-		summary += ")"
-		return fmt.Sprintf("<details>\n<summary>%s</summary>\n\n%s\n</details>\n", summary, codeBlock)
+		note += ")"
+		return fmt.Sprintf("```\n%s\n...\n%s\n```\n*%s*\n", head, tail, note)
 	}
 
-	return codeBlock
+	return fmt.Sprintf("```\n%s%s\n```\n", prefix, text)
+}
+
+// isPlanTool returns true if the tool name is the plan tool.
+func isPlanTool(name string) bool {
+	return name == "plan"
+}
+
+// formatPlanMarkdown renders plan tool args as rich markdown.
+// First update: full elegant plan with progress bar and all entries.
+// Subsequent updates: compact blockquote (Poe collapses these) with
+// just the progress bar and active items.
+func formatPlanMarkdown(args map[string]any, updateCount int, isError bool) string {
+	if isError {
+		return "\n\n> ⚠️ Plan update failed\n\n"
+	}
+
+	title, _ := args["title"].(string)
+	metadata, _ := args["metadata"].(map[string]any)
+	rawEntries, _ := args["entries"].([]any)
+
+	type entry struct {
+		content  string
+		status   string
+		priority string
+	}
+
+	entries := make([]entry, 0, len(rawEntries))
+	for _, raw := range rawEntries {
+		obj, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, _ := obj["content"].(string)
+		status, _ := obj["status"].(string)
+		priority, _ := obj["priority"].(string)
+		if content != "" {
+			entries = append(entries, entry{content, status, priority})
+		}
+	}
+
+	if len(entries) == 0 {
+		return "\n\n> 📋 Plan cleared\n\n"
+	}
+
+	// Count by status
+	completed, inProgress, pending := 0, 0, 0
+	for _, e := range entries {
+		switch e.status {
+		case "completed":
+			completed++
+		case "in_progress":
+			inProgress++
+		default:
+			pending++
+		}
+	}
+
+	bar := planProgressBar(completed, inProgress, len(entries))
+	pct := completed * 100 / len(entries)
+
+	var b strings.Builder
+	b.WriteString("\n\n")
+
+	if updateCount <= 1 {
+		// ── Full plan ──────────────────────────────
+		//
+		// 📋 **Deploy Service**
+		// `▓▓▓▓▓▓░░░░` 3/5 complete
+		//
+		//   ✓ ~~Build binary~~
+		//   ✓ ~~Run unit tests~~
+		//   ✓ ~~Push to staging~~
+		//   → **Integration tests** ❗
+		//   ○ Push to production
+
+		// Title
+		if title != "" {
+			b.WriteString("📋 **" + title + "**\n")
+		} else {
+			b.WriteString("📋 **Plan**\n")
+		}
+
+		// Progress bar
+		b.WriteString(fmt.Sprintf("`%s` %d/%d complete", bar, completed, len(entries)))
+		if pct > 0 && pct < 100 {
+			b.WriteString(fmt.Sprintf(" (%d%%)", pct))
+		}
+		b.WriteString("\n")
+
+		// Metadata
+		if len(metadata) > 0 {
+			for _, k := range sortedMetaKeys(metadata) {
+				s, _ := metadata[k].(string)
+				if s != "" {
+					b.WriteString(fmt.Sprintf("*%s: %s*\n", k, s))
+				}
+			}
+		}
+
+		b.WriteString("\n")
+
+		// Entries
+		for _, e := range entries {
+			b.WriteString(formatPlanEntry(e.content, e.status, e.priority))
+		}
+	} else {
+		// ── Compact blockquote (Poe collapses) ────
+		//
+		// > 📋 **Deploy Service** `▓▓▓▓▓▓░░░░` 3/5
+		// > → **Integration tests**
+
+		if title != "" {
+			b.WriteString(fmt.Sprintf("> 📋 **%s** `%s` %d/%d", title, bar, completed, len(entries)))
+		} else {
+			b.WriteString(fmt.Sprintf("> 📋 `%s` %d/%d", bar, completed, len(entries)))
+		}
+
+		// Show only in-progress items
+		for _, e := range entries {
+			if e.status == "in_progress" {
+				priorityMark := ""
+				if e.priority == "high" {
+					priorityMark = " ❗"
+				}
+				b.WriteString(fmt.Sprintf("\n> → **%s**%s", e.content, priorityMark))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+// formatPlanEntry renders a single plan entry line.
+func formatPlanEntry(content, status, priority string) string {
+	priorityMark := ""
+	if priority == "high" {
+		priorityMark = " ❗"
+	}
+	switch status {
+	case "completed":
+		return fmt.Sprintf("  ✓ ~~%s~~\n", content)
+	case "in_progress":
+		return fmt.Sprintf("  → **%s**%s\n", content, priorityMark)
+	default:
+		return fmt.Sprintf("  ○ %s%s\n", content, priorityMark)
+	}
+}
+
+// sortedMetaKeys returns metadata keys in sorted order, excluding internal keys.
+func sortedMetaKeys(metadata map[string]any) []string {
+	keys := make([]string, 0, len(metadata))
+	for k := range metadata {
+		if k == "next_update_in" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	return keys
+}
+
+// planProgressBar renders a text progress bar like "████░░░░" using
+// Unicode block characters. Works in any markdown renderer.
+func planProgressBar(completed, inProgress, total int) string {
+	if total == 0 {
+		return ""
+	}
+	const barLen = 10
+	filledLen := completed * barLen / total
+	// Ensure at least 1 block shown when there's any progress.
+	if completed > 0 && filledLen == 0 {
+		filledLen = 1
+	}
+	activeLen := inProgress * barLen / total
+	if inProgress > 0 && activeLen == 0 {
+		activeLen = 1
+	}
+	if filledLen+activeLen > barLen {
+		activeLen = barLen - filledLen
+	}
+	emptyLen := barLen - filledLen - activeLen
+
+	var b strings.Builder
+	for range filledLen {
+		b.WriteRune('█')
+	}
+	for range activeLen {
+		b.WriteRune('▓')
+	}
+	for range emptyLen {
+		b.WriteRune('░')
+	}
+	return b.String()
 }
