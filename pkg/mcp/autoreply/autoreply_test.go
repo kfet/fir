@@ -162,7 +162,7 @@ func TestAutoReply_Finalize(t *testing.T) {
 			Delta: "hi",
 		},
 	})
-	sub.emit(agent.AgentEvent{Type: agent.EventMessageEnd})
+	sub.emit(agent.AgentEvent{Type: agent.EventAgentEnd})
 
 	calls := log.waitFor(2)
 	if len(calls) != 2 {

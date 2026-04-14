@@ -102,7 +102,9 @@ func (s *State) SetMessageID(msgID string) {
 // Wire subscribes to agent events and streams them to Poe.
 // Returns an unsubscribe function.
 func (s *State) Wire(sub EventSubscriber) func() {
+	firlog.Info("auto-reply: Wire() subscribing to agent events")
 	return sub.Subscribe(func(ae agent.AgentEvent) {
+		firlog.Debug("auto-reply: event received", "type", ae.Type)
 		switch ae.Type {
 		case agent.EventMessageUpdate:
 			if ae.AssistantMessageEvent != nil && ae.AssistantMessageEvent.Type == ai.EventTextDelta {
@@ -125,7 +127,9 @@ func (s *State) Wire(sub EventSubscriber) func() {
 			}
 
 		case agent.EventMessageEnd:
-			s.finalize()
+			// Don't finalize here — message_end fires for each content block,
+			// including internal/system blocks before the assistant response.
+			// Only finalize on agent_end (true end of turn).
 
 		case agent.EventAgentEnd:
 			s.finalize()
