@@ -54,8 +54,16 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 		ts := time.Now().UnixMilli()
 		firlog.Info("injecting channel message", "server", serverName, "source", source)
 
-		// Send typing indicator if the server has a "reply" tool.
-		if mgr.HasServerTools(serverName, "reply") {
+		// Send typing indicator and wire auto-reply if the server has (or will have)
+		// a "reply" tool. We check HasServerTools, but also fall through if the server
+		// is still connecting (tools not loaded yet) — the tool will be available by
+		// the time the LLM responds.
+		hasReply := mgr.HasServerTools(serverName, "reply")
+		serverConnecting := mgr.IsServerConnecting(serverName)
+		if hasReply || serverConnecting {
+			if serverConnecting {
+				firlog.Info("server still connecting, optimistically wiring reply hook", "server", serverName)
+			}
 			firlog.Info("channel message from reply-capable server", "server", serverName, "hasMsgID", cm.Meta["message_id"] != nil)
 			if err := SendTypingIndicator(context.Background(), mgr, serverName, cm.Meta); err != nil {
 				firlog.Debug("typing indicator failed", "err", err)

@@ -737,6 +737,16 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 // HasServerTools reports whether the named server exposes all of the given
 // tool names. This checks the raw MCP tool names (not the prefixed agent
 // tool names).
+// IsServerConnecting returns true if the server is still performing its
+// initial connection/initialize handshake.
+func (m *Manager) IsServerConnecting(serverName string) bool {
+	var connecting bool
+	m.withEntry(serverName, func(e *serverEntry) {
+		connecting = e.connecting
+	})
+	return connecting
+}
+
 func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
 	var serverTools []agent.AgentTool
 	m.withEntry(serverName, func(e *serverEntry) {
