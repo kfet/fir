@@ -34,13 +34,23 @@ type BaseRequest struct {
 	Type    string `json:"type"`
 }
 
+// Attachment is a file or image attached to a Poe message.
+type Attachment struct {
+	URL           string `json:"url"`
+	ContentType   string `json:"content_type"`
+	Name          string `json:"name"`
+	ParsedContent string `json:"parsed_content,omitempty"` // Poe's pre-extracted text (for PDFs, etc.)
+	IsInline      bool   `json:"is_inline,omitempty"`
+}
+
 // ProtocolMessage is one entry in a query's conversation history.
 type ProtocolMessage struct {
-	Role        string     `json:"role"`
-	Content     string     `json:"content"`
-	ContentType string     `json:"content_type"`
-	Timestamp   int64      `json:"timestamp"`
-	MessageID   Identifier `json:"message_id"`
+	Role        string       `json:"role"`
+	Content     string       `json:"content"`
+	ContentType string       `json:"content_type"`
+	Timestamp   int64        `json:"timestamp"`
+	MessageID   Identifier   `json:"message_id"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // QueryRequest is the body of a `type: query` POST.
@@ -265,7 +275,7 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request, q *QueryRe
 func (h *Handler) handleSettings(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(SettingsResponse{
-		AllowAttachments:    false,
+		AllowAttachments:    true,
 		IntroductionMessage: "",
 	})
 }

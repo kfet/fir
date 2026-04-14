@@ -12,10 +12,10 @@ import (
 	"github.com/kfet/fir/pkg/mcp/history"
 )
 
-// MessageInjector is a function that injects a formatted text message into
-// an agent conversation. The caller is responsible for building the
-// AgentMessage; this package only provides the text.
-type MessageInjector func(text string, ts int64)
+// MessageInjector is a function that injects a formatted message into
+// an agent conversation. The content can be a plain string or a
+// []any slice of content blocks (text + images).
+type MessageInjector func(content any, ts int64)
 
 // SessionLengthFunc returns the number of messages in the current session.
 // Used to decide whether to inject conversation history on the first message.
@@ -105,7 +105,22 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 		}
 
 		text := fmt.Sprintf("[Channel message from %s via %s%s]\n%s", source, serverName, meta, cm.Text())
-		inject(text, ts)
+
+		// If the message has images, build multi-modal content blocks.
+		if len(cm.Images) > 0 {
+			blocks := make([]any, 0, 1+len(cm.Images))
+			blocks = append(blocks, map[string]string{"type": "text", "text": text})
+			for _, img := range cm.Images {
+				blocks = append(blocks, map[string]string{
+					"type":     "image",
+					"data":     img.Data,
+					"mimeType": img.MimeType,
+				})
+			}
+			inject(blocks, ts)
+		} else {
+			inject(text, ts)
+		}
 	})
 }
 

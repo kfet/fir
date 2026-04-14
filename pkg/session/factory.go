@@ -252,13 +252,13 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 		ar.SetMessageID(messageID)
 	}
 
-	mcp.WireChannelInjectionWithReplyHook(mgr, func(text string, ts int64) {
+	mcp.WireChannelInjectionWithReplyHook(mgr, func(content any, ts int64) {
 		// Wait for extensions (auth etc.) before injecting, so the first
 		// LLM call has valid credentials.
 		if opts.ExtReady != nil {
 			<-opts.ExtReady
 		}
-		msg := agent.NewAgentMessage(ai.NewUserMsg(text, ts))
+		msg := agent.NewAgentMessage(ai.NewUserMsg(content, ts))
 		sess.InjectMessage(msg)
 	}, replyHook, func() int {
 		return len(sess.SessionStore.BuildSessionContext().Messages)

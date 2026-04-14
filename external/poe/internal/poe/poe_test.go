@@ -204,8 +204,8 @@ func TestHandler_Settings_OK(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if got.AllowAttachments != false {
-		t.Errorf("AllowAttachments: got %v, want false", got.AllowAttachments)
+	if got.AllowAttachments != true {
+		t.Errorf("AllowAttachments: got %v, want true", got.AllowAttachments)
 	}
 }
 

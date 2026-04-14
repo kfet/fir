@@ -7,8 +7,10 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -294,8 +296,32 @@ func runAgent() {
 
 	// When relay delivers a query, forward to fir via MCP channel notification.
 	ag.OnQuery = func(msg relayPkg.RelayMsg) {
+		// Build content with attachment info appended.
+		contentBody := msg.Content
+		attachments := extractAttachments(msg.Query)
+
+		// Separate images (download for vision) from documents (inline text).
+		var images []mcpnotify.ChannelImage
+		var nonImageAtts []poeAttachment
+		for _, a := range attachments {
+			if isImageMIME(a.ContentType) {
+				img, err := downloadImage(a.URL, a.ContentType, a.Name)
+				if err != nil {
+					log.Printf("[agent] download image %s: %v", a.Name, err)
+					nonImageAtts = append(nonImageAtts, a) // fall back to link
+				} else {
+					images = append(images, img)
+				}
+			} else {
+				nonImageAtts = append(nonImageAtts, a)
+			}
+		}
+		if len(nonImageAtts) > 0 {
+			contentBody += "\n\n" + formatAttachments(nonImageAtts)
+		}
+
 		content := fmt.Sprintf("<poe message_id=\"%s\" conversation_id=\"%s\" user_id=\"%s\">\n%s\n</poe>",
-			msg.MessageID, msg.ConvID, msg.UserID, msg.Content)
+			msg.MessageID, msg.ConvID, msg.UserID, contentBody)
 
 		meta := map[string]any{
 			"source":          "poe",
@@ -310,6 +336,7 @@ func runAgent() {
 		_ = notif.SendChannel(ctx, mcpnotify.ChannelMessage{
 			Content: content,
 			Meta:    meta,
+			Images:  images,
 		})
 	}
 
@@ -408,4 +435,103 @@ func newAgentMCPServer(ag *agentPkg.Agent) *mcp.Server {
 	})
 
 	return srv
+}
+
+// poeAttachment matches the attachment shape in Poe's ProtocolMessage JSON.
+type poeAttachment struct {
+	URL           string `json:"url"`
+	ContentType   string `json:"content_type"`
+	Name          string `json:"name"`
+	ParsedContent string `json:"parsed_content,omitempty"`
+	IsInline      bool   `json:"is_inline,omitempty"`
+}
+
+// poeQueryMsg is used to extract attachments from the raw query JSON array.
+type poeQueryMsg struct {
+	Role        string          `json:"role"`
+	Attachments []poeAttachment `json:"attachments,omitempty"`
+}
+
+// extractAttachments pulls attachments from the last user message in the raw query JSON.
+func extractAttachments(queryJSON json.RawMessage) []poeAttachment {
+	if len(queryJSON) == 0 {
+		return nil
+	}
+	var msgs []poeQueryMsg
+	if err := json.Unmarshal(queryJSON, &msgs); err != nil {
+		return nil
+	}
+	// Only look at the last user message (the one that triggered this query).
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" && len(msgs[i].Attachments) > 0 {
+			return msgs[i].Attachments
+		}
+	}
+	return nil
+}
+
+// formatAttachments renders attachments as markdown for the AI context.
+// Images become markdown image links; documents with parsed_content are
+// included inline; other files are linked.
+func formatAttachments(atts []poeAttachment) string {
+	var b strings.Builder
+	b.WriteString("**Attachments:**\n")
+	for _, a := range atts {
+		if isImageMIME(a.ContentType) {
+			// Markdown image — the AI can see this via vision.
+			b.WriteString(fmt.Sprintf("![%s](%s)\n", a.Name, a.URL))
+		} else if a.ParsedContent != "" {
+			// Document with pre-extracted text.
+			b.WriteString(fmt.Sprintf("\n📄 **%s** (%s):\n```\n%s\n```\n", a.Name, a.ContentType, a.ParsedContent))
+		} else {
+			// Other file — link it.
+			b.WriteString(fmt.Sprintf("📎 [%s](%s) (%s)\n", a.Name, a.URL, a.ContentType))
+		}
+	}
+	return b.String()
+}
+
+// isImageMIME returns true if the MIME type is an image type.
+func isImageMIME(ct string) bool {
+	return strings.HasPrefix(ct, "image/")
+}
+
+// downloadImage fetches an image URL and returns it as a base64-encoded ChannelImage.
+func downloadImage(url, mimeType, name string) (mcpnotify.ChannelImage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return mcpnotify.ChannelImage{}, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return mcpnotify.ChannelImage{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return mcpnotify.ChannelImage{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Cap at 20MB to avoid OOM on huge images.
+	const maxImageBytes = 20 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
+	if err != nil {
+		return mcpnotify.ChannelImage{}, err
+	}
+
+	// Use content-type from response if available, fall back to provided.
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" || ct == "application/octet-stream" {
+		ct = mimeType
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(data)
+	return mcpnotify.ChannelImage{
+		MimeType: ct,
+		Data:     encoded,
+		Name:     name,
+	}, nil
 }

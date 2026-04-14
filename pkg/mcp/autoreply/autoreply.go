@@ -32,12 +32,7 @@ type State struct {
 	started    bool
 	closed     bool
 	sendCh     chan sendReq // never closed; lives for the lifetime of State
-	inThinking bool        // currently inside a thinking block
-
-	// Plan rendering: track plan tool args so we can render rich markdown
-	// instead of the generic "Plan updated" text.
-	planArgs        map[string]any // captured at ToolExecutionStart
-	planUpdateCount int            // how many plan updates this message
+	inThinking bool // currently inside a thinking block
 }
 
 type sendReq struct {
@@ -105,8 +100,6 @@ func (s *State) SetMessageID(msgID string) {
 	s.started = false
 	s.closed = false
 	s.inThinking = false
-	s.planArgs = nil
-	s.planUpdateCount = 0
 }
 
 // Wire subscribes to agent events and streams them to Poe.
@@ -140,39 +133,17 @@ func (s *State) Wire(sub EventSubscriber) func() {
 
 		case agent.EventToolExecutionStart:
 			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
-				// Capture plan args for rich rendering; skip the generic code block.
-				if isPlanTool(ae.ToolName) {
-					s.mu.Lock()
-					if m, ok := ae.Args.(map[string]any); ok {
-						s.planArgs = m
-					}
-					s.mu.Unlock()
-				} else {
-					lang := toolLang(ae.ToolName)
-					argStr := formatToolArgs(ae.ToolName, ae.Args)
-					text := fmt.Sprintf("\n\n```%s\n%s%s\n```\n", lang, ae.ToolName, argStr)
-					s.sendChunk(text, false, false)
-				}
+				lang := toolLang(ae.ToolName)
+				argStr := formatToolArgs(ae.ToolName, ae.Args)
+				text := fmt.Sprintf("\n\n```%s\n%s%s\n```\n", lang, ae.ToolName, argStr)
+				s.sendChunk(text, false, false)
 			}
 
 		case agent.EventToolExecutionEnd:
 			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
-				if isPlanTool(ae.ToolName) {
-					s.mu.Lock()
-					args := s.planArgs
-					s.planArgs = nil
-					s.planUpdateCount++
-					count := s.planUpdateCount
-					s.mu.Unlock()
-					if args != nil {
-						text := formatPlanMarkdown(args, count, ae.IsError)
-						s.sendChunk(text, false, false)
-					}
-				} else {
-					text := formatToolResult(ae.Result, ae.IsError)
-					if text != "" {
-						s.sendChunk(text, false, false)
-					}
+				text := formatToolResult(ae.Result, ae.IsError)
+				if text != "" {
+					s.sendChunk(text, false, false)
 				}
 			}
 
@@ -354,143 +325,4 @@ func formatToolResult(result any, isError bool) string {
 	}
 
 	return codeBlock
-}
-
-// isPlanTool returns true if the tool name is the plan tool.
-func isPlanTool(name string) bool {
-	return name == "plan"
-}
-
-// formatPlanMarkdown renders plan tool args as rich markdown.
-// For the first plan update in a message, it renders visibly.
-// For subsequent updates (count > 1), it wraps in a <details> block
-// so the chat doesn't get cluttered with repeated plan snapshots.
-func formatPlanMarkdown(args map[string]any, updateCount int, isError bool) string {
-	if isError {
-		return "\n\n> ⚠️ Plan update failed\n\n"
-	}
-
-	title, _ := args["title"].(string)
-	metadata, _ := args["metadata"].(map[string]any)
-	rawEntries, _ := args["entries"].([]any)
-
-	type entry struct {
-		content  string
-		status   string
-		priority string
-	}
-
-	entries := make([]entry, 0, len(rawEntries))
-	for _, raw := range rawEntries {
-		obj, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		content, _ := obj["content"].(string)
-		status, _ := obj["status"].(string)
-		priority, _ := obj["priority"].(string)
-		if content != "" {
-			entries = append(entries, entry{content, status, priority})
-		}
-	}
-
-	if len(entries) == 0 {
-		return "\n\n> 📋 Plan cleared\n\n"
-	}
-
-	// Count by status
-	completed, inProgress, pending := 0, 0, 0
-	for _, e := range entries {
-		switch e.status {
-		case "completed":
-			completed++
-		case "in_progress":
-			inProgress++
-		default:
-			pending++
-		}
-	}
-
-	// Build header
-	var b strings.Builder
-	b.WriteString("\n\n")
-
-	header := "📋"
-	if title != "" {
-		header += " **" + title + "**"
-	}
-	header += fmt.Sprintf(" — %d/%d", completed, len(entries))
-	if inProgress > 0 {
-		header += fmt.Sprintf(" · %d 🔄", inProgress)
-	}
-	if pending > 0 {
-		header += fmt.Sprintf(" · %d ⬜", pending)
-	}
-
-	// Render metadata if present (sorted for stable output)
-	var metaLines string
-	if len(metadata) > 0 {
-		keys := make([]string, 0, len(metadata))
-		for k := range metadata {
-			if k == "next_update_in" {
-				continue // internal, don't show to user
-			}
-			keys = append(keys, k)
-		}
-		// Simple insertion sort for small maps (typically 3-5 keys).
-		for i := 1; i < len(keys); i++ {
-			for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-				keys[j], keys[j-1] = keys[j-1], keys[j]
-			}
-		}
-		var mb strings.Builder
-		for _, k := range keys {
-			s, _ := metadata[k].(string)
-			if s != "" {
-				mb.WriteString(fmt.Sprintf("> *%s: %s*\n", k, s))
-			}
-		}
-		metaLines = mb.String()
-	}
-
-	// Render entries
-	var eb strings.Builder
-	for _, e := range entries {
-		icon := "⬜"
-		switch e.status {
-		case "completed":
-			icon = "✅"
-		case "in_progress":
-			icon = "🔄"
-		}
-		priorityMark := ""
-		if e.priority == "high" {
-			priorityMark = " ❗"
-		}
-		eb.WriteString(fmt.Sprintf("%s %s%s\n", icon, e.content, priorityMark))
-	}
-	entryBlock := eb.String()
-
-	// First update: render visibly. Subsequent: collapsible.
-	if updateCount <= 1 {
-		b.WriteString(header + "\n")
-		if metaLines != "" {
-			b.WriteString(metaLines)
-		}
-		b.WriteString(entryBlock)
-	} else {
-		summary := fmt.Sprintf("📋 Plan updated (%d/%d done)", completed, len(entries))
-		b.WriteString("<details>\n<summary>")
-		b.WriteString(summary)
-		b.WriteString("</summary>\n\n")
-		b.WriteString(header + "\n")
-		if metaLines != "" {
-			b.WriteString(metaLines)
-		}
-		b.WriteString(entryBlock)
-		b.WriteString("\n</details>")
-	}
-
-	b.WriteString("\n")
-	return b.String()
 }
