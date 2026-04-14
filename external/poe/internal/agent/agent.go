@@ -41,6 +41,11 @@ var ErrDisconnected = errors.New("agent: relay disconnected, reconnecting")
 type Config struct {
 	RelayURL string // ws://host:port/ws
 	ConvID   string // optional: auto-register on connect
+
+	// Callbacks — set before Connect. Safe to leave nil.
+	OnConnect          func()
+	OnDisconnect       func(err error)
+	OnRegisterRejected func(convID, reason string)
 }
 
 // DialFunc dials a websocket. Replaceable in tests.
@@ -112,11 +117,14 @@ func Connect(ctx context.Context, cfg Config) (*Agent, error) {
 // ConnectWithDial is like Connect but accepts a custom dialer (for testing).
 func ConnectWithDial(ctx context.Context, cfg Config, dial DialFunc) (*Agent, error) {
 	a := &Agent{
-		cfg:    cfg,
-		dial:   dial,
-		router: router.New(),
-		done:   make(chan struct{}),
-		wsDone: make(chan struct{}),
+		cfg:                cfg,
+		dial:               dial,
+		router:             router.New(),
+		done:               make(chan struct{}),
+		wsDone:             make(chan struct{}),
+		OnConnect:          cfg.OnConnect,
+		OnDisconnect:       cfg.OnDisconnect,
+		OnRegisterRejected: cfg.OnRegisterRejected,
 	}
 
 	// Try first connection synchronously so callers know it worked.

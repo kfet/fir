@@ -53,24 +53,23 @@ func connectWithCallbacks(t *testing.T, ctx context.Context, url, convID string)
 	connectCh := make(chan struct{}, 8)
 	disconnectCh := make(chan struct{}, 8)
 
-	a, err := ConnectWithDial(ctx, Config{RelayURL: url, ConvID: convID}, DefaultDial)
+	a, err := ConnectWithDial(ctx, Config{
+		RelayURL: url,
+		ConvID:   convID,
+		OnConnect: func() {
+			select {
+			case connectCh <- struct{}{}:
+			default:
+			}
+		},
+		OnDisconnect: func(err error) {
+			select {
+			case disconnectCh <- struct{}{}:
+			default:
+			}
+		},
+	}, DefaultDial)
 	require.NoError(t, err)
-
-	// Set callbacks under the agent's lock to avoid racing with reconnectLoop.
-	a.mu.Lock()
-	a.OnConnect = func() {
-		select {
-		case connectCh <- struct{}{}:
-		default:
-		}
-	}
-	a.OnDisconnect = func(err error) {
-		select {
-		case disconnectCh <- struct{}{}:
-		default:
-		}
-	}
-	a.mu.Unlock()
 
 	return a, connectCh, disconnectCh
 }

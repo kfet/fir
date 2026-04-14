@@ -263,19 +263,18 @@ func runAgent() {
 	ag, err := agentPkg.Connect(ctx, agentPkg.Config{
 		RelayURL: relayURL,
 		ConvID:   convID,
+		OnConnect: func() {
+			log.Printf("[bridge] relay connected")
+		},
+		OnDisconnect: func(err error) {
+			log.Printf("[bridge] relay disconnected (will reconnect)")
+		},
 	})
 	if err != nil {
 		// Connect only returns error for truly fatal problems (not dial failures).
 		log.Fatalf("agent connect: %v", err)
 	}
 	defer ag.Close()
-
-	ag.OnConnect = func() {
-		log.Printf("[bridge] relay connected")
-	}
-	ag.OnDisconnect = func(err error) {
-		log.Printf("[bridge] relay disconnected (will reconnect)")
-	}
 
 	notif := mcpnotify.NewNotifier()
 
