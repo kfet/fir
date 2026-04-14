@@ -257,62 +257,56 @@ bridges-install: bridges ## install all external bridges to GOBIN
 
 # ---------------------------------------------------------------------------
 # Poe deploy: test, install, and rolling-restart relay + all agents.
-# Usage: make poe-deploy
+#
+# Everything runs in one tmux session "poe":
+#   relay      — poe-bridge --relay
+#   catch-all  — fir (claims new conversations, spawns agents)
+#   <conv-id>  — dedicated agent per conversation
+#
+# All windows use remain-on-exit. Deploy uses respawn-window -k to kill
+# the old process and re-run the original command with the new binary.
+#
+# Usage: make poe-deploy        # test + install + restart all
+#        make poe-start          # initial setup (create session)
 # ---------------------------------------------------------------------------
 
-.PHONY: poe-deploy
+POE_SESSION    := poe
+POE_RELAY_DIR  := $(HOME)/.local/state/fir/poe/relay
+POE_CATCHALL   := $(HOME)/.local/state/fir/agents/catch-all
 
-poe-deploy: test bridges-test install bridges-install ## deploy poe: test → install → restart relay + agents
+.PHONY: poe-deploy poe-start
+
+poe-start: install bridges-install ## create the poe tmux session with relay + catch-all
+	@mkdir -p $(POE_RELAY_DIR) $(POE_CATCHALL)/.fir
+	@test -f $(POE_CATCHALL)/.fir/mcp.json || printf '{"mcpServers":{"poe":{"command":"poe-bridge","args":["--agent","ws://localhost:9090/ws"],"env":{"POE_BOT_NAME":"fir-air"}}}}\n' > $(POE_CATCHALL)/.fir/mcp.json
+	@if tmux has-session -t $(POE_SESSION) 2>/dev/null; then \
+		echo "session '$(POE_SESSION)' already exists"; \
+	else \
+		echo "creating tmux session '$(POE_SESSION)'..."; \
+		tmux new-session -d -s $(POE_SESSION) -n relay \
+			"cd $(POE_RELAY_DIR) && exec poe-bridge --relay"; \
+		tmux set-option -t $(POE_SESSION):relay remain-on-exit on; \
+		tmux new-window -t $(POE_SESSION) -n catch-all \
+			"cd $(POE_CATCHALL) && exec fir --session-name catch-all"; \
+		tmux set-option -t $(POE_SESSION):catch-all remain-on-exit on; \
+		echo "poe session ready ✓"; \
+	fi
+
+poe-deploy: test bridges-test install bridges-install ## deploy poe: test → install → respawn all
 	@echo ""
-	@echo "=== Poe deploy: restarting relay ==="
-	@RELAY_PID=$$(pgrep -f 'poe-bridge --relay' 2>/dev/null); \
-	if [ -n "$$RELAY_PID" ]; then \
-		echo "  killing old relay ($$RELAY_PID)"; \
-		kill $$RELAY_PID; \
-		sleep 1; \
-	fi; \
-	echo "  starting new relay..."; \
-	tmux send-keys -t poe-air:1 'poe-bridge --relay' Enter; \
-	sleep 2; \
-	if curl -s -o /dev/null -w '' http://localhost:8080/ 2>/dev/null; then \
-		echo "  relay ready ✓"; \
-	else \
-		echo "  WARN: relay may not be ready"; \
+	@if ! tmux has-session -t $(POE_SESSION) 2>/dev/null; then \
+		echo "no '$(POE_SESSION)' session — run 'make poe-start' first"; \
+		exit 1; \
 	fi
-	@echo "=== Poe deploy: restarting other agents ==="
-	@MY_PID=$$$$; \
-	MY_FIR_PID=$$(pgrep -P $$MY_PID fir 2>/dev/null || echo ""); \
-	for ppid in $$(tmux list-panes -t agents -F '#{pane_pid}' 2>/dev/null); do \
-		FIR_PID=$$(pgrep -P $$ppid fir 2>/dev/null); \
-		if [ -n "$$FIR_PID" ] && [ "$$FIR_PID" != "$$MY_FIR_PID" ]; then \
-			echo "  SIGHUP agent fir $$FIR_PID"; \
-			kill -HUP $$FIR_PID 2>/dev/null || true; \
-		fi; \
+	@echo "=== Poe deploy: respawning relay ==="
+	@tmux respawn-window -k -t $(POE_SESSION):relay 2>/dev/null && \
+		echo "  relay ✓" || echo "  relay: window not found (run poe-start)"
+	@sleep 2
+	@echo "=== Poe deploy: respawning agents ==="
+	@for win in $$(tmux list-windows -t $(POE_SESSION) -F '#{window_name}' 2>/dev/null); do \
+		case "$$win" in relay) continue ;; esac; \
+		tmux respawn-window -k -t "$(POE_SESSION):$$win" 2>/dev/null && \
+			echo "  $$win ✓" || echo "  $$win: respawn failed"; \
 	done
-	@echo "=== Poe deploy: restarting catch-all ==="
-	@for ppid in $$(tmux list-panes -t poe-air:0 -F '#{pane_pid}' 2>/dev/null); do \
-		FIR_PID=$$(pgrep -P $$ppid fir 2>/dev/null); \
-		if [ -n "$$FIR_PID" ]; then \
-			echo "  SIGHUP catch-all fir $$FIR_PID"; \
-			kill -HUP $$FIR_PID 2>/dev/null || true; \
-		fi; \
-	done
-	@echo "=== Poe deploy: self-restart (last step) ==="
-	@CALLER_PID=$$(ps -p $$$$ -o ppid= | tr -d ' '); \
-	FIR_ANCESTOR=""; \
-	PID=$$CALLER_PID; \
-	while [ -n "$$PID" ] && [ "$$PID" != "1" ]; do \
-		COMM=$$(ps -p $$PID -o comm= 2>/dev/null | tr -d ' '); \
-		if [ "$$COMM" = "fir" ]; then \
-			FIR_ANCESTOR=$$PID; \
-			break; \
-		fi; \
-		PID=$$(ps -p $$PID -o ppid= 2>/dev/null | tr -d ' '); \
-	done; \
-	if [ -n "$$FIR_ANCESTOR" ]; then \
-		echo "  self-restart scheduled (fir $$FIR_ANCESTOR) — reexec in 2s"; \
-		nohup sh -c "sleep 2 && kill -HUP $$FIR_ANCESTOR" >/dev/null 2>&1 & \
-	else \
-		echo "  not running inside fir — skipping self-restart"; \
-	fi
-	@echo "Deploy complete."
+	@echo ""
+	@echo "Deploy complete. All windows respawned with new binaries."
