@@ -307,7 +307,11 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 	while read idx name; do \
 		case "$$idx" in 0) continue ;; esac; \
 		pid=$$(tmux display-message -t "$(POE_SESSION):$$idx" -p '#{pane_pid}' 2>/dev/null); \
-		if [ -n "$$pid" ]; then pkill -TERM -P "$$pid" 2>/dev/null; sleep 0.2; fi; \
+		if [ -n "$$pid" ] && [ "$$pid" != "-1" ]; then \
+			for cpid in $$(pgrep -P "$$pid" 2>/dev/null); do kill "$$cpid" 2>/dev/null; done; \
+			kill "$$pid" 2>/dev/null; \
+			sleep 0.3; \
+		fi; \
 		tmux respawn-window -k -t "$(POE_SESSION):$$idx" 2>/dev/null && \
 			echo "  $$name ✓" || echo "  $$name: respawn failed"; \
 	done
