@@ -223,8 +223,8 @@ func TestHandler_ReportTypes_200(t *testing.T) {
 	}
 }
 
-func TestHandler_Query_StreamsMetaTextDone(t *testing.T) {
-	h := &Handler{AccessKey: "k", BotName: "test-bot"}
+func TestHandler_Query_NoHandler_Error(t *testing.T) {
+	h := &Handler{AccessKey: "k"}
 	body := `{
 		"version":"1.0",
 		"type":"query",
@@ -240,7 +240,7 @@ func TestHandler_Query_StreamsMetaTextDone(t *testing.T) {
 	h.ServeHTTP(rr, newReq(t, http.MethodPost, body, "k"))
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200", rr.Code)
+		t.Fatalf("status: got %d, want 200 (SSE already started)", rr.Code)
 	}
 	if got := rr.Header().Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type: got %q, want text/event-stream", got)
@@ -248,28 +248,18 @@ func TestHandler_Query_StreamsMetaTextDone(t *testing.T) {
 
 	out := rr.Body.String()
 
-	// Mandatory ordering: meta MUST be first.
-	metaIdx := strings.Index(out, "event: meta")
-	textIdx := strings.Index(out, "event: text")
-	doneIdx := strings.Index(out, "event: done")
-	if metaIdx < 0 || textIdx < 0 || doneIdx < 0 {
-		t.Fatalf("missing event in output:\n%s", out)
+	// Must have meta, error, and done events.
+	if !strings.Contains(out, "event: meta") {
+		t.Error("missing meta event")
 	}
-	if !(metaIdx < textIdx && textIdx < doneIdx) {
-		t.Errorf("event ordering wrong: meta=%d text=%d done=%d", metaIdx, textIdx, doneIdx)
+	if !strings.Contains(out, "event: error") {
+		t.Error("missing error event")
 	}
-	if !strings.Contains(out, "test-bot") {
-		t.Errorf("body missing bot name: %s", out)
+	if !strings.Contains(out, "no query handler configured") {
+		t.Errorf("missing error text in output: %s", out)
 	}
-	// echoed identifiers
-	for _, want := range []string{
-		"u-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		"c-cccccccccccccccccccccccccccccccc",
-		"m-dddddddddddddddddddddddddddddddd",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("body missing %q", want)
-		}
+	if !strings.Contains(out, "event: done") {
+		t.Error("missing done event")
 	}
 }
 
@@ -286,8 +276,14 @@ func TestHandler_Query_BadJSON(t *testing.T) {
 
 // --- end-to-end via httptest.Server (uses real net stack) ---------------
 
-func TestHandler_EndToEnd(t *testing.T) {
-	h := &Handler{AccessKey: "k", BotName: "e2e-bot"}
+func TestHandler_EndToEnd_WithOnQuery(t *testing.T) {
+	h := &Handler{
+		AccessKey: "k",
+		OnQuery: func(ctx context.Context, q *QueryRequest, sse *SSEWriter) error {
+			_ = sse.WriteEvent("text", map[string]any{"text": "e2e-reply"})
+			return sse.WriteEvent("done", map[string]any{})
+		},
+	}
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -308,7 +304,7 @@ func TestHandler_EndToEnd(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{"event: meta", "event: text", "event: done", "e2e-bot", "u-x", "c-y", "m-z"} {
+	for _, want := range []string{"event: meta", "e2e-reply", "event: done"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in:\n%s", want, s)
 		}
