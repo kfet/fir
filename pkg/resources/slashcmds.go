@@ -47,7 +47,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "model", Description: "Select model (opens selector UI)"},
 	{Name: "settings", Description: "Open settings menu"},
 	{Name: "session", Description: "Show session info and stats"},
-	{Name: "new", Description: "Start a new session (optionally with a name)"},
+	{Name: "new", Description: "Start a new session (optionally with an initial prompt)"},
 	{Name: "compact", Description: "Manually compact the session context"},
 	{Name: "resume", Description: "Resume a different session"},
 	{Name: "tree", Description: "Navigate session tree (switch branches)"},

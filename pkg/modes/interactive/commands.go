@@ -155,11 +155,11 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 	case "/help":
 		m.showHelp()
 	case "/new":
-		var newName string
+		var initialPrompt string
 		if len(parts) > 1 {
-			newName = strings.Join(parts[1:], " ")
+			initialPrompt = strings.Join(parts[1:], " ")
 		}
-		go m.handleClearCommand(newName)
+		go m.handleClearCommand(initialPrompt)
 	case "/compact":
 		var instructions string
 		if len(parts) > 1 {
@@ -594,19 +594,17 @@ func (m *InteractiveMode) handleExternalEditor() {
 	// On non-zero exit keep the original text (no-op).
 }
 
-func (m *InteractiveMode) handleClearCommand(newName string) {
+func (m *InteractiveMode) handleClearCommand(initialPrompt string) {
 	if m.session != nil {
 		// Cancel any in-progress LLM stream before starting a new session.
 		if m.session.IsStreaming() {
 			m.session.Agent.Abort()
+			m.session.Agent.WaitForIdle()
 		}
 		_, err := m.session.NewSessionCmd()
 		if err != nil {
 			m.showWarning(fmt.Sprintf("Failed to create new session: %s", err))
 			return
-		}
-		if newName != "" {
-			m.session.SetSessionName(newName)
 		}
 	}
 	if m.messageContainer != nil {
@@ -624,10 +622,17 @@ func (m *InteractiveMode) handleClearCommand(newName string) {
 	if m.ui != nil {
 		m.ui.RequestRender(true)
 	}
-	if newName != "" {
-		m.showStatus(fmt.Sprintf("New session started: %s", newName))
-	} else {
-		m.showStatus("New session started")
+	m.showStatus("New session started")
+
+	// If an initial prompt was provided (e.g. "/new read the handoff doc"),
+	// submit it as the first message in the fresh session. This avoids the
+	// race condition of sending /new and a follow-up message as separate
+	// inputs via tmux send-keys.
+	if initialPrompt != "" && m.session != nil {
+		m.AddUserMessage(initialPrompt)
+		if err := m.session.Prompt(initialPrompt); err != nil {
+			m.showWarning(fmt.Sprintf("Failed to send message: %v", err))
+		}
 	}
 }
 
@@ -1575,7 +1580,7 @@ func (m *InteractiveMode) showHelp() {
   /settings       - Open settings menu
   /plan           - Show/hide the current session plan
   /theme          - Select theme
-  /new            - Start a new session
+  /new [prompt]   - Start a new session (optionally with an initial prompt)
   /compact        - Compact conversation context
   /resume         - Resume a different session
   /session        - Show session info and stats

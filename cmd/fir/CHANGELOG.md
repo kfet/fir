@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/new [prompt]` now accepts an optional initial prompt instead of a session name. The prompt is submitted atomically after the session clears, fixing a race condition in self-handoff where `/new` and the follow-up message were sent as separate inputs.
+- Self-handoff skill updated to use `/new <prompt>` instead of two-step `tmux send-keys`.
+
 ## [0.28.0] - 2026-04-08
 
 ### Added

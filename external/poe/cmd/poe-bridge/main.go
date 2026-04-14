@@ -26,8 +26,8 @@ import (
 	"github.com/kfet/fir/external/poe/internal/mcpnotify"
 	"github.com/kfet/fir/external/poe/internal/poe"
 	relayPkg "github.com/kfet/fir/external/poe/internal/relay"
-	"github.com/kfet/fir/external/poe/scripts"
 	"github.com/kfet/fir/external/poe/internal/selfupdate"
+	"github.com/kfet/fir/external/poe/scripts"
 )
 
 const (
