@@ -150,9 +150,6 @@ type Handler struct {
 	// If empty, authentication is skipped (dev mode only — never deploy).
 	AccessKey string
 
-	// BotName is included in the fallback canned reply. Optional.
-	BotName string
-
 	// OnQuery, if non-nil, is called with a pre-configured SSEWriter that
 	// has already emitted the mandatory `meta` event. The hook owns the
 	// rest of the response lifecycle and must emit `done` itself before
@@ -256,18 +253,11 @@ func (h *Handler) handleQuery(w http.ResponseWriter, r *http.Request, q *QueryRe
 		return
 	}
 
-	// --- Fallback: canned echo (M2 stub) ---
-	bot := h.BotName
-	if bot == "" {
-		bot = "poe-bridge"
-	}
-	body := fmt.Sprintf(
-		"hello from %s (stub)\n\n- received %d query message(s)\n- user: `%s`\n- conversation: `%s`\n- message: `%s`",
-		bot, len(q.Query), q.UserID, q.ConversationID, q.MessageID,
-	)
-	if err := sse.WriteEvent("text", map[string]any{"text": body}); err != nil {
-		return
-	}
+	// No OnQuery handler configured — error.
+	_ = sse.WriteEvent("error", map[string]any{
+		"allow_retry": false,
+		"text":        "no query handler configured",
+	})
 	_ = sse.WriteEvent("done", map[string]any{})
 }
 

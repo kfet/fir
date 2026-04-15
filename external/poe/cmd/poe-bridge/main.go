@@ -35,10 +35,6 @@ import (
 const (
 	version  = "0.3.0"
 	httpAddr = ":8080"
-
-	// queryTimeout bounds how long a single Poe query may occupy the SSE
-	// stream while waiting for agent chunks.
-	queryTimeout = 50 * time.Minute
 )
 
 // pingArgs is the empty input schema for the ping tool.
@@ -143,7 +139,6 @@ func runRelay() {
 	// Poe HTTP handler routes queries through the hub.
 	poeHandler := &poe.Handler{
 		AccessKey: os.Getenv("POE_ACCESS_KEY"),
-		BotName:   os.Getenv("POE_BOT_NAME"),
 		OnQuery:   newRelayOnQuery(hub, acl),
 	}
 

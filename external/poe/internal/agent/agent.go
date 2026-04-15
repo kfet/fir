@@ -23,7 +23,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/kfet/fir/external/poe/internal/relay"
-	"github.com/kfet/fir/external/poe/internal/router"
 )
 
 // Backoff parameters for reconnect.
@@ -58,12 +57,11 @@ func DefaultDial(ctx context.Context, url string) (*websocket.Conn, error) {
 	return ws, err
 }
 
-// Agent holds the relay websocket connection and a local router for
-// bridging reply tool calls back to the relay.
+// Agent holds the relay websocket connection for bridging MCP tool
+// calls back to the relay.
 type Agent struct {
-	cfg    Config
-	dial   DialFunc
-	router *router.Router
+	cfg  Config
+	dial DialFunc
 
 	// ws and connected are protected by mu.
 	mu        sync.Mutex
@@ -119,7 +117,6 @@ func ConnectWithDial(ctx context.Context, cfg Config, dial DialFunc) (*Agent, er
 	a := &Agent{
 		cfg:                cfg,
 		dial:               dial,
-		router:             router.New(),
 		done:               make(chan struct{}),
 		wsDone:             make(chan struct{}),
 		OnConnect:          cfg.OnConnect,
@@ -301,11 +298,6 @@ func (a *Agent) Reply(messageID, text string, final, replace, isError bool, erro
 	}
 }
 
-// Router returns the agent's local router.
-func (a *Agent) Router() *router.Router {
-	return a.router
-}
-
 // Done returns a channel that's closed when the reconnect loop exits.
 func (a *Agent) Done() <-chan struct{} {
 	return a.done
@@ -415,12 +407,6 @@ func (a *Agent) readPump(ws *websocket.Conn, wsDone chan struct{}) {
 			log.Printf("[agent] unknown msg type: %s", msg.Type)
 		}
 	}
-}
-
-// ListPending returns pending conv_ids. Currently a stub — the relay
-// pushes pending notifications rather than supporting a pull query.
-func (a *Agent) ListPending() []string {
-	return nil
 }
 
 // OAuthRegister tells the relay to register an OAuth session and returns

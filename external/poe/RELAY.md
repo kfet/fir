@@ -16,7 +16,7 @@ agents (fir + skills + bash).
 ```
                          ┌──────────────────────┐
     Poe ──HTTPS/SSE───▶  │       relay          │
-                         │  :443 Funnel (public) │
+                         │  :8080 HTTP (public)  │
                          │  :9090 ws (tailnet)   │
                          │                       │
                          │  conv→conn map        │
@@ -269,17 +269,61 @@ full history in each query, so the new fir has full context.
 
 ```
 # Relay mode
-poe-bridge --relay \
-  --poe-port 8080 \
-  --agent-port 9090 \
-  --access-key $POE_ACCESS_KEY \
-  --state-dir ~/.config/poe-relay
+poe-bridge --relay
 
-# Agent mode  
-poe-bridge --agent \
-  --relay ws://krpi2one:9090 \
-  --conv c-alpha
+# Environment variables:
+#   POE_ACCESS_KEY   — bearer secret from Poe bot dashboard
+#   POE_HTTP_ADDR    — Poe HTTP listen address (default :8080)
+#   POE_AGENT_PORT   — agent websocket port (default 9090)
+#   POE_STATE_DIR    — state directory for access control persistence
+
+# Agent mode
+poe-bridge --agent <relay-ws-url>
+
+# Environment variables:
+#   POE_RELAY_URL    — alternative to positional arg
+#   POE_CONV_ID      — lock to a single conversation (dedicated agent)
 ```
 
-v1 mode (no --relay, no --agent) continues working as before —
-single bridge, single fir, no relay.
+## Future: Tailscale Funnel for non-tailnet relay
+
+Currently the relay listens on a plain HTTP port and expects a reverse
+proxy (nginx, Caddy, Cloudflare tunnel, etc.) in front for TLS. The
+agent ws port (:9090) is typically only reachable within the tailnet.
+
+For deployments where the relay host is **not on the tailnet** — or
+where you want zero-config public HTTPS without a separate reverse
+proxy — [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) can
+expose the relay directly to the internet with automatic TLS.
+
+### How it would work
+
+A `funnel` package (previously prototyped, removed in cleanup) would:
+
+1. Start a [`tsnet.Server`](https://pkg.go.dev/tailscale.com/tsnet)
+   with a configured hostname (e.g. `poe-relay`)
+2. Call `ListenFunnel("tcp", ":443")` to get a public HTTPS listener
+3. Serve the Poe HTTP handler on that listener
+
+This gives you a stable `https://poe-relay.<tailnet>.ts.net` URL that
+you paste into the Poe bot dashboard — no nginx, no Caddy, no DNS
+config. The relay binary is the entire stack.
+
+### Config sketch
+
+```
+POE_FUNNEL=1                          # enable Funnel mode
+POE_FUNNEL_HOSTNAME=poe-relay         # tsnet device name
+POE_FUNNEL_STATE_DIR=~/.local/state/poe-funnel  # tsnet state
+TS_AUTHKEY=tskey-auth-...             # one-time; state persists after first run
+```
+
+### When to implement
+
+This becomes worthwhile when:
+- The relay needs to run on a machine outside the tailnet
+- You want to eliminate the reverse proxy from the deployment
+- You need automatic TLS certificate management
+
+The `tailscale.com/tsnet` dependency is ~55 indirect deps, so it
+should only be pulled in when Funnel support is actually built.
