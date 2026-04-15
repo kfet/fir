@@ -298,6 +298,7 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 		echo "no '$(POE_SESSION)' session — run 'make poe-start' first"; \
 		exit 1; \
 	fi
+	@tmux set-environment -t $(POE_SESSION) PATH "$$PATH"
 	@echo "=== Poe deploy: respawning relay ==="
 	@tmux respawn-window -k -t $(POE_SESSION):relay 2>/dev/null && \
 		echo "  relay ✓" || echo "  relay: window not found (run poe-start)"
