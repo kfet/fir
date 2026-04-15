@@ -208,10 +208,24 @@ func extractBuiltinExtensions() (string, error) {
 		cacheBase := filepath.Join(os.TempDir(), "fir-builtin-extensions")
 		dir := filepath.Join(cacheBase, hash)
 
-		// If the directory already exists, reuse it (includes .pyc caches).
-		if _, err := os.Stat(dir); err == nil {
-			builtinExtExtractDir = dir
-			return
+		// If the directory already exists AND has files, reuse it (includes .pyc caches).
+		// macOS periodically purges temp file contents while leaving directories intact,
+		// so we verify at least one file exists before reusing the cache.
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			entries, _ := os.ReadDir(dir)
+			hasFiles := false
+			for _, e := range entries {
+				if !e.IsDir() {
+					hasFiles = true
+					break
+				}
+			}
+			if hasFiles {
+				builtinExtExtractDir = dir
+				return
+			}
+			// Directory exists but is empty — remove and re-extract.
+			os.RemoveAll(dir)
 		}
 
 		if err := os.MkdirAll(cacheBase, 0o755); err != nil {
