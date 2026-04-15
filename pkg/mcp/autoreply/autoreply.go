@@ -32,7 +32,7 @@ type State struct {
 	started    bool
 	closed     bool
 	sendCh     chan sendReq // never closed; lives for the lifetime of State
-	inThinking bool        // currently inside a thinking block
+	inThinking bool         // currently inside a thinking block
 
 	// Plan rendering: track plan tool args so we can render rich markdown
 	// instead of the generic "Plan updated" text.
