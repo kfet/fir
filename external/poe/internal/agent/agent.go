@@ -57,8 +57,8 @@ func DefaultDial(ctx context.Context, url string) (*websocket.Conn, error) {
 	return ws, err
 }
 
-// Agent holds the relay websocket connection and a local router for
-// bridging reply tool calls back to the relay.
+// Agent holds the relay websocket connection for bridging MCP tool
+// calls back to the relay.
 type Agent struct {
 	cfg  Config
 	dial DialFunc
