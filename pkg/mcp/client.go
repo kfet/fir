@@ -889,3 +889,35 @@ func DetailsFunc(mgr *Manager) func() []ServerDetail {
 	}
 	return mgr.Details
 }
+
+// HasServerToolParam checks whether a server has a tool with the given name
+// whose input schema includes a specific property. Used to distinguish between
+// reply tools with different signatures (e.g. Poe reply with "message_id"
+// vs Telegram reply with "chat_id").
+func (m *Manager) HasServerToolParam(serverName, toolName, paramName string) bool {
+	var serverTools []agent.AgentTool
+	m.withEntry(serverName, func(e *serverEntry) {
+		serverTools = e.tools
+	})
+	prefix := sanitizeToolName("mcp__" + serverName + "__")
+	for _, t := range serverTools {
+		name := t.Tool.Name
+		rawName := ""
+		if len(name) > len(prefix) && name[:len(prefix)] == prefix {
+			rawName = name[len(prefix):]
+		}
+		if rawName != toolName {
+			continue
+		}
+		// Check if the tool's Parameters schema has the property.
+		if params, ok := t.Tool.Parameters.(map[string]any); ok {
+			if props, ok := params["properties"].(map[string]any); ok {
+				if _, ok := props[paramName]; ok {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
