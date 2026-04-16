@@ -3,6 +3,9 @@
 # Output directory for all build artifacts
 BINDIR    := bin
 BINARY    := $(BINDIR)/fir
+
+# Go binary install path (for tmux commands that need full paths)
+GOBIN     := $(shell go env GOPATH)/bin
 BINARY_PGO := $(BINDIR)/fir.pgo
 BINARY_MAX_SIZE := 20971520
 BINARY_SIZE_BASELINE := $(shell cat BINARY_SIZE_BASELINE 2>/dev/null || echo 0)
@@ -278,16 +281,16 @@ POE_CATCHALL   := $(HOME)/.local/state/fir/agents/catch-all
 
 poe-start: install bridges-install ## create the poe tmux session with relay + catch-all
 	@mkdir -p $(POE_RELAY_DIR) $(POE_CATCHALL)/.fir
-	@test -f $(POE_CATCHALL)/.fir/mcp.json || printf '{"mcpServers":{"poe":{"command":"poe-bridge","args":["--agent","ws://localhost:9090/ws"],"env":{"POE_BOT_NAME":"fir-air"}}}}\n' > $(POE_CATCHALL)/.fir/mcp.json
+	@test -f $(POE_CATCHALL)/.fir/mcp.json || printf '{"mcpServers":{"poe":{"command":"$(GOBIN)/poe-bridge","args":["--agent","ws://localhost:9090/ws"],"env":{"POE_BOT_NAME":"fir-air"}}}}\n' > $(POE_CATCHALL)/.fir/mcp.json
 	@if tmux has-session -t $(POE_SESSION) 2>/dev/null; then \
 		echo "session '$(POE_SESSION)' already exists"; \
 	else \
 		echo "creating tmux session '$(POE_SESSION)'..."; \
 		tmux new-session -d -s $(POE_SESSION) -n relay \
-			"cd $(POE_RELAY_DIR) && exec poe-bridge --relay"; \
+			"cd $(POE_RELAY_DIR) && exec $(GOBIN)/poe-bridge --relay"; \
 		tmux set-option -t $(POE_SESSION):relay remain-on-exit on; \
 		tmux new-window -t $(POE_SESSION) -n catch-all \
-			"cd $(POE_CATCHALL) && exec fir --session-name catch-all"; \
+			"cd $(POE_CATCHALL) && exec $(GOBIN)/fir --session-name catch-all"; \
 		tmux set-option -t $(POE_SESSION):catch-all remain-on-exit on; \
 		echo "poe session ready ✓"; \
 	fi
@@ -298,7 +301,6 @@ poe-deploy: test bridges-test install bridges-install ## deploy poe: test → in
 		echo "no '$(POE_SESSION)' session — run 'make poe-start' first"; \
 		exit 1; \
 	fi
-	@tmux set-environment -t $(POE_SESSION) PATH "$$PATH"
 	@echo "=== Poe deploy: respawning relay ==="
 	@tmux respawn-window -k -t $(POE_SESSION):relay 2>/dev/null && \
 		echo "  relay ✓" || echo "  relay: window not found (run poe-start)"
