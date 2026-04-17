@@ -77,6 +77,7 @@ const (
 	ThinkingMedium  = ai.ThinkingMedium
 	ThinkingHigh    = ai.ThinkingHigh
 	ThinkingXHigh   = ai.ThinkingXHigh
+	ThinkingMax     = ai.ThinkingMax
 )
 
 // ToAIThinkingLevel converts a ThinkingLevel to the ai-layer value.

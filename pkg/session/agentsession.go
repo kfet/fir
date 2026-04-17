@@ -975,6 +975,10 @@ func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
 	if ai.SupportsXhigh(model) {
 		levels = append(levels, agent.ThinkingXHigh)
 	}
+	// Check if model supports max
+	if ai.SupportsMax(model) {
+		levels = append(levels, agent.ThinkingMax)
+	}
 	return levels
 }
 

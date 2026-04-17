@@ -64,7 +64,7 @@ type Args struct {
 }
 
 // ValidThinkingLevels lists all valid thinking level values.
-var ValidThinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+var ValidThinkingLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 // IsValidThinkingLevel checks if a string is a valid thinking level.
 func IsValidThinkingLevel(level string) bool {
@@ -315,7 +315,7 @@ Options:
                                  Also: FIR_MCP_CONFIG env var (CLI flag wins)
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: read, bash, edit, write, grep, find, ls
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
+  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
   --no-extensions                Disable all extensions (overrides config)
   --extension <name>, -e <name>  Enable a specific extension by name (repeatable; overrides config)
                                  When any --extension flag is set, only named extensions are started

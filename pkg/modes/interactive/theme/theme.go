@@ -346,6 +346,8 @@ func (t *Theme) GetThinkingBorderColor(level string) func(string) string {
 		color = "thinkingHigh"
 	case "xhigh":
 		color = "thinkingXhigh"
+	case "max":
+		color = "thinkingMax"
 	default:
 		color = "thinkingOff"
 	}
@@ -469,7 +471,7 @@ func createDarkTheme(mode ColorMode) *Theme {
 		"syntaxVariable": "#9CDCFE", "syntaxString": "#CE9178", "syntaxNumber": "#B5CEA8",
 		"syntaxType": "#4EC9B0", "syntaxOperator": "#D4D4D4", "syntaxPunctuation": "#D4D4D4",
 		"thinkingOff": "#505050", "thinkingMinimal": "#6e6e6e", "thinkingLow": "#5f87af",
-		"thinkingMedium": "#81a2be", "thinkingHigh": "#b294bb", "thinkingXhigh": "#d183e8",
+		"thinkingMedium": "#81a2be", "thinkingHigh": "#b294bb", "thinkingXhigh": "#d183e8", "thinkingMax": "#ff6ec7",
 		"bashMode": "#b5bd68",
 	}
 	bg := map[ThemeBg]string{
@@ -496,7 +498,7 @@ func createLightTheme(mode ColorMode) *Theme {
 		"syntaxVariable": "#657b83", "syntaxString": "#2aa198", "syntaxNumber": "#d33682",
 		"syntaxType": "#859900", "syntaxOperator": "#657b83", "syntaxPunctuation": "#657b83",
 		"thinkingOff": "#b0b0b0", "thinkingMinimal": "#93a1a1", "thinkingLow": "#268bd2",
-		"thinkingMedium": "#6c71c4", "thinkingHigh": "#d33682", "thinkingXhigh": "#cb4b16",
+		"thinkingMedium": "#6c71c4", "thinkingHigh": "#d33682", "thinkingXhigh": "#cb4b16", "thinkingMax": "#a30000",
 		"bashMode": "#859900",
 	}
 	bg := map[ThemeBg]string{

@@ -80,12 +80,42 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 	}
 }
 
-// ClampReasoning clamps "xhigh" to "high".
+// ClampReasoning clamps "xhigh" and "max" down to "high". This is the
+// safe fallback for providers/models that don't support the higher tiers.
+// Model-aware callers should prefer ClampReasoningForModel so that models
+// which do support xhigh or max keep the requested level.
 func ClampReasoning(level ai.ThinkingLevel) ai.ThinkingLevel {
-	if level == ai.ThinkingXHigh {
+	if level == ai.ThinkingXHigh || level == ai.ThinkingMax {
 		return ai.ThinkingHigh
 	}
 	return level
+}
+
+// ClampReasoningForModel clamps a requested reasoning level to the highest
+// tier the model actually supports:
+//   - "max"   -> kept if the model supports max; otherwise clamped to
+//     xhigh (if supported) or high.
+//   - "xhigh" -> kept if the model supports xhigh; otherwise clamped to
+//     high.
+//   - other   -> returned as-is.
+func ClampReasoningForModel(level ai.ThinkingLevel, model *ai.Model) ai.ThinkingLevel {
+	switch level {
+	case ai.ThinkingMax:
+		if ai.SupportsMax(model) {
+			return ai.ThinkingMax
+		}
+		if ai.SupportsXhigh(model) {
+			return ai.ThinkingXHigh
+		}
+		return ai.ThinkingHigh
+	case ai.ThinkingXHigh:
+		if ai.SupportsXhigh(model) {
+			return ai.ThinkingXHigh
+		}
+		return ai.ThinkingHigh
+	default:
+		return level
+	}
 }
 
 // AdjustMaxTokensForThinking adjusts max tokens and calculates thinking budget.

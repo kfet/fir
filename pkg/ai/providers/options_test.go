@@ -48,10 +48,55 @@ func TestBuildBaseOptions_ApiKeyPriority(t *testing.T) {
 
 func TestClampReasoning(t *testing.T) {
 	assert.Equal(t, ai.ThinkingHigh, ClampReasoning(ai.ThinkingXHigh))
+	assert.Equal(t, ai.ThinkingHigh, ClampReasoning(ai.ThinkingMax))
 	assert.Equal(t, ai.ThinkingHigh, ClampReasoning(ai.ThinkingHigh))
 	assert.Equal(t, ai.ThinkingMedium, ClampReasoning(ai.ThinkingMedium))
 	assert.Equal(t, ai.ThinkingLow, ClampReasoning(ai.ThinkingLow))
 	assert.Equal(t, ai.ThinkingMinimal, ClampReasoning(ai.ThinkingMinimal))
+}
+
+func TestClampReasoningForModel(t *testing.T) {
+	opus47 := &ai.Model{ID: "claude-opus-4-7", Api: ai.ApiAnthropicMessages}
+	opus46 := &ai.Model{ID: "claude-opus-4-6", Api: ai.ApiAnthropicMessages}
+	gpt53 := &ai.Model{ID: "gpt-5.3", Api: ai.ApiOpenAICompletions}
+	vanilla := &ai.Model{ID: "claude-sonnet-4-20250514", Api: ai.ApiAnthropicMessages}
+
+	// Opus 4.7: supports both xhigh and max — pass through.
+	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingXHigh, opus47))
+	assert.Equal(t, ai.ThinkingMax, ClampReasoningForModel(ai.ThinkingMax, opus47))
+
+	// Opus 4.6: supports max but NOT xhigh — xhigh clamps to high, max stays.
+	assert.Equal(t, ai.ThinkingHigh, ClampReasoningForModel(ai.ThinkingXHigh, opus46))
+	assert.Equal(t, ai.ThinkingMax, ClampReasoningForModel(ai.ThinkingMax, opus46))
+
+	// gpt-5.3: supports xhigh but not max — max clamps down to xhigh.
+	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingXHigh, gpt53))
+	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingMax, gpt53))
+
+	// Vanilla model: neither xhigh nor max — both clamp to high.
+	assert.Equal(t, ai.ThinkingHigh, ClampReasoningForModel(ai.ThinkingXHigh, vanilla))
+	assert.Equal(t, ai.ThinkingHigh, ClampReasoningForModel(ai.ThinkingMax, vanilla))
+
+	// Non-top levels pass through regardless of model.
+	assert.Equal(t, ai.ThinkingMedium, ClampReasoningForModel(ai.ThinkingMedium, vanilla))
+	assert.Equal(t, ai.ThinkingHigh, ClampReasoningForModel(ai.ThinkingHigh, vanilla))
+}
+
+func TestBedrockThinkingLevelToEffort(t *testing.T) {
+	// Opus 4.7 — xhigh is its own effort value.
+	assert.Equal(t, "low", bedrockThinkingLevelToEffort(ai.ThinkingMinimal, "anthropic.claude-opus-4-7"))
+	assert.Equal(t, "medium", bedrockThinkingLevelToEffort(ai.ThinkingMedium, "anthropic.claude-opus-4-7"))
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingHigh, "anthropic.claude-opus-4-7"))
+	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-7"))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-7"))
+
+	// Opus 4.6 — xhigh clamps to high, max still goes through.
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-6"))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-6"))
+
+	// Sonnet 4.6 — same rules as Opus 4.6.
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-sonnet-4-6"))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-sonnet-4-6"))
 }
 
 func TestAdjustMaxTokensForThinking_Default(t *testing.T) {

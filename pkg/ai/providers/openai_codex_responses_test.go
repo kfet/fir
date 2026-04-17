@@ -102,6 +102,13 @@ func TestClampCodexReasoningEffort(t *testing.T) {
 		{"gpt-5.1-codex-mini", "low", "medium"},
 		{"codex-mini-latest", "high", "high"},
 		{"provider/gpt-5.2", "minimal", "low"},
+		// "max" is a new top-tier level — no Codex model supports it, so it
+		// must clamp down. Specifically, it should behave like xhigh.
+		{"gpt-5.2", "max", "xhigh"},
+		{"gpt-5.3", "max", "xhigh"},
+		{"gpt-5.1", "max", "high"},
+		{"gpt-5.1-codex-mini", "max", "high"},
+		{"codex-mini-latest", "max", "xhigh"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.modelID+"_"+tt.effort, func(t *testing.T) {

@@ -127,7 +127,12 @@ func supportsModelCompaction(model *ai.Model) bool {
 	return false
 }
 
-func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
+// mapThinkingLevelToEffort maps a ThinkingLevel to the Anthropic adaptive
+// thinking "effort" header value. This is only consulted for models that
+// pass supportsAdaptiveThinking — they all support "max"; only Opus 4.7
+// (and later xhigh-aware models) keep a distinct "xhigh" effort, others
+// clamp xhigh down to "high".
+func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	switch level {
 	case ai.ThinkingMinimal, ai.ThinkingLow:
 		return "low"
@@ -136,6 +141,11 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel) string {
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
+		if strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
+			return "xhigh"
+		}
+		return "high"
+	case ai.ThinkingMax:
 		return "max"
 	default:
 		return "high"
@@ -656,7 +666,7 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
-		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning)
+		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning, model.ID)
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 

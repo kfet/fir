@@ -464,10 +464,7 @@ func StreamSimpleOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai
 	base := BuildBaseOptions(model, options, apiKey)
 
 	if options != nil && options.Reasoning != "" && model.Reasoning {
-		reasoningEffort := ClampReasoning(options.Reasoning)
-		if ai.SupportsXhigh(model) {
-			reasoningEffort = options.Reasoning
-		}
+		reasoningEffort := ClampReasoningForModel(options.Reasoning, model)
 		if reasoningEffort != "" {
 			base.ReasoningEffort = reasoningEffort
 		}

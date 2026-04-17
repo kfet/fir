@@ -17,6 +17,7 @@ func TestToAIThinkingLevel(t *testing.T) {
 		{ThinkingMedium, ai.ThinkingMedium},
 		{ThinkingHigh, ai.ThinkingHigh},
 		{ThinkingXHigh, ai.ThinkingXHigh},
+		{ThinkingMax, ai.ThinkingMax},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.level), func(t *testing.T) {

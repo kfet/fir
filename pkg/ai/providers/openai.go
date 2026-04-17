@@ -128,6 +128,7 @@ func detectCompat(model *ai.Model) resolvedCompat {
 			"medium":  "default",
 			"high":    "default",
 			"xhigh":   "default",
+			"max":     "default",
 		}
 	}
 
@@ -1175,11 +1176,7 @@ func StreamSimpleOpenAICompletions(ctx context.Context, model *ai.Model, prompt 
 	base := BuildBaseOptions(model, options, apiKey)
 
 	if options != nil && options.Reasoning != "" && model.Reasoning {
-		reasoningEffort := ClampReasoning(options.Reasoning)
-		// Check if model supports xhigh (don't clamp to "high" for those)
-		if ai.SupportsXhigh(model) {
-			reasoningEffort = options.Reasoning
-		}
+		reasoningEffort := ClampReasoningForModel(options.Reasoning, model)
 		if reasoningEffort != "" {
 			base.ReasoningEffort = reasoningEffort
 		}

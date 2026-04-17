@@ -581,20 +581,28 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 
 func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 	tests := []struct {
-		level ai.ThinkingLevel
-		want  string
+		level   ai.ThinkingLevel
+		modelID string
+		want    string
 	}{
-		{ai.ThinkingMinimal, "low"},
-		{ai.ThinkingLow, "low"},
-		{ai.ThinkingMedium, "medium"},
-		{ai.ThinkingHigh, "high"},
-		{ai.ThinkingXHigh, "max"},
-		{"", "high"}, // default
+		// Non-Opus-4.7 adaptive model (e.g. opus-4.6): xhigh clamps to high,
+		// max passes through.
+		{ai.ThinkingMinimal, "claude-opus-4-6", "low"},
+		{ai.ThinkingLow, "claude-opus-4-6", "low"},
+		{ai.ThinkingMedium, "claude-opus-4-6", "medium"},
+		{ai.ThinkingHigh, "claude-opus-4-6", "high"},
+		{ai.ThinkingXHigh, "claude-opus-4-6", "high"},
+		{ai.ThinkingMax, "claude-opus-4-6", "max"},
+		{"", "claude-opus-4-6", "high"}, // default
+		// Opus 4.7: xhigh is its own distinct tier.
+		{ai.ThinkingHigh, "claude-opus-4-7", "high"},
+		{ai.ThinkingXHigh, "claude-opus-4-7", "xhigh"},
+		{ai.ThinkingMax, "claude-opus-4-7", "max"},
 	}
 	for _, tt := range tests {
-		got := mapThinkingLevelToEffort(tt.level)
+		got := mapThinkingLevelToEffort(tt.level, tt.modelID)
 		if got != tt.want {
-			t.Errorf("mapThinkingLevelToEffort(%q) = %q, want %q", tt.level, got, tt.want)
+			t.Errorf("mapThinkingLevelToEffort(%q, %q) = %q, want %q", tt.level, tt.modelID, got, tt.want)
 		}
 	}
 }

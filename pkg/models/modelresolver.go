@@ -53,7 +53,7 @@ type InitialModelResult struct {
 
 // validThinkingLevels for pattern parsing.
 var validThinkingLevels = map[string]bool{
-	"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true,
+	"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
 }
 
 func isValidThinkingLevel(s string) bool {

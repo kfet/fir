@@ -71,20 +71,48 @@ func CalculateCost(model *Model, usage *Usage) UsageCost {
 	return usage.Cost
 }
 
-// SupportsXhigh checks if a model supports the xhigh thinking level.
+// SupportsXhigh reports whether a model supports the "xhigh" thinking level
+// as a distinct tier (between "high" and "max"). For models that return
+// false, callers should clamp "xhigh" down to whatever top tier the model
+// does support (typically "high").
+//
+// Anthropic: only Opus 4.7 exposes a separate xhigh tier. Opus 4.6 and
+// Sonnet 4.6 have a "max" tier but no intermediate xhigh, so they clamp
+// xhigh to "high" here and use SupportsMax for their top tier. The check
+// works for first-party Anthropic IDs (`claude-opus-4-7`), Bedrock IDs
+// (`anthropic.claude-opus-4-7`), and Vertex IDs alike, because the model
+// family suffix is always present in the ID.
+//
+// OpenAI: gpt-5.2 and gpt-5.3 treat xhigh as a distinct effort value and
+// have been supporting it since before Opus 4.7 shipped.
 func SupportsXhigh(model *Model) bool {
 	if model == nil {
 		return false
 	}
-	if strings.Contains(model.ID, "gpt-5.2") || strings.Contains(model.ID, "gpt-5.3") {
+	id := model.ID
+	if strings.Contains(id, "gpt-5.2") || strings.Contains(id, "gpt-5.3") {
 		return true
 	}
-	if model.Api == ApiAnthropicMessages {
-		if strings.Contains(model.ID, "opus-4-6") || strings.Contains(model.ID, "opus-4.6") {
-			return true
-		}
+	// Anthropic Opus 4.7 across first-party, Bedrock, Vertex, etc.
+	if strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") {
+		return true
 	}
 	return false
+}
+
+// SupportsMax reports whether a model supports the "max" thinking level as
+// a distinct top tier. Anthropic adaptive-thinking models (Opus 4.6+,
+// Sonnet 4.6+, including Opus 4.7) all support max across every surface
+// (first-party, Bedrock, Vertex). For other models callers should clamp
+// "max" down to the highest tier the model supports.
+func SupportsMax(model *Model) bool {
+	if model == nil {
+		return false
+	}
+	id := model.ID
+	return strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
+		strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") ||
+		strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
 }
 
 // ModelsAreEqual checks if two models are equal by comparing ID and provider.

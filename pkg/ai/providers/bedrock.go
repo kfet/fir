@@ -706,7 +706,9 @@ func supportsBedrockAdaptiveThinking(modelID string) bool {
 }
 
 // bedrockThinkingLevelToEffort maps thinking level to Bedrock effort value.
-// Only Opus models support "max"; other models clamp xhigh to "high".
+// Adaptive Bedrock models (Opus 4.6+, Sonnet 4.6+, Opus 4.7) all support
+// "max". Only Opus 4.7 exposes a distinct "xhigh" tier; older adaptive
+// models clamp xhigh down to "high".
 func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	switch level {
 	case ai.ThinkingMinimal, ai.ThinkingLow:
@@ -716,10 +718,12 @@ func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") {
-			return "max"
+		if strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
+			return "xhigh"
 		}
 		return "high"
+	case ai.ThinkingMax:
+		return "max"
 	default:
 		return "high"
 	}
@@ -752,20 +756,25 @@ func StreamSimpleBedrock(ctx context.Context, model *ai.Model, prompt ai.Context
 		base.Headers = map[string]string{}
 	}
 
-	effort := ClampReasoning(options.Reasoning)
+	// For adaptive models we preserve xhigh/max so bedrockThinkingLevelToEffort
+	// can emit the right provider-side value (model-aware). For non-adaptive
+	// budget-based models we fall back to ClampReasoning since there are no
+	// separate budgets above "high".
+	rawEffort := options.Reasoning
+	clampedEffort := ClampReasoning(rawEffort)
 
 	if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
 		if supportsBedrockAdaptiveThinking(model.ID) {
-			base.Headers["x-bedrock-reasoning"] = string(effort)
+			base.Headers["x-bedrock-reasoning"] = string(ClampReasoningForModel(rawEffort, model))
 		} else {
 			maxTokens := 0
 			if base.MaxTokens != nil {
 				maxTokens = *base.MaxTokens
 			}
 			adjustedMax, thinkingBudget := AdjustMaxTokensForThinking(
-				maxTokens, model.MaxTokens, effort, options.ThinkingBudgets)
+				maxTokens, model.MaxTokens, clampedEffort, options.ThinkingBudgets)
 			base.MaxTokens = &adjustedMax
-			base.Headers["x-bedrock-reasoning"] = string(effort)
+			base.Headers["x-bedrock-reasoning"] = string(clampedEffort)
 			base.Headers["x-bedrock-thinking-budget"] = fmt.Sprintf("%d", thinkingBudget)
 			base.Headers["x-bedrock-interleaved-thinking"] = "true"
 		}

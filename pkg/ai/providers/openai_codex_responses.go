@@ -82,6 +82,11 @@ func clampCodexReasoningEffort(modelID, effort string) string {
 	if idx := strings.LastIndex(id, "/"); idx >= 0 {
 		id = id[idx+1:]
 	}
+	// No Codex model supports "max" today — clamp up-front so the
+	// model-specific rules below only deal with valid effort values.
+	if effort == "max" {
+		effort = "xhigh"
+	}
 	switch {
 	case (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4")) && effort == "minimal":
 		return "low"
@@ -428,10 +433,7 @@ func StreamSimpleOpenAICodexResponses(ctx context.Context, model *ai.Model, prom
 	base := BuildBaseOptions(model, options, apiKey)
 
 	if options != nil && options.Reasoning != "" && model.Reasoning {
-		reasoningEffort := ClampReasoning(options.Reasoning)
-		if ai.SupportsXhigh(model) {
-			reasoningEffort = options.Reasoning
-		}
+		reasoningEffort := ClampReasoningForModel(options.Reasoning, model)
 		if reasoningEffort != "" {
 			base.ReasoningEffort = reasoningEffort
 		}

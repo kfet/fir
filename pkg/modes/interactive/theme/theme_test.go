@@ -177,7 +177,7 @@ func TestTheme_Strikethrough(t *testing.T) {
 
 func TestTheme_GetThinkingBorderColor(t *testing.T) {
 	th := createDarkTheme(ColorModeTruecolor)
-	for _, level := range []string{"off", "minimal", "low", "medium", "high", "xhigh"} {
+	for _, level := range []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"} {
 		fn := th.GetThinkingBorderColor(level)
 		if !strings.Contains(fn("─"), "\x1b[") {
 			t.Errorf("expected ANSI for level %q", level)
@@ -211,7 +211,7 @@ func TestLoadThemeFromPath(t *testing.T) {
 			"syntaxPunctuation": "#D4D4D4",
 			"thinkingOff":       "#505050", "thinkingMinimal": "#6e6e6e",
 			"thinkingLow": "#5f87af", "thinkingMedium": "#81a2be",
-			"thinkingHigh": "#b294bb", "thinkingXhigh": "#d183e8",
+			"thinkingHigh": "#b294bb", "thinkingXhigh": "#d183e8", "thinkingMax": "#ff6ec7",
 			"bashMode": "#b5bd68",
 		},
 	}

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- Thinking/reasoning effort level `max`: new top-tier reasoning level. Anthropic adaptive-thinking models (Opus 4.6+, Sonnet 4.6+, Opus 4.7) support `max` natively on first-party, Bedrock, and Vertex surfaces. Models that don't support it clamp down to the highest tier they do support (`xhigh` if available, else `high`).
+- `ai.SupportsMax(model)` capability check and `ai.ThinkingMax` / `agent.ThinkingMax` constants.
+- `providers.ClampReasoningForModel(level, model)`: model-aware clamp — preserves `xhigh`/`max` when the model supports them and clamps down otherwise. OpenAI Completions, OpenAI Responses, Azure OpenAI Responses, Codex Responses, and Bedrock (adaptive path) now use it so the requested level propagates correctly per-model.
+- Bedrock: `xhigh` now propagates to Opus 4.7 on Bedrock (previously lost in the simple-stream clamp).
+
+### Changed
+
+- `ai.SupportsXhigh` narrowed on Anthropic: only **Opus 4.7** exposes a distinct `xhigh` tier. Opus 4.6 / Sonnet 4.6 now clamp `xhigh` to `high` and use the new `max` tier for their top effort. OpenAI `gpt-5.2`/`gpt-5.3` continue to support `xhigh` as before. `SupportsXhigh`/`SupportsMax` now recognize Anthropic model IDs across every API surface (first-party, Bedrock, Vertex), not just `ApiAnthropicMessages`.
+- `providers.ClampReasoning` now folds both `xhigh` and `max` down to `high` (it's the safe fallback for providers that don't know about the higher tiers). Model-aware callers should use `ClampReasoningForModel` instead.
+- Anthropic `mapThinkingLevelToEffort` is now model-aware (signature `(level, modelID)`): returns `xhigh` only for Opus 4.7, `max` for the new top tier, clamps other cases down.
+- Bedrock `bedrockThinkingLevelToEffort` follows the same rule: `xhigh` only for Opus 4.7, `max` for all adaptive models.
+- Codex `clampCodexReasoningEffort` accepts the new `max` effort and clamps it to `xhigh` up-front (no Codex model supports `max`), preserving existing model-specific rules.
+- `--thinking` flag, interactive settings selector, theme color palette, and `/thinking` resolver all accept `max`.
+- `clampThinkingLevel` (CLI) falls back `max` → `xhigh` → `high` based on model capability; `GetAvailableThinkingLevels` exposes `xhigh`/`max` only for supporting models.
+
 ## [0.29.0] - 2026-04-16
 
 ### Added

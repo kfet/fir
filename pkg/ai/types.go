@@ -84,7 +84,15 @@ const (
 	ThinkingLow     ThinkingLevel = "low"
 	ThinkingMedium  ThinkingLevel = "medium"
 	ThinkingHigh    ThinkingLevel = "high"
-	ThinkingXHigh   ThinkingLevel = "xhigh"
+	// ThinkingXHigh sits between "high" and "max". Introduced with Opus 4.7
+	// to give users finer control over the reasoning/latency tradeoff on hard
+	// problems. Only models that declare ai.SupportsXhigh treat this as a
+	// distinct level; all others clamp it down to the highest tier they
+	// support (typically "high").
+	ThinkingXHigh ThinkingLevel = "xhigh"
+	// ThinkingMax is the top reasoning tier. Models that don't declare
+	// ai.SupportsMax clamp this down.
+	ThinkingMax ThinkingLevel = "max"
 )
 
 // ThinkingBudgets maps thinking levels to token budgets (token-based providers only).

@@ -291,6 +291,12 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 	effective := string(thinking)
 	if !s.Model().Reasoning {
 		effective = "off"
+	} else if effective == "max" && !ai.SupportsMax(s.Model()) {
+		if ai.SupportsXhigh(s.Model()) {
+			effective = "xhigh"
+		} else {
+			effective = "high"
+		}
 	} else if effective == "xhigh" && !ai.SupportsXhigh(s.Model()) {
 		effective = "high"
 	}

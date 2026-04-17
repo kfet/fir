@@ -133,14 +133,71 @@ func TestSupportsXhigh_GPT53(t *testing.T) {
 	}
 }
 
-func TestSupportsXhigh_AnthropicOpus46(t *testing.T) {
+func TestSupportsXhigh_AnthropicOpus47(t *testing.T) {
+	// Matches across first-party, Bedrock, and Vertex IDs.
+	for _, id := range []string{
+		"claude-opus-4-7", "claude-opus-4.7",
+		"anthropic.claude-opus-4-7", "us.anthropic.claude-opus-4-7",
+		"claude-opus-4-7@20250101",
+	} {
+		m := &Model{ID: id, Api: ApiAnthropicMessages}
+		if !SupportsXhigh(m) {
+			t.Errorf("expected xhigh support for %s", id)
+		}
+	}
+	// Bedrock path (different Api) must also work.
+	mb := &Model{ID: "anthropic.claude-opus-4-7", Api: ApiBedrockConverseStream}
+	if !SupportsXhigh(mb) {
+		t.Error("expected xhigh support for Bedrock opus-4-7")
+	}
+}
+
+func TestSupportsXhigh_AnthropicOpus46_ClampsDown(t *testing.T) {
+	// Opus 4.6 has a "max" tier but NOT a distinct xhigh tier — xhigh must
+	// clamp to "high" for these models.
 	m := &Model{ID: "claude-opus-4-6", Api: ApiAnthropicMessages}
-	if !SupportsXhigh(m) {
-		t.Error("expected xhigh support for opus-4-6")
+	if SupportsXhigh(m) {
+		t.Error("opus-4-6 must not report xhigh support (clamps to high)")
 	}
 	m2 := &Model{ID: "claude-opus-4.6", Api: ApiAnthropicMessages}
-	if !SupportsXhigh(m2) {
-		t.Error("expected xhigh support for opus-4.6")
+	if SupportsXhigh(m2) {
+		t.Error("opus-4.6 must not report xhigh support (clamps to high)")
+	}
+}
+
+func TestSupportsMax_AnthropicAdaptive(t *testing.T) {
+	// All adaptive-thinking Anthropic models support the "max" tier,
+	// across first-party, Bedrock, and Vertex IDs.
+	for _, id := range []string{
+		"claude-opus-4-6", "claude-opus-4.6",
+		"claude-opus-4-7", "claude-opus-4.7",
+		"claude-sonnet-4-6", "claude-sonnet-4.6",
+		"anthropic.claude-opus-4-6",
+		"us.anthropic.claude-opus-4-7",
+		"eu.anthropic.claude-sonnet-4-6",
+	} {
+		m := &Model{ID: id, Api: ApiAnthropicMessages}
+		if !SupportsMax(m) {
+			t.Errorf("expected max support for %s (ApiAnthropicMessages)", id)
+		}
+		// Also verify it works for the Bedrock Api.
+		mb := &Model{ID: id, Api: ApiBedrockConverseStream}
+		if !SupportsMax(mb) {
+			t.Errorf("expected max support for %s (Bedrock Api)", id)
+		}
+	}
+}
+
+func TestSupportsMax_RegularModel(t *testing.T) {
+	m := &Model{ID: "claude-sonnet-4-20250514", Api: ApiAnthropicMessages}
+	if SupportsMax(m) {
+		t.Error("expected no max support for pre-4.6 model")
+	}
+}
+
+func TestSupportsMax_NilModel(t *testing.T) {
+	if SupportsMax(nil) {
+		t.Error("expected false for nil model")
 	}
 }
 

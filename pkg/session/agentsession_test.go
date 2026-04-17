@@ -1987,6 +1987,57 @@ func TestAgentSession_GetAvailableThinkingLevels_ReasoningModel(t *testing.T) {
 	}
 }
 
+func TestAgentSession_GetAvailableThinkingLevels_Opus46_MaxButNoXhigh(t *testing.T) {
+	session := newTestAgentSessionWithModel(t, nil)
+	defer session.Close()
+
+	session.Agent.SetModel(&ai.Model{
+		ID:        "claude-opus-4-6",
+		Provider:  "anthropic",
+		Api:       ai.ApiAnthropicMessages,
+		Reasoning: true,
+	})
+
+	levels := session.GetAvailableThinkingLevels()
+	// off, minimal, low, medium, high, max (no xhigh — Opus 4.6 only has max)
+	wantLast := []agent.ThinkingLevel{agent.ThinkingHigh, agent.ThinkingMax}
+	if len(levels) != 6 {
+		t.Fatalf("expected 6 thinking levels, got %d: %v", len(levels), levels)
+	}
+	if levels[4] != wantLast[0] || levels[5] != wantLast[1] {
+		t.Errorf("expected trailing levels %v, got %v", wantLast, levels[4:])
+	}
+	for _, l := range levels {
+		if l == agent.ThinkingXHigh {
+			t.Error("opus-4-6 must NOT expose xhigh")
+		}
+	}
+}
+
+func TestAgentSession_GetAvailableThinkingLevels_Opus47_XhighAndMax(t *testing.T) {
+	session := newTestAgentSessionWithModel(t, nil)
+	defer session.Close()
+
+	session.Agent.SetModel(&ai.Model{
+		ID:        "claude-opus-4-7",
+		Provider:  "anthropic",
+		Api:       ai.ApiAnthropicMessages,
+		Reasoning: true,
+	})
+
+	levels := session.GetAvailableThinkingLevels()
+	// off, minimal, low, medium, high, xhigh, max
+	if len(levels) != 7 {
+		t.Fatalf("expected 7 thinking levels, got %d: %v", len(levels), levels)
+	}
+	if levels[5] != agent.ThinkingXHigh {
+		t.Errorf("expected xhigh at position 5, got %q", levels[5])
+	}
+	if levels[6] != agent.ThinkingMax {
+		t.Errorf("expected max at position 6, got %q", levels[6])
+	}
+}
+
 // ============================================================================
 // persistMessage
 // ============================================================================

@@ -87,13 +87,13 @@ func TestIsAlias(t *testing.T) {
 // --- isValidThinkingLevel ---
 
 func TestIsValidThinkingLevel(t *testing.T) {
-	valid := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+	valid := []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 	for _, v := range valid {
 		if !isValidThinkingLevel(v) {
 			t.Errorf("expected %q to be valid", v)
 		}
 	}
-	invalid := []string{"", "max", "none", "ultra"}
+	invalid := []string{"", "none", "ultra"}
 	for _, v := range invalid {
 		if isValidThinkingLevel(v) {
 			t.Errorf("expected %q to be invalid", v)
