@@ -2,29 +2,45 @@
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-04-16
+
 ### Added
 
-- Poe attachment support with image vision: user-uploaded images are downloaded, base64-encoded, and sent to fir as multi-modal content blocks (via `ChannelImage` on `ChannelMessage`). Non-image attachments (documents with `parsed_content`) are inlined as text; other files are linked. Images up to 20 MB are supported.
-- Auto-reply rich rendering for Poe: tool calls now render inside markdown code fences (with language hints like `bash`, `text`, `tool`) instead of inline emoji-prefixed text. Bash commands show `$ cmd` syntax. Tool output is truncated to 8 lines with a line count when longer.
-- Auto-reply thinking blocks: LLM thinking/reasoning is streamed to Poe as italic blockquotes (`> *thinking...*`), giving users visibility into the model's reasoning process.
-- Auto-reply plan rendering: plan tool calls render as rich markdown with Unicode progress bars (`████░░░░`), status icons (✓/→/○), priority markers (❗), and metadata. First plan update shows full detail; subsequent updates use a compact blockquote with just the progress bar and active items.
-- `ChannelImage` type added to both `pkg/mcp` and `external/poe/internal/mcpnotify` — base64-encoded image with MIME type and optional name, carried on channel messages.
+- `/new <prompt>` — atomic session clear + initial prompt. The prompt is submitted atomically after the session clears, fixing a race condition in self-handoff where `/new` and the follow-up message were sent as separate inputs.
+- Auto-reply rich rendering: tool calls render inside markdown code fences (with language hints like `bash`, `text`, `tool`). Bash commands show `$ cmd` syntax. Tool output truncated to 8 lines with a line count when longer.
+- Auto-reply thinking blocks: LLM thinking/reasoning streamed as italic blockquotes (`> *thinking...*`), giving visibility into the model's reasoning process.
+- Auto-reply plan rendering: plan tool calls render as rich markdown with Unicode progress bars (`████░░░░`), status icons (✓/→/○), priority markers (❗), and metadata.
+- `ChannelImage` type for multi-modal channel messages — base64-encoded image with MIME type and optional name.
 - `MessageInjector` now accepts `any` content (string or `[]any` content blocks) instead of just `string`, enabling multi-modal message injection with text + images.
+- MCP: channel meta (chat_id, message_id, etc.) included in injected message text.
+- MCP: history preamble injection on empty sessions.
+- MCP: `SendChannel` waits for connection instead of failing immediately.
+- Session: wait for ExtReady before injecting channel messages.
+- Shared SIGHUP reexec handler across all modes; interactive SIGHUP triggers graceful reexec.
+- Adaptive grace period + faster reconnect + rejection notification for channel connections.
+- Builtin skill: `telegram-bot-setup` — document subdir install form.
+- Builtin skill: `remote-update` — self-update + reexec over channel.
+- `make bridges-install` target for external bridges.
 
 ### Changed
 
-- `/new [prompt]` now accepts an optional initial prompt instead of a session name. The prompt is submitted atomically after the session clears, fixing a race condition in self-handoff where `/new` and the follow-up message were sent as separate inputs. The agent also waits for idle before starting the new session.
 - Self-handoff skill updated to use `/new <prompt>` instead of two-step `tmux send-keys`.
-- `make poe-deploy` now uses window index instead of window name for respawn, and kills fir child processes before respawning agent windows to ensure clean shutdown. Dead panes are handled gracefully.
-- Auto-reply tool arg formatting: bash commands show up to 120 characters (was 80) with `$ ` prefix; file paths for read/write/edit use space separator instead of colon.
+- Auto-reply tool arg formatting: bash commands show up to 120 characters (was 80) with `$ ` prefix; file paths use space separator instead of colon.
+- Auto-reply only wires for Poe-style reply tools (not all MCP tools).
 
 ### Fixed
 
-- Auto-reply: prevent `send on closed channel` panic — `sendCh` is never closed; a `closed` flag gates all sends. The `finalize()` method sets the flag under mutex and sends the final chunk via a non-blocking select, eliminating the race between concurrent event handlers and stream finalization.
-- Auto-reply: recover from send-on-closed-channel race via deferred recover in `sendChunk`, logging the panic instead of crashing the agent.
-- Poe relay: send error message ("Agent crashed or disconnected") to Poe user when an agent's websocket drops mid-query, instead of hanging silently. The relay now tracks which agent conn owns each pending reply, so `RemoveAgent` can orphan in-flight queries.
-- Poe relay: update the pending entry's agent conn when a lobby query is delivered to a newly registered agent, so crash detection works for lobby-queued queries too.
-- Poe spawn: use `respawn-window -k` when a dead agent tmux window already exists, instead of silently failing to create a duplicate.
+- Agent loop: drain follow-up queue after error/abort before exiting loop — prevents silently dropped channel messages after a 429 or other LLM error.
+- Auto-reply: prevent `send on closed channel` panic — `sendCh` is never closed; a `closed` flag gates all sends.
+- Auto-reply: recover from send-on-closed-channel race via deferred recover in `sendChunk`.
+- Auto-reply: only finalize on `agent_end`, not `message_end`.
+- Auto-reply: async send queue prevents agent event loop deadlock.
+- Auto-reply: intercept manual `reply()` when auto-reply is active.
+- Auto-reply: wire even when MCP tools not yet loaded.
+- Extensions: handle empty temp cache dir from macOS cleanup.
+- Agent callbacks moved to Config for race-safe initialization.
+- Channel-based sync in reconnect tests, fix data race.
+- Review pass: dead code removal, goroutine leak fix, ACP reexec safety, grep safety.
 
 ## [0.28.0] - 2026-04-08
 
