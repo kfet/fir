@@ -35,7 +35,7 @@ _MANUAL_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 _SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
 
 
-_CLAUDE_CODE_VERSION = "2.1.75"
+_CLAUDE_CODE_VERSION = "2.1.112"
 
 
 # ---------------------------------------------------------------------------
