@@ -29,7 +29,6 @@ import (
 	firpkg "github.com/kfet/fir/pkg/pkg"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
-	firReexec "github.com/kfet/fir/pkg/session/reexec"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/update"
@@ -775,9 +774,11 @@ func resolveEnabledExtensions(args *Args, sm *config.SettingsManager) []string {
 // runAcpMode runs ACP mode over stdin/stdout.
 func runAcpMode(args *Args) error {
 	acpmode.SetVersion(version)
-	// Start shared SIGHUP reexec handler. ACP sessions are registered
-	// dynamically via acpmode's session lifecycle.
-	_ = firReexec.NewHandler()
+	// Note: SIGHUP is deliberately not trapped. It takes its default
+	// action (terminate) so tmux/ssh-driven hangups (e.g. the
+	// `tmux respawn-window -k` used by `make poe-deploy`) cleanly kill
+	// fir instead of re-execing it and leaking MCP subprocess trees.
+	// /reexec is triggered via the explicit command path, not SIGHUP.
 	return acpmode.RunAcpMode(acpmode.Options{
 		AdditionalSkillPaths:          args.Skills,
 		AdditionalPromptTemplatePaths: args.PromptTemplates,
@@ -804,11 +805,9 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		}
 	}()
 
-	// Register session with the shared SIGHUP reexec handler.
-	reexecHandler := firReexec.NewHandler()
-	reexecHandler.Register(firReexec.SessionInfo{
-		Session: setup.result.Session,
-	})
+	// Note: no SIGHUP handler is installed. SIGHUP takes its default
+	// action (terminate). The /reexec command drives re-exec explicitly
+	// via reexec.Exec() on its own path, not through signal handling.
 
 	// Load keybindings
 	keybindings := tui.NewKeybindingsManager(setup.agentDir, filepath.Join(setup.cwd, config.ConfigDirName))

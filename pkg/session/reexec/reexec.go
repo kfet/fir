@@ -1,120 +1,34 @@
-// Package reexec provides SIGHUP-triggered graceful restart for all fir modes.
+// Package reexec provides the low-level "replace this process with a fresh
+// copy of itself" primitive used by the interactive `/reexec` command and
+// `/update` self-update flow.
 //
-// When SIGHUP is received, the handler waits for all registered sessions
-// to finish streaming (via event subscription), then performs a clean
-// reexec: flush sessions, run shutdown callbacks, exec new binary.
+// Design note: this package deliberately does NOT install a SIGHUP handler.
+// Earlier versions turned SIGHUP into a graceful reexec across every mode,
+// but SIGHUP has well-established Unix semantics ("the controlling terminal
+// or parent went away") that many tools rely on:
+//
+//   - `tmux respawn-window -k` sends SIGHUP to the pane's process group
+//   - ssh sends SIGHUP when the connection drops
+//   - shells send SIGHUP to jobs when they exit
+//
+// Catching SIGHUP globally caused fir to re-exec itself in all of those
+// situations, detaching from the (now-dying) tty and leaving an orphaned
+// process behind. Because MCP/extension subprocesses run in their own
+// process groups (Setpgid), syscall.Exec preserves them across the
+// re-exec, so every unintended SIGHUP leaked another tree of agents.
+// This was especially visible during `make poe-deploy`, which uses
+// `tmux respawn-window -k` and accumulated zombie agents on every deploy.
+//
+// SIGHUP now takes its default action (terminate). The explicit /reexec
+// and /update paths call Exec() directly and do not depend on signals.
 package reexec
 
 import (
 	"os"
-	"os/signal"
-	"sync"
 	"syscall"
 
-	"github.com/kfet/fir/pkg/agent"
 	firlog "github.com/kfet/fir/pkg/log"
-	"github.com/kfet/fir/pkg/session"
 )
-
-// SessionInfo holds everything needed to cleanly reexec a session.
-type SessionInfo struct {
-	Session *session.AgentSession
-	// OnShutdown is called before exec to save mode-specific state
-	// (e.g. extension data, follow-up queue). May be nil.
-	OnShutdown func()
-}
-
-// Handler manages SIGHUP-triggered reexec across any number of sessions.
-type Handler struct {
-	mu       sync.Mutex
-	sessions []SessionInfo
-}
-
-// NewHandler creates a handler and starts listening for SIGHUP.
-func NewHandler() *Handler {
-	h := &Handler{}
-	go h.listen()
-	return h
-}
-
-// Register adds a session to be waited on before reexec.
-func (h *Handler) Register(info SessionInfo) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.sessions = append(h.sessions, info)
-}
-
-// Unregister removes a session (by pointer equality).
-func (h *Handler) Unregister(sess *session.AgentSession) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for i, info := range h.sessions {
-		if info.Session == sess {
-			h.sessions = append(h.sessions[:i], h.sessions[i+1:]...)
-			return
-		}
-	}
-}
-
-func (h *Handler) listen() {
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
-
-	<-sigCh
-	firlog.Info("reexec: SIGHUP received")
-
-	h.mu.Lock()
-	sessions := make([]SessionInfo, len(h.sessions))
-	copy(sessions, h.sessions)
-	h.mu.Unlock()
-
-	// Wait for all sessions to finish streaming.
-	WaitAllIdle(sessions)
-	firlog.Info("reexec: all sessions idle")
-
-	// Run shutdown callbacks and flush.
-	for _, info := range sessions {
-		if info.OnShutdown != nil {
-			info.OnShutdown()
-		}
-		info.Session.SessionStore.ForceFlush()
-	}
-
-	// Exec with same binary and args.
-	Exec("", nil)
-}
-
-// WaitAllIdle blocks until every session is no longer streaming,
-// using event subscription for deterministic wakeup.
-func WaitAllIdle(sessions []SessionInfo) {
-	var wg sync.WaitGroup
-	for _, info := range sessions {
-		s := info.Session
-		if s == nil || !s.IsStreaming() {
-			continue
-		}
-		wg.Add(1)
-		ch := make(chan struct{}, 1)
-		unsub := s.Subscribe(func(ev session.AgentSessionEvent) {
-			if ev.AgentEvent != nil && ev.AgentEvent.Type == agent.EventAgentEnd {
-				select {
-				case ch <- struct{}{}:
-				default:
-				}
-			}
-		})
-		go func() {
-			defer wg.Done()
-			defer unsub()
-			if !s.IsStreaming() {
-				return
-			}
-			<-ch
-		}()
-	}
-	wg.Wait()
-}
 
 // Exec performs the actual syscall.Exec. If binary is empty, uses the
 // current executable. If args is nil, uses os.Args.

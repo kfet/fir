@@ -78,21 +78,23 @@ After this change, upgrading all binaries:
 # 1. Build & install
 make install bridges-install
 
-# 2. Restart relay (new binary)
-#    Agent bridges temporarily disconnect, auto-reconnect
-kill -HUP $(pgrep -f 'poe-bridge --relay') 
-# or: kill & restart if relay doesn't support SIGHUP yet
-
-# 3. Restart each agent fir (new fir + new poe-bridge binary)
-#    SIGHUP → reexec, session preserved, new bridge reconnects
-tmux list-panes -t agents -F '#{pane_pid}' | xargs kill -HUP
-
-# 4. Restart catch-all
-tmux list-panes -t poe-air:0 -F '#{pane_pid}' | xargs kill -HUP
+# 2. Redeploy via tmux respawn (Makefile target handles child cleanup)
+#    This sends SIGHUP to each pane's process group; fir takes the
+#    default action and exits, then tmux respawn-window -k starts a
+#    fresh process with the new binary. MCP/extension subprocesses
+#    are killed explicitly beforehand (see `poe-deploy` in Makefile).
+make poe-deploy
 ```
 
+Note: SIGHUP is NOT a "graceful reexec" signal for fir. Older versions
+caught SIGHUP and re-exec'd the process in place, which orphaned MCP
+subprocesses (they live in their own process groups) and leaked a tree
+of agents on every redeploy. SIGHUP now terminates fir as expected.
+Use the `/reexec` command inside fir for graceful in-place restart
+(session preserved); use `make poe-deploy` for redeployment.
+
 Poe queries during relay restart (~2s window) get HTTP timeout → Poe
-auto-retries. Queries during agent SIGHUP are buffered in relay lobby
+auto-retries. Queries during agent restart are buffered in relay lobby
 and delivered when agent reconnects.
 
 ### E2E test plan

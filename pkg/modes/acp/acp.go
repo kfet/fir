@@ -114,7 +114,9 @@ func RunAcpMode(opts Options) error {
 	firlog.Info("acp server: connection established", "elapsed_ms", time.Since(runStart).Milliseconds())
 
 	// Catch SIGTERM/SIGINT so we still run cleanup when the host kills us.
-	// SIGHUP is handled by the shared reexec.Handler registered at app level.
+	// SIGHUP is intentionally not trapped — it takes its default action
+	// (terminate) so tmux/ssh hangups cleanly tear down the process
+	// rather than re-execing it and leaking MCP subprocesses.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 

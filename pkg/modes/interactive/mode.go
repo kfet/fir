@@ -456,7 +456,9 @@ func (m *InteractiveMode) Run() error {
 	m.running = true
 
 	// Handle SIGINT/SIGTERM for clean shutdown (e.g. kill from another terminal).
-	// Handle SIGHUP for graceful restart (re-exec with new binary).
+	// SIGHUP is intentionally left at its default action (terminate) so that
+	// tmux/ssh-driven hangups cleanly kill fir instead of triggering a
+	// re-exec that would orphan MCP/extension subprocess trees.
 	// Note: in raw mode Ctrl+C is handled as input (\x03), not as SIGINT.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

@@ -19,6 +19,10 @@
 - `--thinking` flag, interactive settings selector, theme color palette, and `/thinking` resolver all accept `max`.
 - `clampThinkingLevel` (CLI) falls back `max` → `xhigh` → `high` based on model capability; `GetAvailableThinkingLevels` exposes `xhigh`/`max` only for supporting models.
 
+### Fixed
+
+- Redeploy no longer leaks agent processes. Previous versions installed a process-wide SIGHUP handler that converted SIGHUP into an in-place re-exec. When `tmux respawn-window -k` (used by `make poe-deploy`) or any ssh/tty hangup delivered SIGHUP, fir re-exec'd itself instead of exiting, detaching from the dying pane. Because MCP/extension subprocesses run in their own process groups (Setpgid), `syscall.Exec` preserved them across the re-exec, so each unintended SIGHUP orphaned a tree of subprocesses. SIGHUP now takes its default action (terminate); `/reexec` and `/update` continue to work since they call the reexec path directly without signals.
+
 ## [0.29.0] - 2026-04-16
 
 ### Added
