@@ -118,6 +118,29 @@ tm-wait proj:server 'Listening on'
 tm-send proj:repl 'curl localhost:8080'
 ```
 
+## Spawning `fir` Inside a Window
+
+When the program you drive through tmux is itself a `fir` agent (e.g.
+a shepherd fleet, a worker window, a poe-style background bot), always
+disable this set of builtin extensions:
+
+```bash
+FIR_DISABLE="-d auto-namer -d notify -d provider-usage -d tmuxspinner"
+tm-win proj worker-1 "fir $FIR_DISABLE"
+```
+
+Why each one:
+
+| Extension | Why disable under tmux-driver |
+|---|---|
+| `auto-namer` | Renames the session with an LLM-generated title. tmux-driver routes by the window name you chose (`tm-send proj:worker-1 ...`); a rename breaks that routing. |
+| `notify` | Desktop notifications for every agent_end — background tmux agents generate them constantly and they're just noise. |
+| `provider-usage` | TUI-only status-bar widget. In a tmux pane driven by `tm-send`/`tm-capture` there's no status bar to render into and its 5-minute API polls add pure overhead. |
+| `tmuxspinner` | Mutates the tmux window title to show a spinner — directly fights the fixed `NAME:WINDOW` naming convention tmux-driver relies on for routing. |
+
+See the `self` skill's "Extensions" section for the full `-d` /
+`--disable-extension` / `--no-extensions` reference.
+
 ## Cleanup
 
 ```bash

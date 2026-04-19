@@ -2,7 +2,7 @@
 # ---
 # name: provider-usage
 # description: Show LLM provider usage/limits in the status bar (Anthropic, Poe)
-# builtin: true
+# builtin: false
 # modes: tui
 # events: session_start, session_shutdown
 # ---

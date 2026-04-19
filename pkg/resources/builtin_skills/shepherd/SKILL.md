@@ -77,8 +77,10 @@ Select model according to the tasks.
 PROVIDER="anthropic"         # default — ask user if different
 CHEAP_MODEL="sonnet"
 
-tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --provider $PROVIDER --model $CHEAP_MODEL"
+tm-send "$SESSION:$WINDOW" "cd $WORKTREE && fir --provider $PROVIDER --model $CHEAP_MODEL -d auto-namer -d notify -d provider-usage -d tmuxspinner"
 ```
+
+The four `-d` flags disable builtin extensions that fight with tmux-driver — see the tmux-driver skill "Spawning `fir` Inside a Window" section for why.
 
 Address agents as `SESSION:WINDOW`.
 
