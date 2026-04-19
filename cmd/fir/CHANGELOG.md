@@ -2,12 +2,17 @@
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-04-19
+
 ### Added
 
 - Thinking/reasoning effort level `max`: new top-tier reasoning level. Anthropic adaptive-thinking models (Opus 4.6+, Sonnet 4.6+, Opus 4.7) support `max` natively on first-party, Bedrock, and Vertex surfaces. Models that don't support it clamp down to the highest tier they do support (`xhigh` if available, else `high`).
 - `ai.SupportsMax(model)` capability check and `ai.ThinkingMax` / `agent.ThinkingMax` constants.
 - `providers.ClampReasoningForModel(level, model)`: model-aware clamp — preserves `xhigh`/`max` when the model supports them and clamps down otherwise. OpenAI Completions, OpenAI Responses, Azure OpenAI Responses, Codex Responses, and Bedrock (adaptive path) now use it so the requested level propagates correctly per-model.
 - Bedrock: `xhigh` now propagates to Opus 4.7 on Bedrock (previously lost in the simple-stream clamp).
+- Third-party attribution: `THIRD_PARTY_NOTICES.md` is now generated at release time via `go-licenses` and uploaded as a release asset alongside `LICENSE` and `checksums.txt` (sha256 covers every asset). New `make notices` and `make check-licenses` targets; the license check is wired into `make all` and fails on forbidden/restricted licenses.
+- `fir --version` / `-v` prints a second line with the MIT license and a link to the exact release page. The URL is injected at build time via `-ldflags -X main.licensesURL=…`.
+- Release workflow now mirrors every release to [kfet/fir-dist](https://github.com/kfet/fir-dist) — a public, binaries-only mirror that will eventually become the download source for `install.sh`, the self-updater, and distro packagers. Requires a `FIR_DIST_TOKEN` secret (fine-grained PAT scoped to `fir-dist` with Contents: read+write). If unset, the mirror step is skipped with a warning and the source release still succeeds.
 
 ### Changed
 
@@ -22,6 +27,7 @@
 ### Fixed
 
 - Redeploy no longer leaks agent processes. Previous versions installed a process-wide SIGHUP handler that converted SIGHUP into an in-place re-exec. When `tmux respawn-window -k` (used by `make poe-deploy`) or any ssh/tty hangup delivered SIGHUP, fir re-exec'd itself instead of exiting, detaching from the dying pane. Because MCP/extension subprocesses run in their own process groups (Setpgid), `syscall.Exec` preserved them across the re-exec, so each unintended SIGHUP orphaned a tree of subprocesses. SIGHUP now takes its default action (terminate); `/reexec` and `/update` continue to work since they call the reexec path directly without signals.
+
 
 ## [0.29.0] - 2026-04-16
 
