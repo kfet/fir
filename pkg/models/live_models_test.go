@@ -198,3 +198,47 @@ func TestLiveCachePersistence(t *testing.T) {
 		t.Error("expected expired cache to be rejected")
 	}
 }
+
+func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	authStore := auth.NewAuthStorage("")
+	registry := NewModelRegistry(authStore, "")
+
+	// Seed disk cache and in-memory state as if a previous fetch happened.
+	registry.saveLiveCache(tmpDir, "prov-a", []LiveModelInfo{{ID: "m1"}})
+	registry.saveLiveCache(tmpDir, "prov-b", []LiveModelInfo{{ID: "m2"}})
+
+	// Write an unrelated file that must NOT be deleted.
+	keepPath := filepath.Join(tmpDir, "other-file.json")
+	if err := os.WriteFile(keepPath, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry.liveModelsMu.Lock()
+	registry.liveCacheDir = tmpDir
+	registry.liveModels["prov-a"] = newLiveModelState()
+	registry.liveModels["prov-b"] = newLiveModelState()
+	registry.liveModelsMu.Unlock()
+
+	registry.RefreshLive(context.Background())
+
+	// In-memory state cleared (no providers have auth, so no re-fetch populates it).
+	registry.liveModelsMu.RLock()
+	n := len(registry.liveModels)
+	registry.liveModelsMu.RUnlock()
+	if n != 0 {
+		t.Errorf("expected liveModels cleared, got %d entries", n)
+	}
+
+	// Disk caches for live-models-* removed.
+	if _, err := os.Stat(filepath.Join(tmpDir, "live-models-prov-a.json")); !os.IsNotExist(err) {
+		t.Errorf("expected prov-a cache removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "live-models-prov-b.json")); !os.IsNotExist(err) {
+		t.Errorf("expected prov-b cache removed, err=%v", err)
+	}
+	// Unrelated file preserved.
+	if _, err := os.Stat(keepPath); err != nil {
+		t.Errorf("unrelated file was deleted: %v", err)
+	}
+}

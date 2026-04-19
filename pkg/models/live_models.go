@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +75,11 @@ func (s *liveModelState) has(modelID string) bool {
 // extReady, if non-nil, is waited on before fetching OAuth provider models
 // (extension-based auth providers are not registered until extensions load).
 func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string, extReady <-chan struct{}) {
+	r.liveModelsMu.Lock()
+	r.liveCacheDir = cacheDir
+	r.liveExtReady = extReady
+	r.liveModelsMu.Unlock()
+
 	r.mu.RLock()
 	providers := r.getProvidersWithAuth()
 	r.mu.RUnlock()
@@ -273,6 +279,33 @@ func (r *ModelRegistry) isModelLive(provider, modelID string) bool {
 		return true // no live data for this provider, be permissive
 	}
 	return state.has(modelID)
+}
+
+// RefreshLive clears any in-memory and on-disk cached live model lists and
+// re-triggers background fetches for every provider, using the cacheDir and
+// extReady channel remembered from the initial StartLiveModelFetch call.
+// Safe to call from a running session; fetches run in the background.
+func (r *ModelRegistry) RefreshLive(ctx context.Context) {
+	r.liveModelsMu.Lock()
+	cacheDir := r.liveCacheDir
+	extReady := r.liveExtReady
+	// Drop in-memory state so fetchers re-populate fresh entries.
+	r.liveModels = make(map[string]*liveModelState)
+	r.liveModelsMu.Unlock()
+
+	// Best-effort delete of on-disk caches so a stale <TTL file can't
+	// resurrect old data on the next load.
+	if cacheDir != "" {
+		if entries, err := os.ReadDir(cacheDir); err == nil {
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), "live-models-") {
+					_ = os.Remove(filepath.Join(cacheDir, e.Name()))
+				}
+			}
+		}
+	}
+
+	r.StartLiveModelFetch(ctx, cacheDir, extReady)
 }
 
 // WaitForLiveFetch blocks until all in-flight live model fetches complete

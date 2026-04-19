@@ -1226,6 +1226,13 @@ func (s *AgentSession) Reload() error {
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
 	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
+
+	// Re-trigger background fetch of live model lists so newly-added providers,
+	// rotated keys, or upstream model changes are picked up without a restart.
+	if s.modelRegistry != nil {
+		s.modelRegistry.Refresh()
+		s.modelRegistry.RefreshLive(context.Background())
+	}
 	return nil
 }
 

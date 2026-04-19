@@ -5,6 +5,7 @@
 ### Fixed
 
 - Builtin slash commands (e.g. `/help`, `/model`, `/compact`) are now added to the editor's prompt history, so they can be recalled with up-arrow like regular prompts, `!`-bash commands, and extension slash commands. Previously the builtin-dispatch branch in `setupEditorHandlers` cleared the editor without calling `AddToHistory`.
+- `/reload` now also refreshes the live model list. Previously, once a session was running the live model lists fetched from provider APIs were effectively frozen for the session lifetime (cached in-memory, with a 1-hour on-disk TTL that would also survive a reexec). After a binary bump, rotated API key, newly-added provider, or upstream model catalogue change, users had to kill and restart the session to see new models. `Session.Reload()` now calls `ModelRegistry.Refresh()` + new `ModelRegistry.RefreshLive(ctx)`, which drops the in-memory live-model state, deletes the `live-models-*.json` disk caches, and re-kicks the same background fetchers used at startup.
 - Flaky race test `TestHandleDequeue_ClearsQueueAfterDequeue` (and 17 sibling tests in `pkg/modes/interactive` sharing the same pattern) surfaced by CI run 24623416594. The `testMode.waitRender()` helper relied on a fixed 10 ms `time.Sleep`, racing against the asynchronous TUI render goroutine. Replaced with a synchronous `ui.DoRender()` call preceded by a single `runtime.Gosched()`, which is deterministic under `-race` and adds no extra sleep on the happy path.
 
 ### Changed

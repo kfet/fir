@@ -313,6 +313,8 @@ type ModelRegistry struct {
 	// populated by background API calls. Protected by liveModelsMu.
 	liveModelsMu sync.RWMutex
 	liveModels   map[string]*liveModelState
+	liveCacheDir string
+	liveExtReady <-chan struct{}
 }
 
 // NewModelRegistry creates a new ModelRegistry.
