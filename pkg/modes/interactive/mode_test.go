@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -225,9 +226,16 @@ func (tm *testMode) editorText() string {
 }
 
 func (tm *testMode) waitRender() {
-	// Give the TUI event loop time to process — poll quickly rather than
-	// sleeping a fixed 200ms.  Most events settle within a few ms.
-	time.Sleep(10 * time.Millisecond)
+	// Yield briefly so any background goroutine triggered by the test can
+	// run (e.g. startUpdateNoticeWatcher), then render synchronously.
+	// DoRender takes renderMu, so it both waits for any in-flight render
+	// by the background render goroutine and guarantees the just-mutated
+	// component state is flushed to MockTerminal before we return — no
+	// fixed-sleep race against the render path.
+	for range 5 {
+		runtime.Gosched()
+	}
+	tm.ui.DoRender()
 }
 
 func (tm *testMode) renderedOutput() string {
@@ -1447,12 +1455,11 @@ func TestHandleDequeue_ClearsQueueAfterDequeue(t *testing.T) {
 	// Second dequeue on now-empty queue should show "No queued".
 	tm.mode.editor.SetText("") // clear editor to avoid merge confusion
 	tm.mode.handleDequeue()
+	tm.waitRender()
 
-	// Poll for the status message rather than relying on a fixed sleep —
-	// under the race detector on CI, 10ms is not always enough for the TUI
-	// render goroutine to flush showStatus() output to the mock terminal.
-	if !tm.waitForOutput("No queued") {
-		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", tm.renderedOutput())
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No queued") {
+		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", output)
 	}
 }
 
