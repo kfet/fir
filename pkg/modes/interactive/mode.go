@@ -579,6 +579,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		// everything else (skill commands, prompt templates) falls through
 		// to session.Prompt which expands them.
 		if strings.HasPrefix(text, "/") && m.isBuiltinSlashCommand(text) {
+			m.editor.AddToHistory(text)
 			m.editor.SetText("")
 			m.handleSlashCommand(text)
 			return

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Builtin slash commands (e.g. `/help`, `/model`, `/compact`) are now added to the editor's prompt history, so they can be recalled with up-arrow like regular prompts, `!`-bash commands, and extension slash commands. Previously the builtin-dispatch branch in `setupEditorHandlers` cleared the editor without calling `AddToHistory`.
 - Flaky race test `TestHandleDequeue_ClearsQueueAfterDequeue` (and 17 sibling tests in `pkg/modes/interactive` sharing the same pattern) surfaced by CI run 24623416594. The `testMode.waitRender()` helper relied on a fixed 10 ms `time.Sleep`, racing against the asynchronous TUI render goroutine. Replaced with a synchronous `ui.DoRender()` call preceded by a single `runtime.Gosched()`, which is deterministic under `-race` and adds no extra sleep on the happy path.
 
 ### Changed
