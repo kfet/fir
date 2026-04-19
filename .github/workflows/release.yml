@@ -54,48 +54,63 @@ jobs:
       # default GITHUB_TOKEN is scoped to kfet/fir and cannot push
       # cross-repo.
       #
+      # We mirror by re-downloading the source release's assets via gh
+      # (authenticated as the source-repo token), then re-uploading them
+      # with FIR_DIST_TOKEN. This keeps the two releases byte-identical
+      # and avoids coupling to GoReleaser's dist/ layout.
+      #
       # The step is idempotent: re-running on the same tag overwrites
       # assets (--clobber) rather than failing.
       # ---------------------------------------------------------------
       - name: Mirror release to kfet/fir-dist
         env:
-          GH_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
+          MIRROR_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
+          SOURCE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
           MIRROR_REPO: kfet/fir-dist
           SOURCE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          if [ -z "${GH_TOKEN:-}" ]; then
+          if [ -z "${MIRROR_TOKEN:-}" ]; then
             echo "::warning::FIR_DIST_TOKEN not set — skipping mirror to $MIRROR_REPO"
             exit 0
           fi
 
-          # Collect the artefacts GoReleaser produced. Raw binaries,
-          # checksums, LICENSE and THIRD_PARTY_NOTICES.md all live flat
-          # in dist/ (see .goreleaser.yaml). We upload everything except
-          # the metadata GoReleaser uses internally.
-          mapfile -t ASSETS < <(find dist -maxdepth 1 -type f \
-            ! -name '*.json' ! -name '*.yaml' ! -name 'artifacts.*' \
-            ! -name 'config.yaml' ! -name 'metadata.json' | sort)
+          STAGING="$(mktemp -d)"
+          trap 'rm -rf "$STAGING"' EXIT
+
+          # Download every asset from the source release using the
+          # default GITHUB_TOKEN (scoped to $SOURCE_REPO).
+          GH_TOKEN="$SOURCE_TOKEN" gh release download "$TAG" \
+            --repo "$SOURCE_REPO" \
+            --dir "$STAGING" \
+            --skip-existing
+
+          # Collect non-empty files. GitHub's asset upload rejects
+          # zero-byte files with HTTP 400 Bad Content-Length.
+          mapfile -t ASSETS < <(find "$STAGING" -maxdepth 1 -type f ! -empty | sort)
 
           if [ "${#ASSETS[@]}" -eq 0 ]; then
-            echo "No assets found in dist/ — nothing to mirror."
+            echo "::error::source release $SOURCE_REPO@$TAG has no assets to mirror"
             exit 1
           fi
 
           echo "Mirroring ${#ASSETS[@]} assets to $MIRROR_REPO@$TAG:"
-          printf '  %s\n' "${ASSETS[@]}"
+          for a in "${ASSETS[@]}"; do
+            printf '  %s (%s bytes)\n' "$(basename "$a")" "$(wc -c <"$a")"
+          done
 
-          # Pull release notes from the source release we just created
-          # so the mirror shows the same changelog.
+          # Pull release notes from the source release so the mirror
+          # shows the same changelog.
           NOTES_FILE="$(mktemp)"
-          gh release view "$TAG" --repo "$SOURCE_REPO" --json body \
-            --jq .body > "$NOTES_FILE" \
+          GH_TOKEN="$SOURCE_TOKEN" gh release view "$TAG" \
+            --repo "$SOURCE_REPO" --json body --jq .body > "$NOTES_FILE" \
             || echo "See https://github.com/$SOURCE_REPO/releases/tag/$TAG" > "$NOTES_FILE"
 
-          # Create the mirror release if it doesn't exist, otherwise
-          # reuse it. --clobber on upload handles re-runs.
+          # Switch to the mirror token for everything touching fir-dist.
+          export GH_TOKEN="$MIRROR_TOKEN"
+
           if ! gh release view "$TAG" --repo "$MIRROR_REPO" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --repo "$MIRROR_REPO" \
