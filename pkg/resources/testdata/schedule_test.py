@@ -469,7 +469,7 @@ class TestIntegration(unittest.TestCase):
         """Cancel a schedule before it fires; verify no action taken."""
         with _Timeout(5):
             ctx = mock.MagicMock()
-            r = schedule.cmd_schedule(["3s"], ctx)
+            r = schedule.cmd_schedule(["1h"], ctx)
             sid = r["message"].split("[")[1].split("]")[0]
 
             # Cancel immediately.
