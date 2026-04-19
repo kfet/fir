@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Homebrew tap: `brew install kfet/fir/fir` now works. GoReleaser auto-publishes `Formula/fir.rb` to `kfet/homebrew-fir` on every release, with download URLs pointing at the public `kfet/fir-dist` mirror so installation requires no GitHub authentication. Uses the existing `HOMEBREW_TAP_TOKEN` secret.
+
 ### Changed
 
 - `install.sh`, the in-binary self-updater (`fir update`, background notice), and the `licensesURL` embedded in the binary now read from the public [`kfet/fir-dist`](https://github.com/kfet/fir-dist) mirror instead of `kfet/fir`. No GitHub authentication is required to install or update. Dropped the `gh` CLI / `GITHUB_TOKEN` fallback paths and the `FetchLatestOrGH` / `ghToken` helpers from `pkg/update`.

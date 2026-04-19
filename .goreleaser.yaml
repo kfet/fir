@@ -42,5 +42,37 @@ release:
     - glob: LICENSE
     - glob: THIRD_PARTY_NOTICES.md
 
+# ---------------------------------------------------------------------------
+# Homebrew tap
+#
+# GoReleaser regenerates Formula/fir.rb on kfet/homebrew-fir on every
+# release. Download URLs point at the public kfet/fir-dist mirror so
+# `brew install kfet/fir/fir` works without GitHub authentication.
+#
+# The default_install_dir reference to main.version keeps the formula's
+# embedded version aligned with the one baked into the binary.
+# ---------------------------------------------------------------------------
+brews:
+  - name: fir
+    repository:
+      owner: kfet
+      name: homebrew-fir
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    url_template: "https://github.com/kfet/fir-dist/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    homepage: "https://github.com/kfet/fir"
+    description: "Fast, portable AI coding agent"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "fir: update to {{ .Tag }}"
+    skip_upload: auto
+    test: |
+      system "#{bin}/fir", "--version"
+    install: |
+      bin.install "fir"
+
 changelog:
   use: github-native

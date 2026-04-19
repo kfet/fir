@@ -21,6 +21,12 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 
 ## Install
 
+### Homebrew (macOS, Linux)
+
+```bash
+brew install kfet/fir/fir
+```
+
 ### Install script (macOS, Linux, Raspberry Pi)
 
 ```bash

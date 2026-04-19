@@ -1,26 +1,23 @@
 # This is a template for the kfet/homebrew-fir tap.
 #
-# Binaries are distributed from the public kfet/fir-dist mirror, so the
-# tap works without any GitHub authentication.
-#
-# This file is kept in the main repo as a reference — it is NOT used by
-# Homebrew directly. To set up the tap repo:
-#   1. Create github.com/kfet/homebrew-fir (public).
-#   2. mkdir Formula && cp this file into Formula/fir.rb.
-#   3. Update url, version, and sha256 on each release (from checksums.txt
-#      at https://github.com/kfet/fir-dist/releases/latest). GoReleaser
-#      can be wired up to do this automatically via a brews: block.
+# Formula/fir.rb in the tap is regenerated automatically by GoReleaser on
+# every kfet/fir tag push (see the brews: block in .goreleaser.yaml).
+# This file is kept in the main repo purely as a reference — it is NOT
+# the file Homebrew reads, and edits here do not affect users.
 #
 # Users install with:
 #   brew install kfet/fir/fir
 #   (or: brew tap kfet/fir && brew install fir)
+#
+# Download URLs point at the public kfet/fir-dist mirror so installation
+# works without GitHub authentication.
 
 class Fir < Formula
   desc "Fast, portable AI coding agent"
   homepage "https://github.com/kfet/fir"
   license "MIT"
 
-  # Replace url, sha256, and version on each release.
+  # GoReleaser replaces url, sha256, and version on each release.
   url "https://github.com/kfet/fir-dist/releases/download/v0.4.0/fir-#{OS}-#{ARCH}"
   version "0.4.0"
   sha256 "PLACEHOLDER"
@@ -33,4 +30,5 @@ class Fir < Formula
     system bin/"fir", "--version"
   end
 end
+
 
