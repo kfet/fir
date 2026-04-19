@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Flaky race test `TestHandleDequeue_ClearsQueueAfterDequeue` (and 17 sibling tests in `pkg/modes/interactive` sharing the same pattern) surfaced by CI run 24623416594. The `testMode.waitRender()` helper relied on a fixed 10 ms `time.Sleep`, racing against the asynchronous TUI render goroutine. Replaced with a synchronous `ui.DoRender()` call preceded by a single `runtime.Gosched()`, which is deterministic under `-race` and adds no extra sleep on the happy path.
+
 ### Changed
 
 - `provider-usage` extension no longer auto-loads: frontmatter flipped to `builtin: false`. It is still embedded in the binary and can be enabled explicitly (`--extension provider-usage` or via `settings.json` `"extensions"`). Rationale: it's a TUI-only status-bar widget that polls provider APIs every 5 minutes — not a sensible always-on default, especially for non-interactive / headless fir sessions.

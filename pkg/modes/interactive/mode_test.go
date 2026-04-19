@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -225,9 +226,19 @@ func (tm *testMode) editorText() string {
 }
 
 func (tm *testMode) waitRender() {
-	// Give the TUI event loop time to process — poll quickly rather than
-	// sleeping a fixed 200ms.  Most events settle within a few ms.
-	time.Sleep(10 * time.Millisecond)
+	// Render synchronously on the test goroutine. DoRender takes renderMu,
+	// so it waits for any in-flight render by the background goroutine and
+	// guarantees the just-mutated component state is flushed to
+	// MockTerminal before we return — no fixed-sleep race against the
+	// render path.
+	//
+	// The leading Gosched yields the scheduler so that any unrelated
+	// goroutine the test just spawned (notably startUpdateNoticeWatcher,
+	// which reads a channel then mutates the component tree) has a chance
+	// to run before we render. Without it TestStartUpdateNoticeWatcher_
+	// ShowsNotice is flaky under -race.
+	runtime.Gosched()
+	tm.ui.DoRender()
 }
 
 func (tm *testMode) renderedOutput() string {
