@@ -226,15 +226,18 @@ func (tm *testMode) editorText() string {
 }
 
 func (tm *testMode) waitRender() {
-	// Yield briefly so any background goroutine triggered by the test can
-	// run (e.g. startUpdateNoticeWatcher), then render synchronously.
-	// DoRender takes renderMu, so it both waits for any in-flight render
-	// by the background render goroutine and guarantees the just-mutated
-	// component state is flushed to MockTerminal before we return — no
-	// fixed-sleep race against the render path.
-	for range 5 {
-		runtime.Gosched()
-	}
+	// Render synchronously on the test goroutine. DoRender takes renderMu,
+	// so it waits for any in-flight render by the background goroutine and
+	// guarantees the just-mutated component state is flushed to
+	// MockTerminal before we return — no fixed-sleep race against the
+	// render path.
+	//
+	// The leading Gosched yields the scheduler so that any unrelated
+	// goroutine the test just spawned (notably startUpdateNoticeWatcher,
+	// which reads a channel then mutates the component tree) has a chance
+	// to run before we render. Without it TestStartUpdateNoticeWatcher_
+	// ShowsNotice is flaky under -race.
+	runtime.Gosched()
 	tm.ui.DoRender()
 }
 
