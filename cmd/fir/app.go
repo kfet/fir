@@ -378,6 +378,11 @@ func run() error {
 
 	if args.Version {
 		fmt.Println("fir " + version)
+		url := licensesURL
+		if url == "" {
+			url = "https://github.com/kfet/fir/releases"
+		}
+		fmt.Println("License: MIT — " + url)
 		return nil
 	}
 

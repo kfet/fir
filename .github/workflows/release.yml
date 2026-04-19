@@ -28,6 +28,9 @@ jobs:
       - name: Build and test
         run: make all
 
+      - name: Generate third-party notices
+        run: make notices
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
         with:
@@ -37,3 +40,75 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # ---------------------------------------------------------------
+      # Mirror release to the public binary-distribution repo.
+      #
+      # kfet/fir-dist is a public, binaries-only mirror. It carries the
+      # same assets (binaries, LICENSE, THIRD_PARTY_NOTICES.md,
+      # checksums.txt) under the same tag so install.sh, the self-updater
+      # and packagers can eventually read from it without needing auth.
+      #
+      # Requires a repository secret FIR_DIST_TOKEN: a fine-grained PAT
+      # with "Contents: read and write" on kfet/fir-dist only. The
+      # default GITHUB_TOKEN is scoped to kfet/fir and cannot push
+      # cross-repo.
+      #
+      # The step is idempotent: re-running on the same tag overwrites
+      # assets (--clobber) rather than failing.
+      # ---------------------------------------------------------------
+      - name: Mirror release to kfet/fir-dist
+        env:
+          GH_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          MIRROR_REPO: kfet/fir-dist
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::FIR_DIST_TOKEN not set — skipping mirror to $MIRROR_REPO"
+            exit 0
+          fi
+
+          # Collect the artefacts GoReleaser produced. Raw binaries,
+          # checksums, LICENSE and THIRD_PARTY_NOTICES.md all live flat
+          # in dist/ (see .goreleaser.yaml). We upload everything except
+          # the metadata GoReleaser uses internally.
+          mapfile -t ASSETS < <(find dist -maxdepth 1 -type f \
+            ! -name '*.json' ! -name '*.yaml' ! -name 'artifacts.*' \
+            ! -name 'config.yaml' ! -name 'metadata.json' | sort)
+
+          if [ "${#ASSETS[@]}" -eq 0 ]; then
+            echo "No assets found in dist/ — nothing to mirror."
+            exit 1
+          fi
+
+          echo "Mirroring ${#ASSETS[@]} assets to $MIRROR_REPO@$TAG:"
+          printf '  %s\n' "${ASSETS[@]}"
+
+          # Pull release notes from the source release we just created
+          # so the mirror shows the same changelog.
+          NOTES_FILE="$(mktemp)"
+          gh release view "$TAG" --repo "$SOURCE_REPO" --json body \
+            --jq .body > "$NOTES_FILE" \
+            || echo "See https://github.com/$SOURCE_REPO/releases/tag/$TAG" > "$NOTES_FILE"
+
+          # Create the mirror release if it doesn't exist, otherwise
+          # reuse it. --clobber on upload handles re-runs.
+          if ! gh release view "$TAG" --repo "$MIRROR_REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$MIRROR_REPO" \
+              --title "fir ${TAG#v}" \
+              --notes-file "$NOTES_FILE" \
+              --verify-tag=false
+          else
+            echo "Release $TAG already exists on $MIRROR_REPO — updating assets."
+          fi
+
+          gh release upload "$TAG" \
+            --repo "$MIRROR_REPO" \
+            --clobber \
+            "${ASSETS[@]}"
+
+          echo "Mirrored to https://github.com/$MIRROR_REPO/releases/tag/$TAG"

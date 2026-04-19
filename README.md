@@ -206,3 +206,44 @@ The initial port was built using the original
 [pi](https://github.com/badlogic/pi-mono) coding agent. Once enough of the
 codebase was functional, development switched to self-hosting: fir now
 continues its own development.
+
+## License
+
+`fir` itself is distributed under the [MIT License](LICENSE).
+
+Third-party Go modules linked into the released binaries are covered by their
+own licenses (MIT, Apache-2.0, BSD-2/3-Clause, MPL-2.0, ISC). A generated
+attribution file is published alongside every GitHub release as
+`THIRD_PARTY_NOTICES.md`, together with a `checksums.txt` covering every
+asset. Running `fir --version` prints a link to the exact release page.
+
+To regenerate the notices file locally:
+
+```sh
+make notices          # writes THIRD_PARTY_NOTICES.md
+make check-licenses   # fails on forbidden/restricted licenses
+```
+
+## Release distribution
+
+Every tag push publishes the same set of artefacts (binaries, `LICENSE`,
+`THIRD_PARTY_NOTICES.md`, `checksums.txt`) to **two** GitHub Releases:
+
+1. [`kfet/fir`](https://github.com/kfet/fir/releases) — the source repo.
+2. [`kfet/fir-dist`](https://github.com/kfet/fir-dist/releases) — a public,
+   binaries-only mirror. Same tag, same assets, same checksums.
+
+`kfet/fir-dist` exists so `install.sh`, the self-updater, Homebrew and
+distro packagers can eventually fetch binaries without needing access to
+the source repo. For now both are kept in sync; consumers will migrate to
+`fir-dist` in a follow-up change.
+
+### Required repo secret
+
+The release workflow uses `FIR_DIST_TOKEN` to push to `kfet/fir-dist`.
+Create a fine-grained Personal Access Token scoped to that repo with
+**Contents: Read and write**, and store it as a repository secret named
+`FIR_DIST_TOKEN` on `kfet/fir`. Without this secret the mirror step is
+skipped with a warning and the source-repo release still succeeds.
+
+

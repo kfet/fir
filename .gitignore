@@ -3,6 +3,7 @@ bin/
 /fir
 cover.out
 dist/
+THIRD_PARTY_NOTICES.md
 
 # IDE
 .idea/

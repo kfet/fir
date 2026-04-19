@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -22,7 +22,7 @@ ifneq ($(GIT_TAG),v$(VERSION))
   endif
 endif
 
-LDFLAGS   := -s -w -X main.version=$(VERSION)
+LDFLAGS   := -s -w -X main.version=$(VERSION) -X main.licensesURL=https://github.com/kfet/fir/releases/tag/v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
 # ---------------------------------------------------------------------------
 # Quiet build helpers — print a short step name, show output only on failure.
@@ -56,7 +56,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
+_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner check-licenses
 
 fmt:
 	@gofmt -s -w .
@@ -148,6 +148,29 @@ generate-models:
 
 clean:
 	rm -rf $(BINDIR)
+	rm -f THIRD_PARTY_NOTICES.md
+
+# ---------------------------------------------------------------------------
+# Third-party license notices
+#
+# `make notices` generates THIRD_PARTY_NOTICES.md from go.mod / go.sum via
+# go-licenses. The resulting file is uploaded as a release asset alongside
+# the binaries so users (and packagers) can locate the attribution text.
+#
+# `make check-licenses` fails the build if any dependency is under a license
+# we do not allow (GPL, AGPL, etc.). Runs in CI and before release.
+# ---------------------------------------------------------------------------
+
+GO_LICENSES := go run github.com/google/go-licenses@v1.6.0
+
+notices: THIRD_PARTY_NOTICES.md
+
+THIRD_PARTY_NOTICES.md: go.mod go.sum hack/notices.tpl
+	$(call RUN,generate notices,$(GO_LICENSES) report ./cmd/fir --template hack/notices.tpl > $@ 2>/dev/null)
+
+check-licenses:
+	$(call RUN,check licenses,$(GO_LICENSES) check ./cmd/fir --disallowed_types=forbidden,restricted 2>/dev/null)
+
 
 # ---------------------------------------------------------------------------
 # Release publishing & remote deployment

@@ -7,7 +7,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.licensesURL=https://github.com/kfet/fir/releases/tag/v{{.Version}}
     goos:
       - darwin
       - linux
@@ -28,6 +28,9 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  extra_files:
+    - glob: LICENSE
+    - glob: THIRD_PARTY_NOTICES.md
 
 release:
   github:
@@ -35,6 +38,9 @@ release:
     name: fir
   prerelease: auto
   name_template: "fir {{.Version}}"
+  extra_files:
+    - glob: LICENSE
+    - glob: THIRD_PARTY_NOTICES.md
 
 changelog:
   use: github-native
