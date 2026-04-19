@@ -256,3 +256,17 @@ func extractPythonCommands(src string) []string {
 	}
 	return results
 }
+
+func TestBuiltinExtensionsHash_Stable(t *testing.T) {
+	h1 := BuiltinExtensionsHash()
+	h2 := BuiltinExtensionsHash()
+	if h1 == "" {
+		t.Fatal("BuiltinExtensionsHash() returned empty")
+	}
+	if h1 != h2 {
+		t.Fatalf("BuiltinExtensionsHash() not stable: %q vs %q", h1, h2)
+	}
+	if len(h1) != 16 {
+		t.Fatalf("BuiltinExtensionsHash() length = %d, want 16", len(h1))
+	}
+}

@@ -5,6 +5,7 @@ package interactive
 import (
 	"fmt"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -12,6 +13,7 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
+	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
@@ -527,6 +529,54 @@ func (m *InteractiveMode) preloadReexecSidecar() {
 
 	// Cache the whole sidecar; restoreReexecSidecar will apply the rest.
 	m.reexecSidecar = sidecar
+
+	// If this reexec crossed a release boundary that changed the set of
+	// builtin extensions, the previously-spawned extension subprocesses
+	// (which syscall.Exec preserved as orphans) are stale: any extension
+	// that was added/removed/modified in the new build will conflict with
+	// or be missing from the inherited pool, and the new manager would
+	// happily spawn fresh copies alongside them. Detect the mismatch and
+	// SIGKILL the orphaned PIDs so the new manager starts from a clean
+	// slate — equivalent to a full restart from the user's perspective.
+	if sidecar.BuiltinHash != "" && sidecar.BuiltinHash != resources.BuiltinExtensionsHash() {
+		killed := killOrphanedExtensions(sidecar.ExtensionPIDs)
+		firlog.Info("reexec: builtin extensions changed, killed orphaned subprocesses",
+			"old_hash", sidecar.BuiltinHash,
+			"new_hash", resources.BuiltinExtensionsHash(),
+			"pids", sidecar.ExtensionPIDs,
+			"killed", killed)
+	}
+}
+
+// killOrphanedExtensions SIGKILLs the given PIDs (best-effort) and returns
+// the count of signals successfully delivered. Used after a /reexec when the
+// builtin-extension hash changed and the inherited subprocesses must be
+// torn down before the new Manager starts fresh ones.
+//
+// PID-reuse caveat: the window between writing the sidecar and reading it
+// here is bounded by syscall.Exec + early process startup (sub-second), so
+// reuse is extremely unlikely. The signal-0 liveness probe shrinks it
+// further but cannot eliminate it. The same caveat applies to Process.Stop
+// and is accepted there for the same reason.
+func killOrphanedExtensions(pids []int) int {
+	killed := 0
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		// Sanity check: only kill processes still alive (signal 0 probes).
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			continue
+		}
+		if err := proc.Kill(); err == nil {
+			killed++
+		}
+	}
+	return killed
 }
 
 // ReexecExtData returns per-extension session data that was saved before the

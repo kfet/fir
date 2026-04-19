@@ -1303,9 +1303,11 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 	}
 	sc := &store.ReexecSidecar{
 		QueueMessages: queueTexts,
+		BuiltinHash:   resources.BuiltinExtensionsHash(),
 	}
 	if m.extSetup != nil && m.extSetup.Manager != nil {
 		sc.ExtensionData = m.extSetup.Manager.ShutdownAndCollect()
+		sc.ExtensionPIDs = m.extSetup.Manager.ExtensionPIDs()
 	}
 	if err := store.WriteReexecSidecar(sessionFile, sc); err != nil {
 		// Non-fatal, but warn the user.

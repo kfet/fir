@@ -9,10 +9,19 @@ import (
 // ReexecSidecar holds state that must survive a reexec: queued follow-up
 // messages, any text the user had typed in the editor, and per-extension
 // key/value data saved by extensions before the exec.
+//
+// BuiltinHash is the hash of the builtin extension set in the *outgoing*
+// binary; the new process compares it to its own hash to decide whether the
+// extension subprocess pool inherited across syscall.Exec is still compatible.
+// ExtensionPIDs lists the inherited extension subprocess PIDs so the new
+// process can SIGKILL them when the hash differs (i.e. a release added,
+// removed, or modified a builtin extension), forcing a clean restart.
 type ReexecSidecar struct {
 	QueueMessages []string                     `json:"queue_messages,omitempty"`
 	PendingInput  string                       `json:"pending_input,omitempty"`
 	ExtensionData map[string]map[string]string `json:"extension_data,omitempty"`
+	BuiltinHash   string                       `json:"builtin_hash,omitempty"`
+	ExtensionPIDs []int                        `json:"extension_pids,omitempty"`
 }
 
 // ReexecSidecarPath returns the sidecar file path for a given session file.

@@ -130,6 +130,17 @@ func (p *Process) Wait() error {
 	return p.waitErr
 }
 
+// Pid returns the OS process ID of the running child, or 0 when the process
+// has not been started or has already exited.
+func (p *Process) Pid() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+
 // Stop sends SIGTERM, waits up to 2s, then SIGKILL.
 func (p *Process) Stop(ctx context.Context) error {
 	p.mu.Lock()

@@ -18,7 +18,37 @@ var (
 	builtinExtExtractOnce sync.Once
 	builtinExtExtractDir  string
 	builtinExtExtractErr  error
+
+	builtinExtHashOnce sync.Once
+	builtinExtHash     string
 )
+
+// BuiltinExtensionsHash returns a deterministic 16-hex-char SHA-256 prefix of
+// every embedded builtin extension file (path + contents). It changes whenever
+// any builtin extension is added, removed, or modified — which makes it useful
+// for detecting that a /reexec has crossed a release boundary that changed the
+// set of builtin extensions.
+//
+// The value is computed once and cached.
+func BuiltinExtensionsHash() string {
+	builtinExtHashOnce.Do(func() {
+		h := sha256.New()
+		_ = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			data, err := BuiltinExtensionsFS.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			h.Write([]byte(path))
+			h.Write(data)
+			return nil
+		})
+		builtinExtHash = fmt.Sprintf("%x", h.Sum(nil))[:16]
+	})
+	return builtinExtHash
+}
 
 // ExtensionFrontmatter holds metadata parsed from a comment frontmatter block
 // at the top of an extension script.
@@ -187,23 +217,10 @@ func parseCommandList(value string) []ExtensionFrontmatterCommand {
 // directory so extension scripts can be executed as subprocesses.
 func extractBuiltinExtensions() (string, error) {
 	builtinExtExtractOnce.Do(func() {
-		// Compute a content hash of all embedded extension files so the
-		// cache directory is stable across runs with the same binary but
+		// Use a content hash of all embedded extension files so the cache
+		// directory is stable across runs with the same binary but
 		// invalidated when extensions change (new build).
-		h := sha256.New()
-		_ = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			data, err := BuiltinExtensionsFS.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			h.Write([]byte(path))
-			h.Write(data)
-			return nil
-		})
-		hash := fmt.Sprintf("%x", h.Sum(nil))[:16]
+		hash := BuiltinExtensionsHash()
 
 		cacheBase := filepath.Join(os.TempDir(), "fir-builtin-extensions")
 		dir := filepath.Join(cacheBase, hash)

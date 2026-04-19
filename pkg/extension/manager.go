@@ -925,6 +925,24 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 	return CommandResult{}, fmt.Errorf("extension: no command %q registered", name)
 }
 
+// ExtensionPIDs returns the OS PIDs of all currently running extension
+// subprocesses. Used by /reexec to record which children syscall.Exec will
+// orphan, so the post-exec process can SIGKILL them when the builtin
+// extension hash changes (see store.ReexecSidecar).
+func (m *Manager) ExtensionPIDs() []int {
+	m.mu.Lock()
+	bridges := append([]*managedBridge(nil), m.bridges...)
+	m.mu.Unlock()
+
+	out := make([]int, 0, len(bridges))
+	for _, mb := range bridges {
+		if pid := mb.proc.Pid(); pid > 0 {
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
 // CollectSessionData returns a snapshot of every running extension's session
 // data, keyed by extension name.  Used by /reexec to persist data in the
 // sidecar file.  Returns nil when no extension has stored any data.

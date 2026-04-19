@@ -13,6 +13,8 @@ func TestWriteAndReadReexecSidecar(t *testing.T) {
 	sc := &ReexecSidecar{
 		QueueMessages: []string{"do thing 1", "do thing 2"},
 		PendingInput:  "partial input",
+		BuiltinHash:   "abcdef0123456789",
+		ExtensionPIDs: []int{4242, 4243},
 	}
 	if err := WriteReexecSidecar(sessionFile, sc); err != nil {
 		t.Fatalf("write: %v", err)
@@ -36,6 +38,12 @@ func TestWriteAndReadReexecSidecar(t *testing.T) {
 	}
 	if got.PendingInput != "partial input" {
 		t.Errorf("unexpected pending input: %q", got.PendingInput)
+	}
+	if got.BuiltinHash != "abcdef0123456789" {
+		t.Errorf("unexpected builtin hash: %q", got.BuiltinHash)
+	}
+	if len(got.ExtensionPIDs) != 2 || got.ExtensionPIDs[0] != 4242 || got.ExtensionPIDs[1] != 4243 {
+		t.Errorf("unexpected extension pids: %v", got.ExtensionPIDs)
 	}
 
 	// File should be deleted after read.
