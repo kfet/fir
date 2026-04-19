@@ -22,7 +22,7 @@ ifneq ($(GIT_TAG),v$(VERSION))
   endif
 endif
 
-LDFLAGS   := -s -w -X main.version=$(VERSION) -X main.licensesURL=https://github.com/kfet/fir/releases/tag/v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
+LDFLAGS   := -s -w -X main.version=$(VERSION) -X main.licensesURL=https://github.com/kfet/fir-dist/releases/tag/v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
 # ---------------------------------------------------------------------------
 # Quiet build helpers — print a short step name, show output only on failure.

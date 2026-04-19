@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `install.sh`, the in-binary self-updater (`fir update`, background notice), and the `licensesURL` embedded in the binary now read from the public [`kfet/fir-dist`](https://github.com/kfet/fir-dist) mirror instead of `kfet/fir`. No GitHub authentication is required to install or update. Dropped the `gh` CLI / `GITHUB_TOKEN` fallback paths and the `FetchLatestOrGH` / `ghToken` helpers from `pkg/update`.
+- `homebrew/fir.rb.template` points at `kfet/fir-dist` too.
+
 ## [0.30.0] - 2026-04-19
 
 ### Added

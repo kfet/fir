@@ -214,17 +214,6 @@ func TestCheckLatest_StaleCache_TriesNetwork(t *testing.T) {
 }
 
 // ============================================================================
-// ghToken
-// ============================================================================
-
-func TestGhToken_NoGH(t *testing.T) {
-	// If gh isn't installed or not authed, should return empty string (not panic).
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_ = ghToken(ctx)
-}
-
-// ============================================================================
 // IsNewer edge cases
 // ============================================================================
 

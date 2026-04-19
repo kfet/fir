@@ -7,7 +7,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.licensesURL=https://github.com/kfet/fir/releases/tag/v{{.Version}}
+      - -s -w -X main.version={{.Version}} -X main.licensesURL=https://github.com/kfet/fir-dist/releases/tag/v{{.Version}}
     goos:
       - darwin
       - linux

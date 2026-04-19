@@ -380,7 +380,7 @@ func run() error {
 		fmt.Println("fir " + version)
 		url := licensesURL
 		if url == "" {
-			url = "https://github.com/kfet/fir/releases"
+			url = "https://github.com/kfet/fir-dist/releases"
 		}
 		fmt.Println("License: MIT — " + url)
 		return nil
@@ -521,7 +521,7 @@ func runUpdate() error {
 
 	fmt.Fprintln(os.Stderr, "Checking for updates...")
 
-	rel, err := update.FetchLatestOrGH(ctx)
+	rel, err := update.FetchLatest(ctx)
 	if err != nil {
 		return fmt.Errorf("check for updates: %w", err)
 	}

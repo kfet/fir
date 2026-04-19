@@ -1174,7 +1174,7 @@ func (m *InteractiveMode) handleUpdateCommand() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	rel, err := update.FetchLatestOrGH(ctx)
+	rel, err := update.FetchLatest(ctx)
 	if err != nil {
 		m.showWarning(fmt.Sprintf("Failed to check for updates: %v", err))
 		return

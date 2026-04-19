@@ -4,18 +4,16 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
 #
-# For private repos, either:
-#   1. Have gh CLI installed and authenticated (gh auth login)
-#   2. Or set GITHUB_TOKEN before running the script
+# Binaries are distributed from the public kfet/fir-dist repo, so no
+# authentication is required.
 #
 # Options (environment variables):
 #   INSTALL_DIR  — where to install (default: /usr/local/bin, or ~/.local/bin if no write access)
 #   VERSION      — specific version to install (default: latest)
-#   GITHUB_TOKEN — used for curl auth if gh is not available (private repos)
 
 set -e
 
-REPO="kfet/fir"
+REPO="kfet/fir-dist"
 BINARY="fir"
 
 # --------------------------------------------------------------------------
@@ -66,26 +64,15 @@ resolve_version() {
         return
     fi
 
-    # Fetch latest tag via gh or curl
-    if command -v gh >/dev/null 2>&1; then
-        TAG=$(gh api "repos/$REPO/releases/latest" --jq '.tag_name' 2>/dev/null) || true
-    fi
+    # Fetch latest tag from the public releases API.
+    URL="https://api.github.com/repos/$REPO/releases/latest"
+    TAG=$(curl -fsSL "$URL" 2>/dev/null \
+        | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
 
     if [ -z "$TAG" ]; then
-        URL="https://api.github.com/repos/$REPO/releases/latest"
-        if [ -n "$GITHUB_TOKEN" ]; then
-            TAG=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$URL" 2>/dev/null \
-                | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
-        else
-            TAG=$(curl -fsSL "$URL" 2>/dev/null \
-                | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
-        fi
-    fi
-
-    if [ -z "$TAG" ]; then
-        echo "Error: could not determine latest version." >&2
-        echo "  For private repos: install gh (https://cli.github.com) and run 'gh auth login'" >&2
-        echo "  Or set GITHUB_TOKEN and retry." >&2
+        echo "Error: could not determine latest version from $URL" >&2
+        echo "  Check your network or install from source:" >&2
+        echo "  go install github.com/kfet/fir/cmd/fir@latest" >&2
         exit 1
     fi
 }
@@ -119,34 +106,12 @@ download() {
 
     echo "Installing fir $TAG ($PLATFORM) to $INSTALL_DIR..."
 
-    # Try gh first (handles private repos with SSH/OAuth)
-    if command -v gh >/dev/null 2>&1; then
-        if gh release download "$TAG" \
-            --repo "$REPO" \
-            --pattern "$ASSET_NAME" \
-            --output "$TMP" \
-            --clobber 2>/dev/null; then
-            install_binary
-            return
-        fi
-        # gh failed (maybe not authed for this repo) — fall through to curl/wget
-    fi
-
-    # Direct HTTPS download (public repos, or private with GITHUB_TOKEN)
     ASSET_URL="https://github.com/$REPO/releases/download/$TAG/$ASSET_NAME"
 
     if command -v curl >/dev/null 2>&1; then
-        if [ -n "$GITHUB_TOKEN" ]; then
-            curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$ASSET_URL" -o "$TMP"
-        else
-            curl -fsSL "$ASSET_URL" -o "$TMP"
-        fi
+        curl -fsSL "$ASSET_URL" -o "$TMP"
     elif command -v wget >/dev/null 2>&1; then
-        if [ -n "$GITHUB_TOKEN" ]; then
-            wget -q --header="Authorization: Bearer $GITHUB_TOKEN" "$ASSET_URL" -O "$TMP"
-        else
-            wget -q "$ASSET_URL" -O "$TMP"
-        fi
+        wget -q "$ASSET_URL" -O "$TMP"
     else
         echo "Error: neither curl nor wget found" >&2
         exit 1

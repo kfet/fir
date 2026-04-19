@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	selfupdate "github.com/creativeprojects/go-selfupdate"
@@ -15,8 +13,11 @@ import (
 )
 
 const (
+	// Binaries are distributed through a public mirror repo (kfet/fir-dist)
+	// so update checks and downloads work without GitHub authentication,
+	// regardless of the visibility of the source repo.
 	repoOwner = "kfet"
-	repoName  = "fir"
+	repoName  = "fir-dist"
 	cacheTTL  = 24 * time.Hour
 )
 
@@ -107,28 +108,10 @@ func CheckLatest(ctx context.Context, currentVersion, cacheDir string) (*Release
 	return &Release{Version: version, inner: latest}, nil
 }
 
-// FetchLatest fetches the latest release from GitHub via HTTPS (no auth).
+// FetchLatest fetches the latest release from the public distribution repo
+// via HTTPS (no auth required).
 func FetchLatest(ctx context.Context) (*Release, error) {
 	source, err := newGitHubSource("")
-	if err != nil {
-		return nil, err
-	}
-	return fetchLatestWithSource(ctx, source)
-}
-
-// FetchLatestOrGH fetches the latest release, trying plain HTTPS first and
-// falling back to the gh CLI token for private repos.
-func FetchLatestOrGH(ctx context.Context) (*Release, error) {
-	rel, err := FetchLatest(ctx)
-	if err == nil {
-		return rel, nil
-	}
-	// Try with gh CLI token.
-	token := ghToken(ctx)
-	if token == "" {
-		return nil, fmt.Errorf("repo may be private — install gh (https://cli.github.com) and run 'gh auth login': %w", err)
-	}
-	source, err := newGitHubSource(token)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +138,7 @@ func fetchLatestWithSource(ctx context.Context, source selfupdate.Source) (*Rele
 func SelfUpdate(ctx context.Context, rel *Release) error {
 	if rel.inner == nil {
 		// Re-fetch to get asset URLs (cache-only releases don't have them).
-		fetched, err := FetchLatestOrGH(ctx)
+		fetched, err := FetchLatest(ctx)
 		if err != nil {
 			return err
 		}
@@ -165,11 +148,7 @@ func SelfUpdate(ctx context.Context, rel *Release) error {
 		return fmt.Errorf("no release assets available")
 	}
 
-	// Use the same auth strategy as detection: try unauthenticated, fall back
-	// to gh token. We pick the token up front to avoid a wasted unauthenticated
-	// attempt on private repos.
-	token := ghToken(ctx)
-	source, err := newGitHubSource(token)
+	source, err := newGitHubSource("")
 	if err != nil {
 		return err
 	}
@@ -206,20 +185,6 @@ func IsNewer(candidate, current string) bool {
 		return false
 	}
 	return c.GreaterThan(cur)
-}
-
-// ghToken extracts the GitHub OAuth token from the gh CLI.
-func ghToken(ctx context.Context) string {
-	ghPath, err := exec.LookPath("gh")
-	if err != nil {
-		return ""
-	}
-	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 func readCache(path string) (*cacheEntry, bool) {

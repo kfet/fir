@@ -27,14 +27,11 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
 ```
 
-For private repos, the script uses `gh` if installed, or `GITHUB_TOKEN`:
-```bash
-# Option 1: gh CLI (handles auth automatically)
-gh auth login
-curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+Binaries are served from the public [`kfet/fir-dist`](https://github.com/kfet/fir-dist)
+mirror — no authentication required. To install a specific version:
 
-# Option 2: token (use gh to supply it automatically)
-curl -fsSL -H "Authorization: token $(gh auth token)" https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+```bash
+VERSION=0.30.0 curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
 ```
 
 ### Go install
@@ -233,10 +230,10 @@ Every tag push publishes the same set of artefacts (binaries, `LICENSE`,
 2. [`kfet/fir-dist`](https://github.com/kfet/fir-dist/releases) — a public,
    binaries-only mirror. Same tag, same assets, same checksums.
 
-`kfet/fir-dist` exists so `install.sh`, the self-updater, Homebrew and
-distro packagers can eventually fetch binaries without needing access to
-the source repo. For now both are kept in sync; consumers will migrate to
-`fir-dist` in a follow-up change.
+Consumers (`install.sh`, the self-updater, the Homebrew formula, and the
+`licensesURL` embedded in the binary) read from `kfet/fir-dist` so they
+work without GitHub authentication regardless of the source repo's
+visibility.
 
 ### Required repo secret
 
