@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-registry.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package models
 
 import (
@@ -536,7 +536,15 @@ func (r *ModelRegistry) loadCustomModels(modelsJsonPath string) *CustomModelsRes
 }
 
 func (r *ModelRegistry) validateConfig(config *ModelsConfig) error {
+	// Built-in providers can define custom models without specifying baseUrl / apiKey / api;
+	// those fields are inherited from the first built-in model for the provider.
+	builtInProviders := make(map[string]bool, len(ai.GetProviders()))
+	for _, p := range ai.GetProviders() {
+		builtInProviders[string(p)] = true
+	}
+
 	for providerName, providerConfig := range config.Providers {
+		isBuiltIn := builtInProviders[providerName]
 		hasModels := len(providerConfig.Models) > 0
 		hasModelOverrides := len(providerConfig.ModelOverrides) > 0
 
@@ -545,8 +553,8 @@ func (r *ModelRegistry) validateConfig(config *ModelsConfig) error {
 			if providerConfig.BaseURL == "" && !hasModelOverrides {
 				return fmt.Errorf("Provider %s: must specify \"baseUrl\", \"modelOverrides\", or \"models\"", providerName)
 			}
-		} else {
-			// Custom models require endpoint + auth
+		} else if !isBuiltIn {
+			// Non-built-in providers with custom models require endpoint + auth.
 			if providerConfig.BaseURL == "" {
 				return fmt.Errorf("Provider %s: \"baseUrl\" is required when defining custom models", providerName)
 			}
@@ -554,17 +562,20 @@ func (r *ModelRegistry) validateConfig(config *ModelsConfig) error {
 				return fmt.Errorf("Provider %s: \"apiKey\" is required when defining custom models", providerName)
 			}
 		}
+		// Built-in providers with custom models: baseUrl/apiKey/api are optional,
+		// inherited from the first built-in model for that provider.
 
 		hasProviderApi := providerConfig.Api != ""
 		for _, modelDef := range providerConfig.Models {
 			hasModelApi := modelDef.Api != ""
 
-			if !hasProviderApi && !hasModelApi {
+			if !hasProviderApi && !hasModelApi && !isBuiltIn {
 				return fmt.Errorf(
 					"Provider %s, model %s: no \"api\" specified. Set at provider or model level",
 					providerName, modelDef.ID,
 				)
 			}
+			// For built-in providers, api is optional — inherited from built-in models.
 
 			if modelDef.ID == "" {
 				return fmt.Errorf("Provider %s: model missing \"id\"", providerName)
@@ -583,6 +594,35 @@ func (r *ModelRegistry) validateConfig(config *ModelsConfig) error {
 func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 	var models []*ai.Model
 
+	builtInProviders := make(map[string]bool, len(ai.GetProviders()))
+	for _, p := range ai.GetProviders() {
+		builtInProviders[string(p)] = true
+	}
+
+	// Cache built-in defaults (api, baseUrl) per provider, extracted from first model.
+	builtInDefaults := make(map[string]struct {
+		api     ai.Api
+		baseURL string
+	})
+	getBuiltInDefaults := func(providerName string) (ai.Api, string, bool) {
+		if !builtInProviders[providerName] {
+			return "", "", false
+		}
+		if d, ok := builtInDefaults[providerName]; ok {
+			return d.api, d.baseURL, true
+		}
+		builtIn := ai.GetModels(ai.Provider(providerName))
+		if len(builtIn) == 0 {
+			return "", "", false
+		}
+		d := struct {
+			api     ai.Api
+			baseURL string
+		}{api: builtIn[0].Api, baseURL: builtIn[0].BaseURL}
+		builtInDefaults[providerName] = d
+		return d.api, d.baseURL, true
+	}
+
 	for providerName, providerConfig := range config.Providers {
 		if len(providerConfig.Models) == 0 {
 			continue // Override-only, no custom models
@@ -593,12 +633,25 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 			r.customProviderApiKeys[providerName] = providerConfig.ApiKey
 		}
 
+		defApi, defBaseURL, hasDefaults := getBuiltInDefaults(providerName)
+
 		for _, modelDef := range providerConfig.Models {
 			api := modelDef.Api
 			if api == "" {
 				api = providerConfig.Api
 			}
+			if api == "" && hasDefaults {
+				api = defApi
+			}
 			if api == "" {
+				continue
+			}
+
+			baseURL := firstNonEmpty(modelDef.BaseURL, providerConfig.BaseURL)
+			if baseURL == "" && hasDefaults {
+				baseURL = defBaseURL
+			}
+			if baseURL == "" {
 				continue
 			}
 
@@ -684,7 +737,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				Name:          name,
 				Api:           api,
 				Provider:      providerName,
-				BaseURL:       firstNonEmpty(modelDef.BaseURL, providerConfig.BaseURL),
+				BaseURL:       baseURL,
 				Reasoning:     reasoning,
 				Input:         input,
 				Cost:          cost,

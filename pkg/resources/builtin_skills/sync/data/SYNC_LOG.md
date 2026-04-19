@@ -1,5 +1,48 @@
 # Sync Log
 
+## 2026-04-18 — Sync to v0.67.68 (commit a1edb8a4)
+
+- `ai/src/utils/overflow.ts` → `pkg/ai/overflow/overflow.go`: Added `request_too_large` (HTTP 413) Anthropic pattern; added Cerebras `400/413 (no body)` pattern directly to `overflowPatterns`; added `nonOverflowPatterns` exclusion list so Bedrock throttling and generic rate-limit messages no longer match `too many tokens`.
+- `ai/src/models.ts` → `pkg/ai/models.go`: `SupportsXhigh` now also accepts `gpt-5.4`. (Anthropic opus-4.6 handling left as fir-specific: fir intentionally restricts xhigh to Opus 4.7.)
+- `ai/src/types.ts` → `pkg/ai/types.go`: Added `ProviderResponse` struct and `OnResponse` callback on `StreamOptions`; added `ZaiToolStream` field on `OpenAICompletionsCompat`; expanded `OpenRouterRouting` with full routing surface (`allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `enforce_distillable_text`, `ignore`, `quantizations`, `sort`, `max_price`, `preferred_min_throughput`, `preferred_max_latency`).
+- `ai/src/providers/simple-options.ts` → `pkg/ai/providers/options.go`: Propagate `OnResponse` through `BuildBaseOptions`.
+- `ai/src/providers/anthropic.ts` → `pkg/ai/providers/anthropic.go`: `supportsAdaptiveThinking` now includes Opus 4.7. (`thinkingDisplay` and `CacheControlEphemeral` tool caching not wired — fir has a hand-rolled provider and this remains a known divergence.)
+- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: `supportsBedrockAdaptiveThinking` now includes Opus 4.7. (`bearerToken`, `thinkingDisplay`, and structured SDK-exception prefix formatting not ported — the Go port uses a different SDK and error path.)
+- `ai/src/providers/google-vertex.ts` → `pkg/ai/providers/google_vertex.go`: Treat literal `gcp-vertex-credentials` as the "use ADC, not API key" sentinel.
+- `ai/src/providers/google-gemini-cli.ts` → `pkg/ai/providers/google_gemini_cli.go`: Bumped default Antigravity client version to `1.21.9`.
+- `ai/src/providers/google.ts` → `pkg/ai/providers/google.go`: Added Gemma-4 family detection (`MINIMAL`/`HIGH` thinking-level model); added distinct 2.5-flash-lite budget schedule; gated adaptive thinking for Gemma 4.
+- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: Usage parser now honours OpenRouter `cache_write_tokens` and subtracts it from reported `cached_tokens` so `cacheRead`/`cacheWrite` are reported correctly; `qwen-chat-template` thinking now sets `preserve_thinking: true`; added z.ai `tool_stream: true` when `compat.zaiToolStream` is on; `resolvedCompat.ZaiToolStream` wired through `detectCompat`/`getCompat`.
+- `ai/src/providers/openai-responses.ts` → `pkg/ai/providers/openai_responses.go`: When caching is not disabled, set `session_id` + `x-client-request-id` request headers so session-keyed cache providers pick up the session ID.
+- `ai/src/providers/openai-codex-responses.ts` → `pkg/ai/providers/openai_codex_responses.go`: Codex SSE and WebSocket now send both `session_id` and `x-client-request-id`. (Service-tier pricing multipliers/`resolveServiceTier` not ported — no codex flex/priority cost surface in fir yet.)
+- `coding-agent/src/core/model-resolver.ts` → `pkg/models/modelresolver.go`: Kimi-coding default model renamed from `kimi-k2-thinking` to `kimi-for-coding`.
+- `coding-agent/src/core/model-registry.ts` → `pkg/models/modelregistry.go`: Built-in providers with custom models now inherit `api` and `baseUrl` from the first built-in model for the provider; `validateConfig` skips the `baseUrl`/`apiKey`/`api` requirement for built-in providers.
+- `coding-agent/src/core/system-prompt.ts` → `pkg/resources/systemprompt.go`: Upstream switched to a local-timezone `YYYY-MM-DD` date; fir already uses `time.Now().Format("2006-01-02")` — behaviour matches.
+- `agent/src/types.ts` → `pkg/agent/types.go`: Added `ToolExecutionMode` type (`sequential`/`parallel`) and `ExecutionMode` field on `AgentTool` so tools can force sequential execution. (No-op in fir today because fir's agent loop is already fully sequential.)
+- `agent/src/agent.ts`, `agent/src/agent-loop.ts`: Only hash bumped. Upstream did a large rewrite around `AgentState` (accessor properties, renamed fields, awaited subscribers, `prepareArguments` hook, per-tool sequential forcing, `afterToolCall` error guard). fir's Go agent already diverged from this surface and ports these features on demand.
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: Switched z.ai source key to `zai-coding-plan` (fallback to `zai`); mark `zaiToolStream: true` on all z.ai models except the four known-unsupported ones (`glm-4.5`, `glm-4.5-air`, `glm-4.5-flash`, `glm-4.5v`); normalize deprecated `k2p5` → `kimi-for-coding`; add static fallback for `claude-opus-4-7`; removed the static kimi-coding fallback block (`kimi-k2-thinking` / `k2p5`) now that models.dev covers it.
+- `ai/src/models.generated.ts` → `pkg/ai/models_generated.go`: Regenerated (845 models).
+
+### Notable changes
+
+- **Context-overflow detection refined**: Anthropic HTTP 413 (`request_too_large`) is now recognised as overflow, while Bedrock throttling (`ThrottlingException: Too many tokens…`) and generic rate-limit messages are explicitly excluded. This unblocks automatic compaction on byte-size-over-limit requests and stops rate-limit errors from triggering compaction retries.
+- **Claude Opus 4.7 support**: Recognised as adaptive-thinking across Anthropic, Bedrock, and (via xhigh-effort mapping) providers that re-expose Opus. Static fallback model added to the generator so it appears even when models.dev lags.
+- **z.ai streaming tool calls**: New `zaiToolStream` compat flag emits top-level `tool_stream: true` for z.ai models that support it, delivering streaming tool-call deltas instead of one blob at end-of-response. Glm-4.5 family is excluded.
+- **OpenAI Responses session cache**: `session_id` and `x-client-request-id` headers are now sent for OpenAI Responses and Codex (SSE + WebSocket), matching upstream's fix so providers that key prompt-cache on session ID actually get hits.
+- **OpenRouter cache-write accounting**: Completion parser now honours `prompt_tokens_details.cache_write_tokens` and subtracts it from reported `cached_tokens`, so downstream cost reports stop double-counting OpenRouter cache writes as reads.
+- **OpenRouter routing surface expanded**: `OpenRouterRouting` now matches upstream's full API (`allow_fallbacks`, `require_parameters`, `data_collection`, `zdr`, `enforce_distillable_text`, `ignore`, `quantizations`, `sort`, `max_price`, `preferred_min_throughput`, `preferred_max_latency`). Existing configs with only `only`/`order` keep working.
+- **Built-in provider + custom models inheritance**: `models.json` entries for a built-in provider (e.g. `anthropic`, `openai`) can now list custom model IDs without having to re-specify `baseUrl`, `apiKey`, or `api` — those inherit from the first built-in model for that provider.
+- **Kimi-coding default rename**: The `kimi-coding` provider's default model moved from `kimi-k2-thinking` to `kimi-for-coding`. Sessions that hard-coded the old ID will need to update or re-resolve.
+- **Gemma 4 thinking levels**: Gemma 4 family detection added; uses Gemini thinking-level semantics (`MINIMAL`/`HIGH`) rather than Gemini 2.x budget-based thinking.
+- **Antigravity client pin bumped**: Default Antigravity client version bumped from `1.18.4` to `1.21.9`; set `PI_AI_ANTIGRAVITY_VERSION` to override.
+- **Gemini 2.5 Flash Lite budgets**: Separate token-budget schedule so low/medium effort isn't clipped against the full flash budgets.
+
+### Deferred / known divergence
+- `ProviderResponse` / `OnResponse` are plumbed through the type surface and `BuildBaseOptions` but are **not yet invoked by any fir provider call path**. Wiring the HTTP/SSE dispatch callers is a follow-up.
+- Anthropic `thinkingDisplay` (`summarized`/`omitted`) and last-tool `cache_control` are not ported; fir's hand-rolled provider keeps its existing cache strategy.
+- Bedrock `bearerToken`, `thinkingDisplay`, and `BedrockRuntimeServiceException`-prefixed error formatting are not ported.
+- OpenAI Codex service-tier pricing multipliers (`flex`/`priority`) are not ported.
+- The upstream Agent state rewrite (accessor properties, `prepareArguments`, awaited-subscriber settlement, `afterToolCall` try/catch) is not ported — fir's agent loop is already architecturally different.
+
 ## 2025-07-18 — Sync to v0.63.2 (commit 41039e8d)
 
 - `ai/src/types.ts` → `pkg/ai/types.go`: Added `ResponseID` field to `AssistantMessage`; expanded `ThinkingFormat` with `openrouter` and `qwen-chat-template` variants; added contract docs to `StreamFunction` and `AssistantMessageEventType`.

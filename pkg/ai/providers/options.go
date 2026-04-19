@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/simple-options.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -73,6 +73,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		Compaction:      options.Compaction,
 		RefreshApiKey:   options.RefreshApiKey,
 		OnPayload:       options.OnPayload,
+		OnResponse:      options.OnResponse,
 		Transport:       options.Transport,
 		ReasoningEffort: options.ReasoningEffort,
 		ToolChoice:      options.ToolChoice,

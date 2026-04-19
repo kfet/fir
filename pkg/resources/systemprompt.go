@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/system-prompt.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package resources
 
 import (

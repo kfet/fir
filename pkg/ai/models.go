@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/models.ts + models.generated.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: a1edb8a4
 package ai
 
 import (
@@ -90,7 +90,7 @@ func SupportsXhigh(model *Model) bool {
 		return false
 	}
 	id := model.ID
-	if strings.Contains(id, "gpt-5.2") || strings.Contains(id, "gpt-5.3") {
+	if strings.Contains(id, "gpt-5.2") || strings.Contains(id, "gpt-5.3") || strings.Contains(id, "gpt-5.4") {
 		return true
 	}
 	// Anthropic Opus 4.7 across first-party, Bedrock, Vertex, etc.

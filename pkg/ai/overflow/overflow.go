@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/overflow.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package overflow
 
 import (
@@ -10,7 +10,8 @@ import (
 
 // overflowPatterns are regex patterns to detect context overflow errors.
 var overflowPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)prompt is too long`),                                  // Anthropic
+	regexp.MustCompile(`(?i)prompt is too long`),                                  // Anthropic token overflow
+	regexp.MustCompile(`(?i)request_too_large`),                                   // Anthropic request byte-size overflow (HTTP 413)
 	regexp.MustCompile(`(?i)input is too long for requested model`),               // Amazon Bedrock
 	regexp.MustCompile(`(?i)exceeds the context window`),                          // OpenAI
 	regexp.MustCompile(`(?i)input token count.*exceeds the maximum`),              // Google
@@ -28,9 +29,17 @@ var overflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),                       // Generic
 	regexp.MustCompile(`(?i)too many tokens`),                                     // Generic
 	regexp.MustCompile(`(?i)token limit exceeded`),                                // Generic
+	regexp.MustCompile(`(?i)^4(?:00|13)\s*(?:status code)?\s*\(no body\)`),        // Cerebras: 400/413 with no body
 }
 
-var statusCodePattern = regexp.MustCompile(`(?i)^4(00|13)\s*(status code)?\s*\(no body\)`)
+// nonOverflowPatterns indicate non-overflow errors (rate limiting, server errors).
+// Messages matching any of these are excluded from overflow detection even if
+// they also match an overflowPatterns entry.
+var nonOverflowPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^(Throttling error|Service unavailable):`), // AWS Bedrock non-overflow
+	regexp.MustCompile(`(?i)rate limit`),                               // Generic rate limiting
+	regexp.MustCompile(`(?i)too many requests`),                        // Generic HTTP 429
+}
 
 // IsContextOverflow checks if an assistant message represents a context overflow error.
 func IsContextOverflow(message *ai.AssistantMessage, contextWindow int) bool {
@@ -40,13 +49,20 @@ func IsContextOverflow(message *ai.AssistantMessage, contextWindow int) bool {
 
 	// Case 1: Error-based overflow
 	if message.StopReason == ai.StopReasonError && message.ErrorMessage != "" {
-		for _, p := range overflowPatterns {
+		// Skip messages matching known non-overflow patterns (e.g. throttling).
+		isNonOverflow := false
+		for _, p := range nonOverflowPatterns {
 			if p.MatchString(message.ErrorMessage) {
-				return true
+				isNonOverflow = true
+				break
 			}
 		}
-		if statusCodePattern.MatchString(message.ErrorMessage) {
-			return true
+		if !isNonOverflow {
+			for _, p := range overflowPatterns {
+				if p.MatchString(message.ErrorMessage) {
+					return true
+				}
+			}
 		}
 	}
 

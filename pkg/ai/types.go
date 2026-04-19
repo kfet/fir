@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package ai
 
 import (
@@ -188,6 +188,13 @@ type AnthropicCompaction struct {
 	Instructions string `json:"instructions,omitempty"`
 }
 
+// ProviderResponse describes the HTTP response returned by a provider before
+// its body stream is consumed. Passed to StreamOptions.OnResponse callbacks.
+type ProviderResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+}
+
 // StreamOptions are the base options shared by all streaming calls.
 type StreamOptions struct {
 	Temperature    *float64       `json:"temperature,omitempty"`
@@ -201,6 +208,9 @@ type StreamOptions struct {
 	// before it is sent. Return nil to keep the original payload unchanged, or
 	// return a non-nil replacement to swap it out.
 	OnPayload func(payload any, model *Model) any `json:"-"`
+	// OnResponse is an optional callback invoked after an HTTP response is
+	// received and before its body stream is consumed.
+	OnResponse func(response ProviderResponse, model *Model) `json:"-"`
 	// RefreshApiKey is called on 401/auth errors to obtain a fresh API key
 	// (e.g. after OAuth token refresh). Returns "" if no refresh is available.
 	RefreshApiKey   func(provider string) string `json:"-"`
@@ -653,7 +663,10 @@ type OpenAICompletionsCompat struct {
 	ThinkingFormat                   ThinkingFormat        `json:"thinkingFormat,omitempty"`
 	OpenRouterRouting                *OpenRouterRouting    `json:"openRouterRouting,omitempty"`
 	VercelGatewayRouting             *VercelGatewayRouting `json:"vercelGatewayRouting,omitempty"`
-	SupportsStrictMode               *bool                 `json:"supportsStrictMode,omitempty"`
+	// ZaiToolStream: whether z.ai supports top-level `tool_stream: true` for
+	// streaming tool call deltas. Default: false.
+	ZaiToolStream      *bool `json:"zaiToolStream,omitempty"`
+	SupportsStrictMode *bool `json:"supportsStrictMode,omitempty"`
 }
 
 // OpenAIResponsesCompat holds compatibility overrides for OpenAI Responses APIs.
@@ -662,9 +675,49 @@ type OpenAIResponsesCompat struct {
 }
 
 // OpenRouterRouting configures OpenRouter provider routing preferences.
+// Sent as the `provider` field in the OpenRouter API request body.
+// See https://openrouter.ai/docs/guides/routing/provider-selection
 type OpenRouterRouting struct {
-	Only  []string `json:"only,omitempty"`
+	// AllowFallbacks: whether to allow backup providers to serve requests. Default: true.
+	AllowFallbacks *bool `json:"allow_fallbacks,omitempty"`
+	// RequireParameters: whether to filter providers to only those that support
+	// all parameters in the request. Default: false.
+	RequireParameters *bool `json:"require_parameters,omitempty"`
+	// DataCollection: "allow" (default) or "deny".
+	DataCollection string `json:"data_collection,omitempty"`
+	// ZDR: restrict routing to only Zero Data Retention endpoints.
+	ZDR *bool `json:"zdr,omitempty"`
+	// EnforceDistillableText: restrict routing to only models that allow text distillation.
+	EnforceDistillableText *bool `json:"enforce_distillable_text,omitempty"`
+	// Order: an ordered list of provider names/slugs to try in sequence.
 	Order []string `json:"order,omitempty"`
+	// Only: providers to exclusively allow for this request.
+	Only []string `json:"only,omitempty"`
+	// Ignore: providers to skip for this request.
+	Ignore []string `json:"ignore,omitempty"`
+	// Quantizations: quantization levels to filter providers by.
+	Quantizations []string `json:"quantizations,omitempty"`
+	// Sort: sorting strategy. Either a string (e.g. "price", "throughput", "latency")
+	// or an object with `by` and `partition`. Use any for the union.
+	Sort any `json:"sort,omitempty"`
+	// MaxPrice: maximum price per million tokens (USD).
+	MaxPrice *OpenRouterMaxPrice `json:"max_price,omitempty"`
+	// PreferredMinThroughput: preferred minimum throughput (tokens/second).
+	// Can be a number or an object with p50/p75/p90/p99 cutoffs.
+	PreferredMinThroughput any `json:"preferred_min_throughput,omitempty"`
+	// PreferredMaxLatency: preferred maximum latency (seconds).
+	// Can be a number or an object with p50/p75/p90/p99 cutoffs.
+	PreferredMaxLatency any `json:"preferred_max_latency,omitempty"`
+}
+
+// OpenRouterMaxPrice represents maximum price limits per million tokens.
+// Values can be numbers or strings (OpenRouter accepts both), so we use any.
+type OpenRouterMaxPrice struct {
+	Prompt     any `json:"prompt,omitempty"`
+	Completion any `json:"completion,omitempty"`
+	Image      any `json:"image,omitempty"`
+	Audio      any `json:"audio,omitempty"`
+	Request    any `json:"request,omitempty"`
 }
 
 // VercelGatewayRouting configures Vercel AI Gateway routing preferences.

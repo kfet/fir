@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -537,7 +537,7 @@ func StreamSimpleGoogle(ctx context.Context, model *ai.Model, prompt ai.Context,
 		effort := ClampReasoning(options.Reasoning)
 
 		// Gemini 3 models use thinking levels
-		if isGemini3Model(model) {
+		if isGemini3Model(model) || isGemma4Model(model) {
 			level := mapGeminiThinkingLevel(effort, model)
 			base.Headers["x-google-thinking-level"] = level
 		} else {
@@ -558,6 +558,12 @@ func isGemini3Model(model *ai.Model) bool {
 	return strings.Contains(id, "gemini-3")
 }
 
+// isGemma4Model returns true for Gemma 4 family models (thinking-level based).
+func isGemma4Model(model *ai.Model) bool {
+	id := strings.ToLower(model.ID)
+	return strings.Contains(id, "gemma-4") || strings.Contains(id, "gemma4")
+}
+
 // isGemini3ProModelByRef returns true for Gemini 3 Pro models (takes *ai.Model).
 func isGemini3ProModelByRef(model *ai.Model) bool {
 	return isGemini3ProModel(model.ID)
@@ -576,11 +582,15 @@ func getDisabledThinkingConfig(model *ai.Model) map[string]any {
 	if isGemini3FlashModelByRef(model) {
 		return map[string]any{"thinkingLevel": "MINIMAL"}
 	}
+	if isGemma4Model(model) {
+		return map[string]any{"thinkingLevel": "MINIMAL"}
+	}
 	return map[string]any{"thinkingBudget": 0}
 }
 
 // mapGeminiThinkingLevel maps our thinking levels to Gemini's thinking levels.
 // Gemini 3 Pro only supports LOW and HIGH. Gemini 3 Flash supports MINIMAL-HIGH.
+// Gemma 4 supports MINIMAL and HIGH only.
 func mapGeminiThinkingLevel(level ai.ThinkingLevel, model *ai.Model) string {
 	id := strings.ToLower(model.ID)
 	isPro := strings.Contains(id, "3-pro")
@@ -590,6 +600,18 @@ func mapGeminiThinkingLevel(level ai.ThinkingLevel, model *ai.Model) string {
 		switch level {
 		case ai.ThinkingMinimal, ai.ThinkingLow:
 			return "LOW"
+		case ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh:
+			return "HIGH"
+		default:
+			return "HIGH"
+		}
+	}
+
+	if isGemma4Model(model) {
+		// Gemma 4: only MINIMAL and HIGH
+		switch level {
+		case ai.ThinkingMinimal, ai.ThinkingLow:
+			return "MINIMAL"
 		case ai.ThinkingMedium, ai.ThinkingHigh, ai.ThinkingXHigh:
 			return "HIGH"
 		default:
@@ -631,6 +653,21 @@ func getGoogleBudget(model *ai.Model, effort ai.ThinkingLevel, budgets *ai.Think
 			return 8192
 		case ai.ThinkingHigh, ai.ThinkingXHigh:
 			return 32768
+		default:
+			return 8192
+		}
+	}
+
+	if strings.Contains(id, "2.5-flash-lite") {
+		switch effort {
+		case ai.ThinkingMinimal:
+			return 512
+		case ai.ThinkingLow:
+			return 2048
+		case ai.ThinkingMedium:
+			return 8192
+		case ai.ThinkingHigh, ai.ThinkingXHigh:
+			return 24576
 		default:
 			return 8192
 		}

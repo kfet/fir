@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent-loop.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package agent
 
 import (

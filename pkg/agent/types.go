@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/types.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package agent
 
 import (
@@ -135,6 +135,16 @@ type AgentToolResult struct {
 // AgentToolUpdateCallback is called during streaming tool execution.
 type AgentToolUpdateCallback func(partialResult AgentToolResult)
 
+// ToolExecutionMode controls how tool calls are dispatched.
+// - "sequential": tools must execute one at a time with other tool calls.
+// - "parallel":   tools can execute concurrently with other tool calls.
+type ToolExecutionMode string
+
+const (
+	ToolExecutionSequential ToolExecutionMode = "sequential"
+	ToolExecutionParallel   ToolExecutionMode = "parallel"
+)
+
 // AgentTool extends ai.Tool with execution capability.
 type AgentTool struct {
 	ai.Tool
@@ -145,6 +155,12 @@ type AgentTool struct {
 	// DisplayHint tells the TUI how to format this tool's execution.
 	// Nil means use built-in formatting or the generic fallback.
 	DisplayHint *ToolDisplayHint
+
+	// ExecutionMode is an optional per-tool override of the agent's default
+	// tool execution mode. When set to ToolExecutionSequential, the presence
+	// of this tool in a batch forces the entire batch to execute
+	// sequentially (matching upstream behaviour).
+	ExecutionMode ToolExecutionMode
 
 	// Execute runs the tool. The context can be cancelled for abort.
 	Execute func(

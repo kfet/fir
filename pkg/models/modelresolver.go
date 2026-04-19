@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package models
 
 import (
@@ -34,7 +34,7 @@ var DefaultModelPerProvider = map[ai.Provider]string{
 	"huggingface":            "moonshotai/Kimi-K2.5",
 	"opencode":               "claude-opus-4-6",
 	"opencode-go":            "kimi-k2.5",
-	"kimi-coding":            "kimi-k2-thinking",
+	"kimi-coding":            "kimi-for-coding",
 }
 
 // ParsedModelResult is the result of parsing a model pattern.

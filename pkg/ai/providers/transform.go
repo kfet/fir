@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/transform-messages.ts
-// Upstream hash: 1caadb2e
+// Upstream hash: a1edb8a4
 package providers
 
 import (

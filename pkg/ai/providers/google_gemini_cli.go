@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-gemini-cli.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -29,7 +29,7 @@ const (
 	geminiCLIDefaultEndpoint    = "https://cloudcode-pa.googleapis.com"
 	antigravityDailyEndpoint    = "https://daily-cloudcode-pa.sandbox.googleapis.com"
 	antigravityAutopushEndpoint = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion   = "1.18.4"
+	defaultAntigravityVersion   = "1.21.9"
 	claudeThinkingBetaHeader    = "interleaved-thinking-2025-05-14"
 	geminiCLIMaxRetries         = 3
 	geminiCLIBaseDelayMs        = 1000

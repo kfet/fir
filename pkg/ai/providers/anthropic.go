@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/anthropic.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -89,6 +89,7 @@ func isAuthError(errType, errMsg string) bool {
 
 func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
 		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 

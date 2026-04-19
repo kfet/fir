@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -62,7 +62,8 @@ type openaiUsage struct {
 	CompletionTokens    int `json:"completion_tokens"`
 	TotalTokens         int `json:"total_tokens"`
 	PromptTokensDetails *struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails *struct {
 		ReasoningTokens int `json:"reasoning_tokens"`
@@ -90,6 +91,7 @@ type resolvedCompat struct {
 	RequiresAssistantAfterToolResult bool
 	RequiresThinkingAsText           bool
 	ThinkingFormat                   ai.ThinkingFormat
+	ZaiToolStream                    *bool
 	SupportsStrictMode               bool
 }
 
@@ -184,6 +186,9 @@ func getCompat(model *ai.Model) resolvedCompat {
 	}
 	if c.ThinkingFormat != "" {
 		detected.ThinkingFormat = c.ThinkingFormat
+	}
+	if c.ZaiToolStream != nil {
+		detected.ZaiToolStream = c.ZaiToolStream
 	}
 	if c.SupportsStrictMode != nil {
 		detected.SupportsStrictMode = *c.SupportsStrictMode
@@ -605,23 +610,43 @@ func parseOpenAISSE(
 }
 
 func parseChunkUsage(u *openaiUsage, model *ai.Model) ai.Usage {
-	cachedTokens := 0
+	reportedCached := 0
+	cacheWrite := 0
 	if u.PromptTokensDetails != nil {
-		cachedTokens = u.PromptTokensDetails.CachedTokens
+		reportedCached = u.PromptTokensDetails.CachedTokens
+		cacheWrite = u.PromptTokensDetails.CacheWriteTokens
 	}
 	reasoningTokens := 0
 	if u.CompletionTokensDetails != nil {
 		reasoningTokens = u.CompletionTokensDetails.ReasoningTokens
 	}
-	// OpenAI includes cached tokens in prompt_tokens, subtract to get non-cached input.
-	input := u.PromptTokens - cachedTokens
+
+	// Normalize to pi-ai semantics:
+	// - cacheRead: hits from cache created by previous requests only
+	// - cacheWrite: tokens written to cache in this request
+	// Some OpenAI-compatible providers (observed on OpenRouter) report
+	// cached_tokens as (previous hits + current writes). When cache_write_tokens
+	// is present, strip it out of cacheRead so we don't double-count.
+	cacheRead := reportedCached
+	if cacheWrite > 0 {
+		cacheRead = reportedCached - cacheWrite
+		if cacheRead < 0 {
+			cacheRead = 0
+		}
+	}
+
+	input := u.PromptTokens - cacheRead - cacheWrite
+	if input < 0 {
+		input = 0
+	}
 	// Add reasoning tokens to output (some providers omit them from total_tokens).
 	outputTokens := u.CompletionTokens + reasoningTokens
 	usage := ai.Usage{
 		Input:       input,
 		Output:      outputTokens,
-		CacheRead:   cachedTokens,
-		TotalTokens: input + outputTokens + cachedTokens,
+		CacheRead:   cacheRead,
+		CacheWrite:  cacheWrite,
+		TotalTokens: input + outputTokens + cacheRead + cacheWrite,
 	}
 	ai.CalculateCost(model, &usage)
 	return usage
@@ -704,6 +729,9 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	// Tools
 	if len(ctx.Tools) > 0 {
 		body["tools"] = convertOpenAITools(ctx.Tools, compat)
+		if compat.ZaiToolStream != nil && *compat.ZaiToolStream {
+			body["tool_stream"] = true
+		}
 	} else if hasToolHistory(ctx.Messages) {
 		// Anthropic via LiteLLM/proxy requires tools param when conversation has tool_calls/tool_results
 		body["tools"] = []any{}
@@ -722,7 +750,10 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 		case ai.ThinkingFormatQwen:
 			body["enable_thinking"] = true
 		case ai.ThinkingFormatQwenChatTpl:
-			body["chat_template_kwargs"] = map[string]any{"enable_thinking": true}
+			body["chat_template_kwargs"] = map[string]any{
+				"enable_thinking":   true,
+				"preserve_thinking": true,
+			}
 		case ai.ThinkingFormatOpenRouter:
 			effort := string(options.ReasoningEffort)
 			if mapped, ok := compat.ReasoningEffortMap[effort]; ok {
@@ -743,7 +774,10 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 	} else if compat.ThinkingFormat == ai.ThinkingFormatQwen && model.Reasoning {
 		body["enable_thinking"] = false
 	} else if compat.ThinkingFormat == ai.ThinkingFormatQwenChatTpl && model.Reasoning {
-		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+		body["chat_template_kwargs"] = map[string]any{
+			"enable_thinking":   false,
+			"preserve_thinking": true,
+		}
 	} else if compat.ThinkingFormat == ai.ThinkingFormatOpenRouter && model.Reasoning {
 		body["reasoning"] = map[string]any{"effort": "none"}
 	}

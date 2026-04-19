@@ -1,5 +1,5 @@
 // Ported from: packages/ai/scripts/generate-models.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 //
 // Command generate-models fetches model data from external APIs and generates
 // pkg/ai/models_generated.go. It is a Go port of scripts/generate-models.ts.
@@ -61,6 +61,7 @@ type compatSpec struct {
 	SupportsDeveloperRole   *bool
 	SupportsReasoningEffort *bool
 	ThinkingFormat          string
+	ZaiToolStream           *bool
 }
 
 // boolPtr returns a pointer to b.
@@ -1005,15 +1006,35 @@ func loadModelsDevData() ([]modelSpec, error) {
 		}
 	}
 
-	// --- ZAI ---
-	if p, ok := data["zai"]; ok {
-		for id, m := range p.Models {
+	// --- ZAI (coding plan) ---
+	// Upstream now reads from the "zai-coding-plan" key on models.dev. Fall back
+	// to legacy "zai" for older snapshots.
+	zaiSrc, zaiOk := data["zai-coding-plan"]
+	if !zaiOk {
+		zaiSrc, zaiOk = data["zai"]
+	}
+	// Models that do NOT support top-level tool_stream streaming.
+	zaiToolStreamUnsupported := map[string]bool{
+		"glm-4.5":       true,
+		"glm-4.5-air":   true,
+		"glm-4.5-flash": true,
+		"glm-4.5v":      true,
+	}
+	if zaiOk {
+		for id, m := range zaiSrc.Models {
 			if !m.ToolCall {
 				continue
 			}
 			input := []string{"text"}
 			if hasString(m.Modalities.Input, "image") {
 				input = append(input, "image")
+			}
+			compat := &compatSpec{
+				SupportsDeveloperRole: boolPtr(false),
+				ThinkingFormat:        "zai",
+			}
+			if !zaiToolStreamUnsupported[id] {
+				compat.ZaiToolStream = boolPtr(true)
 			}
 			models = append(models, modelSpec{
 				ID:             id,
@@ -1029,10 +1050,7 @@ func loadModelsDevData() ([]modelSpec, error) {
 				CostCacheWrite: m.Cost.CacheWrite,
 				ContextWindow:  intOr(m.Limit.Context, 4096),
 				MaxTokens:      intOr(m.Limit.Output, 4096),
-				Compat: &compatSpec{
-					SupportsDeveloperRole: boolPtr(false),
-					ThinkingFormat:        "zai",
-				},
+				Compat:         compat,
 			})
 		}
 	}
@@ -1246,17 +1264,31 @@ func loadModelsDevData() ([]modelSpec, error) {
 
 	// --- Kimi For Coding ---
 	if p, ok := data["kimi-for-coding"]; ok {
+		// models.dev still exposes deprecated "k2p5" in some snapshots.
+		// Normalize to the canonical "kimi-for-coding" id and drop duplicates.
+		_, hasCanonical := p.Models["kimi-for-coding"]
 		for id, m := range p.Models {
 			if !m.ToolCall {
 				continue
 			}
+			if id == "k2p5" && hasCanonical {
+				continue
+			}
+
+			normalizedID := id
+			normalizedName := stringOr(m.Name, id)
+			if id == "k2p5" {
+				normalizedID = "kimi-for-coding"
+				normalizedName = "Kimi For Coding"
+			}
+
 			input := []string{"text"}
 			if hasString(m.Modalities.Input, "image") {
 				input = append(input, "image")
 			}
 			models = append(models, modelSpec{
-				ID:             id,
-				Name:           stringOr(m.Name, id),
+				ID:             normalizedID,
+				Name:           normalizedName,
 				API:            "anthropic-messages",
 				Provider:       "kimi-coding",
 				BaseURL:        "https://api.kimi.com/coding",
@@ -1410,6 +1442,21 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		all = append(all, modelSpec{
 			ID:        "claude-opus-4-6",
 			Name:      "Claude Opus 4.6",
+			API:       "anthropic-messages",
+			Provider:  "anthropic",
+			BaseURL:   "https://api.anthropic.com",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
+			ContextWindow: 1000000, MaxTokens: 128000,
+		})
+	}
+
+	// Add missing Claude Opus 4.7
+	if !hasModel(all, "anthropic", "claude-opus-4-7") {
+		all = append(all, modelSpec{
+			ID:        "claude-opus-4-7",
+			Name:      "Claude Opus 4.7",
 			API:       "anthropic-messages",
 			Provider:  "anthropic",
 			BaseURL:   "https://api.anthropic.com",
@@ -1777,21 +1824,6 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 	}
 	all = append(all, vertexModels...)
 
-	// Kimi For Coding static fallbacks
-	kimiCodingModels := []modelSpec{
-		{ID: "kimi-k2-thinking", Name: "Kimi K2 Thinking", API: "anthropic-messages",
-			Provider: "kimi-coding", BaseURL: "https://api.kimi.com/coding", Reasoning: true,
-			Input: []string{"text"}, ContextWindow: 262144, MaxTokens: 32768},
-		{ID: "k2p5", Name: "Kimi K2.5", API: "anthropic-messages",
-			Provider: "kimi-coding", BaseURL: "https://api.kimi.com/coding", Reasoning: true,
-			Input: []string{"text"}, ContextWindow: 262144, MaxTokens: 32768},
-	}
-	for _, m := range kimiCodingModels {
-		if !hasModel(all, "kimi-coding", m.ID) {
-			all = append(all, m)
-		}
-	}
-
 	// Annotate Anthropic Messages Claude models with known server-tool capabilities.
 	for i := range all {
 		m := &all[i]
@@ -1888,6 +1920,9 @@ func renderCompat(c *compatSpec) string {
 	}
 	if c.ThinkingFormat != "" {
 		fields = append(fields, fmt.Sprintf("ThinkingFormat: %s", goString(c.ThinkingFormat)))
+	}
+	if c.ZaiToolStream != nil {
+		fields = append(fields, fmt.Sprintf("ZaiToolStream: boolRef(%v)", *c.ZaiToolStream))
 	}
 	if len(fields) == 0 {
 		return "nil"

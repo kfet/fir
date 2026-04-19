@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses-shared.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (

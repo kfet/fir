@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -120,6 +120,14 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			map[string]string{"Authorization": "Bearer " + apiKey},
 			model, options,
 		)
+
+		// Match upstream: when caching is enabled, set session headers so
+		// providers that key cache on the session pick it up.
+		// See upstream openai-responses.ts createClient()
+		if options != nil && options.SessionID != "" && options.CacheRetention != ai.CacheNone {
+			headers["session_id"] = options.SessionID
+			headers["x-client-request-id"] = options.SessionID
+		}
 
 		firlog.Debug("openai-responses request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 

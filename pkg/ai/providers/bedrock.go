@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 //
 // Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
 // SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
@@ -699,9 +699,10 @@ func supportsBedrockThinkingSignature(model *ai.Model) bool {
 	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
 }
 
-// supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking (Opus 4.6 and Sonnet 4.6).
+// supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking (Opus 4.6+, Sonnet 4.6).
 func supportsBedrockAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
+		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
 		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 

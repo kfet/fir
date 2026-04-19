@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -402,6 +402,7 @@ func buildCodexSSEHeaders(modelHeaders map[string]string, options *ai.StreamOpti
 	headers["OpenAI-Beta"] = "responses=experimental"
 	if options != nil && options.SessionID != "" {
 		headers["session_id"] = options.SessionID
+		headers["x-client-request-id"] = options.SessionID
 	}
 	return headers
 }
@@ -411,6 +412,7 @@ func buildCodexWebSocketHeaders(modelHeaders map[string]string, options *ai.Stre
 	// WebSocket requests must NOT include OpenAI-Beta header
 	if options != nil && options.SessionID != "" {
 		headers["session_id"] = options.SessionID
+		headers["x-client-request-id"] = options.SessionID
 	}
 	return headers
 }

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-vertex.ts
-// Upstream hash: 41039e8d
+// Upstream hash: a1edb8a4
 package providers
 
 import (
@@ -259,13 +259,24 @@ func streamVertexHTTP(
 	return parseGoogleResponse(resp.Body, model, output, stream)
 }
 
+// gcpVertexCredentialsMarker is a sentinel value that indicates credentials
+// should be sourced via ADC / service account JSON rather than treated as a
+// real API key. Mirrors upstream's GCP_VERTEX_CREDENTIALS_MARKER.
+const gcpVertexCredentialsMarker = "gcp-vertex-credentials"
+
 // resolveVertexAPIKey returns the Vertex AI API key from options or env.
 // When set, API key authentication is used instead of ADC (no project/location needed).
 func resolveVertexAPIKey(options *ai.StreamOptions) string {
+	key := ""
 	if options != nil && options.ApiKey != "" {
-		return options.ApiKey
+		key = options.ApiKey
+	} else {
+		key = os.Getenv("GOOGLE_CLOUD_API_KEY")
 	}
-	return os.Getenv("GOOGLE_CLOUD_API_KEY")
+	if key == gcpVertexCredentialsMarker {
+		return ""
+	}
+	return key
 }
 
 // resolveVertexProject resolves the GCP project from options or env.
