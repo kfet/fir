@@ -516,6 +516,74 @@ func TestInteractiveMode_ReexecCommand_NonExecutablePath(t *testing.T) {
 	}
 }
 
+func TestInteractiveMode_ReexecCommand_PromptAfterDoubleDash(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	tm.mode.handleReexecCommand("/reexec -- hello world")
+
+	if tm.mode.reexecBinary == "" {
+		t.Fatalf("expected reexec to be scheduled with default binary")
+	}
+
+	sessionFile := tm.mode.session.SessionStore.GetSessionFile()
+	sc, err := store.ReadReexecSidecar(sessionFile)
+	if err != nil {
+		t.Fatalf("ReadReexecSidecar: %v", err)
+	}
+	if sc == nil || len(sc.QueueMessages) != 1 || sc.QueueMessages[0] != "hello world" {
+		t.Fatalf("QueueMessages = %#v, want [\"hello world\"]", sc)
+	}
+}
+
+func TestInteractiveMode_ReexecCommand_PathAndPrompt(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	bin := filepath.Join(t.TempDir(), "fir-test-bin")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+
+	tm.mode.handleReexecCommand("/reexec " + bin + " -- continue please")
+
+	abs, _ := filepath.Abs(bin)
+	if tm.mode.reexecBinary != abs {
+		t.Fatalf("reexecBinary = %q, want %q", tm.mode.reexecBinary, abs)
+	}
+
+	sessionFile := tm.mode.session.SessionStore.GetSessionFile()
+	sc, err := store.ReadReexecSidecar(sessionFile)
+	if err != nil {
+		t.Fatalf("ReadReexecSidecar: %v", err)
+	}
+	if sc == nil || len(sc.QueueMessages) != 1 || sc.QueueMessages[0] != "continue please" {
+		t.Fatalf("QueueMessages = %#v, want [\"continue please\"]", sc)
+	}
+}
+
+func TestInteractiveMode_ReexecCommand_BarePrompt(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SessionStore.AppendAIMessage(ai.NewUserMsg("persist", 0))
+
+	// Multi-token, first token not path-like → treated as bare prompt
+	// with the default binary.
+	tm.mode.handleReexecCommand("/reexec rerun this task")
+
+	if tm.mode.reexecBinary == "" {
+		t.Fatalf("expected default binary to be scheduled")
+	}
+
+	sessionFile := tm.mode.session.SessionStore.GetSessionFile()
+	sc, err := store.ReadReexecSidecar(sessionFile)
+	if err != nil {
+		t.Fatalf("ReadReexecSidecar: %v", err)
+	}
+	if sc == nil || len(sc.QueueMessages) != 1 || sc.QueueMessages[0] != "rerun this task" {
+		t.Fatalf("QueueMessages = %#v, want [\"rerun this task\"]", sc)
+	}
+}
+
 func TestInteractiveMode_IsBuiltinSlashCommand(t *testing.T) {
 	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 

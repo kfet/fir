@@ -1209,7 +1209,46 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 		return
 	}
 
-	reexecPath := strings.TrimSpace(strings.TrimPrefix(text, "/reexec"))
+	rest := strings.TrimSpace(strings.TrimPrefix(text, "/reexec"))
+	// Parse forms:
+	//   /reexec                       -> default binary
+	//   /reexec <path>                -> custom binary (single token)
+	//   /reexec -- <prompt>           -> default binary + prompt
+	//   /reexec <path> -- <prompt>    -> custom binary + prompt
+	//   /reexec <prompt...>           -> default binary + prompt (when first
+	//                                    token doesn't look like a path)
+	// A token "looks like a path" if it contains '/' or starts with '.'.
+	// For paths containing spaces, use the explicit "--" form.
+	reexecPath := ""
+	continuePrompt := ""
+	if rest != "" {
+		switch {
+		case rest == "--":
+			// empty prompt, default binary
+		case strings.HasPrefix(rest, "-- "):
+			continuePrompt = strings.TrimSpace(rest[3:])
+		default:
+			firstEnd := strings.IndexByte(rest, ' ')
+			first := rest
+			if firstEnd >= 0 {
+				first = rest[:firstEnd]
+			}
+			looksLikePath := strings.ContainsRune(first, '/') || strings.HasPrefix(first, ".")
+			singleToken := firstEnd < 0
+			if !looksLikePath && !singleToken {
+				// Multi-token, first token isn't path-like → whole thing is prompt.
+				continuePrompt = rest
+			} else if idx := strings.Index(rest, " -- "); idx >= 0 {
+				reexecPath = strings.TrimSpace(rest[:idx])
+				continuePrompt = strings.TrimSpace(rest[idx+4:])
+			} else if strings.HasSuffix(rest, " --") {
+				reexecPath = strings.TrimSpace(rest[:len(rest)-3])
+			} else {
+				reexecPath = rest
+			}
+		}
+	}
+
 	binary := ""
 	if reexecPath == "" {
 		var err error
@@ -1259,6 +1298,9 @@ func (m *InteractiveMode) handleReexecCommand(text string) {
 	// RPC calls to complete, and then snapshots all per-extension data.
 	// This must happen before m.Shutdown() cancels the bridge Run goroutines.
 	queueTexts := m.session.PeekFollowUpQueue()
+	if continuePrompt != "" {
+		queueTexts = append(queueTexts, continuePrompt)
+	}
 	sc := &store.ReexecSidecar{
 		QueueMessages: queueTexts,
 	}

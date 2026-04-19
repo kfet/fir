@@ -60,7 +60,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "reload", Description: "Reload extensions, skills, prompts, themes, and MCP servers"},
 	{Name: "skills", Description: "List loaded skills, or install a builtin skill"},
 	{Name: "update", Description: "Update fir to the latest version in-place and restart"},
-	{Name: "reexec", Description: "Re-exec into the current or a specified binary, preserving the session, message queue, and pending input"},
+	{Name: "reexec", Description: "Re-exec into the current or a specified binary, preserving the session, message queue, and pending input. Usage: /reexec [<path>] [-- <prompt>]  |  /reexec <prompt>"},
 	{Name: "queue", Description: "Show the follow-up message queue"},
 	{Name: "dequeue", Description: "Restore queued messages to the editor (/dequeue [N] removes item N)"},
 	{Name: "plan", Description: "Show/hide the current session plan"},

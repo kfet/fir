@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/reexec` now accepts an optional continuation prompt that is injected as the first user message after the re-exec. Forms: `/reexec -- <prompt>`, `/reexec <path> -- <prompt>`, and the shorthand `/reexec <prompt>` (when the first token doesn't look like a path, i.e. contains no `/` and doesn't start with `.`). The prompt rides along in the existing reexec sidecar `QueueMessages`, which is already replayed via `Agent.FollowUp` on the restored side, so no new plumbing was needed.
+
 ### Fixed
 
 - Builtin slash commands (e.g. `/help`, `/model`, `/compact`) are now added to the editor's prompt history, so they can be recalled with up-arrow like regular prompts, `!`-bash commands, and extension slash commands. Previously the builtin-dispatch branch in `setupEditorHandlers` cleared the editor without calling `AddToHistory`.
