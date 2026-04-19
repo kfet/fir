@@ -22,6 +22,7 @@
 
 ### Added
 
+- `extensionPaths` settings key: list of directories to scan for extensions, mirroring the existing `skills` / `prompts` / `themes` path arrays. Entries support absolute, `~/`-relative, and cwd-relative forms; missing paths are silently skipped. Works in both global (`~/.config/fir/settings.json`) and project (`.fir/settings.json`) configs. Lets you keep extensions under e.g. `<project>/extensions/` without symlinking into `.fir/extensions/`.
 - Homebrew tap: `brew install kfet/fir/fir` now works. GoReleaser auto-publishes `Formula/fir.rb` to `kfet/homebrew-fir` on every release, with download URLs pointing at the public `kfet/fir-dist` mirror so installation requires no GitHub authentication. Uses the existing `HOMEBREW_TAP_TOKEN` secret.
 
 ### Changed

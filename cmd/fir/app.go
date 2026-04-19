@@ -193,6 +193,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
 			DisabledNames:       args.DisabledExtensions,
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
+			ExtraExtensionDirs:  resolveSettingsExtensionPaths(cwd, settingsManager),
 		}
 		if !deferExtensions {
 			extSetup, err = extension.Setup(result.Session, *extOpts)
@@ -1050,4 +1051,29 @@ func recordCLIFlags(tracker *Tracker, args *Args) {
 	} else {
 		tracker.Record(EventSession, "new")
 	}
+}
+
+// resolveSettingsExtensionPaths resolves extensionPaths entries from settings
+// (merged global + project) against cwd, matching the semantics used for
+// skills/prompts/themes path settings. Relative paths resolve against cwd,
+// '~' expands to $HOME, and absolute paths pass through unchanged.
+func resolveSettingsExtensionPaths(cwd string, sm *config.SettingsManager) []string {
+	if sm == nil {
+		return nil
+	}
+	raw := sm.GetExtensionPaths()
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]bool)
+	for _, p := range raw {
+		r := resources.ResolveResourcePath(cwd, p)
+		if r == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
 }

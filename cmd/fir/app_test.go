@@ -12,6 +12,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
+	"github.com/kfet/fir/pkg/config"
 )
 
 // ============================================================================
@@ -591,5 +592,36 @@ func TestSetupSession_DeferExtensions_FasterThanBlocking(t *testing.T) {
 
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("setupSession with deferExtensions=true took %v, expected < 500ms", elapsed)
+	}
+}
+
+func TestResolveSettingsExtensionPaths(t *testing.T) {
+	cwd := t.TempDir()
+	sm := config.NewInMemorySettingsManager(config.Settings{
+		ExtensionPaths: []string{"ext", "/abs/path", "ext", "  dup  "},
+	})
+	got := resolveSettingsExtensionPaths(cwd, sm)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 paths after dedup, got %d: %v", len(got), got)
+	}
+	if got[0] != cwd+"/ext" {
+		t.Errorf("expected relative 'ext' resolved to %s/ext, got %s", cwd, got[0])
+	}
+	if got[1] != "/abs/path" {
+		t.Errorf("expected absolute path preserved, got %s", got[1])
+	}
+	// "  dup  " trims to "dup" — different from "ext"
+	if got[2] != cwd+"/dup" {
+		t.Errorf("expected trimmed relative 'dup' resolved, got %s", got[2])
+	}
+}
+
+func TestResolveSettingsExtensionPaths_Nil(t *testing.T) {
+	if got := resolveSettingsExtensionPaths("/cwd", nil); got != nil {
+		t.Errorf("expected nil for nil settings, got %v", got)
+	}
+	sm := config.NewInMemorySettingsManager(config.Settings{})
+	if got := resolveSettingsExtensionPaths("/cwd", sm); got != nil {
+		t.Errorf("expected nil for empty, got %v", got)
 	}
 }

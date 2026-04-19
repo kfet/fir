@@ -606,6 +606,12 @@ func mergePaths(cwd string, primary, additional []string) []string {
 	return merged
 }
 
+// ResolveResourcePath expands ~ and resolves relative paths against cwd.
+// Exported for callers that need the same resolution semantics as resource paths.
+func ResolveResourcePath(cwd, p string) string {
+	return resolveResourcePath(cwd, p)
+}
+
 // resolveResourcePath expands ~ and resolves relative paths.
 func resolveResourcePath(cwd, p string) string {
 	trimmed := strings.TrimSpace(p)

@@ -113,7 +113,7 @@ Skills, prompts, and themes are discovered from multiple locations, merged in pr
 
 ### Settings Path Resolution
 
-Paths in `"skills"`, `"prompts"`, and `"themes"` settings arrays support three forms:
+Paths in `"skills"`, `"prompts"`, `"themes"`, and `"extensionPaths"` settings arrays support three forms:
 
 | Form | Example | Resolves to |
 |------|---------|-------------|
@@ -127,7 +127,8 @@ Paths in `"skills"`, `"prompts"`, and `"themes"` settings arrays support three f
 // In ~/.config/fir/settings.json (global):
 {
   "skills": ["skills"],       // → finds ./skills/ in any project that has one
-  "prompts": ["prompts"]      // → finds ./prompts/ in any project that has one
+  "prompts": ["prompts"],     // → finds ./prompts/ in any project that has one
+  "extensionPaths": ["extensions"]  // → finds ./extensions/ in any project
 }
 ```
 
@@ -260,6 +261,10 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
 
   // Extension/skill/prompt/theme allowlists (empty = all)
   "extensions": [],
+
+  // Extension search directories (relative paths resolve against cwd)
+  //   "extensionPaths": ["extensions"]  → looks for ./extensions/ in every project
+  "extensionPaths": [],
 
   // Additional resource lookup paths (resolved per-invocation relative to cwd)
   // Use absolute paths, ~/... paths, or relative paths.

@@ -81,6 +81,7 @@ type Settings struct {
 	CollapseChangelog      *bool                     `json:"collapseChangelog,omitempty"`
 	Packages               []any                     `json:"packages,omitempty"`
 	Extensions             []string                  `json:"extensions,omitempty"`
+	ExtensionPaths         []string                  `json:"extensionPaths,omitempty"`
 	Skills                 []string                  `json:"skills,omitempty"`
 	Prompts                []string                  `json:"prompts,omitempty"`
 	Themes                 []string                  `json:"themes,omitempty"`
@@ -131,6 +132,9 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	}
 	if overrides.Extensions != nil {
 		r.Extensions = overrides.Extensions
+	}
+	if overrides.ExtensionPaths != nil {
+		r.ExtensionPaths = overrides.ExtensionPaths
 	}
 	if overrides.Skills != nil {
 		r.Skills = overrides.Skills
@@ -874,6 +878,15 @@ func (sm *SettingsManager) GetThemePaths() []string {
 	return out
 }
 
+// GetExtensionPaths returns extra extension search directories from settings.
+func (sm *SettingsManager) GetExtensionPaths() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	out := make([]string, len(sm.settings.ExtensionPaths))
+	copy(out, sm.settings.ExtensionPaths)
+	return out
+}
+
 // GetSkillPaths returns extra skill directories/files from settings.
 func (sm *SettingsManager) GetSkillPaths() []string {
 	sm.mu.RLock()
@@ -1017,13 +1030,23 @@ func (sm *SettingsManager) SetProjectPackages(packages []any) {
 	sm.saveProjectSettings(projectSettings)
 }
 
-// SetProjectExtensionPaths sets the extensions setting in the project settings file.
-func (sm *SettingsManager) SetProjectExtensionPaths(paths []string) {
+// SetProjectEnabledExtensions sets the extensions allowlist in the project settings file.
+func (sm *SettingsManager) SetProjectEnabledExtensions(paths []string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	projectSettings := deepCopySettings(sm.projectSettings)
 	projectSettings.Extensions = paths
 	sm.markProjectModified("extensions")
+	sm.saveProjectSettings(projectSettings)
+}
+
+// SetProjectExtensionPaths sets the extensionPaths setting in the project settings file.
+func (sm *SettingsManager) SetProjectExtensionPaths(paths []string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	projectSettings := deepCopySettings(sm.projectSettings)
+	projectSettings.ExtensionPaths = paths
+	sm.markProjectModified("extensionPaths")
 	sm.saveProjectSettings(projectSettings)
 }
 

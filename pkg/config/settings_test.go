@@ -350,7 +350,7 @@ func TestSettingsManager_ProjectSetters(t *testing.T) {
 	agentDir := t.TempDir()
 	sm := NewSettingsManager(cwd, agentDir)
 
-	sm.SetProjectExtensionPaths([]string{"/ext/a", "/ext/b"})
+	sm.SetProjectEnabledExtensions([]string{"/ext/a", "/ext/b"})
 	assert.Equal(t, []string{"/ext/a", "/ext/b"}, sm.GetEnabledExtensions())
 
 	sm.SetProjectSkillPaths([]string{"/skills/a"})
@@ -362,11 +362,15 @@ func TestSettingsManager_ProjectSetters(t *testing.T) {
 	sm.SetProjectThemePaths([]string{"/themes/a"})
 	assert.Equal(t, []string{"/themes/a"}, sm.GetThemePaths())
 
+	sm.SetProjectExtensionPaths([]string{"/ext-search/a", "/ext-search/b"})
+	assert.Equal(t, []string{"/ext-search/a", "/ext-search/b"}, sm.GetExtensionPaths())
+
 	proj := sm.GetProjectSettings()
 	assert.Equal(t, []string{"/ext/a", "/ext/b"}, proj.Extensions)
 	assert.Equal(t, []string{"/skills/a"}, proj.Skills)
 	assert.Equal(t, []string{"/prompts/a"}, proj.Prompts)
 	assert.Equal(t, []string{"/themes/a"}, proj.Themes)
+	assert.Equal(t, []string{"/ext-search/a", "/ext-search/b"}, proj.ExtensionPaths)
 }
 
 func TestSettingsManager_InMemoryStorage(t *testing.T) {
