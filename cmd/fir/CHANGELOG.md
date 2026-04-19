@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Flaky race test `TestHandleDequeue_ClearsQueueAfterDequeue` (and 17 sibling tests in `pkg/modes/interactive` sharing the same pattern) surfaced by CI run 24623416594. The `testMode.waitRender()` helper relied on a fixed 10 ms `time.Sleep`, racing against the asynchronous TUI render goroutine. Replaced with a synchronous `ui.DoRender()` call preceded by a single `runtime.Gosched()`, which is deterministic under `-race` and adds no extra sleep on the happy path.
+
 ### Added
 
 - Homebrew tap: `brew install kfet/fir/fir` now works. GoReleaser auto-publishes `Formula/fir.rb` to `kfet/homebrew-fir` on every release, with download URLs pointing at the public `kfet/fir-dist` mirror so installation requires no GitHub authentication. Uses the existing `HOMEBREW_TAP_TOKEN` secret.
