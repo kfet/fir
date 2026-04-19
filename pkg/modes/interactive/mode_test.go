@@ -1447,11 +1447,12 @@ func TestHandleDequeue_ClearsQueueAfterDequeue(t *testing.T) {
 	// Second dequeue on now-empty queue should show "No queued".
 	tm.mode.editor.SetText("") // clear editor to avoid merge confusion
 	tm.mode.handleDequeue()
-	tm.waitRender()
 
-	output := tm.renderedOutput()
-	if !strings.Contains(output, "No queued") {
-		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", output)
+	// Poll for the status message rather than relying on a fixed sleep —
+	// under the race detector on CI, 10ms is not always enough for the TUI
+	// render goroutine to flush showStatus() output to the mock terminal.
+	if !tm.waitForOutput("No queued") {
+		t.Errorf("expected 'No queued' after second dequeue, got:\n%s", tm.renderedOutput())
 	}
 }
 
