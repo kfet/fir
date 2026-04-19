@@ -15,6 +15,7 @@
 
 ### Changed
 
+- `review-and-fix` skill: final summary now leads with a one-line high-level description of what the reviewed code implements, giving reviewers immediate context before the file/iteration/issue breakdown.
 - `provider-usage` extension no longer auto-loads: frontmatter flipped to `builtin: false`. It is still embedded in the binary and can be enabled explicitly (`--extension provider-usage` or via `settings.json` `"extensions"`). Rationale: it's a TUI-only status-bar widget that polls provider APIs every 5 minutes — not a sensible always-on default, especially for non-interactive / headless fir sessions.
 - `tmux-driver` skill: new "Spawning `fir` Inside a Window" section instructing agents to pass `-d auto-namer -d notify -d provider-usage -d tmuxspinner` when they launch a child fir process in a tmux-driver window. These four builtin extensions fight tmux-driver's fixed window-name routing (`auto-namer`, `tmuxspinner`), spam the host desktop (`notify`), or render into a non-existent status bar (`provider-usage`).
 - `shepherd` skill: worker-launch example now includes the same four `-d` flags.

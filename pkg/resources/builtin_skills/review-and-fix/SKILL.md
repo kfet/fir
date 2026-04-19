@@ -62,4 +62,4 @@ Always commit. Only skip if the working tree is truly clean.
 
 ## Output
 
-Summarize: files reviewed, review iterations, issues found (by category), issues fixed, final build status, commit hash + message.
+Summarize: one-line high-level description of what the reviewed code implements, files reviewed, review iterations, issues found (by category), issues fixed, final build status, commit hash + message.
