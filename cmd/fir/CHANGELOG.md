@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-04-19
+
 ### Added
 
 - `/reexec` now accepts an optional continuation prompt that is injected as the first user message after the re-exec. Forms: `/reexec -- <prompt>`, `/reexec <path> -- <prompt>`, and the shorthand `/reexec <prompt>` (when the first token doesn't look like a path, i.e. contains no `/` and doesn't start with `.`). The prompt rides along in the existing reexec sidecar `QueueMessages`, which is already replayed via `Agent.FollowUp` on the restored side, so no new plumbing was needed.
