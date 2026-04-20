@@ -34,7 +34,6 @@ var providerEnvMap = map[string]string{
 // be expressed as a single key→envvar mapping (multi-var checks, special cases).
 var additionalAuthEnvVars = []string{
 	// anthropic
-	"ANTHROPIC_OAUTH_TOKEN",
 	"ANTHROPIC_API_KEY",
 	// github-copilot
 	"COPILOT_GITHUB_TOKEN",
@@ -103,10 +102,6 @@ func GetEnvApiKey(provider string) string {
 		return os.Getenv("GITHUB_TOKEN")
 
 	case string(ai.ProviderAnthropic):
-		// ANTHROPIC_OAUTH_TOKEN takes precedence over ANTHROPIC_API_KEY
-		if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
-			return v
-		}
 		return os.Getenv("ANTHROPIC_API_KEY")
 
 	case string(ai.ProviderGoogleVertex):

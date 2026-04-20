@@ -141,7 +141,8 @@ func TestAuthStorage_GetApiKey_OAuth(t *testing.T) {
 
 	s := NewAuthStorage(path)
 
-	// Test OAuth credential returns access token
+	// OAuth credential without a registered provider should return empty —
+	// the token can't be refreshed and the provider won't use Bearer auth.
 	s.Set("anthropic", AuthCredential{
 		Type:    CredentialTypeOAuth,
 		Access:  "sk-ant-oat01-test-token",
@@ -150,8 +151,18 @@ func TestAuthStorage_GetApiKey_OAuth(t *testing.T) {
 	})
 
 	key := s.GetApiKey("anthropic")
+	if key != "" {
+		t.Errorf("expected empty key without OAuth provider, got %q", key)
+	}
+
+	// With a registered OAuth provider, the token should be returned.
+	mock := &mockOAuthProvider{id: "anthropic"}
+	oauth.RegisterProvider(mock)
+	defer oauth.UnregisterProvider("anthropic")
+
+	key = s.GetApiKey("anthropic")
 	if key != "sk-ant-oat01-test-token" {
-		t.Errorf("expected OAuth access token, got %q", key)
+		t.Errorf("expected OAuth access token with provider, got %q", key)
 	}
 }
 

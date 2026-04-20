@@ -21,14 +21,6 @@ func TestGetEnvApiKey_Anthropic_APIKey(t *testing.T) {
 	}
 }
 
-func TestGetEnvApiKey_Anthropic_OAuthTakesPrecedence(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-	t.Setenv("ANTHROPIC_OAUTH_TOKEN", "oauth-token")
-	if got := GetEnvApiKey("anthropic"); got != "oauth-token" {
-		t.Errorf("expected 'oauth-token', got %q", got)
-	}
-}
-
 func TestGetEnvApiKey_GitHubCopilot(t *testing.T) {
 	t.Setenv("COPILOT_GITHUB_TOKEN", "ghu_test")
 	if got := GetEnvApiKey("github-copilot"); got != "ghu_test" {

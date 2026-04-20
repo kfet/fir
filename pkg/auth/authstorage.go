@@ -398,8 +398,12 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
 			oauthProvider := oauth.GetProvider(provider)
 			if oauthProvider == nil {
+				// OAuth extension not loaded — token can't be refreshed and
+				// the provider won't know to send it as Bearer auth. Return
+				// empty so the caller gets a clear "no API key" error instead
+				// of a confusing auth failure with x-api-key.
 				s.mu.RUnlock()
-				return cred.Access
+				return ""
 			}
 
 			// Check if token needs refresh

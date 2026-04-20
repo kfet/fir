@@ -57,7 +57,11 @@
 ### Fixed
 
 - Redeploy no longer leaks agent processes. Previous versions installed a process-wide SIGHUP handler that converted SIGHUP into an in-place re-exec. When `tmux respawn-window -k` (used by `make poe-deploy`) or any ssh/tty hangup delivered SIGHUP, fir re-exec'd itself instead of exiting, detaching from the dying pane. Because MCP/extension subprocesses run in their own process groups (Setpgid), `syscall.Exec` preserved them across the re-exec, so each unintended SIGHUP orphaned a tree of subprocesses. SIGHUP now takes its default action (terminate); `/reexec` and `/update` continue to work since they call the reexec path directly without signals.
+- OAuth tokens no longer sent as `x-api-key` when the auth extension is not loaded; `GetApiKey` returns empty instead, surfacing a clear "no API key" error.
 
+### Removed
+
+- `ANTHROPIC_OAUTH_TOKEN` environment variable — OAuth tokens require refreshing, which env vars cannot support. Use `fir login anthropic` instead.
 
 ## [0.29.0] - 2026-04-16
 
