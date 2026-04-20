@@ -1948,7 +1948,18 @@ func TestStartUpdateNoticeWatcher_ShowsNotice(t *testing.T) {
 
 	before := tm.messageCount()
 	tm.mode.startUpdateNoticeWatcher()
-	tm.waitRender()
+
+	// Poll: the watcher runs in a goroutine and races with our check. Wait
+	// up to 2s for the message to appear (re-rendering each iteration to
+	// flush component state).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		tm.waitRender()
+		if tm.messageCount() > before {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	if tm.messageCount() <= before {
 		t.Error("expected message to be added when notice is non-empty")

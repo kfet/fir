@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Flaky test `TestStartUpdateNoticeWatcher_ShowsNotice` (CI run 24650519048): the watcher goroutine raced with the test's single `waitRender()` check. Replaced with a poll loop that re-renders up to 2s.
+
 ## [0.31.0] - 2026-04-19
 
 ### Added
