@@ -109,13 +109,22 @@ func TestLiveModelState_Permissive(t *testing.T) {
 
 func TestLiveModelState_Filters(t *testing.T) {
 	s := newLiveModelState()
-	s.set([]LiveModelInfo{{ID: "model-a"}, {ID: "model-b"}})
+	s.set([]*ai.Model{
+		{ID: "model-a", Provider: "test", Name: "Model A", ContextWindow: 128000, MaxTokens: 4096},
+		{ID: "model-b", Provider: "test", Name: "Model B", ContextWindow: 128000, MaxTokens: 4096},
+	})
 
 	if !s.has("model-a") {
 		t.Error("expected model-a to be available")
 	}
 	if s.has("model-c") {
 		t.Error("expected model-c to be unavailable")
+	}
+	if m := s.get("model-a"); m == nil || m.Name != "Model A" {
+		t.Error("expected get() to return synthesised model")
+	}
+	if m := s.get("model-c"); m != nil {
+		t.Error("expected get() to return nil for unknown")
 	}
 }
 
@@ -145,7 +154,9 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 
 	// Simulate live fetch completing with only real-model
 	state := newLiveModelState()
-	state.set([]LiveModelInfo{{ID: "real-model"}})
+	state.set([]*ai.Model{
+		{ID: "real-model", Provider: "anthropic", Name: "Real Model", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com", ContextWindow: 128000, MaxTokens: 4096},
+	})
 	registry.liveModelsMu.Lock()
 	registry.liveModels["anthropic"] = state
 	registry.liveModelsMu.Unlock()
@@ -173,7 +184,10 @@ func TestLiveCachePersistence(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	registry := NewModelRegistry(authStore, "")
 
-	models := []LiveModelInfo{{ID: "model-a"}, {ID: "model-b"}}
+	models := []*ai.Model{
+		{ID: "model-a", Provider: "test", Name: "Model A", ContextWindow: 128000, MaxTokens: 4096},
+		{ID: "model-b", Provider: "test", Name: "Model B", ContextWindow: 128000, MaxTokens: 4096},
+	}
 	registry.saveLiveCache(tmpDir, "test-provider", models)
 
 	loaded, ok := registry.loadLiveCache(tmpDir, "test-provider")
@@ -185,7 +199,7 @@ func TestLiveCachePersistence(t *testing.T) {
 	}
 
 	// Verify expired cache is rejected
-	cachePath := filepath.Join(tmpDir, "live-models-test-provider.json")
+	cachePath := liveCachePath(tmpDir, "test-provider")
 	data, _ := os.ReadFile(cachePath)
 	var cache liveModelCache
 	json.Unmarshal(data, &cache)
@@ -205,8 +219,12 @@ func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
 	registry := NewModelRegistry(authStore, "")
 
 	// Seed disk cache and in-memory state as if a previous fetch happened.
-	registry.saveLiveCache(tmpDir, "prov-a", []LiveModelInfo{{ID: "m1"}})
-	registry.saveLiveCache(tmpDir, "prov-b", []LiveModelInfo{{ID: "m2"}})
+	registry.saveLiveCache(tmpDir, "prov-a", []*ai.Model{
+		{ID: "m1", Provider: "prov-a", Name: "M1", ContextWindow: 128000, MaxTokens: 4096},
+	})
+	registry.saveLiveCache(tmpDir, "prov-b", []*ai.Model{
+		{ID: "m2", Provider: "prov-b", Name: "M2", ContextWindow: 128000, MaxTokens: 4096},
+	})
 
 	// Write an unrelated file that must NOT be deleted.
 	keepPath := filepath.Join(tmpDir, "other-file.json")
@@ -231,10 +249,10 @@ func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
 	}
 
 	// Disk caches for live-models-* removed.
-	if _, err := os.Stat(filepath.Join(tmpDir, "live-models-prov-a.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(liveCachePath(tmpDir, "prov-a")); !os.IsNotExist(err) {
 		t.Errorf("expected prov-a cache removed, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(tmpDir, "live-models-prov-b.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(liveCachePath(tmpDir, "prov-b")); !os.IsNotExist(err) {
 		t.Errorf("expected prov-b cache removed, err=%v", err)
 	}
 	// Unrelated file preserved.

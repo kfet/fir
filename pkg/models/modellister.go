@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // LiveModelInfo represents a model ID returned by a provider's list-models API.
@@ -19,6 +21,14 @@ type LiveModelInfo struct {
 type ModelLister interface {
 	// ListModels returns the model IDs available for this provider.
 	ListModels(ctx context.Context, baseURL, apiKey string) ([]LiveModelInfo, error)
+}
+
+// ListerModelDefaulter is an optional interface for ModelLister implementations
+// that can supply metadata for a live-listed model ID not present in the
+// built-in registry. Returns nil to defer to the generic sibling-clone
+// fallback. Implementations must be cheap (no network).
+type ListerModelDefaulter interface {
+	ModelDefaults(provider, modelID string, siblings []*ai.Model) *ai.Model
 }
 
 // --- OpenAI-compatible lister (covers OpenAI, xAI, Groq, Cerebras, OpenRouter, Huggingface) ---
@@ -60,6 +70,80 @@ func (l *openAIModelLister) ListModels(ctx context.Context, baseURL, apiKey stri
 		models[i] = LiveModelInfo{ID: m.ID}
 	}
 	return models, nil
+}
+
+// ModelDefaults provides per-provider heuristics. The OpenAI lister is shared
+// across several providers (openai, xai, groq, cerebras, openrouter, huggingface)
+// each of which has its own naming conventions worth special-casing.
+func (l *openAIModelLister) ModelDefaults(provider, modelID string, siblings []*ai.Model) *ai.Model {
+	switch provider {
+	case "openai":
+		return cloneFromGroup(modelID, siblings, openAIFamily, humaniseID)
+	case "openrouter":
+		return cloneFromGroup(modelID, siblings, openRouterVendor, humaniseID)
+	default:
+		// xai, groq, cerebras, huggingface: rely on generic sibling-clone.
+		return nil
+	}
+}
+
+// cloneFromGroup picks the lexicographically-greatest sibling whose group
+// (per groupFn) matches the new model's group, then clones it with the new
+// ID and a humanised name (per nameFn). Returns nil if no sibling matches.
+func cloneFromGroup(
+	modelID string,
+	siblings []*ai.Model,
+	groupFn func(string) string,
+	nameFn func(string) string,
+) *ai.Model {
+	group := groupFn(modelID)
+	if group == "" {
+		return nil
+	}
+	var match *ai.Model
+	for _, s := range siblings {
+		if groupFn(s.ID) == group {
+			if match == nil || s.ID > match.ID {
+				match = s
+			}
+		}
+	}
+	if match == nil {
+		return nil
+	}
+	out := *match
+	out.ID = modelID
+	out.Name = nameFn(modelID)
+	out.SWEInferred = true
+	return &out
+}
+
+// openAIFamily classifies an OpenAI model ID into its family group.
+func openAIFamily(id string) string {
+	switch {
+	case strings.HasPrefix(id, "gpt-4o"):
+		return "gpt-4o"
+	case strings.HasPrefix(id, "gpt-4.1"):
+		return "gpt-4.1"
+	case strings.HasPrefix(id, "gpt-5"):
+		return "gpt-5"
+	case strings.HasPrefix(id, "o1"):
+		return "o1"
+	case strings.HasPrefix(id, "o3"):
+		return "o3"
+	case strings.HasPrefix(id, "o4"):
+		return "o4"
+	}
+	return ""
+}
+
+// openRouterVendor extracts the vendor prefix: "anthropic/claude-x" -> "anthropic".
+func openRouterVendor(id string) string {
+	vendor, _, ok := strings.Cut(id, "/")
+	if !ok {
+		return ""
+	}
+	return vendor
 }
 
 // --- Anthropic lister ---
@@ -117,6 +201,54 @@ func (l *anthropicModelLister) ListModels(ctx context.Context, baseURL, apiKey s
 	}
 
 	return all, nil
+}
+
+// ModelDefaults parses Anthropic IDs of the form
+// "claude-<family>-<major>-<minor>-<yyyymmdd>" and clones the most recent
+// sibling of the same family. Falls back to nil for unparseable IDs.
+func (l *anthropicModelLister) ModelDefaults(_ string, modelID string, siblings []*ai.Model) *ai.Model {
+	return cloneFromGroup(modelID, siblings, anthropicFamily, anthropicHumanName)
+}
+
+// anthropicFamily extracts the family token: "claude-sonnet-4-7-20260601" -> "sonnet".
+func anthropicFamily(id string) string {
+	if !strings.HasPrefix(id, "claude-") {
+		return ""
+	}
+	rest := strings.TrimPrefix(id, "claude-")
+	parts := strings.SplitN(rest, "-", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	switch parts[0] {
+	case "opus", "sonnet", "haiku":
+		return parts[0]
+	}
+	return ""
+}
+
+// anthropicHumanName produces a readable name like "Claude Sonnet 4 7 (2026-06-01)".
+// If no trailing date is present, falls back to humaniseID.
+func anthropicHumanName(id string) string {
+	parts := strings.Split(id, "-")
+	if len(parts) >= 2 && len(parts[len(parts)-1]) == 8 && allDigits(parts[len(parts)-1]) {
+		date := parts[len(parts)-1]
+		core := humaniseID(strings.Join(parts[:len(parts)-1], "-"))
+		return fmt.Sprintf("%s (%s-%s-%s)", core, date[:4], date[4:6], date[6:8])
+	}
+	return humaniseID(id)
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // --- Google Generative AI lister ---

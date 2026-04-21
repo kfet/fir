@@ -77,6 +77,17 @@ type Provider interface {
 	ModifyModels(models []*ai.Model, creds *Credentials) []*ai.Model
 }
 
+// ModelDefaulter is an optional interface that Provider implementations may
+// also satisfy. It lets the provider supply metadata for a model ID returned
+// by ListModels but not present in the built-in registry.
+//
+// Returning nil means "I have nothing special for this ID" — the caller then
+// falls back to a generic sibling-clone heuristic. Implementations should be
+// cheap (no network) since this is called during live-list synthesis.
+type ModelDefaulter interface {
+	ModelDefaults(modelID string, siblings []*ai.Model) *ai.Model
+}
+
 // ProviderInfo describes an OAuth provider for display in the UI.
 type ProviderInfo struct {
 	ID        string

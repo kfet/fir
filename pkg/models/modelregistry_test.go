@@ -79,8 +79,32 @@ func TestModelRegistry_Find(t *testing.T) {
 	}
 
 	m = registry.Find("test-provider-find", "nonexistent")
+	// With cold-start synthesis, an unknown ID returns a sibling-cloned model
+	// rather than nil when siblings exist (and no live-list state contradicts
+	// it). Verify it inherits the sibling's wire-protocol fields.
+	if m == nil {
+		t.Fatal("expected synthesised model for unknown ID when siblings exist, got nil")
+	}
+	if m.ID != "nonexistent" || m.Provider != "test-provider-find" {
+		t.Errorf("expected synthesised model with correct ID/Provider, got %+v", m)
+	}
+	if m.Api != ai.ApiAnthropicMessages {
+		t.Errorf("expected synth to inherit sibling's Api, got %q", m.Api)
+	}
+	if m.BaseURL != "https://api.test.com" {
+		t.Errorf("expected synth to inherit sibling's BaseURL, got %q", m.BaseURL)
+	}
+	if m.ContextWindow != 128000 {
+		t.Errorf("expected synth to inherit sibling's ContextWindow, got %d", m.ContextWindow)
+	}
+	if !m.SWEInferred {
+		t.Error("expected synth to flag SWEInferred=true")
+	}
+
+	// When no siblings exist at all, Find returns nil
+	m = registry.Find("unknown-provider", "unknown-model")
 	if m != nil {
-		t.Error("expected nil for nonexistent model")
+		t.Error("expected nil for unknown provider with no siblings")
 	}
 }
 

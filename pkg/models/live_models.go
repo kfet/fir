@@ -9,40 +9,42 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // liveModelCache is the on-disk cache format for a provider's live model list.
+// V2 stores fully-synthesised model metadata so cold-start Find() can resolve
+// previously-seen IDs without waiting for a fresh fetch. The filename embeds
+// the version (live-models-v2-<provider>.json) so v1 caches from older fir
+// builds are ignored rather than silently mis-decoded into half-empty Models.
 type liveModelCache struct {
-	Provider  string          `json:"provider"`
-	Models    []LiveModelInfo `json:"models"`
-	FetchedAt time.Time       `json:"fetchedAt"`
+	Provider  string      `json:"provider"`
+	Models    []*ai.Model `json:"models"` // synthesised metadata, not just IDs
+	FetchedAt time.Time   `json:"fetchedAt"`
 }
 
 const liveCacheTTL = 1 * time.Hour
 
 // liveModelState tracks the background-fetched models for a single provider.
 type liveModelState struct {
-	mu       sync.RWMutex
-	modelIDs map[string]bool // set of model IDs available from the API
-	fetched  bool            // true once the first fetch completes (success or fail)
-	err      error           // last fetch error, if any
-	done     chan struct{}   // closed when fetch completes
+	mu      sync.RWMutex
+	models  []*ai.Model   // fully-synthesised models
+	fetched bool          // true once the first fetch completes (success or fail)
+	err     error         // last fetch error, if any
+	done    chan struct{} // closed when fetch completes
 }
 
 func newLiveModelState() *liveModelState {
 	return &liveModelState{done: make(chan struct{})}
 }
 
-func (s *liveModelState) set(ids []LiveModelInfo) {
+func (s *liveModelState) set(models []*ai.Model) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.modelIDs = make(map[string]bool, len(ids))
-	for _, m := range ids {
-		s.modelIDs[m.ID] = true
-	}
+	s.models = models
 	if !s.fetched {
 		s.fetched = true
 		close(s.done)
@@ -63,10 +65,42 @@ func (s *liveModelState) setError(err error) {
 func (s *liveModelState) has(modelID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.fetched || s.err != nil || s.modelIDs == nil {
+	if !s.fetched || s.err != nil || s.models == nil {
 		return true // not yet fetched, error, or no data: be permissive
 	}
-	return s.modelIDs[modelID]
+	for _, m := range s.models {
+		if m.ID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+// get returns a synthesised model by ID, or nil if not found.
+func (s *liveModelState) get(modelID string) *ai.Model {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, m := range s.models {
+		if m.ID == modelID {
+			return m
+		}
+	}
+	return nil
+}
+
+// ids returns a snapshot of live model IDs, or nil if the fetch hasn't
+// completed or produced usable data.
+func (s *liveModelState) ids() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.fetched || s.err != nil || s.models == nil {
+		return nil
+	}
+	out := make([]string, len(s.models))
+	for i, m := range s.models {
+		out[i] = m.ID
+	}
+	return out
 }
 
 // StartLiveModelFetch kicks off background goroutines to fetch live model lists
@@ -174,13 +208,11 @@ func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string,
 		return
 	}
 
-	infos := make([]LiveModelInfo, len(ids))
-	for i, id := range ids {
-		infos[i] = LiveModelInfo{ID: id}
-	}
-	state.set(infos)
-	r.saveLiveCache(cacheDir, providerID, infos)
-	firlog.Debug("live model list for OAuth provider %s: %d models", providerID, len(infos))
+	// Synthesise metadata for returned IDs using built-in siblings.
+	models := r.synthesiseForLiveIDs(ctx, providerID, ids)
+	state.set(models)
+	r.saveLiveCache(cacheDir, providerID, models)
+	firlog.Debug("live model list for OAuth provider %s: %d models", providerID, len(models))
 }
 
 func (r *ModelRegistry) getProvidersWithAuth() []string {
@@ -218,12 +250,22 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 		return
 	}
 
-	models, err := lister.ListModels(ctx, baseURL, apiKey)
+	// Fetch raw IDs only from provider API
+	raw, err := lister.ListModels(ctx, baseURL, apiKey)
 	if err != nil {
 		firlog.Debug("live model list failed for %s: %v", provider, err)
 		state.setError(err)
 		return
 	}
+
+	// Convert []LiveModelInfo to []string for synthesis
+	ids := make([]string, len(raw))
+	for i, m := range raw {
+		ids[i] = m.ID
+	}
+
+	// Synthesise full metadata using built-in siblings
+	models := r.synthesiseForLiveIDs(ctx, provider, ids)
 
 	state.set(models)
 	r.saveLiveCache(cacheDir, provider, models)
@@ -231,10 +273,18 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 }
 
 func liveCachePath(cacheDir, provider string) string {
-	return filepath.Join(cacheDir, "live-models-"+provider+".json")
+	return filepath.Join(cacheDir, "live-models-v2-"+provider+".json")
 }
 
-func (r *ModelRegistry) loadLiveCache(cacheDir, provider string) ([]LiveModelInfo, bool) {
+// liveCachePrefixes lists every on-disk cache filename prefix this binary
+// recognises. Used by RefreshLive to scrub stale files (including ones from
+// previous schema versions, so they never resurrect bad metadata).
+var liveCachePrefixes = []string{
+	"live-models-v2-",
+	"live-models-", // legacy v1 (raw IDs); always treated as stale.
+}
+
+func (r *ModelRegistry) loadLiveCache(cacheDir, provider string) ([]*ai.Model, bool) {
 	if cacheDir == "" {
 		return nil, false
 	}
@@ -252,7 +302,7 @@ func (r *ModelRegistry) loadLiveCache(cacheDir, provider string) ([]LiveModelInf
 	return cache.Models, true
 }
 
-func (r *ModelRegistry) saveLiveCache(cacheDir, provider string, models []LiveModelInfo) {
+func (r *ModelRegistry) saveLiveCache(cacheDir, provider string, models []*ai.Model) {
 	if cacheDir == "" {
 		return
 	}
@@ -294,12 +344,16 @@ func (r *ModelRegistry) RefreshLive(ctx context.Context) {
 	r.liveModelsMu.Unlock()
 
 	// Best-effort delete of on-disk caches so a stale <TTL file can't
-	// resurrect old data on the next load.
+	// resurrect old data on the next load. Includes legacy prefixes so
+	// upgrades clean up old v1 caches the first time RefreshLive runs.
 	if cacheDir != "" {
 		if entries, err := os.ReadDir(cacheDir); err == nil {
 			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), "live-models-") {
-					_ = os.Remove(filepath.Join(cacheDir, e.Name()))
+				for _, prefix := range liveCachePrefixes {
+					if strings.HasPrefix(e.Name(), prefix) {
+						_ = os.Remove(filepath.Join(cacheDir, e.Name()))
+						break
+					}
 				}
 			}
 		}

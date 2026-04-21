@@ -142,6 +142,38 @@ func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credenti
 	return result.Models
 }
 
+// ModelDefaults satisfies oauth.ModelDefaulter. Extensions can implement the
+// "auth/model_defaults" JSON-RPC hook to provide metadata for live-listed
+// model IDs not in the built-in registry. Returning nil (or omitting the
+// hook) defers to the generic sibling-clone fallback.
+//
+// Only sibling IDs are sent over the wire — extensions that need full sibling
+// metadata can fetch it via a follow-up `models/get` call (or replicate the
+// info themselves). Keeps the RPC payload small even for providers with
+// hundreds of registered models.
+func (p *extAuthProvider) ModelDefaults(modelID string, siblings []*ai.Model) *ai.Model {
+	siblingIDs := make([]string, len(siblings))
+	for i, s := range siblings {
+		siblingIDs[i] = s.ID
+	}
+	params := map[string]any{
+		"provider_id": p.spec.ID,
+		"model_id":    modelID,
+		"sibling_ids": siblingIDs,
+	}
+	raw, err := p.bridge.CallHook(context.Background(), "auth/model_defaults", params, 5*time.Second)
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var result struct {
+		Model *ai.Model `json:"model"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+	return result.Model
+}
+
 // StartCallbackServer starts a local OAuth callback server for the extension.
 func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path, state string) (string, string, error) {
 	p.callbackMu.Lock()

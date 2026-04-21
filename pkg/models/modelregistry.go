@@ -3,6 +3,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -315,6 +316,14 @@ type ModelRegistry struct {
 	liveModels   map[string]*liveModelState
 	liveCacheDir string
 	liveExtReady <-chan struct{}
+
+	// Synthesis caches for live-only model IDs not present in the built-in
+	// registry. Protected by synthMu (independent of r.mu so read paths like
+	// Find/GetAvailable don't have to upgrade their lock).
+	synthMu             sync.Mutex
+	enricher            MetadataEnricher
+	synthesised         map[string]*ai.Model   // cache: provider\x00id -> synthesised model (or nil)
+	synthesisedSiblings map[string][]*ai.Model // provider -> built-in siblings for synthesis
 }
 
 // NewModelRegistry creates a new ModelRegistry.
@@ -359,6 +368,10 @@ func (r *ModelRegistry) refresh() {
 	ai.DefaultRegistry.ResetApiProviders()
 
 	r.loadModels()
+
+	// Synthesised models cloned siblings from the previous r.models snapshot;
+	// drop them so the next synth uses fresh siblings.
+	r.invalidateSynthesisCache()
 }
 
 // GetError returns any error from loading models.json (empty string if no error).
@@ -766,29 +779,84 @@ func (r *ModelRegistry) GetAll() []*ai.Model {
 }
 
 // GetAvailable returns only models that have auth configured and are confirmed
-// available by the provider's live model list (when available).
+// available by the provider's live model list (when available). It also
+// surfaces live-list IDs that aren't in the built-in registry, synthesising
+// metadata from sibling models (optionally refined via a MetadataEnricher).
 func (r *ModelRegistry) GetAvailable() []*ai.Model {
+	// First: built-in models confirmed live. Snapshot under r.mu.
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	var result []*ai.Model
 	for _, m := range r.models {
 		if r.authStorage.HasAuth(m.Provider) && r.isModelLive(m.Provider, m.ID) {
 			result = append(result, m)
 		}
 	}
+	r.mu.RUnlock()
+
+	// Second: live-only models not in built-in registry. Snapshot live state
+	// without holding r.mu — synthesiseForLiveIDs takes its own read lock.
+	r.liveModelsMu.RLock()
+	states := make(map[string]*liveModelState, len(r.liveModels))
+	for prov, st := range r.liveModels {
+		states[prov] = st
+	}
+	r.liveModelsMu.RUnlock()
+
+	for prov, st := range states {
+		if !r.authStorage.HasAuth(prov) {
+			continue
+		}
+		// Use cached synthesised models from the state directly when present
+		// — no need to re-run the pipeline. The fetch path already populated
+		// the state with full metadata.
+		st.mu.RLock()
+		for _, m := range st.models {
+			result = append(result, m)
+		}
+		st.mu.RUnlock()
+	}
 	return result
 }
 
-// Find returns a model by provider and ID, or nil if not found.
+// Find returns a model by provider and ID. Resolution order:
+//  1. built-in registered models
+//  2. synthesised model from the live-list state (cached or just-fetched)
+//  3. on-the-fly synthesis using sibling-clone heuristic — only used when no
+//     live-list state exists (e.g. cold start before fetch completes), so a
+//     mistyped ID against an authed provider returns nil rather than a
+//     phantom model.
 func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for _, m := range r.models {
 		if m.Provider == provider && m.ID == modelID {
+			r.mu.RUnlock()
 			return m
 		}
 	}
-	return nil
+	r.mu.RUnlock()
+
+	// Consult live-list state. If a live-list exists for this provider, it's
+	// authoritative: only IDs the provider confirmed exist will resolve.
+	r.liveModelsMu.RLock()
+	state, hasLive := r.liveModels[provider]
+	r.liveModelsMu.RUnlock()
+	if hasLive {
+		if m := state.get(modelID); m != nil {
+			return m
+		}
+		// Live-list exists but doesn't contain this ID. Don't fall through —
+		// the provider has spoken.
+		// Exception: live-list state may exist with no models yet (fetch in
+		// progress, no disk cache). state.get returns nil in both "not in
+		// list" and "list empty" cases; we can disambiguate via state.ids().
+		if state.ids() != nil {
+			return nil // confirmed: not a real model
+		}
+		// Live state exists but has no data yet — fall through to synthesis.
+	}
+
+	// Cold-start synthesis: settings may reference a previously-live model.
+	return r.synthesise(context.Background(), provider, modelID)
 }
 
 // GetApiKey returns the API key for a model's provider.
