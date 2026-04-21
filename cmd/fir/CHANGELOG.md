@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Homebrew formula install: the GoReleaser-generated `Formula/fir.rb` previously hardcoded `bin.install "fir"`, but `archives.formats=binary` publishes raw binaries named `fir-<os>-<arch>`, causing `brew install kfet/fir/fir` to fail with `Errno::ENOENT: No such file or directory - fir`. Updated the `brews.install` template (and the reference `homebrew/fir.rb.template`) to glob the staged artifact: `bin.install Dir["fir-*"].first => "fir"`. Durable — every future release regenerates the tap's formula from this config.
 - Flaky test `TestStartUpdateNoticeWatcher_ShowsNotice` (CI run 24650519048): the watcher goroutine raced with the test's single `waitRender()` check. Replaced with a poll loop that re-renders up to 2s.
 
 ## [0.31.0] - 2026-04-19

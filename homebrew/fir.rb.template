@@ -23,7 +23,7 @@ class Fir < Formula
   sha256 "PLACEHOLDER"
 
   def install
-    bin.install "fir"
+    bin.install Dir["fir-*"].first => "fir"
   end
 
   test do

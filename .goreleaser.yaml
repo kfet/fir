@@ -71,8 +71,11 @@ brews:
     skip_upload: auto
     test: |
       system "#{bin}/fir", "--version"
+    # The downloaded artifact is named fir-<os>-<arch> (archives.formats=binary
+    # emits raw binaries, not tarballs), so `bin.install "fir"` fails with
+    # ENOENT. Glob the staged artifact and rename it on install.
     install: |
-      bin.install "fir"
+      bin.install Dir["fir-*"].first => "fir"
 
 changelog:
   use: github-native
