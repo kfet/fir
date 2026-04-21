@@ -348,6 +348,9 @@ func run() error {
 		runPTY()
 		return nil
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "sessions" {
+		return runSessions()
+	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `fir sessions [list]` subcommand: prints the sessions associated with the current working directory (resolved via `store.SessionDirForCwd`), as a table with id / modified / message count / name / first-message columns. Mirrors the existing `fir skills` / `fir extensions` / `fir packages` list UX and works without touching auth or extensions.
+- Global `-C <dir>` flag (also `-C=dir`, `--cwd[=dir]`, `--directory[=dir]`): runs fir as if it had been launched in `<dir>`. Handled in `main` before argument parsing by `applyChdirFlag`, which `os.Chdir`s and strips the flag from `os.Args`, so every subcommand (including `sessions`, interactive, print, ACP) sees the requested cwd. Mirrors `git -C <dir>` / `make -C <dir>` ergonomics.
+
 ### Fixed
 
 - Homebrew formula install: the GoReleaser-generated `Formula/fir.rb` previously hardcoded `bin.install "fir"`, but `archives.formats=binary` publishes raw binaries named `fir-<os>-<arch>`, causing `brew install kfet/fir/fir` to fail with `Errno::ENOENT: No such file or directory - fir`. Updated the `brews.install` template (and the reference `homebrew/fir.rb.template`) to glob the staged artifact: `bin.install Dir["fir-*"].first => "fir"`. Durable — every future release regenerates the tap's formula from this config.
