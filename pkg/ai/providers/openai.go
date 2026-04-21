@@ -745,6 +745,12 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 
 	// Thinking / reasoning format
 	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
+		// Poe's "assistant" bot is backed by gpt-5.2-chat-latest which only
+		// accepts "medium" for reasoning.effort; any other value 400s.
+		effortOverride := string(options.ReasoningEffort)
+		if model.Provider == ai.ProviderPoe && model.ID == "assistant" && effortOverride != "medium" {
+			effortOverride = "medium"
+		}
 		switch compat.ThinkingFormat {
 		case ai.ThinkingFormatZAI:
 			body["enable_thinking"] = true
@@ -756,14 +762,14 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 				"preserve_thinking": true,
 			}
 		case ai.ThinkingFormatOpenRouter:
-			effort := string(options.ReasoningEffort)
+			effort := effortOverride
 			if mapped, ok := compat.ReasoningEffortMap[effort]; ok {
 				effort = mapped
 			}
 			body["reasoning"] = map[string]any{"effort": effort}
 		default:
 			if compat.SupportsReasoningEffort {
-				effort := string(options.ReasoningEffort)
+				effort := effortOverride
 				if mapped, ok := compat.ReasoningEffortMap[effort]; ok {
 					effort = mapped
 				}

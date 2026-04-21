@@ -423,6 +423,29 @@ func TestBuildOpenAIRequestBody_ReasoningEffort(t *testing.T) {
 	assert.Equal(t, "high", parsed["reasoning_effort"])
 }
 
+func TestBuildOpenAIRequestBody_PoeAssistantForcesMediumEffort(t *testing.T) {
+	// Poe's "assistant" bot is backed by gpt-5.2-chat-latest which only
+	// accepts "medium" for reasoning.effort. Any other value should be
+	// clamped before hitting the wire (otherwise Poe returns 400).
+	m := &ai.Model{Provider: ai.ProviderPoe, BaseURL: "https://api.poe.com/v1", ID: "assistant", Reasoning: true, MaxTokens: 16384}
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
+
+	for _, in := range []string{"low", "high", "xhigh", "minimal"} {
+		body, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{ReasoningEffort: ai.ThinkingLevel(in)})
+		require.NoError(t, err)
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal(body, &parsed))
+		assert.Equal(t, "medium", parsed["reasoning_effort"], "input=%s", in)
+	}
+
+	// medium should pass through unchanged.
+	body, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{ReasoningEffort: "medium"})
+	require.NoError(t, err)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	assert.Equal(t, "medium", parsed["reasoning_effort"])
+}
+
 func TestBuildOpenAIRequestBody_ZaiThinking(t *testing.T) {
 	m := &ai.Model{Provider: "zai", BaseURL: "https://api.z.ai", ID: "claude-3.5-sonnet", Reasoning: true, MaxTokens: 16384}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
