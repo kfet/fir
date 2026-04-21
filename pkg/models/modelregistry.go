@@ -3,7 +3,6 @@
 package models
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -844,19 +843,17 @@ func (r *ModelRegistry) Find(provider, modelID string) *ai.Model {
 		if m := state.get(modelID); m != nil {
 			return m
 		}
-		// Live-list exists but doesn't contain this ID. Don't fall through —
-		// the provider has spoken.
-		// Exception: live-list state may exist with no models yet (fetch in
-		// progress, no disk cache). state.get returns nil in both "not in
-		// list" and "list empty" cases; we can disambiguate via state.ids().
-		if state.ids() != nil {
-			return nil // confirmed: not a real model
+		// Live-list exists but doesn't contain this ID. If the fetch has
+		// produced data, the provider has spoken — return nil. If it hasn't
+		// completed yet, fall through to synthesis so settings referencing a
+		// previously-live model still resolve.
+		if state.hasData() {
+			return nil
 		}
-		// Live state exists but has no data yet — fall through to synthesis.
 	}
 
 	// Cold-start synthesis: settings may reference a previously-live model.
-	return r.synthesise(context.Background(), provider, modelID)
+	return r.synthesise(provider, modelID)
 }
 
 // GetApiKey returns the API key for a model's provider.

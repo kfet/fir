@@ -92,19 +92,12 @@ func (s *liveModelState) get(modelID string) *ai.Model {
 	return nil
 }
 
-// ids returns a snapshot of live model IDs, or nil if the fetch hasn't
-// completed or produced usable data.
-func (s *liveModelState) ids() []string {
+// hasData reports whether the fetch produced a usable (possibly empty) list.
+// Returns false if the fetch hasn't completed, errored, or the list is nil.
+func (s *liveModelState) hasData() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if !s.fetched || s.err != nil || s.models == nil {
-		return nil
-	}
-	out := make([]string, len(s.models))
-	for i, m := range s.models {
-		out[i] = m.ID
-	}
-	return out
+	return s.fetched && s.err == nil && s.models != nil
 }
 
 // StartLiveModelFetch kicks off background goroutines to fetch live model lists
@@ -213,7 +206,7 @@ func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string,
 	}
 
 	// Synthesise metadata for returned IDs using built-in siblings.
-	models := r.synthesiseForLiveIDs(ctx, providerID, ids)
+	models := r.synthesiseForLiveIDs(providerID, ids)
 	state.set(models)
 	r.saveLiveCache(cacheDir, providerID, models)
 	firlog.Debug("live model list for OAuth provider %s: %d models", providerID, len(models))
@@ -269,7 +262,7 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 	}
 
 	// Resolve full metadata using built-in models and synthesis fallback.
-	models := r.synthesiseForLiveIDs(ctx, provider, ids)
+	models := r.synthesiseForLiveIDs(provider, ids)
 
 	state.set(models)
 	r.saveLiveCache(cacheDir, provider, models)

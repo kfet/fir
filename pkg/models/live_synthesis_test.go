@@ -1,7 +1,6 @@
 package models
 
 import (
-	"context"
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -52,7 +51,7 @@ func TestSynthesiseFromSibling(t *testing.T) {
 		{ID: "claude-opus-4-1", Provider: "p", Api: "api3", BaseURL: "u3", ContextWindow: 300},
 	}
 	// Should pick the longest-prefix match (claude-sonnet-4-5).
-	m := synthesiseFromSibling("p", "claude-sonnet-4-7-20260601", siblings)
+	m := synthesiseFromSibling("claude-sonnet-4-7-20260601", siblings)
 	if m == nil {
 		t.Fatal("expected non-nil synth")
 	}
@@ -68,7 +67,7 @@ func TestSynthesiseFromSibling(t *testing.T) {
 }
 
 func TestSynthesiseFromSibling_EmptySiblings(t *testing.T) {
-	if m := synthesiseFromSibling("p", "x", nil); m != nil {
+	if m := synthesiseFromSibling("x", nil); m != nil {
 		t.Errorf("expected nil for empty siblings, got %+v", m)
 	}
 }
@@ -244,7 +243,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 	r := NewModelRegistry(authStore, "")
 
 	// Fall back to sibling-clone.
-	m := r.synthesise(context.Background(), "synth-test-provider", "synth-new")
+	m := r.synthesise("synth-test-provider", "synth-new")
 	if m == nil || m.ContextWindow != 50000 {
 		t.Fatalf("fallback failed: %+v", m)
 	}
@@ -253,7 +252,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 	}
 
 	// Cache returns same instance second time.
-	m2 := r.synthesise(context.Background(), "synth-test-provider", "synth-new")
+	m2 := r.synthesise("synth-test-provider", "synth-new")
 	if m2 != m {
 		t.Error("expected cached instance")
 	}
@@ -262,7 +261,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 func TestSynthesise_NoSiblings_ReturnsNil(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	r := NewModelRegistry(authStore, "")
-	m := r.synthesise(context.Background(), "totally-unknown-provider", "x")
+	m := r.synthesise("totally-unknown-provider", "x")
 	if m != nil {
 		t.Errorf("expected nil with no siblings, got %+v", m)
 	}
