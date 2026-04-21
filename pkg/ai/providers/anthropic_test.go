@@ -609,6 +609,28 @@ func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 
 // --- Header tests ---
 
+func TestAnthropic_PoeHeaders(t *testing.T) {
+	model := &ai.Model{
+		ID:       "claude-sonnet-4.5",
+		Provider: "poe",
+		BaseURL:  "https://api.poe.com/v1",
+	}
+	headers := buildAnthropicHeaders(model, "poe-token-xyz", false, nil)
+
+	if got := headers["authorization"]; got != "Bearer poe-token-xyz" {
+		t.Errorf("expected Bearer auth, got %q", got)
+	}
+	if headers["x-api-key"] != "" {
+		t.Errorf("Poe must not set x-api-key, got %q", headers["x-api-key"])
+	}
+	if headers["anthropic-beta"] != "" {
+		t.Errorf("Poe must not send anthropic-beta headers, got %q", headers["anthropic-beta"])
+	}
+	if headers["anthropic-version"] != "2023-06-01" {
+		t.Errorf("expected anthropic-version 2023-06-01, got %q", headers["anthropic-version"])
+	}
+}
+
 func TestAnthropic_AnthropicVersionHeader(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
 

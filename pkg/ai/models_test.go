@@ -46,6 +46,24 @@ func TestGetModel_NotFound(t *testing.T) {
 	}
 }
 
+// TestGetModel_PoeAnthropicBaseURL guards against a regression where Poe's
+// BaseURL kept its "/v1" suffix while the model routed through
+// anthropic-messages. The Anthropic handler appends "/v1/messages" itself,
+// so a BaseURL ending in "/v1" produces https://api.poe.com/v1/v1/messages
+// and 404s at the server.
+func TestGetModel_PoeAnthropicBaseURL(t *testing.T) {
+	m := GetModel(ProviderPoe, "claude-haiku-4.5")
+	if m == nil {
+		t.Fatal("expected claude-haiku-4.5 on poe to be registered")
+	}
+	if m.Api != ApiAnthropicMessages {
+		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.Api)
+	}
+	if m.BaseURL != "https://api.poe.com" {
+		t.Errorf("expected BaseURL without /v1 suffix, got %q", m.BaseURL)
+	}
+}
+
 func TestGetModel_UnknownProvider(t *testing.T) {
 	m := GetModel("unknown-provider", "some-model")
 	if m != nil {

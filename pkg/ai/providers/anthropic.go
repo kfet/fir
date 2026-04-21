@@ -702,7 +702,41 @@ func RegisterAnthropic(r *ai.Registry) {
 
 // --- Internal helpers ---
 
+// isPoeAnthropic reports whether the model routes Anthropic /v1/messages
+// calls through Poe (api.poe.com). Poe proxies to Bedrock and does not
+// accept Anthropic beta headers or the x-api-key auth scheme; it expects
+// Bearer auth with the Poe API key / OAuth access token.
+func isPoeAnthropic(model *ai.Model) bool {
+	if model == nil {
+		return false
+	}
+	return model.Provider == "poe" || strings.Contains(model.BaseURL, "poe.com")
+}
+
 func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, options *ai.StreamOptions) map[string]string {
+	if isPoeAnthropic(model) {
+		// Poe-specific: Bearer auth, no x-api-key, no anthropic-beta.
+		// Poe proxies to Bedrock which rejects unknown beta flags, and
+		// Anthropic's OAuth/system-prefix machinery does not apply.
+		hdrs := map[string]string{
+			"accept":            "application/json",
+			"content-type":      "application/json",
+			"anthropic-version": "2023-06-01",
+			"authorization":     "Bearer " + apiKey,
+		}
+		filteredModel := &ai.Model{Headers: make(map[string]string, len(model.Headers))}
+		for k, v := range model.Headers {
+			if k == "x-anthropic-oauth-beta-prefix" || k == "x-anthropic-oauth-system-prefix" {
+				continue
+			}
+			if strings.EqualFold(k, "authorization") || strings.EqualFold(k, "x-api-key") || strings.EqualFold(k, "anthropic-beta") {
+				continue
+			}
+			filteredModel.Headers[k] = v
+		}
+		return BuildRequestHeaders(hdrs, filteredModel, options, "x-anthropic-thinking-")
+	}
+
 	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 
 	// Add server tool betas if needed.

@@ -1060,11 +1060,29 @@ func fetchPoeModels() ([]modelSpec, error) {
 			name = m.ID
 		}
 
+		// Route Claude-family bots through Anthropic's native
+		// /v1/messages when Poe advertises it. This preserves native
+		// thinking blocks and tool-use semantics that would otherwise be
+		// flattened by Poe's OpenAI translation. /v1/messages is only
+		// reliable for Claude on Poe — non-Claude models return a 200
+		// error envelope when routed through it.
+		//
+		// BaseURL differs by API: the Anthropic handler appends
+		// "/v1/messages" itself (so base must be bare host), while the
+		// OpenAI chat-completions/responses handlers append
+		// "/chat/completions" or "/responses" (so base must already
+		// include "/v1").
+		baseURL := "https://api.poe.com/v1"
+		if strings.HasPrefix(m.ID, "claude-") && hasString(m.SupportedEndpoints, "/v1/messages") {
+			api = "anthropic-messages"
+			baseURL = "https://api.poe.com"
+		}
+
 		models = append(models, modelSpec{
 			ID:             m.ID,
 			Name:           name,
 			API:            api,
-			BaseURL:        "https://api.poe.com/v1",
+			BaseURL:        baseURL,
 			Provider:       "poe",
 			Reasoning:      m.Reasoning.Required || m.Reasoning.SupportsReasoningEffort,
 			Input:          input,
