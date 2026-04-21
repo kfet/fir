@@ -22,6 +22,10 @@
 
 - Pressing the model-selector keybinding (default `Ctrl+L`) a second time while the selector is open now closes it, the same as `Esc`. Resolved dynamically via `KeybindingsManager.Matches(ActionSelectModel)` so it tracks any user rebinding in `keybindings.json`.
 
+### Changed
+
+- Builtin `review-and-fix` skill: highlight simplification as an explicit goal of the review phase (one-line emphasis above the checklist).
+
 ### Fixed
 
 - Poe usage builtin skill (`poe-usage`) now resolves Poe OAuth credentials from `~/.config/fir/auth.json` (`poe.access`) as well as legacy `poe.key`, so usage queries work right after `fir login poe` without manually setting `POE_API_KEY`.

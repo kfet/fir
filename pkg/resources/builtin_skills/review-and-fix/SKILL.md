@@ -19,7 +19,7 @@ git ls-files --others --exclude-standard
 
 Run the project's build/test commands (e.g. `make all`). Note failures.
 
-Read every changed file. Look for:
+Read every changed file. **Actively look for ways to simplify the code.** Look for:
 
 - **Build breaks** — compilation errors, missing imports, broken tests
 - **Security** — key exposure, path traversal, injection, hardcoded secrets
