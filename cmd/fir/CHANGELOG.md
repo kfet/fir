@@ -4,6 +4,7 @@
 
 ### Added
 
+- `/skills <name>` shows details for a loaded skill (name, source, location, description). The loaded-skills names are also offered as top-level autocomplete suggestions alongside `list` and `install`, so `/skills <tab>` cycles through subcommands *and* every loaded skill. The combined autocomplete is driven by letting `CommandArgSpec` carry both `SubCommands` and a static `Values` list at the first-arg position.
 - `fir sessions [list]` subcommand: prints the sessions associated with the current working directory (resolved via `store.SessionDirForCwd`), as a table with id / modified / message count / name / first-message columns. Mirrors the existing `fir skills` / `fir extensions` / `fir packages` list UX and works without touching auth or extensions.
 - Global `-C <dir>` flag (also `-C=dir`, `--cwd[=dir]`, `--directory[=dir]`): runs fir as if it had been launched in `<dir>`. Handled in `main` before argument parsing by `applyChdirFlag`, which `os.Chdir`s and strips the flag from `os.Args`, so every subcommand (including `sessions`, interactive, print, ACP) sees the requested cwd. Mirrors `git -C <dir>` / `make -C <dir>` ergonomics.
 

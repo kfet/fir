@@ -835,18 +835,36 @@ func (m *InteractiveMode) setupAutocomplete() {
 	}
 
 	// /skills has subcommands: list, install; /skills install completes builtin skill names.
+	// Loaded skill names are also added as top-level args so `/skills <name>` shows details.
 	skillInstallSpec := &CommandArgSpec{Type: ArgCompleteStatic}
 	builtinSkills := resources.LoadBuiltinSkills()
 	for _, s := range builtinSkills.Skills {
 		skillInstallSpec.Values = append(skillInstallSpec.Values, s.Name)
 	}
 	sort.Strings(skillInstallSpec.Values)
-	argSpecs["skills"] = &CommandArgSpec{
+	skillsSpec := &CommandArgSpec{
+		Type: ArgCompleteStatic,
 		SubCommands: map[string]*CommandArgSpec{
 			"list":    {Type: ArgCompleteNone},
 			"install": skillInstallSpec,
 		},
 	}
+	skillsSpec.Values = []string{"list", "install"}
+	if m.session != nil {
+		if rl := m.session.ResourceLoader(); rl != nil {
+			if loaded, _ := rl.GetSkills(); len(loaded) > 0 {
+				seen := map[string]bool{"list": true, "install": true}
+				for _, s := range loaded {
+					if !seen[s.Name] {
+						skillsSpec.Values = append(skillsSpec.Values, s.Name)
+						seen[s.Name] = true
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(skillsSpec.Values)
+	argSpecs["skills"] = skillsSpec
 
 	// /mcp completes with server names for detailed inspection.
 	if m.mcpDetails != nil {

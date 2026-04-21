@@ -62,7 +62,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
 	r.register(slashCommand{"reload", "Reload extensions, skills, prompts", cmdReload})
-	r.register(slashCommand{"skills", "List loaded skills (or /skills install <name>)", cmdSkills})
+	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
 	r.register(slashCommand{"mcp", "Show MCP servers summary, or /mcp <name> for full tool details", cmdMCP})
 	return r
 }
@@ -513,7 +513,22 @@ func cmdSkills(ctx *commandContext, args string) {
 		cmdSkillsInstall(ctx, parts[1:])
 		return
 	}
-	ctx.sendMessage(fmt.Sprintf("Unknown skills subcommand: %s. Usage: /skills [list | install <name> [--user] [--force]]", parts[0]))
+	// Otherwise treat the arg as a loaded-skill name and show its details.
+	cmdSkillDetail(ctx, parts[0])
+}
+
+func cmdSkillDetail(ctx *commandContext, name string) {
+	skills, _ := ctx.entry.session.ResourceLoader().GetSkills()
+	for _, s := range skills {
+		if s.Name == name {
+			ctx.sendMessage(fmt.Sprintf(
+				"Name:        %s\nSource:      %s\nLocation:    %s\nDescription: %s",
+				s.Name, s.Source, s.FilePath, s.Description,
+			))
+			return
+		}
+	}
+	ctx.sendMessage(fmt.Sprintf("Unknown skills subcommand or skill: %s. Usage: /skills [list | install <name> [--user] [--force] | <name>]", name))
 }
 
 func cmdSkillsList(ctx *commandContext) {

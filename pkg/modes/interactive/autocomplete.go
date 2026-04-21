@@ -281,10 +281,23 @@ func (p *combinedAutocompleteProvider) getCommandArgSuggestions(cmdName, afterCm
 		firstArg := parts[0]
 
 		if len(parts) == 1 {
-			// Still typing the first arg — complete from subcommand names.
+			// Still typing the first arg — complete from subcommand names
+			// plus any extra top-level static values on the spec.
+			seen := map[string]bool{}
 			var candidates []string
 			for k := range spec.SubCommands {
-				candidates = append(candidates, k)
+				if !seen[k] {
+					candidates = append(candidates, k)
+					seen[k] = true
+				}
+			}
+			if spec.Type == ArgCompleteStatic {
+				for _, v := range spec.Values {
+					if !seen[v] {
+						candidates = append(candidates, v)
+						seen[v] = true
+					}
+				}
 			}
 			sort.Strings(candidates)
 			return p.filterStaticCandidates(candidates, firstArg, fullPrefix)

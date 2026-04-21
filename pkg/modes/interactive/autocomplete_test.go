@@ -480,6 +480,8 @@ func TestCleanSlashes(t *testing.T) {
 func TestGetSuggestions_CommandArgStaticCompletion(t *testing.T) {
 	argSpecs := map[string]*CommandArgSpec{
 		"skills": {
+			Type:   ArgCompleteStatic,
+			Values: []string{"list", "install", "my-skill"},
 			SubCommands: map[string]*CommandArgSpec{
 				"list":    {Type: ArgCompleteNone},
 				"install": {Type: ArgCompleteStatic, Values: []string{"code-review", "testing"}},
@@ -488,13 +490,19 @@ func TestGetSuggestions_CommandArgStaticCompletion(t *testing.T) {
 	}
 	p := NewCombinedAutocompleteProvider(testCommands(), "/tmp", argSpecs)
 
-	// Complete subcommand
+	// Complete subcommand + loaded skill names
 	s := p.GetSuggestions([]string{"/skills "}, 0, 8)
 	if s == nil {
 		t.Fatal("expected suggestions for /skills subcommands")
 	}
-	if len(s.Items) != 2 {
-		t.Fatalf("expected 2 subcommand suggestions, got %d", len(s.Items))
+	if len(s.Items) != 3 {
+		t.Fatalf("expected 3 suggestions (list,install,my-skill), got %d", len(s.Items))
+	}
+
+	// Fuzzy filter loaded skill name
+	s = p.GetSuggestions([]string{"/skills my"}, 0, 10)
+	if s == nil || len(s.Items) != 1 || s.Items[0].Value != "my-skill" {
+		t.Fatalf("expected 'my-skill', got %v", s)
 	}
 
 	// Fuzzy filter subcommand

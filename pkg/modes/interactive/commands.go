@@ -1055,7 +1055,29 @@ func (m *InteractiveMode) handleSkillsCommand(args []string) {
 		m.handleSkillsInstall(args[1])
 		return
 	}
-	m.showWarning(fmt.Sprintf("Unknown skills subcommand: %s. Usage: /skills [list | install <name>]", args[0]))
+	// Otherwise treat the arg as a loaded-skill name and show its details.
+	m.handleSkillDetail(args[0])
+}
+
+// handleSkillDetail shows name, description, and file location for a loaded skill.
+func (m *InteractiveMode) handleSkillDetail(name string) {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	skills, _ := m.session.ResourceLoader().GetSkills()
+	for _, s := range skills {
+		if s.Name == name {
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("Name:        %s\n", s.Name))
+			sb.WriteString(fmt.Sprintf("Source:      %s\n", s.Source))
+			sb.WriteString(fmt.Sprintf("Location:    %s\n", s.FilePath))
+			sb.WriteString(fmt.Sprintf("Description: %s", s.Description))
+			m.showStatus(sb.String())
+			return
+		}
+	}
+	m.showWarning(fmt.Sprintf("Unknown skills subcommand or skill: %s. Usage: /skills [list | install <name> | <name>]", name))
 }
 
 func (m *InteractiveMode) handleSkillsList() {
@@ -1636,7 +1658,7 @@ func (m *InteractiveMode) showHelp() {
   /share          - Share session as a secret GitHub gist
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, prompts, themes, and MCP servers
-  /skills         - List loaded skills (or /skills install <name>)
+  /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
   /mcp            - Show MCP servers (or /mcp <name> for full details)
   /reexec [path] - Re-exec into specified or current binary (%s), preserving the session
   /quit           - Quit fir
