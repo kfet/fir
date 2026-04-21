@@ -763,6 +763,13 @@ type Model struct {
 	Compaction    bool              `json:"compaction,omitempty"`  // supports server-side context compaction
 	SWEScore      float64           `json:"sweScore,omitempty"`    // best known SWE-bench Verified score (0–100 %)
 	SWEInferred   bool              `json:"sweInferred,omitempty"` // true when SWEScore is inherited from a related model, not directly benchmarked
+
+	// ReasoningEffortValues is the allowed enum of values for reasoning.effort /
+	// reasoning_effort when the provider exposes a bot-specific restriction
+	// (e.g. Poe bots whose /v1/models parameters[] advertise an "effort" enum
+	// narrower than fir's {minimal,low,medium,high,xhigh}). Empty means "no
+	// known restriction — use the provider default".
+	ReasoningEffortValues []string `json:"reasoningEffortValues,omitempty"`
 }
 
 // StreamFunction is the raw provider streaming function signature.

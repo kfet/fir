@@ -745,11 +745,14 @@ func buildOpenAIRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 
 	// Thinking / reasoning format
 	if options != nil && options.ReasoningEffort != "" && model.Reasoning {
-		// Poe's "assistant" bot is backed by gpt-5.2-chat-latest which only
-		// accepts "medium" for reasoning.effort; any other value 400s.
+		// Clamp effort to the model's advertised enum when the catalog
+		// pins one (e.g. Poe bots whose /v1/models parameters[] expose
+		// a narrower reasoning_effort enum than fir's default set).
+		// If the requested value is already in the enum, pass through;
+		// otherwise pick the nearest neighbour.
 		effortOverride := string(options.ReasoningEffort)
-		if model.Provider == ai.ProviderPoe && model.ID == "assistant" && effortOverride != "medium" {
-			effortOverride = "medium"
+		if len(model.ReasoningEffortValues) > 0 {
+			effortOverride = clampEffortToEnum(effortOverride, model.ReasoningEffortValues)
 		}
 		switch compat.ThinkingFormat {
 		case ai.ThinkingFormatZAI:

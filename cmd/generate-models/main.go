@@ -53,6 +53,11 @@ type modelSpec struct {
 	Compaction     bool
 	SWEScore       float64 // best known SWE-bench Verified score (0–100 %)
 	SWEInferred    bool    // true when SWEScore is inherited from family, not directly benchmarked
+
+	// ReasoningEffortValues is the allowed enum for reasoning.effort / reasoning_effort,
+	// when advertised by the upstream catalog (e.g. Poe's parameters[].schema.enum).
+	// Empty means "no known restriction".
+	ReasoningEffortValues []string
 }
 
 // compatSpec represents OpenAICompletionsCompat fields used in models.
@@ -829,7 +834,8 @@ type poeModel struct {
 	Parameters []struct {
 		Name   string `json:"name"`
 		Schema struct {
-			Maximum float64 `json:"maximum"`
+			Maximum float64  `json:"maximum"`
+			Enum    []string `json:"enum"`
 		} `json:"schema"`
 	} `json:"parameters"`
 }
@@ -1078,6 +1084,36 @@ func fetchPoeModels() ([]modelSpec, error) {
 			baseURL = "https://api.poe.com"
 		}
 
+		// Pick up any bot-advertised reasoning effort enum. Poe exposes
+		// per-bot `parameters[].schema.enum` values under names like
+		// "reasoning_effort", "effort", or "thinking_level". Only bots
+		// with a recognisably OpenAI-style effort enum (values drawn from
+		// {none,minimal,low,medium,high,xhigh,extra-high,max}) are
+		// captured here — boolean-style thinking toggles (enable_thinking,
+		// deep_thinking) and Anthropic "output_effort" knobs are handled
+		// elsewhere.
+		var effortValues []string
+		for _, p := range m.Parameters {
+			name := strings.ToLower(p.Name)
+			if name != "reasoning_effort" && name != "effort" && name != "thinking_level" {
+				continue
+			}
+			if len(p.Schema.Enum) == 0 {
+				continue
+			}
+			effortValues = append([]string(nil), p.Schema.Enum...)
+			break
+		}
+		// Hardcoded override for Poe's "assistant" router bot: its
+		// /v1/models entry advertises supports_reasoning_effort=true but
+		// ships an empty parameters[]. Empirically the backing model
+		// (gpt-5.2-chat-latest) only accepts "medium" — any other value
+		// 400s. Upstream Poe bug; safe to remove once they populate the
+		// field.
+		if m.ID == "assistant" && len(effortValues) == 0 && m.Reasoning.SupportsReasoningEffort {
+			effortValues = []string{"medium"}
+		}
+
 		models = append(models, modelSpec{
 			ID:             m.ID,
 			Name:           name,
@@ -1092,6 +1128,7 @@ func fetchPoeModels() ([]modelSpec, error) {
 			CostCacheWrite: parseFloat(m.Pricing.InputCacheWrite) * 1_000_000,
 			ContextWindow:  intOr(ctxLen, 4096),
 			MaxTokens:      intOr(maxOut, 4096),
+			ReasoningEffortValues: effortValues,
 		})
 	}
 	// Second pass: for bots whose context size is still missing, inherit
@@ -2331,6 +2368,9 @@ func generateGoSource(models []modelSpec) string {
 		}
 		if m.SWEInferred {
 			sb.WriteString("\t\tSWEInferred:   true,\n")
+		}
+		if len(m.ReasoningEffortValues) > 0 {
+			sb.WriteString(fmt.Sprintf("\t\tReasoningEffortValues: %s,\n", renderStringSlice(m.ReasoningEffortValues)))
 		}
 		sb.WriteString("\t})\n")
 	}

@@ -119,6 +119,61 @@ func ClampReasoningForModel(level ai.ThinkingLevel, model *ai.Model) ai.Thinking
 	}
 }
 
+// clampEffortToEnum returns effort unchanged if it is in allowed, otherwise
+// picks the nearest allowed neighbour on fir's canonical ladder
+// (none < minimal < low < medium < high < xhigh < max). Also tolerates a few
+// common synonyms seen in upstream catalogs ("extra-high" ≡ "xhigh").
+// If allowed is empty, effort is returned as-is.
+func clampEffortToEnum(effort string, allowed []string) string {
+	if len(allowed) == 0 || effort == "" {
+		return effort
+	}
+	ladder := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	rank := func(s string) int {
+		if s == "extra-high" {
+			s = "xhigh"
+		}
+		for i, v := range ladder {
+			if v == s {
+				return i
+			}
+		}
+		return -1
+	}
+	// allowed contains exact match?
+	for _, v := range allowed {
+		if v == effort {
+			return effort
+		}
+	}
+	want := rank(effort)
+	if want < 0 {
+		return allowed[0] // unknown — fall back to first advertised value
+	}
+	best := ""
+	bestDist := 0
+	for _, v := range allowed {
+		r := rank(v)
+		if r < 0 {
+			continue
+		}
+		d := r - want
+		if d < 0 {
+			d = -d
+		}
+		if best == "" || d < bestDist {
+			best, bestDist = v, d
+		}
+	}
+	if best == "" {
+		return allowed[0]
+	}
+	// Normalise "extra-high" back to the wire form that was advertised —
+	// we want to return exactly what the upstream catalog listed, so the
+	// wire request matches its enum verbatim.
+	return best
+}
+
 // AdjustMaxTokensForThinking adjusts max tokens and calculates thinking budget.
 func AdjustMaxTokensForThinking(
 	baseMaxTokens int,

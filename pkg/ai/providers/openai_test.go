@@ -426,8 +426,13 @@ func TestBuildOpenAIRequestBody_ReasoningEffort(t *testing.T) {
 func TestBuildOpenAIRequestBody_PoeAssistantForcesMediumEffort(t *testing.T) {
 	// Poe's "assistant" bot is backed by gpt-5.2-chat-latest which only
 	// accepts "medium" for reasoning.effort. Any other value should be
-	// clamped before hitting the wire (otherwise Poe returns 400).
-	m := &ai.Model{Provider: ai.ProviderPoe, BaseURL: "https://api.poe.com/v1", ID: "assistant", Reasoning: true, MaxTokens: 16384}
+	// clamped via the model's ReasoningEffortValues metadata before
+	// hitting the wire (otherwise Poe returns 400).
+	m := &ai.Model{
+		Provider: ai.ProviderPoe, BaseURL: "https://api.poe.com/v1",
+		ID: "assistant", Reasoning: true, MaxTokens: 16384,
+		ReasoningEffortValues: []string{"medium"},
+	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	for _, in := range []string{"low", "high", "xhigh", "minimal"} {
@@ -444,6 +449,33 @@ func TestBuildOpenAIRequestBody_PoeAssistantForcesMediumEffort(t *testing.T) {
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))
 	assert.Equal(t, "medium", parsed["reasoning_effort"])
+}
+
+func TestBuildOpenAIRequestBody_PoeNarrowEnumSnapsToNearest(t *testing.T) {
+	// e.g. gpt-5.4-pro advertises {medium, high, xhigh}. A request for
+	// "low" should snap up to "medium" (nearest allowed neighbour);
+	// "minimal" likewise -> "medium"; "max" -> "xhigh".
+	m := &ai.Model{
+		Provider: ai.ProviderPoe, BaseURL: "https://api.poe.com/v1",
+		ID: "gpt-5.4-pro", Reasoning: true, MaxTokens: 16384,
+		ReasoningEffortValues: []string{"medium", "high", "xhigh"},
+	}
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hi", 0)}}
+	cases := map[string]string{
+		"minimal": "medium",
+		"low":     "medium",
+		"medium":  "medium",
+		"high":    "high",
+		"xhigh":   "xhigh",
+		"max":     "xhigh",
+	}
+	for in, want := range cases {
+		body, err := buildOpenAIRequestBody(m, ctx, &ai.StreamOptions{ReasoningEffort: ai.ThinkingLevel(in)})
+		require.NoError(t, err)
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal(body, &parsed))
+		assert.Equal(t, want, parsed["reasoning_effort"], "input=%s", in)
+	}
 }
 
 func TestBuildOpenAIRequestBody_ZaiThinking(t *testing.T) {
