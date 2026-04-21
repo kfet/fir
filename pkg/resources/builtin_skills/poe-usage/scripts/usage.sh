@@ -24,11 +24,43 @@ find_api_key() {
     fi
   fi
 
-  # 3. fir auth storage (~/.config/fir/auth.json) — "poe" provider with api_key type
+  # 3. fir auth storage (~/.config/fir/auth.json) — "poe" provider entry.
+  #    Supports both credential shapes used by fir:
+  #      { "type": "api_key", "key": "sk-poe-..." }
+  #      { "type": "oauth",   "access": "sk-poe-...", "refresh": "...", "expires": 123 }
+  #    We prefer the shape implied by "type", and also fall back to whichever
+  #    field happens to be populated, so older/newer layouts still work.
   local auth_file="$HOME/.config/fir/auth.json"
   if [[ -f "$auth_file" ]]; then
-    local key
-    key=$(jq -r '.poe.key // empty' "$auth_file" 2>/dev/null)
+    local cred_type key
+    cred_type=$(jq -r '.poe.type // empty' "$auth_file" 2>/dev/null)
+
+    case "$cred_type" in
+      oauth)
+        key=$(jq -r '.poe.access // empty' "$auth_file" 2>/dev/null)
+        # Warn (but don't fail) if the OAuth token looks expired. `expires`
+        # is stored in milliseconds since the Unix epoch.
+        local expires_ms now_ms
+        expires_ms=$(jq -r '.poe.expires // empty' "$auth_file" 2>/dev/null)
+        now_ms=$(( $(date +%s) * 1000 ))
+        if [[ "$expires_ms" =~ ^[0-9]+$ && "$expires_ms" -lt "$now_ms" ]]; then
+          echo "WARNING: Poe OAuth token in auth.json appears expired. Re-run 'fir login poe' if the API rejects it." >&2
+        fi
+        ;;
+      api_key|"")
+        key=$(jq -r '.poe.key // empty' "$auth_file" 2>/dev/null)
+        ;;
+      *)
+        # Unknown type — try both fields.
+        key=$(jq -r '.poe.key // .poe.access // empty' "$auth_file" 2>/dev/null)
+        ;;
+    esac
+
+    # Final fallback: whichever field is non-empty.
+    if [[ -z "$key" || "$key" == "null" ]]; then
+      key=$(jq -r '.poe.access // .poe.key // empty' "$auth_file" 2>/dev/null)
+    fi
+
     if [[ -n "$key" && "$key" != "null" ]]; then
       printf "%s" "$key"
       return 0

@@ -13,9 +13,16 @@ The script resolves your Poe API key from (in order):
 
 1. **`POE_API_KEY` environment variable** — set it in your shell
 2. **fir models config** — `~/.config/fir/models.json` at `.providers.Poe.apiKey`
-3. **fir auth storage** — `~/.config/fir/auth.json` under the `"poe"` provider key
+3. **fir auth storage** — `~/.config/fir/auth.json` under the `"poe"` provider key.
+   Both credential shapes are supported:
+   - `{"type": "api_key", "key": "sk-poe-..."}` (manual API key)
+   - `{"type": "oauth", "access": "sk-poe-...", "refresh": "...", "expires": 1234}` (written by `fir login poe`)
 
-To store the key in fir's auth storage, add a `poe` entry to `~/.config/fir/auth.json`:
+The OAuth `access` token is itself a usable Poe API key, so either shape works.
+If the stored OAuth token is expired, the script prints a warning and still tries
+the token; re-run `fir login poe` to refresh it.
+
+To store a manual key in fir's auth storage, add a `poe` entry to `~/.config/fir/auth.json`:
 
 ```json
 {
