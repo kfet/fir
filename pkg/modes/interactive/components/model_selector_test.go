@@ -65,3 +65,28 @@ func TestSortModels_FreeMarkedWithBadge(t *testing.T) {
 		t.Fatalf("expected FREE badge in rendered output, got:\n%s", rendered)
 	}
 }
+
+func TestSortModels_ZeroCostCopilotNotTreatedAsFree(t *testing.T) {
+	// GitHub Copilot models list with zero per-token pricing because Copilot
+	// is billed via subscription, not per-call. We must not advertise them
+	// as FREE in the picker, and they should not win the same-model
+	// tiebreaker.
+	current := &ai.Model{ID: "current", Provider: "p"}
+	settings := config.NewInMemorySettingsManager(config.Settings{})
+	tmpDir := t.TempDir()
+	authStorage := auth.NewAuthStorage(tmpDir)
+	registry := models.NewModelRegistry(authStorage, "")
+	c := NewModelSelectorComponent(current, settings, registry, func(*ai.Model) {}, func() {}, "")
+
+	copilot := &ai.Model{ID: "claude-sonnet-4", Name: "Claude", Provider: ai.ProviderGitHubCopilot, SWEScore: 77}
+	if isFreeModel(copilot) {
+		t.Fatalf("copilot zero-cost model must not be classified as free")
+	}
+	c.filteredModels = []ModelItem{{Provider: copilot.Provider, ID: copilot.ID, Model: copilot}}
+	c.selectedIndex = 0
+	c.updateList()
+	rendered := strings.Join(c.listContainer.Render(80), "\n")
+	if strings.Contains(rendered, "FREE") {
+		t.Fatalf("did not expect FREE badge for Copilot model, got:\n%s", rendered)
+	}
+}

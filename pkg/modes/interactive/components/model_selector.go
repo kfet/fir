@@ -131,11 +131,15 @@ func (c *ModelSelectorComponent) loadModels() {
 	c.clampSelection()
 }
 
-// isFreeModel reports whether the model has zero pricing across all cost axes.
-// These are typically provider-hosted free tiers (e.g. certain Poe bots) that
-// the user will usually want to prefer over paid duplicates.
+// isFreeModel reports whether the model is genuinely free to call — i.e. it
+// has zero pricing across all cost axes AND is hosted on a provider where
+// zero cost reflects per-call reality rather than a subscription plan the
+// user may or may not have. Today that means Poe, which exposes the same
+// underlying models as both paid and free bots; other zero-cost entries
+// (GitHub Copilot, Gemini CLI, Antigravity, OpenAI Codex) are behind
+// subscription/OAuth gates and shouldn't be advertised as "free".
 func isFreeModel(m *ai.Model) bool {
-	if m == nil {
+	if m == nil || m.Provider != ai.ProviderPoe {
 		return false
 	}
 	c := m.Cost
