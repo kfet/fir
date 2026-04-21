@@ -131,6 +131,17 @@ func (c *ModelSelectorComponent) loadModels() {
 	c.clampSelection()
 }
 
+// isFreeModel reports whether the model has zero pricing across all cost axes.
+// These are typically provider-hosted free tiers (e.g. certain Poe bots) that
+// the user will usually want to prefer over paid duplicates.
+func isFreeModel(m *ai.Model) bool {
+	if m == nil {
+		return false
+	}
+	c := m.Cost
+	return c.Input == 0 && c.Output == 0 && c.CacheRead == 0 && c.CacheWrite == 0
+}
+
 func (c *ModelSelectorComponent) sortModels(models []ModelItem) []ModelItem {
 	sorted := make([]ModelItem, len(models))
 	copy(sorted, models)
@@ -143,13 +154,30 @@ func (c *ModelSelectorComponent) sortModels(models []ModelItem) []ModelItem {
 		if !iCurrent && jCurrent {
 			return false
 		}
+		// When two entries refer to the "same" model (same provider + display
+		// name — common on Poe where the same model is exposed as multiple
+		// bots with different pricing), put the free variant first.
+		iFree := isFreeModel(sorted[i].Model)
+		jFree := isFreeModel(sorted[j].Model)
+		if sorted[i].Provider == sorted[j].Provider &&
+			sorted[i].Model.Name == sorted[j].Model.Name &&
+			iFree != jFree {
+			return iFree
+		}
 		// Sort by SWE-bench Verified score descending; unscored models go last.
 		iScore := sorted[i].Model.SWEScore
 		jScore := sorted[j].Model.SWEScore
 		if iScore != jScore {
 			return iScore > jScore
 		}
-		return sorted[i].Provider < sorted[j].Provider
+		if sorted[i].Provider != sorted[j].Provider {
+			return sorted[i].Provider < sorted[j].Provider
+		}
+		// Final tiebreaker: free models ahead of paid ones.
+		if iFree != jFree {
+			return iFree
+		}
+		return false
 	})
 	return sorted
 }
@@ -203,6 +231,10 @@ func (c *ModelSelectorComponent) updateList() {
 			checkmark = t.Fg("success", " ✓")
 		}
 		providerBadge := t.Fg("muted", "["+item.Provider+"]")
+		freeBadge := ""
+		if isFreeModel(item.Model) {
+			freeBadge = " " + t.Fg("success", "[FREE]")
+		}
 		sweBadge := ""
 		if item.Model.SWEScore > 0 {
 			if item.Model.SWEInferred {
@@ -215,9 +247,13 @@ func (c *ModelSelectorComponent) updateList() {
 		var line string
 		if isSelected {
 			prefix := t.Fg("accent", "→ ")
-			line = prefix + t.Fg("accent", item.ID) + " " + providerBadge + sweBadge + checkmark
+			line = prefix + t.Fg("accent", item.ID) + " " + providerBadge + freeBadge + sweBadge + checkmark
 		} else {
-			line = "  " + item.ID + " " + providerBadge + sweBadge + checkmark
+			idText := item.ID
+			if isFreeModel(item.Model) {
+				idText = t.Fg("success", item.ID)
+			}
+			line = "  " + idText + " " + providerBadge + freeBadge + sweBadge + checkmark
 		}
 		c.listContainer.AddChild(tuicomp.NewText(line, 0, 0, nil))
 	}
