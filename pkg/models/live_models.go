@@ -44,7 +44,11 @@ func newLiveModelState() *liveModelState {
 func (s *liveModelState) set(models []*ai.Model) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.models = models
+	if models == nil {
+		s.models = make([]*ai.Model, 0)
+	} else {
+		s.models = models
+	}
 	if !s.fetched {
 		s.fetched = true
 		close(s.done)
@@ -264,7 +268,7 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 		ids[i] = m.ID
 	}
 
-	// Synthesise full metadata using built-in siblings
+	// Resolve full metadata using built-in models and synthesis fallback.
 	models := r.synthesiseForLiveIDs(ctx, provider, ids)
 
 	state.set(models)
