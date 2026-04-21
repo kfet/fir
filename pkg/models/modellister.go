@@ -211,13 +211,10 @@ func anthropicFamily(id string) string {
 		return ""
 	}
 	rest := strings.TrimPrefix(id, "claude-")
-	parts := strings.SplitN(rest, "-", 2)
-	if len(parts) == 0 {
-		return ""
-	}
-	switch parts[0] {
+	family, _, _ := strings.Cut(rest, "-")
+	switch family {
 	case "opus", "sonnet", "haiku":
-		return parts[0]
+		return family
 	}
 	return ""
 }

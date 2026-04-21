@@ -16,13 +16,11 @@ import (
 )
 
 // liveModelCache is the on-disk cache format for a provider's live model list.
-// V2 stores fully-synthesised model metadata so cold-start Find() can resolve
-// previously-seen IDs without waiting for a fresh fetch. The filename embeds
-// the version (live-models-v2-<provider>.json) so v1 caches from older fir
-// builds are ignored rather than silently mis-decoded into half-empty Models.
+// Stores fully-synthesised model metadata so cold-start Find() can resolve
+// previously-seen IDs without waiting for a fresh fetch.
 type liveModelCache struct {
 	Provider  string      `json:"provider"`
-	Models    []*ai.Model `json:"models"` // synthesised metadata, not just IDs
+	Models    []*ai.Model `json:"models"`
 	FetchedAt time.Time   `json:"fetchedAt"`
 }
 
