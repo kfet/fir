@@ -5,6 +5,7 @@ package components
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/config"
@@ -201,6 +202,74 @@ func (c *ModelSelectorComponent) filterModels(query string) {
 	c.updateList()
 }
 
+func formatCostBadge(cost ai.ModelCost) string {
+	if cost.Input == 0 && cost.Output == 0 {
+		return ""
+	}
+	return fmt.Sprintf("[$%.2f/$%.2f]", cost.Input, cost.Output)
+}
+
+func formatCostDetails(cost ai.ModelCost) string {
+	parts := []string{
+		fmt.Sprintf("in: $%.2f/1M", cost.Input),
+		fmt.Sprintf("out: $%.2f/1M", cost.Output),
+	}
+	// Only surface cache pricing when the model actually charges for it;
+	// most models have zero on both axes and the extra columns are noise.
+	if cost.CacheRead != 0 || cost.CacheWrite != 0 {
+		parts = append(parts,
+			fmt.Sprintf("cache read: $%.2f/1M", cost.CacheRead),
+			fmt.Sprintf("cache write: $%.2f/1M", cost.CacheWrite),
+		)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// buildLeftPart renders the portion of a row up to provider badge.
+// It's used both for the final render and for computing the alignment column
+// across all filtered models. The visible width is independent of `selected`
+// because both the "→ " accent prefix and the plain "  " prefix occupy two
+// visible columns.
+func buildLeftPart(t *theme.Theme, item ModelItem, selected bool) string {
+	providerBadge := t.Fg("muted", "["+item.Provider+"]")
+	if selected {
+		return t.Fg("accent", "→ ") + t.Fg("accent", item.ID) + " " + providerBadge
+	}
+	idText := item.ID
+	if isFreeModel(item.Model) {
+		idText = t.Fg("success", item.ID)
+	}
+	return "  " + idText + " " + providerBadge
+}
+
+func buildPriceBadge(t *theme.Theme, item ModelItem) string {
+	if isFreeModel(item.Model) {
+		return t.Fg("success", "[FREE]")
+	}
+	if b := formatCostBadge(item.Model.Cost); b != "" {
+		return t.Fg("muted", b)
+	}
+	return ""
+}
+
+func buildSWEBadge(t *theme.Theme, item ModelItem) string {
+	if item.Model.SWEScore > 0 {
+		if item.Model.SWEInferred {
+			return " " + t.Fg("warning", fmt.Sprintf("[SWE:~%.0f%%]", item.Model.SWEScore))
+		}
+		return " " + t.Fg("muted", fmt.Sprintf("[SWE:%.0f%%]", item.Model.SWEScore))
+	}
+	return ""
+}
+
+func padToWidth(text string, width int) string {
+	pad := width - tui.VisibleWidth(text)
+	if pad <= 0 {
+		return ""
+	}
+	return strings.Repeat(" ", pad)
+}
+
 func (c *ModelSelectorComponent) clampSelection() {
 	max := len(c.filteredModels) - 1
 	if max < 0 {
@@ -228,6 +297,27 @@ func (c *ModelSelectorComponent) updateList() {
 		endIndex = len(c.filteredModels)
 	}
 
+	// Compute alignment widths across ALL filtered models so columns stay stable
+	// while scrolling.
+	maxLeftWidth := 0
+	maxPriceWidth := 0
+	maxSWEWidth := 0
+	for _, item := range c.filteredModels {
+		left := buildLeftPart(t, item, false)
+		price := buildPriceBadge(t, item)
+		swe := buildSWEBadge(t, item)
+
+		if lw := tui.VisibleWidth(left); lw > maxLeftWidth {
+			maxLeftWidth = lw
+		}
+		if pw := tui.VisibleWidth(price); pw > maxPriceWidth {
+			maxPriceWidth = pw
+		}
+		if sw := tui.VisibleWidth(swe); sw > maxSWEWidth {
+			maxSWEWidth = sw
+		}
+	}
+
 	for i := startIndex; i < endIndex; i++ {
 		item := c.filteredModels[i]
 		isSelected := i == c.selectedIndex
@@ -237,31 +327,17 @@ func (c *ModelSelectorComponent) updateList() {
 		if isCurrent {
 			checkmark = t.Fg("success", " ✓")
 		}
-		providerBadge := t.Fg("muted", "["+item.Provider+"]")
-		freeBadge := ""
-		if isFreeModel(item.Model) {
-			freeBadge = " " + t.Fg("success", "[FREE]")
-		}
-		sweBadge := ""
-		if item.Model.SWEScore > 0 {
-			if item.Model.SWEInferred {
-				sweBadge = " " + t.Fg("warning", fmt.Sprintf("[SWE:~%.0f%%]", item.Model.SWEScore))
-			} else {
-				sweBadge = " " + t.Fg("muted", fmt.Sprintf("[SWE:%.0f%%]", item.Model.SWEScore))
-			}
-		}
+		priceBadge := buildPriceBadge(t, item)
 
-		var line string
-		if isSelected {
-			prefix := t.Fg("accent", "→ ")
-			line = prefix + t.Fg("accent", item.ID) + " " + providerBadge + freeBadge + sweBadge + checkmark
-		} else {
-			idText := item.ID
-			if isFreeModel(item.Model) {
-				idText = t.Fg("success", item.ID)
-			}
-			line = "  " + idText + " " + providerBadge + freeBadge + sweBadge + checkmark
-		}
+		leftPart := buildLeftPart(t, item, isSelected)
+		sweBadge := buildSWEBadge(t, item)
+		leftPad := padToWidth(leftPart, maxLeftWidth) + " "
+
+		line := leftPart + leftPad
+		line += priceBadge + padToWidth(priceBadge, maxPriceWidth)
+		line += " "
+		line += sweBadge + padToWidth(sweBadge, maxSWEWidth)
+		line += checkmark
 		c.listContainer.AddChild(tuicomp.NewText(line, 0, 0, nil))
 	}
 
@@ -280,6 +356,7 @@ func (c *ModelSelectorComponent) updateList() {
 		sel := c.filteredModels[c.selectedIndex]
 		c.listContainer.AddChild(tuicomp.NewSpacer(1))
 		c.listContainer.AddChild(tuicomp.NewText(t.Fg("muted", "  Model Name: "+sel.Model.Name), 0, 0, nil))
+		c.listContainer.AddChild(tuicomp.NewText(t.Fg("muted", "  Cost (per 1M tokens): "+formatCostDetails(sel.Model.Cost)), 0, 0, nil))
 	}
 }
 
