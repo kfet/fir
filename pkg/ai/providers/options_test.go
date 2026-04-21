@@ -169,3 +169,30 @@ func TestBuildBaseOptions_CompactionPassThrough(t *testing.T) {
 	assert.True(t, opts.Compaction.Enabled)
 	assert.Equal(t, 100000, opts.Compaction.TriggerTokens)
 }
+
+func TestClampEffortToEnum(t *testing.T) {
+	cases := []struct {
+		name    string
+		effort  string
+		allowed []string
+		want    string
+	}{
+		{"empty-allowed-passes-through", "low", nil, "low"},
+		{"empty-effort-passes-through", "", []string{"medium"}, ""},
+		{"exact-match", "high", []string{"low", "medium", "high"}, "high"},
+		{"single-value-forces-medium", "low", []string{"medium"}, "medium"},
+		{"single-value-forces-medium-from-high", "high", []string{"medium"}, "medium"},
+		{"snap-up-from-minimal", "minimal", []string{"medium", "high", "xhigh"}, "medium"},
+		{"snap-up-from-low", "low", []string{"medium", "high", "xhigh"}, "medium"},
+		{"snap-down-from-max", "max", []string{"medium", "high", "xhigh"}, "xhigh"},
+		{"tie-breaks-up", "medium", []string{"low", "high"}, "high"},
+		{"extra-high-equiv-xhigh", "xhigh", []string{"medium", "extra-high"}, "extra-high"},
+		{"unknown-falls-back-to-first", "bogus", []string{"medium", "high"}, "medium"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := clampEffortToEnum(c.effort, c.allowed)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}

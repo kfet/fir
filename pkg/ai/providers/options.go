@@ -152,6 +152,7 @@ func clampEffortToEnum(effort string, allowed []string) string {
 	}
 	best := ""
 	bestDist := 0
+	bestRank := -1
 	for _, v := range allowed {
 		r := rank(v)
 		if r < 0 {
@@ -161,16 +162,17 @@ func clampEffortToEnum(effort string, allowed []string) string {
 		if d < 0 {
 			d = -d
 		}
-		if best == "" || d < bestDist {
-			best, bestDist = v, d
+		// On ties, prefer the higher rung — a user who asked for more
+		// reasoning effort than the enum offers gets the highest
+		// available; likewise ties between a rung below and above the
+		// request round up.
+		if best == "" || d < bestDist || (d == bestDist && r > bestRank) {
+			best, bestDist, bestRank = v, d, r
 		}
 	}
 	if best == "" {
 		return allowed[0]
 	}
-	// Normalise "extra-high" back to the wire form that was advertised —
-	// we want to return exactly what the upstream catalog listed, so the
-	// wire request matches its enum verbatim.
 	return best
 }
 

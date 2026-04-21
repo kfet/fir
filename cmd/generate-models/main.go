@@ -1115,19 +1115,19 @@ func fetchPoeModels() ([]modelSpec, error) {
 		}
 
 		models = append(models, modelSpec{
-			ID:             m.ID,
-			Name:           name,
-			API:            api,
-			BaseURL:        baseURL,
-			Provider:       "poe",
-			Reasoning:      m.Reasoning.Required || m.Reasoning.SupportsReasoningEffort,
-			Input:          input,
-			CostInput:      parseFloat(m.Pricing.Prompt) * 1_000_000,
-			CostOutput:     parseFloat(m.Pricing.Completion) * 1_000_000,
-			CostCacheRead:  parseFloat(m.Pricing.InputCacheRead) * 1_000_000,
-			CostCacheWrite: parseFloat(m.Pricing.InputCacheWrite) * 1_000_000,
-			ContextWindow:  intOr(ctxLen, 4096),
-			MaxTokens:      intOr(maxOut, 4096),
+			ID:                    m.ID,
+			Name:                  name,
+			API:                   api,
+			BaseURL:               baseURL,
+			Provider:              "poe",
+			Reasoning:             m.Reasoning.Required || m.Reasoning.SupportsReasoningEffort,
+			Input:                 input,
+			CostInput:             parseFloat(m.Pricing.Prompt) * 1_000_000,
+			CostOutput:            parseFloat(m.Pricing.Completion) * 1_000_000,
+			CostCacheRead:         parseFloat(m.Pricing.InputCacheRead) * 1_000_000,
+			CostCacheWrite:        parseFloat(m.Pricing.InputCacheWrite) * 1_000_000,
+			ContextWindow:         intOr(ctxLen, 4096),
+			MaxTokens:             intOr(maxOut, 4096),
 			ReasoningEffortValues: effortValues,
 		})
 	}
