@@ -48,6 +48,7 @@ func (m *InteractiveMode) showModelSelector(initialSearch string) {
 			m.session.Model(),
 			m.settings,
 			m.session.ModelRegistryRef(),
+			m.keybindings,
 			func(model *ai.Model) {
 				m.session.SetModel(model)
 				m.footerComponent.Invalidate()

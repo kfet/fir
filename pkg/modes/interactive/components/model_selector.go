@@ -33,6 +33,7 @@ type ModelSelectorComponent struct {
 	currentModel    *ai.Model
 	settingsManager *config.SettingsManager
 	modelRegistry   *models.ModelRegistry
+	keybindings     *tui.KeybindingsManager
 	onSelect        func(model *ai.Model)
 	onCancel        func()
 	errorMessage    string
@@ -48,6 +49,7 @@ func NewModelSelectorComponent(
 	currentModel *ai.Model,
 	settingsManager *config.SettingsManager,
 	modelRegistry *models.ModelRegistry,
+	keybindings *tui.KeybindingsManager,
 	onSelect func(model *ai.Model),
 	onCancel func(),
 	initialSearch string,
@@ -56,6 +58,7 @@ func NewModelSelectorComponent(
 		currentModel:    currentModel,
 		settingsManager: settingsManager,
 		modelRegistry:   modelRegistry,
+		keybindings:     keybindings,
 		onSelect:        onSelect,
 		onCancel:        onCancel,
 		listContainer:   &tui.Container{},
@@ -308,6 +311,8 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 			c.handleSelectModel(c.filteredModels[c.selectedIndex].Model)
 		}
 	case tuicomp.MatchesEditorAction(data, tuicomp.ActSelectCancel):
+		c.onCancel()
+	case c.keybindings != nil && c.keybindings.Matches(data, tui.ActionSelectModel):
 		c.onCancel()
 	default:
 		c.searchInput.HandleInput(data)

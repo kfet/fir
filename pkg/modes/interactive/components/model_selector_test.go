@@ -17,7 +17,7 @@ func TestModelSelectorComponent_Render(t *testing.T) {
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
 
-	comp := NewModelSelectorComponent(model, settings, registry, func(*ai.Model) {}, func() {}, "")
+	comp := NewModelSelectorComponent(model, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
 	lines := comp.Render(80)
 	if len(lines) == 0 {
 		t.Fatal("expected rendered output")
@@ -33,7 +33,7 @@ func TestSortModels_FreeBeatsPaidForSameModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
 
 	paid := &ai.Model{ID: "claude-paid", Name: "Claude", Provider: "poe",
 		Cost: ai.ModelCost{Input: 3, Output: 15}, SWEScore: 70}
@@ -54,7 +54,7 @@ func TestSortModels_FreeMarkedWithBadge(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
 
 	free := &ai.Model{ID: "free-one", Name: "Free", Provider: "poe"}
 	c.filteredModels = []ModelItem{{Provider: "poe", ID: free.ID, Model: free}}
@@ -76,7 +76,7 @@ func TestSortModels_ZeroCostCopilotNotTreatedAsFree(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
 
 	copilot := &ai.Model{ID: "claude-sonnet-4", Name: "Claude", Provider: ai.ProviderGitHubCopilot, SWEScore: 77}
 	if isFreeModel(copilot) {
