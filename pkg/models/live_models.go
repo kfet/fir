@@ -41,29 +41,33 @@ func newLiveModelState() *liveModelState {
 	return &liveModelState{done: make(chan struct{})}
 }
 
-func (s *liveModelState) set(models []*ai.Model) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if models == nil {
-		s.models = make([]*ai.Model, 0)
-	} else {
-		s.models = models
-	}
+// markFetched flips fetched=true and closes done on the first call. Caller
+// holds s.mu.
+func (s *liveModelState) markFetched() {
 	if !s.fetched {
 		s.fetched = true
 		close(s.done)
 	}
+}
+
+func (s *liveModelState) set(models []*ai.Model) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Always store a non-nil slice: has() and hasData() use s.models == nil
+	// to mean "fetch hasn't completed / no data".
+	if models == nil {
+		models = []*ai.Model{}
+	}
+	s.models = models
 	s.err = nil
+	s.markFetched()
 }
 
 func (s *liveModelState) setError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.fetched {
-		s.fetched = true
-		close(s.done)
-	}
 	s.err = err
+	s.markFetched()
 }
 
 func (s *liveModelState) has(modelID string) bool {
@@ -267,13 +271,9 @@ func liveCachePath(cacheDir, provider string) string {
 	return filepath.Join(cacheDir, "live-models-v2-"+provider+".json")
 }
 
-// liveCachePrefixes lists every on-disk cache filename prefix this binary
-// recognises. Used by RefreshLive to scrub stale files (including ones from
-// previous schema versions, so they never resurrect bad metadata).
-var liveCachePrefixes = []string{
-	"live-models-v2-",
-	"live-models-", // legacy v1 (raw IDs); always treated as stale.
-}
+// liveCachePrefix matches all live-model cache filenames (including legacy v1
+// layouts) so RefreshLive can scrub stale files on upgrade.
+const liveCachePrefix = "live-models-"
 
 func (r *ModelRegistry) loadLiveCache(cacheDir, provider string) ([]*ai.Model, bool) {
 	if cacheDir == "" {
@@ -340,11 +340,8 @@ func (r *ModelRegistry) RefreshLive(ctx context.Context) {
 	if cacheDir != "" {
 		if entries, err := os.ReadDir(cacheDir); err == nil {
 			for _, e := range entries {
-				for _, prefix := range liveCachePrefixes {
-					if strings.HasPrefix(e.Name(), prefix) {
-						_ = os.Remove(filepath.Join(cacheDir, e.Name()))
-						break
-					}
+				if strings.HasPrefix(e.Name(), liveCachePrefix) {
+					_ = os.Remove(filepath.Join(cacheDir, e.Name()))
 				}
 			}
 		}

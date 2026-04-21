@@ -322,7 +322,6 @@ type ModelRegistry struct {
 	synthMu             sync.Mutex
 	synthesised         map[string]*ai.Model   // cache: provider\x00id -> synthesised model (or nil)
 	synthesisedSiblings map[string][]*ai.Model // provider -> built-in siblings for synthesis
-
 }
 
 // NewModelRegistry creates a new ModelRegistry.
