@@ -45,27 +45,32 @@ func (r *ModelRegistry) invalidateSynthesisCache() {
 // siblingsFor returns built-in siblings for a provider, building & caching the
 // per-provider index lazily under synthMu.
 func (r *ModelRegistry) siblingsFor(provider string) []*ai.Model {
+	var models []*ai.Model
+	// Snapshot r.models first under r.mu to avoid lock-order inversion with refresh,
+	// which acquires r.mu then synthMu.
+	r.mu.RLock()
+	if len(r.models) > 0 {
+		models = make([]*ai.Model, len(r.models))
+		copy(models, r.models)
+	}
+	r.mu.RUnlock()
+
 	r.synthMu.Lock()
-	defer r.synthMu.Unlock()
 	if r.synthesisedSiblings == nil {
 		r.synthesisedSiblings = make(map[string][]*ai.Model)
-		// Snapshot r.models under r.mu — caller may already hold it for read
-		// (Find), so use a separate read here. Note: we accept the small race
-		// window where r.models is replaced concurrently; in that case the
-		// next Refresh -> invalidateSynthesisCache will clear stale entries.
-		r.mu.RLock()
-		for _, m := range r.models {
+		for _, m := range models {
 			r.synthesisedSiblings[m.Provider] = append(r.synthesisedSiblings[m.Provider], m)
 		}
-		r.mu.RUnlock()
 	}
 	// Return a defensive copy so callers can iterate without holding synthMu.
 	src := r.synthesisedSiblings[provider]
 	if len(src) == 0 {
+		r.synthMu.Unlock()
 		return nil
 	}
 	out := make([]*ai.Model, len(src))
 	copy(out, src)
+	r.synthMu.Unlock()
 	return out
 }
 
