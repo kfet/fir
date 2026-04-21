@@ -12,15 +12,10 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 )
 
-// LiveModelInfo represents a model ID returned by a provider's list-models API.
-type LiveModelInfo struct {
-	ID string `json:"id"`
-}
-
 // ModelLister fetches available model IDs from a provider API.
 type ModelLister interface {
 	// ListModels returns the model IDs available for this provider.
-	ListModels(ctx context.Context, baseURL, apiKey string) ([]LiveModelInfo, error)
+	ListModels(ctx context.Context, baseURL, apiKey string) ([]string, error)
 }
 
 // ListerModelDefaulter is an optional interface for ModelLister implementations
@@ -41,7 +36,7 @@ type openAIModelsResponse struct {
 	} `json:"data"`
 }
 
-func (l *openAIModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]LiveModelInfo, error) {
+func (l *openAIModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
 	url := strings.TrimRight(baseURL, "/") + "/models"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -65,11 +60,11 @@ func (l *openAIModelLister) ListModels(ctx context.Context, baseURL, apiKey stri
 		return nil, err
 	}
 
-	models := make([]LiveModelInfo, len(result.Data))
+	ids := make([]string, len(result.Data))
 	for i, m := range result.Data {
-		models[i] = LiveModelInfo{ID: m.ID}
+		ids[i] = m.ID
 	}
-	return models, nil
+	return ids, nil
 }
 
 // ModelDefaults provides per-provider heuristics. The OpenAI lister is shared
@@ -157,9 +152,9 @@ type anthropicModelsResponse struct {
 	HasMore bool `json:"has_more"`
 }
 
-func (l *anthropicModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]LiveModelInfo, error) {
+func (l *anthropicModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
 	base := strings.TrimRight(baseURL, "/") + "/v1/models"
-	var all []LiveModelInfo
+	var all []string
 	afterID := ""
 
 	for {
@@ -191,7 +186,7 @@ func (l *anthropicModelLister) ListModels(ctx context.Context, baseURL, apiKey s
 		}
 
 		for _, m := range result.Data {
-			all = append(all, LiveModelInfo{ID: m.ID})
+			all = append(all, m.ID)
 		}
 
 		if !result.HasMore || len(result.Data) == 0 {
@@ -261,7 +256,7 @@ type googleModelsResponse struct {
 	} `json:"models"`
 }
 
-func (l *googleModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]LiveModelInfo, error) {
+func (l *googleModelLister) ListModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
 	url := strings.TrimRight(baseURL, "/") + "/models?pageSize=100&key=" + apiKey
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -284,13 +279,12 @@ func (l *googleModelLister) ListModels(ctx context.Context, baseURL, apiKey stri
 		return nil, err
 	}
 
-	models := make([]LiveModelInfo, 0, len(result.Models))
+	ids := make([]string, 0, len(result.Models))
 	for _, m := range result.Models {
 		// Strip "models/" prefix: "models/gemini-2.0-flash" -> "gemini-2.0-flash"
-		id := strings.TrimPrefix(m.Name, "models/")
-		models = append(models, LiveModelInfo{ID: id})
+		ids = append(ids, strings.TrimPrefix(m.Name, "models/"))
 	}
-	return models, nil
+	return ids, nil
 }
 
 // --- Shared HTTP client with short timeout ---

@@ -247,18 +247,12 @@ func (r *ModelRegistry) fetchLiveModels(ctx context.Context, provider string, li
 		return
 	}
 
-	// Fetch raw IDs only from provider API
-	raw, err := lister.ListModels(ctx, baseURL, apiKey)
+	// Fetch IDs from provider API
+	ids, err := lister.ListModels(ctx, baseURL, apiKey)
 	if err != nil {
 		firlog.Debug("live model list failed for %s: %v", provider, err)
 		state.setError(err)
 		return
-	}
-
-	// Convert []LiveModelInfo to []string for synthesis
-	ids := make([]string, len(raw))
-	for i, m := range raw {
-		ids[i] = m.ID
 	}
 
 	// Resolve full metadata using built-in models and synthesis fallback.

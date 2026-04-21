@@ -39,7 +39,7 @@ func TestOpenAIModelLister(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("expected 2 models, got %d", len(models))
 	}
-	if models[0].ID != "gpt-4o" || models[1].ID != "gpt-4o-mini" {
+	if models[0] != "gpt-4o" || models[1] != "gpt-4o-mini" {
 		t.Errorf("unexpected model IDs: %v", models)
 	}
 }
@@ -65,7 +65,7 @@ func TestAnthropicModelLister(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].ID != "claude-sonnet-4-20250514" {
+	if len(models) != 1 || models[0] != "claude-sonnet-4-20250514" {
 		t.Errorf("unexpected models: %v", models)
 	}
 }
@@ -89,7 +89,7 @@ func TestGoogleModelLister(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 || models[0].ID != "gemini-2.0-flash" || models[1].ID != "gemini-2.5-pro" {
+	if len(models) != 2 || models[0] != "gemini-2.0-flash" || models[1] != "gemini-2.5-pro" {
 		t.Errorf("unexpected models: %v", models)
 	}
 }
