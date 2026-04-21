@@ -986,16 +986,26 @@ func fetchPoeModels() ([]modelSpec, error) {
 		if !hasString(m.SupportedFeatures, "tools") {
 			continue
 		}
-		// Surface models that advertise /v1/chat/completions, plus those
-		// with an empty supported_endpoints list (Poe's metadata is
-		// incomplete for many third-party bots — e.g. the Kimi K2.5/K2.6,
-		// GLM, Qwen, Minimax, Seed, DeepSeek families — but they are still
-		// reachable via /v1/chat/completions). Models that explicitly
-		// restrict themselves to non-chat endpoints (/v1/videos, /v1/images,
-		// etc.) are excluded.
+		// Surface models that advertise /v1/chat/completions or
+		// /v1/responses, plus those with an empty supported_endpoints
+		// list (Poe's metadata is incomplete for many third-party
+		// bots — e.g. the Kimi K2.5/K2.6, GLM, Qwen, Minimax, Seed,
+		// DeepSeek families — but they are still reachable via
+		// /v1/chat/completions). Models that explicitly restrict
+		// themselves to non-chat, non-responses endpoints (/v1/videos,
+		// /v1/images, etc.) are excluded.
 		eps := m.SupportedEndpoints
-		if len(eps) > 0 && !hasString(eps, "/v1/chat/completions") {
+		supportsChat := len(eps) == 0 || hasString(eps, "/v1/chat/completions")
+		supportsResponses := hasString(eps, "/v1/responses")
+		if !supportsChat && !supportsResponses {
 			continue
+		}
+		// Prefer /v1/chat/completions when available (widely supported,
+		// well-tested). Fall back to /v1/responses when the bot doesn't
+		// expose /v1/chat/completions (e.g. gpt-5.3-codex-spark).
+		api := "openai-completions"
+		if !supportsChat && supportsResponses {
+			api = "openai-responses"
 		}
 
 		input := []string{"text"}
@@ -1053,7 +1063,7 @@ func fetchPoeModels() ([]modelSpec, error) {
 		models = append(models, modelSpec{
 			ID:             m.ID,
 			Name:           name,
-			API:            "openai-completions",
+			API:            api,
 			BaseURL:        "https://api.poe.com/v1",
 			Provider:       "poe",
 			Reasoning:      m.Reasoning.Required || m.Reasoning.SupportsReasoningEffort,

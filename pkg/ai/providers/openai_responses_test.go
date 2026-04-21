@@ -332,3 +332,207 @@ func TestConvertResponsesInput_ShellCallReplay(t *testing.T) {
 	require.NotNil(t, shellOutputItem, "shell_call_output item should be replayed")
 	assert.Equal(t, "sho_001", shellOutputItem["id"])
 }
+
+func TestBuildOpenAIResponsesBody_PoeCompat(t *testing.T) {
+	// Poe's /v1/responses proxy rejects OpenAI-only reasoning extensions:
+	// - `include: ["reasoning.encrypted_content"]` — unknown include value
+	// - `reasoning.effort: "none"` — enum is {low, medium, high, xhigh}
+	// - the `developer` role — only system/user/assistant allowed
+	model := &ai.Model{
+		ID:            "gpt-5.3-codex-spark",
+		Api:           ai.ApiOpenAIResponses,
+		Provider:      ai.ProviderPoe,
+		BaseURL:       "https://api.poe.com/v1",
+		Reasoning:     true,
+		ContextWindow: 128000,
+		MaxTokens:     16384,
+	}
+	ctx := ai.Context{
+		SystemPrompt: "You are helpful.",
+		Messages:     []ai.Message{ai.NewUserMsg("hi", 0)},
+	}
+
+	// No reasoning effort → `reasoning` field omitted entirely (not "none").
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	require.NoError(t, err)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	_, hasReasoning := parsed["reasoning"]
+	assert.False(t, hasReasoning, "reasoning should be omitted for Poe when no effort is set")
+	_, hasInclude := parsed["include"]
+	assert.False(t, hasInclude, "include should never be sent to Poe")
+
+	// System prompt uses `system` role (not `developer`).
+	input := parsed["input"].([]any)
+	first := input[0].(map[string]any)
+	assert.Equal(t, "system", first["role"], "Poe rejects the developer role")
+
+	// With explicit reasoning effort → reasoning is sent but `include` is still omitted.
+	effort := ai.ThinkingHigh
+	opts := &ai.StreamOptions{ApiKey: "sk-test", ReasoningEffort: effort}
+	body, err = buildOpenAIResponsesBody(model, ctx, opts)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	reasoning := parsed["reasoning"].(map[string]any)
+	assert.Equal(t, "high", reasoning["effort"])
+	_, hasInclude = parsed["include"]
+	assert.False(t, hasInclude, "include should not be sent to Poe even with explicit effort")
+}
+
+func TestBuildOpenAIResponsesBody_OpenAIStillGetsEncryptedContent(t *testing.T) {
+	// Regression guard: the Poe carve-out must not strip encrypted-content
+	// includes from real OpenAI requests.
+	model := &ai.Model{
+		ID:            "gpt-5",
+		Api:           ai.ApiOpenAIResponses,
+		Provider:      ai.ProviderOpenAI,
+		BaseURL:       "https://api.openai.com/v1",
+		Reasoning:     true,
+		ContextWindow: 128000,
+		MaxTokens:     16384,
+	}
+	ctx := ai.Context{
+		SystemPrompt: "sys",
+		Messages:     []ai.Message{ai.NewUserMsg("hi", 0)},
+	}
+	effort := ai.ThinkingMedium
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{ApiKey: "sk", ReasoningEffort: effort})
+	require.NoError(t, err)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	include := parsed["include"].([]any)
+	assert.Equal(t, "reasoning.encrypted_content", include[0])
+
+	input := parsed["input"].([]any)
+	first := input[0].(map[string]any)
+	assert.Equal(t, "developer", first["role"])
+}
+
+// Regression: Poe's /v1/responses only sends `response.output_text.delta`
+// (for text) and a final `response.completed` carrying the full
+// `response.output` array — no `response.output_item.added` / `.done`
+// events. fir must still capture text and tool calls.
+func TestResponsesSSE_PoeNoItemEvents_Text(t *testing.T) {
+	output := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		Content:    []ai.AssistantContent{},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.ZeroUsage(),
+	}
+	stream := ai.NewAssistantMessageEventStream()
+	proc := &responsesSSEProcessor{output: output, stream: stream, model: &ai.Model{}}
+
+	// Consume events in a goroutine so Push() doesn't block.
+	go func() {
+		for range stream.Events {
+		}
+	}()
+
+	// Exact shape Poe sends: the delta event's item_id is the
+	// *response* id (resp_...), while the final response.output[]
+	// carries the real message id (msg_...). Previously this mismatch
+	// caused the reconciler to duplicate the message.
+	events := []string{
+		`{"type":"response.output_text.delta","item_id":"resp_123","output_index":0,"content_index":0,"delta":"Hi"}`,
+		`{"type":"response.completed","response":{"id":"resp_123","status":"completed","output":[` +
+			`{"id":"rs_1","type":"reasoning","summary":[]},` +
+			`{"id":"msg_1","type":"message","role":"assistant","status":"completed",` +
+			`"content":[{"type":"output_text","text":"Hi"}]}` +
+			`],"usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11}}}`,
+	}
+	for _, e := range events {
+		done, err := proc.processEvent(e)
+		require.NoError(t, err)
+		_ = done
+	}
+	stream.End(nil)
+
+	// Lazy-open happened first (text delta), then reasoning was
+	// replayed from response.output at completion. Order reflects
+	// arrival, not the server's output[] array.
+	require.Len(t, output.Content, 2, "must not duplicate the lazy-opened message item")
+	require.True(t, output.Content[0].IsText())
+	assert.Equal(t, "Hi", output.Content[0].Text.Text)
+	// Text signature should be set from response.output[] so multi-turn
+	// replay can reference the real msg_ id.
+	assert.Contains(t, output.Content[0].Text.TextSignature, "msg_1")
+	assert.True(t, output.Content[1].IsThinking())
+	assert.Equal(t, ai.StopReasonStop, output.StopReason)
+}
+
+func TestResponsesSSE_PoeNoItemEvents_ToolCall(t *testing.T) {
+	output := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		Content:    []ai.AssistantContent{},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.ZeroUsage(),
+	}
+	stream := ai.NewAssistantMessageEventStream()
+	proc := &responsesSSEProcessor{output: output, stream: stream, model: &ai.Model{}}
+	go func() {
+		for range stream.Events {
+		}
+	}()
+
+	// Poe emits NO delta events for tool-call-only responses — just
+	// `response.completed` with the entire output array.
+	events := []string{
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[` +
+			`{"id":"rs_1","type":"reasoning","summary":[]},` +
+			`{"id":"fc_1","type":"function_call","call_id":"call_abc","name":"list_dir",` +
+			`"arguments":"{\"path\":\"/tmp\"}","status":"completed"}` +
+			`],"usage":{"input_tokens":48,"output_tokens":76,"total_tokens":124}}}`,
+	}
+	for _, e := range events {
+		_, err := proc.processEvent(e)
+		require.NoError(t, err)
+	}
+	stream.End(nil)
+
+	// Expect reasoning + tool call, and stop reason flipped to tool_use.
+	require.Len(t, output.Content, 2)
+	assert.True(t, output.Content[0].IsThinking())
+	require.True(t, output.Content[1].IsToolCall())
+	tc := output.Content[1].ToolCall
+	assert.Equal(t, "list_dir", tc.Name)
+	assert.Equal(t, "call_abc|fc_1", tc.ID)
+	assert.Equal(t, "/tmp", tc.Arguments["path"])
+	assert.Equal(t, ai.StopReasonToolUse, output.StopReason)
+}
+
+// Regression guard: the Poe-shaped reconciler in handleResponseCompleted
+// must be a no-op for real OpenAI streams where every output item was
+// already streamed via response.output_item.added / .done. No content
+// blocks should be duplicated.
+func TestResponsesSSE_NormalOpenAIStream_NoDuplication(t *testing.T) {
+	output := &ai.AssistantMessage{
+		Role:       ai.RoleAssistant,
+		Content:    []ai.AssistantContent{},
+		StopReason: ai.StopReasonStop,
+		Usage:      ai.ZeroUsage(),
+	}
+	stream := ai.NewAssistantMessageEventStream()
+	proc := &responsesSSEProcessor{output: output, stream: stream, model: &ai.Model{}}
+	go func() {
+		for range stream.Events {
+		}
+	}()
+
+	events := []string{
+		`{"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","delta":"Hello"}`,
+		`{"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello"}]}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[` +
+			`{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello"}]}` +
+			`],"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}`,
+	}
+	for _, e := range events {
+		_, err := proc.processEvent(e)
+		require.NoError(t, err)
+	}
+	stream.End(nil)
+
+	require.Len(t, output.Content, 1, "normal OpenAI stream must not duplicate items via the Poe reconciler")
+	assert.True(t, output.Content[0].IsText())
+	assert.Equal(t, "Hello", output.Content[0].Text.Text)
+}

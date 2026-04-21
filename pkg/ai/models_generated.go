@@ -9762,6 +9762,20 @@ func init() {
 		SWEScore:      80,
 	})
 	RegisterModel(&Model{
+		ID:            "gpt-5.3-codex-spark",
+		Name:          "GPT-5.3-Codex-Spark",
+		Api:           "openai-responses",
+		Provider:      "poe",
+		BaseURL:       "https://api.poe.com/v1",
+		Reasoning:     true,
+		Input:         []string{"text"},
+		Cost:          ModelCost{Input: 0, Output: 0, CacheRead: 0, CacheWrite: 0},
+		ContextWindow: 128000,
+		MaxTokens:     16384,
+		Headers:       nil,
+		SWEScore:      80,
+	})
+	RegisterModel(&Model{
 		ID:            "gpt-5.3-instant",
 		Name:          "GPT-5.3-Instant",
 		Api:           "openai-completions",

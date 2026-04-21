@@ -19,6 +19,11 @@ type responsesSSEProcessor struct {
 	stream  *ai.AssistantMessageEventStream
 	model   *ai.Model
 	current *responsesItemState
+	// seenItemIDs tracks IDs of output items that have already been
+	// fully processed via `response.output_item.done`. Used at
+	// `response.completed` time to reconcile items that a proxy (e.g.
+	// Poe) skipped streaming entirely.
+	seenItemIDs map[string]struct{}
 }
 
 type responsesItemState struct {
@@ -223,8 +228,21 @@ func (p *responsesSSEProcessor) handleOutputItemAdded(raw map[string]any) {
 }
 
 func (p *responsesSSEProcessor) handleTextDelta(raw map[string]any) {
+	// Some OpenAI-compatible proxies (notably Poe) emit
+	// `response.output_text.delta` without first sending the usual
+	// `response.output_item.added` for the message item. Lazy-open a
+	// message item so the text is captured instead of being silently
+	// dropped. We deliberately don't copy `raw["item_id"]` into the
+	// synthesized item's id: on Poe that field is the *response* id
+	// (e.g. "resp_..."), not the message item id (e.g. "msg_..."),
+	// which would confuse the reconciler in handleResponseCompleted.
 	if p.current == nil || p.current.itemType != "message" {
-		return
+		p.handleOutputItemAdded(map[string]any{
+			"item": map[string]any{"type": "message"},
+		})
+		if p.current == nil || p.current.itemType != "message" {
+			return
+		}
 	}
 	delta, _ := raw["delta"].(string)
 	if delta == "" {
@@ -338,6 +356,12 @@ func (p *responsesSSEProcessor) handleOutputItemDone(raw map[string]any) {
 	iType := ""
 	if itemRaw != nil {
 		iType, _ = itemRaw["type"].(string)
+		if id, _ := itemRaw["id"].(string); id != "" {
+			if p.seenItemIDs == nil {
+				p.seenItemIDs = map[string]struct{}{}
+			}
+			p.seenItemIDs[id] = struct{}{}
+		}
 	}
 
 	switch iType {
@@ -456,6 +480,57 @@ func (p *responsesSSEProcessor) handleResponseCompleted(raw map[string]any) {
 	if id, ok := respRaw["id"].(string); ok && p.output.ResponseID == "" {
 		p.output.ResponseID = id
 	}
+
+	// Some OpenAI-compatible proxies (notably Poe) don't emit
+	// `response.output_item.added` / `.done` / per-item delta events
+	// at all — they only stream `output_text.delta` (sometimes) and
+	// then a final `response.completed` carrying the full
+	// `response.output` array. Walk that array and replay any items
+	// we haven't already seen so text / reasoning / tool calls all
+	// make it into the output. Real OpenAI streams are unaffected:
+	// every item has already been marked in `seenItemIDs` by
+	// `handleOutputItemDone`, so the replay loop is a no-op.
+	if outItems, ok := respRaw["output"].([]any); ok {
+		// First, finalize any currently-open item using the matching
+		// entry from response.output (so text signatures etc. are set).
+		if p.current != nil {
+			openType := p.current.itemType
+			openID := p.current.id
+			for _, it := range outItems {
+				m, _ := it.(map[string]any)
+				if m == nil {
+					continue
+				}
+				if t, _ := m["type"].(string); t != openType {
+					continue
+				}
+				if openID != "" {
+					if id, _ := m["id"].(string); id != openID {
+						continue
+					}
+				}
+				p.handleOutputItemDone(map[string]any{"item": m})
+				break
+			}
+		}
+
+		// Replay any items that were never streamed.
+		for _, it := range outItems {
+			m, _ := it.(map[string]any)
+			if m == nil {
+				continue
+			}
+			id, _ := m["id"].(string)
+			if id != "" {
+				if _, seen := p.seenItemIDs[id]; seen {
+					continue
+				}
+			}
+			p.handleOutputItemAdded(map[string]any{"item": m})
+			p.handleOutputItemDone(map[string]any{"item": m})
+		}
+	}
+
 	if usageRaw, ok := respRaw["usage"].(map[string]any); ok {
 		cachedTokens := 0
 		if details, ok := usageRaw["input_tokens_details"].(map[string]any); ok {

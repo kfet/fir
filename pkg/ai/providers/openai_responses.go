@@ -248,6 +248,7 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 	}
 
 	// Reasoning
+	isPoe := model.Provider == ai.ProviderPoe || strings.Contains(model.BaseURL, "poe.com")
 	if model.Reasoning {
 		if options != nil && options.ReasoningEffort != "" {
 			effort := string(options.ReasoningEffort)
@@ -258,8 +259,16 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 				"effort":  effort,
 				"summary": "auto",
 			}
-			body["include"] = []string{"reasoning.encrypted_content"}
-		} else if model.Provider != ai.ProviderGitHubCopilot {
+			// `include: ["reasoning.encrypted_content"]` is an
+			// OpenAI/Azure-specific feature; third-party proxies
+			// like Poe reject unknown include values.
+			if !isPoe {
+				body["include"] = []string{"reasoning.encrypted_content"}
+			}
+		} else if model.Provider != ai.ProviderGitHubCopilot && !isPoe {
+			// Poe's reasoning.effort enum is {low,medium,high,xhigh};
+			// "none" would 400. Just omit the field — Poe will use
+			// its default.
 			body["reasoning"] = map[string]any{"effort": "none"}
 		}
 	}
@@ -285,7 +294,10 @@ func convertResponsesInput(model *ai.Model, ctx ai.Context) []any {
 	// System prompt
 	if ctx.SystemPrompt != "" {
 		role := "system"
-		if model.Reasoning {
+		// Poe's proxy only accepts system/user/assistant; the
+		// `developer` role used by OpenAI reasoning models is rejected.
+		isPoe := model.Provider == ai.ProviderPoe || strings.Contains(model.BaseURL, "poe.com")
+		if model.Reasoning && !isPoe {
 			role = "developer"
 		}
 		input = append(input, map[string]any{
