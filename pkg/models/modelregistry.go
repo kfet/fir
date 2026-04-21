@@ -778,10 +778,10 @@ func (r *ModelRegistry) GetAll() []*ai.Model {
 
 // GetAvailable returns only models that have auth configured and are confirmed
 // available by the provider's live model list (when available). It also
-// surfaces live-list IDs that aren't in the built-in registry, synthesising
-// metadata from sibling models (optionally refined via a MetadataEnricher).
+// surfaces live-list IDs that aren't in the built-in registry, with metadata
+// synthesised from sibling models.
 func (r *ModelRegistry) GetAvailable() []*ai.Model {
-	// First: built-in models confirmed live. Snapshot under r.mu.
+	// Built-in models confirmed live.
 	r.mu.RLock()
 	var result []*ai.Model
 	for _, m := range r.models {
@@ -791,26 +791,20 @@ func (r *ModelRegistry) GetAvailable() []*ai.Model {
 	}
 	r.mu.RUnlock()
 
-	// Second: live-only models not in built-in registry. Snapshot live state
-	// without holding r.mu — synthesiseForLiveIDs takes its own read lock.
+	// Live-only models not in the built-in registry (already populated by the
+	// fetch path with full metadata).
 	r.liveModelsMu.RLock()
-	states := make(map[string]*liveModelState, len(r.liveModels))
+	states := make([]*liveModelState, 0, len(r.liveModels))
 	for prov, st := range r.liveModels {
-		states[prov] = st
+		if r.authStorage.HasAuth(prov) {
+			states = append(states, st)
+		}
 	}
 	r.liveModelsMu.RUnlock()
 
-	for prov, st := range states {
-		if !r.authStorage.HasAuth(prov) {
-			continue
-		}
-		// Use cached synthesised models from the state directly when present
-		// — no need to re-run the pipeline. The fetch path already populated
-		// the state with full metadata.
+	for _, st := range states {
 		st.mu.RLock()
-		for _, m := range st.models {
-			result = append(result, m)
-		}
+		result = append(result, st.models...)
 		st.mu.RUnlock()
 	}
 	return result
