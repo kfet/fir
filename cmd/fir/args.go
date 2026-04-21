@@ -301,7 +301,7 @@ Usage:
 
 Options:
   -C <dir>                       Run as if fir was started in <dir>
-  --provider <name>              Provider name (default: google)
+  --provider <name>              Provider name (default: from settings, else first provider with a valid API key)
   --model <id>                   Model ID
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)

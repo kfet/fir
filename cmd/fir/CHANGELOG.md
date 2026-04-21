@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `fir --help` no longer claims `--provider` defaults to `google`. The actual resolution (in `pkg/models/modelresolver.go::FindInitialModel`) is: CLI flags → `settings.json` `defaultProvider`/`defaultModelID` → first available provider with a valid API key (in `knownProviderOrder`). The hardcoded `(default: google)` text was misleading — `ParseArgs` leaves `Args.Provider` empty when the flag is omitted, with no implicit provider.
+
 ### Added
 
 - Print/JSON (`-p`) mode now waits up to 30 seconds for all configured MCP servers to finish their initial connect/initialize handshake before sending the first prompt. This fixes the case where `fir -p "use my mcp tool"` would race the LLM call against the MCP subprocess spawn and run without the tools being registered. New `(*mcp.Manager).WaitReady(ctx)` blocks until every `Start`-launched goroutine has settled (success or error) and is used under a `context.WithTimeout` from `cmd/fir/app.go` — a timeout only emits a stderr warning rather than aborting. Interactive and ACP modes opt into the same behaviour via a new `--wait-mcp` flag: the TUI prints `Waiting for MCP servers to initialize...` to stderr and blocks before `ui.Init()`; ACP blocks inside `createSession` after `session.Setup` returns (plumbed through `acpmode.Options.WaitMCP`) so the first `session/prompt` for that session sees every tool.
