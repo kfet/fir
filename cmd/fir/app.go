@@ -323,6 +323,20 @@ func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string,
 	}
 }
 
+// waitMCPReady blocks until every MCP server has finished its initial
+// connect/handshake (or until 30s elapses). Timeouts emit a stderr warning
+// rather than aborting. Safe to call with a nil manager (no-op).
+func waitMCPReady(mgr *mcp.Manager) {
+	if mgr == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := mgr.WaitReady(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: timed out waiting for MCP servers to initialize: %v\n", err)
+	}
+}
+
 // run is the main application logic.
 func run() error {
 	// Standalone subcommands — handle before normal parsing.
@@ -505,6 +519,10 @@ func run() error {
 	if args.OutputMode == ModeJSON {
 		outputMode = printmode.ModeJSON
 	}
+
+	// Wait for MCP servers to finish their initial connection attempt so
+	// any tools they provide are available before the first prompt.
+	waitMCPReady(setup.mcpManager)
 
 	runErr := printmode.Run(setup.result.Session, printmode.Options{
 		Mode:           outputMode,
@@ -796,6 +814,7 @@ func runAcpMode(args *Args) error {
 		NoExtensions:                  args.NoExtensions,
 		NoMCP:                         args.NoMCP,
 		MCPConfig:                     args.MCPConfig,
+		WaitMCP:                       args.WaitMCP,
 		EnabledExtensions:             args.Extensions,
 		DisabledExtensions:            args.DisabledExtensions,
 	})
@@ -888,6 +907,14 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 
 	// Wire the update notice channel so the TUI shows it at startup.
 	ui.SetUpdateChannel(noticeCh)
+
+	// --wait-mcp: block until all MCP servers have finished their initial
+	// connect handshake before the TUI starts, so an initial prompt sees
+	// every MCP tool.
+	if args.WaitMCP {
+		fmt.Fprintln(os.Stderr, "Waiting for MCP servers to initialize...")
+		waitMCPReady(setup.mcpManager)
+	}
 
 	if err := ui.Init(); err != nil {
 		return fmt.Errorf("init interactive mode: %w", err)

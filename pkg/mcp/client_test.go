@@ -826,3 +826,67 @@ func TestManager_VerboseLoggingTransport(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hey", result.Content[0].Text)
 }
+
+// TestManager_WaitReady_Success verifies that WaitReady returns once the
+// initial connection attempt for every configured server has finished.
+func TestManager_WaitReady_Success(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"a": {}, "b": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+	defer mgr.Close()
+
+	mgr.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.WaitReady(ctx))
+
+	// Once WaitReady returns, no server should be marked connecting.
+	assert.False(t, mgr.IsServerConnecting("a"))
+	assert.False(t, mgr.IsServerConnecting("b"))
+}
+
+// TestManager_WaitReady_ReturnsOnFailedConnect verifies that WaitReady also
+// returns when the initial connect fails (not just on success).
+func TestManager_WaitReady_ReturnsOnFailedConnect(t *testing.T) {
+	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
+	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+		return nil, errors.New("nope")
+	}
+
+	mgr.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.WaitReady(ctx))
+}
+
+// TestManager_WaitReady_NoConfigs returns immediately when there are no
+// configured servers.
+func TestManager_WaitReady_NoConfigs(t *testing.T) {
+	mgr := NewManager(nil, false)
+	mgr.Start(context.Background())
+	require.NoError(t, mgr.WaitReady(context.Background()))
+}
+
+// TestManager_WaitReady_ContextCanceled returns ctx.Err() if the context is
+// cancelled before the initial connects finish.
+func TestManager_WaitReady_ContextCanceled(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	mgr := NewManager(map[string]ServerConfig{"slow": {}}, false)
+	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+		<-block
+		return nil, errors.New("never")
+	}
+
+	mgr.Start(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := mgr.WaitReady(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

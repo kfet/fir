@@ -246,6 +246,16 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		mcpStatus:       mcp.StatusFunc(result.MCPManager),
 	}
 
+	// --wait-mcp: block session creation until every MCP server has finished
+	// its initial handshake so the first prompt sees all MCP tools.
+	if pa.options.WaitMCP && entry.mcpManager != nil {
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		if werr := entry.mcpManager.WaitReady(waitCtx); werr != nil {
+			firlog.Warn("acp createSession: wait-mcp timed out", "err", werr)
+		}
+		cancel()
+	}
+
 	unsub := result.Session.Subscribe(func(event session.AgentSessionEvent) {
 		pa.handleEvent(sessionID, entry, event)
 	})

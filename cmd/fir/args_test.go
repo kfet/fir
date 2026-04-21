@@ -432,3 +432,20 @@ func TestIsValidThinkingLevel(t *testing.T) {
 		t.Error("expected empty string to be invalid")
 	}
 }
+
+func TestParseArgs_WaitMCP(t *testing.T) {
+	args := ParseArgs([]string{"--wait-mcp", "hello"})
+	if !args.WaitMCP {
+		t.Error("expected WaitMCP=true")
+	}
+	if len(args.Messages) != 1 || args.Messages[0] != "hello" {
+		t.Errorf("expected message 'hello' to survive the flag, got %v", args.Messages)
+	}
+}
+
+func TestParseArgs_WaitMCPDefaultsFalse(t *testing.T) {
+	args := ParseArgs([]string{"hello"})
+	if args.WaitMCP {
+		t.Error("expected WaitMCP=false by default")
+	}
+}

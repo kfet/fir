@@ -42,6 +42,7 @@ type Args struct {
 	NoTools            bool
 	NoMCP              bool
 	MCPConfig          string
+	WaitMCP            bool
 	Extensions         []string
 	DisabledExtensions []string
 	NoExtensions       bool
@@ -161,6 +162,9 @@ func ParseArgs(args []string) *Args {
 		case arg == "--mcp-config" && i+1 < len(args):
 			i++
 			result.MCPConfig = args[i]
+
+		case arg == "--wait-mcp":
+			result.WaitMCP = true
 
 		case arg == "--tools" && i+1 < len(args):
 			i++
@@ -315,6 +319,10 @@ Options:
   --no-mcp                       Disable MCP server integration
   --mcp-config <path>            Load additional MCP config file (highest precedence)
                                  Also: FIR_MCP_CONFIG env var (CLI flag wins)
+  --wait-mcp                     Block until all MCP servers have finished
+                                 their initial handshake (up to 30s) before the
+                                 first prompt. Applies in all modes — print/JSON
+                                 always waits; interactive and ACP opt in here.
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max

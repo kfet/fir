@@ -125,6 +125,11 @@ type Manager struct {
 	// dialFn creates a Transport for the given server config.
 	// Defaults to commandTransport. Replaced in tests to inject in-memory transports.
 	dialFn func(cfg ServerConfig) (sdk.Transport, error)
+
+	// startWG tracks in-flight initial connection attempts started by Start.
+	// WaitReady blocks until every goroutine launched by Start has finished
+	// its initial connect (success or failure).
+	startWG sync.WaitGroup
 }
 
 // NewManager creates a new Manager for the given server configs.
@@ -301,7 +306,9 @@ func (m *Manager) Start(ctx context.Context) {
 	m.forEachServer(func(name string, e *serverEntry) bool {
 		e.connecting = true
 		cfg := e.config
+		m.startWG.Add(1)
 		go func() {
+			defer m.startWG.Done()
 			_, err := m.startServer(ctx, name, cfg)
 			m.withEntry(name, func(e *serverEntry) {
 				e.connecting = false
@@ -734,9 +741,6 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 	})
 }
 
-// HasServerTools reports whether the named server exposes all of the given
-// tool names. This checks the raw MCP tool names (not the prefixed agent
-// tool names).
 // IsServerConnecting returns true if the server is still performing its
 // initial connection/initialize handshake.
 func (m *Manager) IsServerConnecting(serverName string) bool {
@@ -747,6 +751,28 @@ func (m *Manager) IsServerConnecting(serverName string) bool {
 	return connecting
 }
 
+// WaitReady blocks until every server launched by Start has finished its
+// initial connection attempt (successfully or with an error), or until ctx
+// is cancelled. It is safe to call before Start (returns immediately) and
+// from multiple goroutines. Callers that want a timeout should pass a
+// context with a deadline.
+func (m *Manager) WaitReady(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		m.startWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// HasServerTools reports whether the named server exposes all of the given
+// tool names. This checks the raw MCP tool names (not the prefixed agent
+// tool names).
 func (m *Manager) HasServerTools(serverName string, toolNames ...string) bool {
 	var serverTools []agent.AgentTool
 	m.withEntry(serverName, func(e *serverEntry) {

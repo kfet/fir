@@ -28,6 +28,9 @@ type Options struct {
 	NoMCP bool
 	// MCPConfig is an extra MCP config file path from --mcp-config.
 	MCPConfig string
+	// WaitMCP blocks session creation until all MCP servers finish their
+	// initial handshake (up to 30s) so the first prompt sees every MCP tool.
+	WaitMCP bool
 	// EnabledExtensions is an explicit allowlist of extension names from --extension flags.
 	// When non-empty, only extensions in this list are started (merged with settings).
 	EnabledExtensions []string
