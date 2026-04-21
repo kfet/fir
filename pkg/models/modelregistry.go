@@ -321,9 +321,9 @@ type ModelRegistry struct {
 	// registry. Protected by synthMu (independent of r.mu so read paths like
 	// Find/GetAvailable don't have to upgrade their lock).
 	synthMu             sync.Mutex
-	enricher            MetadataEnricher
 	synthesised         map[string]*ai.Model   // cache: provider\x00id -> synthesised model (or nil)
 	synthesisedSiblings map[string][]*ai.Model // provider -> built-in siblings for synthesis
+
 }
 
 // NewModelRegistry creates a new ModelRegistry.

@@ -229,19 +229,9 @@ func TestAnthropicDefaults(t *testing.T) {
 
 // --- Resolution order in synthesise() ---
 
-type fakeEnricher struct {
-	called bool
-	model  *ai.Model
-}
-
-func (e *fakeEnricher) Enrich(_ context.Context, _, _ string, _ []*ai.Model) *ai.Model {
-	e.called = true
-	return e.model
-}
-
 func TestSynthesise_Pipeline(t *testing.T) {
 	// Built-in sibling so the fallback works. Use a provider with no
-	// registered ModelDefaulter so we exercise enricher and fallback paths.
+	// registered ModelDefaulter so we exercise the fallback path.
 	ai.RegisterModel(&ai.Model{
 		ID:            "synth-base",
 		Provider:      "synth-test-provider",
@@ -253,48 +243,28 @@ func TestSynthesise_Pipeline(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	r := NewModelRegistry(authStore, "")
 
-	// 1. No enricher: should fall back to sibling-clone.
+	// Fall back to sibling-clone.
 	m := r.synthesise(context.Background(), "synth-test-provider", "synth-new")
 	if m == nil || m.ContextWindow != 50000 {
 		t.Fatalf("fallback failed: %+v", m)
 	}
-
-	// 2. Enricher set + cache cleared: enricher wins.
-	enr := &fakeEnricher{model: &ai.Model{ContextWindow: 999999}}
-	r.SetMetadataEnricher(enr) // also invalidates cache
-	m = r.synthesise(context.Background(), "synth-test-provider", "synth-new-2")
-	if !enr.called {
-		t.Error("enricher not called")
-	}
-	if m == nil || m.ContextWindow != 999999 {
-		t.Errorf("expected enricher result, got %+v", m)
-	}
-	// Provider/ID always stamped.
-	if m.Provider != "synth-test-provider" || m.ID != "synth-new-2" {
+	if m.Provider != "synth-test-provider" || m.ID != "synth-new" {
 		t.Errorf("provider/id not stamped: %+v", m)
 	}
 
-	// 3. Enricher returns nil: falls through to sibling-clone.
-	enr.model = nil
-	r.SetMetadataEnricher(enr)
-	m = r.synthesise(context.Background(), "synth-test-provider", "synth-new-3")
-	if m == nil || m.ContextWindow != 50000 {
-		t.Errorf("expected fallback, got %+v", m)
-	}
-
-	// 4. Cache returns same instance second time.
-	m2 := r.synthesise(context.Background(), "synth-test-provider", "synth-new-3")
+	// Cache returns same instance second time.
+	m2 := r.synthesise(context.Background(), "synth-test-provider", "synth-new")
 	if m2 != m {
 		t.Error("expected cached instance")
 	}
 }
 
-func TestSynthesise_NoSiblings_NoEnricher_ReturnsNil(t *testing.T) {
+func TestSynthesise_NoSiblings_ReturnsNil(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	r := NewModelRegistry(authStore, "")
 	m := r.synthesise(context.Background(), "totally-unknown-provider", "x")
 	if m != nil {
-		t.Errorf("expected nil with no siblings/enricher, got %+v", m)
+		t.Errorf("expected nil with no siblings, got %+v", m)
 	}
 }
 

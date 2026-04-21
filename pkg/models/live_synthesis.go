@@ -9,30 +9,6 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// MetadataEnricher fills in metadata for a model ID that was returned by a
-// provider's live-list but not present in the built-in registry.
-//
-// This is the lowest-priority hook — providers should generally implement
-// ModelDefaults on their oauth.Provider or ModelLister directly. The enricher
-// is reserved for callers (e.g. extensions) that want to plug in an LLM-based
-// fallback for novel naming schemes.
-type MetadataEnricher interface {
-	Enrich(ctx context.Context, provider, modelID string, siblings []*ai.Model) *ai.Model
-}
-
-// SetMetadataEnricher installs an enricher used when synthesising live-only
-// model metadata. Pass nil to disable. Resolution order during synthesis is:
-//  1. provider-specific ModelDefaults (oauth.Provider or ModelLister)
-//  2. this enricher (if set)
-//  3. generic sibling-clone heuristic
-func (r *ModelRegistry) SetMetadataEnricher(e MetadataEnricher) {
-	r.synthMu.Lock()
-	defer r.synthMu.Unlock()
-	r.enricher = e
-	r.synthesised = nil
-	r.synthesisedSiblings = nil
-}
-
 // invalidateSynthesisCache drops cached synthesised models. Called after a
 // registry refresh so stale entries based on prior built-in models are cleared.
 func (r *ModelRegistry) invalidateSynthesisCache() {
@@ -97,9 +73,8 @@ func (r *ModelRegistry) storeSynthesised(provider, id string, m *ai.Model) {
 }
 
 // synthesise produces a *ai.Model for a single (provider, modelID) pair using
-// (in order): provider-specific defaulter, registered enricher, generic
-// sibling-clone fallback. Cached. Safe to call concurrently. Does not require
-// any caller-held locks.
+// (in order): provider-specific defaulter, generic sibling-clone fallback.
+// Cached. Safe to call concurrently. Does not require any caller-held locks.
 func (r *ModelRegistry) synthesise(ctx context.Context, provider, id string) *ai.Model {
 	if cached, ok := r.lookupSynthesised(provider, id); ok {
 		return cached
@@ -114,11 +89,7 @@ func (r *ModelRegistry) synthesise(ctx context.Context, provider, id string) *ai
 }
 
 // runSynthesisPipeline executes the resolution order without touching caches.
-func (r *ModelRegistry) runSynthesisPipeline(ctx context.Context, provider, id string, siblings []*ai.Model) *ai.Model {
-	r.synthMu.Lock()
-	enricher := r.enricher
-	r.synthMu.Unlock()
-
+func (r *ModelRegistry) runSynthesisPipeline(_ context.Context, provider, id string, siblings []*ai.Model) *ai.Model {
 	// 1. provider-specific defaulter (oauth.Provider or ModelLister).
 	if oauthProv := oauth.GetProvider(provider); oauthProv != nil {
 		if d, ok := oauthProv.(oauth.ModelDefaulter); ok {
@@ -138,19 +109,8 @@ func (r *ModelRegistry) runSynthesisPipeline(ctx context.Context, provider, id s
 			}
 		}
 	}
-	// 2. registered enricher.
-	if enricher != nil {
-		if m := enricher.Enrich(ctx, provider, id, siblings); m != nil {
-			m.Provider = provider
-			m.ID = id
-			return m
-		}
-	}
-	// 3. generic sibling-clone fallback.
-	if m := synthesiseFromSibling(provider, id, siblings); m != nil {
-		return m
-	}
-	return nil
+	// 2. generic sibling-clone fallback.
+	return synthesiseFromSibling(provider, id, siblings)
 }
 
 // synthesiseForLiveIDs produces *ai.Model entries for a batch of live-listed
