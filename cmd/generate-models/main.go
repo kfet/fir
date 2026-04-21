@@ -793,6 +793,306 @@ func fetchAIGatewayModels() ([]modelSpec, error) {
 	return models, nil
 }
 
+// --- Poe (poe.com, OpenAI-compatible) ---
+
+type poeModelResponse struct {
+	Data []poeModel `json:"data"`
+}
+
+type poeModel struct {
+	ID           string `json:"id"`
+	Description  string `json:"description"`
+	OwnedBy      string `json:"owned_by"`
+	Architecture struct {
+		InputModalities []string `json:"input_modalities"`
+	} `json:"architecture"`
+	SupportedFeatures  []string `json:"supported_features"`
+	SupportedEndpoints []string `json:"supported_endpoints"`
+	Pricing            struct {
+		Prompt          string `json:"prompt"`
+		Completion      string `json:"completion"`
+		InputCacheRead  string `json:"input_cache_read"`
+		InputCacheWrite string `json:"input_cache_write"`
+	} `json:"pricing"`
+	ContextWindow struct {
+		ContextLength   int `json:"context_length"`
+		MaxOutputTokens int `json:"max_output_tokens"`
+	} `json:"context_window"`
+	ContextLength int `json:"context_length"`
+	Reasoning     struct {
+		Required                bool `json:"required"`
+		SupportsReasoningEffort bool `json:"supports_reasoning_effort"`
+	} `json:"reasoning"`
+	Metadata struct {
+		DisplayName string `json:"display_name"`
+	} `json:"metadata"`
+	Parameters []struct {
+		Name   string `json:"name"`
+		Schema struct {
+			Maximum float64 `json:"maximum"`
+		} `json:"schema"`
+	} `json:"parameters"`
+}
+
+// poeContextDescRe captures context-window hints from free-text model
+// descriptions. Poe leaves the structured context_window field null for many
+// third-party bots but usually mentions the size in the description. Examples
+// handled: "Context Window: 256k", "Context Length: 131k tokens",
+// "context window of 128,000 tokens", "1 million token context window",
+// "256k context".
+//
+// The regex has two alternatives:
+//   - "context ... NUMBER[unit]"  (keyword first)
+//   - "NUMBER[unit] ... context"  (number first)
+var poeContextDescRe = regexp.MustCompile(
+	`(?i)` +
+		// keyword-first: "Context Window: 256k", "Context Length: 131k"
+		`(?:context[ _-]*(?:window|length|size)[^\d]{0,40}([\d,]+(?:\.\d+)?)\s*(k|m|million|thousand|tokens?)?` +
+		// number-first with optional "tokens" and then "context[s]":
+		//   "256k context", "1 million token context window", "1 million tokens) ... context"
+		`|([\d,]+(?:\.\d+)?)\s*(k|m|million|thousand)?[- ]?(?:tokens?[^.]{0,40})?contexts?` +
+		// fallback: "NUMBER[unit] tokens" anywhere inside a (context|supports|handle|window) phrase
+		`|(?:context|supports|handle|window|long)[^\d.]{0,40}([\d,]+(?:\.\d+)?)\s*(k|m|million|thousand)\s*tokens?` +
+		`)`)
+
+// parsePoeContextFromDesc returns the largest context-window size (in tokens)
+// mentioned in a free-text description, or 0 if none is found.
+func parsePoeContextFromDesc(desc string) int {
+	if desc == "" {
+		return 0
+	}
+	best := 0
+	for _, match := range poeContextDescRe.FindAllStringSubmatch(desc, -1) {
+		// Either group 1/2 (keyword-first) or 3/4 (number-first) will match.
+		numStr := match[1]
+		unit := match[2]
+		if numStr == "" {
+			numStr = match[3]
+			unit = match[4]
+		}
+		if numStr == "" {
+			numStr = match[5]
+			unit = match[6]
+		}
+		numStr = strings.ReplaceAll(numStr, ",", "")
+		unit = strings.ToLower(unit)
+		n := parseFloat(numStr)
+		if n <= 0 {
+			continue
+		}
+		switch unit {
+		case "k", "thousand":
+			n *= 1_000
+		case "m", "million":
+			n *= 1_000_000
+		}
+		tokens := int(n)
+		// Sanity: ignore absurdly small (<1024) or huge (>4M) matches —
+		// those almost certainly matched something unrelated or a typo
+		// (e.g. magistral's description says "40,000k" meaning 40k).
+		if tokens < 1024 || tokens > 4_000_000 {
+			continue
+		}
+		if tokens > best {
+			best = tokens
+		}
+	}
+	return best
+}
+
+// poeContextOverrides hardcodes context-window sizes for Poe bots whose
+// metadata is unreliable or missing. Prefer fixing the scraper over adding
+// entries here — this map is only for cases the API genuinely gets wrong.
+var poeContextOverrides = map[string]int{
+	// Poe description says "Context Window: 40,000k" which is a typo for
+	// 40k tokens. Mistral's docs confirm 40,000 (40k) for Magistral Medium.
+	"magistral-medium-2509-thinking": 40_000,
+}
+
+// poeSiblingCtx returns the context size of a sibling Poe bot (same model
+// under a different host) so `-fw` / `-tog` / `-t` variants can inherit from
+// the canonical entry when their own metadata is missing. Matches in order:
+//  1. exact base (e.g. `kimi-k2.5-fw` → `kimi-k2.5`)
+//  2. any known model whose ID starts with the base (e.g. `qwen3.5-397b-fw`
+//     → `qwen3.5-397b-a17b`)
+//  3. any known model that shares the longest ID prefix of at least 5 chars
+//     (e.g. `glm-5.1-fw` → `glm-5`)
+func poeSiblingCtx(id string, known map[string]int) int {
+	const suffixes = "-fw -tog -t -n"
+	var base string
+	for _, suf := range strings.Fields(suffixes) {
+		if strings.HasSuffix(id, suf) {
+			base = strings.TrimSuffix(id, suf)
+			break
+		}
+	}
+	if base == "" {
+		return 0
+	}
+	// 1. exact match
+	if ctx, ok := known[base]; ok && ctx > 0 {
+		return ctx
+	}
+	// 2. prefix match: any known ID that starts with the base
+	for k, v := range known {
+		if k == id || v <= 0 {
+			continue
+		}
+		if strings.HasPrefix(k, base+"-") {
+			return v
+		}
+	}
+	// 3. longest-shared-prefix match (at least 5 chars shared).
+	best, bestLen := 0, 0
+	for k, v := range known {
+		if v <= 0 || k == id {
+			continue
+		}
+		n := commonPrefixLen(k, base)
+		if n >= 5 && n > bestLen {
+			best, bestLen = v, n
+		}
+	}
+	return best
+}
+
+// commonPrefixLen returns the length of the common prefix of a and b.
+func commonPrefixLen(a, b string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+// fetchPoeModels fetches the model catalog from Poe's public OpenAI-compatible
+// endpoint. Poe's /v1/models requires no auth and returns every bot accessible
+// via the chat/completions endpoint.
+func fetchPoeModels() ([]modelSpec, error) {
+	log.Println("Fetching models from Poe API...")
+	var resp poeModelResponse
+	if err := fetchJSON("https://api.poe.com/v1/models", &resp); err != nil {
+		return nil, err
+	}
+
+	var models []modelSpec
+	for _, m := range resp.Data {
+		// Require tool support so the model works with fir's agent loop.
+		if !hasString(m.SupportedFeatures, "tools") {
+			continue
+		}
+		// Surface models that advertise /v1/chat/completions, plus those
+		// with an empty supported_endpoints list (Poe's metadata is
+		// incomplete for many third-party bots — e.g. the Kimi K2.5/K2.6,
+		// GLM, Qwen, Minimax, Seed, DeepSeek families — but they are still
+		// reachable via /v1/chat/completions). Models that explicitly
+		// restrict themselves to non-chat endpoints (/v1/videos, /v1/images,
+		// etc.) are excluded.
+		eps := m.SupportedEndpoints
+		if len(eps) > 0 && !hasString(eps, "/v1/chat/completions") {
+			continue
+		}
+
+		input := []string{"text"}
+		if hasString(m.Architecture.InputModalities, "image") {
+			input = append(input, "image")
+		}
+
+		ctxLen := m.ContextWindow.ContextLength
+		if ctxLen == 0 {
+			ctxLen = m.ContextLength
+		}
+		maxOut := m.ContextWindow.MaxOutputTokens
+		// Fall back to the max_output_tokens parameter's upper bound when
+		// Poe doesn't fill in the structured context_window fields. This
+		// is the only context-size signal available for many third-party
+		// bots (e.g. kimi-k2.6 advertises 262144 here).
+		paramMax := 0
+		for _, p := range m.Parameters {
+			if p.Name == "max_output_tokens" && p.Schema.Maximum > 0 {
+				paramMax = int(p.Schema.Maximum)
+				break
+			}
+		}
+		if ctxLen == 0 && paramMax > 0 {
+			ctxLen = paramMax
+		}
+		// Last-resort: scrape context size from the free-text description
+		// (many third-party Poe bots only mention it there).
+		if ctxLen == 0 {
+			if descCtx := parsePoeContextFromDesc(m.Description); descCtx > 0 {
+				ctxLen = descCtx
+			}
+		}
+		// Hardcoded overrides take precedence over everything: used when
+		// Poe's own metadata is wrong (see poeContextOverrides).
+		if override, ok := poeContextOverrides[m.ID]; ok {
+			ctxLen = override
+		}
+		if maxOut == 0 && paramMax > 0 {
+			maxOut = paramMax
+		}
+		if maxOut == 0 {
+			maxOut = 8192
+		}
+		// MaxTokens must never exceed the context window.
+		if ctxLen > 0 && maxOut > ctxLen {
+			maxOut = ctxLen
+		}
+
+		name := m.Metadata.DisplayName
+		if name == "" {
+			name = m.ID
+		}
+
+		models = append(models, modelSpec{
+			ID:             m.ID,
+			Name:           name,
+			API:            "openai-completions",
+			BaseURL:        "https://api.poe.com/v1",
+			Provider:       "poe",
+			Reasoning:      m.Reasoning.Required || m.Reasoning.SupportsReasoningEffort,
+			Input:          input,
+			CostInput:      parseFloat(m.Pricing.Prompt) * 1_000_000,
+			CostOutput:     parseFloat(m.Pricing.Completion) * 1_000_000,
+			CostCacheRead:  parseFloat(m.Pricing.InputCacheRead) * 1_000_000,
+			CostCacheWrite: parseFloat(m.Pricing.InputCacheWrite) * 1_000_000,
+			ContextWindow:  intOr(ctxLen, 4096),
+			MaxTokens:      intOr(maxOut, 4096),
+		})
+	}
+	// Second pass: for bots whose context size is still missing, inherit
+	// from a canonical sibling (e.g. `kimi-k2.5-fw` inherits from `kimi-k2.5`).
+	// This recovers Fireworks/Together-hosted mirror bots that ship with
+	// blank descriptions.
+	known := make(map[string]int, len(models))
+	for _, mm := range models {
+		// 4096 is our "unknown" default; don't propagate it as a sibling signal.
+		if mm.ContextWindow == 4096 {
+			continue
+		}
+		known[mm.ID] = mm.ContextWindow
+	}
+	for i := range models {
+		if models[i].ContextWindow > 0 && models[i].ContextWindow != 4096 {
+			continue
+		}
+		if sib := poeSiblingCtx(models[i].ID, known); sib > 0 {
+			models[i].ContextWindow = sib
+			if models[i].MaxTokens == 0 || models[i].MaxTokens == 4096 || models[i].MaxTokens > sib {
+				models[i].MaxTokens = sib
+			}
+		}
+	}
+	log.Printf("Fetched %d tool-capable models from Poe", len(models))
+	return models, nil
+}
+
 var copilotClaude4Re = regexp.MustCompile(`^claude-(haiku|sonnet|opus)-4([.\-]|$)`)
 
 func loadModelsDevData() ([]modelSpec, error) {
@@ -2039,6 +2339,11 @@ func main() {
 		log.Printf("Warning: AI Gateway fetch failed: %v", err)
 	}
 
+	poeModels, err := fetchPoeModels()
+	if err != nil {
+		log.Printf("Warning: Poe fetch failed: %v", err)
+	}
+
 	// Fetch SWE-bench Verified leaderboard for model capability ordering.
 	// Failure is non-fatal; curated baseline scores are used instead.
 	sweScores := fetchSWEBenchScores()
@@ -2046,6 +2351,7 @@ func main() {
 	// Combine: models.dev first (takes priority during dedup)
 	all := append(modelsDevModels, openRouterModels...)
 	all = append(all, aiGatewayModels...)
+	all = append(all, poeModels...)
 
 	// Apply manual overrides and additions
 	all = applyOverridesAndAdditions(all)

@@ -246,3 +246,43 @@ func TestMatchSWELeaderboardName(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePoeContextFromDesc(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want int
+	}{
+		{"context-window-colon-k", "- Context Window: 256k", 256_000},
+		{"context-window-full-number", "- Context Window: 1,000,000", 1_000_000},
+		{"context-length-k", "Context Length: 131k", 131_000},
+		{"supports-k-context", "It supports 256k context, four reasoning modes", 256_000},
+		{"context-window-of-tokens", "It supports a context window of 128,000 tokens", 128_000},
+		{"offers-context-window-of", "It offers a context window of 300,000 tokens", 300_000},
+		{"million-token-context-window", "It offers a 1 million token context window", 1_000_000},
+		{"long-contexts-million-tokens", "extremely long contexts (\u2248 1 million tokens)", 1_000_000},
+		{"no-match", "Kimi K2.5 is Moonshot AI's flagship agentic model", 0},
+		{"reject-typo-huge", "Context Window: 40,000k", 0}, // 40M > cap
+		{"reject-too-small", "Context Window: 100", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parsePoeContextFromDesc(tt.desc); got != tt.want {
+				t.Errorf("parsePoeContextFromDesc(%q) = %d, want %d", tt.desc, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPoeSiblingCtx(t *testing.T) {
+	known := map[string]int{"kimi-k2.5": 128000, "qwen3.5-397b-a17b": 64000, "glm-5": 131072}
+	if got := poeSiblingCtx("kimi-k2.5-fw", known); got != 128000 {
+		t.Errorf("kimi sibling fallback got %d, want 128000", got)
+	}
+	if got := poeSiblingCtx("qwen3.5-397b-fw", known); got != 64000 {
+		t.Errorf("qwen sibling fallback got %d, want 64000", got)
+	}
+	if got := poeSiblingCtx("glm-5.1-fw", known); got != 131072 {
+		t.Errorf("glm sibling fallback got %d, want 131072", got)
+	}
+}

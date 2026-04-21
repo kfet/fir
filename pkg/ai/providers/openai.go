@@ -105,7 +105,8 @@ func detectCompat(model *ai.Model) resolvedCompat {
 	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
 		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
 		strings.Contains(baseURL, "chutes.ai") || strings.Contains(baseURL, "deepseek.com") ||
-		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai")
+		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai") ||
+		provider == "poe" || strings.Contains(baseURL, "poe.com")
 
 	useMaxTokens := strings.Contains(baseURL, "chutes.ai")
 

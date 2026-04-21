@@ -61,6 +61,7 @@ var builtinAuthProviderIDs = map[string]bool{
 	"google-gemini-cli":  true,
 	"google-antigravity": true,
 	"openai-codex":       true,
+	"poe":                true,
 }
 
 // ValidateCommandName checks that a command name is well-formed. It returns

@@ -71,6 +71,7 @@ const (
 	ProviderOpenCode             Provider = "opencode"
 	ProviderOpenCodeGo           Provider = "opencode-go"
 	ProviderKimiCoding           Provider = "kimi-coding"
+	ProviderPoe                  Provider = "poe"
 )
 
 // --- Thinking ---

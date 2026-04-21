@@ -25,6 +25,8 @@ var Registry = []Var{
 	{Name: "FIR_EXT_TIMEOUT", Description: "Extension init handshake timeout in seconds (default: 5)"},
 	{Name: "FIR_HARDWARE_CURSOR", Description: "Show hardware cursor in TUI (set to 1)"},
 	{Name: "FIR_MCP_CONFIG", Description: "Extra MCP config file path (--mcp-config flag wins)"},
+	{Name: "FIR_POE_CLIENT_ID", Description: "Override Poe OAuth client ID (default: fir's registered client)"},
+	{Name: "FIR_POE_REDIRECT_URI", Description: "Override Poe OAuth redirect URI (defaults to http://localhost:1456/auth/callback)"},
 	{Name: "FIR_PTY_SOCKET_DIR", Description: "Override directory for PTY socket files"},
 	{Name: "FIR_REEXEC_CONTINUE", Description: "Internal: signal that session is being re-exec'd", Internal: true},
 	{Name: "FIR_TIMING", Description: "Enable request timing logs (set to 1)"},
@@ -41,6 +43,7 @@ var ProviderKeys = []Var{
 	{Name: "MISTRAL_API_KEY", Description: "Mistral API key"},
 	{Name: "OPENAI_API_KEY", Description: "OpenAI GPT API key"},
 	{Name: "OPENROUTER_API_KEY", Description: "OpenRouter API key"},
+	{Name: "POE_API_KEY", Description: "Poe API key (see https://poe.com/api_key)"},
 	{Name: "XAI_API_KEY", Description: "xAI Grok API key"},
 }
 

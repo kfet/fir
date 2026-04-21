@@ -28,6 +28,7 @@ var providerEnvMap = map[string]string{
 	string(ai.ProviderOpenCode):             "OPENCODE_API_KEY",
 	string(ai.ProviderOpenCodeGo):           "OPENCODE_API_KEY",
 	string(ai.ProviderKimiCoding):           "KIMI_API_KEY",
+	string(ai.ProviderPoe):                  "POE_API_KEY",
 }
 
 // additionalAuthEnvVars lists env vars used by providers whose auth logic can't
