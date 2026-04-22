@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-04-21
+
 ### Fixed
 
 - `fir --help` no longer claims `--provider` defaults to `google`. The actual resolution (in `pkg/models/modelresolver.go::FindInitialModel`) is: CLI flags → `settings.json` `defaultProvider`/`defaultModelID` → first available provider with a valid API key (in `knownProviderOrder`). The hardcoded `(default: google)` text was misleading — `ParseArgs` leaves `Args.Provider` empty when the flag is omitted, with no implicit provider.
