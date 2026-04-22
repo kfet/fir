@@ -7,12 +7,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 )
+
+// TestMain registers the canonical Claude-Code tool-name map for the test
+// process. In production this map is supplied by the anthropic-auth builtin
+// extension at handshake time; for unit tests we mirror that registration
+// up front so the existing tool-name tests keep exercising the real
+// translation path.
+func TestMain(m *testing.M) {
+	RegisterToolNameAliases("anthropic-auth-test", map[string]string{
+		"read":  "Read",
+		"write": "Write",
+		"edit":  "Edit",
+		"bash":  "Bash",
+		"grep":  "Grep",
+		"find":  "Glob",
+	})
+	os.Exit(m.Run())
+}
 
 func anthropicModel(serverURL string) *ai.Model {
 	m := testModel(serverURL, ai.ApiAnthropicMessages, ai.ProviderAnthropic)
@@ -530,6 +548,47 @@ func TestAnthropic_ClaudeCodeNames(t *testing.T) {
 	}
 	if fromClaudeCodeName("Bash", tools) != "bash" {
 		t.Error("expected bash from Bash")
+	}
+}
+
+func TestAnthropic_ClaudeCodeNames_UnmappedPassthrough(t *testing.T) {
+	// Fir tools without a Claude-Code counterpart (e.g. bash_output,
+	// bash_kill, ls) must pass through unchanged — the OAuth endpoint
+	// accepts custom tool names in that case.
+	for _, name := range []string{"bash_output", "bash_kill", "ls"} {
+		if got := toClaudeCodeName(name); got != name {
+			t.Errorf("toClaudeCodeName(%q) = %q, want passthrough", name, got)
+		}
+	}
+
+	// And the reverse: the LLM sending back a custom name we registered
+	// must resolve to the fir tool name.
+	tools := []ai.Tool{{Name: "bash_output"}, {Name: "ls"}}
+	for _, name := range []string{"bash_output", "ls"} {
+		if got := fromClaudeCodeName(name, tools); got != name {
+			t.Errorf("fromClaudeCodeName(%q) = %q, want %q", name, got, name)
+		}
+	}
+
+	// find ↔ Glob still round-trips via the registered alias.
+	if got := toClaudeCodeName("find"); got != "Glob" {
+		t.Errorf("toClaudeCodeName(find) = %q, want Glob", got)
+	}
+	if got := fromClaudeCodeName("Glob", []ai.Tool{{Name: "find"}}); got != "find" {
+		t.Errorf("fromClaudeCodeName(Glob) = %q, want find", got)
+	}
+}
+
+func TestAnthropic_ToolNameAliases_UnregisterClears(t *testing.T) {
+	// Register under a unique ext name and a tool name not in the global
+	// test map so we can observe pure register/unregister behaviour.
+	RegisterToolNameAliases("test-ext-unregister", map[string]string{"frobnicate": "Frobnicate"})
+	if toClaudeCodeName("frobnicate") != "Frobnicate" {
+		t.Fatal("register failed")
+	}
+	UnregisterToolNameAliases("test-ext-unregister")
+	if got := toClaudeCodeName("frobnicate"); got != "frobnicate" {
+		t.Errorf("after unregister: got %q, want passthrough frobnicate", got)
 	}
 }
 

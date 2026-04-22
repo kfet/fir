@@ -45,6 +45,12 @@ type InitResult struct {
 	Commands      []CommandSpec      `json:"commands,omitempty"`
 	Events        []string           `json:"events,omitempty"`
 	AuthProviders []AuthProviderSpec `json:"auth_providers,omitempty"`
+	// ToolNameMap is a static mapping from fir tool names to canonical
+	// provider-side tool names (e.g. Claude Code's "KillShell" for fir's
+	// "bash_kill"). Collected once at handshake by the extension manager
+	// and consumed by provider adapters (currently pkg/ai/providers
+	// anthropic OAuth mode) to translate tool names to and from the LLM.
+	ToolNameMap map[string]string `json:"tool_name_map,omitempty"`
 }
 
 // commandNameRE validates extension command names: lowercase letters, digits,

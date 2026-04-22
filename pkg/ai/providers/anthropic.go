@@ -20,21 +20,90 @@ import (
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// claudeCodeTools are the canonical tool names from Claude Code 2.x.
-var claudeCodeTools = []string{
-	"Read", "Write", "Edit", "Bash", "Grep", "Glob",
-	"AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "KillShell",
-	"NotebookEdit", "Skill", "Task", "TaskOutput", "TodoWrite",
-	"WebFetch", "WebSearch",
+// Tool-name translation for the anthropic OAuth (Claude Pro/Max) path.
+//
+// Claude Code's OAuth endpoint expects the canonical tool names it ships
+// with (e.g. "Read", "Bash", "KillShell"). fir's built-in tools use their
+// own names ("read", "bash", "bash_kill", ...). The mapping between the
+// two is *not* baked into this file — it is supplied at handshake time by
+// the anthropic-auth builtin extension via RegisterToolNameAliases, so
+// all the Claude-Code-specific naming lives next to the OAuth flow.
+//
+// ccToolLookup is kept (empty by default) for the unit tests and for any
+// future provider-adapter that wants to add a hardcoded baseline.
+var ccToolLookup = map[string]string{}
+
+var (
+	// extToolAliases holds per-extension alias maps registered via
+	// RegisterToolNameAliases. Keys are extension names; values map our
+	// tool name (lowercased) → canonical provider-side tool name.
+	extToolAliasesMu sync.RWMutex
+	extToolAliases   = map[string]map[string]string{}
+)
+
+// RegisterToolNameAliases registers a static mapping from fir tool names to
+// canonical provider-side (Claude-Code) tool names for the given extension.
+// It is intended to be called once per extension at handshake time by the
+// extension manager; subsequent calls for the same extName replace the
+// previous map.
+//
+// Keys are fir tool names (e.g. "bash_kill", "read"); values are the
+// canonical names expected by the provider (e.g. "KillShell", "Read").
+// The map is consulted by toClaudeCodeName (outbound: fir → LLM) and
+// fromClaudeCodeName (inbound: LLM → fir) so tool-name translation
+// round-trips correctly regardless of which tool subset a session has.
+func RegisterToolNameAliases(extName string, aliases map[string]string) {
+	extToolAliasesMu.Lock()
+	defer extToolAliasesMu.Unlock()
+	if len(aliases) == 0 {
+		delete(extToolAliases, extName)
+		return
+	}
+	cp := make(map[string]string, len(aliases))
+	for k, v := range aliases {
+		if k == "" || v == "" {
+			continue
+		}
+		cp[strings.ToLower(k)] = v
+	}
+	extToolAliases[extName] = cp
 }
 
-var ccToolLookup map[string]string
+// UnregisterToolNameAliases removes a previously-registered alias map.
+// Safe to call when no map was registered.
+func UnregisterToolNameAliases(extName string) {
+	extToolAliasesMu.Lock()
+	delete(extToolAliases, extName)
+	extToolAliasesMu.Unlock()
+}
 
-func init() {
-	ccToolLookup = make(map[string]string, len(claudeCodeTools))
-	for _, t := range claudeCodeTools {
-		ccToolLookup[strings.ToLower(t)] = t
+// lookupToolAlias consults the extension-registered alias maps for a
+// canonical provider-side tool name. Returns "" when no alias is registered.
+func lookupToolAlias(ourName string) string {
+	key := strings.ToLower(ourName)
+	extToolAliasesMu.RLock()
+	defer extToolAliasesMu.RUnlock()
+	for _, m := range extToolAliases {
+		if cc, ok := m[key]; ok {
+			return cc
+		}
 	}
+	return ""
+}
+
+// lookupToolAliasReverse returns the fir tool name for a given canonical
+// provider-side name, if one is registered. Returns "" when no match.
+func lookupToolAliasReverse(ccName string) string {
+	extToolAliasesMu.RLock()
+	defer extToolAliasesMu.RUnlock()
+	for _, m := range extToolAliases {
+		for ourLower, cc := range m {
+			if strings.EqualFold(cc, ccName) {
+				return ourLower
+			}
+		}
+	}
+	return ""
 }
 
 // anthropicPrefixGuards tracks prefix stability per session.
@@ -42,6 +111,9 @@ var anthropicPrefixGuards sync.Map // sessionID → *PrefixGuard
 
 func toClaudeCodeName(name string) string {
 	if cc, ok := ccToolLookup[strings.ToLower(name)]; ok {
+		return cc
+	}
+	if cc := lookupToolAlias(name); cc != "" {
 		return cc
 	}
 	return name
@@ -52,6 +124,17 @@ func fromClaudeCodeName(name string, tools []ai.Tool) string {
 	for _, t := range tools {
 		if strings.ToLower(t.Name) == lower {
 			return t.Name
+		}
+	}
+	// Reverse alias lookup: Claude Code name → our tool name.
+	// Uses extension-registered alias maps so tools whose fir name differs
+	// from the canonical Claude-Code name (e.g. bash_kill / KillShell)
+	// still resolve correctly when the session has the fir tool.
+	if ours := lookupToolAliasReverse(name); ours != "" {
+		for _, t := range tools {
+			if strings.EqualFold(t.Name, ours) {
+				return t.Name
+			}
 		}
 	}
 	return name

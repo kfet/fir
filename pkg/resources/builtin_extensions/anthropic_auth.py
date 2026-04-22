@@ -229,4 +229,34 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Tool-name mapping (fir → Claude Code canonical names)
+# ---------------------------------------------------------------------------
+#
+# When a session is authenticated with OAuth (Claude Pro/Max), Anthropic's
+# backend expects the Claude Code canonical tool names. We translate fir's
+# tool names to the CC names on the way out to the LLM and back again on
+# incoming tool calls. The map is shipped with this extension so all the
+# Claude-Code-specific knowledge lives next to the OAuth flow.
+#
+# Current CC tool surface (as advertised by Claude Code itself): Agent,
+# Bash, Edit, Glob, Grep, Read, ScheduleWakeup, Skill, ToolSearch, Write.
+# Only fir tools that have a genuine CC counterpart appear below; tools
+# without a match (e.g. ``bash_output``, ``bash_kill``, ``ls``) are sent
+# through unmapped and the endpoint treats them as custom tool names.
+#
+# Collected once at init time and registered globally by fir's extension
+# manager; no per-turn cost.
+fir_ext.register_tool_name_map(
+    {
+        "read": "Read",
+        "write": "Write",
+        "edit": "Edit",
+        "bash": "Bash",
+        "grep": "Grep",
+        "find": "Glob",
+    }
+)
+
+
 fir_ext.run(name="anthropic-auth")

@@ -440,6 +440,14 @@ _auth_api_key_handlers: dict[str, Callable] = {}
 _auth_list_models_handlers: dict[str, Callable] = {}
 _auth_modify_models_handlers: dict[str, Callable] = {}
 
+# Static tool-name map: fir tool name → canonical provider-side tool name.
+# Collected once at init and sent to fir in the handshake result under
+# ``tool_name_map``. Consumed by provider adapters (e.g. anthropic OAuth
+# mode) to translate tool names to and from the LLM. Only extensions that
+# bridge fir tools to a provider-specific naming scheme should populate it
+# (see ``register_tool_name_map``).
+_tool_name_map: dict[str, str] = {}
+
 # ---------------------------------------------------------------------------
 # Decorators
 # ---------------------------------------------------------------------------
@@ -624,6 +632,31 @@ def auth_list_models(provider: str) -> Callable:
         return fn
 
     return decorator
+
+
+def register_tool_name_map(mapping: dict[str, str]) -> None:
+    """Declare a static mapping from fir tool names to canonical provider-side
+    tool names.
+
+    Consumed by fir once at init time (sent back as ``tool_name_map`` in the
+    handshake result). Provider adapters use it to translate tool names to
+    and from the LLM. For example, the anthropic-auth extension uses this
+    to map fir's ``bash_kill`` to Claude Code's ``KillShell`` when running
+    OAuth'd (Claude Pro/Max) sessions.
+
+    Calling this multiple times merges into the existing map, later calls
+    overriding earlier values for the same key.
+
+    Parameters
+    ----------
+    mapping : dict
+        Keys are fir tool names (e.g. ``"bash_kill"``), values are canonical
+        provider names (e.g. ``"KillShell"``).
+    """
+    for k, v in mapping.items():
+        if not isinstance(k, str) or not isinstance(v, str) or not k or not v:
+            continue
+        _tool_name_map[k] = v
 
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1261,8 @@ def run(
             }
             if _auth_providers:
                 init_result["auth_providers"] = list(_auth_providers)
+            if _tool_name_map:
+                init_result["tool_name_map"] = dict(_tool_name_map)
             resp = _make_response(msg_id, init_result)
             _write_message(resp, out)
             return

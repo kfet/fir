@@ -33,6 +33,7 @@
 ### Changed
 
 - Builtin `review-and-fix` skill: highlight simplification as an explicit goal of the review phase (one-line emphasis above the checklist).
+- Tool-name mapping for Anthropic OAuth in ACP is now extension-owned: the `anthropic-auth` builtin extension now ships a static `tool_name_map` via handshake, and the provider uses that map to translate between fir tool names and Claude Code names at startup (no hardcoded/duplicate mapping in provider code). This keeps mapping logic centralized in the auth extension and preserves ACP-only tool behavior (`bash_output`/`bash_kill` pass through unchanged if unmapped).
 
 ### Fixed
 

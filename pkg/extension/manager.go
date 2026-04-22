@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/extension/sdk"
 	"github.com/kfet/fir/pkg/resources"
 )
@@ -373,6 +374,13 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
 	bridge.RegisterAuthProviders()
+	// Register any static tool-name map declared by the extension so that
+	// provider adapters (e.g. anthropic OAuth mode) can translate tool
+	// names to and from the LLM. Collected once here; re-registered on
+	// reload.
+	if len(caps.ToolNameMap) > 0 {
+		providers.RegisterToolNameAliases(caps.Name, caps.ToolNameMap)
+	}
 	m.logger.Info("ext startOne: done", "ext", cfg.Name, "total_ms", time.Since(startOneBegin).Milliseconds())
 
 	// Wire optional UI callbacks.
@@ -453,6 +461,9 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	// safe and avoids O(n) sequential waits on slow hardware.
 	for _, mb := range bridges {
 		mb.bridge.UnregisterAuthProviders()
+		if mb.bridge != nil && mb.bridge.caps != nil && len(mb.bridge.caps.ToolNameMap) > 0 {
+			providers.UnregisterToolNameAliases(mb.bridge.caps.Name)
+		}
 		mb.cancel()
 	}
 	for _, mb := range bridges {
