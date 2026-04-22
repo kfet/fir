@@ -2941,3 +2941,62 @@ func TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip(t *testin
 		t.Error("redacted_thinking block must not have a 'thinking' field")
 	}
 }
+// TestAnthropic_OnRetryCallback verifies StreamOptions.OnRetry is invoked
+// once per retry with a 1-based attempt number, a non-zero (or zero via
+// our injection) delay, and the last provider error message.
+func TestAnthropic_OnRetryCallback(t *testing.T) {
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	overloadedData := loadFixture(t, "anthropic_error.sse")
+	successData := loadFixture(t, "anthropic_simple_response.sse")
+
+	attempts := 0
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		attempts++
+		if attempts < 3 {
+			w.Write(overloadedData)
+		} else {
+			w.Write(successData)
+		}
+	})
+	defer srv.Close()
+
+	type call struct {
+		attempt int
+		errMsg  string
+	}
+	var calls []call
+	opts := &ai.StreamOptions{
+		ApiKey: "test-key",
+		OnRetry: func(attempt int, delaySeconds float64, errMsg string) {
+			calls = append(calls, call{attempt: attempt, errMsg: errMsg})
+		},
+	}
+
+	model := anthropicModel(srv.URL)
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
+
+	stream := StreamAnthropic(context.Background(), model, ctx, opts)
+	collectEvents(t, stream)
+
+	if attempts != 3 {
+		t.Fatalf("expected 3 provider attempts, got %d", attempts)
+	}
+	// Two retries happened (attempts 2 and 3), so OnRetry should fire twice
+	// with 1-based attempt numbers.
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 OnRetry calls, got %d: %+v", len(calls), calls)
+	}
+	if calls[0].attempt != 1 || calls[1].attempt != 2 {
+		t.Errorf("expected attempt numbers 1,2 got %d,%d", calls[0].attempt, calls[1].attempt)
+	}
+	for i, c := range calls {
+		if !strings.Contains(c.errMsg, "Overloaded") {
+			t.Errorf("call %d: errMsg missing 'Overloaded': %q", i, c.errMsg)
+		}
+	}
+}
