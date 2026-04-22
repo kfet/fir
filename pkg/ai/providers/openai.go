@@ -298,11 +298,15 @@ func StreamOpenAICompletions(ctx context.Context, model *ai.Model, prompt ai.Con
 			// Retry transient server errors before surfacing
 			if ctx.Err() == nil && ratelimit.IsRetryableError(err.Error()) {
 				for retry := 1; retry <= 2; retry++ {
+					delay := openaiRetryDelay(retry)
 					firlog.Debug("openai transient error, retrying", "attempt", retry, "err", err)
+					if options != nil && options.OnRetry != nil {
+						options.OnRetry(retry, delay.Seconds(), err.Error())
+					}
 					select {
 					case <-ctx.Done():
 						err = ctx.Err()
-					case <-time.After(openaiRetryDelay(retry)):
+					case <-time.After(delay):
 					}
 					if ctx.Err() != nil {
 						break
