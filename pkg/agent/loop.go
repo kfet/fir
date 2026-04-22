@@ -605,6 +605,7 @@ func streamAssistantResponse(
 			ServerTools:     config.ServerTools,
 			Compaction:      config.Compaction,
 			OnPayload:       config.OnPayload,
+			OnRetry:         config.OnRetry,
 			RefreshApiKey:   refreshApiKey,
 		},
 		Reasoning:       config.Reasoning,

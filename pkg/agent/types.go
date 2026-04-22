@@ -77,6 +77,11 @@ type AgentLoopConfig struct {
 	// OnPayload is an optional callback to inspect or replace provider payloads before sending.
 	// Return nil to keep the original payload unchanged.
 	OnPayload func(payload any, model *core.Model) any
+
+	// OnRetry is invoked before a retryable pre-stream error (rate limit /
+	// overloaded / transient 5xx) is retried. Sessions can use this to notify
+	// the user that a retry is in flight.
+	OnRetry func(attempt int, delaySeconds float64, errMsg string)
 }
 
 // ThinkingLevel is an alias for core.ThinkingLevel so all packages use the same type.

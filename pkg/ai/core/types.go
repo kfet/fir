@@ -234,6 +234,12 @@ type StreamOptions struct {
 	Metadata        map[string]any        `json:"metadata,omitempty"`
 	ServerTools     []AnthropicServerTool `json:"serverTools,omitempty"`
 	Compaction      *AnthropicCompaction  `json:"compaction,omitempty"`
+	// OnRetry is invoked just before the provider sleeps to retry a retryable
+	// error (rate limit, overloaded, transient 5xx) during the pre-stream phase.
+	// attempt is 1-based (first retry is attempt=1). delaySeconds is the wait
+	// duration. errMsg is the provider-supplied error text. Callers can use this
+	// to surface a user-visible "rate-limited, retrying…" notice.
+	OnRetry func(attempt int, delaySeconds float64, errMsg string) `json:"-"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.

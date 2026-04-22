@@ -58,6 +58,11 @@ type SetupOptions struct {
 	// MCPConfigs are the MCP server configurations to start. When empty, no MCP.
 	MCPConfigs map[string]mcp.ServerConfig
 
+	// OnRetry is forwarded to the agent and invoked before a retryable
+	// pre-stream provider error (rate limit / overloaded / transient 5xx)
+	// is retried.
+	OnRetry func(attempt int, delaySeconds float64, errMsg string)
+
 	// ExtReady is closed when extensions finish loading. Live model fetching
 	// for OAuth providers waits on this. When nil, OAuth fetching starts immediately.
 	ExtReady <-chan struct{}
@@ -177,6 +182,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		CompactionRunner: compactionRunner,
 		UsageTracker:     opts.UsageTracker,
 		ExtReady:         opts.ExtReady,
+		OnRetry:          opts.OnRetry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)

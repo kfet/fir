@@ -393,6 +393,9 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			if attempt > 0 {
 				delay := anthropicRetryDelay(lastErrMsg, attempt-1, maxDelayMs)
 				firlog.Info("anthropic overloaded, retrying", "attempt", attempt, "delay", delay, "error", lastErrMsg)
+				if options != nil && options.OnRetry != nil {
+					options.OnRetry(attempt, delay.Seconds(), lastErrMsg)
+				}
 				select {
 				case <-ctx.Done():
 					out := &ai.AssistantMessage{

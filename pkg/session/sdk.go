@@ -62,6 +62,10 @@ type CreateAgentSessionOptions struct {
 	// for OAuth providers waits on this before querying extension-based auth.
 	// When nil, OAuth model fetching proceeds immediately.
 	ExtReady <-chan struct{}
+
+	// OnRetry, if set, is forwarded to the agent so that retryable pre-stream
+	// errors can be surfaced to the user.
+	OnRetry func(attempt int, delaySeconds float64, errMsg string)
 }
 
 // CreateAgentSessionResult is returned by CreateAgentSession.
@@ -257,6 +261,10 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		}
 		c.Instructions = sc.Instructions
 		agentOpts.Compaction = c
+	}
+
+	if opts.OnRetry != nil {
+		agentOpts.OnRetry = opts.OnRetry
 	}
 
 	a := agent.NewAgent(agentOpts)

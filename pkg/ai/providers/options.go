@@ -82,6 +82,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		RefreshApiKey:   options.RefreshApiKey,
 		OnPayload:       options.OnPayload,
 		OnResponse:      options.OnResponse,
+		OnRetry:         options.OnRetry,
 		Transport:       options.Transport,
 		ReasoningEffort: options.ReasoningEffort,
 		ToolChoice:      options.ToolChoice,

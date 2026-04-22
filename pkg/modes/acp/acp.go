@@ -243,6 +243,14 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			SettingsManager: settingsManager,
 			ModelRegistry:   modelRegistry,
 		},
+		OnRetry: func(attempt int, delaySeconds float64, errMsg string) {
+			// Keep the message short — errMsg can contain long provider bodies.
+			short := errMsg
+			if len(short) > 160 {
+				short = short[:160] + "…"
+			}
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("⏳ Provider rate-limited/overloaded — retrying in %.0fs (attempt %d/%d): %s", delaySeconds, attempt, 5, short))
+		},
 	})
 	if err != nil {
 		return nil, err

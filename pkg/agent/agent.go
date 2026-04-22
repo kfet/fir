@@ -89,6 +89,9 @@ type AgentOptions struct {
 	// OnPayload is an optional callback to inspect or replace provider payloads before sending.
 	// Return nil to keep the original payload unchanged.
 	OnPayload func(payload any, model *core.Model) any
+
+	// OnRetry is invoked before a retryable pre-stream error is retried.
+	OnRetry func(attempt int, delaySeconds float64, errMsg string)
 }
 
 // Agent orchestrates the agent loop with state management and event dispatch.
@@ -115,6 +118,7 @@ type Agent struct {
 	serverTools     []core.AnthropicServerTool
 	compaction      *core.AnthropicCompaction
 	onPayload       func(any, *core.Model) any
+	onRetry         func(int, float64, string)
 
 	// idleCh is closed when the agent finishes processing.
 	idleCh chan struct{}
@@ -199,6 +203,9 @@ func NewAgent(opts AgentOptions) *Agent {
 	}
 	if opts.OnPayload != nil {
 		a.onPayload = opts.OnPayload
+	}
+	if opts.OnRetry != nil {
+		a.onRetry = opts.OnRetry
 	}
 
 	return a
@@ -984,6 +991,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 		ServerTools:      a.serverTools,
 		Compaction:       a.compaction,
 		OnPayload:        a.onPayload,
+		OnRetry:          a.onRetry,
 		ConvertToLLM:     a.convertToLLM,
 		TransformContext: a.transformCtx,
 		GetApiKey:        a.getApiKey,
