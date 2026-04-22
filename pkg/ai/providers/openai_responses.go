@@ -138,11 +138,15 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 		var lastErr error
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			if attempt > 0 {
+				delay := openaiRetryDelay(attempt)
 				firlog.Debug("openai-responses retry", "attempt", attempt, "lastErr", lastErr)
+				if options != nil && options.OnRetry != nil && lastErr != nil {
+					options.OnRetry(attempt, delay.Seconds(), lastErr.Error())
+				}
 				select {
 				case <-ctx.Done():
 					lastErr = ctx.Err()
-				case <-time.After(openaiRetryDelay(attempt)):
+				case <-time.After(delay):
 				}
 				if ctx.Err() != nil {
 					break

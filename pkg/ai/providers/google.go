@@ -92,11 +92,15 @@ func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, optio
 			// Retry transient server errors before surfacing
 			if ctx.Err() == nil && ratelimit.IsRetryableError(err.Error()) {
 				for retry := 1; retry <= 2; retry++ {
+					delay := googleRetryDelay(retry)
 					firlog.Debug("google transient error, retrying", "attempt", retry, "err", err)
+					if options != nil && options.OnRetry != nil {
+						options.OnRetry(retry, delay.Seconds(), err.Error())
+					}
 					select {
 					case <-ctx.Done():
 						err = ctx.Err()
-					case <-time.After(googleRetryDelay(retry)):
+					case <-time.After(delay):
 					}
 					if ctx.Err() != nil {
 						break

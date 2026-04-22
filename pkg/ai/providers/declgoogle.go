@@ -673,6 +673,9 @@ func streamDeclGoogle(
 			lastErr = fmt.Errorf("network error: %v", err)
 			if attempt < declGoogleMaxRetries {
 				delay := declGoogleBaseDelayMs * int(math.Pow(2, float64(attempt)))
+				if options != nil && options.OnRetry != nil {
+					options.OnRetry(attempt+1, float64(delay)/1000.0, lastErr.Error())
+				}
 				sleepCtx(ctx, time.Duration(delay)*time.Millisecond)
 				continue
 			}
@@ -704,6 +707,11 @@ func streamDeclGoogle(
 			if maxDelayMs > 0 && serverDelay > 0 && serverDelay > maxDelayMs {
 				return fmt.Errorf("server requested %ds retry delay (max: %ds). %s",
 					serverDelay/1000, maxDelayMs/1000, extractErrorMessage(errorText))
+			}
+
+			if options != nil && options.OnRetry != nil {
+				options.OnRetry(attempt+1, float64(delayMs)/1000.0,
+					fmt.Sprintf("%d: %s", resp.StatusCode, extractErrorMessage(errorText)))
 			}
 			sleepCtx(ctx, time.Duration(delayMs)*time.Millisecond)
 			continue
