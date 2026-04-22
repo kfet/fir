@@ -45,6 +45,9 @@ type SetupOptions struct {
 	// Extensions can constrain themselves via comment frontmatter `mode`/`modes`.
 	Mode string
 
+	// Version is the host version string, surfaced via agent.info to extensions.
+	Version string
+
 	// EnabledNames is an optional allowlist of extension names to activate.
 	// When non-empty, only extensions whose name matches an entry are started.
 	// When empty (the default), all discovered extensions are started.
@@ -197,6 +200,8 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	}
 
 	bridge := NewSessionBridge(asession)
+	bridge.Mode = opts.Mode
+	bridge.Version = opts.Version
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = opts.ProjectDir

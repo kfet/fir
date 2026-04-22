@@ -24,6 +24,10 @@
 
 ### Added
 
+- `agent_introspect` builtin extension + host `agent.info` RPC: gives the agent a single tool that returns a structured JSON snapshot of the current runtime (version, mode, cwd, session id/file/name, model, context usage + compact mode, thinking level + available levels, message counts, token totals, cost). Backed by a new `AgentSession.Introspect()` method reusing existing helpers (`GetSessionStats`, `GetContextUsage`, `GetAvailableThinkingLevels`). Served per-session via the extension bridge so concurrent ACP sessions each get their own snapshot with no cross-session leakage. Python SDK gains `Context.agent_info()`; the builtin extension is ~20 lines that just forwards the RPC.
+- `/session` output (both interactive and ACP) now includes a `Context:` line showing `<percent>% / <used> / <window> (<off|client|server>)`, so context-window usage and compaction mode are visible alongside the existing session details. Unknown usage (e.g. right after compaction) renders as `?%`. Backed by new `session.FormatContextUsage` helper and `AgentSession.CompactMode()` accessor.
+- Interactive mode: new `Ctrl+S` keybinding (action `showSession`) prints the full session info inline — same content as `/session`, without typing the slash command. Exposed via `ActionShowSession` in the keybindings manager and listed in the keyboard shortcuts help text.
+
 - Pressing the model-selector keybinding (default `Ctrl+L`) a second time while the selector is open now closes it, the same as `Esc`. Resolved dynamically via `KeybindingsManager.Matches(ActionSelectModel)` so it tracks any user rebinding in `keybindings.json`.
 
 ### Changed

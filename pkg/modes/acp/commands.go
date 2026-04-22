@@ -258,6 +258,9 @@ func cmdSession(ctx *commandContext, _ string) {
 	if model := entry.session.Model(); model != nil {
 		info += fmt.Sprintf("- **Model:** %s\n", model.ID)
 		info += fmt.Sprintf("- **Provider:** %s\n", model.Provider)
+		if cu := entry.session.GetContextUsage(); cu != nil {
+			info += fmt.Sprintf("- **Context:** %s\n", session.FormatContextUsage(cu, entry.session.CompactMode()))
+		}
 	}
 	if entry.extSetup != nil && entry.extSetup.Manager != nil {
 		enabled := entry.extSetup.Manager.EnabledExtensionNames()

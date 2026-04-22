@@ -375,6 +375,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		b.reportProgress(p.Message, api)
 		result = map[string]any{"ok": true}
 
+	case "agent.info":
+		result = api.Introspect()
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {

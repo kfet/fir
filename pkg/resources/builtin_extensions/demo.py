@@ -270,6 +270,7 @@ def on_session_start(params, ctx):
     ctx.set_session_data("started", "true")            # set_session_data
     ctx.list_tools()                                   # list_tools (read-only discovery)
     ctx.prepend("Demo extension is active.")           # prepend
+    ctx.agent_info()                                   # agent_info
 
 
 @fir_ext.on("session_shutdown")

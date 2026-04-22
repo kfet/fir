@@ -721,6 +721,9 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	m.editor.OnAction(tui.ActionTogglePlan, func() {
 		m.togglePlanVisibility()
 	})
+	m.editor.OnAction(tui.ActionShowSession, func() {
+		m.handleSessionCommand()
+	})
 	m.editor.OnAction(tui.ActionClear, func() {
 		m.handleCtrlC()
 	})

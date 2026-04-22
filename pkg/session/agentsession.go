@@ -1622,3 +1622,120 @@ func (s *AgentSession) RegisterSessionTools() {
 func (s *AgentSession) GetTools() *agent.ToolSet {
 	return s.Agent.State().Tools
 }
+
+// Introspection is a snapshot of the current session's runtime state,
+// returned by Introspect(). Shape is stable; unknown fields use zero values
+// (for context.tokens/percent, -1 means genuinely unknown).
+type Introspection struct {
+	Version string `json:"version"`
+	Mode    string `json:"mode"`
+	Cwd     string `json:"cwd"`
+	Session struct {
+		ID   string `json:"id"`
+		File string `json:"file"`
+		Name string `json:"name"`
+	} `json:"session"`
+	Model struct {
+		ID            string `json:"id"`
+		Provider      string `json:"provider"`
+		ContextWindow int    `json:"contextWindow"`
+	} `json:"model"`
+	Context struct {
+		Tokens      int     `json:"tokens"`
+		Window      int     `json:"window"`
+		Percent     float64 `json:"percent"`
+		CompactMode string  `json:"compactMode"`
+	} `json:"context"`
+	Thinking struct {
+		Current   string   `json:"current"`
+		Available []string `json:"available"`
+	} `json:"thinking"`
+	Messages struct {
+		User        int `json:"user"`
+		Assistant   int `json:"assistant"`
+		ToolCalls   int `json:"toolCalls"`
+		ToolResults int `json:"toolResults"`
+		Total       int `json:"total"`
+	} `json:"messages"`
+	Tokens struct {
+		Input      int `json:"input"`
+		Output     int `json:"output"`
+		CacheRead  int `json:"cacheRead"`
+		CacheWrite int `json:"cacheWrite"`
+		Total      int `json:"total"`
+	} `json:"tokens"`
+	Cost float64 `json:"cost"`
+}
+
+// IntrospectOptions carries host-side context not reachable from AgentSession.
+type IntrospectOptions struct {
+	Version string
+	Mode    string // "interactive" | "acp" | "print"
+}
+
+// Introspect returns a stable snapshot of this session's runtime state.
+// Fields that AgentSession cannot determine on its own (version, mode)
+// are supplied via opts.
+func (s *AgentSession) Introspect(opts IntrospectOptions) Introspection {
+	var out Introspection
+	out.Version = opts.Version
+	out.Mode = opts.Mode
+	out.Cwd = s.cwd
+
+	stats := s.GetSessionStats()
+	out.Session.ID = stats.SessionID
+	out.Session.File = stats.SessionFile
+	out.Session.Name = s.SessionStore.GetSessionName()
+
+	if m := s.Model(); m != nil {
+		out.Model.ID = m.ID
+		out.Model.Provider = string(m.Provider)
+		out.Model.ContextWindow = m.ContextWindow
+	}
+
+	out.Context.Tokens = -1
+	out.Context.Percent = -1
+	if cu := s.GetContextUsage(); cu != nil {
+		out.Context.Tokens = cu.Tokens
+		out.Context.Window = cu.ContextWindow
+		out.Context.Percent = cu.Percent
+	}
+	out.Context.CompactMode = s.CompactMode()
+
+	out.Thinking.Current = s.ThinkingLevel()
+	levels := s.GetAvailableThinkingLevels()
+	out.Thinking.Available = make([]string, 0, len(levels))
+	for _, l := range levels {
+		out.Thinking.Available = append(out.Thinking.Available, string(l))
+	}
+
+	out.Messages.User = stats.UserMessages
+	out.Messages.Assistant = stats.AssistantMessages
+	out.Messages.ToolCalls = stats.ToolCalls
+	out.Messages.ToolResults = stats.ToolResults
+	out.Messages.Total = stats.TotalMessages
+
+	out.Tokens.Input = stats.Tokens.Input
+	out.Tokens.Output = stats.Tokens.Output
+	out.Tokens.CacheRead = stats.Tokens.CacheRead
+	out.Tokens.CacheWrite = stats.Tokens.CacheWrite
+	out.Tokens.Total = stats.Tokens.Total
+	out.Cost = stats.Cost
+
+	return out
+}
+
+// CompactMode reports the current auto-compaction mode for user-facing
+// output: "server" > "client" > "off".
+func (s *AgentSession) CompactMode() string {
+	if s.SettingsManager == nil {
+		return "off"
+	}
+	if sc := s.SettingsManager.GetServerCompaction(); sc != nil && sc.Enabled != nil && *sc.Enabled {
+		return "server"
+	}
+	if s.SettingsManager.GetCompactionEnabled() {
+		return "client"
+	}
+	return "off"
+}

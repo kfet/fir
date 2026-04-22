@@ -940,6 +940,14 @@ class Context:
         """
         self._call("prepend_context", {"content": content})
 
+    def agent_info(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Return a structured snapshot of the current agent runtime.
+
+        Fields include version, mode, session, model, context usage,
+        thinking level, message counts, token totals, and cost.
+        """
+        return self._call("agent.info", {}, timeout=timeout)
+
 
 class AuthContext(Context):
     """Extended context for auth provider handlers with OAuth helper methods.

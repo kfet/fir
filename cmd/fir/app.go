@@ -190,6 +190,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			ProjectDir:          cwd,
 			Cwd:                 cwd,
 			Mode:                resolveExtensionMode(args),
+			Version:             version,
 			EnabledNames:        resolveEnabledExtensions(args, settingsManager),
 			DisabledNames:       args.DisabledExtensions,
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),

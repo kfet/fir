@@ -218,6 +218,7 @@ func (tm *testMode) typeText(text string) {
 func (tm *testMode) pressEnter()     { tm.term.SimulateInput("\r") }
 func (tm *testMode) pressCtrlC()     { tm.term.SimulateInput("\x03") }
 func (tm *testMode) pressCtrlD()     { tm.term.SimulateInput("\x04") }
+func (tm *testMode) pressCtrlS()     { tm.term.SimulateInput("\x13") }
 func (tm *testMode) pressEscape()    { tm.term.SimulateInput("\x1b") }
 func (tm *testMode) pressBackspace() { tm.term.SimulateInput("\x7f") }
 
@@ -357,8 +358,50 @@ func TestInteractiveMode_CtrlCOnEmptyEditorIsNoop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Ctrl+D tests
+// Ctrl+S tests
 // ---------------------------------------------------------------------------
+
+func TestInteractiveMode_CtrlSShowsSessionInfo(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      ai.ProviderAnthropic,
+		ContextWindow: 10000,
+	}
+	tm.mode.session.SetModel(model)
+
+	tm.pressCtrlS()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "Session Info") {
+		t.Errorf("expected session info output, got %q", output)
+	}
+	if !strings.Contains(output, "Messages") {
+		t.Errorf("expected session info sections, got %q", output)
+	}
+	if !strings.Contains(output, "Context:") {
+		t.Errorf("expected context usage line, got %q", output)
+	}
+	if !strings.Contains(output, "(client)") {
+		t.Errorf("expected client compaction mode in context usage, got %q", output)
+	}
+}
+
+func TestInteractiveMode_CtrlSShowsNoSessionWarningWithoutCrash(t *testing.T) {
+	tm := newTestMode(t)
+
+	tm.pressCtrlS()
+	tm.waitRender()
+
+	output := tm.renderedOutput()
+	if !strings.Contains(output, "No session available") {
+		t.Errorf("expected no-session warning, got %q", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ctrl+D tests
 
 func TestInteractiveMode_CtrlDOnEmptyEditorTriggersShutdown(t *testing.T) {
 	tm := newTestMode(t)

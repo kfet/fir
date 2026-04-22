@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // mockBridgeAPI implements BridgeAPI for testing.
@@ -98,6 +99,9 @@ func (m *mockBridgeAPI) CallTool(_ context.Context, name string, params map[stri
 func (m *mockBridgeAPI) PrependContext(_ string) {}
 func (m *mockBridgeAPI) ListTools() []ToolInfo   { return nil }
 func (m *mockBridgeAPI) ReportProgress(_ string) {}
+func (m *mockBridgeAPI) Introspect() session.Introspection {
+	return session.Introspection{}
+}
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
 var _ BridgeAPI = (*mockBridgeAPI)(nil)

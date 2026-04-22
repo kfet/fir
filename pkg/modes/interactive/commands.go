@@ -826,6 +826,9 @@ func (m *InteractiveMode) handleSessionCommand() {
 	if model := m.session.Model(); model != nil {
 		lines = append(lines, t.Fg("dim", "Model: ")+model.ID)
 		lines = append(lines, t.Fg("dim", "Provider: ")+string(model.Provider))
+		if cu := m.session.GetContextUsage(); cu != nil {
+			lines = append(lines, t.Fg("dim", "Context: ")+session.FormatContextUsage(cu, m.session.CompactMode()))
+		}
 	}
 	if m.mcpStatus != nil {
 		statuses := m.mcpStatus()
@@ -1676,6 +1679,7 @@ Keyboard shortcuts:
   Ctrl+O          - Toggle tool output expansion
   Ctrl+T          - Toggle thinking block visibility
   Ctrl+R          - Toggle plan visibility
+  Ctrl+S          - Show session info
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands

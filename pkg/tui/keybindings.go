@@ -31,6 +31,7 @@ const (
 	ActionTree               AppAction = "tree"
 	ActionResume             AppAction = "resume"
 	ActionTogglePlan         AppAction = "togglePlan"
+	ActionShowSession        AppAction = "showSession"
 )
 
 // DefaultAppKeybindings maps app actions to their default key bindings.
@@ -54,6 +55,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionTree:               {},
 	ActionResume:             {},
 	ActionTogglePlan:         {"ctrl+r"},
+	ActionShowSession:        {"ctrl+s"},
 }
 
 // KeybindingsConfig is the JSON config mapping actions to key IDs.

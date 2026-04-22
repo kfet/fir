@@ -271,6 +271,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			ProjectDir:    cwd,
 			Cwd:           cwd,
 			Mode:          "acp",
+			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
 			DisabledNames: pa.options.DisabledExtensions,
 		})

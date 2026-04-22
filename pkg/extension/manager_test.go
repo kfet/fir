@@ -16,7 +16,7 @@ import (
 
 // builtinToolCount is the number of tools registered by builtin extensions
 // (aside=1, install=4). Tests must add their own extensions' tool counts on top.
-const builtinToolCount = 5
+const builtinToolCount = 6
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

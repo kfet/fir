@@ -619,6 +619,36 @@ Only meaningful while an extension tool is executing; ignored otherwise.
 
 Response: `{"ok": true}`
 
+#### `agent.info`
+
+Return a structured snapshot of the current agent runtime. Served per-session
+— the snapshot reflects only the session the calling extension is bound to.
+
+Params: none (pass `{}`).
+
+Response fields (shape is stable; unknown values use zero-equivalent defaults;
+`context.tokens`/`percent` use `-1` to mean genuinely unknown, e.g. right
+after compaction):
+
+```json
+{
+  "version": "0.x.y",
+  "mode": "interactive | acp | print",
+  "cwd": "/abs/path",
+  "session": {"id": "...", "file": "...", "name": "..."},
+  "model":   {"id": "...", "provider": "...", "contextWindow": 0},
+  "context": {"tokens": 0, "window": 0, "percent": 0.0, "compactMode": "off|client|server"},
+  "thinking": {"current": "...", "available": ["..."]},
+  "messages": {"user": 0, "assistant": 0, "toolCalls": 0, "toolResults": 0, "total": 0},
+  "tokens":   {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+  "cost": 0.0
+}
+```
+
+```json
+{"jsonrpc":"2.0","id":1020,"method":"agent.info","params":{}}
+```
+
 ---
 
 ## Comment Frontmatter

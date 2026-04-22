@@ -714,10 +714,17 @@ func TestHandleSlashCommand_Session(t *testing.T) {
 	defer sess.Close()
 	mgr := extension.NewManager(slog.Default())
 	mgr.AllowedNames = []string{"tmuxspinner", "demo"}
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      ai.ProviderAnthropic,
+		ContextWindow: 10000,
+	}
+	sess.SetModel(model)
 	entry := &firSession{
-		termState: newTerminalState(),
-		session:   sess,
-		extSetup:  &extension.SetupResult{Manager: mgr},
+		termState:       newTerminalState(),
+		session:         sess,
+		extSetup:        &extension.SetupResult{Manager: mgr},
+		settingsManager: nil,
 	}
 
 	found := pa.handleSlashCommand("s1", entry, "session", "")
@@ -743,6 +750,12 @@ func TestHandleSlashCommand_Session(t *testing.T) {
 	}
 	if !strings.Contains(chunk.Content.Text.Text, "**Extensions:** demo, tmuxspinner") {
 		t.Errorf("expected enabled extensions in session info, got: %q", chunk.Content.Text.Text)
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "**Context:**") {
+		t.Errorf("expected context usage in session info, got: %q", chunk.Content.Text.Text)
+	}
+	if !strings.Contains(chunk.Content.Text.Text, "(off)") {
+		t.Errorf("expected default context mode to be off in session info, got: %q", chunk.Content.Text.Text)
 	}
 }
 
@@ -1251,6 +1264,9 @@ func (n *noopBridgeAPI) CallTool(_ context.Context, _ string, _ map[string]any) 
 func (n *noopBridgeAPI) PrependContext(_ string)         {}
 func (n *noopBridgeAPI) ListTools() []extension.ToolInfo { return nil }
 func (n *noopBridgeAPI) ReportProgress(_ string)         {}
+func (n *noopBridgeAPI) Introspect() session.Introspection {
+	return session.Introspection{}
+}
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command

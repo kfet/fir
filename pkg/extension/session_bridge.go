@@ -23,11 +23,24 @@ type SessionBridge struct {
 	session  *session.AgentSession
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string   // names of tools registered by extensions
+
+	// Version and Mode are passed through into Introspect results.
+	// Populated by Setup.
+	Version string
+	Mode    string
 }
 
 // NewSessionBridge creates a SessionBridge wrapping the given session.
 func NewSessionBridge(session *session.AgentSession) *SessionBridge {
 	return &SessionBridge{session: session}
+}
+
+// Introspect returns an introspection snapshot for the bound session.
+func (b *SessionBridge) Introspect() session.Introspection {
+	return b.session.Introspect(session.IntrospectOptions{
+		Version: b.Version,
+		Mode:    b.Mode,
+	})
 }
 
 var _ BridgeAPI = (*SessionBridge)(nil)

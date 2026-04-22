@@ -5,6 +5,7 @@ import (
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // BridgeAPI is the subset of the session API that external process
@@ -41,6 +42,8 @@ type BridgeAPI interface {
 	// ReportProgress sends a transient status message to the UI
 	// (e.g. "Calling Read..."). Only meaningful while a tool is executing.
 	ReportProgress(message string)
+	// Introspect returns a snapshot of the session's runtime state.
+	Introspect() session.Introspection
 }
 
 // ExecResult is the result of a shell command.
