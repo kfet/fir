@@ -31,8 +31,6 @@ func TestBuildToolTitle(t *testing.T) {
 		{"edit", map[string]any{"path": "/tmp/baz"}, "Edit /tmp/baz"},
 		{"grep", map[string]any{"pattern": "TODO", "path": "src/"}, `grep "TODO" in src/`},
 		{"find", map[string]any{"pattern": "*.go"}, `find "*.go"`},
-		{"ls", map[string]any{"path": "/tmp"}, "ls /tmp"},
-		{"ls", nil, "List files"},
 		{"bash_output", map[string]any{"command_id": "abc"}, "Get output: abc"},
 		{"bash_kill", map[string]any{"command_id": "abc"}, "Kill: abc"},
 		{"unknown_tool", nil, "unknown_tool"},

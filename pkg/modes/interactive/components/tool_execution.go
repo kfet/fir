@@ -358,8 +358,6 @@ func (tc *ToolExecutionComponent) formatToolExecution() string {
 		return tc.formatWrite(t, invalidArg)
 	case "edit":
 		return tc.formatEdit(t, invalidArg)
-	case "ls":
-		return tc.formatLs(t, invalidArg)
 	case "find":
 		return tc.formatFind(t, invalidArg)
 	case "grep":
@@ -537,55 +535,6 @@ func (tc *ToolExecutionComponent) formatEdit(t *theme.Theme, invalidArg string) 
 			}
 		} else if diff, ok := tc.result.Details["diff"].(string); ok && diff != "" {
 			text += "\n\n" + RenderDiff(diff, nil)
-		}
-	}
-	return text
-}
-
-func (tc *ToolExecutionComponent) formatLs(t *theme.Theme, invalidArg string) string {
-	rawPath, pathOK := strArgChecked(tc.args, "path")
-	limit, _ := tc.args["limit"].(float64)
-
-	var pathDisplay string
-	switch {
-	case !pathOK:
-		pathDisplay = invalidArg
-	default:
-		p := rawPath
-		if p == "" {
-			p = "."
-		}
-		pathDisplay = t.Fg("accent", shortenPath(p))
-	}
-
-	text := t.Fg("toolTitle", t.Bold("ls")) + " " + pathDisplay
-	if limit > 0 {
-		text += t.Fg("toolOutput", fmt.Sprintf(" (limit %.0f)", limit))
-	}
-
-	if tc.result != nil {
-		output := strings.TrimSpace(tc.getTextOutput())
-		if output != "" {
-			lines := strings.Split(output, "\n")
-			maxLines := 20
-			if tc.expanded {
-				maxLines = len(lines)
-			}
-			displayLines := lines
-			if len(displayLines) > maxLines {
-				displayLines = lines[:maxLines]
-			}
-			remaining := len(lines) - len(displayLines)
-
-			styledLines := make([]string, len(displayLines))
-			for i, line := range displayLines {
-				styledLines[i] = t.Fg("toolOutput", line)
-			}
-			text += "\n\n" + strings.Join(styledLines, "\n")
-			if remaining > 0 {
-				text += t.Fg("muted", fmt.Sprintf("\n... (%d more lines,", remaining)) +
-					" " + KeyHint(tuicomp.ActExpandTools, "to expand") + ")"
-			}
 		}
 	}
 	return text

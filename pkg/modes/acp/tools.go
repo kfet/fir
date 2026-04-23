@@ -43,7 +43,6 @@ func (pa *firAgent) createAcpTools(cwd, sessionID string, useClientTerminal, use
 		writeTool,
 		tools.NewGrepTool(cwd),
 		tools.NewFindTool(cwd),
-		tools.NewLsTool(cwd),
 	}
 	if useClientTerminal {
 		toolList = append(toolList,

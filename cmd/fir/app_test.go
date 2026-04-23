@@ -158,10 +158,10 @@ func TestResolveTools_ToolsOnly(t *testing.T) {
 }
 
 func TestResolveTools_AllTools(t *testing.T) {
-	args := &Args{Tools: []string{"read", "bash", "edit", "write", "grep", "find", "ls"}}
+	args := &Args{Tools: []string{"read", "bash", "edit", "write", "grep", "find"}}
 	result := resolveTools(args, t.TempDir())
-	if len(result) != 7 {
-		t.Errorf("expected 7 tools, got %d", len(result))
+	if len(result) != 6 {
+		t.Errorf("expected 6 tools, got %d", len(result))
 	}
 }
 

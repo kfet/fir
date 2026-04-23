@@ -18,7 +18,7 @@ func MapToolKind(toolName string) acpsdk.ToolKind {
 		return "edit"
 	case "bash", "bash_output", "bash_kill":
 		return "execute"
-	case "grep", "find", "ls":
+	case "grep", "find":
 		return "search"
 	default:
 		return "other"
@@ -143,15 +143,6 @@ func BuildToolTitle(toolName string, args map[string]interface{}) string {
 			return fmt.Sprintf(`find "%s"%s`, pattern, target)
 		}
 		return "Find"
-	case "ls":
-		dir, _ := args["path"].(string)
-		if dir == "" {
-			dir, _ = args["directory"].(string)
-		}
-		if dir != "" {
-			return "ls " + dir
-		}
-		return "List files"
 	case "bash_output":
 		if cmdID, ok := args["command_id"].(string); ok {
 			if len(cmdID) > 40 {
@@ -205,7 +196,7 @@ func BuildToolCallContent(toolName string, args map[string]interface{}, result i
 	case "write":
 		return nil, nil
 
-	case "read", "bash", "bash_output", "bash_kill", "grep", "find", "ls":
+	case "read", "bash", "bash_output", "bash_kill", "grep", "find":
 		text := extractResultText(result)
 		if text != "" {
 			return []acpsdk.ToolCallContent{textContent(MarkdownEscape(text))}, nil

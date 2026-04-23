@@ -153,12 +153,12 @@ func TestBuildSystemPrompt_WithContextFiles(t *testing.T) {
 func TestBuildSystemPrompt_Guidelines(t *testing.T) {
 	// With all tools
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
-		SelectedTools: []string{"read", "bash", "edit", "write", "grep", "find", "ls"},
+		SelectedTools: []string{"read", "bash", "edit", "write", "grep", "find"},
 		Cwd:           "/test",
 	})
 
-	if !strings.Contains(prompt, "Prefer grep/find/ls") {
-		t.Error("should suggest preferring grep/find/ls over bash")
+	if !strings.Contains(prompt, "Prefer grep/find") {
+		t.Error("should suggest preferring grep/find over bash")
 	}
 
 	// With only bash

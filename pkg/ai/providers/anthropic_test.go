@@ -553,9 +553,9 @@ func TestAnthropic_ClaudeCodeNames(t *testing.T) {
 
 func TestAnthropic_ClaudeCodeNames_UnmappedPassthrough(t *testing.T) {
 	// Fir tools without a Claude-Code counterpart (e.g. bash_output,
-	// bash_kill, ls) must pass through unchanged — the OAuth endpoint
+	// bash_kill) must pass through unchanged — the OAuth endpoint
 	// accepts custom tool names in that case.
-	for _, name := range []string{"bash_output", "bash_kill", "ls"} {
+	for _, name := range []string{"bash_output", "bash_kill"} {
 		if got := toClaudeCodeName(name); got != name {
 			t.Errorf("toClaudeCodeName(%q) = %q, want passthrough", name, got)
 		}
@@ -563,8 +563,8 @@ func TestAnthropic_ClaudeCodeNames_UnmappedPassthrough(t *testing.T) {
 
 	// And the reverse: the LLM sending back a custom name we registered
 	// must resolve to the fir tool name.
-	tools := []ai.Tool{{Name: "bash_output"}, {Name: "ls"}}
-	for _, name := range []string{"bash_output", "ls"} {
+	tools := []ai.Tool{{Name: "bash_output"}, {Name: "bash_kill"}}
+	for _, name := range []string{"bash_output", "bash_kill"} {
 		if got := fromClaudeCodeName(name, tools); got != name {
 			t.Errorf("fromClaudeCodeName(%q) = %q, want %q", name, got, name)
 		}

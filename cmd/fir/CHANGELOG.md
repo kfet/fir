@@ -6,6 +6,15 @@
 
 - `fir login <provider-id>` CLI subcommand: drives the interactive OAuth login flow for a named provider and persists credentials to `~/.config/fir/auth.json`, equivalent to the existing `--login` flag but available as a first-class subcommand alongside `fir skills` / `fir extensions` / `fir sessions`. Because OAuth providers are contributed by auth extensions (`anthropic_auth.py`, `copilot_auth.py`, `gemini_cli_auth.py`, `poe_auth.py`, `codex_auth.py`, `antigravity_auth.py`), the subcommand boots a minimal ephemeral session (no tools, no MCP, no skills, in-memory session store) that loads extensions the same way the main CLI does — honouring `settings.json` `extensions`, `--extension`/`-e` allow-listing, `--disable-extension`/`-d`, and `--no-extensions` — so every extension-registered provider is visible and usable. `fir login list` (or bare `fir login`) prints all registered providers after loading extensions. Also supports `--debug` for login-time log output.
 
+### Removed
+
+- `ls` tool. The fir-native directory-listing tool duplicated `bash ls`, was not in `DefaultCodingTools` (CLI/interactive/print never shipped it by default), and its system-prompt claim of respecting `.gitignore` was untrue — the implementation was a plain `os.ReadDir` with no ignore logic. `grep` and `find` are retained (ripgrep speed, structured glob matching); `ls` was the weakest of the three. Cleanup touched `pkg/agent/tools/ls.go` (deleted), `pkg/session/sdk.go` (`AllTools` dropped), `cmd/fir/app.go` (`--tools ls` whitelist + warning message), `pkg/modes/interactive/components/tool_execution.go` + `tree_selector.go` (display cases), `pkg/resources/systemprompt.go` (re-attributed `.gitignore` to `grep` only). Users who relied on the tool can do the same thing with `bash("ls <path>")`.
+
+### Changed
+
+- ACP mode no longer auto-registers `ls` alongside read/bash/edit/write/grep/find — it was the only mode doing so, and since the tool itself is now gone this closes the asymmetry flagged by the ACP system-tools audit (`pkg/modes/acp/tools.go::createAcpTools`). The ACP branch that falls back to `DefaultCodingTools` (no client Terminal/Fs capabilities) is unchanged.
+- `anthropic-auth` builtin extension: map `bash_output` → `Monitor` and `bash_kill` → `TaskStop` in the Claude Code tool-name map. These two fir-specific tools (state accessors for ACP's `run_in_background` feature) previously went to Anthropic's OAuth endpoint under their raw fir names. The rename is cosmetic — neither `Monitor` nor `TaskStop` is part of CC's canonical tool surface (Agent/Bash/Edit/Glob/Grep/Read/ScheduleWakeup/Skill/ToolSearch/Write), so the endpoint still treats them as custom tool names — but it gives nicer wire-level display.
+
 ## [0.32.0] - 2026-04-21
 
 ### Fixed

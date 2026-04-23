@@ -150,11 +150,11 @@ func TestBuiltInCommands(t *testing.T) {
 func TestCreateAcpTools(t *testing.T) {
 	mc := newMockConn()
 	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
-	// useClientTerminal=true, useClientFs=false → 9 tools (with bash_output + bash_kill)
+	// useClientTerminal=true, useClientFs=false → 8 tools (with bash_output + bash_kill)
 	toolList := pa.createAcpTools("/tmp/test", "session-1", true, false, "")
 
-	if len(toolList) != 9 {
-		t.Fatalf("expected 9 ACP tools, got %d", len(toolList))
+	if len(toolList) != 8 {
+		t.Fatalf("expected 8 ACP tools, got %d", len(toolList))
 	}
 
 	names := make(map[string]bool)
@@ -162,23 +162,23 @@ func TestCreateAcpTools(t *testing.T) {
 		names[tool.Tool.Name] = true
 	}
 
-	expected := []string{"read", "bash", "edit", "write", "grep", "find", "ls", "bash_output", "bash_kill"}
+	expected := []string{"read", "bash", "edit", "write", "grep", "find", "bash_output", "bash_kill"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("missing tool: %q", name)
 		}
 	}
 
-	// useClientTerminal=false, useClientFs=false → 7 tools (no bash_output/bash_kill, default bash)
+	// useClientTerminal=false, useClientFs=false → 6 tools (no bash_output/bash_kill, default bash)
 	toolList2 := pa.createAcpTools("/tmp/test", "session-1", false, false, "")
-	if len(toolList2) != 7 {
-		t.Fatalf("expected 7 ACP tools (no terminal), got %d", len(toolList2))
+	if len(toolList2) != 6 {
+		t.Fatalf("expected 6 ACP tools (no terminal), got %d", len(toolList2))
 	}
 
-	// useClientTerminal=false, useClientFs=true → 7 tools with ACP read/write/edit
+	// useClientTerminal=false, useClientFs=true → 6 tools with ACP read/write/edit
 	toolList3 := pa.createAcpTools("/tmp/test", "session-1", false, true, "")
-	if len(toolList3) != 7 {
-		t.Fatalf("expected 7 ACP tools (fs only), got %d", len(toolList3))
+	if len(toolList3) != 6 {
+		t.Fatalf("expected 6 ACP tools (fs only), got %d", len(toolList3))
 	}
 }
 

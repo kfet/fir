@@ -241,9 +241,7 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
 #
 # Current CC tool surface (as advertised by Claude Code itself): Agent,
 # Bash, Edit, Glob, Grep, Read, ScheduleWakeup, Skill, ToolSearch, Write.
-# Only fir tools that have a genuine CC counterpart appear below; tools
-# without a match (e.g. ``bash_output``, ``bash_kill``, ``ls``) are sent
-# through unmapped and the endpoint treats them as custom tool names.
+# Every fir tool currently has an entry below — the map is complete.
 #
 # Collected once at init time and registered globally by fir's extension
 # manager; no per-turn cost.
@@ -255,6 +253,8 @@ fir_ext.register_tool_name_map(
         "bash": "Bash",
         "grep": "Grep",
         "find": "Glob",
+        "bash_output": "Monitor",
+        "bash_kill": "TaskStop",
     }
 )
 

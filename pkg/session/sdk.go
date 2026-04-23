@@ -348,7 +348,6 @@ func AllTools(cwd string) []agent.AgentTool {
 		tools.NewWriteTool(cwd),
 		tools.NewGrepTool(cwd),
 		tools.NewFindTool(cwd),
-		tools.NewLsTool(cwd),
 	}
 }
 

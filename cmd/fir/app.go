@@ -751,7 +751,6 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 		"write": tools.NewWriteTool,
 		"grep":  tools.NewGrepTool,
 		"find":  tools.NewFindTool,
-		"ls":    tools.NewLsTool,
 	}
 
 	if args.NoTools && len(args.Tools) == 0 {
@@ -766,7 +765,7 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 			if fn, ok := allToolMap[name]; ok {
 				result = append(result, fn(cwd))
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: unknown tool %q (available: read, bash, edit, write, grep, find, ls)\n", name)
+				fmt.Fprintf(os.Stderr, "Warning: unknown tool %q (available: read, bash, edit, write, grep, find)\n", name)
 			}
 		}
 		return result

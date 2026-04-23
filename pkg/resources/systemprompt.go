@@ -110,10 +110,10 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSe
 	// Build guidelines
 	var guidelines []string
 
-	if toolSet["bash"] && !toolSet["grep"] && !toolSet["find"] && !toolSet["ls"] {
+	if toolSet["bash"] && !toolSet["grep"] && !toolSet["find"] {
 		guidelines = append(guidelines, "Use bash for file operations like ls, rg, find")
-	} else if toolSet["bash"] && (toolSet["grep"] || toolSet["find"] || toolSet["ls"]) {
-		guidelines = append(guidelines, "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)")
+	} else if toolSet["bash"] && (toolSet["grep"] || toolSet["find"]) {
+		guidelines = append(guidelines, "Prefer grep/find tools over bash for search and file discovery (faster; grep respects .gitignore)")
 	}
 
 	guidelines = append(guidelines, "Be concise in your responses")

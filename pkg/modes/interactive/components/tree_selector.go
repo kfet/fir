@@ -995,12 +995,6 @@ func (tl *TreeList) formatToolCall(name string, args map[string]any) string {
 			path = "."
 		}
 		return fmt.Sprintf("[find: %s in %s]", pattern, path)
-	case "ls":
-		path := shortenPath(getStr("path"))
-		if path == "" {
-			path = "."
-		}
-		return fmt.Sprintf("[ls: %s]", path)
 	default:
 		argsJSON, _ := json.Marshal(args)
 		s := string(argsJSON)

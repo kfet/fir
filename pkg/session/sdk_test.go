@@ -65,8 +65,8 @@ func TestDefaultCodingTools(t *testing.T) {
 
 func TestAllTools(t *testing.T) {
 	tools := AllTools("/tmp/test")
-	if len(tools) != 7 {
-		t.Fatalf("expected 7 tools, got %d", len(tools))
+	if len(tools) != 6 {
+		t.Fatalf("expected 6 tools, got %d", len(tools))
 	}
 
 	names := make(map[string]bool)
@@ -74,7 +74,7 @@ func TestAllTools(t *testing.T) {
 		names[tool.Name] = true
 	}
 
-	expected := []string{"read", "bash", "edit", "write", "grep", "find", "ls"}
+	expected := []string{"read", "bash", "edit", "write", "grep", "find"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected tool %s, got names: %v", name, names)
