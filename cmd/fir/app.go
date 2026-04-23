@@ -366,6 +366,9 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "sessions" {
 		return runSessions()
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "login" {
+		return runLoginSubcommand()
+	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
@@ -461,7 +464,7 @@ func run() error {
 
 	// Handle --login: run interactive OAuth login and exit.
 	if args.Login != "" {
-		return runLogin(args)
+		return runLoginWithExtensions(args, args.Login)
 	}
 
 	// ACP mode creates sessions on demand, so dispatch before setupSession.

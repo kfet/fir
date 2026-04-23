@@ -67,8 +67,12 @@ fir reads `AGENTS.md` (or `CLAUDE.md`) from the working directory and its ancest
 Two methods:
 
 1. **Environment variables** — set `<PROVIDER>_API_KEY` (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the full list below.
-2. **OAuth** — use `/login` in interactive mode. Supports Anthropic, Google (Antigravity & Gemini CLI), OpenAI Codex, GitHub Copilot, and Poe. Credentials are persisted automatically.
+2. **OAuth** — use `/login` in interactive mode, or `fir login <provider-id>` from the shell. Supports Anthropic, Google (Antigravity & Gemini CLI), OpenAI Codex, GitHub Copilot, and Poe. Credentials are persisted automatically.
 3. New OAuth providers can be added as extensions
+
+## Login subcommand
+
+`fir login <provider-id>` runs the OAuth flow for a provider from the shell (no interactive TUI required) and writes credentials to `~/.config/fir/auth.json`. Because OAuth providers are contributed by auth extensions, `fir login` loads extensions before running the flow — honouring the `settings.json` `extensions` allowlist, `-e/--extension`, `-d/--disable-extension`, and `--no-extensions`, exactly like the main CLI. `fir login list` (or bare `fir login`) lists every provider registered after extensions load. Equivalent to the long-standing `--login <provider-id>` flag; both paths share the same session-bootstrap code.
 
 ## Environment Variables
 

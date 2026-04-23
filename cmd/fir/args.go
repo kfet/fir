@@ -298,6 +298,8 @@ Usage:
   %s packages [list]             List installed packages
   %s packages update [source]    Update one or all installed packages
   %s sessions [list]             List sessions associated with the current directory
+  %s login <provider-id>         OAuth login for a provider (auth extensions loaded)
+  %s login list                  List available OAuth providers
 
 Options:
   -C <dir>                       Run as if fir was started in <dir>
@@ -378,5 +380,5 @@ Available Tools (default: read, bash, edit, write):
   grep   - Search file contents (read-only, off by default)
   find   - Find files by glob pattern (read-only, off by default)
   ls     - List directory contents (read-only, off by default)
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
 }

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `fir login <provider-id>` CLI subcommand: drives the interactive OAuth login flow for a named provider and persists credentials to `~/.config/fir/auth.json`, equivalent to the existing `--login` flag but available as a first-class subcommand alongside `fir skills` / `fir extensions` / `fir sessions`. Because OAuth providers are contributed by auth extensions (`anthropic_auth.py`, `copilot_auth.py`, `gemini_cli_auth.py`, `poe_auth.py`, `codex_auth.py`, `antigravity_auth.py`), the subcommand boots a minimal ephemeral session (no tools, no MCP, no skills, in-memory session store) that loads extensions the same way the main CLI does — honouring `settings.json` `extensions`, `--extension`/`-e` allow-listing, `--disable-extension`/`-d`, and `--no-extensions` — so every extension-registered provider is visible and usable. `fir login list` (or bare `fir login`) prints all registered providers after loading extensions. Also supports `--debug` for login-time log output.
+
 ## [0.32.0] - 2026-04-21
 
 ### Fixed
