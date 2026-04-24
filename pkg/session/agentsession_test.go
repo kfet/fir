@@ -817,6 +817,60 @@ func TestAgentSession_BuildSystemPrompt_Default(t *testing.T) {
 	}
 }
 
+// Regression test: NewAgentSession must propagate baseSystemPrompt to the
+// underlying agent state so the very first turn includes a system prompt.
+// Historically, Agent.SetSystemPrompt was only called from
+// Reload/NewSessionCmd/SwitchSession and NewAgentSession forgot it, so
+// freshly created sessions sent no system prompt to the LLM. The propagation
+// now lives inside buildSystemPrompt() itself — this test pins that behaviour
+// so it can't silently regress again.
+func TestAgentSession_NewAgentSession_WiresSystemPromptOntoAgent(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := sessionpkg.NewSessionStore(cwd, filepath.Join(agentDir, "sessions"))
+	settingsManager := config.NewSettingsManager(cwd, agentDir)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{Cwd: cwd, AgentDir: agentDir})
+	rl.Reload()
+
+	modelRegistry := models.NewModelRegistry(auth.NewAuthStorage(filepath.Join(agentDir, "auth.json")), "")
+
+	// Critically: do NOT pre-seed the agent's SystemPrompt here. We want to
+	// prove that NewAgentSession itself wires the built prompt onto the agent.
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{ThinkingLevel: "off"},
+		ConvertToLLM: func(msgs []agent.AgentMessage) ([]ai.Message, error) {
+			return fmsg.ConvertToLLM(msgs)
+		},
+	})
+
+	// Sanity check: the agent starts with an empty system prompt.
+	if a.State().SystemPrompt != "" {
+		t.Fatalf("precondition: expected empty SystemPrompt before NewAgentSession, got %q", a.State().SystemPrompt)
+	}
+
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionStore:    sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		ModelRegistry:   modelRegistry,
+		Cwd:             cwd,
+	})
+	defer session.Close()
+
+	if session.baseSystemPrompt == "" {
+		t.Fatal("expected non-empty baseSystemPrompt on session")
+	}
+	got := session.Agent.State().SystemPrompt
+	if got == "" {
+		t.Fatal("expected agent.State().SystemPrompt to be non-empty right after NewAgentSession (first turn would otherwise send no system prompt to the LLM)")
+	}
+	if got != session.baseSystemPrompt {
+		t.Errorf("agent SystemPrompt does not match session baseSystemPrompt\nagent: %q\nsession: %q", got, session.baseSystemPrompt)
+	}
+}
+
 func TestAgentSession_BuildSystemPrompt_WithAgentsFile(t *testing.T) {
 	cwd := t.TempDir()
 	agentDir := t.TempDir()

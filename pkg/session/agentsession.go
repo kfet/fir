@@ -248,7 +248,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 	// Subscribe to agent events for internal handling
 	s.unsubAgent = s.Agent.Subscribe(s.handleAgentEvent)
 
-	// Build system prompt
+	// Build system prompt (also pushes it onto the agent — see buildSystemPrompt).
 	s.buildSystemPrompt()
 
 	firlog.Debug("agent session created",
@@ -639,6 +639,12 @@ func (s *AgentSession) RemoveFollowUp(oneBasedIndex int) (string, bool) {
 // System prompt
 // ============================================================================
 
+// buildSystemPrompt rebuilds s.baseSystemPrompt from the current resource
+// loader + settings state and pushes it onto the agent so the next LLM call
+// includes it. All four call sites (NewAgentSession, NewSessionCmd,
+// SwitchSession, Reload) need both steps — doing them together here prevents
+// callers from forgetting the SetSystemPrompt half (which historically caused
+// freshly-created sessions to send no system prompt to the LLM on turn one).
 func (s *AgentSession) buildSystemPrompt() {
 	// Collect skills
 	skills, _ := s.resourceLoader.GetSkills()
@@ -669,6 +675,7 @@ func (s *AgentSession) buildSystemPrompt() {
 	}
 
 	s.baseSystemPrompt = prompt
+	s.Agent.SetSystemPrompt(prompt)
 }
 
 // expandSkillCommand expands /skill:<name> commands into skill XML blocks.
@@ -1113,7 +1120,6 @@ func (s *AgentSession) NewSessionCmd() (bool, error) {
 	s.Agent.ReplaceMessages(nil)
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 	// Clear plan state so stale plans don't persist across sessions.
 	s.UpdatePlan("", nil, nil)
 	// Clear the session name so extensions (e.g. tmuxspinner) reset the window title.
@@ -1158,7 +1164,6 @@ func (s *AgentSession) SwitchSession(sessionPath string) (bool, error) {
 	// Rebuild system prompt
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 
 	// Emit session_named so extensions (e.g. tmuxspinner) update the window title.
 	// Always emit, even with an empty name, so the old name is cleared.
@@ -1225,7 +1230,6 @@ func (s *AgentSession) Reload() error {
 	}
 	s.sessionDate = time.Now().Format("2006-01-02")
 	s.buildSystemPrompt()
-	s.Agent.SetSystemPrompt(s.baseSystemPrompt)
 
 	// Re-trigger background fetch of live model lists so newly-added providers,
 	// rotated keys, or upstream model changes are picked up without a restart.

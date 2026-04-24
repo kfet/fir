@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- First turn of a freshly-created session now includes the system prompt. `NewAgentSession` built `baseSystemPrompt` but never pushed it onto the underlying `agent.Agent`'s state — only `Reload()`, `NewSessionCmd()`, and `SwitchSession()` did. A brand-new session's first LLM call therefore went out with no `system`/`developer` message at all (confirmed empirically via captured OpenAI chat-completions requests against a mock backend, affecting TUI, print, and ACP modes equally). Fixed by moving the `Agent.SetSystemPrompt` call into `buildSystemPrompt()` itself so every build path (construction, new session, session switch, resource reload) propagates the prompt to the agent in one step — the four duplicated two-line sequences at each call site collapse to one, and no future caller can forget the second half. Regression test `TestAgentSession_NewAgentSession_WiresSystemPromptOntoAgent` constructs an agent with an empty initial `SystemPrompt` and asserts that `session.Agent.State().SystemPrompt` is non-empty and equal to `session.baseSystemPrompt` immediately after `NewAgentSession` returns (no `Reload` required).
+
 ## [0.33.0] - 2026-04-23
 
 ### Added
