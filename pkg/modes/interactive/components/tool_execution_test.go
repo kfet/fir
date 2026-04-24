@@ -310,8 +310,8 @@ func TestToolExecution_SpinnerShownForHintTools(t *testing.T) {
 	// Spinner should be present while pending
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "Working...") {
-		t.Errorf("expected Working... spinner while pending, got %q", joined)
+	if !strings.Contains(joined, "Inferring...") {
+		t.Errorf("expected Inferring... spinner while pending, got %q", joined)
 	}
 
 	// SetStatusMessage should update the spinner text
@@ -328,7 +328,7 @@ func TestToolExecution_SpinnerShownForHintTools(t *testing.T) {
 	}, false)
 	lines = comp.Render(80)
 	joined = strings.Join(lines, "\n")
-	if strings.Contains(joined, "Working...") || strings.Contains(joined, "Calling Read...") {
+	if strings.Contains(joined, "Inferring...") || strings.Contains(joined, "Calling Read...") {
 		t.Errorf("expected spinner removed after result, got %q", joined)
 	}
 }
@@ -339,7 +339,7 @@ func TestToolExecution_NoSpinnerForPlainTools(t *testing.T) {
 
 	lines := comp.Render(80)
 	joined := strings.Join(lines, "\n")
-	if strings.Contains(joined, "Working...") {
+	if strings.Contains(joined, "Inferring...") {
 		t.Errorf("plain tools should not have a spinner, got %q", joined)
 	}
 }

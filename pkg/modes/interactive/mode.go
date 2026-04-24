@@ -47,7 +47,7 @@ type InteractiveMode struct {
 
 	// State
 	messageContainer       *tui.Container
-	activityContainer      *tui.Container // spinners: "Working...", "Compacting..."
+	activityContainer      *tui.Container // spinners: "Inferring...", "Compacting..."
 	commandStatusContainer *tui.Container // transient command result messages
 	planContainer          *tui.Container // plan visualization
 	planComponent          *components.PlanComponent
@@ -303,7 +303,7 @@ func (m *InteractiveMode) Init() error {
 	m.messageContainer = &tui.Container{}
 	m.ui.AddChild(m.messageContainer)
 
-	// Create activity container (for spinners: "Working...", "Compacting...")
+	// Create activity container (for spinners: "Inferring...", "Compacting...")
 	m.activityContainer = &tui.Container{}
 	m.ui.AddChild(m.activityContainer)
 

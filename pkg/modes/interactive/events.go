@@ -236,7 +236,7 @@ func (m *InteractiveMode) onAgentStart() {
 		m.ui.AsRenderRequester(),
 		func(spinner string) string { return t.Fg("accent", spinner) },
 		func(text string) string { return t.Fg("muted", text) },
-		"Working...",
+		"Inferring...",
 	)
 	m.loadingAnimation = loader
 	m.activityContainer.AddChild(loader)
@@ -308,7 +308,7 @@ func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
 	m.pendingTools[ae.ToolCallID] = comp
 	m.messageContainer.AddChild(comp)
 
-	// Hide the main "Working..." spinner when a tool has its own inline
+	// Hide the main "Inferring..." spinner when a tool has its own inline
 	// spinner (hint-based tools like aside) to avoid visual duplication.
 	if comp.HasSpinner() {
 		m.activityContainer.SetVisible(false)
@@ -377,7 +377,7 @@ func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 		}
 	}
 
-	// Restore the main "Working..." spinner if this tool was hiding it
+	// Restore the main "Inferring..." spinner if this tool was hiding it
 	// and no other spinner-bearing tools are still pending.
 	if hadSpinner {
 		anySpinner := false

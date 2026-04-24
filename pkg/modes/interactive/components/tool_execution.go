@@ -200,7 +200,7 @@ func (tc *ToolExecutionComponent) spinnerSuffix() string {
 	msg := tc.statusMsg
 	tc.spinnerMu.Unlock()
 	if msg == "" {
-		msg = "Working..."
+		msg = "Inferring..."
 	}
 	return "\n\n" + t.Fg("accent", frame) + " " + t.Fg("muted", msg)
 }

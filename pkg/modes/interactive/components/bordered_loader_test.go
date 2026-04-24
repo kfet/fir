@@ -24,7 +24,7 @@ func TestBorderedLoader_Cancellable(t *testing.T) {
 
 func TestBorderedLoader_NonCancellable(t *testing.T) {
 	theme := theme.GetTheme()
-	bl := NewBorderedLoader(&loaderRenderRequester{}, theme, "Working...", &BorderedLoaderOptions{Cancellable: false})
+	bl := NewBorderedLoader(&loaderRenderRequester{}, theme, "Inferring...", &BorderedLoaderOptions{Cancellable: false})
 	defer bl.Dispose()
 
 	lines := bl.Render(60)

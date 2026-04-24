@@ -305,12 +305,12 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 
 	// If pending work, resume it; otherwise show completion status
 	if m.session.HasPendingWork() {
-		// Show "Working..." spinner and resume
+		// Show "Inferring..." spinner and resume
 		loader := tuicomp.NewLoader(
 			m.ui.AsRenderRequester(),
 			func(spinner string) string { return t.Fg("accent", spinner) },
 			func(text string) string { return t.Fg("muted", text) },
-			"Working...",
+			"Inferring...",
 		)
 		m.loadingAnimation = loader
 		m.activityContainer.AddChild(loader)

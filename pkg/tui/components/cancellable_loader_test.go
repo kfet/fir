@@ -18,7 +18,7 @@ func TestCancellableLoader_Create(t *testing.T) {
 }
 
 func TestCancellableLoader_Render(t *testing.T) {
-	cl := NewCancellableLoader(&mockRenderRequester{}, func(s string) string { return s }, func(s string) string { return s }, "Working...")
+	cl := NewCancellableLoader(&mockRenderRequester{}, func(s string) string { return s }, func(s string) string { return s }, "Inferring...")
 	defer cl.Dispose()
 
 	lines := cl.Render(60)

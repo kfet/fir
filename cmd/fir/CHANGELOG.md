@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- TUI spinner label: rename `Working...` to `Inferring...` throughout the interactive mode (agent turn spinner, post-compaction resume spinner, and the default fallback for hint-based tool spinners like `aside`). A small cosmetic nod to the fact that what fir is actually doing while the wheel spins is LLM inference.
+
 ### Fixed
 
 - Live-model filter incorrectly hid every built-in model of a provider once its live-list fetch completed. The regression was introduced in commit `47f0954f` ("feat: live-list new-model synthesis with provider extensions") where `liveModelState.models` was repurposed to store only *synthesised* metadata for IDs not in the built-in registry, but `has(modelID)` still scanned that same slice to confirm liveness. Because `synthesiseForLiveIDs` skips any ID already present as a built-in, all known models were absent from `s.models`, so `has("claude-sonnet-4-5")` returned `false` and `GetAvailable` filtered them out. Most visible in ACP mode's model selector (all 23 built-in Anthropic models vanished once the OAuth-authenticated live fetch succeeded). Fixed by adding a separate `liveIDs map[string]bool` on `liveModelState` that holds the raw ID list from `ListModels`; `has()` now consults that set while `models` continues to carry synth metadata for novel IDs. Cache format (`live-models-v2-<provider>.json`) grew an `ids` field; legacy v2 caches without the field are rejected so they're repopulated on next run (prevents silently reloading a broken cache). Test coverage: existing `TestLiveModelState_Filters` and `TestGetAvailable_WithLiveFiltering` were updated to pass both ID lists and synth slices; they continue to verify that `has()` returns true only for live-listed IDs.
