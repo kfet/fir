@@ -109,7 +109,7 @@ func TestLiveModelState_Permissive(t *testing.T) {
 
 func TestLiveModelState_Filters(t *testing.T) {
 	s := newLiveModelState()
-	s.set([]*ai.Model{
+	s.set([]string{"model-a", "model-b"}, []*ai.Model{
 		{ID: "model-a", Provider: "test", Name: "Model A", ContextWindow: 128000, MaxTokens: 4096},
 		{ID: "model-b", Provider: "test", Name: "Model B", ContextWindow: 128000, MaxTokens: 4096},
 	})
@@ -154,7 +154,7 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 
 	// Simulate live fetch completing with only real-model
 	state := newLiveModelState()
-	state.set([]*ai.Model{
+	state.set([]string{"real-model"}, []*ai.Model{
 		{ID: "real-model", Provider: "anthropic", Name: "Real Model", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com", ContextWindow: 128000, MaxTokens: 4096},
 	})
 	registry.liveModelsMu.Lock()
@@ -188,9 +188,9 @@ func TestLiveCachePersistence(t *testing.T) {
 		{ID: "model-a", Provider: "test", Name: "Model A", ContextWindow: 128000, MaxTokens: 4096},
 		{ID: "model-b", Provider: "test", Name: "Model B", ContextWindow: 128000, MaxTokens: 4096},
 	}
-	registry.saveLiveCache(tmpDir, "test-provider", models)
+	registry.saveLiveCache(tmpDir, "test-provider", []string{"model-a", "model-b"}, models)
 
-	loaded, ok := registry.loadLiveCache(tmpDir, "test-provider")
+	_, loaded, ok := registry.loadLiveCache(tmpDir, "test-provider")
 	if !ok {
 		t.Fatal("expected cache to load")
 	}
@@ -207,7 +207,7 @@ func TestLiveCachePersistence(t *testing.T) {
 	data, _ = json.Marshal(cache)
 	os.WriteFile(cachePath, data, 0o644)
 
-	_, ok = registry.loadLiveCache(tmpDir, "test-provider")
+	_, _, ok = registry.loadLiveCache(tmpDir, "test-provider")
 	if ok {
 		t.Error("expected expired cache to be rejected")
 	}
@@ -219,10 +219,10 @@ func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
 	registry := NewModelRegistry(authStore, "")
 
 	// Seed disk cache and in-memory state as if a previous fetch happened.
-	registry.saveLiveCache(tmpDir, "prov-a", []*ai.Model{
+	registry.saveLiveCache(tmpDir, "prov-a", []string{"m1"}, []*ai.Model{
 		{ID: "m1", Provider: "prov-a", Name: "M1", ContextWindow: 128000, MaxTokens: 4096},
 	})
-	registry.saveLiveCache(tmpDir, "prov-b", []*ai.Model{
+	registry.saveLiveCache(tmpDir, "prov-b", []string{"m2"}, []*ai.Model{
 		{ID: "m2", Provider: "prov-b", Name: "M2", ContextWindow: 128000, MaxTokens: 4096},
 	})
 

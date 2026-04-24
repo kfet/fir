@@ -279,7 +279,7 @@ func TestFind_LiveListAuthoritative(t *testing.T) {
 
 	// Inject a live-list state with one known ID.
 	state := newLiveModelState()
-	state.set([]*ai.Model{
+	state.set([]string{"find-auth-real", "find-auth-live"}, []*ai.Model{
 		{ID: "find-auth-live", Provider: "find-auth-test", ContextWindow: 50000},
 	})
 	r.liveModelsMu.Lock()
