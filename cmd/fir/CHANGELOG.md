@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-04-23
+
 ### Changed
 
 - TUI spinner label: rename `Working...` to `Inferring...` throughout the interactive mode (agent turn spinner, post-compaction resume spinner, and the default fallback for hint-based tool spinners like `aside`). A small cosmetic nod to the fact that what fir is actually doing while the wheel spins is LLM inference.
