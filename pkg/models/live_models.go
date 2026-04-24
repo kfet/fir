@@ -21,9 +21,10 @@ import (
 type liveModelCache struct {
 	Provider string `json:"provider"`
 	// IDs is the full set of live-listed model IDs — the authoritative
-	// "this is available" list used to filter built-in models. Nil/empty
-	// means either a legacy v2 cache or an empty provider response.
-	IDs       []string    `json:"ids,omitempty"`
+	// "this is available" list used to filter built-in models. A nil
+	// value marks legacy v2 caches (rejected on load); an empty slice
+	// is a valid "provider returned nothing" response.
+	IDs       []string    `json:"ids"`
 	Models    []*ai.Model `json:"models"`
 	FetchedAt time.Time   `json:"fetchedAt"`
 }

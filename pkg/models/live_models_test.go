@@ -128,6 +128,27 @@ func TestLiveModelState_Filters(t *testing.T) {
 	}
 }
 
+// TestLiveModelState_BuiltinNotInModels is a regression test for the bug
+// where has() scanned s.models for the queried ID, but synthesiseForLiveIDs
+// only populates s.models with IDs *not* already in the built-in registry.
+// Live IDs that are also built-in must still be reported as available.
+func TestLiveModelState_BuiltinNotInModels(t *testing.T) {
+	s := newLiveModelState()
+	// Live list contains two built-in IDs; synth slice is empty because
+	// synthesiseForLiveIDs skipped them (already built-in).
+	s.set([]string{"claude-sonnet-4-5", "claude-opus-4-5"}, nil)
+
+	if !s.has("claude-sonnet-4-5") {
+		t.Error("expected built-in live-listed ID to be available")
+	}
+	if !s.has("claude-opus-4-5") {
+		t.Error("expected built-in live-listed ID to be available")
+	}
+	if s.has("claude-haiku-99") {
+		t.Error("expected non-listed ID to be unavailable")
+	}
+}
+
 func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	t.Setenv("ANTHROPIC_API_KEY", "test")

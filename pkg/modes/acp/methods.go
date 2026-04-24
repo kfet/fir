@@ -64,8 +64,12 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 			firlog.Warn("acp initialize: auth extension setup failed", "err", aerr)
 		}
 		pa.mu.Lock()
+		oldAuthExt := pa.authExtSetup
 		pa.authExtSetup = authSetup
 		pa.mu.Unlock()
+		if oldAuthExt != nil {
+			oldAuthExt.Stop()
+		}
 		firlog.Info("acp initialize: auth extensions started", "elapsed_ms", time.Since(t0).Milliseconds())
 	}
 
