@@ -86,6 +86,11 @@ type firAgent struct {
 	clientCaps  acpsdk.ClientCapabilities
 	authMethods []ExtendedAuthMethod
 	authStorage *auth.AuthStorage // global auth storage from Initialize, shared by all sessions
+	// authExtSetup holds auth-provider extensions started eagerly in
+	// Initialize so their OAuth providers are registered before
+	// authMethods is built. Sessions exclude these names from their own
+	// extension startup to avoid double-starting.
+	authExtSetup *extension.AuthSetupResult
 }
 
 // Compile-time interface check: firAgent must implement Agent.
@@ -153,6 +158,15 @@ func RunAcpMode(opts Options) error {
 		if entry.mcpManager != nil {
 			_ = entry.mcpManager.Close()
 		}
+	}
+
+	// Stop the auth-provider extensions started in Initialize.
+	pa.mu.Lock()
+	authExt := pa.authExtSetup
+	pa.authExtSetup = nil
+	pa.mu.Unlock()
+	if authExt != nil {
+		authExt.Stop()
 	}
 
 	return nil
@@ -267,13 +281,23 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	entry.extReady = make(chan struct{})
 	if !pa.options.NoExtensions {
 		t0 := time.Now()
+		pa.mu.Lock()
+		authExtNames := []string(nil)
+		if pa.authExtSetup != nil {
+			authExtNames = append(authExtNames, pa.authExtSetup.Names...)
+		}
+		pa.mu.Unlock()
+		// Don't re-start auth-provider extensions; they're already running
+		// from Initialize and their auth providers are globally registered.
+		disabled := append([]string(nil), pa.options.DisabledExtensions...)
+		disabled = append(disabled, authExtNames...)
 		extSetup, err := extension.Setup(result.Session, extension.SetupOptions{
 			ProjectDir:    cwd,
 			Cwd:           cwd,
 			Mode:          "acp",
 			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
-			DisabledNames: pa.options.DisabledExtensions,
+			DisabledNames: disabled,
 		})
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
@@ -43,6 +44,30 @@ func (pa *firAgent) Initialize(_ context.Context, params acpsdk.InitializeReques
 	t0 = time.Now()
 	modelRegistry := models.NewModelRegistry(authStorage, filepath.Join(agentDir, "models.json"))
 	firlog.Info("acp initialize: model registry created", "elapsed_ms", time.Since(t0).Milliseconds())
+
+	t0 = time.Now()
+	// Eagerly start auth-provider extensions so OAuth providers (like
+	// anthropic, codex, copilot, …) are registered in the global oauth
+	// registry before we enumerate AuthMethods. Without this the ACP
+	// client would only see env-var methods.
+	if !pa.options.NoExtensions {
+		cwd, _ := os.Getwd()
+		authSetup, aerr := extension.SetupAuthProviders(extension.AuthSetupOptions{
+			ProjectDir:    cwd,
+			Cwd:           cwd,
+			Mode:          "acp",
+			Version:       version,
+			EnabledNames:  pa.options.EnabledExtensions,
+			DisabledNames: pa.options.DisabledExtensions,
+		})
+		if aerr != nil {
+			firlog.Warn("acp initialize: auth extension setup failed", "err", aerr)
+		}
+		pa.mu.Lock()
+		pa.authExtSetup = authSetup
+		pa.mu.Unlock()
+		firlog.Info("acp initialize: auth extensions started", "elapsed_ms", time.Since(t0).Milliseconds())
+	}
 
 	t0 = time.Now()
 	authMethods := buildAuthMethods(authStorage, modelRegistry, params.ClientCapabilities)
