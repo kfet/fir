@@ -240,7 +240,8 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
 # Claude-Code-specific knowledge lives next to the OAuth flow.
 #
 # Current CC tool surface (as advertised by Claude Code itself): Agent,
-# Bash, Edit, Glob, Grep, Read, ScheduleWakeup, Skill, ToolSearch, Write.
+# Bash, BashOutput, Edit, Glob, Grep, KillShell, Read, ScheduleWakeup,
+# Skill, ToolSearch, Write.
 # Every fir tool currently has an entry below — the map is complete.
 #
 # Collected once at init time and registered globally by fir's extension
@@ -253,8 +254,8 @@ fir_ext.register_tool_name_map(
         "bash": "Bash",
         "grep": "Grep",
         "find": "Glob",
-        "bash_output": "Monitor",
-        "bash_kill": "TaskStop",
+        "bash_output": "BashOutput",
+        "bash_kill": "KillShell",
     }
 )
 
