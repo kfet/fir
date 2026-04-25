@@ -444,12 +444,28 @@ class TestIntegration(unittest.TestCase):
         with _Timeout(5):
             ctx = mock.MagicMock()
             # Pause the fast clock so both schedules are created before
-            # the countdown threads can fire.
-            with mock.patch.object(schedule, "_TICK", 0.5):
-                schedule.cmd_schedule(["1s", "first"], ctx)
-                schedule.cmd_schedule(["2s", "second"], ctx)
-                with schedule._lock:
-                    self.assertEqual(len(schedule._schedules), 2)
+            # the countdown threads can fire.  We freeze ``_now`` to a fixed
+            # past timestamp during creation so each thread's first
+            # ``target - _now()`` returns a positive remainder; without this,
+            # the FastClock has often already advanced past the 1s mark by
+            # the time the second thread starts on a busy CI box, causing
+            # the first schedule to fire and remove itself before the
+            # ``len(_schedules) == 2`` assertion.
+            self._now_patch.stop()
+            frozen_now = self._clock()  # snapshot the fast clock once
+            frozen_patch = mock.patch.object(
+                schedule, "_now", return_value=frozen_now,
+            )
+            frozen_patch.start()
+            try:
+                with mock.patch.object(schedule, "_TICK", 0.5):
+                    schedule.cmd_schedule(["1s", "first"], ctx)
+                    schedule.cmd_schedule(["2s", "second"], ctx)
+                    with schedule._lock:
+                        self.assertEqual(len(schedule._schedules), 2)
+            finally:
+                frozen_patch.stop()
+                self._now_patch.start()
 
             # Restore fast tick and wait for both to fire.
             deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=3)

@@ -29,6 +29,7 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 				"- Each call replaces the entire plan — always include all entries\n" +
 				"- Keep steps concrete and actionable, not vague\n" +
 				"- Use metadata for short contextual info (e.g. how to access a fleet, session name, worktree path)\n" +
+				"- Set metadata key \"progress_metric\" to a free-form short string that represents real task progress (e.g. \"coverage=95.2%\", \"endpoints migrated 3/8\", \"tests passing 12/40\"). Update it as the underlying number moves; the harness counts plan-updates since the string last changed and surfaces stagnation back to you.\n" +
 				"- Always set metadata key \"next_update_in\" to estimate how many turns before your next plan update (e.g. \"3\"). This controls how often you get reminded.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -39,7 +40,7 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 					},
 					"metadata": map[string]any{
 						"type":        "object",
-						"description": "Optional key-value pairs shown in the plan header. Max 5 keys, values ≤80 chars. Use for context like session names, access commands, or links. Always include \"next_update_in\" with your estimated turns until next update.",
+						"description": "Optional key-value pairs shown in the plan header. Max 5 keys, values ≤80 chars. Use for context like session names, access commands, or links. Recognised keys: \"progress_metric\" (a free-form short string representing real progress, e.g. \"coverage=95.2%\" or \"endpoints migrated 3/8\"; the harness counts plan-updates since this string last changed and surfaces stagnation back to you), \"next_update_in\" (estimated turns until next plan update, e.g. \"3\"; controls reminder cadence).",
 						"additionalProperties": map[string]any{
 							"type":      "string",
 							"maxLength": 80,

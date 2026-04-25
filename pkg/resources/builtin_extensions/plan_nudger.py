@@ -1,169 +1,262 @@
 #!/usr/bin/env python3
 # ---
 # name: plan-nudger
-# description: Remind the agent to keep working when it pauses with incomplete plan steps
+# description: Surface a calm plan-status steer when the agent pauses or stagnates while a plan is in flight
 # builtin: true
 # events: session_update, turn_end, agent_end, tool_execution_end
 # ---
 """
-plan-nudger — keeps the agent moving through a long-running work loop.
+plan-nudger — keeps a long-running work loop legible to both the user
+and the agent.
 
-A nudge fired at the wrong moment is worse than no nudge: an agent that
-is already making productive progress (tests passing, files changing,
-tools succeeding) reads an alarming reminder as a false positive and
-spends its next turn arguing with it instead of working. The copy and
-firing rules below are all designed around that failure mode — neutral
-wording, tool-call-demanding phrasing, and triggering only on genuinely
-idle turns so healthy loop ticks are left alone.
+Design notes
+------------
+The previous version of this extension fired a loud ``[CONTINUE]``
+reminder that demanded a tool call and forbade prose-only replies.  In
+practice that wording produced two failure modes:
+
+1. The agent *gamed* the literal check by marking incomplete items
+   "completed" or splitting them into a "future work" plan.
+2. The procedural "MUST" voice triggered either brittle compliance or
+   rationalisation-driven evasion.  It addressed the **fact** of stopping,
+   not the **reasons** for stopping.
+
+The redesign keeps the firing rules from main (idle-turn threshold,
+wall-clock backstop, stagnation tracking) — those proved sound — but
+replaces every imperative with calm collaborator-to-collaborator
+framing.  The shift in voice is: instead of telling the agent "you
+stopped, do the thing", we explain *why* we want frequent plan updates
+("so the user can see what you're doing") and surface only the facts
+the agent can't compute itself (counters and stagnation count).
+
+The steer body is composed from four optional blocks, each appearing
+only when relevant.  Steady-state output is two short lines.
 """
 
 import time
 
 import fir_ext
 
-# A turn that ran one or more tools is never idle. Only when this many
+# ---------------------------------------------------------------------------
+# Firing rules (kept from main's plan-nudger — they were the right call)
+# ---------------------------------------------------------------------------
+
+# A turn that ran one or more tools is never idle.  Only when this many
 # consecutive turns end without a single tool call do we consider the
-# agent to have paused — and only then does the nudge fire.
+# agent to have paused — and only then does the steer fire from
+# turn_end.
 IDLE_TURN_THRESHOLD = 2
 
 # Backstop for extreme cases where the agent sits idle for a long time
-# between turns — trips even if IDLE_TURN_THRESHOLD has not been reached.
+# between turns — trips even if IDLE_TURN_THRESHOLD has not been
+# reached.
 NUDGE_TIME_THRESHOLD = 120  # seconds
 
 # After this many consecutive idle-turn nudges without plan_completed
-# advancing, escalate to a stronger steer.
-STAGNATION_WARN_THRESHOLD = 2
-# After this many, switch to a [SYS_EXT] prepend with system-prompt-level
-# authority.
-STAGNATION_CRIT_THRESHOLD = 3
+# advancing, surface a stagnation line in the steer body.
+STAGNATION_THRESHOLD = 2
 
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Mutable state
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+# Plan snapshot from the latest plan_update.
+plan_total: int = 0
+plan_completed: int = 0
+plan_metadata: dict = {}
 
 # Consecutive turns that ended without executing any tool.
-idle_turns = 0
-# Timestamp of the last "active" tick (session update or tool execution).
-last_active_time = time.monotonic()
+idle_turns: int = 0
 
-plan_total = 0
-plan_completed = 0
+# Timestamp of the last "active" tick (tool execution or plan update).
+last_active_time: float = time.monotonic()
 
 # Did any tool execute during the current turn?
-tool_used_this_turn = False
-# Last tool the agent invoked (any turn) and whether it errored.
-last_tool_name = ""
-last_tool_is_error = False
+tool_used_this_turn: bool = False
 
-# Consecutive idle-turn nudges where plan_completed did not advance.
-nudges_without_progress = 0
+# Consecutive nudges where plan_completed did not advance.  Used to
+# detect "I've been pinging the agent and nothing is happening".
+nudges_without_progress: int = 0
+
+# Tracks plan-updates that left ``progress_metric`` unchanged.  Reset
+# whenever the AI bumps the metric string.
+updates_since_metric_change: int = 0
+last_metric_value: str = ""
 
 
-# -----------------------------------------------------------------------------
-# Event handlers
-# -----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Event handlers — bookkeeping
+# ---------------------------------------------------------------------------
 
 
 @fir_ext.on("session_update")
 def on_session_update(params, ctx):
-    global plan_total, plan_completed, nudges_without_progress
+    """Snapshot plan state from each ``plan_update`` event.
+
+    A plan update is itself a sign of forward motion: the agent just
+    used the plan tool, which is exactly what we want it to be doing.
+    Treat it as an active tick so we don't immediately fire a steer on
+    the next idle turn.
+    """
+    global plan_total, plan_completed, plan_metadata
     global idle_turns, last_active_time
-    plan = params.get("plan")
-    if plan is None:
+    global nudges_without_progress
+    global updates_since_metric_change, last_metric_value
+
+    if not params or params.get("type") != "plan_update":
         return
-    new_total = plan.get("total", 0)
-    new_completed = plan.get("completed", 0)
-    # Only reset the stagnation counter when tasks are actually completed,
-    # not merely because the plan was touched.
+
+    plan = params.get("plan") or {}
+    new_total = int(plan.get("total", 0) or 0)
+    new_completed = int(plan.get("completed", 0) or 0)
+    new_metadata = plan.get("metadata") or {}
+    new_metric = (new_metadata.get("progress_metric") or "").strip()
+
+    # Reset stagnation only when items are actually completed, not just
+    # because the plan was touched.  A plan update without a completion
+    # is fine — we still tick the active counter — but it doesn't
+    # extinguish the stagnation flag.
     if new_completed > plan_completed:
         nudges_without_progress = 0
+
+    # Independent stagnation signal: AI is touching the plan but the
+    # progress_metric string isn't moving.
+    if new_metric != last_metric_value:
+        updates_since_metric_change = 0
+        last_metric_value = new_metric
+    else:
+        updates_since_metric_change += 1
+
     plan_total = new_total
     plan_completed = new_completed
-    # A plan update is itself a sign of forward motion — count it as an
-    # active tick so we don't fire right after one.
+    plan_metadata = new_metadata
+
     idle_turns = 0
     last_active_time = time.monotonic()
 
 
 @fir_ext.on("tool_execution_end")
 def on_tool_execution_end(params, ctx):
-    global tool_used_this_turn, last_tool_name, last_tool_is_error
-    global last_active_time
+    """Mark the current turn as active.
+
+    The flag is consumed (and cleared) inside ``turn_end``: a tool-using
+    turn never fires a steer, and resets the idle counter.
+    """
+    global tool_used_this_turn, last_active_time
     tool_used_this_turn = True
-    last_tool_name = params.get("tool_name") or last_tool_name
-    last_tool_is_error = bool(params.get("is_error", False))
     last_active_time = time.monotonic()
 
 
-# -----------------------------------------------------------------------------
-# Nudge copy
-# -----------------------------------------------------------------------------
-#
-# Every variant:
-#   * starts with [CONTINUE] — neutral, no "stuck" language
-#   * includes the last tool + status so the next action is obvious
-#   * explicitly forbids a prose-only reply (must call a tool)
-#   * never suggests rewriting anything from scratch
-#
-# ``{tool_hint}`` is a pre-formatted phrase like
-# ``Last tool was Bash (ok).`` or ``No tool has run yet this session.``
+# ---------------------------------------------------------------------------
+# Steer body composition
+# ---------------------------------------------------------------------------
 
 
-NUDGE_MILD = (
-    "[CONTINUE] {tool_hint} Your plan still has incomplete steps — "
-    "run the next tool now. Your next reply MUST contain a tool call; "
-    "do not reply with prose only. If this is a natural pause point, "
-    "update the plan via the plan tool to reflect current status and "
-    "continue on the next step."
+# Always-on tag.  The framing ("keeping plan visible to the user")
+# is *why* we send these steers — collaborator-to-collaborator, not
+# parent-to-child.  The agent reads the tag before any counters and
+# knows the message exists for the user's sake.
+_TAG = "[plan-status — keeping plan visible to the user]"
+
+_HANDOFF_LINE = (
+    "Note: context isn't a hard wall — `self-handoff` writes a doc and "
+    "starts fresh; work continues. Stopping early is not the only escape "
+    "from context pressure."
 )
 
-NUDGE_WARN = (
-    "[CONTINUE] {tool_hint} You have paused {n} times without completing "
-    "a plan item. Pick the smallest next action and execute it with a "
-    "tool call — do not analyze, do not narrate. Your next reply MUST "
-    "contain a tool call."
-)
-
-NUDGE_CRIT = (
-    "[CONTINUE] {tool_hint} {n} consecutive idle turns with no plan "
-    "progress. Treat this as a loop tick, not a conversation turn.\n\n"
-    "Rules for your next reply:\n"
-    "  - It MUST contain a tool call. Prose-only replies are not allowed.\n"
-    "  - Do not re-read files you have already read.\n"
-    "  - Do not re-run the same command to confirm a previous result.\n"
-    "  - Do not explain what you are about to do — just do it.\n"
-    "If you believe the work is complete, call the plan tool to mark all "
-    "remaining steps completed or cancelled."
-)
-
-AGENT_END_NUDGE = (
-    "[CONTINUE] Your plan still has incomplete steps. End-of-turn is a "
-    "pause point in the loop, not a stopping point. If more work remains, "
-    "your next reply MUST contain a tool call. If the work really is done, "
-    "update the plan via the plan tool so the remaining steps are marked "
-    "completed or cancelled, and confirm the outcome to the user."
+_METRIC_TIP = (
+    "Tip: set metadata.progress_metric (e.g. \"coverage=95.2%\" or "
+    "\"endpoints migrated 3/8\") on your next plan update so the user "
+    "sees real progress here too."
 )
 
 
-def _tool_hint() -> str:
-    """Return a short sentence describing the last tool the agent ran."""
-    if not last_tool_name:
-        return "No tool has run yet this session."
-    status = "error" if last_tool_is_error else "ok"
-    return f"Last tool was {last_tool_name} ({status})."
+def _build_status_body(*, surface_handoff: bool) -> str:
+    """Compose the steer body from optional blocks.
+
+    Steady-state (no stagnation, metric set, plan in flight) is just
+    the tag + the counter line.  Each optional block is added only
+    when it has something meaningful to say.
+
+    Parameters
+    ----------
+    surface_handoff
+        When True, append the ``self-handoff`` reassurance line.  Caller
+        decides this — typically we only surface it once stagnation is
+        real, so it doesn't become wallpaper.
+    """
+    incomplete = max(plan_total - plan_completed, 0)
+    metric = (plan_metadata.get("progress_metric") or "").strip()
+
+    # ── counter line ───────────────────────────────────────────────────
+    parts = [f"{incomplete} step(s) incomplete"]
+    if idle_turns > 0:
+        parts.append(f"{idle_turns} idle turn(s)")
+    if metric and updates_since_metric_change > 0:
+        parts.append(
+            f"{updates_since_metric_change} plan-update(s) since "
+            "progress_metric changed",
+        )
+    if nudges_without_progress >= STAGNATION_THRESHOLD:
+        parts.append(
+            f"{nudges_without_progress} consecutive pause(s) without "
+            "plan progress",
+        )
+    counter_line = " · ".join(parts)
+
+    lines = [_TAG, counter_line]
+
+    # ── tip: progress_metric is unset ──────────────────────────────────
+    # Only show when there's a plan in flight and the metric is
+    # genuinely missing.  Once set, the counter line carries the
+    # information instead.
+    if not metric and plan_total > 0:
+        lines.append(_METRIC_TIP)
+
+    # ── handoff reassurance ────────────────────────────────────────────
+    if surface_handoff:
+        lines.append(_HANDOFF_LINE)
+
+    return "\n".join(lines)
 
 
-# -----------------------------------------------------------------------------
-# Turn / agent-end handlers
-# -----------------------------------------------------------------------------
+def _send_steer(ctx) -> None:
+    """Fire a steer with the current state.  Idempotent; caller does
+    the rate-limiting via ``idle_turns``/``last_active_time`` checks."""
+    body = _build_status_body(
+        surface_handoff=nudges_without_progress >= STAGNATION_THRESHOLD,
+    )
+    ctx.send_message(
+        "plan_status",
+        body,
+        display=True,
+        deliver_as="steer",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Firing handlers
+# ---------------------------------------------------------------------------
 
 
 @fir_ext.on("turn_end")
 def on_turn_end(params, ctx):
+    """Fire the calm steer when the agent paused for too long.
+
+    Identical gating to main's plan-nudger:
+      * a turn that called any tool is a normal loop tick — never fires;
+      * fires only after IDLE_TURN_THRESHOLD consecutive idle turns or
+        NUDGE_TIME_THRESHOLD seconds of wall-clock idleness;
+      * plan must be in flight (total > completed).
+
+    What's different is the body: no imperatives, no escalation tiers,
+    no [SYS_EXT] prepend.  The agent reads the same calm shape every
+    time and reasons.
+    """
     global idle_turns, tool_used_this_turn, last_active_time
     global nudges_without_progress
 
-    # A turn that ran any tool is a normal loop tick — never nudge.
+    # A tool-using turn is a healthy loop tick — never fires.
     if tool_used_this_turn:
         tool_used_this_turn = False
         idle_turns = 0
@@ -173,7 +266,7 @@ def on_turn_end(params, ctx):
     # No tools ran this turn — the agent paused to reply with prose.
     idle_turns += 1
 
-    # Nothing to nudge about if the plan is already complete (or absent).
+    # Nothing to say if the plan is absent or already complete.
     if plan_total <= plan_completed:
         return
 
@@ -181,41 +274,33 @@ def on_turn_end(params, ctx):
     if idle_turns < IDLE_TURN_THRESHOLD and elapsed < NUDGE_TIME_THRESHOLD:
         return
 
-    # Fire a nudge. Reset the idle counter so we don't fire every turn.
-    idle_turns = 0
-    last_active_time = time.monotonic()
+    # Bump stagnation BEFORE composing so the counter line reflects
+    # this firing.  Reset the wall-clock so we don't immediately
+    # re-fire on the time backstop.
     nudges_without_progress += 1
-
-    hint = _tool_hint()
-    if nudges_without_progress >= STAGNATION_CRIT_THRESHOLD:
-        # Inject with system-prompt authority so it cannot be rationalized
-        # away. Demand a tool call on the next reply.
-        ctx.prepend(NUDGE_CRIT.format(tool_hint=hint, n=nudges_without_progress))
-    elif nudges_without_progress >= STAGNATION_WARN_THRESHOLD:
-        ctx.send_message(
-            "nudge",
-            NUDGE_WARN.format(tool_hint=hint, n=nudges_without_progress),
-            display=True,
-            deliver_as="steer",
-        )
-    else:
-        ctx.send_message(
-            "nudge",
-            NUDGE_MILD.format(tool_hint=hint),
-            display=True,
-            deliver_as="steer",
-        )
+    last_active_time = time.monotonic()
+    _send_steer(ctx)
+    # Reset idle so the next steer needs a fresh idle window.
+    idle_turns = 0
 
 
 @fir_ext.on("agent_end")
 def on_agent_end(params, ctx):
-    if plan_total > plan_completed:
-        ctx.send_message(
-            "nudge",
-            AGENT_END_NUDGE,
-            display=True,
-            deliver_as="steer",
-        )
+    """Fire when the agent loop exits while a plan is in flight.
+
+    ``agent_end`` is qualitatively different from ``turn_end``: the
+    agent has actively decided "I'm done for now" and the loop is
+    unwinding.  We use the same steer body so the message shape stays
+    consistent — the only difference is that we always fire here when
+    a plan is incomplete (no idle threshold needed; the agent already
+    stopped).
+    """
+    global nudges_without_progress, last_active_time
+    if plan_total <= plan_completed:
+        return
+    nudges_without_progress += 1
+    last_active_time = time.monotonic()
+    _send_steer(ctx)
 
 
 fir_ext.run(name="plan-nudger")
