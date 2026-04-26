@@ -28,6 +28,9 @@ type mockBridgeAPI struct {
 	modelSet        *ai.Model
 	toolsRegistered []ToolDefinition
 	sessionData     map[string]string
+	// captures of the most recent SideQuery call
+	sideQueryQuestion string
+	sideQueryOpts     *session.SideQueryOptions
 }
 
 func newMockAPI() *mockBridgeAPI {
@@ -69,7 +72,11 @@ func (m *mockBridgeAPI) SetLabel(id, label string)     { m.labels[id] = label }
 func (m *mockBridgeAPI) ClearLabel(id string)          { delete(m.labels, id) }
 func (m *mockBridgeAPI) SetModel(model *ai.Model) bool { m.modelSet = model; return true }
 func (m *mockBridgeAPI) ContinueSession() error        { return nil }
-func (m *mockBridgeAPI) SideQuery(question string) (string, error) {
+func (m *mockBridgeAPI) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {
+	m.mu.Lock()
+	m.sideQueryQuestion = question
+	m.sideQueryOpts = opts
+	m.mu.Unlock()
 	return "mock response", nil
 }
 func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
@@ -112,9 +119,9 @@ type slowSideQueryAPI struct {
 	delay time.Duration
 }
 
-func (s *slowSideQueryAPI) SideQuery(question string) (string, error) {
+func (s *slowSideQueryAPI) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {
 	time.Sleep(s.delay)
-	return s.mockBridgeAPI.SideQuery(question)
+	return s.mockBridgeAPI.SideQuery(question, opts)
 }
 
 // pipePair creates a Bridge connected via pipes (no real process).
@@ -345,6 +352,75 @@ func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
 	}
 	if resp.Error != nil {
 		t.Fatalf("side_query returned error: %v", resp.Error)
+	}
+}
+
+func TestBridge_SideQuery_PassesOverridesThrough(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// Send side_query with full override params.
+	params := json.RawMessage(`{"question":"q","model":"claude-opus-4-x","provider":"anthropic","effort":"high"}`)
+	if err := extCodec.WriteRequest(7, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok || resp.Error != nil {
+		t.Fatalf("expected ok response, got %+v", msg)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if api.sideQueryQuestion != "q" {
+		t.Errorf("question = %q, want %q", api.sideQueryQuestion, "q")
+	}
+	if api.sideQueryOpts == nil {
+		t.Fatal("expected SideQueryOptions to be passed, got nil")
+	}
+	if api.sideQueryOpts.Model != "claude-opus-4-x" {
+		t.Errorf("model = %q", api.sideQueryOpts.Model)
+	}
+	if api.sideQueryOpts.Provider != "anthropic" {
+		t.Errorf("provider = %q", api.sideQueryOpts.Provider)
+	}
+	if api.sideQueryOpts.Effort != ai.ThinkingHigh {
+		t.Errorf("effort = %q, want %q", api.sideQueryOpts.Effort, ai.ThinkingHigh)
+	}
+}
+
+func TestBridge_SideQuery_NilOptsWhenAllUnset(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"question":"q"}`)
+	if err := extCodec.WriteRequest(8, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, ok := msg.(*Response); !ok || resp.Error != nil {
+		t.Fatalf("expected ok response, got %+v", msg)
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if api.sideQueryOpts != nil {
+		t.Errorf("expected nil opts when no overrides set, got %+v", api.sideQueryOpts)
 	}
 }
 

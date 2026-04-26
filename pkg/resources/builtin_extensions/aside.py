@@ -3,7 +3,7 @@
 # name: aside
 # description: Ephemeral side queries and multi-tool orchestration — off the record
 # builtin: true
-# commands: aside: Ask a side question or run tools ephemerally (e.g. /aside what does that error mean?)
+# commands: aside: Ask a side question or run tools ephemerally (e.g. /aside what does that error mean?), aside-advisor: Show or set the advisor model used by aside's escalate flag
 # ---
 """aside.py — ephemeral side queries and multi-tool orchestration.
 
@@ -22,11 +22,118 @@ Architecture:
   3. Build a synthesis prompt from collected outputs + user instructions.
   4. Run ``ctx.side_query()`` to get an ephemeral LLM summary.
   5. Return only the summary.
+
+Advisor escalation
+------------------
+
+The ``aside`` tool grows an extra ``escalate: bool`` parameter when an
+advisor model is in effect.  Setting it to ``true`` routes the side query
+to the advisor instead of the executor's own model — the "advisor
+strategy" pattern: a small, fast executor that escalates hard decisions
+to a stronger advisor without entering history.
+
+By default fir's bundled top-tier Anthropic Opus is used as the advisor,
+so the feature works out of the box with zero config (Anthropic auth
+required).  Override or disable it with one line:
+
+    /aside-advisor anthropic/claude-opus-4-x          # pin a model
+    /aside-advisor anthropic/claude-opus-4-x:high     # with effort
+    /aside-advisor                                    # show current
+    /aside-advisor off                                # disable escalation
+
+Stored at ``~/.config/fir/aside.json``.  Read once at module load — the
+``escalate`` parameter only appears in the tool schema when an advisor
+is in effect, so users who explicitly disable it see no extra surface.
+Changes take effect on the next session start.
 """
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+from typing import Any
+
 import fir_ext
+
+# ---------------------------------------------------------------------------
+# Advisor configuration — read once at module load
+# ---------------------------------------------------------------------------
+
+_CONFIG_DIR = Path(os.environ.get("FIR_AGENT_DIR") or os.environ.get("FIR_CONFIG_DIR") or (Path.home() / ".config" / "fir"))
+_CONFIG_PATH = _CONFIG_DIR / "aside.json"
+
+# Default advisor when no config file exists. Bump this when fir's bundled
+# model registry gains a newer Anthropic Opus tier — keeps "no config" UX
+# pointing at the strongest known frontier model. The user can always
+# override with `/aside-advisor`.
+_DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-7"
+
+
+def _load_advisor_config() -> dict[str, str] | None:
+    """Read advisor model config from ``~/.config/fir/aside.json``.
+
+    Returns a dict with ``provider``, ``model`` and optional ``effort`` keys,
+    or ``None`` if no advisor is configured.  Malformed files are ignored
+    silently — the extension falls back to the default in that case.
+
+    Resolution order:
+      1. Explicit ``"advisor": null`` (or ``"advisor": "off"``) → no advisor.
+      2. Explicit ``"advisor": "<spec>"`` → use it (validated; falls through
+         to default on parse failure).
+      3. File missing or unparsable → use the bundled default.
+    """
+    if _CONFIG_PATH.is_file():
+        try:
+            data = json.loads(_CONFIG_PATH.read_text())
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict) and "advisor" in data:
+            advisor = data["advisor"]
+            # Explicit opt-out.
+            if advisor is None or (isinstance(advisor, str) and advisor.strip().lower() in ("", "off", "none")):
+                return None
+            if isinstance(advisor, str):
+                parsed = _parse_advisor_spec(advisor)
+                if parsed is not None:
+                    return parsed
+            # Malformed entry — fall through to default rather than disable.
+
+    # Default: highest Anthropic Opus baked into fir at build time.
+    return _parse_advisor_spec(_DEFAULT_ADVISOR_SPEC)
+
+
+def _parse_advisor_spec(spec: str) -> dict[str, str] | None:
+    """Parse a ``provider/model[:effort]`` advisor spec string.
+
+    Returns a dict with ``provider``, ``model`` and optional ``effort``,
+    or ``None`` if the spec is malformed (missing ``/``).
+    """
+    spec = spec.strip()
+    if "/" not in spec:
+        return None
+    head, _, effort = spec.partition(":")
+    provider, _, model = head.partition("/")
+    provider = provider.strip()
+    model = model.strip()
+    effort = effort.strip()
+    if not provider or not model:
+        return None
+    out: dict[str, str] = {"provider": provider, "model": model}
+    if effort:
+        out["effort"] = effort
+    return out
+
+
+def _format_advisor_spec(cfg: dict[str, str]) -> str:
+    """Inverse of _parse_advisor_spec — render a config dict back to a string."""
+    base = f"{cfg['provider']}/{cfg['model']}"
+    effort = cfg.get("effort")
+    return f"{base}:{effort}" if effort else base
+
+
+_ADVISOR = _load_advisor_config()
+
 
 # ---------------------------------------------------------------------------
 # Helper: extract text from a tool result
@@ -81,6 +188,7 @@ def _run_aside(
     tools: list[dict],
     instructions: str,
     ctx: fir_ext.Context,
+    escalate: bool = False,
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -93,6 +201,10 @@ def _run_aside(
         Synthesis instructions for the LLM.
     ctx : fir_ext.Context
         Extension context for call_tool / side_query.
+    escalate : bool
+        When True (and an advisor model is configured), route the side query
+        to the advisor model instead of the agent's current model.  Ignored
+        when no advisor is configured.
 
     Returns
     -------
@@ -102,14 +214,24 @@ def _run_aside(
     if not instructions:
         return _error("instructions are required")
 
+    # Resolve advisor override if escalate is requested and configured.
+    sq_kwargs: dict[str, Any] = {}
+    advisor_used: dict[str, str] | None = None
+    if escalate and _ADVISOR is not None:
+        sq_kwargs["model"] = _ADVISOR["model"]
+        sq_kwargs["provider"] = _ADVISOR["provider"]
+        if "effort" in _ADVISOR:
+            sq_kwargs["effort"] = _ADVISOR["effort"]
+        advisor_used = _ADVISOR
+
     # No tools — pure ephemeral side query.
     if not tools:
         try:
-            synthesis = ctx.side_query(instructions)
+            synthesis = ctx.side_query(instructions, **sq_kwargs)
         except Exception as exc:
             return _side_query_error(exc)
         return {
-            "content": [{"type": "text", "text": synthesis}],
+            "content": [{"type": "text", "text": _prefix_advisor(synthesis, advisor_used)}],
             "is_error": False,
         }
 
@@ -189,7 +311,7 @@ def _run_aside(
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
     try:
-        synthesis = ctx.side_query(prompt)
+        synthesis = ctx.side_query(prompt, **sq_kwargs)
     except Exception as exc:
         return _side_query_error(exc)
 
@@ -209,10 +331,23 @@ def _run_aside(
         })
 
     return {
-        "content": [{"type": "text", "text": synthesis}],
+        "content": [{"type": "text", "text": _prefix_advisor(synthesis, advisor_used)}],
         "is_error": False,
         "details": {"tool_outputs": tool_outputs},
     }
+
+
+def _prefix_advisor(text: str, advisor: dict[str, str] | None) -> str:
+    """Prefix the synthesis with a single trace line when escalation was used.
+
+    The trace makes advisor invocations visible to both user and agent —
+    the agent sees that the response came from a stronger model, and the
+    user sees what was billed.
+    """
+    if advisor is None:
+        return text
+    spec = _format_advisor_spec(advisor)
+    return f"[advisor: {spec}]\n\n{text}"
 
 
 def _error(msg: str) -> dict:
@@ -255,9 +390,9 @@ def _side_query_error_text(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 
 
-@fir_ext.tool(
-    name="aside",
-    description=(
+def _aside_tool_description() -> str:
+    """Build the aside tool description, growing escalation guidance only when configured."""
+    base = (
         "Ephemeral side query with optional multi-tool orchestration. "
         "Everything happens off to the side — nothing enters conversation "
         "history, only the synthesis is returned.\n\n"
@@ -266,8 +401,22 @@ def _side_query_error_text(exc: Exception) -> str:
         "Use when you need to gather data from several tools and want "
         "a concise summary without bloating context, or when you want "
         "to ask a quick side question."
-    ),
-    parameters={
+    )
+    if _ADVISOR is None:
+        return base
+    return base + (
+        "\n\nEscalation: set 'escalate' to true to route this side query to "
+        "a stronger advisor model. Use it when stuck, before irreversible "
+        "or large changes, for architecture/design tradeoffs, subtle "
+        "correctness questions, or when the user's intent is genuinely "
+        "ambiguous. Don't escalate for routine lookups or things you can "
+        "answer directly."
+    )
+
+
+def _aside_tool_parameters() -> dict[str, Any]:
+    """Build the aside tool's parameter schema, adding 'escalate' only when configured."""
+    schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             "title": {
@@ -302,7 +451,23 @@ def _side_query_error_text(exc: Exception) -> str:
             },
         },
         "required": ["title", "instructions"],
-    },
+    }
+    if _ADVISOR is not None:
+        schema["properties"]["escalate"] = {
+            "type": "boolean",
+            "description": (
+                "When true, route this side query to the configured advisor "
+                "model instead of the executor's current model. Use sparingly "
+                "— see the tool description for when escalation is warranted."
+            ),
+        }
+    return schema
+
+
+@fir_ext.tool(
+    name="aside",
+    description=_aside_tool_description(),
+    parameters=_aside_tool_parameters(),
     display_hint={
         "title_args": [{"name": "title", "style": "accent"}],
     },
@@ -310,7 +475,8 @@ def _side_query_error_text(exc: Exception) -> str:
 def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])
     instructions = params.get("instructions", "")
-    return _run_aside(tools, instructions, ctx)
+    escalate = bool(params.get("escalate", False))
+    return _run_aside(tools, instructions, ctx, escalate=escalate)
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +529,110 @@ def cmd_aside(args: list[str], ctx: fir_ext.Context):
     )
     ctx.send_user_message(prompt)
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Command: /aside-advisor
+# ---------------------------------------------------------------------------
+
+
+def _save_advisor_config(cfg: dict[str, str] | None) -> str | None:
+    """Persist *cfg* to the advisor config file. Returns an error string on failure.
+
+    When *cfg* is ``None``, persists the explicit opt-out marker
+    (``"advisor": "off"``) so the absence of a file remains the "use default
+    advisor" signal. This keeps the contract simple:
+
+      file missing       → use built-in default advisor
+      "advisor": "off"   → escalation disabled
+      "advisor": "p/m"   → user-pinned advisor
+    """
+    try:
+        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        existing: dict[str, Any] = {}
+        if _CONFIG_PATH.is_file():
+            try:
+                loaded = json.loads(_CONFIG_PATH.read_text())
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except (OSError, json.JSONDecodeError):
+                pass
+        if cfg is None:
+            existing["advisor"] = "off"
+        else:
+            existing["advisor"] = _format_advisor_spec(cfg)
+        _CONFIG_PATH.write_text(json.dumps(existing, indent=2) + "\n")
+        return None
+    except OSError as exc:
+        return f"failed to write {_CONFIG_PATH}: {exc}"
+
+
+@fir_ext.command(
+    name="aside-advisor",
+    description=(
+        "Show, set, or unset the advisor model used by aside's escalate flag. "
+        "Usage: /aside-advisor [provider/model[:effort] | off]"
+    ),
+)
+def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
+    """Handle /aside-advisor — manage the persisted advisor model config."""
+    spec = " ".join(args).strip()
+
+    # Show current.
+    if not spec:
+        if _ADVISOR is None:
+            return {
+                "message": (
+                    "aside-advisor: disabled (advisor: off in aside.json).\n\n"
+                    "Set one with:\n"
+                    "  /aside-advisor anthropic/claude-opus-4-x\n"
+                    "  /aside-advisor anthropic/claude-opus-4-x:high\n\n"
+                    "Changes take effect on the next session start."
+                ),
+            }
+        is_default = not _CONFIG_PATH.is_file()
+        suffix = " (default — no aside.json)" if is_default else f" (from {_CONFIG_PATH})"
+        return {
+            "message": (
+                f"aside-advisor: {_format_advisor_spec(_ADVISOR)}{suffix}\n\n"
+                "Override:  /aside-advisor <provider>/<model>[:effort]\n"
+                "Disable:   /aside-advisor off"
+            ),
+        }
+
+    # Unset.
+    if spec.lower() in ("off", "none", "unset", "clear"):
+        err = _save_advisor_config(None)
+        if err:
+            return {"message": f"aside-advisor: {err}"}
+        return {
+            "message": (
+                "aside-advisor: disabled. The 'escalate' parameter will be "
+                "removed from the aside tool on next session start. "
+                "Run `/aside-advisor <provider>/<model>` to re-enable, or "
+                "delete aside.json to return to the built-in default."
+            ),
+        }
+
+    # Set.
+    parsed = _parse_advisor_spec(spec)
+    if parsed is None:
+        return {
+            "message": (
+                f"aside-advisor: malformed spec {spec!r}.\n"
+                "Expected 'provider/model' or 'provider/model:effort' "
+                "(e.g. 'anthropic/claude-opus-4-x:high')."
+            ),
+        }
+    err = _save_advisor_config(parsed)
+    if err:
+        return {"message": f"aside-advisor: {err}"}
+    return {
+        "message": (
+            f"aside-advisor: set to {_format_advisor_spec(parsed)}.\n"
+            "Changes take effect on the next session start."
+        ),
+    }
 
 
 fir_ext.run(name="aside")

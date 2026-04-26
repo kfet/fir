@@ -514,8 +514,20 @@ Make a one-shot LLM call using the current session context.  No tools, no
 history persistence.  Blocks until the response is complete.  SDK timeout:
 120 s.
 
+Optional params override the agent's current model/effort for this single
+call only — used by the `aside` extension to implement the "advisor"
+pattern (escalating to a stronger model when stuck):
+
+| Param      | Type   | Notes                                                              |
+|------------|--------|--------------------------------------------------------------------|
+| `question` | string | Required. The side question.                                        |
+| `model`    | string | Optional. Model id (e.g. `claude-opus-4-x`).                       |
+| `provider` | string | Optional. Provider id (e.g. `anthropic`); needed only to disambiguate. |
+| `effort`   | string | Optional. Reasoning level: `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`. |
+
 ```json
 {"jsonrpc":"2.0","id":1013,"method":"side_query","params":{"question":"Summarise this in one sentence."}}
+{"jsonrpc":"2.0","id":1014,"method":"side_query","params":{"question":"Should I refactor this?","model":"claude-opus-4-x","effort":"high"}}
 ```
 
 Response: `{"ok": true, "text": "A one-sentence summary."}`

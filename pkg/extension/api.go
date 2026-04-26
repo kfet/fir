@@ -20,7 +20,7 @@ type BridgeAPI interface {
 	ClearLabel(entryID string)
 	SetModel(model *ai.Model) bool
 	ContinueSession() error
-	SideQuery(question string) (string, error)
+	SideQuery(question string, opts *session.SideQueryOptions) (string, error)
 	RegisterTool(def ToolDefinition)
 	// SetSessionData stores a key/value pair in the extension's session data
 	// store.  Values are persisted across /reexec via the reexec sidecar and

@@ -316,9 +316,11 @@ otherwise noted.
 | ``continue_      | *(none)*                              | ``{ok: true}``            |
 | session``        | Triggers a new agent turn.            | SDK timeout: 60 s         |
 +------------------+---------------------------------------+---------------------------+
-| ``side_query``   | ``{question}``                        | ``{ok: true,              |
-|                  | One-shot LLM call, no history.        | text: "..."}``            |
-|                  |                                       | SDK timeout: 120 s        |
+| ``side_query``   | ``{question, model?, provider?,       | ``{ok: true,              |
+|                  | effort?}``                            | text: "..."}``            |
+|                  | One-shot LLM call, no history.        | SDK timeout: 120 s        |
+|                  | model/provider/effort override the    |                           |
+|                  | agent's defaults for this call.       |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``set_session_   | ``{key, value}``                      | ``{ok: true}``            |
 | data``           | Persist string K/V; survives          |                           |
@@ -886,13 +888,40 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
-    def side_query(self, question: str, timeout: float = 120.0) -> str:
+    def side_query(
+        self,
+        question: str,
+        timeout: float = 120.0,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        effort: str | None = None,
+    ) -> str:
         """Ask a side question using the current session context.
 
         Makes a one-shot LLM call with no tools and no history persistence.
         Returns the full response text. Blocks until the response is complete.
+
+        Optional overrides (all keyword-only):
+          model    Model id to route the side query to (e.g. ``"claude-opus-4-x"``).
+                   When omitted, the agent's current model is used.
+          provider Provider id (e.g. ``"anthropic"``). Optional even when
+                   ``model`` is set; only required to disambiguate when the
+                   same model id is registered under multiple providers.
+          effort   Reasoning effort override. One of ``"off"``, ``"minimal"``,
+                   ``"low"``, ``"medium"``, ``"high"``, ``"xhigh"``, ``"max"``.
+
+        These are used by the ``aside`` extension to implement the
+        "advisor" pattern — escalating a side query to a stronger model.
         """
-        result = self._call("side_query", {"question": question}, timeout=timeout)
+        params: dict[str, Any] = {"question": question}
+        if model:
+            params["model"] = model
+        if provider:
+            params["provider"] = provider
+        if effort:
+            params["effort"] = effort
+        result = self._call("side_query", params, timeout=timeout)
         if isinstance(result, dict):
             return result.get("text", "")
         return ""

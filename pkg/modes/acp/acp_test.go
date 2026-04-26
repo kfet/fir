@@ -1254,10 +1254,12 @@ func (n *noopBridgeAPI) SetLabel(_ string, _ string)                            
 func (n *noopBridgeAPI) ClearLabel(_ string)                                                        {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
-func (n *noopBridgeAPI) SideQuery(_ string) (string, error)                                         { return "", nil }
-func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition)                                    {}
-func (n *noopBridgeAPI) SetSessionData(_, _ string)                                                 {}
-func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)                                     { return "", false }
+func (n *noopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
+	return "", nil
+}
+func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition) {}
+func (n *noopBridgeAPI) SetSessionData(_, _ string)              {}
+func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)  { return "", false }
 func (n *noopBridgeAPI) CallTool(_ context.Context, _ string, _ map[string]any) (extension.ToolResult, error) {
 	return extension.ToolResult{}, nil
 }

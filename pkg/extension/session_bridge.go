@@ -137,8 +137,8 @@ func (b *SessionBridge) ContinueSession() error {
 	return nil
 }
 
-func (b *SessionBridge) SideQuery(question string) (string, error) {
-	return b.session.SideQuery(context.Background(), question)
+func (b *SessionBridge) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {
+	return b.session.SideQuery(context.Background(), question, opts)
 }
 
 // SetSessionData / GetSessionData on SessionBridge are no-ops: the real

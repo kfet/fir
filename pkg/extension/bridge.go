@@ -10,6 +10,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/session"
 )
 
 // NotifyFunc is called when an extension sends a "notify" request.
@@ -279,6 +280,9 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	case "side_query":
 		var p struct {
 			Question string `json:"question"`
+			Model    string `json:"model,omitempty"`
+			Provider string `json:"provider,omitempty"`
+			Effort   string `json:"effort,omitempty"`
 		}
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
@@ -286,8 +290,16 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
+		var opts *session.SideQueryOptions
+		if p.Model != "" || p.Provider != "" || p.Effort != "" {
+			opts = &session.SideQueryOptions{
+				Model:    p.Model,
+				Provider: p.Provider,
+				Effort:   ai.ThinkingLevel(p.Effort),
+			}
+		}
 		stop := b.keepAlive()
-		text, err := api.SideQuery(p.Question)
+		text, err := api.SideQuery(p.Question, opts)
 		stop()
 		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}

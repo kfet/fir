@@ -3151,7 +3151,7 @@ func TestSideQuery_ReturnsResponse(t *testing.T) {
 		return stream
 	})
 
-	got, err := session.SideQuery(context.Background(), "what is 2+2?")
+	got, err := session.SideQuery(context.Background(), "what is 2+2?", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3177,7 +3177,7 @@ func TestSideQuery_DoesNotModifySessionMessages(t *testing.T) {
 	})
 
 	before := len(session.Agent.State().Messages)
-	_, err := session.SideQuery(context.Background(), "side question")
+	_, err := session.SideQuery(context.Background(), "side question", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3208,7 +3208,7 @@ func TestSideQuery_IncludesExistingContextInCall(t *testing.T) {
 		return stream
 	})
 
-	_, err := session.SideQuery(context.Background(), "btw question")
+	_, err := session.SideQuery(context.Background(), "btw question", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3223,9 +3223,75 @@ func TestSideQuery_ErrorOnNoModel(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	_, err := session.SideQuery(context.Background(), "question")
+	_, err := session.SideQuery(context.Background(), "question", nil)
 	if err == nil {
 		t.Fatal("expected error when no model set")
+	}
+}
+
+func TestSideQuery_OverrideModel_NotFound(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.End(nil)
+		}()
+		return stream
+	})
+
+	// Unknown provider should produce a side-query: ... not found error
+	// (synthesis fails for an unknown provider with no siblings).
+	_, err := session.SideQuery(context.Background(), "q", &SideQueryOptions{
+		Model:    "no-such-model",
+		Provider: "no-such-provider",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown model")
+	}
+	if !strings.Contains(err.Error(), "side-query:") {
+		t.Errorf("expected error prefixed with 'side-query:', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %v", err)
+	}
+}
+
+func TestSideQuery_OverrideEffort_PassesThrough(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+
+	var seenReasoning ai.ThinkingLevel
+	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		if opts != nil {
+			seenReasoning = opts.Reasoning
+		}
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.End(nil)
+		}()
+		return stream
+	})
+
+	_, err := session.SideQuery(context.Background(), "q", &SideQueryOptions{Effort: ai.ThinkingHigh})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenReasoning != ai.ThinkingHigh {
+		t.Errorf("expected effort %q to reach the stream, got %q", ai.ThinkingHigh, seenReasoning)
+	}
+
+	// Session's persistent thinking level must be untouched.
+	if session.ThinkingLevel() != string(agent.ThinkingOff) {
+		t.Errorf("session thinking level mutated: got %s", session.ThinkingLevel())
 	}
 }
 

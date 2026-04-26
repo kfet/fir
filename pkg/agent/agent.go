@@ -549,12 +549,33 @@ func (a *Agent) Continue() error {
 	return nil
 }
 
+// SimplePromptOptions overrides per-call settings for SimplePrompt.
+// All fields are optional; nil/empty values inherit the agent's current state.
+//
+// Used to support "advisor" patterns where a side query is routed to a
+// different (typically stronger) model than the executor agent is running on.
+type SimplePromptOptions struct {
+	// Model overrides the LLM model used for this call.
+	// When non-nil, the provider is implied by Model.Api and the appropriate
+	// API key is resolved via the agent's GetApiKey for that provider.
+	Model *ai.Model
+
+	// Reasoning overrides the thinking/reasoning effort.
+	// Empty string ("") inherits the agent's current ThinkingLevel.
+	// Use ai.ThinkingOff explicitly to disable thinking for this call.
+	Reasoning ai.ThinkingLevel
+}
+
 // SimplePrompt makes a single-turn LLM call with the given messages.
 // It reuses the agent's model, streamFn, api key resolution, and transport
 // config but sends no tools, runs no agent loop, and does not modify the
 // agent's state. The caller provides the full message list (including system
 // prompt via the agent's current state). Returns the assistant's text response.
 // Safe to call concurrently while the agent loop is running.
+//
+// opts may be nil. When non-nil, opts.Model and opts.Reasoning override the
+// agent's current model and thinking level for this single call only. State
+// is not mutated.
 //
 // NO-COMPACTION CONTRACT: SimplePrompt MUST NOT trigger auto-compaction, ever.
 // This is guaranteed by two design choices that must be preserved:
@@ -564,7 +585,7 @@ func (a *Agent) Continue() error {
 //     goroutine — events never reach AgentSession.checkAutoCompaction.
 //
 // Do not forward these events to the session or add Compaction to the config.
-func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (string, error) {
+func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions) (string, error) {
 	a.mu.Lock()
 	model := a.state.Model
 	systemPrompt := a.state.SystemPrompt
@@ -580,6 +601,16 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage) (stri
 	thinkingBudgets := a.thinkingBudgets
 	maxRetryDelayMs := a.maxRetryDelayMs
 	a.mu.Unlock()
+
+	// Apply per-call overrides.
+	if opts != nil {
+		if opts.Model != nil {
+			model = opts.Model
+		}
+		if opts.Reasoning != "" {
+			reasoning = opts.Reasoning
+		}
+	}
 
 	if model == nil {
 		return "", fmt.Errorf("no model selected")

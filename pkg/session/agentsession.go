@@ -1568,10 +1568,32 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 	return &NavigateTreeResult{EditorText: editorText}, nil
 }
 
+// SideQueryOptions overrides per-call settings for SideQuery.
+// All fields are optional; nil/empty values inherit the session's current
+// agent state. Used to support "advisor" patterns where the side query is
+// routed to a different (typically stronger) model than the executor.
+type SideQueryOptions struct {
+	// Model is the model identifier (e.g. "claude-opus-4-x"). When empty,
+	// the agent's current model is used.
+	Model string
+
+	// Provider is the provider identifier (e.g. "anthropic"). Optional even
+	// when Model is set; if empty the registry resolves the unique provider
+	// for the given model id, returning an error on ambiguity.
+	Provider string
+
+	// Effort overrides the thinking/reasoning level for this call.
+	// Empty string inherits the agent's current ThinkingLevel.
+	Effort ai.ThinkingLevel
+}
+
 // SideQuery makes a one-shot, ephemeral LLM call using the current session
 // context plus the given question. No tools are provided and nothing is added
 // to the session history. Delegates to Agent.SimplePrompt which reuses the
 // agent's streamFn, api key resolution, and transport config.
+//
+// opts may be nil. When non-nil, the model/provider/effort overrides are
+// applied for this single call only; session state is not mutated.
 //
 // NO-COMPACTION CONTRACT: SideQuery MUST NOT trigger auto-compaction, ever.
 // SimplePrompt guarantees this (see its own contract comment). Do not replace
@@ -1581,7 +1603,7 @@ func (s *AgentSession) NavigateTree(entryID string, summarize bool, customInstru
 // is returned as a non-nil error with a "side-query: ..." prefix so the caller
 // (the aside extension) can surface it to the main LLM as a meaningful
 // is_error tool result rather than silently swallowing the failure.
-func (s *AgentSession) SideQuery(ctx context.Context, question string) (string, error) {
+func (s *AgentSession) SideQuery(ctx context.Context, question string, opts *SideQueryOptions) (string, error) {
 	// Snapshot current messages.
 	state := s.Agent.State()
 	msgs := make([]agent.AgentMessage, len(state.Messages))
@@ -1590,7 +1612,20 @@ func (s *AgentSession) SideQuery(ctx context.Context, question string) (string, 
 	// Append the side question.
 	msgs = append(msgs, agent.NewAgentMessage(ai.NewUserMsg(question, time.Now().UnixMilli())))
 
-	result, err := s.Agent.SimplePrompt(ctx, msgs)
+	// Resolve overrides into Agent.SimplePrompt options.
+	var promptOpts *agent.SimplePromptOptions
+	if opts != nil && (opts.Model != "" || opts.Effort != "") {
+		promptOpts = &agent.SimplePromptOptions{Reasoning: opts.Effort}
+		if opts.Model != "" {
+			model, err := s.resolveSideQueryModel(opts.Model, opts.Provider)
+			if err != nil {
+				return "", fmt.Errorf("side-query: %w", err)
+			}
+			promptOpts.Model = model
+		}
+	}
+
+	result, err := s.Agent.SimplePrompt(ctx, msgs, promptOpts)
 	if err != nil {
 		// Prefix with "side-query:" so callers (e.g. the aside extension) can
 		// surface a clear, attributable error to the main LLM instead of a
@@ -1598,6 +1633,37 @@ func (s *AgentSession) SideQuery(ctx context.Context, question string) (string, 
 		return "", fmt.Errorf("side-query: %w", err)
 	}
 	return result, nil
+}
+
+// resolveSideQueryModel finds a model in the registry by id and (optional)
+// provider. Returns an error when the registry is missing, the model is not
+// found, or when no provider is given and the model id is ambiguous across
+// providers.
+func (s *AgentSession) resolveSideQueryModel(modelID, provider string) (*ai.Model, error) {
+	if s.modelRegistry == nil {
+		return nil, fmt.Errorf("model registry unavailable")
+	}
+	if provider != "" {
+		m := s.modelRegistry.Find(provider, modelID)
+		if m == nil {
+			return nil, fmt.Errorf("model %q not found for provider %q", modelID, provider)
+		}
+		return m, nil
+	}
+	// No provider given — search across all available models for unique id match.
+	var match *ai.Model
+	for _, m := range s.modelRegistry.GetAll() {
+		if m.ID == modelID {
+			if match != nil {
+				return nil, fmt.Errorf("model id %q is ambiguous; specify provider", modelID)
+			}
+			match = m
+		}
+	}
+	if match == nil {
+		return nil, fmt.Errorf("model %q not found", modelID)
+	}
+	return match, nil
 }
 
 // Close cleans up the session.

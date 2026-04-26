@@ -367,5 +367,266 @@ class TestAsideCommand(unittest.TestCase):
         self.assertIn("read the 5 largest .go files", msg)
 
 
+# ---------------------------------------------------------------------------
+# Advisor configuration & escalation
+# ---------------------------------------------------------------------------
+
+
+class TestParseAdvisorSpec(unittest.TestCase):
+    """Round-trip parse/format of the 'provider/model[:effort]' spec form."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_parses_provider_and_model(self):
+        got = self.mod._parse_advisor_spec("anthropic/claude-opus-4-x")
+        self.assertEqual(got, {"provider": "anthropic", "model": "claude-opus-4-x"})
+
+    def test_parses_with_effort(self):
+        got = self.mod._parse_advisor_spec("anthropic/claude-opus-4-x:high")
+        self.assertEqual(
+            got,
+            {"provider": "anthropic", "model": "claude-opus-4-x", "effort": "high"},
+        )
+
+    def test_strips_whitespace(self):
+        got = self.mod._parse_advisor_spec("  anthropic / claude-opus-4-x : high  ")
+        self.assertEqual(got["provider"], "anthropic")
+        self.assertEqual(got["model"], "claude-opus-4-x")
+        self.assertEqual(got["effort"], "high")
+
+    def test_rejects_missing_slash(self):
+        self.assertIsNone(self.mod._parse_advisor_spec("claude-opus-4-x"))
+
+    def test_rejects_empty_provider(self):
+        self.assertIsNone(self.mod._parse_advisor_spec("/claude-opus-4-x"))
+
+    def test_rejects_empty_model(self):
+        self.assertIsNone(self.mod._parse_advisor_spec("anthropic/"))
+
+    def test_format_round_trips(self):
+        for spec in ("anthropic/claude-opus-4-x", "anthropic/claude-opus-4-x:high"):
+            cfg = self.mod._parse_advisor_spec(spec)
+            self.assertEqual(self.mod._format_advisor_spec(cfg), spec)
+
+
+class TestAdvisorEscalation(unittest.TestCase):
+    """Tool-level behaviour when an advisor is configured and 'escalate' is set."""
+
+    def _ctx(self, side_query_result="advisor reply"):
+        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx.side_query = mock.MagicMock(return_value=side_query_result)
+        return ctx
+
+    def _load_with_advisor(self, advisor_cfg):
+        """Reload aside.py with a patched _ADVISOR module-level constant."""
+        mod = _load_aside()
+        mod._ADVISOR = advisor_cfg
+        return mod
+
+    def test_escalate_routes_to_advisor_model(self):
+        mod = self._load_with_advisor(
+            {"provider": "anthropic", "model": "claude-opus-4-x", "effort": "high"}
+        )
+        ctx = self._ctx(side_query_result="advisor says so")
+        result = mod._run_aside([], "design tradeoff?", ctx, escalate=True)
+
+        self.assertFalse(result["is_error"])
+        ctx.side_query.assert_called_once()
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-opus-4-x")
+        self.assertEqual(kwargs["provider"], "anthropic")
+        self.assertEqual(kwargs["effort"], "high")
+        # Output prefixed with the advisor trace line.
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor: anthropic/claude-opus-4-x:high]"))
+        self.assertIn("advisor says so", text)
+
+    def test_escalate_without_effort_omits_effort_kwarg(self):
+        mod = self._load_with_advisor(
+            {"provider": "anthropic", "model": "claude-opus-4-x"}
+        )
+        ctx = self._ctx()
+        mod._run_aside([], "q", ctx, escalate=True)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertNotIn("effort", kwargs)
+        self.assertEqual(kwargs["model"], "claude-opus-4-x")
+
+    def test_no_escalate_uses_no_overrides(self):
+        mod = self._load_with_advisor(
+            {"provider": "anthropic", "model": "claude-opus-4-x"}
+        )
+        ctx = self._ctx(side_query_result="plain reply")
+        result = mod._run_aside([], "q", ctx, escalate=False)
+        # No model/provider/effort kwargs were passed.
+        self.assertEqual(ctx.side_query.call_args.kwargs, {})
+        # No advisor prefix on the output.
+        self.assertEqual(result["content"][0]["text"], "plain reply")
+
+    def test_escalate_ignored_when_no_advisor_configured(self):
+        mod = self._load_with_advisor(None)
+        ctx = self._ctx(side_query_result="plain reply")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        # Even with escalate=True, no override kwargs are set.
+        self.assertEqual(ctx.side_query.call_args.kwargs, {})
+        self.assertEqual(result["content"][0]["text"], "plain reply")
+
+    def test_tool_schema_has_no_escalate_when_unconfigured(self):
+        # Reload without an advisor — escalate must NOT appear in the schema.
+        mod = _load_aside()
+        mod._ADVISOR = None
+        params = mod._aside_tool_parameters()
+        self.assertNotIn("escalate", params["properties"])
+        self.assertNotIn("Escalation", mod._aside_tool_description())
+
+    def test_tool_schema_has_escalate_when_configured(self):
+        mod = _load_aside()
+        mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
+        params = mod._aside_tool_parameters()
+        self.assertIn("escalate", params["properties"])
+        self.assertEqual(params["properties"]["escalate"]["type"], "boolean")
+        self.assertIn("Escalation", mod._aside_tool_description())
+
+
+class TestLoadAdvisorConfig(unittest.TestCase):
+    """Cover the default-vs-config matrix for _load_advisor_config."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.mod = _load_aside()
+        # Redirect config IO into a temp dir so we never touch the user's home.
+        self.mod._CONFIG_DIR = self.mod.Path(self._tmp.name)
+        self.mod._CONFIG_PATH = self.mod._CONFIG_DIR / "aside.json"
+
+    def test_missing_file_returns_default(self):
+        cfg = self.mod._load_advisor_config()
+        self.assertIsNotNone(cfg)
+        # Default tracks _DEFAULT_ADVISOR_SPEC. If someone bumps it to a
+        # newer Opus, the test still passes — we only assert the family.
+        self.assertEqual(cfg["provider"], "anthropic")
+        self.assertTrue(cfg["model"].startswith("claude-opus-"))
+
+    def test_default_is_at_least_opus_4_7(self):
+        # Floor for "no config" UX. Bump alongside _DEFAULT_ADVISOR_SPEC.
+        spec = self.mod._DEFAULT_ADVISOR_SPEC
+        self.assertTrue(spec.startswith("anthropic/claude-opus-"))
+        # Compare numeric tail so 4-7, 4-8, 5-0 etc. all pass.
+        tail = spec.split("claude-opus-")[1]
+        major, minor = (int(p) for p in tail.split("-")[:2])
+        self.assertGreaterEqual((major, minor), (4, 7))
+
+    def test_explicit_off_returns_none(self):
+        self.mod._CONFIG_PATH.write_text('{"advisor": "off"}')
+        self.assertIsNone(self.mod._load_advisor_config())
+
+    def test_explicit_null_returns_none(self):
+        self.mod._CONFIG_PATH.write_text('{"advisor": null}')
+        self.assertIsNone(self.mod._load_advisor_config())
+
+    def test_pinned_spec_returns_pinned(self):
+        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x:high"}')
+        cfg = self.mod._load_advisor_config()
+        self.assertEqual(
+            cfg,
+            {"provider": "anthropic", "model": "claude-opus-4-x", "effort": "high"},
+        )
+
+    def test_malformed_spec_falls_back_to_default(self):
+        # A bad spec should not silently disable escalation — fall back to
+        # the bundled default so the feature keeps working.
+        self.mod._CONFIG_PATH.write_text('{"advisor": "not-a-spec"}')
+        cfg = self.mod._load_advisor_config()
+        self.assertIsNotNone(cfg)
+        self.assertEqual(cfg["provider"], "anthropic")
+
+    def test_corrupt_json_falls_back_to_default(self):
+        self.mod._CONFIG_PATH.write_text('not json')
+        cfg = self.mod._load_advisor_config()
+        self.assertIsNotNone(cfg)
+
+
+class TestAsideAdvisorCommand(unittest.TestCase):
+    """The /aside-advisor slash command — show, set, off."""
+
+    def setUp(self):
+        # Re-import aside.py with a freshly patched config dir/file so the
+        # tests don't touch the user's real ~/.config/fir.
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.mod = _load_aside()
+        self.mod._CONFIG_DIR = self.mod.Path(self._tmp.name)
+        self.mod._CONFIG_PATH = self.mod._CONFIG_DIR / "aside.json"
+
+    def _handler(self):
+        return fir_ext._command_handlers["aside-advisor"]
+
+    def test_show_when_disabled(self):
+        self.mod._ADVISOR = None
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("disabled", result["message"])
+
+    def test_show_when_default(self):
+        # File missing + advisor is the default → "(default — no aside.json)"
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-7"}
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("anthropic/claude-opus-4-7", result["message"])
+        self.assertIn("default", result["message"])
+
+    def test_show_when_pinned(self):
+        # File present → show its path.
+        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("anthropic/claude-opus-4-x", result["message"])
+        self.assertIn(str(self.mod._CONFIG_PATH), result["message"])
+
+    def test_set_writes_config_file(self):
+        result = self._handler()(["anthropic/claude-opus-4-x:high"], mock.MagicMock())
+        self.assertIn("set to anthropic/claude-opus-4-x:high", result["message"])
+        # File persisted with the spec.
+        self.assertTrue(self.mod._CONFIG_PATH.is_file())
+        import json as _json
+        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        self.assertEqual(data, {"advisor": "anthropic/claude-opus-4-x:high"})
+
+    def test_set_rejects_malformed_spec(self):
+        result = self._handler()(["claude-opus-4-x"], mock.MagicMock())
+        self.assertIn("malformed spec", result["message"])
+        self.assertFalse(self.mod._CONFIG_PATH.is_file())
+
+    def test_off_writes_explicit_off_marker(self):
+        # /aside-advisor off must be a hard opt-out — survives across sessions
+        # without a missing file silently re-enabling the default advisor.
+        result = self._handler()(["off"], mock.MagicMock())
+        self.assertIn("disabled", result["message"])
+        self.assertTrue(self.mod._CONFIG_PATH.is_file())
+        import json as _json
+        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        self.assertEqual(data, {"advisor": "off"})
+
+    def test_off_overwrites_existing_pin(self):
+        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
+        self._handler()(["off"], mock.MagicMock())
+        import json as _json
+        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        self.assertEqual(data["advisor"], "off")
+
+    def test_off_preserves_other_keys(self):
+        # If aside.json gains other keys later, /aside-advisor off must
+        # only flip the advisor key, not nuke the file.
+        import json as _json
+        self.mod._CONFIG_PATH.write_text(_json.dumps(
+            {"advisor": "anthropic/claude-opus-4-x", "future_key": "x"}
+        ))
+        self._handler()(["off"], mock.MagicMock())
+        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        self.assertEqual(data, {"advisor": "off", "future_key": "x"})
+
+
 if __name__ == "__main__":
     unittest.main()

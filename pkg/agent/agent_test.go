@@ -433,7 +433,7 @@ func TestSimplePrompt_ReturnsText(t *testing.T) {
 	a.SetModel(testModel())
 
 	msgs := []AgentMessage{NewAgentMessage(ai.NewUserMsg("test question", 0))}
-	got, err := a.SimplePrompt(context.Background(), msgs)
+	got, err := a.SimplePrompt(context.Background(), msgs, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestSimplePrompt_ErrorOnNoModel(t *testing.T) {
 	a := NewAgent(AgentOptions{
 		ConvertToLLM: DefaultConvertToLLM,
 	})
-	_, err := a.SimplePrompt(context.Background(), nil)
+	_, err := a.SimplePrompt(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error when no model set")
 	}
@@ -467,7 +467,7 @@ func TestSimplePrompt_ErrorMessageFromModel(t *testing.T) {
 	})
 	a.SetModel(testModel())
 
-	_, err := a.SimplePrompt(context.Background(), nil)
+	_, err := a.SimplePrompt(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error for error message from model")
 	}
@@ -492,12 +492,95 @@ func TestSimplePrompt_DoesNotMutateAgentState(t *testing.T) {
 		NewAgentMessage(ai.NewUserMsg("existing", 0)),
 		NewAgentMessage(ai.NewUserMsg("side question", 0)),
 	}
-	_, err := a.SimplePrompt(context.Background(), msgs)
+	_, err := a.SimplePrompt(context.Background(), msgs, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	after := len(a.State().Messages)
 	if before != after {
 		t.Errorf("agent messages changed: before=%d after=%d", before, after)
+	}
+}
+
+// captureStreamFn returns a StreamFn that records the model and reasoning
+// it was invoked with. Used to assert SimplePromptOptions overrides take
+// effect without leaking through to the agent's persistent state.
+func captureStreamFn(seenModel **ai.Model, seenReasoning *ai.ThinkingLevel, response *ai.AssistantMessage) StreamFn {
+	return func(model *ai.Model, c ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		*seenModel = model
+		if options != nil {
+			*seenReasoning = options.Reasoning
+		}
+		s := ai.NewAssistantMessageEventStream()
+		go func() {
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: response})
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: response.StopReason, Message: response})
+			s.End(nil)
+		}()
+		return s
+	}
+}
+
+func TestSimplePrompt_OverrideModel(t *testing.T) {
+	defaultModel := testModel()
+	overrideModel := &ai.Model{
+		ID: "advisor-model", Name: "Advisor", Api: ai.ApiAnthropicMessages,
+		Provider: ai.ProviderAnthropic, ContextWindow: 200000, MaxTokens: 4096,
+	}
+
+	var seenModel *ai.Model
+	var seenReasoning ai.ThinkingLevel
+	a := NewAgent(AgentOptions{
+		StreamFn:     captureStreamFn(&seenModel, &seenReasoning, simpleResponse("ok")),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(defaultModel)
+
+	// No override → uses agent's model.
+	_, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenModel == nil || seenModel.ID != defaultModel.ID {
+		t.Errorf("expected default model, got %+v", seenModel)
+	}
+
+	// With override → uses overrideModel.
+	_, err = a.SimplePrompt(context.Background(), nil, &SimplePromptOptions{Model: overrideModel})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenModel == nil || seenModel.ID != overrideModel.ID {
+		t.Errorf("expected override model, got %+v", seenModel)
+	}
+
+	// Agent state must not have been mutated by the override.
+	if a.State().Model.ID != defaultModel.ID {
+		t.Errorf("agent model mutated: got %s, want %s", a.State().Model.ID, defaultModel.ID)
+	}
+}
+
+func TestSimplePrompt_OverrideReasoning(t *testing.T) {
+	var seenModel *ai.Model
+	var seenReasoning ai.ThinkingLevel
+	a := NewAgent(AgentOptions{
+		StreamFn:     captureStreamFn(&seenModel, &seenReasoning, simpleResponse("ok")),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+	// Agent's default reasoning is ThinkingOff.
+
+	// With reasoning override → uses overridden level.
+	_, err := a.SimplePrompt(context.Background(), nil, &SimplePromptOptions{Reasoning: ai.ThinkingHigh})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenReasoning != ai.ThinkingHigh {
+		t.Errorf("expected reasoning %q, got %q", ai.ThinkingHigh, seenReasoning)
+	}
+
+	// Agent's persistent thinking level must not have been touched.
+	if a.State().ThinkingLevel != ThinkingOff {
+		t.Errorf("agent thinking level mutated: got %s, want %s", a.State().ThinkingLevel, ThinkingOff)
 	}
 }
