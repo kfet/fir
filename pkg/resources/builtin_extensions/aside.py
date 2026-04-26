@@ -63,13 +63,11 @@ import fir_ext
 _CONFIG_DIR = Path(os.environ.get("FIR_AGENT_DIR") or os.environ.get("FIR_CONFIG_DIR") or (Path.home() / ".config" / "fir"))
 _CONFIG_PATH = _CONFIG_DIR / "aside.json"
 
-# BEGIN_DEFAULT_ADVISOR (auto-generated; bump via `make generate-models`)
 # Default advisor when no config file exists. Always points at the highest
-# Anthropic Opus tier baked into fir's model registry. Kept in sync by
-# cmd/aside-default-advisor; `make all` fails if this drifts from the
-# registry. Edit by running `make generate-models`, not by hand.
+# Anthropic Opus tier baked into fir's model registry. Drift is caught by
+# TestAsideDefaultAdvisor_TracksHighestAnthropicOpus in pkg/resources —
+# bump this constant when fir adds a newer Opus.
 _DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-7"
-# END_DEFAULT_ADVISOR
 
 
 def _load_advisor_config() -> dict[str, str] | None:
