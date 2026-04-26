@@ -13,6 +13,11 @@ import (
 type InitParams struct {
 	Version string `json:"version"`
 	Cwd     string `json:"cwd"`
+	// ConfigDirs is an ordered list of directories the extension may use to
+	// read/write its configuration. Highest priority first (project-local
+	// before global). Typically [projectDir/.fir, ~/.config/fir]. The SDK
+	// exposes a friendly load_config()/config_path() API around this.
+	ConfigDirs []string `json:"config_dirs,omitempty"`
 }
 
 // ToolSpec describes a tool registered by an extension.
@@ -94,7 +99,7 @@ func ValidateAuthProviderID(id string, allowBuiltinOverride bool) error {
 // Handshake sends an "init" request to the extension process and waits for a
 // response. If timeout is zero, defaults to 5 seconds (overridable via
 // FIR_EXT_TIMEOUT environment variable, in seconds). Returns the parsed InitResult.
-func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, error) {
+func Handshake(proc *Process, cwd string, configDirs []string, timeout time.Duration) (*InitResult, error) {
 	if timeout == 0 {
 		timeout = 5 * time.Second
 		if v := os.Getenv("FIR_EXT_TIMEOUT"); v != "" {
@@ -109,7 +114,7 @@ func Handshake(proc *Process, cwd string, timeout time.Duration) (*InitResult, e
 		return nil, fmt.Errorf("extension: process not started")
 	}
 
-	if err := codec.WriteRequest(1, "init", InitParams{Version: "1", Cwd: cwd}); err != nil {
+	if err := codec.WriteRequest(1, "init", InitParams{Version: "1", Cwd: cwd, ConfigDirs: configDirs}); err != nil {
 		return nil, fmt.Errorf("extension: send init: %w", err)
 	}
 

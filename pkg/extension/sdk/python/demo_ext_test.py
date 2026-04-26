@@ -189,13 +189,16 @@ class FakeFir:
     def send(self, msg: dict) -> None:
         self._to_ext.put(json.dumps(msg) + "\n")
 
-    def send_init(self, cwd: str = "/tmp") -> dict:
+    def send_init(self, cwd: str = "/tmp", config_dirs: Optional[list] = None) -> dict:
         """Send init and wait for the response. Returns the parsed result."""
+        params: dict = {"version": "1", "cwd": cwd}
+        if config_dirs is not None:
+            params["config_dirs"] = config_dirs
         self.send({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "init",
-            "params": {"version": "1", "cwd": cwd},
+            "params": params,
         })
         resp = self.wait_for_response(1)
         assert resp is not None, "no init response"
@@ -294,7 +297,7 @@ class TestDemoInit(DemoTestCase):
             {
                 "word_count", "shell_run",
                 "change_model", "inject_message",
-                "batch_example",
+                "batch_example", "show_config_dirs",
             },
         )
 

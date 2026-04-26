@@ -91,7 +91,8 @@ it as failed.
   "method": "init",
   "params": {
     "version": "1",
-    "cwd": "/path/to/project"
+    "cwd": "/path/to/project",
+    "config_dirs": ["/path/to/project/.fir", "/home/user/.config/fir"]
   }
 }
 ```
@@ -100,6 +101,7 @@ it as failed.
 |-------|-------------|
 | `version` | Protocol version string.  Currently `"1"`. |
 | `cwd` | Project working directory. |
+| `config_dirs` | Priority-ordered list of directories the extension may use to read/write its per-extension config file (highest priority first). Typically `[projectDir/.fir, ~/.config/fir]`. Use the SDK helpers `load_config()` / `config_path()` rather than accessing this directly. |
 
 ### extension → fir
 

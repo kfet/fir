@@ -41,8 +41,10 @@ required).  Override or disable it with one line:
     /aside-advisor                                    # show current
     /aside-advisor off                                # disable escalation
 
-Stored at ``~/.config/fir/aside.json``.  Read once at module load — the
-``escalate`` parameter only appears in the tool schema when an advisor
+Stored in the highest-priority config dir advertised by the host (project-local
+``.fir/aside.json`` overrides ``~/.config/fir/aside.json``).  Read lazily on
+first use so the host's config dirs are available from the init handshake.
+The ``escalate`` parameter only appears in the tool schema when an advisor
 is in effect, so users who explicitly disable it see no extra surface.
 Changes take effect on the next session start.
 """
@@ -50,7 +52,6 @@ Changes take effect on the next session start.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -60,18 +61,30 @@ import fir_ext
 # Advisor configuration — read once at module load
 # ---------------------------------------------------------------------------
 
-_CONFIG_DIR = Path(os.environ.get("FIR_AGENT_DIR") or os.environ.get("FIR_CONFIG_DIR") or (Path.home() / ".config" / "fir"))
-_CONFIG_PATH = _CONFIG_DIR / "aside.json"
+_CONFIG_FILENAME = "aside.json"
 
 # Default advisor when no config file exists. Always points at the highest
 # Anthropic Opus tier baked into fir's model registry. Drift is caught by
-# TestAsideDefaultAdvisor_TracksHighestAnthropicOpus in pkg/resources —
-# bump this constant when fir adds a newer Opus.
+# DefaultAdvisorTracksHighestAnthropicOpus in pkg/resources/testdata/aside_test.py
+# — bump this constant when fir adds a newer Opus.
 _DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-7"
 
 
+def _config_path() -> Path | None:
+    """Highest-priority path for reading/writing aside.json. None when the
+    SDK has no config dirs (e.g. tests that haven't seeded any)."""
+    p = fir_ext.config_path(_CONFIG_FILENAME)
+    return Path(p) if p else None
+
+
+def _read_existing_config() -> dict | None:
+    """Read the existing aside.json from the highest-priority dir that has
+    one. Returns the parsed dict, or None if no file exists / unparsable."""
+    return fir_ext.load_config(_CONFIG_FILENAME)
+
+
 def _load_advisor_config() -> dict[str, str] | None:
-    """Read advisor model config from ``~/.config/fir/aside.json``.
+    """Read advisor model config from aside.json in the host-provided dirs.
 
     Returns a dict with ``provider``, ``model`` and optional ``effort`` keys,
     or ``None`` if no advisor is configured.  Malformed files are ignored
@@ -83,21 +96,17 @@ def _load_advisor_config() -> dict[str, str] | None:
          to default on parse failure).
       3. File missing or unparsable → use the bundled default.
     """
-    if _CONFIG_PATH.is_file():
-        try:
-            data = json.loads(_CONFIG_PATH.read_text())
-        except (OSError, json.JSONDecodeError):
-            data = None
-        if isinstance(data, dict) and "advisor" in data:
-            advisor = data["advisor"]
-            # Explicit opt-out.
-            if advisor is None or (isinstance(advisor, str) and advisor.strip().lower() in ("", "off", "none")):
-                return None
-            if isinstance(advisor, str):
-                parsed = _parse_advisor_spec(advisor)
-                if parsed is not None:
-                    return parsed
-            # Malformed entry — fall through to default rather than disable.
+    data = _read_existing_config()
+    if isinstance(data, dict) and "advisor" in data:
+        advisor = data["advisor"]
+        # Explicit opt-out.
+        if advisor is None or (isinstance(advisor, str) and advisor.strip().lower() in ("", "off", "none")):
+            return None
+        if isinstance(advisor, str):
+            parsed = _parse_advisor_spec(advisor)
+            if parsed is not None:
+                return parsed
+        # Malformed entry — fall through to default rather than disable.
 
     # Default: highest Anthropic Opus baked into fir at build time.
     return _parse_advisor_spec(_DEFAULT_ADVISOR_SPEC)
@@ -132,7 +141,18 @@ def _format_advisor_spec(cfg: dict[str, str]) -> str:
     return f"{base}:{effort}" if effort else base
 
 
-_ADVISOR = _load_advisor_config()
+# Lazily-loaded advisor config — populated on first access (after the init
+# handshake has set fir_ext.config_dirs). Tests that want to inject a value
+# can assign to _ADVISOR directly.
+_ADVISOR_UNSET = object()
+_ADVISOR: Any = _ADVISOR_UNSET
+
+
+def _advisor() -> dict[str, str] | None:
+    global _ADVISOR
+    if _ADVISOR is _ADVISOR_UNSET:
+        _ADVISOR = _load_advisor_config()
+    return _ADVISOR
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +237,13 @@ def _run_aside(
     # Resolve advisor override if escalate is requested and configured.
     sq_kwargs: dict[str, Any] = {}
     advisor_used: dict[str, str] | None = None
-    if escalate and _ADVISOR is not None:
-        sq_kwargs["model"] = _ADVISOR["model"]
-        sq_kwargs["provider"] = _ADVISOR["provider"]
-        if "effort" in _ADVISOR:
-            sq_kwargs["effort"] = _ADVISOR["effort"]
-        advisor_used = _ADVISOR
+    advisor = _advisor()
+    if escalate and advisor is not None:
+        sq_kwargs["model"] = advisor["model"]
+        sq_kwargs["provider"] = advisor["provider"]
+        if "effort" in advisor:
+            sq_kwargs["effort"] = advisor["effort"]
+        advisor_used = advisor
 
     # No tools — pure ephemeral side query.
     if not tools:
@@ -402,7 +423,7 @@ def _aside_tool_description() -> str:
         "a concise summary without bloating context, or when you want "
         "to ask a quick side question."
     )
-    if _ADVISOR is None:
+    if _advisor() is None:
         return base
     return base + (
         "\n\nEscalation: set 'escalate' to true to route this side query to "
@@ -452,7 +473,7 @@ def _aside_tool_parameters() -> dict[str, Any]:
         },
         "required": ["title", "instructions"],
     }
-    if _ADVISOR is not None:
+    if _advisor() is not None:
         schema["properties"]["escalate"] = {
             "type": "boolean",
             "description": (
@@ -547,24 +568,23 @@ def _save_advisor_config(cfg: dict[str, str] | None) -> str | None:
       "advisor": "off"   → escalation disabled
       "advisor": "p/m"   → user-pinned advisor
     """
+    cfg_path = _config_path()
+    if cfg_path is None:
+        return "no config dir advertised by host; cannot persist advisor config"
     try:
-        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
         existing: dict[str, Any] = {}
-        if _CONFIG_PATH.is_file():
-            try:
-                loaded = json.loads(_CONFIG_PATH.read_text())
-                if isinstance(loaded, dict):
-                    existing = loaded
-            except (OSError, json.JSONDecodeError):
-                pass
+        loaded = _read_existing_config()
+        if isinstance(loaded, dict):
+            existing = loaded
         if cfg is None:
             existing["advisor"] = "off"
         else:
             existing["advisor"] = _format_advisor_spec(cfg)
-        _CONFIG_PATH.write_text(json.dumps(existing, indent=2) + "\n")
+        cfg_path.write_text(json.dumps(existing, indent=2) + "\n")
         return None
     except OSError as exc:
-        return f"failed to write {_CONFIG_PATH}: {exc}"
+        return f"failed to write {cfg_path}: {exc}"
 
 
 @fir_ext.command(
@@ -580,7 +600,8 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
 
     # Show current.
     if not spec:
-        if _ADVISOR is None:
+        advisor = _advisor()
+        if advisor is None:
             return {
                 "message": (
                     "aside-advisor: disabled (advisor: off in aside.json).\n\n"
@@ -590,11 +611,12 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
                     "Changes take effect on the next session start."
                 ),
             }
-        is_default = not _CONFIG_PATH.is_file()
-        suffix = " (default — no aside.json)" if is_default else f" (from {_CONFIG_PATH})"
+        cfg_path = _config_path()
+        is_default = cfg_path is None or not cfg_path.is_file()
+        suffix = " (default — no aside.json)" if is_default else f" (from {cfg_path})"
         return {
             "message": (
-                f"aside-advisor: {_format_advisor_spec(_ADVISOR)}{suffix}\n\n"
+                f"aside-advisor: {_format_advisor_spec(advisor)}{suffix}\n\n"
                 "Override:  /aside-advisor <provider>/<model>[:effort]\n"
                 "Disable:   /aside-advisor off"
             ),

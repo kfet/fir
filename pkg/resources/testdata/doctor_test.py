@@ -8,9 +8,8 @@ import time
 import unittest
 from unittest.mock import MagicMock
 
-# Patch config dir before importing doctor
+# Patch config dirs before importing doctor
 _tmpdir = tempfile.mkdtemp()
-os.environ["FIR_CONFIG_DIR"] = _tmpdir
 
 # Add SDK and builtin_extensions to path
 _sdk_path = os.path.join(
@@ -23,6 +22,9 @@ from unittest import mock as _mock
 
 import fir_ext
 
+# Seed config_dirs so doctor uses our tmpdir as the global log location.
+fir_ext.config_dirs = [_tmpdir]
+
 with _mock.patch.object(fir_ext, "run"):
     import doctor
 
@@ -33,7 +35,7 @@ class TestDoctor(unittest.TestCase):
         doctor._session.clear()
         doctor._tool_errors.clear()
         doctor._session_end_fired = False
-        doctor.DOCTOR_LOG.unlink(missing_ok=True)
+        doctor._doctor_log().unlink(missing_ok=True)
         self.ctx = MagicMock(spec=doctor.fir_ext.Context)
 
     def test_session_with_tool_errors_records_failure(self):

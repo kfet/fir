@@ -43,9 +43,19 @@ _K_DATA = "data"
 _stop_event = threading.Event()
 _thread: threading.Thread | None = None
 
-_CACHE_DIR = Path.home() / ".config" / "fir"
 
-_CONFIG_PATHS = ["~/.config/fir"]
+def _cache_dir() -> Path:
+    """Global config dir for cache files — lowest-priority (last) config dir."""
+    if fir_ext.config_dirs:
+        return Path(fir_ext.config_dirs[-1])
+    return Path.home() / ".config" / "fir"
+
+
+def _config_search_paths() -> list[str]:
+    """All host-advertised config dirs (highest priority first) for key lookup."""
+    if fir_ext.config_dirs:
+        return list(fir_ext.config_dirs)
+    return ["~/.config/fir"]
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +108,7 @@ def _get_nested(d: dict | None, *keys) -> str | None:
 
 def _search_configs(filename: str, *keys) -> str | None:
     """Search config paths for a nested key."""
-    for base in _CONFIG_PATHS:
+    for base in _config_search_paths():
         val = _get_nested(_read_json(Path(f"{base}/{filename}").expanduser()), *keys)
         if val:
             return val
@@ -127,9 +137,10 @@ def _http_get_json(url: str, headers: dict) -> dict:
 
 def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
     """Fetch data using a shared file cache with flock to prevent thundering herd."""
-    cache_file = _CACHE_DIR / f"{cache_name}-cache.json"
-    lock_file = _CACHE_DIR / f"{cache_name}-cache.lock"
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cd = _cache_dir()
+    cache_file = cd / f"{cache_name}-cache.json"
+    lock_file = cd / f"{cache_name}-cache.lock"
+    cd.mkdir(parents=True, exist_ok=True)
 
     def _is_fresh(cached: dict) -> bool:
         return (time.time() - cached.get(_K_FETCHED_AT, 0)) < CACHE_SECONDS_TTL
@@ -143,7 +154,7 @@ def _cached_fetch(cache_name: str, fetch_fn) -> CacheResult:
     def _write_cache(obj: dict) -> None:
         tmp_path = None
         try:
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(_CACHE_DIR), suffix=".tmp")
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cd), suffix=".tmp")
             with os.fdopen(tmp_fd, "w") as tmp_f:
                 json.dump(obj, tmp_f)
             os.replace(tmp_path, str(cache_file))

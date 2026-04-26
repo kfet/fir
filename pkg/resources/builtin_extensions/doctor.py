@@ -26,8 +26,17 @@ import fir_ext
 # Storage
 # ---------------------------------------------------------------------------
 
-DOCTOR_DIR = Path(os.environ.get("FIR_CONFIG_DIR", Path.home() / ".config" / "fir"))
-DOCTOR_LOG = DOCTOR_DIR / "doctor.jsonl"
+# Doctor log is a cross-project failure history, so it lives in the global
+# (lowest-priority) config dir advertised by the host — typically
+# ~/.config/fir. Falls back to ~/.config/fir when running outside fir.
+def _doctor_dir() -> Path:
+    if fir_ext.config_dirs:
+        return Path(fir_ext.config_dirs[-1])
+    return Path.home() / ".config" / "fir"
+
+
+def _doctor_log() -> Path:
+    return _doctor_dir() / "doctor.jsonl"
 
 # In-memory buffer for the current session (flushed on session_end).
 _session: dict[str, Any] = {}
@@ -37,16 +46,18 @@ _session_end_fired: bool = False
 
 def _append_record(record: dict[str, Any]) -> None:
     """Append a single JSON record to the doctor log."""
-    DOCTOR_DIR.mkdir(parents=True, exist_ok=True)
-    with open(DOCTOR_LOG, "a") as f:
+    log = _doctor_log()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "a") as f:
         f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
 
 def _read_records(limit: int = 200) -> list[dict[str, Any]]:
     """Read the last *limit* records from the log."""
-    if not DOCTOR_LOG.exists():
+    log = _doctor_log()
+    if not log.exists():
         return []
-    lines = DOCTOR_LOG.read_text().strip().splitlines()
+    lines = log.read_text().strip().splitlines()
     records = []
     for line in lines[-limit:]:
         try:

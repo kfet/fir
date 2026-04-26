@@ -62,12 +62,15 @@ request.  The extension **must** respond within **5 seconds**.
 
 fir → extension::
 
-    {"jsonrpc":"2.0","id":1,"method":"init","params":{"version":"1","cwd":"/project"}}
+    {"jsonrpc":"2.0","id":1,"method":"init","params":{"version":"1","cwd":"/project","config_dirs":["/project/.fir","~/.config/fir"]}}
 
 Params:
 
 * ``version`` - protocol version string (currently ``"1"``).
 * ``cwd`` - the project's working directory.
+* ``config_dirs`` - priority-ordered list of directories for per-extension
+  config files (highest priority first). Use ``fir_ext.load_config()`` /
+  ``fir_ext.config_path()`` instead of reading this directly.
 
 extension → fir::
 
@@ -402,6 +405,7 @@ PROCESS LIFECYCLE
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, Protocol
@@ -449,6 +453,50 @@ _auth_modify_models_handlers: dict[str, Callable] = {}
 # bridge fir tools to a provider-specific naming scheme should populate it
 # (see ``register_tool_name_map``).
 _tool_name_map: dict[str, str] = {}
+
+# Init-handshake state populated when fir sends "init". See load_config()
+# / config_path() below for the recommended way to use this.
+cwd: str = ""  # project working directory (set during init)
+config_dirs: list[str] = []  # priority-ordered config dirs (highest first)
+ext_name: str = ""  # name this extension registered with (set during init)
+
+
+def load_config(filename: str | None = None) -> dict[str, Any] | None:
+    """Read this extension's JSON config file from the host-provided dirs.
+
+    Searches ``config_dirs`` in priority order (highest first) and returns the
+    parsed JSON contents of the first existing file. Returns ``None`` when no
+    file is found.
+
+    ``filename`` defaults to ``f"{ext_name}.json"``.
+    """
+    name = filename or (f"{ext_name}.json" if ext_name else None)
+    if not name:
+        return None
+    for d in config_dirs:
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                return None
+    return None
+
+
+def config_path(filename: str | None = None) -> str | None:
+    """Return the highest-priority path for writing this extension's config.
+
+    Always points at ``config_dirs[0]/{filename}``. ``filename`` defaults to
+    ``f"{ext_name}.json"``. Returns ``None`` when no config dirs were
+    advertised by the host (e.g. running outside fir).
+
+    The caller is responsible for creating the parent directory if needed.
+    """
+    name = filename or (f"{ext_name}.json" if ext_name else None)
+    if not name or not config_dirs:
+        return None
+    return os.path.join(config_dirs[0], name)
 
 # ---------------------------------------------------------------------------
 # Decorators
@@ -1119,6 +1167,7 @@ def run(
     input_stream, output_stream : file-like, optional
         Override stdin/stdout (useful for testing).
     """
+    global ext_name
     ext_name = name or "python-ext"
     inp = input_stream or sys.stdin
     out = output_stream or sys.stdout
@@ -1282,6 +1331,9 @@ def run(
 
         # --- init handshake (always synchronous) ---
         if method == "init":
+            global cwd, config_dirs
+            cwd = params.get("cwd", "") or ""
+            config_dirs = list(params.get("config_dirs") or [])
             init_result: dict[str, Any] = {
                 "name": ext_name,
                 "tools": list(_tools),

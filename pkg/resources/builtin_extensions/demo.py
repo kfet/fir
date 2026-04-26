@@ -336,4 +336,18 @@ def cmd_demo_echo(args, ctx):
     return {"message": f"demo-echo: {msg}"}
 
 
+@fir_ext.tool(
+    name="show_config_dirs",
+    description="Return the host-advertised config dirs and demo's config path/contents.",
+    parameters={"type": "object", "properties": {}},
+)
+def show_config_dirs(params, ctx):
+    """Demonstrate fir_ext.config_dirs / load_config() / config_path()."""
+    return {
+        "config_dirs": list(fir_ext.config_dirs),
+        "config_path": fir_ext.config_path(),
+        "config": fir_ext.load_config(),
+    }
+
+
 fir_ext.run(name="demo")

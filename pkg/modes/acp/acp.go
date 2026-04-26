@@ -298,6 +298,7 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			Version:       version,
 			EnabledNames:  resolveEnabledExtensions(pa.options.EnabledExtensions, result.SettingsManager),
 			DisabledNames: disabled,
+			ConfigDirs:    []string{filepath.Join(cwd, ".fir"), resolveAgentDir()},
 		})
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {

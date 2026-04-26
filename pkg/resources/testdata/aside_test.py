@@ -496,10 +496,12 @@ class TestLoadAdvisorConfig(unittest.TestCase):
 
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
+        # Seed SDK config_dirs so the extension reads from our tmp dir.
+        self._prev_dirs = list(fir_ext.config_dirs)
+        fir_ext.config_dirs = [self._tmp.name]
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", self._prev_dirs))
         self.mod = _load_aside()
-        # Redirect config IO into a temp dir so we never touch the user's home.
-        self.mod._CONFIG_DIR = self.mod.Path(self._tmp.name)
-        self.mod._CONFIG_PATH = self.mod._CONFIG_DIR / "aside.json"
+        self._cfg_path = self.mod.Path(self._tmp.name) / "aside.json"
 
     def test_missing_file_returns_default(self):
         cfg = self.mod._load_advisor_config()
@@ -519,15 +521,15 @@ class TestLoadAdvisorConfig(unittest.TestCase):
         self.assertGreaterEqual((major, minor), (4, 7))
 
     def test_explicit_off_returns_none(self):
-        self.mod._CONFIG_PATH.write_text('{"advisor": "off"}')
+        self._cfg_path.write_text('{"advisor": "off"}')
         self.assertIsNone(self.mod._load_advisor_config())
 
     def test_explicit_null_returns_none(self):
-        self.mod._CONFIG_PATH.write_text('{"advisor": null}')
+        self._cfg_path.write_text('{"advisor": null}')
         self.assertIsNone(self.mod._load_advisor_config())
 
     def test_pinned_spec_returns_pinned(self):
-        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x:high"}')
+        self._cfg_path.write_text('{"advisor": "anthropic/claude-opus-4-x:high"}')
         cfg = self.mod._load_advisor_config()
         self.assertEqual(
             cfg,
@@ -537,13 +539,13 @@ class TestLoadAdvisorConfig(unittest.TestCase):
     def test_malformed_spec_falls_back_to_default(self):
         # A bad spec should not silently disable escalation — fall back to
         # the bundled default so the feature keeps working.
-        self.mod._CONFIG_PATH.write_text('{"advisor": "not-a-spec"}')
+        self._cfg_path.write_text('{"advisor": "not-a-spec"}')
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
         self.assertEqual(cfg["provider"], "anthropic")
 
     def test_corrupt_json_falls_back_to_default(self):
-        self.mod._CONFIG_PATH.write_text('not json')
+        self._cfg_path.write_text('not json')
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
 
@@ -558,9 +560,11 @@ class TestAsideAdvisorCommand(unittest.TestCase):
 
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
+        self._prev_dirs = list(fir_ext.config_dirs)
+        fir_ext.config_dirs = [self._tmp.name]
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", self._prev_dirs))
         self.mod = _load_aside()
-        self.mod._CONFIG_DIR = self.mod.Path(self._tmp.name)
-        self.mod._CONFIG_PATH = self.mod._CONFIG_DIR / "aside.json"
+        self._cfg_path = self.mod.Path(self._tmp.name) / "aside.json"
 
     def _handler(self):
         return fir_ext._command_handlers["aside-advisor"]
@@ -579,53 +583,113 @@ class TestAsideAdvisorCommand(unittest.TestCase):
 
     def test_show_when_pinned(self):
         # File present → show its path.
-        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
+        self._cfg_path.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
         self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
         result = self._handler()([], mock.MagicMock())
         self.assertIn("anthropic/claude-opus-4-x", result["message"])
-        self.assertIn(str(self.mod._CONFIG_PATH), result["message"])
+        self.assertIn(str(self._cfg_path), result["message"])
 
     def test_set_writes_config_file(self):
         result = self._handler()(["anthropic/claude-opus-4-x:high"], mock.MagicMock())
         self.assertIn("set to anthropic/claude-opus-4-x:high", result["message"])
         # File persisted with the spec.
-        self.assertTrue(self.mod._CONFIG_PATH.is_file())
+        self.assertTrue(self._cfg_path.is_file())
         import json as _json
-        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "anthropic/claude-opus-4-x:high"})
 
     def test_set_rejects_malformed_spec(self):
         result = self._handler()(["claude-opus-4-x"], mock.MagicMock())
         self.assertIn("malformed spec", result["message"])
-        self.assertFalse(self.mod._CONFIG_PATH.is_file())
+        self.assertFalse(self._cfg_path.is_file())
 
     def test_off_writes_explicit_off_marker(self):
         # /aside-advisor off must be a hard opt-out — survives across sessions
         # without a missing file silently re-enabling the default advisor.
         result = self._handler()(["off"], mock.MagicMock())
         self.assertIn("disabled", result["message"])
-        self.assertTrue(self.mod._CONFIG_PATH.is_file())
+        self.assertTrue(self._cfg_path.is_file())
         import json as _json
-        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "off"})
 
     def test_off_overwrites_existing_pin(self):
-        self.mod._CONFIG_PATH.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
+        self._cfg_path.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
         self._handler()(["off"], mock.MagicMock())
         import json as _json
-        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data["advisor"], "off")
 
     def test_off_preserves_other_keys(self):
         # If aside.json gains other keys later, /aside-advisor off must
         # only flip the advisor key, not nuke the file.
         import json as _json
-        self.mod._CONFIG_PATH.write_text(_json.dumps(
+        self._cfg_path.write_text(_json.dumps(
             {"advisor": "anthropic/claude-opus-4-x", "future_key": "x"}
         ))
         self._handler()(["off"], mock.MagicMock())
-        data = _json.loads(self.mod._CONFIG_PATH.read_text())
+        data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "off", "future_key": "x"})
+
+
+class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
+    """Guards aside.py's _DEFAULT_ADVISOR_SPEC.
+
+    When no aside.json exists the extension falls back to a hard-coded model
+    spec — that spec must always point at the strongest Anthropic Opus baked
+    into fir's bundled model registry. We parse both sides as text and
+    compare.
+
+    Date-suffixed aliases (claude-opus-4-1-20250805, claude-opus-4-20250514)
+    are intentionally ignored — those are short-lived; the bare X-Y form is
+    the long-lived alias users pin to.
+    """
+
+    _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
+    _MODELS_GO = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "ai", "models_generated.go",
+    )
+
+    def test_default_advisor_matches_highest_opus(self):
+        import re
+
+        with open(self._ASIDE_PY, encoding="utf-8") as f:
+            aside_src = f.read()
+        m = re.search(r'_DEFAULT_ADVISOR_SPEC\s*=\s*"([^"]+)"', aside_src)
+        self.assertIsNotNone(m, "aside.py: _DEFAULT_ADVISOR_SPEC literal not found")
+        assert m is not None  # for type checker
+        got = m.group(1)
+
+        with open(self._MODELS_GO, encoding="utf-8") as f:
+            models_src = f.read()
+
+        # Each RegisterModel block has ID: "..." and Provider: "anthropic".
+        # Bare X-Y form only — minor capped at 2 digits to reject date stamps.
+        block_re = re.compile(
+            r'ID:\s*"(claude-opus-(\d+)-(\d{1,2}))"'
+            r'(?:[^}]*?)Provider:\s*"anthropic"',
+            re.DOTALL,
+        )
+        best = (-1, -1, "")
+        for match in block_re.finditer(models_src):
+            full_id, major, minor = match.group(1), int(match.group(2)), int(match.group(3))
+            if (major, minor) > (best[0], best[1]):
+                best = (major, minor, full_id)
+
+        self.assertNotEqual(
+            best[2], "",
+            "no claude-opus-<major>-<minor> models registered under anthropic provider",
+        )
+        want_spec = "anthropic/" + best[2]
+        self.assertEqual(
+            got, want_spec,
+            "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
+            f"  got:  {got}\n"
+            f"  want: {want_spec}\n"
+            f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
+            f"_DEFAULT_ADVISOR_SPEC to {want_spec!r}.",
+        )
 
 
 if __name__ == "__main__":

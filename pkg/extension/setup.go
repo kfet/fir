@@ -75,6 +75,12 @@ type SetupOptions struct {
 	// global and project extensions with the same name.
 	// Use this to load individual extension files discovered in installed packages.
 	ExtraExtensionFiles []string
+
+	// ConfigDirs is the priority-ordered list of directories sent to each
+	// extension via the init handshake. Highest priority first. Typically
+	// [projectDir/.fir, agentDir]. Extensions read/write their config from
+	// these via the SDK (load_config / config_path in Python).
+	ConfigDirs []string
 }
 
 // SetupResult holds the running state of extensions for a session.
@@ -167,6 +173,9 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	}
 	if len(opts.ExtraExtensionFiles) > 0 {
 		mgr.SetExtraExtensionFiles(opts.ExtraExtensionFiles)
+	}
+	if len(opts.ConfigDirs) > 0 {
+		mgr.SetConfigDirs(opts.ConfigDirs)
 	}
 	mgr.ActiveMode = opts.Mode
 

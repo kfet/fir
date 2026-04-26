@@ -262,6 +262,7 @@ func startLoginSession(args *Args) (func(), error) {
 			DisabledNames:       args.DisabledExtensions,
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
 			ExtraExtensionDirs:  resolveSettingsExtensionPaths(cwd, settingsManager),
+			ConfigDirs:          extensionConfigDirs(cwd),
 		}
 		extSetup, err = extension.Setup(result.Session, extOpts)
 		if err != nil {

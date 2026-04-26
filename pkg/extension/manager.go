@@ -59,6 +59,7 @@ type Manager struct {
 	sdkDir              string   // extracted SDK directory
 	extraExtensionDirs  []string // extra dirs from installed packages
 	extraExtensionFiles []string // extra script files from installed packages
+	configDirs          []string // priority-ordered config dirs sent to extensions on init
 }
 
 type managedBridge struct {
@@ -146,6 +147,15 @@ func (m *Manager) SetExtraExtensionFiles(files []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.extraExtensionFiles = append([]string(nil), files...)
+}
+
+// SetConfigDirs sets the priority-ordered list of directories sent to each
+// extension during the init handshake. Highest priority first (e.g.
+// [projectDir/.fir, ~/.config/fir]). Call before Start.
+func (m *Manager) SetConfigDirs(dirs []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.configDirs = append([]string(nil), dirs...)
 }
 
 // Start discovers extensions, spawns processes, performs handshakes, and
@@ -343,7 +353,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	m.logger.Info("ext startOne: process started", "ext", cfg.Name, "elapsed_ms", time.Since(t0).Milliseconds())
 
 	t0 = time.Now()
-	caps, err := Handshake(proc, cwd, 0)
+	caps, err := Handshake(proc, cwd, m.configDirs, 0)
 	if err != nil {
 		_ = proc.Stop(context.Background())
 		return err

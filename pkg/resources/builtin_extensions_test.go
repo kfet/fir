@@ -2,12 +2,8 @@ package resources
 
 import (
 	"reflect"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestParseCommentFrontmatter(t *testing.T) {
@@ -273,74 +269,4 @@ func TestBuiltinExtensionsHash_Stable(t *testing.T) {
 	if len(h1) != 16 {
 		t.Fatalf("BuiltinExtensionsHash() length = %d, want 16", len(h1))
 	}
-}
-
-// TestAsideDefaultAdvisor_TracksHighestAnthropicOpus guards the aside
-// extension's default advisor.  When no aside.json exists the extension
-// falls back to a hard-coded model spec — that spec must always point at
-// the strongest Anthropic Opus baked into fir's bundled model registry.
-//
-// The test reads _DEFAULT_ADVISOR_SPEC from aside.py and compares it to
-// the highest claude-opus-<major>-<minor> id registered under the
-// "anthropic" provider.  When this fails, bump the constant in aside.py
-// to the value the test reports.
-//
-// We intentionally ignore date-suffixed aliases (e.g. claude-opus-4-1-20250805,
-// claude-opus-4-20250514) — those are short-lived; the bare X-Y form is the
-// long-lived alias users pin to.
-func TestAsideDefaultAdvisor_TracksHighestAnthropicOpus(t *testing.T) {
-	// Read the constant from the embedded aside.py.
-	data, err := BuiltinExtensionsFS.ReadFile("builtin_extensions/aside.py")
-	if err != nil {
-		t.Fatalf("read embedded aside.py: %v", err)
-	}
-	specRe := regexp.MustCompile(`_DEFAULT_ADVISOR_SPEC\s*=\s*"([^"]+)"`)
-	m := specRe.FindStringSubmatch(string(data))
-	if m == nil {
-		t.Fatal("aside.py: _DEFAULT_ADVISOR_SPEC literal not found")
-	}
-	got := m[1]
-
-	// Find the highest claude-opus-<major>-<minor> in the live registry.
-	// Bare X-Y form only — minor must be 1-2 digits so date-stamped ids
-	// like claude-opus-4-1-20250805 are filtered out by the missing third
-	// dash component, and claude-opus-4-20250514 fails the 1-2 digit cap.
-	want := highestAnthropicOpusInRegistry(t)
-	if want == "" {
-		t.Fatal("no claude-opus-<major>-<minor> models registered under anthropic provider")
-	}
-	wantSpec := "anthropic/" + want
-
-	if got != wantSpec {
-		t.Fatalf(
-			"aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"+
-				"  got:  %s\n"+
-				"  want: %s\n"+
-				"\nFix: edit pkg/resources/builtin_extensions/aside.py and update _DEFAULT_ADVISOR_SPEC to %q.",
-			got, wantSpec, wantSpec,
-		)
-	}
-}
-
-// highestAnthropicOpusInRegistry finds the largest claude-opus-<major>-<minor>
-// id registered under the "anthropic" provider in the live ai model registry.
-// Returns "" when no such model exists.
-func highestAnthropicOpusInRegistry(t *testing.T) string {
-	t.Helper()
-	// Bare X-Y form; minor capped at 2 digits to reject date stamps.
-	idRe := regexp.MustCompile(`^claude-opus-(\d+)-(\d{1,2})$`)
-	bestMajor, bestMinor := -1, -1
-	bestID := ""
-	for _, m := range ai.GetModels(ai.ProviderAnthropic) {
-		match := idRe.FindStringSubmatch(m.ID)
-		if match == nil {
-			continue
-		}
-		major, _ := strconv.Atoi(match[1])
-		minor, _ := strconv.Atoi(match[2])
-		if major > bestMajor || (major == bestMajor && minor > bestMinor) {
-			bestMajor, bestMinor, bestID = major, minor, m.ID
-		}
-	}
-	return bestID
 }

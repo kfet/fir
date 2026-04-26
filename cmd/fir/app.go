@@ -195,6 +195,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			DisabledNames:       args.DisabledExtensions,
 			ExtraExtensionFiles: rl.GetPackageExtensionPaths(),
 			ExtraExtensionDirs:  resolveSettingsExtensionPaths(cwd, settingsManager),
+			ConfigDirs:          extensionConfigDirs(cwd),
 		}
 		if !deferExtensions {
 			extSetup, err = extension.Setup(result.Session, *extOpts)
@@ -702,6 +703,16 @@ func resolveAgentDir() string {
 		return dir
 	}
 	return session.DefaultAgentDir()
+}
+
+// extensionConfigDirs returns the priority-ordered list of directories
+// extensions may use to read/write their per-extension config files.
+// Highest priority first: project-local .fir overrides global agent dir.
+func extensionConfigDirs(projectDir string) []string {
+	return []string{
+		filepath.Join(projectDir, ".fir"),
+		resolveAgentDir(),
+	}
 }
 
 // drainUpdateNotice non-blockingly reads a notice from noticeCh and prints

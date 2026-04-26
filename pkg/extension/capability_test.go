@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"testing"
@@ -47,7 +48,7 @@ func TestHandshake_Success(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, result, nil)
 	}()
 
-	got, err := Handshake(proc, "/tmp/project", 0)
+	got, err := Handshake(proc, "/tmp/project", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestHandshake_ErrorResponse(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, nil, &Error{Code: -32600, Message: "bad init"})
 	}()
 
-	_, err := Handshake(proc, "/tmp", 0)
+	_, err := Handshake(proc, "/tmp", nil, 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -107,7 +108,7 @@ func TestHandshake_Timeout(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, err := Handshake(proc, "/tmp", 50*time.Millisecond)
+	_, err := Handshake(proc, "/tmp", nil, 50*time.Millisecond)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -118,16 +119,28 @@ func TestHandshake_Timeout(t *testing.T) {
 }
 
 func TestHandshake_InitParams(t *testing.T) {
-	// Verify InitParams serializes correctly.
-	p := InitParams{Version: "1", Cwd: "/my/project"}
+	// Verify InitParams serializes correctly, including config_dirs.
+	p := InitParams{Version: "1", Cwd: "/my/project", ConfigDirs: []string{"/my/project/.fir", "/home/user/.config/fir"}}
 	data, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got map[string]string
-	json.Unmarshal(data, &got)
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
 	if got["version"] != "1" || got["cwd"] != "/my/project" {
 		t.Errorf("unexpected: %s", data)
+	}
+	dirs, ok := got["config_dirs"].([]any)
+	if !ok || len(dirs) != 2 || dirs[0] != "/my/project/.fir" || dirs[1] != "/home/user/.config/fir" {
+		t.Errorf("config_dirs unexpected: %v", got["config_dirs"])
+	}
+	// Verify omitempty: empty ConfigDirs must not appear in JSON.
+	p2 := InitParams{Version: "1", Cwd: "/p"}
+	data2, _ := json.Marshal(p2)
+	if bytes.Contains(data2, []byte("config_dirs")) {
+		t.Errorf("config_dirs should be omitted when empty: %s", data2)
 	}
 }
 
@@ -135,7 +148,7 @@ func TestHandshake_NilCodec(t *testing.T) {
 	proc := &Process{
 		cfg: ExtProcConfig{Name: "nil", Path: "/fake", Scope: "project"},
 	}
-	_, err := Handshake(proc, "/tmp", 0)
+	_, err := Handshake(proc, "/tmp", nil, 0)
 	if err == nil {
 		t.Fatal("expected error for nil codec")
 	}
@@ -180,7 +193,7 @@ func TestHandshake_Commands(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, result, nil)
 	}()
 
-	got, err := Handshake(proc, "/tmp", 0)
+	got, err := Handshake(proc, "/tmp", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +228,7 @@ func TestHandshake_InvalidCommandName(t *testing.T) {
 		_ = extCodec.WriteResponse(req.ID, result, nil)
 	}()
 
-	_, err := Handshake(proc, "/tmp", 0)
+	_, err := Handshake(proc, "/tmp", nil, 0)
 	if err == nil {
 		t.Fatal("expected error for invalid command name")
 	}
