@@ -674,7 +674,7 @@ func TestAnthropic_PoeHeaders(t *testing.T) {
 		Provider: "poe",
 		BaseURL:  "https://api.poe.com/v1",
 	}
-	headers := buildAnthropicHeaders(model, "poe-token-xyz", false, nil)
+	headers := buildAnthropicHeaders(model, "poe-token-xyz", false, nil, false)
 
 	if got := headers["authorization"]; got != "Bearer poe-token-xyz" {
 		t.Errorf("expected Bearer auth, got %q", got)
@@ -694,13 +694,13 @@ func TestAnthropic_AnthropicVersionHeader(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
 
 	// Non-OAuth
-	headers := buildAnthropicHeaders(model, "sk-test", false, nil)
+	headers := buildAnthropicHeaders(model, "sk-test", false, nil, false)
 	if headers["anthropic-version"] != "2023-06-01" {
 		t.Errorf("expected anthropic-version 2023-06-01, got %q", headers["anthropic-version"])
 	}
 
 	// OAuth
-	oauthHeaders := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil)
+	oauthHeaders := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil, false)
 	if oauthHeaders["anthropic-version"] != "2023-06-01" {
 		t.Errorf("expected anthropic-version 2023-06-01 for OAuth, got %q", oauthHeaders["anthropic-version"])
 	}
@@ -721,7 +721,7 @@ func TestAnthropic_OAuthHeaders(t *testing.T) {
 			"x-anthropic-oauth-system-prefix": "You are Claude Code, Anthropic's official CLI for Claude.",
 		},
 	}
-	headers := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil)
+	headers := buildAnthropicHeaders(model, "sk-ant-oat-test", true, nil, false)
 
 	if headers["authorization"] != "Bearer sk-ant-oat-test" {
 		t.Errorf("expected Bearer auth, got %q", headers["authorization"])
@@ -739,7 +739,7 @@ func TestAnthropic_OAuthHeaders(t *testing.T) {
 
 func TestAnthropic_NonOAuthHeaders(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
-	headers := buildAnthropicHeaders(model, "sk-ant-api03-test", false, nil)
+	headers := buildAnthropicHeaders(model, "sk-ant-api03-test", false, nil, false)
 
 	if headers["x-api-key"] != "sk-ant-api03-test" {
 		t.Errorf("expected x-api-key, got %q", headers["x-api-key"])
@@ -758,7 +758,7 @@ func TestAnthropic_BuildHeaders_ModelHeaders(t *testing.T) {
 		BaseURL: "https://api.anthropic.com",
 		Headers: map[string]string{"x-custom-model": "yes"},
 	}
-	headers := buildAnthropicHeaders(model, "test-key", false, nil)
+	headers := buildAnthropicHeaders(model, "test-key", false, nil, false)
 
 	if headers["x-custom-model"] != "yes" {
 		t.Errorf("expected model header x-custom-model=yes, got %q", headers["x-custom-model"])
@@ -778,7 +778,7 @@ func TestAnthropic_BuildHeaders_InternalHeadersStripped(t *testing.T) {
 			"x-custom-header":              "keep-me",
 		},
 	}
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 
 	if _, ok := headers["x-anthropic-thinking-enabled"]; ok {
 		t.Error("internal header x-anthropic-thinking-enabled should be stripped")
@@ -1028,7 +1028,8 @@ func TestAnthropic_ConvertTools_StableOrder(t *testing.T) {
 
 func TestAnthropic_CacheControlBlock(t *testing.T) {
 	// Short retention on anthropic.com
-	cc := cacheControlBlock("https://api.anthropic.com", ai.CacheShort)
+	model := &ai.Model{BaseURL: "https://api.anthropic.com"}
+	cc := cacheControlBlock(model, ai.CacheShort)
 	if cc["type"] != "ephemeral" {
 		t.Errorf("expected ephemeral, got %v", cc["type"])
 	}
@@ -1037,15 +1038,23 @@ func TestAnthropic_CacheControlBlock(t *testing.T) {
 	}
 
 	// Long retention on anthropic.com
-	cc = cacheControlBlock("https://api.anthropic.com", ai.CacheLong)
+	cc = cacheControlBlock(model, ai.CacheLong)
 	if cc["ttl"] != "1h" {
 		t.Errorf("expected 1h ttl, got %v", cc["ttl"])
 	}
 
-	// Long retention on non-anthropic
-	cc = cacheControlBlock("https://custom.proxy.com", ai.CacheLong)
+	// Long retention on non-anthropic — default compat supports long cache
+	model2 := &ai.Model{BaseURL: "https://custom.proxy.com"}
+	cc = cacheControlBlock(model2, ai.CacheLong)
+	if cc["ttl"] != "1h" {
+		t.Errorf("non-anthropic with default compat (supportsLongCacheRetention=true) should have ttl, got %v", cc["ttl"])
+	}
+
+	// Long retention on non-anthropic with compat that disables long cache
+	model3 := &ai.Model{BaseURL: "https://custom.proxy.com", Compat: &ai.AnthropicMessagesCompat{SupportsLongCacheRetention: ai.BoolPtr(false)}}
+	cc = cacheControlBlock(model3, ai.CacheLong)
 	if cc["ttl"] != nil {
-		t.Error("non-anthropic should not have ttl even with long retention")
+		t.Error("non-anthropic with supportsLongCacheRetention=false should not have ttl")
 	}
 }
 
@@ -1374,8 +1383,8 @@ func TestAnthropic_ConvertMessages_AssistantContent(t *testing.T) {
 
 	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(result))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (user, assistant, synthetic tool result), got %d", len(result))
 	}
 
 	aBlocks, ok := result[1]["content"].([]map[string]any)
@@ -1393,6 +1402,20 @@ func TestAnthropic_ConvertMessages_AssistantContent(t *testing.T) {
 	}
 	if aBlocks[1]["name"] != "read" {
 		t.Errorf("expected name=read, got %v", aBlocks[1]["name"])
+	}
+
+	// Third message should be a synthetic tool result for the unresolved tool call.
+	// Anthropic wraps tool_result blocks in a "user" role message.
+	synthResult := result[2]
+	if synthResult["role"] != "user" {
+		t.Errorf("expected synthetic result role=user (Anthropic wraps tool_result in user), got %v", synthResult["role"])
+	}
+	synthContent, ok := synthResult["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected synthetic result content to be []map[string]any, got %T", synthResult["content"])
+	}
+	if len(synthContent) != 1 || synthContent[0]["type"] != "tool_result" {
+		t.Errorf("expected single tool_result block, got %v", synthContent)
 	}
 }
 
@@ -1964,7 +1987,7 @@ func TestAnthropic_ServerTools_BetaHeaders(t *testing.T) {
 		},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
 	if !strings.Contains(beta, "web-search-2025-03-05") {
 		t.Errorf("expected web-search beta in header, got %s", beta)
@@ -1986,12 +2009,79 @@ func TestAnthropic_ServerTools_BetaHeaders_NoDuplicates(t *testing.T) {
 		},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
 	// Count occurrences of the beta string
 	count := strings.Count(beta, "web-search-2025-03-05")
 	if count != 1 {
 		t.Errorf("expected exactly 1 occurrence of web-search beta, got %d in %q", count, beta)
+	}
+}
+
+// TestAnthropic_FineGrainedToolStreamingBeta_NoTools verifies the fine-grained
+// tool streaming beta is NOT sent when there are no tools.
+func TestAnthropic_FineGrainedToolStreamingBeta_NoTools(t *testing.T) {
+	// Default model (no compat) should not use the legacy beta when no tools.
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	headers := buildAnthropicHeaders(model, "test-key", false, nil, false)
+	if strings.Contains(headers["anthropic-beta"], "fine-grained-tool-streaming") {
+		t.Errorf("expected no fine-grained-tool-streaming beta when no tools, got %q", headers["anthropic-beta"])
+	}
+}
+
+// TestAnthropic_FineGrainedToolStreamingBeta_WithTools_DefaultEager verifies
+// the legacy beta is NOT sent when the model supports eager tool input streaming
+// (the default).
+func TestAnthropic_FineGrainedToolStreamingBeta_WithTools_DefaultEager(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	headers := buildAnthropicHeaders(model, "test-key", false, nil, true)
+	if strings.Contains(headers["anthropic-beta"], "fine-grained-tool-streaming") {
+		t.Errorf("default model with tools should not send legacy beta, got %q", headers["anthropic-beta"])
+	}
+}
+
+// TestAnthropic_FineGrainedToolStreamingBeta_WithTools_NoEager verifies the
+// legacy beta IS sent when the model's compat opts out of eager streaming
+// (e.g. third-party Anthropic-compatible endpoints).
+func TestAnthropic_FineGrainedToolStreamingBeta_WithTools_NoEager(t *testing.T) {
+	f := false
+	model := &ai.Model{
+		ID:      "claude-sonnet-4-20250514",
+		BaseURL: "https://api.anthropic.com",
+		Compat:  &ai.AnthropicMessagesCompat{SupportsEagerToolInputStreaming: &f},
+	}
+	headers := buildAnthropicHeaders(model, "test-key", false, nil, true)
+	if !strings.Contains(headers["anthropic-beta"], "fine-grained-tool-streaming-2025-05-14") {
+		t.Errorf("expected fine-grained-tool-streaming beta when compat opts out of eager, got %q", headers["anthropic-beta"])
+	}
+}
+
+// TestAnthropic_CacheControlLongRetention verifies the 1h ttl is applied
+// only when the model's compat allows long cache retention.
+func TestAnthropic_CacheControlLongRetention(t *testing.T) {
+	// Default model: long retention supported.
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	cc := cacheControlBlock(model, ai.CacheLong)
+	if cc["ttl"] != "1h" {
+		t.Errorf("default model should set ttl=1h for long cache retention, got %v", cc)
+	}
+
+	// Compat opts out: no ttl.
+	f := false
+	modelNoLong := &ai.Model{
+		ID:      "claude-sonnet-4-20250514",
+		BaseURL: "https://api.anthropic.com",
+		Compat:  &ai.AnthropicMessagesCompat{SupportsLongCacheRetention: &f},
+	}
+	cc = cacheControlBlock(modelNoLong, ai.CacheLong)
+	if _, has := cc["ttl"]; has {
+		t.Errorf("compat without long retention should not set ttl, got %v", cc)
+	}
+
+	// Short retention: no ttl regardless of compat.
+	cc = cacheControlBlock(model, ai.CacheNone)
+	if _, has := cc["ttl"]; has {
+		t.Errorf("CacheNone should not set ttl, got %v", cc)
 	}
 }
 
@@ -2056,11 +2146,12 @@ func TestAnthropic_UnknownServerTool_NoBeta(t *testing.T) {
 		},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
-	// Unknown tools should not add any extra beta
-	if strings.Count(beta, ",") != 1 {
-		t.Errorf("expected only base betas, got %s", beta)
+	// Unknown tools should not add any extra beta.
+	// With conditional betas, base betas may be empty when no tools/thinking.
+	if strings.Contains(beta, "unknown") {
+		t.Errorf("unknown tool beta should not appear, got %s", beta)
 	}
 }
 
@@ -2224,7 +2315,7 @@ func TestAnthropic_CompactionBetaHeader(t *testing.T) {
 		Compaction: &ai.AnthropicCompaction{Enabled: true},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
 	if !strings.Contains(beta, "compact-2026-01-12") {
 		t.Errorf("expected compact beta in header, got %s", beta)
@@ -2237,7 +2328,7 @@ func TestAnthropic_CompactionDisabled_NoBeta(t *testing.T) {
 		Compaction: &ai.AnthropicCompaction{Enabled: false},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
 	if strings.Contains(beta, "compact") {
 		t.Errorf("did not expect compact beta when disabled, got %s", beta)
@@ -2327,7 +2418,7 @@ func TestAnthropic_ServerToolsBetaHeaders_AnyModel(t *testing.T) {
 		},
 	}
 
-	headers := buildAnthropicHeaders(model, "test-key", false, opts)
+	headers := buildAnthropicHeaders(model, "test-key", false, opts, false)
 	beta := headers["anthropic-beta"]
 	if !strings.Contains(beta, "web-search-2025-03-05") {
 		t.Errorf("expected web-search beta for custom model, got %s", beta)

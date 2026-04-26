@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/simple-options.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package providers
 
 import (
@@ -36,23 +36,29 @@ func apiKeyErrorFromSimpleOpts(options *ai.SimpleStreamOptions) string {
 // BuildBaseOptions constructs base StreamOptions from SimpleStreamOptions.
 func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey string) *ai.StreamOptions {
 	if options == nil {
-		maxTokens := model.MaxTokens
-		if maxTokens > 32000 {
-			maxTokens = 32000
+		var maxTokens *int
+		if model.MaxTokens > 0 {
+			mt := model.MaxTokens
+			if mt > 32000 {
+				mt = 32000
+			}
+			maxTokens = &mt
 		}
 		return &ai.StreamOptions{
-			MaxTokens: &maxTokens,
+			MaxTokens: maxTokens,
 			ApiKey:    apiKey,
 		}
 	}
 
 	maxTokens := options.MaxTokens
 	if maxTokens == nil {
-		mt := model.MaxTokens
-		if mt > 32000 {
-			mt = 32000
+		if model.MaxTokens > 0 {
+			mt := model.MaxTokens
+			if mt > 32000 {
+				mt = 32000
+			}
+			maxTokens = &mt
 		}
-		maxTokens = &mt
 	}
 
 	key := apiKey
@@ -68,6 +74,8 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		CacheRetention:  options.CacheRetention,
 		SessionID:       options.SessionID,
 		Headers:         options.Headers,
+		TimeoutMs:       options.TimeoutMs,
+		MaxRetries:      options.MaxRetries,
 		MaxRetryDelayMs: options.MaxRetryDelayMs,
 		ServerTools:     options.ServerTools,
 		Compaction:      options.Compaction,

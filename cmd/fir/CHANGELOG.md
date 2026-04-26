@@ -5,6 +5,7 @@
 ### Added
 
 - Extension init handshake now includes `config_dirs` — a priority-ordered list of directories (project-local `.fir` first, global `~/.config/fir` last) for per-extension config storage. The Python SDK exposes `fir_ext.config_dirs`, `fir_ext.load_config()` (first-found JSON read), and `fir_ext.config_path()` (highest-priority write target). `aside.py`, `doctor.py`, and `provider_usage.py` migrated away from hardcoded `~/.config/fir` paths. `aside.py` default advisor model now guarded by unit test `DefaultAdvisorTracksHighestAnthropicOpus` in `pkg/resources/testdata/aside_test.py`, which ensures `_DEFAULT_ADVISOR_SPEC` stays in sync with the highest Anthropic Opus in the model registry.
+- Upstream sync v0.67.68 → v0.70.2: DeepSeek V4 provider (`deepseek-v4-flash`, `deepseek-v4-pro`) and Fireworks provider with API key support; gpt-5.5 codex model; updated default models (anthropic→claude-opus-4-7, openai-codex→gpt-5.5, google→gemini-3.1-pro-preview); `AnthropicMessagesCompat` for conditional fine-grained-tool-streaming beta and long cache retention; agent tool `Terminate` flag for early loop exit; `sanitizeForOpenAPI` strips JSON Schema meta-keys from Gemini tool parameters; `downgradeUnsupportedImages` centralises image-to-placeholder conversion for non-vision models; synthetic tool results now inserted at end of conversation; `PI_OAUTH_CALLBACK_HOST` env var for Codex OAuth; `TimeoutMs`/`MaxRetries` fields on `StreamOptions`.
 
 ### Changed
 

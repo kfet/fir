@@ -1,5 +1,5 @@
 // Ported from: packages/ai/scripts/generate-models.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 //
 // Command generate-models fetches model data from external APIs and generates
 // pkg/ai/models_generated.go. It is a Go port of scripts/generate-models.ts.
@@ -62,11 +62,13 @@ type modelSpec struct {
 
 // compatSpec represents OpenAICompletionsCompat fields used in models.
 type compatSpec struct {
-	SupportsStore           *bool
-	SupportsDeveloperRole   *bool
-	SupportsReasoningEffort *bool
-	ThinkingFormat          string
-	ZaiToolStream           *bool
+	SupportsStore                               *bool
+	SupportsDeveloperRole                       *bool
+	SupportsReasoningEffort                     *bool
+	ThinkingFormat                              string
+	ZaiToolStream                               *bool
+	RequiresReasoningContentOnAssistantMessages *bool
+	ReasoningEffortMap                          map[string]string
 }
 
 // boolPtr returns a pointer to b.
@@ -1966,12 +1968,49 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
 			CostInput: 2.5, CostOutput: 15, CostCacheRead: 0.25, CostCacheWrite: 0,
 			ContextWindow: 1048576, MaxTokens: codexMaxTokens},
+		{ID: "gpt-5.5", Name: "GPT-5.5", API: "openai-codex-responses", Provider: "openai-codex",
+			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
+			CostInput: 5, CostOutput: 30, CostCacheRead: 0.5, CostCacheWrite: 0,
+			ContextWindow: codexContext, MaxTokens: codexMaxTokens},
 		{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", API: "openai-codex-responses", Provider: "openai-codex",
 			BaseURL: codexBaseURL, Reasoning: true, Input: []string{"text", "image"},
 			CostInput: 0.75, CostOutput: 4.5, CostCacheRead: 0.075, CostCacheWrite: 0,
 			ContextWindow: codexContext, MaxTokens: codexMaxTokens},
 	}
 	all = append(all, codexModels...)
+
+	// --- DeepSeek V4 models ---
+	deepseekCompat := &compatSpec{
+		RequiresReasoningContentOnAssistantMessages: boolPtr(true),
+		ThinkingFormat: "deepseek",
+		ReasoningEffortMap: map[string]string{
+			"minimal": "high",
+			"low":     "high",
+			"medium":  "high",
+			"high":    "high",
+			"xhigh":   "max",
+		},
+	}
+	if !hasModel(all, "deepseek", "deepseek-v4-flash") {
+		all = append(all, modelSpec{
+			ID: "deepseek-v4-flash", Name: "DeepSeek V4 Flash",
+			API: "openai-completions", Provider: "deepseek", BaseURL: "https://api.deepseek.com",
+			Reasoning: true, Input: []string{"text"},
+			CostInput: 0.14, CostOutput: 0.28, CostCacheRead: 0.028, CostCacheWrite: 0,
+			ContextWindow: 1000000, MaxTokens: 384000,
+			Compat: deepseekCompat,
+		})
+	}
+	if !hasModel(all, "deepseek", "deepseek-v4-pro") {
+		all = append(all, modelSpec{
+			ID: "deepseek-v4-pro", Name: "DeepSeek V4 Pro",
+			API: "openai-completions", Provider: "deepseek", BaseURL: "https://api.deepseek.com",
+			Reasoning: true, Input: []string{"text"},
+			CostInput: 1.74, CostOutput: 3.48, CostCacheRead: 0.145, CostCacheWrite: 0,
+			ContextWindow: 1000000, MaxTokens: 384000,
+			Compat: deepseekCompat,
+		})
+	}
 
 	// Add missing Grok model
 	if !hasModel(all, "xai", "grok-code-fast-1") {
@@ -2288,6 +2327,17 @@ func renderCompat(c *compatSpec) string {
 	}
 	if c.ZaiToolStream != nil {
 		fields = append(fields, fmt.Sprintf("ZaiToolStream: boolRef(%v)", *c.ZaiToolStream))
+	}
+	if c.RequiresReasoningContentOnAssistantMessages != nil {
+		fields = append(fields, fmt.Sprintf("RequiresReasoningContentOnAssistantMessages: boolRef(%v)", *c.RequiresReasoningContentOnAssistantMessages))
+	}
+	if len(c.ReasoningEffortMap) > 0 {
+		pairs := make([]string, 0, len(c.ReasoningEffortMap))
+		for k, v := range c.ReasoningEffortMap {
+			pairs = append(pairs, fmt.Sprintf("%s: %s", goString(k), goString(v)))
+		}
+		sort.Strings(pairs)
+		fields = append(fields, "ReasoningEffortMap: map[string]string{"+strings.Join(pairs, ", ")+"}")
 	}
 	if len(fields) == 0 {
 		return "nil"

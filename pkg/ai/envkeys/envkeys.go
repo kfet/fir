@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/env-api-keys.ts
-// Upstream hash: f04d9bc4
+// Upstream hash: 48aa882
 package envkeys
 
 import (
@@ -15,6 +15,8 @@ var providerEnvMap = map[string]string{
 	string(ai.ProviderOpenAI):               "OPENAI_API_KEY",
 	string(ai.ProviderAzureOpenAIResponses): "AZURE_OPENAI_API_KEY",
 	string(ai.ProviderGoogle):               "GEMINI_API_KEY",
+	string(ai.ProviderDeepseek):             "DEEPSEEK_API_KEY",
+	string(ai.ProviderFireworks):            "FIREWORKS_API_KEY",
 	string(ai.ProviderGroq):                 "GROQ_API_KEY",
 	string(ai.ProviderCerebras):             "CEREBRAS_API_KEY",
 	string(ai.ProviderXAI):                  "XAI_API_KEY",
@@ -36,6 +38,7 @@ var providerEnvMap = map[string]string{
 var additionalAuthEnvVars = []string{
 	// anthropic
 	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_OAUTH_TOKEN",
 	// github-copilot
 	"COPILOT_GITHUB_TOKEN",
 	"GH_TOKEN",
@@ -103,6 +106,9 @@ func GetEnvApiKey(provider string) string {
 		return os.Getenv("GITHUB_TOKEN")
 
 	case string(ai.ProviderAnthropic):
+		if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
+			return v
+		}
 		return os.Getenv("ANTHROPIC_API_KEY")
 
 	case string(ai.ProviderGoogleVertex):

@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/types.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package agent
 
 import (
@@ -126,6 +126,10 @@ type AgentToolResult struct {
 	// even when Execute returns a nil error. Used by extension hooks
 	// to mark a modified result as an error.
 	IsError bool
+	// Terminate hints that the agent should stop after the current tool batch.
+	// Early termination only happens when every finalized tool result in the batch
+	// sets this to true.
+	Terminate bool
 	// StatusMessage is a transient progress label for the UI (e.g.
 	// "Calling Read..."). It is only meaningful on partial-update
 	// results and never persisted.

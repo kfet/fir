@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -208,8 +209,12 @@ func loginOpenAICodex(callbacks LoginCallbacks) (*Credentials, error) {
 	callbackCtx, cancelCallback := context.WithCancel(ctx)
 	defer cancelCallback()
 
+	callbackHost := os.Getenv("PI_OAUTH_CALLBACK_HOST")
+	if callbackHost == "" {
+		callbackHost = "127.0.0.1"
+	}
 	var codeCh <-chan *CallbackResult
-	srv, ch, _, srvErr := StartOAuthCallbackServer(callbackCtx, "/auth/callback", "127.0.0.1:1455", state)
+	srv, ch, _, srvErr := StartOAuthCallbackServer(callbackCtx, "/auth/callback", callbackHost+":1455", state)
 	if srvErr == nil {
 		codeCh = ch
 		defer srv.Close()

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package providers
 
 import (
@@ -123,9 +123,12 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 
 		// Match upstream: when caching is enabled, set session headers so
 		// providers that key cache on the session pick it up.
-		// See upstream openai-responses.ts createClient()
+		// OpenAIResponsesCompat controls whether session_id is sent.
+		compat := getOpenAIResponsesCompat(model)
 		if options != nil && options.SessionID != "" && options.CacheRetention != ai.CacheNone {
-			headers["session_id"] = options.SessionID
+			if compat.SendSessionIdHeader {
+				headers["session_id"] = options.SessionID
+			}
 			headers["x-client-request-id"] = options.SessionID
 		}
 
@@ -223,8 +226,11 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 	}
 
 	// Session ID for prompt caching
-	if options != nil && options.SessionID != "" {
+	if options != nil && options.SessionID != "" && options.CacheRetention != ai.CacheNone {
 		body["prompt_cache_key"] = options.SessionID
+		if compat := getOpenAIResponsesCompat(model); options.CacheRetention == ai.CacheLong && compat.SupportsLongCacheRetention {
+			body["prompt_cache_retention"] = "24h"
+		}
 	}
 
 	// Tools
@@ -520,4 +526,27 @@ func supportsHostedShell(model *ai.Model) bool {
 		return true
 	}
 	return false
+}
+
+// resolvedOpenAIResponsesCompat is the resolved OpenAIResponsesCompat with defaults applied.
+type resolvedOpenAIResponsesCompat struct {
+	SendSessionIdHeader        bool
+	SupportsLongCacheRetention bool
+}
+
+// getOpenAIResponsesCompat returns resolved OpenAIResponsesCompat settings for a model.
+func getOpenAIResponsesCompat(model *ai.Model) resolvedOpenAIResponsesCompat {
+	result := resolvedOpenAIResponsesCompat{
+		SendSessionIdHeader:        true,
+		SupportsLongCacheRetention: true,
+	}
+	if compat := model.GetOpenAIResponsesCompat(); compat != nil {
+		if compat.SendSessionIdHeader != nil {
+			result.SendSessionIdHeader = *compat.SendSessionIdHeader
+		}
+		if compat.SupportsLongCacheRetention != nil {
+			result.SupportsLongCacheRetention = *compat.SupportsLongCacheRetention
+		}
+	}
+	return result
 }

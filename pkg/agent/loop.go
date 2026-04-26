@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent-loop.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package agent
 
 import (
@@ -152,7 +152,9 @@ func runLoop(
 
 			var toolResults []ai.ToolResultMessage
 			if hasMoreToolCalls {
-				toolResults = executeToolCalls(ctx, currentCtx, message, events)
+				batch := executeToolCalls(ctx, currentCtx, message, events)
+				toolResults = batch.messages
+				hasMoreToolCalls = !batch.terminate
 
 				for _, result := range toolResults {
 					currentCtx.Messages = append(currentCtx.Messages, NewAgentMessage(ai.NewToolResultMsg(result)))
@@ -346,13 +348,19 @@ func streamAssistantResponse(
 	return result
 }
 
+// executedToolCallBatch is the result of executing a batch of tool calls.
+type executedToolCallBatch struct {
+	messages  []ai.ToolResultMessage
+	terminate bool
+}
+
 // executeToolCalls executes tool calls from an assistant message.
 func executeToolCalls(
 	ctx context.Context,
 	agentCtx *AgentContext,
 	assistantMsg *ai.AssistantMessage,
 	events chan<- AgentEvent,
-) []ai.ToolResultMessage {
+) executedToolCallBatch {
 	var toolCalls []ai.ToolCall
 	for _, c := range assistantMsg.Content {
 		if c.IsToolCall() {
@@ -361,6 +369,7 @@ func executeToolCalls(
 	}
 
 	var results []ai.ToolResultMessage
+	var allTerminate bool = true
 
 	for _, tc := range toolCalls {
 		firlog.Debug("executing tool", "name", tc.Name, "id", tc.ID)
@@ -437,12 +446,19 @@ func executeToolCalls(
 		}
 		results = append(results, toolResult)
 
+		if !result.Terminate {
+			allTerminate = false
+		}
+
 		trMsg := NewAgentMessage(ai.NewToolResultMsg(toolResult))
 		events <- AgentEvent{Type: EventMessageStart, Message: &trMsg}
 		events <- AgentEvent{Type: EventMessageEnd, Message: &trMsg}
 	}
 
-	return results
+	// Terminate only when there are tool calls AND every result sets terminate=true
+	shouldTerminate := len(toolCalls) > 0 && allTerminate
+
+	return executedToolCallBatch{messages: results, terminate: shouldTerminate}
 }
 
 // errorAssistantMessage creates an error assistant message.

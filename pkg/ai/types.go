@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package ai
 
 import (
@@ -67,6 +67,8 @@ const (
 	ProviderMistral              Provider = "mistral"
 	ProviderMinimax              Provider = "minimax"
 	ProviderMinimaxCN            Provider = "minimax-cn"
+	ProviderDeepseek             Provider = "deepseek"
+	ProviderFireworks            Provider = "fireworks"
 	ProviderHuggingface          Provider = "huggingface"
 	ProviderOpenCode             Provider = "opencode"
 	ProviderOpenCodeGo           Provider = "opencode-go"
@@ -214,14 +216,20 @@ type StreamOptions struct {
 	OnResponse func(response ProviderResponse, model *Model) `json:"-"`
 	// RefreshApiKey is called on 401/auth errors to obtain a fresh API key
 	// (e.g. after OAuth token refresh). Returns "" if no refresh is available.
-	RefreshApiKey   func(provider string) string `json:"-"`
-	Headers         map[string]string            `json:"headers,omitempty"`
-	MaxRetryDelayMs *int                         `json:"maxRetryDelayMs,omitempty"`
-	ReasoningEffort ThinkingLevel                `json:"reasoningEffort,omitempty"`
-	ToolChoice      string                       `json:"toolChoice,omitempty"`
-	Metadata        map[string]any               `json:"metadata,omitempty"`
-	ServerTools     []AnthropicServerTool        `json:"serverTools,omitempty"`
-	Compaction      *AnthropicCompaction         `json:"compaction,omitempty"`
+	RefreshApiKey func(provider string) string `json:"-"`
+	Headers       map[string]string            `json:"headers,omitempty"`
+	// TimeoutMs is the HTTP request timeout in milliseconds for providers/SDKs that support it.
+	// For example, OpenAI and Anthropic SDK clients default to 10 minutes.
+	TimeoutMs *int `json:"timeoutMs,omitempty"`
+	// MaxRetries is the maximum retry attempts for providers/SDKs that support client-side retries.
+	// For example, OpenAI and Anthropic SDK clients default to 2.
+	MaxRetries      *int                  `json:"maxRetries,omitempty"`
+	MaxRetryDelayMs *int                  `json:"maxRetryDelayMs,omitempty"`
+	ReasoningEffort ThinkingLevel         `json:"reasoningEffort,omitempty"`
+	ToolChoice      string                `json:"toolChoice,omitempty"`
+	Metadata        map[string]any        `json:"metadata,omitempty"`
+	ServerTools     []AnthropicServerTool `json:"serverTools,omitempty"`
+	Compaction      *AnthropicCompaction  `json:"compaction,omitempty"`
 }
 
 // SimpleStreamOptions extends StreamOptions with reasoning/thinking.
@@ -637,6 +645,7 @@ type ThinkingFormat string
 const (
 	ThinkingFormatOpenAI      ThinkingFormat = "openai"
 	ThinkingFormatOpenRouter  ThinkingFormat = "openrouter"
+	ThinkingFormatDeepSeek    ThinkingFormat = "deepseek"
 	ThinkingFormatZAI         ThinkingFormat = "zai"
 	ThinkingFormatQwen        ThinkingFormat = "qwen"
 	ThinkingFormatQwenChatTpl ThinkingFormat = "qwen-chat-template"
@@ -652,27 +661,53 @@ const (
 
 // OpenAICompletionsCompat holds compatibility overrides for OpenAI-compatible completions APIs.
 type OpenAICompletionsCompat struct {
-	SupportsStore                    *bool                 `json:"supportsStore,omitempty"`
-	SupportsDeveloperRole            *bool                 `json:"supportsDeveloperRole,omitempty"`
-	SupportsReasoningEffort          *bool                 `json:"supportsReasoningEffort,omitempty"`
-	ReasoningEffortMap               map[string]string     `json:"reasoningEffortMap,omitempty"`
-	SupportsUsageInStreaming         *bool                 `json:"supportsUsageInStreaming,omitempty"`
-	MaxTokensField                   MaxTokensField        `json:"maxTokensField,omitempty"`
-	RequiresToolResultName           *bool                 `json:"requiresToolResultName,omitempty"`
-	RequiresAssistantAfterToolResult *bool                 `json:"requiresAssistantAfterToolResult,omitempty"`
-	RequiresThinkingAsText           *bool                 `json:"requiresThinkingAsText,omitempty"`
-	ThinkingFormat                   ThinkingFormat        `json:"thinkingFormat,omitempty"`
-	OpenRouterRouting                *OpenRouterRouting    `json:"openRouterRouting,omitempty"`
-	VercelGatewayRouting             *VercelGatewayRouting `json:"vercelGatewayRouting,omitempty"`
+	SupportsStore                               *bool                 `json:"supportsStore,omitempty"`
+	SupportsDeveloperRole                       *bool                 `json:"supportsDeveloperRole,omitempty"`
+	SupportsReasoningEffort                     *bool                 `json:"supportsReasoningEffort,omitempty"`
+	ReasoningEffortMap                          map[string]string     `json:"reasoningEffortMap,omitempty"`
+	SupportsUsageInStreaming                    *bool                 `json:"supportsUsageInStreaming,omitempty"`
+	MaxTokensField                              MaxTokensField        `json:"maxTokensField,omitempty"`
+	RequiresToolResultName                      *bool                 `json:"requiresToolResultName,omitempty"`
+	RequiresAssistantAfterToolResult            *bool                 `json:"requiresAssistantAfterToolResult,omitempty"`
+	RequiresThinkingAsText                      *bool                 `json:"requiresThinkingAsText,omitempty"`
+	RequiresReasoningContentOnAssistantMessages *bool                 `json:"requiresReasoningContentOnAssistantMessages,omitempty"`
+	ThinkingFormat                              ThinkingFormat        `json:"thinkingFormat,omitempty"`
+	OpenRouterRouting                           *OpenRouterRouting    `json:"openRouterRouting,omitempty"`
+	VercelGatewayRouting                        *VercelGatewayRouting `json:"vercelGatewayRouting,omitempty"`
 	// ZaiToolStream: whether z.ai supports top-level `tool_stream: true` for
 	// streaming tool call deltas. Default: false.
 	ZaiToolStream      *bool `json:"zaiToolStream,omitempty"`
 	SupportsStrictMode *bool `json:"supportsStrictMode,omitempty"`
+	// CacheControlFormat controls prompt caching convention. "anthropic" applies
+	// Anthropic-style cache_control markers to system prompt, last tool definition,
+	// and last user/assistant text content.
+	CacheControlFormat string `json:"cacheControlFormat,omitempty"` // "anthropic" or ""
+	// SendSessionAffinityHeaders: whether to send session_id, x-client-request-id,
+	// x-session-affinity headers from options.sessionId when caching is enabled.
+	SendSessionAffinityHeaders *bool `json:"sendSessionAffinityHeaders,omitempty"`
+	// SupportsLongCacheRetention: whether the provider supports long prompt cache
+	// retention (prompt_cache_retention: "24h" or Anthropic-style cache_control.ttl: "1h").
+	SupportsLongCacheRetention *bool `json:"supportsLongCacheRetention,omitempty"`
 }
 
 // OpenAIResponsesCompat holds compatibility overrides for OpenAI Responses APIs.
 type OpenAIResponsesCompat struct {
-	// Reserved for future use.
+	// SendSessionIdHeader: whether to send the OpenAI session_id cache-affinity header
+	// from options.sessionId when caching is enabled. Default: true.
+	SendSessionIdHeader *bool `json:"sendSessionIdHeader,omitempty"`
+	// SupportsLongCacheRetention: whether the provider supports prompt_cache_retention: "24h". Default: true.
+	SupportsLongCacheRetention *bool `json:"supportsLongCacheRetention,omitempty"`
+}
+
+// AnthropicMessagesCompat holds compatibility overrides for Anthropic Messages-compatible APIs.
+type AnthropicMessagesCompat struct {
+	// SupportsEagerToolInputStreaming: whether the provider accepts per-tool eager_input_streaming.
+	// When false, the Anthropic provider omits tools[].eager_input_streaming and sends the legacy
+	// fine-grained-tool-streaming beta header for tool-enabled requests. Default: true.
+	SupportsEagerToolInputStreaming *bool `json:"supportsEagerToolInputStreaming,omitempty"`
+	// SupportsLongCacheRetention: whether the provider supports Anthropic long cache retention
+	// (cache_control.ttl: "1h"). Default: true.
+	SupportsLongCacheRetention *bool `json:"supportsLongCacheRetention,omitempty"`
 }
 
 // OpenRouterRouting configures OpenRouter provider routing preferences.
@@ -808,3 +843,18 @@ func (m *Model) GetOpenAIResponsesCompat() *OpenAIResponsesCompat {
 	}
 	return nil
 }
+
+// GetAnthropicMessagesCompat returns the Anthropic messages compat settings, or nil.
+func (m *Model) GetAnthropicMessagesCompat() *AnthropicMessagesCompat {
+	if c, ok := m.Compat.(*AnthropicMessagesCompat); ok {
+		return c
+	}
+	return nil
+}
+
+// BoolPtr returns a pointer to the given bool value.
+// Useful for constructing struct literals with *bool fields.
+func BoolPtr(v bool) *bool { return &v }
+
+// IntPtr returns a pointer to the given int value.
+func IntPtr(v int) *int { return &v }

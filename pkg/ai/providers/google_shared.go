@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/google-shared.ts
-// Upstream hash: 41039e8d
+// Upstream hash: 48aa882
 package providers
 
 import (
@@ -343,13 +343,51 @@ func ConvertGoogleTools(tools []ai.Tool, useParameters bool) []map[string]any {
 			"description": tool.Description,
 		}
 		if useParameters {
-			decl["parameters"] = tool.Parameters
+			decl["parameters"] = sanitizeForOpenAPI(tool.Parameters)
 		} else {
 			decl["parametersJsonSchema"] = tool.Parameters
 		}
 		decls = append(decls, decl)
 	}
 	return []map[string]any{{"functionDeclarations": decls}}
+}
+
+// jsonSchemaMetaDeclarations are JSON Schema keys that Google's OpenAPI-based
+// function declaration format does not accept. They must be stripped before
+// sending tool parameters to Gemini.
+var jsonSchemaMetaDeclarations = map[string]bool{
+	"$schema":        true,
+	"$id":            true,
+	"$anchor":        true,
+	"$dynamicAnchor": true,
+	"$vocabulary":    true,
+	"$comment":       true,
+	"$defs":          true,
+	"definitions":    true, // pre-draft-2019-09 equivalent of $defs
+}
+
+// sanitizeForOpenAPI strips JSON Schema meta-declarations from a schema object.
+// Google's Gemini API rejects keys like $schema, $id, $defs, etc.
+func sanitizeForOpenAPI(schema any) any {
+	switch v := schema.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(v))
+		for key, value := range v {
+			if jsonSchemaMetaDeclarations[key] {
+				continue
+			}
+			result[key] = sanitizeForOpenAPI(value)
+		}
+		return result
+	case []any:
+		result := make([]any, len(v))
+		for i, item := range v {
+			result[i] = sanitizeForOpenAPI(item)
+		}
+		return result
+	default:
+		return schema
+	}
 }
 
 // MapGoogleToolChoice maps a tool choice string to Gemini FunctionCallingConfigMode.

@@ -88,7 +88,7 @@ func clampCodexReasoningEffort(modelID, effort string) string {
 		effort = "xhigh"
 	}
 	switch {
-	case (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4")) && effort == "minimal":
+	case (strings.HasPrefix(id, "gpt-5.2") || strings.HasPrefix(id, "gpt-5.3") || strings.HasPrefix(id, "gpt-5.4") || strings.HasPrefix(id, "gpt-5.5")) && effort == "minimal":
 		return "low"
 	case id == "gpt-5.1" && effort == "xhigh":
 		return "high"

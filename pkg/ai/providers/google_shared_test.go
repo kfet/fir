@@ -138,6 +138,86 @@ func TestConvertGoogleTools(t *testing.T) {
 	}
 }
 
+// TestConvertGoogleTools_SanitizesJSONSchemaMeta verifies that JSON Schema
+// meta-declarations are stripped from tool parameters when using the legacy
+// OpenAPI-style parameters format (Gemini rejects $schema, $defs, etc.).
+func TestConvertGoogleTools_SanitizesJSONSchemaMeta(t *testing.T) {
+	tools := []ai.Tool{{
+		Name:        "complex",
+		Description: "A tool with JSON Schema meta keys",
+		Parameters: map[string]any{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$id":     "https://example.com/schema.json",
+			"$defs": map[string]any{
+				"Foo": map[string]any{"type": "string"},
+			},
+			"definitions": map[string]any{},
+			"$comment":    "ignore me",
+			"type":        "object",
+			"properties": map[string]any{
+				"name": map[string]any{"type": "string"},
+			},
+		},
+	}}
+	result := ConvertGoogleTools(tools, true)
+	decls, _ := result[0]["functionDeclarations"].([]map[string]any)
+	params, _ := decls[0]["parameters"].(map[string]any)
+	for _, key := range []string{"$schema", "$id", "$defs", "definitions", "$comment"} {
+		if _, has := params[key]; has {
+			t.Errorf("expected %q to be stripped from sanitized parameters, got %#v", key, params)
+		}
+	}
+	if params["type"] != "object" {
+		t.Errorf("expected type=object preserved, got %#v", params["type"])
+	}
+	if _, has := params["properties"]; !has {
+		t.Errorf("expected properties preserved, got %#v", params)
+	}
+}
+
+// TestSanitizeForOpenAPI_NestedAndArrays verifies recursion through nested
+// objects and arrays.
+func TestSanitizeForOpenAPI_NestedAndArrays(t *testing.T) {
+	in := map[string]any{
+		"$schema": "drop me",
+		"type":    "object",
+		"properties": map[string]any{
+			"items": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"$id":  "drop nested",
+					"type": "string",
+				},
+			},
+		},
+		"oneOf": []any{
+			map[string]any{"$schema": "drop", "type": "string"},
+			map[string]any{"type": "number"},
+		},
+	}
+	out, ok := sanitizeForOpenAPI(in).(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", sanitizeForOpenAPI(in))
+	}
+	if _, has := out["$schema"]; has {
+		t.Error("top-level $schema not stripped")
+	}
+	props, _ := out["properties"].(map[string]any)
+	items, _ := props["items"].(map[string]any)
+	itemsItems, _ := items["items"].(map[string]any)
+	if _, has := itemsItems["$id"]; has {
+		t.Error("nested $id not stripped")
+	}
+	if itemsItems["type"] != "string" {
+		t.Errorf("nested type not preserved: %#v", itemsItems)
+	}
+	oneOf, _ := out["oneOf"].([]any)
+	first, _ := oneOf[0].(map[string]any)
+	if _, has := first["$schema"]; has {
+		t.Error("array element $schema not stripped")
+	}
+}
+
 func TestConvertGoogleMessages_UserText(t *testing.T) {
 	model := &ai.Model{ID: "gemini-2.0-flash", Provider: "google"}
 	ctx := ai.Context{
@@ -170,8 +250,8 @@ func TestConvertGoogleMessages_AssistantWithToolCall(t *testing.T) {
 		},
 	}
 	contents := ConvertGoogleMessages(model, ctx)
-	if len(contents) != 1 {
-		t.Fatalf("expected 1 content, got %d", len(contents))
+	if len(contents) != 2 {
+		t.Fatalf("expected 2 contents (model + synthetic tool result), got %d", len(contents))
 	}
 	if contents[0].Role != "model" {
 		t.Errorf("expected role 'model', got %q", contents[0].Role)

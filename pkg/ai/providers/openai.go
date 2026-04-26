@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package providers
 
 import (
@@ -81,18 +81,22 @@ type openaiBlock struct {
 
 // resolvedCompat holds fully resolved compatibility settings for an OpenAI-compatible provider.
 type resolvedCompat struct {
-	SupportsStore                    bool
-	SupportsDeveloperRole            bool
-	SupportsReasoningEffort          bool
-	ReasoningEffortMap               map[string]string
-	SupportsUsageInStreaming         bool
-	MaxTokensField                   ai.MaxTokensField
-	RequiresToolResultName           bool
-	RequiresAssistantAfterToolResult bool
-	RequiresThinkingAsText           bool
-	ThinkingFormat                   ai.ThinkingFormat
-	ZaiToolStream                    *bool
-	SupportsStrictMode               bool
+	SupportsStore                               bool
+	SupportsDeveloperRole                       bool
+	SupportsReasoningEffort                     bool
+	ReasoningEffortMap                          map[string]string
+	SupportsUsageInStreaming                    bool
+	MaxTokensField                              ai.MaxTokensField
+	RequiresToolResultName                      bool
+	RequiresAssistantAfterToolResult            bool
+	RequiresThinkingAsText                      bool
+	RequiresReasoningContentOnAssistantMessages bool
+	ThinkingFormat                              ai.ThinkingFormat
+	ZaiToolStream                               *bool
+	SupportsStrictMode                          bool
+	CacheControlFormat                          string // "anthropic" or ""
+	SendSessionAffinityHeaders                  bool
+	SupportsLongCacheRetention                  bool
 }
 
 // detectCompat auto-detects compat settings from the model's provider and base URL.
@@ -102,9 +106,11 @@ func detectCompat(model *ai.Model) resolvedCompat {
 
 	isZai := provider == "zai" || strings.Contains(baseURL, "api.z.ai")
 
+	isDeepSeek := provider == "deepseek" || strings.Contains(baseURL, "deepseek.com")
+
 	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
 		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
-		strings.Contains(baseURL, "chutes.ai") || strings.Contains(baseURL, "deepseek.com") ||
+		strings.Contains(baseURL, "chutes.ai") || isDeepSeek ||
 		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai") ||
 		provider == "poe" || strings.Contains(baseURL, "poe.com")
 
@@ -119,12 +125,22 @@ func detectCompat(model *ai.Model) resolvedCompat {
 	}
 
 	thinkingFmt := ai.ThinkingFormatOpenAI
-	if isZai {
+	if isDeepSeek {
+		thinkingFmt = ai.ThinkingFormatDeepSeek
+	} else if isZai {
 		thinkingFmt = ai.ThinkingFormatZAI
 	}
 
 	var reasoningEffortMap map[string]string
-	if isGroq && model.ID == "qwen/qwen3-32b" {
+	if isDeepSeek {
+		reasoningEffortMap = map[string]string{
+			"minimal": "high",
+			"low":     "high",
+			"medium":  "high",
+			"high":    "high",
+			"xhigh":   "max",
+		}
+	} else if isGroq && model.ID == "qwen/qwen3-32b" {
 		reasoningEffortMap = map[string]string{
 			"minimal": "default",
 			"low":     "default",
@@ -135,18 +151,27 @@ func detectCompat(model *ai.Model) resolvedCompat {
 		}
 	}
 
+	cacheControlFormat := ""
+	if provider == "openrouter" && strings.HasPrefix(model.ID, "anthropic/") {
+		cacheControlFormat = "anthropic"
+	}
+
 	return resolvedCompat{
-		SupportsStore:                    !isNonStandard,
-		SupportsDeveloperRole:            !isNonStandard,
-		SupportsReasoningEffort:          !isGrok && !isZai,
-		ReasoningEffortMap:               reasoningEffortMap,
-		SupportsUsageInStreaming:         true,
-		MaxTokensField:                   maxField,
-		RequiresToolResultName:           false,
-		RequiresAssistantAfterToolResult: false,
-		RequiresThinkingAsText:           false,
-		ThinkingFormat:                   thinkingFmt,
-		SupportsStrictMode:               true,
+		SupportsStore:                               !isNonStandard,
+		SupportsDeveloperRole:                       !isNonStandard,
+		SupportsReasoningEffort:                     !isGrok && !isZai,
+		ReasoningEffortMap:                          reasoningEffortMap,
+		SupportsUsageInStreaming:                    true,
+		MaxTokensField:                              maxField,
+		RequiresToolResultName:                      false,
+		RequiresAssistantAfterToolResult:            false,
+		RequiresThinkingAsText:                      false,
+		RequiresReasoningContentOnAssistantMessages: isDeepSeek,
+		ThinkingFormat:                              thinkingFmt,
+		SupportsStrictMode:                          true,
+		CacheControlFormat:                          cacheControlFormat,
+		SendSessionAffinityHeaders:                  false,
+		SupportsLongCacheRetention:                  true,
 	}
 }
 
@@ -193,6 +218,18 @@ func getCompat(model *ai.Model) resolvedCompat {
 	}
 	if c.SupportsStrictMode != nil {
 		detected.SupportsStrictMode = *c.SupportsStrictMode
+	}
+	if c.RequiresReasoningContentOnAssistantMessages != nil {
+		detected.RequiresReasoningContentOnAssistantMessages = *c.RequiresReasoningContentOnAssistantMessages
+	}
+	if c.CacheControlFormat != "" {
+		detected.CacheControlFormat = c.CacheControlFormat
+	}
+	if c.SendSessionAffinityHeaders != nil {
+		detected.SendSessionAffinityHeaders = *c.SendSessionAffinityHeaders
+	}
+	if c.SupportsLongCacheRetention != nil {
+		detected.SupportsLongCacheRetention = *c.SupportsLongCacheRetention
 	}
 
 	return detected

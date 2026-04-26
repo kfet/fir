@@ -1,11 +1,16 @@
 // Ported from: packages/ai/src/providers/transform-messages.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package providers
 
 import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
+)
+
+const (
+	nonVisionUserImagePlaceholder = "(image omitted: model does not support images)"
+	nonVisionToolImagePlaceholder = "(tool image omitted: model does not support images)"
 )
 
 // NormalizeToolCallIDFunc normalizes tool call IDs for cross-provider compatibility.
@@ -18,11 +23,14 @@ type NormalizeToolCallIDFunc func(id string, model *ai.Model, source *ai.Assista
 //   - Synthetic tool results for orphaned tool calls
 //   - Skipping errored/aborted assistant messages
 func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCallID NormalizeToolCallIDFunc) []ai.Message {
+	// Downgrade unsupported images for non-vision models
+	imageAwareMessages := downgradeUnsupportedImages(messages, model)
+
 	toolCallIDMap := make(map[string]string)
 
 	// First pass: transform messages
-	transformed := make([]ai.Message, 0, len(messages))
-	for _, msg := range messages {
+	transformed := make([]ai.Message, 0, len(imageAwareMessages))
+	for _, msg := range imageAwareMessages {
 		switch {
 		case msg.AsUser() != nil:
 			transformed = append(transformed, msg)
@@ -160,5 +168,104 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 		}
 	}
 
+	// If the conversation ends with unresolved tool calls, synthesize results now.
+	insertSyntheticResults()
+
+	return result
+}
+
+// downgradeUnsupportedImages replaces image blocks with placeholder text for
+// models that don't support image input. This consolidates image filtering
+// that was previously done in each provider's convertMessages.
+func downgradeUnsupportedImages(messages []ai.Message, model *ai.Model) []ai.Message {
+	if model.SupportsImages() {
+		return messages
+	}
+
+	result := make([]ai.Message, 0, len(messages))
+	for _, msg := range messages {
+		switch {
+		case msg.AsUser() != nil:
+			u := msg.AsUser()
+			if arr, ok := u.Content.([]any); ok {
+				if newBlocks, changed := replaceImagesWithPlaceholder(arr, nonVisionUserImagePlaceholder); changed {
+					result = append(result, ai.NewUserMsg(newBlocks, u.Timestamp))
+					continue
+				}
+			}
+			result = append(result, msg)
+
+		case msg.AsToolResult() != nil:
+			tr := msg.AsToolResult()
+			newContent := replaceImagesInToolResult(tr.Content, nonVisionToolImagePlaceholder)
+			if len(newContent) != len(tr.Content) {
+				tr2 := *tr
+				tr2.Content = newContent
+				result = append(result, ai.NewToolResultMsg(tr2))
+			} else {
+				result = append(result, msg)
+			}
+
+		default:
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// replaceImagesWithPlaceholder replaces image content blocks with a text placeholder.
+// Consecutive images produce only one placeholder to avoid spam.
+// Returns (blocks, changed) — if no images found, returns (nil, false).
+func replaceImagesWithPlaceholder(blocks []any, placeholder string) ([]any, bool) {
+	hasImage := false
+	for _, block := range blocks {
+		if m, ok := block.(map[string]any); ok && m["type"] == "image" {
+			hasImage = true
+			break
+		}
+	}
+	if !hasImage {
+		return nil, false
+	}
+	var result []any
+	prevWasPlaceholder := false
+	for _, block := range blocks {
+		// Check if it's an image content block
+		if m, ok := block.(map[string]any); ok {
+			if m["type"] == "image" {
+				if !prevWasPlaceholder {
+					result = append(result, map[string]any{
+						"type": "text",
+						"text": placeholder,
+					})
+				}
+				prevWasPlaceholder = true
+				continue
+			}
+		}
+		result = append(result, block)
+		prevWasPlaceholder = false
+	}
+	return result, true
+}
+
+// replaceImagesInToolResult replaces image content blocks in tool results with text placeholders.
+func replaceImagesInToolResult(content []ai.ToolResultContent, placeholder string) []ai.ToolResultContent {
+	var result []ai.ToolResultContent
+	prevWasPlaceholder := false
+	for _, block := range content {
+		if block.IsImage() {
+			if !prevWasPlaceholder {
+				result = append(result, ai.ToolResultContent{
+					Type: ai.ContentTypeText,
+					Text: placeholder,
+				})
+			}
+			prevWasPlaceholder = true
+			continue
+		}
+		result = append(result, block)
+		prevWasPlaceholder = false
+	}
 	return result
 }

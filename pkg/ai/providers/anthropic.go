@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/anthropic.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 48aa882
 package providers
 
 import (
@@ -359,7 +359,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		}
 
 		url := strings.TrimRight(model.BaseURL, "/") + "/v1/messages"
-		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options)
+		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 
 		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
@@ -613,7 +613,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						if refreshed != "" && refreshed != apiKey {
 							firlog.Info("anthropic auth error, refreshed token", "attempt", attempt)
 							apiKey = refreshed
-							headers = buildAnthropicHeaders(model, apiKey, oauthToken, options)
+							headers = buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 							lastErrMsg = errMsg
 							retryNeeded = true
 							break sseLoop
@@ -682,7 +682,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					if refreshed != "" && refreshed != apiKey {
 						firlog.Info("anthropic HTTP auth error, refreshed token", "status", sseStatusCode, "attempt", attempt)
 						apiKey = refreshed
-						headers = buildAnthropicHeaders(model, apiKey, oauthToken, options)
+						headers = buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 						lastErrMsg = errMsg
 						continue
 					}
@@ -797,7 +797,7 @@ func isPoeAnthropic(model *ai.Model) bool {
 	return model.Provider == "poe" || strings.Contains(model.BaseURL, "poe.com")
 }
 
-func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, options *ai.StreamOptions) map[string]string {
+func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, options *ai.StreamOptions, hasTools bool) map[string]string {
 	if isPoeAnthropic(model) {
 		// Poe-specific: Bearer auth, no x-api-key, no anthropic-beta.
 		// Poe proxies to Bedrock which rejects unknown beta flags, and
@@ -821,7 +821,24 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		return BuildRequestHeaders(hdrs, filteredModel, options, "x-anthropic-thinking-")
 	}
 
-	betaFeatures := "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+	betaFeatures := []string{}
+
+	// Fine-grained tool streaming: use legacy beta header only when
+	// the provider doesn't support per-tool eager_input_streaming.
+	if hasTools && !getAnthropicCompat(model).SupportsEagerToolInputStreaming {
+		betaFeatures = append(betaFeatures, "fine-grained-tool-streaming-2025-05-14")
+	}
+
+	// Interleaved thinking beta (only for non-adaptive-thinking models)
+	if options != nil && options.Headers != nil {
+		if options.Headers["x-anthropic-thinking-disabled"] == "true" ||
+			options.Headers["x-anthropic-thinking-enabled"] == "true" ||
+			options.Headers["x-anthropic-thinking-effort"] != "" {
+			if !supportsAdaptiveThinking(model.ID) {
+				betaFeatures = append(betaFeatures, "interleaved-thinking-2025-05-14")
+			}
+		}
+	}
 
 	// Add server tool betas if needed.
 	if options != nil {
@@ -841,11 +858,11 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 			}
 			if beta != "" && !seen[beta] {
 				seen[beta] = true
-				betaFeatures += "," + beta
+				betaFeatures = append(betaFeatures, beta)
 			}
 		}
 		if options.Compaction != nil && options.Compaction.Enabled && supportsModelCompaction(model) {
-			betaFeatures += ",compact-2026-01-12"
+			betaFeatures = append(betaFeatures, "compact-2026-01-12")
 		}
 	}
 
@@ -856,20 +873,22 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		"anthropic-dangerous-direct-browser-access": "true",
 	}
 
+	betaStr := strings.Join(betaFeatures, ",")
+
 	if oauthToken {
 		// OAuth beta prefix is set by the auth extension via model headers.
 		oauthBetaPrefix := model.Headers["x-anthropic-oauth-beta-prefix"]
 		if oauthBetaPrefix != "" {
-			authHeaders["anthropic-beta"] = oauthBetaPrefix + "," + betaFeatures
+			authHeaders["anthropic-beta"] = oauthBetaPrefix + "," + betaStr
 		} else {
-			authHeaders["anthropic-beta"] = betaFeatures
+			authHeaders["anthropic-beta"] = betaStr
 		}
 		// Use the apiKey (resolved fresh via GetApiKey with auto-refresh)
 		// as a Bearer token. This avoids using a stale token baked into
 		// model.Headers at startup.
 		authHeaders["authorization"] = "Bearer " + apiKey
 	} else {
-		authHeaders["anthropic-beta"] = betaFeatures
+		authHeaders["anthropic-beta"] = betaStr
 		authHeaders["x-api-key"] = apiKey
 	}
 
@@ -928,7 +947,7 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 			"text": ctx.SystemPrompt,
 		}
 		if retention != ai.CacheNone {
-			block["cache_control"] = cacheControlBlock(model.BaseURL, retention)
+			block["cache_control"] = cacheControlBlock(model, retention)
 		}
 		systemBlocks = append(systemBlocks, block)
 	}
@@ -1028,12 +1047,35 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	return params
 }
 
-func cacheControlBlock(baseURL string, retention ai.CacheRetention) map[string]any {
+func cacheControlBlock(model *ai.Model, retention ai.CacheRetention) map[string]any {
 	cc := map[string]any{"type": "ephemeral"}
-	if retention == ai.CacheLong && strings.Contains(baseURL, "api.anthropic.com") {
+	if retention == ai.CacheLong && getAnthropicCompat(model).SupportsLongCacheRetention {
 		cc["ttl"] = "1h"
 	}
 	return cc
+}
+
+// resolvedAnthropicCompat is the resolved AnthropicMessagesCompat with defaults applied.
+type resolvedAnthropicCompat struct {
+	SupportsEagerToolInputStreaming bool
+	SupportsLongCacheRetention      bool
+}
+
+// getAnthropicCompat returns the resolved AnthropicMessagesCompat for a model.
+func getAnthropicCompat(model *ai.Model) resolvedAnthropicCompat {
+	result := resolvedAnthropicCompat{
+		SupportsEagerToolInputStreaming: true,
+		SupportsLongCacheRetention:      true,
+	}
+	if compat := model.GetAnthropicMessagesCompat(); compat != nil {
+		if compat.SupportsEagerToolInputStreaming != nil {
+			result.SupportsEagerToolInputStreaming = *compat.SupportsEagerToolInputStreaming
+		}
+		if compat.SupportsLongCacheRetention != nil {
+			result.SupportsLongCacheRetention = *compat.SupportsLongCacheRetention
+		}
+	}
+	return result
 }
 
 func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken bool, retention ai.CacheRetention) []map[string]any {
@@ -1169,7 +1211,7 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 		last := params[len(params)-1]
 		if role, _ := last["role"].(string); role == "user" {
 			if content, ok := last["content"].([]map[string]any); ok && len(content) > 0 {
-				content[len(content)-1]["cache_control"] = cacheControlBlock(model.BaseURL, retention)
+				content[len(content)-1]["cache_control"] = cacheControlBlock(model, retention)
 			}
 		}
 	}

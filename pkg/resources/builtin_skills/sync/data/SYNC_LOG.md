@@ -1,5 +1,42 @@
 # Sync Log
 
+## 2026-04-26 — Sync to v0.70.2 (commit 48aa882)
+
+- `ai/src/types.ts` → `pkg/ai/types.go`: New providers `deepseek` and `fireworks`; new `StreamOptions` fields `timeoutMs` and `maxRetries`; new `AnthropicMessagesCompat` type with `supportsEagerToolInputStreaming` and `supportsLongCacheRetention`; `OpenAICompletionsCompat` gains `requiresReasoningContentOnAssistantMessages`, `thinkingFormat: "deepseek"`, `cacheControlFormat`, `sendSessionAffinityHeaders`, `supportsLongCacheRetention`; `OpenAIResponsesCompat` gains `sendSessionIdHeader` and `supportsLongCacheRetention`; Model compat now resolves `AnthropicMessagesCompat` for `anthropic-messages` API; added `BoolPtr`/`IntPtr` helpers.
+- `ai/src/env-api-keys.ts` → `pkg/ai/envkeys/envkeys.go`: Added `deepseek` → `DEEPSEEK_API_KEY` and `fireworks` → `FIREWORKS_API_KEY` mappings; `ANTHROPIC_OAUTH_TOKEN` now takes precedence over `ANTHROPIC_API_KEY`.
+- `ai/src/providers/simple-options.ts` → `pkg/ai/providers/options.go`: `maxTokens` uses `??` semantics (respects explicit 0); added `timeoutMs`/`maxRetries` passthrough.
+- `ai/src/providers/transform-messages.ts` → `pkg/ai/providers/transform.go`: New `downgradeUnsupportedImages()` — replaces images with placeholder text for non-vision models; `insertSyntheticResults()` now called at end to synthesize results for unresolved tool calls.
+- `agent/src/types.ts` → `pkg/agent/types.go`: `AgentToolResult` gains `Terminate` field for early-termination hint.
+- `agent/src/agent-loop.ts` → `pkg/agent/loop.go`: `executeToolCalls` returns `executedToolCallBatch` with `terminate` flag; agent loop stops when all finalized results set `terminate=true`.
+- `ai/src/providers/anthropic.ts` → `pkg/ai/providers/anthropic.go`: New `AnthropicMessagesCompat` drives `supportsEagerToolInputStreaming` (conditional `eager_input_streaming` / fine-grained-tool-streaming beta) and `supportsLongCacheRetention` (conditional `cache_control.ttl: "1h"`); beta features now conditionally included (not hardcoded); `cacheControlBlock` uses compat instead of URL check.
+- `ai/src/providers/openai-completions.ts` → `pkg/ai/providers/openai.go`: DeepSeek thinking format (`thinking: { type }` + `reasoning_effort` mapping); `requiresReasoningContentOnAssistantMessages`; `cacheControlFormat: "anthropic"` for Anthropic-style cache_control markers; `sendSessionAffinityHeaders`; `supportsLongCacheRetention`.
+- `ai/src/providers/openai-responses.ts` → `pkg/ai/providers/openai_responses.go`: `OpenAIResponsesCompat` drives `sendSessionIdHeader` (conditional session_id header) and `supportsLongCacheRetention` (conditional `prompt_cache_retention: "24h"`).
+- `ai/src/providers/openai-codex-responses.ts` → `pkg/ai/providers/openai_codex_responses.go`: gpt-5.5 added to `clampReasoningEffort` minimal→low clamping.
+- `ai/src/providers/google-shared.ts` → `pkg/ai/providers/google_shared.go`: New `sanitizeForOpenAPI` strips JSON Schema meta-declarations (`$schema`, `$id`, `$defs`, etc.) from tool parameters before sending to Gemini.
+- `ai/src/utils/oauth/openai-codex.ts` → `pkg/ai/oauth/openai_codex.go`: Callback host reads `PI_OAUTH_CALLBACK_HOST` env var.
+- `coding-agent/src/core/model-resolver.ts` → `pkg/models/modelresolver.go`: New providers `deepseek` and `fireworks` in defaults; updated defaults (anthropic→claude-opus-4-7, openai-codex→gpt-5.5, azure→gpt-5.4, google→gemini-3.1-pro-preview, github-copilot→gpt-5.4, etc.).
+- `ai/scripts/generate-models.ts` → `cmd/generate-models/main.go`: New models: gpt-5.5, deepseek-v4-flash, deepseek-v4-pro; new `compatSpec` fields `RequiresReasoningContentOnAssistantMessages` and `ReasoningEffortMap`.
+
+### Notable changes
+
+- **DeepSeek V4 provider**: Full DeepSeek support with dedicated thinking format, reasoning-effort mapping, and `requiresReasoningContentOnAssistantMessages` compat.
+- **Fireworks provider**: New provider with `FIREWORKS_API_KEY` env key.
+- **Anthropic conditional betas and compat**: `fine-grained-tool-streaming` and `interleaved-thinking` betas are now conditional based on `AnthropicMessagesCompat`. Third-party Anthropic-compatible endpoints (e.g. GitHub Copilot, Fireworks) that don't support these betas can opt out.
+- **Agent tool termination**: Tools can signal `terminate=true` to halt the agent loop after the current batch.
+- **Centralised image downgrade**: Non-vision models now get `"(image omitted: model does not support images)"` placeholder text instead of silently dropping images, matching upstream's consolidation of image filtering into `transform-messages`.
+- **Synthetic tool results at end**: Unresolved tool calls at the end of a conversation now get synthetic error results, preventing API errors from providers that require tool results after tool calls.
+- **Google JSON Schema sanitization**: Tool parameters sent to Gemini now have `$schema`, `$id`, `$defs` etc. stripped, preventing API rejection errors.
+- **OAuth callback host configurability**: `PI_OAUTH_CALLBACK_HOST` env var enables OAuth in containerised/remote environments.
+- **Updated default models**: Most provider defaults bumped (claude-opus-4-7, gpt-5.5, gemini-3.1-pro-preview, etc.).
+- **timeoutMs / maxRetries**: New `StreamOptions` fields for per-request timeout and retry control (wired through options.go, consumed by providers that support it).
+
+### Deferred / known divergence
+- Anthropic SSE rewrite (upstream replaced SDK `.stream()` with manual SSE parsing) — fir already has its own SSE parsing via `pkg/ai/providers/sse.go`.
+- OpenAI Completions full cache-control and session-affinity wiring (Anthropic-style `cache_control` markers, `prompt_cache_key`/`prompt_cache_retention` params) — not yet wired into fir's OpenAI completions provider; compat types are defined but the call-site logic is not yet ported.
+- Google Vertex custom baseUrl with `ResourceScope.COLLECTION` — fir uses the genai SDK differently.
+- Bedrock region resolution improvements — fir's Bedrock provider has diverged.
+- Model registry validation refactor (Ajv → TypeBox Compile) — fir uses Go-native validation.
+
 ## 2026-04-18 — Sync to v0.67.68 (commit a1edb8a4)
 
 - `ai/src/utils/overflow.ts` → `pkg/ai/overflow/overflow.go`: Added `request_too_large` (HTTP 413) Anthropic pattern; added Cerebras `400/413 (no body)` pattern directly to `overflowPatterns`; added `nonOverflowPatterns` exclusion list so Bedrock throttling and generic rate-limit messages no longer match `too many tokens`.
