@@ -3,8 +3,6 @@ package extension
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
@@ -58,11 +56,6 @@ type SetupOptions struct {
 	// Extensions in this list are not started even if they appear in EnabledNames.
 	// This is populated from --disable-extension flags.
 	DisabledNames []string
-
-	// OfferFixFn is called when a frontmatter mismatch is detected after an
-	// extension handshake. It receives the mismatch and returns true if the
-	// frontmatter should be auto-fixed. When nil, a warning is printed to stderr.
-	OfferFixFn func(mm FrontmatterMismatch) bool
 
 	// ExtraExtensionDirs lists additional directories to scan for extension
 	// scripts. Each directory is scanned with "package" scope, shadowed by
@@ -188,17 +181,6 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		}
 	}
 	mgr.ConfirmFn = confirmFn
-
-	// Wire frontmatter fix offer.
-	if opts.OfferFixFn != nil {
-		mgr.OfferFixFn = opts.OfferFixFn
-	} else {
-		// Default: print warning to stderr, don't fix.
-		mgr.OfferFixFn = func(mm FrontmatterMismatch) bool {
-			fmt.Fprintln(os.Stderr, FormatFrontmatterWarning(mm))
-			return false
-		}
-	}
 
 	// Wire optional UI callbacks.
 	if opts.NotifyFn != nil {

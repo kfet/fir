@@ -24,7 +24,6 @@ type Manager struct {
 	trust     *TrustStore
 	mu        sync.Mutex
 	bridges   []*managedBridge
-	pending   []*pendingExtension // extensions deferred for lazy startup
 	ConfirmFn ConfirmFunc
 
 	// AllowedNames is an optional allowlist of extension names. When non-empty,
@@ -42,11 +41,6 @@ type Manager struct {
 	// Optional UI callbacks, applied to each bridge when it starts.
 	notifyFn    NotifyFunc
 	setStatusFn SetStatusFunc
-
-	// OfferFixFn is called when a frontmatter mismatch is detected after
-	// handshake. It receives the mismatch details and returns true if the
-	// user wants the frontmatter auto-fixed. When nil, only a warning is logged.
-	OfferFixFn func(mm FrontmatterMismatch) bool
 
 	// startFailures records extensions that failed during Start.
 	startFailures []StartFailure
@@ -74,13 +68,6 @@ type StartFailure struct {
 	Name   string // extension name
 	IsAuth bool   // true when the extension provides auth providers
 	Err    error  // the error that prevented startup
-}
-
-// pendingExtension is an extension that declared its events/commands in
-// frontmatter and will be started lazily on first matching event or command.
-type pendingExtension struct {
-	cfg    ExtProcConfig
-	events map[string]bool // event names this extension subscribes to
 }
 
 // NewManager creates a Manager with the given logger.
@@ -159,14 +146,8 @@ func (m *Manager) SetConfigDirs(dirs []string) {
 }
 
 // Start discovers extensions, spawns processes, performs handshakes, and
-// starts bridge dispatch loops.
-//
-// Extensions that declare their subscribed events in frontmatter are deferred
-// for lazy startup — they are only spawned when the first matching event fires.
-// However, if an extension also declares `tools:` in frontmatter, it is started
-// eagerly so its tools are registered up-front (lazy stub-registration is only
-// implemented for commands).  Extensions without frontmatter events are started
-// eagerly (in parallel).
+// starts bridge dispatch loops.  All discovered extensions start eagerly in
+// parallel — there is no lazy/deferred startup.
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
 	m.mu.Lock()
 	m.projectDir = projectDir
@@ -226,36 +207,21 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	m.sdkDir = sdkPath
 	m.mu.Unlock()
 
-	// Partition into eager (no frontmatter events, OR declares tools) and
-	// lazy (only events/commands).  Tool-bearing extensions must always
-	// start eagerly so their tools are registered up-front; lazy startup is
-	// only safe for ext that contribute commands or pure event handlers.
-	var eager []ExtProcConfig
+	// All discovered extensions start eagerly, in parallel.  Handshakes spawn
+	// Python interpreters and are I/O-bound, so parallelism keeps wall-clock
+	// startup low (~150ms total for ~9 builtins on M-series).
+	var toStart []ExtProcConfig
 	for _, cfg := range configs {
 		if m.shouldSkip(cfg) {
 			continue
 		}
-		if len(cfg.Events) > 0 && len(cfg.Tools) == 0 {
-			// Defer: register as pending, start on first matching event.
-			eventSet := make(map[string]bool, len(cfg.Events))
-			for _, e := range cfg.Events {
-				eventSet[e] = true
-			}
-			m.mu.Lock()
-			m.pending = append(m.pending, &pendingExtension{cfg: cfg, events: eventSet})
-			m.mu.Unlock()
-			m.logger.Debug("deferred extension for lazy start", "ext", cfg.Name, "events", cfg.Events)
-		} else {
-			eager = append(eager, cfg)
-		}
+		toStart = append(toStart, cfg)
 	}
 
-	// Start eager extensions concurrently — handshakes involve spawning
-	// Python interpreters and are I/O-bound, so parallelism helps a lot.
 	var wg sync.WaitGroup
 	var failMu sync.Mutex
 	var failures []StartFailure
-	for _, cfg := range eager {
+	for _, cfg := range toStart {
 		wg.Add(1)
 		go func(cfg ExtProcConfig) {
 			defer wg.Done()
@@ -372,21 +338,6 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		return err
 	}
 
-	// Validate frontmatter against actual handshake capabilities.
-	if mm := CheckFrontmatter(cfg, caps); !mm.Empty() {
-		m.logger.Warn(FormatFrontmatterWarning(mm))
-		m.mu.Lock()
-		offerFix := m.OfferFixFn
-		m.mu.Unlock()
-		if offerFix != nil && offerFix(mm) {
-			if err := FixFrontmatter(cfg.Path, caps); err != nil {
-				m.logger.Warn("failed to fix frontmatter", "ext", cfg.Name, "err", err)
-			} else {
-				m.logger.Info("fixed frontmatter", "ext", cfg.Name)
-			}
-		}
-	}
-
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
 	bridge.RegisterAuthProviders()
@@ -444,7 +395,6 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	m.mu.Lock()
 	bridges := m.bridges
 	m.bridges = nil
-	m.pending = nil // discard any un-triggered lazy extensions
 	m.mu.Unlock()
 
 	// Build session_end payload.
@@ -528,59 +478,8 @@ func (m *Manager) Reload(ctx context.Context) error {
 	return nil
 }
 
-// startPendingForEvent starts any pending (lazy) extensions that subscribe to
-// the given event or hook name. It removes them from the pending list and
-// starts them in parallel, blocking until all are ready.
-func (m *Manager) startPendingForEvent(name string) {
-	m.mu.Lock()
-	var toStart []ExtProcConfig
-	var remaining []*pendingExtension
-	for _, pe := range m.pending {
-		if pe.events[name] {
-			toStart = append(toStart, pe.cfg)
-		} else {
-			remaining = append(remaining, pe)
-		}
-	}
-	if len(toStart) > 0 {
-		m.pending = remaining
-	}
-	cwd := m.cwd
-	sdkEnv := m.sdkEnv
-	api := m.api
-	projectDir := m.projectDir
-	m.mu.Unlock()
-
-	if len(toStart) == 0 {
-		return
-	}
-
-	var wg sync.WaitGroup
-	for _, cfg := range toStart {
-		wg.Add(1)
-		go func(cfg ExtProcConfig) {
-			defer wg.Done()
-			if err := m.startOne(context.Background(), cfg, cwd, sdkEnv, api, projectDir); err != nil {
-				m.logger.Warn("failed to lazy-start extension",
-					"ext", cfg.Name, "trigger", name, "err", err)
-			} else {
-				m.logger.Info("lazy-started extension", "ext", cfg.Name, "trigger", name)
-			}
-		}(cfg)
-	}
-	wg.Wait()
-
-	// A lazy-started extension may have registered auth providers that
-	// conflict with an already-running extension. Resolve deterministically.
-	m.resolveAuthConflicts()
-}
-
 // EmitEvent fans out a notification to all bridges.
-// If any pending (lazy) extensions subscribe to this event, they are started
-// first so they receive it.
 func (m *Manager) EmitEvent(name string, data any) {
-	m.startPendingForEvent(name)
-
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
@@ -593,11 +492,7 @@ func (m *Manager) EmitEvent(name string, data any) {
 }
 
 // CallHook calls all bridges with the given hook and collects results concurrently.
-// If any pending (lazy) extensions subscribe to this hook, they are started
-// first so their hook handlers are active.
 func (m *Manager) CallHook(ctx context.Context, name string, data any, timeout time.Duration) ([]json.RawMessage, error) {
-	m.startPendingForEvent(name)
-
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
@@ -735,7 +630,6 @@ func (m *Manager) EnabledExtensionNames() []string {
 	m.mu.Lock()
 	allowed := append([]string(nil), m.AllowedNames...)
 	bridges := append([]*managedBridge(nil), m.bridges...)
-	pending := append([]*pendingExtension(nil), m.pending...)
 	m.mu.Unlock()
 
 	names := make(map[string]struct{})
@@ -753,11 +647,6 @@ func (m *Manager) EnabledExtensionNames() []string {
 			}
 			names[mb.cfg.Name] = struct{}{}
 		}
-		for _, pe := range pending {
-			if pe.cfg.Name != "" {
-				names[pe.cfg.Name] = struct{}{}
-			}
-		}
 	}
 
 	out := make([]string, 0, len(names))
@@ -769,7 +658,7 @@ func (m *Manager) EnabledExtensionNames() []string {
 }
 
 // ExtensionToolNames returns a map of extension name → tool names for all
-// running (not pending) extensions that have registered tools.
+// running extensions that have registered tools.
 func (m *Manager) ExtensionToolNames() map[string][]string {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
@@ -820,18 +709,12 @@ func (m *Manager) checkCommandClashes(extName string, cmds []CommandSpec) error 
 
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
-	pending := append([]*pendingExtension(nil), m.pending...)
 	m.mu.Unlock()
 
 	existing := make(map[string]string) // command name -> owning extension
 	for _, mb := range bridges {
 		for _, spec := range mb.bridge.caps.Commands {
 			existing[spec.Name] = mb.cfg.Name
-		}
-	}
-	for _, pe := range pending {
-		for _, cmd := range pe.cfg.Commands {
-			existing[cmd.Name] = pe.cfg.Name
 		}
 	}
 
@@ -853,22 +736,12 @@ type ExtCommand struct {
 func (m *Manager) GetCommands() []ExtCommand {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
-	pending := append([]*pendingExtension(nil), m.pending...)
 	m.mu.Unlock()
 
 	var cmds []ExtCommand
 	for _, mb := range bridges {
 		for _, spec := range mb.bridge.caps.Commands {
 			cmds = append(cmds, ExtCommand{ExtName: mb.cfg.Name, Spec: spec})
-		}
-	}
-	// Include commands declared in frontmatter for pending (lazy) extensions.
-	for _, pe := range pending {
-		for _, cmd := range pe.cfg.Commands {
-			cmds = append(cmds, ExtCommand{
-				ExtName: pe.cfg.Name,
-				Spec:    CommandSpec{Name: cmd.Name, Description: cmd.Description},
-			})
 		}
 	}
 	return cmds
@@ -910,43 +783,6 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 				return result, nil
 			}
 		}
-	}
-
-	// Check pending extensions for a matching frontmatter command.
-	m.mu.Lock()
-	var matchedCfg *ExtProcConfig
-	var remaining []*pendingExtension
-	for _, pe := range m.pending {
-		matched := false
-		for _, cmd := range pe.cfg.Commands {
-			if cmd.Name == name {
-				matched = true
-				cfg := pe.cfg
-				matchedCfg = &cfg
-				break
-			}
-		}
-		if !matched {
-			remaining = append(remaining, pe)
-		}
-	}
-	if matchedCfg != nil {
-		m.pending = remaining
-	}
-	cwd := m.cwd
-	sdkEnv := m.sdkEnv
-	api := m.api
-	projectDir := m.projectDir
-	m.mu.Unlock()
-
-	if matchedCfg != nil {
-		// Start the extension, then dispatch the command.
-		if err := m.startOne(context.Background(), *matchedCfg, cwd, sdkEnv, api, projectDir); err != nil {
-			return CommandResult{}, fmt.Errorf("failed to start extension %s for command %q: %w", matchedCfg.Name, name, err)
-		}
-		m.logger.Info("lazy-started extension for command", "ext", matchedCfg.Name, "command", name)
-		// Retry dispatch now that the extension is running.
-		return m.DispatchCommand(name, args, timeout)
 	}
 
 	return CommandResult{}, fmt.Errorf("extension: no command %q registered", name)
@@ -1000,12 +836,6 @@ func (m *Manager) CollectSessionData() map[string]map[string]string {
 // (handleReexecCommand) shuts down the TUI immediately after, and
 // syscall.Exec replaces the process entirely, so no explicit teardown is
 // needed.
-//
-// Note: pending (lazy) extensions that have not yet been started are skipped,
-// consistent with Stop(). In practice this is not an issue: any extension that
-// needs to react to session_shutdown (e.g. the schedule extension) also
-// subscribes to session_start, which causes it to be started eagerly at the
-// beginning of the session — well before /reexec is invoked.
 func (m *Manager) ShutdownAndCollect() map[string]map[string]string {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
@@ -1051,11 +881,6 @@ func (m *Manager) SeedSessionData(data map[string]map[string]string) {
 // The data is also seeded into each bridge's store so ctx.get_session_data()
 // works throughout the session.
 func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]string) {
-	// Start any lazy extensions that subscribe to session_start before
-	// dispatching, so they don't miss the event.
-	m.startPendingForEvent("session_start")
-
-	// Snapshot bridges *after* lazy start so newly-started bridges are included.
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()

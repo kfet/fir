@@ -3,7 +3,6 @@
 # name: plan-nudger
 # description: Surface a calm plan-status steer when the agent pauses or stagnates while a plan is in flight
 # builtin: true
-# events: session_update, turn_end, agent_end, tool_execution_end
 # ---
 """
 plan-nudger — keeps a long-running work loop legible to both the user

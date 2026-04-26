@@ -517,7 +517,7 @@ fir_ext.run()
 ## Frontmatter
 
 Extensions can declare auth providers in comment frontmatter for discovery
-(same pattern as events and commands):
+without spawning the extension process:
 
 ```python
 #!/usr/bin/env python3
@@ -525,8 +525,9 @@ Extensions can declare auth providers in comment frontmatter for discovery
 # fir:auth_provider my-corp
 ```
 
-This allows fir to know about auth providers before starting the extension
-process (useful for lazy loading).
+This allows the auth-only manager (used during fir startup before the full
+extension manager runs) to know which extensions register auth providers and
+spawn only those.
 
 ## Validation
 

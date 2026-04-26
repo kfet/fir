@@ -674,9 +674,6 @@ directly after an optional shebang line:
 #!/usr/bin/env python3
 # ---
 # name: my-ext
-# events: session_start, hook/tool_call
-# commands: my-cmd: Brief description, other-cmd
-# tools: my_tool, other_tool
 # modes: tui, acp
 # demo: true
 # ---
@@ -686,22 +683,21 @@ fir reads this block **before** starting the process and uses it for:
 
 - Filtering by mode (`modes` key).
 - Displaying the extension in listings.
-- Validating the init handshake result (events, commands, and tools must match; fir
-  warns on mismatch and can auto-fix with user consent).
-- Deciding eager vs lazy startup.  An extension that declares only `events`
-  and/or `commands` is started lazily — its process spawns on the first
-  matching event or slash-command invocation.  Declaring `tools` forces eager
-  startup so the tool surface is registered up front.
+- Skipping demo files in real sessions.
+
+The actual capability set (tools, commands, events the extension subscribes
+to) is reported by the extension during the init handshake — there is no
+parallel frontmatter declaration.  All extensions start eagerly in parallel.
 
 ### Frontmatter Keys
 
 | Key | Description |
 |-----|-------------|
 | `name` | Override the filename-derived extension name. |
-| `events` | Comma-separated list of event/hook names the extension subscribes to.  Must stay in sync with what the extension actually registers. |
-| `commands` | Comma-separated list of `name: description` pairs for slash commands. |
-| `tools` | Comma-separated list of tool names the extension registers.  Required when the extension subscribes to events but also exposes tools — otherwise it would be deferred for lazy startup and its tools wouldn't be available until the first event fires. |
+| `description` | One-line summary shown in listings. |
+| `builtin` | When `true`, marks a builtin extension shipped with fir. |
 | `modes` | Comma-separated list of fir modes in which this extension should run.  Values: `tui` (alias `interactive`), `text`, `json`, `rpc`, `acp`.  Omit to run in all modes. |
+| `auth_providers` | Comma-separated list of auth provider IDs registered by the extension (used by the auth-only manager to discover provider extensions before full startup). |
 | `demo` | When `true`, marks the file as a demo extension that is never loaded in real sessions (used by tests). |
 
 ---

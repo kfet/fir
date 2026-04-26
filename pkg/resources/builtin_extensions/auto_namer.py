@@ -3,7 +3,6 @@
 # name: auto-namer
 # description: Automatically name unnamed sessions after the first interaction
 # builtin: true
-# events: session_start, session_named, tool_execution_start, turn_end
 # ---
 """auto_namer.py — derive a short session name from the first user message.
 

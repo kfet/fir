@@ -167,56 +167,6 @@ func TestManager_EmitEvent(t *testing.T) {
 	mgr.Stop()
 }
 
-func TestManager_ToolBearingExtWithEventsStartsEagerly(t *testing.T) {
-	// An extension that declares both `events:` and `tools:` in frontmatter
-	// must be started eagerly so its tools are registered before any matching
-	// event fires.  (Without `tools:`, declaring events would defer the ext
-	// for lazy startup, and its tools would silently be unavailable until the
-	// first matching event arrived.)
-	dir := t.TempDir()
-	extDir := filepath.Join(dir, ".fir", "extensions")
-	if err := os.MkdirAll(extDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	scriptPath := filepath.Join(extDir, "eager-tool-ext")
-	content := `#!/bin/sh
-# ---
-# name: eager-tool-ext
-# events: session_start
-# tools: my_tool
-# ---
-read line
-echo '{"jsonrpc":"2.0","id":1,"result":{"name":"eager-tool-ext","tools":[{"name":"my_tool","description":"a tool"}],"events":["session_start"]}}'
-cat >/dev/null
-`
-	if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	trustPath := filepath.Join(dir, "trust.json")
-	ts := NewTrustStoreWithPath(trustPath)
-	hash, _ := ComputeHash(scriptPath)
-	ts.RecordTrust(dir, "eager-tool-ext", hash)
-
-	mgr := NewManager(slog.Default())
-	mgr.SetTrustStore(ts)
-
-	api := newMockAPI()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if err := mgr.Start(ctx, dir, dir, api); err != nil {
-		t.Fatal(err)
-	}
-
-	// The ext's tool must be registered without us emitting any event.
-	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
-		t.Fatalf("expected %d tools (eager registration), got %d", builtinToolCount+1, n)
-	}
-
-	mgr.Stop()
-}
-
 func TestManager_NoExtensions(t *testing.T) {
 	dir := t.TempDir()
 

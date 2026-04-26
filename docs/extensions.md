@@ -142,8 +142,8 @@ def cmd_summary(args, ctx):
     return {"message": "All checks passing."}
 ```
 
-The command name must be declared in the `commands` frontmatter key to avoid a
-startup warning.
+The command name is reported during the init handshake; no frontmatter
+declaration is required.
 
 ### `fir_ext.ToolError(message, code=-32000)`
 

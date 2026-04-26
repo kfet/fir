@@ -356,23 +356,16 @@ started::
     #!/usr/bin/env python3
     # ---
     # name: my-ext                        # overrides filename-derived name
-    # events: session_start, hook/tool_call
-    # commands: my-cmd: Brief description
-    # tools: my_tool                      # forces eager startup; needed if ext also has events
+    # description: One-line summary
+    # builtin: true                       # set on extensions shipped with fir
     # modes: tui, acp                     # restrict to specific fir modes
     # demo: true                          # mark as demo; not loaded by default
     # ---
 
-fir checks the frontmatter against the actual init-handshake result and warns
-(or auto-fixes when the user consents) if they diverge.  The ``events``,
-``commands`` and ``tools`` keys must stay in sync with what ``fir_ext.run()``
-actually registers.
-
-Eager vs lazy startup: an extension that declares only ``events`` and/or
-``commands`` is started lazily — the process spawns on the first matching
-event or slash-command invocation.  Declaring ``tools`` forces eager startup
-so the tool surface is registered up front (lazy stub-registration is only
-implemented for commands today).
+The actual capability set (tools, commands, subscribed events) is reported by
+the extension during the ``init`` handshake — there is no parallel
+declaration in frontmatter.  All extensions start eagerly in parallel; there
+is no lazy startup.
 
 Supported ``modes`` values: ``tui`` (alias ``interactive``), ``text``,
 ``json``, ``rpc``, ``acp``.  Omitting the key runs the extension in all modes.

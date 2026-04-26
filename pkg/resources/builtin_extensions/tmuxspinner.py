@@ -4,7 +4,6 @@
 # description: Animate a spinner in the tmux window name while the agent is working
 # builtin: true
 # modes: tui
-# events: agent_start, agent_end, session_shutdown, session_named
 # ---
 """Animate a spinner in the tmux window name while the agent is working.
 

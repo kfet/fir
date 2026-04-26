@@ -10,15 +10,12 @@ import (
 
 // ExtProcConfig describes a discovered external process extension.
 type ExtProcConfig struct {
-	Name          string                                  // derived from filename or sub-directory name
-	Path          string                                  // absolute path to the executable
-	Scope         string                                  // "project", "global", or "builtin"
-	Modes         []string                                // optional mode allowlist from comment frontmatter
-	Demo          bool                                    // demo/test extension; skipped unless explicitly allowed
-	Events        []string                                // event names declared in frontmatter (for lazy loading)
-	Commands      []resources.ExtensionFrontmatterCommand // commands declared in frontmatter
-	Tools         []string                                // tool names declared in frontmatter; presence forces eager startup
-	AuthProviders []string                                // auth provider IDs declared in frontmatter
+	Name          string   // derived from filename or sub-directory name
+	Path          string   // absolute path to the executable
+	Scope         string   // "project", "global", or "builtin"
+	Modes         []string // optional mode allowlist from comment frontmatter
+	Demo          bool     // demo/test extension; skipped unless explicitly allowed
+	AuthProviders []string // auth provider IDs declared in frontmatter
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -42,9 +39,6 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 				Path:          b.Path,
 				Scope:         "builtin",
 				Modes:         fm.Modes,
-				Events:        fm.Events,
-				Commands:      fm.Commands,
-				Tools:         fm.Tools,
 				AuthProviders: fm.AuthProviders,
 			}
 		}
@@ -153,9 +147,6 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			Path:          filePath,
 			Scope:         "package",
 			Modes:         fm.Modes,
-			Events:        fm.Events,
-			Commands:      fm.Commands,
-			Tools:         fm.Tools,
 			AuthProviders: fm.AuthProviders,
 		}
 	}
@@ -194,9 +185,6 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				Scope:         scope,
 				Modes:         fm.Modes,
 				Demo:          fm.Demo,
-				Events:        fm.Events,
-				Commands:      fm.Commands,
-				Tools:         fm.Tools,
 				AuthProviders: fm.AuthProviders,
 			}
 			continue
@@ -230,9 +218,6 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Scope:         scope,
 			Modes:         fm.Modes,
 			Demo:          fm.Demo,
-			Events:        fm.Events,
-			Commands:      fm.Commands,
-			Tools:         fm.Tools,
 			AuthProviders: fm.AuthProviders,
 		}
 	}

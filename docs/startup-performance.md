@@ -25,12 +25,11 @@ run() → setupSession(deferExtensions=true) → mode.Init() → mode.Run()
 
 ### Why extensions were slow
 
-`extension.Setup()` eagerly starts all extensions that don't declare an
-`events:` filter in their frontmatter. Each eager extension spawns a Python
-interpreter and performs a JSON-RPC `init` handshake. Even with concurrent
-startup, the slowest handshake determines wall-clock time (~500-700ms for 5
-eager extensions). Additionally, extensions subscribing to `session_start`
-are lazy-started synchronously when the event fires, adding another ~200ms.
+`extension.Setup()` starts every discovered extension in parallel.  Each
+extension spawns a Python interpreter and performs a JSON-RPC `init`
+handshake.  Even with concurrent startup, the slowest handshake determines
+wall-clock time (~150ms for ~9 builtin extensions on M-series; longer when
+extensions do significant init-time work).
 
 ### Design constraints
 

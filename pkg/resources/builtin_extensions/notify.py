@@ -4,7 +4,6 @@
 # description: Send native terminal notifications when the agent finishes
 # builtin: true
 # modes: tui
-# events: agent_end, session_named
 # ---
 """Send native terminal notifications when the agent finishes.
 

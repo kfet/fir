@@ -442,6 +442,14 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	}
 	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
 
+	// Wait for async extension setup so the EmitSessionStart goroutine
+	// (which reads session state via GetSessionName) finishes before we
+	// mutate the session via SwitchSession.  Without this the two race on
+	// SessionStore internals.
+	if entry.extReady != nil {
+		<-entry.extReady
+	}
+
 	// Switch to the requested session file.
 	forked, err := entry.session.SwitchSession(sessionPath)
 	if err != nil {

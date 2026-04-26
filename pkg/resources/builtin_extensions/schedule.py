@@ -4,8 +4,6 @@
 # description: Schedule the agent to continue at a future time
 # builtin: false
 # modes: tui
-# commands: schedule: Schedule the agent to continue at a future time
-# events: session_start, session_shutdown
 # ---
 """Schedule the agent session to resume at a future time.
 

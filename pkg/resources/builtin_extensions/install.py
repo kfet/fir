@@ -3,8 +3,6 @@
 # name: install
 # description: Install, uninstall, update, and list fir packages (skills, extensions, themes) from git repos or local paths.
 # builtin: true
-# commands: install: Install a package, uninstall: Uninstall a package, packages: List installed packages, update-packages: Update packages
-# tools: install_package, list_packages, uninstall_package, update_packages
 # ---
 """
 Builtin extension that exposes fir's package management as slash-commands

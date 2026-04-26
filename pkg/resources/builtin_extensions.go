@@ -58,17 +58,8 @@ type ExtensionFrontmatter struct {
 	Builtin       bool
 	Demo          bool // demo/test extensions; not loaded unless explicitly allowed
 	Modes         []string
-	Events        []string                      // event names this extension subscribes to (for lazy loading)
-	Commands      []ExtensionFrontmatterCommand // slash commands (registered as stubs for lazy loading)
-	Tools         []string                      // tool names this extension registers; presence forces eager startup
-	AuthProviders []string                      // auth provider IDs this extension registers
-	Present       bool                          // true when a valid frontmatter block was found
-}
-
-// ExtensionFrontmatterCommand describes a slash command declared in frontmatter.
-type ExtensionFrontmatterCommand struct {
-	Name        string
-	Description string
+	AuthProviders []string // auth provider IDs this extension registers
+	Present       bool     // true when a valid frontmatter block was found
 }
 
 // ParseCommentFrontmatter parses frontmatter from comment-delimited blocks.
@@ -129,12 +120,6 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Demo = value == "true"
 		case "mode", "modes":
 			fm.Modes = parseExtensionModes(value)
-		case "event", "events":
-			fm.Events = parseCommaSeparatedList(value)
-		case "commands":
-			fm.Commands = parseCommandList(value)
-		case "tool", "tools":
-			fm.Tools = parseCommaSeparatedList(value)
 		case "auth_provider", "auth_providers":
 			fm.AuthProviders = parseCommaSeparatedList(value)
 		}
@@ -187,33 +172,6 @@ func parseCommaSeparatedList(value string) []string {
 		return nil
 	}
 	return result
-}
-
-// parseCommandList parses a command list from frontmatter.
-// Format: "name1: description1, name2: description2"
-// or bracket-wrapped: "[name1: desc1, name2: desc2]"
-func parseCommandList(value string) []ExtensionFrontmatterCommand {
-	value = strings.TrimSpace(value)
-	value = strings.TrimPrefix(value, "[")
-	value = strings.TrimSuffix(value, "]")
-	if value == "" {
-		return nil
-	}
-	parts := strings.Split(value, ",")
-	var cmds []ExtensionFrontmatterCommand
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		name, desc, ok := strings.Cut(part, ":")
-		if !ok {
-			name = part
-		}
-		name = strings.Trim(strings.TrimSpace(name), `"'`)
-		desc = strings.Trim(strings.TrimSpace(desc), `"'`)
-		if name != "" {
-			cmds = append(cmds, ExtensionFrontmatterCommand{Name: name, Description: desc})
-		}
-	}
-	return cmds
 }
 
 // extractBuiltinExtensions extracts the builtin_extensions/ tree to a temp

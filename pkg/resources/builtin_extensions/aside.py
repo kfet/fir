@@ -3,9 +3,6 @@
 # name: aside
 # description: Ephemeral side queries and multi-tool orchestration — off the record
 # builtin: true
-# commands: aside: Ask a side question or run tools ephemerally (e.g. /aside what does that error mean?), aside-advisor: Show or set the advisor model used by aside's escalate flag
-# tools: aside
-# events: session_start
 # ---
 """aside.py — ephemeral side queries and multi-tool orchestration.
 

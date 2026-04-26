@@ -3,7 +3,6 @@ package extension
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -131,12 +130,6 @@ func SetupAuthProviders(opts AuthSetupOptions) (*AuthSetupResult, error) {
 		}
 	}
 	mgr.ConfirmFn = confirmFn
-
-	// Default frontmatter-fix: warn only.
-	mgr.OfferFixFn = func(mm FrontmatterMismatch) bool {
-		fmt.Fprintln(os.Stderr, FormatFrontmatterWarning(mm))
-		return false
-	}
 
 	cwd := opts.Cwd
 	if cwd == "" {

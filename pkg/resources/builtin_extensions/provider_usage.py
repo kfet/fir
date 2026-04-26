@@ -4,7 +4,6 @@
 # description: Show LLM provider usage/limits in the status bar (Anthropic, Poe)
 # builtin: false
 # modes: tui
-# events: session_start, session_shutdown
 # ---
 """Periodically fetch Anthropic and/or Poe usage stats and display in the status bar.
 
