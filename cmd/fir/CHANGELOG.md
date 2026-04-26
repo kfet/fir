@@ -4,7 +4,7 @@
 
 ### Added
 
-- Extension init handshake now includes `config_dirs` — a priority-ordered list of directories (project-local `.fir` first, global `~/.config/fir` last) for per-extension config storage. The Python SDK exposes `fir_ext.config_dirs`, `fir_ext.load_config()` (first-found JSON read), and `fir_ext.config_path()` (highest-priority write target). `aside.py`, `doctor.py`, and `provider_usage.py` migrated away from hardcoded `~/.config/fir` paths.
+- Extension init handshake now includes `config_dirs` — a priority-ordered list of directories (project-local `.fir` first, global `~/.config/fir` last) for per-extension config storage. The Python SDK exposes `fir_ext.config_dirs`, `fir_ext.load_config()` (first-found JSON read), and `fir_ext.config_path()` (highest-priority write target). `aside.py`, `doctor.py`, and `provider_usage.py` migrated away from hardcoded `~/.config/fir` paths. `aside.py` default advisor model now guarded by unit test `DefaultAdvisorTracksHighestAnthropicOpus` in `pkg/resources/testdata/aside_test.py`, which ensures `_DEFAULT_ADVISOR_SPEC` stays in sync with the highest Anthropic Opus in the model registry.
 
 ### Changed
 
