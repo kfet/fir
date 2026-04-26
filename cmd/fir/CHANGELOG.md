@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider HTTP calls (streaming SSE + non-streaming `DoJSONRequest`) used `http.Client`s with no custom `Transport`, so they inherited Go's default `TLSHandshakeTimeout` of 10s. On slow networks / corporate proxies this surfaced as `net/http: TLS handshake timeout` against `api.anthropic.com` and other providers. Switched both clients to a shared `*http.Transport` cloned from `http.DefaultTransport` (preserving proxy/env settings) with `TLSHandshakeTimeout` bumped to 30s. Regression test in `pkg/ai/providers/sse_transport_test.go`.
+
 ## [0.33.1] - 2026-04-23
 
 ### Changed
