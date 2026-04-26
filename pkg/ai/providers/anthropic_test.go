@@ -958,6 +958,72 @@ func TestAnthropic_BuildParams_NoSystemPrompt(t *testing.T) {
 	}
 }
 
+// TestAnthropic_BuildParams_OAuthPrefixNoCacheControl ensures the OAuth
+// identity prefix block does NOT carry cache_control. Putting a breakpoint
+// there is wasteful — it's a strict prefix of the next system block, so the
+// later breakpoint already covers it. Burning a breakpoint here would
+// reduce the number of breakpoints available for messages.
+func TestAnthropic_BuildParams_OAuthPrefixNoCacheControl(t *testing.T) {
+	model := &ai.Model{
+		ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
+		Headers: map[string]string{
+			"x-anthropic-oauth-beta-prefix":   "claude-code-20250219,oauth-2025-04-20",
+			"x-anthropic-oauth-system-prefix": "You are Claude Code.",
+		},
+	}
+	ctx := ai.Context{
+		SystemPrompt: "Be helpful.",
+		Messages:     []ai.Message{ai.NewUserMsg("hi", 1000)},
+	}
+
+	params := buildAnthropicParams(model, ctx, true, &ai.StreamOptions{CacheRetention: ai.CacheShort})
+	system := params["system"].([]map[string]any)
+	if len(system) != 2 {
+		t.Fatalf("expected 2 system blocks, got %d", len(system))
+	}
+	if system[0]["cache_control"] != nil {
+		t.Errorf("OAuth prefix block must not carry cache_control, got %v", system[0]["cache_control"])
+	}
+	if system[1]["cache_control"] == nil {
+		t.Error("user system block should carry cache_control")
+	}
+}
+
+// TestAnthropic_ConvertTools_StableOrder verifies tools are emitted in
+// alphabetical order regardless of input order. This keeps the Anthropic
+// prompt-cache prefix stable when extensions and MCP servers register
+// tools asynchronously.
+func TestAnthropic_ConvertTools_StableOrder(t *testing.T) {
+	mkTool := func(name string) ai.Tool {
+		return ai.Tool{
+			Name:        name,
+			Description: "x",
+			Parameters: map[string]any{
+				"type": "object", "properties": map[string]any{}, "required": []string{},
+			},
+		}
+	}
+
+	a := []ai.Tool{mkTool("zebra"), mkTool("apple"), mkTool("mango")}
+	b := []ai.Tool{mkTool("mango"), mkTool("zebra"), mkTool("apple")}
+
+	ra := convertAnthropicTools(a, false)
+	rb := convertAnthropicTools(b, false)
+
+	if len(ra) != len(rb) {
+		t.Fatalf("len mismatch: %d vs %d", len(ra), len(rb))
+	}
+	want := []string{"apple", "mango", "zebra"}
+	for i, w := range want {
+		if ra[i]["name"] != w {
+			t.Errorf("ra[%d].name = %v, want %s", i, ra[i]["name"], w)
+		}
+		if rb[i]["name"] != w {
+			t.Errorf("rb[%d].name = %v, want %s", i, rb[i]["name"], w)
+		}
+	}
+}
+
 // --- Cache control tests ---
 
 func TestAnthropic_CacheControlBlock(t *testing.T) {
@@ -1666,11 +1732,12 @@ func TestAnthropic_ConvertTools_OAuthNames(t *testing.T) {
 	}
 
 	result := convertAnthropicTools(tools, true)
-	if result[0]["name"] != "Read" {
-		t.Errorf("OAuth: expected 'Read', got %v", result[0]["name"])
+	// Sort is on the input (fir) tool name: custom_tool < read.
+	if result[0]["name"] != "custom_tool" {
+		t.Errorf("OAuth: expected 'custom_tool' (unmapped) first, got %v", result[0]["name"])
 	}
-	if result[1]["name"] != "custom_tool" {
-		t.Errorf("OAuth: expected 'custom_tool' (unmapped), got %v", result[1]["name"])
+	if result[1]["name"] != "Read" {
+		t.Errorf("OAuth: expected 'Read' second, got %v", result[1]["name"])
 	}
 }
 

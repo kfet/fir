@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -911,13 +912,13 @@ func buildAnthropicParams(model *ai.Model, ctx ai.Context, oauthToken bool, opti
 	// System prompt
 	var systemBlocks []map[string]any
 	// OAuth models require the Claude Code identity prefix (set by the auth extension).
+	// Don't attach a cache_control breakpoint here — it's a strict prefix of the
+	// next system block's breakpoint, so it would burn one of the four available
+	// breakpoints for no benefit.
 	if oauthSystemPrefix, ok := model.Headers["x-anthropic-oauth-system-prefix"]; ok && oauthSystemPrefix != "" {
 		block := map[string]any{
 			"type": "text",
 			"text": oauthSystemPrefix,
-		}
-		if retention != ai.CacheNone {
-			block["cache_control"] = cacheControlBlock(model.BaseURL, retention)
 		}
 		systemBlocks = append(systemBlocks, block)
 	}
@@ -1219,8 +1220,15 @@ func convertToolResultContent(content []ai.ToolResultContent, model *ai.Model) a
 }
 
 func convertAnthropicTools(tools []ai.Tool, oauthToken bool) []map[string]any {
-	result := make([]map[string]any, 0, len(tools))
-	for _, t := range tools {
+	// Sort tools alphabetically by name to keep the prompt-cache prefix
+	// stable across registration races (extensions and MCP servers add
+	// tools asynchronously, so insertion order varies between turns).
+	sorted := make([]ai.Tool, len(tools))
+	copy(sorted, tools)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	result := make([]map[string]any, 0, len(sorted))
+	for _, t := range sorted {
 		name := t.Name
 		if oauthToken {
 			name = toClaudeCodeName(name)

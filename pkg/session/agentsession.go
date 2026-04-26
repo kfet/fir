@@ -1228,7 +1228,10 @@ func (s *AgentSession) Reload() error {
 	if err := s.resourceLoader.Reload(); err != nil {
 		return err
 	}
-	s.sessionDate = time.Now().Format("2006-01-02")
+	// NOTE: Don't refresh sessionDate here. /reload across midnight would
+	// otherwise change the "Current date:" line in the system prompt and
+	// invalidate the prompt cache for the rest of the session. The date
+	// is captured once at session creation (and on NewSession/SwitchSession).
 	s.buildSystemPrompt()
 
 	// Re-trigger background fetch of live model lists so newly-added providers,

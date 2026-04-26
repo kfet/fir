@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kfet/fir/pkg/config"
@@ -333,6 +334,10 @@ func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionP
 			}
 		}
 	}
+	// Sort once more after appending builtins — without this, the system
+	// prompt's <available_skills> ordering depends on builtin walk order
+	// vs user/project order, which can shift when paths change.
+	sort.Slice(r.skills, func(i, j int) bool { return r.skills[i].Name < r.skills[j].Name })
 	r.applyExtensionMetadata(extensionPaths, skillFilePaths(r.skills))
 
 	for _, skill := range r.skills {

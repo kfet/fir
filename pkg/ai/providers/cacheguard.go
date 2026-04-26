@@ -21,10 +21,26 @@ package providers
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"os"
 	"sync"
 
 	firlog "github.com/kfet/fir/pkg/log"
 )
+
+// cacheDebugEnabled returns true when FIR_CACHE_DEBUG is set, which promotes
+// prefix-invalidation logs from Debug to Warn so they surface in normal runs.
+func cacheDebugEnabled() bool {
+	v := os.Getenv("FIR_CACHE_DEBUG")
+	return v != "" && v != "0" && v != "false"
+}
+
+func logCacheInvalidation(msg string, args ...any) {
+	if cacheDebugEnabled() {
+		firlog.Warn(msg, args...)
+	} else {
+		firlog.Debug(msg, args...)
+	}
+}
 
 // PrefixGuard tracks the serialized prefix of previous requests and warns
 // when it changes unexpectedly. Safe for concurrent use.
@@ -51,7 +67,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 	// Check system prompt
 	sysHash := hashJSON(systemBlocks)
 	if pg.prevSystemHash != "" && sysHash != pg.prevSystemHash {
-		firlog.Debug("cache prefix invalidated: system prompt changed")
+		logCacheInvalidation("cache prefix invalidated: system prompt changed")
 		invalidated++
 	}
 	pg.prevSystemHash = sysHash
@@ -69,7 +85,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 
 	for i := 0; i < prefixLen; i++ {
 		if newHashes[i] != pg.prevHashes[i] {
-			firlog.Debug("cache prefix invalidated: message changed", "index", i)
+			logCacheInvalidation("cache prefix invalidated: message changed", "index", i)
 			invalidated++
 		}
 	}

@@ -216,3 +216,38 @@ func TestLoadSkills_CollisionDiagnostics(t *testing.T) {
 		t.Error("expected loser path to be set")
 	}
 }
+
+// TestLoadSkills_StableOrder verifies LoadSkills returns skills in
+// alphabetical order so the system prompt's <available_skills> block
+// stays byte-stable across process restarts and Reload calls. Map
+// iteration is randomised, so without an explicit sort the order
+// would drift and bust the prompt cache.
+func TestLoadSkills_StableOrder(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"zebra", "apple", "mango", "banana"} {
+		sub := filepath.Join(dir, name)
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + name + "\ndescription: skill " + name + "\n---\nbody\n"
+		if err := os.WriteFile(filepath.Join(sub, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []string{"apple", "banana", "mango", "zebra"}
+
+	// Run several times — map iteration order is randomised per process,
+	// but the result must be identical.
+	for i := 0; i < 5; i++ {
+		result := LoadSkills(LoadSkillsOptions{Cwd: dir, SkillPaths: []string{dir}})
+		if len(result.Skills) != len(want) {
+			t.Fatalf("iter %d: got %d skills, want %d", i, len(result.Skills), len(want))
+		}
+		for j, w := range want {
+			if result.Skills[j].Name != w {
+				t.Errorf("iter %d: skill[%d].Name = %q, want %q", i, j, result.Skills[j].Name, w)
+			}
+		}
+	}
+}

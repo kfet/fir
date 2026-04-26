@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -371,6 +372,10 @@ func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
 	for _, s := range skillMap {
 		skills = append(skills, s)
 	}
+	// Sort by name for deterministic ordering. Map iteration is randomised,
+	// so without this the system prompt's <available_skills> block reorders
+	// every process start / Reload, busting the prompt cache.
+	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
 
 	return LoadSkillsResult{Skills: skills, Diagnostics: allDiagnostics}
 }
