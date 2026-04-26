@@ -83,14 +83,25 @@ type SSEClient struct {
 	HTTPClient *http.Client
 }
 
-// sharedTransport is reused by all provider HTTP calls. The Go default
-// Transport sets TLSHandshakeTimeout to 10s, which is too aggressive on slow
-// networks / corporate proxies and surfaces as "net/http: TLS handshake
-// timeout" against api.anthropic.com et al. Cloned from http.DefaultTransport
-// so HTTP_PROXY / HTTPS_PROXY env vars still apply.
+// sharedTransport is reused by all provider HTTP calls. Cloned from
+// http.DefaultTransport so HTTP_PROXY / HTTPS_PROXY env vars still apply.
+//
+// Tuning vs Go defaults, aimed at api.anthropic.com on slow / corporate links:
+//   - TLSHandshakeTimeout: 60s (default 10s) — slow networks and proxies
+//     routinely surface as "net/http: TLS handshake timeout"; a previous
+//     bump to 30s wasn't always enough.
+//   - MaxIdleConnsPerHost: 20 (default 2) — sessions issue several parallel
+//     requests (subagents, parallel tool calls, summariser). The default of
+//     2 forces new dials + new TLS handshakes for every extra concurrent
+//     call, which is itself a major source of handshake timeouts.
+//   - IdleConnTimeout: 10m (default 90s) — keep TCP/TLS connections warm
+//     across turns so we reuse instead of re-handshaking. TCP keep-alive
+//     (inherited from the default dialer) detects dead paths.
 var sharedTransport = func() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.TLSHandshakeTimeout = 30 * time.Second
+	t.TLSHandshakeTimeout = 60 * time.Second
+	t.MaxIdleConnsPerHost = 20
+	t.IdleConnTimeout = 10 * time.Minute
 	return t
 }()
 
