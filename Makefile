@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses check-aside-default _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -56,7 +56,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner check-licenses
+_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner check-licenses check-aside-default
 
 fmt:
 	@gofmt -s -w .
@@ -145,6 +145,14 @@ generate-models:
 	@mkdir -p $(BINDIR)
 	go build -o $(BINDIR)/generate-models ./cmd/generate-models/
 	$(BINDIR)/generate-models
+	$(call RUN,update aside default advisor,go run ./cmd/aside-default-advisor -write)
+
+# Verify the aside extension's built-in default advisor still points at the
+# highest Anthropic Opus baked into the model registry. Drift means a new
+# Opus tier landed in pkg/ai/models_generated.go but `make generate-models`
+# wasn't re-run. Cheap and runs as part of `make all`.
+check-aside-default:
+	$(call RUN,check aside default advisor,go run ./cmd/aside-default-advisor -check)
 
 clean:
 	rm -rf $(BINDIR)
