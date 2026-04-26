@@ -4,6 +4,8 @@
 # description: Ephemeral side queries and multi-tool orchestration — off the record
 # builtin: true
 # commands: aside: Ask a side question or run tools ephemerally (e.g. /aside what does that error mean?), aside-advisor: Show or set the advisor model used by aside's escalate flag
+# tools: aside
+# events: session_start
 # ---
 """aside.py — ephemeral side queries and multi-tool orchestration.
 
@@ -235,20 +237,21 @@ def _run_aside(
         return _error("instructions are required")
 
     # Resolve advisor override if escalate is requested and configured.
-    sq_kwargs: dict[str, Any] = {}
     advisor_used: dict[str, str] | None = None
+    sq_model: str | None = None
+    sq_provider: str | None = None
+    sq_effort: str | None = None
     advisor = _advisor()
     if escalate and advisor is not None:
-        sq_kwargs["model"] = advisor["model"]
-        sq_kwargs["provider"] = advisor["provider"]
-        if "effort" in advisor:
-            sq_kwargs["effort"] = advisor["effort"]
+        sq_model = advisor["model"]
+        sq_provider = advisor["provider"]
+        sq_effort = advisor.get("effort")
         advisor_used = advisor
 
     # No tools — pure ephemeral side query.
     if not tools:
         try:
-            synthesis = ctx.side_query(instructions, **sq_kwargs)
+            synthesis = ctx.side_query(instructions, model=sq_model, provider=sq_provider, effort=sq_effort)
         except Exception as exc:
             return _side_query_error(exc)
         return {
@@ -332,7 +335,7 @@ def _run_aside(
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
     try:
-        synthesis = ctx.side_query(prompt, **sq_kwargs)
+        synthesis = ctx.side_query(prompt, model=sq_model, provider=sq_provider, effort=sq_effort)
     except Exception as exc:
         return _side_query_error(exc)
 
@@ -418,20 +421,17 @@ def _aside_tool_description() -> str:
         "Everything happens off to the side — nothing enters conversation "
         "history, only the synthesis is returned.\n\n"
         "With tools: executes them, collects outputs, synthesises via LLM.\n"
-        "Without tools: runs a pure side question against current context.\n\n"
-        "Use when you need to gather data from several tools and want "
-        "a concise summary without bloating context, or when you want "
-        "to ask a quick side question."
+        "Without tools: runs a pure ephemeral side question against current context.\n\n"
+        "Use your fast (current) model with this tool to gather data, collect context, "
+        "ask quick questions, or investigate issues without polluting history."
     )
     if _advisor() is None:
         return base
     return base + (
-        "\n\nEscalation: set 'escalate' to true to route this side query to "
-        "a stronger advisor model. Use it when stuck, before irreversible "
-        "or large changes, for architecture/design tradeoffs, subtle "
-        "correctness questions, or when the user's intent is genuinely "
-        "ambiguous. Don't escalate for routine lookups or things you can "
-        "answer directly."
+        "\n\nAdvisor escalation: set 'escalate' to true to route this side query "
+        "to a stronger advisor model. See the session-start [SYS_EXT] note for "
+        "when escalation is warranted — the principle is judgement-call cost, "
+        "not a checklist of categories."
     )
 
 
@@ -655,6 +655,38 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
             "Changes take effect on the next session start."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Session start: steer the LLM toward the advisor when one is configured
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.on("session_start")
+def on_session_start(params: dict, ctx: fir_ext.Context):
+    """Inject a [SYS_EXT] note teaching the LLM *why* the advisor exists.
+
+    Principle, not checklist — the LLM decides when its own reasoning is the
+    bottleneck and reaches for help. We only describe the lever, not every
+    case for pulling it.
+    """
+    advisor = _advisor()
+    if advisor is None:
+        return
+    spec = _format_advisor_spec(advisor)
+    ctx.prepend(
+        f"A stronger advisor model ({spec}) is reachable via the `aside` tool "
+        f"with `escalate=true`. It costs more and is slower, but reasons better.\n\n"
+        f"You are the executor. The advisor is your second opinion. Reach for it "
+        f"when your own reasoning — not your tools — is the bottleneck: when the "
+        f"answer depends on judgement you don't trust yourself to make alone, and "
+        f"the cost of being wrong outweighs the cost of asking. Otherwise, decide "
+        f"and act.\n\n"
+        f"Earlier is cheaper. The advisor sees less context at turn 1 than at "
+        f"turn 50, and a wrong direction caught now saves the executor turns "
+        f"spent unwinding it. If the request is non-trivial and you can already "
+        f"feel the judgement-call coming, ask up front rather than after committing."
+    )
 
 
 fir_ext.run(name="aside")

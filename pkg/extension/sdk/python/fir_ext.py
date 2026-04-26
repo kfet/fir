@@ -358,14 +358,21 @@ started::
     # name: my-ext                        # overrides filename-derived name
     # events: session_start, hook/tool_call
     # commands: my-cmd: Brief description
+    # tools: my_tool                      # forces eager startup; needed if ext also has events
     # modes: tui, acp                     # restrict to specific fir modes
     # demo: true                          # mark as demo; not loaded by default
     # ---
 
 fir checks the frontmatter against the actual init-handshake result and warns
-(or auto-fixes when the user consents) if they diverge.  The ``events`` and
-``commands`` keys must stay in sync with what ``fir_ext.run()`` actually
-registers.
+(or auto-fixes when the user consents) if they diverge.  The ``events``,
+``commands`` and ``tools`` keys must stay in sync with what ``fir_ext.run()``
+actually registers.
+
+Eager vs lazy startup: an extension that declares only ``events`` and/or
+``commands`` is started lazily — the process spawns on the first matching
+event or slash-command invocation.  Declaring ``tools`` forces eager startup
+so the tool surface is registered up front (lazy stub-registration is only
+implemented for commands today).
 
 Supported ``modes`` values: ``tui`` (alias ``interactive``), ``text``,
 ``json``, ``rpc``, ``acp``.  Omitting the key runs the extension in all modes.
@@ -839,7 +846,6 @@ class Context:
         self,
         custom_type: str,
         content: Any,
-        *,
         display: bool = False,
         deliver_as: str | None = None,
         trigger_turn: bool = False,
@@ -866,14 +872,13 @@ class Context:
             "custom_type": custom_type,
             "content": content,
             "display": display,
+            "trigger_turn": trigger_turn,
         }
         if deliver_as is not None:
             params["deliver_as"] = deliver_as
-        if trigger_turn:
-            params["trigger_turn"] = trigger_turn
         self._call("send_message", params)
 
-    def send_user_message(self, content: str, *, deliver_as: str | None = None) -> None:
+    def send_user_message(self, content: str, deliver_as: str | None = None) -> None:
         """Inject a user-role message into the session.
 
         Parameters
@@ -940,7 +945,6 @@ class Context:
         self,
         question: str,
         timeout: float = 120.0,
-        *,
         model: str | None = None,
         provider: str | None = None,
         effort: str | None = None,
@@ -950,7 +954,7 @@ class Context:
         Makes a one-shot LLM call with no tools and no history persistence.
         Returns the full response text. Blocks until the response is complete.
 
-        Optional overrides (all keyword-only):
+        Optional overrides:
           model    Model id to route the side query to (e.g. ``"claude-opus-4-x"``).
                    When omitted, the agent's current model is used.
           provider Provider id (e.g. ``"anthropic"``). Optional even when

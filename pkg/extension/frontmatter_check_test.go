@@ -17,7 +17,9 @@ func TestCheckFrontmatter(t *testing.T) {
 		wantEmpty  bool
 		wantMissE  []string
 		wantMissC  []string
+		wantMissT  []string
 		wantExtraE []string
+		wantExtraT []string
 	}{
 		{
 			name: "perfect match",
@@ -27,10 +29,12 @@ func TestCheckFrontmatter(t *testing.T) {
 				Commands: []resources.ExtensionFrontmatterCommand{
 					{Name: "foo", Description: "Do foo"},
 				},
+				Tools: []string{"my_tool"},
 			},
 			caps: &InitResult{
 				Events:   []string{"agent_end", "turn_end"},
 				Commands: []CommandSpec{{Name: "foo", Description: "Do foo"}},
+				Tools:    []ToolSpec{{Name: "my_tool"}},
 			},
 			wantEmpty: true,
 		},
@@ -67,6 +71,28 @@ func TestCheckFrontmatter(t *testing.T) {
 			wantMissC: []string{"do-thing"},
 		},
 		{
+			name: "missing tools",
+			cfg: ExtProcConfig{
+				Name:  "test",
+				Tools: []string{"a"},
+			},
+			caps: &InitResult{
+				Tools: []ToolSpec{{Name: "a"}, {Name: "b"}, {Name: "c"}},
+			},
+			wantMissT: []string{"b", "c"},
+		},
+		{
+			name: "extra tools in frontmatter",
+			cfg: ExtProcConfig{
+				Name:  "test",
+				Tools: []string{"a", "stale"},
+			},
+			caps: &InitResult{
+				Tools: []ToolSpec{{Name: "a"}},
+			},
+			wantExtraT: []string{"stale"},
+		},
+		{
 			name:      "no frontmatter no caps",
 			cfg:       ExtProcConfig{Name: "test"},
 			caps:      &InitResult{},
@@ -91,8 +117,14 @@ func TestCheckFrontmatter(t *testing.T) {
 			if !sliceEqual(mm.MissingCommands, tt.wantMissC) {
 				t.Errorf("MissingCommands = %v, want %v", mm.MissingCommands, tt.wantMissC)
 			}
+			if !sliceEqual(mm.MissingTools, tt.wantMissT) {
+				t.Errorf("MissingTools = %v, want %v", mm.MissingTools, tt.wantMissT)
+			}
 			if !sliceEqual(mm.ExtraEvents, tt.wantExtraE) {
 				t.Errorf("ExtraEvents = %v, want %v", mm.ExtraEvents, tt.wantExtraE)
+			}
+			if !sliceEqual(mm.ExtraTools, tt.wantExtraT) {
+				t.Errorf("ExtraTools = %v, want %v", mm.ExtraTools, tt.wantExtraT)
 			}
 		})
 	}
@@ -120,6 +152,7 @@ fir_ext.run(name="my-ext")
 	caps := &InitResult{
 		Events:   []string{"agent_end", "agent_start"},
 		Commands: []CommandSpec{{Name: "do-thing", Description: "Run a thing"}},
+		Tools:    []ToolSpec{{Name: "my_tool"}},
 	}
 
 	if err := FixFrontmatter(path, caps); err != nil {
@@ -148,6 +181,9 @@ fir_ext.run(name="my-ext")
 	}
 	if len(fm.Commands) != 1 || fm.Commands[0].Name != "do-thing" {
 		t.Errorf("commands = %v, want [{do-thing Run a thing}]", fm.Commands)
+	}
+	if !sliceEqual(fm.Tools, []string{"my_tool"}) {
+		t.Errorf("tools = %v, want [my_tool]", fm.Tools)
 	}
 
 	// Verify rest of file is preserved.

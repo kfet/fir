@@ -3,6 +3,7 @@
 # name: agent-introspect
 # description: Expose the agent_introspect tool so the agent can inspect its own runtime state
 # builtin: true
+# tools: agent_introspect
 # ---
 """Single-tool extension that returns a structured snapshot of the current
 fir runtime/session. Wraps the host ``agent.info`` RPC."""

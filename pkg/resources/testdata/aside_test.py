@@ -180,7 +180,9 @@ class TestRunAside(unittest.TestCase):
         self.assertFalse(result["is_error"])
         self.assertEqual(result["content"][0]["text"], "the answer is 42")
         ctx.call_tool.assert_not_called()
-        ctx.side_query.assert_called_once_with("what is the meaning of life?")
+        ctx.side_query.assert_called_once_with(
+            "what is the meaning of life?", model=None, provider=None, effort=None
+        )
 
     def test_empty_instructions_returns_error(self):
         ctx = self._make_ctx()
@@ -449,7 +451,8 @@ class TestAdvisorEscalation(unittest.TestCase):
         ctx = self._ctx()
         mod._run_aside([], "q", ctx, escalate=True)
         kwargs = ctx.side_query.call_args.kwargs
-        self.assertNotIn("effort", kwargs)
+        # effort is always passed by name (None when no override is configured).
+        self.assertIsNone(kwargs["effort"])
         self.assertEqual(kwargs["model"], "claude-opus-4-x")
 
     def test_no_escalate_uses_no_overrides(self):
@@ -458,8 +461,11 @@ class TestAdvisorEscalation(unittest.TestCase):
         )
         ctx = self._ctx(side_query_result="plain reply")
         result = mod._run_aside([], "q", ctx, escalate=False)
-        # No model/provider/effort kwargs were passed.
-        self.assertEqual(ctx.side_query.call_args.kwargs, {})
+        # All overrides default to None when not escalating.
+        self.assertEqual(
+            ctx.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
         # No advisor prefix on the output.
         self.assertEqual(result["content"][0]["text"], "plain reply")
 
@@ -467,8 +473,11 @@ class TestAdvisorEscalation(unittest.TestCase):
         mod = self._load_with_advisor(None)
         ctx = self._ctx(side_query_result="plain reply")
         result = mod._run_aside([], "q", ctx, escalate=True)
-        # Even with escalate=True, no override kwargs are set.
-        self.assertEqual(ctx.side_query.call_args.kwargs, {})
+        # Even with escalate=True, all overrides remain None.
+        self.assertEqual(
+            ctx.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
         self.assertEqual(result["content"][0]["text"], "plain reply")
 
     def test_tool_schema_has_no_escalate_when_unconfigured(self):
@@ -479,13 +488,87 @@ class TestAdvisorEscalation(unittest.TestCase):
         self.assertNotIn("escalate", params["properties"])
         self.assertNotIn("Escalation", mod._aside_tool_description())
 
-    def test_tool_schema_has_escalate_when_configured(self):
-        mod = _load_aside()
-        mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
-        params = mod._aside_tool_parameters()
-        self.assertIn("escalate", params["properties"])
-        self.assertEqual(params["properties"]["escalate"]["type"], "boolean")
-        self.assertIn("Escalation", mod._aside_tool_description())
+    def test_executor_advisor_pattern_gather_then_escalate(self):
+        """Demonstrate the full executor/advisor pattern.
+
+        1. Executor (cheap model) gathers data via aside without escalate.
+        2. Executor then escalates to advisor with escalate=True for a decision.
+        """
+        mod = self._load_with_advisor(
+            {"provider": "anthropic", "model": "claude-opus-4-x"}
+        )
+
+        # Step 1: Cheap model gathers data (no escalate).
+        # Build a proper mock context with call_tool, list_tools, and side_query.
+        ctx_gather = mock.MagicMock(spec=fir_ext.Context)
+        ctx_gather.call_tool = mock.MagicMock(
+            return_value={"content": [{"text": "Found 3 .go files"}], "is_error": False}
+        )
+        ctx_gather.list_tools = mock.MagicMock(
+            return_value=[
+                {
+                    "name": "Bash",
+                    "description": "Run bash",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                }
+            ]
+        )
+        ctx_gather.side_query = mock.MagicMock(
+            return_value="Found 3 .go files, 5KB total"
+        )
+        ctx_gather.report_progress = mock.MagicMock()
+
+        gather_tools = [
+            {
+                "name": "Bash",
+                "title": "Find large Go files",
+                "params": {"command": "find . -name '*.go' -size +1k"},
+            }
+        ]
+        gather_result = mod._run_aside(
+            gather_tools,
+            "How many large .go files are there?",
+            ctx_gather,
+            escalate=False,
+        )
+
+        # Assertion: no model override in the side_query call (escalate=False).
+        self.assertEqual(
+            ctx_gather.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
+        self.assertEqual(
+            gather_result["content"][0]["text"], "Found 3 .go files, 5KB total"
+        )
+        # No advisor trace prefix.
+        self.assertFalse(gather_result["content"][0]["text"].startswith("[advisor:"))
+
+        # Step 2: Escalate to advisor for planning (escalate=True).
+        ctx_advise = self._ctx(
+            side_query_result="Recommend: refactor all 3 into a module to improve testability."
+        )
+        advise_result = mod._run_aside(
+            [],  # no tools, just ask the advisor
+            "Given those 3 large files, what's the best refactoring strategy?",
+            ctx_advise,
+            escalate=True,
+        )
+
+        # Assertion: model/provider were passed to side_query.
+        kwargs = ctx_advise.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-opus-4-x")
+        self.assertEqual(kwargs["provider"], "anthropic")
+
+        # Output has the advisor trace prefix so the AI knows this came from the advisor.
+        text = advise_result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor: anthropic/claude-opus-4-x]"))
+        self.assertIn(
+            "Recommend: refactor all 3 into a module", advise_result["content"][0]["text"]
+        )
 
 
 class TestLoadAdvisorConfig(unittest.TestCase):

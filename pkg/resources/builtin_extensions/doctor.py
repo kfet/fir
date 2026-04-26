@@ -5,6 +5,7 @@
 # builtin: true
 # events: session_start, session_end, session_shutdown, tool_execution_end
 # commands: doctor: Show recent failure diagnostics
+# tools: doctor_query, doctor_summary
 # ---
 """fir doctor — black-box failure recorder and diagnostic query tool.
 

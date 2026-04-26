@@ -98,6 +98,20 @@ import sys
 				Present:  true,
 			},
 		},
+		{
+			name: "tools",
+			input: `#!/usr/bin/env python3
+# ---
+# name: my-ext
+# tools: my_tool, other_tool
+# ---
+`,
+			want: ExtensionFrontmatter{
+				Name:    "my-ext",
+				Tools:   []string{"my_tool", "other_tool"},
+				Present: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -174,6 +188,30 @@ func TestBuiltinExtensionFrontmatterCompleteness(t *testing.T) {
 					t.Errorf("extension %q registers command %q via @fir_ext.command() but does not declare it in frontmatter commands", fm.Name, cmd)
 				}
 			}
+
+			// Check that all registered tools are declared in frontmatter
+			// (presence of `tools:` forces eager startup; missing entries
+			// would silently break tool availability for ext that also
+			// subscribe to events).
+			usedTools := extractPythonTools(src)
+			declaredTools := make(map[string]bool, len(fm.Tools))
+			for _, tn := range fm.Tools {
+				declaredTools[tn] = true
+			}
+			for _, tn := range usedTools {
+				if !declaredTools[tn] {
+					t.Errorf("extension %q registers tool %q via @fir_ext.tool() but does not declare it in frontmatter tools", fm.Name, tn)
+				}
+			}
+			usedToolSet := make(map[string]bool, len(usedTools))
+			for _, tn := range usedTools {
+				usedToolSet[tn] = true
+			}
+			for _, tn := range fm.Tools {
+				if !usedToolSet[tn] {
+					t.Errorf("extension %q declares tool %q in frontmatter but never registers it via @fir_ext.tool()", fm.Name, tn)
+				}
+			}
 		})
 	}
 }
@@ -236,6 +274,46 @@ func extractPythonCommands(src string) []string {
 			}
 		}
 		// Find name="..." or name='...'
+		nameIdx := strings.Index(block, "name=")
+		if nameIdx < 0 {
+			continue
+		}
+		rest := block[nameIdx+5:]
+		for _, q := range []byte{'"', '\''} {
+			idx := strings.IndexByte(rest, q)
+			if idx < 0 {
+				continue
+			}
+			end := strings.IndexByte(rest[idx+1:], q)
+			if end < 0 {
+				continue
+			}
+			results = append(results, rest[idx+1:idx+1+end])
+			break
+		}
+	}
+	return results
+}
+
+// extractPythonTools extracts tool names from @fir_ext.tool(...) calls.
+// Same form-handling as extractPythonCommands.
+func extractPythonTools(src string) []string {
+	var results []string
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "@fir_ext.tool(") {
+			continue
+		}
+		block := trimmed
+		if !strings.Contains(block, ")") {
+			for j := i + 1; j < len(lines) && j < i+10; j++ {
+				block += " " + strings.TrimSpace(lines[j])
+				if strings.Contains(lines[j], ")") {
+					break
+				}
+			}
+		}
 		nameIdx := strings.Index(block, "name=")
 		if nameIdx < 0 {
 			continue

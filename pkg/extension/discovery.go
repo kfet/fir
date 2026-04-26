@@ -17,6 +17,7 @@ type ExtProcConfig struct {
 	Demo          bool                                    // demo/test extension; skipped unless explicitly allowed
 	Events        []string                                // event names declared in frontmatter (for lazy loading)
 	Commands      []resources.ExtensionFrontmatterCommand // commands declared in frontmatter
+	Tools         []string                                // tool names declared in frontmatter; presence forces eager startup
 	AuthProviders []string                                // auth provider IDs declared in frontmatter
 }
 
@@ -43,6 +44,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 				Modes:         fm.Modes,
 				Events:        fm.Events,
 				Commands:      fm.Commands,
+				Tools:         fm.Tools,
 				AuthProviders: fm.AuthProviders,
 			}
 		}
@@ -153,6 +155,7 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			Modes:         fm.Modes,
 			Events:        fm.Events,
 			Commands:      fm.Commands,
+			Tools:         fm.Tools,
 			AuthProviders: fm.AuthProviders,
 		}
 	}
@@ -193,6 +196,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				Demo:          fm.Demo,
 				Events:        fm.Events,
 				Commands:      fm.Commands,
+				Tools:         fm.Tools,
 				AuthProviders: fm.AuthProviders,
 			}
 			continue
@@ -228,6 +232,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Demo:          fm.Demo,
 			Events:        fm.Events,
 			Commands:      fm.Commands,
+			Tools:         fm.Tools,
 			AuthProviders: fm.AuthProviders,
 		}
 	}

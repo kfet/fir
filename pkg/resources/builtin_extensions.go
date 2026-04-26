@@ -60,6 +60,7 @@ type ExtensionFrontmatter struct {
 	Modes         []string
 	Events        []string                      // event names this extension subscribes to (for lazy loading)
 	Commands      []ExtensionFrontmatterCommand // slash commands (registered as stubs for lazy loading)
+	Tools         []string                      // tool names this extension registers; presence forces eager startup
 	AuthProviders []string                      // auth provider IDs this extension registers
 	Present       bool                          // true when a valid frontmatter block was found
 }
@@ -132,6 +133,8 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Events = parseCommaSeparatedList(value)
 		case "commands":
 			fm.Commands = parseCommandList(value)
+		case "tool", "tools":
+			fm.Tools = parseCommaSeparatedList(value)
 		case "auth_provider", "auth_providers":
 			fm.AuthProviders = parseCommaSeparatedList(value)
 		}

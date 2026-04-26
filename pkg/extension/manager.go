@@ -163,7 +163,10 @@ func (m *Manager) SetConfigDirs(dirs []string) {
 //
 // Extensions that declare their subscribed events in frontmatter are deferred
 // for lazy startup — they are only spawned when the first matching event fires.
-// Extensions without frontmatter events are started eagerly (in parallel).
+// However, if an extension also declares `tools:` in frontmatter, it is started
+// eagerly so its tools are registered up-front (lazy stub-registration is only
+// implemented for commands).  Extensions without frontmatter events are started
+// eagerly (in parallel).
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
 	m.mu.Lock()
 	m.projectDir = projectDir
@@ -223,13 +226,16 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 	m.sdkDir = sdkPath
 	m.mu.Unlock()
 
-	// Partition into eager (no frontmatter events) and lazy (has frontmatter events).
+	// Partition into eager (no frontmatter events, OR declares tools) and
+	// lazy (only events/commands).  Tool-bearing extensions must always
+	// start eagerly so their tools are registered up-front; lazy startup is
+	// only safe for ext that contribute commands or pure event handlers.
 	var eager []ExtProcConfig
 	for _, cfg := range configs {
 		if m.shouldSkip(cfg) {
 			continue
 		}
-		if len(cfg.Events) > 0 {
+		if len(cfg.Events) > 0 && len(cfg.Tools) == 0 {
 			// Defer: register as pending, start on first matching event.
 			eventSet := make(map[string]bool, len(cfg.Events))
 			for _, e := range cfg.Events {

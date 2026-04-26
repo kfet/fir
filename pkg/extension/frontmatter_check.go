@@ -16,10 +16,12 @@ type FrontmatterMismatch struct {
 	// Missing lists items present in the handshake but absent from frontmatter.
 	MissingEvents        []string
 	MissingCommands      []string
+	MissingTools         []string
 	MissingAuthProviders []string
 	// Extra lists items in frontmatter but not in the handshake (stale).
 	ExtraEvents        []string
 	ExtraCommands      []string
+	ExtraTools         []string
 	ExtraAuthProviders []string
 }
 
@@ -32,6 +34,9 @@ func (m FrontmatterMismatch) Summary() string {
 	if len(m.MissingCommands) > 0 {
 		parts = append(parts, fmt.Sprintf("missing commands: %s", strings.Join(m.MissingCommands, ", ")))
 	}
+	if len(m.MissingTools) > 0 {
+		parts = append(parts, fmt.Sprintf("missing tools: %s", strings.Join(m.MissingTools, ", ")))
+	}
 	if len(m.MissingAuthProviders) > 0 {
 		parts = append(parts, fmt.Sprintf("missing auth_providers: %s", strings.Join(m.MissingAuthProviders, ", ")))
 	}
@@ -40,6 +45,9 @@ func (m FrontmatterMismatch) Summary() string {
 	}
 	if len(m.ExtraCommands) > 0 {
 		parts = append(parts, fmt.Sprintf("extra commands: %s", strings.Join(m.ExtraCommands, ", ")))
+	}
+	if len(m.ExtraTools) > 0 {
+		parts = append(parts, fmt.Sprintf("extra tools: %s", strings.Join(m.ExtraTools, ", ")))
 	}
 	if len(m.ExtraAuthProviders) > 0 {
 		parts = append(parts, fmt.Sprintf("extra auth_providers: %s", strings.Join(m.ExtraAuthProviders, ", ")))
@@ -50,9 +58,9 @@ func (m FrontmatterMismatch) Summary() string {
 // Empty returns true if there is no mismatch.
 func (m FrontmatterMismatch) Empty() bool {
 	return len(m.MissingEvents) == 0 && len(m.MissingCommands) == 0 &&
-		len(m.MissingAuthProviders) == 0 &&
+		len(m.MissingTools) == 0 && len(m.MissingAuthProviders) == 0 &&
 		len(m.ExtraEvents) == 0 && len(m.ExtraCommands) == 0 &&
-		len(m.ExtraAuthProviders) == 0
+		len(m.ExtraTools) == 0 && len(m.ExtraAuthProviders) == 0
 }
 
 // CheckFrontmatter compares the extension's frontmatter declarations against
@@ -68,6 +76,10 @@ func CheckFrontmatter(cfg ExtProcConfig, caps *InitResult) FrontmatterMismatch {
 	fmCmds := make(map[string]bool, len(cfg.Commands))
 	for _, c := range cfg.Commands {
 		fmCmds[c.Name] = true
+	}
+	fmTools := make(map[string]bool, len(cfg.Tools))
+	for _, t := range cfg.Tools {
+		fmTools[t] = true
 	}
 
 	// Check events from handshake.
@@ -124,11 +136,29 @@ func CheckFrontmatter(cfg ExtProcConfig, caps *InitResult) FrontmatterMismatch {
 		}
 	}
 
+	// Check tools from handshake.
+	for _, t := range caps.Tools {
+		if !fmTools[t.Name] {
+			mm.MissingTools = append(mm.MissingTools, t.Name)
+		}
+	}
+	capsTools := make(map[string]bool, len(caps.Tools))
+	for _, t := range caps.Tools {
+		capsTools[t.Name] = true
+	}
+	for _, t := range cfg.Tools {
+		if !capsTools[t] {
+			mm.ExtraTools = append(mm.ExtraTools, t)
+		}
+	}
+
 	sort.Strings(mm.MissingEvents)
 	sort.Strings(mm.MissingCommands)
+	sort.Strings(mm.MissingTools)
 	sort.Strings(mm.MissingAuthProviders)
 	sort.Strings(mm.ExtraEvents)
 	sort.Strings(mm.ExtraCommands)
+	sort.Strings(mm.ExtraTools)
 	sort.Strings(mm.ExtraAuthProviders)
 	return mm
 }
@@ -181,7 +211,7 @@ func FixFrontmatter(path string, caps *InitResult) error {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key == "events" || key == "event" || key == "commands" || key == "auth_providers" || key == "auth_provider" {
+		if key == "events" || key == "event" || key == "commands" || key == "tool" || key == "tools" || key == "auth_providers" || key == "auth_provider" {
 			continue // will be rewritten
 		}
 		newFM = append(newFM, line)
@@ -206,6 +236,16 @@ func FixFrontmatter(path string, caps *InitResult) error {
 			}
 		}
 		newFM = append(newFM, "# commands: "+strings.Join(parts, ", "))
+	}
+
+	// Add tools line if there are registered tools.
+	if len(caps.Tools) > 0 {
+		names := make([]string, 0, len(caps.Tools))
+		for _, t := range caps.Tools {
+			names = append(names, t.Name)
+		}
+		sort.Strings(names)
+		newFM = append(newFM, "# tools: "+strings.Join(names, ", "))
 	}
 
 	// Add auth_providers line if there are registered auth providers.
