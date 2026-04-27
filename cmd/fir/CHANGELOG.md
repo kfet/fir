@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-04-27
+
 ### Fixed
 
 - `pkg/mcp`: eliminate root cause of `ToolListChangedHandler` race — if a server sends `notifications/tools/list_changed` during the `initialize` handshake (before `Connect()` returns), the re-list goroutine now detects that `e.session` is still nil and exits early instead of calling `session.Tools()` on a mid-initialization session. The `startServer` call already does a full tool enumeration after `Connect()` returns, so the notification is redundant and safe to skip.
