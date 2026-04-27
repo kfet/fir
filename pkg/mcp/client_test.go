@@ -493,12 +493,21 @@ func TestManager_LoggingHandler(t *testing.T) {
 		Data:   "hello from server",
 	}))
 
-	// Wait for the log notification to arrive in slog.
+	// Wait for the server-log notification to arrive in slog. Other unrelated
+	// records (e.g. a transient "MCP re-list tools error" from startup races
+	// observed under CI load) may arrive on the same channel — skip past them.
+	deadline := time.After(3 * time.Second)
 	var rec slog.Record
-	select {
-	case rec = <-ch:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for MCP server log message in slog")
+	found := false
+	for !found {
+		select {
+		case rec = <-ch:
+			if rec.Message == "MCP server log" {
+				found = true
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for MCP server log message in slog")
+		}
 	}
 
 	assert.Equal(t, slog.LevelWarn, rec.Level, "MCP 'warning' must map to slog.LevelWarn")

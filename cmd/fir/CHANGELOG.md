@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-04-26
+
+### Fixed
+
+- `pkg/mcp.TestManager_LoggingHandler` flaked on CI: the slog-capture channel sometimes received an unrelated `"MCP re-list tools error"` record (from a startup-race re-list against a server that hadn't yet completed its initialize handshake) before the expected `"MCP server log"` warning, and the test's blocking `<-ch` consumed the wrong record. Test now drains the channel until it sees the expected message (with the same 3 s overall deadline). Reproduced under CI load on the v0.34.0 release build.
+
 ### Added
 
 - `aside` extension now subscribes to `session_start` and prepends a `[SYS_EXT]` note teaching the LLM *why* the advisor model exists when one is configured. Principle-based, not a checklist — the note frames the advisor as a second opinion to reach for when the LLM's own reasoning (not its tools) is the bottleneck and the cost of being wrong outweighs the cost of asking. Co-located with the tool that owns the behaviour and only fires when the advisor is enabled, so users who run `/aside-advisor off` see zero prompt bloat.
