@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-04-27
+
 ### Added
 
 - New `/advise` slash command in the `aside` extension: routes a side question directly to the configured advisor model (same resolution as `escalate=true` on the `aside` tool). When no advisor is configured, prints a hint to `/aside-advisor` instead of silently falling back — the whole point of the command is to ask a stronger model. Output is prefixed `[advisor: provider/model[:effort]]` for traceability, mirroring the tool path.
