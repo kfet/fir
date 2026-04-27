@@ -158,6 +158,22 @@ func isOAuthModel(model *ai.Model) bool {
 	return model != nil && model.Headers != nil && model.Headers["x-anthropic-oauth-beta-prefix"] != ""
 }
 
+// joinBetaParts joins comma-separated anthropic-beta header parts, dropping
+// empty entries so we never emit a stray empty value (which the API rejects
+// with: 400 Unexpected value(s) “ for the `anthropic-beta` header).
+func joinBetaParts(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		for _, s := range strings.Split(p, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return strings.Join(out, ",")
+}
+
 // isAuthError returns true if the error indicates an authentication failure
 // (e.g. expired OAuth token) that may be resolved by refreshing credentials.
 func isAuthError(errType, errMsg string) bool {
@@ -878,17 +894,18 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 	if oauthToken {
 		// OAuth beta prefix is set by the auth extension via model headers.
 		oauthBetaPrefix := model.Headers["x-anthropic-oauth-beta-prefix"]
-		if oauthBetaPrefix != "" {
-			authHeaders["anthropic-beta"] = oauthBetaPrefix + "," + betaStr
-		} else {
-			authHeaders["anthropic-beta"] = betaStr
+		combined := joinBetaParts(oauthBetaPrefix, betaStr)
+		if combined != "" {
+			authHeaders["anthropic-beta"] = combined
 		}
 		// Use the apiKey (resolved fresh via GetApiKey with auto-refresh)
 		// as a Bearer token. This avoids using a stale token baked into
 		// model.Headers at startup.
 		authHeaders["authorization"] = "Bearer " + apiKey
 	} else {
-		authHeaders["anthropic-beta"] = betaStr
+		if betaStr != "" {
+			authHeaders["anthropic-beta"] = betaStr
+		}
 		authHeaders["x-api-key"] = apiKey
 	}
 

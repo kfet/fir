@@ -2646,3 +2646,80 @@ func TestAnthropic_AuthErrorNoRefreshFails(t *testing.T) {
 		t.Errorf("expected authentication_error in message, got %q", result.ErrorMessage)
 	}
 }
+
+// TestAnthropic_NoEmptyBetaHeader_APIKey verifies that when no beta features
+// are needed, the anthropic-beta header is omitted entirely (not sent empty).
+// The Anthropic API rejects empty beta headers with:
+//
+//	400 Unexpected value(s) `` for the `anthropic-beta` header.
+func TestAnthropic_NoEmptyBetaHeader_APIKey(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com"}
+	headers := buildAnthropicHeaders(model, "test-key", false, nil, false)
+	if v, ok := headers["anthropic-beta"]; ok {
+		t.Errorf("expected no anthropic-beta header when no betas needed, got %q", v)
+	}
+}
+
+// TestAnthropic_NoEmptyBetaHeader_OAuth_NoPrefix verifies that an OAuth model
+// with an empty oauth-beta-prefix and no feature betas does not emit an empty
+// anthropic-beta header.
+func TestAnthropic_NoEmptyBetaHeader_OAuth_NoPrefix(t *testing.T) {
+	model := &ai.Model{
+		ID:      "claude-sonnet-4-20250514",
+		BaseURL: "https://api.anthropic.com",
+		Headers: map[string]string{
+			"x-anthropic-oauth-beta-prefix": "",
+		},
+	}
+	headers := buildAnthropicHeaders(model, "test-token", true, nil, false)
+	if v, ok := headers["anthropic-beta"]; ok && v == "" {
+		t.Errorf("expected no empty anthropic-beta header, got empty value")
+	}
+}
+
+// TestAnthropic_OAuthBetaPrefix_NoTrailingComma verifies the oauth prefix is
+// joined with feature betas without a trailing/leading empty entry that would
+// produce a value like "oauth-2025-04-20," (rejected by the API).
+func TestAnthropic_OAuthBetaPrefix_NoTrailingComma(t *testing.T) {
+	model := &ai.Model{
+		ID:      "claude-sonnet-4-20250514",
+		BaseURL: "https://api.anthropic.com",
+		Headers: map[string]string{
+			"x-anthropic-oauth-beta-prefix": "oauth-2025-04-20",
+		},
+	}
+	headers := buildAnthropicHeaders(model, "test-token", true, nil, false)
+	beta := headers["anthropic-beta"]
+	if beta != "oauth-2025-04-20" {
+		t.Errorf("expected clean oauth prefix only, got %q", beta)
+	}
+	for _, part := range strings.Split(beta, ",") {
+		if strings.TrimSpace(part) == "" {
+			t.Errorf("anthropic-beta has empty entry: %q", beta)
+		}
+	}
+}
+
+func TestJoinBetaParts(t *testing.T) {
+	cases := []struct {
+		in  []string
+		out string
+	}{
+		{[]string{}, ""},
+		{[]string{""}, ""},
+		{[]string{"", ""}, ""},
+		{[]string{"a"}, "a"},
+		{[]string{"a", ""}, "a"},
+		{[]string{"", "a"}, "a"},
+		{[]string{"a,b", ""}, "a,b"},
+		{[]string{"a", "b,c"}, "a,b,c"},
+		{[]string{"a,", ",b"}, "a,b"},
+		{[]string{" a , b "}, "a,b"},
+	}
+	for _, c := range cases {
+		got := joinBetaParts(c.in...)
+		if got != c.out {
+			t.Errorf("joinBetaParts(%v) = %q, want %q", c.in, got, c.out)
+		}
+	}
+}
