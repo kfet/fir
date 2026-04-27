@@ -775,5 +775,71 @@ class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
         )
 
 
+
+
+class TestAdviseCommand(unittest.TestCase):
+    """/advise — slash command that always routes to the advisor model."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def _ctx(self, side_query_result="advisor reply"):
+        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx.side_query = mock.MagicMock(return_value=side_query_result)
+        return ctx
+
+    def test_empty_args_shows_usage(self):
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx()
+        result = handler([], ctx)
+        self.assertIn("Usage", result["message"])
+        ctx.side_query.assert_not_called()
+
+    def test_no_advisor_configured_returns_hint(self):
+        self.mod._ADVISOR = None
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx()
+        result = handler(["why", "is", "the", "sky", "blue"], ctx)
+        self.assertIn("No advisor configured", result["message"])
+        self.assertIn("/aside-advisor", result["message"])
+        ctx.side_query.assert_not_called()
+
+    def test_routes_to_advisor_with_overrides(self):
+        self.mod._ADVISOR = {
+            "provider": "anthropic",
+            "model": "claude-opus-4-x",
+            "effort": "high",
+        }
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx(side_query_result="deep thought")
+        result = handler(["what", "should", "I", "do?"], ctx)
+        ctx.side_query.assert_called_once()
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-opus-4-x")
+        self.assertEqual(kwargs["provider"], "anthropic")
+        self.assertEqual(kwargs["effort"], "high")
+        msg = result["message"]
+        self.assertIn("advise:", msg)
+        self.assertIn("[advisor: anthropic/claude-opus-4-x:high]", msg)
+        self.assertIn("deep thought", msg)
+
+    def test_advisor_without_effort_passes_none(self):
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx()
+        handler(["q"], ctx)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertIsNone(kwargs["effort"])
+
+    def test_side_query_failure_returns_error(self):
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx()
+        ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
+        result = handler(["q"], ctx)
+        self.assertIn("LLM down", result["message"])
+
+
 if __name__ == "__main__":
     unittest.main()

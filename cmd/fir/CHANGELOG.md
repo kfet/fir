@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `/advise` slash command in the `aside` extension: routes a side question directly to the configured advisor model (same resolution as `escalate=true` on the `aside` tool). When no advisor is configured, prints a hint to `/aside-advisor` instead of silently falling back — the whole point of the command is to ask a stronger model. Output is prefixed `[advisor: provider/model[:effort]]` for traceability, mirroring the tool path.
+
+### Fixed
+
+- Anthropic provider no longer emits an empty `anthropic-beta` header when no beta features are needed (or when the OAuth `x-anthropic-oauth-beta-prefix` is empty). The API rejects empty values with `400 Unexpected value(s) `` for the `anthropic-beta` header`, which surfaced as `aside LLM call failed` for users on accounts where no betas applied to the chosen model. New helper `joinBetaParts` strips empty entries; the header is omitted entirely when the result is empty. Regression tests in `pkg/ai/providers/anthropic_test.go`.
+
 ## [0.35.0] - 2026-04-27
 
 ### Fixed
