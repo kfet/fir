@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `pkg/mcp`: eliminate root cause of `ToolListChangedHandler` race — if a server sends `notifications/tools/list_changed` during the `initialize` handshake (before `Connect()` returns), the re-list goroutine now detects that `e.session` is still nil and exits early instead of calling `session.Tools()` on a mid-initialization session. The `startServer` call already does a full tool enumeration after `Connect()` returns, so the notification is redundant and safe to skip.
+
 ### Added
 
 - New builtin skill `aside-advisor`: teaches the executor the advisor/escalation pattern via a `[SYS_EXT]` description in the base system prompt. Unlike the old `session_start` prepend (a user-role history message that drifts during compaction), the skill's description lives in `<available_skills>` inside the system prompt and is present on every turn. The skill body adds detailed guidance on when to escalate, timing, and how to formulate a good advisor query. Removed the `on_session_start` handler from `aside.py` — the skill now owns this steering. Body and description rewritten to incorporate Anthropic advisor-tool best practices: call before substantive work, before declaring done (after making deliverable durable), when stuck or changing approach; treat advice with weight and surface conflicts in a reconcile call; ask advisor for <100-word enumerated responses. Description now keyword-dense (deliberating · stuck · uncertain · change of approach · declare done · second opinion) so the executor pattern-matches on the actual trigger states.
