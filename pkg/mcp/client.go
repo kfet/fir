@@ -415,6 +415,16 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 			// cancelled when the handler returns, before the goroutine finishes.
 			session := req.Session
 			go func() {
+				// If Connect() hasn't returned yet, e.session is still nil and
+				// the session is mid-initialization — calling session.Tools()
+				// would fail with "method is invalid during session
+				// initialization". Skip: startServer already does a full
+				// Tools() enumeration after Connect() returns.
+				var stored bool
+				m.withEntry(serverName, func(e *serverEntry) { stored = e.session != nil })
+				if !stored {
+					return
+				}
 				var updated []agent.AgentTool
 				for tool, err := range session.Tools(context.Background(), nil) {
 					if err != nil {
