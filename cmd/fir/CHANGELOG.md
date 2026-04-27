@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- New builtin skill `aside-advisor`: teaches the executor the advisor/escalation pattern via a `[SYS_EXT]` description in the base system prompt. Unlike the old `session_start` prepend (a user-role history message that drifts during compaction), the skill's description lives in `<available_skills>` inside the system prompt and is present on every turn. The skill body adds detailed guidance on when to escalate, timing, and how to formulate a good advisor query. Removed the `on_session_start` handler from `aside.py` — the skill now owns this steering.
+
 ## [0.34.0] - 2026-04-26
 
 ### Fixed

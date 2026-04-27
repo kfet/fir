@@ -46,6 +46,16 @@ first use so the host's config dirs are available from the init handshake.
 The ``escalate`` parameter only appears in the tool schema when an advisor
 is in effect, so users who explicitly disable it see no extra surface.
 Changes take effect on the next session start.
+
+Steering the executor
+---------------------
+
+The executor is guided toward the advisor pattern via the built-in
+``aside-advisor`` skill rather than a session_start prepend.  The skill's
+``[SYS_EXT]`` description appears in the base system prompt's
+``<available_skills>`` block on every turn, making it more persistent than
+a prepended history message which can drift away during compaction.
+The skill body provides detailed examples and decision guidance.
 """
 
 from __future__ import annotations
@@ -652,38 +662,6 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
             "Changes take effect on the next session start."
         ),
     }
-
-
-# ---------------------------------------------------------------------------
-# Session start: steer the LLM toward the advisor when one is configured
-# ---------------------------------------------------------------------------
-
-
-@fir_ext.on("session_start")
-def on_session_start(params: dict, ctx: fir_ext.Context):
-    """Inject a [SYS_EXT] note teaching the LLM *why* the advisor exists.
-
-    Principle, not checklist — the LLM decides when its own reasoning is the
-    bottleneck and reaches for help. We only describe the lever, not every
-    case for pulling it.
-    """
-    advisor = _advisor()
-    if advisor is None:
-        return
-    spec = _format_advisor_spec(advisor)
-    ctx.prepend(
-        f"A stronger advisor model ({spec}) is reachable via the `aside` tool "
-        f"with `escalate=true`. It costs more and is slower, but reasons better.\n\n"
-        f"You are the executor. The advisor is your second opinion. Reach for it "
-        f"when your own reasoning — not your tools — is the bottleneck: when the "
-        f"answer depends on judgement you don't trust yourself to make alone, and "
-        f"the cost of being wrong outweighs the cost of asking. Otherwise, decide "
-        f"and act.\n\n"
-        f"Earlier is cheaper. The advisor sees less context at turn 1 than at "
-        f"turn 50, and a wrong direction caught now saves the executor turns "
-        f"spent unwinding it. If the request is non-trivial and you can already "
-        f"feel the judgement-call coming, ask up front rather than after committing."
-    )
 
 
 fir_ext.run(name="aside")
