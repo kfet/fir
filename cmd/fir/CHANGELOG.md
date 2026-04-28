@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anthropic provider no longer drops or downgrades thinking blocks when replaying conversation history, which caused `400 thinking or redacted_thinking blocks in the latest assistant message cannot be modified` errors on multi-turn sessions with extended thinking enabled. Two root causes fixed:
+  1. `convertAnthropicMessages`: a thinking block with a non-empty `ThinkingSignature` but empty `Thinking` text was silently dropped by the empty-text guard. Reordered checks so any block with a valid signature is always forwarded verbatim.
+  2. `TransformMessages`: when model IDs didn't match exactly (e.g. alias `claude-opus-4-7` vs dated `claude-opus-4-7-20250514`), thinking blocks with signatures were converted to plain text, stripping the signature. A new `isSameProvider` check (same `Provider` + `Api`) now preserves all signed thinking blocks — including `redacted_thinking` — verbatim across model-ID variations within the same provider.
+
 ## [0.36.0] - 2026-04-27
 
 ### Added
