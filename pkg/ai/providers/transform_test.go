@@ -352,3 +352,45 @@ func TestTransformMessages_ThinkingEmptySignatureDifferentModel(t *testing.T) {
 		t.Errorf("expected thinking converted to text, got %s", am.Content[0].ContentType())
 	}
 }
+
+// TestTransformMessages_RedactedThinkingSameProviderDifferentModelID verifies
+// that a redacted thinking block (Thinking="", ThinkingSignature="encrypted",
+// Redacted=true) is preserved verbatim when isSameProvider=true but
+// isSameModel=false.  The empty Thinking text must not trigger the drop-empty
+// guard; only the ThinkingSignature check should apply.
+func TestTransformMessages_RedactedThinkingSameProviderDifferentModelID(t *testing.T) {
+	model := &ai.Model{
+		ID:       "claude-opus-4-7-20250514",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+	}
+	redactedBlock := ai.NewThinkingContent("")
+	redactedBlock.Thinking.Redacted = true
+	redactedBlock.Thinking.ThinkingSignature = "EncryptedBlob=="
+
+	msg := ai.AssistantMessage{
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7", // different ID → isSameModel = false
+		Content: []ai.AssistantContent{
+			redactedBlock,
+			ai.NewTextContent("answer"),
+		},
+		StopReason: ai.StopReasonStop,
+	}
+
+	result := TransformMessages([]ai.Message{ai.NewAssistantMsg(msg)}, model, nil)
+	am := result[0].AsAssistant()
+	if len(am.Content) != 2 {
+		t.Fatalf("expected 2 blocks (redacted thinking + text), got %d", len(am.Content))
+	}
+	if !am.Content[0].IsThinking() {
+		t.Errorf("expected redacted thinking block preserved, got %s", am.Content[0].ContentType())
+	}
+	if !am.Content[0].Thinking.Redacted {
+		t.Error("expected Redacted=true to be preserved")
+	}
+	if am.Content[0].Thinking.ThinkingSignature != "EncryptedBlob==" {
+		t.Errorf("expected ThinkingSignature preserved, got %q", am.Content[0].Thinking.ThinkingSignature)
+	}
+}

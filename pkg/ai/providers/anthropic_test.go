@@ -2819,3 +2819,52 @@ func TestAnthropic_ConvertMessages_ThinkingWhitespaceTextWithSignature(t *testin
 		t.Errorf("expected block[0] type=thinking, got %v", aBlocks[0]["type"])
 	}
 }
+
+// TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip verifies
+// the full pipeline: a redacted thinking block that survived TransformMessages
+// (isSameProvider=true, isSameModel=false) is correctly serialised as a
+// {"type":"redacted_thinking","data":"..."} block by convertAnthropicMessages,
+// NOT as a {"type":"thinking",...} block.
+func TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip(t *testing.T) {
+	model := &ai.Model{
+		ID: "claude-opus-4-7-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+	}
+
+	// Simulate a redacted block that was preserved verbatim through TransformMessages.
+	redactedBlock := ai.NewThinkingContent("")
+	redactedBlock.Thinking.Redacted = true
+	redactedBlock.Thinking.ThinkingSignature = "EncryptedOpaqueBlobXYZ=="
+
+	assistantMsg := ai.AssistantMessage{
+		Role:     "assistant",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7", // original model ID differs from current
+		Content: []ai.AssistantContent{
+			redactedBlock,
+			ai.NewTextContent("Here is my answer."),
+		},
+	}
+
+	msgs := []ai.Message{
+		ai.NewUserMsg("Question?", 1000),
+		ai.NewAssistantMsg(assistantMsg),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+
+	aBlocks, ok := result[1]["content"].([]map[string]any)
+	if !ok || len(aBlocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(aBlocks))
+	}
+	if aBlocks[0]["type"] != "redacted_thinking" {
+		t.Errorf("expected type=redacted_thinking, got %v", aBlocks[0]["type"])
+	}
+	if aBlocks[0]["data"] != "EncryptedOpaqueBlobXYZ==" {
+		t.Errorf("expected data='EncryptedOpaqueBlobXYZ==', got %v", aBlocks[0]["data"])
+	}
+	if _, hasThinking := aBlocks[0]["thinking"]; hasThinking {
+		t.Error("redacted_thinking block must not have a 'thinking' field")
+	}
+}

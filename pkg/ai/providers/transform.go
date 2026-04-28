@@ -66,13 +66,11 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 				switch {
 				case block.IsThinking():
 					b := block.Thinking
-					if isSameModel && b.ThinkingSignature != "" {
-						// Same model, has signature → keep verbatim.
-						newContent = append(newContent, block)
-					} else if isSameProvider && b.ThinkingSignature != "" {
-						// Different model ID but same provider/API (e.g. alias vs
-						// dated version).  The signature is still valid; preserve the
-						// block verbatim so it can be forwarded to the API unchanged.
+					if isSameProvider && b.ThinkingSignature != "" {
+						// Same provider+API (covers same-model and same-provider-different-ID).
+						// The signature was issued by the same back-end, so the block
+						// must be forwarded verbatim — converting to plain text strips
+						// the signature and triggers a 400 "cannot be modified".
 						newContent = append(newContent, block)
 					} else if b.Thinking == "" || strings.TrimSpace(b.Thinking) == "" {
 						// No signature and no content — drop.
