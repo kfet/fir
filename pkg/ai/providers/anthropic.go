@@ -1168,16 +1168,25 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 							"type": "redacted_thinking",
 							"data": c.Thinking.ThinkingSignature,
 						})
-					} else if strings.TrimSpace(c.Thinking.Thinking) == "" {
-						continue
-					} else if c.Thinking.ThinkingSignature == "" {
-						blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking.Thinking})
-					} else {
+					} else if c.Thinking.ThinkingSignature != "" {
+						// Thinking block with a valid signature must be passed back
+						// verbatim — even when Thinking.Thinking is empty (e.g. the
+						// model produced a zero-length thinking block). Dropping or
+						// converting it to plain text changes the assistant-message
+						// structure and triggers a 400 "cannot be modified" from the
+						// Anthropic API on the next turn.
 						blocks = append(blocks, map[string]any{
 							"type":      "thinking",
 							"thinking":  c.Thinking.Thinking,
 							"signature": c.Thinking.ThinkingSignature,
 						})
+					} else if strings.TrimSpace(c.Thinking.Thinking) == "" {
+						// No signature, no content — genuinely empty block; drop it.
+						continue
+					} else {
+						// Has content but no signature: downgrade to plain text.
+						// This happens when history comes from a different provider.
+						blocks = append(blocks, map[string]any{"type": "text", "text": c.Thinking.Thinking})
 					}
 				} else if c.IsToolCall() {
 					name := c.ToolCall.Name

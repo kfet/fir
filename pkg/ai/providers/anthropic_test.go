@@ -2723,3 +2723,99 @@ func TestJoinBetaParts(t *testing.T) {
 		}
 	}
 }
+
+// TestAnthropic_ConvertMessages_ThinkingEmptyTextWithSignature ensures that a
+// thinking block whose Thinking text is empty but whose ThinkingSignature is
+// non-empty is forwarded verbatim as a {"type":"thinking",...} block rather
+// than being silently dropped.  Dropping it changes the assistant-message
+// structure and triggers a 400 "cannot be modified" from the Anthropic API.
+func TestAnthropic_ConvertMessages_ThinkingEmptyTextWithSignature(t *testing.T) {
+	model := &ai.Model{
+		ID: "claude-opus-4-7", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+	}
+
+	// Simulate a thinking block where the model returned an empty thinking text
+	// but a valid signature (e.g. zero-budget or adaptive thinking with no output).
+	assistantMsg := ai.AssistantMessage{
+		Role:     "assistant",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7",
+		Content: []ai.AssistantContent{
+			func() ai.AssistantContent {
+				c := ai.NewThinkingContent("") // empty thinking text
+				c.Thinking.ThinkingSignature = "sig_empty_thinking"
+				return c
+			}(),
+			ai.NewTextContent("My answer."),
+		},
+	}
+
+	msgs := []ai.Message{
+		ai.NewUserMsg("Hello?", 1000),
+		ai.NewAssistantMsg(assistantMsg),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+	aBlocks, ok := result[1]["content"].([]map[string]any)
+	if !ok {
+		t.Fatal("content is not []map[string]any")
+	}
+	// Must keep both blocks: thinking (even with empty text) and text.
+	if len(aBlocks) != 2 {
+		t.Fatalf("expected 2 blocks (thinking + text), got %d — thinking block was wrongly dropped", len(aBlocks))
+	}
+	if aBlocks[0]["type"] != "thinking" {
+		t.Errorf("expected block[0] type=thinking, got %v", aBlocks[0]["type"])
+	}
+	if aBlocks[0]["thinking"] != "" {
+		t.Errorf("expected empty thinking text, got %q", aBlocks[0]["thinking"])
+	}
+	if aBlocks[0]["signature"] != "sig_empty_thinking" {
+		t.Errorf("expected signature 'sig_empty_thinking', got %q", aBlocks[0]["signature"])
+	}
+}
+
+// TestAnthropic_ConvertMessages_ThinkingWhitespaceTextWithSignature ensures
+// that whitespace-only thinking text does not cause the block to be dropped
+// when a ThinkingSignature is present.
+func TestAnthropic_ConvertMessages_ThinkingWhitespaceTextWithSignature(t *testing.T) {
+	model := &ai.Model{
+		ID: "claude-opus-4-7", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+	}
+
+	assistantMsg := ai.AssistantMessage{
+		Role:     "assistant",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7",
+		Content: []ai.AssistantContent{
+			func() ai.AssistantContent {
+				c := ai.NewThinkingContent("   ") // whitespace only
+				c.Thinking.ThinkingSignature = "sig_ws"
+				return c
+			}(),
+			ai.NewTextContent("Answer."),
+		},
+	}
+
+	msgs := []ai.Message{
+		ai.NewUserMsg("Hi?", 1000),
+		ai.NewAssistantMsg(assistantMsg),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+	aBlocks := result[1]["content"].([]map[string]any)
+	if len(aBlocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d — whitespace thinking block was wrongly dropped", len(aBlocks))
+	}
+	if aBlocks[0]["type"] != "thinking" {
+		t.Errorf("expected block[0] type=thinking, got %v", aBlocks[0]["type"])
+	}
+}

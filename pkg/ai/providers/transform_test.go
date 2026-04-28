@@ -277,3 +277,78 @@ func TestTransformMessages_SyntheticToolResultUsesAssistantTimestamp(t *testing.
 		t.Errorf("synthetic tool result timestamp not deterministic: %d vs %d", tr.Timestamp, tr2.Timestamp)
 	}
 }
+
+// TestTransformMessages_ThinkingSignatureSameProviderDifferentModelID checks
+// that a thinking block with a valid signature is preserved verbatim when the
+// stored assistant message comes from the same provider+API but a different
+// model ID (e.g. alias "claude-opus-4-7" vs dated "claude-opus-4-7-20250514").
+// Converting it to text would strip the signature and cause a 400 from the
+// Anthropic API on the next turn ("thinking blocks cannot be modified").
+func TestTransformMessages_ThinkingSignatureSameProviderDifferentModelID(t *testing.T) {
+	// Current call uses the dated model ID.
+	model := &ai.Model{
+		ID:       "claude-opus-4-7-20250514",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+	}
+	// Stored assistant message uses the alias.
+	msg := ai.AssistantMessage{
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7", // different ID → isSameModel = false
+		Content: []ai.AssistantContent{
+			{Thinking: &ai.ThinkingContent{
+				Type:              ai.ContentTypeThinking,
+				Thinking:          "let me think",
+				ThinkingSignature: "sig-cross-model",
+			}},
+			ai.NewTextContent("answer"),
+		},
+		StopReason: ai.StopReasonStop,
+	}
+
+	result := TransformMessages([]ai.Message{ai.NewAssistantMsg(msg)}, model, nil)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	am := result[0].AsAssistant()
+	if len(am.Content) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(am.Content))
+	}
+	if !am.Content[0].IsThinking() {
+		t.Errorf("expected thinking block preserved, got %s", am.Content[0].ContentType())
+	}
+	if am.Content[0].Thinking.ThinkingSignature != "sig-cross-model" {
+		t.Errorf("expected signature 'sig-cross-model', got %q", am.Content[0].Thinking.ThinkingSignature)
+	}
+}
+
+// TestTransformMessages_ThinkingEmptySignatureDifferentModel verifies that a
+// thinking block WITHOUT a signature from a different model is still converted
+// to plain text (existing behaviour for cross-provider thinking downgrade).
+func TestTransformMessages_ThinkingEmptySignatureDifferentModel(t *testing.T) {
+	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, Api: ai.ApiOpenAICompletions}
+	msg := ai.AssistantMessage{
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-3",
+		Content: []ai.AssistantContent{
+			{Thinking: &ai.ThinkingContent{
+				Type:     ai.ContentTypeThinking,
+				Thinking: "some thought",
+				// No ThinkingSignature
+			}},
+			ai.NewTextContent("answer"),
+		},
+		StopReason: ai.StopReasonStop,
+	}
+
+	result := TransformMessages([]ai.Message{ai.NewAssistantMsg(msg)}, model, nil)
+	am := result[0].AsAssistant()
+	if len(am.Content) != 2 {
+		t.Fatalf("expected 2 blocks (converted to text), got %d", len(am.Content))
+	}
+	if !am.Content[0].IsText() {
+		t.Errorf("expected thinking converted to text, got %s", am.Content[0].ContentType())
+	}
+}

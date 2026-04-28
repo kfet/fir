@@ -52,15 +52,30 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 				m.Api == model.Api &&
 				m.Model == model.ID
 
+			// isSameProvider is true when the stored assistant message used the
+			// same wire protocol (API) as the current call, even if the model ID
+			// differs (e.g. "claude-opus-4-7" vs "claude-opus-4-7-20250514").
+			// For the Anthropic messages API this matters: a thinking block's
+			// signature was issued by the same Anthropic back-end, so it must be
+			// forwarded verbatim — converting it to plain text would strip the
+			// signature and trigger a 400 "cannot be modified" on the next turn.
+			isSameProvider := m.Provider == model.Provider && m.Api == model.Api
+
 			newContent := make([]ai.AssistantContent, 0, len(m.Content))
 			for _, block := range m.Content {
 				switch {
 				case block.IsThinking():
 					b := block.Thinking
 					if isSameModel && b.ThinkingSignature != "" {
+						// Same model, has signature → keep verbatim.
+						newContent = append(newContent, block)
+					} else if isSameProvider && b.ThinkingSignature != "" {
+						// Different model ID but same provider/API (e.g. alias vs
+						// dated version).  The signature is still valid; preserve the
+						// block verbatim so it can be forwarded to the API unchanged.
 						newContent = append(newContent, block)
 					} else if b.Thinking == "" || strings.TrimSpace(b.Thinking) == "" {
-						// skip empty
+						// No signature and no content — drop.
 					} else if isSameModel {
 						newContent = append(newContent, block)
 					} else {
