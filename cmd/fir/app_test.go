@@ -173,6 +173,27 @@ func TestResolveTools_UnknownToolIgnored(t *testing.T) {
 	}
 }
 
+func TestAllToolNames_MatchesMap(t *testing.T) {
+	names := allToolNames()
+	// Must have exactly the same count as the map.
+	if len(names) != len(allToolMap) {
+		t.Errorf("allToolNames() returned %d names, allToolMap has %d entries", len(names), len(allToolMap))
+	}
+	// Every name must be a key in allToolMap.
+	for _, n := range names {
+		if _, ok := allToolMap[n]; !ok {
+			t.Errorf("allToolNames() returned %q which is not in allToolMap", n)
+		}
+	}
+	// Must be sorted.
+	for i := 1; i < len(names); i++ {
+		if names[i] < names[i-1] {
+			t.Errorf("allToolNames() is not sorted: %v", names)
+			break
+		}
+	}
+}
+
 // ============================================================================
 // readPipedStdin
 // ============================================================================

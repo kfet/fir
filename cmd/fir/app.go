@@ -838,7 +838,6 @@ func allToolNames() []string {
 // resolveTools builds the tool list based on CLI --tools/--no-tools flags.
 // Returns nil if no flags are set (use defaults).
 func resolveTools(args *Args, cwd string) []agent.AgentTool {
-
 	if args.NoTools && len(args.Tools) == 0 {
 		// --no-tools only: no tools at all
 		return []agent.AgentTool{}
