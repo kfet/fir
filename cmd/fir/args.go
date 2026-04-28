@@ -327,7 +327,7 @@ Options:
                                  first prompt. Applies in all modes — print/JSON
                                  always waits; interactive and ACP opt in here.
   --tools <tools>                Comma-separated list of tools to enable
-                                 Available: read, bash, edit, write, grep, find
+                                 Available: %s
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
   --no-extensions                Disable all extensions (overrides config)
   --extension <name>, -e <name>  Enable a specific extension by name (repeatable; overrides config)
@@ -372,5 +372,5 @@ Examples:
 
 Environment Variables:
 %s
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
+`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, strings.Join(allToolNames(), ", "), appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
 }

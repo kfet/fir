@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -813,17 +814,30 @@ func readPipedStdin() string {
 	return strings.TrimSpace(sb.String())
 }
 
+// allToolMap is the authoritative registry of built-in tools.
+// Keys are used to populate --tools help text and validate user input.
+var allToolMap = map[string]func(string) agent.AgentTool{
+	"read":  tools.NewReadTool,
+	"bash":  tools.NewBashTool,
+	"edit":  tools.NewEditTool,
+	"write": tools.NewWriteTool,
+	"grep":  tools.NewGrepTool,
+	"find":  tools.NewFindTool,
+}
+
+// allToolNames returns the sorted list of built-in tool names.
+func allToolNames() []string {
+	names := make([]string, 0, len(allToolMap))
+	for k := range allToolMap {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // resolveTools builds the tool list based on CLI --tools/--no-tools flags.
 // Returns nil if no flags are set (use defaults).
 func resolveTools(args *Args, cwd string) []agent.AgentTool {
-	allToolMap := map[string]func(string) agent.AgentTool{
-		"read":  tools.NewReadTool,
-		"bash":  tools.NewBashTool,
-		"edit":  tools.NewEditTool,
-		"write": tools.NewWriteTool,
-		"grep":  tools.NewGrepTool,
-		"find":  tools.NewFindTool,
-	}
 
 	if args.NoTools && len(args.Tools) == 0 {
 		// --no-tools only: no tools at all
@@ -837,7 +851,7 @@ func resolveTools(args *Args, cwd string) []agent.AgentTool {
 			if fn, ok := allToolMap[name]; ok {
 				result = append(result, fn(cwd))
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: unknown tool %q (available: read, bash, edit, write, grep, find)\n", name)
+				fmt.Fprintf(os.Stderr, "Warning: unknown tool %q (available: %s)\n", name, strings.Join(allToolNames(), ", "))
 			}
 		}
 		return result
