@@ -372,14 +372,5 @@ Examples:
 
 Environment Variables:
 %s
-
-Available Tools (default: read, bash, edit, write):
-  read   - Read file contents
-  bash   - Execute bash commands
-  edit   - Edit files with find/replace
-  write  - Write files (creates/overwrites)
-  grep   - Search file contents (read-only, off by default)
-  find   - Find files by glob pattern (read-only, off by default)
-  ls     - List directory contents (read-only, off by default)
 `, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
 }

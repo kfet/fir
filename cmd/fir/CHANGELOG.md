@@ -14,7 +14,7 @@
 
 ### Fixed
 
-- Removed the "Available tools" section from the default system prompt; tool definitions are already supplied via the API, so listing them in prose was redundant. Also removed `ToolSnippets` from `BuildSystemPromptOptions`.
+- Removed the "Available tools" section from `--help` output and from the default system prompt; tool definitions are already supplied via the API, so listing them in prose was redundant. Also removed `ToolSnippets` from `BuildSystemPromptOptions`.
 
 - Anthropic provider no longer drops or downgrades thinking blocks when replaying conversation history, which caused `400 thinking or redacted_thinking blocks in the latest assistant message cannot be modified` errors on multi-turn sessions with extended thinking enabled. Two root causes fixed:
   1. `convertAnthropicMessages`: a thinking block with a non-empty `ThinkingSignature` but empty `Thinking` text was silently dropped by the empty-text guard. Reordered checks so any block with a valid signature is always forwarded verbatim.
