@@ -20,7 +20,6 @@ type ContextFile struct {
 type BuildSystemPromptOptions struct {
 	CustomPrompt       string
 	SelectedTools      []string
-	ToolSnippets       map[string]string // one-line snippets for tools to show in "Available tools"
 	AppendSystemPrompt string
 	Cwd                string
 	ContextFiles       []ContextFile
@@ -81,29 +80,8 @@ func buildCustomPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSec
 }
 
 func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSection string) string {
-	tools := opts.SelectedTools
-
-	// A tool appears in Available tools only when the caller provides a one-line snippet.
-	var visibleTools []string
-	for _, t := range tools {
-		if opts.ToolSnippets != nil {
-			if _, ok := opts.ToolSnippets[t]; ok {
-				visibleTools = append(visibleTools, t)
-			}
-		}
-	}
-
-	toolsList := "(none)"
-	if len(visibleTools) > 0 {
-		var lines []string
-		for _, t := range visibleTools {
-			lines = append(lines, fmt.Sprintf("- %s: %s", t, opts.ToolSnippets[t]))
-		}
-		toolsList = strings.Join(lines, "\n")
-	}
-
 	toolSet := make(map[string]bool)
-	for _, t := range tools {
+	for _, t := range opts.SelectedTools {
 		toolSet[t] = true
 	}
 
@@ -130,13 +108,8 @@ func buildDefaultPrompt(opts BuildSystemPromptOptions, promptCwd, date, appendSe
 
 	prompt := fmt.Sprintf(`You are an expert coding assistant operating inside fir, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
-Available tools:
-%s
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
 Guidelines:
-%s`, toolsList, guidelinesStr)
+%s`, guidelinesStr)
 
 	prompt += appendSection
 

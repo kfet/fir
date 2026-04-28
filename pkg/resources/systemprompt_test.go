@@ -8,22 +8,10 @@ import (
 func TestBuildSystemPrompt_Default(t *testing.T) {
 	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
 		Cwd: "/test/dir",
-		ToolSnippets: map[string]string{
-			"read":  "Read file contents",
-			"bash":  "Execute bash commands",
-			"edit":  "Make surgical edits",
-			"write": "Create or overwrite files",
-		},
 	})
 
 	if !strings.Contains(prompt, "expert coding assistant") {
 		t.Error("should contain role description")
-	}
-	if !strings.Contains(prompt, "read: Read file contents") {
-		t.Error("should list read tool")
-	}
-	if !strings.Contains(prompt, "bash: Execute bash") {
-		t.Error("should list bash tool")
 	}
 	if !strings.Contains(prompt, "/test/dir") {
 		t.Error("should contain cwd")
@@ -31,37 +19,8 @@ func TestBuildSystemPrompt_Default(t *testing.T) {
 	if !strings.Contains(prompt, "Current date:") {
 		t.Error("should contain date")
 	}
-}
-
-func TestBuildSystemPrompt_NoSnippets(t *testing.T) {
-	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
-		Cwd: "/test/dir",
-	})
-
-	// Without ToolSnippets, tools section shows "(none)"
-	if !strings.Contains(prompt, "(none)") {
-		t.Error("should show (none) when no tool snippets provided")
-	}
-}
-
-func TestBuildSystemPrompt_CustomTools(t *testing.T) {
-	prompt := BuildSystemPrompt(BuildSystemPromptOptions{
-		SelectedTools: []string{"read", "write"},
-		Cwd:           "/test",
-		ToolSnippets: map[string]string{
-			"read":  "Read file contents",
-			"write": "Create or overwrite files",
-		},
-	})
-
-	if !strings.Contains(prompt, "read: Read file contents") {
-		t.Error("should list read")
-	}
-	if !strings.Contains(prompt, "write: Create or overwrite") {
-		t.Error("should list write")
-	}
-	if strings.Contains(prompt, "bash: Execute bash") {
-		t.Error("should NOT list bash")
+	if strings.Contains(prompt, "Available tools") {
+		t.Error("should not contain Available tools section")
 	}
 }
 
