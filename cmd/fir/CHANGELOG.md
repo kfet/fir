@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/advise` command now prints the advisor response to the scrollable conversation area instead of the transient status bar, so long multi-line answers are fully visible and persistent. Added `print_response` field to `CommandResult`; when true, interactive mode routes the message to `showMessage` (conversation area) rather than `showStatus` (status bar).
+
 ### Added
 
 - Shell completion for bash and zsh, shipped in `cmd/fir/completions/` and embedded into the binary. New subcommand `fir completion <bash|zsh>` prints the script. Static completion covers every flag and subcommand; dynamic completion shells out to the binary itself (`fir --list-models`, `fir extensions list`, `fir skills list`, `fir sessions list`, `fir packages list`) so providers, models, extensions, skills, sessions, and installed packages all complete live. Homebrew (via `generate_completions_from_executable` in the goreleaser brews block) and `install.sh` (per-user `~/.local/share/{bash-completion,zsh}/`) drop the files automatically; `make install` runs the new `install-completions` target. Build-time test `cmd/fir/completion_test.go` parses `args.go` and `app.go` for every flag/short-flag/subcommand and fails CI if any are missing from either completion script — and additionally runs `bash -n` / `zsh -fn` over the embedded scripts so a typo in the static files fails the build, not the user's shell.

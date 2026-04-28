@@ -118,7 +118,11 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 		return
 	}
 	if result.Message != "" {
-		m.showStatus(result.Message)
+		if result.PrintResponse {
+			m.showMessage(result.Message)
+		} else {
+			m.showStatus(result.Message)
+		}
 	}
 }
 

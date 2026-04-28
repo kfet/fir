@@ -751,6 +751,10 @@ func (m *Manager) GetCommands() []ExtCommand {
 type CommandResult struct {
 	// Message is optional text shown to the user in the TUI.
 	Message string `json:"message"`
+	// PrintResponse, when true, prints Message to the main conversation area
+	// (scrollable message list) instead of the transient status bar. Use this
+	// for commands that return substantial output (e.g. advisor responses).
+	PrintResponse bool `json:"print_response"`
 }
 
 // DispatchCommand sends a hook/command call to the extension that owns name.

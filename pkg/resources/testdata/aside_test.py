@@ -823,6 +823,10 @@ class TestAdviseCommand(unittest.TestCase):
         self.assertIn("advise:", msg)
         self.assertIn("[advisor: anthropic/claude-opus-4-x:high]", msg)
         self.assertIn("deep thought", msg)
+        self.assertTrue(
+            result.get("print_response"),
+            "print_response must be True so response renders in conversation area",
+        )
 
     def test_advisor_without_effort_passes_none(self):
         self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x"}
