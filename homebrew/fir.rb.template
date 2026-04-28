@@ -24,6 +24,7 @@ class Fir < Formula
 
   def install
     bin.install Dir["fir-*"].first => "fir"
+    generate_completions_from_executable(bin/"fir", "completion")
   end
 
   test do

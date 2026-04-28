@@ -76,6 +76,7 @@ brews:
     # ENOENT. Glob the staged artifact and rename it on install.
     install: |
       bin.install Dir["fir-*"].first => "fir"
+      generate_completions_from_executable(bin/"fir", "completion")
 
 changelog:
   use: github-native

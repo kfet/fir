@@ -1,4 +1,4 @@
-.PHONY: build build-all install test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -63,6 +63,32 @@ fmt:
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
+	@$(MAKE) --no-print-directory install-completions
+
+# install-completions drops shell completion files into common locations.
+# Falls back to per-user paths when system dirs aren't writable.
+# PREFIX defaults to /usr/local. Override with `make install-completions PREFIX=...`.
+PREFIX ?= /usr/local
+install-completions:
+	@bash_dir="$(PREFIX)/etc/bash_completion.d"; \
+	zsh_dir="$(PREFIX)/share/zsh/site-functions"; \
+	if [ ! -w "$(PREFIX)" ] && [ ! -w "$$bash_dir" ]; then \
+		bash_dir="$$HOME/.local/share/bash-completion/completions"; \
+		zsh_dir="$$HOME/.local/share/zsh/site-functions"; \
+	fi; \
+	mkdir -p "$$bash_dir" "$$zsh_dir" 2>/dev/null || true; \
+	if [ -w "$$bash_dir" ]; then \
+		cp cmd/fir/completions/fir.bash "$$bash_dir/fir" && \
+		printf "  %-28s ✓ (bash → %s)\n" "install-completions" "$$bash_dir/fir"; \
+	else \
+		printf "  %-28s skip (no write access to %s)\n" "install-completions" "$$bash_dir"; \
+	fi; \
+	if [ -w "$$zsh_dir" ]; then \
+		cp cmd/fir/completions/_fir "$$zsh_dir/_fir" && \
+		printf "  %-28s ✓ (zsh  → %s)\n" "install-completions" "$$zsh_dir/_fir"; \
+	else \
+		printf "  %-28s skip (no write access to %s)\n" "install-completions" "$$zsh_dir"; \
+	fi
 
 # Binary size guard — runs after every native build.
 # Fails on: absolute cap (20 MB) exceeded OR >5% growth vs BINARY_SIZE_BASELINE.

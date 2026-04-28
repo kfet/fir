@@ -132,6 +132,8 @@ install_binary() {
     fi
 
     echo "Successfully installed fir $TAG to $DEST"
+    install_completions
+
     echo ""
     echo "Run 'fir --version' to verify."
 
@@ -144,6 +146,40 @@ install_binary() {
             echo "Add it:  export PATH=\"$INSTALL_DIR:\$PATH\""
             ;;
     esac
+}
+
+# Install bash + zsh completion to per-user directories. We never sudo here —
+# system-wide install is left to package managers (Homebrew etc.). Each shell
+# is handled independently so a failure on one doesn't skip the other. The
+# completion script is generated to a temp file first and only moved into
+# place after a successful run, so an existing valid file is never replaced
+# by an empty one if `fir completion` happens to error.
+install_completions() {
+    bash_dir="$HOME/.local/share/bash-completion/completions"
+    zsh_dir="$HOME/.local/share/zsh/site-functions"
+
+    if mkdir -p "$bash_dir" 2>/dev/null; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/fir-completion.XXXXXX") || tmp=""
+        if [ -n "$tmp" ] && "$DEST" completion bash > "$tmp" 2>/dev/null; then
+            chmod 644 "$tmp"
+            mv "$tmp" "$bash_dir/fir"
+            echo "Installed bash completion: $bash_dir/fir"
+        else
+            [ -n "$tmp" ] && rm -f "$tmp"
+        fi
+    fi
+
+    if mkdir -p "$zsh_dir" 2>/dev/null; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/fir-completion.XXXXXX") || tmp=""
+        if [ -n "$tmp" ] && "$DEST" completion zsh > "$tmp" 2>/dev/null; then
+            chmod 644 "$tmp"
+            mv "$tmp" "$zsh_dir/_fir"
+            echo "Installed zsh completion:  $zsh_dir/_fir"
+            echo "  (ensure '$zsh_dir' is on your zsh \$fpath before compinit)"
+        else
+            [ -n "$tmp" ] && rm -f "$tmp"
+        fi
+    fi
 }
 
 # --------------------------------------------------------------------------

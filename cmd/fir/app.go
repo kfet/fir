@@ -370,6 +370,9 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "login" {
 		return runLoginSubcommand()
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "completion" {
+		return runCompletion()
+	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()

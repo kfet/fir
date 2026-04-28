@@ -1,0 +1,266 @@
+#compdef fir
+# zsh completion for fir — generated and also available via `fir completion zsh`.
+#
+# Install:
+#   fir completion zsh > "${fpath[1]}/_fir"
+#   compinit
+#
+# Or, if installed via Homebrew, this file is dropped into the right place
+# automatically.
+
+_fir() {
+    local curcontext="$curcontext" state state_descr line
+    typeset -A opt_args
+
+    local -a subcommands
+    subcommands=(
+        'update:Self-update fir to the latest release'
+        'skills:List or install skills'
+        'extensions:List or install extensions'
+        'install:Install a package (git repo or local path)'
+        'uninstall:Remove an installed package'
+        'packages:List or update installed packages'
+        'sessions:List sessions for the current directory'
+        'login:OAuth login for a provider'
+        'completion:Print shell completion script'
+    )
+
+    # Top-level dispatch: if word 1 is a known subcommand, delegate.
+    if (( CURRENT > 1 )); then
+        case ${words[2]} in
+            update)      _fir_no_more_args; return ;;
+            skills)      _fir_skills; return ;;
+            extensions)  _fir_extensions; return ;;
+            install)     _fir_install; return ;;
+            uninstall)   _fir_uninstall; return ;;
+            packages)    _fir_packages; return ;;
+            sessions)    _fir_sessions; return ;;
+            login)       _fir_login; return ;;
+            completion)  _fir_completion; return ;;
+        esac
+    fi
+
+    _arguments -C -s \
+        '(- *)'{-h,--help}'[Show help]' \
+        '(- *)'{-v,--version}'[Show version]' \
+        '(-p --print)'{-p,--print}'[Non-interactive: process prompt and exit]' \
+        '(-c --continue)'{-c,--continue}'[Continue previous session]' \
+        '(-r --resume)'{-r,--resume}'[Select a session to resume]' \
+        '--mode=[Output mode]:mode:(text json acp)' \
+        '--thinking=[Thinking level]:level:(off minimal low medium high xhigh max)' \
+        '--provider=[Provider name]:provider:->providers' \
+        '--model=[Model ID]:model:->models' \
+        '--api-key=[API key]:key:' \
+        '--system-prompt=[System prompt]:text:' \
+        '--append-system-prompt=[Append text/file to system prompt]:text or file:_files' \
+        '--session=[Session file]:session:->sessions' \
+        '--session-name=[Display name for the session]:name:' \
+        '--session-dir=[Session storage directory]:dir:_files -/' \
+        '--no-session[Do not save session (ephemeral)]' \
+        '--models=[Comma-separated model patterns for cycling]:patterns:_values -s , model ${(f)"$(fir --list-models 2>/dev/null)"}' \
+        '--no-tools[Disable all built-in tools]' \
+        '--tools=[Comma-separated list of tools]:tools:->tools' \
+        '--no-mcp[Disable MCP server integration]' \
+        '--mcp-config=[Additional MCP config file]:file:_files' \
+        '--wait-mcp[Wait for MCP servers to finish handshake]' \
+        '--no-extensions[Disable all extensions]' \
+        '*'{-e,--extension=}'[Enable a specific extension]:extension:->exts' \
+        '*'{-d,--disable-extension=}'[Disable a specific extension]:extension:->exts' \
+        '*--skill=[Load a skill file or directory]:path:_files' \
+        '--no-skills[Disable skills]' \
+        '*--prompt-template=[Load a prompt template file or directory]:path:_files' \
+        '--no-prompt-templates[Disable prompt template discovery]' \
+        '*--theme=[Load a theme file or directory]:path:_files' \
+        '--no-themes[Disable theme discovery]' \
+        '--export=[Export session to HTML file]:file:_files' \
+        '--list-models=[List available models (optional pattern)]::pattern:' \
+        '--list-available-models=[List authenticated, available models]::pattern:' \
+        '--verbose[Force verbose startup]' \
+        '--debug[Enable debug logging]' \
+        '--debug-log-file=[Debug log path]:file:_files' \
+        '--login=[OAuth login for provider]:provider:->providers' \
+        '-C[Run as if started in dir]:dir:_files -/' \
+        '--cwd=[Run as if started in dir]:dir:_files -/' \
+        '--directory=[Run as if started in dir]:dir:_files -/' \
+        '1: :_fir_first_arg' \
+        '*::arg:_fir_rest_arg'
+
+    case $state in
+        providers) _fir_providers ;;
+        models)    _fir_models ;;
+        exts)      _fir_extension_names ;;
+        sessions)  _fir_session_names ;;
+        tools)     _values -s , 'tool' read bash edit write grep find ls ;;
+    esac
+}
+
+# First positional: subcommand or @file or message.
+_fir_first_arg() {
+    local -a subs
+    subs=(
+        'update:Self-update fir'
+        'skills:Manage skills'
+        'extensions:Manage extensions'
+        'install:Install a package'
+        'uninstall:Remove a package'
+        'packages:List/update packages'
+        'sessions:List sessions'
+        'login:OAuth login'
+        'completion:Print shell completion script'
+    )
+    _alternative \
+        'subcommands:subcommand:(( ${subs[@]} ))' \
+        'files:file argument (@file):_files -P @' \
+        'messages:message:'
+}
+
+_fir_rest_arg() {
+    _alternative \
+        'files:file argument (@file):_files -P @' \
+        'messages:message:'
+}
+
+_fir_no_more_args() { _message 'no more arguments' }
+
+# Subcommand: skills
+_fir_skills() {
+    if (( CURRENT == 3 )); then
+        _values 'skills subcommand' \
+            'list[List loaded skills]' \
+            'install[Install a builtin skill]'
+        return
+    fi
+    case ${words[3]} in
+        install)
+            if (( CURRENT == 4 )); then
+                _fir_builtin_skill_names
+            else
+                _values 'flag' '--user[Install to ~/.config/fir/skills/]' '--force[Overwrite existing]'
+            fi
+            ;;
+    esac
+}
+
+# Subcommand: extensions
+_fir_extensions() {
+    if (( CURRENT == 3 )); then
+        _values 'extensions subcommand' \
+            'list[List builtin extensions]' \
+            'install[Install a builtin extension]'
+        return
+    fi
+    case ${words[3]} in
+        install)
+            if (( CURRENT == 4 )); then
+                _fir_builtin_extension_names
+            else
+                _values 'flag' '--user[Install to ~/.config/fir/extensions/]' '--force[Overwrite existing]'
+            fi
+            ;;
+    esac
+}
+
+_fir_install() {
+    _arguments '--local[Install to project scope (.fir/packages/)]' '*:source:_files'
+}
+
+_fir_uninstall() {
+    _arguments '--local[Uninstall from project scope]' '*:source:_fir_installed_packages'
+}
+
+_fir_packages() {
+    if (( CURRENT == 3 )); then
+        _values 'packages subcommand' \
+            'list[List installed packages]' \
+            'update[Update one or all packages]'
+        return
+    fi
+    case ${words[3]} in
+        update) _fir_installed_packages ;;
+    esac
+}
+
+_fir_sessions() {
+    if (( CURRENT == 3 )); then
+        _values 'sessions subcommand' 'list[List sessions]'
+    fi
+}
+
+_fir_login() {
+    if (( CURRENT == 3 )); then
+        _alternative \
+            'subcommand:subcommand:((list\:List\ available\ OAuth\ providers))' \
+            'providers:provider:_fir_providers'
+    fi
+}
+
+_fir_completion() {
+    if (( CURRENT == 3 )); then
+        _values 'shell' bash zsh
+    fi
+}
+
+# --- Dynamic data sources (call fir, cache results per shell invocation) ---
+
+_fir_models() {
+    local -a models
+    local cache_var=_fir_models_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_models_cache
+        _fir_models_cache=( ${(f)"$(fir --list-models 2>/dev/null)"} )
+    fi
+    compadd -a _fir_models_cache
+}
+
+_fir_providers() {
+    local -a providers
+    providers=(anthropic openai google bedrock azure-openai openai-codex google-vertex google-gemini-cli poe groq cerebras deepseek xai openrouter github-copilot openai-antigravity)
+    # Augment with providers seen in --list-models output (provider/id).
+    local cache_var=_fir_providers_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_providers_cache
+        _fir_providers_cache=( ${(u)${(f)"$(fir --list-models 2>/dev/null)"}%%/*} )
+    fi
+    compadd -a _fir_providers_cache
+    compadd -a providers
+}
+
+_fir_extension_names() {
+    local cache_var=_fir_extnames_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_extnames_cache
+        _fir_extnames_cache=( ${(f)"$(fir extensions list 2>/dev/null | awk 'NR>1 && $1!="NAME" {print $1}')"} )
+    fi
+    compadd -a _fir_extnames_cache
+}
+
+_fir_builtin_extension_names() { _fir_extension_names }
+
+_fir_builtin_skill_names() {
+    local cache_var=_fir_skillnames_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_skillnames_cache
+        _fir_skillnames_cache=( ${(f)"$(fir skills list 2>/dev/null | awk 'NR>1 && $1!="NAME" {print $1}')"} )
+    fi
+    compadd -a _fir_skillnames_cache
+}
+
+_fir_session_names() {
+    local cache_var=_fir_sessions_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_sessions_cache
+        _fir_sessions_cache=( ${(f)"$(fir sessions list 2>/dev/null | awk 'NR>1 && $1!="ID" {print $1}')"} )
+    fi
+    compadd -a _fir_sessions_cache
+}
+
+_fir_installed_packages() {
+    local cache_var=_fir_pkgs_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_pkgs_cache
+        _fir_pkgs_cache=( ${(f)"$(fir packages list 2>/dev/null | awk 'NR>1 && $1!="SOURCE" {print $1}')"} )
+    fi
+    compadd -a _fir_pkgs_cache
+}
+
+_fir "$@"

@@ -16,6 +16,17 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 - **Install script** (macOS, Linux, Raspberry Pi): `curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh`
 - **Self-update**: `fir update` (pulls from `kfet/fir-dist`).
 
+### Shell completion
+
+Bash and zsh completion ship with fir. Homebrew and the install script drop them automatically; for manual setup or `go install` builds:
+
+```sh
+fir completion bash > ~/.local/share/bash-completion/completions/fir
+fir completion zsh  > "${fpath[1]}/_fir" && compinit
+```
+
+The completion covers every flag and subcommand and dynamically completes `--provider`, `--model`, `--extension`, `--skill`, `--session`, and installed packages by shelling out to `fir --list-models`, `fir extensions list`, etc. A build-time test (`cmd/fir/completion_test.go`) parses `args.go` and fails CI if any new flag/subcommand is missing from the completion scripts.
+
 Not to be confused with `fir install <source>`, which installs *packages* (skills/extensions/prompts/themes) into an existing fir install — see "External Packages" below.
 
 ## Modes

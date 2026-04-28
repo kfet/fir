@@ -71,6 +71,19 @@ To fix this, remove the quarantine attribute from the downloaded binary:
 xattr -d com.apple.quarantine $(which fir)
 ```
 
+### Shell completion
+
+Bash and zsh completion are installed automatically by Homebrew and the
+`install.sh` script. For manual setup (e.g. after `go install`):
+
+```bash
+fir completion bash > ~/.local/share/bash-completion/completions/fir
+fir completion zsh  > "${fpath[1]}/_fir" && compinit
+```
+
+The completion handles every flag and subcommand and dynamically completes
+`--provider`, `--model`, `--extension`, `--skill`, and `--session`.
+
 ## Usage
 
 ```bash
