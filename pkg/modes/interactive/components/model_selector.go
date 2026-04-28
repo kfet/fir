@@ -209,6 +209,43 @@ func formatCostBadge(cost ai.ModelCost) string {
 	return fmt.Sprintf("[$%.2f/$%.2f]", cost.Input, cost.Output)
 }
 
+// formatContextBadge returns a short human-readable context window badge
+// like "[128k]" or "[1M]". Returns "" for zero/unknown context windows.
+func formatContextBadge(ctxWindow int) string {
+	if ctxWindow <= 0 {
+		return ""
+	}
+	switch {
+	case ctxWindow >= 1_000_000 && ctxWindow%1_000_000 == 0:
+		return fmt.Sprintf("[%dM]", ctxWindow/1_000_000)
+	case ctxWindow >= 1_000_000:
+		return fmt.Sprintf("[%.1fM]", float64(ctxWindow)/1_000_000)
+	case ctxWindow%1000 == 0:
+		return fmt.Sprintf("[%dk]", ctxWindow/1000)
+	default:
+		return fmt.Sprintf("[%.0fk]", float64(ctxWindow)/1000)
+	}
+}
+
+// costTierColor returns the theme color name for a model based on input
+// cost per million tokens.
+//   - "" (default text) for free / unknown models — those get separate FREE badge
+//   - "success" (green) for cheap (< $0.50/M)
+//   - "warning" (yellow) for expensive (> $3/M)
+//   - "" (default) for mid-range
+func costTierColor(cost ai.ModelCost) string {
+	if cost.Input <= 0 {
+		return ""
+	}
+	if cost.Input < 0.50 {
+		return "success"
+	}
+	if cost.Input > 3.0 {
+		return "warning"
+	}
+	return ""
+}
+
 func formatCostDetails(cost ai.ModelCost) string {
 	parts := []string{
 		fmt.Sprintf("in: $%.2f/1M", cost.Input),
@@ -236,10 +273,23 @@ func buildLeftPart(t *theme.Theme, item ModelItem, selected bool) string {
 		return t.Fg("accent", "→ ") + t.Fg("accent", item.ID) + " " + providerBadge
 	}
 	idText := item.ID
-	if isFreeModel(item.Model) {
+	switch {
+	case isFreeModel(item.Model):
 		idText = t.Fg("success", item.ID)
+	default:
+		if c := costTierColor(item.Model.Cost); c != "" {
+			idText = t.Fg(c, item.ID)
+		}
 	}
 	return "  " + idText + " " + providerBadge
+}
+
+func buildContextBadge(t *theme.Theme, item ModelItem) string {
+	b := formatContextBadge(item.Model.ContextWindow)
+	if b == "" {
+		return ""
+	}
+	return t.Fg("muted", b)
 }
 
 func buildPriceBadge(t *theme.Theme, item ModelItem) string {
@@ -301,10 +351,12 @@ func (c *ModelSelectorComponent) updateList() {
 	// while scrolling.
 	maxLeftWidth := 0
 	maxPriceWidth := 0
+	maxCtxWidth := 0
 	maxSWEWidth := 0
 	for _, item := range c.filteredModels {
 		left := buildLeftPart(t, item, false)
 		price := buildPriceBadge(t, item)
+		ctx := buildContextBadge(t, item)
 		swe := buildSWEBadge(t, item)
 
 		if lw := tui.VisibleWidth(left); lw > maxLeftWidth {
@@ -312,6 +364,9 @@ func (c *ModelSelectorComponent) updateList() {
 		}
 		if pw := tui.VisibleWidth(price); pw > maxPriceWidth {
 			maxPriceWidth = pw
+		}
+		if cw := tui.VisibleWidth(ctx); cw > maxCtxWidth {
+			maxCtxWidth = cw
 		}
 		if sw := tui.VisibleWidth(swe); sw > maxSWEWidth {
 			maxSWEWidth = sw
@@ -328,6 +383,7 @@ func (c *ModelSelectorComponent) updateList() {
 			checkmark = t.Fg("success", " ✓")
 		}
 		priceBadge := buildPriceBadge(t, item)
+		ctxBadge := buildContextBadge(t, item)
 
 		leftPart := buildLeftPart(t, item, isSelected)
 		sweBadge := buildSWEBadge(t, item)
@@ -336,8 +392,13 @@ func (c *ModelSelectorComponent) updateList() {
 		line := leftPart + leftPad
 		line += priceBadge + padToWidth(priceBadge, maxPriceWidth)
 		line += " "
+		line += ctxBadge + padToWidth(ctxBadge, maxCtxWidth)
+		line += " "
 		line += sweBadge + padToWidth(sweBadge, maxSWEWidth)
 		line += checkmark
+		if isSelected {
+			line = t.Bg("selectedBg", line)
+		}
 		c.listContainer.AddChild(tuicomp.NewText(line, 0, 0, nil))
 	}
 

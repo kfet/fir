@@ -5,6 +5,8 @@
 ### Added
 
 - Shell completion for bash and zsh, shipped in `cmd/fir/completions/` and embedded into the binary. New subcommand `fir completion <bash|zsh>` prints the script. Static completion covers every flag and subcommand; dynamic completion shells out to the binary itself (`fir --list-models`, `fir extensions list`, `fir skills list`, `fir sessions list`, `fir packages list`) so providers, models, extensions, skills, sessions, and installed packages all complete live. Homebrew (via `generate_completions_from_executable` in the goreleaser brews block) and `install.sh` (per-user `~/.local/share/{bash-completion,zsh}/`) drop the files automatically; `make install` runs the new `install-completions` target. Build-time test `cmd/fir/completion_test.go` parses `args.go` and `app.go` for every flag/short-flag/subcommand and fails CI if any are missing from either completion script — and additionally runs `bash -n` / `zsh -fn` over the embedded scripts so a typo in the static files fails the build, not the user's shell.
+- `--list-models` and `--list-available-models` now display each model's context window size (e.g. `128k`, `1M`) and color-code entries by cost tier: cyan for free/unknown, green for cheap (input < $0.50/M tokens), yellow for expensive (input > $3/M tokens), default for mid-range.
+- Interactive `/models` selector popup: new `[ctx]` column shows each model's context window (`128k`, `1M`, `200k`, ...) aligned across rows; model IDs are now color-coded by input-cost tier (green for cheap < $0.50/M, yellow for expensive > $3/M, default for mid-range) — previously only free Poe bots were highlighted. The selected row is now highlighted with a full-width background bar across all columns, not just the arrow + ID.
 
 ### Fixed
 
