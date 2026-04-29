@@ -85,6 +85,25 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 
+	// Apply Claude Code-style env vars: CLAUDE_CODE_USE_BEDROCK=1 + ANTHROPIC_MODEL
+	// route the model through Amazon Bedrock. ANTHROPIC_MODEL can be a model id
+	// (e.g. "us.anthropic.claude-opus-4-6-v1") or a Bedrock ARN
+	// (e.g. "arn:aws:bedrock:us-east-1:123:application-inference-profile/abc").
+	// Explicit CLI flags take precedence over env vars.
+	if os.Getenv("CLAUDE_CODE_USE_BEDROCK") == "1" {
+		if envModel := os.Getenv("ANTHROPIC_MODEL"); envModel != "" {
+			// Always register it so it shows up in the /model selector and
+			// --list-models, even if the user has an explicit --model flag.
+			registerBedrockEnvModel(modelRegistry, envModel)
+			if args.Model == "" {
+				args.Model = envModel
+				if args.Provider == "" {
+					args.Provider = "amazon-bedrock"
+				}
+			}
+		}
+	}
+
 	// Resolve model from CLI flags
 	var model *ai.Model
 	if args.Model != "" {
@@ -1169,6 +1188,56 @@ func recordCLIFlags(tracker *Tracker, args *Args) {
 	} else {
 		tracker.Record(EventSession, "new")
 	}
+}
+
+// registerBedrockEnvModel ensures a Bedrock model with the given id (which may
+// be a Bedrock ARN, an inference-profile id, or a regular Bedrock model id) is
+// present in the registry, so it shows up in `/model`, `--list-models`, and
+// resolves cleanly without sibling-synthesis warnings. If a model with that id
+// is already registered for amazon-bedrock the call is a no-op.
+func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
+	for _, m := range reg.GetAll() {
+		if m.Provider == string(ai.ProviderAmazonBedrock) && m.ID == id {
+			return
+		}
+	}
+
+	// Clone settings from the bedrock default model so cost/context-window/
+	// reasoning flags inherit sensible values.
+	var base *ai.Model
+	defaultID := models.DefaultModelPerProvider[ai.ProviderAmazonBedrock]
+	for _, m := range reg.GetAll() {
+		if m.Provider != string(ai.ProviderAmazonBedrock) {
+			continue
+		}
+		if m.ID == defaultID {
+			base = m
+			break
+		}
+		if base == nil {
+			base = m
+		}
+	}
+	if base == nil {
+		// No bedrock model registered at all — synthesise a minimal one.
+		base = &ai.Model{
+			Provider:      string(ai.ProviderAmazonBedrock),
+			Api:           ai.ApiBedrockConverseStream,
+			Reasoning:     true,
+			Input:         []string{"text", "image"},
+			ContextWindow: 200000,
+			MaxTokens:     8192,
+		}
+	}
+
+	clone := *base
+	clone.ID = id
+	if strings.HasPrefix(id, "arn:") {
+		clone.Name = "Bedrock (custom ARN)"
+	} else {
+		clone.Name = id
+	}
+	reg.AddRuntimeModel(&clone)
 }
 
 // resolveSettingsExtensionPaths resolves extensionPaths entries from settings

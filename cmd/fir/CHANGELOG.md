@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Bedrock ARN model support: when `CLAUDE_CODE_USE_BEDROCK=1` and `ANTHROPIC_MODEL` is set, fir routes through `amazon-bedrock` and passes `ANTHROPIC_MODEL` to Bedrock as the model id. Accepts both regular Bedrock model ids and full ARNs (e.g. `arn:aws:bedrock:us-east-1:123:application-inference-profile/abc`). ARN-form ids are passed through to `ConverseStream` verbatim — no "model not found" warning. Explicit `--model`/`--provider` CLI flags still take precedence.
+
 ### Fixed
 
 - `/advise` command now prints the advisor response to the scrollable conversation area instead of the transient status bar, so long multi-line answers are fully visible and persistent. Added `print_response` field to `CommandResult`; when true, interactive mode routes the message to `showMessage` (conversation area) rather than `showStatus` (status bar).

@@ -36,7 +36,9 @@ var Registry = []Var{
 // important to document alongside).
 var ProviderKeys = []Var{
 	{Name: "ANTHROPIC_API_KEY", Description: "Anthropic Claude API key"},
+	{Name: "ANTHROPIC_MODEL", Description: "Model id or Bedrock ARN to use (paired with CLAUDE_CODE_USE_BEDROCK=1)"},
 	{Name: "AWS_PROFILE", Description: "AWS profile for Amazon Bedrock"},
+	{Name: "CLAUDE_CODE_USE_BEDROCK", Description: "Set to 1 to route ANTHROPIC_MODEL through Amazon Bedrock"},
 	{Name: "GEMINI_API_KEY", Description: "Google Gemini API key"},
 	{Name: "GROQ_API_KEY", Description: "Groq API key"},
 	{Name: "MINIMAX_API_KEY", Description: "MiniMax API key"},

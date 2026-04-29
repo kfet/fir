@@ -348,6 +348,11 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 	if provider != "" {
 		fallbackModel := buildFallbackModel(provider, pattern, allModels)
 		if fallbackModel != nil {
+			// Bedrock ARNs and inference-profile IDs are first-class identifiers
+			// — pass them through silently rather than warning.
+			if provider == "amazon-bedrock" && isBedrockPassthroughID(pattern) {
+				return ResolveCliModelResult{Model: fallbackModel}
+			}
 			fallbackWarning := fmt.Sprintf("Model %q not found for provider %q. Using custom model id.", pattern, provider)
 			if res.Warning != "" {
 				fallbackWarning = res.Warning + " " + fallbackWarning
@@ -367,6 +372,12 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 		Warning: res.Warning,
 		Error:   fmt.Sprintf("Model %q not found. Use --list-models to see available models.", display),
 	}
+}
+
+// isBedrockPassthroughID returns true when the given model id looks like a
+// Bedrock ARN that the user wants to pass through verbatim.
+func isBedrockPassthroughID(id string) bool {
+	return strings.HasPrefix(id, "arn:aws:bedrock:")
 }
 
 // buildFallbackModel creates a model with a custom ID when the exact model

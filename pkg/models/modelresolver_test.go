@@ -472,6 +472,42 @@ func TestResolveCliModel_OpenRouterSlashID(t *testing.T) {
 	}
 }
 
+func TestResolveCliModel_BedrockARNPassthrough(t *testing.T) {
+	bedrockModel := &ai.Model{
+		ID: "us.anthropic.claude-opus-4-6-v1", Name: "Claude Opus 4.6 (Bedrock)",
+		Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock,
+		Reasoning:     true,
+		Input:         []string{"text", "image"},
+		ContextWindow: 200000, MaxTokens: 8192,
+	}
+	registry := newTestRegistry(t, append(testModels(), bedrockModel))
+
+	arn := "arn:aws:bedrock:us-east-1:130726505375:application-inference-profile/kzezlud25yzf"
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIProvider:   "amazon-bedrock",
+		CLIModel:      arn,
+		ModelRegistry: registry,
+	})
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Warning != "" {
+		t.Errorf("ARN passthrough should not warn, got %q", result.Warning)
+	}
+	if result.Model == nil {
+		t.Fatal("expected model, got nil")
+	}
+	if result.Model.ID != arn {
+		t.Errorf("expected model ID %q, got %q", arn, result.Model.ID)
+	}
+	if result.Model.Provider != string(ai.ProviderAmazonBedrock) {
+		t.Errorf("expected bedrock provider, got %q", result.Model.Provider)
+	}
+	if result.Model.Api != ai.ApiBedrockConverseStream {
+		t.Errorf("expected bedrock API, got %q", result.Model.Api)
+	}
+}
+
 func TestResolveCliModel_ThinkingLevel(t *testing.T) {
 	registry := newTestRegistry(t, testModels())
 	result := ResolveCliModel(ResolveCliModelOptions{

@@ -818,3 +818,36 @@ func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
 		t.Fatalf("unexpected serverTools override: %#v", m.ServerTools)
 	}
 }
+
+func TestModelRegistry_AddRuntimeModel(t *testing.T) {
+	dir := t.TempDir()
+	authStorage := auth.NewAuthStorage(filepath.Join(dir, "auth.json"))
+	r := NewModelRegistry(authStorage, "")
+
+	m := &ai.Model{
+		Provider: "amazon-bedrock", ID: "arn:aws:bedrock:us-east-1:1:foo/bar",
+		Name: "Custom", Api: ai.ApiBedrockConverseStream,
+		ContextWindow: 200000, MaxTokens: 8192,
+	}
+	r.AddRuntimeModel(m)
+
+	got := r.Find("amazon-bedrock", "arn:aws:bedrock:us-east-1:1:foo/bar")
+	if got == nil || got.Name != "Custom" {
+		t.Fatalf("expected runtime model registered, got %#v", got)
+	}
+
+	// Replace path: same provider+id keeps a single entry.
+	before := len(r.GetAll())
+	m2 := *m
+	m2.Name = "Renamed"
+	r.AddRuntimeModel(&m2)
+	if got := len(r.GetAll()); got != before {
+		t.Errorf("expected %d models after replace, got %d", before, got)
+	}
+	if updated := r.Find("amazon-bedrock", m.ID); updated == nil || updated.Name != "Renamed" {
+		t.Errorf("expected replaced model, got %#v", updated)
+	}
+
+	// Nil is a no-op.
+	r.AddRuntimeModel(nil)
+}

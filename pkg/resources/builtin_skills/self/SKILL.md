@@ -50,6 +50,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | File | Purpose |
 |------|---------|
 | `settings.json` | Default provider, model, thinking, compaction, retry, terminal, image settings |
+| `models.json` | Add or override models per provider (custom ids, base URLs, headers, costs) |
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 | `skills/` | User-level skills (shared across projects) |
@@ -88,6 +89,46 @@ Two methods:
 ## Environment Variables
 
 {{FIR_ENV_VARS_TABLE}}
+
+## Adding Custom Models
+
+fir's model list is the union of built-in models and anything you add. Three ways to add a model so it shows up in `/model`, `--list-models`, and is selectable as a default:
+
+### 1. `models.json` (preferred — persistent, visible everywhere)
+
+Drop a `models.json` in `~/.config/fir/` (global) or `.fir/` (project). Add models under the relevant provider — they appear alongside built-ins:
+
+```json
+{
+  "providers": {
+    "amazon-bedrock": {
+      "models": [
+        {
+          "id": "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc",
+          "name": "Opus 4.6 (Bedrock app profile)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 200000,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
+```
+
+The same file also supports per-provider overrides (`baseUrl`, `apiKey`, `headers`, `authHeader`) and per-model overrides under `modelOverrides`.
+
+### 2. Environment variables (Claude Code parity)
+
+Set `CLAUDE_CODE_USE_BEDROCK=1` and `ANTHROPIC_MODEL=<id-or-arn>` (plus standard AWS auth — `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, optionally `AWS_REGION`). At startup fir registers the model under `amazon-bedrock` automatically so it appears in `/model`. Explicit `--provider`/`--model` flags still win.
+
+`ANTHROPIC_MODEL` accepts a regular Bedrock model id (e.g. `us.anthropic.claude-opus-4-6-v1`) or a full Bedrock ARN (e.g. `arn:aws:bedrock:us-east-1:123:application-inference-profile/abc`).
+
+### 3. CLI one-off
+
+`fir --provider amazon-bedrock --model <id-or-arn>` works without any config — fir clones a sibling Bedrock model, substitutes the id, and routes through `ConverseStream`. Not persisted; not shown in `/model` until restart with `models.json` or env vars.
 
 ## Extensions
 

@@ -481,6 +481,26 @@ func (r *ModelRegistry) mergeCustomModels(builtIn []*ai.Model, custom []*ai.Mode
 	return merged
 }
 
+// AddRuntimeModel registers an extra model in the registry at runtime.
+// Used for env-driven additions (e.g. ANTHROPIC_MODEL pointing at a Bedrock
+// ARN). If a model with the same provider+id already exists it is replaced.
+// The model becomes visible in the /model selector and --list-models output.
+func (r *ModelRegistry) AddRuntimeModel(m *ai.Model) {
+	if m == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.models {
+		if existing.Provider == m.Provider && existing.ID == m.ID {
+			r.models[i] = m
+			return
+		}
+	}
+	r.models = append(r.models, m)
+	r.invalidateSynthesisCache()
+}
+
 func (r *ModelRegistry) loadCustomModels(modelsJsonPath string) *CustomModelsResult {
 	data, err := os.ReadFile(modelsJsonPath)
 	if err != nil {
