@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-04-29
+
 ### Changed
 
 - Built-in skill set re-evaluated. Promoted to built-in: `self-handoff`, `rebase-on-main`, `merge-to-main`, `poe-usage`. Demoted (no longer built-in): `work`, `fix`, `loop`, `monitor` — these were too opinionated or niche to ship by default. Merged `skill-updater` into `skill-creator` (the review checklist now lives in the creator skill; updater is removed).
