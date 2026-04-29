@@ -281,29 +281,24 @@ func ParseArgs(args []string) *Args {
 func PrintHelp() {
 	appName := "fir"
 
-	fmt.Printf(`%s - AI coding assistant with read, bash, edit, write tools
+	// Header + subcommand list (registry-driven — add new cmds in subcommands.go).
+	fmt.Printf("%s - AI coding assistant with read, bash, edit, write tools\n\nUsage:\n", appName)
+	fmt.Printf("  %s [options] [@files...] [messages...]\n", appName)
+	const syntaxW = 31
+	for _, sc := range subcommands {
+		for _, row := range sc.Help {
+			syntax, summary := row[0], row[1]
+			if syntax == "" {
+				fmt.Printf("  %-*s %s\n", syntaxW, "", summary)
+				continue
+			}
+			fmt.Printf("  %-*s %s\n", syntaxW, syntax, summary)
+		}
+	}
 
-Usage:
-  %s [options] [@files...] [messages...]
-  %s update                      Self-update to the latest release
-  %s skills [list]               List all loaded skills
-  %s skills install <name>       Install a builtin skill to project (.fir/skills/)
-                                   Options: --user (install to ~/.config/fir/skills/), --force
-  %s extensions [list]           List all builtin extensions
-  %s extensions install <name>   Install a builtin extension to project (.fir/extensions/)
-                                   Options: --user (install to ~/.config/fir/extensions/), --force
-  %s install <source> [--local]  Install a package (git repo or local path)
-                                   --local installs to project scope (.fir/packages/)
-  %s uninstall <source> [--local] Remove an installed package
-  %s packages [list]             List installed packages
-  %s packages update [source]    Update one or all installed packages
-  %s sessions [list]             List sessions associated with the current directory
-  %s login <provider-id>         OAuth login for a provider (auth extensions loaded)
-  %s login list                  List available OAuth providers
-  %s completion <bash|zsh>       Print shell completion script
-
+	fmt.Printf(`
 Options:
-  -C <dir>                       Run as if fir was started in <dir>
+  -C <dir>                       Run as if %s was started in <dir>
   --provider <name>              Provider name (default: from settings, else first provider with a valid API key)
   --model <id>                   Model ID
   --api-key <key>                API key (defaults to env vars)
@@ -372,5 +367,7 @@ Examples:
 
 Environment Variables:
 %s
-`, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, appName, strings.Join(allToolNames(), ", "), appName, appName, appName, appName, appName, appName, appName, envvars.FormatHelpText())
+`, appName, strings.Join(allToolNames(), ", "),
+		appName, appName, appName, appName, appName, appName, appName,
+		envvars.FormatHelpText())
 }

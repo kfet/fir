@@ -334,6 +334,23 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		value, ok := b.GetSessionData(p.Key)
 		result = map[string]any{"value": value, "ok": ok}
 
+	case "get_session_file":
+		// Returns absolute path to the session's JSONL transcript, or "" for
+		// in-memory sessions. Used by extensions that want to expose the
+		// transcript to outside readers (e.g. observe.py writes the path
+		// into its sidecar so `fir observe` can tail -F it).
+		result = map[string]any{"path": api.GetSessionFile()}
+
+	case "get_session_id":
+		// Returns the unique session ID. Also available as "session_id" in
+		// the session_start event params, but this method allows retrieval
+		// at any point during the session lifetime.
+		result = map[string]any{"id": api.GetSessionID()}
+
+	case "get_session_name":
+		// Returns the session's display name, or "" if unset.
+		result = map[string]any{"name": api.GetSessionName()}
+
 	case "call_tool":
 		var p struct {
 			Name   string         `json:"name"`

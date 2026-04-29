@@ -1356,3 +1356,97 @@ func TestSessionDirForCwd(t *testing.T) {
 		t.Errorf("SessionDirForCwd = %q, want %q", dir, expected)
 	}
 }
+
+// TestSessionStoreFileExistsFromCreation pins the contract required by the
+// `fir observe` feature: the session JSONL file exists with its header line
+// from the moment NewSessionStore returns, *before* any user/assistant
+// message has been appended. This lets observers tail the file from byte 0
+// without missing the first turn.
+//
+// Regression test for the previous "wait for first assistant message"
+// gate in persistEntry, which made the file invisible to observers
+// during the entire first turn.
+func TestSessionStoreFileExistsFromCreation(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+
+	ss := NewSessionStore(tmpDir, sessDir)
+	defer ss.Close()
+
+	sessionFile := ss.GetSessionFile()
+	if sessionFile == "" {
+		t.Fatal("expected session file path immediately after NewSessionStore")
+	}
+
+	stat, err := os.Stat(sessionFile)
+	if err != nil {
+		t.Fatalf("session file should exist immediately after NewSessionStore: %v", err)
+	}
+	if stat.Size() == 0 {
+		t.Fatal("session file should contain header line, but is empty")
+	}
+
+	// Header must be parseable as a SessionHeader.
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 1 {
+		t.Fatalf("expected at least the header line, got %d lines", len(lines))
+	}
+	var header SessionHeader
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("parse header line %q: %v", lines[0], err)
+	}
+	if header.Type != "session" {
+		t.Errorf("header type = %q, want \"session\"", header.Type)
+	}
+	if header.ID == "" {
+		t.Error("header ID empty")
+	}
+	if header.Version != CurrentSessionVersion {
+		t.Errorf("header version = %d, want %d", header.Version, CurrentSessionVersion)
+	}
+}
+
+// TestSessionStoreEntriesAppendImmediately pins the second contract for
+// `fir observe`: every Append* call results in an immediate disk append
+// (not buffered until first assistant message). A tail -F reader must see
+// each entry as soon as it's appended.
+func TestSessionStoreEntriesAppendImmediately(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessDir := filepath.Join(tmpDir, "sessions")
+
+	ss := NewSessionStore(tmpDir, sessDir)
+	defer ss.Close()
+
+	sessionFile := ss.GetSessionFile()
+
+	// Append a user message — *without* any assistant message following.
+	ss.AppendAIMessage(ai.NewUserMsg("first prompt", time.Now().UnixMilli()))
+
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected header + 1 entry on disk after AppendAIMessage, got %d lines:\n%s",
+			len(lines), string(data))
+	}
+
+	// Append a tool execution *start* event (no result yet); should also
+	// land on disk immediately so observers see in-flight work.
+	ss.AppendCommandEntry("bash", "ls -la")
+
+	data, err = os.ReadFile(sessionFile)
+	if err != nil {
+		t.Fatalf("re-read session file: %v", err)
+	}
+	lines = strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected header + 2 entries after second append, got %d lines:\n%s",
+			len(lines), string(data))
+	}
+}

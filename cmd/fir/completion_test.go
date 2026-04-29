@@ -162,6 +162,27 @@ func extractFlagsFromArgsGo(path string) (long, short []string, err error) {
 }
 
 func extractSubcommandsFromAppGo(path string) ([]string, error) {
+	// Subcommands are now declared in subcommands.go (the registry), not via
+	// individual os.Args[1] checks in app.go.  Try subcommands.go first;
+	// fall back to the old os.Args pattern for compatibility.
+	dir := filepath.Dir(path)
+	regPath := filepath.Join(dir, "subcommands.go")
+	if data, err := os.ReadFile(regPath); err == nil {
+		reReg := regexp.MustCompile(`Name:\s*"([a-z-]+)"`)
+		seen := map[string]bool{}
+		for _, m := range reReg.FindAllStringSubmatch(string(data), -1) {
+			seen[m[1]] = true
+		}
+		if len(seen) > 0 {
+			out := make([]string, 0, len(seen))
+			for s := range seen {
+				out = append(out, s)
+			}
+			sort.Strings(out)
+			return out, nil
+		}
+	}
+	// Legacy fallback: parse os.Args[1] == "..." patterns in app.go.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

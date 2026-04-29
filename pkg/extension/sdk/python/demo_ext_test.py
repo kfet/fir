@@ -163,6 +163,12 @@ class FakeFir:
             ]
         elif method == "get_session_data":
             result = {"ok": True, "value": "mock_value"}
+        elif method == "get_session_file":
+            result = {"path": "/tmp/mock-session.jsonl"}
+        elif method == "get_session_name":
+            result = {"name": "mock-session-name"}
+        elif method == "get_session_id":
+            result = {"id": "mock-session-id-1234"}
         else:
             result = {"ok": True}
         resp = json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n"
@@ -586,6 +592,18 @@ class TestDemoEvents(DemoTestCase):
         msg = fake.wait_for_method("agent.info")
         fake.stop()
         self.assertIsNotNone(msg, "expected agent.info after session_start")
+
+    def test_session_start_calls_get_session_file(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("get_session_file")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected get_session_file after session_start")
+
+    def test_session_start_calls_get_session_name(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("get_session_name")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected get_session_name after session_start")
 
     # -- session_shutdown ----------------------------------------------------
 

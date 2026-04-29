@@ -890,10 +890,19 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 	m.mu.Unlock()
 
 	for _, mb := range bridges {
-		var params map[string]any
+		params := map[string]any{}
+		// Always include session_id so extensions can identify the session.
+		if m.api != nil {
+			if sid := m.api.GetSessionID(); sid != "" {
+				params["session_id"] = sid
+			}
+		}
 		if d, ok := reexecData[mb.cfg.Name]; ok && len(d) > 0 {
 			mb.bridge.SeedSessionData(d)
-			params = map[string]any{"session_data": d}
+			params["session_data"] = d
+		}
+		if len(params) == 0 {
+			params = nil
 		}
 		_ = mb.bridge.EmitEvent("session_start", params)
 	}

@@ -174,6 +174,8 @@ func (n *nopBridgeAPI) SendMessage(_ CustomMessageSpec, _ *SendMessageOptions) {
 func (n *nopBridgeAPI) SendUserMessage(_ string, _ *SendUserMessageOptions)    {}
 func (n *nopBridgeAPI) SetSessionName(_ string)                                {}
 func (n *nopBridgeAPI) GetSessionName() string                                 { return "" }
+func (n *nopBridgeAPI) GetSessionFile() string                                 { return "" }
+func (n *nopBridgeAPI) GetSessionID() string                                   { return "" }
 func (n *nopBridgeAPI) SetLabel(_, _ string)                                   {}
 func (n *nopBridgeAPI) ClearLabel(_ string)                                    {}
 func (n *nopBridgeAPI) SetModel(_ *ai.Model) bool                              { return false }

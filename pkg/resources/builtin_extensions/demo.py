@@ -13,7 +13,7 @@ Outbound calls demonstrated (extension → fir):
   notify · exec · set_status · set_session_name ·
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
-  set_session_data · get_session_data · continue_session · side_query · call_tool ·
+  set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
   report_progress ·
   prepend
 
@@ -269,6 +269,9 @@ def on_session_start(params, ctx):
     ctx.list_tools()                                   # list_tools (read-only discovery)
     ctx.prepend("Demo extension is active.")           # prepend
     ctx.agent_info()                                   # agent_info
+    ctx.get_session_file()                             # get_session_file
+    ctx.get_session_name()                             # get_session_name
+    ctx.get_session_id()                               # get_session_id
 
 
 @fir_ext.on("session_shutdown")

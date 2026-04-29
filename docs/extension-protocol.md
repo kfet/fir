@@ -318,7 +318,7 @@ the `events` array of the init response.  For hooks, use the full `hook/` name.
 
 | Event name | `params` |
 |------------|----------|
-| `session_start` | `{"session_data": {"key": "value", ...}}` — `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`.  `params` key absent on a fresh session (no prior data). |
+| `session_start` | `{"session_id": "...", "session_data": {"key": "value", ...}}` — `session_id` is the unique session identifier (always present, also retrievable any time via `get_session_id`).  `session_data` is the map previously stored via `set_session_data`, seeded from the reexec sidecar on `/reexec`; absent on a fresh session (no prior data). |
 | `session_shutdown` | *(params key absent)* — session is about to stop; last chance for cleanup. |
 | `session_named` | `{"name": "..."}` — fired when the session acquires a display name (on start if one already exists, or when it is set later). |
 | `session_update` | `{"type": "session_named"│"plan_update", "session_name": "...", "plan": {"total": N, "completed": N, "metadata": {...}}}` — generic session state change. |
@@ -554,6 +554,53 @@ sidecar and handed back in the `session_start` event params under
 
 The data store is **per-extension** — two extensions cannot read each other's
 keys.
+
+---
+
+#### `get_session_file`
+
+Return the absolute path to the session's JSONL transcript on disk, or `""`
+for in-memory (non-persisted) sessions.
+
+```json
+{"jsonrpc":"2.0","id":1016,"method":"get_session_file","params":{}}
+```
+
+Response: `{"path": "/Users/x/.fir/sessions/--Users-x-dev-foo--/2026-04-27T12-34-56Z_abc.jsonl"}`
+
+The transcript file is created at session start (with its `SessionHeader`
+line) and appended to as events occur, so external observers can `tail -F`
+it from byte 0 without missing the first turn. This is the foundation of
+the `fir observe` feature — the observation extension announces this path
+in a sidecar file so observers read the transcript directly without any
+further IPC into fir.
+
+---
+
+#### `get_session_name`
+
+Return the session's display name, or `""` if unset. Set by the user (via
+`/name` or `set_session_name`) or auto-emitted as a `session_named` event.
+
+```json
+{"jsonrpc":"2.0","id":1017,"method":"get_session_name","params":{}}
+```
+
+Response: `{"name": "my-feature"}`
+
+---
+
+#### `get_session_id`
+
+Return the unique session identifier.  Also delivered in the
+`session_start` event params under the `session_id` key — this method
+allows retrieval at any point during the session lifetime.
+
+```json
+{"jsonrpc":"2.0","id":1018,"method":"get_session_id","params":{}}
+```
+
+Response: `{"id": "abc12345-6789-..."}`
 
 ---
 

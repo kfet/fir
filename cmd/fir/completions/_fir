@@ -21,6 +21,8 @@ _fir() {
         'uninstall:Remove an installed package'
         'packages:List or update installed packages'
         'sessions:List sessions for the current directory'
+        'observe:List or tail live fir session transcripts'
+        'send:Send messages to a live fir session'
         'login:OAuth login for a provider'
         'completion:Print shell completion script'
     )
@@ -35,6 +37,8 @@ _fir() {
             uninstall)   _fir_uninstall; return ;;
             packages)    _fir_packages; return ;;
             sessions)    _fir_sessions; return ;;
+            observe)     _fir_observe; return ;;
+            send)        _fir_send; return ;;
             login)       _fir_login; return ;;
             completion)  _fir_completion; return ;;
         esac
@@ -184,6 +188,23 @@ _fir_sessions() {
     if (( CURRENT == 3 )); then
         _values 'sessions subcommand' 'list[List sessions]'
     fi
+}
+
+_fir_observe() {
+    _arguments \
+        '--json[Raw JSONL output (no formatting)]' \
+        '--full[Formatted output with no truncation (best for agents)]' \
+        '--interact[Also pipe stdin to session as input]' \
+        '--cwd=[Resolve session by directory]:directory:_files -/' \
+        ':session id prefix:'
+}
+
+_fir_send() {
+    _arguments \
+        '--steer[All messages sent as steer (interrupt)]' \
+        '--follow[All messages sent as followUp (queue)]' \
+        '--cwd=[Resolve session by directory]:directory:_files -/' \
+        ':session id prefix:'
 }
 
 _fir_login() {

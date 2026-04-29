@@ -1250,6 +1250,8 @@ func (n *noopBridgeAPI) SendMessage(_ extension.CustomMessageSpec, _ *extension.
 func (n *noopBridgeAPI) SendUserMessage(_ string, _ *extension.SendUserMessageOptions)              {}
 func (n *noopBridgeAPI) SetSessionName(_ string)                                                    {}
 func (n *noopBridgeAPI) GetSessionName() string                                                     { return "" }
+func (n *noopBridgeAPI) GetSessionFile() string                                                     { return "" }
+func (n *noopBridgeAPI) GetSessionID() string                                                       { return "" }
 func (n *noopBridgeAPI) SetLabel(_ string, _ string)                                                {}
 func (n *noopBridgeAPI) ClearLabel(_ string)                                                        {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }

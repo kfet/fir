@@ -86,6 +86,31 @@ Two methods:
 
 `fir login <provider-id>` runs the OAuth flow for a provider from the shell (no interactive TUI required) and writes credentials to `~/.config/fir/auth.json`. Because OAuth providers are contributed by auth extensions, `fir login` loads extensions before running the flow — honouring the `settings.json` `extensions` allowlist, `-e/--extension`, `-d/--disable-extension`, and `--no-extensions`, exactly like the main CLI. `fir login list` (or bare `fir login`) lists every provider registered after extensions load. Equivalent to the long-standing `--login <provider-id>` flag; both paths share the same session-bootstrap code.
 
+## Session observation (`fir observe` / `fir send`)
+
+Every fir session writes a JSONL transcript to disk via `SessionStore`. The builtin `observe` extension registers a sidecar at `$XDG_STATE_HOME/fir/agents/<session-id>.json` containing discovery metadata (pid, socket path, transcript path, cwd, status, name) and listens on a Unix socket for input injection.
+
+The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
+
+```
+fir observe                        # list all live sessions (across all fir processes)
+fir observe <id-prefix>            # tail-and-format the session transcript
+fir observe <id-prefix> --json     # raw JSONL passthrough
+fir observe --cwd .                # resolve by current directory
+fir observe <id> --interact        # also pipe stdin to session (single-pane convenience)
+
+fir send <id-prefix>               # send messages interactively (Enter to send each line)
+fir send <id-prefix> --steer       # all messages sent as steer (interrupt)
+fir send <id-prefix> --follow      # all messages sent as followUp (queue)
+echo "nudge" | fir send <id>       # pipe a single message
+```
+
+`<id-prefix>` prefix-matches against session id, session name, or basename(cwd). First-line sigils in `fir send`: `!message` → steer, `+message` → followUp, `\!`/`\+` to escape. `Ctrl-\` detaches.
+
+**Note**: when using `-e <name>` flags to selectively enable extensions, include all required auth extensions too (e.g. `-d auto-namer -d notify` to suppress noise without blocking auth). Using `-e observe` alone blocks auth extensions.
+
+For multi-pane monitoring: run `fir observe <id>` in one tmux pane and `fir send <id>` in another.
+
 ## Environment Variables
 
 {{FIR_ENV_VARS_TABLE}}
@@ -207,7 +232,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
 - **In-place update** — use `/update` to check for, download, and install the latest release, then automatically restart the session.
 - **Compaction** — when context grows large, fir automatically summarizes older messages to stay within the model's context window. Configurable via `settings.json`.
 - **Review & Fix** — use the `review-and-fix` skill to run a one-shot review pass over recent changes. Covers build breaks, security, correctness, test gaps, and simplification (code reuse, quality, efficiency). Fixes all issues found, verifies the build, and commits.
-- **Aside (ephemeral side queries)** — use `/aside <question>` to ask a quick side question using the current session context without adding the exchange to history. The response is shown as a notification and the main conversation is unaffected. Works even while a task is streaming. When given tool calls, `/aside` orchestrates multi-tool workflows ephemerally via `ctx.call_tool()` + `ctx.side_query()` — raw tool outputs never enter the main conversation, only the synthesis is returned. Use `/aside read the 5 largest .go files and summarise` to ask the agent to build and run an aside automatically. The `aside` tool can also be called directly by the agent. Use `/advise <question>` to route the side query to the configured advisor model (see `/aside-advisor`).
+- **Aside (ephemeral side queries)** — use `/aside <question>` to ask a quick side question using the current session context without adding the exchange to history. The response is shown as a notification and the main conversation is unaffected. Works even while a task is streaming. When given tool calls, `/aside` orchestrates multi-tool workflows ephemerally via `ctx.call_tool()` + `ctx.side_query()` — raw tool outputs never enter the main conversation, only the synthesis is returned. Use `/aside read the 5 largest .go files and summarise` to ask the agent to build and run an aside automatically. The `aside` tool can also be called directly by the agent.
 - **Thinking levels** — control reasoning depth: none, minimal, low, medium, high. Toggle with `Shift+Tab` or `--thinking`.
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
 - **call_tool bridge** — extensions can call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)`. Results are returned directly and never enter conversation history. This enables extensions to build rich orchestration workflows.

@@ -234,6 +234,8 @@ func ContinueRecentSession(cwd, sessionDir string) (*SessionStore, bool) {
 // If the session is locked by another process, it forks the session to
 // preserve history. Returns true if the session was forked.
 func (ss *SessionStore) SetSessionFile(filePath string) bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 	return ss.setSessionFile(filePath)
 }
 
@@ -340,6 +342,12 @@ func (ss *SessionStore) newSession(opts *NewSessionOptions) string {
 		if lock, ok := tryLockSession(ss.sessionFile); ok {
 			ss.lock = lock
 		}
+		// Write the header immediately so observers (e.g. `fir observe`)
+		// can tail the file from byte 0 without missing the first turn.
+		// This also flips us into append-only mode for subsequent entries:
+		// persistEntry no longer takes the rewriteFile path on first
+		// persist, which would have been non-atomic vs concurrent readers.
+		ss.writeHeaderOnly()
 	}
 
 	firlog.Debug("new session created", "sessionID", ss.sessionID, "file", ss.sessionFile)
@@ -375,6 +383,38 @@ func (ss *SessionStore) generateID() string {
 	// Exhausted retries (practically impossible with 48-bit IDs).
 	// Fall back to full UUID but truncate to same length for consistency.
 	return uuid.New().String()[:12]
+}
+
+// writeHeaderOnly writes just the session header to the session file,
+// creating it. Used at session creation so observers can tail from byte 0.
+// After this call, persistEntry will use the append path (ss.flushed=true).
+func (ss *SessionStore) writeHeaderOnly() {
+	if !ss.persist || ss.sessionFile == "" || ss.header == nil {
+		return
+	}
+	data, err := json.Marshal(ss.header)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session: marshal header: %v\n", err)
+		return
+	}
+	// O_EXCL: never clobber an existing file. Session creation is the only
+	// caller and it always picks a fresh path.
+	f, err := os.OpenFile(ss.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	if err != nil {
+		// File already exists (e.g. continue/reopen path). Not an error.
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write header to %s: %v\n", ss.sessionFile, err)
+		return
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write header newline: %v\n", err)
+		return
+	}
+	ss.flushed = true
+	ss.updateSidecar()
 }
 
 func (ss *SessionStore) rewriteFile() {
@@ -420,48 +460,34 @@ func (ss *SessionStore) persistEntry(entry *SessionEntry) {
 		return
 	}
 
-	// Don't write until we have an assistant message
-	hasAssistant := false
-	for _, e := range ss.entries {
-		if e.Type == "message" && len(e.RawMessage) > 0 {
-			var probe struct {
-				Role string `json:"role"`
-			}
-			if json.Unmarshal(e.RawMessage, &probe) == nil && probe.Role == "assistant" {
-				hasAssistant = true
-				break
-			}
-		}
-	}
-
-	if !hasAssistant {
-		ss.flushed = false
-		return
-	}
-
+	// Append-only fast path. The header was written at session creation
+	// (writeHeaderOnly), and ss.flushed is always true on persisted
+	// sessions, so we always take the append branch here in normal
+	// operation. The rewriteFile fallback exists for code paths that
+	// reset ss.flushed (e.g. compaction-driven rewrites).
 	if !ss.flushed {
 		ss.rewriteFile()
 		ss.flushed = true
-	} else {
-		f, err := os.OpenFile(ss.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "session: open %s: %v\n", ss.sessionFile, err)
-			return
-		}
-		defer f.Close()
-		data, err := json.Marshal(entry)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "session: marshal entry %s: %v\n", entry.ID, err)
-			return
-		}
-		if _, err := f.Write(data); err != nil {
-			fmt.Fprintf(os.Stderr, "session: write entry %s: %v\n", entry.ID, err)
-		}
-		if _, err := f.WriteString("\n"); err != nil {
-			fmt.Fprintf(os.Stderr, "session: write newline: %v\n", err)
-		}
-		ss.updateSidecar()
+		return
 	}
+	f, err := os.OpenFile(ss.sessionFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session: open %s: %v\n", ss.sessionFile, err)
+		return
+	}
+	defer f.Close()
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "session: marshal entry %s: %v\n", entry.ID, err)
+		return
+	}
+	if _, err := f.Write(data); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write entry %s: %v\n", entry.ID, err)
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "session: write newline: %v\n", err)
+	}
+	ss.updateSidecar()
 }
 
 // updateSidecar rebuilds and writes the metadata sidecar for the current

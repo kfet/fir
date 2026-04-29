@@ -16,6 +16,13 @@ type BridgeAPI interface {
 	SendUserMessage(content string, opts *SendUserMessageOptions)
 	SetSessionName(name string)
 	GetSessionName() string
+	// GetSessionFile returns the absolute path to the session's JSONL
+	// transcript on disk, or "" for in-memory (non-persisted) sessions.
+	// The file is created at session start and appended to as events occur,
+	// so observers (e.g. `fir observe`) can `tail -F` it from byte 0.
+	GetSessionFile() string
+	// GetSessionID returns the unique identifier for the current session.
+	GetSessionID() string
 	SetLabel(entryID string, label string)
 	ClearLabel(entryID string)
 	SetModel(model *ai.Model) bool

@@ -20,6 +20,7 @@ type mockBridgeAPI struct {
 	execCalled      bool
 	execCmd         string
 	sessionName     string
+	sessionFile     string
 	sentMessages    []CustomMessageSpec
 	sentMsgOpts     []*SendMessageOptions
 	userMessages    []string
@@ -68,6 +69,8 @@ func (m *mockBridgeAPI) SendUserMessage(content string, opts *SendUserMessageOpt
 }
 func (m *mockBridgeAPI) SetSessionName(name string)    { m.sessionName = name }
 func (m *mockBridgeAPI) GetSessionName() string        { return m.sessionName }
+func (m *mockBridgeAPI) GetSessionFile() string        { return m.sessionFile }
+func (m *mockBridgeAPI) GetSessionID() string          { return "" }
 func (m *mockBridgeAPI) SetLabel(id, label string)     { m.labels[id] = label }
 func (m *mockBridgeAPI) ClearLabel(id string)          { delete(m.labels, id) }
 func (m *mockBridgeAPI) SetModel(model *ai.Model) bool { m.modelSet = model; return true }

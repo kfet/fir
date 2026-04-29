@@ -20,7 +20,7 @@ _fir_complete() {
     local subcommand=""
     if [[ $cword -ge 2 ]]; then
         case ${words[1]} in
-            update|skills|extensions|install|uninstall|packages|sessions|login|completion)
+            update|skills|extensions|install|uninstall|packages|sessions|observe|send|login|completion)
                 subcommand=${words[1]}
                 ;;
         esac
@@ -96,7 +96,7 @@ _fir_complete() {
 
     # First positional: subcommand or @file or message
     if [[ $cword -eq 1 ]]; then
-        local subs="update skills extensions install uninstall packages sessions login completion"
+        local subs="update skills extensions install uninstall packages sessions observe send login completion"
         if [[ $cur == @* ]]; then
             local stripped=${cur#@}
             local files=( $(compgen -f -- "$stripped") )
@@ -162,6 +162,10 @@ _fir_complete_subcommand() {
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list" -- "$cur") )
             fi ;;
+        observe)
+            COMPREPLY=( $(compgen -W "--json --full --cwd --interact" -- "$cur") ) ;;
+        send)
+            COMPREPLY=( $(compgen -W "--steer --follow --cwd" -- "$cur") ) ;;
         login)
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list $(_fir_providers)" -- "$cur") )

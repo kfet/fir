@@ -332,6 +332,18 @@ otherwise noted.
 | ``get_session_   | ``{key}``                             | ``{value: "...",          |
 | data``           |                                       | ok: bool}``               |
 +------------------+---------------------------------------+---------------------------+
+| ``get_session_   | ``{}``                                | ``{path: "..."}``         |
+| file``           | Absolute path to the session JSONL    | Empty for in-memory       |
+|                  | transcript on disk. Tail-able from    | sessions.                 |
+|                  | byte 0; foundation of ``fir observe``.|                           |
++------------------+---------------------------------------+---------------------------+
+| ``get_session_   | ``{}``                                | ``{name: "..."}``         |
+| name``           | Session display name. Empty if unset. |                           |
++------------------+---------------------------------------+---------------------------+
+| ``get_session_   | ``{}``                                | ``{id: "..."}``           |
+| id``             | Unique session id. Also in            |                           |
+|                  | ``session_start`` event params.       |                           |
++------------------+---------------------------------------+---------------------------+
 | ``call_tool``    | ``{name, params}``                    | ``{content: [...],        |
 |                  | Calls any registered tool directly,   | is_error: bool}``         |
 |                  | bypassing conversation history.       | SDK timeout: 60 s         |
@@ -914,6 +926,51 @@ class Context:
         if isinstance(result, dict) and result.get("ok"):
             return result.get("value")
         return None
+
+    def get_session_file(self) -> str:
+        """Return the absolute path to the session's JSONL transcript on disk.
+
+        Returns an empty string for in-memory (non-persisted) sessions.
+
+        The transcript is created at session start and appended to as events
+        occur, so it can be ``tail -F``'d from byte 0 to follow the session
+        live without missing the first turn. This is the foundation for
+        ``fir observe``: the observation extension announces this path
+        (via a sidecar file) so external observers can read the transcript
+        directly without any further IPC into fir.
+        """
+        result = self._call("get_session_file", {})
+        if isinstance(result, dict):
+            value = result.get("path", "")
+            if isinstance(value, str):
+                return value
+        return ""
+
+    def get_session_name(self) -> str:
+        """Return the session's display name, or ``""`` if unset.
+
+        Set by the user (via ``/name`` or the ``set_session_name`` API) or
+        emitted as a ``session_named`` event when fir auto-names a session.
+        """
+        result = self._call("get_session_name", {})
+        if isinstance(result, dict):
+            value = result.get("name", "")
+            if isinstance(value, str):
+                return value
+        return ""
+
+    def get_session_id(self) -> str:
+        """Return the unique session ID.
+
+        Also available as ``session_id`` in the ``session_start`` event params,
+        but this method allows retrieval at any point during the session.
+        """
+        result = self._call("get_session_id", {})
+        if isinstance(result, dict):
+            value = result.get("id", "")
+            if isinstance(value, str):
+                return value
+        return ""
 
     def set_label(self, entry_id: str, label: str) -> None:
         """Set a label on a session entry."""

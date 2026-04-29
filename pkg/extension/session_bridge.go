@@ -115,6 +115,23 @@ func (b *SessionBridge) GetSessionName() string {
 	return b.session.GetSessionName()
 }
 
+// GetSessionFile returns the absolute path to the session's JSONL transcript,
+// or "" for in-memory sessions. See BridgeAPI for full semantics.
+func (b *SessionBridge) GetSessionFile() string {
+	if b.session == nil || b.session.SessionStore == nil {
+		return ""
+	}
+	return b.session.SessionStore.GetSessionFile()
+}
+
+// GetSessionID returns the unique identifier for the current session.
+func (b *SessionBridge) GetSessionID() string {
+	if b.session == nil || b.session.SessionStore == nil {
+		return ""
+	}
+	return b.session.SessionStore.GetSessionID()
+}
+
 func (b *SessionBridge) SetLabel(entryID, label string) {
 	b.session.SessionStore.AppendLabelChange(entryID, label)
 }

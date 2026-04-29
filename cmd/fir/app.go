@@ -361,37 +361,11 @@ func waitMCPReady(mgr *mcp.Manager) {
 
 // run is the main application logic.
 func run() error {
-	// Standalone subcommands — handle before normal parsing.
-	if len(os.Args) >= 2 && os.Args[1] == "update" {
-		return runUpdate()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "skills" {
-		return runSkills()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "extensions" {
-		return runExtensions()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "install" {
-		return runInstall()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "uninstall" {
-		return runUninstall()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "packages" {
-		return runPackages()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "pty" {
-		runPTY()
-		return nil
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "sessions" {
-		return runSessions()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "login" {
-		return runLoginSubcommand()
-	}
-	if len(os.Args) >= 2 && os.Args[1] == "completion" {
-		return runCompletion()
+	// Standalone subcommands — registry-driven (see subcommands.go).
+	if len(os.Args) >= 2 {
+		if h := dispatchSubcommand(os.Args[1]); h != nil {
+			return h()
+		}
 	}
 
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
@@ -590,64 +564,6 @@ func runUpdate() error {
 	return nil
 }
 
-// formatContextWindow formats a context window size as a human-readable string.
-// e.g. 128000 -> "128k", 1000000 -> "1M", 200000 -> "200k"
-func formatContextWindow(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	if n >= 1_000_000 && n%1_000_000 == 0 {
-		return fmt.Sprintf("%dM", n/1_000_000)
-	}
-	if n >= 1_000_000 {
-		v := float64(n) / 1_000_000
-		if v == float64(int(v)) {
-			return fmt.Sprintf("%dM", int(v))
-		}
-		return fmt.Sprintf("%.1fM", v)
-	}
-	if n%1000 == 0 {
-		return fmt.Sprintf("%dk", n/1000)
-	}
-	v := float64(n) / 1000
-	return fmt.Sprintf("%.0fk", v)
-}
-
-// modelCostColor returns an ANSI color escape for the model line based on
-// input cost per million tokens.
-//   - expensive (input > $3/M):  yellow  (\033[33m)
-//   - cheap     (input < $0.50/M or free): green (\033[32m)
-//   - mid-range: default (no color)
-func modelCostColor(inputPerM float64) string {
-	switch {
-	case inputPerM <= 0:
-		return "\033[36m" // cyan — free / unknown cost
-	case inputPerM < 0.50:
-		return "\033[32m" // green — cheap
-	case inputPerM > 3.0:
-		return "\033[33m" // yellow — expensive
-	default:
-		return "" // mid-range — default terminal color
-	}
-}
-
-const ansiReset = "\033[0m"
-
-// printModelLine prints a single model entry with context window and cost coloring.
-func printModelLine(m *ai.Model) {
-	ctx := formatContextWindow(m.ContextWindow)
-	color := modelCostColor(m.Cost.Input)
-	reset := ""
-	if color != "" {
-		reset = ansiReset
-	}
-	if ctx != "" {
-		fmt.Printf("%s%s/%s  [%s]%s\n", color, m.Provider, m.ID, ctx, reset)
-	} else {
-		fmt.Printf("%s%s/%s%s\n", color, m.Provider, m.ID, reset)
-	}
-}
-
 // runListModels lists available models and exits.
 func runListModels(args *Args) error {
 	agentDir := resolveAgentDir()
@@ -674,7 +590,7 @@ func runListModels(args *Args) error {
 				continue
 			}
 		}
-		printModelLine(m)
+		fmt.Printf("%s/%s\n", m.Provider, m.ID)
 	}
 
 	return nil
@@ -724,7 +640,7 @@ func runListAvailableModels(args *Args) error {
 				continue
 			}
 		}
-		printModelLine(m)
+		fmt.Printf("%s/%s\n", m.Provider, m.ID)
 	}
 
 	return nil
@@ -833,8 +749,6 @@ func readPipedStdin() string {
 	return strings.TrimSpace(sb.String())
 }
 
-// allToolMap is the authoritative registry of built-in tools.
-// Keys are used to populate --tools help text and validate user input.
 var allToolMap = map[string]func(string) agent.AgentTool{
 	"read":  tools.NewReadTool,
 	"bash":  tools.NewBashTool,
