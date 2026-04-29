@@ -1,7 +1,6 @@
 ---
 name: work
 description: Implement, build, refactor, or fix anything substantial — creates a git worktree and feature branch before any edits so work is isolated and reversible.
-builtin: true
 ---
 
 # Work

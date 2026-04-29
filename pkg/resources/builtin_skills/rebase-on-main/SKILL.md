@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: rebase-on-main
 description: Rebase the current feature branch onto local main to pick up recent main changes without merging. Verifies no main content is lost during conflict resolution.
 ---

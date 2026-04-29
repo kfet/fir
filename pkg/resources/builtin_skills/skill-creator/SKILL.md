@@ -1,12 +1,14 @@
 ---
 builtin: true
 name: skill-creator
-description: Create, write, add, edit, or update a fir skill — author SKILL.md with frontmatter and instructions, then run the skill-updater review before telling the user to /reload.
+description: Create, write, add, edit, update, or review a fir skill — author SKILL.md with frontmatter and agent-facing instructions, run the quality checklist, and tell the user to /reload.
 ---
 
 # Skill Creator
 
-Use this skill whenever you are writing a new skill or editing an existing one.
+Use this skill whenever you are writing a new skill, editing an existing one, or just reviewing a SKILL.md for quality.
+
+> **Skill files target a smart AI, not a beginner. Skip anything obvious. Every sentence must earn its place.**
 
 ## Location
 
@@ -14,7 +16,7 @@ Skills live under `.fir/skills/<name>/SKILL.md`. The directory name must match t
 
 ## Format
 
-Every `SKILL.md` must start with YAML frontmatter followed by Markdown instructions for the executing agent:
+Every `SKILL.md` starts with YAML frontmatter followed by Markdown instructions for the executing agent:
 
 ```yaml
 ---
@@ -25,8 +27,35 @@ description: One-line, keyword-rich trigger statement used by the agent to decid
 
 ## Steps
 
-1. Create (or open) `.fir/skills/<name>/SKILL.md`.
-2. Write the frontmatter with `name` and a keyword-rich `description`.
-3. Write clear, agent-facing Markdown instructions in the body — no stubs or TODOs.
-4. Read `.fir/skills/skill-updater/SKILL.md` and run that review on the finished file, applying all fixes in place.
+1. Create or open `.fir/skills/<name>/SKILL.md`.
+2. Write the frontmatter — `name` matching the directory, plus a keyword-rich `description`.
+3. Write clear, agent-facing Markdown instructions — no stubs, no TODOs, no user-facing fluff.
+4. Run the review checklist below and fix issues in place.
 5. Tell the user to `/reload`.
+
+## Review checklist
+
+Apply this on every create or edit (including review-only passes on hand-edited files).
+
+### Frontmatter
+
+`description` is the sole trigger signal. It must be a single tight sentence naming the concrete action and the key nouns a user would say — precise and keyword-rich.
+
+Good:
+```yaml
+name: releaser
+description: Release a new version. Confirms reviews and tests pass, updates VERSION and CHANGELOG.md, commits, tags, and installs.
+```
+
+### Body
+
+Cut anything vague, redundant, incomplete, or longer than necessary. Instructions must target the executing agent, not the user.
+
+**No project-root boilerplate.** The shell already starts in the project root. Remove any `git rev-parse --show-toplevel` calls and any `PROJECT_ROOT` / `PROJECT` preambles that exist only to locate the repo. Use `$PWD` or relative paths directly.
+
+### Checklist
+
+- `name` matches the directory name
+- `description` is a one-sentence keyword-rich trigger
+- No stubs or TODOs
+- Agent-facing language throughout

@@ -20,19 +20,18 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"autoresearch-create": false,
 		"claude-usage":        false,
 		"extension-creator":   false,
-		"fix":                 false,
-		"loop":                false,
-		"monitor":             false,
+		"merge-to-main":       false,
 		"notify":              false,
+		"poe-usage":           false,
+		"rebase-on-main":      false,
 		"research":            false,
 		"review":              false,
 		"review-and-fix":      false,
 		"self":                false,
+		"self-handoff":        false,
 		"shepherd":            false,
 		"skill-creator":       false,
-		"skill-updater":       false,
 		"tmux-driver":         false,
-		"work":                false,
 	}
 
 	for _, s := range result.Skills {

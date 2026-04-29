@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: poe-usage
 description: Check Poe API usage — queries current point balance and usage history using a Poe API key from the environment or fir config.
 ---

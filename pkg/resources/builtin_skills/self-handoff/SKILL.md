@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: self-handoff
 description: Write a handoff document and restart with a clean LLM context in the same tmux pane. Use when context is getting large, switching tasks, or explicitly asked to hand off. The new session picks up from the handoff doc. This is a self-handoff — same process, clean slate.
 ---

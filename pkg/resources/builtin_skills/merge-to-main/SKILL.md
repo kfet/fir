@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: merge-to-main
 description: Merge a feature branch to main — squash, rebase onto local main, verify no main changes lost, ff-merge into the main worktree.
 ---

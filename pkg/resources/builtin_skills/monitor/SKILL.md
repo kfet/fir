@@ -1,5 +1,4 @@
 ---
-builtin: true
 name: monitor
 description: Continuously monitor a project's file activity, build health, and work-tracker progress. Loops every 30 seconds, reports changes, and flags stuck or broken states.
 ---

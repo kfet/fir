@@ -1,5 +1,4 @@
 ---
-builtin: true
 name: loop
 description: Repeatedly execute any user-provided prompt on a fixed interval. Ask the user what to repeat and how often, then keep looping until told to stop.
 ---
