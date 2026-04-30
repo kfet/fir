@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-04-29
+
 ### Added
 
 - ACP `authenticate` RPC now supports a non-blocking interactive OAuth flow via `_meta.auth.interactive`. Two-call protocol: call 1 starts the login and returns the auth URL plus an opaque pending-id; call 2 submits the pasted redirect URL to complete. Reuses the existing `oauth.LoginCallbacks` plumbing (same flow as the TUI's `fir login`). Lets ACP clients without an attached browser (e.g. `poe-acp-relay`) drive OAuth by surfacing the URL to the end user and feeding the redirect back. Legacy clients that don't set the meta flag use the existing blocking `OpenBrowser` path unchanged. Multiple concurrent logins per provider are supported via the per-flow id.
