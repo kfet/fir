@@ -353,6 +353,16 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 			if provider == "amazon-bedrock" && isBedrockPassthroughID(pattern) {
 				return ResolveCliModelResult{Model: fallbackModel}
 			}
+			// Poe exposes its full bot catalogue in models_generated.go. A
+			// missing id almost always means a typo — Poe responds to unknown
+			// bots with an opaque 500. Refuse the fallback and surface a clear
+			// error instead.
+			if provider == "poe" {
+				return ResolveCliModelResult{
+					Warning: res.Warning,
+					Error:   fmt.Sprintf("Model %q not found for provider %q. Use --list-models to see available Poe bots.", pattern, provider),
+				}
+			}
 			fallbackWarning := fmt.Sprintf("Model %q not found for provider %q. Using custom model id.", pattern, provider)
 			if res.Warning != "" {
 				fallbackWarning = res.Warning + " " + fallbackWarning

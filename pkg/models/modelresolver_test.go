@@ -455,6 +455,27 @@ func TestResolveCliModel_ModelNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveCliModel_PoeRefusesUnknownBot(t *testing.T) {
+	// Poe exposes its full bot catalogue. Unknown bots must produce a clear
+	// error rather than a custom-id fallback that yields opaque 500s upstream.
+	registry := newTestRegistry(t, []*ai.Model{{
+		ID: "gemma-4-31b", Name: "Gemma-4-31B",
+		Api: ai.ApiOpenAICompletions, Provider: ai.ProviderPoe,
+		BaseURL: "https://api.poe.com/v1",
+	}})
+	result := ResolveCliModel(ResolveCliModelOptions{
+		CLIProvider:   "poe",
+		CLIModel:      "gemma-4-31b-fw",
+		ModelRegistry: registry,
+	})
+	if result.Error == "" {
+		t.Fatal("expected error for unknown Poe bot")
+	}
+	if result.Model != nil {
+		t.Errorf("expected nil model for unknown Poe bot, got %v", result.Model)
+	}
+}
+
 func TestResolveCliModel_OpenRouterSlashID(t *testing.T) {
 	// "openai/gpt-5.1-codex" is a model ID on openrouter (not provider=openai, model=gpt-5.1-codex)
 	registry := newTestRegistry(t, testModels())

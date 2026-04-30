@@ -97,6 +97,7 @@ type resolvedCompat struct {
 	CacheControlFormat                          string // "anthropic" or ""
 	SendSessionAffinityHeaders                  bool
 	SupportsLongCacheRetention                  bool
+	StripAdditionalProperties                   bool
 }
 
 // detectCompat auto-detects compat settings from the model's provider and base URL.
@@ -108,11 +109,13 @@ func detectCompat(model *ai.Model) resolvedCompat {
 
 	isDeepSeek := provider == "deepseek" || strings.Contains(baseURL, "deepseek.com")
 
+	isPoe := provider == "poe" || strings.Contains(baseURL, "poe.com")
+
 	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
 		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
 		strings.Contains(baseURL, "chutes.ai") || isDeepSeek ||
 		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai") ||
-		provider == "poe" || strings.Contains(baseURL, "poe.com")
+		isPoe
 
 	useMaxTokens := strings.Contains(baseURL, "chutes.ai")
 
@@ -172,6 +175,7 @@ func detectCompat(model *ai.Model) resolvedCompat {
 		CacheControlFormat:                          cacheControlFormat,
 		SendSessionAffinityHeaders:                  false,
 		SupportsLongCacheRetention:                  true,
+		StripAdditionalProperties:                   isPoe,
 	}
 }
 
@@ -1215,12 +1219,40 @@ func maybeAddOpenRouterAnthropicCacheControl(model *ai.Model, messages []map[str
 	}
 }
 
+// stripAdditionalProperties recursively removes "additionalProperties" keys
+// from a JSON Schema. Used for providers (e.g. Poe routing to Google Gemini)
+// whose upstream rejects this field as an unknown name.
+func stripAdditionalProperties(schema any) any {
+	switch v := schema.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, val := range v {
+			if k == "additionalProperties" {
+				continue
+			}
+			out[k] = stripAdditionalProperties(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = stripAdditionalProperties(item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 func convertOpenAITools(tools []ai.Tool, compat resolvedCompat) []map[string]any {
 	var result []map[string]any
 	for _, tool := range tools {
 		schema := tool.Parameters
 		if schema == nil {
 			schema = map[string]any{"type": "object", "properties": map[string]any{}}
+		}
+		if compat.StripAdditionalProperties {
+			schema = stripAdditionalProperties(schema)
 		}
 		fn := map[string]any{
 			"name":        tool.Name,

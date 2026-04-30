@@ -544,6 +544,42 @@ func TestConvertOpenAITools_NoStrictField(t *testing.T) {
 	assert.False(t, hasStrict)
 }
 
+func TestConvertOpenAITools_StripAdditionalProperties(t *testing.T) {
+	// Poe routes Gemma/Gemini bots to Google's API which rejects
+	// "additionalProperties" inside tool parameter schemas. Verify the field
+	// is stripped at every nesting level when StripAdditionalProperties is set.
+	compat := resolvedCompat{StripAdditionalProperties: true}
+	tools := []ai.Tool{{
+		Name:        "plan",
+		Description: "Plan",
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"metadata": map[string]any{
+					"type":                 "object",
+					"additionalProperties": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}}
+	result := convertOpenAITools(tools, compat)
+	require.Len(t, result, 1)
+	params := result[0]["function"].(map[string]any)["parameters"].(map[string]any)
+	_, ok := params["additionalProperties"]
+	assert.False(t, ok, "top-level additionalProperties should be stripped")
+	props := params["properties"].(map[string]any)
+	meta := props["metadata"].(map[string]any)
+	_, ok = meta["additionalProperties"]
+	assert.False(t, ok, "nested additionalProperties should be stripped")
+}
+
+func TestDetectCompat_PoeStripsAdditionalProperties(t *testing.T) {
+	m := &ai.Model{Provider: "poe", BaseURL: "https://api.poe.com/v1", ID: "gemma-4-31b"}
+	c := detectCompat(m)
+	assert.True(t, c.StripAdditionalProperties)
+}
+
 // --- OnPayload hook tests ---
 
 func TestStreamOpenAI_OnPayload_Called(t *testing.T) {
