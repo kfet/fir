@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `pebble-emu` builtin skill: AI-friendly recipe for the Rebble/Core-Devices `pebble-tool` v5 emulator. Documents the build → install → screenshot loop (`pebble screenshot --no-open` pulls a live PNG over the pebble-protocol socket — the agent's eye), the `--vnc` flag (QEMU `-vnc :1` on port 5901 + websockify noVNC on 6080), input/sensor injection (`emu-tap`, `emu-accel`, `emu-battery`, `emu-bt-connection`, `emu-compass`, `emu-app-config`, `emu-control`), all six platforms (aplite/basalt/chalk/diorite/emery/flint), and cleanup (`pebble kill`, `pebble wipe`).
+
 ## [0.38.0] - 2026-04-29
 
 ### Added
