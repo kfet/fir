@@ -6,6 +6,10 @@
 
 - New `pebble-emu` builtin skill: AI-friendly recipe for the Rebble/Core-Devices `pebble-tool` v5 emulator. Documents the build → install → screenshot loop (`pebble screenshot --no-open` pulls a live PNG over the pebble-protocol socket — the agent's eye), the `--vnc` flag (QEMU `-vnc :1` on port 5901 + websockify noVNC on 6080), input/sensor injection (`emu-tap`, `emu-accel`, `emu-battery`, `emu-bt-connection`, `emu-compass`, `emu-app-config`, `emu-control`), all six platforms (aplite/basalt/chalk/diorite/emery/flint), and cleanup (`pebble kill`, `pebble wipe`).
 
+### Changed
+
+- `notify` builtin extension now uses the tmux session id (`$TMUX`) as the OSC 99 notification identifier when running inside tmux. Kitty coalesces same-id notifications, so multiple background fir agents in one tmux session collapse into a single updating banner instead of stacking. Outside tmux, falls back to the previous fixed id. OSC 777 terminals (Ghostty, iTerm2, WezTerm) are unaffected — that protocol has no id field.
+
 ## [0.38.0] - 2026-04-29
 
 ### Added

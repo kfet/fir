@@ -121,6 +121,21 @@ class TestNotifyOSC99(unittest.TestCase):
                 for call in mock_write.call_args_list:
                     self.assertIn(b"Ptmux", call[0][0])
 
+    def test_uses_tmux_session_as_id(self):
+        # $TMUX = socket,pid,sessionid — sanitised "/" and "," to "_".
+        with mock.patch.dict(os.environ, {"TMUX": "/tmp/tmux-1000/default,12345,7"}):
+            with mock.patch.object(self.mod, "_write_to_tty") as mock_write:
+                self.mod._notify_osc99("t", "b")
+                data = mock_write.call_args_list[0][0][0]
+                self.assertIn(b"i=_tmp_tmux-1000_default_12345_7:", data)
+
+    def test_default_id_outside_tmux(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch.object(self.mod, "_write_to_tty") as mock_write:
+                self.mod._notify_osc99("t", "b")
+                data = mock_write.call_args_list[0][0][0]
+                self.assertIn(b"i=1:", data)
+
 
 class TestNotifyTerminal(unittest.TestCase):
     def setUp(self):

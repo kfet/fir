@@ -99,8 +99,8 @@ class TestNotifyFormats(unittest.TestCase):
         ):
             result = self._capture_tty(_notify._notify_osc99, "title", "body")
         self.assertIn("Ptmux;", result)
-        self.assertIn("99;i=1:d=0;title", result)
-        self.assertIn("99;i=1:p=body;body", result)
+        self.assertIn("99;i=_tmp_tmux-1234_default_1_0:d=0;title", result)
+        self.assertIn("99;i=_tmp_tmux-1234_default_1_0:p=body;body", result)
 
     def test_notify_terminal_uses_osc99_in_kitty(self):
         with patch.dict(

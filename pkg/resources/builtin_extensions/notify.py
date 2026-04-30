@@ -17,12 +17,26 @@ This is a Python port of pkg/extensions/notify.
 """
 
 import os
+import re
 
 import fir_ext
 
 
 def _in_tmux():
     return os.environ.get("TMUX", "") != ""
+
+
+def _group_id() -> str:
+    """Stable per-tmux-session id for notification coalescing.
+
+    Inside tmux, $TMUX is `socket,serverpid,sessionid` — globally unique per
+    session. Sanitised for OSC 99 `i=` which wants `[A-Za-z0-9_-]`. Outside
+    tmux, return "" so we fall back to the previous (non-grouped) behaviour.
+    """
+    tmux = os.environ.get("TMUX", "")
+    if not tmux:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", tmux)
 
 
 def _in_kitty():
@@ -48,12 +62,13 @@ def _notify_osc777(title: str, body: str):
 
 def _notify_osc99(title: str, body: str):
     """Kitty OSC 99 notification."""
+    ident = _group_id() or "1"
     if _in_tmux():
-        _write_to_tty(f"\x1bPtmux;\x1b\x1b]99;i=1:d=0;{title}\x1b\x1b\\\x1b\\".encode())
-        _write_to_tty(f"\x1bPtmux;\x1b\x1b]99;i=1:p=body;{body}\x1b\x1b\\\x1b\\".encode())
+        _write_to_tty(f"\x1bPtmux;\x1b\x1b]99;i={ident}:d=0;{title}\x1b\x1b\\\x1b\\".encode())
+        _write_to_tty(f"\x1bPtmux;\x1b\x1b]99;i={ident}:p=body;{body}\x1b\x1b\\\x1b\\".encode())
     else:
-        _write_to_tty(f"\x1b]99;i=1:d=0;{title}\x1b\\".encode())
-        _write_to_tty(f"\x1b]99;i=1:p=body;{body}\x1b\\".encode())
+        _write_to_tty(f"\x1b]99;i={ident}:d=0;{title}\x1b\\".encode())
+        _write_to_tty(f"\x1b]99;i={ident}:p=body;{body}\x1b\\".encode())
 
 
 def notify_terminal(title: str, body: str):
