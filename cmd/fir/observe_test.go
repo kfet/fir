@@ -441,3 +441,43 @@ func TestRunObserve_UnknownFlag(t *testing.T) {
 // helper.)
 var _ = fmt.Errorf
 var _ = errors.New
+
+// nopWriteCloser adapts a bytes.Buffer to io.WriteCloser for testing.
+type nopWriteCloser struct{ *bytes.Buffer }
+
+func (nopWriteCloser) Close() error { return nil }
+
+// TestInteractSendLoop_FirstEnterSendsImmediately verifies that --interact
+// sends each non-empty line on the first Enter (not the second). Driving via
+// `tmux send-keys "msg" Enter` depends on this behaviour.
+func TestInteractSendLoop_FirstEnterSendsImmediately(t *testing.T) {
+	var buf bytes.Buffer
+	input := strings.NewReader("hello agent\n!steer me\n+also this\n\n   \nfinal\n")
+	interactSendLoop(input, nopWriteCloser{&buf})
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 NDJSON messages (blank/whitespace skipped), got %d: %q", len(lines), buf.String())
+	}
+	var msgs []map[string]string
+	for _, ln := range lines {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(ln), &m); err != nil {
+			t.Fatalf("parse %q: %v", ln, err)
+		}
+		msgs = append(msgs, m)
+	}
+	want := []struct {
+		content, deliverAs string
+	}{
+		{"hello agent", ""},
+		{"steer me", "steer"},
+		{"also this", "followUp"},
+		{"final", ""},
+	}
+	for i, w := range want {
+		if msgs[i]["content"] != w.content || msgs[i]["deliver_as"] != w.deliverAs {
+			t.Errorf("msg %d: got %+v, want content=%q deliver_as=%q", i, msgs[i], w.content, w.deliverAs)
+		}
+	}
+}

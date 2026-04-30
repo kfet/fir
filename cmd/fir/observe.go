@@ -336,6 +336,25 @@ func ageString(startedAt string, now time.Time) string {
 // `fir observe <id>` — tail the transcript
 // ---------------------------------------------------------------------------
 
+// interactSendLoop reads lines from r and writes each non-empty line as a
+// single message to w. Line-oriented: each Enter sends immediately (matches
+// `fir send` and `tmux send-keys ... Enter`). First-line sigils !/+/\ are
+// parsed by sendMsg. Closes w when r reaches EOF.
+func interactSendLoop(r io.Reader, w io.WriteCloser) {
+	defer w.Close()
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if err := sendMsg(w, []string{line}, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: send: %v\n", err)
+			return
+		}
+	}
+}
+
 func runObserveTail(idPrefix, cwdFlag string, jsonOut, interact, fullText bool) error {
 	s, err := resolveSidecar(idPrefix, cwdFlag)
 	if err != nil {
@@ -355,25 +374,7 @@ func runObserveTail(idPrefix, cwdFlag string, jsonOut, interact, fullText bool) 
 			if cerr != nil {
 				fmt.Fprintf(os.Stderr, "warning: --interact: connect socket: %v (continuing read-only)\n", cerr)
 			} else {
-				go func() {
-					defer conn.Close()
-					sc := bufio.NewScanner(os.Stdin)
-					var lines []string
-					for sc.Scan() {
-						line := sc.Text()
-						if line == "" {
-							if len(lines) > 0 {
-								_ = sendMsg(conn, lines, "")
-								lines = lines[:0]
-							}
-							continue
-						}
-						lines = append(lines, line)
-					}
-					if len(lines) > 0 {
-						_ = sendMsg(conn, lines, "")
-					}
-				}()
+				go interactSendLoop(os.Stdin, conn)
 			}
 		}
 	}

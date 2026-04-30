@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `tmux-observer` builtin skill: instructions for attaching a tmux window to an already-running fir session and driving it via `tmux send-keys`. Pure markdown — three tmux primitives (`new-window`, `capture-pane`, `send-keys`) plus `fir observe <id> --interact --full`. No script, no orchestration logic — the parent agent decides layout and window strategy.
+
+### Fixed
+
+- `fir observe --interact` now sends each non-empty line on the first Enter, matching `fir send` and every other line-oriented CLI tool. Previously it accumulated lines and only flushed on a blank line (second Enter), which broke `tmux send-keys "msg" Enter` driving and confused human users. Sigils (`!` steer, `+` followUp, `\` escape) are still parsed via the shared `sendMsg`.
+
 ### Changed
 
 - Demoted `review` from built-in skills. Still available via `fir skills install review` or by checking out the source.
