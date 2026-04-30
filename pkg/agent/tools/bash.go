@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -30,7 +31,7 @@ func NewBashTool(cwd string) agent.AgentTool {
 		Tool: ai.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
-				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
 				runtime.GOOS, runtime.GOARCH, DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
@@ -111,37 +112,76 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 		defer cancel()
 	}
 
-	// Create command
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	// Create command. We deliberately do NOT use exec.CommandContext: we need
+	// to manage the process lifecycle ourselves so we can kill the entire
+	// process group as soon as the foreground bash process exits, reaping any
+	// backgrounded children that would otherwise hold the stdout pipe open
+	// (e.g. `(sleep 30; echo done) &`). Daemons that detach via setsid (tmux
+	// server, sshd, etc.) escape the group and survive — that is the whole
+	// point of setsid.
+	cmd := exec.Command("bash", "-c", command)
 	cmd.Dir = cwd
 	cmd.Env = AppendColorEnv(os.Environ())
 	cmd.Env = append(cmd.Env, "GIT_EDITOR=true")
 
-	// Run bash in its own process group so we can kill the entire group
-	// (bash + any child processes it spawns) on cancellation. Without
-	// this, child processes inherit the stdout/stderr pipe write-end and
-	// keep it open after bash is killed, causing cmd.Wait() to hang.
+	// Run bash in its own process group so we can kill the entire group on
+	// exit/cancellation.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// Override the default Cancel (which only kills the bash process) to
-	// kill the entire process group. This ensures child processes
-	// (e.g. "sleep" spawned by bash) are also killed when the context is
-	// cancelled (e.g. user presses Esc), closing the pipe and unblocking
-	// cmd.Wait().
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		// Negative PID targets the process group.
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// Use our own pipe for stdout/stderr so we can drain it after killpg.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return agent.AgentToolResult{}, fmt.Errorf("pipe: %w", err)
 	}
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
-	// Capture output
+	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
+		return agent.AgentToolResult{}, err
+	}
+	// Close the parent's copy of the write end; only children hold it now.
+	pw.Close()
+
+	// Drain pipe into buffer.
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, pr)
+		pr.Close()
+		close(drained)
+	}()
 
-	err := cmd.Run()
+	// Watch ctx for cancellation/timeout; kill the process group if it fires
+	// before bash exits naturally.
+	mainExited := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		case <-mainExited:
+		}
+	}()
+
+	// Wait for bash itself to exit (does not wait for backgrounded children).
+	state, waitErr := cmd.Process.Wait()
+	close(mainExited)
+
+	// Reap any orphaned children still in the group (backgrounded `&` jobs
+	// that inherit the pipe and would otherwise block the drain). ESRCH is
+	// expected when no group members remain.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+	// Now safe to wait for pipe drain — all writers are gone.
+	<-drained
+
+	// Synthesise an exec.ExitError on non-zero exit so downstream code keeps
+	// working (cmd.Wait normally does this for us).
+	err = waitErr
+	if err == nil && state != nil && !state.Success() {
+		err = &exec.ExitError{ProcessState: state}
+	}
 
 	output := buf.String()
 

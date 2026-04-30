@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `bash` tool no longer hangs when a command backgrounds a process that inherits the stdout pipe (e.g. `(sleep 30; echo done) &`). After the foreground bash process exits we now `killpg(-pgid, SIGKILL)` to reap any orphaned background children still holding the pipe, so the tool returns immediately. Well-behaved daemons that `setsid` (tmux server, sshd, etc.) escape the process group and are unaffected.
 - `fir observe --interact` now sends each non-empty line on the first Enter, matching `fir send` and every other line-oriented CLI tool. Previously it accumulated lines and only flushed on a blank line (second Enter), which broke `tmux send-keys "msg" Enter` driving and confused human users. Sigils (`!` steer, `+` followUp, `\` escape) are still parsed via the shared `sendMsg`.
 
 ### Changed

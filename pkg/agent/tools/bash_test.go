@@ -112,6 +112,27 @@ func TestBashTool_AbortWithChildren(t *testing.T) {
 	}
 }
 
+// TestBashTool_BackgroundChildHoldsPipe verifies that a backgrounded subshell
+// which inherits the stdout pipe does not block the tool. Without the
+// "killpg-after-bash-exits" reaping, this would block until the background
+// `sleep` finishes (~30s), even though bash itself exited immediately.
+func TestBashTool_BackgroundChildHoldsPipe(t *testing.T) {
+	tool := NewBashTool(t.TempDir())
+
+	start := time.Now()
+	_, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "(sleep 30; echo done) &\necho started",
+	}, nil)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Execute took %v — backgrounded child held pipe open", elapsed)
+	}
+}
+
 func TestBashTool_NoOutput(t *testing.T) {
 	tool := NewBashTool(t.TempDir())
 	result, err := tool.Execute(context.Background(), "call-1", map[string]any{

@@ -53,6 +53,32 @@ func TestTool_Bash(t *testing.T) {
 	}
 }
 
+// TestTool_BashBackgroundDoesNotHang verifies the regression where a
+// backgrounded subshell that inherits the bash tool's stdout pipe used to
+// keep the tool blocked until the child finished. With the killpg-on-exit
+// fix, the tool returns promptly after the foreground command exits.
+func TestTool_BashBackgroundDoesNotHang(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now()
+	// 30s background sleep; with the bug, the bash tool took the full 30s.
+	// The harness timeout (25s) is well under that, so a regression shows up
+	// as a hang/timeout here.
+	out, code := runFirMockDir(t, dir,
+		"RUN_BASH (sleep 30; echo LATE) & echo PROMPT",
+		25*time.Second, "--print", "--no-session")
+	elapsed := time.Since(start)
+	if code != 0 {
+		t.Logf("exit code %d (may be ok if stdin closed)", code)
+	}
+	assertNoPanic(t, out)
+	if elapsed > 20*time.Second {
+		t.Fatalf("bash tool hung on backgrounded child (elapsed=%v): %s", elapsed, out)
+	}
+	if !strings.Contains(out, "MOCK_TOOL_DONE") {
+		t.Fatalf("expected MOCK_TOOL_DONE: %s", out)
+	}
+}
+
 // expectedBaseTools are the tools that must always be present regardless of
 // MCP servers, extensions, or other mutations.
 var expectedBaseTools = []string{"read", "bash", "edit", "write", "plan"}
