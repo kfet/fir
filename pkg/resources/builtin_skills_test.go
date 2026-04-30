@@ -25,7 +25,6 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"poe-usage":           false,
 		"rebase-on-main":      false,
 		"research":            false,
-		"review":              false,
 		"review-and-fix":      false,
 		"self":                false,
 		"self-handoff":        false,

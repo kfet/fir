@@ -300,6 +300,45 @@ func (r *DefaultResourceLoader) scopeForPath(p string) string {
 	return "user"
 }
 
+// classifySkillSource returns a meaningful Source label for a loaded skill
+// based on where its file lives. Builtin skills keep "builtin"; everything
+// else is bucketed as "project" (under <cwd>/.fir), "user" (under agentDir
+// or ~/.fir), "package" (installed fir package), or falls back to "path".
+func (r *DefaultResourceLoader) classifySkillSource(s Skill) string {
+	if s.Source == "builtin" {
+		return "builtin"
+	}
+	abs, err := filepath.Abs(s.FilePath)
+	if err != nil {
+		abs = s.FilePath
+	}
+
+	projectFir := filepath.Join(r.cwd, config.ConfigDirName)
+	userFir := r.agentDir
+	if home, err := os.UserHomeDir(); err == nil {
+		homeFir := filepath.Join(home, config.ConfigDirName)
+		// Packages installed without --local live under ~/.fir/packages
+		if isUnderPath(abs, filepath.Join(homeFir, "packages")) {
+			return "package"
+		}
+		// Treat anything else under ~/.fir as user-scoped.
+		if isUnderPath(abs, homeFir) {
+			return "user"
+		}
+	}
+	// Project-local packages: <cwd>/.fir/packages
+	if isUnderPath(abs, filepath.Join(projectFir, "packages")) {
+		return "package"
+	}
+	if isUnderPath(abs, projectFir) {
+		return "project"
+	}
+	if userFir != "" && isUnderPath(abs, userFir) {
+		return "user"
+	}
+	return "path"
+}
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
@@ -333,6 +372,12 @@ func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionP
 				r.skills = append(r.skills, s)
 			}
 		}
+	}
+	// Reclassify Source by FilePath location so listings show meaningful
+	// scopes ("user", "project", "package") instead of the generic "path"
+	// that LoadSkills assigns to anything coming via SkillPaths.
+	for i := range r.skills {
+		r.skills[i].Source = r.classifySkillSource(r.skills[i])
 	}
 	// Sort once more after appending builtins — without this, the system
 	// prompt's <available_skills> ordering depends on builtin walk order

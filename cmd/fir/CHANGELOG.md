@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Demoted `review` from built-in skills. Still available via `fir skills install review` or by checking out the source.
+- `/skills` listing now classifies skills as `builtin`, `user`, `project`, `package`, or `path` based on file location, instead of labelling everything from `SkillPaths` as `path`. Makes it obvious whether a skill came from `~/.fir/skills`, `<cwd>/.fir/skills`, an installed package, or an explicit `--skill` path.
+
 ## [0.37.0] - 2026-04-29
 
 ### Changed

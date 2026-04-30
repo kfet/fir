@@ -1,7 +1,6 @@
 ---
 name: review
 description: Continuously review code produced by other agents. Checks staged and recent changes for simplification opportunities, security issues, test gaps, and correctness. Run this when multiple agents are actively working on the project.
-builtin: true
 ---
 
 # Continuous Code Review
