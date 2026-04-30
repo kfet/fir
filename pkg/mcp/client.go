@@ -537,6 +537,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 	}
 	m.withEntry(name, func(e *serverEntry) {
 		e.session = session
+		e.err = nil
 	})
 
 	// Request the server to send log messages at the appropriate level.
@@ -650,6 +651,29 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 				})
 			}
 			toStart[name] = newCfg
+		} else {
+			// Config unchanged — but reconnect if the server is disconnected
+			// or in an errored state. /reload is the user's way to recover
+			// from a dead server, so an unchanged config should not stop us
+			// from retrying the connection.
+			entry := m.loadEntry(name)
+			if entry != nil {
+				var needRestart bool
+				entry.with(func(e *serverEntry) {
+					if e.connecting {
+						return // initial connect still in flight; leave it
+					}
+					if e.session == nil || e.err != nil {
+						needRestart = true
+						if e.session != nil {
+							toStop = append(toStop, stopItem{name, e.session})
+						}
+					}
+				})
+				if needRestart {
+					toStart[name] = newCfg
+				}
+			}
 		}
 	}
 	for name, cfg := range newConfigs {

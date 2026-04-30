@@ -64,6 +64,51 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	assert.True(t, mgr.hasSession("srv2"), "srv2 session should exist after Reload")
 }
 
+// TestManager_Reload_ReconnectsDisconnected verifies that /reload restarts a
+// server whose config is unchanged but whose session has dropped or errored.
+// Regression test: previously Reload only restarted servers whose config
+// differed, so a dead-but-still-configured MCP server (e.g. grafana on a
+// transient port that went away) could not be recovered without restarting fir.
+func TestManager_Reload_ReconnectsDisconnected(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "myTool", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	connectCount := 0
+	realDial := inMemoryDial(t, server)
+	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
+	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+		connectCount++
+		return realDial(cfg)
+	}
+
+	startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+	require.Equal(t, 1, connectCount)
+	require.True(t, mgr.hasSession("srv1"))
+
+	// Simulate the server having disconnected/errored in the background.
+	mgr.withEntry("srv1", func(e *serverEntry) {
+		if e.session != nil {
+			_ = e.session.Close()
+		}
+		e.session = nil
+		e.tools = nil
+		e.err = assert.AnError
+	})
+
+	// /reload with identical config should reconnect the dead server.
+	_, reloadErr := mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
+	require.NoError(t, reloadErr)
+	assert.Equal(t, 2, connectCount, "disconnected server should be reconnected by Reload")
+	assert.True(t, mgr.hasSession("srv1"), "srv1 should have a live session after Reload")
+	mgr.withEntry("srv1", func(e *serverEntry) {
+		assert.NoError(t, e.err, "error should be cleared after successful reconnect")
+	})
+}
+
 // TestManager_Reload_Unchanged verifies that an unchanged server is not reconnected.
 func TestManager_Reload_Unchanged(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
