@@ -220,6 +220,14 @@ func (pa *firAgent) handleAuthenticate(ctx context.Context, req acpsdk.Authentic
 
 	switch method.Type {
 	case AuthMethodTypeAgent:
+		// Interactive two-call protocol: relay/client opts in via
+		// _meta.auth.interactive. URL goes out in the first response,
+		// the pasted redirect URL comes back in a second authenticate
+		// call. Legacy (non-interactive) clients fall through to the
+		// blocking branch below.
+		if in := parseAuthMeta(req.Meta); in.Interactive || in.Cancel || in.Redirect != "" {
+			return pa.authenticateOAuthInteractive(ctx, method, in)
+		}
 		return pa.authenticateOAuth(ctx, method)
 	case AuthMethodTypeEnvVar:
 		return pa.authenticateEnvVar(ctx, method)

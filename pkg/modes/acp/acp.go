@@ -91,6 +91,14 @@ type firAgent struct {
 	// authMethods is built. Sessions exclude these names from their own
 	// extension startup to avoid double-starting.
 	authExtSetup *extension.AuthSetupResult
+
+	// pendingAuths tracks in-flight interactive OAuth logins, keyed by
+	// the per-flow opaque id returned to the client on call 1. Multiple
+	// concurrent flows per auth method are supported. Used by the
+	// two-call `_meta.auth.interactive` protocol so a relay (e.g.
+	// poe-acp-relay) can surface the auth URL to a remote user and feed
+	// the pasted redirect URL back into the login flow.
+	pendingAuths map[string]*pendingAuth
 }
 
 // Compile-time interface check: firAgent must implement Agent.
@@ -107,9 +115,10 @@ func RunAcpMode(opts Options) error {
 	runStart := time.Now()
 	firlog.Info("acp server starting")
 	pa := &firAgent{
-		options:  opts,
-		sessions: make(map[string]*firSession),
-		commands: newCommandRegistry(),
+		options:      opts,
+		sessions:     make(map[string]*firSession),
+		commands:     newCommandRegistry(),
+		pendingAuths: make(map[string]*pendingAuth),
 	}
 
 	// Use newRawConn instead of AgentSideConnection so that session/list and

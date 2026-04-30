@@ -4,6 +4,7 @@
 
 ### Added
 
+- ACP `authenticate` RPC now supports a non-blocking interactive OAuth flow via `_meta.auth.interactive`. Two-call protocol: call 1 starts the login and returns the auth URL plus an opaque pending-id; call 2 submits the pasted redirect URL to complete. Reuses the existing `oauth.LoginCallbacks` plumbing (same flow as the TUI's `fir login`). Lets ACP clients without an attached browser (e.g. `poe-acp-relay`) drive OAuth by surfacing the URL to the end user and feeding the redirect back. Legacy clients that don't set the meta flag use the existing blocking `OpenBrowser` path unchanged. Multiple concurrent logins per provider are supported via the per-flow id.
 - New `tmux-observer` builtin skill: instructions for attaching a tmux window to an already-running fir session and driving it via `tmux send-keys`. Pure markdown — three tmux primitives (`new-window`, `capture-pane`, `send-keys`) plus `fir observe <id> --interact --full`. No script, no orchestration logic — the parent agent decides layout and window strategy.
 
 ### Fixed
