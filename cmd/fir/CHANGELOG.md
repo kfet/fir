@@ -4,6 +4,7 @@
 
 ### Added
 
+- Versioned Homebrew formulas: each release publishes `fir@MAJOR.MINOR` to the `kfet/homebrew-fir` tap alongside the rolling `fir`, letting users pin or roll back with `brew install kfet/fir/fir@0.29`. A `tap-prune` workflow keeps the 10 most-recent minor channels and removes older ones automatically after each release. Pinned and rolling formulas both ship a `bin/fir`; switching between them is `brew unlink` / `brew link --overwrite` (the requested clobber UX).
 - New `pebble-emu` builtin skill: AI-friendly recipe for the Rebble/Core-Devices `pebble-tool` v5 emulator. Documents the build → install → screenshot loop (`pebble screenshot --no-open` pulls a live PNG over the pebble-protocol socket — the agent's eye), the `--vnc` flag (QEMU `-vnc :1` on port 5901 + websockify noVNC on 6080), input/sensor injection (`emu-tap`, `emu-accel`, `emu-battery`, `emu-bt-connection`, `emu-compass`, `emu-app-config`, `emu-control`), all six platforms (aplite/basalt/chalk/diorite/emery/flint), and cleanup (`pebble kill`, `pebble wipe`).
 
 ### Changed

@@ -78,5 +78,53 @@ brews:
       bin.install Dir["fir-*"].first => "fir"
       generate_completions_from_executable(bin/"fir", "completion")
 
+  # Pinned per-minor-version formula for rollback / version-pinning.
+  #
+  # Each release publishes Formula/fir@MAJOR.MINOR.rb in the tap. Patch
+  # releases overwrite the file for that minor channel. Users roll back
+  # (or pin) with:
+  #
+  #   brew unlink fir 2>/dev/null
+  #   brew install kfet/fir/fir@0.29   # or: brew link --overwrite fir@0.29
+  #
+  # No keg_only, no conflicts_with: linking just clashes on bin/fir, so
+  # `brew install fir@X.Y` lands the keg but the user must clobber the
+  # rolling symlink to actually use it (`brew unlink fir` or
+  # `brew link --overwrite fir@X.Y`). That is the rollback flow.
+  # The tap-prune workflow keeps only the 10 most recent minors.
+  - name: "fir@{{ .Major }}.{{ .Minor }}"
+    repository:
+      owner: kfet
+      name: homebrew-fir
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    url_template: "https://github.com/kfet/fir-dist/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    homepage: "https://github.com/kfet/fir"
+    description: "Fast, portable AI coding agent (pinned {{ .Major }}.{{ .Minor }})"
+    license: MIT
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "fir@{{ .Major }}.{{ .Minor }}: update to {{ .Tag }}"
+    skip_upload: auto
+    caveats: |
+      This is a pinned channel (fir@{{ .Major }}.{{ .Minor }}). It ships
+      its own bin/fir, which collides with the rolling kfet/fir/fir
+      formula if you have both installed.
+
+      To switch to this version (e.g. for rollback):
+        brew unlink fir 2>/dev/null
+        brew link --overwrite fir@{{ .Major }}.{{ .Minor }}
+
+      To go back to the rolling latest:
+        brew unlink fir@{{ .Major }}.{{ .Minor }}
+        brew link fir
+    test: |
+      system "#{bin}/fir", "--version"
+    install: |
+      bin.install Dir["fir-*"].first => "fir"
+      generate_completions_from_executable(bin/"fir", "completion")
+
 changelog:
   use: github-native

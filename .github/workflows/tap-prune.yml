@@ -1,0 +1,71 @@
+name: tap-prune
+
+# After every release, keep only the 10 most-recent fir@MAJOR.MINOR
+# formulas in kfet/homebrew-fir. Older pinned channels are deleted so
+# the tap doesn't grow unbounded. The rolling Formula/fir.rb is never
+# touched.
+on:
+  workflow_run:
+    workflows: ["release"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Number of recent minor channels to keep"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: kfet/homebrew-fir
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Prune old fir@X.Y formulas
+        env:
+          KEEP: ${{ github.event.inputs.keep || '10' }}
+        run: |
+          set -euo pipefail
+          cd tap
+
+          # List existing pinned formulas: Formula/fir@X.Y.rb
+          # Sort by semver (numeric major, numeric minor) descending.
+          mapfile -t ALL < <(
+            ls Formula/fir@*.rb 2>/dev/null \
+              | sed -E 's|^Formula/fir@([0-9]+)\.([0-9]+)\.rb$|\1 \2 &|' \
+              | sort -k1,1n -k2,2n -r \
+              | awk '{print $3}'
+          )
+
+          echo "Found ${#ALL[@]} pinned formula(s); keeping newest $KEEP."
+          if [ "${#ALL[@]}" -le "$KEEP" ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+
+          TO_DELETE=("${ALL[@]:$KEEP}")
+          echo "Pruning ${#TO_DELETE[@]} formula(s):"
+          for f in "${TO_DELETE[@]}"; do
+            echo "  $f"
+            git rm -f -- "$f"
+          done
+
+          if git diff --cached --quiet; then
+            echo "Nothing staged — already pruned."
+            exit 0
+          fi
+
+          git -c user.name=goreleaserbot \
+              -c user.email=bot@goreleaser.com \
+              commit -m "tap-prune: drop ${#TO_DELETE[@]} old pinned formula(s)"
+          git push
