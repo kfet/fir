@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -898,4 +901,30 @@ func TestManager_WaitReady_ContextCanceled(t *testing.T) {
 	err := mgr.WaitReady(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+// TestIsBenignCloseErr verifies that EOF and context-cancellation on the
+// DELETE close request are treated as benign (server hung up without
+// responding to our session-terminate DELETE), while other errors are not.
+func TestIsBenignCloseErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain EOF", io.EOF, false},
+		{"DELETE EOF", &url.Error{Op: "Delete", URL: "http://x/mcp", Err: io.EOF}, true},
+		{"DELETE unexpected EOF", &url.Error{Op: "Delete", URL: "http://x/mcp", Err: io.ErrUnexpectedEOF}, true},
+		{"DELETE ctx canceled", &url.Error{Op: "Delete", URL: "http://x/mcp", Err: context.Canceled}, true},
+		{"DELETE other err", &url.Error{Op: "Delete", URL: "http://x/mcp", Err: errors.New("connection refused")}, false},
+		{"GET EOF", &url.Error{Op: "Get", URL: "http://x/mcp", Err: io.EOF}, false},
+		{"POST EOF", &url.Error{Op: "Post", URL: "http://x/mcp", Err: io.EOF}, false},
+		{"wrapped DELETE EOF", fmt.Errorf("disconnected: %w", &url.Error{Op: "Delete", URL: "http://x/mcp", Err: io.EOF}), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isBenignCloseErr(tc.err))
+		})
+	}
 }

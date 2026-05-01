@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- MCP streamable HTTP transport: a clean session shutdown no longer surfaces as a user-visible disconnect error. The transport sends a `DELETE /mcp` to terminate the session in `Close()`; some servers (e.g. grafana MCP) close the TCP connection without sending an HTTP response, so the DELETE returns `Delete "URL": EOF`. `pkg/mcp` now treats EOF / `io.ErrUnexpectedEOF` / `context.Canceled` errors with `Op="Delete"` as benign in the post-startup disconnect goroutine — Status() shows `disconnected` instead of `error: disconnected: Delete "...": EOF`. Real mid-session failures (Op `Get`/`Post` or non-url errors) still surface unchanged.
+
 - Interactive TUI: tool-result background colour stayed in the "pending" tone when `Ctrl+O` (toggle tool-output expansion) was active. `onToolExecEnd` was passing `m.toolOutputExpanded` as the `isPartial` argument to `UpdateResult`, conflating expansion state with completion state. Pass `false` (the tool has finished) and rely on the existing `SetExpanded` call in `onToolExecStart` for expansion. No verbosity change — output truncation thresholds are unchanged.
 
 ## [0.39.0] - 2026-05-01

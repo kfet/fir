@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"os"
@@ -596,7 +598,7 @@ func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig
 			}
 			e.session = nil
 			e.tools = nil
-			if waitErr != nil {
+			if waitErr != nil && !isBenignCloseErr(waitErr) {
 				e.err = fmt.Errorf("disconnected: %w", waitErr)
 			}
 		})
@@ -840,6 +842,29 @@ type ServerStatus struct {
 	// Error is non-nil when the server failed to connect or has disconnected
 	// with an error.
 	Error error
+}
+
+// isBenignCloseErr reports whether a session.Wait() error is one we should
+// treat as a clean shutdown rather than a user-visible disconnect error.
+//
+// The streamable HTTP transport sends a DELETE request to terminate the
+// session in (*streamableClientConn).Close. Some MCP servers (e.g. grafana)
+// simply close the TCP connection in response to DELETE without sending an
+// HTTP response, which surfaces as `Delete "URL": EOF` (a *url.Error wrapping
+// io.EOF / io.ErrUnexpectedEOF). The DELETE is best-effort per spec — if the
+// server already considers the session over, that's not an error condition
+// for us. Any error originating from the DELETE close request is benign;
+// real mid-session failures arrive via Op="Get"/"Post" or non-url errors.
+func isBenignCloseErr(err error) bool {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) || urlErr.Op != "Delete" {
+		return false
+	}
+	// Network EOF on close is the common case (server hangs up without
+	// responding). Context cancellation during shutdown is also benign.
+	return errors.Is(urlErr.Err, io.EOF) ||
+		errors.Is(urlErr.Err, io.ErrUnexpectedEOF) ||
+		errors.Is(urlErr.Err, context.Canceled)
 }
 
 // StatusString returns a human-readable status label: "connected",
