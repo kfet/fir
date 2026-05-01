@@ -1,6 +1,6 @@
 # Compaction rework — design + tracker
 
-Status: **proposal, not started**
+Status: **Phases 0–2 complete on branch `review-compact-flow`.** Phases 3–4 pending (require eval harness).
 Branch: `review-compact-flow`
 Owner: TBD
 
@@ -345,11 +345,11 @@ invalidation; gate that on the eval harness.
 
 Goal: eliminate architectural drift, plug the boundary leak.
 
-- [ ] **#1** Move `pkg/compaction` → `pkg/session/compaction`. Split
+- [x] **#1** Move `pkg/compaction` → `pkg/session/compaction`. Split
       `compaction.go` into `compaction.go` / `cutpoint.go` / `prompts.go` /
       `tokens.go`. Update three call sites (`cmd/fir/app.go`,
       `cmd/fir/login.go`, `pkg/modes/acp/acp.go`).
-- [ ] **#2** Introduce `pkg/session/artifact.go` with `Artifact` type +
+- [x] **#2** Introduce `pkg/session/artifact.go` with `Artifact` type +
       `CompactionArtifacts()` / `ApplyCompaction()` accessors. Refactor
       compaction to use them. Delete the unused `compaction.SessionEntry`
       struct.
@@ -358,23 +358,23 @@ Goal: eliminate architectural drift, plug the boundary leak.
 
 No measurement needed. Pure improvements.
 
-- [ ] **#3** Add `EntryID` to file-op tracking.
-- [ ] **#5** Add recall instruction to system + summary prompt.
-- [ ] **#6** Drop `[Assistant thinking]:` from summarizer input.
-- [ ] **#7** Lower trigger to 70%.
-- [ ] **#9** Bound "Done" list.
-- [ ] **#10** Promote `/compact <instructions>` to first-class section.
-- [ ] **#13** Throttle TUI re-renders.
+- [x] **#3** Add `EntryID` to file-op tracking.
+- [x] **#5** Add recall instruction to system + summary prompt.
+- [x] **#6** Drop `[Assistant thinking]:` from summarizer input.
+- [x] **#7** Lower trigger to 70%.
+- [x] **#9** Bound "Done" list.
+- [x] **#10** Promote `/compact <instructions>` to first-class section.
+- [x] **#13** Throttle TUI re-renders.
 
 ### Phase 2 — pointer-stubs + artifact tracking (1.5 days)
 
 The bulk of the "artifacts as pointers" idea. Touches summarizer input
 only — live LLM context unchanged, no cache risk.
 
-- [ ] **#4** Stub old/large tool results in `SerializeConversation`.
-- [ ] **#8** Extend file-op extraction to bash + MCP tools.
-- [ ] **#11** Add "Working Set" section.
-- [ ] **#12** Verbatim "Facts" section.
+- [x] **#4** Stub old/large tool results in `SerializeConversation`.
+- [x] **#8** Extend file-op extraction to bash + MCP tools.
+- [x] **#11** Add "Working Set" section.
+- [x] **#12** Verbatim "Facts" section.
 
 ### Phase 3 — eval-gated (3+ days)
 
@@ -429,3 +429,4 @@ only — live LLM context unchanged, no cache risk.
 ## Changelog
 
 - _2025-05-01_ — initial doc, no work started.
+- _2026-05-01_ — Phases 0–2 implemented on branch `review-compact-flow`. 13 of 19 recommendations shipped (#1, #2, #3, #4, #5, #6, #7, #8 partial, #9, #10, #11, #12, #13). Outstanding: #8 sed -i tokeniser, #14–#19 pending eval harness.
