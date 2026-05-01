@@ -11,30 +11,6 @@ import (
 	"github.com/kfet/fir/pkg/session/store"
 )
 
-// SessionEntry is the compaction-local representation of a session entry.
-type SessionEntry struct {
-	Type      string          `json:"type"`
-	ID        string          `json:"id"`
-	ParentID  string          `json:"parentId"`
-	Timestamp string          `json:"timestamp"`
-	Message   json.RawMessage `json:"message,omitempty"`
-
-	// compaction fields
-	Summary          string          `json:"summary,omitempty"`
-	FirstKeptEntryID string          `json:"firstKeptEntryId,omitempty"`
-	TokensBefore     int             `json:"tokensBefore,omitempty"`
-	Details          json.RawMessage `json:"details,omitempty"`
-	FromHook         bool            `json:"fromHook,omitempty"`
-
-	// branch_summary
-	FromID string `json:"fromId,omitempty"`
-
-	// custom / custom_message
-	CustomType string          `json:"customType,omitempty"`
-	Content    json.RawMessage `json:"content,omitempty"`
-	Display    bool            `json:"display,omitempty"`
-}
-
 // CompactionDetails are stored in CompactionEntry.Details for file tracking.
 type CompactionDetails struct {
 	ReadFiles     []string `json:"readFiles"`

@@ -88,22 +88,21 @@ func (r *DefaultRunner) RunCompaction(ctx context.Context, sess *session.AgentSe
 		return nil, err
 	}
 
-	// Persist the compaction entry
+	// Persist the compaction entry and rebuild the agent's in-memory
+	// message list via the session-level write path.
 	var detailsJSON json.RawMessage
 	if result.Details != nil {
 		detailsJSON, _ = json.Marshal(result.Details)
 	}
-	sess.SessionStore.AppendCompaction(
-		result.Summary,
-		result.FirstKeptEntryID,
-		result.TokensBefore,
-		detailsJSON,
-		false,
-	)
-
-	// Rebuild messages from compacted session
-	sessionCtx := sess.SessionStore.BuildSessionContext()
-	sess.Agent.ReplaceMessages(sessionCtx.Messages)
+	if err := sess.ApplyCompaction(session.CompactionOutput{
+		Summary:          result.Summary,
+		FirstKeptEntryID: result.FirstKeptEntryID,
+		TokensBefore:     result.TokensBefore,
+		DetailsJSON:      detailsJSON,
+		FromHook:         false,
+	}); err != nil {
+		return nil, fmt.Errorf("apply compaction: %w", err)
+	}
 
 	firlog.Info("compaction complete", "tokensBefore", result.TokensBefore)
 
