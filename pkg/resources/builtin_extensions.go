@@ -56,9 +56,9 @@ type ExtensionFrontmatter struct {
 	Name          string
 	Description   string
 	Builtin       bool
-	Demo          bool // demo/test extensions; not loaded unless explicitly allowed
 	Modes         []string
 	AuthProviders []string // auth provider IDs this extension registers
+	CLIVerbs      []string // top-level `fir <verb>` names this extension claims
 	Present       bool     // true when a valid frontmatter block was found
 }
 
@@ -116,12 +116,12 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Description = value
 		case "builtin":
 			fm.Builtin = value == "true"
-		case "demo":
-			fm.Demo = value == "true"
 		case "mode", "modes":
 			fm.Modes = parseExtensionModes(value)
 		case "auth_provider", "auth_providers":
 			fm.AuthProviders = parseCommaSeparatedList(value)
+		case "cli_verb", "cli_verbs":
+			fm.CLIVerbs = parseCommaSeparatedList(value)
 		}
 	}
 

@@ -68,24 +68,6 @@ var subcommands = []subcommand{
 		Help: [][2]string{{"fir sessions [list]", "List sessions associated with the current directory"}},
 	},
 	{
-		Name: "observe",
-		Run:  runObserve,
-		Help: [][2]string{
-			{"fir observe", "List live fir sessions across all running processes"},
-			{"fir observe <id-prefix>", "Tail-and-format the matching session's transcript"},
-			{"", "  --json: raw JSONL (no truncation, best for agents)"},
-			{"", "  --full: formatted with no truncation  --interact: also send input"},
-		},
-	},
-	{
-		Name: "send",
-		Run:  runSend,
-		Help: [][2]string{
-			{"fir send <id-prefix>", "Send a message to a live session (Enter to send)"},
-			{"", "  Options: --steer (interrupt), --follow (queue), --cwd <path>"},
-		},
-	},
-	{
 		Name: "login",
 		Run:  runLoginSubcommand,
 		Help: [][2]string{

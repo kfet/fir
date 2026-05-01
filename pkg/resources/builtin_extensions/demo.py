@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ---
-# demo: true
+# cli_verbs: demo-cli
 # ---
 """demo.py — comprehensive example exercising the full fir extension API.
 
@@ -349,6 +349,22 @@ def show_config_dirs(params, ctx):
         "config_path": fir_ext.config_path(),
         "config": fir_ext.load_config(),
     }
+
+
+# ---------------------------------------------------------------------------
+# CLI verb (demonstrates `fir <verb>` dispatch — see docs/design/extension-cli-verbs.md)
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.cli_verb("demo-cli", summary="Echo argv back via host.println")
+def cli_demo(argv, host):
+    """Echo argv back through fir's real stdout. Returns 0."""
+    host.println("demo-cli argv:", *argv)
+    if not host.stdin_is_tty:
+        # Forward stdin lines if piped in.
+        for line in host.stdin_lines():
+            host.println("demo-cli stdin:", line.rstrip("\n"))
+    return 0
 
 
 fir_ext.run(name="demo")

@@ -90,6 +90,14 @@ Two methods:
 
 Every fir session writes a JSONL transcript to disk via `SessionStore`. The builtin `observe` extension registers a sidecar at `$XDG_STATE_HOME/fir/agents/<session-id>.json` containing discovery metadata (pid, socket path, transcript path, cwd, status, name) and listens on a Unix socket for input injection.
 
+`fir observe` and `fir send` are **CLI verbs of the `observe` extension** (declared via `cli_verbs:` in its frontmatter), dispatched cold by fir's verb-dispatcher. There is no Go subcommand for either — the entire implementation lives in `pkg/resources/builtin_extensions/observe.py`. See `docs/design/extension-cli-verbs.md` for the mechanism.
+
+The same extension also exposes:
+- **`/observe`** and **`/send`** slash commands — usable from inside an interactive session for snapshot inspection / one-shot message injection.
+- **`observe_session`** and **`send_session`** AI tools — let the agent inspect or nudge sibling sessions as part of a turn.
+
+Slash commands and tools take **snapshots** (last N transcript lines) and send single messages; they do not live-tail. Use `fir observe <id>` from another terminal for live observation.
+
 The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
 
 ```
@@ -168,6 +176,8 @@ Extensions can optionally self-restrict by mode using script comment frontmatter
 Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 
 Extensions can be reloaded via `/reload`; there is no automatic file watching. Reloading extensions rebuilds the system prompt, which might impact prompt cacheing.
+
+Extensions can also register top-level CLI verbs via the `cli_verbs:` frontmatter key — `fir <verb> [args...]` spawns the extension cold (no session) and routes via a `cli_invoke` JSON-RPC request. The extension drives fir's TTY through `host.println()`/`host.readline()` etc. Built-in subcommands cannot be shadowed; verb collisions are a startup error. `fir observe` and `fir send` are the first users; see `docs/design/extension-cli-verbs.md` and `docs/extension-protocol.md` § CLI Verbs.
 
 ## Skills
 

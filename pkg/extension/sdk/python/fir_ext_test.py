@@ -505,5 +505,133 @@ class TestJsonRpcHelpers(unittest.TestCase):
         self.assertIsNone(fir_ext._read_message(buf))
 
 
+# ---------------------------------------------------------------------------
+# CLI verbs (cli_verb / on_cli_signal / Host)
+# ---------------------------------------------------------------------------
+
+
+class TestCLIVerb(unittest.TestCase):
+    def setUp(self):
+        # Reset module-level CLI verb state so tests don't interfere.
+        fir_ext._cli_verb_handlers.clear()
+        fir_ext._cli_signal_handlers.clear()
+
+    def tearDown(self):
+        fir_ext._cli_verb_handlers.clear()
+        fir_ext._cli_signal_handlers.clear()
+
+    def test_cli_verb_decorator_registers(self):
+        @fir_ext.cli_verb("greet", summary="say hello")
+        def greet(argv, host):
+            return 0
+
+        self.assertIn("greet", fir_ext._cli_verb_handlers)
+        self.assertIs(fir_ext._cli_verb_handlers["greet"], greet)
+
+    def test_on_cli_signal_appends(self):
+        calls = []
+
+        @fir_ext.on_cli_signal
+        def handler(name, host):
+            calls.append(name)
+
+        self.assertEqual(len(fir_ext._cli_signal_handlers), 1)
+        # Multiple registrations stack.
+        @fir_ext.on_cli_signal
+        def handler2(name, host):
+            calls.append(("h2", name))
+
+        self.assertEqual(len(fir_ext._cli_signal_handlers), 2)
+
+
+class TestHost(unittest.TestCase):
+    def _host_with_buf(self):
+        buf = io.StringIO()
+        return fir_ext.Host(out=buf), buf
+
+    def _decode_stream(self, buf):
+        """Pull cli_stdout/cli_stderr notification payloads out of buf."""
+        buf.seek(0)
+        out = []
+        for line in buf:
+            line = line.strip()
+            if not line:
+                continue
+            msg = json.loads(line)
+            out.append((msg.get("method"), msg.get("params", {}).get("data", "")))
+        return out
+
+    def test_print_emits_cli_stdout(self):
+        host, buf = self._host_with_buf()
+        host.print("hello")
+        self.assertEqual(self._decode_stream(buf), [("cli_stdout", "hello")])
+
+    def test_println_appends_newline(self):
+        host, buf = self._host_with_buf()
+        host.println("hello", "world")
+        self.assertEqual(self._decode_stream(buf), [("cli_stdout", "hello world\n")])
+
+    def test_eprintln_emits_cli_stderr(self):
+        host, buf = self._host_with_buf()
+        host.eprintln("warning")
+        self.assertEqual(self._decode_stream(buf), [("cli_stderr", "warning\n")])
+
+    def test_print_empty_skipped(self):
+        host, buf = self._host_with_buf()
+        host.print()  # no args → nothing emitted
+        self.assertEqual(self._decode_stream(buf), [])
+
+    def test_readline_returns_queued(self):
+        host, _ = self._host_with_buf()
+        host._push_stdin("first\n")
+        host._push_stdin("second\n")
+        self.assertEqual(host.readline(), "first\n")
+        self.assertEqual(host.readline(), "second\n")
+
+    def test_readline_eof_returns_none(self):
+        host, _ = self._host_with_buf()
+        host._push_stdin(None)  # signal eof
+        self.assertIsNone(host.readline())
+        # Repeated calls after EOF still return None.
+        self.assertIsNone(host.readline())
+
+    def test_readline_blocks_until_pushed(self):
+        host, _ = self._host_with_buf()
+        result = []
+
+        def reader():
+            result.append(host.readline())
+
+        t = threading.Thread(target=reader, daemon=True)
+        t.start()
+        time.sleep(0.05)
+        self.assertFalse(result, "readline should block until data arrives")
+        host._push_stdin("late\n")
+        t.join(timeout=1.0)
+        self.assertEqual(result, ["late\n"])
+
+    def test_readline_timeout_returns_none(self):
+        host, _ = self._host_with_buf()
+        # No data, no eof → timeout fires, returns None without blocking forever.
+        start = time.monotonic()
+        self.assertIsNone(host.readline(timeout=0.05))
+        self.assertLess(time.monotonic() - start, 0.5)
+
+    def test_stdin_lines_iterates_until_eof(self):
+        host, _ = self._host_with_buf()
+        host._push_stdin("a\n")
+        host._push_stdin("b\n")
+        host._push_stdin(None)
+        self.assertEqual(list(host.stdin_lines()), ["a\n", "b\n"])
+
+    def test_argv_and_tty_flags_default(self):
+        host, _ = self._host_with_buf()
+        self.assertEqual(host.argv, [])
+        self.assertEqual(host.cwd, "")
+        self.assertFalse(host.stdin_is_tty)
+        self.assertFalse(host.stdout_is_tty)
+        self.assertFalse(host.stderr_is_tty)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -371,7 +371,7 @@ started::
     # description: One-line summary
     # builtin: true                       # set on extensions shipped with fir
     # modes: tui, acp                     # restrict to specific fir modes
-    # demo: true                          # mark as demo; not loaded by default
+    # cli_verbs: my-cmd, other-cmd        # register top-level `fir <verb>`s
     # ---
 
 The actual capability set (tools, commands, subscribed events) is reported by
@@ -381,6 +381,36 @@ is no lazy startup.
 
 Supported ``modes`` values: ``tui`` (alias ``interactive``), ``text``,
 ``json``, ``rpc``, ``acp``.  Omitting the key runs the extension in all modes.
+
+-------------------------------------------------------------------------------
+CLI VERBS  (`fir <verb>` invocations)
+-------------------------------------------------------------------------------
+
+Extensions may declare top-level ``fir <verb>`` names in frontmatter. fir
+discovers these without spawning the extension; on a matching invocation
+the extension is started cold (no session) and dispatched via a
+``cli_invoke`` request. The bridge owns stdio, so output flows through
+``cli_stdout`` / ``cli_stderr`` notifications and input arrives via
+``cli_stdin``::
+
+    # ---
+    # cli_verbs: greet
+    # ---
+
+    @fir_ext.cli_verb("greet", summary="Say hello")
+    def greet(argv, host):
+        host.println("hello", *argv)
+        return 0
+
+    @fir_ext.on_cli_signal
+    def _on_sig(name, host):
+        if "interrupt" in name.lower():
+            os._exit(130)
+
+The ``host`` argument is a ``Host`` (see class docstring) bound to fir's
+real TTY. Bridge methods on ``Context`` that require a session
+(``send_user_message`` etc.) are unavailable in verb mode. See
+``docs/extension-protocol.md`` § CLI Verbs for the full wire protocol.
 
 -------------------------------------------------------------------------------
 DISCOVERY & TRUST
@@ -449,6 +479,13 @@ _hook_handlers: dict[str, Callable] = {}
 _event_handlers: dict[str, Callable] = {}
 _commands: list[dict[str, Any]] = []
 _command_handlers: dict[str, Callable] = {}
+
+# CLI verb registry — top-level `fir <verb>` names this extension claims.
+# Populated by @cli_verb decorator; declared at runtime so fir's verb-dispatcher
+# (which reads frontmatter, *not* init result) need only spawn us once. The
+# init result echoes the list back for diagnostic purposes.
+_cli_verb_handlers: dict[str, Callable] = {}
+_cli_signal_handlers: list[Callable] = []
 
 # Auth provider registries
 _auth_providers: list[dict[str, Any]] = []
@@ -590,6 +627,55 @@ def on(event_name: str) -> Callable:
         return fn
 
     return decorator
+
+
+def cli_verb(name: str, summary: str = "") -> Callable:
+    """Register a top-level ``fir <name>`` CLI verb handler.
+
+    The decorated function receives ``(argv: list[str], host: Host)`` where
+    ``argv`` is the list of arguments after the verb name and ``host`` is a
+    minimal output/input helper bound to fir's real TTY (since the
+    extension's own stdio carries the JSON-RPC bridge). The handler should
+    return an integer exit code.
+
+    Example::
+
+        @fir_ext.cli_verb("greet", summary="Say hello")
+        def greet(argv, host):
+            who = argv[0] if argv else "world"
+            host.println(f"hello {who}")
+            return 0
+
+    The verb name **must** also be declared in the extension's frontmatter
+    under ``cli_verbs:`` so fir can dispatch without spawning every
+    extension on every CLI invocation::
+
+        # ---
+        # name: my-ext
+        # cli_verbs: greet, summarise
+        # ---
+    """
+    del summary  # reserved for future help-text integration
+
+    def decorator(fn: Callable) -> Callable:
+        _cli_verb_handlers[name] = fn
+        return fn
+
+    return decorator
+
+
+def on_cli_signal(fn: Callable) -> Callable:
+    """Register a handler called when fir forwards a signal during a CLI verb.
+
+    Receives ``(name: str, host: Host)`` where ``name`` is the signal name
+    (e.g. ``"interrupt"``, ``"quit"``, ``"terminated"``, ``"window size changes"``).
+    Multiple handlers may be registered; all are invoked in order.
+
+    Use this to clean up and exit promptly when the user hits Ctrl-C or
+    Ctrl-\\ during ``fir <verb>``.
+    """
+    _cli_signal_handlers.append(fn)
+    return fn
 
 
 def auth_provider(
@@ -1200,6 +1286,105 @@ class AuthContext(Context):
 
 
 # ---------------------------------------------------------------------------
+# CLI verb host — extension → fir stdio for `fir <verb>` invocations
+# ---------------------------------------------------------------------------
+
+
+class Host:
+    """Drives fir's real TTY during a CLI verb invocation.
+
+    A verb handler's stdio is owned by the JSON-RPC bridge, so any output
+    the verb wants the user to see has to flow through fir. ``Host`` is
+    the thin wrapper around the necessary notifications and stdin queue.
+
+    Methods:
+      print/println       write to fir's stdout (no flush needed; each call
+                          is one notification)
+      eprint/eprintln     write to fir's stderr
+      readline            block until fir delivers the next stdin line, or
+                          return None on EOF
+      stdin_lines         iterator over readline() until EOF — convenient
+                          for ``for line in host.stdin_lines(): ...``
+      argv / cwd          per-invocation context, set before the handler runs
+      stdout_is_tty / stderr_is_tty / stdin_is_tty
+                          tty-ness flags reported by fir at invoke time
+
+    """
+
+    def __init__(self, out: WriteStream) -> None:
+        self._out = out
+        self._stdin_q: list[str] = []
+        self._stdin_eof = False
+        self._stdin_cv = threading.Condition()
+        self.argv: list[str] = []
+        self.cwd: str = ""
+        self.stdin_is_tty: bool = False
+        self.stdout_is_tty: bool = False
+        self.stderr_is_tty: bool = False
+
+    # -- output -------------------------------------------------------------
+
+    def print(self, *args: Any, sep: str = " ", end: str = "") -> None:
+        """Write to fir's real stdout. No newline appended unless given."""
+        text = sep.join(str(a) for a in args) + end
+        if text:
+            _write_message(
+                {"jsonrpc": "2.0", "method": "cli_stdout", "params": {"data": text}},
+                self._out,
+            )
+
+    def println(self, *args: Any, sep: str = " ") -> None:
+        """Like ``print`` but appends a newline."""
+        self.print(*args, sep=sep, end="\n")
+
+    def eprint(self, *args: Any, sep: str = " ", end: str = "") -> None:
+        """Write to fir's real stderr."""
+        text = sep.join(str(a) for a in args) + end
+        if text:
+            _write_message(
+                {"jsonrpc": "2.0", "method": "cli_stderr", "params": {"data": text}},
+                self._out,
+            )
+
+    def eprintln(self, *args: Any, sep: str = " ") -> None:
+        """Like ``eprint`` but appends a newline."""
+        self.eprint(*args, sep=sep, end="\n")
+
+    # -- input --------------------------------------------------------------
+
+    def _push_stdin(self, data: str | None) -> None:
+        """Internal: enqueue a line from fir, or signal EOF when data is None."""
+        with self._stdin_cv:
+            if data is None:
+                self._stdin_eof = True
+            else:
+                self._stdin_q.append(data)
+            self._stdin_cv.notify_all()
+
+    def readline(self, timeout: float | None = None) -> str | None:
+        """Read one line from fir's stdin (already terminated by ``\\n``).
+
+        Returns ``None`` at EOF. ``timeout`` (seconds) limits the wait;
+        on timeout returns ``None`` even if more data may arrive later.
+        """
+        with self._stdin_cv:
+            if not self._stdin_q and not self._stdin_eof:
+                self._stdin_cv.wait(timeout=timeout)
+            if self._stdin_q:
+                return self._stdin_q.pop(0)
+            return None
+
+    def stdin_lines(self):
+        """Yield each stdin line until EOF. Convenience for handlers that
+        consume the entire stream."""
+        while True:
+            line = self.readline()
+            if line is None:
+                return
+            yield line
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -1231,6 +1416,7 @@ def run(
     results: dict[int, Any] = {}
 
     ctx = Context(output_stream=out, pending=pending, results=results)
+    _cli_host = Host(out=out)
 
     # Worker threads for handlers that may call back into fir
     _workers: list[threading.Thread] = []
@@ -1398,8 +1584,78 @@ def run(
                 init_result["auth_providers"] = list(_auth_providers)
             if _tool_name_map:
                 init_result["tool_name_map"] = dict(_tool_name_map)
+            if _cli_verb_handlers:
+                init_result["cli_verbs"] = sorted(_cli_verb_handlers.keys())
             resp = _make_response(msg_id, init_result)
             _write_message(resp, out)
+            return
+
+        # --- cli_invoke: run a top-level `fir <verb>` handler ---
+        if method == "cli_invoke":
+            verb = params.get("verb", "")
+            handler = _cli_verb_handlers.get(verb)
+            if handler is None:
+                _write_message(
+                    _make_error(msg_id, -32601, f"No handler for cli verb: {verb}"),
+                    out,
+                )
+                return
+            host = _cli_host
+            host.argv = list(params.get("argv") or [])
+            host.cwd = params.get("cwd", "") or ""
+            host.stdin_is_tty = bool(params.get("stdin_is_tty"))
+            host.stdout_is_tty = bool(params.get("stdout_is_tty"))
+            host.stderr_is_tty = bool(params.get("stderr_is_tty"))
+
+            def _run_verb(h=handler, p=params, mid=msg_id):
+                try:
+                    code = h(host.argv, host)
+                    if not isinstance(code, int):
+                        code = 0
+                except SystemExit as exc:
+                    if isinstance(exc.code, int):
+                        code = exc.code
+                    elif exc.code is None:
+                        code = 0
+                    else:
+                        code = 1
+                except Exception:
+                    import traceback
+                    traceback.print_exc(file=sys.stderr)
+                    code = 1
+                _write_message(_make_response(mid, {"exit_code": code}), out)
+
+            t = threading.Thread(target=_run_verb, daemon=True)
+            t.start()
+            _track_worker(t)
+            return
+
+        # --- cli_stdin: forwarded stdin from fir's TTY ---
+        if method == "cli_stdin":
+            if params.get("eof"):
+                _cli_host._push_stdin(None)
+            else:
+                data = params.get("data", "")
+                if isinstance(data, str):
+                    _cli_host._push_stdin(data)
+            return
+
+        # --- cli_signal: forwarded signal during a verb invocation ---
+        if method == "cli_signal":
+            sig = params.get("name", "")
+
+            def _run_sig_handlers(name=sig):
+                # Snapshot via tuple so concurrent registration mutations
+                # during signal storms don't trip iteration.
+                handlers = tuple(_cli_signal_handlers)
+                for h in handlers:
+                    try:
+                        h(name, _cli_host)
+                    except Exception:  # noqa: PERF203 — per-handler isolation
+                        import traceback
+                        traceback.print_exc(file=sys.stderr)
+
+            threading.Thread(target=_run_sig_handlers, daemon=True).start()
             return
 
         # --- tool_call / hooks: run in thread so read loop stays free ---

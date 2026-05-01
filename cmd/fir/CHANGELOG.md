@@ -6,10 +6,17 @@
 
 - Versioned Homebrew formulas: each release publishes `fir@MAJOR.MINOR` to the `kfet/homebrew-fir` tap alongside the rolling `fir`, letting users pin or roll back with `brew install kfet/fir/fir@0.29`. A `tap-prune` workflow keeps the 10 most-recent minor channels and removes older ones automatically after each release. Pinned and rolling formulas both ship a `bin/fir`; switching between them is `brew unlink` / `brew link --overwrite` (the requested clobber UX).
 - New `pebble-emu` builtin skill: AI-friendly recipe for the Rebble/Core-Devices `pebble-tool` v5 emulator. Documents the build → install → screenshot loop (`pebble screenshot --no-open` pulls a live PNG over the pebble-protocol socket — the agent's eye), the `--vnc` flag (QEMU `-vnc :1` on port 5901 + websockify noVNC on 6080), input/sensor injection (`emu-tap`, `emu-accel`, `emu-battery`, `emu-bt-connection`, `emu-compass`, `emu-app-config`, `emu-control`), all six platforms (aplite/basalt/chalk/diorite/emery/flint), and cleanup (`pebble kill`, `pebble wipe`).
+- Extensions can now register top-level CLI verbs via `cli_verbs:` in their comment frontmatter. `fir <verb> [args...]` spawns the extension cold (no session, no Manager), performs the standard init handshake, and dispatches via a `cli_invoke` JSON-RPC request. The extension drives fir's real TTY through `host.println()` / `host.eprintln()` / `host.readline()`; Ctrl-C/Ctrl-\ are forwarded as `cli_signal` notifications. Reserved built-in subcommands cannot be shadowed; verb collisions between two extensions surface as a startup error. Python SDK adds `@fir_ext.cli_verb(name)` and `@fir_ext.on_cli_signal`. See `docs/design/extension-cli-verbs.md`.
+- `/observe` and `/send` slash commands plus `observe_session` and `send_session` AI tools, all served by the builtin `observe` extension. The slash commands and tools take **snapshots** of another session's transcript / inject single messages — they do not live-tail (use `fir observe` from another terminal for that). Lets one fir agent inspect or steer a sibling session as part of its turn.
 
 ### Changed
 
 - `notify` builtin extension now uses the tmux session id (`$TMUX`) as the OSC 99 notification identifier when running inside tmux. Kitty coalesces same-id notifications, so multiple background fir agents in one tmux session collapse into a single updating banner instead of stacking. Outside tmux, falls back to the previous fixed id. OSC 777 terminals (Ghostty, iTerm2, WezTerm) are unaffected — that protocol has no id field.
+- `fir observe` and `fir send` are now CLI verbs of the builtin `observe` extension instead of Go subcommands. Behaviour is identical (sidecar discovery, formatter, `--json` / `--full` / `--interact`, sigil parsing, `--cwd`, NDJSON wire to the per-session socket); the implementation moved from `cmd/fir/observe.go` + `cmd/fir/send.go` (~880 LoC of Go) into `pkg/resources/builtin_extensions/observe.py`. First real users of the extension-CLI-verbs mechanism.
+
+### Removed
+
+- `# demo: true` extension frontmatter flag and its `Demo` gating in the manager. The flag's only effective use was skipping demo extensions in real sessions, but the only files marked with it (`demo.py`, `hello.py`) are also missing `# builtin: true` and were already not loaded at runtime — so the gate never fired in practice. Both files remain as test fixtures in `pkg/resources/builtin_extensions/` for direct-path loading by tests.
 
 ## [0.38.0] - 2026-04-29
 

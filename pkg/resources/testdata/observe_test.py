@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 from contextlib import suppress
+from datetime import datetime, timezone
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -380,3 +381,461 @@ class TestSocket(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# CLI verb tests — formatter, sigil parser, age formatter, arg parser
+# ---------------------------------------------------------------------------
+
+
+class TestFormatter(unittest.TestCase):
+    def _fmt(self, **kw):
+        return observe._Formatter(
+            raw_json=kw.get("raw_json", False),
+            full_text=kw.get("full_text", False),
+            color=kw.get("color", False),
+        )
+
+    def test_raw_json_passthrough(self):
+        line = '{"type":"message","timestamp":"2026-04-27T12:00:00Z"}'
+        self.assertEqual(self._fmt(raw_json=True).render(line), line)
+
+    def test_session_header(self):
+        line = '{"type":"session","version":3,"id":"abcdef0123","cwd":"/path"}'
+        out = self._fmt().render(line)
+        self.assertIn("session abcdef01", out)
+        self.assertIn("v3", out)
+
+    def test_user_message(self):
+        line = ('{"type":"message","timestamp":"2026-04-27T12:00:00Z",'
+                '"message":{"role":"user","content":"hi there"}}')
+        out = self._fmt().render(line)
+        self.assertIn("user", out)
+        self.assertIn("hi there", out)
+
+    def test_assistant_with_tool_use(self):
+        line = ('{"type":"message","timestamp":"2026-04-27T12:00:00Z","message":'
+                '{"role":"assistant","content":'
+                '[{"type":"text","text":"thinking..."},{"type":"tool_use","name":"bash"}]}}')
+        out = self._fmt().render(line)
+        self.assertIn("assistant", out)
+        self.assertIn("thinking", out)
+        self.assertIn("→ bash", out)
+
+    def test_model_change(self):
+        line = ('{"type":"model_change","timestamp":"2026-04-27T12:00:00Z",'
+                '"provider":"anthropic","modelId":"claude-opus-4"}')
+        out = self._fmt().render(line)
+        self.assertIn("model →", out)
+        self.assertIn("anthropic", out)
+
+    def test_compaction(self):
+        line = ('{"type":"compaction","timestamp":"2026-04-27T12:00:00Z",'
+                '"summary":"compressed 50 turns"}')
+        out = self._fmt().render(line)
+        self.assertIn("compaction", out)
+        self.assertIn("50 turns", out)
+
+    def test_plan_update(self):
+        line = ('{"type":"plan_update","timestamp":"2026-04-27T12:00:00Z",'
+                '"planTitle":"Implement caching"}')
+        self.assertIn("Implement caching", self._fmt().render(line))
+
+    def test_command(self):
+        line = ('{"type":"command","timestamp":"2026-04-27T12:00:00Z",'
+                '"command":"bash","args":"go test ./..."}')
+        out = self._fmt().render(line)
+        self.assertIn("bash", out)
+        self.assertIn("go test", out)
+
+    def test_hidden_types_return_none(self):
+        for ty in ("label", "branch_summary", "custom", "custom_message"):
+            line = f'{{"type":"{ty}","timestamp":"2026-04-27T12:00:00Z"}}'
+            self.assertIsNone(self._fmt().render(line),
+                              f"type {ty} should be suppressed")
+
+    def test_unknown_type_renders_name(self):
+        line = '{"type":"future_type","timestamp":"2026-04-27T12:00:00Z"}'
+        self.assertIn("future_type", self._fmt().render(line))
+
+
+class TestSummariseContent(unittest.TestCase):
+    def test_strings_collapse_newlines(self):
+        self.assertEqual(
+            observe._summarise_content("hello\nworld\nlong text", False),
+            "hello world long text",
+        )
+
+    def test_truncates(self):
+        out = observe._summarise_content("x" * 500, False)
+        self.assertLessEqual(len(out), 200)
+        self.assertTrue(out.endswith("…"))
+
+    def test_full_no_truncation(self):
+        long = "x" * 500
+        self.assertEqual(observe._summarise_content(long, True), long)
+
+
+class TestEncodeSend(unittest.TestCase):
+    def _decode(self, b) -> dict:
+        assert b is not None
+        return json.loads(b.decode().rstrip("\n"))
+
+    def test_basic(self):
+        d = self._decode(observe._encode_send("hello agent", ""))
+        self.assertEqual(d, {"deliver_as": "", "content": "hello agent"})
+
+    def test_bang_sigil_steer(self):
+        d = self._decode(observe._encode_send("!stop, read foo.go", ""))
+        self.assertEqual(d["deliver_as"], "steer")
+        self.assertEqual(d["content"], "stop, read foo.go")
+
+    def test_plus_sigil_followup(self):
+        d = self._decode(observe._encode_send("+also update changelog", ""))
+        self.assertEqual(d["deliver_as"], "followUp")
+        self.assertEqual(d["content"], "also update changelog")
+
+    def test_escaped_bang(self):
+        d = self._decode(observe._encode_send("\\!literal bang", ""))
+        self.assertEqual(d["deliver_as"], "")
+        self.assertEqual(d["content"], "!literal bang")
+
+    def test_escaped_plus(self):
+        d = self._decode(observe._encode_send("\\+literal plus", ""))
+        self.assertEqual(d["content"], "+literal plus")
+
+    def test_default_deliver_as_steer(self):
+        d = self._decode(observe._encode_send("no sigil", "steer"))
+        self.assertEqual(d["deliver_as"], "steer")
+
+    def test_sigil_overrides_default(self):
+        d = self._decode(observe._encode_send("+override", "steer"))
+        self.assertEqual(d["deliver_as"], "followUp")
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(observe._encode_send("   ", ""))
+        self.assertIsNone(observe._encode_send("", ""))
+
+
+class TestAgeString(unittest.TestCase):
+    def test_formats(self):
+        # Use a fixed reference time so tests are deterministic.
+        ref = datetime(2026, 4, 27, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+        def t(seconds: int) -> str:
+            dt = datetime.fromtimestamp(ref - seconds, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.assertEqual(observe._age_string(t(30), ref), "30s")
+        self.assertEqual(observe._age_string(t(5 * 60), ref), "5m00s")
+        self.assertEqual(observe._age_string(t(2 * 3600 + 30 * 60), ref), "2h30m")
+        self.assertEqual(observe._age_string(t(49 * 3600), ref), "2d")
+        self.assertEqual(observe._age_string("not-a-date", ref), "?")
+        self.assertEqual(observe._age_string("", ref), "?")
+
+
+class TestArgParsers(unittest.TestCase):
+    def test_observe_no_args(self):
+        self.assertEqual(
+            observe._parse_observe_args([]),
+            ("", "", False, False, False, None),
+        )
+
+    def test_observe_id_prefix(self):
+        self.assertEqual(
+            observe._parse_observe_args(["abc"]),
+            ("abc", "", False, False, False, None),
+        )
+
+    def test_observe_flags(self):
+        r = observe._parse_observe_args(["abc", "--json", "--full", "--interact"])
+        self.assertEqual(r, ("abc", "", True, True, True, None))
+
+    def test_observe_cwd(self):
+        self.assertEqual(
+            observe._parse_observe_args(["--cwd", "/path"])[1],
+            "/path",
+        )
+        self.assertEqual(
+            observe._parse_observe_args(["--cwd=/path"])[1],
+            "/path",
+        )
+
+    def test_observe_unknown_flag(self):
+        _, _, _, _, _, err = observe._parse_observe_args(["--bogus"])
+        assert err is not None
+
+        self.assertIn("unknown flag", err)
+
+    def test_observe_extra_arg(self):
+        _, _, _, _, _, err = observe._parse_observe_args(["a", "b"])
+        assert err is not None
+
+        self.assertIn("extra argument", err)
+
+    def test_observe_help(self):
+        _, _, _, _, _, err = observe._parse_observe_args(["--help"])
+        self.assertEqual(err, "__HELP__")
+
+    def test_send_no_args_required(self):
+        _, _, _, err = observe._parse_send_args([])
+        assert err is not None
+
+        self.assertIn("required", err)
+
+    def test_send_unknown_flag(self):
+        _, _, _, err = observe._parse_send_args(["--bogus"])
+        assert err is not None
+
+        self.assertIn("unknown flag", err)
+
+    def test_send_conflicting_flags(self):
+        _, _, _, err = observe._parse_send_args(["--steer", "--follow", "abc"])
+        assert err is not None
+
+        self.assertIn("mutually exclusive", err)
+
+    def test_send_steer_default(self):
+        _, _, da, err = observe._parse_send_args(["--steer", "abc"])
+        self.assertIsNone(err)
+        self.assertEqual(da, "steer")
+
+    def test_send_follow_default(self):
+        _, _, da, err = observe._parse_send_args(["--follow", "abc"])
+        self.assertIsNone(err)
+        self.assertEqual(da, "followUp")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+# ---------------------------------------------------------------------------
+# Slash commands and AI tools (snapshot, not live tail)
+# ---------------------------------------------------------------------------
+
+
+class TestSlashCommandsAndTools(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state_dir = tempfile.mkdtemp(prefix="observe-test-state-")
+        self.sock_dir = f"/tmp/o{os.getpid()}-{int(time.time() * 1000) % 10000}"
+        os.makedirs(self.sock_dir, exist_ok=True)
+        _reset_observe_state(self.state_dir, self.sock_dir)
+        self.session_id = "abcd1234ef567890" + "0" * 20
+        # A pretend transcript file with a few JSONL entries.
+        self.transcript = os.path.join(self.state_dir, "transcript.jsonl")
+        with open(self.transcript, "w") as f:
+            f.write('{"type":"session","version":3,"id":"' + self.session_id + '","cwd":"/tmp"}\n')
+            f.write('{"type":"message","timestamp":"2026-04-27T12:00:00Z",'
+                    '"message":{"role":"user","content":"hello"}}\n')
+            f.write('{"type":"message","timestamp":"2026-04-27T12:00:05Z",'
+                    '"message":{"role":"assistant","content":"hi back"}}\n')
+        # Set up server-side socket via session_start so /send + tool_send work.
+        ctx = _make_ctx(session_file=self.transcript)
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        # Wait for socket bind.
+        sock_path = observe._socket_path(self.session_id)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if os.path.exists(sock_path):
+                break
+            time.sleep(0.01)
+        self.server_ctx = ctx
+
+    def tearDown(self) -> None:
+        observe.on_session_shutdown({}, _make_ctx())
+
+    # -- /observe -----------------------------------------------------------
+
+    def test_observe_command_no_args_lists_sessions(self) -> None:
+        result = observe.cmd_observe([], MagicMock())
+        self.assertIn("ID", result["message"])
+        self.assertIn(self.session_id[:8], result["message"])
+        self.assertTrue(result.get("print_response"))
+
+    def test_observe_command_id_prefix_returns_snapshot(self) -> None:
+        result = observe.cmd_observe([self.session_id[:8]], MagicMock())
+        self.assertIn("hello", result["message"])
+        self.assertIn("hi back", result["message"])
+
+    def test_observe_command_json_passthrough(self) -> None:
+        result = observe.cmd_observe([self.session_id[:8], "--json"], MagicMock())
+        # Raw JSONL should preserve the JSON structure verbatim.
+        self.assertIn('"role":"user"', result["message"])
+
+    def test_observe_command_unknown_flag(self) -> None:
+        result = observe.cmd_observe(["--bogus"], MagicMock())
+        self.assertIn("unknown flag", result["message"])
+
+    def test_observe_command_no_match(self) -> None:
+        result = observe.cmd_observe(["zzz-no-match"], MagicMock())
+        self.assertIn("no session matching", result["message"])
+
+    # -- observe_session tool ----------------------------------------------
+
+    def test_tool_observe_no_args_lists(self) -> None:
+        out = observe.tool_observe({}, MagicMock())
+        self.assertIn("ID", out)
+        self.assertIn(self.session_id[:8], out)
+
+    def test_tool_observe_snapshot(self) -> None:
+        out = observe.tool_observe(
+            {"id_prefix": self.session_id[:8], "lines": 50}, MagicMock(),
+        )
+        self.assertIn("hello", out)
+        self.assertIn("hi back", out)
+
+    def test_tool_observe_raises_tool_error_on_miss(self) -> None:
+        with self.assertRaises(fir_ext.ToolError):
+            observe.tool_observe({"id_prefix": "zzz-no-match"}, MagicMock())
+
+    # -- /send --------------------------------------------------------------
+
+    def test_send_command_round_trip(self) -> None:
+        # /send delivers via the per-session socket → server forwards via
+        # ctx.send_user_message. We registered the server in setUp.
+        result = observe.cmd_send(
+            [self.session_id[:8], "fix", "the", "bug"],
+            MagicMock(),
+        )
+        self.assertIn("sent", result["message"])
+        # Wait for the accept-loop thread to forward.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if self.server_ctx.send_user_message.called:
+                break
+            time.sleep(0.01)
+        self.server_ctx.send_user_message.assert_called_with(
+            "fix the bug", deliver_as="",
+        )
+
+    def test_send_command_steer_flag(self) -> None:
+        observe.cmd_send(
+            [self.session_id[:8], "--steer", "stop", "and", "look"],
+            MagicMock(),
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if self.server_ctx.send_user_message.called:
+                break
+            time.sleep(0.01)
+        self.server_ctx.send_user_message.assert_called_with(
+            "stop and look", deliver_as="steer",
+        )
+
+    def test_send_command_sigil_overrides_default(self) -> None:
+        # --steer says steer, but the leading + sigil overrides to followUp.
+        observe.cmd_send(
+            [self.session_id[:8], "--steer", "+queue", "this"],
+            MagicMock(),
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if self.server_ctx.send_user_message.called:
+                break
+            time.sleep(0.01)
+        self.server_ctx.send_user_message.assert_called_with(
+            "queue this", deliver_as="followUp",
+        )
+
+    def test_send_command_missing_message(self) -> None:
+        result = observe.cmd_send([self.session_id[:8]], MagicMock())
+        self.assertIn("message text required", result["message"])
+
+    def test_send_command_no_id(self) -> None:
+        result = observe.cmd_send(["--steer", "msg"], MagicMock())
+        self.assertIn("required", result["message"])
+
+    # -- send_session tool --------------------------------------------------
+
+    def test_tool_send_round_trip(self) -> None:
+        out = observe.tool_send(
+            {"id_prefix": self.session_id[:8], "content": "review this"},
+            MagicMock(),
+        )
+        self.assertTrue(out.get("ok"))
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if self.server_ctx.send_user_message.called:
+                break
+            time.sleep(0.01)
+        self.server_ctx.send_user_message.assert_called_with(
+            "review this", deliver_as="",
+        )
+
+    def test_tool_send_deliver_as(self) -> None:
+        observe.tool_send(
+            {
+                "id_prefix": self.session_id[:8],
+                "content": "queue this",
+                "deliver_as": "followUp",
+            },
+            MagicMock(),
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if self.server_ctx.send_user_message.called:
+                break
+            time.sleep(0.01)
+        self.server_ctx.send_user_message.assert_called_with(
+            "queue this", deliver_as="followUp",
+        )
+
+    def test_tool_send_requires_id_or_cwd(self) -> None:
+        with self.assertRaises(fir_ext.ToolError):
+            observe.tool_send({"content": "no target"}, MagicMock())
+
+    def test_tool_send_invalid_deliver_as(self) -> None:
+        with self.assertRaises(fir_ext.ToolError):
+            observe.tool_send(
+                {"id_prefix": self.session_id[:8], "content": "x", "deliver_as": "bogus"},
+                MagicMock(),
+            )
+
+
+
+class TestTailLines(unittest.TestCase):
+    def setUp(self):
+        # Use mkstemp to avoid SIM115 (NamedTemporaryFile is a context manager).
+        fd, self.path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(fd)
+
+    def tearDown(self):
+        with suppress(FileNotFoundError):
+            os.unlink(self.path)
+
+    def _write(self, text: str) -> None:
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_empty_file(self):
+        self._write("")
+        self.assertEqual(observe._tail_lines(self.path, 5), [])
+
+    def test_zero_n(self):
+        self._write("a\nb\nc\n")
+        self.assertEqual(observe._tail_lines(self.path, 0), [])
+
+    def test_fewer_lines_than_n(self):
+        self._write("a\nb\n")
+        self.assertEqual(observe._tail_lines(self.path, 5), ["a", "b"])
+
+    def test_more_lines_than_n(self):
+        self._write("\n".join(str(i) for i in range(100)) + "\n")
+        out = observe._tail_lines(self.path, 5)
+        self.assertEqual(out, ["95", "96", "97", "98", "99"])
+
+    def test_no_trailing_newline(self):
+        self._write("first\nsecond\nthird")
+        out = observe._tail_lines(self.path, 2)
+        self.assertEqual(out, ["second", "third"])
+
+    def test_exact_chunk_boundary(self):
+        # Force backward-read to span multiple chunks.
+        line = "x" * 100
+        self._write((line + "\n") * 200)
+        out = observe._tail_lines(self.path, 3, chunk_size=64)
+        self.assertEqual(out, [line, line, line])
+
+    def test_missing_file_returns_empty(self):
+        os.unlink(self.path)
+        self.assertEqual(observe._tail_lines(self.path, 5), [])

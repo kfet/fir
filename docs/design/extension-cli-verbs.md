@@ -1,9 +1,9 @@
 # Design: extension CLI verbs
 
-**Status**: design stub / future anchor. Not scheduled.
-**Motivated by**: `docs/design/observe.md` discussion — the observe extension
-could in principle register `fir observe` itself. Deferred deliberately
-(see "Why not now").
+**Status**: implemented — landed alongside the move of `fir observe` /
+`fir send` into `observe.py` (the first real users).
+**Original motivation**: `docs/design/observe.md` discussion — the observe
+extension could in principle register `fir observe` itself.
 
 ## Goal
 
@@ -11,17 +11,74 @@ Let extensions register top-level CLI verbs so that, e.g., a `deploy`
 extension makes `fir deploy …` work — discovered, dispatched, and helped by
 fir, with the actual implementation living in the extension.
 
-The win:
+## What actually shipped (vs. the original sketch)
 
-- Third-party extensions extend the CLI surface without a Go PR.
-- Builtin extensions can fully own their user-facing verbs (no
-  `cmd/fir/foo.go` shim needed).
-- Single namespace, single binary, single help system, single completion
-  source.
+Two deviations from the "Sketch" section below worth knowing:
 
-`git`'s `git-foo` mechanism is the obvious prior art.
+1. **Bridge owns stdio, not raw exec.** The original sketch said "exec, not
+   JSON-RPC" with the verb getting a real TTY directly. We instead reuse the
+   existing extension-manager pattern — bridge over stdin/stdout — and add
+   helper notifications (`cli_stdout`, `cli_stderr`, `cli_stdin`,
+   `cli_signal`) so the extension drives fir's real TTY through fir. Reason:
+   verbs that want LLM/auth/MCP/settings infrastructure get all of fir's
+   bridge methods for free, without inventing a parallel exec-mode protocol.
+   Cost: ~one JSON-RPC notification per output line; fine for line-oriented
+   verbs (observe, send) — pathological only for raw-mode TUIs (out of scope).
 
-## Why not now
+2. **Frontmatter is a simple comma-separated list.** No nested YAML — just
+   `cli_verbs: foo, bar`. The extension dispatches internally on `verb` from
+   `cli_invoke` params. Help text per verb is deferred until a verb actually
+   wants it.
+
+## Wire protocol
+
+```
+fir → ext  (request)        cli_invoke { verb, argv, cwd, stdin_is_tty,
+                                          stdout_is_tty, stderr_is_tty }
+fir → ext  (notification)   cli_stdin  { data: "...\n" } | { eof: true }
+fir → ext  (notification)   cli_signal { name: "interrupt" | ... }
+ext → fir  (notification)   cli_stdout { data: "..." }
+ext → fir  (notification)   cli_stderr { data: "..." }
+ext → fir  (response)       { exit_code: N }
+```
+
+The `cli_invoke` response's `exit_code` becomes fir's exit code. Standard
+bridge methods (`notify`, `exec`, etc.) are answered with `method-not-found`
+in verb mode since there is no Manager / session.
+
+## Discovery & dispatch
+
+- Frontmatter `cli_verbs:` is parsed at `fir` startup — no extension
+  spawning required to know which verbs exist.
+- Built-in fir subcommands (registry in `cmd/fir/subcommands.go`) are
+  reserved and cannot be shadowed. Two extensions claiming the same verb
+  is a fatal startup error.
+- Lookup happens in `cmd/fir/cliverb.go` after the builtin-subcommand check
+  and before normal `ParseArgs`.
+
+## SDK (Python)
+
+```python
+@fir_ext.cli_verb("greet", summary="Say hello")
+def greet(argv, host):
+    who = argv[0] if argv else "world"
+    host.println(f"hello {who}")
+    return 0
+
+@fir_ext.on_cli_signal
+def _quit(name, host):
+    if "interrupt" in name.lower(): os._exit(130)
+```
+
+`host` exposes `println` / `print` / `eprintln` / `eprint` / `readline` /
+`stdin_lines` plus `argv`, `cwd`, `stdin_is_tty`, `stdout_is_tty`,
+`stderr_is_tty`.
+
+---
+
+## Original deferral note (kept for context)
+
+
 
 1. **n=1 is wrong-by-construction for an abstraction.** observe is one use
    case. We need ≥3 *unrelated* motivating extensions (e.g. doctor, bench,

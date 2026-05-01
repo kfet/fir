@@ -418,6 +418,14 @@ Two small additive changes:
    long the writer buffers. If `SessionStore` batches, change to flush
    per event. ~30 min investigation; ~0–10 LoC fix if needed.
 
+> **Update**: `fir observe` and `fir send` now run as **CLI verbs of
+> observe.py** rather than Go subcommands in `cmd/fir/`. The mechanism is
+> documented in `docs/design/extension-cli-verbs.md`. Behaviour is
+> unchanged — sidecar discovery, formatter, `--interact`, sigil parsing,
+> NDJSON wire format are all identical, just ported from Go to Python.
+> The "Implementation order" section below is historical; the bridge
+> method, sidecar/socket extension, and CLI verbs all shipped together.
+
 The `message_update` / `tool_execution_update` extension event surface is
 **not** needed — the transcript file already has them, and the extension
 itself doesn't read events for any purpose other than lifecycle.

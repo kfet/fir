@@ -65,13 +65,28 @@ import sys
 			want: ExtensionFrontmatter{Name: "dev-only", Present: true},
 		},
 		{
-			name: "demo",
-			input: `#!/usr/bin/env python3
-# ---
-# demo: true
+			name: "cli_verbs (plural)",
+			input: `# ---
+# cli_verbs: observe, send
 # ---
 `,
-			want: ExtensionFrontmatter{Demo: true, Present: true},
+			want: ExtensionFrontmatter{CLIVerbs: []string{"observe", "send"}, Present: true},
+		},
+		{
+			name: "cli_verb (singular alias)",
+			input: `# ---
+# cli_verb: deploy
+# ---
+`,
+			want: ExtensionFrontmatter{CLIVerbs: []string{"deploy"}, Present: true},
+		},
+		{
+			name: "cli_verbs bracketed and quoted",
+			input: `# ---
+# cli_verbs: ["foo", 'bar']
+# ---
+`,
+			want: ExtensionFrontmatter{CLIVerbs: []string{"foo", "bar"}, Present: true},
 		},
 	}
 

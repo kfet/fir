@@ -264,9 +264,6 @@ func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		return true
 	}
-	if cfg.Demo && !containsString(allowed, cfg.Name) {
-		return true
-	}
 	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {
 		return true
 	}
@@ -286,11 +283,6 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
-		return nil
-	}
-	// Demo extensions are skipped unless explicitly in the allowlist.
-	if cfg.Demo && !containsString(allowed, cfg.Name) {
-		m.logger.Debug("skipping demo extension (not explicitly allowed)", "ext", cfg.Name)
 		return nil
 	}
 	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {

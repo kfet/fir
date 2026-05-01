@@ -722,7 +722,6 @@ directly after an optional shebang line:
 # ---
 # name: my-ext
 # modes: tui, acp
-# demo: true
 # ---
 ```
 
@@ -730,7 +729,6 @@ fir reads this block **before** starting the process and uses it for:
 
 - Filtering by mode (`modes` key).
 - Displaying the extension in listings.
-- Skipping demo files in real sessions.
 
 The actual capability set (tools, commands, events the extension subscribes
 to) is reported by the extension during the init handshake — there is no
@@ -745,7 +743,105 @@ parallel frontmatter declaration.  All extensions start eagerly in parallel.
 | `builtin` | When `true`, marks a builtin extension shipped with fir. |
 | `modes` | Comma-separated list of fir modes in which this extension should run.  Values: `tui` (alias `interactive`), `text`, `json`, `rpc`, `acp`.  Omit to run in all modes. |
 | `auth_providers` | Comma-separated list of auth provider IDs registered by the extension (used by the auth-only manager to discover provider extensions before full startup). |
-| `demo` | When `true`, marks the file as a demo extension that is never loaded in real sessions (used by tests). |
+| `cli_verbs` | Comma-separated list of top-level `fir <verb>` names this extension claims. See [CLI Verbs](#cli-verbs) below. |
+
+---
+
+## CLI Verbs
+
+Extensions can register top-level CLI verbs via the `cli_verbs:` frontmatter
+key, so users can invoke extension functionality as `fir <verb> [args...]`
+without going through a chat session. Design notes live in
+`docs/design/extension-cli-verbs.md`.
+
+### Frontmatter declaration
+
+```python
+# ---
+# name: my-ext
+# cli_verbs: greet, summarise
+# ---
+```
+
+Frontmatter is read at startup without spawning the extension, so verb
+lookup is free.
+
+### Dispatch flow
+
+1. `fir <verb> [args...]` matches a registered verb (built-in subcommands
+   take precedence — collisions abort startup).
+2. fir spawns the extension, performs the standard `init` handshake, and
+   sends a `cli_invoke` request.
+3. The extension's stdio is owned by the JSON-RPC bridge, so output flows
+   through `cli_stdout` / `cli_stderr` notifications and input arrives via
+   `cli_stdin` notifications. Signals received by fir are forwarded as
+   `cli_signal` notifications.
+4. The `cli_invoke` response carries `exit_code`, which becomes fir's exit
+   code.
+
+### Wire methods
+
+#### cli_invoke (fir → ext, Request)
+
+```json
+{
+  "jsonrpc": "2.0", "id": 2, "method": "cli_invoke",
+  "params": {
+    "verb": "greet",
+    "argv": ["world"],
+    "cwd": "/Users/x/proj",
+    "stdin_is_tty":  true,
+    "stdout_is_tty": true,
+    "stderr_is_tty": true
+  }
+}
+```
+
+Response:
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{"exit_code":0}}
+```
+
+#### cli_stdout / cli_stderr (ext → fir, Notification)
+
+```json
+{"jsonrpc":"2.0","method":"cli_stdout","params":{"data":"hello\n"}}
+```
+
+`data` is written verbatim to fir's stdout (or stderr). ANSI sequences,
+trailing newlines, and partial lines all pass through unchanged.
+
+#### cli_stdin (fir → ext, Notification)
+
+```json
+{"jsonrpc":"2.0","method":"cli_stdin","params":{"data":"line1\n"}}
+{"jsonrpc":"2.0","method":"cli_stdin","params":{"eof":true}}
+```
+
+Lines are forwarded as fir reads from its real stdin. After EOF, no further
+`cli_stdin` notifications arrive.
+
+#### cli_signal (fir → ext, Notification)
+
+```json
+{"jsonrpc":"2.0","method":"cli_signal","params":{"name":"interrupt"}}
+```
+
+Forwarded for `SIGINT`, `SIGTERM`, `SIGQUIT`, `SIGHUP`, `SIGWINCH`. The
+extension is expected to wind down (or terminate via `os._exit`).
+
+### Constraints
+
+- Verb dispatch runs **cold** — no Manager, no session. Bridge methods that
+  need a live session (`send_user_message`, `set_label`, etc.) return
+  `method-not-found`. Verbs that need filesystem state should compute paths
+  from `$XDG_*` like the observe extension does.
+- Two extensions claiming the same verb is a fatal startup error. Built-in
+  fir subcommands cannot be shadowed.
+- One JSON-RPC notification per output write — fine for line-oriented
+  output (which is what every shipped verb does), inappropriate for
+  high-frequency raw-mode TUIs.
 
 ---
 

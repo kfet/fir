@@ -14,8 +14,8 @@ type ExtProcConfig struct {
 	Path          string   // absolute path to the executable
 	Scope         string   // "project", "global", or "builtin"
 	Modes         []string // optional mode allowlist from comment frontmatter
-	Demo          bool     // demo/test extension; skipped unless explicitly allowed
 	AuthProviders []string // auth provider IDs declared in frontmatter
+	CLIVerbs      []string // top-level `fir <verb>` names declared in frontmatter
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -40,6 +40,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 				Scope:         "builtin",
 				Modes:         fm.Modes,
 				AuthProviders: fm.AuthProviders,
+				CLIVerbs:      fm.CLIVerbs,
 			}
 		}
 	}
@@ -148,6 +149,7 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			Scope:         "package",
 			Modes:         fm.Modes,
 			AuthProviders: fm.AuthProviders,
+			CLIVerbs:      fm.CLIVerbs,
 		}
 	}
 	result := make([]ExtProcConfig, 0, len(byName))
@@ -184,8 +186,8 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				Path:          entryPoint,
 				Scope:         scope,
 				Modes:         fm.Modes,
-				Demo:          fm.Demo,
 				AuthProviders: fm.AuthProviders,
+				CLIVerbs:      fm.CLIVerbs,
 			}
 			continue
 		}
@@ -217,8 +219,8 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Path:          filePath,
 			Scope:         scope,
 			Modes:         fm.Modes,
-			Demo:          fm.Demo,
 			AuthProviders: fm.AuthProviders,
+			CLIVerbs:      fm.CLIVerbs,
 		}
 	}
 	return nil

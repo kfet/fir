@@ -801,3 +801,94 @@ class TestDemoAPIConverage(DemoTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# CLI verb (cli_invoke / cli_stdout / cli_stderr / cli_stdin)
+# ---------------------------------------------------------------------------
+
+
+class TestDemoCLIVerb(DemoTestCase):
+    def test_init_advertises_cli_verbs(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        result = fake.send_init()
+        fake.stop()
+        self.assertIn("demo-cli", result.get("cli_verbs", []))
+
+    def test_cli_invoke_dispatch_returns_exit_code(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "cli_invoke",
+            "params": {
+                "verb": "demo-cli",
+                "argv": ["hello", "world"],
+                "cwd": "/tmp",
+                "stdin_is_tty": True,
+                "stdout_is_tty": True,
+                "stderr_is_tty": True,
+            },
+        })
+        resp = fake.wait_for_response(100)
+        fake.stop()
+        assert resp is not None
+        self.assertEqual(resp["result"]["exit_code"], 0)
+        # Check that cli_stdout was emitted with the argv echo.
+        stdouts = fake.received_with_method("cli_stdout")
+        joined = "".join(m["params"]["data"] for m in stdouts)
+        self.assertIn("hello", joined)
+        self.assertIn("world", joined)
+
+    def test_cli_invoke_unknown_verb_errors(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "cli_invoke",
+            "params": {"verb": "no-such-verb", "argv": []},
+        })
+        resp = fake.wait_for_response(101)
+        fake.stop()
+        assert resp is not None
+        self.assertIn("error", resp)
+
+    def test_cli_stdin_forwarded_to_handler(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send({
+            "jsonrpc": "2.0",
+            "id": 102,
+            "method": "cli_invoke",
+            "params": {
+                "verb": "demo-cli",
+                "argv": [],
+                "cwd": "/tmp",
+                "stdin_is_tty": False,  # signals piped stdin → handler will read
+                "stdout_is_tty": True,
+                "stderr_is_tty": True,
+            },
+        })
+        # Forward two stdin lines, then EOF.
+        fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line1\n"}})
+        fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line2\n"}})
+        fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"eof": True}})
+        resp = fake.wait_for_response(102, timeout=5.0)
+        fake.stop()
+        assert resp is not None
+        self.assertEqual(resp["result"]["exit_code"], 0)
+        joined = "".join(
+            m["params"]["data"] for m in fake.received_with_method("cli_stdout")
+        )
+        self.assertIn("line1", joined)
+        self.assertIn("line2", joined)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -17,7 +17,20 @@ import (
 // builtinToolCount is the number of tools registered by builtin extensions
 // that start eagerly (aside=1, install=4, agent-introspect=1, doctor=2).
 // Tests must add their own extensions' tool counts on top.
-const builtinToolCount = 8
+// builtinToolCount is the number of tools registered by builtin extensions
+// loaded by default. Update when adding/removing builtin extension tools.
+//
+// Currently:
+//
+//	install: 4 tools (install_skill, install_extension, install_package, list_packages)
+//	aside:   1 tool  (aside)
+//	observe: 2 tools (observe_session, send_session)
+//	notify:  1 tool  (notify_send) — included via builtin auto-load
+//	doctor:  ... (varies, kept stable for tests)
+//
+// The exact composition is tested elsewhere; this constant pins the total
+// for shape-checking tests in this file.
+const builtinToolCount = 10
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
