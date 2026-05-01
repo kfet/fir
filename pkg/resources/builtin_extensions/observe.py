@@ -1603,10 +1603,15 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
     global _htop_host
     _htop_host = host
 
-    # Enter alt screen + hide cursor; ensure we leave them on exit even on
-    # exception. Without raw mode, the user's terminal echoes their typing
-    # at the bottom — acceptable for a batch-mode monitor.
-    host.print("\x1b[?1049h\x1b[?25l")
+    # Enter alt screen. We deliberately do NOT hide the cursor (`?25l`):
+    # restoring DECTCEM across `?1049h/l` is unreliable under tmux, which
+    # composites the alt screen internally and may emit one final `?25l`
+    # from a stale alt-screen frame *after* we've sent our cleanup —
+    # leaving the user's shell cursor hidden after `fir htop` exits
+    # (reproducible on tmux 3.6a + ghostty/iTerm). htop is a batch-mode
+    # monitor, not raw-mode, so a visible-but-jumpy cursor during redraw
+    # is acceptable; a permanently hidden cursor afterwards is not.
+    host.print("\x1b[?1049h")
     try:
         while not _htop_stop.is_set():
             sidecars = _read_sidecars()
@@ -1622,14 +1627,10 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
                 return 0
             # Any other line: force an immediate redraw on next loop.
     finally:
-        # Leave alt screen FIRST, then show cursor on the main screen.
-        # Some terminals (notably tmux and a few VTE-based emulators) scope
-        # DECTCEM (?25) per screen buffer, so emitting `?25h` while still in
-        # the alt screen leaves the main screen with the cursor hidden — a
-        # visible bug after `fir htop` exits. Sending `?1049l` first
-        # switches back to the main buffer; the subsequent `?25h` then
-        # restores cursor visibility on the buffer the user actually sees.
-        host.print("\x1b[?1049l\x1b[?25h")
+        # Leave alt screen. Since we never hid the cursor, there's nothing
+        # to restore — the main screen retains whatever DECTCEM state it
+        # had before we entered.
+        host.print("\x1b[?1049l")
         _htop_host = None
     return 0
 
@@ -1639,9 +1640,9 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
 def _on_signal(name: str, host: fir_ext.Host) -> None:
     # SIGQUIT is the conventional clean-detach signal in send-style tools.
     # If htop is the active verb, treat SIGQUIT like SIGINT so the verb's
-    # finally block can restore the terminal (alt screen + cursor) before
-    # we exit. Otherwise calling os._exit(0) here would leave the cursor
-    # hidden on the user's main screen.
+    # finally block can leave the alt screen before we exit. Otherwise
+    # calling os._exit(0) here would leave the user stuck on the alt
+    # screen with no way back to their shell content.
     if "quit" in name.lower() or name == "SIGQUIT":
         if _htop_host is not None:
             _htop_stop.set()
@@ -1649,8 +1650,8 @@ def _on_signal(name: str, host: fir_ext.Host) -> None:
                 _htop_host.wake()
             return
         os._exit(0)
-    # Ctrl-C: tell the htop loop to stop cleanly so we restore the terminal
-    # (alt screen + cursor) before exiting. Wake the blocked readline by
+    # Ctrl-C: tell the htop loop to stop cleanly so we leave the alt
+    # screen before exiting. Wake the blocked readline by
     # pushing EOF through the host's stdin queue so we don't sleep up to
     # --interval seconds before noticing. If htop isn't running this is a
     # no-op; the bridge exits on its own when fir terminates the process.

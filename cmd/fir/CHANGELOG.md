@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- `fir htop` no longer leaves the shell cursor hidden after exit. Empirical capture (tmux 3.6a) showed tmux composites alt-screen toggles internally and never forwards `?1049l` from the verb's exit to the outer terminal — its own follow-up redraw frame ends in `?25l` from a stale alt-screen state, which sticks. The fix sidesteps the entire DECTCEM dance: the verb no longer hides the cursor (`?25l`) on entry, so there is nothing to restore on exit. Cursor blinks briefly between frames during the 1s redraw — acceptable for a batch-mode monitor; permanently-hidden cursor afterwards is not. SIGQUIT (Ctrl-\) during `htop` now also runs the cleanup path instead of `os._exit(0)`-ing past the `finally` block. Supersedes the earlier 0.38.0 attempt that re-emitted `?25h` after `?1049l` — that fix worked on plain ghostty/iTerm but not under tmux, which composites alt-screen toggles internally and dedupes the trailing `?25h`.
 - `observe` builtin extension daemon no longer pegs a CPU on long-running sessions. `_accept_loop` now does a plain blocking `accept()` and relies on `on_session_shutdown` closing the listening socket (which raises `OSError` and exits the loop) — the previous 0.5s `settimeout` poll was inherited by accepted sockets on POSIX, so `_handle_conn`'s `for line in f` over `conn.makefile()` could surface `socket.timeout` mid-read instead of blocking. The transcript tail loop in `fir observe` also yields 10ms when `readline()` returns a partial line (no trailing `\n`), preventing a writer that appends bytes without newlines from busy-spinning.
 
 ## [0.38.0] - 2026-04-29
@@ -35,7 +36,6 @@
 
 ### Fixed
 
-- `fir htop` no longer leaves the shell cursor hidden after exit. The exit sequence now leaves the alt screen *first* and then re-emits `\x1b[?25h` on the main buffer, so terminals (notably tmux and some VTE-based emulators) that scope DECTCEM per screen buffer correctly restore cursor visibility. SIGQUIT (Ctrl-\) during `htop` now also runs the cleanup path instead of `os._exit(0)`-ing past the `finally` block.
 - Poe bots that route to Google Gemini/Gemma upstream (e.g. `poe/gemma-4-31b`) no longer fail with a 400 `Unknown name "additional_properties"` error. Tool parameter schemas now have `additionalProperties` stripped recursively when targeting Poe — Google's API rejects the field even though OpenAI accepts it.
 - `fir --model poe/<unknown-bot>` now fails fast with a clear "Model not found for provider \"poe\". Use --list-models …" error instead of falling back to a custom model id and producing an opaque upstream 500. Poe's full bot catalogue lives in our model list, so a missing id is always a typo.
 - `bash` tool no longer hangs when a command backgrounds a process that inherits the stdout pipe (e.g. `(sleep 30; echo done) &`). After the foreground bash process exits we now `killpg(-pgid, SIGKILL)` to reap any orphaned background children still holding the pipe, so the tool returns immediately. Well-behaved daemons that `setsid` (tmux server, sshd, etc.) escape the process group and are unaffected.
