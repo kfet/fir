@@ -1619,8 +1619,14 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
                 return 0
             # Any other line: force an immediate redraw on next loop.
     finally:
-        # Show cursor + leave alt screen.
-        host.print("\x1b[?25h\x1b[?1049l")
+        # Leave alt screen FIRST, then show cursor on the main screen.
+        # Some terminals (notably tmux and a few VTE-based emulators) scope
+        # DECTCEM (?25) per screen buffer, so emitting `?25h` while still in
+        # the alt screen leaves the main screen with the cursor hidden — a
+        # visible bug after `fir htop` exits. Sending `?1049l` first
+        # switches back to the main buffer; the subsequent `?25h` then
+        # restores cursor visibility on the buffer the user actually sees.
+        host.print("\x1b[?1049l\x1b[?25h")
         _htop_host = None
     return 0
 
@@ -1629,7 +1635,16 @@ def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
 @fir_ext.on_cli_signal
 def _on_signal(name: str, host: fir_ext.Host) -> None:
     # SIGQUIT is the conventional clean-detach signal in send-style tools.
+    # If htop is the active verb, treat SIGQUIT like SIGINT so the verb's
+    # finally block can restore the terminal (alt screen + cursor) before
+    # we exit. Otherwise calling os._exit(0) here would leave the cursor
+    # hidden on the user's main screen.
     if "quit" in name.lower() or name == "SIGQUIT":
+        if _htop_host is not None:
+            _htop_stop.set()
+            with contextlib.suppress(Exception):
+                _htop_host.wake()
+            return
         os._exit(0)
     # Ctrl-C: tell the htop loop to stop cleanly so we restore the terminal
     # (alt screen + cursor) before exiting. Wake the blocked readline by
