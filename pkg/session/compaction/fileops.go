@@ -71,7 +71,8 @@ func ExtractFileOpsFromMessage(message agent.AgentMessage, entryID string, fileO
 		tc := block.ToolCall
 
 		// Bash: parse the command for write/edit-shaped patterns.
-		// (Phase 2 #8 — redirects, tee, sed -i.)
+		// (Phase 2 #8 — redirects, tee. sed -i is TODO; see
+		// extractBashWrittenPaths.)
 		if tc.Name == "bash" {
 			cmd, _ := tc.Arguments["command"].(string)
 			for _, p := range extractBashWrittenPaths(cmd) {

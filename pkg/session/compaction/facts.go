@@ -23,10 +23,10 @@ type Facts struct {
 // extractFacts walks an entry slice and pulls verbatim command lines and
 // error/exit-code lines from assistant tool calls and tool results.
 //
-// `cap` bounds each list — older items are dropped first.
-func extractFacts(messages []agent.AgentMessage, cap int) Facts {
-	if cap <= 0 {
-		cap = 20
+// `limit` bounds each list — older items are dropped first.
+func extractFacts(messages []agent.AgentMessage, limit int) Facts {
+	if limit <= 0 {
+		limit = 20
 	}
 	var f Facts
 	seenCmd := make(map[string]struct{})
@@ -74,11 +74,11 @@ func extractFacts(messages []agent.AgentMessage, cap int) Facts {
 		}
 	}
 
-	if len(f.Commands) > cap {
-		f.Commands = f.Commands[len(f.Commands)-cap:]
+	if len(f.Commands) > limit {
+		f.Commands = f.Commands[len(f.Commands)-limit:]
 	}
-	if len(f.Errors) > cap {
-		f.Errors = f.Errors[len(f.Errors)-cap:]
+	if len(f.Errors) > limit {
+		f.Errors = f.Errors[len(f.Errors)-limit:]
 	}
 	return f
 }

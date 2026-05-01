@@ -3,6 +3,7 @@ package compaction
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -55,6 +56,27 @@ func TestSerializeConversation_Empty(t *testing.T) {
 	result := SerializeConversation(nil)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestSerializeConversation_StubUTF8Safe(t *testing.T) {
+	// 6000 bytes of repeated 3-byte rune ("中"). A naïve byte slice
+	// could split a rune mid-sequence; the rune-aware truncation must
+	// preserve valid UTF-8 in head and tail.
+	bigText := strings.Repeat("中", 2000)
+	messages := []ai.Message{
+		ai.NewToolResultMsg(ai.ToolResultMessage{
+			ToolCallID: "1",
+			ToolName:   "bash",
+			Content:    []ai.ToolResultContent{{Type: "text", Text: bigText}},
+		}),
+	}
+	out := SerializeConversationWithIDs(messages, []string{"e1"}, DefaultStubOptions)
+	if !utf8.ValidString(out) {
+		t.Fatalf("stub output is not valid UTF-8: %q", out)
+	}
+	if !strings.Contains(out, "entry e1") {
+		t.Errorf("expected entry id in stub: %q", out)
 	}
 }
 

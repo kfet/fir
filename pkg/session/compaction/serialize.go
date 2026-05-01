@@ -5,6 +5,7 @@ package compaction
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kfet/fir/pkg/ai"
 )
@@ -144,13 +145,15 @@ func SerializeConversationWithIDs(messages []ai.Message, entryIDs []string, opts
 //	[entry <id> tool=<name> bytes=<n> head="..." tail="..."]
 //
 // id may be empty, in which case the `entry` token is rendered as
-// `entry=?` so the stub is still well-formed.
+// `entry=?` so the stub is still well-formed. head/tail are sliced on
+// UTF-8 rune boundaries — a naïve byte slice could land mid-rune and
+// produce invalid UTF-8 inside the summarizer prompt.
 func formatToolResultStub(id, toolName, text string, opts StubOptions) string {
 	head := text
 	tail := ""
 	if len(text) > opts.HeadBytes+opts.TailBytes {
-		head = text[:opts.HeadBytes]
-		tail = text[len(text)-opts.TailBytes:]
+		head = utf8Prefix(text, opts.HeadBytes)
+		tail = utf8Suffix(text, opts.TailBytes)
 	}
 	idTok := "entry=?"
 	if id != "" {
@@ -160,6 +163,38 @@ func formatToolResultStub(id, toolName, text string, opts StubOptions) string {
 		toolName = "?"
 	}
 	return fmt.Sprintf("[%s tool=%s bytes=%d head=%q tail=%q]", idTok, toolName, len(text), head, tail)
+}
+
+// utf8Prefix returns the longest valid-UTF-8 prefix of s with byte length
+// ≤ n. If a multi-byte rune straddles position n it is dropped entirely.
+func utf8Prefix(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	// Walk back from n until we hit a rune-start byte.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// utf8Suffix returns the longest valid-UTF-8 suffix of s with byte length
+// ≤ n. If a multi-byte rune straddles position len(s)-n it is dropped.
+func utf8Suffix(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n >= len(s) {
+		return s
+	}
+	start := len(s) - n
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[start:]
 }
 
 func extractTextFromUserContent(content any) string {

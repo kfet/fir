@@ -1,10 +1,12 @@
 package session
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 func TestCompactionArtifacts_Empty(t *testing.T) {
@@ -76,5 +78,52 @@ func TestApplyCompaction_PersistsAndRebuilds(t *testing.T) {
 	}
 	if prevIdx < 0 {
 		t.Errorf("expected prevIdx >= 0, got %d", prevIdx)
+	}
+}
+
+// TestApplyCompaction_RebuildIncludesRecallHint asserts the rebuilt
+// session context surfaces the recall hint attached to
+// CompactionSummarySuffix — the continuing agent must see it adjacent
+// to any (entry <id>) / [entry <id> ...] references in the summary.
+func TestApplyCompaction_RebuildIncludesRecallHint(t *testing.T) {
+	sess, _ := newTestAgentSession(t)
+	defer sess.Close()
+
+	now := time.Now().UnixMilli()
+	sess.SessionStore.AppendAIMessage(ai.NewUserMsg("hello", now))
+	entries := sess.SessionStore.GetBranch("")
+	firstID := entries[0].ID
+
+	if err := sess.ApplyCompaction(CompactionOutput{
+		Summary:          "summary body",
+		FirstKeptEntryID: firstID,
+		TokensBefore:     1,
+	}); err != nil {
+		t.Fatalf("ApplyCompaction: %v", err)
+	}
+
+	// Rebuild the LLM context. The compaction summary lives as a Custom
+	// agent message at this layer; converting via store.ConvertToLLM
+	// reifies it into the user-message wrapper that includes Prefix +
+	// Summary + Suffix (the recall hint).
+	ctx := sess.SessionStore.BuildSessionContext()
+	llm, err := store.ConvertToLLM(ctx.Messages)
+	if err != nil {
+		t.Fatalf("ConvertToLLM: %v", err)
+	}
+	var found bool
+	for _, m := range llm {
+		u := m.AsUser()
+		if u == nil {
+			continue
+		}
+		text, _ := u.Content.(string)
+		if strings.Contains(text, "summary body") && strings.Contains(text, "Note on references in the summary above") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected post-compaction LLM context to contain summary body alongside the recall hint")
 	}
 }

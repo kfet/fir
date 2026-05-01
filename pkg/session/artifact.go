@@ -33,9 +33,12 @@ const (
 // Artifact is a neutral representation of a session entry suitable for
 // consumption by compaction and other session features.
 //
-// Message is set for everything that maps to an agent.AgentMessage. For
-// compaction summaries, Summary/TokensBefore/Details carry the entry's
-// structured fields.
+// Message is set for everything that maps to an agent.AgentMessage,
+// including compaction/branch summaries (which are reified into a
+// synthetic CompactionSummaryMessage / BranchSummaryMessage). Structured
+// compaction-entry fields (Summary, TokensBefore, Details) are not
+// re-exposed here — callers that need them go through the dedicated
+// CompactionArtifacts return values.
 type Artifact struct {
 	// EntryID is the stable session-store ID. Used as the pointer-stub key.
 	EntryID string
@@ -44,8 +47,9 @@ type Artifact struct {
 	Kind ArtifactKind
 
 	// Message is the corresponding agent message, when applicable.
-	// Zero-valued for compaction/branch_summary entries that don't reify
-	// into a message until consumed.
+	// For compaction and branch summaries this is a synthetic
+	// CompactionSummaryMessage / BranchSummaryMessage built from the
+	// entry's stored fields.
 	Message agent.AgentMessage
 
 	// ToolName is set for ToolResult/Assistant artifacts when a single
