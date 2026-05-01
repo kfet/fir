@@ -120,7 +120,7 @@ func PrepareCompaction(pathEntries []*store.SessionEntry, settings CompactionSet
 	if len(pathEntries) == 0 {
 		return nil
 	}
-	if len(pathEntries) > 0 && pathEntries[len(pathEntries)-1].Type == "compaction" {
+	if pathEntries[len(pathEntries)-1].Type == "compaction" {
 		return nil
 	}
 
@@ -271,9 +271,16 @@ func Compact(
 	// (Phase 2 #12.) These are extracted deterministically from the
 	// summarised history (and split-turn prefix) so they survive any
 	// LLM paraphrasing.
-	allMsgs := preparation.MessagesToSummarize
-	if preparation.IsSplitTurn {
+	//
+	// Build a fresh slice — appending directly onto MessagesToSummarize
+	// could mutate the preparation's backing array if it has spare cap.
+	var allMsgs []agent.AgentMessage
+	if preparation.IsSplitTurn && len(preparation.TurnPrefixMessages) > 0 {
+		allMsgs = make([]agent.AgentMessage, 0, len(preparation.MessagesToSummarize)+len(preparation.TurnPrefixMessages))
+		allMsgs = append(allMsgs, preparation.MessagesToSummarize...)
 		allMsgs = append(allMsgs, preparation.TurnPrefixMessages...)
+	} else {
+		allMsgs = preparation.MessagesToSummarize
 	}
 	summary += FormatFacts(extractFacts(allMsgs, 20))
 
