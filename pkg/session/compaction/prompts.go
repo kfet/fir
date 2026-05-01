@@ -51,6 +51,10 @@ Use this EXACT format:
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
+## Working Set
+- ` + "`path/to/file.go`" + ` — [one-line status: what role this file plays now, what was changed, what's pending]
+- [Add one bullet per actively-touched file. Pull paths from the conversation. Omit files that are merely referenced but not part of the active change.]
+
 Keep each section concise. Preserve exact file paths, function names, and error messages.`
 
 const updateSummarizationPromptText = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
@@ -92,6 +96,10 @@ Use this EXACT format:
 
 ## Critical Context
 - [Preserve important context, add new if needed]
+
+## Working Set
+- ` + "`path/to/file.go`" + ` — [one-line status: current role, recent change, pending work]
+- [Carry forward existing entries; update statuses based on new messages; add bullets for newly-touched files; drop files that are no longer in flight]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`
 
@@ -135,6 +143,31 @@ func BuildSummarizationPrompt(conversationText, previousSummary, customInstructi
 // Summary generation
 // ============================================================================
 
+// convertWithIDs is like store.ConvertToLLM but preserves a parallel
+// slice of session-store entry IDs (one per output message). Some inputs
+// (e.g. BashExecutionMessage with ExcludeFromContext) drop out, so the
+// output may be shorter than the input — the returned ID slice stays
+// aligned with the messages slice.
+func convertWithIDs(messages []agent.AgentMessage, entryIDs []string) ([]ai.Message, []string, error) {
+	out := make([]ai.Message, 0, len(messages))
+	outIDs := make([]string, 0, len(messages))
+	for i, m := range messages {
+		converted, err := store.ConvertToLLM([]agent.AgentMessage{m})
+		if err != nil {
+			return nil, nil, err
+		}
+		id := ""
+		if i < len(entryIDs) {
+			id = entryIDs[i]
+		}
+		for _, x := range converted {
+			out = append(out, x)
+			outIDs = append(outIDs, id)
+		}
+	}
+	return out, outIDs, nil
+}
+
 // GenerateSummary generates a summary of the conversation using the LLM.
 // If the context carries a CompactionProgressFunc (via core.WithCompactionProgress),
 // it is called with phase="summarizing history" and each text delta as the LLM streams.
@@ -142,6 +175,7 @@ func GenerateSummary(
 	ctx context.Context,
 	registry *ai.Registry,
 	currentMessages []agent.AgentMessage,
+	entryIDs []string,
 	model *ai.Model,
 	reserveTokens int,
 	apiKey string,
@@ -150,11 +184,11 @@ func GenerateSummary(
 ) (string, error) {
 	maxTokens := int(0.8 * float64(reserveTokens))
 
-	llmMessages, err := store.ConvertToLLM(currentMessages)
+	llmMessages, llmIDs, err := convertWithIDs(currentMessages, entryIDs)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}
-	conversationText := SerializeConversation(llmMessages)
+	conversationText := SerializeConversationWithIDs(llmMessages, llmIDs, DefaultStubOptions)
 	promptText := BuildSummarizationPrompt(conversationText, previousSummary, customInstructions)
 
 	progress := session.CompactionProgressFromCtx(ctx)
@@ -199,17 +233,18 @@ func generateTurnPrefixSummary(
 	ctx context.Context,
 	registry *ai.Registry,
 	messages []agent.AgentMessage,
+	entryIDs []string,
 	model *ai.Model,
 	reserveTokens int,
 	apiKey string,
 ) (string, error) {
 	maxTokens := int(0.5 * float64(reserveTokens))
 
-	llmMessages, err := store.ConvertToLLM(messages)
+	llmMessages, llmIDs, err := convertWithIDs(messages, entryIDs)
 	if err != nil {
 		return "", fmt.Errorf("convert messages: %w", err)
 	}
-	conversationText := SerializeConversation(llmMessages)
+	conversationText := SerializeConversationWithIDs(llmMessages, llmIDs, DefaultStubOptions)
 	promptText := "<conversation>\n" + conversationText + "\n</conversation>\n\n" + turnPrefixSummarizationPromptText
 
 	progress := session.CompactionProgressFromCtx(ctx)

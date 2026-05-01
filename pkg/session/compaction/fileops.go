@@ -4,6 +4,7 @@ package compaction
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -44,17 +45,11 @@ func ExtractFileOpsFromMessage(message agent.AgentMessage, entryID string, fileO
 		return
 	}
 
-	for _, block := range assistant.Content {
-		if block.ToolCall == nil {
-			continue
+	record := func(op string, path string) {
+		if path == "" {
+			return
 		}
-		tc := block.ToolCall
-		path, ok := tc.Arguments["path"].(string)
-		if !ok || path == "" {
-			continue
-		}
-
-		switch tc.Name {
+		switch op {
 		case "read":
 			fileOps.Read[path] = struct{}{}
 		case "write":
@@ -62,14 +57,108 @@ func ExtractFileOpsFromMessage(message agent.AgentMessage, entryID string, fileO
 		case "edit":
 			fileOps.Edited[path] = struct{}{}
 		default:
-			continue
+			return
 		}
 		if entryID != "" {
-			// Most-recent entry wins.
 			fileOps.EntryIDs[path] = entryID
 		}
 	}
+
+	for _, block := range assistant.Content {
+		if block.ToolCall == nil {
+			continue
+		}
+		tc := block.ToolCall
+
+		// Bash: parse the command for write/edit-shaped patterns.
+		// (Phase 2 #8 — redirects, tee, sed -i.)
+		if tc.Name == "bash" {
+			cmd, _ := tc.Arguments["command"].(string)
+			for _, p := range extractBashWrittenPaths(cmd) {
+				record("write", p)
+			}
+			continue
+		}
+
+		// Path-keyed tools.
+		path, ok := tc.Arguments["path"].(string)
+		if !ok || path == "" {
+			continue
+		}
+
+		switch tc.Name {
+		case "read":
+			record("read", path)
+		case "write":
+			record("write", path)
+		case "edit", "multi_edit", "MultiEdit":
+			record("edit", path)
+		}
+	}
 }
+
+// extractBashWrittenPaths heuristically pulls likely-written file paths
+// from a bash command string. Patterns recognised:
+//
+//   - redirect:  > FILE   >> FILE
+//   - tee:       tee FILE | tee -a FILE
+//
+// Pseudo-targets (/dev/null, /dev/stdout, &1, &2, etc.) are skipped.
+// This is intentionally conservative — false positives are preferable to
+// silent silence in the summary, but we don't try to parse arbitrary shell.
+//
+// TODO(compaction): `sed -i` and `awk -i inplace` need a real tokeniser
+// (Go regex lacks lookbehind, and the expression token sits between the
+// -i flag and the file argument). Skip for now.
+func extractBashWrittenPaths(command string) []string {
+	if command == "" {
+		return nil
+	}
+	out := make(map[string]struct{})
+
+	// Redirects: capture the token after > or >>.
+	for _, m := range bashRedirectRe.FindAllStringSubmatch(command, -1) {
+		if p := normaliseBashTarget(m[1]); p != "" {
+			out[p] = struct{}{}
+		}
+	}
+	// tee.
+	for _, m := range bashTeeRe.FindAllStringSubmatch(command, -1) {
+		if p := normaliseBashTarget(m[1]); p != "" {
+			out[p] = struct{}{}
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(out))
+	for p := range out {
+		paths = append(paths, p)
+	}
+	return paths
+}
+
+func normaliseBashTarget(tok string) string {
+	tok = strings.Trim(tok, "\"'")
+	if tok == "" {
+		return ""
+	}
+	// Skip fd duplications (>&2 etc) and /dev/null-like sinks.
+	if strings.HasPrefix(tok, "&") {
+		return ""
+	}
+	if tok == "/dev/null" || tok == "/dev/stdout" || tok == "/dev/stderr" || tok == "/dev/tty" {
+		return ""
+	}
+	return tok
+}
+
+var (
+	// >FILE / >>FILE — disallow `&` (fd dup) right after the operator.
+	bashRedirectRe = regexp.MustCompile(`>>?\s*([^\s|&;<>()]+)`)
+	bashTeeRe      = regexp.MustCompile(`\btee\b(?:\s+-[aA-Za-z]+)*\s+("[^"]+"|'[^']+'|[^\s|&;<>()]+)`)
+)
 
 // ComputeFileLists returns readFiles (only read, not modified) and modifiedFiles
 // as plain path slices, sorted, deduplicated. Use FormatFileOperations to

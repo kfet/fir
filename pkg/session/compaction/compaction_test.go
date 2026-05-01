@@ -755,7 +755,7 @@ func TestGenerateSummary_ProgressCallback(t *testing.T) {
 	})
 	ctx := session.WithCompactionProgress(context.Background(), progressFn)
 
-	result, err := GenerateSummary(ctx, registry, nil, model, 4096, "key", "", "")
+	result, err := GenerateSummary(ctx, registry, nil, nil, model, 4096, "key", "", "")
 	if err != nil {
 		t.Fatalf("GenerateSummary: %v", err)
 	}

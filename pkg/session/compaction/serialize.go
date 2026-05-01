@@ -9,13 +9,61 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 )
 
+// StubOptions controls pointer-stub elision of large/old observations in
+// summarizer input. Stubbing applies to tool-result messages only and is
+// summarizer-input only — live LLM context is not affected, so prompt-cache
+// prefixes are preserved. Phase 2 #4 of the compaction rework.
+type StubOptions struct {
+	// SizeThreshold: tool-result texts larger than this many bytes are
+	// replaced by a stub. Zero or negative disables size-based stubbing.
+	SizeThreshold int
+	// HeadBytes / TailBytes: characters from the start / end of the
+	// elided text to include in the stub. Both default to 128 when zero.
+	HeadBytes int
+	TailBytes int
+	// OldestKeptIndex: tool-result messages at indices strictly less than
+	// this in the input slice are stubbed regardless of size. Zero
+	// disables age-based stubbing.
+	OldestKeptIndex int
+}
+
+// DefaultStubOptions are the defaults used by SerializeConversation.
+// Tuned conservatively: 4 KiB size cap, 128 head + 128 tail.
+var DefaultStubOptions = StubOptions{
+	SizeThreshold: 4096,
+	HeadBytes:     128,
+	TailBytes:     128,
+}
+
 // SerializeConversation serializes LLM messages to text for summarization.
 // This prevents the model from treating it as a conversation to continue.
 // Call ConvertToLLM first to handle custom message types.
+//
+// Stubbing of large/old tool results uses DefaultStubOptions and assumes
+// no entry IDs are available. Use SerializeConversationWithIDs to render
+// pointer-stub keys.
 func SerializeConversation(messages []ai.Message) string {
+	return SerializeConversationWithIDs(messages, nil, DefaultStubOptions)
+}
+
+// SerializeConversationWithIDs is like SerializeConversation but each
+// message at index i is associated with entryIDs[i] (or "" if unknown).
+// Tool results that meet stub criteria are rendered as
+// `[entry <id> tool=<name> bytes=<n> head="..." tail="..."]`.
+//
+// entryIDs may be nil or shorter than messages — missing IDs are treated
+// as "".
+func SerializeConversationWithIDs(messages []ai.Message, entryIDs []string, opts StubOptions) string {
+	if opts.HeadBytes <= 0 {
+		opts.HeadBytes = DefaultStubOptions.HeadBytes
+	}
+	if opts.TailBytes <= 0 {
+		opts.TailBytes = DefaultStubOptions.TailBytes
+	}
+
 	var parts []string
 
-	for _, msg := range messages {
+	for i, msg := range messages {
 		switch msg.Role() {
 		case "user":
 			u := msg.AsUser()
@@ -69,13 +117,49 @@ func SerializeConversation(messages []ai.Message) string {
 				}
 			}
 			text := strings.Join(texts, "")
-			if text != "" {
+			if text == "" {
+				continue
+			}
+
+			id := ""
+			if i < len(entryIDs) {
+				id = entryIDs[i]
+			}
+
+			oldEnough := opts.OldestKeptIndex > 0 && i < opts.OldestKeptIndex
+			tooLarge := opts.SizeThreshold > 0 && len(text) > opts.SizeThreshold
+			if oldEnough || tooLarge {
+				parts = append(parts, formatToolResultStub(id, tr.ToolName, text, opts))
+			} else {
 				parts = append(parts, "[Tool result]: "+text)
 			}
 		}
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// formatToolResultStub renders a pointer-stub for an elided tool result.
+//
+//	[entry <id> tool=<name> bytes=<n> head="..." tail="..."]
+//
+// id may be empty, in which case the `entry` token is rendered as
+// `entry=?` so the stub is still well-formed.
+func formatToolResultStub(id, toolName, text string, opts StubOptions) string {
+	head := text
+	tail := ""
+	if len(text) > opts.HeadBytes+opts.TailBytes {
+		head = text[:opts.HeadBytes]
+		tail = text[len(text)-opts.TailBytes:]
+	}
+	idTok := "entry=?"
+	if id != "" {
+		idTok = "entry " + id
+	}
+	if toolName == "" {
+		toolName = "?"
+	}
+	return fmt.Sprintf("[%s tool=%s bytes=%d head=%q tail=%q]", idTok, toolName, len(text), head, tail)
 }
 
 func extractTextFromUserContent(content any) string {

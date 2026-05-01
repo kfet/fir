@@ -48,6 +48,56 @@ func TestFileOperations_IgnoreNonAssistant(t *testing.T) {
 	}
 }
 
+func TestFileOperations_BashRedirect(t *testing.T) {
+	fileOps := NewFileOperations()
+	asst := ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("1", "bash", map[string]any{
+				"command": "echo hi > out.txt && cat data | tee /tmp/log.txt",
+			}),
+		},
+	})
+	ExtractFileOpsFromMessage(agent.NewAgentMessage(asst), "e1", fileOps)
+	if _, ok := fileOps.Written["out.txt"]; !ok {
+		t.Errorf("expected out.txt in Written; got %#v", fileOps.Written)
+	}
+	if _, ok := fileOps.Written["/tmp/log.txt"]; !ok {
+		t.Errorf("expected /tmp/log.txt in Written; got %#v", fileOps.Written)
+	}
+}
+
+func TestFileOperations_BashSedInplace_TODO(t *testing.T) {
+	t.Skip("sed -i extraction needs a real tokeniser; tracked as TODO in fileops.go")
+}
+
+func TestFileOperations_BashSkipsDevNull(t *testing.T) {
+	fileOps := NewFileOperations()
+	asst := ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("1", "bash", map[string]any{
+				"command": "noisy 2>/dev/null >&2",
+			}),
+		},
+	})
+	ExtractFileOpsFromMessage(agent.NewAgentMessage(asst), "e1", fileOps)
+	if len(fileOps.Written) != 0 {
+		t.Errorf("expected nothing tracked, got %#v", fileOps.Written)
+	}
+}
+
+func TestFileOperations_MultiEdit(t *testing.T) {
+	fileOps := NewFileOperations()
+	asst := ai.NewAssistantMsg(ai.AssistantMessage{
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("1", "multi_edit", map[string]any{"path": "/x.go"}),
+		},
+	})
+	ExtractFileOpsFromMessage(agent.NewAgentMessage(asst), "e1", fileOps)
+	if _, ok := fileOps.Edited["/x.go"]; !ok {
+		t.Errorf("expected /x.go in Edited via multi_edit; got %#v", fileOps.Edited)
+	}
+}
+
 func TestComputeFileLists(t *testing.T) {
 	fileOps := NewFileOperations()
 	fileOps.Read["/src/main.go"] = struct{}{}

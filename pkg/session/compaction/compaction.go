@@ -44,7 +44,13 @@ type CompactionResult struct {
 type CompactionPreparation struct {
 	FirstKeptEntryID    string
 	MessagesToSummarize []agent.AgentMessage
+	// EntryIDsToSummarize is parallel to MessagesToSummarize: the
+	// session-store entry ID each message originated from. Used by
+	// SerializeConversationWithIDs to render pointer-stubs for elided
+	// tool results.
+	EntryIDsToSummarize []string
 	TurnPrefixMessages  []agent.AgentMessage
+	TurnPrefixEntryIDs  []string
 	IsSplitTurn         bool
 	TokensBefore        int
 	PreviousSummary     string
@@ -154,17 +160,21 @@ func PrepareCompaction(pathEntries []*store.SessionEntry, settings CompactionSet
 	}
 
 	var messagesToSummarize []agent.AgentMessage
+	var entryIDsToSummarize []string
 	for i := boundaryStart; i < historyEnd; i++ {
 		if msg := getMessageFromEntry(pathEntries[i]); msg != nil {
 			messagesToSummarize = append(messagesToSummarize, *msg)
+			entryIDsToSummarize = append(entryIDsToSummarize, pathEntries[i].ID)
 		}
 	}
 
 	var turnPrefixMessages []agent.AgentMessage
+	var turnPrefixEntryIDs []string
 	if cutPoint.IsSplitTurn {
 		for i := cutPoint.TurnStartIndex; i < cutPoint.FirstKeptEntryIndex; i++ {
 			if msg := getMessageFromEntry(pathEntries[i]); msg != nil {
 				turnPrefixMessages = append(turnPrefixMessages, *msg)
+				turnPrefixEntryIDs = append(turnPrefixEntryIDs, pathEntries[i].ID)
 			}
 		}
 	}
@@ -191,7 +201,9 @@ func PrepareCompaction(pathEntries []*store.SessionEntry, settings CompactionSet
 	return &CompactionPreparation{
 		FirstKeptEntryID:    firstKeptEntry.ID,
 		MessagesToSummarize: messagesToSummarize,
+		EntryIDsToSummarize: entryIDsToSummarize,
 		TurnPrefixMessages:  turnPrefixMessages,
+		TurnPrefixEntryIDs:  turnPrefixEntryIDs,
 		IsSplitTurn:         cutPoint.IsSplitTurn,
 		TokensBefore:        tokensBefore,
 		PreviousSummary:     previousSummary,
@@ -220,7 +232,7 @@ func Compact(
 		var err error
 		if len(preparation.MessagesToSummarize) > 0 {
 			historyResult, err = GenerateSummary(
-				ctx, registry, preparation.MessagesToSummarize, model,
+				ctx, registry, preparation.MessagesToSummarize, preparation.EntryIDsToSummarize, model,
 				preparation.Settings.ReserveTokens, apiKey,
 				customInstructions, preparation.PreviousSummary,
 			)
@@ -232,7 +244,7 @@ func Compact(
 		}
 
 		turnPrefixResult, err := generateTurnPrefixSummary(
-			ctx, registry, preparation.TurnPrefixMessages, model,
+			ctx, registry, preparation.TurnPrefixMessages, preparation.TurnPrefixEntryIDs, model,
 			preparation.Settings.ReserveTokens, apiKey,
 		)
 		if err != nil {
@@ -243,7 +255,7 @@ func Compact(
 	} else {
 		var err error
 		summary, err = GenerateSummary(
-			ctx, registry, preparation.MessagesToSummarize, model,
+			ctx, registry, preparation.MessagesToSummarize, preparation.EntryIDsToSummarize, model,
 			preparation.Settings.ReserveTokens, apiKey,
 			customInstructions, preparation.PreviousSummary,
 		)
@@ -254,6 +266,16 @@ func Compact(
 
 	readFiles, modifiedFiles := ComputeFileLists(preparation.FileOps)
 	summary += FormatFileOperations(readFiles, modifiedFiles, preparation.FileOps.EntryIDs)
+
+	// Append verbatim Facts: bash commands, errors, exit codes.
+	// (Phase 2 #12.) These are extracted deterministically from the
+	// summarised history (and split-turn prefix) so they survive any
+	// LLM paraphrasing.
+	allMsgs := preparation.MessagesToSummarize
+	if preparation.IsSplitTurn {
+		allMsgs = append(allMsgs, preparation.TurnPrefixMessages...)
+	}
+	summary += FormatFacts(extractFacts(allMsgs, 20))
 
 	return &CompactionResult{
 		Summary:          summary,

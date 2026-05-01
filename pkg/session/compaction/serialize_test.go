@@ -66,3 +66,48 @@ func TestSummarizationSystemPrompt(t *testing.T) {
 		t.Error("expected 'summarization' in system prompt")
 	}
 }
+
+func TestSerializeConversation_StubsLargeToolResult(t *testing.T) {
+	bigText := strings.Repeat("x", 5000)
+	messages := []ai.Message{
+		ai.NewToolResultMsg(ai.ToolResultMessage{
+			ToolCallID: "1",
+			ToolName:   "bash",
+			Content: []ai.ToolResultContent{
+				{Type: "text", Text: bigText},
+			},
+		}),
+	}
+	out := SerializeConversationWithIDs(messages, []string{"e7f3a2"}, DefaultStubOptions)
+	if !strings.Contains(out, "entry e7f3a2") {
+		t.Errorf("expected entry id in stub, got %q", out)
+	}
+	if !strings.Contains(out, "tool=bash") {
+		t.Errorf("expected tool name in stub, got %q", out)
+	}
+	if !strings.Contains(out, "bytes=5000") {
+		t.Errorf("expected bytes in stub, got %q", out)
+	}
+	if strings.Contains(out, bigText) {
+		t.Error("expected full body to be elided")
+	}
+}
+
+func TestSerializeConversation_KeepsSmallToolResult(t *testing.T) {
+	messages := []ai.Message{
+		ai.NewToolResultMsg(ai.ToolResultMessage{
+			ToolCallID: "1",
+			ToolName:   "read",
+			Content: []ai.ToolResultContent{
+				{Type: "text", Text: "small output"},
+			},
+		}),
+	}
+	out := SerializeConversationWithIDs(messages, []string{"abc"}, DefaultStubOptions)
+	if !strings.Contains(out, "[Tool result]: small output") {
+		t.Errorf("expected un-stubbed small result, got %q", out)
+	}
+	if strings.Contains(out, "entry abc") {
+		t.Error("did not expect stub for small result")
+	}
+}

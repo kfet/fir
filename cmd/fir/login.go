@@ -11,7 +11,6 @@ import (
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
@@ -19,6 +18,7 @@ import (
 	firpkg "github.com/kfet/fir/pkg/pkg"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/session/store"
 )
 
