@@ -14,7 +14,10 @@ import (
 // Compaction and branch summary prefixes/suffixes.
 const (
 	CompactionSummaryPrefix = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-	CompactionSummarySuffix = "\n</summary>"
+	CompactionSummarySuffix = "\n</summary>\n\n" +
+		"Note on references in the summary above:\n" +
+		"- `path (entry <id>)` lines under `<read-files>` / `<modified-files>` point at the session-store entry where that file was last touched. The full pre-compaction history still exists on disk, but is no longer in your context.\n" +
+		"- `[entry <id> tool=<name> bytes=<n> head=\"...\" tail=\"...\"]` is a pointer-stub: a large/old tool result was elided to keep the summary compact. Treat it as a reference, not data — do not invent content for it. If you need the actual output to continue, re-run the command or re-`read` the file rather than guess."
 
 	BranchSummaryPrefix = "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
 	BranchSummarySuffix = "</summary>"
