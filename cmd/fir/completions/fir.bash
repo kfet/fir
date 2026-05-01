@@ -20,7 +20,7 @@ _fir_complete() {
     local subcommand=""
     if [[ $cword -ge 2 ]]; then
         case ${words[1]} in
-            update|skills|extensions|install|uninstall|packages|sessions|observe|send|login|completion)
+            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|completion)
                 subcommand=${words[1]}
                 ;;
         esac
@@ -96,7 +96,7 @@ _fir_complete() {
 
     # First positional: subcommand or @file or message
     if [[ $cword -eq 1 ]]; then
-        local subs="update skills extensions install uninstall packages sessions observe send login completion"
+        local subs="update skills extensions install uninstall packages sessions observe htop send login completion"
         if [[ $cur == @* ]]; then
             local stripped=${cur#@}
             local files=( $(compgen -f -- "$stripped") )

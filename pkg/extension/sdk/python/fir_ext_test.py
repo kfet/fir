@@ -617,6 +617,29 @@ class TestHost(unittest.TestCase):
         self.assertIsNone(host.readline(timeout=0.05))
         self.assertLess(time.monotonic() - start, 0.5)
 
+    def test_wake_unblocks_readline(self):
+        """Host.wake() must wake a pending readline immediately, returning
+        None (EOF) — used by cli_signal handlers that want to interrupt a
+        long timeout so the verb can exit cleanly."""
+        host, _ = self._host_with_buf()
+        result: list = []
+
+        def reader():
+            result.append(host.readline(timeout=5.0))
+
+        t = threading.Thread(target=reader, daemon=True)
+        t.start()
+        time.sleep(0.05)
+        self.assertFalse(result, "readline should still be blocked")
+        start = time.monotonic()
+        host.wake()
+        t.join(timeout=1.0)
+        self.assertLess(time.monotonic() - start, 0.5,
+                        "wake() should unblock readline promptly")
+        self.assertEqual(result, [None])
+        # After wake() further reads keep returning None (EOF state set).
+        self.assertIsNone(host.readline(timeout=0.05))
+
     def test_stdin_lines_iterates_until_eof(self):
         host, _ = self._host_with_buf()
         host._push_stdin("a\n")

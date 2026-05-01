@@ -272,7 +272,8 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		case agent.EventMessageStart:
 			mgr.EmitEvent("message_start", nil)
 		case agent.EventMessageEnd:
-			mgr.EmitEvent("message_end", nil)
+			payload := messageEndPayload(ae)
+			mgr.EmitEvent("message_end", payload)
 		case agent.EventToolExecutionStart:
 			mgr.EmitEvent("tool_execution_start", map[string]any{
 				"tool_call_id": ae.ToolCallID,
@@ -310,4 +311,49 @@ func countCompleted(entries []agent.PlanEntry) int {
 		}
 	}
 	return n
+}
+
+// messageEndPayload builds the extension payload for an `EventMessageEnd`
+// event. For assistant messages with usage data we include role, provider,
+// model, stop reason, response id, and the full Usage breakdown (tokens +
+// cost). User and tool-result messages get only their role. The schema is
+// stable enough for extensions (e.g. observe.py) to meter usage in their
+// sidecars.
+func messageEndPayload(ae *agent.AgentEvent) map[string]any {
+	if ae == nil || ae.Message == nil {
+		return nil
+	}
+	role := ae.Message.Role()
+	if role == "" {
+		return nil
+	}
+	payload := map[string]any{"role": role}
+	am := ae.Message.AsAssistant()
+	if am == nil {
+		return payload
+	}
+	payload["provider"] = string(am.Provider)
+	payload["model"] = am.Model
+	if am.StopReason != "" {
+		payload["stop_reason"] = string(am.StopReason)
+	}
+	if am.ResponseID != "" {
+		payload["response_id"] = am.ResponseID
+	}
+	u := am.Usage
+	payload["usage"] = map[string]any{
+		"input":        u.Input,
+		"output":       u.Output,
+		"cache_read":   u.CacheRead,
+		"cache_write":  u.CacheWrite,
+		"total_tokens": u.TotalTokens,
+		"cost": map[string]any{
+			"input":       u.Cost.Input,
+			"output":      u.Cost.Output,
+			"cache_read":  u.Cost.CacheRead,
+			"cache_write": u.Cost.CacheWrite,
+			"total":       u.Cost.Total,
+		},
+	}
+	return payload
 }

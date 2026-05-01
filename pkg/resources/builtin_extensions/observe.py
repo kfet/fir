@@ -6,7 +6,7 @@
 #   accepts user-input messages on a Unix socket, and provides command-line
 #   tools to list, tail, and steer running fir sessions.
 # builtin: true
-# cli_verbs: observe, send
+# cli_verbs: observe, send, htop
 # ---
 """fir observe / fir send — per-session observation extension and CLI verbs.
 
@@ -38,6 +38,7 @@ provided by the kernel + filesystem. See docs/design/observe.md.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import json
 import os
@@ -106,7 +107,41 @@ _state: dict[str, Any] = {
     "started_at": "",
     "status": "running",
     "session_name": "",
-    "schema": 1,
+    "schema": 2,
+    # Live activity counters — updated on each agent event. Sidecar consumers
+    # (e.g. `fir htop`) read these to render top-style metrics without
+    # parsing the transcript.
+    "activity": {
+        "last_event": "",          # ISO-8601 UTC of the most recent event
+        "last_event_type": "",     # e.g. "message_end", "tool_execution_end"
+        "turns": 0,                # turn_end count
+        "messages": 0,             # message_end count (any role)
+        "assistant_messages": 0,   # message_end with role=assistant
+        "tool_calls": 0,           # tool_execution_end count
+        "tool_errors": 0,          # tool_execution_end with is_error=true
+    },
+    # Most-recent provider/model from an assistant message_end (best-effort).
+    "model": {
+        "provider": "",
+        "id": "",
+    },
+    # Aggregated token + cost totals across the session. Cost numbers come
+    # from the upstream provider when available; zero otherwise.
+    "usage": {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 0,
+        "cost": {
+            "input": 0.0,
+            "output": 0.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0,
+            "total": 0.0,
+        },
+        "requests": 0,             # number of assistant messages contributing
+    },
 }
 _socket: socket.socket | None = None
 _accept_thread: threading.Thread | None = None
@@ -119,17 +154,33 @@ _shutdown = threading.Event()
 
 
 def _write_sidecar() -> None:
-    sid = _state["session_id"]
+    """Atomically write ``_state`` to the sidecar file.
+
+    The whole operation runs **inside** the lock so that:
+
+    1. JSON serialisation can't observe a half-mutated nested dict — other
+       event-handler threads (each ``_run_event`` runs in its own thread)
+       freely mutate ``_state`` between calls.
+    2. Concurrent writers don't race on the shared ``.json.tmp`` path:
+       two threads writing the same tmp file then ``os.replace``-ing it
+       can interleave and produce a final file with stale or partial
+       content. Holding the lock across ``write_text`` + ``os.replace``
+       serialises this end-to-end.
+
+    The sidecar is small (<2KB) so holding the lock across the file IO
+    is negligible compared to the cost of getting it wrong.
+    """
+    sid = _state.get("session_id", "")
     if not sid:
         return
     path = _sidecar_path(sid)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with _state_lock:
-        snapshot = dict(_state)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(snapshot, indent=2) + "\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    with _state_lock:
+        payload = json.dumps(_state, indent=2) + "\n"
+        tmp.write_text(payload)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
 
 
 def _update_state(**kwargs: Any) -> None:
@@ -242,6 +293,87 @@ def on_session_named(params: dict[str, Any], ctx: fir_ext.Context) -> None:
     if params:
         name = params.get("name", "") or ""
     _update_state(session_name=name)
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _bump_activity(event_type: str, **counters: int) -> None:
+    """Increment activity counters and stamp last_event. Atomic + sidecar rewrite."""
+    with _state_lock:
+        act = _state.setdefault("activity", {})
+        act["last_event"] = _now_iso()
+        act["last_event_type"] = event_type
+        for k, v in counters.items():
+            act[k] = int(act.get(k, 0)) + int(v)
+    _write_sidecar()
+
+
+def _accumulate_usage(payload: dict[str, Any]) -> None:
+    """Merge a message_end payload's usage + provider/model into _state."""
+    if not payload:
+        return
+    with _state_lock:
+        prov = payload.get("provider", "")
+        mid = payload.get("model", "")
+        if prov or mid:
+            _state.setdefault("model", {})
+            if prov:
+                _state["model"]["provider"] = prov
+            if mid:
+                _state["model"]["id"] = mid
+        u = payload.get("usage")
+        if isinstance(u, dict):
+            agg = _state.setdefault("usage", {})
+            for k in ("input", "output", "cache_read", "cache_write", "total_tokens"):
+                agg[k] = int(agg.get(k, 0)) + int(u.get(k, 0) or 0)
+            cost_in = u.get("cost") or {}
+            agg_cost = agg.setdefault("cost", {})
+            for k in ("input", "output", "cache_read", "cache_write", "total"):
+                agg_cost[k] = float(agg_cost.get(k, 0.0)) + float(cost_in.get(k, 0.0) or 0.0)
+            agg["requests"] = int(agg.get("requests", 0)) + 1
+
+
+@fir_ext.on("turn_start")
+def on_turn_start(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    _bump_activity("turn_start")
+
+
+@fir_ext.on("turn_end")
+def on_turn_end(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    _bump_activity("turn_end", turns=1)
+
+
+@fir_ext.on("message_start")
+def on_message_start(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    _bump_activity("message_start")
+
+
+@fir_ext.on("message_end")
+def on_message_end(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    role = ""
+    if params:
+        role = params.get("role", "") or ""
+    if role == "assistant":
+        _accumulate_usage(params or {})
+        _bump_activity("message_end", messages=1, assistant_messages=1)
+    else:
+        _bump_activity("message_end", messages=1)
+
+
+@fir_ext.on("tool_execution_start")
+def on_tool_execution_start(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    _bump_activity("tool_execution_start")
+
+
+@fir_ext.on("tool_execution_end")
+def on_tool_execution_end(params: dict[str, Any], ctx: fir_ext.Context) -> None:
+    is_error = bool((params or {}).get("is_error", False))
+    if is_error:
+        _bump_activity("tool_execution_end", tool_calls=1, tool_errors=1)
+    else:
+        _bump_activity("tool_execution_end", tool_calls=1)
 
 
 @fir_ext.on("agent_start")
@@ -1196,12 +1328,320 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
             conn.close()
 
 
+# ---------------------------------------------------------------------------
+# CLI verb: `fir htop`
+# ---------------------------------------------------------------------------
+#
+# A top/htop-style live monitor for fir sessions. Reuses _read_sidecars()
+# for discovery and surfaces the metering written by this same extension
+# (model, usage, activity counters).
+#
+# Constraint: the cli-verb bridge is line-based — fir's TTY is not put in
+# raw mode for us. So `htop` runs in batch mode: every `--interval` it
+# clears the screen and redraws. Quitting is via Ctrl-C (forwarded as a
+# cli_signal) or by typing `q<Enter>`. This is intentional — see
+# docs/design/extension-cli-verbs.md "pathological only for raw-mode TUIs".
+
+_HTOP_USAGE = """\
+usage: fir htop [--interval <dur>]
+
+  Live top/htop-style view of all fir sessions discovered via
+  $XDG_STATE_HOME/fir/agents/.
+
+  Columns: ID, NAME, CWD, STATUS, AGE, ACT (last activity), MODEL,
+  TOK (total tokens), $ (USD cost), TOOLS (calls/errors).
+
+  Input (line-based; no raw mode):
+    q<Enter>     quit
+    <Enter>      force refresh
+    Ctrl-C       quit
+
+  Options:
+    --interval <dur>   refresh cadence (default 1s; min 100ms; e.g. 500ms, 2s)
+"""
+
+
+def _parse_htop_args(argv: list[str]) -> tuple[float, str | None]:
+    """Returns (interval_seconds, error_or_HELP)."""
+    interval = 1.0
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("--help", "-h"):
+            return (0.0, "__HELP__")
+        if a in ("--interval", "-n"):
+            if i + 1 >= len(argv):
+                return (0.0, "--interval requires a duration (e.g. 500ms, 2s)")
+            try:
+                interval = _parse_duration(argv[i + 1])
+            except ValueError as e:
+                return (0.0, f"invalid --interval {argv[i + 1]!r}: {e}")
+            i += 2
+            continue
+        if a.startswith("--interval="):
+            try:
+                interval = _parse_duration(a[len("--interval="):])
+            except ValueError as e:
+                return (0.0, f"invalid --interval: {e}")
+        elif a.startswith("--"):
+            return (0.0, f"unknown flag: {a}")
+        else:
+            return (0.0, f"unexpected argument: {a}")
+        i += 1
+    if interval < 0.1:
+        interval = 0.1
+    return (interval, None)
+
+
+def _parse_duration(s: str) -> float:
+    """Parse Go-style duration suffixes (ms/s/m). Returns seconds."""
+    s = s.strip()
+    if not s:
+        raise ValueError("empty duration")
+    if s.endswith("ms"):
+        return float(s[:-2]) / 1000
+    if s.endswith("s"):
+        return float(s[:-1])
+    if s.endswith("m"):
+        return float(s[:-1]) * 60
+    return float(s)  # bare number = seconds
+
+
+def _format_tokens(n: int) -> str:
+    """Render an int as 1.2k / 3.4M; '-' when zero."""
+    if n <= 0:
+        return "-"
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}k"
+    if n < 1_000_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    return f"{n / 1_000_000_000:.1f}G"
+
+
+def _format_cost(c: float) -> str:
+    """Render a USD amount; '-' when zero, '<$.01' when sub-cent."""
+    if c <= 0:
+        return "-"
+    if c < 0.01:
+        return "<$.01"
+    if c < 100:
+        return f"${c:.2f}"
+    return f"${c:.0f}"
+
+
+def _format_tools(calls: int, errors: int) -> str:
+    """Render 'calls' or 'calls/errors'; '-' when zero."""
+    if calls <= 0:
+        return "-"
+    if errors > 0:
+        return f"{calls}/{errors}"
+    return str(calls)
+
+
+def _format_model(provider: str, mid: str) -> str:
+    if provider and mid:
+        return f"{provider}/{mid}"
+    if mid:
+        return mid
+    if provider:
+        return provider
+    return "-"
+
+
+def _last_activity_string(s: dict[str, Any], now: float) -> str:
+    """Time since the sidecar's activity.last_event (preferred) or transcript
+    mtime (fallback). Returns '-' when neither is available."""
+    activity = s.get("activity") or {}
+    last = activity.get("last_event") or ""
+    t: float | None = None
+    if last:
+        try:
+            # observe.py writes "%Y-%m-%dT%H:%M:%SZ" (UTC, no fractional).
+            # Use calendar.timegm so the parsed tuple is interpreted as UTC;
+            # time.mktime would treat it as local and break under DST.
+            t = calendar.timegm(time.strptime(last, "%Y-%m-%dT%H:%M:%SZ"))
+        except ValueError:
+            t = None
+    if t is None:
+        store = s.get("store_path") or ""
+        if store:
+            try:
+                t = os.path.getmtime(store)
+            except OSError:
+                t = None
+    if t is None:
+        return "-"
+    delta = max(0.0, now - t)
+    if delta < 1:
+        return "now"
+    if delta < 60:
+        return f"{int(delta)}s"
+    if delta < 3600:
+        return f"{int(delta // 60)}m"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h"
+    return f"{int(delta // 86400)}d"
+
+
+def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
+    """Build a full-screen frame: cursor-home + clear + table. Single string
+    so the whole frame ships in one cli_stdout notification."""
+    now = time.time()
+    counts = {"running": 0, "idle": 0, "ended": 0, "crashed": 0}
+    for s in sidecars:
+        st = s.get("status", "")
+        if st in counts:
+            counts[st] += 1
+
+    def dim(t: str) -> str:
+        return f"\x1b[2m{t}\x1b[0m" if color else t
+
+    def status_color(st: str, line: str) -> str:
+        if not color:
+            return line
+        if st == "running":
+            return f"\x1b[32m{line}\x1b[0m"
+        if st == "ended":
+            return f"\x1b[2m{line}\x1b[0m"
+        if st == "crashed":
+            return f"\x1b[31m{line}\x1b[0m"
+        return line
+
+    out: list[str] = ["\x1b[H\x1b[2J"]  # home + clear
+    header = (
+        f" fir htop  —  {len(sidecars)} session"
+        f"{'' if len(sidecars) == 1 else 's'}  "
+        f"(live {counts['running']}  idle {counts['idle']}  "
+        f"ended {counts['ended']}  crashed {counts['crashed']})  "
+        f"{time.strftime('%H:%M:%S')}"
+    )
+    out.append(("\x1b[7m" + header + "\x1b[0m") if color else header)
+
+    # Compute name/cwd widths (modest, leave room for fixed cols).
+    name_w, cwd_w = 6, 14
+    for s in sidecars:
+        name_w = max(name_w, min(20, len(s.get("session_name") or "")))
+        cwd_w = max(cwd_w, min(24, len(os.path.basename(s.get("cwd") or ""))))
+
+    col_header = (
+        f"{'ID':<8}  {'NAME':<{name_w}}  {'CWD':<{cwd_w}}  "
+        f"{'STATUS':<8}  {'AGE':<6}  {'ACT':<5}  "
+        f"{'MODEL':<22}  {'TOK':>9}  {'$':>7}  {'TOOLS':<6}"
+    )
+    out.append(dim(col_header))
+
+    if not sidecars:
+        out.append(dim("  (no fir sessions found — try `fir` in another terminal)"))
+    for s in sidecars:
+        sid = (s.get("session_id") or "")[:8]
+        name = (s.get("session_name") or "-")
+        cwd = os.path.basename(s.get("cwd") or "")
+        status = s.get("status") or ""
+        age = _age_string(s.get("started_at") or "", now)
+        act = _last_activity_string(s, now)
+        model_d = s.get("model") or {}
+        model = _format_model(model_d.get("provider", "") or "", model_d.get("id", "") or "")
+        usage = s.get("usage") or {}
+        tok = _format_tokens(int(usage.get("total_tokens", 0) or 0))
+        cost = _format_cost(float((usage.get("cost") or {}).get("total", 0.0) or 0.0))
+        activity = s.get("activity") or {}
+        tools = _format_tools(
+            int(activity.get("tool_calls", 0) or 0),
+            int(activity.get("tool_errors", 0) or 0),
+        )
+        line = (
+            f"{sid:<8}  {_trunc(name, name_w):<{name_w}}  "
+            f"{_trunc(cwd, cwd_w):<{cwd_w}}  "
+            f"{_trunc(status, 8):<8}  {age:<6}  {act:<5}  "
+            f"{_trunc(model, 22):<22}  {tok:>9}  {cost:>7}  "
+            f"{_trunc(tools, 6):<6}"
+        )
+        out.append(status_color(status, line))
+
+    out.append("")
+    out.append(dim(" q<Enter> quit  <Enter> refresh  Ctrl-C quit"))
+    return "\n".join(out) + "\n"
+
+
+# Module-level stop flag flipped by the cli_signal handler. The cli-verb
+# bridge runs each verb in its own subprocess so a flag is fine — no
+# cross-invocation leakage.
+_htop_stop = threading.Event()
+# Set while `cli_htop` is running; Ctrl-C wakes its blocked readline through
+# this so we exit promptly instead of waiting up to --interval seconds.
+_htop_host: fir_ext.Host | None = None
+
+
+@fir_ext.cli_verb("htop")
+def cli_htop(argv: list[str], host: fir_ext.Host) -> int:
+    interval, err = _parse_htop_args(argv)
+    if err == "__HELP__":
+        host.eprint(_HTOP_USAGE)
+        return 0
+    if err is not None:
+        host.eprintln(err)
+        host.eprint(_HTOP_USAGE)
+        return 1
+
+    # Non-TTY: degrade to a one-shot list — nothing useful about a TUI when
+    # the output isn't a terminal (and the alt-screen escapes would garble
+    # downstream pipelines).
+    if not host.stdout_is_tty:
+        return _verb_observe_list(host)
+
+    color = not os.environ.get("NO_COLOR")
+    _htop_stop.clear()
+    # Expose the host so the cli_signal handler can wake the readline
+    # blocked on it. Using a module-level reference keeps the signal
+    # handler signature unchanged (name, host) — _on_signal already gets
+    # its own host arg, but it's the same instance per invocation.
+    global _htop_host
+    _htop_host = host
+
+    # Enter alt screen + hide cursor; ensure we leave them on exit even on
+    # exception. Without raw mode, the user's terminal echoes their typing
+    # at the bottom — acceptable for a batch-mode monitor.
+    host.print("\x1b[?1049h\x1b[?25l")
+    try:
+        while not _htop_stop.is_set():
+            sidecars = _read_sidecars()
+            host.print(_htop_render(sidecars, color))
+            line = host.readline(timeout=interval)
+            if _htop_stop.is_set():
+                return 0
+            if line is None:
+                # Timeout — just redraw.
+                continue
+            stripped = line.strip().lower()
+            if stripped in ("q", "quit", "exit"):
+                return 0
+            # Any other line: force an immediate redraw on next loop.
+    finally:
+        # Show cursor + leave alt screen.
+        host.print("\x1b[?25h\x1b[?1049l")
+        _htop_host = None
+    return 0
+
+
 # Ctrl-\ during `fir send` (interactive): clean detach.
 @fir_ext.on_cli_signal
 def _on_signal(name: str, host: fir_ext.Host) -> None:
     # SIGQUIT is the conventional clean-detach signal in send-style tools.
     if "quit" in name.lower() or name == "SIGQUIT":
         os._exit(0)
+    # Ctrl-C: tell the htop loop to stop cleanly so we restore the terminal
+    # (alt screen + cursor) before exiting. Wake the blocked readline by
+    # pushing EOF through the host's stdin queue so we don't sleep up to
+    # --interval seconds before noticing. If htop isn't running this is a
+    # no-op; the bridge exits on its own when fir terminates the process.
+    if "interrupt" in name.lower() or name == "SIGINT":
+        _htop_stop.set()
+        h = _htop_host
+        if h is not None:
+            with contextlib.suppress(Exception):
+                h.wake()  # signal EOF → readline returns None
 
 
 # ---------------------------------------------------------------------------

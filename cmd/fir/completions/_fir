@@ -22,6 +22,7 @@ _fir() {
         'packages:List or update installed packages'
         'sessions:List sessions for the current directory'
         'observe:List or tail live fir session transcripts'
+        'htop:Live top/htop-style monitor of fir sessions'
         'send:Send messages to a live fir session'
         'login:OAuth login for a provider'
         'completion:Print shell completion script'

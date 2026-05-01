@@ -379,8 +379,140 @@ class TestSocket(unittest.TestCase):
         self.assertEqual(ctx.send_user_message.call_count, 5)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestMetering(unittest.TestCase):
+    """Verify the activity/usage/model fields observe.py writes to the sidecar."""
+
+    def setUp(self) -> None:
+        self.state_dir = tempfile.mkdtemp(prefix="observe-meter-state-")
+        self.sock_dir = f"/tmp/om{os.getpid()}-{int(time.time() * 1000) % 10000}"
+        os.makedirs(self.sock_dir, exist_ok=True)
+        _reset_observe_state(self.state_dir, self.sock_dir)
+        # Reset the nested counters too so each test starts clean.
+        observe._state["activity"] = {
+            "last_event": "",
+            "last_event_type": "",
+            "turns": 0,
+            "messages": 0,
+            "assistant_messages": 0,
+            "tool_calls": 0,
+            "tool_errors": 0,
+        }
+        observe._state["model"] = {"provider": "", "id": ""}
+        observe._state["usage"] = {
+            "input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
+            "total_tokens": 0, "requests": 0,
+            "cost": {"input": 0.0, "output": 0.0, "cache_read": 0.0,
+                     "cache_write": 0.0, "total": 0.0},
+        }
+        self.session_id = "meter1234ef567890" + "0" * 19  # 36 chars
+
+    def tearDown(self) -> None:
+        observe._shutdown.set()
+        if observe._socket is not None:
+            with suppress(Exception):
+                observe._socket.close()
+            observe._socket = None
+
+    def _start(self) -> MagicMock:
+        ctx = _make_ctx()
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        return ctx
+
+    def _read_sidecar(self) -> dict:
+        path = os.path.join(self.state_dir, "fir", "agents", f"{self.session_id}.json")
+        return json.loads(open(path).read())
+
+    def test_assistant_message_end_records_usage_and_model(self) -> None:
+        self._start()
+        observe.on_message_end({
+            "role": "assistant",
+            "provider": "anthropic",
+            "model": "claude-3-5-sonnet",
+            "usage": {
+                "input": 100, "output": 50,
+                "cache_read": 20, "cache_write": 10,
+                "total_tokens": 180,
+                "cost": {"input": 0.001, "output": 0.002,
+                         "cache_read": 0.0, "cache_write": 0.0,
+                         "total": 0.003},
+            },
+        }, MagicMock())
+        s = self._read_sidecar()
+        self.assertEqual(s["model"], {"provider": "anthropic", "id": "claude-3-5-sonnet"})
+        self.assertEqual(s["usage"]["input"], 100)
+        self.assertEqual(s["usage"]["total_tokens"], 180)
+        self.assertEqual(s["usage"]["requests"], 1)
+        self.assertAlmostEqual(s["usage"]["cost"]["total"], 0.003, places=6)
+        self.assertEqual(s["activity"]["assistant_messages"], 1)
+        self.assertEqual(s["activity"]["messages"], 1)
+        self.assertEqual(s["activity"]["last_event_type"], "message_end")
+        self.assertTrue(s["activity"]["last_event"], "last_event timestamp must be set")
+
+    def test_user_message_end_does_not_touch_usage(self) -> None:
+        self._start()
+        observe.on_message_end({"role": "user"}, MagicMock())
+        s = self._read_sidecar()
+        self.assertEqual(s["usage"]["requests"], 0)
+        self.assertEqual(s["activity"]["assistant_messages"], 0)
+        self.assertEqual(s["activity"]["messages"], 1)
+
+    def test_usage_accumulates_across_calls(self) -> None:
+        self._start()
+        for _ in range(3):
+            observe.on_message_end({
+                "role": "assistant",
+                "provider": "openai", "model": "gpt-4",
+                "usage": {"input": 10, "output": 5, "cache_read": 0,
+                          "cache_write": 0, "total_tokens": 15,
+                          "cost": {"input": 0, "output": 0, "cache_read": 0,
+                                   "cache_write": 0, "total": 0.01}},
+            }, MagicMock())
+        s = self._read_sidecar()
+        self.assertEqual(s["usage"]["input"], 30)
+        self.assertEqual(s["usage"]["total_tokens"], 45)
+        self.assertEqual(s["usage"]["requests"], 3)
+        self.assertAlmostEqual(s["usage"]["cost"]["total"], 0.03, places=6)
+
+    def test_tool_execution_end_counts_calls_and_errors(self) -> None:
+        self._start()
+        observe.on_tool_execution_end({"is_error": False}, MagicMock())
+        observe.on_tool_execution_end({"is_error": True}, MagicMock())
+        observe.on_tool_execution_end({"is_error": False}, MagicMock())
+        s = self._read_sidecar()
+        self.assertEqual(s["activity"]["tool_calls"], 3)
+        self.assertEqual(s["activity"]["tool_errors"], 1)
+
+    def test_concurrent_writes_do_not_corrupt_sidecar(self) -> None:
+        """Regression: shallow snapshot + json.dumps outside lock would
+        race on nested dicts. With the fix (json.dumps inside lock),
+        many concurrent event handlers still produce valid JSON."""
+        self._start()
+
+        def _hammer(n: int) -> None:
+            for _ in range(50):
+                observe.on_message_end({
+                    "role": "assistant",
+                    "provider": "p", "model": "m",
+                    "usage": {"input": 1, "output": 1, "cache_read": 0,
+                              "cache_write": 0, "total_tokens": 2,
+                              "cost": {"input": 0, "output": 0,
+                                       "cache_read": 0, "cache_write": 0,
+                                       "total": 0.0001}},
+                }, MagicMock())
+                observe.on_tool_execution_end({"is_error": False}, MagicMock())
+
+        threads = [threading.Thread(target=_hammer, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Sidecar must parse cleanly and counters must equal totals.
+        s = self._read_sidecar()
+        self.assertEqual(s["usage"]["requests"], 8 * 50)
+        self.assertEqual(s["usage"]["total_tokens"], 8 * 50 * 2)
+        self.assertEqual(s["activity"]["tool_calls"], 8 * 50)
+        self.assertEqual(s["activity"]["assistant_messages"], 8 * 50)
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +734,157 @@ class TestArgParsers(unittest.TestCase):
         _, _, da, err = observe._parse_send_args(["--follow", "abc"])
         self.assertIsNone(err)
         self.assertEqual(da, "followUp")
+
+
+class TestHtopHelpers(unittest.TestCase):
+    """Tests for the formatting + parsing helpers backing the `fir htop`
+    cli verb. They're pure functions so we exercise them directly."""
+
+    def test_format_tokens(self) -> None:
+        self.assertEqual(observe._format_tokens(0), "-")
+        self.assertEqual(observe._format_tokens(-5), "-")
+        self.assertEqual(observe._format_tokens(42), "42")
+        self.assertEqual(observe._format_tokens(1234), "1.2k")
+        self.assertEqual(observe._format_tokens(2_500_000), "2.5M")
+        self.assertEqual(observe._format_tokens(3_400_000_000), "3.4G")
+
+    def test_format_cost(self) -> None:
+        self.assertEqual(observe._format_cost(0), "-")
+        self.assertEqual(observe._format_cost(0.005), "<$.01")
+        self.assertEqual(observe._format_cost(1.234), "$1.23")
+        self.assertEqual(observe._format_cost(250.0), "$250")
+
+    def test_format_tools(self) -> None:
+        self.assertEqual(observe._format_tools(0, 0), "-")
+        self.assertEqual(observe._format_tools(7, 0), "7")
+        self.assertEqual(observe._format_tools(7, 2), "7/2")
+
+    def test_format_model(self) -> None:
+        self.assertEqual(observe._format_model("anthropic", "claude"), "anthropic/claude")
+        self.assertEqual(observe._format_model("", "claude"), "claude")
+        self.assertEqual(observe._format_model("anthropic", ""), "anthropic")
+        self.assertEqual(observe._format_model("", ""), "-")
+
+    def test_parse_duration(self) -> None:
+        self.assertEqual(observe._parse_duration("500ms"), 0.5)
+        self.assertEqual(observe._parse_duration("2s"), 2.0)
+        self.assertEqual(observe._parse_duration("1m"), 60.0)
+        self.assertEqual(observe._parse_duration("3"), 3.0)
+        with self.assertRaises(ValueError):
+            observe._parse_duration("")
+        with self.assertRaises(ValueError):
+            observe._parse_duration("abc")
+
+    def test_parse_htop_args_default(self) -> None:
+        interval, err = observe._parse_htop_args([])
+        self.assertIsNone(err)
+        self.assertEqual(interval, 1.0)
+
+    def test_parse_htop_args_help(self) -> None:
+        _, err = observe._parse_htop_args(["--help"])
+        self.assertEqual(err, "__HELP__")
+
+    def test_parse_htop_args_interval_separate(self) -> None:
+        interval, err = observe._parse_htop_args(["--interval", "500ms"])
+        self.assertIsNone(err)
+        self.assertEqual(interval, 0.5)
+
+    def test_parse_htop_args_interval_equals(self) -> None:
+        interval, err = observe._parse_htop_args(["--interval=2s"])
+        self.assertIsNone(err)
+        self.assertEqual(interval, 2.0)
+
+    def test_parse_htop_args_short_flag(self) -> None:
+        interval, err = observe._parse_htop_args(["-n", "3s"])
+        self.assertIsNone(err)
+        self.assertEqual(interval, 3.0)
+
+    def test_parse_htop_args_clamp_below_min(self) -> None:
+        interval, err = observe._parse_htop_args(["--interval", "10ms"])
+        self.assertIsNone(err)
+        self.assertEqual(interval, 0.1)
+
+    def test_parse_htop_args_unknown_flag(self) -> None:
+        _, err = observe._parse_htop_args(["--bogus"])
+        self.assertIsNotNone(err)
+        assert err is not None
+        self.assertIn("unknown", err)
+
+    def test_parse_htop_args_missing_value(self) -> None:
+        _, err = observe._parse_htop_args(["--interval"])
+        self.assertIsNotNone(err)
+
+    def test_parse_htop_args_invalid_duration(self) -> None:
+        _, err = observe._parse_htop_args(["--interval", "abc"])
+        self.assertIsNotNone(err)
+
+    def test_last_activity_uses_sidecar_timestamp(self) -> None:
+        # 2 minutes ago in UTC. We construct the iso-8601 'Z' string from
+        # gmtime so the test is independent of the host timezone.
+        now = time.time()
+        ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 120))
+        s = {"activity": {"last_event": ts_str}}
+        self.assertEqual(observe._last_activity_string(s, now), "2m")
+
+    def test_last_activity_dst_safe(self) -> None:
+        """Regression: the previous implementation parsed UTC strings via
+        time.mktime (local) and subtracted time.timezone (standard offset),
+        which slips by 1 hour during DST. We assert the helper returns
+        a sub-minute reading for an event marked 'now in UTC' regardless
+        of the host's DST state.
+        """
+        now = time.time()
+        ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+        s = {"activity": {"last_event": ts_str}}
+        out = observe._last_activity_string(s, now)
+        # The DST bug would surface as ~"59m" or "1h"; a healthy reading
+        # is "now" or "Ns" with N small.
+        self.assertIn(out, ("now", "0s", "1s"), f"DST bug? got {out!r}")
+
+    def test_last_activity_falls_back_to_mtime(self) -> None:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"")
+            path = tmp.name
+        try:
+            now = time.time()
+            os.utime(path, (now - 90, now - 90))  # 90s ago
+            s = {"store_path": path, "activity": {"last_event": ""}}
+            self.assertEqual(observe._last_activity_string(s, now), "1m")
+        finally:
+            os.unlink(path)
+
+    def test_last_activity_returns_dash_when_unavailable(self) -> None:
+        s: dict[str, object] = {"activity": {}, "store_path": ""}
+        self.assertEqual(observe._last_activity_string(s, time.time()), "-")
+
+    def test_htop_render_empty(self) -> None:
+        out = observe._htop_render([], color=False)
+        self.assertIn("0 sessions", out)
+        self.assertIn("no fir sessions found", out)
+        # ANSI clear should be present.
+        self.assertTrue(out.startswith("\x1b[H\x1b[2J"))
+
+    def test_htop_render_populated(self) -> None:
+        sidecars = [{
+            "session_id": "deadbeefcafe1234",
+            "session_name": "demo",
+            "cwd": "/tmp/work",
+            "status": "running",
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "store_path": "",
+            "model": {"provider": "anthropic", "id": "claude"},
+            "usage": {"total_tokens": 12345, "cost": {"total": 1.23}},
+            "activity": {"tool_calls": 7, "tool_errors": 2,
+                         "last_event": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                     time.gmtime())},
+        }]
+        out = observe._htop_render(sidecars, color=False)
+        self.assertIn("1 session ", out)  # singular, no trailing 's'
+        self.assertIn("deadbeef", out)    # truncated id
+        self.assertIn("anthropic/claude", out)
+        self.assertIn("12.3k", out)
+        self.assertIn("$1.23", out)
+        self.assertIn("7/2", out)
 
 
 if __name__ == "__main__":

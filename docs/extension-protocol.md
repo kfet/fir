@@ -327,7 +327,7 @@ the `events` array of the init response.  For hooks, use the full `hook/` name.
 | `turn_start` | *(params key absent)* — streaming turn is starting. |
 | `turn_end` | *(params key absent)* — streaming turn has finished. |
 | `message_start` | *(params key absent)* — LLM message block is starting. |
-| `message_end` | *(params key absent)* — LLM message block has finished. |
+| `message_end` | `{role, provider?, model?, stop_reason?, response_id?, usage?}` — LLM message block has finished. `role` is `"user"`, `"assistant"`, or `"toolResult"`. Assistant messages also carry `provider`, `model`, `stop_reason`, `response_id`, and a `usage` object: `{input, output, cache_read, cache_write, total_tokens, cost: {input, output, cache_read, cache_write, total}}`. Token counts are integers; cost values are USD floats from the upstream provider (zero when unavailable). |
 | `tool_execution_start` | `{"tool_call_id": "...", "tool_name": "..."}` |
 | `tool_execution_end` | `{"tool_call_id": "...", "tool_name": "...", "is_error": false}` |
 

@@ -34,6 +34,9 @@ Batch tool demonstration:
   conversation history.
 """
 
+import sys
+import threading
+
 import fir_ext
 
 # ---------------------------------------------------------------------------
@@ -308,7 +311,23 @@ def on_message_start(params, ctx):
 
 @fir_ext.on("message_end")
 def on_message_end(params, ctx):
-    pass
+    # Assistant messages now carry provider/model/usage so observers can
+    # meter token + cost spend without parsing the transcript. User and
+    # tool-result messages get only `role`. Older fir builds emitted no
+    # params at all, so always treat fields as best-effort.
+    if not params:
+        return
+    role = params.get("role", "")
+    if role != "assistant":
+        return
+    u = params.get("usage") or {}
+    cost = (u.get("cost") or {}).get("total", 0.0)
+    print(
+        f"demo: message_end role={role} "
+        f"model={params.get('provider', '')}/{params.get('model', '')} "
+        f"tokens={u.get('total_tokens', 0)} cost=${cost:.4f}",
+        file=sys.stderr,
+    )
 
 
 @fir_ext.on("tool_execution_start")
@@ -358,8 +377,20 @@ def show_config_dirs(params, ctx):
 
 @fir_ext.cli_verb("demo-cli", summary="Echo argv back via host.println")
 def cli_demo(argv, host):
-    """Echo argv back through fir's real stdout. Returns 0."""
+    """Echo argv back through fir's real stdout. Returns 0.
+
+    With ``--wake-after``, schedules a delayed ``host.wake()`` from a
+    background thread that EOFs the stdin queue early — exercises the
+    SDK's ``Host.wake`` method.
+    """
     host.println("demo-cli argv:", *argv)
+    if "--wake-after" in argv:
+        # Force readline to return immediately even if no input is piped.
+        # Tests use this to verify wake() unblocks a pending read.
+        threading.Timer(0.05, host.wake).start()
+        line = host.readline(timeout=2.0)
+        host.println("demo-cli woke:", "EOF" if line is None else repr(line))
+        return 0
     if not host.stdin_is_tty:
         # Forward stdin lines if piped in.
         for line in host.stdin_lines():

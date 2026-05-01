@@ -256,7 +256,7 @@ init response.
 +-------------------------+------------------------------------------------+
 | ``message_start``       | *(params key absent)* — LLM message block start|
 +-------------------------+------------------------------------------------+
-| ``message_end``         | *(params key absent)* — LLM message block end  |
+| ``message_end``         | ``{role, provider?, model?, usage?}`` — see docs |
 +-------------------------+------------------------------------------------+
 | ``tool_execution_start``| ``{"tool_call_id": "...", "tool_name": "..."}``|
 +-------------------------+------------------------------------------------+
@@ -1305,6 +1305,9 @@ class Host:
                           return None on EOF
       stdin_lines         iterator over readline() until EOF — convenient
                           for ``for line in host.stdin_lines(): ...``
+      wake                synthesise EOF locally so a blocked readline
+                          returns immediately (e.g. from a cli_signal
+                          handler that wants the verb to exit promptly)
       argv / cwd          per-invocation context, set before the handler runs
       stdout_is_tty / stderr_is_tty / stdin_is_tty
                           tty-ness flags reported by fir at invoke time
@@ -1360,6 +1363,18 @@ class Host:
             else:
                 self._stdin_q.append(data)
             self._stdin_cv.notify_all()
+
+    def wake(self) -> None:
+        """Wake any pending ``readline`` immediately by pushing EOF.
+
+        Useful from a ``cli_signal`` handler that wants the verb's blocking
+        ``readline(timeout=...)`` to return promptly so the verb can exit
+        cleanly (e.g. restore alt-screen / cursor) instead of waiting out
+        the rest of its poll interval. After ``wake()`` further reads
+        return ``None``; do not call this if the verb intends to keep
+        reading user input.
+        """
+        self._push_stdin(None)
 
     def readline(self, timeout: float | None = None) -> str | None:
         """Read one line from fir's stdin (already terminated by ``\\n``).
