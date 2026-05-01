@@ -21,6 +21,10 @@
 
 - `# demo: true` extension frontmatter flag and its `Demo` gating in the manager. The flag's only effective use was skipping demo extensions in real sessions, but the only files marked with it (`demo.py`, `hello.py`) are also missing `# builtin: true` (the real load gate) and were already not loaded at runtime — so the gate never fired in practice. Both files remain as test fixtures in `pkg/resources/builtin_extensions/` for direct-path loading by tests.
 
+### Fixed
+
+- `observe` builtin extension daemon no longer pegs a CPU on long-running sessions. `_accept_loop` now does a plain blocking `accept()` and relies on `on_session_shutdown` closing the listening socket (which raises `OSError` and exits the loop) — the previous 0.5s `settimeout` poll was inherited by accepted sockets on POSIX, so `_handle_conn`'s `for line in f` over `conn.makefile()` could surface `socket.timeout` mid-read instead of blocking. The transcript tail loop in `fir observe` also yields 10ms when `readline()` returns a partial line (no trailing `\n`), preventing a writer that appends bytes without newlines from busy-spinning.
+
 ## [0.38.0] - 2026-04-29
 
 ### Added

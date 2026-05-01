@@ -211,12 +211,11 @@ def _bind_socket(path: Path) -> socket.socket | None:
 
 
 def _accept_loop(sock: socket.socket, ctx: fir_ext.Context) -> None:
-    sock.settimeout(0.5)
+    # Blocking accept; on shutdown, on_session_shutdown closes _socket
+    # which makes accept() raise OSError and we exit cleanly.
     while not _shutdown.is_set():
         try:
             conn, _ = sock.accept()
-        except socket.timeout:
-            continue
         except OSError:
             return
         threading.Thread(target=_handle_conn, args=(conn, ctx), daemon=True).start()
@@ -1120,6 +1119,10 @@ def _verb_observe_tail(
                     rendered = fmt.render(line)
                     if rendered is not None:
                         host.println(rendered)
+                    continue
+                # Partial line buffered — yield briefly so a writer that
+                # appends bytes without newlines can't pin a CPU.
+                time.sleep(0.01)
                 continue
             # EOF — poll for growth.
             time.sleep(0.1)
