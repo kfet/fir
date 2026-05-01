@@ -32,13 +32,11 @@ func SerializeConversation(messages []ai.Message) string {
 			if a == nil {
 				continue
 			}
-			var textParts, thinkingParts, toolCalls []string
+			var textParts, toolCalls []string
 
 			for _, block := range a.Content {
 				if block.Text != nil {
 					textParts = append(textParts, block.Text.Text)
-				} else if block.Thinking != nil {
-					thinkingParts = append(thinkingParts, block.Thinking.Thinking)
 				} else if block.ToolCall != nil {
 					var argParts []string
 					for k, v := range block.ToolCall.Arguments {
@@ -48,12 +46,13 @@ func SerializeConversation(messages []ai.Message) string {
 				}
 			}
 
-			if len(thinkingParts) > 0 {
-				parts = append(parts, "[Assistant thinking]: "+strings.Join(thinkingParts, "\n"))
-			}
 			if len(textParts) > 0 {
 				parts = append(parts, "[Assistant]: "+strings.Join(textParts, "\n"))
 			}
+			// NOTE: thinking blocks are intentionally dropped from
+			// summarizer input. They bloat the prompt, bias the summary
+			// toward the agent's prior CoT, and would otherwise leak
+			// reasoning across compactions.
 			if len(toolCalls) > 0 {
 				parts = append(parts, "[Assistant tool calls]: "+strings.Join(toolCalls, "; "))
 			}

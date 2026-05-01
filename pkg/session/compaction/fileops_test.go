@@ -21,7 +21,7 @@ func TestFileOperations_ExtractFromMessage(t *testing.T) {
 		},
 	})
 
-	ExtractFileOpsFromMessage(agent.NewAgentMessage(assistantMsg), fileOps)
+	ExtractFileOpsFromMessage(agent.NewAgentMessage(assistantMsg), "e1", fileOps)
 
 	if _, ok := fileOps.Read["/src/main.go"]; !ok {
 		t.Error("expected /src/main.go in Read")
@@ -41,7 +41,7 @@ func TestFileOperations_IgnoreNonAssistant(t *testing.T) {
 	fileOps := NewFileOperations()
 
 	userMsg := ai.NewUserMsg("hello", 0)
-	ExtractFileOpsFromMessage(agent.NewAgentMessage(userMsg), fileOps)
+	ExtractFileOpsFromMessage(agent.NewAgentMessage(userMsg), "", fileOps)
 
 	if len(fileOps.Read) != 0 || len(fileOps.Written) != 0 || len(fileOps.Edited) != 0 {
 		t.Error("expected empty file ops for non-assistant message")
@@ -75,7 +75,7 @@ func TestComputeFileLists_Empty(t *testing.T) {
 }
 
 func TestFormatFileOperations(t *testing.T) {
-	result := FormatFileOperations([]string{"/src/util.go"}, []string{"/src/main.go", "/src/new.go"})
+	result := FormatFileOperations([]string{"/src/util.go"}, []string{"/src/main.go", "/src/new.go"}, nil)
 
 	if result == "" {
 		t.Fatal("expected non-empty result")
@@ -92,14 +92,14 @@ func TestFormatFileOperations(t *testing.T) {
 }
 
 func TestFormatFileOperations_Empty(t *testing.T) {
-	result := FormatFileOperations(nil, nil)
+	result := FormatFileOperations(nil, nil, nil)
 	if result != "" {
 		t.Errorf("expected empty string, got %q", result)
 	}
 }
 
 func TestFormatFileOperations_OnlyRead(t *testing.T) {
-	result := FormatFileOperations([]string{"/a.go"}, nil)
+	result := FormatFileOperations([]string{"/a.go"}, nil, nil)
 	if !strings.Contains(result, "<read-files>") {
 		t.Error("expected <read-files> tag")
 	}
@@ -109,7 +109,7 @@ func TestFormatFileOperations_OnlyRead(t *testing.T) {
 }
 
 func TestFormatFileOperations_OnlyModified(t *testing.T) {
-	result := FormatFileOperations(nil, []string{"/a.go"})
+	result := FormatFileOperations(nil, []string{"/a.go"}, nil)
 	if strings.Contains(result, "<read-files>") {
 		t.Error("did not expect <read-files> tag")
 	}

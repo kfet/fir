@@ -71,14 +71,19 @@ type ContextUsageEstimate struct {
 // File operation extraction
 // ============================================================================
 
-func extractFileOperations(messages []agent.AgentMessage, entries []*store.SessionEntry, prevCompactionIndex int) *FileOperations {
+// extractFileOperations builds a FileOperations from a slice of entries
+// (the slice covers the range to summarize). Each entry's stable ID is
+// associated with the file paths it touches so the rendered <modified-files>
+// list can carry pointer-stub-style references back to the session log.
+func extractFileOperations(entries []*store.SessionEntry, allEntries []*store.SessionEntry, prevCompactionIndex int) *FileOperations {
 	fileOps := NewFileOperations()
 
 	if prevCompactionIndex >= 0 {
-		prev := entries[prevCompactionIndex]
+		prev := allEntries[prevCompactionIndex]
 		if prev.Type == "compaction" && !prev.FromHook && len(prev.Details) > 0 {
 			var details CompactionDetails
 			if err := json.Unmarshal(prev.Details, &details); err == nil {
+				// Carried-forward paths: ID unknown.
 				for _, f := range details.ReadFiles {
 					fileOps.Read[f] = struct{}{}
 				}
@@ -89,8 +94,12 @@ func extractFileOperations(messages []agent.AgentMessage, entries []*store.Sessi
 		}
 	}
 
-	for _, msg := range messages {
-		ExtractFileOpsFromMessage(msg, fileOps)
+	for _, e := range entries {
+		msg := getMessageFromEntry(e)
+		if msg == nil {
+			continue
+		}
+		ExtractFileOpsFromMessage(*msg, e.ID, fileOps)
 	}
 
 	return fileOps
@@ -165,10 +174,17 @@ func PrepareCompaction(pathEntries []*store.SessionEntry, settings CompactionSet
 		previousSummary = pathEntries[prevCompactionIndex].Summary
 	}
 
-	fileOps := extractFileOperations(messagesToSummarize, pathEntries, prevCompactionIndex)
+	// History entries (boundaryStart .. historyEnd) — pass the entry slice
+	// so file-op tracking can record source entry IDs.
+	fileOps := extractFileOperations(pathEntries[boundaryStart:historyEnd], pathEntries, prevCompactionIndex)
 	if cutPoint.IsSplitTurn {
-		for _, msg := range turnPrefixMessages {
-			ExtractFileOpsFromMessage(msg, fileOps)
+		for i := cutPoint.TurnStartIndex; i < cutPoint.FirstKeptEntryIndex; i++ {
+			e := pathEntries[i]
+			msg := getMessageFromEntry(e)
+			if msg == nil {
+				continue
+			}
+			ExtractFileOpsFromMessage(*msg, e.ID, fileOps)
 		}
 	}
 
@@ -237,7 +253,7 @@ func Compact(
 	}
 
 	readFiles, modifiedFiles := ComputeFileLists(preparation.FileOps)
-	summary += FormatFileOperations(readFiles, modifiedFiles)
+	summary += FormatFileOperations(readFiles, modifiedFiles, preparation.FileOps.EntryIDs)
 
 	return &CompactionResult{
 		Summary:          summary,

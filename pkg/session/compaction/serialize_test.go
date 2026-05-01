@@ -38,8 +38,10 @@ func TestSerializeConversation(t *testing.T) {
 	if !strings.Contains(result, "[Assistant]: Sure, let me take a look.") {
 		t.Error("expected assistant text in output")
 	}
-	if !strings.Contains(result, "[Assistant thinking]: Let me think about this...") {
-		t.Error("expected thinking in output")
+	// Thinking blocks are intentionally dropped from summarizer input —
+	// see Phase 1 #6 of docs/review-compact-flow/COMPACTION_REWORK.md.
+	if strings.Contains(result, "[Assistant thinking]") {
+		t.Error("expected thinking to be dropped from summarizer input")
 	}
 	if !strings.Contains(result, "[Assistant tool calls]: read(") {
 		t.Error("expected tool calls in output")

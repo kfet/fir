@@ -279,9 +279,22 @@ func (m *InteractiveMode) executeCompaction(customInstructions string) {
 	m.ui.RequestRender(false)
 
 	// Attach a streaming progress callback that updates the label as the LLM writes.
+	// Throttle re-renders to ~20Hz; otherwise per-token deltas can swamp the
+	// TUI render loop with one re-render per stream event. (Phase 1 #13.)
 	var writtenChars int
+	var lastUpdate time.Time
+	const progressInterval = 50 * time.Millisecond
+	var lastPhase string
 	progressFn := func(phase, delta string) {
 		writtenChars += len(delta)
+		now := time.Now()
+		// Always update on phase change so the user sees transitions
+		// (e.g. "summarizing history" → "summarizing turn context").
+		if phase == lastPhase && now.Sub(lastUpdate) < progressInterval {
+			return
+		}
+		lastUpdate = now
+		lastPhase = phase
 		tokensWritten := writtenChars / 4
 		label := m.compactionLoaderLabel(info, fmt.Sprintf("%s... %d tokens written (Esc to cancel)", phase, tokensWritten))
 		loader.SetMessage(label)

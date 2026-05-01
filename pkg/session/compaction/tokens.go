@@ -84,8 +84,10 @@ func EstimateContextTokens(messages []agent.AgentMessage) ContextUsageEstimate {
 // ShouldCompact checks if compaction should trigger.
 // Compaction fires if either condition is true:
 //   - Absolute token cap: contextTokens > MaxContextTokens (when MaxContextTokens > 0)
-//   - Fill-ratio + reserve: context is at least 90% full AND remaining
-//     headroom < ReserveTokens.
+//   - Fill-ratio: context is at least 70% full. Models degrade well before
+//     the window is exhausted (research: ~30k effective regardless of
+//     stated window), so we trigger early rather than waiting for the
+//     reserve to be eaten. The old AND-with-reserve gate is removed.
 func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings) bool {
 	if !settings.Enabled || contextWindow <= 0 {
 		return false
@@ -96,12 +98,8 @@ func ShouldCompact(contextTokens, contextWindow int, settings CompactionSettings
 		return true
 	}
 
-	// Existing fill-ratio + reserve path.
-	const minFillRatio = 0.90
-	if float64(contextTokens)/float64(contextWindow) < minFillRatio {
-		return false
-	}
-	return contextTokens > contextWindow-settings.ReserveTokens
+	const minFillRatio = 0.70
+	return float64(contextTokens)/float64(contextWindow) >= minFillRatio
 }
 
 // ============================================================================

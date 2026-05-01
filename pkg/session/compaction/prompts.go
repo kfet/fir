@@ -20,6 +20,8 @@ import (
 
 const summarizationPromptText = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
+Note on elided observations: older or large tool outputs in the conversation may appear as ` + "`[entry <id> tool=<name> bytes=<n> ...]`" + ` stubs. Treat these as references — do not invent content for them. If continuing the work needs the actual output, the next agent should re-run the command or re-` + "`read`" + ` the file rather than guess.
+
 Use this EXACT format:
 
 ## Goal
@@ -59,7 +61,10 @@ Update the existing structured summary with new information. RULES:
 - UPDATE the Progress section: move items from "In Progress" to "Done" when completed
 - UPDATE "Next Steps" based on what was accomplished
 - PRESERVE exact file paths, function names, and error messages
+- BOUND the "Done" list to the most recent ~20 items. Older completed items may be summarized into a single "Earlier (summarized): ..." bullet so the list does not grow without bound across many compactions.
 - If something is no longer relevant, you may remove it
+
+Note on elided observations: older or large tool outputs may appear as ` + "`[entry <id> tool=<name> bytes=<n> ...]`" + ` stubs. Treat these as references — do not invent content. To recover, re-run the command or re-` + "`read`" + ` the file.
 
 Use this EXACT format:
 
@@ -71,7 +76,7 @@ Use this EXACT format:
 
 ## Progress
 ### Done
-- [x] [Include previously done items AND newly completed items]
+- [x] [Most recent ~20 completed items; older items rolled up into a single "Earlier (summarized)" bullet]
 
 ### In Progress
 - [ ] [Current work - update based on progress]
@@ -111,13 +116,16 @@ func BuildSummarizationPrompt(conversationText, previousSummary, customInstructi
 	if previousSummary != "" {
 		basePrompt = updateSummarizationPromptText
 	}
-	if customInstructions != "" {
-		basePrompt = basePrompt + "\n\nAdditional focus: " + customInstructions
-	}
 
 	promptText := "<conversation>\n" + conversationText + "\n</conversation>\n\n"
 	if previousSummary != "" {
 		promptText += "<previous-summary>\n" + previousSummary + "\n</previous-summary>\n\n"
+	}
+	// Promote user-supplied focus to a first-class section ABOVE the
+	// format spec so it carries weight comparable to the spec itself.
+	// (Phase 1 #10 of the compaction rework.)
+	if customInstructions != "" {
+		promptText += "<user-focus>\nThe user supplied the following focus for this compaction. Treat it as a hard requirement; the structured format below is the medium, this focus is the priority.\n\n" + customInstructions + "\n</user-focus>\n\n"
 	}
 	promptText += basePrompt
 	return promptText

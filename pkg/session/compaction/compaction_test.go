@@ -615,9 +615,14 @@ func TestExtractFileOperations_WithPrevCompaction(t *testing.T) {
 			ai.NewToolCallContent("1", "read", map[string]any{"path": "/new/read.go"}),
 		},
 	})
-	messages := []agent.AgentMessage{agent.NewAgentMessage(assistantMsg)}
+	// Wrap the assistant message in a session entry so we can pass it as
+	// the entries slice (the new extractFileOperations signature).
+	rawMsg, _ := json.Marshal(assistantMsg)
+	msgEntries := []*store.SessionEntry{
+		{Type: "message", ID: "m1", RawMessage: rawMsg},
+	}
 
-	fileOps := extractFileOperations(messages, entries, 0)
+	fileOps := extractFileOperations(msgEntries, entries, 0)
 	if _, ok := fileOps.Read["/prev/read.go"]; !ok {
 		t.Error("expected /prev/read.go from previous compaction details")
 	}
