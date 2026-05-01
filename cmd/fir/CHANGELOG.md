@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-05-01
+
 ### Added
 
 - Slash-skill CLI invocation: `fir /<skill-name> <task...>` rewrites into an initial agent message that points at the named skill's `SKILL.md` and supplies the rest of the positional arguments as the task body. Composes with all other flags (`-p`, `--model`, etc.). Skill names are resolved via the usual loader (project + user + builtin); typos fail fast with the available list. Bash and zsh completion are extended so `fir /<TAB>` enumerates installed skills dynamically (cached per shell invocation, sourced from `fir skills list`).
