@@ -5,6 +5,8 @@
 ### Added
 
 - Slash-skill CLI invocation: `fir /<skill-name> <task...>` rewrites into an initial agent message that points at the named skill's `SKILL.md` and supplies the rest of the positional arguments as the task body. Composes with all other flags (`-p`, `--model`, etc.). Skill names are resolved via the usual loader (project + user + builtin); typos fail fast with the available list. Bash and zsh completion are extended so `fir /<TAB>` enumerates installed skills dynamically (cached per shell invocation, sourced from `fir skills list`).
+- New `wt` builtin skill: delegate a task to a fresh fir agent in a new tmux window on its own git worktree. Replaces the old `.fir/prompts/wt.md` slash-prompt with a discoverable, descriptioned skill that the agent picks up automatically when the user asks to "kick off" / "spin up" / "delegate" a task.
+- New `caveman` builtin skill: ultra-compressed caveman-speech mode that cuts token usage ~75% while keeping technical accuracy. Extracted from `AGENTS.md` so it's only loaded when the user asks for it (e.g. "caveman mode") instead of bloating every session's system prompt.
 - `# explicit: true` extension frontmatter flag: extensions marked explicit are **discovered** (so `fir -e <name>` and listings find them) but **not auto-loaded** — they only run when the user names them in the allowlist. Replaces the dropped `# demo: true` flag with a semantically clean opt-in marker. The shipped example/fixture extensions `demo.py` and `hello.py` are now annotated with it: they're loaded by the builtin extension loader so `fir -e demo` works, but stay dormant by default.
 - Versioned Homebrew formulas: each release publishes `fir@MAJOR.MINOR` to the `kfet/homebrew-fir` tap alongside the rolling `fir`, letting users pin or roll back with `brew install kfet/fir/fir@0.29`. A `tap-prune` workflow keeps the 10 most-recent minor channels and removes older ones automatically after each release. Pinned and rolling formulas both ship a `bin/fir`; switching between them is `brew unlink` / `brew link --overwrite` (the requested clobber UX).
 - New `pebble-emu` builtin skill: AI-friendly recipe for the Rebble/Core-Devices `pebble-tool` v5 emulator. Documents the build → install → screenshot loop (`pebble screenshot --no-open` pulls a live PNG over the pebble-protocol socket — the agent's eye), the `--vnc` flag (QEMU `-vnc :1` on port 5901 + websockify noVNC on 6080), input/sensor injection (`emu-tap`, `emu-accel`, `emu-battery`, `emu-bt-connection`, `emu-compass`, `emu-app-config`, `emu-control`), all six platforms (aplite/basalt/chalk/diorite/emery/flint), and cleanup (`pebble kill`, `pebble wipe`).
@@ -15,11 +17,14 @@
 
 ### Changed
 
+- `AGENTS.md` reorganised: worktree convention (previously in the demoted `work` skill) and advisor-escalation guidance are now first-class sections, and the standing Python-3.9 / "you own this codebase" rules are tightened. Caveman mode moved out into its own skill.
+- `shepherd` skill no longer references the removed `work` skill — it points at the worktree convention in `AGENTS.md` instead.
 - `notify` builtin extension now uses the tmux session id (`$TMUX`) as the OSC 99 notification identifier when running inside tmux. Kitty coalesces same-id notifications, so multiple background fir agents in one tmux session collapse into a single updating banner instead of stacking. Outside tmux, falls back to the previous fixed id. OSC 777 terminals (Ghostty, iTerm2, WezTerm) are unaffected — that protocol has no id field.
 - `fir observe` and `fir send` are now CLI verbs of the builtin `observe` extension instead of Go subcommands. Behaviour is identical (sidecar discovery, formatter, `--json` / `--full` / `--interact`, sigil parsing, `--cwd`, NDJSON wire to the per-session socket); the implementation moved from `cmd/fir/observe.go` + `cmd/fir/send.go` (~880 LoC of Go) into `pkg/resources/builtin_extensions/observe.py`. First real users of the extension-CLI-verbs mechanism.
 
 ### Removed
 
+- `work` builtin skill and `.fir/prompts/wt.md` slash-prompt — content folded into `AGENTS.md` (worktree convention) and the new `wt` skill (delegated-agent recipe) respectively.
 - `# demo: true` extension frontmatter flag and its `Demo` gating in the manager. The flag's only effective use was skipping demo extensions in real sessions, but the only files marked with it (`demo.py`, `hello.py`) are also missing `# builtin: true` (the real load gate) and were already not loaded at runtime — so the gate never fired in practice. Both files remain as test fixtures in `pkg/resources/builtin_extensions/` for direct-path loading by tests.
 
 ### Fixed

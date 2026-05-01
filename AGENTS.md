@@ -6,11 +6,9 @@ Prefer `sync/atomic`, `sync.Once`, and channels over manual mutex management whe
 
 ## Python 3.9 minimum
 
-All Python code (SDK, extensions, tests) **must** remain compatible with Python 3.9. macOS ships with Python 3.9 and we want everything to work out of the box on a fresh macOS install — no Homebrew, no pyenv, no extra steps. Do not bump `requires-python` in `pyproject.toml` or `python-version` in the ty config.
+All Python code (SDK, extensions, tests) **must** stay compatible with Python 3.9 — macOS ships 3.9 and fir must work on a fresh install with no Homebrew/pyenv. Do not bump `requires-python` in `pyproject.toml` or `python-version` in the ty config.
 
-Do not ignore any issues, address them promptly, even if preexisting. Do not postpone any work, even if it seems daunting - just break it down into smaller tasks. **Never dismiss a problem as "pre-existing" or "out of scope" — you own this entire codebase. If you see it, you fix it.**
-
-Do not leave incomplete or stubbed code. Ensure all code is functional and tested.
+Never dismiss a problem as "pre-existing" or "out of scope" — you own this entire codebase. If you see it, fix it. No stubs, no TODOs, no postponed work; break large tasks into small ones instead.
 
 ## Modes — think before you specialise
 
@@ -44,6 +42,51 @@ GIT_EDITOR=true git commit
 When the user says "rebase to main", they mean local `main`, not `origin/main`.
 
 When merging a feature branch back to main, always use `git merge --ff-only` to keep a linear history and avoid merge commits. Rebase the branch first if needed.
+
+## Worktrees
+
+All non-trivial work happens in a **git worktree** on a feature branch. Never edit `main` directly.
+
+```bash
+FEATURE="<short-kebab-name>"          # e.g. acp-auth-methods
+BRANCH="work/${FEATURE}"
+PROJECT="$PWD"                        # captured before we cd away
+WORKTREE="${PROJECT}-wt-${FEATURE}"   # sibling of project root
+
+git worktree add "$WORKTREE" -b "$BRANCH"
+cd "$WORKTREE"
+```
+
+All edits, tests, and commits happen in `$WORKTREE`.
+
+If the task needs design work, write a short plan doc **in the worktree** before coding — name specific files, interfaces, and test cases.
+
+When the task touches multiple packages or wants parallel work streams, use the `shepherd` skill to coordinate multiple agents (it reuses this worktree convention).
+
+To delegate a task to a fresh agent in a new tmux window instead of doing it yourself, use the `wt` skill.
+
+### Finishing
+
+1. Final `make all` in the worktree.
+2. Call the advisor (`aside` with `escalate=true`) before declaring the task done — see *Advisor* below.
+3. Commit everything.
+4. Ff-merge back to main and clean up (using the captured `$PROJECT`, since you're still inside `$WORKTREE`):
+   ```bash
+   git -C "$PROJECT" merge --ff-only "$BRANCH"
+   git -C "$PROJECT" worktree remove "$WORKTREE"
+   git -C "$PROJECT" branch -d "$BRANCH"
+   ```
+
+## Advisor
+
+The `aside-advisor` skill (auto-loaded) explains how to escalate to a stronger advisor model via `aside` with `escalate=true`. Use it at the high-leverage moments:
+
+- **Before committing to an approach** on any non-trivial task — after orientation, before substantive edits.
+- **When stuck** — recurring errors, not converging, results that don't fit. If you've re-run the same command 5+ times (see *Stuck loops*), escalate instead of looping.
+- **Before declaring a task done** — after `make all` passes and the deliverable is written, but before you tell the user it's finished.
+- **When considering a change of approach.**
+
+Apply the bottleneck check first: if more data would resolve the uncertainty, gather it; only escalate when the gap is reasoning, not information.
 
 ## Stuck loops
 
@@ -115,29 +158,3 @@ Key constraints:
 - The Go SDK (schema 0.10.7) is missing unstable methods (`session/set_model`, `session/list`, `session/resume`); define those types locally in `types.go`.
 - Use `acp.NewConnection` directly (not `AgentSideConnection`) to handle all methods — stable and unstable — in one switch.
 
-## Caveman Mode
-
-Ultra-compressed communication. Slash token usage ~75% by speaking like caveman while keeping full technical accuracy.
-
-### Grammar
-- Drop articles (a, an, the)
-- Drop filler (just, really, basically, actually, simply)
-- Drop pleasantries (sure, certainly, of course, happy to)
-- Short synonyms (big not extensive, fix not "implement a solution for")
-- No hedging (skip "it might be worth considering")
-- Fragments fine. No need full sentence
-- Technical terms stay exact
-- Code blocks unchanged. Caveman speak around code, not in code
-- Error messages quoted exact
-
-### Pattern
-`[thing] [action] [reason]. [next step].`
-
-Not: "Sure! I'd be happy to help. The issue is likely caused by..."
-Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
-
-### Boundaries
-- Code: write normal. Caveman English only
-- Git commits: normal
-- PR descriptions: normal
-- User say "stop caveman" or "normal mode": revert immediately

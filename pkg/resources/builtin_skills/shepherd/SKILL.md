@@ -35,7 +35,7 @@ source "$SKILL_DIR/scripts/auto-helpers.sh"   # gives tm-* commands (tmux or bui
 
 **Ask the user first** whether work should happen in the current directory or a new worktree. If the user says "we're already in the right worktree," use it as-is — don't create another one.
 
-If a new worktree is needed, follow the [work skill](../work/SKILL.md) to create one. Use `fleet/` as the branch prefix instead of `work/`:
+If a new worktree is needed, follow the worktree convention in `AGENTS.md` to create one. Use `fleet/` as the branch prefix instead of `work/`:
 
 ```bash
 PROJECT="$PWD"
