@@ -20,7 +20,7 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/auth"
-	"github.com/kfet/fir/pkg/compaction"
+	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
 	firlog "github.com/kfet/fir/pkg/log"
