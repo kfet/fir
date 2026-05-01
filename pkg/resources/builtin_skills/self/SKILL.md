@@ -185,6 +185,8 @@ Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML
 
 Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills and `fir skills install <name>` to extract a builtin skill for customisation.
 
+Skills can also be invoked directly from the CLI: `fir /<skill-name> [task...]` rewrites into an initial agent message that points at the named skill and supplies the rest of the positional arguments as the task body. Composes with all flags (`-p`, `--model`, `-c`, …). Bash and zsh completion enumerate `/<skill>` candidates dynamically from `fir skills list`.
+
 ## External Packages
 
 Install/manage external packages (git repos or local paths) that contribute skills, extensions, prompts, and themes:

@@ -113,8 +113,20 @@ _fir_first_arg() {
         'login:OAuth login'
         'completion:Print shell completion script'
     )
+    # Slash-prefixed skill invocation: `fir /<skill> ...` (cached per shell).
+    local -a slash_skills
+    local cache_var=_fir_slash_skills_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_slash_skills_cache
+        local s
+        for s in ${(f)"$(fir skills list 2>/dev/null | awk 'NR>1 && $1!="NAME" {print $1}')"}; do
+            _fir_slash_skills_cache+=("/$s:skill")
+        done
+    fi
+    slash_skills=( "${_fir_slash_skills_cache[@]}" )
     _alternative \
         'subcommands:subcommand:(( ${subs[@]} ))' \
+        'skills:slash-skill:(( ${slash_skills[@]} ))' \
         'files:file argument (@file):_files -P @' \
         'messages:message:'
 }

@@ -478,6 +478,13 @@ func run() error {
 		return runLoginWithExtensions(args, args.Login)
 	}
 
+	// Slash-skill invocation: `fir /<skill-name> <task...>` rewrites to a
+	// directive message. Done after --help/--version/--list-models/--export
+	// /--login so those exits are never blocked by an unknown-skill error.
+	if err := rewriteSlashSkillMessages(args); err != nil {
+		return err
+	}
+
 	// ACP mode creates sessions on demand, so dispatch before setupSession.
 	if isACPMode {
 		firlog.Debug("mode dispatch", "mode", "acp")

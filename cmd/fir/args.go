@@ -285,6 +285,7 @@ func PrintHelp() {
 	fmt.Printf("%s - AI coding assistant with read, bash, edit, write tools\n\nUsage:\n", appName)
 	fmt.Printf("  %s [options] [@files...] [messages...]\n", appName)
 	const syntaxW = 31
+	fmt.Printf("  %-*s %s\n", syntaxW, appName+" /<skill> [task...]", "Invoke a skill by name with the given task")
 	for _, sc := range subcommands {
 		for _, row := range sc.Help {
 			syntax, summary := row[0], row[1]

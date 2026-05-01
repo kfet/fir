@@ -103,6 +103,16 @@ _fir_complete() {
             COMPREPLY=( "${files[@]/#/@}" )
             return
         fi
+        if [[ $cur == /* ]]; then
+            local stripped=${cur#/}
+            local names
+            names=$(_fir_skill_names)
+            local prefixed=()
+            local n
+            for n in $names; do prefixed+=("/$n"); done
+            COMPREPLY=( $(compgen -W "${prefixed[*]}" -- "$cur") )
+            return
+        fi
         COMPREPLY=( $(compgen -W "$subs" -- "$cur") )
         return
     fi
