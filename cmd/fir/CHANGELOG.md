@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The `pty` subcommand and PTY multiplexer are now provided by the standalone [`firpty`](https://github.com/kfet/firpty) module (extracted from `pkg/ptydriver/`). `fir` re-exposes `fir pty …` as a thin shim that imports `github.com/kfet/firpty`, so all existing skills and shell helpers keep working unchanged. The new module has 100% unit-test coverage with thin wrappers over `creack/pty` and `os/exec` excluded via `.covignore`.
+
 ### Fixed
 
 - Interactive TUI: tool-result background colour stayed in the "pending" tone when `Ctrl+O` (toggle tool-output expansion) was active. `onToolExecEnd` was passing `m.toolOutputExpanded` as the `isPartial` argument to `UpdateResult`, conflating expansion state with completion state. Pass `false` (the tool has finished) and rely on the existing `SetExpanded` call in `onToolExecStart` for expansion. No verbosity change — output truncation thresholds are unchanged.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/kfet/fir/pkg/ptydriver"
+	"github.com/kfet/firpty"
 )
 
 // runPTY implements the "fir pty" subcommand.
@@ -36,8 +36,8 @@ func runPTY() {
 	args = args[1:]
 
 	if cmd == "serve" {
-		sock := ptydriver.DefaultSocketPath()
-		srv, err := ptydriver.NewServer(sock)
+		sock := firpty.DefaultSocketPath()
+		srv, err := firpty.NewServer(sock, nil)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -51,7 +51,7 @@ func runPTY() {
 	}
 
 	// All other commands are client calls.
-	client := &ptydriver.Client{SocketPath: ptydriver.DefaultSocketPath()}
+	client := &firpty.Client{SocketPath: firpty.DefaultSocketPath()}
 
 	switch cmd {
 	case "new":
@@ -178,7 +178,7 @@ func need(args []string, min int, usage string) {
 	}
 }
 
-func call(client *ptydriver.Client, method string, params any) {
+func call(client *firpty.Client, method string, params any) {
 	resp, err := client.Call(method, params)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
