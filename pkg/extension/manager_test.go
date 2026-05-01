@@ -895,3 +895,78 @@ func TestManager_AuthProviderConflict_SameScopeTiebreak(t *testing.T) {
 		t.Errorf("expected aaa-auth to win tie-break, got %q", provider.Name())
 	}
 }
+
+// writeExplicitExtScript writes a project-local extension marked explicit: true.
+func writeExplicitExtScript(t *testing.T, dir, name string) string {
+	t.Helper()
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, name)
+	content := `#!/bin/sh
+# ---
+# name: ` + name + `
+# explicit: true
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[{"name":"explicit_tool","description":"opt-in"}],"events":[]}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func TestManager_ExplicitExtension_SkippedByDefault(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeExplicitExtScript(t, dir, "opt-in-ext")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash, _ := ComputeHash(scriptPath)
+	_ = ts.RecordTrust(dir, "opt-in-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	// Wait for builtin extensions to settle, then check the explicit one was skipped.
+	pollToolCount(api, builtinToolCount, 5*time.Second)
+	time.Sleep(100 * time.Millisecond)
+	if n := api.toolCount(); n != builtinToolCount {
+		t.Fatalf("expected %d tools (explicit ext skipped), got %d", builtinToolCount, n)
+	}
+}
+
+func TestManager_ExplicitExtension_LoadedWhenAllowed(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeExplicitExtScript(t, dir, "opt-in-ext")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash, _ := ComputeHash(scriptPath)
+	_ = ts.RecordTrust(dir, "opt-in-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+	mgr.SetAllowedNames([]string{"opt-in-ext"})
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	if n := pollToolCount(api, 1, 5*time.Second); n != 1 {
+		t.Fatalf("expected 1 tool from opt-in-ext, got %d", n)
+	}
+}

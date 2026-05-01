@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # ---
 # name: hello
+# explicit: true
 # ---
 """Simple test extension: logs a message on agent_end."""
 

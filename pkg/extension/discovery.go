@@ -16,6 +16,7 @@ type ExtProcConfig struct {
 	Modes         []string // optional mode allowlist from comment frontmatter
 	AuthProviders []string // auth provider IDs declared in frontmatter
 	CLIVerbs      []string // top-level `fir <verb>` names declared in frontmatter
+	Explicit      bool     // when true, extension is opt-in: only loaded when named via -e
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -41,6 +42,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 				Modes:         fm.Modes,
 				AuthProviders: fm.AuthProviders,
 				CLIVerbs:      fm.CLIVerbs,
+				Explicit:      fm.Explicit,
 			}
 		}
 	}
@@ -150,6 +152,7 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			Modes:         fm.Modes,
 			AuthProviders: fm.AuthProviders,
 			CLIVerbs:      fm.CLIVerbs,
+			Explicit:      fm.Explicit,
 		}
 	}
 	result := make([]ExtProcConfig, 0, len(byName))
@@ -188,6 +191,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				Modes:         fm.Modes,
 				AuthProviders: fm.AuthProviders,
 				CLIVerbs:      fm.CLIVerbs,
+				Explicit:      fm.Explicit,
 			}
 			continue
 		}
@@ -221,6 +225,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			Modes:         fm.Modes,
 			AuthProviders: fm.AuthProviders,
 			CLIVerbs:      fm.CLIVerbs,
+			Explicit:      fm.Explicit,
 		}
 	}
 	return nil

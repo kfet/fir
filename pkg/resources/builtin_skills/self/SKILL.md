@@ -171,7 +171,7 @@ A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extens
 
 Control loading via `settings.json` `"extensions"` allowlist, `--extension`/`-e` flags, or `--no-extensions`.
 
-Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, or `text`.
+Extensions can optionally self-restrict by mode using script comment frontmatter (`# modes: ...`), e.g. `tui`, `acp`, or `text`. Mark an extension `# explicit: true` to make it **opt-in only** — it stays discoverable (so `fir -e <name>` and listings find it) but is **not** auto-loaded; it runs only when named in the allowlist. The shipped `demo` and `hello` example extensions use this.
 
 Builtin extensions (notify, tmuxspinner, plan_nudger, etc.) are embedded in the binary and auto-discovered at lowest priority. Use `fir extensions` to list them and `fir extensions install <name>` to extract one for customisation.
 

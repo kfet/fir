@@ -63,6 +63,13 @@ func runExtensionsList() error {
 	fmt.Printf("%-*s  %s\n", nameW, "NAME", "DESCRIPTION")
 	for _, b := range builtins {
 		desc := b.Description
+		if b.Explicit {
+			if desc == "" {
+				desc = "(opt-in: load with -e " + b.Name + ")"
+			} else {
+				desc = "[opt-in] " + desc
+			}
+		}
 		if len(desc) > 60 {
 			desc = desc[:57] + "..."
 		}
@@ -75,10 +82,11 @@ type builtinExtMeta struct {
 	Name        string
 	Description string
 	FileName    string // original filename in the embedded FS
+	Explicit    bool   // opt-in: discovered but not auto-loaded
 }
 
 // listBuiltinExtensionMeta reads frontmatter from all embedded extensions
-// marked with builtin: true.
+// marked with builtin: true or explicit: true.
 func listBuiltinExtensionMeta() []builtinExtMeta {
 	entries, err := resources.BuiltinExtensionsFS.ReadDir("builtin_extensions")
 	if err != nil {
@@ -95,7 +103,7 @@ func listBuiltinExtensionMeta() []builtinExtMeta {
 			continue
 		}
 		fm := resources.ParseCommentFrontmatter(string(data))
-		if !fm.Builtin {
+		if !fm.Builtin && !fm.Explicit {
 			continue
 		}
 		name := fm.Name
@@ -106,6 +114,7 @@ func listBuiltinExtensionMeta() []builtinExtMeta {
 			Name:        name,
 			Description: fm.Description,
 			FileName:    e.Name(),
+			Explicit:    fm.Explicit,
 		})
 	}
 	return result
@@ -158,8 +167,9 @@ func runExtensionsInstall(name string, user, force bool) error {
 		return fmt.Errorf("create directory %s: %w", targetDir, err)
 	}
 
-	// Strip the builtin: true frontmatter line so the installed copy
-	// is treated as a normal extension (not a duplicate builtin).
+	// Strip the builtin: true / explicit: true frontmatter lines so the
+	// installed copy is treated as a normal extension (not a duplicate
+	// builtin, and not opt-in — the user installed it deliberately).
 	content := stripBuiltinFrontmatter(string(data))
 
 	if err := os.WriteFile(targetFile, []byte(content), 0o755); err != nil {
@@ -174,13 +184,15 @@ func runExtensionsInstall(name string, user, force bool) error {
 	return nil
 }
 
-// stripBuiltinFrontmatter removes the "# builtin: true" line from
-// frontmatter so an installed copy isn't treated as a builtin.
+// stripBuiltinFrontmatter removes the "# builtin: true" and "# explicit: true"
+// lines from frontmatter so an installed copy isn't treated as a builtin or
+// as opt-in only.
 func stripBuiltinFrontmatter(content string) string {
 	lines := strings.Split(content, "\n")
 	var out []string
 	for _, line := range lines {
-		if strings.TrimSpace(line) == "# builtin: true" {
+		t := strings.TrimSpace(line)
+		if t == "# builtin: true" || t == "# explicit: true" {
 			continue
 		}
 		out = append(out, line)

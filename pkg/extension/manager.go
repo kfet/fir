@@ -251,7 +251,7 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 }
 
 // shouldSkip returns true if the extension should be skipped based on
-// allowlist, demo, and mode filtering. Extracted from startOne so that
+// allowlist, explicit-only, and mode filtering. Extracted from startOne so that
 // Start can partition before spawning goroutines.
 func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 	m.mu.Lock()
@@ -262,6 +262,12 @@ func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 		return true
 	}
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
+		return true
+	}
+	// Explicit extensions are opt-in: they only load when named in the
+	// allowlist (e.g. via `-e <name>`). Without an explicit allowlist match,
+	// skip them.
+	if cfg.Explicit && !containsString(allowed, cfg.Name) {
 		return true
 	}
 	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {
@@ -283,6 +289,10 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 	if len(allowed) > 0 && !containsString(allowed, cfg.Name) {
 		m.logger.Debug("skipping extension (not in allowlist)", "ext", cfg.Name)
+		return nil
+	}
+	if cfg.Explicit && !containsString(allowed, cfg.Name) {
+		m.logger.Debug("skipping extension (explicit-only, not requested)", "ext", cfg.Name)
 		return nil
 	}
 	if !extensionSupportsMode(cfg.Modes, m.ActiveMode) {

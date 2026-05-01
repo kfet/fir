@@ -53,9 +53,13 @@ func BuiltinExtensionsHash() string {
 // ExtensionFrontmatter holds metadata parsed from a comment frontmatter block
 // at the top of an extension script.
 type ExtensionFrontmatter struct {
-	Name          string
-	Description   string
-	Builtin       bool
+	Name        string
+	Description string
+	Builtin     bool
+	// Explicit marks an extension as opt-in: it is discovered (so `-e <name>`
+	// can find it) but is NOT auto-loaded. Use for example/demo extensions
+	// that should only run when the user asks for them by name.
+	Explicit      bool
 	Modes         []string
 	AuthProviders []string // auth provider IDs this extension registers
 	CLIVerbs      []string // top-level `fir <verb>` names this extension claims
@@ -116,6 +120,8 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.Description = value
 		case "builtin":
 			fm.Builtin = value == "true"
+		case "explicit":
+			fm.Explicit = value == "true"
 		case "mode", "modes":
 			fm.Modes = parseExtensionModes(value)
 		case "auth_provider", "auth_providers":
@@ -272,9 +278,12 @@ type BuiltinExtension struct {
 	Path string // absolute path to the extracted executable
 }
 
-// LoadBuiltinExtensions returns extensions marked with builtin: true in their
-// comment frontmatter. The scripts are extracted to a temp directory so they
-// can be executed as subprocesses.
+// LoadBuiltinExtensions returns extensions marked with builtin: true OR
+// explicit: true in their comment frontmatter. Builtin extensions are
+// auto-loaded by default; explicit extensions are discovered so `-e <name>`
+// can find them but are skipped from default loading by the manager.
+// The scripts are extracted to a temp directory so they can be executed as
+// subprocesses.
 func LoadBuiltinExtensions() ([]BuiltinExtension, error) {
 	extractDir, err := extractBuiltinExtensions()
 	if err != nil {
@@ -303,7 +312,7 @@ func LoadBuiltinExtensions() ([]BuiltinExtension, error) {
 			continue
 		}
 		fm := ParseCommentFrontmatter(string(data))
-		if !fm.Builtin {
+		if !fm.Builtin && !fm.Explicit {
 			continue
 		}
 		name := fm.Name
@@ -337,7 +346,7 @@ func loadBuiltinSubdirExtension(extractDir, dirname string) ([]BuiltinExtension,
 	}
 
 	fm := ParseCommentFrontmatter(string(data))
-	if !fm.Builtin {
+	if !fm.Builtin && !fm.Explicit {
 		return nil, nil
 	}
 

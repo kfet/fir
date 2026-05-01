@@ -741,6 +741,7 @@ parallel frontmatter declaration.  All extensions start eagerly in parallel.
 | `name` | Override the filename-derived extension name. |
 | `description` | One-line summary shown in listings. |
 | `builtin` | When `true`, marks a builtin extension shipped with fir. |
+| `explicit` | When `true`, the extension is **opt-in**: it is discovered (so `fir -e <name>` and listings find it), but is **not** auto-loaded. Use for example/demo extensions that should only run when the user asks for them by name. |
 | `modes` | Comma-separated list of fir modes in which this extension should run.  Values: `tui` (alias `interactive`), `text`, `json`, `rpc`, `acp`.  Omit to run in all modes. |
 | `auth_providers` | Comma-separated list of auth provider IDs registered by the extension (used by the auth-only manager to discover provider extensions before full startup). |
 | `cli_verbs` | Comma-separated list of top-level `fir <verb>` names this extension claims. See [CLI Verbs](#cli-verbs) below. |

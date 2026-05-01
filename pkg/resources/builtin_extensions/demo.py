@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # ---
+# name: demo
+# explicit: true
 # cli_verbs: demo-cli
 # ---
 """demo.py — comprehensive example exercising the full fir extension API.

@@ -88,6 +88,16 @@ import sys
 `,
 			want: ExtensionFrontmatter{CLIVerbs: []string{"foo", "bar"}, Present: true},
 		},
+		{
+			name: "explicit",
+			input: `#!/usr/bin/env python3
+# ---
+# name: demo
+# explicit: true
+# ---
+`,
+			want: ExtensionFrontmatter{Name: "demo", Explicit: true, Present: true},
+		},
 	}
 
 	for _, tt := range tests {
