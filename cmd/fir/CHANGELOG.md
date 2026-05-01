@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Interactive TUI: tool-result background colour stayed in the "pending" tone when `Ctrl+O` (toggle tool-output expansion) was active. `onToolExecEnd` was passing `m.toolOutputExpanded` as the `isPartial` argument to `UpdateResult`, conflating expansion state with completion state. Pass `false` (the tool has finished) and rely on the existing `SetExpanded` call in `onToolExecStart` for expansion. No verbosity change — output truncation thresholds are unchanged.
+
 ## [0.39.0] - 2026-05-01
 
 ### Added

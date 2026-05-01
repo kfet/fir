@@ -373,7 +373,10 @@ func (m *InteractiveMode) onToolExecEnd(ae *agent.AgentEvent) {
 			resultData = toolResultDataFromAgent(&result, ae.IsError)
 		}
 		if resultData != nil {
-			comp.UpdateResult(resultData, m.toolOutputExpanded)
+			// Second arg is isPartial: the tool has finished, so it's not
+			// partial. Expansion state is set separately via SetExpanded
+			// in onToolExecStart based on m.toolOutputExpanded.
+			comp.UpdateResult(resultData, false)
 		}
 	}
 
