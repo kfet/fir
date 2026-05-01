@@ -158,7 +158,7 @@ func normaliseBashTarget(tok string) string {
 var (
 	// >FILE / >>FILE — disallow `&` (fd dup) right after the operator.
 	bashRedirectRe = regexp.MustCompile(`>>?\s*([^\s|&;<>()]+)`)
-	bashTeeRe      = regexp.MustCompile(`\btee\b(?:\s+-[aA-Za-z]+)*\s+("[^"]+"|'[^']+'|[^\s|&;<>()]+)`)
+	bashTeeRe      = regexp.MustCompile(`\btee\b(?:\s+-[a-zA-Z]+)*\s+("[^"]+"|'[^']+'|[^\s|&;<>()]+)`)
 )
 
 // ComputeFileLists returns readFiles (only read, not modified) and modifiedFiles
