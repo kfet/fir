@@ -224,18 +224,25 @@ func TestManager_OnDemand_NoLoopReturnsNotConnected(t *testing.T) {
 }
 
 // TestManager_ConcurrentCallTool_SingleFlight verifies that many concurrent
-// CallTool callers during a reconnect window share a single dial: dialCount
-// increases by exactly 1 (the actual reconnect).
+// CallTool callers during a reconnect window share a single dial — they
+// converge on the in-flight reconnect rather than each spawning their own.
 func TestManager_ConcurrentCallTool_SingleFlight(t *testing.T) {
 	shortenReconnectDelays(t)
-	reconnectInitialDelay = 200 * time.Millisecond
-	reconnectMaxDelay = 200 * time.Millisecond
+	// Long-ish backoff so the loop is parked in a sleep when concurrent
+	// CallTools arrive — that's the window we want to exercise.
+	reconnectInitialDelay = 300 * time.Millisecond
+	reconnectMaxDelay = 300 * time.Millisecond
 
 	server := makePingServer()
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
+	// Fail the first reconnect attempt so the loop enters its backoff
+	// sleep deterministically. Subsequent attempts succeed.
 	dial := func(cfg ServerConfig) (sdk.Transport, error) {
-		dialCount.Add(1)
+		n := dialCount.Add(1)
+		if n == 2 {
+			return nil, errors.New("simulated transient dial failure")
+		}
 		return realDial(cfg)
 	}
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
@@ -247,11 +254,17 @@ func TestManager_ConcurrentCallTool_SingleFlight(t *testing.T) {
 	require.Equal(t, int32(1), dialCount.Load())
 
 	closeServerSession(t, server)
-	require.Eventually(t, func() bool { return !mgr.hasSession("srv") },
-		2*time.Second, 5*time.Millisecond)
 
-	// Fire many concurrent CallTools. They should all converge on a single
-	// reconnect dial.
+	// Wait until the loop has tried-and-failed the first reconnect (so
+	// it's now sleeping in backoff and session is nil).
+	require.Eventually(t, func() bool {
+		return dialCount.Load() >= 2 && !mgr.hasSession("srv")
+	}, 3*time.Second, 5*time.Millisecond)
+	dialsBeforeKick := dialCount.Load()
+
+	// Fire many concurrent CallTools. They should all converge on a
+	// single follow-up reconnect dial — N goroutines, but only one new
+	// dial because they share the ready chan.
 	const N = 20
 	var wg sync.WaitGroup
 	errs := make([]error, N)
@@ -268,10 +281,14 @@ func TestManager_ConcurrentCallTool_SingleFlight(t *testing.T) {
 	for i, err := range errs {
 		assert.NoErrorf(t, err, "call %d", i)
 	}
-	// Expect 2 dials total (initial + 1 reconnect). Allow up to 3 in case
-	// the loop made a brief retry before all callers landed.
-	assert.LessOrEqual(t, dialCount.Load(), int32(3),
-		"single-flight: ~one dial for the reconnect (dial count = %d)", dialCount.Load())
+	// Single-flight: exactly one additional dial after the kick (the
+	// successful reconnect). Allow up to 2 extra in case multiple kicks
+	// triggered a quick retry before the install committed.
+	addedDials := dialCount.Load() - dialsBeforeKick
+	assert.LessOrEqual(t, addedDials, int32(2),
+		"single-flight: expected ~1 new dial across %d concurrent CallTools, got %d", N, addedDials)
+	assert.GreaterOrEqual(t, addedDials, int32(1),
+		"at least one dial must have happened to reconnect")
 }
 
 // TestManager_Close_CancelsReconnect verifies that Close cancels an in-flight
