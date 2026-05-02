@@ -21,7 +21,6 @@ func defaultSettingsConfig() SettingsConfig {
 		HideThinkingBlock:       false,
 		CollapseChangelog:       false,
 		ShowHardwareCursor:      false,
-		EditorPaddingX:          1,
 		AutocompleteMaxVisible:  10,
 		QuietStartup:            false,
 		ClearOnShrink:           false,

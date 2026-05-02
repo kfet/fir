@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- `editorPaddingX` setting and the matching `/settings` "Editor padding" item. The setting was dead-wired: the production getter, settings-selector callback, and `Editor.SetPaddingX` were never connected, so changing it had no effect. Removed the field from `Settings`, the selector entry/callback, the `Editor.PaddingX` option / internal field / `GetPaddingX` / `SetPaddingX`, the render-time padding logic, and the mention in the `self` skill doc.
+
 ### Changed
 
 - The `pty` subcommand and PTY multiplexer are now provided by the standalone [`firpty`](https://github.com/kfet/firpty) module (extracted from `pkg/ptydriver/`). `fir` re-exposes `fir pty …` as a thin shim that imports `github.com/kfet/firpty`, so all existing skills and shell helpers keep working unchanged. The new module has 100% unit-test coverage with thin wrappers over `creack/pty` and `os/exec` excluded via `.covignore`.

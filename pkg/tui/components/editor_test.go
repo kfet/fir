@@ -660,29 +660,6 @@ func TestEditor_RenderCursorNotFocused(t *testing.T) {
 	}
 }
 
-func TestEditor_RenderWithPadding(t *testing.T) {
-	e := NewEditor(nil, EditorTheme{
-		BorderColor: func(s string) string { return s },
-		SelectList: SelectListTheme{
-			SelectedPrefix: func(s string) string { return s },
-			SelectedText:   func(s string) string { return s },
-			Description:    func(s string) string { return s },
-			ScrollInfo:     func(s string) string { return s },
-			NoMatch:        func(s string) string { return s },
-		},
-	}, EditorOptions{PaddingX: 2})
-
-	e.SetText("test")
-	lines := e.Render(40)
-
-	if len(lines) > 2 {
-		contentLine := lines[1]
-		if !strings.HasPrefix(contentLine, "  ") {
-			t.Errorf("expected padding, got %q", contentLine)
-		}
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Scroll
 // ---------------------------------------------------------------------------
@@ -992,16 +969,6 @@ func TestEditor_SetFocused(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Padding options
-// ---------------------------------------------------------------------------
-
-func TestEditor_PaddingXGetSet(t *testing.T) {
-	e := newTestEditor()
-	if e.GetPaddingX() != 0 {
-		t.Errorf("expected 0, got %d", e.GetPaddingX())
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Combined multi-operation scenarios
 // ---------------------------------------------------------------------------

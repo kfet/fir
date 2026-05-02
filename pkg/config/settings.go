@@ -91,7 +91,6 @@ type Settings struct {
 	Images                 *ImageSettings            `json:"images,omitempty"`
 	EnabledModels          []string                  `json:"enabledModels,omitempty"`
 	ThinkingBudgets        *ThinkingBudgetsSettings  `json:"thinkingBudgets,omitempty"`
-	EditorPaddingX         *int                      `json:"editorPaddingX,omitempty"`
 	AutocompleteMaxVisible *int                      `json:"autocompleteMaxVisible,omitempty"`
 	ShowHardwareCursor     *bool                     `json:"showHardwareCursor,omitempty"`
 	Markdown               *MarkdownSettings         `json:"markdown,omitempty"`
@@ -123,7 +122,6 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
 	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)
 	mergeBool(&r.ShowHardwareCursor, overrides.ShowHardwareCursor)
-	mergeInt(&r.EditorPaddingX, overrides.EditorPaddingX)
 	mergeInt(&r.AutocompleteMaxVisible, overrides.AutocompleteMaxVisible)
 
 	// Slice fields: override wins if non-nil

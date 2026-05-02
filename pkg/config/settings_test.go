@@ -31,7 +31,6 @@ func TestNewInMemorySettingsManager_Defaults(t *testing.T) {
 	assert.True(t, sm.GetImageAutoResize())
 	assert.False(t, sm.GetBlockImages())
 	assert.True(t, sm.GetEnableSkillCommands())
-	assert.Equal(t, 0, sm.GetEditorPaddingX())
 	assert.Equal(t, 5, sm.GetAutocompleteMaxVisible())
 	assert.Equal(t, "  ", sm.GetCodeBlockIndent())
 	assert.Equal(t, "sse", sm.GetTransport())
@@ -521,12 +520,6 @@ func (sm *SettingsManager) GetBlockImages() bool {
 		return boolDefault(sm.settings.Images.BlockImages, false)
 	}
 	return false
-}
-
-func (sm *SettingsManager) GetEditorPaddingX() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return intDefault(sm.settings.EditorPaddingX, 0)
 }
 
 func (sm *SettingsManager) GetCodeBlockIndent() string {

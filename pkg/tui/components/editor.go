@@ -359,7 +359,6 @@ type EditorTheme struct {
 
 // EditorOptions holds editor configuration.
 type EditorOptions struct {
-	PaddingX               int
 	AutocompleteMaxVisible int
 }
 
@@ -399,7 +398,6 @@ type Editor struct {
 
 	tuiRef       *tui.TUI
 	theme        EditorTheme
-	paddingX     int
 	lastWidth    int
 	scrollOffset int
 	BorderColor  func(string) string
@@ -441,10 +439,6 @@ func NewEditor(t *tui.TUI, theme EditorTheme, opts ...EditorOptions) *Editor {
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	paddingX := o.PaddingX
-	if paddingX < 0 {
-		paddingX = 0
-	}
 	maxVis := o.AutocompleteMaxVisible
 	if maxVis == 0 {
 		maxVis = 5
@@ -459,7 +453,6 @@ func NewEditor(t *tui.TUI, theme EditorTheme, opts ...EditorOptions) *Editor {
 		state:              editorState{lines: []string{""}},
 		tuiRef:             t,
 		theme:              theme,
-		paddingX:           paddingX,
 		lastWidth:          80,
 		BorderColor:        theme.BorderColor,
 		autocompleteMaxVis: maxVis,
@@ -467,22 +460,6 @@ func NewEditor(t *tui.TUI, theme EditorTheme, opts ...EditorOptions) *Editor {
 		historyIndex:       -1,
 		killRing:           NewKillRing(),
 		undoStack:          NewUndoStack[editorState](),
-	}
-}
-
-// GetPaddingX returns the horizontal padding.
-func (e *Editor) GetPaddingX() int { return e.paddingX }
-
-// SetPaddingX sets the horizontal padding.
-func (e *Editor) SetPaddingX(p int) {
-	if p < 0 {
-		p = 0
-	}
-	if e.paddingX != p {
-		e.paddingX = p
-		if e.tuiRef != nil {
-			e.tuiRef.RequestRender(false)
-		}
 	}
 }
 
@@ -715,20 +692,12 @@ func (e *Editor) Render(width int) []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	maxPadding := max(0, int(math.Floor(float64(width-1)/2.0)))
-	paddingX := e.paddingX
-	if paddingX > maxPadding {
-		paddingX = maxPadding
-	}
-	contentWidth := width - paddingX*2
+	contentWidth := width
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 
-	layoutWidth := contentWidth
-	if paddingX == 0 {
-		layoutWidth = contentWidth - 1
-	}
+	layoutWidth := contentWidth - 1
 	// Account for prompt width in layout
 	if e.Prompt != "" {
 		layoutWidth -= tui.VisibleWidth(e.Prompt)
@@ -779,8 +748,6 @@ func (e *Editor) Render(width int) []string {
 	visibleLines := layoutLines[e.scrollOffset:end]
 
 	var result []string
-	leftPadding := strings.Repeat(" ", paddingX)
-	rightPadding := leftPadding
 
 	// Top border
 	if e.scrollOffset > 0 {
@@ -801,7 +768,6 @@ func (e *Editor) Render(width int) []string {
 	for lineIdx, ll := range visibleLines {
 		displayText := ll.text
 		lineVisWidth := tui.VisibleWidth(ll.text)
-		cursorInPadding := false
 
 		// Determine if this is the absolute first line (scrollOffset == 0 && first visible)
 		isFirstLine := e.scrollOffset == 0 && lineIdx == 0
@@ -844,22 +810,15 @@ func (e *Editor) Render(width int) []string {
 				cursor := "\x1b[7m \x1b[0m"
 				displayText = before + marker + cursor
 				lineVisWidth++
-				if lineVisWidth > contentWidth && paddingX > 0 {
-					cursorInPadding = true
-				}
 			}
 		}
 
 		padding := strings.Repeat(" ", max(0, contentWidth-lineVisWidth))
-		rp := rightPadding
-		if cursorInPadding && len(rp) > 0 {
-			rp = rp[1:]
-		}
 		prefix := linePrompt
 		if prefix == "" {
 			prefix = linePromptPad
 		}
-		result = append(result, leftPadding+prefix+displayText+padding+rp)
+		result = append(result, prefix+displayText+padding)
 	}
 
 	// Bottom border
@@ -881,7 +840,7 @@ func (e *Editor) Render(width int) []string {
 		for _, acl := range acLines {
 			lw := tui.VisibleWidth(acl)
 			pad := strings.Repeat(" ", max(0, contentWidth-lw))
-			result = append(result, leftPadding+acl+pad+rightPadding)
+			result = append(result, acl+pad)
 		}
 	}
 

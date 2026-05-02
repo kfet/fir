@@ -43,7 +43,6 @@ type SettingsConfig struct {
 	ServerToolWebFetch      bool
 	ServerToolCodeExec      bool
 	ShowHardwareCursor      bool
-	EditorPaddingX          int
 	AutocompleteMaxVisible  int
 	QuietStartup            bool
 	ClearOnShrink           bool
@@ -67,7 +66,6 @@ type SettingsCallbacks struct {
 	OnCollapseChangelogChange      func(bool)
 	OnServerToolsChange            func([]string) // receives full list of enabled tool names
 	OnShowHardwareCursorChange     func(bool)
-	OnEditorPaddingXChange         func(int)
 	OnAutocompleteMaxVisibleChange func(int)
 	OnQuietStartupChange           func(bool)
 	OnClearOnShrinkChange          func(bool)
@@ -135,7 +133,6 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "server-tool-web-fetch", Label: "Server: web fetch", Description: "Anthropic server-side web page/PDF fetching", CurrentValue: boolStr(config.ServerToolWebFetch), Values: []string{"true", "false"}},
 		{ID: "server-tool-code-exec", Label: "Server: code execution", Description: "Anthropic server-side Python sandbox", CurrentValue: boolStr(config.ServerToolCodeExec), Values: []string{"true", "false"}},
 		{ID: "show-hardware-cursor", Label: "Show hardware cursor", Description: "Show terminal cursor for IME support", CurrentValue: boolStr(config.ShowHardwareCursor), Values: []string{"true", "false"}},
-		{ID: "editor-padding", Label: "Editor padding", Description: "Horizontal padding for input editor (0-3)", CurrentValue: strconv.Itoa(config.EditorPaddingX), Values: []string{"0", "1", "2", "3"}},
 		{ID: "autocomplete-max-visible", Label: "Autocomplete max items", Description: "Max visible items in autocomplete dropdown", CurrentValue: strconv.Itoa(config.AutocompleteMaxVisible), Values: []string{"3", "5", "7", "10", "15", "20"}},
 		{ID: "clear-on-shrink", Label: "Clear on shrink", Description: "Clear empty rows when content shrinks", CurrentValue: boolStr(config.ClearOnShrink), Values: []string{"true", "false"}},
 		{ID: "thinking", Label: "Thinking level", Description: "Reasoning depth for thinking-capable models", CurrentValue: config.ThinkingLevel, Values: config.AvailableThinkingLevels},
@@ -302,11 +299,6 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "show-hardware-cursor":
 		if cb.OnShowHardwareCursorChange != nil {
 			cb.OnShowHardwareCursorChange(value == "true")
-		}
-	case "editor-padding":
-		if cb.OnEditorPaddingXChange != nil {
-			v, _ := strconv.Atoi(value)
-			cb.OnEditorPaddingXChange(v)
 		}
 	case "autocomplete-max-visible":
 		if cb.OnAutocompleteMaxVisibleChange != nil {

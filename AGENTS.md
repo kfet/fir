@@ -70,13 +70,12 @@ To delegate a task to a fresh agent in a new tmux window instead of doing it you
 1. Final `make all` in the worktree.
 2. Call the advisor (`aside` with `escalate=true`) before declaring the task done — see *Advisor* below.
 3. Commit everything.
-4. Ff-merge back to main and clean up (using the captured `$PROJECT`, since you're still inside `$WORKTREE`):
+4. Ff-merge back to main and confirm with the user if they want to do a clean up, since it's destructive (using the captured `$PROJECT`, since you're still inside `$WORKTREE`):
    ```bash
    git -C "$PROJECT" merge --ff-only "$BRANCH"
    git -C "$PROJECT" worktree remove "$WORKTREE"
    git -C "$PROJECT" branch -d "$BRANCH"
    ```
-
 ## Advisor
 
 The `aside-advisor` skill (auto-loaded) explains how to escalate to a stronger advisor model via `aside` with `escalate=true`. Use it at the high-leverage moments:

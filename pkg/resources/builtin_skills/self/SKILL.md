@@ -303,7 +303,6 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   "quietStartup": false,                 // Suppress startup messages
   "collapseChangelog": false,            // Collapse changelog on startup
   "doubleEscapeAction": "tree",          // "tree" or "quit"
-  "editorPaddingX": 0,                   // Horizontal editor padding
   "autocompleteMaxVisible": 5,           // Max autocomplete suggestions shown
   "showHardwareCursor": false,           // Show hardware cursor
 
