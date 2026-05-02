@@ -300,7 +300,6 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   // UI
   "theme": "dark",                       // Theme name or path
   "hideThinkingBlock": false,            // Hide thinking blocks in output
-  "quietStartup": false,                 // Suppress startup messages
   "collapseChangelog": false,            // Collapse changelog on startup
   "doubleEscapeAction": "tree",          // "tree" or "quit"
   "autocompleteMaxVisible": 5,           // Max autocomplete suggestions shown

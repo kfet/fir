@@ -44,7 +44,6 @@ type SettingsConfig struct {
 	ServerToolCodeExec      bool
 	ShowHardwareCursor      bool
 	AutocompleteMaxVisible  int
-	QuietStartup            bool
 	ClearOnShrink           bool
 	MaxContextTokens        int // hard token cap for compaction; 0 = disabled
 }
@@ -67,7 +66,6 @@ type SettingsCallbacks struct {
 	OnServerToolsChange            func([]string) // receives full list of enabled tool names
 	OnShowHardwareCursorChange     func(bool)
 	OnAutocompleteMaxVisibleChange func(int)
-	OnQuietStartupChange           func(bool)
 	OnClearOnShrinkChange          func(bool)
 	OnMaxContextTokensChange       func(int)
 	OnCancel                       func()
@@ -128,7 +126,6 @@ func buildSettingsEntries(config SettingsConfig) []settingEntry {
 		{ID: "transport", Label: "Transport", Description: "Preferred transport for providers that support multiple transports", CurrentValue: config.Transport, Values: []string{"sse", "websocket", "auto"}},
 		{ID: "hide-thinking", Label: "Hide thinking", Description: "Hide thinking blocks in assistant responses", CurrentValue: boolStr(config.HideThinkingBlock), Values: []string{"true", "false"}},
 		{ID: "collapse-changelog", Label: "Collapse changelog", Description: "Show condensed changelog after updates", CurrentValue: boolStr(config.CollapseChangelog), Values: []string{"true", "false"}},
-		{ID: "quiet-startup", Label: "Quiet startup", Description: "Disable verbose printing at startup", CurrentValue: boolStr(config.QuietStartup), Values: []string{"true", "false"}},
 		{ID: "server-tool-web-search", Label: "Server: web search", Description: "Anthropic server-side web search", CurrentValue: boolStr(config.ServerToolWebSearch), Values: []string{"true", "false"}},
 		{ID: "server-tool-web-fetch", Label: "Server: web fetch", Description: "Anthropic server-side web page/PDF fetching", CurrentValue: boolStr(config.ServerToolWebFetch), Values: []string{"true", "false"}},
 		{ID: "server-tool-code-exec", Label: "Server: code execution", Description: "Anthropic server-side Python sandbox", CurrentValue: boolStr(config.ServerToolCodeExec), Values: []string{"true", "false"}},
@@ -282,10 +279,6 @@ func (c *SettingsSelectorComponent) applyChange(id, value string) {
 	case "collapse-changelog":
 		if cb.OnCollapseChangelogChange != nil {
 			cb.OnCollapseChangelogChange(value == "true")
-		}
-	case "quiet-startup":
-		if cb.OnQuietStartupChange != nil {
-			cb.OnQuietStartupChange(value == "true")
 		}
 	case "server-tool-web-search":
 		c.config.ServerToolWebSearch = value == "true"

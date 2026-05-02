@@ -22,7 +22,6 @@ func defaultSettingsConfig() SettingsConfig {
 		CollapseChangelog:       false,
 		ShowHardwareCursor:      false,
 		AutocompleteMaxVisible:  10,
-		QuietStartup:            false,
 		ClearOnShrink:           false,
 	}
 }

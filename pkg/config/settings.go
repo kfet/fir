@@ -76,7 +76,6 @@ type Settings struct {
 	Retry                  *RetrySettings            `json:"retry,omitempty"`
 	HideThinkingBlock      *bool                     `json:"hideThinkingBlock,omitempty"`
 	ShellPath              string                    `json:"shellPath,omitempty"`
-	QuietStartup           *bool                     `json:"quietStartup,omitempty"`
 	ShellCommandPrefix     string                    `json:"shellCommandPrefix,omitempty"`
 	CollapseChangelog      *bool                     `json:"collapseChangelog,omitempty"`
 	Packages               []any                     `json:"packages,omitempty"`
@@ -117,7 +116,6 @@ func deepMergeSettings(base, overrides Settings) Settings {
 
 	// Pointer fields: override wins if non-nil
 	mergeBool(&r.HideThinkingBlock, overrides.HideThinkingBlock)
-	mergeBool(&r.QuietStartup, overrides.QuietStartup)
 	mergeBool(&r.CollapseChangelog, overrides.CollapseChangelog)
 	mergeBool(&r.EnableSkillCommands, overrides.EnableSkillCommands)
 	mergeBool(&r.EnableSysExtensions, overrides.EnableSysExtensions)

@@ -26,7 +26,6 @@ func TestNewInMemorySettingsManager_Defaults(t *testing.T) {
 	assert.True(t, sm.GetRetryEnabled())
 	assert.False(t, sm.GetHideThinkingBlock())
 	assert.Equal(t, "", sm.GetShellPath())
-	assert.False(t, sm.GetQuietStartup())
 	assert.True(t, sm.GetShowImages())
 	assert.True(t, sm.GetImageAutoResize())
 	assert.False(t, sm.GetBlockImages())
@@ -478,12 +477,6 @@ func (sm *SettingsManager) SetShellPath(path string) {
 	sm.globalSettings.ShellPath = path
 	sm.markModified("shellPath")
 	sm.save()
-}
-
-func (sm *SettingsManager) GetQuietStartup() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return boolDefault(sm.settings.QuietStartup, false)
 }
 
 func (sm *SettingsManager) GetShowImages() bool {
