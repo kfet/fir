@@ -239,3 +239,52 @@ func TestUpdateNotice_Format(t *testing.T) {
 		t.Errorf("got %q, want %q", notice, want)
 	}
 }
+
+// ============================================================================
+// Dev build behaviour: a dev build of X.Y.Z must not be told that X.Y.Z is
+// "available". The dev build is *ahead of* (or equal to) the released tag.
+// ============================================================================
+
+func TestIsNewer_DevBuildOfSameRelease(t *testing.T) {
+	// Running 0.39.0-dev+abc (a dev build past the 0.39.0 tag).
+	// The released 0.39.0 must NOT be considered newer.
+	cases := []string{
+		"0.39.0-dev+abc123",
+		"0.39.0-dev+abc123-dirty",
+		"v0.39.0-dev+abc123",
+		"0.39.0-dev",
+	}
+	for _, cur := range cases {
+		if IsNewer("v0.39.0", cur) {
+			t.Errorf("IsNewer(v0.39.0, %q) = true; want false (dev build is ahead of release)", cur)
+		}
+		if IsNewer("0.39.0", cur) {
+			t.Errorf("IsNewer(0.39.0, %q) = true; want false (dev build is ahead of release)", cur)
+		}
+	}
+}
+
+func TestIsNewer_DevBuildStillNoticesNewerRelease(t *testing.T) {
+	// A 0.39.0-dev build SHOULD still be told about 0.40.0.
+	if !IsNewer("v0.40.0", "0.39.0-dev+abc") {
+		t.Error("IsNewer(v0.40.0, 0.39.0-dev+abc) = false; want true")
+	}
+	if !IsNewer("0.40.0", "0.39.0-dev+abc-dirty") {
+		t.Error("expected 0.40.0 to be newer than 0.39.0-dev build")
+	}
+}
+
+func TestCheckLatest_CachedSameReleaseAsDevBuild(t *testing.T) {
+	dir := t.TempDir()
+	writeCache(filepath.Join(dir, "update-check.json"), &cacheEntry{
+		CheckedAt:     time.Now(),
+		LatestVersion: "v0.39.0",
+	})
+	rel, err := CheckLatest(context.Background(), "0.39.0-dev+abc123", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rel != nil {
+		t.Errorf("expected nil for dev build of same release, got %+v", rel)
+	}
+}

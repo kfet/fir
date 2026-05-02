@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	selfupdate "github.com/creativeprojects/go-selfupdate"
@@ -175,6 +176,13 @@ func UpdateNotice(newVersion string) string {
 
 // IsNewer reports whether candidate is strictly newer than current.
 // Both strings are expected to be semver with an optional leading "v".
+//
+// Dev-build special case: if current has a prerelease segment starting with
+// "dev" (e.g. "0.39.0-dev+abc"), the running binary is built from a commit
+// after the v0.39.0 tag and is therefore considered AHEAD of the v0.39.0
+// release. We compare candidate against current's core (major.minor.patch)
+// and only report newer when the candidate's core is strictly greater.
+// This prevents "fir v0.39.0 available" notices on a 0.39.0-dev+sha build.
 func IsNewer(candidate, current string) bool {
 	c, err := goversion.NewVersion(candidate)
 	if err != nil {
@@ -184,7 +192,17 @@ func IsNewer(candidate, current string) bool {
 	if err != nil {
 		return false
 	}
+	if isDevPrerelease(cur) {
+		return c.Core().GreaterThan(cur.Core())
+	}
 	return c.GreaterThan(cur)
+}
+
+// isDevPrerelease reports whether v's prerelease segment marks it as a dev
+// build past a release tag (e.g. "0.39.0-dev+abc123" or "0.39.0-dev").
+func isDevPrerelease(v *goversion.Version) bool {
+	pre := v.Prerelease()
+	return pre == "dev" || strings.HasPrefix(pre, "dev.") || strings.HasPrefix(pre, "dev-")
 }
 
 func readCache(path string) (*cacheEntry, bool) {
