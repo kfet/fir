@@ -919,11 +919,6 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
                 "description": "Return raw JSONL instead of formatted text. Default false.",
                 "default": False,
             },
-            "full_text": {
-                "type": "boolean",
-                "description": "Disable truncation (useful for agent consumption). Default false.",
-                "default": False,
-            },
         },
     },
 )
@@ -932,11 +927,10 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     cwd_flag = (params.get("cwd") or "").strip()
     lines = int(params.get("lines") or 50)
     raw_json = bool(params.get("raw_json"))
-    full_text = bool(params.get("full_text"))
     if not id_prefix and not cwd_flag:
         return _snapshot_session_list()
     try:
-        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, full_text)
+        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, True)
     except ValueError as e:
         raise fir_ext.ToolError(str(e)) from e
 

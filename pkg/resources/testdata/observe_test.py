@@ -967,6 +967,18 @@ class TestSlashCommandsAndTools(unittest.TestCase):
         self.assertIn("hello", out)
         self.assertIn("hi back", out)
 
+    def test_tool_observe_always_returns_full_text(self) -> None:
+        # The tool schema no longer exposes full_text; output must never
+        # be truncated regardless of message length.
+        long_msg = "x" * 500
+        with open(self.transcript, "a") as f:
+            f.write('{"type":"message","timestamp":"2026-04-27T12:00:10Z",'
+                    '"message":{"role":"user","content":"' + long_msg + '"}}\n')
+        out = observe.tool_observe(
+            {"id_prefix": self.session_id[:8], "lines": 50}, MagicMock(),
+        )
+        self.assertIn(long_msg, out)
+
     def test_tool_observe_raises_tool_error_on_miss(self) -> None:
         with self.assertRaises(fir_ext.ToolError):
             observe.tool_observe({"id_prefix": "zzz-no-match"}, MagicMock())

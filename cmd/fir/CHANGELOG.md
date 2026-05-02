@@ -4,6 +4,8 @@
 
 ### Removed
 
+- `full_text` parameter on the `observe_session` AI tool. The tool now always returns the full untruncated transcript snapshot — the previous default truncated long messages, which was useless for an agent consuming the output. The CLI `fir observe --full` flag is unchanged. Schema, handler, and tests updated.
+
 - `quietStartup` setting. The flag was dead — fir no longer prints a startup banner, so nothing was reading the value. Removed the `Settings.QuietStartup` field and merge, the `/settings` "Quiet startup" entry / callback / case, the `SettingsConfig.QuietStartup` field, the test getter, and the mention in the `self` skill doc.
 
 - `editorPaddingX` setting and the matching `/settings` "Editor padding" item. The setting was dead-wired: the production getter, settings-selector callback, and `Editor.SetPaddingX` were never connected, so changing it had no effect. Removed the field from `Settings`, the selector entry/callback, the `Editor.PaddingX` option / internal field / `GetPaddingX` / `SetPaddingX`, the render-time padding logic, and the mention in the `self` skill doc.
