@@ -5,6 +5,9 @@
 ### Removed
 
 - `editorPaddingX` setting and the matching `/settings` "Editor padding" item. The setting was dead-wired: the production getter, settings-selector callback, and `Editor.SetPaddingX` were never connected, so changing it had no effect. Removed the field from `Settings`, the selector entry/callback, the `Editor.PaddingX` option / internal field / `GetPaddingX` / `SetPaddingX`, the render-time padding logic, and the mention in the `self` skill doc.
+### Added
+
+- MCP auto-reconnect with on-demand kick. Each MCP server now has a per-entry reconnect loop that transparently re-establishes the session when it drops (server-side timeout, dropped TCP, transient network failure). Tool calls arriving during the disconnect window block (bounded by ctx) on the loop's `ready` channel and proceed once a fresh session is installed; `CallTool` also sends a non-blocking kick so an on-demand call short-circuits any backoff sleep. Backoff is exponential (1s → 60s cap, ±20% jitter); errors surface in `Status()` only after 3 consecutive dial failures so transient blips don't churn the UI. `onToolsChanged` re-fires after every successful reconnect, fulfilling the contract that the aggregate tool list stays accurate. Reconnect goroutines are tracked by a WaitGroup so `Close()` returns cleanly with no leaks. `AdaptTool` now resolves the active session per-call via a `SessionGetter` so individual tool calls survive a transparent reconnect mid-turn instead of failing on a stale captured session. Covered by unit tests (in-memory transport, deterministic) and a wire-level integration test using `httptest.NewServer` + `sdk.StreamableHTTPHandler` that force-closes the server-side session and asserts auto-recovery over real HTTP/SSE.
 
 ### Changed
 

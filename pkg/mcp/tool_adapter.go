@@ -36,7 +36,24 @@ func sanitizeToolName(name string) string {
 	return name
 }
 
-func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, registry *progressRegistry) agent.AgentTool {
+// SessionGetter returns the currently-active *sdk.ClientSession for a server.
+// AdaptTool calls this on every tool invocation so calls survive transparent
+// reconnects: the manager's auto-reconnect loop installs a fresh session on
+// disconnect, and the next tool call uses it without the agent re-listing.
+type SessionGetter func(ctx context.Context) (*sdk.ClientSession, error)
+
+// StaticSession is a SessionGetter that always returns the same session.
+// Useful for tests that want a fixed session without a Manager.
+func StaticSession(s *sdk.ClientSession) SessionGetter {
+	return func(_ context.Context) (*sdk.ClientSession, error) {
+		if s == nil {
+			return nil, fmt.Errorf("nil session")
+		}
+		return s, nil
+	}
+}
+
+func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, registry *progressRegistry) agent.AgentTool {
 	label := tool.Title
 	if label == "" {
 		label = tool.Name + " (via " + serverName + ")"
@@ -62,6 +79,10 @@ func AdaptTool(session *sdk.ClientSession, serverName string, tool *sdk.Tool, re
 			params map[string]any,
 			onUpdate agent.AgentToolUpdateCallback,
 		) (agent.AgentToolResult, error) {
+			session, err := getSession(ctx)
+			if err != nil {
+				return agent.AgentToolResult{}, fmt.Errorf("mcp session for %q: %w", serverName, err)
+			}
 			callParams := &sdk.CallToolParams{
 				Name:      toolName,
 				Arguments: params,

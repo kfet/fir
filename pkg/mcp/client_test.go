@@ -780,11 +780,23 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
 		})
 
+	// Counting dial that succeeds once then fails permanently. The first
+	// (initial) connect is the only one that yields a working session, so
+	// auto-reconnect will keep failing and Status() will stably report
+	// disconnected — that's what we're asserting here.
+	var dialCount atomic.Int32
+	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
-	mgr.dialFn = inMemoryDial(t, server)
+	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+		if dialCount.Add(1) == 1 {
+			return realDial(cfg)
+		}
+		return nil, errors.New("dial fails after first connect")
+	}
 
 	ctx := context.Background()
 	startAndWait(t, mgr, ctx)
+	defer mgr.Close()
 
 	// Confirm connected initially.
 	statuses := mgr.Status()
@@ -801,15 +813,13 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	require.NotNil(t, ss, "server must have an active session")
 	require.NoError(t, ss.Close())
 
-	// The Wait goroutine should detect the disconnect and update Status().
+	// Auto-reconnect's dialFn is rigged to fail, so the session stays down.
+	// Status should stably reflect that.
 	require.Eventually(t, func() bool {
 		st := mgr.Status()
 		return len(st) == 1 && !st[0].Connected
-	}, 3*time.Second, 25*time.Millisecond, "Status() must show disconnected after server closes")
+	}, 3*time.Second, 25*time.Millisecond, "Status() must show disconnected when reconnect cannot succeed")
 
-	// After a clean server close, Status correctly shows not connected.
-	// Error may be nil (clean close) or non-nil (error close) depending on
-	// how the server terminated — either way Connected is false.
 	statuses = mgr.Status()
 	assert.False(t, statuses[0].Connected)
 }

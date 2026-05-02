@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -76,21 +77,29 @@ func TestManager_Reload_ReconnectsDisconnected(t *testing.T) {
 			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
 		})
 
-	connectCount := 0
+	var connectCount atomic.Int32
 	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
 	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
-		connectCount++
+		connectCount.Add(1)
 		return realDial(cfg)
 	}
 
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
-	require.Equal(t, 1, connectCount)
+	require.Equal(t, int32(1), connectCount.Load())
 	require.True(t, mgr.hasSession("srv1"))
 
-	// Simulate the server having disconnected/errored in the background.
+	// Cancel the auto-reconnect loop so we can deterministically simulate
+	// a "stuck disconnected" state without the loop racing to reconnect
+	// before /reload runs. This mirrors the regression scenario: a server
+	// that genuinely cannot self-heal (e.g. dialFn errors permanently),
+	// where /reload is the user's explicit recovery action.
 	mgr.withEntry("srv1", func(e *serverEntry) {
+		if e.reconnectCancel != nil {
+			e.reconnectCancel()
+			e.reconnectCancel = nil
+		}
 		if e.session != nil {
 			_ = e.session.Close()
 		}
@@ -102,7 +111,7 @@ func TestManager_Reload_ReconnectsDisconnected(t *testing.T) {
 	// /reload with identical config should reconnect the dead server.
 	_, reloadErr := mgr.Reload(context.Background(), map[string]ServerConfig{"srv1": {}})
 	require.NoError(t, reloadErr)
-	assert.Equal(t, 2, connectCount, "disconnected server should be reconnected by Reload")
+	assert.Equal(t, int32(2), connectCount.Load(), "disconnected server should be reconnected by Reload")
 	assert.True(t, mgr.hasSession("srv1"), "srv1 should have a live session after Reload")
 	mgr.withEntry("srv1", func(e *serverEntry) {
 		assert.NoError(t, e.err, "error should be cleared after successful reconnect")
