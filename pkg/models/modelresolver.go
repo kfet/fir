@@ -1,5 +1,5 @@
 // Ported from: packages/coding-agent/src/core/model-resolver.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package models
 
 import (
@@ -32,11 +32,16 @@ var DefaultModelPerProvider = map[ai.Provider]string{
 	"mistral":                "devstral-medium-latest",
 	"minimax":                "MiniMax-M2.7",
 	"minimax-cn":             "MiniMax-M2.7",
+	"moonshotai":             "kimi-k2.6",
+	"moonshotai-cn":          "kimi-k2.6",
 	"fireworks":              "accounts/fireworks/models/kimi-k2p6",
 	"huggingface":            "moonshotai/Kimi-K2.6",
 	"opencode":               "kimi-k2.6",
 	"opencode-go":            "kimi-k2.6",
 	"kimi-coding":            "kimi-for-coding",
+	"cloudflare-workers-ai":  "@cf/moonshotai/kimi-k2.6",
+	"cloudflare-ai-gateway":  "workers-ai/@cf/moonshotai/kimi-k2.6",
+	"xiaomi":                 "mimo-v2.5-pro",
 }
 
 // ParsedModelResult is the result of parsing a model pattern.
@@ -538,7 +543,9 @@ var knownProviderOrder = []ai.Provider{
 	"google-gemini-cli", "google-antigravity", "google-vertex",
 	"github-copilot", "openrouter", "vercel-ai-gateway",
 	"xai", "groq", "cerebras", "zai", "mistral",
-	"minimax", "minimax-cn", "huggingface", "opencode", "kimi-coding",
+	"minimax", "minimax-cn", "moonshotai", "moonshotai-cn",
+	"huggingface", "opencode", "kimi-coding",
+	"cloudflare-workers-ai", "cloudflare-ai-gateway", "xiaomi",
 }
 
 // globMatch is a simple glob matcher supporting * and ?.

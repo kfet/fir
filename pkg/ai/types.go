@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/types.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package ai
 
 import (
@@ -67,12 +67,17 @@ const (
 	ProviderMistral              Provider = "mistral"
 	ProviderMinimax              Provider = "minimax"
 	ProviderMinimaxCN            Provider = "minimax-cn"
+	ProviderMoonshotAI           Provider = "moonshotai"
+	ProviderMoonshotAICN         Provider = "moonshotai-cn"
 	ProviderDeepseek             Provider = "deepseek"
 	ProviderFireworks            Provider = "fireworks"
 	ProviderHuggingface          Provider = "huggingface"
 	ProviderOpenCode             Provider = "opencode"
 	ProviderOpenCodeGo           Provider = "opencode-go"
 	ProviderKimiCoding           Provider = "kimi-coding"
+	ProviderCloudflareWorkersAI  Provider = "cloudflare-workers-ai"
+	ProviderCloudflareAIGateway  Provider = "cloudflare-ai-gateway"
+	ProviderXiaomi               Provider = "xiaomi"
 	ProviderPoe                  Provider = "poe"
 )
 
@@ -136,9 +141,10 @@ func (tb *ThinkingBudgets) BudgetForLevel(level ThinkingLevel) int {
 type Transport string
 
 const (
-	TransportSSE       Transport = "sse"
-	TransportWebSocket Transport = "websocket"
-	TransportAuto      Transport = "auto"
+	TransportSSE             Transport = "sse"
+	TransportWebSocket       Transport = "websocket"
+	TransportWebSocketCached Transport = "websocket-cached"
+	TransportAuto            Transport = "auto"
 )
 
 // --- Cache ---
@@ -328,16 +334,17 @@ type UserContentBlock = any
 
 // AssistantMessage is a message from the assistant.
 type AssistantMessage struct {
-	Role         string             `json:"role"` // always "assistant"
-	Content      []AssistantContent `json:"content"`
-	Api          Api                `json:"api"`
-	Provider     Provider           `json:"provider"`
-	Model        string             `json:"model"`
-	Usage        Usage              `json:"usage"`
-	StopReason   StopReason         `json:"stopReason"`
-	ResponseID   string             `json:"responseId,omitempty"` // Provider-specific response/message identifier when the upstream API exposes one
-	ErrorMessage string             `json:"errorMessage,omitempty"`
-	Timestamp    int64              `json:"timestamp"` // Unix ms
+	Role          string             `json:"role"` // always "assistant"
+	Content       []AssistantContent `json:"content"`
+	Api           Api                `json:"api"`
+	Provider      Provider           `json:"provider"`
+	Model         string             `json:"model"`
+	ResponseModel string             `json:"responseModel,omitempty"` // Concrete chunk.model when different from requested model (e.g. OpenRouter "auto" -> "anthropic/...")
+	Usage         Usage              `json:"usage"`
+	StopReason    StopReason         `json:"stopReason"`
+	ResponseID    string             `json:"responseId,omitempty"` // Provider-specific response/message identifier when the upstream API exposes one
+	ErrorMessage  string             `json:"errorMessage,omitempty"`
+	Timestamp     int64              `json:"timestamp"` // Unix ms
 }
 
 // SnapshotContent returns a shallow copy of the AssistantMessage with deep-copied

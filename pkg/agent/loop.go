@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent-loop.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package agent
 
 import (
@@ -167,6 +167,19 @@ func runLoop(
 				Type:        EventTurnEnd,
 				TurnMessage: &am,
 				ToolResults: toolResults,
+			}
+
+			// Allow the caller to request a graceful stop after the current turn.
+			if config.ShouldStopAfterTurn != nil {
+				if config.ShouldStopAfterTurn(ShouldStopAfterTurnContext{
+					Message:     message,
+					ToolResults: toolResults,
+					Context:     *currentCtx,
+					NewMessages: newMessages,
+				}) {
+					events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
+					return newMessages
+				}
 			}
 
 			// Get steering messages after turn completes

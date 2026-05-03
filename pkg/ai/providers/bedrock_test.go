@@ -269,13 +269,15 @@ func TestSupportsBedrockThinkingSignature(t *testing.T) {
 }
 
 func TestSupportsBedrockAdaptiveThinking(t *testing.T) {
-	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4-6-v1"))
-	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4.6-v1"))
-	assert.False(t, supportsBedrockAdaptiveThinking("anthropic.claude-3-7-sonnet"))
+	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4-6-v1", ""))
+	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4.6-v1", ""))
+	assert.False(t, supportsBedrockAdaptiveThinking("anthropic.claude-3-7-sonnet", ""))
+	// Application inference profile: ID has no model name; Name carries it.
+	assert.True(t, supportsBedrockAdaptiveThinking("arn:aws:bedrock:us-east-1:123:application-inference-profile/abcd", "Claude Opus 4.7"))
 }
 
 func TestBuildBedrockAdditionalFields_Adaptive(t *testing.T) {
-	fields := buildBedrockAdditionalFields("anthropic.claude-opus-4-6-v1", "high", &ai.StreamOptions{
+	fields := buildBedrockAdditionalFields(&ai.Model{ID: "anthropic.claude-opus-4-6-v1"}, "high", &ai.StreamOptions{
 		Headers: map[string]string{"x-bedrock-reasoning": "high"},
 	})
 	require.NotNil(t, fields)
@@ -284,7 +286,7 @@ func TestBuildBedrockAdditionalFields_Adaptive(t *testing.T) {
 }
 
 func TestBuildBedrockAdditionalFields_BudgetBased(t *testing.T) {
-	fields := buildBedrockAdditionalFields("anthropic.claude-3-7-sonnet", "medium", &ai.StreamOptions{
+	fields := buildBedrockAdditionalFields(&ai.Model{ID: "anthropic.claude-3-7-sonnet"}, "medium", &ai.StreamOptions{
 		Headers: map[string]string{
 			"x-bedrock-reasoning":            "medium",
 			"x-bedrock-thinking-budget":      "4096",

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Sync of upstream pi-mono v0.70.2 → v0.72.1.
+  - New provider identifiers and env-key mappings: `moonshotai`, `moonshotai-cn` (`MOONSHOT_API_KEY`), `cloudflare-workers-ai`, `cloudflare-ai-gateway` (`CLOUDFLARE_API_KEY`), `xiaomi` (`XIAOMI_API_KEY`). Default model IDs for each added to the model resolver. Generator now ships 62 catalog entries for the five providers (cloudflare-workers-ai 8, cloudflare-ai-gateway 35, xiaomi 5, moonshotai 7, moonshotai-cn 7).
+  - `AssistantMessage.ResponseModel` field — set when a provider chunk's `model` differs from the requested model (e.g. OpenRouter `auto` → concrete provider id). Wired through `pkg/ai/providers/openai.go`.
+  - `AgentLoopConfig.ShouldStopAfterTurn` callback — request a graceful stop after the current turn fully completes, before steering/follow-up polling and before the next LLM call. Includes new `ShouldStopAfterTurnContext` struct.
+  - `Transport "websocket-cached"` constant + Codex `previous_response_id` cached-WebSocket continuation in `pkg/ai/providers/codex_websocket.go`. Cached connections track `(lastBodyJSONNoInput, lastInput, lastResponseId)`. Follow-up requests are rewritten to send only the new input items + `previous_response_id`: the helper finds the prefix matching the prior input, skips any contiguous run of assistant-output items (`message[role=assistant]`, `reasoning`, `function_call`) since the server replays them, and sends the rest. New helpers `computeWSContinuationDelta`, `isAssistantOutputItem`, `responseInputsEqual`, `requestBodyJSONWithoutInput`. Test added.
+  - Cloudflare AI Gateway client wiring: `pkg/ai/providers/cloudflare.go` resolves `{CLOUDFLARE_ACCOUNT_ID}`/`{CLOUDFLARE_GATEWAY_ID}` placeholders and rewrites Authorization → `cf-aig-authorization`. Integrated into `anthropic.go`, `openai.go`, `openai_responses.go`.
+  - Xiaomi MiMo-style length-stop overflow detection in `pkg/ai/overflow` (stopReason "length" + output 0 + input filling the context window).
+  - `gpt-5.5` recognised as an xhigh-thinking model.
+  - Mistral `mistral-medium-3.5` model added to the catalog override list.
+  - Azure OpenAI Responses URL normalisation: `normalizeAzureBaseURL` auto-appends `/openai/v1` for bare `*.openai.azure.com` / `*.cognitiveservices.azure.com` hosts.
+  - DeepSeek-style `prompt_cache_hit_tokens` fallback for cache-hit token counting in `pkg/ai/providers/openai.go`.
+  - Anthropic truncated-stream guard (`pkg/ai/providers/anthropic.go`): tracks `message_start`/`message_stop`; if the SSE channel closes after `message_start` without a matching `message_stop`, the stream is reported as an error instead of a successful (truncated) response.
+
+### Changed
+
+- Default agent transport is now `auto` instead of `sse` (matches upstream pi-mono v0.71.1).
+- Bedrock model detection (Anthropic Claude, adaptive thinking, prompt caching) now also matches against `model.Name`, supporting AWS application inference profiles whose ARNs don't contain the model name.
+- OpenAI Codex Responses default `text.verbosity` is now `"low"` (was `"medium"`).
+- OpenAI Completions compat detection now recognises Moonshot AI (`moonshotai`/`moonshotai-cn`/`api.moonshot.*`) and Cloudflare Workers AI / AI Gateway: Moonshot and Cloudflare AI Gateway disable strict mode and `reasoning_effort` and use `max_tokens`; Cloudflare disables long cache retention.
+- `acquireWebSocket` now returns the cached entry alongside the connection so callers can read/write per-connection continuation state.
+
 ## [0.40.0] - 2026-05-02
 
 ### Removed

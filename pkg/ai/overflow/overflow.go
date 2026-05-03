@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/utils/overflow.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 036bde0a
 package overflow
 
 import (
@@ -70,6 +70,16 @@ func IsContextOverflow(message *ai.AssistantMessage, contextWindow int) bool {
 	if contextWindow > 0 && message.StopReason == ai.StopReasonStop {
 		inputTokens := message.Usage.Input + message.Usage.CacheRead
 		if inputTokens > contextWindow {
+			return true
+		}
+	}
+
+	// Case 3: Length-stop overflow (Xiaomi MiMo style) — server truncates oversized input
+	// to fit the context window, leaving no room for output. Returns stopReason "length"
+	// with output=0 and input+cacheRead filling the context window.
+	if contextWindow > 0 && message.StopReason == ai.StopReasonLength && message.Usage.Output == 0 {
+		inputTokens := message.Usage.Input + message.Usage.CacheRead
+		if float64(inputTokens) >= float64(contextWindow)*0.99 {
 			return true
 		}
 	}

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-responses.ts + openai-responses-shared.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -114,12 +114,11 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			}
 		}
 
-		url := openAIResponsesURL(model.BaseURL)
+		url := openAIResponsesURL(ResolveCloudflareBaseURL(model))
 
-		headers := BuildRequestHeaders(
-			map[string]string{"Authorization": "Bearer " + apiKey},
-			model, options,
-		)
+		authHeaders := map[string]string{"Authorization": "Bearer " + apiKey}
+		applyCloudflareAuthHeaders(model.Provider, authHeaders, apiKey)
+		headers := BuildRequestHeaders(authHeaders, model, options)
 
 		// Match upstream: when caching is enabled, set session headers so
 		// providers that key cache on the session pick it up.

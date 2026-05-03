@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/amazon-bedrock.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 036bde0a
 //
 // Uses the AWS SDK for Go v2 (BedrockRuntime ConverseStream) for proper
 // SigV4 signing and credential resolution (profiles, IAM, IRSA, ECS, etc.).
@@ -403,8 +403,8 @@ func buildConverseStreamInput(model *ai.Model, ctx ai.Context, options *ai.Strea
 	// Thinking/reasoning config
 	if options != nil && options.Headers != nil {
 		if reasoning := options.Headers["x-bedrock-reasoning"]; reasoning != "" {
-			if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
-				fields := buildBedrockAdditionalFields(model.ID, reasoning, options)
+			if isBedrockAnthropicClaudeModel(model) && model.Reasoning {
+				fields := buildBedrockAdditionalFields(model, reasoning, options)
 				if fields != nil {
 					input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
 				}
@@ -629,11 +629,11 @@ func convertBedrockToolConfig(tools []ai.Tool, toolChoice string) *brtypes.ToolC
 	return config
 }
 
-func buildBedrockAdditionalFields(modelID, reasoning string, options *ai.StreamOptions) map[string]any {
-	if supportsBedrockAdaptiveThinking(modelID) {
+func buildBedrockAdditionalFields(model *ai.Model, reasoning string, options *ai.StreamOptions) map[string]any {
+	if supportsBedrockAdaptiveThinking(model.ID, model.Name) {
 		return map[string]any{
 			"thinking":      map[string]any{"type": "adaptive"},
-			"output_config": map[string]any{"effort": bedrockThinkingLevelToEffort(ai.ThinkingLevel(reasoning), modelID)},
+			"output_config": map[string]any{"effort": bedrockThinkingLevelToEffort(ai.ThinkingLevel(reasoning), model.ID)},
 		}
 	}
 
@@ -661,49 +661,98 @@ func bedrockCachePoint(retention ai.CacheRetention) brtypes.CachePointBlock {
 	return cp
 }
 
+// modelMatchCandidates returns lowercased variants of the model ID and (optionally)
+// model name that downstream string-contains checks can scan. Application inference
+// profile ARNs in Bedrock don't contain the model name, so we also accept the
+// human-readable Name field which the user provides via models.json.
+func modelMatchCandidates(modelID, modelName string) []string {
+	values := []string{modelID}
+	if modelName != "" {
+		values = append(values, modelName)
+	}
+	out := make([]string, 0, len(values)*2)
+	for _, v := range values {
+		lower := strings.ToLower(v)
+		out = append(out, lower)
+		// Normalise whitespace, underscores, periods, colons to dashes so
+		// "Claude Opus 4.7" matches the canonical "opus-4-7" tokens.
+		repl := lower
+		for _, sep := range []string{" ", "_", ".", ":"} {
+			repl = strings.ReplaceAll(repl, sep, "-")
+		}
+		if repl != lower {
+			out = append(out, repl)
+		}
+	}
+	return out
+}
+
+func anyContains(candidates []string, needle string) bool {
+	for _, s := range candidates {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 // supportsBedrockPromptCaching determines whether cache points should be added.
 //
 // For base models and system-defined inference profiles the model ID / ARN
 // contains the model name, so we can decide locally.
 //
 // For application inference profiles (whose ARNs don't contain the model name),
-// set AWS_BEDROCK_FORCE_CACHE=1 to enable cache points. Amazon Nova models
-// have automatic caching and don't need explicit cache points.
+// we also check model.Name (user-controlled via models.json or RegisterProvider).
+// As a last resort, set AWS_BEDROCK_FORCE_CACHE=1 to enable cache points.
+// Amazon Nova models have automatic caching and don't need explicit cache points.
 func supportsBedrockPromptCaching(model *ai.Model) bool {
-	id := strings.ToLower(model.ID)
+	candidates := modelMatchCandidates(model.ID, model.Name)
 
-	if !strings.Contains(id, "claude") {
-		// Application inference profiles don't contain the model name in the ARN.
-		// Allow users to force cache points via environment variable.
+	if !anyContains(candidates, "claude") {
+		// No claude reference anywhere — likely an application inference profile
+		// pointing at a non-Anthropic model, or the user didn't supply a name.
+		// Allow forcing via env var.
 		if os.Getenv("AWS_BEDROCK_FORCE_CACHE") == "1" {
 			return true
 		}
 		return false
 	}
 
-	if strings.Contains(id, "-4-") || strings.Contains(id, "-4.") {
+	if anyContains(candidates, "-4-") {
 		return true
 	}
-	if strings.Contains(id, "claude-3-7-sonnet") {
+	if anyContains(candidates, "claude-3-7-sonnet") {
 		return true
 	}
-	if strings.Contains(id, "claude-3-5-haiku") {
+	if anyContains(candidates, "claude-3-5-haiku") {
 		return true
 	}
 	return false
 }
 
 // supportsBedrockThinkingSignature checks if the model supports thinking signatures.
+// Checks both model ID and model name to support application inference profiles.
 func supportsBedrockThinkingSignature(model *ai.Model) bool {
-	id := strings.ToLower(model.ID)
-	return strings.Contains(id, "anthropic.claude") || strings.Contains(id, "anthropic/claude")
+	return isBedrockAnthropicClaudeModel(model)
+}
+
+// isBedrockAnthropicClaudeModel reports whether a Bedrock model is an
+// Anthropic Claude model. Checks ID and Name to support application inference
+// profiles whose ARNs don't carry the model name.
+func isBedrockAnthropicClaudeModel(model *ai.Model) bool {
+	candidates := modelMatchCandidates(model.ID, model.Name)
+	return anyContains(candidates, "anthropic.claude") ||
+		anyContains(candidates, "anthropic/claude") ||
+		anyContains(candidates, "claude")
 }
 
 // supportsBedrockAdaptiveThinking checks if the model supports adaptive thinking (Opus 4.6+, Sonnet 4.6).
-func supportsBedrockAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
-		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
-		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
+// Checks both model ID and model name to support application inference profiles.
+func supportsBedrockAdaptiveThinking(modelID, modelName string) bool {
+	candidates := modelMatchCandidates(modelID, modelName)
+	return anyContains(candidates, "opus-4-6") ||
+		anyContains(candidates, "opus-4-7") ||
+		anyContains(candidates, "sonnet-4-6")
 }
 
 // bedrockThinkingLevelToEffort maps thinking level to Bedrock effort value.
@@ -764,8 +813,8 @@ func StreamSimpleBedrock(ctx context.Context, model *ai.Model, prompt ai.Context
 	rawEffort := options.Reasoning
 	clampedEffort := ClampReasoning(rawEffort)
 
-	if strings.Contains(model.ID, "anthropic.claude") && model.Reasoning {
-		if supportsBedrockAdaptiveThinking(model.ID) {
+	if isBedrockAnthropicClaudeModel(model) && model.Reasoning {
+		if supportsBedrockAdaptiveThinking(model.ID, model.Name) {
 			base.Headers["x-bedrock-reasoning"] = string(ClampReasoningForModel(rawEffort, model))
 		} else {
 			maxTokens := 0

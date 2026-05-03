@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/anthropic.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -374,7 +374,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			return
 		}
 
-		url := strings.TrimRight(model.BaseURL, "/") + "/v1/messages"
+		url := strings.TrimRight(ResolveCloudflareBaseURL(model), "/") + "/v1/messages"
 		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 
 		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
@@ -430,6 +430,10 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			blocks := map[int]*blockInfo{}
 
 			retryNeeded := false
+			// Track message_start / message_stop to detect truncated streams
+			// where the server closes the connection without emitting message_stop.
+			sawMessageStart := false
+			sawMessageStop := false
 
 		sseLoop:
 			for evt := range sseEvents {
@@ -451,6 +455,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 				switch eventType {
 				case "message_start":
+					sawMessageStart = true
 					if msg, ok := raw["message"].(map[string]any); ok {
 						if id, ok := msg["id"].(string); ok && output.ResponseID == "" {
 							output.ResponseID = id
@@ -605,6 +610,8 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						updateAnthropicUsage(output, usage, model)
 					}
 
+				case "message_stop":
+					sawMessageStop = true
 				case "error":
 					errObj, _ := raw["error"].(map[string]any)
 					errMsg, _ := errObj["message"].(string)
@@ -710,6 +717,19 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				}
 				output.StopReason = ai.StopReasonError
 				output.ErrorMessage = errMsg
+				if !startEmitted {
+					stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
+				}
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
+				return
+			}
+
+			// Truncated-stream guard: if the server sent message_start but the
+			// connection closed without message_stop, treat this as an error
+			// rather than reporting a successful (but partial) response.
+			if sawMessageStart && !sawMessageStop {
+				output.StopReason = ai.StopReasonError
+				output.ErrorMessage = "Anthropic stream ended before message_stop"
 				if !startEmitted {
 					stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
 				}
@@ -907,6 +927,18 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 			authHeaders["anthropic-beta"] = betaStr
 		}
 		authHeaders["x-api-key"] = apiKey
+	}
+
+	// Cloudflare AI Gateway: replace x-api-key/Authorization with cf-aig-authorization.
+	// The gateway authenticates the caller via cf-aig-* and forwards to Anthropic
+	// using the gateway-configured upstream credentials.
+	if model.Provider == ai.ProviderCloudflareAIGateway {
+		delete(authHeaders, "x-api-key")
+		delete(authHeaders, "authorization")
+		delete(authHeaders, "Authorization")
+		authHeaders["cf-aig-authorization"] = "Bearer " + apiKey
+		// Cloudflare requires the dangerous-direct-browser-access flag.
+		authHeaders["anthropic-dangerous-direct-browser-access"] = "true"
 	}
 
 	// Build final headers using the standard merge order, but filter

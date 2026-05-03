@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/env-api-keys.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package envkeys
 
 import (
@@ -26,10 +26,15 @@ var providerEnvMap = map[string]string{
 	string(ai.ProviderMistral):              "MISTRAL_API_KEY",
 	string(ai.ProviderMinimax):              "MINIMAX_API_KEY",
 	string(ai.ProviderMinimaxCN):            "MINIMAX_CN_API_KEY",
+	string(ai.ProviderMoonshotAI):           "MOONSHOT_API_KEY",
+	string(ai.ProviderMoonshotAICN):         "MOONSHOT_API_KEY",
 	string(ai.ProviderHuggingface):          "HF_TOKEN",
 	string(ai.ProviderOpenCode):             "OPENCODE_API_KEY",
 	string(ai.ProviderOpenCodeGo):           "OPENCODE_API_KEY",
 	string(ai.ProviderKimiCoding):           "KIMI_API_KEY",
+	string(ai.ProviderCloudflareWorkersAI):  "CLOUDFLARE_API_KEY",
+	string(ai.ProviderCloudflareAIGateway):  "CLOUDFLARE_API_KEY",
+	string(ai.ProviderXiaomi):               "XIAOMI_API_KEY",
 	string(ai.ProviderPoe):                  "POE_API_KEY",
 }
 

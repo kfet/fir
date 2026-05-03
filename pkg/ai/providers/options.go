@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/simple-options.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package providers
 
 import (

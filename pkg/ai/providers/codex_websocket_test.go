@@ -300,7 +300,7 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
+		conn, _, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
 		if err == nil && conn != nil {
 			release(false)
 		}
@@ -318,7 +318,7 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		conn, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
+		conn, _, release, err := acquireWebSocket(ctx, wsURL, nil, sessionID)
 		if err == nil && conn != nil {
 			release(false)
 		}
@@ -336,5 +336,71 @@ func TestAcquireWebSocket_InflightCoalescing(t *testing.T) {
 	}
 	if peak > 1 {
 		t.Errorf("coalescing failed: peak concurrent connections = %d, want ≤ 1", peak)
+	}
+}
+
+func TestComputeWSContinuationDelta(t *testing.T) {
+	cont := &wsContinuation{
+		LastBodyJSONNoInput: `{"model":"gpt-5.5","stream":true}`,
+		LastInput: []any{
+			map[string]any{"type": "message", "role": "user", "content": "hi"},
+		},
+		LastResponseID: "resp_1",
+	}
+
+	// Next request: previous user msg, then the assistant text the server
+	// produced (skipped — replayed via previous_response_id), then a follow-up
+	// user message which is the only item we should send as the delta.
+	body := map[string]any{
+		"model":  "gpt-5.5",
+		"stream": true,
+		"input": []any{
+			map[string]any{"type": "message", "role": "user", "content": "hi"},
+			map[string]any{"type": "message", "role": "assistant", "content": "hello"},
+			map[string]any{"type": "reasoning", "encrypted_content": "<opaque>"},
+			map[string]any{"type": "function_call", "call_id": "c1", "name": "x", "arguments": "{}"},
+			map[string]any{"type": "function_call_output", "call_id": "c1", "output": "ok"},
+			map[string]any{"type": "message", "role": "user", "content": "follow-up"},
+		},
+	}
+	delta, ok := computeWSContinuationDelta(body, cont)
+	if !ok {
+		t.Fatalf("expected continuation match")
+	}
+	if len(delta) != 2 {
+		t.Fatalf("expected 2 delta items (function_call_output + new user), got %d", len(delta))
+	}
+	first := delta[0].(map[string]any)["type"]
+	second := delta[1].(map[string]any)["type"]
+	if first != "function_call_output" || second != "message" {
+		t.Fatalf("unexpected delta items: %+v", delta)
+	}
+
+	// Mismatched body shape — different model — should reject continuation.
+	body["model"] = "gpt-other"
+	if _, ok := computeWSContinuationDelta(body, cont); ok {
+		t.Fatalf("expected mismatch on different model")
+	}
+
+	// Prefix mismatch — replace user msg in baseline → reject.
+	body["model"] = "gpt-5.5"
+	body["input"] = []any{map[string]any{"type": "message", "role": "user", "content": "different"}}
+	if _, ok := computeWSContinuationDelta(body, cont); ok {
+		t.Fatalf("expected mismatch on prefix divergence")
+	}
+
+	// Nil continuation → reject.
+	if _, ok := computeWSContinuationDelta(body, nil); ok {
+		t.Fatalf("expected mismatch with nil continuation")
+	}
+
+	// Same as previous (only assistant items, no real delta) → reject so we
+	// don't send an empty input.
+	body["input"] = []any{
+		map[string]any{"type": "message", "role": "user", "content": "hi"},
+		map[string]any{"type": "message", "role": "assistant", "content": "hello"},
+	}
+	if _, ok := computeWSContinuationDelta(body, cont); ok {
+		t.Fatalf("expected rejection when delta would be empty")
 	}
 }

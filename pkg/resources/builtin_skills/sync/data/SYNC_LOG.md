@@ -1,5 +1,53 @@
 # Sync Log
 
+## 2026-05-02 — Sync to v0.72.1 (commit 036bde0a)
+
+- `ai/src/types.ts` → `pkg/ai/types.go`: added providers `moonshotai`, `moonshotai-cn`, `cloudflare-workers-ai`, `cloudflare-ai-gateway`, `xiaomi`; added `Transport "websocket-cached"`; added `AssistantMessage.ResponseModel` for routing-provider model id mismatches.
+- `ai/src/env-api-keys.ts` → `pkg/ai/envkeys/envkeys.go`: env-var mappings for the five new providers (MOONSHOT_API_KEY, CLOUDFLARE_API_KEY, XIAOMI_API_KEY). Bun `/proc/self/environ` fallback skipped (Node-on-Linux Bun-only — irrelevant in Go).
+- `ai/src/utils/overflow.ts` → `pkg/ai/overflow/overflow.go`: new Case 3 — Xiaomi MiMo length-stop overflow (stopReason="length", output=0, input fills context window ≥99%).
+- `ai/src/models.ts` → `pkg/ai/models.go`: `gpt-5.5` added to `SupportsXhigh`.
+- `ai/src/providers/amazon-bedrock.ts` → `pkg/ai/providers/bedrock.go`: `supportsBedrockAdaptiveThinking`, `isBedrockAnthropicClaudeModel`, `supportsBedrockPromptCaching`, `supportsBedrockThinkingSignature` now match against both `model.ID` and `model.Name` via lowercased + dash-normalised candidates, supporting application inference profiles. New helpers `modelMatchCandidates` and `anyContains`.
+- `agent/src/types.ts` → `pkg/agent/types.go`: new `AgentLoopConfig.ShouldStopAfterTurn` callback and `ShouldStopAfterTurnContext` struct.
+- `agent/src/agent-loop.ts` → `pkg/agent/loop.go`: agent loop calls `ShouldStopAfterTurn` after the `turn_end` event and exits gracefully before polling steering/follow-up queues if it returns true.
+- `agent/src/agent.ts` → `pkg/agent/agent.go`: default `Transport` is now `auto` (was `sse`).
+- `coding-agent/src/core/model-resolver.ts` → `pkg/models/modelresolver.go`: added defaults for the five new providers (`moonshotai`/`moonshotai-cn` → `kimi-k2.6`, `cloudflare-workers-ai` → `@cf/moonshotai/kimi-k2.6`, `cloudflare-ai-gateway` → `workers-ai/@cf/moonshotai/kimi-k2.6`, `xiaomi` → `mimo-v2.5-pro`). Added them to `knownProviderOrder`. `google-gemini-cli` and `google-antigravity` retained for backward compatibility (see Deferred).
+
+### Notable changes
+
+- **`ShouldStopAfterTurn` callback**: lets the agent owner request a graceful exit after the current turn finishes, e.g. when context is nearing a soft limit. Exits before any further LLM call; `agent_end` is emitted with the messages accumulated so far.
+- **Xiaomi-style length-stop overflow detection**: the overflow helper now recognises providers that silently truncate oversized input to the context window, then return `stopReason "length"` with zero output. Required for proper compaction triggers on Xiaomi MiMo and similar.
+- **Bedrock application inference profile support**: AWS application inference profile ARNs don't contain the model name. fir's Bedrock helpers now also check `model.Name` (which the user supplies via `models.json`) so adaptive thinking, Anthropic-Claude detection, prompt caching, and thinking-signature support work for inference-profile ARNs.
+- **`AssistantMessage.ResponseModel` field**: surfaces the concrete provider model id when a routing provider (OpenRouter `auto`, Vercel AI Gateway, etc.) resolves a request to a different upstream model. Useful for accounting and for correctly attributing costs.
+- **Default transport is `auto`**: the agent now lets the per-provider stream pick its preferred transport instead of always SSE. WebSocket-capable providers (OpenAI Codex Responses) can use it without an explicit opt-in.
+- **`websocket-cached` transport constant**: introduced for the upstream OpenAI Codex `previous_response_id` continuation feature. The wire-level cached-WS handling is not yet ported (see Deferred), but the transport value is reserved.
+- **New provider plumbing**: env-key + resolver default + provider-string registration for `moonshotai`, `moonshotai-cn`, `cloudflare-workers-ai`, `cloudflare-ai-gateway`, `xiaomi`. Users can register concrete models for these in `models.json`; the streaming side reuses the existing OpenAI-completions / Anthropic providers for now.
+
+### Deferred / known divergence
+
+- **`thinkingLevelMap` migration**: upstream replaced the global `supportsXhigh()` / id-based `reasoningEffortMap` with per-model `thinkingLevelMap` carried on each `Model`. fir keeps its functionally-equivalent `SupportsXhigh` / `SupportsMax` / `ClampReasoningForModel` system; provider call sites were not rewritten. The two approaches diverge for any model that needs an unusual `level → effort` remapping (e.g. DeepSeek `low → "high"`, Groq qwen3-32b `* → "default"`); fir's existing `Compat.ReasoningEffortMap` still handles those cases.
+- **Anthropic SSE message-event allowlist (event-type filtering)**: fir already has this implicitly — its switch-on-event-type uses a default case that silently ignores unknown events. No change needed.
+- **Model registry `name`, per-model `baseUrl` override, `getProviderAuthStatus` / `getProviderDisplayName` helpers, and `upsertRegisteredProvider` semantics**: not yet ported to `pkg/models/modelregistry.go`. fir's registry has diverged from upstream's TypeBox-based validation flow and these helpers are coding-agent UI plumbing.
+- **Google `google-gemini-cli` + `google-antigravity` provider/oauth**: upstream removed these in v0.71.x as a breaking change. **fir intentionally keeps them** — they let users stream Gemini 3 / Antigravity-bundled models via personal Google OAuth (Cloud Code Assist quota) without an API key, which is a meaningful value-add for a local-first agent. The OAuth flows already live in builtin Python extensions (`gemini_cli_auth.py`, `antigravity_auth.py`); the Go-side streaming provider, API/provider constants, generator catalog entries, and model-resolver defaults stay. This is a permanent fir-vs-upstream divergence, not a deferred deletion.
+
+### Follow-up commits (post-initial-sync, same upstream tag)
+
+These were originally deferred on the first pass, then completed in the same batch:
+
+- **OpenAI Completions (`pkg/ai/providers/openai.go`)**:
+  - `responseModel` capture from streaming chunks when `chunk.model` differs from the requested `model.ID` (routing providers like OpenRouter `auto`).
+  - `prompt_cache_hit_tokens` legacy fallback for cache-hit token counting (DeepSeek-style).
+  - Moonshot AI compat detection (`moonshotai`/`moonshotai-cn`/`api.moonshot.*`): treated as non-standard, no `supportsStrictMode`, no `supportsReasoningEffort`, uses `max_tokens` instead of `max_completion_tokens`.
+  - Cloudflare Workers AI / AI Gateway compat detection: non-standard; `supportsLongCacheRetention` disabled; AI Gateway disables strict mode and reasoning_effort.
+- **Cloudflare AI Gateway client wiring** (`pkg/ai/providers/cloudflare.go`, plus integration in `anthropic.go`, `openai.go`, `openai_responses.go`):
+  - `ResolveCloudflareBaseURL` substitutes `{CLOUDFLARE_ACCOUNT_ID}` and `{CLOUDFLARE_GATEWAY_ID}` placeholders from env.
+  - `applyCloudflareAuthHeaders` rewrites `Authorization: Bearer <key>` → `cf-aig-authorization: Bearer <key>` for the AI Gateway provider.
+  - Anthropic provider also adds `anthropic-dangerous-direct-browser-access: true` for the gateway path.
+- **Codex `previous_response_id` cached-WebSocket continuation** (`pkg/ai/providers/codex_websocket.go`): cached connections now track the previous request body (without input), the previous input, and the previous response id. When a follow-up call arrives on the same socket and the body matches except for input — and the new input begins with the previous input — the helper skips any leading run of assistant-output items (`message[role=assistant]`, `reasoning`, `function_call`) that the server will replay via `previous_response_id`, and sends only the remaining items. Reduces token retransmission across turns without depending on stable `msg_<index>` ids. New helpers `computeWSContinuationDelta`, `isAssistantOutputItem`, `requestBodyJSONWithoutInput`, `responseInputsEqual`. Test added (`TestComputeWSContinuationDelta`). `acquireWebSocket` signature changed to expose the cached entry to callers.
+- **Azure OpenAI Responses URL normalisation** (`pkg/ai/providers/azure_openai_responses.go`): new `normalizeAzureBaseURL` auto-appends `/openai/v1` when an Azure OpenAI / Cognitive Services host is supplied without the standard path. Lets users put just `https://<resource>.openai.azure.com` in `models.json`.
+- **OpenAI Codex Responses default text verbosity = "low"** (was `"medium"`).
+- **Mistral `mistral-medium-3.5`** added to the catalog override list in `cmd/generate-models/main.go`.
+- **New provider catalogs** (`cloudflare-workers-ai` 8 models, `cloudflare-ai-gateway` 35 models, `xiaomi` 5 models, `moonshotai` 7 models, `moonshotai-cn` 7 models) extracted from upstream `models.generated.ts` and added to `applyOverridesAndAdditions` in the generator. Total 62 new model entries in `pkg/ai/models_generated.go`.
+
 ## 2026-04-26 — Sync to v0.70.2 (commit 48aa882)
 
 - `ai/src/types.ts` → `pkg/ai/types.go`: New providers `deepseek` and `fireworks`; new `StreamOptions` fields `timeoutMs` and `maxRetries`; new `AnthropicMessagesCompat` type with `supportsEagerToolInputStreaming` and `supportsLongCacheRetention`; `OpenAICompletionsCompat` gains `requiresReasoningContentOnAssistantMessages`, `thinkingFormat: "deepseek"`, `cacheControlFormat`, `sendSessionAffinityHeaders`, `supportsLongCacheRetention`; `OpenAIResponsesCompat` gains `sendSessionIdHeader` and `supportsLongCacheRetention`; Model compat now resolves `AnthropicMessagesCompat` for `anthropic-messages` API; added `BoolPtr`/`IntPtr` helpers.

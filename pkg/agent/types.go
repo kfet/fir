@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/types.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package agent
 
 import (
@@ -30,11 +30,24 @@ type AgentLoopConfig struct {
 	GetApiKey func(provider string) (string, error)
 
 	// GetSteeringMessages returns steering messages to inject mid-run.
-	// Called after the current assistant turn finishes executing its tool calls.
+	// Called after the current assistant turn finishes executing its tool calls,
+	// unless ShouldStopAfterTurn exits first.
 	// Tool calls from the current assistant message are not skipped.
 	//
 	// Contract: must not return an error. Return nil/empty when no steering messages are available.
 	GetSteeringMessages func() ([]AgentMessage, error)
+
+	// ShouldStopAfterTurn is called after each turn fully completes and the
+	// turn_end event has been emitted. If it returns true, the loop emits
+	// agent_end and exits before polling steering or follow-up queues, without
+	// starting another LLM call.
+	//
+	// Use this to request a graceful stop after the current turn, e.g. before
+	// context gets too full.
+	//
+	// Contract: must not panic. Panicking interrupts the agent loop without
+	// producing a normal event sequence.
+	ShouldStopAfterTurn func(ctx ShouldStopAfterTurnContext) bool
 
 	// GetFollowUpMessages returns follow-up messages after the agent would otherwise stop.
 	GetFollowUpMessages func() ([]AgentMessage, error)
@@ -205,6 +218,21 @@ type AgentContext struct {
 	SystemPrompt string
 	Messages     []AgentMessage
 	Tools        *ToolSet
+}
+
+// ShouldStopAfterTurnContext is the context passed to AgentLoopConfig.ShouldStopAfterTurn.
+type ShouldStopAfterTurnContext struct {
+	// Message is the assistant message that completed the turn.
+	Message *ai.AssistantMessage
+	// ToolResults are the tool result messages passed to the preceding turn_end event.
+	ToolResults []ai.ToolResultMessage
+	// Context is the current agent context after the turn's assistant message
+	// and tool results have been appended.
+	Context AgentContext
+	// NewMessages are the messages that this loop invocation will return if it
+	// exits at this point. Prompt runs include the initial prompt messages;
+	// continuation runs do not include pre-existing context messages.
+	NewMessages []AgentMessage
 }
 
 // --- Agent Events ---

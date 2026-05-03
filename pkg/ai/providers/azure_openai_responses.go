@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/azure-openai-responses.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -91,8 +92,32 @@ func resolveAzureConfig(model *ai.Model, baseURLOverride, resourceNameOverride, 
 		return "", "", fmt.Errorf("Azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME, or pass azureBaseUrl, azureResourceName, or model.baseUrl")
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
+	baseURL = normalizeAzureBaseURL(baseURL)
 	return baseURL, apiVersion, nil
+}
+
+// normalizeAzureBaseURL trims trailing slashes and, for Azure OpenAI / Cognitive
+// Services hosts that lack the standard `/openai/v1` path, appends it so the
+// AzureOpenAI SDK can correctly construct the deployment endpoint.
+//
+// This matches upstream pi-mono's normalization (v0.71.x): users frequently
+// configure just `https://<resource>.openai.azure.com` in models.json — the
+// SDK then needs `/openai/v1` to build `/deployments/<id>/...?api-version=v1`.
+func normalizeAzureBaseURL(raw string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return trimmed
+	}
+	host := strings.ToLower(u.Hostname())
+	isAzureHost := strings.HasSuffix(host, ".openai.azure.com") || strings.HasSuffix(host, ".cognitiveservices.azure.com")
+	path := strings.TrimRight(u.Path, "/")
+	if isAzureHost && (path == "" || path == "/openai") {
+		u.Path = "/openai/v1"
+		u.RawQuery = ""
+	}
+	out := u.String()
+	return strings.TrimRight(out, "/")
 }
 
 // StreamAzureOpenAIResponses implements streaming for the Azure OpenAI Responses API.

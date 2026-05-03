@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-completions.ts
-// Upstream hash: 48aa882
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -25,6 +25,7 @@ import (
 
 type openaiChunk struct {
 	ID      string         `json:"id"`
+	Model   string         `json:"model"`
 	Choices []openaiChoice `json:"choices"`
 	Usage   *openaiUsage   `json:"usage"`
 }
@@ -58,10 +59,13 @@ type openaiToolCallFunc struct {
 }
 
 type openaiUsage struct {
-	PromptTokens        int `json:"prompt_tokens"`
-	CompletionTokens    int `json:"completion_tokens"`
-	TotalTokens         int `json:"total_tokens"`
-	PromptTokensDetails *struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	// PromptCacheHitTokens is DeepSeek-style legacy field: when newer
+	// `prompt_tokens_details.cached_tokens` is absent we fall back to this.
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+	PromptTokensDetails  *struct {
 		CachedTokens     int `json:"cached_tokens"`
 		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"prompt_tokens_details"`
@@ -111,13 +115,20 @@ func detectCompat(model *ai.Model) resolvedCompat {
 
 	isPoe := provider == "poe" || strings.Contains(baseURL, "poe.com")
 
+	isMoonshot := provider == "moonshotai" || provider == "moonshotai-cn" ||
+		strings.Contains(baseURL, "api.moonshot.")
+	isCloudflareWorkersAI := provider == "cloudflare-workers-ai" ||
+		strings.Contains(baseURL, "api.cloudflare.com")
+	isCloudflareAIGateway := provider == "cloudflare-ai-gateway" ||
+		strings.Contains(baseURL, "gateway.ai.cloudflare.com")
+
 	isNonStandard := provider == "cerebras" || strings.Contains(baseURL, "cerebras.ai") ||
 		provider == "xai" || strings.Contains(baseURL, "api.x.ai") ||
 		strings.Contains(baseURL, "chutes.ai") || isDeepSeek ||
 		isZai || provider == "opencode" || strings.Contains(baseURL, "opencode.ai") ||
-		isPoe
+		isPoe || isMoonshot || isCloudflareWorkersAI || isCloudflareAIGateway
 
-	useMaxTokens := strings.Contains(baseURL, "chutes.ai")
+	useMaxTokens := strings.Contains(baseURL, "chutes.ai") || isMoonshot || isCloudflareAIGateway
 
 	isGrok := provider == "xai" || strings.Contains(baseURL, "api.x.ai")
 	isGroq := provider == "groq" || strings.Contains(baseURL, "groq.com")
@@ -162,7 +173,7 @@ func detectCompat(model *ai.Model) resolvedCompat {
 	return resolvedCompat{
 		SupportsStore:                               !isNonStandard,
 		SupportsDeveloperRole:                       !isNonStandard,
-		SupportsReasoningEffort:                     !isGrok && !isZai,
+		SupportsReasoningEffort:                     !isGrok && !isZai && !isMoonshot && !isCloudflareAIGateway,
 		ReasoningEffortMap:                          reasoningEffortMap,
 		SupportsUsageInStreaming:                    true,
 		MaxTokensField:                              maxField,
@@ -171,10 +182,10 @@ func detectCompat(model *ai.Model) resolvedCompat {
 		RequiresThinkingAsText:                      false,
 		RequiresReasoningContentOnAssistantMessages: isDeepSeek,
 		ThinkingFormat:                              thinkingFmt,
-		SupportsStrictMode:                          true,
+		SupportsStrictMode:                          !isMoonshot && !isCloudflareAIGateway,
 		CacheControlFormat:                          cacheControlFormat,
 		SendSessionAffinityHeaders:                  false,
-		SupportsLongCacheRetention:                  true,
+		SupportsLongCacheRetention:                  !(isCloudflareWorkersAI || isCloudflareAIGateway),
 		StripAdditionalProperties:                   isPoe,
 	}
 }
@@ -369,7 +380,7 @@ func streamOpenAIHTTP(
 		}
 	}
 
-	url := openAIChatCompletionsURL(model.BaseURL)
+	url := openAIChatCompletionsURL(ResolveCloudflareBaseURL(model))
 
 	firlog.Debug("openai request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
 
@@ -382,10 +393,9 @@ func streamOpenAIHTTP(
 	req.Header.Set("Accept", "text/event-stream")
 
 	// Build auth + model headers (options merged after provider-specific logic below)
-	baseHeaders := BuildRequestHeaders(
-		map[string]string{"Authorization": "Bearer " + apiKey},
-		model, nil,
-	)
+	authHeaders := map[string]string{"Authorization": "Bearer " + apiKey}
+	applyCloudflareAuthHeaders(model.Provider, authHeaders, apiKey)
+	baseHeaders := BuildRequestHeaders(authHeaders, model, nil)
 	ApplyHeaders(req, baseHeaders)
 
 	// Copilot-specific headers
@@ -515,6 +525,11 @@ func parseOpenAISSE(
 		// Track response ID (same across all chunks in a single completion)
 		if chunk.ID != "" && output.ResponseID == "" {
 			output.ResponseID = chunk.ID
+		}
+		// Track concrete response model when a routing provider (OpenRouter "auto",
+		// Vercel AI Gateway, etc.) resolved the request to a different upstream id.
+		if chunk.Model != "" && chunk.Model != model.ID && output.ResponseModel == "" {
+			output.ResponseModel = chunk.Model
 		}
 
 		// Usage
@@ -657,6 +672,12 @@ func parseChunkUsage(u *openaiUsage, model *ai.Model) ai.Usage {
 	if u.PromptTokensDetails != nil {
 		reportedCached = u.PromptTokensDetails.CachedTokens
 		cacheWrite = u.PromptTokensDetails.CacheWriteTokens
+	}
+	// DeepSeek (and a couple of OpenAI-compatible third parties) report cache hits
+	// in the legacy top-level `prompt_cache_hit_tokens` field. Use it only when the
+	// modern `prompt_tokens_details.cached_tokens` field didn't supply a value.
+	if reportedCached == 0 && u.PromptCacheHitTokens > 0 {
+		reportedCached = u.PromptCacheHitTokens
 	}
 	reasoningTokens := 0
 	if u.CompletionTokensDetails != nil {

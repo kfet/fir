@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -197,7 +197,7 @@ func StreamOpenAICodexResponses(ctx context.Context, model *ai.Model, prompt ai.
 		if transport != ai.TransportSSE {
 			wsURL := resolveCodexWebSocketURL(model.BaseURL)
 			wsStarted, wsErr := processWebSocketStream(ctx, wsURL, body, wsHeaders, output, stream, model, options)
-			if wsStarted || transport == ai.TransportWebSocket {
+			if wsStarted || transport == ai.TransportWebSocket || transport == ai.TransportWebSocketCached {
 				if wsErr != nil {
 					output.StopReason = ai.StopReasonError
 					output.ErrorMessage = wsErr.Error()
@@ -330,7 +330,7 @@ func buildCodexRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamOp
 		"stream":              true,
 		"instructions":        ctx.SystemPrompt,
 		"input":               input,
-		"text":                map[string]any{"verbosity": "medium"},
+		"text":                map[string]any{"verbosity": "low"},
 		"include":             []string{"reasoning.encrypted_content"},
 		"tool_choice":         "auto",
 		"parallel_tool_calls": true,

@@ -1,5 +1,5 @@
 // Ported from: packages/ai/src/providers/openai-codex-responses.ts (WebSocket transport section)
-// Upstream hash: 9e22d391
+// Upstream hash: 036bde0a
 package providers
 
 import (
@@ -27,6 +27,31 @@ type cachedWSConn struct {
 	conn      *websocket.Conn
 	busy      bool
 	idleTimer *time.Timer
+	// continuation tracks the most recent successful response on this socket
+	// so the next request can be sent as `previous_response_id` + delta input
+	// when transport is "websocket-cached" or "auto".
+	continuation *wsContinuation
+}
+
+// wsContinuation captures the state needed to construct a follow-up Codex
+// Responses request that reuses server-side context via previous_response_id.
+//
+// We deliberately do not store the previous response's converted "items": the
+// converter is allowed to embed positional ids (e.g. `msg_<index>`) that won't
+// match across requests. Instead we rely on the simpler invariant that the
+// next request's input begins with the previous `LastInput`, immediately
+// followed by zero or more assistant-output items (`message[role=assistant]`,
+// `reasoning`, `function_call`), and that everything after those is the true
+// delta the caller wants to add (`function_call_output`, new user messages, …).
+type wsContinuation struct {
+	// LastBodyJSONNoInput is the JSON of the previous request body with the
+	// "input", "previous_response_id", and "type" keys stripped — the
+	// comparison key for continuation matching.
+	LastBodyJSONNoInput string
+	// LastInput is the previous request's input array.
+	LastInput []any
+	// LastResponseID is the id of the previous response.
+	LastResponseID string
 }
 
 var (
@@ -92,13 +117,15 @@ func connectWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 }
 
 // acquireWebSocket gets a WebSocket connection, reusing a cached one if available.
-func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]string, sessionID string) (conn *websocket.Conn, release func(keep bool), err error) {
+// Returns the connection, optional cached entry (nil for non-session or non-cached
+// reuse), and a release func that takes a `keep` flag.
+func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]string, sessionID string) (conn *websocket.Conn, entry *cachedWSConn, release func(keep bool), err error) {
 	if sessionID == "" {
 		c, err := connectWebSocket(ctx, wsURL, headers)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return c, func(keep bool) {
+		return c, nil, func(keep bool) {
 			c.Close(websocket.StatusNormalClosure, "done")
 		}, nil
 	}
@@ -115,7 +142,7 @@ func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 			// Reuse cached connection
 			cached.busy = true
 			wsSessionCacheMu.Unlock()
-			return cached.conn, func(keep bool) {
+			return cached.conn, cached, func(keep bool) {
 				wsSessionCacheMu.Lock()
 				defer wsSessionCacheMu.Unlock()
 				if !keep {
@@ -131,9 +158,9 @@ func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 		wsSessionCacheMu.Unlock()
 		c, err := connectWebSocket(ctx, wsURL, headers)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return c, func(keep bool) {
+		return c, nil, func(keep bool) {
 			c.Close(websocket.StatusNormalClosure, "done")
 		}, nil
 	}
@@ -146,7 +173,7 @@ func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 			// Dial completed; retry to pick up the cached entry.
 			return acquireWebSocket(ctx, wsURL, headers, sessionID)
 		case <-ctx.Done():
-			return nil, nil, ctx.Err()
+			return nil, nil, nil, ctx.Err()
 		}
 	}
 
@@ -163,27 +190,27 @@ func acquireWebSocket(ctx context.Context, wsURL string, headers map[string]stri
 	close(ready) // wake any waiters (they will retry and find the entry or fail)
 	if dialErr != nil {
 		wsSessionCacheMu.Unlock()
-		return nil, nil, dialErr
+		return nil, nil, nil, dialErr
 	}
-	entry := &cachedWSConn{conn: c, busy: true}
-	wsSessionCache[sessionID] = entry
+	newEntry := &cachedWSConn{conn: c, busy: true}
+	wsSessionCache[sessionID] = newEntry
 	wsSessionCacheMu.Unlock()
 
-	return c, func(keep bool) {
+	return c, newEntry, func(keep bool) {
 		wsSessionCacheMu.Lock()
 		defer wsSessionCacheMu.Unlock()
 		if !keep {
 			c.Close(websocket.StatusNormalClosure, "done")
-			if entry.idleTimer != nil {
-				entry.idleTimer.Stop()
+			if newEntry.idleTimer != nil {
+				newEntry.idleTimer.Stop()
 			}
-			if wsSessionCache[sessionID] == entry {
+			if wsSessionCache[sessionID] == newEntry {
 				delete(wsSessionCache, sessionID)
 			}
 			return
 		}
-		entry.busy = false
-		scheduleWSExpiry(sessionID, entry)
+		newEntry.busy = false
+		scheduleWSExpiry(sessionID, newEntry)
 	}, nil
 }
 
@@ -209,6 +236,12 @@ func scheduleWSExpiry(sessionID string, entry *cachedWSConn) {
 // processWebSocketStream runs a Codex response over WebSocket transport.
 // It sends the request body over the socket, reads SSE-like events back,
 // and feeds them through the shared responses processor.
+//
+// When transport is "auto" or "websocket-cached" and a cached connection has
+// continuation state from a prior response on the same session, the request
+// body is rewritten to send only the new input items plus a
+// `previous_response_id` reference. After a successful response, continuation
+// state is updated for the next request.
 func processWebSocketStream(
 	ctx context.Context,
 	wsURL string,
@@ -220,11 +253,16 @@ func processWebSocketStream(
 	options *ai.StreamOptions,
 ) (started bool, err error) {
 	sessionID := ""
+	transport := ai.TransportSSE
 	if options != nil {
 		sessionID = options.SessionID
+		if options.Transport != "" {
+			transport = options.Transport
+		}
 	}
+	useCachedContinuation := transport == ai.TransportWebSocketCached || transport == ai.TransportAuto
 
-	conn, release, err := acquireWebSocket(ctx, wsURL, headers, sessionID)
+	conn, entry, release, err := acquireWebSocket(ctx, wsURL, headers, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -240,6 +278,22 @@ func processWebSocketStream(
 		keepConnection = false
 		return false, fmt.Errorf("parsing request body: %w", err)
 	}
+
+	// Snapshot the full input before any continuation rewrite — this is what
+	// we'll record as `LastInput` for the next request.
+	fullInput, _ := bodyMap["input"].([]any)
+
+	// Try to compress to a continuation request when we have cached state.
+	if useCachedContinuation && entry != nil {
+		if delta, ok := computeWSContinuationDelta(bodyMap, entry.continuation); ok {
+			bodyMap["input"] = delta
+			bodyMap["previous_response_id"] = entry.continuation.LastResponseID
+		} else {
+			// Continuation state no longer applies — drop it.
+			entry.continuation = nil
+		}
+	}
+
 	bodyMap["type"] = "response.create"
 	wsMsg, err := json.Marshal(bodyMap)
 	if err != nil {
@@ -249,6 +303,10 @@ func processWebSocketStream(
 
 	if err := conn.Write(ctx, websocket.MessageText, wsMsg); err != nil {
 		keepConnection = false
+		// Drop continuation: we don't know if the server saw the request.
+		if entry != nil {
+			entry.continuation = nil
+		}
 		return false, fmt.Errorf("websocket write: %w", err)
 	}
 
@@ -265,6 +323,9 @@ func processWebSocketStream(
 	for {
 		if ctx.Err() != nil {
 			keepConnection = false
+			if entry != nil {
+				entry.continuation = nil
+			}
 			return true, fmt.Errorf("request was aborted")
 		}
 
@@ -274,6 +335,9 @@ func processWebSocketStream(
 				break
 			}
 			keepConnection = false
+			if entry != nil {
+				entry.continuation = nil
+			}
 			return true, fmt.Errorf("websocket read: %w", err)
 		}
 
@@ -296,6 +360,9 @@ func processWebSocketStream(
 		done, err := proc.processEvent(data)
 		if err != nil {
 			keepConnection = false
+			if entry != nil {
+				entry.continuation = nil
+			}
 			return true, err
 		}
 		if done {
@@ -305,9 +372,117 @@ func processWebSocketStream(
 
 	if ctx.Err() != nil {
 		keepConnection = false
+		if entry != nil {
+			entry.continuation = nil
+		}
+		return true, nil
+	}
+
+	// Record continuation state for the next call on this socket. Only applies
+	// when we're using the cached transport mode and the response carried an id.
+	if useCachedContinuation && entry != nil && output.ResponseID != "" {
+		entry.continuation = &wsContinuation{
+			LastBodyJSONNoInput: requestBodyJSONWithoutInput(bodyMap),
+			LastInput:           fullInput,
+			LastResponseID:      output.ResponseID,
+		}
+	} else if entry != nil && output.ResponseID == "" {
+		entry.continuation = nil
 	}
 
 	return true, nil
+}
+
+// computeWSContinuationDelta returns the input slice that should be sent as a
+// follow-up `previous_response_id` request, or false if continuation cannot be
+// applied (request shape mismatch or input prefix mismatch).
+//
+// Strategy:
+//  1. The non-input portion of the body must match the previous request.
+//  2. The current input must begin with the previous request's input.
+//  3. After that prefix, we skip any contiguous run of assistant-output items
+//     (message[role=assistant], reasoning, function_call). Those correspond
+//     to the items the server will replay via previous_response_id.
+//  4. Whatever remains is the delta the caller actually wants to add this turn
+//     (function_call_output for tool results, plus any new user messages).
+//
+// If the prefix-match fails or the delta is empty, continuation cannot be
+// applied and the caller should send the full request.
+func computeWSContinuationDelta(body map[string]any, cont *wsContinuation) ([]any, bool) {
+	if cont == nil || cont.LastResponseID == "" {
+		return nil, false
+	}
+	if requestBodyJSONWithoutInput(body) != cont.LastBodyJSONNoInput {
+		return nil, false
+	}
+	current, _ := body["input"].([]any)
+	if len(current) < len(cont.LastInput) {
+		return nil, false
+	}
+	prefix := current[:len(cont.LastInput)]
+	if !responseInputsEqual(prefix, cont.LastInput) {
+		return nil, false
+	}
+	rest := current[len(cont.LastInput):]
+	// Skip the leading run of assistant-output items — the server will replay
+	// them via previous_response_id.
+	skip := 0
+	for skip < len(rest) && isAssistantOutputItem(rest[skip]) {
+		skip++
+	}
+	delta := rest[skip:]
+	if len(delta) == 0 {
+		// Nothing new to send. Don't apply continuation; let the caller
+		// resend the full request (server would reject an empty input).
+		return nil, false
+	}
+	out := make([]any, len(delta))
+	copy(out, delta)
+	return out, true
+}
+
+// isAssistantOutputItem reports whether the given item looks like an output
+// item the server emitted as part of the previous response (and therefore
+// will replay via previous_response_id).
+func isAssistantOutputItem(item any) bool {
+	m, ok := item.(map[string]any)
+	if !ok {
+		return false
+	}
+	t, _ := m["type"].(string)
+	switch t {
+	case "reasoning", "function_call":
+		return true
+	case "message":
+		role, _ := m["role"].(string)
+		return role == "assistant"
+	}
+	return false
+}
+
+// requestBodyJSONWithoutInput returns the canonical JSON of a request body with
+// the "input", "previous_response_id", and "type" keys removed — the comparison
+// key for continuation matching.
+func requestBodyJSONWithoutInput(body map[string]any) string {
+	clone := make(map[string]any, len(body))
+	for k, v := range body {
+		if k == "input" || k == "previous_response_id" || k == "type" {
+			continue
+		}
+		clone[k] = v
+	}
+	out, _ := json.Marshal(clone)
+	return string(out)
+}
+
+// responseInputsEqual deep-compares two response input slices via JSON equality.
+func responseInputsEqual(a, b []any) bool {
+	aj, err1 := json.Marshal(a)
+	bj, err2 := json.Marshal(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return string(aj) == string(bj)
 }
 
 // mapCodexEventFromMap maps a parsed Codex event map to a JSON string for the processor.

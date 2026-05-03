@@ -1,5 +1,5 @@
 // Ported from: packages/agent/src/agent.ts
-// Upstream hash: a1edb8a4
+// Upstream hash: 036bde0a
 package agent
 
 import (
@@ -166,7 +166,7 @@ func NewAgent(opts AgentOptions) *Agent {
 	if opts.Transport != "" {
 		a.transport = opts.Transport
 	} else {
-		a.transport = ai.TransportSSE
+		a.transport = ai.TransportAuto
 	}
 	if opts.MaxRetryDelayMs != nil {
 		a.maxRetryDelayMs = opts.MaxRetryDelayMs
