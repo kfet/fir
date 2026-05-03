@@ -709,16 +709,18 @@ def _snapshot_session_list(include_all: bool = False) -> str:
         if hidden:
             return f"no live fir sessions ({hidden} ended/crashed — use --all to show)"
         return _NO_SESSIONS_NOTICE
-    id_w, name_w, cwd_w = 8, 4, 3
+    id_w, name_w, cwd_w, pid_w = 8, 4, 3, 3
     for s in sidecars:
         sid = s.get("session_id", "") or ""
         id_w = max(id_w, min(8, len(sid)))
         name_w = max(name_w, len(s.get("session_name", "") or ""))
         cwd_w = max(cwd_w, len(os.path.basename(s.get("cwd", "") or "")))
+        pid_val = s.get("host_pid") or s.get("pid") or 0
+        pid_w = max(pid_w, len(str(pid_val)))
     name_w = min(name_w, 30)
     cwd_w = min(cwd_w, 30)
     lines = [
-        f"{'ID':<{id_w}}  {'NAME':<{name_w}}  {'CWD':<{cwd_w}}  {'STATUS':<9}  AGE"
+        f"{'ID':<{id_w}}  {'PID':>{pid_w}}  {'NAME':<{name_w}}  {'CWD':<{cwd_w}}  {'STATUS':<9}  AGE"
     ]
     now = time.time()
     for s in sidecars:
@@ -727,7 +729,8 @@ def _snapshot_session_list(include_all: bool = False) -> str:
         cwd = _trunc(os.path.basename(s.get("cwd", "") or ""), cwd_w)
         status = s.get("status", "") or ""
         age = _age_string(s.get("started_at", "") or "", now)
-        lines.append(f"{sid:<{id_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}")
+        pid_val = s.get("host_pid") or s.get("pid") or 0
+        lines.append(f"{sid:<{id_w}}  {pid_val:>{pid_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}")
     if hidden:
         lines.append(f"({hidden} ended/crashed hidden — use --all to show)")
     return "\n".join(lines)
