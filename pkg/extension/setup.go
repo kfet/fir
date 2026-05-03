@@ -108,8 +108,8 @@ func (r *SetupResult) EmitSessionStart(reexecData map[string]map[string]string) 
 		// original window name.
 		if r.session != nil {
 			if name := r.session.GetSessionName(); name != "" {
-				r.Manager.EmitEvent("session_named", map[string]any{
-					"name": name,
+				r.Manager.EmitEvent("session_named", SessionNamedPayload{
+					Name: name,
 				})
 			}
 		}
@@ -211,10 +211,10 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 	// hook/tool_call. When no extensions are running the hook is a no-op.
 	hooks := &session.AgentSessionHooks{
 		OnToolCall: func(toolCallID, toolName string, input map[string]any) *session.ToolCallBlock {
-			raws, err := mgr.CallHook(context.Background(), "hook/tool_call", map[string]any{
-				"tool_call_id": toolCallID,
-				"tool_name":    toolName,
-				"params":       input,
+			raws, err := mgr.CallHook(context.Background(), "hook/tool_call", ToolCallHookPayload{
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Params:     input,
 			}, 5*time.Second)
 			if err != nil {
 				return nil
@@ -239,21 +239,21 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 		if event.AgentEvent == nil {
 			switch event.Type {
 			case "session_named":
-				mgr.EmitEvent("session_named", map[string]any{
-					"name": event.SessionName,
+				mgr.EmitEvent("session_named", SessionNamedPayload{
+					Name: event.SessionName,
 				})
-				mgr.EmitEvent("session_update", map[string]any{
-					"type":         event.Type,
-					"session_name": event.SessionName,
+				mgr.EmitEvent("session_update", SessionUpdatePayload{
+					Type:        event.Type,
+					SessionName: event.SessionName,
 				})
 			case "plan_update":
-				mgr.EmitEvent("session_update", map[string]any{
-					"type":         event.Type,
-					"session_name": event.SessionName,
-					"plan": map[string]any{
-						"total":     len(event.PlanEntries),
-						"completed": countCompleted(event.PlanEntries),
-						"metadata":  event.PlanMetadata,
+				mgr.EmitEvent("session_update", SessionUpdatePayload{
+					Type:        event.Type,
+					SessionName: event.SessionName,
+					Plan: &PlanInfo{
+						Total:     len(event.PlanEntries),
+						Completed: countCompleted(event.PlanEntries),
+						Metadata:  event.PlanMetadata,
 					},
 				})
 			}
@@ -275,21 +275,21 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 			payload := messageEndPayload(ae)
 			mgr.EmitEvent("message_end", payload)
 		case agent.EventToolExecutionStart:
-			mgr.EmitEvent("tool_execution_start", map[string]any{
-				"tool_call_id": ae.ToolCallID,
-				"tool_name":    ae.ToolName,
+			mgr.EmitEvent("tool_execution_start", ToolExecutionStartPayload{
+				ToolCallID: ae.ToolCallID,
+				ToolName:   ae.ToolName,
 			})
 		case agent.EventToolExecutionEnd:
-			payload := map[string]any{
-				"tool_call_id": ae.ToolCallID,
-				"tool_name":    ae.ToolName,
-				"is_error":     ae.IsError,
+			payload := ToolExecutionEndPayload{
+				ToolCallID: ae.ToolCallID,
+				ToolName:   ae.ToolName,
+				IsError:    ae.IsError,
 			}
 			if ae.IsError {
 				if r, ok := ae.Result.(agent.AgentToolResult); ok {
 					for _, c := range r.Content {
 						if c.Text != "" {
-							payload["error_text"] = c.Text
+							payload.ErrorText = c.Text
 							break
 						}
 					}
@@ -319,7 +319,7 @@ func countCompleted(entries []agent.PlanEntry) int {
 // cost). User and tool-result messages get only their role. The schema is
 // stable enough for extensions (e.g. observe.py) to meter usage in their
 // sidecars.
-func messageEndPayload(ae *agent.AgentEvent) map[string]any {
+func messageEndPayload(ae *agent.AgentEvent) *MessageEndPayload {
 	if ae == nil || ae.Message == nil {
 		return nil
 	}
@@ -327,32 +327,32 @@ func messageEndPayload(ae *agent.AgentEvent) map[string]any {
 	if role == "" {
 		return nil
 	}
-	payload := map[string]any{"role": role}
+	payload := &MessageEndPayload{Role: role}
 	am := ae.Message.AsAssistant()
 	if am == nil {
 		return payload
 	}
-	payload["provider"] = string(am.Provider)
-	payload["model"] = am.Model
+	payload.Provider = string(am.Provider)
+	payload.Model = am.Model
 	if am.StopReason != "" {
-		payload["stop_reason"] = string(am.StopReason)
+		payload.StopReason = string(am.StopReason)
 	}
 	if am.ResponseID != "" {
-		payload["response_id"] = am.ResponseID
+		payload.ResponseID = am.ResponseID
 	}
 	u := am.Usage
-	payload["usage"] = map[string]any{
-		"input":        u.Input,
-		"output":       u.Output,
-		"cache_read":   u.CacheRead,
-		"cache_write":  u.CacheWrite,
-		"total_tokens": u.TotalTokens,
-		"cost": map[string]any{
-			"input":       u.Cost.Input,
-			"output":      u.Cost.Output,
-			"cache_read":  u.Cost.CacheRead,
-			"cache_write": u.Cost.CacheWrite,
-			"total":       u.Cost.Total,
+	payload.Usage = &MessageEndUsage{
+		Input:       u.Input,
+		Output:      u.Output,
+		CacheRead:   u.CacheRead,
+		CacheWrite:  u.CacheWrite,
+		TotalTokens: u.TotalTokens,
+		Cost: MessageEndCost{
+			Input:      u.Cost.Input,
+			Output:     u.Cost.Output,
+			CacheRead:  u.Cost.CacheRead,
+			CacheWrite: u.Cost.CacheWrite,
+			Total:      u.Cost.Total,
 		},
 	}
 	return payload

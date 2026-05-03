@@ -31,6 +31,37 @@ Quick start::
 See ``pkg/resources/builtin_extensions/demo.py`` for a working example that
 exercises every API surface.
 
+Typed surface
+~~~~~~~~~~~~~
+Every wire shape has a ``TypedDict`` (e.g. :class:`ToolResult`,
+:class:`ExecResult`, :class:`MessageEndParams`, :class:`ToolCallHookParams`)
+exported from this module. Annotating handler signatures with these types
+gives full IDE/type-checker support without changing runtime behaviour —
+all TypedDicts are plain ``dict``\\s under the hood. Existing extensions
+that pass dicts around continue to work unchanged.
+
+Example with typed handlers::
+
+    from typing import Optional
+    import fir_ext
+
+    @fir_ext.on("message_end")
+    def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> None:
+        if params.get("role") != "assistant":
+            return
+        usage = params.get("usage", {})
+        cost = usage.get("cost", {}).get("total", 0.0)
+        ctx.notify(f"turn cost ${cost:.4f}")
+
+    @fir_ext.on("hook/tool_call")
+    def on_tool_call(
+        params: fir_ext.ToolCallHookParams, ctx: fir_ext.Context
+    ) -> Optional[fir_ext.ToolCallHookResult]:
+        if (params.get("tool_name") or "").startswith("blocked:"):
+            return {"block": True, "reason": "blocked by policy"}
+        return None
+
+
 -------------------------------------------------------------------------------
 WIRE PROTOCOL
 -------------------------------------------------------------------------------
@@ -450,7 +481,7 @@ import json
 import os
 import sys
 import threading
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypedDict, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -467,6 +498,612 @@ class WriteStream(Protocol):
 
     def write(self, s: str, /) -> int: ...
     def flush(self) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Typed wire surface
+# ---------------------------------------------------------------------------
+#
+# Every shape that crosses the JSON-RPC boundary has a ``TypedDict`` so
+# extension authors get IDE/type-checker support while we keep zero runtime
+# overhead — at runtime these are still plain ``dict``s.
+#
+# Conventions:
+# * ``total=False`` whenever a key is genuinely optional on the wire.
+# * Names mirror the wire shape: ``ToolExecutionStartParams`` is what arrives
+#   with ``event/tool_execution_start``.
+# * Result types end in ``Result``; param types end in ``Params``.
+# * Hook return types end in ``HookResult`` and use ``total=False`` because
+#   returning ``None`` is always a valid "pass-through" answer.
+#
+# Compatibility note: every TypedDict is a ``dict`` at runtime, so existing
+# handlers that already use ``params.get(...)`` / ``result["ok"]`` keep
+# working unchanged. Nothing forces extension code to import these types.
+
+
+# -- content / tool result --------------------------------------------------
+
+
+class ContentBlock(TypedDict, total=False):
+    """A single content block returned from a tool call."""
+
+    type: str  # currently always "text"
+    text: str
+
+
+class ToolResult(TypedDict, total=False):
+    """Structured result of a tool invocation."""
+
+    content: list[ContentBlock]
+    is_error: bool
+
+
+# -- tool / command / hook spec (init handshake) ----------------------------
+
+
+class TitleArgSpec(TypedDict, total=False):
+    """One entry in a ``DisplayHint.title_args`` list."""
+
+    name: str
+    style: str   # "path" | "pattern" | "accent" | ""
+    label: str
+
+
+class DisplayHint(TypedDict, total=False):
+    """TUI rendering hints attached to a tool definition."""
+
+    title_args: list[TitleArgSpec]
+    result_max_lines: int
+    use_box: bool
+
+
+class ToolSpec(TypedDict, total=False):
+    """Tool definition reported to fir during the init handshake."""
+
+    name: str
+    description: str
+    parameters: dict   # JSON Schema; arbitrary nested shape
+    display_hint: DisplayHint
+
+
+class CommandSpec(TypedDict, total=False):
+    """Slash-command spec reported during init."""
+
+    name: str
+    description: str
+
+
+class AuthProviderSpec(TypedDict, total=False):
+    """Auth-provider spec reported during init."""
+
+    id: str
+    name: str
+    uses_callback_server: bool
+
+
+class InitParams(TypedDict, total=False):
+    """Params delivered with the inbound ``init`` request."""
+
+    version: str
+    cwd: str
+    config_dirs: list[str]
+
+
+class InitResult(TypedDict, total=False):
+    """Response payload for the ``init`` handshake."""
+
+    name: str
+    tools: list[ToolSpec]
+    commands: list[CommandSpec]
+    events: list[str]
+    auth_providers: list[AuthProviderSpec]
+    tool_name_map: dict   # str -> str
+    cli_verbs: list[str]
+
+
+# -- tool_call request ------------------------------------------------------
+
+
+class ToolCallParams(TypedDict, total=False):
+    """Params delivered with an inbound ``tool_call`` request."""
+
+    tool_call_id: str
+    name: str
+    params: dict   # caller-defined; per-tool schema
+
+
+# -- hook payloads ----------------------------------------------------------
+
+
+class ToolCallHookParams(TypedDict, total=False):
+    """Params for ``hook/tool_call``."""
+
+    tool_call_id: str
+    tool_name: str
+    params: dict
+
+
+class ToolCallHookResult(TypedDict, total=False):
+    """Return shape of a ``hook/tool_call`` handler.
+
+    Returning ``None`` (or an empty dict) allows the call to proceed.
+    """
+
+    block: bool
+    reason: str
+
+
+class CommandHookParams(TypedDict, total=False):
+    """Params for ``hook/command``."""
+
+    name: str
+    args: list[str]
+
+
+class CommandHookResult(TypedDict, total=False):
+    """Return shape of a slash-command handler."""
+
+    message: str
+    print_response: bool
+
+
+# -- event payloads ---------------------------------------------------------
+#
+# Many event payloads have no fields (notification with no params); those use
+# an empty TypedDict for symmetry with the typed handler signatures.
+
+
+class _Empty(TypedDict, total=False):
+    """Empty event payload (no fields)."""
+
+
+class SessionStartParams(TypedDict, total=False):
+    session_id: str
+    session_data: dict
+
+
+class SessionShutdownParams(_Empty):
+    """Params for ``session_shutdown`` (always empty)."""
+
+
+class SessionEndParams(TypedDict, total=False):
+    """Params for ``session_end``."""
+
+    reason: str
+    error: str
+
+
+class SessionNamedParams(TypedDict, total=False):
+    """Params for ``session_named``."""
+
+    name: str
+
+
+class PlanInfo(TypedDict, total=False):
+    """The ``plan`` field of a ``session_update`` event."""
+
+    total: int
+    completed: int
+    metadata: dict
+
+
+class SessionUpdateParams(TypedDict, total=False):
+    """Params for the generic ``session_update`` event."""
+
+    type: str   # "session_named" | "plan_update"
+    session_name: str
+    plan: PlanInfo
+
+
+class AgentLifecycleParams(_Empty):
+    """Empty params for agent_*/turn_*/message_start events."""
+
+
+class MessageEndCost(TypedDict, total=False):
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float
+    total: float
+
+
+class MessageEndUsage(TypedDict, total=False):
+    input: int
+    output: int
+    cache_read: int
+    cache_write: int
+    total_tokens: int
+    cost: MessageEndCost
+
+
+class MessageEndParams(TypedDict, total=False):
+    role: str
+    provider: str
+    model: str
+    stop_reason: str
+    response_id: str
+    usage: MessageEndUsage
+
+
+class ToolExecutionStartParams(TypedDict, total=False):
+    tool_call_id: str
+    tool_name: str
+
+
+class ToolExecutionEndParams(TypedDict, total=False):
+    tool_call_id: str
+    tool_name: str
+    is_error: bool
+    error_text: str
+
+
+# -- bridge method (extension → fir) params/results -------------------------
+#
+# Param shapes — used as the body of ctx._call() — and result shapes — what
+# the call returns.
+
+
+class OkResult(TypedDict, total=False):
+    """Generic ``{"ok": true}`` ack."""
+
+    ok: bool
+
+
+class NotifyParams(TypedDict, total=False):
+    message: str
+    level: str   # "info" | "warning" | "error"
+
+
+class ExecParams(TypedDict, total=False):
+    command: str
+    args: list[str]
+
+
+class ExecResult(TypedDict, total=False):
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+class SendMessageParams(TypedDict, total=False):
+    custom_type: str
+    content: object   # any JSON-serialisable value
+    display: bool
+    deliver_as: str
+    trigger_turn: bool
+
+
+class SendUserMessageParams(TypedDict, total=False):
+    content: str
+    deliver_as: str
+
+
+class SetSessionNameParams(TypedDict, total=False):
+    name: str
+
+
+class SetLabelParams(TypedDict, total=False):
+    entry_id: str
+    label: str
+
+
+class ClearLabelParams(TypedDict, total=False):
+    entry_id: str
+
+
+class SetModelParams(TypedDict, total=False):
+    provider: str
+    id: str
+
+
+class SetStatusParams(TypedDict, total=False):
+    status: str
+
+
+class SideQueryParams(TypedDict, total=False):
+    question: str
+    model: str
+    provider: str
+    effort: str   # "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+
+
+class SideQueryResult(TypedDict, total=False):
+    ok: bool
+    text: str
+
+
+class SetSessionDataParams(TypedDict, total=False):
+    key: str
+    value: str
+
+
+class GetSessionDataParams(TypedDict, total=False):
+    key: str
+
+
+class GetSessionDataResult(TypedDict, total=False):
+    value: str
+    ok: bool
+
+
+class GetSessionFileResult(TypedDict, total=False):
+    path: str
+
+
+class GetSessionNameResult(TypedDict, total=False):
+    name: str
+
+
+class GetSessionIDResult(TypedDict, total=False):
+    id: str
+
+
+class CallToolParams(TypedDict, total=False):
+    name: str
+    params: dict
+
+
+class ListToolsItem(TypedDict, total=False):
+    name: str
+    description: str
+    parameters: dict
+
+
+class PrependContextParams(TypedDict, total=False):
+    content: str
+
+
+class ReportProgressParams(TypedDict, total=False):
+    message: str
+
+
+# -- CLI verb wire shapes ---------------------------------------------------
+
+
+class CLIInvokeParams(TypedDict, total=False):
+    verb: str
+    argv: list[str]
+    cwd: str
+    stdin_is_tty: bool
+    stdout_is_tty: bool
+    stderr_is_tty: bool
+
+
+class CLIInvokeResult(TypedDict, total=False):
+    exit_code: int
+
+
+class CLIStdinParams(TypedDict, total=False):
+    data: str
+    eof: bool
+
+
+class CLISignalParams(TypedDict, total=False):
+    name: str
+
+
+class CLIStdoutParams(TypedDict, total=False):
+    data: str
+
+
+# -- Auth provider wire shapes ---------------------------------------------
+
+
+class AuthCredentials(TypedDict, total=False):
+    access: str
+    refresh: str
+    expires: int
+
+
+class AuthLoginParams(TypedDict, total=False):
+    provider_id: str
+
+
+class AuthRefreshParams(TypedDict, total=False):
+    provider_id: str
+    credentials: AuthCredentials
+
+
+class AuthAPIKeyParams(TypedDict, total=False):
+    provider_id: str
+    credentials: AuthCredentials
+
+
+class AuthListModelsParams(TypedDict, total=False):
+    provider_id: str
+    credentials: AuthCredentials
+
+
+class AuthModifyModelsParams(TypedDict, total=False):
+    provider_id: str
+    credentials: AuthCredentials
+    models: list
+
+
+class AuthLoginResult(TypedDict, total=False):
+    credentials: AuthCredentials
+
+
+class AuthAPIKeyResult(TypedDict, total=False):
+    api_key: str
+
+
+class AuthModelsResult(TypedDict, total=False):
+    models: list | None
+
+
+class PKCEResult(TypedDict, total=False):
+    verifier: str
+    challenge: str
+
+
+class CallbackServerParams(TypedDict, total=False):
+    addr: str
+    path: str
+    state: str
+
+
+class CallbackServerResult(TypedDict, total=False):
+    addr: str
+    redirect_uri: str
+
+
+class CallbackResult(TypedDict, total=False):
+    code: str
+    state: str
+
+
+class AuthOpenURLParams(TypedDict, total=False):
+    url: str
+    instructions: str
+
+
+class AuthProgressParams(TypedDict, total=False):
+    message: str
+
+
+class AuthPromptParams(TypedDict, total=False):
+    message: str
+    placeholder: str
+    allow_empty: bool
+
+
+class AuthPromptResult(TypedDict, total=False):
+    value: str
+
+
+# -- handler-shape aliases --------------------------------------------------
+#
+# These are documentation aliases; we keep the registries weakly typed
+# (Callable) so existing extensions that don't import these aliases stay
+# valid. Use them in your own code to get full IDE support, e.g.::
+#
+#     ToolHandler = fir_ext.ToolHandlerType
+#     def my_tool(params: dict, ctx: fir_ext.Context) -> fir_ext.ToolResult: ...
+
+_T_Params = TypeVar("_T_Params")
+
+if TYPE_CHECKING:
+    from collections.abc import Callable as _Callable
+
+    ToolHandlerType = _Callable[[dict, "Context"], Any]
+    """``(params, ctx) -> dict | str | ToolResult`` — see :func:`tool`."""
+
+    EventHandlerType = _Callable[[dict, "Context"], None]
+    """``(params, ctx) -> None`` — see :func:`on`."""
+
+    HookHandlerType = _Callable[[dict, "Context"], Any]
+    """``(params, ctx) -> Optional[dict]`` — see :func:`on`."""
+
+    CommandHandlerType = _Callable[[list[str], "Context"], Optional[CommandHookResult]]
+    """``(args, ctx) -> Optional[CommandHookResult]`` — see :func:`command`."""
+
+    CLIVerbHandlerType = _Callable[[list[str], "Host"], int]
+    """``(argv, host) -> exit_code`` — see :func:`cli_verb`."""
+
+
+# Public re-exports for the typed surface. Existing extensions don't need to
+# import these — TypedDicts are plain ``dict`` at runtime — but adding them
+# to ``__all__`` keeps autocomplete and documentation tooling happy.
+__all__ = [
+    "AgentLifecycleParams",
+    "AuthAPIKeyParams",
+    "AuthAPIKeyResult",
+    "AuthContext",
+    # Auth
+    "AuthCredentials",
+    "AuthListModelsParams",
+    "AuthLoginParams",
+    "AuthLoginResult",
+    "AuthModelsResult",
+    "AuthModifyModelsParams",
+    "AuthOpenURLParams",
+    "AuthProgressParams",
+    "AuthPromptParams",
+    "AuthPromptResult",
+    "AuthProviderSpec",
+    "AuthRefreshParams",
+    # CLI verbs
+    "CLIInvokeParams",
+    "CLIInvokeResult",
+    "CLISignalParams",
+    "CLIStdinParams",
+    "CLIStdoutParams",
+    "CallToolParams",
+    "CallbackResult",
+    "CallbackServerParams",
+    "CallbackServerResult",
+    "ClearLabelParams",
+    "CommandHookParams",
+    "CommandHookResult",
+    "CommandSpec",
+    # Content / tool result
+    "ContentBlock",
+    "Context",
+    "DisplayHint",
+    "ExecParams",
+    "ExecResult",
+    "GetSessionDataParams",
+    "GetSessionDataResult",
+    "GetSessionFileResult",
+    "GetSessionIDResult",
+    "GetSessionNameResult",
+    "Host",
+    "InitParams",
+    "InitResult",
+    "ListToolsItem",
+    "MessageEndCost",
+    "MessageEndParams",
+    "MessageEndUsage",
+    "NotifyParams",
+    # Bridge methods
+    "OkResult",
+    "PKCEResult",
+    "PlanInfo",
+    "PrependContextParams",
+    "ReportProgressParams",
+    "SendMessageParams",
+    "SendUserMessageParams",
+    "SessionEndParams",
+    "SessionNamedParams",
+    "SessionShutdownParams",
+    # Events
+    "SessionStartParams",
+    "SessionUpdateParams",
+    "SetLabelParams",
+    "SetModelParams",
+    "SetSessionDataParams",
+    "SetSessionNameParams",
+    "SetStatusParams",
+    "SideQueryParams",
+    "SideQueryResult",
+    # Init / definitions
+    "TitleArgSpec",
+    "ToolCallHookParams",
+    "ToolCallHookResult",
+    # Tool calls / hooks
+    "ToolCallParams",
+    "ToolError",
+    "ToolExecutionEndParams",
+    "ToolExecutionStartParams",
+    "ToolResult",
+    "ToolSpec",
+    "auth_api_key",
+    "auth_list_models",
+    "auth_modify_models",
+    "auth_provider",
+    "auth_refresh",
+    "cli_verb",
+    "command",
+    "config_path",
+    "load_config",
+    "on",
+    "on_cli_signal",
+    "register_tool_name_map",
+    "run",
+    # Decorators / lifecycle
+    "tool",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -919,7 +1556,7 @@ class Context:
 
     def exec(
         self, command: str, args: list[str] | None = None, timeout: float = 10.0
-    ) -> dict[str, Any]:
+    ) -> ExecResult:
         """Run a command via fir. Returns dict with stdout, stderr, exit_code.
 
         Parameters
@@ -931,7 +1568,10 @@ class Context:
         timeout : float, optional
             How long to wait for the RPC response (client-side only, not sent to Go).
         """
-        return self._call("exec", {"command": command, "args": args or []}, timeout=timeout)
+        result = self._call("exec", {"command": command, "args": args or []}, timeout=timeout)
+        if isinstance(result, dict):
+            return result  # type: ignore[return-value]
+        return {"stdout": "", "stderr": "", "exit_code": 0}
 
     def send_message(
         self,
@@ -1131,7 +1771,7 @@ class Context:
         name: str,
         params: dict[str, Any] | None = None,
         timeout: float = 60.0,
-    ) -> dict[str, Any]:
+    ) -> ToolResult:
         """Call a registered tool by name and return its result.
 
         Executes the tool directly via the bridge — the call does not appear
@@ -1148,10 +1788,10 @@ class Context:
 
         Returns
         -------
-        dict
-            Tool result with ``content`` (list of content blocks) and
-            ``is_error`` (bool).  On RPC-level errors a dict with
-            ``is_error=True`` and a text content block is returned.
+        ToolResult
+            ``{"content": [...], "is_error": bool}``. On RPC-level errors
+            an entry with ``is_error=True`` and a text content block is
+            returned.
         """
         result = self._call(
             "call_tool",
@@ -1159,21 +1799,21 @@ class Context:
             timeout=timeout,
         )
         if isinstance(result, dict):
-            return result
-        return {"content": [{"text": str(result)}], "is_error": False}
+            return result  # type: ignore[return-value]
+        return {"content": [{"type": "text", "text": str(result)}], "is_error": False}
 
-    def list_tools(self, timeout: float = 10.0) -> list[dict[str, Any]]:
+    def list_tools(self, timeout: float = 10.0) -> list[ListToolsItem]:
         """Return info about all registered tools.
 
         Returns
         -------
-        list of dict
-            Each dict has ``name`` (str), ``description`` (str, optional),
+        list of ListToolsItem
+            Each item has ``name`` (str), ``description`` (str, optional),
             and ``parameters`` (dict, optional — JSON Schema).
         """
         result = self._call("list_tools", {}, timeout=timeout)
         if isinstance(result, list):
-            return result
+            return result  # type: ignore[return-value]
         return []
 
     def prepend(self, content: str) -> None:
@@ -1195,8 +1835,14 @@ class Context:
 
         Fields include version, mode, session, model, context usage,
         thinking level, message counts, token totals, and cost.
+
+        Returns a free-form dict — fir's :class:`session.Introspection`
+        evolves over time, so we keep this loosely typed by design.
         """
-        return self._call("agent.info", {}, timeout=timeout)
+        result = self._call("agent.info", {}, timeout=timeout)
+        if isinstance(result, dict):
+            return result
+        return {}
 
 
 class AuthContext(Context):
@@ -1206,12 +1852,12 @@ class AuthContext(Context):
     that call back into fir's OAuth infrastructure.
     """
 
-    def generate_pkce(self, timeout: float = 10.0) -> dict[str, str]:
+    def generate_pkce(self, timeout: float = 10.0) -> PKCEResult:
         """Generate a PKCE code verifier and challenge.
 
         Returns
         -------
-        dict
+        PKCEResult
             ``{"verifier": "...", "challenge": "..."}``
         """
         return self._call("auth/generate_pkce", {}, timeout=timeout)
@@ -1222,7 +1868,7 @@ class AuthContext(Context):
         path: str = "/callback",
         state: str = "",
         timeout: float = 10.0,
-    ) -> dict[str, str]:
+    ) -> CallbackServerResult:
         """Start a local HTTP server to receive the OAuth callback.
 
         Parameters
@@ -1237,7 +1883,7 @@ class AuthContext(Context):
 
         Returns
         -------
-        dict
+        CallbackServerResult
             ``{"addr": "127.0.0.1:NNNNN", "redirect_uri": "http://localhost:NNNNN/callback"}``
         """
         return self._call(
@@ -1246,12 +1892,12 @@ class AuthContext(Context):
             timeout=timeout,
         )
 
-    def await_callback(self, timeout: float = 300.0) -> dict[str, str]:
+    def await_callback(self, timeout: float = 300.0) -> CallbackResult:
         """Block until the callback server receives an auth code.
 
         Returns
         -------
-        dict
+        CallbackResult
             ``{"code": "...", "state": "..."}``
         """
         return self._call("auth/await_callback", {}, timeout=timeout)

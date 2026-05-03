@@ -27,6 +27,13 @@ Inbound surface demonstrated (fir → extension):
     turn_start, turn_end, message_start, message_end,
     tool_execution_start, tool_execution_end
 
+Type annotations:
+  Handlers in this file use the TypedDicts re-exported from fir_ext
+  (e.g. ``fir_ext.ToolCallHookParams``, ``fir_ext.MessageEndParams``,
+  ``fir_ext.ExecResult``) so that this demo doubles as a typed-API
+  reference. The TypedDicts are plain ``dict`` at runtime, so the
+  annotations are purely for tooling.
+
 Batch tool demonstration:
   The batch_example tool shows how extensions can use ctx.call_tool(),
   ctx.report_progress(), and ctx.side_query() to orchestrate multi-tool
@@ -38,6 +45,7 @@ Batch tool demonstration:
 
 import sys
 import threading
+from typing import Optional
 
 import fir_ext
 
@@ -58,7 +66,7 @@ import fir_ext
         "title_args": [{"name": "text", "style": "accent"}],
     },
 )
-def word_count(params, ctx):
+def word_count(params: dict, ctx: fir_ext.Context) -> dict:
     words = params.get("text", "").split()
     n = len(words)
     ctx.set_label("last_wc", str(n))          # set_label
@@ -86,7 +94,7 @@ def word_count(params, ctx):
         "result_max_lines": 15,
     },
 )
-def shell_run(params, ctx):
+def shell_run(params: dict, ctx: fir_ext.Context) -> fir_ext.ExecResult:
     return ctx.exec(params["command"], params.get("args", []))
 
 
@@ -108,7 +116,7 @@ def shell_run(params, ctx):
         ],
     },
 )
-def change_model(params, ctx):
+def change_model(params: dict, ctx: fir_ext.Context) -> dict:
     ok = ctx.set_model(params["provider"], params["model"])  # set_model
     return {"ok": ok}
 
@@ -128,7 +136,7 @@ def change_model(params, ctx):
         "required": ["kind", "content"],
     },
 )
-def inject_message(params, ctx):
+def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
     if params["kind"] == "user":
         ctx.send_user_message(params["content"])           # send_user_message
     else:
@@ -254,7 +262,9 @@ def _json_compact(obj):
 
 
 @fir_ext.on("hook/tool_call")
-def on_hook_tool_call(params, ctx):
+def on_hook_tool_call(
+    params: fir_ext.ToolCallHookParams, ctx: fir_ext.Context
+) -> Optional[fir_ext.ToolCallHookResult]:
     """Block any tool whose name starts with 'blocked:'."""
     name = params.get("tool_name") or params.get("name", "")
     if name.startswith("blocked:"):
@@ -268,7 +278,7 @@ def on_hook_tool_call(params, ctx):
 
 
 @fir_ext.on("session_start")
-def on_session_start(params, ctx):
+def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -> None:
     ctx.set_status("demo ready")                      # set_status
     ctx.set_session_data("started", "true")            # set_session_data
     ctx.list_tools()                                   # list_tools (read-only discovery)
@@ -280,39 +290,53 @@ def on_session_start(params, ctx):
 
 
 @fir_ext.on("session_shutdown")
-def on_session_shutdown(params, ctx):
+def on_session_shutdown(
+    params: fir_ext.SessionShutdownParams, ctx: fir_ext.Context
+) -> None:
     _ = ctx.get_session_data("started")                # get_session_data
     ctx.set_status("")                                 # set_status (clear)
 
 
 @fir_ext.on("agent_start")
-def on_agent_start(params, ctx):
+def on_agent_start(
+    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
+) -> None:
     ctx.set_session_name("demo session")              # set_session_name
 
 
 @fir_ext.on("agent_end")
-def on_agent_end(params, ctx):
+def on_agent_end(
+    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
+) -> None:
     ctx.notify("Agent finished", level="info")        # notify
     ctx.clear_label("last_wc")                        # clear_label
 
 
 @fir_ext.on("turn_start")
-def on_turn_start(params, ctx):
+def on_turn_start(
+    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
+) -> None:
     pass   # subscribed; no outbound call needed
 
 
 @fir_ext.on("turn_end")
-def on_turn_end(params, ctx):
+def on_turn_end(
+    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
+) -> None:
     ctx.continue_session()                             # continue_session
 
 
 @fir_ext.on("message_start")
-def on_message_start(params, ctx):
+def on_message_start(
+    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
+) -> None:
     pass
 
 
 @fir_ext.on("message_end")
-def on_message_end(params, ctx):
+def on_message_end(
+    params: fir_ext.MessageEndParams, ctx: fir_ext.Context
+) -> None:
     # Assistant messages now carry provider/model/usage so observers can
     # meter token + cost spend without parsing the transcript. User and
     # tool-result messages get only `role`. Older fir builds emitted no
@@ -333,7 +357,9 @@ def on_message_end(params, ctx):
 
 
 @fir_ext.on("tool_execution_start")
-def on_tool_execution_start(params, ctx):
+def on_tool_execution_start(
+    params: fir_ext.ToolExecutionStartParams, ctx: fir_ext.Context
+) -> None:
     name = params.get("tool_name", "")
     tcid = params.get("tool_call_id", "")
     if tcid:
@@ -341,7 +367,9 @@ def on_tool_execution_start(params, ctx):
 
 
 @fir_ext.on("tool_execution_end")
-def on_tool_execution_end(params, ctx):
+def on_tool_execution_end(
+    params: fir_ext.ToolExecutionEndParams, ctx: fir_ext.Context
+) -> None:
     tcid = params.get("tool_call_id", "")
     if tcid:
         ctx.clear_label(tcid)                         # clear_label
@@ -353,7 +381,9 @@ def on_tool_execution_end(params, ctx):
 
 
 @fir_ext.command(name="demo-echo", description="Echo arguments back as a TUI message")
-def cmd_demo_echo(args, ctx):
+def cmd_demo_echo(
+    args: list, ctx: fir_ext.Context
+) -> fir_ext.CommandHookResult:
     msg = " ".join(args) if args else "(no arguments)"
     return {"message": f"demo-echo: {msg}"}
 
@@ -378,7 +408,7 @@ def show_config_dirs(params, ctx):
 
 
 @fir_ext.cli_verb("demo-cli", summary="Echo argv back via host.println")
-def cli_demo(argv, host):
+def cli_demo(argv: list, host: fir_ext.Host) -> int:
     """Echo argv back through fir's real stdout. Returns 0.
 
     With ``--wake-after``, schedules a delayed ``host.wake()`` from a

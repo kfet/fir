@@ -44,31 +44,27 @@ func TestMessageEndPayload_Assistant(t *testing.T) {
 	if p == nil {
 		t.Fatal("want non-nil payload")
 	}
-	if p["role"] != "assistant" {
-		t.Errorf("role=%v", p["role"])
+	if p.Role != "assistant" {
+		t.Errorf("role=%v", p.Role)
 	}
-	if p["provider"] != "anthropic" {
-		t.Errorf("provider=%v", p["provider"])
+	if p.Provider != "anthropic" {
+		t.Errorf("provider=%v", p.Provider)
 	}
-	if p["model"] != "claude-3-5-sonnet" {
-		t.Errorf("model=%v", p["model"])
+	if p.Model != "claude-3-5-sonnet" {
+		t.Errorf("model=%v", p.Model)
 	}
-	if p["response_id"] != "resp_123" {
-		t.Errorf("response_id=%v", p["response_id"])
+	if p.ResponseID != "resp_123" {
+		t.Errorf("response_id=%v", p.ResponseID)
 	}
-	u, ok := p["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage not a map: %T", p["usage"])
+	u := p.Usage
+	if u == nil {
+		t.Fatal("usage nil")
 	}
-	if u["input"].(int) != 100 || u["output"].(int) != 50 || u["total_tokens"].(int) != 180 {
-		t.Errorf("usage tokens wrong: %v", u)
+	if u.Input != 100 || u.Output != 50 || u.TotalTokens != 180 {
+		t.Errorf("usage tokens wrong: %+v", u)
 	}
-	cost, ok := u["cost"].(map[string]any)
-	if !ok {
-		t.Fatalf("cost not a map: %T", u["cost"])
-	}
-	if cost["total"].(float64) != 0.0033 {
-		t.Errorf("cost total: %v", cost["total"])
+	if u.Cost.Total != 0.0033 {
+		t.Errorf("cost total: %v", u.Cost.Total)
 	}
 }
 
@@ -76,10 +72,10 @@ func TestMessageEndPayload_User(t *testing.T) {
 	msg := ai.NewUserMsg("hi", 0)
 	am := agent.NewAgentMessage(msg)
 	p := messageEndPayload(&agent.AgentEvent{Type: agent.EventMessageEnd, Message: &am})
-	if p == nil || p["role"] != "user" {
+	if p == nil || p.Role != "user" {
 		t.Fatalf("user payload: %v", p)
 	}
-	if _, ok := p["usage"]; ok {
-		t.Errorf("user payload should not include usage: %v", p)
+	if p.Usage != nil {
+		t.Errorf("user payload should not include usage: %+v", p)
 	}
 }

@@ -128,10 +128,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 
 	switch req.Method {
 	case "notify":
-		var p struct {
-			Level   string `json:"level"`
-			Message string `json:"message"`
-		}
+		var p notifyParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -141,13 +138,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		if b.NotifyFn != nil {
 			b.NotifyFn(p.Level, p.Message)
 		}
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "exec":
-		var p struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		}
+		var p execParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -162,13 +156,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		}
 
 	case "send_message":
-		var p struct {
-			CustomType  string `json:"custom_type"`
-			Content     any    `json:"content"`
-			Display     bool   `json:"display"`
-			DeliverAs   string `json:"deliver_as"`
-			TriggerTurn bool   `json:"trigger_turn"`
-		}
+		var p sendMessageParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -183,13 +171,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			DeliverAs:   p.DeliverAs,
 			TriggerTurn: p.TriggerTurn,
 		})
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "send_user_message":
-		var p struct {
-			Content   string `json:"content"`
-			DeliverAs string `json:"deliver_as"`
-		}
+		var p sendUserMessageParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -199,12 +184,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		api.SendUserMessage(p.Content, &SendUserMessageOptions{
 			DeliverAs: p.DeliverAs,
 		})
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "set_session_name":
-		var p struct {
-			Name string `json:"name"`
-		}
+		var p setSessionNameParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -212,13 +195,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		api.SetSessionName(p.Name)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "set_label":
-		var p struct {
-			EntryID string `json:"entry_id"`
-			Label   string `json:"label"`
-		}
+		var p setLabelParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -226,12 +206,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		api.SetLabel(p.EntryID, p.Label)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "clear_label":
-		var p struct {
-			EntryID string `json:"entry_id"`
-		}
+		var p clearLabelParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -239,13 +217,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		api.ClearLabel(p.EntryID)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "set_model":
-		var p struct {
-			Provider string `json:"provider"`
-			ID       string `json:"id"`
-		}
+		var p setModelParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -253,12 +228,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		ok := api.SetModel(&ai.Model{Provider: p.Provider, ID: p.ID})
-		result = map[string]any{"ok": ok}
+		result = OkResult{Ok: ok}
 
 	case "set_status":
-		var p struct {
-			Status string `json:"status"`
-		}
+		var p setStatusParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -268,22 +241,17 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		if b.SetStatusFn != nil {
 			b.SetStatusFn(b.caps.Name, p.Status)
 		}
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "continue_session":
 		if err := api.ContinueSession(); err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
-			result = map[string]any{"ok": true}
+			result = okTrue
 		}
 
 	case "side_query":
-		var p struct {
-			Question string `json:"question"`
-			Model    string `json:"model,omitempty"`
-			Provider string `json:"provider,omitempty"`
-			Effort   string `json:"effort,omitempty"`
-		}
+		var p sideQueryParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -304,14 +272,11 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		if err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
-			result = map[string]any{"ok": true, "text": text}
+			result = SideQueryResult{Ok: true, Text: text}
 		}
 
 	case "set_session_data":
-		var p struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
-		}
+		var p setSessionDataParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -319,12 +284,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		b.SetSessionData(p.Key, p.Value)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "get_session_data":
-		var p struct {
-			Key string `json:"key"`
-		}
+		var p getSessionDataParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -332,30 +295,27 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		value, ok := b.GetSessionData(p.Key)
-		result = map[string]any{"value": value, "ok": ok}
+		result = GetSessionDataResult{Value: value, Ok: ok}
 
 	case "get_session_file":
 		// Returns absolute path to the session's JSONL transcript, or "" for
 		// in-memory sessions. Used by extensions that want to expose the
 		// transcript to outside readers (e.g. observe.py writes the path
 		// into its sidecar so `fir observe` can tail -F it).
-		result = map[string]any{"path": api.GetSessionFile()}
+		result = GetSessionFileResult{Path: api.GetSessionFile()}
 
 	case "get_session_id":
 		// Returns the unique session ID. Also available as "session_id" in
 		// the session_start event params, but this method allows retrieval
 		// at any point during the session lifetime.
-		result = map[string]any{"id": api.GetSessionID()}
+		result = GetSessionIDResult{ID: api.GetSessionID()}
 
 	case "get_session_name":
 		// Returns the session's display name, or "" if unset.
-		result = map[string]any{"name": api.GetSessionName()}
+		result = GetSessionNameResult{Name: api.GetSessionName()}
 
 	case "call_tool":
-		var p struct {
-			Name   string         `json:"name"`
-			Params map[string]any `json:"params"`
-		}
+		var p callToolParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -379,9 +339,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		result = api.ListTools()
 
 	case "prepend_context":
-		var p struct {
-			Content string `json:"content"`
-		}
+		var p prependContextParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -389,12 +347,10 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		api.PrependContext(p.Content)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "report_progress":
-		var p struct {
-			Message string `json:"message"`
-		}
+		var p reportProgressParams
 		if req.Params != nil {
 			if err := json.Unmarshal(*req.Params, &p); err != nil {
 				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
@@ -402,7 +358,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		b.reportProgress(p.Message, api)
-		result = map[string]any{"ok": true}
+		result = okTrue
 
 	case "agent.info":
 		result = api.Introspect()
@@ -434,9 +390,7 @@ func (b *Bridge) reportProgress(message string, api BridgeAPI) {
 func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
 	switch n.Method {
 	case "report_progress":
-		var p struct {
-			Message string `json:"message"`
-		}
+		var p reportProgressParams
 		if n.Params != nil {
 			_ = json.Unmarshal(*n.Params, &p)
 		}
@@ -579,10 +533,10 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 				b.activeCtx.Store(&ctx.Context)
 				defer b.activeCtx.Store(nil)
 
-				params := map[string]any{
-					"tool_call_id": ctx.ToolCallID,
-					"name":         tool.Name,
-					"params":       ctx.Params,
+				params := ToolCallHookPayload{
+					ToolCallID: ctx.ToolCallID,
+					Name:       tool.Name,
+					Params:     ctx.Params,
 				}
 				raw, err := b.CallHook(ctx.Context, "tool_call", params, 30*time.Second)
 				if err != nil {

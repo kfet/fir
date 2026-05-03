@@ -400,11 +400,9 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	m.mu.Unlock()
 
 	// Build session_end payload.
-	payload := map[string]any{
-		"reason": reason,
-	}
+	payload := SessionEndPayload{Reason: reason}
 	if errMsg != "" {
-		payload["error"] = errMsg
+		payload.Error = errMsg
 	}
 
 	// Send session_end event to all extensions concurrently so slow
@@ -475,7 +473,7 @@ func (m *Manager) Reload(ctx context.Context) error {
 
 	// Re-emit session_named so reloaded extensions pick up the current name.
 	if name := api.GetSessionName(); name != "" {
-		m.EmitEvent("session_named", map[string]any{"name": name})
+		m.EmitEvent("session_named", SessionNamedPayload{Name: name})
 	}
 	return nil
 }
@@ -774,9 +772,9 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 	for _, mb := range bridges {
 		for _, spec := range mb.bridge.caps.Commands {
 			if spec.Name == name {
-				params := map[string]any{
-					"name": name,
-					"args": args,
+				params := CommandHookPayload{
+					Name: name,
+					Args: args,
 				}
 				raw, err := mb.bridge.CallHook(context.Background(), "hook/command", params, timeout)
 				if err != nil {
@@ -848,7 +846,7 @@ func (m *Manager) ShutdownAndCollect() map[string]map[string]string {
 	m.mu.Unlock()
 
 	for _, mb := range bridges {
-		_ = mb.bridge.EmitEvent("session_end", map[string]any{"reason": "reexec"})
+		_ = mb.bridge.EmitEvent("session_end", SessionEndPayload{Reason: "reexec"})
 		_ = mb.bridge.EmitEvent("session_shutdown", nil)
 	}
 
@@ -892,20 +890,23 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 	m.mu.Unlock()
 
 	for _, mb := range bridges {
-		params := map[string]any{}
+		var payload *SessionStartPayload
 		// Always include session_id so extensions can identify the session.
+		var sid string
 		if m.api != nil {
-			if sid := m.api.GetSessionID(); sid != "" {
-				params["session_id"] = sid
-			}
+			sid = m.api.GetSessionID()
 		}
+		var data map[string]string
 		if d, ok := reexecData[mb.cfg.Name]; ok && len(d) > 0 {
 			mb.bridge.SeedSessionData(d)
-			params["session_data"] = d
+			data = d
 		}
-		if len(params) == 0 {
-			params = nil
+		if sid != "" || len(data) > 0 {
+			payload = &SessionStartPayload{
+				SessionID:   sid,
+				SessionData: data,
+			}
 		}
-		_ = mb.bridge.EmitEvent("session_start", params)
+		_ = mb.bridge.EmitEvent("session_start", payload)
 	}
 }

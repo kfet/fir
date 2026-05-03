@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Strong typing across the extension wire boundary. `pkg/extension/types.go` now declares one Go struct per JSON-RPC method param/result and per event payload (e.g. `OkResult`, `SideQueryResult`, `GetSessionDataResult`, `MessageEndPayload`, `ToolExecutionEndPayload`, `SessionStartPayload`); the bridge marshals typed values instead of ad-hoc `map[string]any` literals. The Python SDK (`fir_ext`) re-exports a `TypedDict` for every wire shape (`ToolResult`, `ExecResult`, `MessageEndParams`, `ToolCallHookParams`, `ToolCallHookResult`, `CommandHookResult`, `SessionStartParams`, etc.) via `__all__`, so handlers can be annotated for IDE/type-checker support. TypedDicts are plain `dict` at runtime — existing extensions keep working unchanged; wire JSON is byte-for-byte identical. `demo.py` now uses the typed annotations as a reference example.
+
 ### Removed
 
 - `fir observe --full` flag. Full untruncated formatted output (no message body or command-args truncation) is now the default and only behaviour. The previous truncating default was useless for agent consumers and only marginally helpful for humans, who can scroll. The `/observe` slash command also no longer accepts `--full`. `--json` is still available for raw JSONL output.

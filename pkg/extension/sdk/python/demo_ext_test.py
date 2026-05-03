@@ -892,3 +892,60 @@ class TestDemoCLIVerb(DemoTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Typed surface — verify the TypedDicts re-exported from fir_ext are usable
+# ---------------------------------------------------------------------------
+
+
+class TestTypedSurface(unittest.TestCase):
+    """Smoke tests for the TypedDict surface introduced in the strong-typing
+    pass.  TypedDicts are plain dict at runtime, so the goal here is to
+    confirm:
+
+      * the names exist and are importable from ``fir_ext``,
+      * they accept the wire shapes our code actually emits/consumes,
+      * the public ``__all__`` covers the names we promised to export.
+    """
+
+    def test_typeddicts_are_dicts(self) -> None:
+        tr: fir_ext.ToolResult = {"content": [{"type": "text", "text": "hi"}], "is_error": False}
+        self.assertIsInstance(tr, dict)
+        er: fir_ext.ExecResult = {"stdout": "x", "stderr": "", "exit_code": 0}
+        self.assertEqual(er["exit_code"], 0)
+
+    def test_message_end_params_shape(self) -> None:
+        params: fir_ext.MessageEndParams = {
+            "role": "assistant",
+            "provider": "anthropic",
+            "model": "claude",
+            "usage": {
+                "input": 1, "output": 2, "cache_read": 0, "cache_write": 0,
+                "total_tokens": 3,
+                "cost": {
+                    "input": 0.0, "output": 0.0, "cache_read": 0.0,
+                    "cache_write": 0.0, "total": 0.0,
+                },
+            },
+        }
+        self.assertEqual(params["role"], "assistant")
+        self.assertIn("cost", params["usage"])
+
+    def test_hook_result_optional_block(self) -> None:
+        allow: fir_ext.ToolCallHookResult = {}
+        block: fir_ext.ToolCallHookResult = {"block": True, "reason": "policy"}
+        self.assertNotIn("block", allow)
+        self.assertTrue(block["block"])
+
+    def test_all_lists_typed_names(self) -> None:
+        promised = {
+            "ToolResult", "ExecResult", "MessageEndParams",
+            "ToolCallHookParams", "ToolCallHookResult",
+            "CommandHookResult", "OkResult",
+            "SessionStartParams", "ToolExecutionStartParams",
+            "ToolExecutionEndParams", "AgentLifecycleParams",
+            "Context", "Host",
+        }
+        missing = promised - set(fir_ext.__all__)
+        self.assertSetEqual(missing, set(), f"missing from __all__: {sorted(missing)}")

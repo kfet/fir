@@ -62,9 +62,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import fir_ext
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # ---------------------------------------------------------------------------
 # Advisor configuration — read once at module load
@@ -169,7 +172,7 @@ def _advisor() -> dict[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def _result_text(result: dict) -> str:
+def _result_text(result: Mapping[str, Any]) -> str:
     """Extract text content from a call_tool result dict."""
     content = result.get("content", [])
     if isinstance(content, list):

@@ -12,6 +12,21 @@ For a user-facing overview, quickstart, and discovery rules see
 docstring of `pkg/extension/sdk/python/fir_ext.py`.  For a complete working
 example see `pkg/resources/builtin_extensions/demo.py`.
 
+The wire shapes documented below are also expressed as concrete typed
+structures in code:
+
+- **Go side** – `pkg/extension/types.go` declares one struct per JSON-RPC
+  method param/result and per event payload (e.g. `OkResult`,
+  `SideQueryResult`, `MessageEndPayload`, `ToolExecutionEndPayload`,
+  `SessionStartPayload`).  The bridge unmarshals inbound params into these
+  types and marshals typed results back out, instead of building ad-hoc
+  `map[string]any` literals.
+- **Python SDK** – `fir_ext` re-exports a `TypedDict` for every shape
+  documented here (e.g. `fir_ext.ToolResult`, `fir_ext.MessageEndParams`,
+  `fir_ext.ToolCallHookParams`).  At runtime they are plain `dict`s, so
+  existing extensions keep working unchanged; annotating handlers with
+  these types gives full IDE/type-checker support.
+
 ---
 
 ## Transport
