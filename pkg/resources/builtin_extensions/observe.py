@@ -692,17 +692,18 @@ def _snapshot_session_list(include_all: bool = False) -> str:
     Default lists only **live** (running/idle) sessions. With
     ``include_all=True`` includes ``ended`` and ``crashed`` rows too.
     """
-    sidecars = _read_sidecars(include_all=include_all)
+    all_sidecars = _read_sidecars(include_all=True)
+    if include_all:
+        sidecars = all_sidecars
+        hidden = 0
+    else:
+        sidecars = [s for s in all_sidecars if _is_live(s)]
+        hidden = len(all_sidecars) - len(sidecars)
     if not sidecars:
-        if not include_all:
-            # Distinguish "nothing at all" from "nothing live but post-mortem
-            # rows exist" so the user knows to retry with --all.
-            hidden = len(_read_sidecars(include_all=True))
-            if hidden:
-                return (
-                    f"no live fir sessions ({hidden} ended/crashed — "
-                    "use --all to show)"
-                )
+        # Distinguish "nothing at all" from "nothing live but post-mortem
+        # rows exist" so the user knows to retry with --all.
+        if hidden:
+            return f"no live fir sessions ({hidden} ended/crashed — use --all to show)"
         return _NO_SESSIONS_NOTICE
     id_w, name_w, cwd_w = 8, 4, 3
     for s in sidecars:
@@ -723,10 +724,6 @@ def _snapshot_session_list(include_all: bool = False) -> str:
         status = s.get("status", "") or ""
         age = _age_string(s.get("started_at", "") or "", now)
         lines.append(f"{sid:<{id_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}")
-    if include_all:
-        return "\n".join(lines)
-    # Append a one-line hint when there are hidden post-mortem rows.
-    hidden = sum(1 for s in _read_sidecars(include_all=True) if not _is_live(s))
     if hidden:
         lines.append(f"({hidden} ended/crashed hidden — use --all to show)")
     return "\n".join(lines)
