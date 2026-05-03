@@ -632,7 +632,7 @@ func writeSidecar(t *testing.T, stateHome, sid string, fields map[string]any) {
 		t.Fatal(err)
 	}
 	base := map[string]any{
-		"schema":       3,
+		"schema":       1,
 		"session_id":   sid,
 		"pid":          os.Getpid(),
 		"socket_path":  "",
