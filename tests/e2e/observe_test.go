@@ -158,8 +158,8 @@ func TestObserve_SidecarWrittenOnSessionStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read sidecar: %v", err)
 	}
-	if m["schema"] != float64(2) {
-		t.Errorf("sidecar schema = %v, want 2", m["schema"])
+	if m["schema"] != float64(3) {
+		t.Errorf("sidecar schema = %v, want 3", m["schema"])
 	}
 	if m["session_id"] == "" || m["session_id"] == nil {
 		t.Errorf("sidecar session_id is empty: %v", m)
@@ -632,7 +632,7 @@ func writeSidecar(t *testing.T, stateHome, sid string, fields map[string]any) {
 		t.Fatal(err)
 	}
 	base := map[string]any{
-		"schema":       2,
+		"schema":       3,
 		"session_id":   sid,
 		"pid":          os.Getpid(),
 		"socket_path":  "",

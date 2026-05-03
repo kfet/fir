@@ -94,7 +94,7 @@ Every fir session writes a JSONL transcript to disk via `SessionStore`. The buil
 
 The same extension also exposes:
 - **`/observe`** and **`/send`** slash commands — usable from inside an interactive session for snapshot inspection / one-shot message injection.
-- **`observe_session`** and **`send_session`** AI tools — let the agent inspect or nudge sibling sessions as part of a turn.
+- **`observe_session`**, **`send_session`**, and **`stop_session`** AI tools — let the agent inspect, nudge, or terminate sibling sessions as part of a turn.
 
 Slash commands and tools take **snapshots** (last N transcript lines) and send single messages; they do not live-tail. Use `fir observe <id>` from another terminal for live observation.
 

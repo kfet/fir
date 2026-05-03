@@ -101,13 +101,17 @@ _state_lock = threading.Lock()
 _state: dict[str, Any] = {
     "session_id": "",
     "pid": os.getpid(),
+    # host_pid is the fir host process (our parent). The extension runs as a
+    # subprocess; `pid` above is the extension's own pid, useful for liveness
+    # checks but not for signaling fir itself. stop_session signals host_pid.
+    "host_pid": os.getppid(),
     "socket_path": "",
     "store_path": "",
     "cwd": "",
     "started_at": "",
     "status": "running",
     "session_name": "",
-    "schema": 2,
+    "schema": 3,
     # Live activity counters — updated on each agent event. Sidecar consumers
     # (e.g. `fir htop`) read these to render top-style metrics without
     # parsing the transcript.
@@ -817,6 +821,40 @@ def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> N
             conn.close()
 
 
+def _stop_one(id_prefix: str, cwd_flag: str, force: bool = False) -> dict[str, Any]:
+    """Resolve a sidecar and signal the fir host process to terminate.
+
+    SIGTERM by default (graceful: fir flushes the transcript and runs
+    session_end handlers). SIGKILL when force=True. Returns a small dict
+    describing what was signaled.
+    """
+    import signal
+
+    s = _resolve_sidecar(id_prefix, cwd_flag)
+    sid8 = (s.get("session_id", "") or "")[:8]
+    host_pid = int(s.get("host_pid") or 0)
+    if host_pid <= 0:
+        # Older sidecars (schema < 3) didn't record host_pid. Refuse rather
+        # than guess — killing the extension pid wouldn't stop the host.
+        raise ValueError(
+            f"session {sid8} sidecar has no host_pid (schema {s.get('schema')}); "
+            "the target fir is too old to support stop_session"
+        )
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.kill(host_pid, sig)
+    except ProcessLookupError as e:
+        raise ValueError(f"session {sid8} host process {host_pid} not running") from e
+    except PermissionError as e:
+        raise ValueError(f"session {sid8} host process {host_pid}: {e}") from e
+    return {
+        "ok": True,
+        "session_id": s.get("session_id", ""),
+        "host_pid": host_pid,
+        "signal": "SIGKILL" if force else "SIGTERM",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Slash commands — `/observe`, `/send`
 # ---------------------------------------------------------------------------
@@ -1028,6 +1066,47 @@ def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
     except (ValueError, OSError) as e:
         raise fir_ext.ToolError(str(e)) from e
     return {"ok": True, "deliver_as": deliver_as or "prompt"}
+
+
+@fir_ext.tool(
+    name="stop_session",
+    description=(
+        "Terminate a different running fir session. Sends SIGTERM to the "
+        "target's host process by default (graceful: fir flushes the "
+        "transcript and runs session_end handlers); set force=true to send "
+        "SIGKILL instead. Resolves the target the same way as send_session "
+        "(id_prefix or cwd). Use to shut down a stuck or no-longer-needed "
+        "sibling agent."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "id_prefix": {
+                "type": "string",
+                "description": "Prefix matching session id / name / basename(cwd). One of id_prefix or cwd is required.",
+            },
+            "cwd": {
+                "type": "string",
+                "description": "Resolve target by working directory. Optional alternative to id_prefix.",
+            },
+            "force": {
+                "type": "boolean",
+                "description": "Send SIGKILL instead of SIGTERM. Default false.",
+                "default": False,
+            },
+        },
+    },
+)
+def tool_stop(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
+    id_prefix = (params.get("id_prefix") or "").strip()
+    cwd_flag = (params.get("cwd") or "").strip()
+    force = bool(params.get("force"))
+    if not id_prefix and not cwd_flag:
+        raise fir_ext.ToolError("one of id_prefix or cwd is required")
+    try:
+        return _stop_one(id_prefix, cwd_flag, force=force)
+    except (ValueError, OSError) as e:
+        raise fir_ext.ToolError(str(e)) from e
 
 
 # ---------------------------------------------------------------------------

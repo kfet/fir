@@ -57,13 +57,14 @@ def _reset_observe_state(state_dir: str, sock_dir: str) -> None:
     observe._state.update({
         "session_id": "",
         "pid": os.getpid(),
+        "host_pid": os.getppid(),
         "socket_path": "",
         "store_path": "",
         "cwd": "",
         "started_at": "",
         "status": "running",
         "session_name": "",
-        "schema": 1,
+        "schema": 3,
     })
     if observe._socket is not None:
         with suppress(Exception):
@@ -110,8 +111,9 @@ class TestSidecar(unittest.TestCase):
         self.assertEqual(d["store_path"], "/tmp/foo.jsonl")
         self.assertEqual(d["session_name"], "my-feature")
         self.assertEqual(d["status"], "running")
-        self.assertEqual(d["schema"], 1)
+        self.assertEqual(d["schema"], 3)
         self.assertEqual(d["pid"], os.getpid())
+        self.assertEqual(d["host_pid"], os.getppid())
         self.assertTrue(d["socket_path"].endswith(".sock"))
         self.assertIn(self.session_id[:16], d["socket_path"])
         self.assertTrue(d["started_at"])  # non-empty timestamp
@@ -1089,6 +1091,51 @@ class TestSlashCommandsAndTools(unittest.TestCase):
                 {"id_prefix": self.session_id[:8], "content": "x", "deliver_as": "bogus"},
                 MagicMock(),
             )
+
+    # -- stop_session -------------------------------------------------------
+
+    def test_tool_stop_signals_host_pid(self) -> None:
+        with mock.patch.object(observe.os, "kill") as mk:
+            result = observe.tool_stop(
+                {"id_prefix": self.session_id[:8]}, MagicMock(),
+            )
+        import signal
+        # _resolve_sidecar also probes liveness with kill(pid, 0); assert
+        # the terminating signal landed on host_pid as the final call.
+        mk.assert_called_with(os.getppid(), signal.SIGTERM)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["host_pid"], os.getppid())
+        self.assertEqual(result["signal"], "SIGTERM")
+        self.assertEqual(result["session_id"], self.session_id)
+
+    def test_tool_stop_force_uses_sigkill(self) -> None:
+        with mock.patch.object(observe.os, "kill") as mk:
+            result = observe.tool_stop(
+                {"id_prefix": self.session_id[:8], "force": True}, MagicMock(),
+            )
+        import signal
+        mk.assert_called_with(os.getppid(), signal.SIGKILL)
+        self.assertEqual(result["signal"], "SIGKILL")
+
+    def test_tool_stop_requires_id_or_cwd(self) -> None:
+        with self.assertRaises(fir_ext.ToolError):
+            observe.tool_stop({}, MagicMock())
+
+    def test_tool_stop_unknown_target_raises(self) -> None:
+        with self.assertRaises(fir_ext.ToolError):
+            observe.tool_stop({"id_prefix": "ffffffff"}, MagicMock())
+
+    def test_tool_stop_dead_process_raises(self) -> None:
+        # Only fail the terminating signal; let the liveness probe (sig 0) pass.
+        def fake_kill(pid, sig):
+            if sig == 0:
+                return
+            raise ProcessLookupError
+        with mock.patch.object(observe.os, "kill", side_effect=fake_kill):
+            with self.assertRaises(fir_ext.ToolError):
+                observe.tool_stop(
+                    {"id_prefix": self.session_id[:8]}, MagicMock(),
+                )
 
 
 

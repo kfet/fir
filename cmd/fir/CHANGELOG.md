@@ -10,6 +10,8 @@
 
 ### Added
 
+- `stop_session` AI tool in the `observe` extension — terminate a sibling fir session by id_prefix or cwd. Sends SIGTERM to the target's host process by default (graceful: fir flushes the transcript and runs session_end handlers); `force=true` sends SIGKILL. Resolves the target the same way as `send_session`. Sidecar schema bumped to 3 to record `host_pid` (the fir process — distinct from the existing `pid`, which is the observe extension subprocess).
+
 - `wt` skill promoted to a built-in skill — ships with fir by default (added `builtin: true` to its frontmatter and to the builtin-skills test expectation).
 
 - Sync of upstream pi-mono v0.70.2 → v0.72.1.
