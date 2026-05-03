@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-05-03
+
 ### Changed
 
 - Built-in skills `fix`, `review`, `monitor`, and `e2e` collapsed into a single `project-ops` catalog skill. The catalog has a narrow trigger description and points to per-role sub-docs under `project-ops/docs/{fix,review,monitor,e2e}.md` (loaded on demand via `Read`). Cuts system-prompt surface for four mutually-exclusive, similarly-triggered loop agents. `skill-creator` now documents the catalog pattern.
