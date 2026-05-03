@@ -1,4 +1,5 @@
 ---
+builtin: true
 name: wt
 description: Delegate a task to a fresh fir agent running in a new tmux window on its own git worktree. Use when the user wants to fire-and-forget a task, or spin up a parallel agent, instead of doing the work in the current session.
 ---

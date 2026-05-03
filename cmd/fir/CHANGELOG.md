@@ -4,6 +4,8 @@
 
 ### Added
 
+- `wt` skill promoted to a built-in skill — ships with fir by default (added `builtin: true` to its frontmatter and to the builtin-skills test expectation).
+
 - Sync of upstream pi-mono v0.70.2 → v0.72.1.
   - New provider identifiers and env-key mappings: `moonshotai`, `moonshotai-cn` (`MOONSHOT_API_KEY`), `cloudflare-workers-ai`, `cloudflare-ai-gateway` (`CLOUDFLARE_API_KEY`), `xiaomi` (`XIAOMI_API_KEY`). Default model IDs for each added to the model resolver. Generator now ships 62 catalog entries for the five providers (cloudflare-workers-ai 8, cloudflare-ai-gateway 35, xiaomi 5, moonshotai 7, moonshotai-cn 7).
   - `AssistantMessage.ResponseModel` field — set when a provider chunk's `model` differs from the requested model (e.g. OpenRouter `auto` → concrete provider id). Wired through `pkg/ai/providers/openai.go`.

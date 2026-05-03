@@ -32,6 +32,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"skill-creator":       false,
 		"tmux-driver":         false,
 		"tmux-observer":       false,
+		"wt":                  false,
 	}
 
 	for _, s := range result.Skills {
