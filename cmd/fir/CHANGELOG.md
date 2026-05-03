@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `fir observe` (no args) now lists only **live** sessions (status `running` or `idle`) by default. Ended and crashed sessions are hidden, with a one-line hint pointing at `--all`. Use `fir observe --all` to include them. The `/observe` slash command and the `observe_session` AI tool gain the same default behaviour (the tool takes a new `all` boolean parameter). `fir htop` is unchanged — it still shows every sidecar with status counters since that is its job. Rationale: a "crashed" sidecar means the fir process is gone and so are its socket and transcript writer, so the session is not observable in real time; only its post-mortem transcript can be tailed by id, which still works via `fir observe <id>`.
+
 ### Added
 
 - `wt` skill promoted to a built-in skill — ships with fir by default (added `builtin: true` to its frontmatter and to the builtin-skills test expectation).

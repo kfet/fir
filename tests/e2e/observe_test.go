@@ -201,8 +201,10 @@ func TestObserve_ListSession(t *testing.T) {
 		t.Fatalf("no sidecar written to %s within 10s", pattern)
 	}
 
-	// fir observe should list it.
-	out, code := firObserve(t, stateHome)
+	// fir observe should list it. Use --all because the print-mode session
+	// may have transitioned to status=ended before we look (default listing
+	// now hides ended/crashed sessions).
+	out, code := firObserve(t, stateHome, "--all")
 	if code != 0 {
 		t.Fatalf("fir observe exit %d: %s", code, out)
 	}
@@ -619,5 +621,111 @@ func TestObserve_AmbiguousPrefixError(t *testing.T) {
 	assertNoPanic(t, out)
 	if !strings.Contains(out, "ambiguous") {
 		t.Errorf("expected 'ambiguous' in error, got: %s", out)
+	}
+}
+
+// writeSidecar drops a synthetic sidecar JSON into stateHome.
+func writeSidecar(t *testing.T, stateHome, sid string, fields map[string]any) {
+	t.Helper()
+	dir := filepath.Join(stateHome, "fir", "agents")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := map[string]any{
+		"schema":       2,
+		"session_id":   sid,
+		"pid":          os.Getpid(),
+		"socket_path":  "",
+		"store_path":   "/dev/null",
+		"cwd":          t.TempDir(),
+		"started_at":   time.Now().UTC().Format(time.RFC3339),
+		"status":       "running",
+		"session_name": "",
+	}
+	for k, v := range fields {
+		base[k] = v
+	}
+	data, _ := json.Marshal(base)
+	if err := os.WriteFile(filepath.Join(dir, sid+".json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestObserve_DefaultHidesNonLive verifies that "fir observe" with no flags
+// shows only live (running/idle) sessions and hides ended/crashed ones,
+// pointing the user at --all.
+func TestObserve_DefaultHidesNonLive(t *testing.T) {
+	stateHome := t.TempDir()
+
+	writeSidecar(t, stateHome, "live0001-aaaa-bbbb-cccc-000000000001",
+		map[string]any{"status": "running", "session_name": "alive"})
+	writeSidecar(t, stateHome, "ende0002-aaaa-bbbb-cccc-000000000002",
+		map[string]any{"status": "ended", "session_name": "donezo"})
+	// Crashed: status=running but pid is one we know is dead. PID 1 is alive,
+	// so use a high pid that's almost certainly free.
+	writeSidecar(t, stateHome, "dead0003-aaaa-bbbb-cccc-000000000003",
+		map[string]any{"status": "running", "session_name": "kaput", "pid": 999999})
+
+	out, code := firObserve(t, stateHome)
+	if code != 0 {
+		t.Fatalf("fir observe exit %d: %s", code, out)
+	}
+	assertNoPanic(t, out)
+	if !strings.Contains(out, "alive") {
+		t.Errorf("expected live session 'alive' in default output:\n%s", out)
+	}
+	if strings.Contains(out, "donezo") || strings.Contains(out, "kaput") {
+		t.Errorf("default output should hide ended/crashed sessions:\n%s", out)
+	}
+	if !strings.Contains(out, "--all") {
+		t.Errorf("expected hint about --all when non-live rows are hidden:\n%s", out)
+	}
+}
+
+// TestObserve_AllFlagShowsCrashedAndEnded verifies "fir observe --all"
+// includes ended and crashed sessions.
+func TestObserve_AllFlagShowsCrashedAndEnded(t *testing.T) {
+	stateHome := t.TempDir()
+
+	writeSidecar(t, stateHome, "live0011-aaaa-bbbb-cccc-000000000011",
+		map[string]any{"status": "running", "session_name": "alive"})
+	writeSidecar(t, stateHome, "ende0012-aaaa-bbbb-cccc-000000000012",
+		map[string]any{"status": "ended", "session_name": "donezo"})
+	writeSidecar(t, stateHome, "dead0013-aaaa-bbbb-cccc-000000000013",
+		map[string]any{"status": "running", "session_name": "kaput", "pid": 999999})
+
+	out, code := firObserve(t, stateHome, "--all")
+	if code != 0 {
+		t.Fatalf("fir observe --all exit %d: %s", code, out)
+	}
+	assertNoPanic(t, out)
+	for _, want := range []string{"alive", "donezo", "kaput"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in --all output:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "crashed") {
+		t.Errorf("expected dead-pid row to be reclassified as 'crashed':\n%s", out)
+	}
+}
+
+// TestObserve_OnlyNonLiveSessions verifies that when no live sessions exist
+// but ended/crashed ones do, default output says so and points at --all.
+func TestObserve_OnlyNonLiveSessions(t *testing.T) {
+	stateHome := t.TempDir()
+
+	writeSidecar(t, stateHome, "ende0021-aaaa-bbbb-cccc-000000000021",
+		map[string]any{"status": "ended"})
+
+	out, code := firObserve(t, stateHome)
+	if code != 0 {
+		t.Fatalf("fir observe exit %d: %s", code, out)
+	}
+	assertNoPanic(t, out)
+	if !strings.Contains(out, "no live fir sessions") {
+		t.Errorf("expected 'no live fir sessions' message:\n%s", out)
+	}
+	if !strings.Contains(out, "--all") {
+		t.Errorf("expected --all hint:\n%s", out)
 	}
 }

@@ -668,18 +668,22 @@ class TestArgParsers(unittest.TestCase):
     def test_observe_no_args(self):
         self.assertEqual(
             observe._parse_observe_args([]),
-            ("", "", False, False, False, None),
+            ("", "", False, False, False, False, None),
         )
 
     def test_observe_id_prefix(self):
         self.assertEqual(
             observe._parse_observe_args(["abc"]),
-            ("abc", "", False, False, False, None),
+            ("abc", "", False, False, False, False, None),
         )
 
     def test_observe_flags(self):
         r = observe._parse_observe_args(["abc", "--json", "--full", "--interact"])
-        self.assertEqual(r, ("abc", "", True, True, True, None))
+        self.assertEqual(r, ("abc", "", True, True, True, False, None))
+
+    def test_observe_all_flag(self):
+        r = observe._parse_observe_args(["--all"])
+        self.assertEqual(r, ("", "", False, False, False, True, None))
 
     def test_observe_cwd(self):
         self.assertEqual(
@@ -692,19 +696,19 @@ class TestArgParsers(unittest.TestCase):
         )
 
     def test_observe_unknown_flag(self):
-        _, _, _, _, _, err = observe._parse_observe_args(["--bogus"])
+        *_, err = observe._parse_observe_args(["--bogus"])
         assert err is not None
 
         self.assertIn("unknown flag", err)
 
     def test_observe_extra_arg(self):
-        _, _, _, _, _, err = observe._parse_observe_args(["a", "b"])
+        *_, err = observe._parse_observe_args(["a", "b"])
         assert err is not None
 
         self.assertIn("extra argument", err)
 
     def test_observe_help(self):
-        _, _, _, _, _, err = observe._parse_observe_args(["--help"])
+        *_, err = observe._parse_observe_args(["--help"])
         self.assertEqual(err, "__HELP__")
 
     def test_send_no_args_required(self):

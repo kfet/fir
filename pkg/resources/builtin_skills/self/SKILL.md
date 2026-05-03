@@ -101,7 +101,8 @@ Slash commands and tools take **snapshots** (last N transcript lines) and send s
 The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
 
 ```
-fir observe                        # list all live sessions (across all fir processes)
+fir observe                        # list LIVE sessions (running/idle) across all fir processes
+fir observe --all                  # include ended + crashed sessions
 fir observe <id-prefix>            # tail-and-format the session transcript
 fir observe <id-prefix> --json     # raw JSONL passthrough
 fir observe --cwd .                # resolve by current directory

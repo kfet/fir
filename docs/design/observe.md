@@ -223,7 +223,8 @@ Two primitives plus one convenience. No unified TUI — window management
 belongs to the user's window manager (tmux, terminal app), not to us.
 
 ```
-fir observe                        # list live sessions (no args)
+fir observe                        # list LIVE sessions (no args; running/idle)
+fir observe --all                  # include ended + crashed sessions in the list
 fir observe <id-prefix>            # tail -F transcript with formatter
 fir observe <id-prefix> --json     # raw JSONL
 fir observe <id-prefix> --cwd .    # resolve by cwd (error if 0/many)

@@ -405,8 +405,26 @@ def on_session_shutdown(params: dict[str, Any], ctx: fir_ext.Context) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_sidecars() -> list[dict[str, Any]]:
-    """Read all sidecars, reclassify dead pids as 'crashed', sort newest first."""
+# Statuses that mean "process alive, socket bound, observable in real time".
+# `ended` (clean shutdown) and `crashed` (pid gone with sidecar still saying
+# running/idle) are both unobservable — the socket is closed and no further
+# transcript bytes will appear. We keep their sidecars for post-mortem tail
+# but hide them from default listings.
+_LIVE_STATUSES = ("running", "idle")
+
+
+def _is_live(s: dict[str, Any]) -> bool:
+    return s.get("status", "") in _LIVE_STATUSES
+
+
+def _read_sidecars(include_all: bool = True) -> list[dict[str, Any]]:
+    """Read all sidecars, reclassify dead pids as 'crashed', sort newest first.
+
+    With ``include_all=False``, drops sessions that are not live (status not
+    in ``running``/``idle``) — i.e. ``ended`` and ``crashed``. Resolution
+    helpers always pass ``include_all=True`` so a user can still tail a
+    post-mortem transcript by id.
+    """
     d = _state_dir()
     if not d.is_dir():
         return []
@@ -424,7 +442,7 @@ def _read_sidecars() -> list[dict[str, Any]]:
             continue
         s["_sidecar_path"] = str(full)
         status = s.get("status", "")
-        if status in ("running", "idle"):
+        if status in _LIVE_STATUSES:
             try:
                 os.kill(int(s.get("pid") or 0), 0)
             except (ProcessLookupError, ValueError, OverflowError):
@@ -433,6 +451,8 @@ def _read_sidecars() -> list[dict[str, Any]]:
                 pass  # process exists, just not ours; treat as alive
             except OSError:
                 s["status"] = "crashed"
+        if not include_all and not _is_live(s):
+            continue
         out.append(s)
     out.sort(key=lambda s: s.get("started_at", ""), reverse=True)
     return out
@@ -666,10 +686,23 @@ def _encode_send(line: str, default_deliver_as: str) -> bytes | None:
 _NO_SESSIONS_NOTICE = "no fir sessions found"
 
 
-def _snapshot_session_list() -> str:
-    """Return a formatted table of live sessions (or empty notice)."""
-    sidecars = _read_sidecars()
+def _snapshot_session_list(include_all: bool = False) -> str:
+    """Return a formatted table of sessions (or empty notice).
+
+    Default lists only **live** (running/idle) sessions. With
+    ``include_all=True`` includes ``ended`` and ``crashed`` rows too.
+    """
+    sidecars = _read_sidecars(include_all=include_all)
     if not sidecars:
+        if not include_all:
+            # Distinguish "nothing at all" from "nothing live but post-mortem
+            # rows exist" so the user knows to retry with --all.
+            hidden = len(_read_sidecars(include_all=True))
+            if hidden:
+                return (
+                    f"no live fir sessions ({hidden} ended/crashed — "
+                    "use --all to show)"
+                )
         return _NO_SESSIONS_NOTICE
     id_w, name_w, cwd_w = 8, 4, 3
     for s in sidecars:
@@ -690,6 +723,12 @@ def _snapshot_session_list() -> str:
         status = s.get("status", "") or ""
         age = _age_string(s.get("started_at", "") or "", now)
         lines.append(f"{sid:<{id_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}")
+    if include_all:
+        return "\n".join(lines)
+    # Append a one-line hint when there are hidden post-mortem rows.
+    hidden = sum(1 for s in _read_sidecars(include_all=True) if not _is_live(s))
+    if hidden:
+        lines.append(f"({hidden} ended/crashed hidden — use --all to show)")
     return "\n".join(lines)
 
 
@@ -796,6 +835,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     cwd_flag = ""
     raw_json = False
     full_text = False
+    include_all = False
     lines = 50
     i = 0
     while i < len(args):
@@ -804,6 +844,8 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             raw_json = True
         elif a == "--full":
             full_text = True
+        elif a == "--all":
+            include_all = True
         elif a == "--cwd":
             if i + 1 < len(args):
                 cwd_flag = args[i + 1]
@@ -823,7 +865,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             id_prefix = a
         i += 1
     if not id_prefix and not cwd_flag:
-        return {"message": _snapshot_session_list(), "print_response": True}
+        return {"message": _snapshot_session_list(include_all=include_all), "print_response": True}
     try:
         out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, full_text)
     except ValueError as e:
@@ -919,6 +961,11 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
                 "description": "Return raw JSONL instead of formatted text. Default false.",
                 "default": False,
             },
+            "all": {
+                "type": "boolean",
+                "description": "When listing (no id_prefix/cwd), include ended/crashed sessions. Default false (live only).",
+                "default": False,
+            },
         },
     },
 )
@@ -927,8 +974,9 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     cwd_flag = (params.get("cwd") or "").strip()
     lines = int(params.get("lines") or 50)
     raw_json = bool(params.get("raw_json"))
+    include_all = bool(params.get("all"))
     if not id_prefix and not cwd_flag:
-        return _snapshot_session_list()
+        return _snapshot_session_list(include_all=include_all)
     try:
         return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, True)
     except ValueError as e:
@@ -989,9 +1037,10 @@ def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
 # CLI verb: `fir observe`
 # ---------------------------------------------------------------------------
 
-_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--json] [--full] [--interact]
+_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--json] [--full] [--interact]
 
-  fir observe                  list live sessions across all running fir processes
+  fir observe                  list LIVE sessions across all running fir processes
+  fir observe --all            include ended and crashed sessions in the list
   fir observe <id-prefix>      tail-and-format the matching session's transcript
   fir observe --cwd <path>     resolve session by working directory
   fir observe --cwd .          session in current directory (error if 0/many)
@@ -1033,8 +1082,8 @@ def _age_string(started_at: str, now: float) -> str:
     return f"{int(delta // 86400)}d"
 
 
-def _verb_observe_list(host: fir_ext.Host) -> int:
-    out = _snapshot_session_list()
+def _verb_observe_list(host: fir_ext.Host, include_all: bool = False) -> int:
+    out = _snapshot_session_list(include_all=include_all)
     if out == _NO_SESSIONS_NOTICE:
         host.eprintln(out)
         return 0
@@ -1170,13 +1219,14 @@ def _interact_send_loop(
             conn.close()
 
 
-def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, str | None]:
-    """Returns (id_prefix, cwd_flag, json_out, interact, full_text, error_message)."""
+def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, bool, str | None]:
+    """Returns (id_prefix, cwd_flag, json_out, interact, full_text, include_all, error_message)."""
     id_prefix = ""
     cwd_flag = ""
     json_out = False
     interact = False
     full_text = False
+    include_all = False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -1186,30 +1236,32 @@ def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, st
             full_text = True
         elif a == "--interact":
             interact = True
+        elif a == "--all":
+            include_all = True
         elif a == "--cwd":
             if i + 1 >= len(argv):
-                return ("", "", False, False, False,
+                return ("", "", False, False, False, False,
                         "--cwd requires an argument (path or '.')")
             cwd_flag = argv[i + 1]
             i += 1
         elif a.startswith("--cwd="):
             cwd_flag = a[len("--cwd="):]
         elif a in ("--help", "-h"):
-            return ("", "", False, False, False, "__HELP__")
+            return ("", "", False, False, False, False, "__HELP__")
         elif a.startswith("--"):
-            return ("", "", False, False, False, f"unknown flag: {a}")
+            return ("", "", False, False, False, False, f"unknown flag: {a}")
         else:
             if id_prefix:
-                return ("", "", False, False, False,
+                return ("", "", False, False, False, False,
                         f"unexpected extra argument: {a}")
             id_prefix = a
         i += 1
-    return (id_prefix, cwd_flag, json_out, interact, full_text, None)
+    return (id_prefix, cwd_flag, json_out, interact, full_text, include_all, None)
 
 
 @fir_ext.cli_verb("observe")
 def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
-    id_prefix, cwd_flag, json_out, interact, full_text, err = _parse_observe_args(argv)
+    id_prefix, cwd_flag, json_out, interact, full_text, include_all, err = _parse_observe_args(argv)
     if err == "__HELP__":
         host.eprint(_OBSERVE_USAGE)
         return 0
@@ -1218,7 +1270,7 @@ def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
         host.eprint(_OBSERVE_USAGE)
         return 1
     if not id_prefix and not cwd_flag:
-        return _verb_observe_list(host)
+        return _verb_observe_list(host, include_all=include_all)
     return _verb_observe_tail(host, id_prefix, cwd_flag, json_out, interact, full_text)
 
 
