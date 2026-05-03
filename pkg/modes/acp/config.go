@@ -130,21 +130,20 @@ func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionC
 
 	case thinkingConfigID:
 		accessor := entry.getThinkingAccessor()
-		level := agent.ThinkingLevel(params.Value)
-		// Validate the level is available.
+		requested := agent.ThinkingLevel(params.Value)
+		// Reject values that aren't real thinking levels; clamp real-but-unsupported
+		// levels down the canonical ladder to the highest the model supports.
+		if !agent.IsCanonicalThinkingLevel(requested) {
+			return SetSessionConfigOptionResponse{}, fmt.Errorf("invalid thinking level: %q", params.Value)
+		}
 		available := accessor.GetAvailableThinkingLevels()
-		valid := false
-		for _, l := range available {
-			if l == level {
-				valid = true
-				break
-			}
+		clamped := agent.ClampThinkingLevel(requested, available)
+		accessor.SetThinkingLevel(string(clamped))
+		if clamped != requested {
+			firlog.Info("acp clamped thinking level", "sessionId", params.SessionId, "requested", params.Value, "clamped", string(clamped))
+		} else {
+			firlog.Info("acp set thinking level", "sessionId", params.SessionId, "level", params.Value)
 		}
-		if !valid {
-			return SetSessionConfigOptionResponse{}, fmt.Errorf("invalid thinking level: %s", params.Value)
-		}
-		accessor.SetThinkingLevel(params.Value)
-		firlog.Info("acp set thinking level", "sessionId", params.SessionId, "level", params.Value)
 	default:
 		return SetSessionConfigOptionResponse{}, fmt.Errorf("unknown config option: %s", params.ConfigId)
 	}

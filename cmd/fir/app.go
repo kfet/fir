@@ -310,18 +310,8 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 	if thinking == "" || s.Model() == nil {
 		return
 	}
-	effective := string(thinking)
-	if !s.Model().Reasoning {
-		effective = "off"
-	} else if effective == "max" && !ai.SupportsMax(s.Model()) {
-		if ai.SupportsXhigh(s.Model()) {
-			effective = "xhigh"
-		} else {
-			effective = "high"
-		}
-	} else if effective == "xhigh" && !ai.SupportsXhigh(s.Model()) {
-		effective = "high"
-	}
+	available := agent.AvailableThinkingLevelsForModel(s.Model())
+	effective := string(agent.ClampThinkingLevel(thinking, available))
 	if effective != s.ThinkingLevel() {
 		firlog.Debug("thinking level", "requested", string(thinking), "clamped", effective)
 		s.SetThinkingLevel(effective)

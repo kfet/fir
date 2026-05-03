@@ -5,6 +5,9 @@
 ### Removed
 
 - `fir observe --full` flag. Full untruncated formatted output (no message body or command-args truncation) is now the default and only behaviour. The previous truncating default was useless for agent consumers and only marginally helpful for humans, who can scroll. The `/observe` slash command also no longer accepts `--full`. `--json` is still available for raw JSONL output.
+### Fixed
+
+- ACP `session/set_config_option(thinking_level)` now clamps unsupported levels down the canonical ladder (max→xhigh→high→medium→low→minimal→off) to the highest level the current model supports, instead of erroring out. Matches the behaviour of `--thinking` on the CLI. The shared `agent.ClampThinkingLevel` and `agent.AvailableThinkingLevelsForModel` helpers in `pkg/agent/clamp.go` are now used by both `cmd/fir/app.go` and `pkg/modes/acp/config.go`; `pkg/session.AgentSession.GetAvailableThinkingLevels` delegates to them too.
 
 ## [0.41.0] - 2026-05-03
 

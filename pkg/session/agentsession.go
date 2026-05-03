@@ -967,26 +967,7 @@ func (s *AgentSession) RecordCommand(command, args string) {
 
 // GetAvailableThinkingLevels returns the thinking levels available for the current model.
 func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
-	model := s.Model()
-	if model == nil || !model.Reasoning {
-		return []agent.ThinkingLevel{agent.ThinkingOff}
-	}
-	levels := []agent.ThinkingLevel{
-		agent.ThinkingOff,
-		agent.ThinkingMinimal,
-		agent.ThinkingLow,
-		agent.ThinkingMedium,
-		agent.ThinkingHigh,
-	}
-	// Check if model supports xhigh
-	if ai.SupportsXhigh(model) {
-		levels = append(levels, agent.ThinkingXHigh)
-	}
-	// Check if model supports max
-	if ai.SupportsMax(model) {
-		levels = append(levels, agent.ThinkingMax)
-	}
-	return levels
+	return agent.AvailableThinkingLevelsForModel(s.Model())
 }
 
 // SetHooks sets the extension hooks and wraps the agent's tools with hook interception.
