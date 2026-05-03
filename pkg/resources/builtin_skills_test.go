@@ -23,6 +23,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"merge-to-main":       false,
 		"notify":              false,
 		"poe-usage":           false,
+		"project-ops":         false,
 		"rebase-on-main":      false,
 		"research":            false,
 		"review-and-fix":      false,

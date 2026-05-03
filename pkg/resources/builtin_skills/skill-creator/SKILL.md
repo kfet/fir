@@ -33,6 +33,16 @@ description: One-line, keyword-rich trigger statement used by the agent to decid
 4. Run the review checklist below and fix issues in place.
 5. Tell the user to `/reload`.
 
+## Catalog pattern (umbrella skills)
+
+When several skills share the same trigger (e.g. four loop-style agents all about "watch the project"), collapse them into a single **catalog skill** to cut system-prompt bloat:
+
+- One real `SKILL.md` at `<name>/SKILL.md` with a narrow keyword-rich `description` and a body that lists each child role and when to use it.
+- Children live as plain markdown under `<name>/docs/<role>.md` — **no frontmatter, not named `SKILL.md`** so the discovery walker silently skips them.
+- The catalog directs the agent to `Read` the relevant sub-doc on demand. Supporting scripts live under `<name>/scripts/` at the skill root (not under `docs/`), so they're easy to find and reference from any sub-doc.
+
+See `project-ops` for a working example.
+
 ## Review checklist
 
 Apply this on every create or edit (including review-only passes on hand-edited files).

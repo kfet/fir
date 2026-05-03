@@ -1,7 +1,3 @@
----
-name: monitor
-description: Continuously monitor a project's file activity, build health, and work-tracker progress. Loops every 30 seconds, reports changes, and flags stuck or broken states.
----
 
 # Monitor Skill
 
@@ -39,7 +35,7 @@ Re-read this skill file to keep instructions in context. Long-running agents dri
 
 ### 2. Run the snapshot
 
-Collect the current state of the project using the script in this skill's `scripts/` directory:
+Collect the current state of the project using the snapshot script. The script lives at the skill root in `scripts/snapshot.sh` — i.e. one level up from this `docs/` directory. Resolve `$SKILL_DIR` to the directory containing the parent `SKILL.md` (the parent of this file's directory):
 
 ```bash
 bash "$SKILL_DIR/scripts/snapshot.sh" "$PROJECT_ROOT"

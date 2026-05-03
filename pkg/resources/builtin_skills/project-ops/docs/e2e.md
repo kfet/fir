@@ -1,7 +1,3 @@
----
-name: e2e
-description: Run the e2e test suite in tests/e2e/, interpret failures, and file bugs to docs/review/ for the fix agent.
----
 
 # End-to-End Testing
 
