@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-05-02
+
 ### Removed
 
 - `full_text` parameter on the `observe_session` AI tool. The tool now always returns the full untruncated transcript snapshot — the previous default truncated long messages, which was useless for an agent consuming the output. The CLI `fir observe --full` flag is unchanged. Schema, handler, and tests updated.
