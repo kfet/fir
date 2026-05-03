@@ -526,7 +526,6 @@ class TestFormatter(unittest.TestCase):
     def _fmt(self, **kw):
         return observe._Formatter(
             raw_json=kw.get("raw_json", False),
-            full_text=kw.get("full_text", False),
             color=kw.get("color", False),
         )
 
@@ -596,18 +595,13 @@ class TestFormatter(unittest.TestCase):
 class TestSummariseContent(unittest.TestCase):
     def test_strings_collapse_newlines(self):
         self.assertEqual(
-            observe._summarise_content("hello\nworld\nlong text", False),
+            observe._summarise_content("hello\nworld\nlong text"),
             "hello world long text",
         )
 
-    def test_truncates(self):
-        out = observe._summarise_content("x" * 500, False)
-        self.assertLessEqual(len(out), 200)
-        self.assertTrue(out.endswith("…"))
-
-    def test_full_no_truncation(self):
+    def test_no_truncation(self):
         long = "x" * 500
-        self.assertEqual(observe._summarise_content(long, True), long)
+        self.assertEqual(observe._summarise_content(long), long)
 
 
 class TestEncodeSend(unittest.TestCase):
@@ -670,22 +664,22 @@ class TestArgParsers(unittest.TestCase):
     def test_observe_no_args(self):
         self.assertEqual(
             observe._parse_observe_args([]),
-            ("", "", False, False, False, False, None),
+            ("", "", False, False, False, None),
         )
 
     def test_observe_id_prefix(self):
         self.assertEqual(
             observe._parse_observe_args(["abc"]),
-            ("abc", "", False, False, False, False, None),
+            ("abc", "", False, False, False, None),
         )
 
     def test_observe_flags(self):
-        r = observe._parse_observe_args(["abc", "--json", "--full", "--interact"])
-        self.assertEqual(r, ("abc", "", True, True, True, False, None))
+        r = observe._parse_observe_args(["abc", "--json", "--interact"])
+        self.assertEqual(r, ("abc", "", True, True, False, None))
 
     def test_observe_all_flag(self):
         r = observe._parse_observe_args(["--all"])
-        self.assertEqual(r, ("", "", False, False, False, True, None))
+        self.assertEqual(r, ("", "", False, False, True, None))
 
     def test_observe_cwd(self):
         self.assertEqual(
@@ -974,8 +968,7 @@ class TestSlashCommandsAndTools(unittest.TestCase):
         self.assertIn("hi back", out)
 
     def test_tool_observe_always_returns_full_text(self) -> None:
-        # The tool schema no longer exposes full_text; output must never
-        # be truncated regardless of message length.
+        # Output must never be truncated regardless of message length.
         long_msg = "x" * 500
         with open(self.transcript, "a") as f:
             f.write('{"type":"message","timestamp":"2026-04-27T12:00:10Z",'

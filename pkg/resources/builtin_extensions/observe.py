@@ -541,9 +541,9 @@ def _trunc_one_line(s: str, max_runes: int) -> str:
     return _trunc(s, max_runes)
 
 
-def _summarise_content(content: Any, full: bool) -> str:
+def _summarise_content(content: Any) -> str:
     """Reduce a Message.Content blob (string or list of blocks) to one line."""
-    limit = 0 if full else 200
+    limit = 0
     if isinstance(content, str):
         return _trunc_one_line(content, limit)
     if isinstance(content, list):
@@ -582,9 +582,8 @@ _ANSI_CODES = {
 
 
 class _Formatter:
-    def __init__(self, raw_json: bool, full_text: bool, color: bool) -> None:
+    def __init__(self, raw_json: bool, color: bool) -> None:
         self.raw_json = raw_json
-        self.full_text = full_text
         self.color = color
 
     def _wrap(self, s: str, code: str) -> str:
@@ -626,8 +625,6 @@ class _Formatter:
             return prefix + self._wrap("✎ session named: ", "dim") + str(d.get("name", ""))
         if ty == "command":
             args = str(d.get("args", "") or "")
-            if not self.full_text:
-                args = _trunc(args, 60)
             return prefix + self._wrap("$ ", "dim") + str(d.get("command", "")) + " " + args
         if ty == "plan_update":
             return prefix + "📋 plan: " + str(d.get("planTitle", ""))
@@ -641,7 +638,7 @@ class _Formatter:
         if not isinstance(raw, dict):
             return self._wrap("(unparseable message)", "dim")
         role = raw.get("role", "")
-        body = _summarise_content(raw.get("content"), self.full_text)
+        body = _summarise_content(raw.get("content"))
         if role == "user":
             return self._wrap("▸ user", "cyan") + "  " + body
         if role == "assistant":
@@ -772,7 +769,6 @@ def _snapshot_transcript(
     cwd_flag: str,
     lines: int,
     raw_json: bool,
-    full_text: bool = False,
 ) -> str:
     """Return the last `lines` formatted (or raw) lines of a session transcript.
 
@@ -788,7 +784,7 @@ def _snapshot_transcript(
         tail = _tail_lines(store_path, max(1, lines))
     except OSError as e:
         raise ValueError(f"open transcript {store_path}: {e}") from e
-    fmt = _Formatter(raw_json=raw_json, full_text=full_text, color=False)
+    fmt = _Formatter(raw_json=raw_json, color=False)
     out: list[str] = []
     for ln in tail:
         if not ln:
@@ -867,7 +863,6 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     id_prefix = ""
     cwd_flag = ""
     raw_json = False
-    full_text = False
     include_all = False
     lines = 50
     i = 0
@@ -875,8 +870,6 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         a = args[i]
         if a == "--json":
             raw_json = True
-        elif a == "--full":
-            full_text = True
         elif a == "--all":
             include_all = True
         elif a == "--cwd":
@@ -900,7 +893,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     if not id_prefix and not cwd_flag:
         return {"message": _snapshot_session_list(include_all=include_all), "print_response": True}
     try:
-        out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, full_text)
+        out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json)
     except ValueError as e:
         return {"message": str(e)}
     return {"message": out, "print_response": True}
@@ -1011,7 +1004,7 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     if not id_prefix and not cwd_flag:
         return _snapshot_session_list(include_all=include_all)
     try:
-        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, True)
+        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json)
     except ValueError as e:
         raise fir_ext.ToolError(str(e)) from e
 
@@ -1111,15 +1104,14 @@ def tool_stop(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
 # CLI verb: `fir observe`
 # ---------------------------------------------------------------------------
 
-_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--json] [--full] [--interact]
+_OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--json] [--interact]
 
   fir observe                  list LIVE sessions across all running fir processes
   fir observe --all            include ended and crashed sessions in the list
   fir observe <id-prefix>      tail-and-format the matching session's transcript
   fir observe --cwd <path>     resolve session by working directory
   fir observe --cwd .          session in current directory (error if 0/many)
-  fir observe <id> --json      raw JSONL transcript — no formatting, no truncation
-  fir observe <id> --full      formatted transcript with no truncation
+  fir observe <id> --json      raw JSONL transcript — no formatting
   fir observe <id> --interact  also pipe stdin to session as input (Enter to send)
 """
 
@@ -1171,7 +1163,6 @@ def _verb_observe_tail(
     cwd_flag: str,
     json_out: bool,
     interact: bool,
-    full_text: bool,
 ) -> int:
     try:
         s = _resolve_sidecar(id_prefix, cwd_flag)
@@ -1213,7 +1204,7 @@ def _verb_observe_tail(
 
     # Color: only when fir's stdout is a TTY and NO_COLOR is unset.
     color = host.stdout_is_tty and not os.environ.get("NO_COLOR")
-    fmt = _Formatter(raw_json=json_out, full_text=full_text, color=color)
+    fmt = _Formatter(raw_json=json_out, color=color)
 
     # Tail loop. ~10 syscalls/sec when idle.
     try:
@@ -1293,49 +1284,46 @@ def _interact_send_loop(
             conn.close()
 
 
-def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, bool, str | None]:
-    """Returns (id_prefix, cwd_flag, json_out, interact, full_text, include_all, error_message)."""
+def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, str | None]:
+    """Returns (id_prefix, cwd_flag, json_out, interact, include_all, error_message)."""
     id_prefix = ""
     cwd_flag = ""
     json_out = False
     interact = False
-    full_text = False
     include_all = False
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--json":
             json_out = True
-        elif a == "--full":
-            full_text = True
         elif a == "--interact":
             interact = True
         elif a == "--all":
             include_all = True
         elif a == "--cwd":
             if i + 1 >= len(argv):
-                return ("", "", False, False, False, False,
+                return ("", "", False, False, False,
                         "--cwd requires an argument (path or '.')")
             cwd_flag = argv[i + 1]
             i += 1
         elif a.startswith("--cwd="):
             cwd_flag = a[len("--cwd="):]
         elif a in ("--help", "-h"):
-            return ("", "", False, False, False, False, "__HELP__")
+            return ("", "", False, False, False, "__HELP__")
         elif a.startswith("--"):
-            return ("", "", False, False, False, False, f"unknown flag: {a}")
+            return ("", "", False, False, False, f"unknown flag: {a}")
         else:
             if id_prefix:
-                return ("", "", False, False, False, False,
+                return ("", "", False, False, False,
                         f"unexpected extra argument: {a}")
             id_prefix = a
         i += 1
-    return (id_prefix, cwd_flag, json_out, interact, full_text, include_all, None)
+    return (id_prefix, cwd_flag, json_out, interact, include_all, None)
 
 
 @fir_ext.cli_verb("observe")
 def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
-    id_prefix, cwd_flag, json_out, interact, full_text, include_all, err = _parse_observe_args(argv)
+    id_prefix, cwd_flag, json_out, interact, include_all, err = _parse_observe_args(argv)
     if err == "__HELP__":
         host.eprint(_OBSERVE_USAGE)
         return 0
@@ -1345,7 +1333,7 @@ def cli_observe(argv: list[str], host: fir_ext.Host) -> int:
         return 1
     if not id_prefix and not cwd_flag:
         return _verb_observe_list(host, include_all=include_all)
-    return _verb_observe_tail(host, id_prefix, cwd_flag, json_out, interact, full_text)
+    return _verb_observe_tail(host, id_prefix, cwd_flag, json_out, interact)
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- `fir observe --full` flag. Full untruncated formatted output (no message body or command-args truncation) is now the default and only behaviour. The previous truncating default was useless for agent consumers and only marginally helpful for humans, who can scroll. The `/observe` slash command also no longer accepts `--full`. `--json` is still available for raw JSONL output.
+
 ## [0.41.0] - 2026-05-03
 
 ### Changed

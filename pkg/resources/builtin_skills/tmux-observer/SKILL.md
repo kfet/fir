@@ -16,7 +16,7 @@ The whole skill is three tmux commands plus one fir command. There is no script.
 
 ## The model
 
-**One tmux window per fir session you want to drive.** The window runs `fir observe <id> --interact --full`, which both tails the transcript and accepts stdin as messages back into the session. You read state with `tmux capture-pane` and send input with `tmux send-keys`.
+**One tmux window per fir session you want to drive.** The window runs `fir observe <id> --interact`, which both tails the transcript and accepts stdin as messages back into the session. You read state with `tmux capture-pane` and send input with `tmux send-keys`.
 
 ## Step 1 — discover the session id
 
@@ -35,12 +35,12 @@ You can also read sidecars directly: `~/.local/state/fir/agents/<id>.json` conta
 ## Step 2 — spawn the observer window
 
 ```bash
-tmux new-window -n fir-<short> "fir observe <id> --interact --full"
+tmux new-window -n fir-<short> "fir observe <id> --interact"
 ```
 
-- `--full` = formatted transcript, no truncation. Best for capture-pane reading.
+- Formatted transcript with full message text — no truncation. Best for capture-pane reading.
 - `--interact` = stdin lines are sent as messages. **Required** if you want to use `tmux send-keys` to drive the session.
-- Use `--json` instead of `--full` only if you need raw JSONL events for programmatic parsing (more tokens, less readable).
+- Use `--json` if you need raw JSONL events for programmatic parsing (more tokens, less readable).
 - Window name `fir-<short>` is just a convention — pick whatever helps you find it later. Use `tmux list-windows` to see your windows.
 
 If you want the observer in a fresh tmux session instead of the current one, use `tmux new-session -d -s <name> ...` — that's your call. This skill does not prescribe layout, naming, or session strategy.
