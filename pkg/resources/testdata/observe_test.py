@@ -64,7 +64,7 @@ def _reset_observe_state(state_dir: str, sock_dir: str) -> None:
         "started_at": "",
         "status": "running",
         "session_name": "",
-        "schema": 3,
+        "schema": 1,
     })
     if observe._socket is not None:
         with suppress(Exception):
@@ -111,7 +111,7 @@ class TestSidecar(unittest.TestCase):
         self.assertEqual(d["store_path"], "/tmp/foo.jsonl")
         self.assertEqual(d["session_name"], "my-feature")
         self.assertEqual(d["status"], "running")
-        self.assertEqual(d["schema"], 3)
+        self.assertEqual(d["schema"], 1)
         self.assertEqual(d["pid"], os.getpid())
         self.assertEqual(d["host_pid"], os.getppid())
         self.assertTrue(d["socket_path"].endswith(".sock"))

@@ -111,7 +111,7 @@ _state: dict[str, Any] = {
     "started_at": "",
     "status": "running",
     "session_name": "",
-    "schema": 3,
+    "schema": 1,
     # Live activity counters — updated on each agent event. Sidecar consumers
     # (e.g. `fir htop`) read these to render top-style metrics without
     # parsing the transcript.
@@ -837,12 +837,7 @@ def _stop_one(id_prefix: str, cwd_flag: str, force: bool = False) -> dict[str, A
     sid8 = (s.get("session_id", "") or "")[:8]
     host_pid = int(s.get("host_pid") or 0)
     if host_pid <= 0:
-        # Older sidecars (schema < 3) didn't record host_pid. Refuse rather
-        # than guess — killing the extension pid wouldn't stop the host.
-        raise ValueError(
-            f"session {sid8} sidecar has no host_pid (schema {s.get('schema')}); "
-            "the target fir is too old to support stop_session"
-        )
+        raise ValueError(f"session {sid8} sidecar has no host_pid")
     sig = signal.SIGKILL if force else signal.SIGTERM
     try:
         os.kill(host_pid, sig)
