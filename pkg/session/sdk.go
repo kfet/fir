@@ -281,6 +281,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		CompactionRunner: opts.CompactionRunner,
 		UsageTracker:     opts.UsageTracker,
 		Cwd:              cwd,
+		ExtReady:         opts.ExtReady,
 	})
 
 	// Register session-aware tools (plan tool needs a session reference).

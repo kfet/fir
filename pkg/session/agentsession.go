@@ -177,6 +177,13 @@ type AgentSessionOptions struct {
 	Cwd              string
 	Hooks            *AgentSessionHooks
 	UsageTracker     UsageTracker
+
+	// ExtReady, if non-nil, is closed once extensions have finished loading
+	// (auth-provider OAuth registrations, ModifyModels hooks, etc.). Prompt
+	// blocks on it before starting a turn so the first LLM call after an
+	// upgrade — when extension startup is slow because the embedded SDK is
+	// re-extracted — sees fully-initialised credentials and headers.
+	ExtReady <-chan struct{}
 }
 
 // ============================================================================
@@ -228,6 +235,11 @@ type AgentSession struct {
 	planTitle    string
 	planMetadata map[string]string
 	planVersion  int64 // incremented on each UpdatePlan call
+
+	// extReady is closed once extensions have finished loading. Prompt
+	// waits on it before starting a turn so the first LLM call after an
+	// upgrade sees fully-initialised auth-provider OAuth registrations.
+	extReady <-chan struct{}
 }
 
 // NewAgentSession creates a new AgentSession.
@@ -243,6 +255,7 @@ func NewAgentSession(opts AgentSessionOptions) *AgentSession {
 		hooks:            opts.Hooks,
 		usageTracker:     opts.UsageTracker,
 		sessionDate:      time.Now().Format("2006-01-02"),
+		extReady:         opts.ExtReady,
 	}
 
 	// Subscribe to agent events for internal handling
@@ -497,6 +510,18 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		return fmt.Errorf("no model selected. Use /login or set an API key environment variable")
 	}
 
+	// Wait for extensions to finish loading before starting a turn.
+	// Auth-provider extensions (anthropic_auth etc.) register their OAuth
+	// providers asynchronously during startup; on the first run after an
+	// upgrade, the embedded SDK is re-extracted and handshakes are slow
+	// enough that this can race ahead of the user's first prompt and
+	// produce a spurious "Credentials may have expired" error. This is
+	// the single gate covering all turn entry points (user prompts,
+	// initial prompt, MCP channel injection via InjectMessage).
+	if s.extReady != nil {
+		<-s.extReady
+	}
+
 	// If a fully-completed plan was left over from a previous turn, clear it
 	// immediately — there's no value showing a stale "done" plan. For
 	// in-progress plans, remember to clear after this turn finishes so the
@@ -581,6 +606,12 @@ func (s *AgentSession) InjectMessage(msg agent.AgentMessage) {
 		s.Agent.FollowUp(msg)
 	} else {
 		go func() {
+			// Same gate as Prompt: don't fire the first LLM call before
+			// extensions (auth providers, ModifyModels hooks, etc.) have
+			// finished loading.
+			if s.extReady != nil {
+				<-s.extReady
+			}
 			if err := s.Agent.PromptMessages([]agent.AgentMessage{msg}); err != nil {
 				firlog.Debug("injected message auto-prompt failed", "err", err)
 			}

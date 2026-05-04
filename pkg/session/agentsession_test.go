@@ -3319,3 +3319,107 @@ func TestAgentSession_InjectMessage_WhenNotStreaming(t *testing.T) {
 		t.Errorf("expected empty follow-up queue, got %d", len(queued))
 	}
 }
+
+// TestAgentSession_Prompt_WaitsForExtReady is a regression test for the
+// startup race where the agent's first turn fires before auth-provider
+// extensions (e.g. anthropic_auth) have registered their OAuth providers,
+// producing a spurious "authentication failed for \"anthropic\". Credentials
+// may have expired" error after upgrading fir.
+//
+// AgentSession.Prompt must block on AgentSessionOptions.ExtReady until it
+// closes before starting the turn.
+func TestAgentSession_Prompt_WaitsForExtReady(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := t.TempDir()
+
+	sm := sessionpkg.InMemorySessionStore()
+	settingsManager := config.NewSettingsManager(tmpDir, agentDir)
+	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		SettingsManager: settingsManager,
+	})
+	_ = rl.Reload()
+
+	model := &ai.Model{
+		ID:            "test-model",
+		Provider:      "test-provider",
+		Api:           "test-api",
+		BaseURL:       "http://localhost",
+		ContextWindow: 200000,
+		MaxTokens:     8192,
+	}
+
+	streamCalled := make(chan struct{}, 1)
+	a := agent.NewAgent(agent.AgentOptions{
+		InitialState: &agent.AgentState{
+			Model:         model,
+			ThinkingLevel: agent.ThinkingOff,
+		},
+		StreamFn: func(m *ai.Model, _ ai.Context, _ *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+			select {
+			case streamCalled <- struct{}{}:
+			default:
+			}
+			stream := ai.NewAssistantMessageEventStream()
+			go func() {
+				msg := &ai.AssistantMessage{
+					Role:       ai.RoleAssistant,
+					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
+					Api:        m.Api,
+					Provider:   m.Provider,
+					Model:      m.ID,
+					Usage:      ai.Usage{Input: 1, Output: 1},
+					StopReason: ai.StopReasonStop,
+				}
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+				stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: msg})
+				stream.End(nil)
+			}()
+			return stream
+		},
+		GetApiKey: func(_ string) (string, error) { return "test-key", nil },
+	})
+
+	extReady := make(chan struct{})
+	session := NewAgentSession(AgentSessionOptions{
+		Agent:           a,
+		SessionStore:    sm,
+		SettingsManager: settingsManager,
+		ResourceLoader:  rl,
+		Cwd:             tmpDir,
+		ExtReady:        extReady,
+	})
+	defer session.Close()
+
+	promptDone := make(chan error, 1)
+	go func() { promptDone <- session.Prompt("hello") }()
+
+	// Before extReady closes, the StreamFn must not have been invoked.
+	select {
+	case <-streamCalled:
+		t.Fatal("agent started turn before extReady closed")
+	case <-promptDone:
+		t.Fatal("Prompt returned before extReady closed")
+	case <-time.After(100 * time.Millisecond):
+		// Good — Prompt is still waiting.
+	}
+
+	close(extReady)
+
+	select {
+	case <-streamCalled:
+		// Good — turn started after extReady closed.
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent did not start turn after extReady closed")
+	}
+
+	select {
+	case err := <-promptDone:
+		if err != nil {
+			t.Fatalf("Prompt returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Prompt did not return after turn finished")
+	}
+}

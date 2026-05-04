@@ -916,7 +916,6 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		setup.settingsManager,
 		interactive.InteractiveModeOptions{
 			InitialPrompt:   initialPrompt,
-			ExtReady:        setup.ExtReady,
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
 			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
