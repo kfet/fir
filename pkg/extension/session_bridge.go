@@ -24,6 +24,9 @@ type SessionBridge struct {
 	mu       sync.Mutex // protects extTools and RegisterTool/UnregisterExtensionTools
 	extTools []string   // names of tools registered by extensions
 
+	restartMu sync.RWMutex
+	restartFn RestartFn
+
 	// Version and Mode are passed through into Introspect results.
 	// Populated by Setup.
 	Version string
@@ -301,3 +304,44 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 // ReportProgress is a no-op on the shared SessionBridge.
 // Bridge.handleInbound calls the active progress reporter directly.
 func (b *SessionBridge) ReportProgress(message string) {}
+
+// RestartFn is set by the active mode to perform a session restart with
+// mode-specific UI cleanup. When nil, RestartSession returns an error.
+//
+// The function is invoked from a fresh goroutine *after* the in-flight
+// stream has been aborted; it should clear UI state, call NewSessionCmd,
+// and submit prompt via session.Prompt. See InteractiveMode.handleHandoff.
+type RestartFn func(prompt string) error
+
+// SetRestartFn registers a mode-specific restart handler. Pass nil to
+// remove. Safe to call after the bridge is in use; the field is read on
+// every RestartSession call.
+func (b *SessionBridge) SetRestartFn(fn RestartFn) {
+	b.restartMu.Lock()
+	b.restartFn = fn
+	b.restartMu.Unlock()
+}
+
+// RestartSession aborts the in-flight stream synchronously and schedules
+// session clear + prompt submission asynchronously. Returns an error when
+// no RestartFn is registered (the current mode does not support restart).
+func (b *SessionBridge) RestartSession(prompt string) error {
+	b.restartMu.RLock()
+	fn := b.restartFn
+	b.restartMu.RUnlock()
+	if fn == nil {
+		return fmt.Errorf("session restart is not supported in this mode")
+	}
+	// Abort synchronously so the tool-result writeback for the calling
+	// extension tool is short-circuited and never lands in the session.
+	if b.session != nil && b.session.Agent != nil {
+		b.session.Agent.Abort()
+	}
+	// The rest must run on a goroutine: the bridge dispatch goroutine is
+	// holding the JSON-RPC handler open, and the mode callback may need
+	// to acquire UI locks that the dispatcher must not block on.
+	go func() {
+		_ = fn(prompt)
+	}()
+	return nil
+}

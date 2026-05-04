@@ -16,12 +16,12 @@ Outbound calls demonstrated (extension → fir):
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
-  report_progress ·
+  report_progress · restart_session ·
   prepend
 
 Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
-    change_model, inject_message, batch_example
+    change_model, inject_message, restart_demo, batch_example
   • hook/tool_call: blocks tools whose name starts with "blocked:"
   • All ten events: session_start, session_shutdown, agent_start, agent_end,
     turn_start, turn_end, message_start, message_end,
@@ -141,6 +141,29 @@ def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
         ctx.send_user_message(params["content"])           # send_user_message
     else:
         ctx.send_message("demo_note", params["content"])   # send_message
+    return {"ok": True}
+
+
+@fir_ext.tool(
+    name="restart_demo",
+    description=(
+        "Demonstrate ctx.restart_session(). Refuses to fire in real fir "
+        "without confirm='yes-really' to avoid accidentally clearing the "
+        "user's session — the canonical use is the self_handoff builtin."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string"},
+            "confirm": {"type": "string"},
+        },
+        "required": ["prompt"],
+    },
+)
+def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
+    if params.get("confirm") != "yes-really":
+        return {"ok": False, "skipped": True}
+    ctx.restart_session(params["prompt"])                   # restart_session
     return {"ok": True}
 
 

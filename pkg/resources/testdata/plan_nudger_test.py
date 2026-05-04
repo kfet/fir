@@ -12,7 +12,7 @@ steer.  These tests exercise both surfaces:
   a plan is in flight, and ``agent_end`` always fires when in flight;
 * **body composition** — fixed tag, counter line that grows with
   whichever counters are non-trivial, optional ``progress_metric``
-  tip when the AI hasn't set one, and the ``self-handoff`` line only
+  tip when the AI hasn't set one, and the ``self_handoff`` line only
   once stagnation is real.
 
 The "must not contain" assertions are the hardest commitment in the
@@ -367,7 +367,7 @@ class TestSteerBody(unittest.TestCase):
     def test_handoff_line_only_at_stagnation(self):
         # First fire: not yet stagnant — no handoff line.
         body, _ = self._fire_turn_end(nudges_without_progress=0)
-        self.assertNotIn("self-handoff", body)
+        self.assertNotIn("self_handoff", body)
 
         # Second/third fire: at the stagnation threshold, handoff line
         # appears.  We pre-load stagnation to STAGNATION_THRESHOLD-1 so
@@ -375,7 +375,7 @@ class TestSteerBody(unittest.TestCase):
         body, _ = self._fire_turn_end(
             nudges_without_progress=self.mod.STAGNATION_THRESHOLD - 1,
         )
-        self.assertIn("self-handoff", body)
+        self.assertIn("self_handoff", body)
         self.assertIn("Stopping early is not the only escape", body)
 
     def test_stagnation_counter_in_body(self):

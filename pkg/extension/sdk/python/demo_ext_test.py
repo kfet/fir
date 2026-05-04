@@ -302,7 +302,7 @@ class TestDemoInit(DemoTestCase):
             tool_names,
             {
                 "word_count", "shell_run",
-                "change_model", "inject_message",
+                "change_model", "inject_message", "restart_demo",
                 "batch_example", "show_config_dirs",
             },
         )
@@ -443,6 +443,31 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected send_user_message call")
         assert msg is not None
         self.assertEqual(msg["params"]["content"], "hi agent")
+        fake.stop()
+
+    # -- restart_demo --------------------------------------------------------
+
+    def test_restart_demo_without_confirm_does_nothing(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "restart_demo", {"prompt": "x"})
+        # No restart_session method should be observed.
+        msg = fake.wait_for_method("restart_session", timeout=0.5)
+        self.assertIsNone(msg, "restart_session should not fire without confirm")
+        fake.stop()
+
+    def test_restart_demo_with_confirm_calls_restart_session(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(
+            2, "restart_demo", {"prompt": "read /tmp/h.md", "confirm": "yes-really"}
+        )
+        msg = fake.wait_for_method("restart_session")
+        self.assertIsNotNone(msg, "expected restart_session call")
+        assert msg is not None
+        self.assertEqual(msg["params"]["prompt"], "read /tmp/h.md")
         fake.stop()
 
     # -- batch_example -------------------------------------------------------

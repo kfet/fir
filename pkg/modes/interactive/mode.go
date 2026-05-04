@@ -215,6 +215,17 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 			}
 		})
 	}
+	if setup != nil && setup.Bridge != nil {
+		// Register the session-restart callback used by the
+		// self_handoff extension. The bridge has already aborted the
+		// in-flight stream; we wait for idle, clear UI state, start a
+		// new session, and submit the handoff prompt as the first
+		// message of the fresh context.
+		setup.Bridge.SetRestartFn(func(prompt string) error {
+			m.handleHandoff(prompt)
+			return nil
+		})
+	}
 
 	// Refresh autocomplete so extension commands appear.
 	m.setupAutocomplete()

@@ -51,6 +51,16 @@ type BridgeAPI interface {
 	ReportProgress(message string)
 	// Introspect returns a snapshot of the session's runtime state.
 	Introspect() session.Introspection
+	// RestartSession aborts any in-flight stream, clears the session
+	// (LLM history, plan, system prompt rebuild) and submits prompt as
+	// the first message of the fresh session. Returns an error when the
+	// active mode does not support restart (e.g. ACP, headless).
+	//
+	// The call is "fire-and-forget on the agent loop": Abort() is invoked
+	// synchronously so the in-flight tool call's result is short-circuited;
+	// the rest (clear + Prompt) happens asynchronously. Callers therefore
+	// must not rely on any state from the *current* turn surviving.
+	RestartSession(prompt string) error
 }
 
 // ExecResult is the result of a shell command.

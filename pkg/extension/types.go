@@ -118,6 +118,11 @@ type reportProgressParams struct {
 	Message string `json:"message"`
 }
 
+// restartSessionParams maps to "restart_session".
+type restartSessionParams struct {
+	Prompt string `json:"prompt"`
+}
+
 // ---------------------------------------------------------------------------
 // Bridge-method result shapes
 // ---------------------------------------------------------------------------

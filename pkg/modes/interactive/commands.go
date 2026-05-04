@@ -611,6 +611,20 @@ func (m *InteractiveMode) handleExternalEditor() {
 	// On non-zero exit keep the original text (no-op).
 }
 
+// handleHandoff is invoked from the extension bridge when an extension
+// triggers a session restart (e.g. via the self_handoff tool). The bridge
+// has already called Agent.Abort() synchronously to short-circuit the
+// in-flight tool call's result writeback; this method handles the rest:
+// wait for idle, clear UI, NewSessionCmd, and submit the handoff prompt.
+//
+// Runs on a goroutine spawned by the bridge.
+func (m *InteractiveMode) handleHandoff(prompt string) {
+	if m.session != nil {
+		m.session.Agent.WaitForIdle()
+	}
+	m.handleClearCommand(prompt)
+}
+
 func (m *InteractiveMode) handleClearCommand(initialPrompt string) {
 	if m.session != nil {
 		// Cancel any in-progress LLM stream before starting a new session.

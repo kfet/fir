@@ -29,6 +29,8 @@ type mockBridgeAPI struct {
 	modelSet        *ai.Model
 	toolsRegistered []ToolDefinition
 	sessionData     map[string]string
+	restartPrompts  []string
+	restartErr      error
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
 	sideQueryOpts     *session.SideQueryOptions
@@ -111,6 +113,14 @@ func (m *mockBridgeAPI) ListTools() []ToolInfo   { return nil }
 func (m *mockBridgeAPI) ReportProgress(_ string) {}
 func (m *mockBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{}
+}
+
+// restartCalls / restartErr are used by TestBridge_RestartSession.
+func (m *mockBridgeAPI) RestartSession(prompt string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.restartPrompts = append(m.restartPrompts, prompt)
+	return m.restartErr
 }
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.
@@ -692,6 +702,93 @@ func TestBridge_SendUserMessage_DeliverAs(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Session data RPC tests
 // ---------------------------------------------------------------------------
+
+func TestBridge_RestartSession_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"prompt":"read /tmp/handoff.md"}`)
+	_ = extCodec.WriteRequest(7, "restart_session", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+
+	waitFor(t, func() bool {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		return len(api.restartPrompts) > 0
+	}, "restart_session not delivered to BridgeAPI")
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if api.restartPrompts[0] != "read /tmp/handoff.md" {
+		t.Fatalf("got prompt %q, want %q", api.restartPrompts[0], "read /tmp/handoff.md")
+	}
+}
+
+func TestBridge_RestartSession_PropagatesError(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+	api.mu.Lock()
+	api.restartErr = errors.New("not supported in this mode")
+	api.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	params := json.RawMessage(`{"prompt":"x"}`)
+	_ = extCodec.WriteRequest(8, "restart_session", &params)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := msg.(*Response)
+	if resp.Error == nil {
+		t.Fatal("expected error response when RestartSession returns error")
+	}
+	if !strings.Contains(resp.Error.Message, "not supported") {
+		t.Fatalf("got error %q, want containing 'not supported'", resp.Error.Message)
+	}
+}
+
+func TestSessionBridge_RestartSession_NoCallback(t *testing.T) {
+	// Without a registered RestartFn, RestartSession must error.
+	sb := &SessionBridge{}
+	if err := sb.RestartSession("x"); err == nil {
+		t.Fatal("expected error when no RestartFn is registered")
+	}
+}
+
+func TestSessionBridge_RestartSession_InvokesCallback(t *testing.T) {
+	sb := &SessionBridge{}
+	got := make(chan string, 1)
+	sb.SetRestartFn(func(prompt string) error {
+		got <- prompt
+		return nil
+	})
+	if err := sb.RestartSession("hello"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case p := <-got:
+		if p != "hello" {
+			t.Fatalf("got prompt %q, want hello", p)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RestartFn was not invoked")
+	}
+}
 
 func TestBridge_SetSessionData_RPC(t *testing.T) {
 	b, extCodec := pipePair(&InitResult{})

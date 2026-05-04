@@ -525,6 +525,35 @@ Response: `{"ok": true}`
 
 ---
 
+#### `restart_session`
+
+Abort the in-flight stream and start a fresh session, with `prompt` as
+the first user message of the new context. Used by the `self_handoff`
+builtin extension to implement reliable session handoff.
+
+| Param    | Type   | Notes                                                                  |
+|----------|--------|-------------------------------------------------------------------------|
+| `prompt` | string | Required. First user message of the fresh session (e.g. "Read /tmp/handoff.md and continue."). |
+
+```json
+{"jsonrpc":"2.0","id":1013,"method":"restart_session","params":{"prompt":"Read /tmp/handoff.md and continue."}}
+```
+
+Behaviour: fir calls `Agent.Abort()` synchronously (so the calling tool's
+result writeback is short-circuited), then asynchronously waits for idle,
+clears UI, calls `NewSessionCmd()`, and submits `prompt` via `Prompt()`.
+This RPC is the primitive behind the `handoff` builtin extension's
+`self_handoff` tool.
+
+Response: `{"ok": true}` — but extensions should not rely on receiving it;
+the calling agent turn is being torn down.
+
+Returns a JSON-RPC error when the active mode does not register a restart
+callback (e.g. ACP, headless). Currently only the interactive (TUI) mode
+supports restart.
+
+---
+
 #### `side_query`
 
 Make a one-shot LLM call using the current session context.  No tools, no

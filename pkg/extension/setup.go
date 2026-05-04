@@ -82,6 +82,11 @@ type SetupResult struct {
 	// no ProjectDir was configured or no extensions were discovered).
 	Manager *Manager
 
+	// Bridge is the per-session BridgeAPI implementation that fields
+	// inbound JSON-RPC calls from extensions. Modes use it to register
+	// mode-specific callbacks (e.g. SetRestartFn for /handoff support).
+	Bridge *SessionBridge
+
 	session *session.AgentSession
 }
 
@@ -204,6 +209,7 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 
 	result := &SetupResult{
 		Manager: mgr,
+		Bridge:  bridge,
 		session: asession,
 	}
 

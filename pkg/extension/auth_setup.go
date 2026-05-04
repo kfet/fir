@@ -195,6 +195,9 @@ func (n *nopBridgeAPI) ReportProgress(_ string) {}
 func (n *nopBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{Version: n.version, Mode: n.mode}
 }
+func (n *nopBridgeAPI) RestartSession(_ string) error {
+	return fmt.Errorf("session restart not available outside a session")
+}
 
 // Ensure agent import is used (ToolDefinition references agent.ToolDisplayHint
 // transitively); keep this to avoid goimports churn.

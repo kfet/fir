@@ -363,6 +363,20 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 	case "agent.info":
 		result = api.Introspect()
 
+	case "restart_session":
+		var p restartSessionParams
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if err := api.RestartSession(p.Prompt); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = okTrue
+		}
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {

@@ -1717,6 +1717,29 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
+    def restart_session(self, prompt: str) -> None:
+        """Abort the in-flight stream and start a fresh session.
+
+        Aborts any current LLM stream synchronously, clears the session
+        (LLM history, plan, system-prompt rebuild), clears UI state, and
+        submits ``prompt`` as the first user message of the new session.
+
+        This is the primitive behind the ``self_handoff`` tool. It is
+        only supported in modes that register a restart callback
+        (interactive). In other modes the call returns a JSON-RPC error.
+
+        Note: when called from inside a tool handler, the tool's result
+        will be discarded — the calling turn is being aborted. The new
+        session begins with ``prompt`` as its first message.
+
+        Parameters
+        ----------
+        prompt : str
+            The first user message of the fresh session. Typically a short
+            instruction pointing at a handoff document on disk.
+        """
+        self._call("restart_session", {"prompt": prompt})
+
     def side_query(
         self,
         question: str,

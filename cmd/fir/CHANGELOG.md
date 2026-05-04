@@ -4,7 +4,8 @@
 
 ### Added
 
-- `self_handoff` builtin extension and accompanying `restart_session` extension RPC. Replaces the old `tmux send-keys "/new ..."` skill mechanism with a typed JSON-RPC tool. The tool atomically writes the handoff doc (or validates an existing one), aborts the in-flight stream synchronously, clears session state, and submits the handoff prompt as the first message of a fresh session — all inside fir, no shell, no tmux dependency. The legacy skill (`.fir/skills/self-handoff/SKILL.md`) now points at the tool with the tmux call kept only as a documented fallback. Bridge plumbing: `BridgeAPI.RestartSession`, `SessionBridge.SetRestartFn`, registered by `InteractiveMode.SetExtensionSetup`. Modes without a registered restart callback (ACP, headless) return a clear JSON-RPC error.
+- `handoff` builtin extension exposing one strictly-typed tool: `self_handoff(content)`. Atomically validates the doc (≥200 chars after strip, ≥3 non-blank lines, ≤64 KB), writes it to `<cwd>/.fir/handoff-<timestamp>.md`, verifies the result is readable and non-empty, then triggers a session restart whose first user message points the new agent at the doc. Replaces the old `tmux send-keys "/new ..."` skill mechanism — typed JSON-RPC, no shell, no tmux dependency, hard validation before any restart fires. Validation failures return a regular tool error and the session continues. Bridge plumbing: new `restart_session` extension RPC plus `BridgeAPI.RestartSession`. `SessionBridge` calls `Agent.Abort()` synchronously to short-circuit the calling tool's result writeback, then runs `WaitForIdle` + UI clear + `NewSessionCmd` + `Prompt` on a goroutine via a mode-supplied callback (parallel to `SetStatusFn`). `InteractiveMode.SetExtensionSetup` registers the callback. Modes without a registered restart callback (ACP, headless) return a clear JSON-RPC error.
+
 ### Fixed
 
 - Anthropic Messages API 400 "messages: text content blocks must be non-empty" on resumed sessions (e.g. opus-4.7 multi-turn after several "resume"/"continue" prompts; observed request id `req_011CaiKVdgvopStQzBuvt3kq`). `convertAnthropicMessages` previously preserved empty text blocks verbatim when the assistant turn carried a signed thinking block, on the theory that dropping a sibling would trigger a "thinking blocks cannot be modified" 400. Production evidence shows Anthropic's empty-text validation runs first and rejects the request. Empty/whitespace-only text blocks are now always dropped; signed/redacted thinking blocks are still replayed verbatim. Regression test `TestAnthropic_ConvertMessages_DropsEmptyTextBesideThinking` plus updated invariants matrix.
@@ -16,6 +17,7 @@
 
 ### Removed
 
+- Builtin `self-handoff` skill — superseded by the `handoff` extension's `self_handoff` tool. The tool description carries the operational content; the doc body is left to the agent (no template).
 - `fir observe --full` flag. Full untruncated formatted output (no message body or command-args truncation) is now the default and only behaviour. The previous truncating default was useless for agent consumers and only marginally helpful for humans, who can scroll. The `/observe` slash command also no longer accepts `--full`. `--json` is still available for raw JSONL output.
 ### Fixed
 

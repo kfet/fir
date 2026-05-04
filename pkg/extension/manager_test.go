@@ -30,7 +30,7 @@ import (
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 11
+const builtinToolCount = 12
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
@@ -374,12 +374,15 @@ func TestManager_ActiveMode(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	if n := pollToolCount(api, builtinToolCount+1, 5*time.Second); n != builtinToolCount+1 {
-		t.Fatalf("expected %d tools in acp mode, got %d", builtinToolCount+1, n)
+	// handoff (modes: tui) registers self_handoff so it is filtered out
+	// in acp mode along with its tool.
+	expected := builtinToolCount - 1 + 1 // builtins (minus tui-only) + acp-ext
+	if n := pollToolCount(api, expected, 5*time.Second); n != expected {
+		t.Fatalf("expected %d tools in acp mode, got %d", expected, n)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if n := api.toolCount(); n != builtinToolCount+1 {
-		t.Fatalf("expected exactly %d tools after filtering by mode, got %d", builtinToolCount+1, n)
+	if n := api.toolCount(); n != expected {
+		t.Fatalf("expected exactly %d tools after filtering by mode, got %d", expected, n)
 	}
 }
 
