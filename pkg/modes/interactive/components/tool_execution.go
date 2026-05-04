@@ -5,6 +5,7 @@ package components
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -717,15 +718,136 @@ func (tc *ToolExecutionComponent) formatGeneric(t *theme.Theme) string {
 	if tc.displayHint != nil && len(tc.displayHint.TitleArgs) > 0 {
 		return tc.formatWithHint(t)
 	}
-	text := t.Fg("toolTitle", t.Bold(tc.toolName))
-	argsJSON, _ := json.MarshalIndent(tc.args, "", "  ")
-	text += "\n\n" + string(argsJSON)
+
+	// MCP tools are named "mcp__<server>__<tool>" by AdaptTool. Render them
+	// with a clean header (server · tool) and a compact one-line summary of
+	// scalar args instead of dumping the full args JSON.
+	isMCP, mcpServer, mcpTool := parseMCPToolName(tc.toolName)
+
+	var text string
+	if isMCP {
+		text = t.Fg("toolTitle", t.Bold("mcp"))
+		text += " " + t.Fg("muted", mcpServer+" ·") + " " + t.Fg("accent", mcpTool)
+		if summary := mcpArgsSummary(tc.args); summary != "" {
+			text += " " + t.Fg("toolOutput", summary)
+		}
+	} else {
+		text = t.Fg("toolTitle", t.Bold(tc.toolName))
+		argsJSON, _ := json.MarshalIndent(tc.args, "", "  ")
+		text += "\n\n" + string(argsJSON)
+	}
 	text += tc.formatToolOutputDetails(t)
+
 	output := tc.getTextOutput()
-	if output != "" {
-		text += "\n" + output
+	if output == "" {
+		return text
+	}
+	// For MCP results, attempt to pretty-print whole-message JSON so a wall of
+	// inlined JSON becomes readable.
+	if isMCP {
+		output = prettyPrintJSON(output)
+	}
+	output = strings.TrimSpace(output)
+
+	// Apply a preview cap to ALL generic tool output. Without a DisplayHint
+	// we previously dumped the full body verbatim — that was a latent bug
+	// for any tool returning large output (notably MCP tools).
+	const maxLinesDefault = 10
+	lines := strings.Split(output, "\n")
+	maxLines := maxLinesDefault
+	if tc.expanded {
+		maxLines = len(lines)
+	}
+	displayLines := lines
+	if len(displayLines) > maxLines {
+		displayLines = lines[:maxLines]
+	}
+	remaining := len(lines) - len(displayLines)
+
+	styled := make([]string, len(displayLines))
+	for i, l := range displayLines {
+		if tc.result != nil && tc.result.IsError {
+			styled[i] = t.Fg("error", l)
+		} else {
+			styled[i] = t.Fg("toolOutput", l)
+		}
+	}
+	text += "\n\n" + strings.Join(styled, "\n")
+	if remaining > 0 {
+		text += t.Fg("muted", fmt.Sprintf("\n... (%d more lines,", remaining)) +
+			" " + KeyHint(tuicomp.ActExpandTools, "to expand") + ")"
 	}
 	return text
+}
+
+// parseMCPToolName splits "mcp__<server>__<tool>" into its components.
+// Returns ok=false for any name that does not match this prefix shape.
+func parseMCPToolName(name string) (ok bool, server, tool string) {
+	const prefix = "mcp__"
+	if !strings.HasPrefix(name, prefix) {
+		return false, "", ""
+	}
+	rest := name[len(prefix):]
+	idx := strings.Index(rest, "__")
+	if idx <= 0 || idx == len(rest)-2 {
+		return false, "", ""
+	}
+	return true, rest[:idx], rest[idx+2:]
+}
+
+// mcpArgsSummary builds a single-line "k=v k=v" summary of scalar arguments,
+// omitting noisy nested objects/arrays. Long string values are clipped.
+func mcpArgsSummary(args map[string]any) string {
+	if len(args) == 0 {
+		return ""
+	}
+	// Stable order — sort keys.
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		v := args[k]
+		switch val := v.(type) {
+		case string:
+			s := val
+			if len(s) > 60 {
+				s = s[:57] + "..."
+			}
+			parts = append(parts, fmt.Sprintf("%s=%q", k, s))
+		case bool, float64, int, int64:
+			parts = append(parts, fmt.Sprintf("%s=%v", k, val))
+		default:
+			// Skip nested structures — they belong in expanded view.
+		}
+		if len(parts) >= 4 {
+			break
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// prettyPrintJSON returns indented JSON when text parses as a JSON object or
+// array, otherwise returns the input unchanged.
+func prettyPrintJSON(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) == 0 {
+		return text
+	}
+	if trimmed[0] != '{' && trimmed[0] != '[' {
+		return text
+	}
+	var v any
+	if err := json.Unmarshal([]byte(trimmed), &v); err != nil {
+		return text
+	}
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return text
+	}
+	return string(out)
 }
 
 func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {

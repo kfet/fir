@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -121,12 +123,64 @@ func AdaptTool(getSession SessionGetter, serverName string, tool *sdk.Tool, regi
 // Unknown content types are represented as a plain text placeholder.
 func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 	content := make([]ai.ToolResultContent, 0, len(result.Content))
+	var (
+		fullOutputPath    string
+		spillFile         *os.File
+		spillBytesWritten int
+	)
+	defer func() {
+		if spillFile != nil {
+			spillFile.Close()
+		}
+	}()
+	// capText applies tail truncation to text returned by an MCP server. When
+	// truncation occurs, the full original text of every truncated block is
+	// appended to a single per-result temp file (separated by a marker), and
+	// a footer pointing the agent at the file is appended to the truncated
+	// text so it can Read it explicitly.
+	capText := func(text string) string {
+		tr := tools.TruncateTail(text, tools.TruncationOptions{})
+		if !tr.Truncated {
+			return text
+		}
+		if spillFile == nil {
+			if f, err := os.CreateTemp("", "fir-mcp-*.txt"); err == nil {
+				spillFile = f
+				fullOutputPath = f.Name()
+			} else {
+				firlog.Warn("mcp truncate temp file failed", "err", err)
+			}
+		}
+		if spillFile != nil {
+			// Separate multi-block spills with a blank line so the file stays
+			// readable when more than one content item is truncated.
+			if fullOutputPath != "" && spillBytesWritten > 0 {
+				if _, werr := spillFile.WriteString("\n"); werr != nil {
+					firlog.Warn("mcp truncate spill failed", "err", werr)
+				}
+			}
+			n, werr := spillFile.WriteString(text)
+			if werr != nil {
+				firlog.Warn("mcp truncate spill failed", "err", werr)
+			}
+			spillBytesWritten += n
+		}
+		var footer string
+		if fullOutputPath != "" {
+			footer = fmt.Sprintf("\n\n[Output truncated (%d lines, %s). Full output written to %s — use Read to view.]",
+				tr.TotalLines, tools.FormatSize(tr.TotalBytes), fullOutputPath)
+		} else {
+			footer = fmt.Sprintf("\n\n[Output truncated (%d lines, %s).]",
+				tr.TotalLines, tools.FormatSize(tr.TotalBytes))
+		}
+		return tr.Content + footer
+	}
 	for _, c := range result.Content {
 		switch v := c.(type) {
 		case *sdk.TextContent:
 			content = append(content, ai.ToolResultContent{
 				Type: ai.ContentTypeText,
-				Text: v.Text,
+				Text: capText(v.Text),
 			})
 		case *sdk.ImageContent:
 			// MCP's ImageContent is spec'd to carry image data, but guard on
@@ -179,7 +233,7 @@ func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 			} else if v.Resource.Text != "" {
 				content = append(content, ai.ToolResultContent{
 					Type: ai.ContentTypeText,
-					Text: v.Resource.Text,
+					Text: capText(v.Resource.Text),
 				})
 			} else {
 				mime := v.Resource.MIMEType
@@ -199,8 +253,12 @@ func convertResult(result *sdk.CallToolResult) agent.AgentToolResult {
 			})
 		}
 	}
-	return agent.AgentToolResult{
+	res := agent.AgentToolResult{
 		Content: content,
 		IsError: result.IsError,
 	}
+	if fullOutputPath != "" {
+		res.Details = map[string]any{"fullOutputPath": fullOutputPath}
+	}
+	return res
 }

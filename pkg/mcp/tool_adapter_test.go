@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,4 +286,91 @@ func TestConvertResult_UnknownContentType(t *testing.T) {
 	require.Len(t, out.Content, 1)
 	assert.Equal(t, "known", out.Content[0].Text)
 	assert.False(t, out.IsError)
+}
+
+// TestConvertResult_TruncatesOversizedText verifies that text content larger
+// than the default truncation budget is tail-truncated, the full output is
+// spilled to a temp file, the truncated text carries a footer pointing to it,
+// and the path is surfaced via Details for the TUI.
+func TestConvertResult_TruncatesOversizedText(t *testing.T) {
+	// Build text with > DefaultMaxLines lines so TruncateTail kicks in.
+	var b strings.Builder
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&b, "line-%d\n", i)
+	}
+	huge := b.String()
+
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{&sdk.TextContent{Text: huge}},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	got := out.Content[0].Text
+	assert.Less(t, len(got), len(huge), "text should be shorter after truncation")
+	assert.Contains(t, got, "[Output truncated", "should have truncation footer")
+	assert.Contains(t, got, "Full output", "footer should reference full output file")
+
+	// Details must surface the temp path for TUI consumption.
+	require.NotNil(t, out.Details)
+	det, ok := out.Details.(map[string]any)
+	require.True(t, ok, "Details should be map[string]any")
+	path, _ := det["fullOutputPath"].(string)
+	require.NotEmpty(t, path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	// Temp file must contain the full original content.
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, huge, string(data))
+	assert.Contains(t, got, path, "footer should embed the temp file path")
+}
+
+// TestConvertResult_NoTruncationForSmallText verifies that small text passes
+// through unchanged with no Details and no temp file.
+func TestConvertResult_NoTruncationForSmallText(t *testing.T) {
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{&sdk.TextContent{Text: "short output"}},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 1)
+	assert.Equal(t, "short output", out.Content[0].Text)
+	assert.Nil(t, out.Details)
+}
+
+// TestConvertResult_MultipleTruncatedBlocks verifies that when more than one
+// text block in a single result exceeds the truncation budget, every block's
+// full text is captured in the shared temp file (not just the first one).
+func TestConvertResult_MultipleTruncatedBlocks(t *testing.T) {
+	mkHuge := func(prefix string) string {
+		var b strings.Builder
+		for i := 0; i < 5000; i++ {
+			fmt.Fprintf(&b, "%s-%d\n", prefix, i)
+		}
+		return b.String()
+	}
+	a := mkHuge("alpha")
+	b := mkHuge("bravo")
+	r := &sdk.CallToolResult{
+		Content: []sdk.Content{
+			&sdk.TextContent{Text: a},
+			&sdk.TextContent{Text: b},
+		},
+	}
+	out := convertResult(r)
+	require.Len(t, out.Content, 2)
+
+	det, ok := out.Details.(map[string]any)
+	require.True(t, ok)
+	path, _ := det["fullOutputPath"].(string)
+	require.NotEmpty(t, path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	// Both blocks' full original text must be in the spill file.
+	assert.Contains(t, string(data), "alpha-4999")
+	assert.Contains(t, string(data), "bravo-4999")
+	// Both footers reference the same shared path.
+	assert.Contains(t, out.Content[0].Text, path)
+	assert.Contains(t, out.Content[1].Text, path)
 }
