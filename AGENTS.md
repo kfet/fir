@@ -43,39 +43,6 @@ When the user says "rebase to main", they mean local `main`, not `origin/main`.
 
 When merging a feature branch back to main, always use `git merge --ff-only` to keep a linear history and avoid merge commits. Rebase the branch first if needed.
 
-## Worktrees
-
-All non-trivial work happens in a **git worktree** on a feature branch. Never edit `main` directly.
-
-```bash
-FEATURE="<short-kebab-name>"          # e.g. acp-auth-methods
-BRANCH="work/${FEATURE}"
-PROJECT="$PWD"                        # captured before we cd away
-WORKTREE="${PROJECT}-wt-${FEATURE}"   # sibling of project root
-
-git worktree add "$WORKTREE" -b "$BRANCH"
-cd "$WORKTREE"
-```
-
-All edits, tests, and commits happen in `$WORKTREE`.
-
-If the task needs design work, write a short plan doc **in the worktree** before coding — name specific files, interfaces, and test cases.
-
-When the task touches multiple packages or wants parallel work streams, use the `shepherd` skill to coordinate multiple agents (it reuses this worktree convention).
-
-To delegate a task to a fresh agent in a new tmux window instead of doing it yourself, use the `wt` skill.
-
-### Finishing
-
-1. Final `make all` in the worktree.
-2. Call the advisor (`aside` with `escalate=true`) before declaring the task done — see *Advisor* below.
-3. Commit everything.
-4. Ff-merge back to main and confirm with the user if they want to do a clean up, since it's destructive (using the captured `$PROJECT`, since you're still inside `$WORKTREE`):
-   ```bash
-   git -C "$PROJECT" merge --ff-only "$BRANCH"
-   git -C "$PROJECT" worktree remove "$WORKTREE"
-   git -C "$PROJECT" branch -d "$BRANCH"
-   ```
 ## Advisor
 
 The `aside-advisor` skill (auto-loaded) explains how to escalate to a stronger advisor model via `aside` with `escalate=true`. Use it at the high-leverage moments:
