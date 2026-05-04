@@ -304,6 +304,74 @@ func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
 	}
 }
 
+// TestAnthropic_ConvertMessages_DropsEmptyTextBesideThinking verifies that
+// empty/whitespace-only text blocks are dropped even when the assistant turn
+// carries a signed thinking block. Anthropic's Messages API validates input
+// blocks before any thinking-modification check and rejects empty text with
+// 400 "messages: text content blocks must be non-empty"; replaying such
+// blocks verbatim therefore breaks resumed sessions. The thinking block must
+// still survive intact.
+//
+// (Earlier code preserved empty siblings on the theory that dropping them
+// would trigger a "thinking blocks cannot be modified" 400. Production
+// evidence — request id req_011CaiKVdgvopStQzBuvt3kq — shows the empty-text
+// rejection fires first, so the safe path is to drop empty text always.)
+func TestAnthropic_ConvertMessages_DropsEmptyTextBesideThinking(t *testing.T) {
+	model := &ai.Model{
+		ID:        "claude-opus-4-7",
+		Provider:  ai.ProviderAnthropic,
+		Api:       ai.ApiAnthropicMessages,
+		BaseURL:   "https://api.anthropic.com",
+		MaxTokens: 64000,
+	}
+
+	thinking := ai.NewThinkingContent("Let me think.")
+	thinking.Thinking.ThinkingSignature = "sig-abc"
+
+	emptyText := ai.NewTextContent("")
+
+	assistantMsg := ai.AssistantMessage{
+		Role:     "assistant",
+		Provider: ai.ProviderAnthropic,
+		Api:      ai.ApiAnthropicMessages,
+		Model:    "claude-opus-4-7",
+		Content: []ai.AssistantContent{
+			thinking,
+			emptyText,
+			ai.NewToolCallContent("call_1", "echo", map[string]any{"x": 1}),
+		},
+	}
+
+	msgs := []ai.Message{
+		ai.NewUserMsg("Question?", 1000),
+		ai.NewAssistantMsg(assistantMsg),
+	}
+
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+	if len(result) < 2 {
+		t.Fatalf("expected at least 2 messages, got %d", len(result))
+	}
+	aBlocks := result[1]["content"].([]map[string]any)
+	if len(aBlocks) != 2 {
+		t.Fatalf("expected 2 assistant blocks (thinking, tool_use) — empty text must be dropped, got %d: %v", len(aBlocks), aBlocks)
+	}
+	if aBlocks[0]["type"] != "thinking" {
+		t.Errorf("block 0: expected thinking, got %v", aBlocks[0]["type"])
+	}
+	if aBlocks[0]["signature"] != "sig-abc" {
+		t.Errorf("block 0: thinking signature mutated, got %v", aBlocks[0]["signature"])
+	}
+	if aBlocks[1]["type"] != "tool_use" {
+		t.Errorf("block 1: expected tool_use, got %v", aBlocks[1]["type"])
+	}
+	// And no block must carry an empty text payload.
+	for i, b := range aBlocks {
+		if b["type"] == "text" && b["text"] == "" {
+			t.Errorf("block %d: empty text block survived (Anthropic 400-rejects it): %v", i, b)
+		}
+	}
+}
+
 func TestAnthropic_StreamingError(t *testing.T) {
 	// Use zero retry delay so the test doesn't sleep through 5 backoff windows.
 	prev := anthropicRetryDelayFn

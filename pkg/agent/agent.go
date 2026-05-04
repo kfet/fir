@@ -851,7 +851,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 						hasContent = true
 						break
 					}
-					if c.IsThinking() && len(c.Thinking.Thinking) > 0 {
+					if c.IsThinking() && (len(c.Thinking.Thinking) > 0 || c.Thinking.ThinkingSignature != "" || c.Thinking.Redacted) {
 						hasContent = true
 						break
 					}

@@ -1186,6 +1186,12 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 			if a == nil {
 				continue
 			}
+			// Always drop empty/whitespace-only text blocks: Anthropic's
+			// Messages API validates input first and rejects them with
+			// 400 "messages: text content blocks must be non-empty"
+			// (request id req_011CaiKVdgvopStQzBuvt3kq), regardless of any
+			// thinking-block siblings. Signed thinking blocks themselves
+			// are still replayed verbatim below.
 			var blocks []map[string]any
 			for _, c := range a.Content {
 				if c.IsText() {
