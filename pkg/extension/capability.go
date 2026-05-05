@@ -97,11 +97,14 @@ func ValidateAuthProviderID(id string, allowBuiltinOverride bool) error {
 }
 
 // Handshake sends an "init" request to the extension process and waits for a
-// response. If timeout is zero, defaults to 5 seconds (overridable via
-// FIR_EXT_TIMEOUT environment variable, in seconds). Returns the parsed InitResult.
+// response. If timeout is zero, defaults to 30 seconds (overridable via
+// FIR_EXT_TIMEOUT environment variable, in seconds). The default is generous
+// to accommodate very slow hardware (e.g. Raspberry Pi Zero) where Python
+// interpreter startup alone can take many seconds. Returns the parsed
+// InitResult.
 func Handshake(proc *Process, cwd string, configDirs []string, timeout time.Duration) (*InitResult, error) {
 	if timeout == 0 {
-		timeout = 5 * time.Second
+		timeout = 30 * time.Second
 		if v := os.Getenv("FIR_EXT_TIMEOUT"); v != "" {
 			if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
 				timeout = time.Duration(secs) * time.Second

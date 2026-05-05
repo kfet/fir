@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Extension init handshake timeout default raised from **5s → 30s** to accommodate very slow hardware (e.g. Raspberry Pi Zero W, where Python interpreter startup alone can take many seconds and previously caused every extension to fail handshake). Still overridable via `FIR_EXT_TIMEOUT` (seconds). Updated `pkg/extension/capability.go`, `pkg/envvars/envvars.go`, `docs/extension-protocol.md`, and the `fir_ext` SDK module docstring.
+
 ### Fixed
 
 - `send_session` tool schema rejected by Gemini/Gemma providers because `deliver_as` enum contained an empty string (`["", "steer", "followUp"]`), which Google's API forbids. Renamed the default value to `"prompt"` (enum is now `["prompt", "steer", "followUp"]`); the handler maps `"prompt"` back to `""` on the wire so behaviour is unchanged.

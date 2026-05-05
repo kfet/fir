@@ -22,7 +22,7 @@ var Registry = []Var{
 	{Name: "FIR_CACHE_RETENTION", Description: "Anthropic prompt cache retention (set to \"long\" for extended)"},
 	{Name: "FIR_DEBUG", Description: "Enable debug logging (set to 1)"},
 	{Name: "FIR_DEBUG_LOG", Description: "Debug log file path (default: ~/.config/fir/debug.log)"},
-	{Name: "FIR_EXT_TIMEOUT", Description: "Extension init handshake timeout in seconds (default: 5)"},
+	{Name: "FIR_EXT_TIMEOUT", Description: "Extension init handshake timeout in seconds (default: 30)"},
 	{Name: "FIR_HARDWARE_CURSOR", Description: "Show hardware cursor in TUI (set to 1)"},
 	{Name: "FIR_MCP_CONFIG", Description: "Extra MCP config file path (--mcp-config flag wins)"},
 	{Name: "FIR_POE_CLIENT_ID", Description: "Override Poe OAuth client ID (default: fir's registered client)"},

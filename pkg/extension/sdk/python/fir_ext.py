@@ -89,7 +89,8 @@ INIT HANDSHAKE
 -------------------------------------------------------------------------------
 
 Immediately after spawning the extension process, fir sends an ``init``
-request.  The extension **must** respond within **5 seconds**.
+request.  The extension **must** respond within **30 seconds** (the default;
+configurable via the ``FIR_EXT_TIMEOUT`` environment variable, in seconds).
 
 fir → extension::
 

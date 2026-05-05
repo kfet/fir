@@ -94,8 +94,9 @@ No `id` field.  The receiver must not send a response.
 ## Init Handshake
 
 Immediately after spawning the process, fir sends an `init` **request**.  The
-extension must respond within **5 seconds** or fir kills the process and marks
-it as failed.
+extension must respond within **30 seconds** (the default; configurable via the
+`FIR_EXT_TIMEOUT` environment variable, in seconds) or fir kills the process
+and marks it as failed.
 
 ### fir → extension
 
