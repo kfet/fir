@@ -225,4 +225,46 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
     return _ok(f"Handing off via {path}…")
 
 
+# ---------------------------------------------------------------------------
+# Slash command: /handoff
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.command(
+    name="handoff",
+    description=(
+        "Hand off to a fresh fir session with a clean LLM context. "
+        "Usage: /handoff [optional focus or notes for the next session]"
+    ),
+)
+def cmd_handoff(args: list[str], ctx: fir_ext.Context) -> dict:
+    """Handle /handoff — instruct the agent to call ``self_handoff``.
+
+    A slash command cannot itself author a curated briefing, so we
+    inject a user-role message asking the agent to write one and call
+    the ``self_handoff`` tool. Any extra args become focus hints for
+    the briefing.
+    """
+    extra = " ".join(args).strip()
+    prompt_lines = [
+        "The user has requested a self-handoff via the /handoff slash command.",
+        "",
+        "Write a curated briefing that covers:",
+        "  - project + branch",
+        "  - what is done",
+        "  - what is in progress (with concrete file/line anchors)",
+        "  - key decisions worth remembering",
+        "  - running services / external state",
+        "  - concrete next steps",
+        "",
+        "Then call the `self_handoff` tool with that briefing as `content`.",
+        "Do not emit any further explanatory text after the tool call — the "
+        "current turn will be aborted and a fresh session will take over.",
+    ]
+    if extra:
+        prompt_lines.extend(["", f"Additional focus / notes from the user: {extra}"])
+    ctx.send_user_message("\n".join(prompt_lines))
+    return {"message": "Preparing self-handoff briefing…"}
+
+
 fir_ext.run(name="handoff")

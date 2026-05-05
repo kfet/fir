@@ -62,12 +62,17 @@ class _StubContext:
 
     def __init__(self, raise_on_restart: bool = False):
         self.restart_calls: list[str] = []
+        self.user_messages: list[str] = []
         self.raise_on_restart = raise_on_restart
 
     def restart_session(self, prompt: str) -> None:
         if self.raise_on_restart:
             raise RuntimeError("simulated restart failure")
         self.restart_calls.append(prompt)
+
+    def send_user_message(self, content: str, deliver_as: str | None = None) -> None:
+        del deliver_as
+        self.user_messages.append(content)
 
 
 def _good_content() -> str:
@@ -271,6 +276,46 @@ class TestSelfHandoffHandler(unittest.TestCase):
         self.assertIn("restart_session failed", text)
         # The doc was still written; the error message should mention the path.
         self.assertIn(self.tmp, text)
+
+
+# ---------------------------------------------------------------------------
+# /handoff slash command
+# ---------------------------------------------------------------------------
+
+
+class TestSlashCommand(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_no_args_injects_briefing_prompt(self) -> None:
+        ctx = _StubContext()
+        result = self.handoff.cmd_handoff([], ctx)
+        self.assertIn("message", result)
+        self.assertEqual(len(ctx.user_messages), 1)
+        msg = ctx.user_messages[0]
+        self.assertIn("self_handoff", msg)
+        self.assertIn("/handoff", msg)
+        self.assertNotIn("Additional focus", msg)
+
+    def test_args_appended_as_focus_hints(self) -> None:
+        ctx = _StubContext()
+        self.handoff.cmd_handoff(["focus", "on", "the", "parser"], ctx)
+        self.assertEqual(len(ctx.user_messages), 1)
+        self.assertIn("Additional focus", ctx.user_messages[0])
+        self.assertIn("focus on the parser", ctx.user_messages[0])
+
+    def test_does_not_call_restart_or_write(self) -> None:
+        ctx = _StubContext()
+        self.handoff.cmd_handoff([], ctx)
+        self.assertEqual(ctx.restart_calls, [])
+        # No handoff doc should have been written by the slash command.
+        base = os.path.join(self.tmp, ".fir")
+        if os.path.isdir(base):
+            self.assertEqual(os.listdir(base), [])
 
 
 if __name__ == "__main__":
