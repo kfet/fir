@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-05-05
+
+### Changed
+
+- ACP `session/new` model list ordering refined: models are now grouped by **provider first** (using the canonical `models.KnownProviderOrder` — anthropic > openai > google > …), and only within each provider group sorted by SWE-bench Verified score descending, then free-before-paid, then ID. Previously the list was a flat capability-sorted mix that interleaved providers; the Poe chat model dropdown now keeps each provider's models contiguous, which matches operator mental model when scanning the list. `models.knownProviderOrder` is exported as `models.KnownProviderOrder` so the ACP modelstate builder can reuse the same canonical order. Test `TestSortAvailableModels` updated to cover provider grouping with unknown-provider fallback.
+
 ## [0.43.0] - 2026-05-05
 
 ### Changed

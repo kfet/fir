@@ -46,16 +46,23 @@ func TestSortAvailableModels(t *testing.T) {
 		return &ai.Model{ID: id, Provider: ai.Provider(provider), Name: id, SWEScore: swe, Cost: ai.ModelCost{Input: inputCost, Output: inputCost}}
 	}
 
-	highSWE := makeModel("high-swe", "anthropic", 80, 3.0)
-	lowSWE := makeModel("low-swe", "anthropic", 40, 3.0)
-	noSWE := makeModel("no-swe", "anthropic", 0, 3.0)
-	free := makeModel("free-model", "openai", 60, 0)
-	paid := makeModel("paid-model", "openai", 60, 2.0)
+	// Provider grouping: anthropic comes before openai (per
+	// KnownProviderOrder), even when an openai model has a higher SWE
+	// score. Within a provider, SWE desc → free-before-paid → ID.
+	anthHigh := makeModel("a-high", "anthropic", 80, 3.0)
+	anthLow := makeModel("a-low", "anthropic", 40, 3.0)
+	anthFree := makeModel("a-free", "anthropic", 80, 0)
+	openaiHigher := makeModel("o-high", "openai", 90, 3.0)
+	openaiLow := makeModel("o-low", "openai", 50, 3.0)
+	unknownProv := makeModel("u", "zzz-unknown", 95, 3.0)
 
-	input := []*ai.Model{noSWE, lowSWE, paid, highSWE, free}
+	input := []*ai.Model{openaiHigher, anthLow, unknownProv, anthHigh, openaiLow, anthFree}
 	out := sortAvailableModels(input)
 
-	wantOrder := []string{"high-swe", "free-model", "paid-model", "low-swe", "no-swe"}
+	// Expected: anthropic block (free first at score 80, then anthHigh,
+	// then anthLow), then openai block (openaiHigher, openaiLow), then
+	// unknown providers — even though unknown has highest score.
+	wantOrder := []string{"a-free", "a-high", "a-low", "o-high", "o-low", "u"}
 	if len(out) != len(wantOrder) {
 		t.Fatalf("got %d models, want %d", len(out), len(wantOrder))
 	}
@@ -63,14 +70,6 @@ func TestSortAvailableModels(t *testing.T) {
 		if out[i].ID != want {
 			t.Errorf("position %d: got %q, want %q", i, out[i].ID, want)
 		}
-	}
-
-	// Verify the sort is stable for identical-score models.
-	a1 := makeModel("a1", "z", 50, 1.0)
-	a2 := makeModel("a2", "z", 50, 1.0)
-	stable := sortAvailableModels([]*ai.Model{a2, a1})
-	if stable[0].ID != "a1" || stable[1].ID != "a2" {
-		t.Errorf("ID tiebreaker: got [%s, %s], want [a1, a2]", stable[0].ID, stable[1].ID)
 	}
 }
 

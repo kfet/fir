@@ -536,8 +536,11 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 
 // --- helpers ---
 
-// knownProviderOrder is the order to try when picking default models.
-var knownProviderOrder = []ai.Provider{
+// KnownProviderOrder is the canonical order to prefer providers in
+// (defaults to anthropic > openai > google > ...). Exported so other
+// packages (e.g. the ACP modelstate builder) can group models by
+// provider in the same canonical order.
+var KnownProviderOrder = []ai.Provider{
 	"anthropic", "openai", "google", "amazon-bedrock",
 	"azure-openai-responses", "openai-codex",
 	"google-gemini-cli", "google-antigravity", "google-vertex",
@@ -547,6 +550,10 @@ var knownProviderOrder = []ai.Provider{
 	"huggingface", "opencode", "kimi-coding",
 	"cloudflare-workers-ai", "cloudflare-ai-gateway", "xiaomi",
 }
+
+// knownProviderOrder is kept as an alias for the historical
+// (unexported) name used by callers in this package.
+var knownProviderOrder = KnownProviderOrder
 
 // globMatch is a simple glob matcher supporting * and ?.
 func globMatch(text, pattern string) bool {

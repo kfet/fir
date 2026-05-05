@@ -36,20 +36,45 @@ func shortProvider(provider string) string {
 	return provider
 }
 
-// sortAvailableModels sorts a slice of available models in a stable, priority
-// order that matches the fir TUI model picker:
-//  1. Higher SWE-bench Verified score first (unscored last).
-//  2. Free models (zero input cost) before paid within same name/provider.
-//  3. Provider name alphabetically.
-//  4. Model ID alphabetically as a final tiebreaker.
+// sortAvailableModels sorts a slice of available models grouped by
+// provider first (using models.KnownProviderOrder, with unknown
+// providers sorted alphabetically after the known set), then within
+// each provider by capability:
+//  1. Provider rank (knownProviderOrder index, else len(known)).
+//  2. Provider name alphabetically (tiebreaker for unknowns).
+//  3. Higher SWE-bench Verified score first (unscored last).
+//  4. Free models (zero input+output cost) before paid.
+//  5. Model ID alphabetically as final tiebreaker.
 //
-// The sort uses SliceStable so models that are equal on all criteria keep
-// their original (registry) order.
+// The sort uses SliceStable so models that are equal on all criteria
+// keep their original (registry) order.
 func sortAvailableModels(available []*ai.Model) []*ai.Model {
+	rank := make(map[ai.Provider]int, len(models.KnownProviderOrder))
+	for i, p := range models.KnownProviderOrder {
+		rank[p] = i
+	}
+	unknown := len(models.KnownProviderOrder)
+
 	out := make([]*ai.Model, len(available))
 	copy(out, available)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
+
+		ar, aok := rank[a.Provider]
+		br, bok := rank[b.Provider]
+		if !aok {
+			ar = unknown
+		}
+		if !bok {
+			br = unknown
+		}
+		if ar != br {
+			return ar < br
+		}
+		if string(a.Provider) != string(b.Provider) {
+			return string(a.Provider) < string(b.Provider)
+		}
+
 		if a.SWEScore != b.SWEScore {
 			return a.SWEScore > b.SWEScore
 		}
@@ -57,9 +82,6 @@ func sortAvailableModels(available []*ai.Model) []*ai.Model {
 		bFree := b.Cost.Input == 0 && b.Cost.Output == 0
 		if aFree != bFree {
 			return aFree
-		}
-		if string(a.Provider) != string(b.Provider) {
-			return string(a.Provider) < string(b.Provider)
 		}
 		return a.ID < b.ID
 	})
