@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- `send_session` tool schema rejected by Gemini/Gemma providers because `deliver_as` enum contained an empty string (`["", "steer", "followUp"]`), which Google's API forbids. Renamed the default value to `"prompt"` (enum is now `["prompt", "steer", "followUp"]`); the handler maps `"prompt"` back to `""` on the wire so behaviour is unchanged.
+
 - `/schedule` extension no longer leaves a misleading "Scheduled: will continue in …" notice in the transcript with no follow-up when the timer fires. The initial response is now reworded as a clear future-tense announcement that explicitly states the notice will not change after firing, and the countdown thread emits a `[schedule_fired]` custom message in the transcript immediately before sending the user message — so it's unambiguous from the scrollback that the schedule actually ran.
 
 ### Added

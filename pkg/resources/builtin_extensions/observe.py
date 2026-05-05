@@ -1014,7 +1014,7 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     description=(
         "Send a message to a different running fir session. The target "
         "session receives the message as a user-role input on its prompt "
-        "queue (deliver_as='') by default; use deliver_as='steer' to "
+        "queue (deliver_as='prompt') by default; use deliver_as='steer' to "
         "interrupt the target's current turn, or 'followUp' to queue after "
         "it. Connects to the target's per-session Unix socket; the target "
         "must be live (not ended). Use to coordinate with sibling agents — "
@@ -1037,9 +1037,9 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
             },
             "deliver_as": {
                 "type": "string",
-                "enum": ["", "steer", "followUp"],
-                "description": "How to deliver: '' (default new turn), 'steer' (interrupt current turn), 'followUp' (queue post-turn).",
-                "default": "",
+                "enum": ["prompt", "steer", "followUp"],
+                "description": "How to deliver: 'prompt' (default new turn), 'steer' (interrupt current turn), 'followUp' (queue post-turn).",
+                "default": "prompt",
             },
         },
         "required": ["content"],
@@ -1050,6 +1050,8 @@ def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
     cwd_flag = (params.get("cwd") or "").strip()
     content = params.get("content") or ""
     deliver_as = params.get("deliver_as") or ""
+    if deliver_as == "prompt":
+        deliver_as = ""
     if not id_prefix and not cwd_flag:
         raise fir_ext.ToolError("one of id_prefix or cwd is required")
     try:
