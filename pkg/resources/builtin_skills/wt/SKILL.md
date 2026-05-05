@@ -1,12 +1,12 @@
 ---
 builtin: true
 name: wt
-description: Delegate a task to a fresh fir agent running in a new tmux window on its own git worktree. Use when the user wants to fire-and-forget a task, or spin up a parallel agent, instead of doing the work in the current session.
+description: Delegate a task to a fresh fir agent in a new tmux window on its own git worktree. Use when the user asks to "kick off", "spin up", "delegate", or "start a worktree for" a task — i.e. wants another agent to do it, not you. If the user wants you to do the work, follow the worktree discipline in `AGENTS.md` instead.
 ---
 
 # wt — spawn a delegated agent in a worktree
 
-Use this skill when the user asks to "kick off", "spin up", "delegate", or "start a worktree for" a task and have **another** agent do it. If the user wants *you* to do the work, follow the worktree discipline in `AGENTS.md` instead — don't spawn a new session.
+Spawn the agent in a new tmux window and continue the task over there. Don't do any of the work — investigation, design, edits — in the current session.
 
 ## Recipe
 
