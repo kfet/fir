@@ -239,6 +239,15 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 			return
 		}
 
+		// Prune empty/whitespace-only text blocks. Bedrock's streamer
+		// creates a text block on the first `text_delta` regardless of
+		// the delta's content, then accumulates into it — so a stream
+		// of whitespace-only `text_delta` events leaves a
+		// whitespace-only text block in stored Content. Bedrock-Claude
+		// inherits Anthropic's thinking-immutability contract on
+		// replay, so we must not let such a block reach storage. See
+		// pruneEmptyAssistantTextBlocks for the full rationale.
+		output.Content = pruneEmptyAssistantTextBlocks(output.Content)
 		firlog.Debug("bedrock response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,

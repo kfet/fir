@@ -334,6 +334,14 @@ func StreamOpenAICompletions(ctx context.Context, model *ai.Model, prompt ai.Con
 			}
 		}
 
+		// Prune empty/whitespace-only text blocks. The OpenAI completions
+		// streamer creates a text block lazily (only on the first
+		// non-empty `delta.Content`), but a stream of whitespace-only
+		// deltas still accumulates into a whitespace-only text block —
+		// which is wasted on the wire and breaks any cross-provider
+		// replay (e.g. switching to Anthropic). See
+		// pruneEmptyAssistantTextBlocks for the full rationale.
+		output.Content = pruneEmptyAssistantTextBlocks(output.Content)
 		firlog.Debug("openai response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,

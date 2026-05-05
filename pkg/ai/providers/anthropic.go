@@ -737,6 +737,22 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				return
 			}
 
+			// Prune empty/whitespace-only text blocks from the final stored
+			// response. The Anthropic stream sometimes opens a `text` content
+			// block that never receives a delta (e.g. when the turn proceeds
+			// straight from `thinking` to `tool_use` in interleaved-thinking
+			// mode). Replaying such a turn breaks both ways:
+			//   - Keeping the empty text block on replay → 400 "messages: text
+			//     content blocks must be non-empty" (req_011CaiKVdgvopStQzBuvt3kq).
+			//   - Dropping it later in convertAnthropicMessages → 400 "thinking
+			//     or redacted_thinking blocks in the latest assistant message
+			//     cannot be modified" (req_011CaisANCxQkzQfGsdKwEcH), because
+			//     dropping any sibling of a signed thinking block counts as a
+			//     mutation.
+			// Pruning at the source — before the message is ever stored —
+			// makes the stored Content match what we will send back, so
+			// neither validator fires on subsequent turns.
+			output.Content = pruneEmptyAssistantTextBlocks(output.Content)
 			firlog.Debug("anthropic response complete", "model", model.ID, "stopReason", output.StopReason)
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
 			return
@@ -1281,6 +1297,43 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 	}
 
 	return params
+}
+
+// pruneEmptyAssistantTextBlocks removes text blocks whose accumulated text is
+// empty or whitespace-only from a streamed assistant response. Several
+// streaming aggregators (Anthropic on `content_block_start`, OpenAI Responses
+// on `output_item.added` for type=message) eagerly create a `NewTextContent("")`
+// placeholder before the first delta arrives. When no deltas follow (e.g. an
+// interleaved-thinking turn that goes straight from `thinking` / `reasoning`
+// to `tool_use`/`function_call`), the placeholder is left in the stored
+// AssistantMessage, where it breaks every subsequent replay:
+//
+//   - Anthropic: returns 400 "messages: text content blocks must be
+//     non-empty" if the empty block is replayed verbatim
+//     (req_011CaiKVdgvopStQzBuvt3kq); and 400 "thinking or redacted_thinking
+//     blocks in the latest assistant message cannot be modified"
+//     (req_011CaisANCxQkzQfGsdKwEcH) if the block is dropped only at wire
+//     conversion time, since dropping any sibling of a signed thinking block
+//     counts as a mutation. Pruning at the source — before the message is
+//     ever stored — makes the stored Content match what we send back, so
+//     neither validator fires on subsequent turns.
+//
+//   - OpenAI Responses: empty message items are wasted bytes and a foot-gun
+//     for any cross-provider replay (e.g. resume on a different model).
+//
+// Signed/redacted thinking blocks and tool_use blocks are preserved verbatim.
+func pruneEmptyAssistantTextBlocks(content []ai.AssistantContent) []ai.AssistantContent {
+	if len(content) == 0 {
+		return content
+	}
+	out := make([]ai.AssistantContent, 0, len(content))
+	for _, c := range content {
+		if c.IsText() && strings.TrimSpace(c.Text.Text) == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // convertToolResultContent converts tool result content to Anthropic format.

@@ -177,6 +177,14 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 			return
 		}
 
+		// Prune empty/whitespace-only text blocks from the final stored
+		// response — same rationale as Anthropic's streamer (see
+		// pruneEmptyAssistantTextBlocks). The Responses streamer eagerly
+		// allocates a `NewTextContent("")` on `output_item.added` for
+		// type=message; when no `output_text.delta` arrives (e.g. the
+		// turn is reasoning→function_call only), that empty block leaks
+		// into stored Content and breaks cross-provider replay.
+		output.Content = pruneEmptyAssistantTextBlocks(output.Content)
 		firlog.Debug("openai-responses response complete", "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{
 			Type:    ai.EventDone,
