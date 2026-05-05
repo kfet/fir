@@ -175,7 +175,17 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.IsDir() {
+		isDir := e.IsDir()
+		// Resolve symlinks: e.IsDir() / e.Type() come from lstat, so a
+		// symlink to a directory looks like a non-dir non-regular entry.
+		if e.Type()&os.ModeSymlink != 0 {
+			target, err := os.Stat(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			isDir = target.IsDir()
+		}
+		if isDir {
 			// Sub-directory: directory name is the extension name.
 			name := e.Name()
 			subdir := filepath.Join(dir, name)

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Skill discovery now follows symlinks inside the skills subtree. `loadSkillsFromDirInternal` previously skipped any `os.ReadDir` entry that wasn't a regular file or directory according to lstat, so a symlinked `SKILL.md` or symlinked subdirectory was silently dropped. We now `os.Stat` symlinked entries and branch on the resolved mode, with cycle protection via a `filepath.EvalSymlinks`-keyed visited set threaded through the recursion. Tests added in `pkg/resources/skills_test.go`.
+- Extension discovery (`pkg/extension/discovery.go` `scanExtDir`) had the same lstat-vs-stat issue: a symlink-to-directory ext slot was treated as a file (because `e.IsDir()` is false on a symlink) and ended up registered as a broken file extension pointing at the symlink itself rather than recursing into it. Now resolves symlinks via `os.Stat` and treats them as directories when appropriate. Test added.
+
 ## [0.43.1] - 2026-05-05
 
 ### Changed

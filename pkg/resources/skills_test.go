@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseFrontmatterSimple(t *testing.T) {
@@ -249,5 +250,106 @@ func TestLoadSkills_StableOrder(t *testing.T) {
 				t.Errorf("iter %d: skill[%d].Name = %q, want %q", i, j, result.Skills[j].Name, w)
 			}
 		}
+	}
+}
+
+// TestLoadSkillsFromDir_SymlinkedSkillFile: a SKILL.md that is a symlink to
+// a real file in another directory should be loaded.
+func TestLoadSkillsFromDir_SymlinkedSkillFile(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	realFile := filepath.Join(external, "real-skill.md")
+	content := "---\nname: linked\ndescription: linked skill\n---\nbody\n"
+	if err := os.WriteFile(realFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skillDir := filepath.Join(root, "linked")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realFile, filepath.Join(skillDir, "SKILL.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result := LoadSkillsFromDir(root, "project")
+	found := false
+	for _, s := range result.Skills {
+		if s.Name == "linked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("symlinked SKILL.md not loaded; got %+v", result.Skills)
+	}
+}
+
+// TestLoadSkillsFromDir_SymlinkedSubdir: a subdirectory entry that is a
+// symlink to another directory containing SKILL.md should recurse into it.
+func TestLoadSkillsFromDir_SymlinkedSubdir(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+
+	realDir := filepath.Join(external, "mango")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: mango\ndescription: mango skill\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(realDir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(realDir, filepath.Join(root, "mango")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result := LoadSkillsFromDir(root, "project")
+	found := false
+	for _, s := range result.Skills {
+		if s.Name == "mango" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("symlinked subdir not recursed; got %+v", result.Skills)
+	}
+}
+
+// TestLoadSkillsFromDir_SymlinkCycle: a symlink cycle must not hang the
+// loader.
+func TestLoadSkillsFromDir_SymlinkCycle(t *testing.T) {
+	root := t.TempDir()
+
+	subA := filepath.Join(root, "a")
+	if err := os.MkdirAll(subA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nname: a\ndescription: a skill\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(subA, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Create a cycle: a/loop -> root, which contains a, which contains loop, ...
+	if err := os.Symlink(root, filepath.Join(subA, "loop")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	done := make(chan LoadSkillsResult, 1)
+	go func() {
+		done <- LoadSkillsFromDir(root, "project")
+	}()
+	select {
+	case result := <-done:
+		found := false
+		for _, s := range result.Skills {
+			if s.Name == "a" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected skill 'a' despite cycle; got %+v", result.Skills)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("loader hung on symlink cycle")
 	}
 }

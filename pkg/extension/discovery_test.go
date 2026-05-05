@@ -331,3 +331,38 @@ func writeExec(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+// TestDiscover_SymlinkedSubdir: a subdirectory entry that is a symlink to a
+// real extension directory should be discovered. Previously e.IsDir() returned
+// false for the symlink (lstat) and the entry was silently dropped.
+func TestDiscover_SymlinkedSubdir(t *testing.T) {
+	globalDir := t.TempDir()
+	projectDir := t.TempDir()
+	external := t.TempDir()
+
+	realDir := filepath.Join(external, "linkedext")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPy := filepath.Join(realDir, "main.py")
+	writeExec(t, mainPy)
+
+	if err := os.Symlink(realDir, filepath.Join(globalDir, "linkedext")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configs) != 1 || configs[0].Name != "linkedext" {
+		t.Fatalf("expected linkedext, got %+v", configs)
+	}
+	if configs[0].Path != mainPy {
+		// Going through the symlink is also valid.
+		viaLink := filepath.Join(globalDir, "linkedext", "main.py")
+		if configs[0].Path != viaLink {
+			t.Errorf("expected path %q or %q, got %q", mainPy, viaLink, configs[0].Path)
+		}
+	}
+}

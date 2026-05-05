@@ -4,6 +4,7 @@ package resources
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,10 +62,10 @@ type SkillFrontmatter struct {
 // - Direct .md children in the root
 // - Recursive SKILL.md under subdirectories
 func LoadSkillsFromDir(dir, source string) LoadSkillsResult {
-	return loadSkillsFromDirInternal(dir, source, true)
+	return loadSkillsFromDirInternal(dir, source, true, map[string]bool{})
 }
 
-func loadSkillsFromDirInternal(dir, source string, includeRootFiles bool) LoadSkillsResult {
+func loadSkillsFromDirInternal(dir, source string, includeRootFiles bool, visited map[string]bool) LoadSkillsResult {
 	var skills []Skill
 	var diagnostics []ResourceDiagnostic
 
@@ -72,6 +73,17 @@ func loadSkillsFromDirInternal(dir, source string, includeRootFiles bool) LoadSk
 	if err != nil || !info.IsDir() {
 		return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
 	}
+
+	// Cycle protection: track resolved directory paths to avoid infinite
+	// recursion on symlink cycles.
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		realDir = dir
+	}
+	if visited[realDir] {
+		return LoadSkillsResult{Skills: skills, Diagnostics: diagnostics}
+	}
+	visited[realDir] = true
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -86,14 +98,27 @@ func loadSkillsFromDirInternal(dir, source string, includeRootFiles bool) LoadSk
 
 		fullPath := filepath.Join(dir, name)
 
-		if entry.IsDir() {
-			sub := loadSkillsFromDirInternal(fullPath, source, false)
+		// Resolve symlinks via os.Stat (entry.Type() comes from lstat).
+		mode := entry.Type()
+		isDir := entry.IsDir()
+		isRegular := mode.IsRegular()
+		if mode&fs.ModeSymlink != 0 {
+			target, err := os.Stat(fullPath)
+			if err != nil {
+				continue
+			}
+			isDir = target.IsDir()
+			isRegular = target.Mode().IsRegular()
+		}
+
+		if isDir {
+			sub := loadSkillsFromDirInternal(fullPath, source, false, visited)
 			skills = append(skills, sub.Skills...)
 			diagnostics = append(diagnostics, sub.Diagnostics...)
 			continue
 		}
 
-		if !entry.Type().IsRegular() {
+		if !isRegular {
 			continue
 		}
 
@@ -332,8 +357,8 @@ func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
 	}
 
 	if opts.IncludeDefaults && opts.AgentDir != "" {
-		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.AgentDir, "skills"), "user", true))
-		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.Cwd, ".fir", "skills"), "project", true))
+		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.AgentDir, "skills"), "user", true, map[string]bool{}))
+		addSkills(loadSkillsFromDirInternal(filepath.Join(opts.Cwd, ".fir", "skills"), "project", true, map[string]bool{}))
 		addSkills(LoadBuiltinSkills())
 	}
 
@@ -354,7 +379,7 @@ func LoadSkills(opts LoadSkillsOptions) LoadSkillsResult {
 		}
 
 		if info.IsDir() {
-			addSkills(loadSkillsFromDirInternal(resolvedPath, "path", true))
+			addSkills(loadSkillsFromDirInternal(resolvedPath, "path", true, map[string]bool{}))
 		} else if strings.HasSuffix(resolvedPath, ".md") {
 			result := loadSkillFromFile(resolvedPath, "path")
 			if result.Skill != nil {
