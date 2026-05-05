@@ -41,6 +41,39 @@ func TestParseModelID(t *testing.T) {
 	}
 }
 
+func TestSortAvailableModels(t *testing.T) {
+	makeModel := func(id, provider string, swe float64, inputCost float64) *ai.Model {
+		return &ai.Model{ID: id, Provider: ai.Provider(provider), Name: id, SWEScore: swe, Cost: ai.ModelCost{Input: inputCost, Output: inputCost}}
+	}
+
+	highSWE := makeModel("high-swe", "anthropic", 80, 3.0)
+	lowSWE := makeModel("low-swe", "anthropic", 40, 3.0)
+	noSWE := makeModel("no-swe", "anthropic", 0, 3.0)
+	free := makeModel("free-model", "openai", 60, 0)
+	paid := makeModel("paid-model", "openai", 60, 2.0)
+
+	input := []*ai.Model{noSWE, lowSWE, paid, highSWE, free}
+	out := sortAvailableModels(input)
+
+	wantOrder := []string{"high-swe", "free-model", "paid-model", "low-swe", "no-swe"}
+	if len(out) != len(wantOrder) {
+		t.Fatalf("got %d models, want %d", len(out), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if out[i].ID != want {
+			t.Errorf("position %d: got %q, want %q", i, out[i].ID, want)
+		}
+	}
+
+	// Verify the sort is stable for identical-score models.
+	a1 := makeModel("a1", "z", 50, 1.0)
+	a2 := makeModel("a2", "z", 50, 1.0)
+	stable := sortAvailableModels([]*ai.Model{a2, a1})
+	if stable[0].ID != "a1" || stable[1].ID != "a2" {
+		t.Errorf("ID tiebreaker: got [%s, %s], want [a1, a2]", stable[0].ID, stable[1].ID)
+	}
+}
+
 func TestBuildModelState(t *testing.T) {
 	for _, key := range envkeys.KnownApiKeyEnvVars() {
 		t.Setenv(key, "")

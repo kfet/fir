@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-05-05
+
 ### Changed
 
 - Extension init handshake timeout default raised from **5s → 30s** to accommodate very slow hardware (e.g. Raspberry Pi Zero W, where Python interpreter startup alone can take many seconds and previously caused every extension to fail handshake). Still overridable via `FIR_EXT_TIMEOUT` (seconds). Updated `pkg/extension/capability.go`, `pkg/envvars/envvars.go`, `docs/extension-protocol.md`, and the `fir_ext` SDK module docstring.
 
 ### Fixed
+
+- ACP `session/new` model list (used by Poe relay's chat-options dropdown, among others) now arrives in a stable, capability-ordered sequence instead of whatever order Go's map iteration happened to return. `BuildModelState` in `pkg/modes/acp/modelstate.go` runs `sortAvailableModels` over `ModelRegistry.GetAvailable()` before serialising, sorting by SWE-bench Verified score descending, then free-before-paid (zero input+output cost), then provider name, then model ID. Mirrors the priority order of the interactive TUI model picker so the same most-capable / cheapest models surface first wherever the list is shown. Test `TestSortAvailableModels` covers SWE-desc, free-vs-paid for same score, and ID tiebreaker stability.
 
 - Model stats/metadata corrected in `cmd/generate-models/main.go` (`applyOverridesAndAdditions` and related tables): `claude-opus-4-7` now inherits the latest known Opus SWE-bench Verified score (80.9%, from Opus 4.5) instead of falling through to the base `claude-opus-4` pattern (67.6%); Poe-hosted `glm-5` and `glm-5.1-fw` context windows corrected from 131072 to 202752 (Z.ai's documented ~200K window, matches OpenRouter/Vercel entries); Poe-hosted `kimi-k2.5` and `kimi-k2.5-fw` context windows corrected from 128000 to 262144 (Moonshot's documented 256K window for Kimi K2.5 / K2 Thinking — Poe's own `max_output_tokens` parameter even allows 262144, confirming the lower number was a metadata bug). Implemented as entries in `poeContextOverrides` and a new `claude-opus-4-7` entry near the top of `sweModelPatterns`.
 - `send_session` tool schema rejected by Gemini/Gemma providers because `deliver_as` enum contained an empty string (`["", "steer", "followUp"]`), which Google's API forbids. Renamed the default value to `"prompt"` (enum is now `["prompt", "steer", "followUp"]`); the handler maps `"prompt"` back to `""` on the wire so behaviour is unchanged.
