@@ -21,10 +21,10 @@ func DefaultModelPerProvider(p ai.Provider) string {
 	return r.DefaultModelID
 }
 
-// orderedProviders returns provider IDs in registry-defined preference order
+// OrderedProviders returns provider IDs in registry-defined preference order
 // (lower Priority first, then ID).  Replaces the previous knownProviderOrder
 // slice.
-func orderedProviders() []ai.Provider {
+func OrderedProviders() []ai.Provider {
 	records := ai.GetRegisteredProviders()
 	out := make([]ai.Provider, 0, len(records))
 	for _, r := range records {
@@ -460,7 +460,7 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 	available := opts.ModelRegistry.GetAvailable()
 	if len(available) > 0 {
 		// Try default model per provider
-		for _, prov := range orderedProviders() {
+		for _, prov := range OrderedProviders() {
 			defaultID := DefaultModelPerProvider(prov)
 			if defaultID == "" {
 				continue
@@ -512,7 +512,7 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 	// Try any available model
 	available := registry.GetAvailable()
 	if len(available) > 0 {
-		for _, prov := range orderedProviders() {
+		for _, prov := range OrderedProviders() {
 			defaultID := DefaultModelPerProvider(prov)
 			for _, m := range available {
 				if m.Provider == prov && m.ID == defaultID {
@@ -534,7 +534,7 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 // --- helpers ---
 
 // knownProviderOrder is now derived from the ai.RegisteredProvider registry
-// at call time; see orderedProviders() above.
+// at call time; see OrderedProviders() above.
 
 // globMatch is a simple glob matcher supporting * and ?.
 func globMatch(text, pattern string) bool {

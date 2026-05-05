@@ -32,7 +32,7 @@ func shortProvider(provider string) string {
 }
 
 // sortAvailableModels sorts a slice of available models grouped by
-// provider first (using models.KnownProviderOrder, with unknown
+// provider first (using models.OrderedProviders(), with unknown
 // providers sorted alphabetically after the known set), then within
 // each provider by capability:
 //  1. Provider rank (knownProviderOrder index, else len(known)).
@@ -44,11 +44,12 @@ func shortProvider(provider string) string {
 // The sort uses SliceStable so models that are equal on all criteria
 // keep their original (registry) order.
 func sortAvailableModels(available []*ai.Model) []*ai.Model {
-	rank := make(map[ai.Provider]int, len(models.KnownProviderOrder))
-	for i, p := range models.KnownProviderOrder {
+	order := models.OrderedProviders()
+	rank := make(map[ai.Provider]int, len(order))
+	for i, p := range order {
 		rank[p] = i
 	}
-	unknown := len(models.KnownProviderOrder)
+	unknown := len(order)
 
 	out := make([]*ai.Model, len(available))
 	copy(out, available)
