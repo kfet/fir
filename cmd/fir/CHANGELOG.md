@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `pipe` builtin extension exposing one tool: `pipe(steps, label?)`. Chains multiple tool calls in a single agent turn with no intermediate LLM round-trip. Steps run sequentially; string params can reference earlier outputs via `{{prev}}`, `{{step:N}}` (0-indexed), or `{{step:N.field}}` for JSON field access. Aborts on the first error unless that step has `continue_on_error: true`. Single-step calls return the raw result (transparent passthrough); multi-step calls return a markdown block with one section per step.
+
 ## [0.42.0] - 2026-05-04
 
 ### Added
