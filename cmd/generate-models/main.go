@@ -237,6 +237,12 @@ type swePattern struct {
 //
 // init() validates this ordering at startup.
 var sweModelPatterns = []swePattern{
+	// --- Claude Opus 4.7 ---
+	// 4.7 is a forward-projection placeholder in this codebase (no public
+	// system card yet). Use the latest known Opus score (4.5 = 80.9%) so
+	// the entry isn't ranked below mid-tier models.
+	{"claude-opus-4-7", "claude-opus-4-7", 80.9},
+	{"claude-opus-4.7", "claude-opus-4-7", 80.9},
 	// --- Claude Opus 4.6 ---
 	// Source: Anthropic system card — 80.8% SWE-bench Verified
 	{"claude-opus-4-6", "claude-opus-4-6", 80.8},
@@ -915,6 +921,19 @@ var poeContextOverrides = map[string]int{
 	// Poe description says "Context Window: 40,000k" which is a typo for
 	// 40k tokens. Mistral's docs confirm 40,000 (40k) for Magistral Medium.
 	"magistral-medium-2509-thinking": 40_000,
+	// Poe reports kimi-k2.5 context_length=128000, but Moonshot's official
+	// Kimi K2.5 / K2 Thinking spec is 256K. Poe's own max_output_tokens
+	// parameter even allows 262144, confirming the lower number is wrong.
+	// Apply to the base model and FW (Fireworks-hosted) sibling so both
+	// surface the correct window.
+	"kimi-k2.5":    262144,
+	"kimi-k2.5-fw": 262144,
+	// Poe doesn't report a context window for glm-5 / glm-5.1 bots; the
+	// fallback uses max_output_tokens (131072) which understates the real
+	// 200K window documented by Z.ai (matches OpenRouter / Vercel entries
+	// at 202752/202800).
+	"glm-5":      202752,
+	"glm-5.1-fw": 202752,
 }
 
 // poeSiblingCtx returns the context size of a sibling Poe bot (same model
