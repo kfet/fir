@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -422,4 +423,46 @@ func TestBedrockNormalizeID(t *testing.T) {
 	assert.Equal(t, "tool_call_123", normalize("tool_call_123"))
 	assert.Equal(t, "tool_call_123", normalize("tool.call.123"))
 	assert.Equal(t, "abc-def_ghi", normalize("abc-def_ghi"))
+}
+
+func TestBedrockToolSchemaCoercion(t *testing.T) {
+	// Valid object schema passes through.
+	in := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
+	assert.Equal(t, in, bedrockToolSchema(in))
+
+	// nil → empty object schema.
+	got := bedrockToolSchema(nil)
+	assert.Equal(t, "object", got["type"])
+	assert.NotNil(t, got["properties"])
+
+	// Empty map passes through (still a valid JSON object).
+	empty := map[string]any{}
+	assert.Equal(t, empty, bedrockToolSchema(empty))
+
+	// JSON-encoded string schema is decoded.
+	got = bedrockToolSchema(`{"type":"object","properties":{}}`)
+	assert.Equal(t, "object", got["type"])
+
+	// JSON-encoded schema from MCP (json.RawMessage).
+	got = bedrockToolSchema(json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`))
+	assert.Equal(t, "object", got["type"])
+
+	// Empty json.RawMessage → fallback.
+	got = bedrockToolSchema(json.RawMessage(nil))
+	assert.Equal(t, "object", got["type"])
+
+	// Garbage/non-object types → fallback.
+	for _, v := range []any{"not json", []byte("garbage"), 42, true, []any{1, 2}} {
+		got = bedrockToolSchema(v)
+		assert.Equal(t, "object", got["type"], "input %v", v)
+	}
+
+	// Verify convertBedrockToolConfig wraps a parameterless tool safely.
+	cfg := convertBedrockToolConfig([]ai.Tool{{Name: "t", Description: "d", Parameters: nil}}, "")
+	require.Len(t, cfg.Tools, 1)
+	spec := cfg.Tools[0].(*brtypes.ToolMemberToolSpec).Value
+	require.NotNil(t, spec.InputSchema)
+	js, ok := spec.InputSchema.(*brtypes.ToolInputSchemaMemberJson)
+	require.True(t, ok)
+	require.NotNil(t, js.Value)
 }

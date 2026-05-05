@@ -8,6 +8,7 @@ package providers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -606,6 +607,42 @@ func convertImageBlock(m map[string]any) brtypes.ContentBlock {
 	}
 }
 
+// bedrockToolSchema coerces a tool's JSON Schema into a valid JSON object as
+// required by the Bedrock Converse API. Bedrock rejects requests where any
+// tool's inputSchema.json is not a JSON object — empty/nil/non-object schemas
+// (which some MCP servers produce for parameterless tools) cause a
+// ValidationException. We normalise these to an empty object schema.
+func bedrockToolSchema(params any) map[string]any {
+	if m, ok := params.(map[string]any); ok && m != nil {
+		return m
+	}
+	// Try to decode JSON-encoded schemas (string or json.RawMessage).
+	switch v := params.(type) {
+	case string:
+		if v != "" {
+			var decoded map[string]any
+			if err := json.Unmarshal([]byte(v), &decoded); err == nil && decoded != nil {
+				return decoded
+			}
+		}
+	case []byte:
+		if len(v) > 0 {
+			var decoded map[string]any
+			if err := json.Unmarshal(v, &decoded); err == nil && decoded != nil {
+				return decoded
+			}
+		}
+	case json.RawMessage:
+		if len(v) > 0 {
+			var decoded map[string]any
+			if err := json.Unmarshal(v, &decoded); err == nil && decoded != nil {
+				return decoded
+			}
+		}
+	}
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+
 func convertBedrockToolConfig(tools []ai.Tool, toolChoice string) *brtypes.ToolConfiguration {
 	var sdkTools []brtypes.Tool
 	for _, tool := range tools {
@@ -614,7 +651,7 @@ func convertBedrockToolConfig(tools []ai.Tool, toolChoice string) *brtypes.ToolC
 				Name:        strPtr(tool.Name),
 				Description: strPtr(tool.Description),
 				InputSchema: &brtypes.ToolInputSchemaMemberJson{
-					Value: document.NewLazyDocument(tool.Parameters),
+					Value: document.NewLazyDocument(bedrockToolSchema(tool.Parameters)),
 				},
 			},
 		})
