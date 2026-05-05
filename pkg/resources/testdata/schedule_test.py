@@ -36,7 +36,7 @@ with mock.patch.object(fir_ext, "run"):
 
 def _ctx():
     return mock.MagicMock(
-        spec=["set_status", "continue_session", "send_user_message"],
+        spec=["set_status", "continue_session", "send_user_message", "send_message"],
     )
 
 
@@ -350,6 +350,14 @@ class TestCountdownThread(unittest.TestCase):
             target = datetime.now(tz=timezone.utc) - timedelta(seconds=1)
             schedule._run_countdown("t1", target, stop, ctx)
             ctx.send_user_message.assert_called_once_with("continue")
+            # Firing must announce itself in the transcript so the original
+            # "Scheduled" notice isn't misleading.
+            ctx.send_message.assert_called_once()
+            kwargs = ctx.send_message.call_args.kwargs
+            self.assertEqual(kwargs.get("custom_type"), "schedule_fired")
+            self.assertTrue(kwargs.get("display"))
+            self.assertIn("[t1]", kwargs.get("content", ""))
+            self.assertIn("fired", kwargs.get("content", "").lower())
 
     def test_fires_message(self):
         with _Timeout(5):
@@ -359,6 +367,10 @@ class TestCountdownThread(unittest.TestCase):
             schedule._run_countdown("t2", target, stop, ctx, message="do it")
             ctx.send_user_message.assert_called_once_with("do it")
             ctx.continue_session.assert_not_called()
+            ctx.send_message.assert_called_once()
+            self.assertIn(
+                "do it", ctx.send_message.call_args.kwargs.get("content", ""),
+            )
 
     def test_cancel_no_fire(self):
         with _Timeout(5):
@@ -369,6 +381,7 @@ class TestCountdownThread(unittest.TestCase):
             schedule._run_countdown("t3", target, stop, ctx)
             ctx.continue_session.assert_not_called()
             ctx.send_user_message.assert_not_called()
+            ctx.send_message.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -171,6 +171,17 @@ def _run_countdown(
     with contextlib.suppress(Exception):
         _update_status(ctx)
 
+    # Announce the firing in the transcript so the user can clearly tell
+    # the schedule actually ran (the original "Scheduled" notice stays put
+    # and would otherwise look like nothing happened).
+    action = f"sending message: {message}" if message else "continuing session"
+    with contextlib.suppress(Exception):
+        ctx.send_message(
+            custom_type="schedule_fired",
+            content=f"🔥 [{entry_id}] Schedule fired — {action}.",
+            display=True,
+        )
+
     with contextlib.suppress(Exception):
         if message:
             ctx.send_user_message(message)
@@ -397,9 +408,11 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
     action = f"send message: {message}" if message else "continue"
     return {
         "message": (
-            f"⏰ [{sid}] Scheduled: will {action} in "
+            f"⏰ [{sid}] Scheduled — will {action} in "
             f"{_format_countdown(remaining)} "
-            f"(at {_format_time(target)})."
+            f"(at {_format_time(target)}). "
+            f"This notice will not update; when the timer fires "
+            f"you'll see a [schedule_fired] entry below."
         )
     }
 

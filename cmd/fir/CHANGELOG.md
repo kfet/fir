@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/schedule` extension no longer leaves a misleading "Scheduled: will continue in …" notice in the transcript with no follow-up when the timer fires. The initial response is now reworded as a clear future-tense announcement that explicitly states the notice will not change after firing, and the countdown thread emits a `[schedule_fired]` custom message in the transcript immediately before sending the user message — so it's unambiguous from the scrollback that the schedule actually ran.
+
 ### Added
 
 - `pipe` builtin extension exposing one tool: `pipe(steps, label?)`. Chains multiple tool calls in a single agent turn with no intermediate LLM round-trip. Steps run sequentially; string params can reference earlier outputs via `{{prev}}`, `{{step:N}}` (0-indexed), or `{{step:N.field}}` for JSON field access. Aborts on the first error unless that step has `continue_on_error: true`. Single-step calls return the raw result (transparent passthrough); multi-step calls return a markdown block with one section per step.
