@@ -140,8 +140,7 @@ func (c *ModelSelectorComponent) loadModels() {
 // zero cost reflects per-call reality rather than a subscription plan the
 // user may or may not have. Today that means Poe, which exposes the same
 // underlying models as both paid and free bots; other zero-cost entries
-// (GitHub Copilot, Gemini CLI, Antigravity, OpenAI Codex) are behind
-// subscription/OAuth gates and shouldn't be advertised as "free".
+// are behind subscription/OAuth gates and shouldn't be advertised as "free".
 func isFreeModel(m *ai.Model) bool {
 	if m == nil || m.Provider != ai.ProviderPoe {
 		return false

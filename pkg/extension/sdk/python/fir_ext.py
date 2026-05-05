@@ -482,6 +482,7 @@ import json
 import os
 import sys
 import threading
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Protocol, TypedDict, TypeVar
 
 if TYPE_CHECKING:
@@ -582,6 +583,251 @@ class AuthProviderSpec(TypedDict, total=False):
     uses_callback_server: bool
 
 
+# -- hosted provider (extension-shipped) ------------------------------------
+#
+# An extension can ship a hosted AI provider — the host treats it like a
+# built-in provider but proxies all streaming, listing, and (optional)
+# custom-id resolution back to the extension over JSON-RPC. The wire shapes
+# below mirror Go's pkg/extension.ProviderSpec / ProviderModelSpec.
+#
+# Use the dataclass helpers (:class:`Provider`, :class:`Model`,
+# :class:`EnvKeys`) plus :func:`register_provider` and the
+# ``@provider_stream`` / ``@provider_list_models`` /
+# ``@provider_resolve_custom_id`` decorators rather than constructing the
+# raw dicts by hand. See ``demo.py`` for a worked example.
+
+
+@dataclass
+class EnvKeys:
+    """Environment-variable spec for an extension-shipped provider's API key.
+
+    Mirrors the Go-side ``EnvKeysSpec``.
+
+    Attributes
+    ----------
+    primary
+        Primary env var fir reads to pick up the API key (e.g. ``"ECHO_API_KEY"``).
+    fallbacks
+        Additional env vars consulted if ``primary`` is unset.
+    authenticated
+        Set to ``True`` when this provider uses OAuth (``oauth_provider_id``)
+        rather than a static API key.
+    """
+
+    primary: str = ""
+    fallbacks: list[str] = field(default_factory=list)
+    authenticated: bool = False
+
+
+@dataclass
+class Model:
+    """A single model an extension-shipped provider declares at handshake.
+
+    Maps to a subset of fir's :class:`ai.Model`. Field names are snake_case
+    here and on the wire; fir converts them to its internal camelCase.
+    """
+
+    id: str
+    name: str = ""
+    base_url: str = ""
+    reasoning: bool = False
+    input: list[str] = field(default_factory=list)  # "text", "image"
+    context_window: int = 0
+    max_tokens: int = 0
+    cost_input: float = 0.0
+    cost_output: float = 0.0
+    cost_cache_read: float = 0.0
+    cost_cache_write: float = 0.0
+    server_tools: list[str] = field(default_factory=list)
+    compaction: bool = False
+    reasoning_effort_values: list[str] = field(default_factory=list)
+    swe_score: float = 0.0
+    swe_inferred: bool = False
+
+
+@dataclass
+class Provider:
+    """A hosted AI provider contributed by an extension.
+
+    Pass instances to :func:`register_provider`. Decorate streaming /
+    listing / custom-id handlers with :func:`provider_stream`,
+    :func:`provider_list_models`, :func:`provider_resolve_custom_id` —
+    the decorators key off ``id``.
+
+    Attributes
+    ----------
+    id
+        Unique provider identifier (e.g. ``"echo"``, ``"my-corp-llm"``).
+        Must match ``[a-z][a-z0-9-]*`` and not collide with built-in
+        providers (unless the extension is shipped under the ``builtin``
+        scope).
+    api
+        Wire-protocol selector for streaming dispatch.
+
+        - ``""`` (default): fir allocates a synthetic ``ext:<id>`` Api
+          and routes streams back via ``provider/stream/start``. Pair
+          with a :func:`provider_stream` handler that does the actual
+          streaming in Python.
+        - A built-in wire protocol id (e.g. ``"openai-completions"``,
+          ``"anthropic-messages"``): fir reuses its in-process stream
+          function for that protocol. The extension ships only metadata
+          (display name, env keys, OAuth wiring, model catalogue) — no
+          ``@provider_stream`` handler is needed. This is how built-in
+          providers can be migrated out of core into an extension while
+          keeping the wire code in Go.
+
+    See ``docs/extension-protocol.md`` § Hosted providers for the full
+    wire reference.
+    """
+
+    id: str
+    api: str = ""
+    display_name: str = ""
+    short_name: str = ""
+    priority: int = 0
+    default_model_id: str = ""
+    key_link: str = ""
+    env_keys: EnvKeys = field(default_factory=EnvKeys)
+    oauth_provider_id: str = ""
+    claims_model_id_globs: list[str] = field(default_factory=list)
+    refuse_fuzzy_match: bool = False
+    supports_live_list: bool = False
+    supports_custom_id: bool = False
+    models: list[Model] = field(default_factory=list)
+
+
+# Wire-shape TypedDicts: what crosses provider/* JSON-RPC. They mirror
+# ai.AssistantMessageEvent's JSON form (camelCase keys — see pkg/ai/types.go).
+
+
+# -- Api specs (extension-shipped wire protocols) --------------------------
+#
+# An extension may ship not just a hosted provider (a service) but also the
+# wire-protocol *adapter* that talks to it, when that adapter is data-driven
+# (endpoints, headers, an envelope template). The host dispatches the spec
+# to a kind handler in pkg/ai/providers — currently only "decl-google" is
+# supported (Cloud-Code-Assist Gemini family). New kinds are added by
+# registering another apikind.Handler in core.
+
+
+@dataclass
+class DeclGoogleConditional:
+    """One header-overlay rule applied when its match clause fires."""
+
+    when_model_id_prefix: str = ""
+    when_requires_reasoning: bool = False
+    set: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class DeclGoogleApi:
+    """A Cloud-Code-Assist Gemini wire-protocol adapter, shipped as data.
+
+    Mirrors the runtime ``DeclGoogleConfig`` struct in
+    ``pkg/ai/providers/declgoogle.go``. Serialised on the wire under
+    ``ApiSpec(kind="decl-google", payload=…)``.
+
+    Attributes
+    ----------
+    id
+        Wire-protocol identifier (e.g. ``"my-corp-wire-v1"``). Must
+        match ``[a-z][a-z0-9-]*`` and not collide with a built-in Api
+        (unless the extension is shipped under the ``builtin`` scope).
+    endpoints
+        HTTPS bases tried in order on 403/404 cascade. Substitutions
+        (``${var}``) supported.
+    headers
+        Per-request base header set (excluding ``Authorization`` /
+        ``Content-Type`` / ``Accept``). Substitutions supported, e.g.
+        ``"User-Agent": "myua/1.0 ${os}/${arch}"``.
+    conditional_headers
+        Header overlays applied when their ``when`` clause matches the
+        resolved model.
+    envelope
+        JSON template for the outer request body (string form). The
+        literal substring ``"$inner"`` is replaced by the inner Gemini
+        request body. Empty string means "send the inner body as-is."
+    system_instruction_prefix
+        Texts prepended to ``systemInstruction.parts`` on every request.
+    system_instruction_role
+        Optional override for the role on the ``systemInstruction``
+        object (e.g. ``"user"`` to inject the prefix as a user turn).
+    reasoning_header_prefix
+        Prefix the adapter looks for in ``options.headers`` when
+        extracting thinking-config (e.g. ``"x-gemini-thinking-"``).
+    """
+
+    id: str
+    endpoints: list[str] = field(default_factory=list)
+    headers: dict[str, str] = field(default_factory=dict)
+    conditional_headers: list[DeclGoogleConditional] = field(default_factory=list)
+    envelope: str = ""
+    system_instruction_prefix: list[str] = field(default_factory=list)
+    system_instruction_role: str = ""
+    reasoning_header_prefix: str = ""
+
+
+class AssistantMessageEvent(TypedDict, total=False):
+    """A single streaming event emitted by a provider stream generator.
+
+    Keys mirror Go's ``ai.AssistantMessageEvent`` JSON shape (camelCase).
+    Only ``type`` is required; the rest depend on the event variant.
+
+    Common variants
+    ---------------
+    * ``{"type": "start", "partial": <AssistantMessage>}`` — stream opening
+    * ``{"type": "text_start", "contentIndex": 0}``
+    * ``{"type": "text_delta", "contentIndex": 0, "delta": "hi"}``
+    * ``{"type": "text_end", "contentIndex": 0, "content": "hi"}``
+    * ``{"type": "done", "reason": "stop", "message": <AssistantMessage>}``
+    * ``{"type": "error", "reason": "error", "error": <AssistantMessage>}``
+
+    The stream MUST end with exactly one ``done`` or ``error`` event;
+    otherwise the runtime synthesises a terminal ``error`` for safety.
+    """
+
+    type: str
+    contentIndex: int
+    delta: str
+    content: str
+    toolCall: dict
+    reason: str
+    partial: dict
+    message: dict
+    error: dict
+
+
+class ProviderStreamStartParams(TypedDict, total=False):
+    """Params delivered with an inbound ``provider/stream/start`` request."""
+
+    provider_id: str
+    stream_id: str
+    model: dict
+    prompt: dict   # ai.Context — system prompt + messages + tools
+    options: dict  # ai.StreamOptions
+
+
+class ProviderListModelsParams(TypedDict, total=False):
+    """Params delivered with ``provider/listModels``."""
+
+    provider_id: str
+    base_url: str
+    api_key: str
+
+
+class ProviderListModelsResult(TypedDict, total=False):
+    """Result returned to ``provider/listModels``."""
+
+    model_ids: list[str]
+
+
+class ProviderResolveCustomIDParams(TypedDict, total=False):
+    """Params delivered with ``provider/resolveCustomId``."""
+
+    provider_id: str
+    model_id: str
+
+
 class InitParams(TypedDict, total=False):
     """Params delivered with the inbound ``init`` request."""
 
@@ -598,6 +844,7 @@ class InitResult(TypedDict, total=False):
     commands: list[CommandSpec]
     events: list[str]
     auth_providers: list[AuthProviderSpec]
+    providers: list   # list[dict] — see Provider/register_provider
     tool_name_map: dict   # str -> str
     cli_verbs: list[str]
 
@@ -1008,6 +1255,7 @@ if TYPE_CHECKING:
 # to ``__all__`` keeps autocomplete and documentation tooling happy.
 __all__ = [
     "AgentLifecycleParams",
+    "AssistantMessageEvent",
     "AuthAPIKeyParams",
     "AuthAPIKeyResult",
     "AuthContext",
@@ -1041,7 +1289,10 @@ __all__ = [
     # Content / tool result
     "ContentBlock",
     "Context",
+    "DeclGoogleApi",
+    "DeclGoogleConditional",
     "DisplayHint",
+    "EnvKeys",
     "ExecParams",
     "ExecResult",
     "GetSessionDataParams",
@@ -1056,12 +1307,18 @@ __all__ = [
     "MessageEndCost",
     "MessageEndParams",
     "MessageEndUsage",
+    "Model",
     "NotifyParams",
     # Bridge methods
     "OkResult",
     "PKCEResult",
     "PlanInfo",
     "PrependContextParams",
+    "Provider",
+    "ProviderListModelsParams",
+    "ProviderListModelsResult",
+    "ProviderResolveCustomIDParams",
+    "ProviderStreamStartParams",
     "ReportProgressParams",
     "SendMessageParams",
     "SendUserMessageParams",
@@ -1097,9 +1354,15 @@ __all__ = [
     "cli_verb",
     "command",
     "config_path",
+    "is_cancelled",
     "load_config",
     "on",
     "on_cli_signal",
+    "provider_list_models",
+    "provider_resolve_custom_id",
+    "provider_stream",
+    "register_api",
+    "register_provider",
     "register_tool_name_map",
     "run",
     # Decorators / lifecycle
@@ -1132,6 +1395,23 @@ _auth_refresh_handlers: dict[str, Callable] = {}
 _auth_api_key_handlers: dict[str, Callable] = {}
 _auth_list_models_handlers: dict[str, Callable] = {}
 _auth_modify_models_handlers: dict[str, Callable] = {}
+
+# Hosted-provider registries — populated by register_provider() and the
+# provider_* decorators, consumed by run() to build the init payload and to
+# dispatch provider/* RPCs.
+_providers: list[dict[str, Any]] = []
+_provider_stream_handlers: dict[str, Callable] = {}
+_provider_list_models_handlers: dict[str, Callable] = {}
+_provider_resolve_custom_id_handlers: dict[str, Callable] = {}
+
+# Wire-protocol Api specs contributed by this extension. Wire shape:
+# ``{id, kind, payload}`` per spec, dispatched by fir to a kind handler.
+_apis: list[dict[str, Any]] = []
+
+# Per-stream cancel events for provider/stream/cancel. Keyed by stream_id;
+# generators may consult :func:`is_cancelled` to abort early.
+_stream_cancels: dict[str, threading.Event] = {}
+_stream_cancels_lock = threading.Lock()
 
 # Static tool-name map: fir tool name → canonical provider-side tool name.
 # Collected once at init and sent to fir in the handshake result under
@@ -1418,6 +1698,246 @@ def auth_list_models(provider: str) -> Callable:
         return fn
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# Hosted-provider helpers
+# ---------------------------------------------------------------------------
+
+
+def _provider_to_wire(p: Provider) -> dict[str, Any]:
+    """Convert a :class:`Provider` dataclass to its on-the-wire dict form."""
+    out: dict[str, Any] = {"id": p.id}
+    if p.api:
+        out["api"] = p.api
+    if p.display_name:
+        out["display_name"] = p.display_name
+    if p.short_name:
+        out["short_name"] = p.short_name
+    if p.priority:
+        out["priority"] = p.priority
+    if p.default_model_id:
+        out["default_model_id"] = p.default_model_id
+    if p.key_link:
+        out["key_link"] = p.key_link
+    ek: dict[str, Any] = {}
+    if p.env_keys.primary:
+        ek["primary"] = p.env_keys.primary
+    if p.env_keys.fallbacks:
+        ek["fallbacks"] = list(p.env_keys.fallbacks)
+    if p.env_keys.authenticated:
+        ek["authenticated"] = True
+    if ek:
+        out["env_keys"] = ek
+    if p.oauth_provider_id:
+        out["oauth_provider_id"] = p.oauth_provider_id
+    if p.claims_model_id_globs:
+        out["claims_model_id_globs"] = list(p.claims_model_id_globs)
+    if p.refuse_fuzzy_match:
+        out["refuse_fuzzy_match"] = True
+    if p.supports_live_list:
+        out["supports_live_list"] = True
+    if p.supports_custom_id:
+        out["supports_custom_id"] = True
+    if p.models:
+        models_wire: list[dict[str, Any]] = []
+        for m in p.models:
+            mw: dict[str, Any] = {"id": m.id}
+            if m.name:
+                mw["name"] = m.name
+            if m.base_url:
+                mw["base_url"] = m.base_url
+            if m.reasoning:
+                mw["reasoning"] = True
+            if m.input:
+                mw["input"] = list(m.input)
+            if m.context_window:
+                mw["context_window"] = m.context_window
+            if m.max_tokens:
+                mw["max_tokens"] = m.max_tokens
+            if m.cost_input:
+                mw["cost_input"] = m.cost_input
+            if m.cost_output:
+                mw["cost_output"] = m.cost_output
+            if m.cost_cache_read:
+                mw["cost_cache_read"] = m.cost_cache_read
+            if m.cost_cache_write:
+                mw["cost_cache_write"] = m.cost_cache_write
+            if m.server_tools:
+                mw["server_tools"] = list(m.server_tools)
+            if m.compaction:
+                mw["compaction"] = True
+            if m.reasoning_effort_values:
+                mw["reasoning_effort_values"] = list(m.reasoning_effort_values)
+            if m.swe_score:
+                mw["swe_score"] = m.swe_score
+            if m.swe_inferred:
+                mw["swe_inferred"] = True
+            models_wire.append(mw)
+        out["models"] = models_wire
+    return out
+
+
+def register_provider(provider: Provider) -> None:
+    """Declare a hosted AI provider this extension contributes.
+
+    Adds the provider to the init-handshake payload so fir registers a
+    synthetic ``ext:<id>`` API and routes streaming completions for the
+    declared models back to this extension. Pair with
+    :func:`provider_stream` (required) and, optionally,
+    :func:`provider_list_models` / :func:`provider_resolve_custom_id`.
+
+    Idempotent on ``provider.id`` — later calls overwrite the earlier
+    spec, which is convenient when reloading during development.
+    """
+    if not isinstance(provider, Provider):
+        raise TypeError("register_provider expects a Provider instance")
+    wire = _provider_to_wire(provider)
+    for i, existing in enumerate(_providers):
+        if existing.get("id") == provider.id:
+            _providers[i] = wire
+            return
+    _providers.append(wire)
+
+
+def _decl_google_api_to_wire(api: DeclGoogleApi) -> dict[str, Any]:
+    """Serialise a DeclGoogleApi to the JSON payload fir expects."""
+    out: dict[str, Any] = {}
+    if api.endpoints:
+        out["endpoints"] = list(api.endpoints)
+    if api.headers:
+        out["headers"] = dict(api.headers)
+    if api.conditional_headers:
+        ch_wire = []
+        for ch in api.conditional_headers:
+            when: dict[str, Any] = {}
+            if ch.when_model_id_prefix:
+                when["model_id_prefix"] = ch.when_model_id_prefix
+            if ch.when_requires_reasoning:
+                when["requires_reasoning"] = True
+            ch_wire.append({"when": when, "set": dict(ch.set)})
+        out["conditional_headers"] = ch_wire
+    if api.envelope:
+        out["envelope"] = api.envelope
+    if api.system_instruction_prefix:
+        out["system_instruction_prefix"] = [
+            {"text": t} for t in api.system_instruction_prefix
+        ]
+    if api.system_instruction_role:
+        out["system_instruction_role"] = api.system_instruction_role
+    if api.reasoning_header_prefix:
+        out["reasoning_header_prefix"] = api.reasoning_header_prefix
+    return out
+
+
+def register_api(api: DeclGoogleApi) -> None:
+    """Declare a wire-protocol Api this extension contributes.
+
+    The host dispatches the spec to a kind handler keyed by the type of
+    ``api``. Currently only :class:`DeclGoogleApi` is supported (kind
+    ``"decl-google"``); pair it with the matching kind handler in
+    ``pkg/ai/providers/extkind_declgoogle.go``.
+
+    A typical builtin extension that ships both the wire protocol *and*
+    the hosted provider that uses it (e.g. one extension shipping both
+    ``api="my-wire"`` and ``provider id="my-wire"``) calls
+    :func:`register_api` *before* :func:`register_provider` so that any
+    same-extension cross-reference resolves cleanly.
+
+    Idempotent on ``api.id``.
+    """
+    if isinstance(api, DeclGoogleApi):
+        kind = "decl-google"
+        payload = _decl_google_api_to_wire(api)
+    else:
+        raise TypeError(f"register_api: unsupported spec type {type(api).__name__}")
+
+    spec: dict[str, Any] = {"id": api.id, "kind": kind}
+    if payload:
+        spec["payload"] = payload
+    for i, existing in enumerate(_apis):
+        if existing.get("id") == api.id:
+            _apis[i] = spec
+            return
+    _apis.append(spec)
+
+
+def provider_stream(provider_id: str) -> Callable:
+    """Register the streaming handler for a hosted provider.
+
+    The decorated function MUST be a generator that takes
+    ``(params: ProviderStreamStartParams, ctx: Context)`` and yields
+    :class:`AssistantMessageEvent` dicts. It MUST end with a terminal
+    ``done`` (success) or ``error`` event; the runtime otherwise
+    synthesises an ``error`` event so the host stream cleans up.
+
+    Cancellation: the runtime sets a per-stream :class:`threading.Event`
+    when fir sends ``provider/stream/cancel``. Long-running generators
+    should periodically check ``fir_ext.is_cancelled(stream_id)`` and
+    yield a terminal ``error``/``done`` to bail out promptly.
+
+    Example::
+
+        @fir_ext.provider_stream("echo")
+        def echo_stream(params, ctx):
+            text = "hello"
+            yield {"type": "text_start", "contentIndex": 0}
+            yield {"type": "text_delta", "contentIndex": 0, "delta": text}
+            yield {"type": "text_end", "contentIndex": 0, "content": text}
+            yield {"type": "done", "reason": "stop", "message": {...}}
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _provider_stream_handlers[provider_id] = fn
+        return fn
+
+    return decorator
+
+
+def provider_list_models(provider_id: str) -> Callable:
+    """Register the live model lister for a hosted provider.
+
+    The decorated function takes ``(params: ProviderListModelsParams,
+    ctx: Context)`` and returns a list of model ID strings (or a
+    :class:`ProviderListModelsResult` dict). Only invoked when the
+    provider's :class:`Provider` was declared with
+    ``supports_live_list=True``.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _provider_list_models_handlers[provider_id] = fn
+        return fn
+
+    return decorator
+
+
+def provider_resolve_custom_id(provider_id: str) -> Callable:
+    """Register a custom-ID resolver for a hosted provider.
+
+    The decorated function takes ``(params:
+    ProviderResolveCustomIDParams, ctx: Context)`` and returns a wire-form
+    :class:`Model` dict (or ``None`` to fall back). Only meaningful when
+    the provider was declared with ``supports_custom_id=True``.
+
+    Reserved for future host wiring; currently called by tests only.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _provider_resolve_custom_id_handlers[provider_id] = fn
+        return fn
+
+    return decorator
+
+
+def is_cancelled(stream_id: str) -> bool:
+    """Return ``True`` if fir has asked us to cancel this provider stream.
+
+    Long-running :func:`provider_stream` generators should poll this
+    between yields to abort promptly when the user interrupts the turn.
+    """
+    with _stream_cancels_lock:
+        evt = _stream_cancels.get(stream_id)
+    return bool(evt and evt.is_set())
 
 
 def register_tool_name_map(mapping: dict[str, str]) -> None:
@@ -2249,6 +2769,170 @@ def run(
         except Exception as exc:
             _write_message(_make_error(msg_id, -32000, str(exc)), out_stream)
 
+    def _send_provider_event(stream_id: str, event: dict[str, Any]) -> None:
+        _write_message(
+            {
+                "jsonrpc": "2.0",
+                "method": "provider.stream.event",
+                "params": {"stream_id": stream_id, "event": event},
+            },
+            out,
+        )
+
+    def _run_provider_stream(
+        provider_id: str, stream_id: str, params: dict[str, Any],
+        cancel: threading.Event,
+    ) -> None:
+        """Drive a @provider_stream generator and forward its events.
+
+        ``cancel`` is pre-registered in ``_stream_cancels`` by the caller so
+        a `provider/stream/cancel` arriving before this worker starts is
+        not lost. We own its removal in the finally block.
+        """
+        handler = _provider_stream_handlers.get(provider_id)
+        if handler is None:
+            _send_provider_event(stream_id, {
+                "type": "error",
+                "reason": "error",
+                "error": {
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": f"no provider_stream handler for {provider_id!r}",
+                },
+            })
+            with _stream_cancels_lock:
+                _stream_cancels.pop(stream_id, None)
+            return
+        terminal_seen = False
+        gen = None
+        try:
+            gen = handler(params, ctx)
+            if gen is None:
+                return
+            for event in gen:
+                if not isinstance(event, dict):
+                    continue
+                ev_type = event.get("type", "")
+                if ev_type in ("done", "error"):
+                    terminal_seen = True
+                _send_provider_event(stream_id, event)
+                if cancel.is_set() and not terminal_seen:
+                    # Generator hasn't noticed cancellation yet — synthesise
+                    # a terminal error and stop iterating so we don't leak.
+                    break
+        except Exception as exc:
+            _send_provider_event(stream_id, {
+                "type": "error",
+                "reason": "error",
+                "error": {
+                    "role": "assistant",
+                    "stopReason": "error",
+                    "errorMessage": f"{type(exc).__name__}: {exc}",
+                },
+            })
+            terminal_seen = True
+        finally:
+            # Close the generator so its own try/finally runs even when we
+            # bail out early (cancellation or exception).
+            if gen is not None and hasattr(gen, "close"):
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    gen.close()
+            if not terminal_seen:
+                _send_provider_event(stream_id, {
+                    "type": "error",
+                    "reason": "aborted" if cancel.is_set() else "error",
+                    "error": {
+                        "role": "assistant",
+                        "stopReason": "aborted" if cancel.is_set() else "error",
+                        "errorMessage": (
+                            "stream cancelled" if cancel.is_set()
+                            else "provider generator exited without terminal event"
+                        ),
+                    },
+                })
+            with _stream_cancels_lock:
+                _stream_cancels.pop(stream_id, None)
+
+    def _handle_provider_request(
+        method: str, msg_id: Any, params: dict[str, Any]
+    ) -> None:
+        """Dispatch a provider/* RPC from fir."""
+        try:
+            if method == "provider/stream/start":
+                provider_id = params.get("provider_id", "")
+                stream_id = params.get("stream_id", "")
+                if not stream_id:
+                    _write_message(
+                        _make_error(msg_id, -32602, "missing stream_id"), out
+                    )
+                    return
+                # Pre-register the cancel event before spawning the worker
+                # so a fast provider/stream/cancel can't be dropped on the
+                # floor while the worker is still starting up.
+                cancel = threading.Event()
+                with _stream_cancels_lock:
+                    _stream_cancels[stream_id] = cancel
+                # Ack immediately so the host doesn't bound latency on the
+                # generator's first yield. Events flow asynchronously via
+                # provider.stream.event notifications.
+                _write_message(_make_response(msg_id, {}), out)
+                worker = threading.Thread(
+                    target=_run_provider_stream,
+                    args=(provider_id, stream_id, params, cancel),
+                    daemon=True,
+                )
+                worker.start()
+                _track_worker(worker)
+                return
+
+            if method == "provider/stream/cancel":
+                stream_id = params.get("stream_id", "")
+                with _stream_cancels_lock:
+                    evt = _stream_cancels.get(stream_id)
+                if evt is not None:
+                    evt.set()
+                _write_message(_make_response(msg_id, {"ok": True}), out)
+                return
+
+            if method == "provider/listModels":
+                provider_id = params.get("provider_id", "")
+                handler = _provider_list_models_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(
+                        _make_error(
+                            msg_id, -32601,
+                            f"no provider_list_models handler for {provider_id!r}",
+                        ),
+                        out,
+                    )
+                    return
+                result = handler(params, ctx)
+                if isinstance(result, list):
+                    result = {"model_ids": list(result)}
+                elif not isinstance(result, dict):
+                    result = {"model_ids": []}
+                _write_message(_make_response(msg_id, result), out)
+                return
+
+            if method == "provider/resolveCustomId":
+                provider_id = params.get("provider_id", "")
+                handler = _provider_resolve_custom_id_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_response(msg_id, None), out)
+                    return
+                result = handler(params, ctx)
+                _write_message(_make_response(msg_id, result), out)
+                return
+
+            _write_message(
+                _make_error(msg_id, -32601, f"unknown provider method: {method}"),
+                out,
+            )
+        except Exception as exc:
+            _write_message(_make_error(msg_id, -32000, str(exc)), out)
+
     def _dispatch(msg: dict[str, Any]) -> None:
         method = msg.get("method", "")
         msg_id = msg.get("id")
@@ -2267,6 +2951,10 @@ def run(
             }
             if _auth_providers:
                 init_result["auth_providers"] = list(_auth_providers)
+            if _apis:
+                init_result["apis"] = list(_apis)
+            if _providers:
+                init_result["providers"] = list(_providers)
             if _tool_name_map:
                 init_result["tool_name_map"] = dict(_tool_name_map)
             if _cli_verb_handlers:
@@ -2354,6 +3042,15 @@ def run(
         if method.startswith("auth/"):
             t = threading.Thread(
                 target=_handle_auth_request, args=(method, msg_id, params, out), daemon=True
+            )
+            t.start()
+            _track_worker(t)
+            return
+
+        # --- provider/* RPCs: hosted-provider streaming + listing ---
+        if method.startswith("provider/"):
+            t = threading.Thread(
+                target=_handle_provider_request, args=(method, msg_id, params), daemon=True
             )
             t.start()
             _track_worker(t)

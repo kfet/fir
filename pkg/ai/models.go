@@ -23,6 +23,27 @@ func RegisterModel(m *Model) {
 	modelRegistry[m.Provider][m.ID] = m
 }
 
+// UnregisterModel removes a model from the registry. Used when an extension
+// withdraws a provider that previously registered models. No-op if absent.
+func UnregisterModel(provider Provider, modelID string) {
+	modelRegistryMu.Lock()
+	defer modelRegistryMu.Unlock()
+	if pm := modelRegistry[provider]; pm != nil {
+		delete(pm, modelID)
+		if len(pm) == 0 {
+			delete(modelRegistry, provider)
+		}
+	}
+}
+
+// UnregisterProviderModels removes every model under the given provider.
+// Used when an extension shuts down to roll back its model contributions.
+func UnregisterProviderModels(provider Provider) {
+	modelRegistryMu.Lock()
+	defer modelRegistryMu.Unlock()
+	delete(modelRegistry, provider)
+}
+
 // GetModel returns a model by provider and model ID, or nil if not found.
 func GetModel(provider Provider, modelID string) *Model {
 	modelRegistryMu.RLock()

@@ -271,27 +271,6 @@ func TestGetModel_NewGemini31Models(t *testing.T) {
 			wantReasoning: true,
 		},
 		{
-			provider:      ProviderGoogleAntigravity,
-			id:            "gemini-3.1-pro-high",
-			wantAPI:       ApiGoogleGeminiCLI,
-			wantCtxWindow: 1048576,
-			wantReasoning: true,
-		},
-		{
-			provider:      ProviderGoogleAntigravity,
-			id:            "gemini-3.1-pro-low",
-			wantAPI:       ApiGoogleGeminiCLI,
-			wantCtxWindow: 1048576,
-			wantReasoning: true,
-		},
-		{
-			provider:      ProviderGoogleGeminiCLI,
-			id:            "gemini-3.1-pro-preview",
-			wantAPI:       ApiGoogleGeminiCLI,
-			wantCtxWindow: 1048576,
-			wantReasoning: true,
-		},
-		{
 			provider:      ProviderGoogleVertex,
 			id:            "gemini-3.1-pro-preview",
 			wantAPI:       ApiGoogleVertex,

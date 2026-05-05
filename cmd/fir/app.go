@@ -104,27 +104,14 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		}
 	}
 
-	// Resolve model from CLI flags
+	// Model resolution from CLI flags is deferred until after extensions
+	// register their providers/models. Built-in providers would resolve
+	// fine here, but extension-shipped providers only become visible to
+	// the registry after their auth extensions hand off ProviderSpec
+	// records, so a single post-extensions resolution path (further
+	// down in this function, after extension.Setup + refreshSessionModel)
+	// avoids "Unknown provider" errors for ext-shipped IDs.
 	var model *ai.Model
-	if args.Model != "" {
-		resolved := models.ResolveCliModel(models.ResolveCliModelOptions{
-			CLIProvider:   args.Provider,
-			CLIModel:      args.Model,
-			ModelRegistry: modelRegistry,
-		})
-		if resolved.Warning != "" {
-			fmt.Fprintf(os.Stderr, "Warning: %s\n", resolved.Warning)
-		}
-		if resolved.Error != "" {
-			return nil, fmt.Errorf("%s", resolved.Error)
-		}
-		model = resolved.Model
-		firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "cli")
-		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
-		if args.Thinking == "" && resolved.ThinkingLevel != "" {
-			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
-		}
-	}
 
 	// Usage tracking
 	usageTracker := New(DefaultPath(agentDir))
@@ -239,6 +226,29 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 			// session's stale pointer.
 			refreshSessionModel(result.Session, modelRegistry)
 		}
+	}
+
+	// Resolve model from CLI flags now that extensions have registered any
+	// ext-shipped providers/models.
+	if args.Model != "" {
+		resolved := models.ResolveCliModel(models.ResolveCliModelOptions{
+			CLIProvider:   args.Provider,
+			CLIModel:      args.Model,
+			ModelRegistry: modelRegistry,
+		})
+		if resolved.Warning != "" {
+			fmt.Fprintf(os.Stderr, "Warning: %s\n", resolved.Warning)
+		}
+		if resolved.Error != "" {
+			return nil, fmt.Errorf("%s", resolved.Error)
+		}
+		model = resolved.Model
+		firlog.Info("model resolved", "provider", model.Provider, "model", model.ID, "source", "cli")
+		// "--model <pattern>:<thinking>" shorthand; explicit --thinking takes precedence.
+		if args.Thinking == "" && resolved.ThinkingLevel != "" {
+			args.Thinking = agent.ThinkingLevel(resolved.ThinkingLevel)
+		}
+		result.Session.SetModel(model)
 	}
 
 	// Warn about model fallback
@@ -1128,7 +1138,7 @@ func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
 	// Clone settings from the bedrock default model so cost/context-window/
 	// reasoning flags inherit sensible values.
 	var base *ai.Model
-	defaultID := models.DefaultModelPerProvider[ai.ProviderAmazonBedrock]
+	defaultID := models.DefaultModelPerProvider(ai.ProviderAmazonBedrock)
 	for _, m := range reg.GetAll() {
 		if m.Provider != string(ai.ProviderAmazonBedrock) {
 			continue

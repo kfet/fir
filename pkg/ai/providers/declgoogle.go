@@ -1,11 +1,20 @@
-// Ported from: packages/ai/src/providers/google-gemini-cli.ts
-// Upstream hash: a1edb8a4
+// Generic declarative adapter for the Cloud Code Assist Gemini wire family.
+//
+// This file replaces the previous google_gemini_cli.go.  It carries no
+// provider-specific literals: per-provider behaviour is supplied via a
+// DeclGoogleConfig record, constructed in register_*.go files alongside each
+// provider's RegisterApiProvider call.
+//
+// The grand vision (Phase 2 + PoC payoff) replaces these in-Go Configs with
+// JSON-encoded records shipped by ext-side `provider_register` payloads,
+// interpreted by the substitution engine in pkg/ai/providers/declcfg/.  For
+// Phase 1e we keep the Config struct in Go and the literals in Go init blocks
+// — the goal here is shape, not yet wire format.
 package providers
 
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,10 +24,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/providers/declcfg"
 	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
@@ -26,66 +38,114 @@ import (
 // --- Constants ---
 
 const (
-	geminiCLIDefaultEndpoint    = "https://cloudcode-pa.googleapis.com"
-	antigravityDailyEndpoint    = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	antigravityAutopushEndpoint = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
-	defaultAntigravityVersion   = "1.21.9"
+	declGoogleMaxRetries        = 3
+	declGoogleBaseDelayMs       = 1000
+	declGoogleMaxEmptyRetries   = 2
+	declGoogleEmptyBaseDelayMs  = 500
+	declGoogleDefaultMaxDelayMs = 60000
 	claudeThinkingBetaHeader    = "interleaved-thinking-2025-05-14"
-	geminiCLIMaxRetries         = 3
-	geminiCLIBaseDelayMs        = 1000
-	geminiCLIMaxEmptyRetries    = 2
-	geminiCLIEmptyBaseDelayMs   = 500
-	geminiCLIDefaultMaxDelayMs  = 60000
 )
 
-// toolCallCounter generates unique tool call IDs.
-var toolCallCounter atomic.Int64
+// --- DeclGoogleConfig ---
 
-// --- Google thinking levels ---
+// DeclGoogleConfig parameterises the generic Cloud Code Assist Gemini adapter.
+// One config per provider on the family.  All fields are data — no callbacks
+// — so a future Phase 2 commit can ship the same record as JSON shipped by an
+// extension, with no Go code changes required.
+type DeclGoogleConfig struct {
+	// Endpoints are tried in order on 403/404 cascade and on retry.
+	// Values support ${var} substitution.
+	Endpoints []string
 
-// GoogleThinkingLevel mirrors Google's ThinkingLevel enum.
-type GoogleThinkingLevel string
+	// Headers carries the per-request base header set (excluding
+	// Authorization / Content-Type / Accept which the adapter always sets).
+	// Values support ${var} and ${fn.x()} substitution — e.g.
+	// "User-Agent": "myua/1.0 ${os}/${arch}".
+	Headers map[string]string
 
-const (
-	ThinkingLevelUnspecified GoogleThinkingLevel = "THINKING_LEVEL_UNSPECIFIED"
-	ThinkingLevelMinimal     GoogleThinkingLevel = "MINIMAL"
-	ThinkingLevelLow         GoogleThinkingLevel = "LOW"
-	ThinkingLevelMedium      GoogleThinkingLevel = "MEDIUM"
-	ThinkingLevelHigh        GoogleThinkingLevel = "HIGH"
-)
+	// ConditionalHeaders are header overlays applied when their When clause
+	// matches the resolved model.  Values support substitution.
+	ConditionalHeaders []ConditionalHeader
 
-// --- Headers ---
+	// Envelope is the JSON template for the outer request body.  The literal
+	// JSON string "$inner" is replaced by the inner Gemini request body.
+	// String fields support ${var}/${fn.x()} substitution.  Nil envelope =
+	// identity (the inner body is sent as-is).
+	Envelope json.RawMessage
 
-func geminiCLIHeaders() map[string]string {
-	return map[string]string{
-		"User-Agent":        "google-cloud-sdk vscode_cloudshelleditor/0.1",
-		"X-Goog-Api-Client": "gl-node/22.17.0",
-		"Client-Metadata":   `{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`,
+	// SystemInstructionPrefix is prepended to the systemInstruction.parts on
+	// every request.
+	SystemInstructionPrefix []googleSysInstrPart
+
+	// SystemInstructionRole, if non-empty, overrides the default role on the
+	// systemInstruction object.
+	SystemInstructionRole string
+
+	// ReasoningHeaderPrefix is the prefix the adapter looks for in
+	// options.Headers when extracting thinking-config (e.g.
+	// "x-gemini-thinking-").  Different per provider so that the agent
+	// session's choice of header keys matches the adapter's expectations.
+	ReasoningHeaderPrefix string
+
+	// parsedEnvelope caches Envelope decoded to a Go value (any).
+	parsedEnvelope     any
+	parsedEnvelopeOnce sync.Once
+	parsedEnvelopeErr  error
+}
+
+// ConditionalHeader applies Set when When matches the resolved model.
+type ConditionalHeader struct {
+	When ConditionalHeaderMatch
+	Set  map[string]string
+}
+
+// ConditionalHeaderMatch describes when a ConditionalHeader fires.
+// All non-zero fields must match.  Zero-value = unconstrained on that field.
+type ConditionalHeaderMatch struct {
+	// ModelIDPrefix matches model.ID against this prefix when non-empty.
+	ModelIDPrefix string
+	// RequiresReasoning, if true, requires model.Reasoning == true.
+	RequiresReasoning bool
+}
+
+func (m ConditionalHeaderMatch) matches(model *ai.Model) bool {
+	if m.ModelIDPrefix != "" && !strings.HasPrefix(model.ID, m.ModelIDPrefix) {
+		return false
 	}
-}
-
-func antigravityHeaders() map[string]string {
-	version := defaultAntigravityVersion
-	return map[string]string{
-		"User-Agent": fmt.Sprintf("antigravity/%s %s/%s", version, runtime.GOOS, runtime.GOARCH),
+	if m.RequiresReasoning && !model.Reasoning {
+		return false
 	}
+	return true
 }
 
-const antigravitySystemInstruction = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding." +
-	"You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question." +
-	"**Absolute paths only**" +
-	"**Proactiveness**"
-
-// --- Request types ---
-
-type cloudCodeAssistRequest struct {
-	Project     string                  `json:"project"`
-	Model       string                  `json:"model"`
-	Request     cloudCodeAssistInnerReq `json:"request"`
-	RequestType string                  `json:"requestType,omitempty"`
-	UserAgent   string                  `json:"userAgent,omitempty"`
-	RequestID   string                  `json:"requestId,omitempty"`
+func (cfg *DeclGoogleConfig) envelope() (any, error) {
+	cfg.parsedEnvelopeOnce.Do(func() {
+		if len(cfg.Envelope) == 0 {
+			return
+		}
+		cfg.parsedEnvelopeErr = json.Unmarshal(cfg.Envelope, &cfg.parsedEnvelope)
+	})
+	return cfg.parsedEnvelope, cfg.parsedEnvelopeErr
 }
+
+// --- Registry from Api id → DeclGoogleConfig ---
+
+var declGoogleConfigs sync.Map // string → *DeclGoogleConfig
+
+// RegisterDeclGoogleConfig binds a config to an Api id.  Called from each
+// provider's Register* function before building the ApiProvider.
+func RegisterDeclGoogleConfig(api string, cfg *DeclGoogleConfig) {
+	declGoogleConfigs.Store(api, cfg)
+}
+
+func getDeclGoogleConfig(api string) *DeclGoogleConfig {
+	if v, ok := declGoogleConfigs.Load(api); ok {
+		return v.(*DeclGoogleConfig)
+	}
+	return nil
+}
+
+// --- Shared types (formerly cloudCodeAssistRequest etc.) ---
 
 type cloudCodeAssistInnerReq struct {
 	Contents          []GoogleContent   `json:"contents"`
@@ -111,15 +171,13 @@ type googleToolConfig struct {
 	} `json:"functionCallingConfig"`
 }
 
-// --- Response types ---
-
 type cloudCodeAssistChunk struct {
 	Response *cloudCodeAssistResp `json:"response,omitempty"`
 }
 
 type cloudCodeAssistResp struct {
 	Candidates    []cloudCodeAssistCandidate `json:"candidates,omitempty"`
-	UsageMetadata *geminiCLIUsageMetadata    `json:"usageMetadata,omitempty"`
+	UsageMetadata *declGoogleUsageMetadata   `json:"usageMetadata,omitempty"`
 }
 
 type cloudCodeAssistCandidate struct {
@@ -145,7 +203,7 @@ type cloudCodeAssistFuncCall struct {
 	ID   string         `json:"id,omitempty"`
 }
 
-type geminiCLIUsageMetadata struct {
+type declGoogleUsageMetadata struct {
 	PromptTokenCount        int `json:"promptTokenCount,omitempty"`
 	CandidatesTokenCount    int `json:"candidatesTokenCount,omitempty"`
 	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"`
@@ -153,11 +211,23 @@ type geminiCLIUsageMetadata struct {
 	CachedContentTokenCount int `json:"cachedContentTokenCount,omitempty"`
 }
 
-// --- Retry delay extraction ---
+// toolCallCounter generates unique tool call IDs.
+var toolCallCounter atomic.Int64
 
-// extractRetryDelay extracts retry delay from error text and response headers.
-// Returns delay in milliseconds, or 0 if not found.
-// Text-based pattern matching is delegated to ratelimit.ExtractRetryDelayFromText.
+// --- Google thinking levels ---
+
+type GoogleThinkingLevel string
+
+const (
+	ThinkingLevelUnspecified GoogleThinkingLevel = "THINKING_LEVEL_UNSPECIFIED"
+	ThinkingLevelMinimal     GoogleThinkingLevel = "MINIMAL"
+	ThinkingLevelLow         GoogleThinkingLevel = "LOW"
+	ThinkingLevelMedium      GoogleThinkingLevel = "MEDIUM"
+	ThinkingLevelHigh        GoogleThinkingLevel = "HIGH"
+)
+
+// --- Retry helpers ---
+
 func extractRetryDelay(errorText string, headers http.Header) int {
 	normalizeDelay := func(ms int) int {
 		if ms > 0 {
@@ -165,9 +235,7 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 		}
 		return 0
 	}
-
 	if headers != nil {
-		// Check Retry-After header
 		if ra := headers.Get("Retry-After"); ra != "" {
 			if sec, err := strconv.Atoi(ra); err == nil {
 				if d := normalizeDelay(sec * 1000); d > 0 {
@@ -180,7 +248,6 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 				}
 			}
 		}
-		// Check x-ratelimit-reset
 		if rr := headers.Get("x-ratelimit-reset"); rr != "" {
 			if sec, err := strconv.Atoi(rr); err == nil {
 				if d := normalizeDelay(sec*1000 - int(time.Now().UnixMilli())); d > 0 {
@@ -188,7 +255,6 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 				}
 			}
 		}
-		// Check x-ratelimit-reset-after
 		if rra := headers.Get("x-ratelimit-reset-after"); rra != "" {
 			if sec, err := strconv.ParseFloat(rra, 64); err == nil {
 				if d := normalizeDelay(int(sec * 1000)); d > 0 {
@@ -197,27 +263,18 @@ func extractRetryDelay(errorText string, headers http.Header) int {
 			}
 		}
 	}
-
-	// Delegate text-based pattern matching to the shared rate-limit utility.
 	if d := ratelimit.ExtractRetryDelayFromText(errorText); d > 0 {
 		return normalizeDelay(int(d.Milliseconds()))
 	}
-
 	return 0
 }
 
-func needsClaudeThinkingBetaHeader(model *ai.Model) bool {
-	return model.Provider == "google-antigravity" && strings.HasPrefix(model.ID, "claude-") && model.Reasoning
-}
-
 func isGemini3ProModel(modelID string) bool {
-	lower := strings.ToLower(modelID)
-	return gemini3ProRegex.MatchString(lower)
+	return gemini3ProRegex.MatchString(strings.ToLower(modelID))
 }
 
 func isGemini3FlashModel(modelID string) bool {
-	lower := strings.ToLower(modelID)
-	return gemini3FlashRegex.MatchString(lower)
+	return gemini3FlashRegex.MatchString(strings.ToLower(modelID))
 }
 
 func isGemini3ModelID(modelID string) bool {
@@ -250,16 +307,90 @@ func extractErrorMessage(errorText string) string {
 	return errorText
 }
 
+// --- Substitution context ---
+
+// buildSubstContext builds a declcfg.Context with model.*, creds.*, os, arch.
+func buildSubstContext(model *ai.Model, creds map[string]string) *declcfg.Context {
+	vars := map[string]any{
+		"os":              runtime.GOOS,
+		"arch":            runtime.GOARCH,
+		"model.id":        model.ID,
+		"model.api":       model.Api,
+		"model.provider":  model.Provider,
+		"model.base_url":  model.BaseURL,
+		"model.reasoning": model.Reasoning,
+	}
+	for k, v := range creds {
+		vars["creds."+k] = v
+	}
+	return &declcfg.Context{Vars: vars}
+}
+
+// parseGoogleCreds decodes the credential string carried in
+// StreamOptions.ApiKey.  If it parses as a JSON object, top-level keys are
+// snake-cased and stored as creds.<key>; the alias creds.access_token is
+// filled from creds.token when missing.  Otherwise the raw string populates
+// both creds.api_key and creds.access_token.
+func parseGoogleCreds(raw string) map[string]string {
+	out := map[string]string{}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err == nil && obj != nil {
+		for k, v := range obj {
+			sk := snakeCase(k)
+			switch x := v.(type) {
+			case string:
+				out[sk] = x
+			case nil:
+				out[sk] = ""
+			default:
+				out[sk] = fmt.Sprint(x)
+			}
+		}
+		if _, ok := out["access_token"]; !ok {
+			if t, ok := out["token"]; ok {
+				out["access_token"] = t
+			}
+		}
+		return out
+	}
+	out["api_key"] = raw
+	out["access_token"] = raw
+	return out
+}
+
+// snakeCase converts camelCase / PascalCase to snake_case.  ASCII-only.
+func snakeCase(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	for i, r := range s {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // --- Build request ---
 
-func buildGeminiCLIRequest(
+func buildDeclGoogleInner(
 	model *ai.Model,
 	ctx ai.Context,
-	projectID string,
 	options *ai.StreamOptions,
-	isAntigravity bool,
-) *cloudCodeAssistRequest {
+	cfg *DeclGoogleConfig,
+) *cloudCodeAssistInnerReq {
 	contents := ConvertGoogleMessages(model, ctx)
+
+	thinkingPrefix := cfg.ReasoningHeaderPrefix
+	if thinkingPrefix == "" {
+		thinkingPrefix = "x-gemini-thinking-"
+	}
 
 	genConfig := map[string]any{}
 	if options != nil && options.Temperature != nil {
@@ -268,16 +399,15 @@ func buildGeminiCLIRequest(
 	if options != nil && options.MaxTokens != nil {
 		genConfig["maxOutputTokens"] = *options.MaxTokens
 	}
-
-	// Thinking config (passed via headers)
 	if options != nil && options.Headers != nil {
-		if options.Headers["x-gemini-thinking-disabled"] == "true" && model.Reasoning {
-			genConfig["thinkingConfig"] = getGeminiCLIDisabledThinkingConfig(model.ID)
-		} else if options.Headers["x-gemini-thinking-enabled"] == "true" && model.Reasoning {
+		hdr := func(suffix string) string { return options.Headers[thinkingPrefix+suffix] }
+		if hdr("disabled") == "true" && model.Reasoning {
+			genConfig["thinkingConfig"] = getDeclGoogleDisabledThinkingConfig(model.ID)
+		} else if hdr("enabled") == "true" && model.Reasoning {
 			thinkingConfig := map[string]any{"includeThoughts": true}
-			if level := options.Headers["x-gemini-thinking-level"]; level != "" {
+			if level := hdr("level"); level != "" {
 				thinkingConfig["thinkingLevel"] = level
-			} else if budget := options.Headers["x-gemini-thinking-budget"]; budget != "" {
+			} else if budget := hdr("budget"); budget != "" {
 				if b, err := strconv.Atoi(budget); err == nil && b > 0 {
 					thinkingConfig["thinkingBudget"] = b
 				}
@@ -286,25 +416,18 @@ func buildGeminiCLIRequest(
 		}
 	}
 
-	req := cloudCodeAssistInnerReq{
-		Contents: contents,
-	}
-
+	req := &cloudCodeAssistInnerReq{Contents: contents}
 	if options != nil && options.SessionID != "" {
 		req.SessionID = options.SessionID
 	}
-
 	if ctx.SystemPrompt != "" {
-		sysInstr := &googleSysInstr{
+		req.SystemInstruction = &googleSysInstr{
 			Parts: []googleSysInstrPart{{Text: SanitizeSurrogates(ctx.SystemPrompt)}},
 		}
-		req.SystemInstruction = sysInstr
 	}
-
 	if len(genConfig) > 0 {
 		req.GenerationConfig = genConfig
 	}
-
 	if len(ctx.Tools) > 0 {
 		useParameters := strings.HasPrefix(model.ID, "claude-")
 		req.Tools = ConvertGoogleTools(ctx.Tools, useParameters)
@@ -315,58 +438,120 @@ func buildGeminiCLIRequest(
 		}
 	}
 
-	if isAntigravity {
+	if len(cfg.SystemInstructionPrefix) > 0 {
 		existingParts := []googleSysInstrPart{}
 		if req.SystemInstruction != nil {
 			existingParts = req.SystemInstruction.Parts
 		}
+		role := cfg.SystemInstructionRole
+		if role == "" && req.SystemInstruction != nil {
+			role = req.SystemInstruction.Role
+		}
 		req.SystemInstruction = &googleSysInstr{
-			Role: "user",
-			Parts: append([]googleSysInstrPart{
-				{Text: antigravitySystemInstruction},
-				{Text: fmt.Sprintf("Please ignore following [ignore]%s[/ignore]", antigravitySystemInstruction)},
-			}, existingParts...),
+			Role:  role,
+			Parts: append(append([]googleSysInstrPart{}, cfg.SystemInstructionPrefix...), existingParts...),
 		}
 	}
-
-	reqType := ""
-	userAgent := "fir-coding-agent"
-	if isAntigravity {
-		reqType = "agent"
-		userAgent = "antigravity"
-	}
-
-	return &cloudCodeAssistRequest{
-		Project:     projectID,
-		Model:       model.ID,
-		Request:     req,
-		RequestType: reqType,
-		UserAgent:   userAgent,
-		RequestID:   fmt.Sprintf("%s-%d-%s", userAgent, time.Now().UnixMilli(), randomID()),
-	}
+	return req
 }
 
-func randomID() string {
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 9)
-	rand.Read(b)
-	for i := range b {
-		b[i] = chars[b[i]%byte(len(chars))]
+// buildDeclGoogleBody returns the final outer JSON body to send.  When the
+// config carries an Envelope template it is substituted with the inner request
+// at "$inner"; otherwise the inner request is returned directly.
+func buildDeclGoogleBody(
+	model *ai.Model,
+	prompt ai.Context,
+	options *ai.StreamOptions,
+	cfg *DeclGoogleConfig,
+	creds map[string]string,
+) (any, error) {
+	inner := buildDeclGoogleInner(model, prompt, options, cfg)
+	envelopeTemplate, err := cfg.envelope()
+	if err != nil {
+		return nil, fmt.Errorf("invalid envelope template: %w", err)
 	}
-	return string(b)
+	if envelopeTemplate == nil {
+		return inner, nil
+	}
+	// Decode inner to any so SubstituteJSON's "$inner" sentinel produces a
+	// JSON value (object) rather than a stringified blob.
+	innerJSON, err := json.Marshal(inner)
+	if err != nil {
+		return nil, fmt.Errorf("marshal inner: %w", err)
+	}
+	var innerAny any
+	if err := json.Unmarshal(innerJSON, &innerAny); err != nil {
+		return nil, fmt.Errorf("re-decode inner: %w", err)
+	}
+	subCtx := buildSubstContext(model, creds)
+	out, err := declcfg.SubstituteJSON(envelopeTemplate, subCtx, innerAny)
+	if err != nil {
+		return nil, fmt.Errorf("substitute envelope: %w", err)
+	}
+	return out, nil
 }
 
-// --- Stream function ---
+// resolveDeclGoogleHeaders renders cfg.Headers + matching ConditionalHeaders
+// through declcfg.Substitute.
+func resolveDeclGoogleHeaders(
+	cfg *DeclGoogleConfig,
+	model *ai.Model,
+	creds map[string]string,
+) (map[string]string, error) {
+	subCtx := buildSubstContext(model, creds)
+	out := make(map[string]string, len(cfg.Headers))
+	for k, v := range cfg.Headers {
+		s, err := declcfg.Substitute(v, subCtx)
+		if err != nil {
+			return nil, fmt.Errorf("header %q: %w", k, err)
+		}
+		out[k] = s
+	}
+	for _, ch := range cfg.ConditionalHeaders {
+		if !ch.When.matches(model) {
+			continue
+		}
+		for k, v := range ch.Set {
+			s, err := declcfg.Substitute(v, subCtx)
+			if err != nil {
+				return nil, fmt.Errorf("conditional header %q: %w", k, err)
+			}
+			out[k] = s
+		}
+	}
+	return out, nil
+}
 
-// StreamGoogleGeminiCLI streams from the Google Gemini CLI / Cloud Code Assist API.
-func StreamGoogleGeminiCLI(
+// resolveDeclGoogleEndpoints renders cfg.Endpoints through declcfg.Substitute.
+func resolveDeclGoogleEndpoints(
+	cfg *DeclGoogleConfig,
+	model *ai.Model,
+	creds map[string]string,
+) ([]string, error) {
+	subCtx := buildSubstContext(model, creds)
+	out := make([]string, 0, len(cfg.Endpoints))
+	for _, ep := range cfg.Endpoints {
+		s, err := declcfg.Substitute(ep, subCtx)
+		if err != nil {
+			return nil, fmt.Errorf("endpoint %q: %w", ep, err)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// --- Stream entry points ---
+
+// StreamDeclGoogle is the generic streamer for any Cloud Code Assist Gemini
+// provider.  Resolves the registered config by model.Api.
+func StreamDeclGoogle(
 	ctx context.Context,
 	model *ai.Model,
 	prompt ai.Context,
 	options *ai.StreamOptions,
 ) *ai.AssistantMessageEventStream {
+	cfg := getDeclGoogleConfig(model.Api)
 	stream := ai.NewAssistantMessageEventStream()
-
 	go func() {
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
@@ -378,9 +563,15 @@ func StreamGoogleGeminiCLI(
 			StopReason: ai.StopReasonStop,
 			Timestamp:  time.Now().UnixMilli(),
 		}
-
-		firlog.Debug("gemini-cli request", "model", model.ID, "messageCount", len(prompt.Messages))
-		err := streamGeminiCLI(ctx, model, prompt, options, output, stream)
+		if cfg == nil {
+			output.StopReason = ai.StopReasonError
+			output.ErrorMessage = fmt.Sprintf("no DeclGoogleConfig registered for api %q", model.Api)
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: output.StopReason, Error: output})
+			stream.End(nil)
+			return
+		}
+		firlog.Debug("declgoogle request", "api", model.Api, "model", model.ID, "messageCount", len(prompt.Messages))
+		err := streamDeclGoogle(ctx, model, prompt, options, cfg, output, stream)
 		if err != nil {
 			if ctx.Err() != nil {
 				output.StopReason = ai.StopReasonAborted
@@ -388,32 +579,23 @@ func StreamGoogleGeminiCLI(
 				output.StopReason = ai.StopReasonError
 			}
 			output.ErrorMessage = err.Error()
-			stream.Push(ai.AssistantMessageEvent{
-				Type:   ai.EventError,
-				Reason: output.StopReason,
-				Error:  output,
-			})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: output.StopReason, Error: output})
 			stream.End(nil)
 			return
 		}
-
-		firlog.Debug("gemini-cli response complete", "model", model.ID, "stopReason", output.StopReason)
-		stream.Push(ai.AssistantMessageEvent{
-			Type:    ai.EventDone,
-			Reason:  output.StopReason,
-			Message: output,
-		})
+		firlog.Debug("declgoogle response complete", "api", model.Api, "model", model.ID, "stopReason", output.StopReason)
+		stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
 		stream.End(nil)
 	}()
-
 	return stream
 }
 
-func streamGeminiCLI(
+func streamDeclGoogle(
 	ctx context.Context,
 	model *ai.Model,
 	prompt ai.Context,
 	options *ai.StreamOptions,
+	cfg *DeclGoogleConfig,
 	output *ai.AssistantMessage,
 	stream *ai.AssistantMessageEventStream,
 ) error {
@@ -424,31 +606,30 @@ func streamGeminiCLI(
 	if apiKeyRaw == "" {
 		return fmt.Errorf("Google Cloud Code Assist requires OAuth authentication. Use /login to authenticate")
 	}
-
-	// Parse JSON-encoded credentials: { "token": "...", "projectId": "..." }
-	var creds struct {
-		Token     string `json:"token"`
-		ProjectID string `json:"projectId"`
-	}
-	if err := json.Unmarshal([]byte(apiKeyRaw), &creds); err != nil {
+	creds := parseGoogleCreds(apiKeyRaw)
+	if creds["access_token"] == "" || creds["project_id"] == "" {
 		return fmt.Errorf("invalid Google Cloud Code Assist credentials. Use /login to re-authenticate")
 	}
-	if creds.Token == "" || creds.ProjectID == "" {
-		return fmt.Errorf("missing token or projectId in Google Cloud credentials. Use /login to re-authenticate")
-	}
 
-	isAntigravity := model.Provider == "google-antigravity"
 	baseURL := strings.TrimSpace(model.BaseURL)
 	var endpoints []string
 	if baseURL != "" {
 		endpoints = []string{baseURL}
-	} else if isAntigravity {
-		endpoints = []string{antigravityDailyEndpoint, antigravityAutopushEndpoint, geminiCLIDefaultEndpoint}
 	} else {
-		endpoints = []string{geminiCLIDefaultEndpoint}
+		eps, err := resolveDeclGoogleEndpoints(cfg, model, creds)
+		if err != nil {
+			return err
+		}
+		endpoints = eps
+	}
+	if len(endpoints) == 0 {
+		return fmt.Errorf("no endpoints configured for api %q", model.Api)
 	}
 
-	reqBody := buildGeminiCLIRequest(model, prompt, creds.ProjectID, options, isAntigravity)
+	reqBody, err := buildDeclGoogleBody(model, prompt, options, cfg, creds)
+	if err != nil {
+		return err
+	}
 	var reqBodyAny any = reqBody
 	if options != nil && options.OnPayload != nil {
 		if next := options.OnPayload(reqBody, model); next != nil {
@@ -460,34 +641,25 @@ func streamGeminiCLI(
 		return fmt.Errorf("marshaling request: %w", err)
 	}
 
-	baseHdrs := geminiCLIHeaders()
-	if isAntigravity {
-		baseHdrs = antigravityHeaders()
+	baseHdrs, err := resolveDeclGoogleHeaders(cfg, model, creds)
+	if err != nil {
+		return err
 	}
-	baseHdrs["Authorization"] = "Bearer " + creds.Token
+	baseHdrs["Authorization"] = "Bearer " + creds["access_token"]
 	baseHdrs["Content-Type"] = "application/json"
 	baseHdrs["Accept"] = "text/event-stream"
-	if needsClaudeThinkingBetaHeader(model) {
-		baseHdrs["anthropic-beta"] = claudeThinkingBetaHeader
-	}
-
 	hdrs := BuildRequestHeaders(baseHdrs, model, options)
 
-	// Retry loop with endpoint fallback.
-	// On 403/404, immediately try the next endpoint (no delay).
-	// On 429/5xx, retry with backoff on the same or next endpoint.
 	var resp *http.Response
 	var lastErr error
 	var requestURL string
 	endpointIndex := 0
 
-	for attempt := 0; attempt <= geminiCLIMaxRetries; attempt++ {
+	for attempt := 0; attempt <= declGoogleMaxRetries; attempt++ {
 		if ctx.Err() != nil {
 			return fmt.Errorf("request was aborted")
 		}
-
 		requestURL = endpoints[endpointIndex] + "/v1internal:streamGenerateContent?alt=sse"
-
 		req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyJSON))
 		if err != nil {
 			return fmt.Errorf("creating request: %w", err)
@@ -495,45 +667,36 @@ func streamGeminiCLI(
 		for k, v := range hdrs {
 			req.Header.Set(k, v)
 		}
-
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("network error: %v", err)
-			if attempt < geminiCLIMaxRetries {
-				delay := geminiCLIBaseDelayMs * int(math.Pow(2, float64(attempt)))
+			if attempt < declGoogleMaxRetries {
+				delay := declGoogleBaseDelayMs * int(math.Pow(2, float64(attempt)))
 				sleepCtx(ctx, time.Duration(delay)*time.Millisecond)
 				continue
 			}
 			return lastErr
 		}
-
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			break
 		}
-
 		errorBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		errorText := string(errorBody)
-
-		// On 403/404, cascade to the next endpoint immediately (no delay)
 		if (resp.StatusCode == 403 || resp.StatusCode == 404) && endpointIndex < len(endpoints)-1 {
 			endpointIndex++
 			continue
 		}
-
-		if attempt < geminiCLIMaxRetries && isRetryableError(resp.StatusCode, errorText) {
-			// Advance endpoint if possible
+		if attempt < declGoogleMaxRetries && isRetryableError(resp.StatusCode, errorText) {
 			if endpointIndex < len(endpoints)-1 {
 				endpointIndex++
 			}
-
 			serverDelay := extractRetryDelay(errorText, resp.Header)
 			delayMs := serverDelay
 			if delayMs == 0 {
-				delayMs = geminiCLIBaseDelayMs * int(math.Pow(2, float64(attempt)))
+				delayMs = declGoogleBaseDelayMs * int(math.Pow(2, float64(attempt)))
 			}
-
-			maxDelayMs := geminiCLIDefaultMaxDelayMs
+			maxDelayMs := declGoogleDefaultMaxDelayMs
 			if options != nil && options.MaxRetryDelayMs != nil {
 				maxDelayMs = *options.MaxRetryDelayMs
 			}
@@ -541,11 +704,9 @@ func streamGeminiCLI(
 				return fmt.Errorf("server requested %ds retry delay (max: %ds). %s",
 					serverDelay/1000, maxDelayMs/1000, extractErrorMessage(errorText))
 			}
-
 			sleepCtx(ctx, time.Duration(delayMs)*time.Millisecond)
 			continue
 		}
-
 		return fmt.Errorf("Cloud Code Assist API error (%d): %s", resp.StatusCode, extractErrorMessage(errorText))
 	}
 
@@ -557,16 +718,13 @@ func streamGeminiCLI(
 	}
 	defer resp.Body.Close()
 
-	// Empty stream retry loop
-	for emptyAttempt := 0; emptyAttempt <= geminiCLIMaxEmptyRetries; emptyAttempt++ {
+	for emptyAttempt := 0; emptyAttempt <= declGoogleMaxEmptyRetries; emptyAttempt++ {
 		if ctx.Err() != nil {
 			return fmt.Errorf("request was aborted")
 		}
-
 		if emptyAttempt > 0 {
-			delay := geminiCLIEmptyBaseDelayMs * int(math.Pow(2, float64(emptyAttempt-1)))
+			delay := declGoogleEmptyBaseDelayMs * int(math.Pow(2, float64(emptyAttempt-1)))
 			sleepCtx(ctx, time.Duration(delay)*time.Millisecond)
-
 			req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyJSON))
 			if err != nil {
 				return fmt.Errorf("creating retry request: %w", err)
@@ -585,16 +743,13 @@ func streamGeminiCLI(
 			}
 			resp.Body.Close()
 			resp = retryResp
-
-			// Reset output for retry
 			output.Content = nil
 			output.Usage = ai.Usage{}
 			output.StopReason = ai.StopReasonStop
 			output.ErrorMessage = ""
 			output.Timestamp = time.Now().UnixMilli()
 		}
-
-		hasContent, err := parseGeminiCLIStream(ctx, resp.Body, model, output, stream)
+		hasContent, err := parseDeclGoogleStream(ctx, resp.Body, model, output, stream)
 		if err != nil {
 			return err
 		}
@@ -605,7 +760,6 @@ func streamGeminiCLI(
 			return nil
 		}
 	}
-
 	return fmt.Errorf("Cloud Code Assist API returned an empty response")
 }
 
@@ -616,9 +770,7 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	}
 }
 
-// parseGeminiCLIStream parses SSE stream from Cloud Code Assist.
-// Returns true if content was received, false for empty streams.
-func parseGeminiCLIStream(
+func parseDeclGoogleStream(
 	ctx context.Context,
 	body io.Reader,
 	model *ai.Model,
@@ -632,14 +784,11 @@ func parseGeminiCLIStream(
 
 	hasContent := false
 	started := false
-	var currentBlockType string // "text" or "thinking"
+	var currentBlockType string
 
 	ensureStarted := func() {
 		if !started {
-			stream.Push(ai.AssistantMessageEvent{
-				Type:    ai.EventStart,
-				Partial: output,
-			})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: output})
 			started = true
 		}
 	}
@@ -649,7 +798,6 @@ func parseGeminiCLIStream(
 		if ctx.Err() != nil {
 			return hasContent, fmt.Errorf("request was aborted")
 		}
-
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
@@ -657,17 +805,14 @@ func parseGeminiCLIStream(
 		if jsonStr == "" {
 			continue
 		}
-
 		var chunk cloudCodeAssistChunk
 		if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
 			continue
 		}
-
 		resp := chunk.Response
 		if resp == nil {
 			continue
 		}
-
 		if len(resp.Candidates) > 0 {
 			candidate := resp.Candidates[0]
 			if candidate.Content != nil && len(candidate.Content.Parts) > 0 {
@@ -675,112 +820,61 @@ func parseGeminiCLIStream(
 					if part.Text != "" || (part.Thought != nil && *part.Thought) {
 						hasContent = true
 						isThinking := part.Thought != nil && *part.Thought
-
-						// Check if we need to switch block type
 						newType := "text"
 						if isThinking {
 							newType = "thinking"
 						}
-
 						if currentBlockType != newType {
-							// End previous block
 							if currentBlockType != "" {
 								idx := len(output.Content) - 1
 								if currentBlockType == "text" {
-									stream.Push(ai.AssistantMessageEvent{
-										Type:         ai.EventTextEnd,
-										ContentIndex: idx,
-										Content:      output.Content[idx].Text.Text,
-										Partial:      output,
-									})
+									stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextEnd, ContentIndex: idx, Content: output.Content[idx].Text.Text, Partial: output})
 								} else {
-									stream.Push(ai.AssistantMessageEvent{
-										Type:         ai.EventThinkingEnd,
-										ContentIndex: idx,
-										Content:      output.Content[idx].Thinking.Thinking,
-										Partial:      output,
-									})
+									stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: idx, Content: output.Content[idx].Thinking.Thinking, Partial: output})
 								}
 							}
-
-							// Start new block
 							idx := len(output.Content)
 							if isThinking {
 								output.Content = append(output.Content, ai.NewThinkingContent(""))
 								ensureStarted()
-								stream.Push(ai.AssistantMessageEvent{
-									Type:         ai.EventThinkingStart,
-									ContentIndex: idx,
-									Partial:      output,
-								})
+								stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingStart, ContentIndex: idx, Partial: output})
 							} else {
 								output.Content = append(output.Content, ai.NewTextContent(""))
 								ensureStarted()
-								stream.Push(ai.AssistantMessageEvent{
-									Type:         ai.EventTextStart,
-									ContentIndex: idx,
-									Partial:      output,
-								})
+								stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: idx, Partial: output})
 							}
 							currentBlockType = newType
 						}
-
 						idx := len(output.Content) - 1
 						if isThinking {
 							c := output.Content[idx]
 							c.Thinking.Thinking += part.Text
 							if part.ThoughtSignature != "" {
-								c.Thinking.ThinkingSignature = RetainThoughtSignature(
-									c.Thinking.ThinkingSignature, part.ThoughtSignature)
+								c.Thinking.ThinkingSignature = RetainThoughtSignature(c.Thinking.ThinkingSignature, part.ThoughtSignature)
 							}
 							output.Content[idx] = c
-							stream.Push(ai.AssistantMessageEvent{
-								Type:         ai.EventThinkingDelta,
-								ContentIndex: idx,
-								Delta:        part.Text,
-								Partial:      output,
-							})
+							stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingDelta, ContentIndex: idx, Delta: part.Text, Partial: output})
 						} else {
 							c := output.Content[idx]
 							c.Text.Text += part.Text
 							if part.ThoughtSignature != "" {
-								c.Text.TextSignature = RetainThoughtSignature(
-									c.Text.TextSignature, part.ThoughtSignature)
+								c.Text.TextSignature = RetainThoughtSignature(c.Text.TextSignature, part.ThoughtSignature)
 							}
 							output.Content[idx] = c
-							stream.Push(ai.AssistantMessageEvent{
-								Type:         ai.EventTextDelta,
-								ContentIndex: idx,
-								Delta:        part.Text,
-								Partial:      output,
-							})
+							stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: idx, Delta: part.Text, Partial: output})
 						}
 					}
-
 					if part.FunctionCall != nil {
 						hasContent = true
-						// End current text/thinking block
 						if currentBlockType != "" {
 							idx := len(output.Content) - 1
 							if currentBlockType == "text" {
-								stream.Push(ai.AssistantMessageEvent{
-									Type:         ai.EventTextEnd,
-									ContentIndex: idx,
-									Content:      output.Content[idx].Text.Text,
-									Partial:      output,
-								})
+								stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextEnd, ContentIndex: idx, Content: output.Content[idx].Text.Text, Partial: output})
 							} else {
-								stream.Push(ai.AssistantMessageEvent{
-									Type:         ai.EventThinkingEnd,
-									ContentIndex: idx,
-									Content:      output.Content[idx].Thinking.Thinking,
-									Partial:      output,
-								})
+								stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: idx, Content: output.Content[idx].Thinking.Thinking, Partial: output})
 							}
 							currentBlockType = ""
 						}
-
-						// Generate unique tool call ID
 						providedID := part.FunctionCall.ID
 						needsNewID := providedID == ""
 						if !needsNewID {
@@ -793,10 +887,8 @@ func parseGeminiCLIStream(
 						}
 						toolCallID := providedID
 						if needsNewID {
-							toolCallID = fmt.Sprintf("%s_%d_%d",
-								part.FunctionCall.Name, time.Now().UnixMilli(), toolCallCounter.Add(1))
+							toolCallID = fmt.Sprintf("%s_%d_%d", part.FunctionCall.Name, time.Now().UnixMilli(), toolCallCounter.Add(1))
 						}
-
 						tc := ai.NewToolCallContent(toolCallID, part.FunctionCall.Name, part.FunctionCall.Args)
 						if part.ThoughtSignature != "" {
 							tc.ToolCall.ThoughtSignature = part.ThoughtSignature
@@ -804,29 +896,13 @@ func parseGeminiCLIStream(
 						output.Content = append(output.Content, tc)
 						idx := len(output.Content) - 1
 						ensureStarted()
-
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventToolcallStart,
-							ContentIndex: idx,
-							Partial:      output,
-						})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: idx, Partial: output})
 						argsJSON, _ := json.Marshal(tc.ToolCall.Arguments)
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventToolcallDelta,
-							ContentIndex: idx,
-							Delta:        string(argsJSON),
-							Partial:      output,
-						})
-						stream.Push(ai.AssistantMessageEvent{
-							Type:         ai.EventToolcallEnd,
-							ContentIndex: idx,
-							ToolCall:     tc.ToolCall,
-							Partial:      output,
-						})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallDelta, ContentIndex: idx, Delta: string(argsJSON), Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallEnd, ContentIndex: idx, ToolCall: tc.ToolCall, Partial: output})
 					}
 				}
 			}
-
 			if candidate.FinishReason != "" {
 				output.StopReason = MapGoogleStopReason(candidate.FinishReason)
 				for _, b := range output.Content {
@@ -837,7 +913,6 @@ func parseGeminiCLIStream(
 				}
 			}
 		}
-
 		if resp.UsageMetadata != nil {
 			u := resp.UsageMetadata
 			cacheRead := u.CachedContentTokenCount
@@ -852,38 +927,36 @@ func parseGeminiCLIStream(
 		}
 	}
 
-	// End last block
 	if currentBlockType != "" {
 		idx := len(output.Content) - 1
 		if currentBlockType == "text" {
-			stream.Push(ai.AssistantMessageEvent{
-				Type:         ai.EventTextEnd,
-				ContentIndex: idx,
-				Content:      output.Content[idx].Text.Text,
-				Partial:      output,
-			})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextEnd, ContentIndex: idx, Content: output.Content[idx].Text.Text, Partial: output})
 		} else {
-			stream.Push(ai.AssistantMessageEvent{
-				Type:         ai.EventThinkingEnd,
-				ContentIndex: idx,
-				Content:      output.Content[idx].Thinking.Thinking,
-				Partial:      output,
-			})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventThinkingEnd, ContentIndex: idx, Content: output.Content[idx].Thinking.Thinking, Partial: output})
 		}
 	}
-
 	return hasContent, nil
 }
 
-// --- StreamSimple wrapper ---
+// --- StreamSimple ---
 
-// StreamSimpleGoogleGeminiCLI wraps StreamGoogleGeminiCLI with simple options.
-func StreamSimpleGoogleGeminiCLI(
+// StreamSimpleDeclGoogle adapts SimpleStreamOptions for the generic adapter.
+// Uses the registered config's ReasoningHeaderPrefix to pick header keys.
+func StreamSimpleDeclGoogle(
 	ctx context.Context,
 	model *ai.Model,
 	prompt ai.Context,
 	options *ai.SimpleStreamOptions,
 ) *ai.AssistantMessageEventStream {
+	cfg := getDeclGoogleConfig(model.Api)
+	prefix := ""
+	if cfg != nil {
+		prefix = cfg.ReasoningHeaderPrefix
+	}
+	if prefix == "" {
+		prefix = "x-gemini-thinking-"
+	}
+
 	apiKey := ""
 	if options != nil {
 		apiKey = options.ApiKey
@@ -910,40 +983,33 @@ func StreamSimpleGoogleGeminiCLI(
 
 	base := BuildBaseOptions(model, options, apiKey)
 	if options == nil || options.Reasoning == "" {
-		base.Headers = mergeHeaders(base.Headers, map[string]string{
-			"x-gemini-thinking-enabled": "false",
-		})
-		return StreamGoogleGeminiCLI(ctx, model, prompt, base)
+		base.Headers = mergeHeaders(base.Headers, map[string]string{prefix + "enabled": "false"})
+		return StreamDeclGoogle(ctx, model, prompt, base)
 	}
-
 	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
-		base.Headers = mergeHeaders(base.Headers, map[string]string{
-			"x-gemini-thinking-disabled": "true",
-		})
-		return StreamGoogleGeminiCLI(ctx, model, prompt, base)
+		base.Headers = mergeHeaders(base.Headers, map[string]string{prefix + "disabled": "true"})
+		return StreamDeclGoogle(ctx, model, prompt, base)
 	}
-
 	effort := ClampReasoning(options.Reasoning)
 	if isGemini3ModelID(model.ID) {
-		level := getGeminiCLIThinkingLevel(effort, model.ID)
+		level := getDeclGoogleThinkingLevel(effort, model.ID)
 		base.Headers = mergeHeaders(base.Headers, map[string]string{
-			"x-gemini-thinking-enabled": "true",
-			"x-gemini-thinking-level":   string(level),
+			prefix + "enabled": "true",
+			prefix + "level":   string(level),
 		})
-		return StreamGoogleGeminiCLI(ctx, model, prompt, base)
+		return StreamDeclGoogle(ctx, model, prompt, base)
 	}
-
 	maxTokens, thinkingBudget := AdjustMaxTokensForThinking(
 		derefInt(base.MaxTokens, 0), model.MaxTokens, effort, options.ThinkingBudgets)
 	base.MaxTokens = &maxTokens
 	base.Headers = mergeHeaders(base.Headers, map[string]string{
-		"x-gemini-thinking-enabled": "true",
-		"x-gemini-thinking-budget":  strconv.Itoa(thinkingBudget),
+		prefix + "enabled": "true",
+		prefix + "budget":  strconv.Itoa(thinkingBudget),
 	})
-	return StreamGoogleGeminiCLI(ctx, model, prompt, base)
+	return StreamDeclGoogle(ctx, model, prompt, base)
 }
 
-func getGeminiCLIThinkingLevel(effort ai.ThinkingLevel, modelID string) GoogleThinkingLevel {
+func getDeclGoogleThinkingLevel(effort ai.ThinkingLevel, modelID string) GoogleThinkingLevel {
 	if isGemini3ProModel(modelID) {
 		switch effort {
 		case ai.ThinkingMinimal, ai.ThinkingLow:
@@ -983,9 +1049,7 @@ func derefInt(p *int, def int) int {
 	return def
 }
 
-// getGeminiCLIDisabledThinkingConfig returns the thinking config to disable thinking.
-// Mirrors the logic in getDisabledThinkingConfig but works with model ID strings.
-func getGeminiCLIDisabledThinkingConfig(modelID string) map[string]any {
+func getDeclGoogleDisabledThinkingConfig(modelID string) map[string]any {
 	if isGemini3ProModel(modelID) {
 		return map[string]any{"thinkingLevel": "LOW"}
 	}
@@ -993,20 +1057,4 @@ func getGeminiCLIDisabledThinkingConfig(modelID string) map[string]any {
 		return map[string]any{"thinkingLevel": "MINIMAL"}
 	}
 	return map[string]any{"thinkingBudget": 0}
-}
-
-// --- Registration ---
-
-// RegisterGoogleGeminiCLI registers the google-gemini-cli and google-antigravity providers.
-func RegisterGoogleGeminiCLI(r *ai.Registry) {
-	r.RegisterApiProvider(&ai.ApiProvider{
-		Api:          "google-gemini-cli",
-		Stream:       StreamGoogleGeminiCLI,
-		StreamSimple: StreamSimpleGoogleGeminiCLI,
-	}, "builtin")
-	r.RegisterApiProvider(&ai.ApiProvider{
-		Api:          "google-antigravity",
-		Stream:       StreamGoogleGeminiCLI,
-		StreamSimple: StreamSimpleGoogleGeminiCLI,
-	}, "builtin")
 }

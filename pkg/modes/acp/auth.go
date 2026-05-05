@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
@@ -16,15 +17,13 @@ import (
 	"github.com/kfet/fir/pkg/session"
 )
 
-// providerKeyLinks maps provider IDs to URLs where users can obtain API keys.
-var providerKeyLinks = map[string]string{
-	"openai":    "https://platform.openai.com/api-keys",
-	"anthropic": "https://console.anthropic.com/settings/keys",
-	"google":    "https://aistudio.google.com/apikey",
-	"groq":      "https://console.groq.com/keys",
-	"xai":       "https://console.x.ai/",
-	"mistral":   "https://console.mistral.ai/api-keys",
-	"cerebras":  "https://cloud.cerebras.ai/",
+// providerKeyLink returns the URL where users obtain an API key for the given
+// provider, or "" if not known.  Backed by the ai.RegisteredProvider registry.
+func providerKeyLink(pid string) string {
+	if r := ai.GetProviderRecord(ai.Provider(pid)); r != nil {
+		return r.KeyLink
+	}
+	return ""
 }
 
 // buildAuthMethods constructs the list of ExtendedAuthMethod for the initialize response.
@@ -57,7 +56,7 @@ func buildAuthMethods(authStorage *auth.AuthStorage, modelRegistry *models.Model
 					Type:        AuthMethodTypeEnvVar,
 					VarName:     envVar,
 				}
-				if link, ok := providerKeyLinks[pid]; ok {
+				if link := providerKeyLink(pid); link != "" {
 					m.Link = link
 				}
 				methods = append(methods, m)
@@ -116,33 +115,16 @@ func collectProviders(modelRegistry *models.ModelRegistry) []string {
 	return providers
 }
 
-// providerDisplayNames maps provider IDs to human-readable names.
-var providerDisplayNames = map[string]string{
-	"openai":                 "OpenAI",
-	"anthropic":              "Anthropic",
-	"google":                 "Google",
-	"groq":                   "Groq",
-	"xai":                    "xAI",
-	"cerebras":               "Cerebras",
-	"openrouter":             "OpenRouter",
-	"mistral":                "Mistral",
-	"github-copilot":         "GitHub Copilot",
-	"azure-openai-responses": "Azure OpenAI",
-	"vercel-ai-gateway":      "Vercel AI Gateway",
-	"zai":                    "ZAI",
-	"minimax":                "MiniMax",
-	"minimax-cn":             "MiniMax CN",
-	"huggingface":            "Hugging Face",
-	"amazon-bedrock":         "Amazon Bedrock",
-	"google-vertex":          "Google Vertex",
-}
+// providerDisplayNames is now sourced from the ai.RegisteredProvider
+// registry; see formatProviderName below.
 
 // formatProviderName converts a provider ID like "openai" to "OpenAI" for display.
+// Display names come from the ai.RegisteredProvider registry; fallback
+// capitalises each hyphen-separated segment.
 func formatProviderName(pid string) string {
-	if name, ok := providerDisplayNames[pid]; ok {
-		return name
+	if r := ai.GetProviderRecord(ai.Provider(pid)); r != nil && r.DisplayName != "" {
+		return r.DisplayName
 	}
-	// Fallback: capitalize first letter of each segment.
 	parts := strings.Split(pid, "-")
 	for i, p := range parts {
 		if len(p) > 0 {

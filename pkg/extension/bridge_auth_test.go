@@ -21,8 +21,6 @@ func TestValidateAuthProviderID(t *testing.T) {
 		// Built-in collisions
 		{"anthropic", true},
 		{"github-copilot", true},
-		{"google-gemini-cli", true},
-		{"google-antigravity", true},
 		{"openai-codex", true},
 	}
 	for _, tt := range tests {

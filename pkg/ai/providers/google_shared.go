@@ -33,7 +33,7 @@ func supportsMultimodalFunctionResponse(modelID string) bool {
 	if v >= 0 {
 		return v >= 3
 	}
-	// Non-Gemini models (e.g. Claude behind Antigravity) support it
+	// Non-Gemini models (e.g. Claude behind a Cloud-Code-Assist gateway) support it
 	return true
 }
 
@@ -237,7 +237,7 @@ func convertAssistantParts(model *ai.Model, a *ai.AssistantMessage) []GooglePart
 
 			// Gemini 3 requires thoughtSignature on all function calls when thinking mode is enabled.
 			// Use the skip_thought_signature_validator sentinel for unsigned function calls
-			// (e.g. replayed from providers without thought signatures like Claude via Antigravity).
+			// (e.g. replayed from providers without thought signatures like Claude behind a Cloud-Code-Assist gateway).
 			isGemini3 := strings.Contains(strings.ToLower(model.ID), "gemini-3")
 			effectiveSig := sig
 			if effectiveSig == "" && isGemini3 {
@@ -285,8 +285,8 @@ func convertToolResultParts(model *ai.Model, tr *ai.ToolResultMessage, contents 
 	}
 
 	// Gemini 3+ models support multimodal function responses with images nested inside
-	// functionResponse.parts. Claude and other non-Gemini models behind Cloud Code Assist /
-	// Antigravity also accept this shape. Gemini < 3 still needs a separate user image turn.
+	// functionResponse.parts. Claude and other non-Gemini models behind Cloud-Code-Assist
+	// gateways also accept this shape. Gemini < 3 still needs a separate user image turn.
 	supportsMultimodal := supportsMultimodalFunctionResponse(model.ID)
 
 	respKey := "output"

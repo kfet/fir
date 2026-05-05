@@ -53,6 +53,16 @@ type Bridge struct {
 	authProvidersMu sync.RWMutex
 	authProviders   []*extAuthProvider
 
+	// providers holds the hosted-provider registrations contributed by
+	// this extension at handshake.
+	providersMu sync.RWMutex
+	providers   []*extProviderRegistration
+	apis        []*extApiRegistration
+
+	// activeStreams maps an in-flight stream ID to the destination
+	// AssistantMessageEventStream the bridge is forwarding events into.
+	activeStreams sync.Map // string → *ai.AssistantMessageEventStream
+
 	// lastActivity tracks the last time the extension sent us any message
 	// (request or response). Used by CallHook to extend timeouts when the
 	// extension is still alive but busy (e.g. aside making call_tool calls).
@@ -409,6 +419,8 @@ func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
 			_ = json.Unmarshal(*n.Params, &p)
 		}
 		b.reportProgress(p.Message, api)
+	case "provider.stream.event":
+		b.handleProviderStreamEvent(n.Params)
 	}
 }
 

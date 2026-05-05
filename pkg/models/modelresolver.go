@@ -10,38 +10,27 @@ import (
 	"github.com/kfet/fir/pkg/config"
 )
 
-// DefaultModelPerProvider maps known providers to their default model IDs.
-var DefaultModelPerProvider = map[ai.Provider]string{
-	"amazon-bedrock":         "us.anthropic.claude-opus-4-6-v1",
-	"anthropic":              "claude-opus-4-7",
-	"openai":                 "gpt-5.4",
-	"azure-openai-responses": "gpt-5.4",
-	"openai-codex":           "gpt-5.5",
-	"deepseek":               "deepseek-v4-pro",
-	"google":                 "gemini-3.1-pro-preview",
-	"google-gemini-cli":      "gemini-3.1-pro-preview",
-	"google-antigravity":     "gemini-3.1-pro-high",
-	"google-vertex":          "gemini-3.1-pro-preview",
-	"github-copilot":         "gpt-5.4",
-	"openrouter":             "moonshotai/kimi-k2.6",
-	"vercel-ai-gateway":      "zai/glm-5.1",
-	"xai":                    "grok-4.20-0309-reasoning",
-	"groq":                   "openai/gpt-oss-120b",
-	"cerebras":               "zai-glm-4.7",
-	"zai":                    "glm-5.1",
-	"mistral":                "devstral-medium-latest",
-	"minimax":                "MiniMax-M2.7",
-	"minimax-cn":             "MiniMax-M2.7",
-	"moonshotai":             "kimi-k2.6",
-	"moonshotai-cn":          "kimi-k2.6",
-	"fireworks":              "accounts/fireworks/models/kimi-k2p6",
-	"huggingface":            "moonshotai/Kimi-K2.6",
-	"opencode":               "kimi-k2.6",
-	"opencode-go":            "kimi-k2.6",
-	"kimi-coding":            "kimi-for-coding",
-	"cloudflare-workers-ai":  "@cf/moonshotai/kimi-k2.6",
-	"cloudflare-ai-gateway":  "workers-ai/@cf/moonshotai/kimi-k2.6",
-	"xiaomi":                 "mimo-v2.5-pro",
+// DefaultModelPerProvider returns the default model ID for a provider, or ""
+// if the provider isn't registered (or has no default).  Backed by the
+// pkg/ai.RegisteredProvider registry; replaces a previous static map.
+func DefaultModelPerProvider(p ai.Provider) string {
+	r := ai.GetProviderRecord(p)
+	if r == nil {
+		return ""
+	}
+	return r.DefaultModelID
+}
+
+// orderedProviders returns provider IDs in registry-defined preference order
+// (lower Priority first, then ID).  Replaces the previous knownProviderOrder
+// slice.
+func orderedProviders() []ai.Provider {
+	records := ai.GetRegisteredProviders()
+	out := make([]ai.Provider, 0, len(records))
+	for _, r := range records {
+		out = append(out, r.ID)
+	}
+	return out
 }
 
 // ParsedModelResult is the result of parsing a model pattern.
@@ -353,19 +342,18 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 	if provider != "" {
 		fallbackModel := buildFallbackModel(provider, pattern, allModels)
 		if fallbackModel != nil {
-			// Bedrock ARNs and inference-profile IDs are first-class identifiers
-			// — pass them through silently rather than warning.
-			if provider == "amazon-bedrock" && isBedrockPassthroughID(pattern) {
+			rec := ai.GetProviderRecord(ai.Provider(provider))
+			// Provider claims this ID shape (e.g. bedrock ARN inference
+			// profiles) — pass it through silently rather than warning.
+			if rec != nil && providerClaimsModelID(rec, pattern) {
 				return ResolveCliModelResult{Model: fallbackModel}
 			}
-			// Poe exposes its full bot catalogue in models_generated.go. A
-			// missing id almost always means a typo — Poe responds to unknown
-			// bots with an opaque 500. Refuse the fallback and surface a clear
-			// error instead.
-			if provider == "poe" {
+			// Provider refuses fuzzy matching (e.g. Poe's bot catalogue is
+			// exhaustive — an unknown id almost always means a typo).
+			if rec != nil && rec.RefuseFuzzyMatch {
 				return ResolveCliModelResult{
 					Warning: res.Warning,
-					Error:   fmt.Sprintf("Model %q not found for provider %q. Use --list-models to see available Poe bots.", pattern, provider),
+					Error:   fmt.Sprintf("Model %q not found for provider %q. Use --list-models to see available models.", pattern, provider),
 				}
 			}
 			fallbackWarning := fmt.Sprintf("Model %q not found for provider %q. Using custom model id.", pattern, provider)
@@ -389,10 +377,19 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 	}
 }
 
-// isBedrockPassthroughID returns true when the given model id looks like a
-// Bedrock ARN that the user wants to pass through verbatim.
-func isBedrockPassthroughID(id string) bool {
-	return strings.HasPrefix(id, "arn:aws:bedrock:")
+// providerClaimsModelID reports whether any of the registered ClaimsModelIDGlobs
+// match the given model id.  Replaces the previous inline isBedrockPassthroughID
+// special case.
+func providerClaimsModelID(rec *ai.RegisteredProvider, modelID string) bool {
+	if rec == nil {
+		return false
+	}
+	for _, g := range rec.ClaimsModelIDGlobs {
+		if globMatch(modelID, g) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildFallbackModel creates a model with a custom ID when the exact model
@@ -409,7 +406,7 @@ func buildFallbackModel(provider, modelID string, availableModels []*ai.Model) *
 		return nil
 	}
 
-	defaultID := DefaultModelPerProvider[ai.Provider(provider)]
+	defaultID := DefaultModelPerProvider(ai.Provider(provider))
 	var baseModel *ai.Model
 	if defaultID != "" {
 		for _, m := range providerModels {
@@ -463,8 +460,8 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 	available := opts.ModelRegistry.GetAvailable()
 	if len(available) > 0 {
 		// Try default model per provider
-		for _, prov := range knownProviderOrder {
-			defaultID := DefaultModelPerProvider[prov]
+		for _, prov := range orderedProviders() {
+			defaultID := DefaultModelPerProvider(prov)
 			if defaultID == "" {
 				continue
 			}
@@ -515,8 +512,8 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 	// Try any available model
 	available := registry.GetAvailable()
 	if len(available) > 0 {
-		for _, prov := range knownProviderOrder {
-			defaultID := DefaultModelPerProvider[prov]
+		for _, prov := range orderedProviders() {
+			defaultID := DefaultModelPerProvider(prov)
 			for _, m := range available {
 				if m.Provider == prov && m.ID == defaultID {
 					msg := fmt.Sprintf("Could not restore model %s/%s (%s). Using %s/%s.",
@@ -536,24 +533,8 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 
 // --- helpers ---
 
-// KnownProviderOrder is the canonical order to prefer providers in
-// (defaults to anthropic > openai > google > ...). Exported so other
-// packages (e.g. the ACP modelstate builder) can group models by
-// provider in the same canonical order.
-var KnownProviderOrder = []ai.Provider{
-	"anthropic", "openai", "google", "amazon-bedrock",
-	"azure-openai-responses", "openai-codex",
-	"google-gemini-cli", "google-antigravity", "google-vertex",
-	"github-copilot", "openrouter", "vercel-ai-gateway",
-	"xai", "groq", "cerebras", "zai", "mistral",
-	"minimax", "minimax-cn", "moonshotai", "moonshotai-cn",
-	"huggingface", "opencode", "kimi-coding",
-	"cloudflare-workers-ai", "cloudflare-ai-gateway", "xiaomi",
-}
-
-// knownProviderOrder is kept as an alias for the historical
-// (unexported) name used by callers in this package.
-var knownProviderOrder = KnownProviderOrder
+// knownProviderOrder is now derived from the ai.RegisteredProvider registry
+// at call time; see orderedProviders() above.
 
 // globMatch is a simple glob matcher supporting * and ?.
 func globMatch(text, pattern string) bool {

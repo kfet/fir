@@ -891,7 +891,270 @@ extension is expected to wind down (or terminate via `os._exit`).
 
 ---
 
-## Discovery & Trust
+## Hosted Providers
+
+Extensions can ship hosted AI providers — fir registers a synthetic
+``ext:<id>`` Api in its provider registry and proxies all streaming
+completions, model listing, and (optional) custom-id resolution back to
+the extension over JSON-RPC. The provider appears alongside built-ins
+in `--list-models`, the model picker, env-key resolution, etc.
+
+A builtin extension can also ship a *wire-protocol Api* alongside its
+provider record, so the entire provider — endpoints, headers, request
+envelope, system instructions, model catalogue, OAuth — lives in
+extension code with no provider-specific Go in core. See § Wire-protocol
+Api specs below.
+
+### Init declaration
+
+Providers are declared in the `init` response under the optional
+`providers` array. Each entry mirrors Go's `pkg/extension.ProviderSpec`:
+
+```json
+{
+  "providers": [
+    {
+      "id": "echo",
+      "api": "",
+      "display_name": "Echo",
+      "short_name": "Echo",
+      "priority": 0,
+      "default_model_id": "echo-1",
+      "key_link": "https://example.com/keys",
+      "env_keys": {
+        "primary": "ECHO_API_KEY",
+        "fallbacks": [],
+        "authenticated": false
+      },
+      "oauth_provider_id": "",
+      "claims_model_id_globs": [],
+      "refuse_fuzzy_match": false,
+      "supports_live_list": true,
+      "supports_custom_id": false,
+      "models": [
+        {
+          "id": "echo-1",
+          "name": "Echo 1",
+          "context_window": 10000,
+          "max_tokens": 4096,
+          "input": ["text"],
+          "cost_input": 0.0, "cost_output": 0.0,
+          "cost_cache_read": 0.0, "cost_cache_write": 0.0,
+          "reasoning": false,
+          "compaction": false,
+          "server_tools": [],
+          "reasoning_effort_values": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Provider IDs must match `[a-z][a-z0-9-]*` and may not collide with any
+built-in provider unless the extension is shipped under fir's `builtin`
+scope. Validation happens during the init handshake — invalid IDs
+abort startup.
+
+### Streaming dispatch modes
+
+The optional `api` field selects how streaming completions are
+dispatched:
+
+- **Empty (synthetic Api mode)** — fir allocates a synthetic
+  ``ext:<id>`` Api and routes streams back to the extension via
+  ``provider/stream/start``. Pair with a Python `@provider_stream`
+  handler that produces the events. Use when the wire protocol isn't
+  one fir already speaks.
+
+- **Set to a built-in wire protocol** (e.g. ``"openai-completions"``,
+  ``"anthropic-messages"``, ``"google-gemini-cli"``) — fir reuses its
+  in-process stream function for that Api. The extension ships only
+  metadata: display name, env keys, OAuth wiring, model catalogue. No
+  ``provider/stream/*`` handler is needed; ``provider/listModels`` and
+  ``provider/resolveCustomId`` still apply if declared. This is how
+  built-in providers can be migrated out of core into a builtin
+  extension while keeping wire-protocol code in Go.
+
+In both modes the extension owns the `RegisteredProvider` metadata
+record, the model entries it ships (added on top of any static
+`models_generated.go` entries with the same provider id), and any
+live-listing or custom-id resolution declared on the spec.
+
+### Outbound (fir → ext) methods
+
+#### `provider/stream/start` (Request)
+
+Asks the extension to start a streaming completion. The extension
+**must** ack this request promptly with `{}` (no payload); streamed
+content flows asynchronously via `provider.stream.event` notifications
+keyed by `stream_id`.
+
+Params:
+
+```json
+{
+  "provider_id": "echo",
+  "stream_id":   "8f3c1b…",
+  "model":       { /* full ai.Model record (camelCase) */ },
+  "prompt":      { /* ai.Context: systemPrompt, messages, tools */ },
+  "options":     { /* ai.StreamOptions: apiKey, temperature, … */ }
+}
+```
+
+Result: `{}` (any value is accepted; the host ignores it).
+
+The stream **must** terminate with exactly one `done` (success) or
+`error` (failure) event on the `provider.stream.event` channel.
+
+#### `provider/stream/cancel` (Request)
+
+Sent best-effort when the host's caller context is cancelled (user
+interrupt, session shutdown). The extension should set its per-stream
+cancel flag and respond `{"ok": true}`. After cancellation the
+extension still owes a terminal `done`/`error` event so the host can
+clean up; emitting `{"type":"error","reason":"aborted",…}` is the
+canonical choice.
+
+#### `provider/listModels` (Request)
+
+Sent only when the provider declared `supports_live_list: true`. Used by
+`--list-models` and the model picker to refresh the catalogue.
+
+Params: `{provider_id, base_url, api_key}` — extensions decide which
+fields are relevant.
+
+Result: `{"model_ids": ["echo-1", …]}`.
+
+#### `provider/resolveCustomId` *(reserved)*
+
+Wire shape: params `{provider_id, model_id}`, result a wire-form
+`ai.Model` dict (or `null` to fall back). Only sent when the provider
+declared `supports_custom_id: true`. Currently the host model resolver
+falls back to `buildFallbackModel` for unknown IDs and does NOT call
+this method — reserved for future wiring (e.g. ARN-style ID resolution).
+
+### Inbound (ext → fir) notifications
+
+#### `provider.stream.event` (Notification)
+
+Emits one streaming event for an in-flight stream. Sent fire-and-forget
+— no response is expected. Params:
+
+```json
+{
+  "stream_id": "8f3c1b…",
+  "event": { /* ai.AssistantMessageEvent (camelCase JSON) */ }
+}
+```
+
+The `event` payload mirrors `pkg/ai.AssistantMessageEvent`. Common
+shapes:
+
+* `{"type": "start",         "partial": <AssistantMessage>}`
+* `{"type": "text_start",    "contentIndex": 0}`
+* `{"type": "text_delta",    "contentIndex": 0, "delta": "hi"}`
+* `{"type": "text_end",      "contentIndex": 0, "content": "hi"}`
+* `{"type": "thinking_*",    …}` (mirrors `text_*`)
+* `{"type": "toolcall_start" | "toolcall_delta" | "toolcall_end", "toolCall": {…}}`
+* `{"type": "done",          "reason": "stop", "message": <AssistantMessage>}`
+* `{"type": "error",         "reason": "error" | "aborted", "error": <AssistantMessage>}`
+
+Notification params keys are snake_case (`stream_id`); the inner
+`event` object uses camelCase to match Go's `AssistantMessageEvent`
+JSON tags.
+
+### Per-turn vs persistent streams
+
+The host issues a fresh `provider/stream/start` for every agent turn —
+the agent loop runs each turn as a new `ai.Stream` call, executes any
+tool calls locally between turns, then issues another stream with the
+appended tool result. There is no `provider/stream/toolResult` method;
+extensions never need to handle inline tool results within a single
+stream.
+
+---
+
+## Wire-protocol Api specs
+
+Extensions can also ship the *wire-protocol Api* itself — the
+HTTP/SSE adapter that talks to a particular hosted service — when that
+adapter is data-driven (endpoints, headers, an envelope template). The
+host dispatches each spec to a kind handler keyed by `kind`, registered
+in core via `apikind.Register(<kind>, …)`.
+
+Currently supported kinds:
+
+| `kind` | Payload | Adapter |
+|---|---|---|
+| `decl-google` | `DeclGoogleApi` (endpoints, headers, conditional headers, envelope template, system-instruction prefix, reasoning-header prefix) | `pkg/ai/providers/StreamDeclGoogle` — Cloud Code Assist Gemini family |
+
+Builtin extensions like `gemini-cli-auth` and `antigravity-auth` ship
+their wire-protocol Api spec, hosted-provider record, and full model
+catalogue together — so `pkg/ai/providers` carries no provider-specific
+literals for those services.
+
+### Init declaration
+
+Apis are declared in the `init` response under the optional `apis`
+array, each entry ``{id, kind, payload}``:
+
+```json
+{
+  "apis": [
+    {
+      "id": "google-gemini-cli",
+      "kind": "decl-google",
+      "payload": {
+        "endpoints": ["https://cloudcode-pa.googleapis.com"],
+        "headers": {
+          "User-Agent": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+          "X-Goog-Api-Client": "gl-node/22.17.0"
+        },
+        "conditional_headers": [],
+        "envelope": "{\"project\":\"${creds.project_id}\",\"model\":\"${model.id}\",\"request\":\"$inner\",\"userAgent\":\"fir-coding-agent\",\"requestId\":\"${fn.rand_id(fir-coding-agent)}\"}",
+        "system_instruction_prefix": [],
+        "system_instruction_role": "",
+        "reasoning_header_prefix": "x-gemini-thinking-"
+      }
+    }
+  ]
+}
+```
+
+Api IDs must match `[a-z][a-z0-9-]*` and must not collide with a
+built-in Api (one whose `ApiProvider` was registered with sourceID
+``"builtin"``). Builtin extensions bypass that restriction.
+
+### Lifecycle
+
+* `init` ships the array. Validation runs at handshake — bad payloads
+  reject the extension.
+* On bridge start, fir calls `apikind.Get(kind).Register(id, payload,
+  "ext-api:<extName>")`. The handler is responsible for wiring whatever
+  state its wire-protocol family needs (e.g. registering a per-Api
+  config) AND registering an ``ai.ApiProvider`` under the supplied
+  source id.
+* On bridge teardown, fir calls `apikind.Get(kind).Unregister(id)` for
+  each spec, then `ai.DefaultRegistry.UnregisterApiProviders(
+  "ext-api:<extName>")` to drop all of this extension's Api adapters at
+  once.
+
+### Adding a new kind
+
+1. Define the JSON payload type and its `apikind.Handler` in the
+   provider package that owns the wire-protocol family.
+2. Register it from an `init()` function: `apikind.Register("<kind>",
+   …)`.
+3. Add an SDK helper to `fir_ext` (e.g. another `@dataclass class
+   FooApi:` with a `register_api()` overload).
+
+No changes are required in `pkg/extension` itself — the indirection
+through `apikind` keeps that layer kind-agnostic.
+
+---
+
+
 
 ### Search Order (highest → lowest precedence)
 

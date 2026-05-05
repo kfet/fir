@@ -51,6 +51,10 @@ def _load_demo() -> None:
     fir_ext._tool_handlers.clear()
     fir_ext._hook_handlers.clear()
     fir_ext._event_handlers.clear()
+    fir_ext._providers.clear()
+    fir_ext._provider_stream_handlers.clear()
+    fir_ext._provider_list_models_handlers.clear()
+    fir_ext._provider_resolve_custom_id_handlers.clear()
     _DEMO_EXT_NAME = None
 
     orig_run = fir_ext.run
@@ -915,13 +919,132 @@ class TestDemoCLIVerb(DemoTestCase):
         self.assertIn("line2", joined)
 
 
+# ---------------------------------------------------------------------------
+# Hosted provider — exercises the @provider_stream / register_provider surface
+# ---------------------------------------------------------------------------
+
+
+class TestDemoProvider(DemoTestCase):
+    def test_init_advertises_echo_provider(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        result = fake.send_init()
+        fake.stop()
+        providers = result.get("providers", [])
+        ids = [p.get("id") for p in providers]
+        self.assertIn("echo", ids, f"providers={providers}")
+        echo = next(p for p in providers if p["id"] == "echo")
+        self.assertEqual(echo.get("display_name"), "Echo")
+        self.assertEqual(echo.get("env_keys", {}).get("primary"), "ECHO_API_KEY")
+        model_ids = [m.get("id") for m in echo.get("models", [])]
+        self.assertEqual(model_ids, ["echo-1"])
+        self.assertTrue(echo.get("supports_live_list"))
+
+    def test_provider_list_models_returns_model_ids(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send({
+            "jsonrpc": "2.0", "id": 200,
+            "method": "provider/listModels",
+            "params": {"provider_id": "echo", "base_url": "", "api_key": ""},
+        })
+        resp = fake.wait_for_response(200)
+        fake.stop()
+        assert resp is not None
+        self.assertIsNone(resp.get("error"))
+        self.assertEqual(resp["result"], {"model_ids": ["echo-1"]})
+
+    def _collect_stream_events(
+        self, fake: "FakeFir", stream_id: str, timeout: float = 3.0
+    ) -> list[dict]:
+        deadline = time.monotonic() + timeout
+        events: list[dict] = []
+        seen_terminal = False
+        while time.monotonic() < deadline and not seen_terminal:
+            with fake._from_ext_lock:
+                for m in fake._from_ext:
+                    if m.get("method") != "provider.stream.event":
+                        continue
+                    p = m.get("params") or {}
+                    if p.get("stream_id") != stream_id:
+                        continue
+                    ev = p.get("event") or {}
+                    if ev not in events:
+                        events.append(ev)
+                        if ev.get("type") in ("done", "error"):
+                            seen_terminal = True
+                            break
+            if seen_terminal:
+                break
+            fake._from_ext_event.wait(timeout=0.05)
+            fake._from_ext_event.clear()
+        return events
+
+    def test_provider_stream_emits_ordered_events(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        stream_id = "stream-abc"
+        fake.send({
+            "jsonrpc": "2.0", "id": 201,
+            "method": "provider/stream/start",
+            "params": {
+                "provider_id": "echo",
+                "stream_id": stream_id,
+                "model": {"id": "echo-1", "api": "ext:echo", "provider": "echo"},
+                "prompt": {
+                    "messages": [
+                        {"role": "user", "content": "hello"},
+                    ],
+                },
+                "options": {},
+            },
+        })
+        # Ack returns immediately.
+        resp = fake.wait_for_response(201)
+        assert resp is not None
+        self.assertIsNone(resp.get("error"))
+        self.assertEqual(resp["result"], {})
+
+        events = self._collect_stream_events(fake, stream_id)
+        fake.stop()
+        types = [e.get("type") for e in events]
+        self.assertIn("text_start", types)
+        self.assertIn("text_delta", types)
+        self.assertIn("text_end", types)
+        self.assertEqual(types[-1], "done")
+        # Concatenated deltas should equal the echoed text.
+        deltas = "".join(e.get("delta", "") for e in events if e.get("type") == "text_delta")
+        self.assertEqual(deltas, "Echo: hello")
+        # Final done message should carry a usage block.
+        done = events[-1]
+        self.assertEqual(done.get("reason"), "stop")
+        msg = done.get("message") or {}
+        self.assertEqual(msg.get("provider"), "echo")
+        self.assertIn("usage", msg)
+
+    def test_provider_stream_cancel_acked(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send({
+            "jsonrpc": "2.0", "id": 202,
+            "method": "provider/stream/cancel",
+            "params": {"stream_id": "no-such-stream"},
+        })
+        resp = fake.wait_for_response(202)
+        fake.stop()
+        assert resp is not None
+        self.assertIsNone(resp.get("error"))
+        self.assertEqual(resp["result"], {"ok": True})
+
+
 if __name__ == "__main__":
     unittest.main()
 
 
-# ---------------------------------------------------------------------------
-# Typed surface — verify the TypedDicts re-exported from fir_ext are usable
-# ---------------------------------------------------------------------------
+
 
 
 class TestTypedSurface(unittest.TestCase):

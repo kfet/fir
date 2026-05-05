@@ -1,5 +1,11 @@
 // Ported from: packages/ai/src/env-api-keys.ts
 // Upstream hash: 036bde0a
+//
+// API-key sourcing from environment variables.  Most providers use a single
+// env var, declared in their RegisteredProvider record (pkg/ai).  A handful
+// have bespoke detection logic (multi-var combinations, filesystem checks)
+// that can't be expressed as data — those keep their inline switch arms
+// below.
 package envkeys
 
 import (
@@ -10,70 +16,18 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 )
 
-// providerEnvMap maps provider names to their API key environment variables.
-var providerEnvMap = map[string]string{
-	string(ai.ProviderOpenAI):               "OPENAI_API_KEY",
-	string(ai.ProviderAzureOpenAIResponses): "AZURE_OPENAI_API_KEY",
-	string(ai.ProviderGoogle):               "GEMINI_API_KEY",
-	string(ai.ProviderDeepseek):             "DEEPSEEK_API_KEY",
-	string(ai.ProviderFireworks):            "FIREWORKS_API_KEY",
-	string(ai.ProviderGroq):                 "GROQ_API_KEY",
-	string(ai.ProviderCerebras):             "CEREBRAS_API_KEY",
-	string(ai.ProviderXAI):                  "XAI_API_KEY",
-	string(ai.ProviderOpenRouter):           "OPENROUTER_API_KEY",
-	string(ai.ProviderVercelAIGateway):      "AI_GATEWAY_API_KEY",
-	string(ai.ProviderZAI):                  "ZAI_API_KEY",
-	string(ai.ProviderMistral):              "MISTRAL_API_KEY",
-	string(ai.ProviderMinimax):              "MINIMAX_API_KEY",
-	string(ai.ProviderMinimaxCN):            "MINIMAX_CN_API_KEY",
-	string(ai.ProviderMoonshotAI):           "MOONSHOT_API_KEY",
-	string(ai.ProviderMoonshotAICN):         "MOONSHOT_API_KEY",
-	string(ai.ProviderHuggingface):          "HF_TOKEN",
-	string(ai.ProviderOpenCode):             "OPENCODE_API_KEY",
-	string(ai.ProviderOpenCodeGo):           "OPENCODE_API_KEY",
-	string(ai.ProviderKimiCoding):           "KIMI_API_KEY",
-	string(ai.ProviderCloudflareWorkersAI):  "CLOUDFLARE_API_KEY",
-	string(ai.ProviderCloudflareAIGateway):  "CLOUDFLARE_API_KEY",
-	string(ai.ProviderXiaomi):               "XIAOMI_API_KEY",
-	string(ai.ProviderPoe):                  "POE_API_KEY",
-}
-
-// additionalAuthEnvVars lists env vars used by providers whose auth logic can't
-// be expressed as a single key→envvar mapping (multi-var checks, special cases).
-var additionalAuthEnvVars = []string{
-	// anthropic
-	"ANTHROPIC_API_KEY",
-	"ANTHROPIC_OAUTH_TOKEN",
-	// github-copilot
-	"COPILOT_GITHUB_TOKEN",
-	"GH_TOKEN",
-	"GITHUB_TOKEN",
-	// amazon-bedrock
-	"AWS_PROFILE",
-	"AWS_ACCESS_KEY_ID",
-	"AWS_SECRET_ACCESS_KEY",
-	"AWS_BEARER_TOKEN_BEDROCK",
-	"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-	"AWS_CONTAINER_CREDENTIALS_FULL_URI",
-	"AWS_WEB_IDENTITY_TOKEN_FILE",
-	// google-vertex
-	"GOOGLE_CLOUD_PROJECT",
-	"GCLOUD_PROJECT",
-	"GOOGLE_CLOUD_LOCATION",
-	"GOOGLE_APPLICATION_CREDENTIALS",
-	"GOOGLE_CLOUD_API_KEY",
-}
-
-// KnownApiKeyEnvVars returns the sorted list of all environment variable names
-// that GetEnvApiKey (or HasAuth) inspects to determine provider authentication.
-// Useful for tests that need a hermetic environment.
+// KnownApiKeyEnvVars returns the sorted list of all environment variable
+// names that GetEnvApiKey (or HasAuth) inspects to determine provider
+// authentication.  Useful for tests that need a hermetic environment.
 func KnownApiKeyEnvVars() []string {
-	seen := make(map[string]struct{}, len(providerEnvMap)+len(additionalAuthEnvVars))
-	for _, v := range providerEnvMap {
-		seen[v] = struct{}{}
-	}
-	for _, v := range additionalAuthEnvVars {
-		seen[v] = struct{}{}
+	seen := map[string]struct{}{}
+	for _, p := range ai.GetRegisteredProviders() {
+		if p.EnvKeys.Primary != "" {
+			seen[p.EnvKeys.Primary] = struct{}{}
+		}
+		for _, fb := range p.EnvKeys.Fallbacks {
+			seen[fb] = struct{}{}
+		}
 	}
 	keys := make([]string, 0, len(seen))
 	for k := range seen {
@@ -83,41 +37,32 @@ func KnownApiKeyEnvVars() []string {
 	return keys
 }
 
-// ProviderEnvVar returns the primary API key environment variable name for a provider.
-// Returns "" if the provider has no simple env var mapping (e.g., bedrock, vertex).
+// ProviderEnvVar returns the primary API key environment variable name for a
+// provider.  Returns "" if the provider has no simple env var mapping (e.g.
+// bedrock, vertex — both Authenticated).
 func ProviderEnvVar(provider string) string {
-	// Handle special cases with multiple env vars — return the primary one.
-	switch provider {
-	case string(ai.ProviderAnthropic):
-		return "ANTHROPIC_API_KEY"
-	case string(ai.ProviderGitHubCopilot):
-		return "COPILOT_GITHUB_TOKEN"
+	p := ai.GetProviderRecord(ai.Provider(provider))
+	if p == nil {
+		return ""
 	}
-	v, _ := providerEnvMap[provider]
-	return v
+	return p.EnvKeys.Primary
 }
 
-// GetEnvApiKey returns the API key for a provider from known environment variables.
-// Returns "" if no key is found.
+// GetEnvApiKey returns the API key for a provider from known environment
+// variables.  Returns "" if no key is found.  Bespoke detection logic for
+// providers with non-trivial auth shapes lives inline below; everything else
+// is a registry-driven Primary→Fallbacks lookup.
 func GetEnvApiKey(provider string) string {
 	switch provider {
-	case string(ai.ProviderGitHubCopilot):
-		if v := os.Getenv("COPILOT_GITHUB_TOKEN"); v != "" {
-			return v
-		}
-		if v := os.Getenv("GH_TOKEN"); v != "" {
-			return v
-		}
-		return os.Getenv("GITHUB_TOKEN")
-
 	case string(ai.ProviderAnthropic):
+		// OAuth-token fallback wins over the static API key.
 		if v := os.Getenv("ANTHROPIC_OAUTH_TOKEN"); v != "" {
 			return v
 		}
 		return os.Getenv("ANTHROPIC_API_KEY")
 
 	case string(ai.ProviderGoogleVertex):
-		// Explicit API key takes precedence over ADC
+		// Explicit API key takes precedence over ADC.
 		if v := os.Getenv("GOOGLE_CLOUD_API_KEY"); v != "" {
 			return v
 		}
@@ -140,23 +85,31 @@ func GetEnvApiKey(provider string) string {
 		return ""
 	}
 
-	envVar, ok := providerEnvMap[provider]
-	if !ok {
+	p := ai.GetProviderRecord(ai.Provider(provider))
+	if p == nil {
 		return ""
 	}
-	return os.Getenv(envVar)
+	if p.EnvKeys.Primary != "" {
+		if v := os.Getenv(p.EnvKeys.Primary); v != "" {
+			return v
+		}
+	}
+	for _, fb := range p.EnvKeys.Fallbacks {
+		if v := os.Getenv(fb); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // hasVertexADCCredentials checks if Google Application Default Credentials exist.
 func hasVertexADCCredentials() bool {
-	// Check GOOGLE_APPLICATION_CREDENTIALS env var first
 	gacPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	if gacPath != "" {
 		_, err := os.Stat(gacPath)
 		return err == nil
 	}
 
-	// Fall back to default ADC path
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false

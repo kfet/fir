@@ -45,6 +45,7 @@ Batch tool demonstration:
 
 import sys
 import threading
+import time as _time
 from typing import Optional
 
 import fir_ext
@@ -451,6 +452,112 @@ def cli_demo(argv: list, host: fir_ext.Host) -> int:
         for line in host.stdin_lines():
             host.println("demo-cli stdin:", line.rstrip("\n"))
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Hosted provider (demonstrates extension-shipped AI provider)
+# ---------------------------------------------------------------------------
+#
+# A minimal "echo" provider: no network, no model — proves the
+# provider/* JSON-RPC surface end-to-end. fir registers a synthetic
+# ``ext:echo`` Api and routes streaming completions for the declared
+# models back to this extension via the @provider_stream handler below.
+
+fir_ext.register_provider(
+    fir_ext.Provider(
+        id="echo",
+        display_name="Echo",
+        short_name="Echo",
+        env_keys=fir_ext.EnvKeys(primary="ECHO_API_KEY"),
+        default_model_id="echo-1",
+        models=[
+            fir_ext.Model(
+                id="echo-1",
+                name="Echo 1",
+                context_window=10_000,
+                max_tokens=4_096,
+                input=["text"],
+            ),
+        ],
+        supports_live_list=True,
+    )
+)
+
+
+def _last_user_text(prompt: dict) -> str:
+    """Pull the most recent user-message text from an ai.Context payload."""
+    msgs = prompt.get("messages") or []
+    for m in reversed(msgs):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = [
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            if parts:
+                return "\n".join(parts)
+    return ""
+
+
+@fir_ext.provider_stream("echo")
+def echo_stream(params: fir_ext.ProviderStreamStartParams, ctx: fir_ext.Context):
+    """Generator: emits a fake streamed completion echoing the last user message."""
+    stream_id = params.get("stream_id", "")
+    model_obj = params.get("model") or {}
+    prompt = params.get("prompt") or {}
+
+    last = _last_user_text(prompt)
+    text = f"Echo: {last}" if last else "Echo: (no input)"
+
+    final_msg = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}],
+        "api": model_obj.get("api", "ext:echo"),
+        "provider": model_obj.get("provider", "echo"),
+        "model": model_obj.get("id", "echo-1"),
+        "usage": {
+            "input": 1,
+            "output": len(text),
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 1 + len(text),
+            "cost": {"input": 0.0, "output": 0.0,
+                     "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0},
+        },
+        "stopReason": "stop",
+        "timestamp": int(_time.time() * 1000),
+    }
+
+    yield {"type": "start", "partial": {**final_msg, "content": []}}
+    yield {"type": "text_start", "contentIndex": 0}
+    # Emit a couple of deltas so streaming is observable.
+    if text:
+        for chunk in (text[: len(text) // 2], text[len(text) // 2 :]):
+            if fir_ext.is_cancelled(stream_id):
+                # Cooperative cancel: terminate with an aborted error rather
+                # than continuing to emit text_end + done.
+                yield {
+                    "type": "error",
+                    "reason": "aborted",
+                    "error": {**final_msg, "stopReason": "aborted",
+                              "errorMessage": "cancelled by host"},
+                }
+                return
+            if chunk:
+                yield {"type": "text_delta", "contentIndex": 0, "delta": chunk}
+    yield {"type": "text_end", "contentIndex": 0, "content": text}
+    yield {"type": "done", "reason": "stop", "message": final_msg}
+
+
+@fir_ext.provider_list_models("echo")
+def echo_list_models(params: fir_ext.ProviderListModelsParams, ctx: fir_ext.Context):
+    """Stub live-list — returns the same single model the static catalogue declares."""
+    return ["echo-1"]
 
 
 fir_ext.run(name="demo")

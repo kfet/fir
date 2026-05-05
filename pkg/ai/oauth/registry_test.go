@@ -8,13 +8,7 @@ import (
 func TestGetProvider_BuiltIns(t *testing.T) {
 	// All built-in OAuth providers are now handled by Python builtin extensions.
 	// The Go registry starts empty; providers are registered dynamically by extensions.
-	expectedIDs := []string{
-		// "anthropic" is now provided by the anthropic_auth builtin extension.
-		// "github-copilot" is now provided by the copilot_auth builtin extension.
-		// "google-gemini-cli" is now provided by the gemini_cli_auth builtin extension.
-		// "google-antigravity" is now provided by the antigravity_auth builtin extension.
-		// "openai-codex" is now provided by the codex_auth builtin extension.
-	}
+	expectedIDs := []string{}
 	for _, id := range expectedIDs {
 		p := GetProvider(id)
 		if p == nil {

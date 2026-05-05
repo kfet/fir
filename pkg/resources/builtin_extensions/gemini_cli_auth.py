@@ -433,4 +433,117 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Wire-protocol Api + hosted-provider registration
+# ---------------------------------------------------------------------------
+#
+# Ships the "google-gemini-cli" wire-protocol Api (Cloud Code Assist's
+# envelope around Google's GenerativeAI request format) and the
+# matching hosted-provider record + model catalogue. Replaces what used
+# to live in:
+#
+#   - pkg/ai/providers/register_gemini_cli.go (Api + DeclGoogleConfig)
+#   - pkg/ai/provider_registry_builtins.go (RegisteredProvider record)
+#   - cmd/generate-models/main.go + pkg/ai/models_generated.go (7 models)
+#
+# fir's core retains only the generic StreamDeclGoogle adapter; nothing
+# in non-extension code mentions "gemini-cli" any more.
+
+_GEMINI_CLI_ENVELOPE = (
+    '{'
+    '"project":"${creds.project_id}",'
+    '"model":"${model.id}",'
+    '"request":"$inner",'
+    '"userAgent":"fir-coding-agent",'
+    '"requestId":"${fn.rand_id(fir-coding-agent)}"'
+    '}'
+)
+
+fir_ext.register_api(
+    fir_ext.DeclGoogleApi(
+        id="google-gemini-cli",
+        endpoints=["https://cloudcode-pa.googleapis.com"],
+        headers={
+            "User-Agent": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+            "X-Goog-Api-Client": "gl-node/22.17.0",
+            "Client-Metadata": (
+                '{"ideType":"IDE_UNSPECIFIED",'
+                '"platform":"PLATFORM_UNSPECIFIED",'
+                '"pluginType":"GEMINI"}'
+            ),
+        },
+        envelope=_GEMINI_CLI_ENVELOPE,
+        reasoning_header_prefix="x-gemini-thinking-",
+    )
+)
+
+_GEMINI_CLI_BASE_URL = "https://cloudcode-pa.googleapis.com"
+_GEMINI_CLI_INPUT = ["text", "image"]
+
+
+def _gemini_cli_model(
+    model_id: str,
+    name: str,
+    *,
+    reasoning: bool,
+    context_window: int = 1_048_576,
+    max_tokens: int,
+    swe_score: float = 0.0,
+) -> fir_ext.Model:
+    return fir_ext.Model(
+        id=model_id,
+        name=name,
+        base_url=_GEMINI_CLI_BASE_URL,
+        reasoning=reasoning,
+        input=list(_GEMINI_CLI_INPUT),
+        context_window=context_window,
+        max_tokens=max_tokens,
+        swe_score=swe_score,
+    )
+
+
+fir_ext.register_provider(
+    fir_ext.Provider(
+        id="google-gemini-cli",
+        api="google-gemini-cli",
+        display_name="Google Gemini CLI",
+        priority=6,
+        default_model_id="gemini-3.1-pro-preview",
+        oauth_provider_id="google-gemini-cli",
+        env_keys=fir_ext.EnvKeys(authenticated=True),
+        models=[
+            _gemini_cli_model(
+                "gemini-2.0-flash", "Gemini 2.0 Flash (Cloud Code Assist)",
+                reasoning=False, max_tokens=8192, swe_score=42.1,
+            ),
+            _gemini_cli_model(
+                "gemini-2.5-flash", "Gemini 2.5 Flash (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535, swe_score=47.3,
+            ),
+            _gemini_cli_model(
+                "gemini-2.5-pro", "Gemini 2.5 Pro (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535, swe_score=57.6,
+            ),
+            _gemini_cli_model(
+                "gemini-3-flash-preview", "Gemini 3 Flash Preview (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535, swe_score=76.2,
+            ),
+            _gemini_cli_model(
+                "gemini-3-pro-preview", "Gemini 3 Pro Preview (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535, swe_score=76.2,
+            ),
+            _gemini_cli_model(
+                "gemini-3.1-flash-light-preview",
+                "Gemini 3.1 Flash Light Preview (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535,
+            ),
+            _gemini_cli_model(
+                "gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview (Cloud Code Assist)",
+                reasoning=True, max_tokens=65535, swe_score=80.6,
+            ),
+        ],
+    )
+)
+
+
 fir_ext.run(name="gemini-cli-auth")

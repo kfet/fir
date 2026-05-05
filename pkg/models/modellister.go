@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -292,17 +293,39 @@ var httpClientForListing = &http.Client{
 
 // --- Provider -> Lister mapping ---
 
+// listerRegistry maps provider IDs to their ModelLister implementation.  Seeded
+// at init() with built-in providers; ext-shipped providers (Phase B) register
+// via RegisterModelLister.
+var listerRegistry sync.Map // string → ModelLister
+
+// RegisterModelLister registers a ModelLister for a provider.  Last write wins.
+func RegisterModelLister(provider string, lister ModelLister) {
+	if provider == "" || lister == nil {
+		return
+	}
+	listerRegistry.Store(provider, lister)
+}
+
+// UnregisterModelLister removes a registered ModelLister.
+func UnregisterModelLister(provider string) {
+	listerRegistry.Delete(provider)
+}
+
 // GetModelLister returns a ModelLister for the given provider, or nil if
 // live listing is not supported for that provider.
 func GetModelLister(provider string) ModelLister {
-	switch provider {
-	case "openai", "xai", "groq", "cerebras", "openrouter", "huggingface":
-		return &openAIModelLister{}
-	case "anthropic":
-		return &anthropicModelLister{}
-	case "google":
-		return &googleModelLister{}
-	default:
+	v, ok := listerRegistry.Load(provider)
+	if !ok {
 		return nil
 	}
+	return v.(ModelLister)
+}
+
+func init() {
+	openAILister := &openAIModelLister{}
+	for _, p := range []string{"openai", "xai", "groq", "cerebras", "openrouter", "huggingface"} {
+		RegisterModelLister(p, openAILister)
+	}
+	RegisterModelLister("anthropic", &anthropicModelLister{})
+	RegisterModelLister("google", &googleModelLister{})
 }

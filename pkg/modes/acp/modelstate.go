@@ -22,16 +22,11 @@ func ParseModelID(acpModelID string) (provider, modelID string, err error) {
 	return acpModelID[:idx], acpModelID[idx+1:], nil
 }
 
-// shortProvider abbreviates provider names for display.
+// shortProvider abbreviates provider names for display.  Sourced from the
+// ai.RegisteredProvider registry's ShortName field.
 func shortProvider(provider string) string {
-	m := map[string]string{
-		"anthropic": "anth", "openai": "oai", "google": "goog",
-		"mistral": "mist", "groq": "groq", "openrouter": "or",
-		"bedrock": "bed", "vertex": "vtx", "azure": "az",
-		"deepseek": "ds", "xai": "xai",
-	}
-	if s, ok := m[provider]; ok {
-		return s
+	if r := ai.GetProviderRecord(ai.Provider(provider)); r != nil && r.ShortName != "" {
+		return r.ShortName
 	}
 	return provider
 }

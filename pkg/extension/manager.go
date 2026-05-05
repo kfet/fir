@@ -342,6 +342,16 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 
 	bridge := NewBridge(proc, caps)
 	bridge.RegisterTools(api)
+	// Apis come first: a Provider may declare api="<id>" referencing an
+	// Api this same extension also ships, so the wire-protocol registry
+	// must be populated before the provider record (which validates the
+	// Api existence at registration time, indirectly via stream lookups).
+	bridge.RegisterApis()
+	// Provider record must land before auth-provider registration so that
+	// any auth code paths reading ai.GetProviderRecord(<id>) (e.g. to look
+	// up OAuthProviderID ↔ provider id mappings) see a populated record.
+	// Reverse order on shutdown: tear down auth first.
+	bridge.RegisterProviders()
 	bridge.RegisterAuthProviders()
 	// Register any static tool-name map declared by the extension so that
 	// provider adapters (e.g. anthropic OAuth mode) can translate tool
@@ -427,6 +437,8 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	// safe and avoids O(n) sequential waits on slow hardware.
 	for _, mb := range bridges {
 		mb.bridge.UnregisterAuthProviders()
+		mb.bridge.UnregisterProviders()
+		mb.bridge.UnregisterApis()
 		if mb.bridge != nil && mb.bridge.caps != nil && len(mb.bridge.caps.ToolNameMap) > 0 {
 			providers.UnregisterToolNameAliases(mb.bridge.caps.Name)
 		}

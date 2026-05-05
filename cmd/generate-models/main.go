@@ -1778,10 +1778,6 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			(m.ID == "claude-opus-4-6" || m.ID == "claude-sonnet-4-6" || m.ID == "claude-opus-4.6" || m.ID == "claude-sonnet-4.6") {
 			m.ContextWindow = 1000000
 		}
-		if m.Provider == "google-antigravity" &&
-			(m.ID == "claude-opus-4-6-thinking" || m.ID == "claude-sonnet-4-6") {
-			m.ContextWindow = 1000000
-		}
 		// OpenCode variants list Claude Sonnet 4/4.5 with 1M context, actual limit is 200K
 		if (m.Provider == "opencode" || m.Provider == "opencode-go") && (m.ID == "claude-sonnet-4-5" || m.ID == "claude-sonnet-4") {
 			m.ContextWindow = 200000
@@ -2055,38 +2051,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 
 	// Gemini 3.1 Pro — announced 2026-02-19, still in preview on all Google endpoints.
 	// https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/
-	// The model ID is gemini-3.1-pro-preview. The google and google-vertex providers are
-	// already supplied by models.dev; we only need to add Cloud Code Assist and Antigravity.
-
-	// Google Cloud Code Assist models (Gemini CLI)
-	const cloudCodeAssistEndpoint = "https://cloudcode-pa.googleapis.com"
-	cloudCodeAssistModels := []modelSpec{
-		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: false,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 8192},
-		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro Preview (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-		// Gemini 3.1 Pro Preview is deployed on Cloud Code Assist but gated behind the
-		// GEMINI_3_1_PRO_LAUNCHED experiment flag (45760185). Users will see a 404 until
-		// the flag rolls out to their account.
-		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3.1-flash-light-preview", Name: "Gemini 3.1 Flash Light Preview (Cloud Code Assist)", API: "google-gemini-cli",
-			Provider: "google-gemini-cli", BaseURL: cloudCodeAssistEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, ContextWindow: 1048576, MaxTokens: 65535},
-	}
-	all = append(all, cloudCodeAssistModels...)
+	// The model ID is gemini-3.1-pro-preview.
 
 	// Gemini 3.1 Pro Preview Custom Tools — variant of the google provider model that
 	// enables custom tool definitions (not returned by models.dev).
@@ -2130,60 +2095,6 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			ContextWindow: 1048576, MaxTokens: 65536,
 		})
 	}
-
-	// Antigravity models
-	const antigravityEndpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-	antigravityModels := []modelSpec{
-		{ID: "gemini-3-pro-high", Name: "Gemini 3 Pro High (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3-pro-low", Name: "Gemini 3 Pro Low (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3.1-pro-high", Name: "Gemini 3.1 Pro High (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3.1-pro-low", Name: "Gemini 3.1 Pro Low (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 2, CostOutput: 12, CostCacheRead: 0.2, CostCacheWrite: 2.375,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3.1-flash-light", Name: "Gemini 3.1 Flash Light (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 0.1, CostOutput: 0.4, CostCacheRead: 0.01, CostCacheWrite: 0,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "gemini-3-flash", Name: "Gemini 3 Flash (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 0.5, CostOutput: 3, CostCacheRead: 0.5, CostCacheWrite: 0,
-			ContextWindow: 1048576, MaxTokens: 65535},
-		{ID: "claude-sonnet-4-5", Name: "Claude Sonnet 4.5 (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: false,
-			Input: []string{"text", "image"}, CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
-			ContextWindow: 200000, MaxTokens: 64000},
-		{ID: "claude-sonnet-4-5-thinking", Name: "Claude Sonnet 4.5 Thinking (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
-			ContextWindow: 200000, MaxTokens: 64000},
-		{ID: "claude-opus-4-5-thinking", Name: "Claude Opus 4.5 Thinking (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
-			ContextWindow: 200000, MaxTokens: 64000},
-		{ID: "claude-opus-4-6-thinking", Name: "Claude Opus 4.6 Thinking (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
-			ContextWindow: 200000, MaxTokens: 128000},
-		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6 (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: true,
-			Input: []string{"text", "image"}, CostInput: 3, CostOutput: 15, CostCacheRead: 0.3, CostCacheWrite: 3.75,
-			ContextWindow: 200000, MaxTokens: 64000},
-		{ID: "gpt-oss-120b-medium", Name: "GPT-OSS 120B Medium (Antigravity)", API: "google-gemini-cli",
-			Provider: "google-antigravity", BaseURL: antigravityEndpoint, Reasoning: false,
-			Input: []string{"text"}, CostInput: 0.09, CostOutput: 0.36, CostCacheRead: 0, CostCacheWrite: 0,
-			ContextWindow: 131072, MaxTokens: 32768},
-	}
-	all = append(all, antigravityModels...)
 
 	// Google Vertex models
 	const vertexBaseURL = "https://{location}-aiplatform.googleapis.com"

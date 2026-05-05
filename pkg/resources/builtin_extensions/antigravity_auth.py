@@ -329,4 +329,192 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Wire-protocol Api + hosted-provider registration
+# ---------------------------------------------------------------------------
+#
+# Ships the "google-antigravity" wire-protocol Api (Cloud Code Assist's
+# sandbox endpoints with antigravity-specific User-Agent, system
+# instructions, and Claude+thinking interleaved-thinking-2025-05-14
+# header), the matching hosted-provider record, and the 12-model catalogue.
+# Replaces what used to live in:
+#
+#   - pkg/ai/providers/register_antigravity.go (DeclGoogleConfig)
+#   - pkg/ai/providers/register_gemini_cli.go (Api wire registration)
+#   - pkg/ai/provider_registry_builtins.go (RegisteredProvider record)
+#   - cmd/generate-models/main.go + pkg/ai/models_generated.go (12 models)
+#
+# Migration also corrects a latent inconsistency: the antigravity Api wire
+# was previously registered but never actively used at runtime — antigravity
+# model entries set api="google-gemini-cli", routing through geminiCLIConfig
+# so antigravityConfig (system instructions + anthropic-beta header for
+# Claude+thinking) never applied. After this migration antigravity models
+# correctly use api="google-antigravity" and pick up that config.
+
+_ANTIGRAVITY_SYSTEM_INSTRUCTION = (
+    "You are Antigravity, a powerful agentic AI coding assistant designed by "
+    "the Google Deepmind team working on Advanced Agentic Coding."
+    "You are pair programming with a USER to solve their coding task. The task "
+    "may require creating a new codebase, modifying or debugging an existing "
+    "codebase, or simply answering a question."
+    "**Absolute paths only**"
+    "**Proactiveness**"
+)
+
+_ANTIGRAVITY_ENVELOPE = (
+    '{'
+    '"project":"${creds.project_id}",'
+    '"model":"${model.id}",'
+    '"request":"$inner",'
+    '"requestType":"agent",'
+    '"userAgent":"antigravity",'
+    '"requestId":"${fn.rand_id(antigravity)}"'
+    '}'
+)
+
+fir_ext.register_api(
+    fir_ext.DeclGoogleApi(
+        id="google-antigravity",
+        endpoints=[
+            "https://daily-cloudcode-pa.sandbox.googleapis.com",
+            "https://autopush-cloudcode-pa.sandbox.googleapis.com",
+            "https://cloudcode-pa.googleapis.com",
+        ],
+        headers={"User-Agent": "antigravity/1.21.9 ${os}/${arch}"},
+        conditional_headers=[
+            fir_ext.DeclGoogleConditional(
+                when_model_id_prefix="claude-",
+                when_requires_reasoning=True,
+                set={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+            ),
+        ],
+        envelope=_ANTIGRAVITY_ENVELOPE,
+        system_instruction_prefix=[
+            _ANTIGRAVITY_SYSTEM_INSTRUCTION,
+            "Please ignore following [ignore]" + _ANTIGRAVITY_SYSTEM_INSTRUCTION + "[/ignore]",
+        ],
+        system_instruction_role="user",
+        reasoning_header_prefix="x-gemini-thinking-",
+    )
+)
+
+_ANTIGRAVITY_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+
+
+def _antigravity_model(
+    model_id: str,
+    name: str,
+    *,
+    reasoning: bool,
+    context_window: int,
+    max_tokens: int,
+    cost_input: float = 0.0,
+    cost_output: float = 0.0,
+    cost_cache_read: float = 0.0,
+    cost_cache_write: float = 0.0,
+    inputs: tuple = ("text", "image"),
+    swe_score: float = 0.0,
+) -> fir_ext.Model:
+    return fir_ext.Model(
+        id=model_id,
+        name=name,
+        base_url=_ANTIGRAVITY_BASE_URL,
+        reasoning=reasoning,
+        input=list(inputs),
+        context_window=context_window,
+        max_tokens=max_tokens,
+        cost_input=cost_input,
+        cost_output=cost_output,
+        cost_cache_read=cost_cache_read,
+        cost_cache_write=cost_cache_write,
+        swe_score=swe_score,
+    )
+
+
+fir_ext.register_provider(
+    fir_ext.Provider(
+        id="google-antigravity",
+        api="google-antigravity",
+        display_name="Google Antigravity",
+        priority=7,
+        default_model_id="gemini-3.1-pro-high",
+        oauth_provider_id="google-antigravity",
+        env_keys=fir_ext.EnvKeys(authenticated=True),
+        models=[
+            _antigravity_model(
+                "claude-opus-4-5-thinking", "Claude Opus 4.5 Thinking (Antigravity)",
+                reasoning=True, context_window=200_000, max_tokens=64_000,
+                cost_input=5, cost_output=25, cost_cache_read=0.5, cost_cache_write=6.25,
+                swe_score=80.9,
+            ),
+            _antigravity_model(
+                "claude-opus-4-6-thinking", "Claude Opus 4.6 Thinking (Antigravity)",
+                reasoning=True, context_window=200_000, max_tokens=128_000,
+                cost_input=5, cost_output=25, cost_cache_read=0.5, cost_cache_write=6.25,
+                swe_score=80.8,
+            ),
+            _antigravity_model(
+                "claude-sonnet-4-5", "Claude Sonnet 4.5 (Antigravity)",
+                reasoning=False, context_window=200_000, max_tokens=64_000,
+                cost_input=3, cost_output=15, cost_cache_read=0.3, cost_cache_write=3.75,
+                swe_score=77.2,
+            ),
+            _antigravity_model(
+                "claude-sonnet-4-5-thinking", "Claude Sonnet 4.5 Thinking (Antigravity)",
+                reasoning=True, context_window=200_000, max_tokens=64_000,
+                cost_input=3, cost_output=15, cost_cache_read=0.3, cost_cache_write=3.75,
+                swe_score=77.2,
+            ),
+            _antigravity_model(
+                "claude-sonnet-4-6", "Claude Sonnet 4.6 (Antigravity)",
+                reasoning=True, context_window=200_000, max_tokens=64_000,
+                cost_input=3, cost_output=15, cost_cache_read=0.3, cost_cache_write=3.75,
+                swe_score=79.6,
+            ),
+            _antigravity_model(
+                "gemini-3-flash", "Gemini 3 Flash (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=0.5, cost_output=3, cost_cache_read=0.5,
+                swe_score=76.2,
+            ),
+            _antigravity_model(
+                "gemini-3-pro-high", "Gemini 3 Pro High (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=2, cost_output=12, cost_cache_read=0.2, cost_cache_write=2.375,
+                swe_score=76.2,
+            ),
+            _antigravity_model(
+                "gemini-3-pro-low", "Gemini 3 Pro Low (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=2, cost_output=12, cost_cache_read=0.2, cost_cache_write=2.375,
+                swe_score=76.2,
+            ),
+            _antigravity_model(
+                "gemini-3.1-flash-light", "Gemini 3.1 Flash Light (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=0.1, cost_output=0.4, cost_cache_read=0.01,
+            ),
+            _antigravity_model(
+                "gemini-3.1-pro-high", "Gemini 3.1 Pro High (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=2, cost_output=12, cost_cache_read=0.2, cost_cache_write=2.375,
+                swe_score=80.6,
+            ),
+            _antigravity_model(
+                "gemini-3.1-pro-low", "Gemini 3.1 Pro Low (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=2, cost_output=12, cost_cache_read=0.2, cost_cache_write=2.375,
+                swe_score=80.6,
+            ),
+            _antigravity_model(
+                "gpt-oss-120b-medium", "GPT-OSS 120B Medium (Antigravity)",
+                reasoning=False, context_window=131072, max_tokens=32768,
+                cost_input=0.09, cost_output=0.36,
+                inputs=("text",),
+            ),
+        ],
+    )
+)
+
+
 fir_ext.run(name="antigravity-auth")

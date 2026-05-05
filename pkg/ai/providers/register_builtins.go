@@ -14,7 +14,9 @@ func RegisterBuiltInApiProviders(r *ai.Registry) {
 	RegisterAzureOpenAIResponses(r)
 	RegisterOpenAICodexResponses(r)
 	RegisterGoogleVertex(r)
-	RegisterGoogleGeminiCLI(r)
+	// Other Apis (Cloud-Code-Assist family etc.) ship from builtin
+	// extensions via fir_ext.register_api(...); their kind handlers
+	// live alongside this file (e.g. extkind_declgoogle.go).
 }
 
 // RegisterDefaultProviders is a convenience that registers built-in providers

@@ -4,6 +4,7 @@ package ai
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -79,6 +80,24 @@ func (r *Registry) UnregisterApiProviders(sourceID string) {
 	}
 }
 
+// IsBuiltInApi reports whether api is registered as core-equivalent —
+// either with sourceID == "builtin" (core wire adapters) or with a
+// "builtin-ext-api:" prefix (Apis shipped by a builtin-scope extension).
+// Used by extension validation to prevent user/project extensions from
+// overriding built-in Api IDs.
+func (r *Registry) IsBuiltInApi(api Api) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry := r.providers[api]
+	if entry == nil {
+		return false
+	}
+	return entry.sourceID == "builtin" || strings.HasPrefix(entry.sourceID, "builtin-ext-api:")
+}
+
+// IsBuiltInApi is the package-level convenience for r.DefaultRegistry.IsBuiltInApi.
+func IsBuiltInApi(api Api) bool { return DefaultRegistry.IsBuiltInApi(api) }
+
 // ClearApiProviders removes all registered providers.
 func (r *Registry) ClearApiProviders() {
 	r.mu.Lock()
@@ -86,13 +105,37 @@ func (r *Registry) ClearApiProviders() {
 	r.providers = make(map[Api]*registeredProvider)
 }
 
-// ResetApiProviders removes all dynamic providers and re-registers built-in ones.
-// builtInRegistrar is called after clearing to restore built-in providers.
+// ResetApiProviders removes built-in and unsourced dynamic providers and
+// re-registers built-in ones via builtInRegistrar. Extension-owned Api
+// providers are preserved — only the extension that owns them may
+// unregister them, via UnregisterApiProviders(sourceID). This lets
+// ModelRegistry.Refresh() rebuild the built-in provider set after
+// models.json overrides change without nuking Apis registered by
+// running extensions, regardless of whether they were declared as
+// stand-alone wire-protocol Apis ("[builtin-]ext-api:*") or implicit
+// synthetic Apis behind a hosted provider ("[builtin-]ext:*").
 func (r *Registry) ResetApiProviders() {
-	r.ClearApiProviders()
+	r.mu.Lock()
+	for api, entry := range r.providers {
+		if isExtOwnedSource(entry.sourceID) {
+			continue
+		}
+		delete(r.providers, api)
+	}
+	r.mu.Unlock()
 	if r.builtInRegistrar != nil {
 		r.builtInRegistrar(r)
 	}
+}
+
+// isExtOwnedSource reports whether a sourceID belongs to an extension —
+// stand-alone Api ("[builtin-]ext-api:*") or hosted-provider synthetic Api
+// ("[builtin-]ext:*"). Such entries survive ResetApiProviders.
+func isExtOwnedSource(sourceID string) bool {
+	return strings.HasPrefix(sourceID, "ext-api:") ||
+		strings.HasPrefix(sourceID, "builtin-ext-api:") ||
+		strings.HasPrefix(sourceID, "ext:") ||
+		strings.HasPrefix(sourceID, "builtin-ext:")
 }
 
 // SetBuiltInRegistrar stores the function used to re-register built-in providers on reset.

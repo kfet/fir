@@ -39,7 +39,6 @@ const (
 	ApiAnthropicMessages     Api = "anthropic-messages"
 	ApiBedrockConverseStream Api = "bedrock-converse-stream"
 	ApiGoogleGenerativeAI    Api = "google-generative-ai"
-	ApiGoogleGeminiCLI       Api = "google-gemini-cli"
 	ApiGoogleVertex          Api = "google-vertex"
 )
 
@@ -51,8 +50,6 @@ const (
 	ProviderAmazonBedrock        Provider = "amazon-bedrock"
 	ProviderAnthropic            Provider = "anthropic"
 	ProviderGoogle               Provider = "google"
-	ProviderGoogleGeminiCLI      Provider = "google-gemini-cli"
-	ProviderGoogleAntigravity    Provider = "google-antigravity"
 	ProviderGoogleVertex         Provider = "google-vertex"
 	ProviderOpenAI               Provider = "openai"
 	ProviderAzureOpenAIResponses Provider = "azure-openai-responses"

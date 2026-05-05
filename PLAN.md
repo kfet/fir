@@ -1,0 +1,133 @@
+# Pluggable AI Providers — Audit & Plan
+
+Branch: `work/pluggable-providers`. Scope: an extension alone must be able to add a provider; no provider name should appear in any code path outside its own self-registration site.
+
+## 1. Audit — every hardcoded-provider site
+
+(Scanned the whole repo; results sorted by where they live and what they encode.)
+
+### 1a. Legitimate self-registration sites (keep, but treat as "the provider's own home")
+- `pkg/ai/providers/*` — built-in stream/transform/headers code, one file per provider family. Owns its own constants. Good.
+- `pkg/ai/oauth/openai_codex.go`, builtin extensions `*_auth.py` — provider-specific OAuth flows. The oauth registry (`pkg/ai/oauth/registry.go`) is already pluggable.
+- `cmd/generate-models/main.go` — offline generator. Its `applyOverridesAndAdditions` (incl. `google-antigravity` synthesis) is a build-time data table, not a runtime code path. Acceptable, but extension-backed providers must be able to *replace or supplement* its output at runtime via their own model list.
+
+### 1b. Cross-cutting sites that violate the invariant (must be data-driven)
+
+| File | Symbol | What it encodes | Fix |
+|---|---|---|---|
+| `pkg/ai/types.go` | `Provider*`/`Api*` constants | Just IDs; no switches. | Keep as docs of well-known IDs. Built-ins move them to providers/ subpkg; nothing else may grow this list. |
+| `pkg/ai/envkeys/envkeys.go` | switch on provider→env-var | API-key env var name per provider | Replace with a registry: each provider self-registers an `EnvKeySpec` (primary + fallbacks + special "<authenticated>" providers like bedrock/vertex). |
+| `pkg/ai/oauth/registry.go` `builtInProviders` | sync.Map seeded by `init()` of each oauth provider file | Already pluggable — fine. | Keep. Document. |
+| `pkg/extension/capability.go` `builtinAuthProviderIDs` | hardcoded set of "reserved" auth provider IDs | Prevents extensions overriding built-ins by accident | Replace with `oauth.IsBuiltInProviderID(id)` derived from the registry's "built-in snapshot" set. |
+| `pkg/models/modelresolver.go` `defaultModels` | provider→default model id map | Default model per provider | Move to `Provider.DefaultModelID()` on the registered provider record (in pkg/ai). Resolver iterates the registry. |
+| `pkg/models/modelresolver.go` `knownProviderOrder` | display/preference order | UX preference order | Move to `Provider.Priority` (int) in the registered provider record. Sort by priority then ID. |
+| `pkg/models/modelresolver.go` bedrock-pass-through and poe special cases | `if provider == "amazon-bedrock"` etc. | ID-shape claiming | Add `Provider.ClaimsModelID(id) bool` and `Provider.ResolveCustomID(id) *Model` hooks; resolver calls these instead of switching. Used by `cmd/fir/app.go` ARN auto-detect too. |
+| `pkg/models/modellister.go` `GetModelLister` switch | provider→remote-listing strategy | Live `/v1/models` calls | Each built-in lister registers itself in a `modellister.Register(id, lister)` map. `openRouterVendor` etc. moves into the openrouter lister. |
+| `pkg/modes/acp/auth.go` `providerKeyLinks`, `displayNames` | maps for UI | Per-provider UX strings | Move to `Provider.KeyLink()`, `Provider.DisplayName()` on the registered record. ACP iterates the registry. |
+| `pkg/modes/acp/modelstate.go` short-name map | abbreviation for status bar | UX | Move to `Provider.ShortName()`; default = first 4 chars of ID. |
+| `cmd/fir/app.go` Bedrock ARN auto-detect | `args.Provider = "amazon-bedrock"` based on ID prefix | Provider claim from ID | Use the new `Registry.ClaimProviderForModelID(id)` (delegates to per-provider `ClaimsModelID`). |
+| `cmd/fir/app.go` Bedrock late-registration | clones a bedrock model | Convenience for ARN models | Becomes the bedrock provider's `ResolveCustomID` hook. |
+
+### 1c. The "Provider record" in core (new)
+
+A single `ai.RegisteredProvider` struct will carry everything cross-cutting code currently switches on:
+
+```go
+type RegisteredProvider struct {
+    ID               Provider
+    DisplayName      string
+    ShortName        string         // status-bar abbreviation
+    Priority         int            // smaller = preferred in defaulting
+    DefaultModelID   string
+    KeyLink          string         // URL where users get an API key
+    EnvKeys          EnvKeySpec     // {Primary, Fallbacks, Authenticated bool}
+    OAuthProviderID  string         // empty if pure API-key
+    ClaimsModelID    func(id string) bool                 // optional
+    ResolveCustomID  func(id string) *Model               // optional
+    Lister           ModelLister                          // optional
+    Stream           StreamFunction                       // built-ins; nil for ext-backed
+    StreamSimple     SimpleStreamFunction                 // optional
+    Source           string         // "builtin" or "ext:<extName>"
+}
+```
+
+Existing `ApiProvider`/`Api` indirection stays — `Api` is the wire protocol, `Provider` is the hosted service. The new record adds a `Provider`-keyed registry alongside the existing `Api`-keyed one, and the `Provider` record references which `Api` it speaks.
+
+## 2. Extension contract for ext-backed providers
+
+### 2a. Init payload
+Adds `providers` to `InitResult`:
+```python
+ProviderSpec {
+    id: str
+    api: str                  # one of the wire protocols, OR "ext-stream" (see 2c)
+    display_name: str
+    short_name: str | None
+    priority: int = 1000
+    default_model_id: str | None
+    key_link: str | None
+    env_keys: {primary: str, fallbacks: [str], authenticated: bool}
+    oauth_provider_id: str | None    # cross-references InitResult.auth_providers
+    models: [Model]                  # static catalogue
+    claims_model_id_globs: [str]     # optional ID-shape claim patterns (e.g. "arn:aws:bedrock:*")
+    supports_live_listing: bool
+}
+```
+Built-in providers will be re-expressed as a Go-side equivalent of this (`RegisteredProvider`); no behavioural change at runtime, but the *shape* of the data is now identical for ext and built-in.
+
+### 2b. Methods called *to* the extension
+- `provider/listModels` `{providerId, credentials?}` → `Model[]`
+- `provider/resolveCustomId` `{providerId, modelId}` → `Model | null` (only if `claims_model_id_globs` matched)
+- `provider/stream/start` `{providerId, streamId, model, request}` → ack `{}`
+- `provider/stream/toolResult` `{streamId, toolUseId, content}` → ack
+- `provider/stream/cancel` `{streamId}` → ack
+
+### 2c. Events from extension to host (existing notif channel)
+- `provider.stream.event` `{streamId, kind, ...}` where kind ∈ `text` / `thinking` / `tool_call` / `usage` / `provider_response` / `done` / `error`
+
+For built-in providers nothing changes — they keep their in-process `StreamFunction`. Ext-backed providers get an in-core `extStreamAdapter` that turns these JSON-RPC events back into the same `StreamEvent` type built-ins emit, so the rest of the agent layer is unaware.
+
+### 2d. Documentation & SDK
+- Typed Go structs in `pkg/extension/types.go` (capability) and the bridge.
+- Python SDK shapes in `pkg/extension/sdk/python/fir_ext.py`: `ProviderSpec`, `Model`, decorators `@provider_list_models`, `@provider_stream`, `@provider_resolve_custom_id`. Writes the streaming yield pattern (sync generator → events) and exposes a `tool_result(stream_id, tool_use_id, content)` callback.
+- `docs/extension-protocol.md` updated with the new methods + payload schemas.
+
+## 3. Refactor plan (phases — landed as separate commits in this branch)
+
+**Phase A — De-literalise core. No new wire protocol.**
+- Add `RegisteredProvider` + `pkg/ai.ProviderRegistry` (Provider-keyed) alongside today's `Api`-keyed registry.
+- Each built-in provider self-registers a `RegisteredProvider` from its existing `register_*.go` file (already the right home).
+- Replace every map/switch in 1b with iteration over the registry.
+- Replace `pkg/ai/envkeys` switch with registry lookup.
+- Replace `pkg/extension/capability.go` reserved-IDs set with `oauth.IsBuiltInProviderID`.
+- Tests: assert that `rg "anthropic|openai|google|..."` returns zero hits outside `pkg/ai/providers/`, `pkg/ai/oauth/`, `pkg/resources/builtin_extensions/`, `cmd/generate-models/`, generated files, and `*_test.go`. Check this in CI via a `make audit-providers` target.
+
+**Phase B — Wire the extension contract.**
+- Add `provider/*` methods to `pkg/extension/bridge.go`, and `ProviderSpec` to `InitResult`.
+- Add the `extStreamAdapter` in `pkg/ai/providers/extprovider/` (its own subpackage; it's an in-core adapter, not a built-in provider) that satisfies `StreamFunction` by talking to the extension manager.
+- Register ext-backed providers into `RegisteredProvider` registry from the extension manager after handshake; unregister on shutdown.
+
+**Phase C — Python SDK + docs + demo.**
+- `fir_ext.py` decorators and helpers; types as `dataclasses` (3.9-compatible, no `from __future__ import annotations` tricks needed).
+- Update `docs/extension-protocol.md`.
+- Update `demo.py` to register a tiny "echo" provider (no real network, just emits a hello world response token-by-token) and add a passing test in `pkg/extension/sdk/python/demo_ext_test.py`.
+- Update `pkg/resources/builtin_extensions/` if any built-in extension wants to migrate (none required for landing).
+
+**Phase D — PoC: third-party provider.**
+- New sample extension `pkg/extension/sdk/python/examples/sample_provider.py` (or a dedicated repo example under `docs/examples/`) that adds a fictional provider via OpenRouter-compatible HTTP. Uses real env-key handling.
+- Integration test: `pkg/extension/integration/provider_test.go` boots fir with the sample extension, lists models, runs a stub streamed completion against an `httptest.Server`, asserts events flow.
+
+**Phase E — Polish.**
+- Update `.fir/skills/self/SKILL.md` to document the new "providers via extensions" capability.
+- Update `CHANGELOG.md` `[Unreleased] / Added`.
+- Confirm `make all` clean. Advisor review. Ff-merge.
+
+## 4. Scope honesty
+
+This is a multi-thousand-LOC refactor touching ~12 packages. I will not try to land it in one shot. Phase A is the prerequisite — it's the part that makes core actually data-driven; without it Phases B–E can't be clean. I'll land Phase A as a self-contained, fully-tested commit first, then reassess. If Phase A reveals nasty surprises (the most likely is bedrock's ARN-claim entanglement with `cmd/fir/app.go` model registration timing), the plan adjusts.
+
+## 5. Risks
+- **Streaming over JSON-RPC**: latency and head-of-line blocking. Mitigation: events are notifs (fire-and-forget); each stream gets its own ID; tool-result ingress is a separate request.
+- **`models_generated.go`**: 14k lines, regenerated by `cmd/generate-models`. Ext-backed providers must contribute their models *at runtime* and never round-trip through this generator.
+- **OAuth refresh races**: keep oauth/registry as today; ext-backed auth providers already use the existing extension `auth_providers` mechanism.
+- **Backwards compat**: every existing CLI flag, model ID, env var must keep working. The Phase A tests pin this.
