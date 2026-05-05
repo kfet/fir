@@ -4,7 +4,6 @@ package components
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -124,69 +123,35 @@ func (c *ModelSelectorComponent) loadModels() {
 	}
 
 	available := c.modelRegistry.GetAvailable()
-	mdls := make([]ModelItem, len(available))
-	for i, m := range available {
+	sorted := models.SortModels(available, c.currentModel)
+	mdls := make([]ModelItem, len(sorted))
+	for i, m := range sorted {
 		mdls[i] = ModelItem{Provider: m.Provider, ID: m.ID, Model: m}
 	}
 
-	c.allModels = c.sortModels(mdls)
+	c.allModels = mdls
 	c.activeModels = c.allModels
 	c.filteredModels = c.activeModels
 	c.clampSelection()
 }
 
-// isFreeModel reports whether the model is genuinely free to call — i.e. it
-// has zero pricing across all cost axes AND is hosted on a provider where
-// zero cost reflects per-call reality rather than a subscription plan the
-// user may or may not have. Today that means Poe, which exposes the same
-// underlying models as both paid and free bots; other zero-cost entries
-// are behind subscription/OAuth gates and shouldn't be advertised as "free".
+// isFreeModel is a thin wrapper over models.IsFreeModel kept for the badge
+// rendering call sites in this file.
 func isFreeModel(m *ai.Model) bool {
-	if m == nil || m.Provider != ai.ProviderPoe {
-		return false
-	}
-	c := m.Cost
-	return c.Input == 0 && c.Output == 0 && c.CacheRead == 0 && c.CacheWrite == 0
+	return models.IsFreeModel(m)
 }
 
-func (c *ModelSelectorComponent) sortModels(models []ModelItem) []ModelItem {
-	sorted := make([]ModelItem, len(models))
-	copy(sorted, models)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		iCurrent := ai.ModelsAreEqual(c.currentModel, sorted[i].Model)
-		jCurrent := ai.ModelsAreEqual(c.currentModel, sorted[j].Model)
-		if iCurrent && !jCurrent {
-			return true
-		}
-		if !iCurrent && jCurrent {
-			return false
-		}
-		// When two entries refer to the "same" model (same provider + display
-		// name — common on Poe where the same model is exposed as multiple
-		// bots with different pricing), put the free variant first.
-		iFree := isFreeModel(sorted[i].Model)
-		jFree := isFreeModel(sorted[j].Model)
-		if sorted[i].Provider == sorted[j].Provider &&
-			sorted[i].Model.Name == sorted[j].Model.Name &&
-			iFree != jFree {
-			return iFree
-		}
-		// Sort by SWE-bench Verified score descending; unscored models go last.
-		iScore := sorted[i].Model.SWEScore
-		jScore := sorted[j].Model.SWEScore
-		if iScore != jScore {
-			return iScore > jScore
-		}
-		if sorted[i].Provider != sorted[j].Provider {
-			return sorted[i].Provider < sorted[j].Provider
-		}
-		// Final tiebreaker: free models ahead of paid ones.
-		if iFree != jFree {
-			return iFree
-		}
-		return false
-	})
-	return sorted
+func (c *ModelSelectorComponent) sortModels(items []ModelItem) []ModelItem {
+	mdls := make([]*ai.Model, len(items))
+	for i, it := range items {
+		mdls[i] = it.Model
+	}
+	sortedM := models.SortModels(mdls, c.currentModel)
+	out := make([]ModelItem, len(sortedM))
+	for i, m := range sortedM {
+		out[i] = ModelItem{Provider: m.Provider, ID: m.ID, Model: m}
+	}
+	return out
 }
 
 func (c *ModelSelectorComponent) filterModels(query string) {

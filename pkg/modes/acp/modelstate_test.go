@@ -47,8 +47,12 @@ func TestSortAvailableModels(t *testing.T) {
 	}
 
 	// Provider grouping: anthropic comes before openai (per
-	// KnownProviderOrder), even when an openai model has a higher SWE
-	// score. Within a provider, SWE desc → free-before-paid → ID.
+	// OrderedProviders), even when an openai model has a higher SWE
+	// score. Within a provider: SWE desc, then ID alpha. Note that
+	// zero-cost non-Poe models are NOT classified as free (those are
+	// subscription/OAuth gated in the registry), so the free/paid
+	// tiebreaker doesn't fire here — a-free wins over a-high purely
+	// by ID alphabetic at equal SWE.
 	anthHigh := makeModel("a-high", "anthropic", 80, 3.0)
 	anthLow := makeModel("a-low", "anthropic", 40, 3.0)
 	anthFree := makeModel("a-free", "anthropic", 80, 0)
@@ -57,11 +61,11 @@ func TestSortAvailableModels(t *testing.T) {
 	unknownProv := makeModel("u", "zzz-unknown", 95, 3.0)
 
 	input := []*ai.Model{openaiHigher, anthLow, unknownProv, anthHigh, openaiLow, anthFree}
-	out := sortAvailableModels(input)
+	out := models.SortModels(input, nil)
 
-	// Expected: anthropic block (free first at score 80, then anthHigh,
-	// then anthLow), then openai block (openaiHigher, openaiLow), then
-	// unknown providers — even though unknown has highest score.
+	// Expected: anthropic block (a-free, a-high tie at SWE 80 → ID
+	// alphabetic; then a-low), openai block (openaiHigher, openaiLow),
+	// then unknown providers — even though unknown has highest score.
 	wantOrder := []string{"a-free", "a-high", "a-low", "o-high", "o-low", "u"}
 	if len(out) != len(wantOrder) {
 		t.Fatalf("got %d models, want %d", len(out), len(wantOrder))

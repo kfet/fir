@@ -4,7 +4,6 @@ package acp
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -31,59 +30,6 @@ func shortProvider(provider string) string {
 	return provider
 }
 
-// sortAvailableModels sorts a slice of available models grouped by
-// provider first (using models.OrderedProviders(), with unknown
-// providers sorted alphabetically after the known set), then within
-// each provider by capability:
-//  1. Provider rank (knownProviderOrder index, else len(known)).
-//  2. Provider name alphabetically (tiebreaker for unknowns).
-//  3. Higher SWE-bench Verified score first (unscored last).
-//  4. Free models (zero input+output cost) before paid.
-//  5. Model ID alphabetically as final tiebreaker.
-//
-// The sort uses SliceStable so models that are equal on all criteria
-// keep their original (registry) order.
-func sortAvailableModels(available []*ai.Model) []*ai.Model {
-	order := models.OrderedProviders()
-	rank := make(map[ai.Provider]int, len(order))
-	for i, p := range order {
-		rank[p] = i
-	}
-	unknown := len(order)
-
-	out := make([]*ai.Model, len(available))
-	copy(out, available)
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-
-		ar, aok := rank[a.Provider]
-		br, bok := rank[b.Provider]
-		if !aok {
-			ar = unknown
-		}
-		if !bok {
-			br = unknown
-		}
-		if ar != br {
-			return ar < br
-		}
-		if string(a.Provider) != string(b.Provider) {
-			return string(a.Provider) < string(b.Provider)
-		}
-
-		if a.SWEScore != b.SWEScore {
-			return a.SWEScore > b.SWEScore
-		}
-		aFree := a.Cost.Input == 0 && a.Cost.Output == 0
-		bFree := b.Cost.Input == 0 && b.Cost.Output == 0
-		if aFree != bFree {
-			return aFree
-		}
-		return a.ID < b.ID
-	})
-	return out
-}
-
 // BuildModelState creates an ACP SessionModelState from the model registry.
 // Only includes models that have auth configured (API key or OAuth token).
 // Models are sorted in a stable priority order (by capability/SWE score) so
@@ -92,7 +38,7 @@ func BuildModelState(reg *models.ModelRegistry, currentModel *ai.Model) *acpsdk.
 	if currentModel == nil {
 		return nil
 	}
-	available := sortAvailableModels(reg.GetAvailable())
+	available := models.SortModels(reg.GetAvailable(), nil)
 	modelInfos := make([]acpsdk.ModelInfo, 0, len(available))
 	for _, m := range available {
 		modelInfos = append(modelInfos, acpsdk.ModelInfo{
