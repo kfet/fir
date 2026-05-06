@@ -10,6 +10,7 @@
 
 ### Changed
 
+- Bedrock provider migrated from `aws-sdk-go-v2` (`bedrockruntime` + `smithy-go`) to the stdlib-only [`github.com/kfet/skipstone`](https://github.com/kfet/skipstone) client (pinned at `v0.1.0`). Drops 16 transitive `aws/*` modules + `smithy-go` (~58 MB of module cache) from fir's dependency graph. Behaviour preserved: ConverseStream API, prompt caching, tool calls, image content, reasoning/thinking blocks, stop-reason mapping, all streaming events, `AWS_BEDROCK_SKIP_AUTH=1`, `BaseURL` override. Credential resolution (env, shared profile, `credential_process`, IRSA, ECS task creds, IMDSv2, STS `AssumeRole` + `source_profile` + `mfa_serial`) is now provided by `skipstone/creds`.
 - Model sort logic unified: `pkg/models/SortModels` is now the single source of truth for both ACP `session/new` model lists and the interactive TUI model selector. Previously `pkg/modes/acp/modelstate.go` and `pkg/modes/interactive/components/model_selector.go` carried separate, divergent implementations. The shared function takes an optional `currentModel` to pin (TUI uses it; ACP passes nil), groups by `OrderedProviders()` (TUI now uses canonical provider order instead of alphabetical), and uses the strict `IsFreeModel` definition (Poe + all four cost axes zero) everywhere. The ACP path previously used a looser zero-input+output check that incorrectly classified subscription/OAuth-gated zero-cost providers (github-copilot, openai-codex, opencode, …) as free and promoted them above paid API models in the dropdown.
 
 ### Fixed

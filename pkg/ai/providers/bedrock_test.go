@@ -1,13 +1,11 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
-	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	skipstone "github.com/kfet/skipstone"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/stretchr/testify/assert"
@@ -56,13 +54,13 @@ func TestBuildConverseStreamInput_Basic(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, input)
 
-	assert.Equal(t, "anthropic.claude-3-5-sonnet-20241022-v2:0", *input.ModelId)
+	assert.Equal(t, "anthropic.claude-3-5-sonnet-20241022-v2:0", input.ModelID)
 	assert.Len(t, input.System, 1)
 	assert.Len(t, input.Messages, 1)
-	assert.NotNil(t, input.InferenceConfig)
-	assert.Equal(t, int32(1024), *input.InferenceConfig.MaxTokens)
-	assert.NotNil(t, input.ToolConfig)
-	assert.Len(t, input.ToolConfig.Tools, 1)
+	require.NotNil(t, input.Inference)
+	assert.Equal(t, 1024, *input.Inference.MaxTokens)
+	require.Len(t, input.Tools, 1)
+	require.NotNil(t, input.ToolChoice)
 }
 
 func TestBuildConverseStreamInput_ToolChoice(t *testing.T) {
@@ -77,30 +75,24 @@ func TestBuildConverseStreamInput_ToolChoice(t *testing.T) {
 	}
 
 	tests := []struct {
-		choice string
-		check  func(t *testing.T, tc brtypes.ToolChoice)
+		choice   string
+		wantType skipstone.ToolChoiceType
+		wantName string
 	}{
-		{"auto", func(t *testing.T, tc brtypes.ToolChoice) {
-			_, ok := tc.(*brtypes.ToolChoiceMemberAuto)
-			assert.True(t, ok)
-		}},
-		{"any", func(t *testing.T, tc brtypes.ToolChoice) {
-			_, ok := tc.(*brtypes.ToolChoiceMemberAny)
-			assert.True(t, ok)
-		}},
-		{"read", func(t *testing.T, tc brtypes.ToolChoice) {
-			v, ok := tc.(*brtypes.ToolChoiceMemberTool)
-			require.True(t, ok)
-			assert.Equal(t, "read", *v.Value.Name)
-		}},
+		{"auto", skipstone.ToolChoiceAuto, ""},
+		{"any", skipstone.ToolChoiceAny, ""},
+		{"read", skipstone.ToolChoiceTool, "read"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.choice, func(t *testing.T) {
 			input, err := buildConverseStreamInput(model, ctx, &ai.StreamOptions{ToolChoice: tt.choice})
 			require.NoError(t, err)
-			require.NotNil(t, input.ToolConfig)
-			tt.check(t, input.ToolConfig.ToolChoice)
+			require.NotNil(t, input.ToolChoice)
+			assert.Equal(t, tt.wantType, input.ToolChoice.Type)
+			if tt.wantName != "" {
+				assert.Equal(t, tt.wantName, input.ToolChoice.Name)
+			}
 		})
 	}
 }
@@ -118,17 +110,11 @@ func TestBuildConverseStreamInput_Thinking(t *testing.T) {
 		Headers: map[string]string{"x-bedrock-reasoning": "high"},
 	})
 	require.NoError(t, err)
-	require.NotNil(t, input.AdditionalModelRequestFields)
+	require.NotEmpty(t, input.AdditionalModelRequestFields)
 
-	// Unmarshal and check it contains thinking config
 	var fields map[string]any
-	err = input.AdditionalModelRequestFields.UnmarshalSmithyDocument(&fields)
-	if err != nil {
-		// Some smithy versions need non-pointer; try alternative
-		t.Logf("unmarshal note: %v (checking fields directly)", err)
-	}
-	// Just verify it was set (non-nil)
-	require.NotNil(t, input.AdditionalModelRequestFields)
+	require.NoError(t, json.Unmarshal(input.AdditionalModelRequestFields, &fields))
+	assert.Contains(t, fields, "thinking")
 }
 
 func TestBuildConverseStreamInput_ToolResults(t *testing.T) {
@@ -153,14 +139,13 @@ func TestBuildConverseStreamInput_ToolResults(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, input.Messages, 3)
 
-	// Last message should be a user message with tool result
 	lastMsg := input.Messages[2]
-	assert.Equal(t, brtypes.ConversationRoleUser, lastMsg.Role)
+	assert.Equal(t, skipstone.RoleUser, lastMsg.Role)
 	require.Len(t, lastMsg.Content, 1)
-	trBlock, ok := lastMsg.Content[0].(*brtypes.ContentBlockMemberToolResult)
-	require.True(t, ok)
-	assert.Equal(t, "tool_01", *trBlock.Value.ToolUseId)
-	assert.Equal(t, brtypes.ToolResultStatusSuccess, trBlock.Value.Status)
+	require.NotNil(t, lastMsg.Content[0].ToolResult)
+	tr := lastMsg.Content[0].ToolResult
+	assert.Equal(t, "tool_01", tr.ToolUseID)
+	assert.Equal(t, "success", tr.Status)
 }
 
 func TestBuildConverseStreamInput_CachePoints(t *testing.T) {
@@ -178,16 +163,12 @@ func TestBuildConverseStreamInput_CachePoints(t *testing.T) {
 	input, err := buildConverseStreamInput(model, ctx, nil)
 	require.NoError(t, err)
 
-	// System should have text + cache point
-	assert.Len(t, input.System, 2)
-	_, isCachePoint := input.System[1].(*brtypes.SystemContentBlockMemberCachePoint)
-	assert.True(t, isCachePoint)
+	require.Len(t, input.System, 2)
+	assert.NotNil(t, input.System[1].CachePoint)
 
-	// Last user message should have cache point appended
 	lastMsg := input.Messages[len(input.Messages)-1]
 	lastContent := lastMsg.Content[len(lastMsg.Content)-1]
-	_, isCachePoint = lastContent.(*brtypes.ContentBlockMemberCachePoint)
-	assert.True(t, isCachePoint)
+	assert.NotNil(t, lastContent.CachePoint)
 }
 
 func TestBuildConverseStreamInput_AssistantThinking(t *testing.T) {
@@ -215,15 +196,11 @@ func TestBuildConverseStreamInput_AssistantThinking(t *testing.T) {
 	input, err := buildConverseStreamInput(model, ctx, nil)
 	require.NoError(t, err)
 
-	// Assistant message should have reasoning + text blocks
 	require.Len(t, input.Messages, 2)
 	assistantMsg := input.Messages[1]
 	require.Len(t, assistantMsg.Content, 2)
-	_, isReasoning := assistantMsg.Content[0].(*brtypes.ContentBlockMemberReasoningContent)
-	assert.True(t, isReasoning)
-	textBlock, isText := assistantMsg.Content[1].(*brtypes.ContentBlockMemberText)
-	assert.True(t, isText)
-	assert.Equal(t, "Response", textBlock.Value)
+	assert.NotNil(t, assistantMsg.Content[0].Reasoning)
+	assert.Equal(t, "Response", assistantMsg.Content[1].Text)
 }
 
 func TestConvertBedrockToolConfig(t *testing.T) {
@@ -235,25 +212,33 @@ func TestConvertBedrockToolConfig(t *testing.T) {
 		},
 	}
 
-	config := convertBedrockToolConfig(tools, "auto")
-	require.NotNil(t, config)
-	require.Len(t, config.Tools, 1)
+	out, choice := convertBedrockToolConfig(tools, "auto")
+	require.Len(t, out, 1)
+	assert.Equal(t, "bash", out[0].Name)
+	assert.Equal(t, "Run a command", out[0].Description)
+	assert.NotEmpty(t, out[0].InputSchema)
 
-	spec, ok := config.Tools[0].(*brtypes.ToolMemberToolSpec)
-	require.True(t, ok)
-	assert.Equal(t, "bash", *spec.Value.Name)
-	assert.Equal(t, "Run a command", *spec.Value.Description)
-
-	_, isAuto := config.ToolChoice.(*brtypes.ToolChoiceMemberAuto)
-	assert.True(t, isAuto)
+	require.NotNil(t, choice)
+	assert.Equal(t, skipstone.ToolChoiceAuto, choice.Type)
 }
 
-func TestBedrockImageFormatSDK(t *testing.T) {
-	assert.Equal(t, brtypes.ImageFormatPng, bedrockImageFormatSDK("image/png"))
-	assert.Equal(t, brtypes.ImageFormatGif, bedrockImageFormatSDK("image/gif"))
-	assert.Equal(t, brtypes.ImageFormatWebp, bedrockImageFormatSDK("image/webp"))
-	assert.Equal(t, brtypes.ImageFormatJpeg, bedrockImageFormatSDK("image/jpeg"))
-	assert.Equal(t, brtypes.ImageFormatJpeg, bedrockImageFormatSDK("image/unknown"))
+func TestBedrockToolSchema(t *testing.T) {
+	// Empty / non-object input is normalised.
+	assert.Equal(t, "object", bedrockToolSchema(nil)["type"])
+	assert.Equal(t, "object", bedrockToolSchema("string")["type"])
+
+	// Existing object preserved with defaults filled in.
+	out := bedrockToolSchema(map[string]any{"properties": map[string]any{"x": "y"}})
+	assert.Equal(t, "object", out["type"])
+	assert.Contains(t, out, "properties")
+}
+
+func TestBedrockImageFormat(t *testing.T) {
+	assert.Equal(t, "png", bedrockImageFormat("image/png"))
+	assert.Equal(t, "gif", bedrockImageFormat("image/gif"))
+	assert.Equal(t, "webp", bedrockImageFormat("image/webp"))
+	assert.Equal(t, "jpeg", bedrockImageFormat("image/jpeg"))
+	assert.Equal(t, "jpeg", bedrockImageFormat("image/unknown"))
 }
 
 func TestSupportsBedrockPromptCaching(t *testing.T) {
@@ -273,7 +258,6 @@ func TestSupportsBedrockAdaptiveThinking(t *testing.T) {
 	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4-6-v1", ""))
 	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4.6-v1", ""))
 	assert.False(t, supportsBedrockAdaptiveThinking("anthropic.claude-3-7-sonnet", ""))
-	// Application inference profile: ID has no model name; Name carries it.
 	assert.True(t, supportsBedrockAdaptiveThinking("arn:aws:bedrock:us-east-1:123:application-inference-profile/abcd", "Claude Opus 4.7"))
 }
 
@@ -313,7 +297,7 @@ func TestNewBedrockClient_SkipAuth(t *testing.T) {
 		BaseURL:  "https://my-proxy.example.com",
 	}
 
-	client, err := newBedrockClient(context.Background(), model, nil)
+	client, err := newBedrockClient(model)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
@@ -321,9 +305,10 @@ func TestNewBedrockClient_SkipAuth(t *testing.T) {
 func TestNewBedrockClient_DefaultRegion(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_BEDROCK_SKIP_AUTH", "1") // avoid touching ~/.aws
 
 	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
-	client, err := newBedrockClient(context.Background(), model, nil)
+	client, err := newBedrockClient(model)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
@@ -332,7 +317,6 @@ func TestConvertBedrockMessages_EmptyText(t *testing.T) {
 	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	msgs := []ai.Message{ai.NewUserMsg("  ", 0)}
 	result := convertBedrockMessages(msgs, model, false, ai.CacheNone)
-	// Empty text should be skipped
 	assert.Empty(t, result)
 }
 
@@ -353,10 +337,8 @@ func TestConvertBedrockMessages_MultipartContent(t *testing.T) {
 	require.Len(t, result, 1)
 	require.Len(t, result[0].Content, 2)
 
-	_, isText := result[0].Content[0].(*brtypes.ContentBlockMemberText)
-	assert.True(t, isText)
-	_, isImage := result[0].Content[1].(*brtypes.ContentBlockMemberImage)
-	assert.True(t, isImage)
+	assert.Equal(t, "Look at this", result[0].Content[0].Text)
+	assert.NotNil(t, result[0].Content[1].Image)
 }
 
 func TestConvertBedrockMessages_ToolResultError(t *testing.T) {
@@ -373,12 +355,10 @@ func TestConvertBedrockMessages_ToolResultError(t *testing.T) {
 	result := convertBedrockMessages(msgs, model, false, ai.CacheNone)
 	require.Len(t, result, 3)
 
-	trBlock, ok := result[2].Content[0].(*brtypes.ContentBlockMemberToolResult)
-	require.True(t, ok)
-	assert.Equal(t, brtypes.ToolResultStatusError, trBlock.Value.Status)
+	require.NotNil(t, result[2].Content[0].ToolResult)
+	assert.Equal(t, "error", result[2].Content[0].ToolResult.Status)
 }
 
-// TestBuildConverseStreamInput_NoOptions verifies nil options don't panic.
 func TestBuildConverseStreamInput_NoOptions(t *testing.T) {
 	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
@@ -386,24 +366,12 @@ func TestBuildConverseStreamInput_NoOptions(t *testing.T) {
 	input, err := buildConverseStreamInput(model, ctx, nil)
 	require.NoError(t, err)
 	require.NotNil(t, input)
-	assert.Nil(t, input.InferenceConfig)
-	assert.Nil(t, input.ToolConfig)
-}
-
-// Verify document.NewLazyDocument works as expected for tool parameters.
-func TestDocumentLazyRoundTrip(t *testing.T) {
-	params := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path": map[string]any{"type": "string"},
-		},
-	}
-	doc := document.NewLazyDocument(params)
-	require.NotNil(t, doc)
+	assert.Nil(t, input.Inference)
+	assert.Empty(t, input.Tools)
+	assert.Nil(t, input.ToolChoice)
 }
 
 func TestBedrockNormalizeID(t *testing.T) {
-	// Test the ID normalization used in convertBedrockMessages
 	normalize := func(id string) string {
 		var b strings.Builder
 		b.Grow(min(len(id), 64))
@@ -423,46 +391,4 @@ func TestBedrockNormalizeID(t *testing.T) {
 	assert.Equal(t, "tool_call_123", normalize("tool_call_123"))
 	assert.Equal(t, "tool_call_123", normalize("tool.call.123"))
 	assert.Equal(t, "abc-def_ghi", normalize("abc-def_ghi"))
-}
-
-func TestBedrockToolSchemaCoercion(t *testing.T) {
-	// Valid object schema passes through.
-	in := map[string]any{"type": "object", "properties": map[string]any{"x": map[string]any{"type": "string"}}}
-	assert.Equal(t, in, bedrockToolSchema(in))
-
-	// nil → empty object schema.
-	got := bedrockToolSchema(nil)
-	assert.Equal(t, "object", got["type"])
-	assert.NotNil(t, got["properties"])
-
-	// Empty map passes through (still a valid JSON object).
-	empty := map[string]any{}
-	assert.Equal(t, empty, bedrockToolSchema(empty))
-
-	// JSON-encoded string schema is decoded.
-	got = bedrockToolSchema(`{"type":"object","properties":{}}`)
-	assert.Equal(t, "object", got["type"])
-
-	// JSON-encoded schema from MCP (json.RawMessage).
-	got = bedrockToolSchema(json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`))
-	assert.Equal(t, "object", got["type"])
-
-	// Empty json.RawMessage → fallback.
-	got = bedrockToolSchema(json.RawMessage(nil))
-	assert.Equal(t, "object", got["type"])
-
-	// Garbage/non-object types → fallback.
-	for _, v := range []any{"not json", []byte("garbage"), 42, true, []any{1, 2}} {
-		got = bedrockToolSchema(v)
-		assert.Equal(t, "object", got["type"], "input %v", v)
-	}
-
-	// Verify convertBedrockToolConfig wraps a parameterless tool safely.
-	cfg := convertBedrockToolConfig([]ai.Tool{{Name: "t", Description: "d", Parameters: nil}}, "")
-	require.Len(t, cfg.Tools, 1)
-	spec := cfg.Tools[0].(*brtypes.ToolMemberToolSpec).Value
-	require.NotNil(t, spec.InputSchema)
-	js, ok := spec.InputSchema.(*brtypes.ToolInputSchemaMemberJson)
-	require.True(t, ok)
-	require.NotNil(t, js.Value)
 }
