@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.2] - 2026-05-05
+
 ### Changed
 
 - Model sort logic unified: `pkg/models/SortModels` is now the single source of truth for both ACP `session/new` model lists and the interactive TUI model selector. Previously `pkg/modes/acp/modelstate.go` and `pkg/modes/interactive/components/model_selector.go` carried separate, divergent implementations. The shared function takes an optional `currentModel` to pin (TUI uses it; ACP passes nil), groups by `OrderedProviders()` (TUI now uses canonical provider order instead of alphabetical), and uses the strict `IsFreeModel` definition (Poe + all four cost axes zero) everywhere. The ACP path previously used a looser zero-input+output check that incorrectly classified subscription/OAuth-gated zero-cost providers (github-copilot, openai-codex, opencode, …) as free and promoted them above paid API models in the dropdown.
