@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -488,4 +489,76 @@ func TestManager_StreamableTransport_AutoReconnect(t *testing.T) {
 	// so any UI listener picks up the refreshed tool list.
 	assert.Greater(t, notifs.Load(), notifsAtConnect,
 		"onToolsChanged must re-fire after auto-reconnect")
+}
+
+// recordingHandler is a slog.Handler that captures every record it sees.
+// Used by TestManager_ReconnectWarning_DoesNotLeakToDefaultSlog to assert
+// that reconnect failure warnings do not punch through the default slog
+// handler (which writes to stderr and would corrupt the TUI).
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *recordingHandler) snapshot() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]slog.Record, len(h.records))
+	copy(out, h.records)
+	return out
+}
+
+// TestManager_ReconnectWarning_DoesNotLeakToDefaultSlog is a regression
+// test for the bug where MCP reconnect warnings printed via slog.Warn
+// reached the default slog handler — which writes a raw text line to
+// stderr and corrupts the TUI render. Reconnect logs must flow through
+// firlog (file-only / discard) instead.
+func TestManager_ReconnectWarning_DoesNotLeakToDefaultSlog(t *testing.T) {
+	shortenReconnectDelays(t)
+
+	rec := &recordingHandler{}
+	orig := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	server := makePingServer()
+	var dialCount atomic.Int32
+	realDial := inMemoryDial(t, server)
+	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+		if dialCount.Add(1) == 1 {
+			return realDial(cfg)
+		}
+		return nil, errors.New("permanent dial failure")
+	}
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = dial
+	mgr.Start(context.Background())
+	require.NoError(t, mgr.WaitReady(context.Background()))
+	defer mgr.Close()
+
+	closeServerSession(t, server)
+
+	// Wait until the err has surfaced — i.e. the reconnect loop has run
+	// past reconnectErrSurfaceThreshold and exercised the slog.Warn path
+	// in the un-fixed code.
+	require.Eventually(t, func() bool {
+		st := mgr.Status()
+		return len(st) == 1 && st[0].Error != nil && !st[0].Connected
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// Default slog must remain untouched: nothing about MCP reconnects
+	// should reach it (it would otherwise hit stderr and clobber the TUI).
+	for _, r := range rec.snapshot() {
+		t.Errorf("unexpected default-slog record: level=%s msg=%q", r.Level, r.Message)
+	}
 }

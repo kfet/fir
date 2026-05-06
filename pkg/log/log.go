@@ -21,6 +21,11 @@ var logger atomic.Pointer[slog.Logger]
 func init() {
 	l := slog.New(discardHandler{})
 	logger.Store(l)
+	// Also redirect the global slog default so any stray slog.* call (or
+	// third-party library using log/slog) cannot punch through to stderr
+	// and corrupt the TUI. Tests that need to capture slog output may
+	// still override via slog.SetDefault.
+	slog.SetDefault(l)
 }
 
 // getLogger returns the current logger. Safe for concurrent use.
@@ -45,7 +50,11 @@ func Init(enabled bool, path string) (cleanup func(), err error) {
 	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
-	logger.Store(slog.New(handler))
+	l := slog.New(handler)
+	logger.Store(l)
+	// Mirror onto slog.Default so any stray slog.* call (ours or a
+	// dependency's) lands in the debug log file instead of stderr.
+	slog.SetDefault(l)
 
 	return func() { f.Close() }, nil
 }

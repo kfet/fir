@@ -476,7 +476,7 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 				var updated []agent.AgentTool
 				for tool, err := range session.Tools(context.Background(), nil) {
 					if err != nil {
-						slog.Warn("MCP re-list tools error", "server", serverName, "err", err)
+						firlog.Warn("MCP re-list tools error", "server", serverName, "err", err)
 						return
 					}
 					updated = append(updated, AdaptTool(m.serverSession(serverName), serverName, tool, &m.progressReg))
@@ -530,7 +530,7 @@ func (m *Manager) clientOptions(serverName string) *sdk.ClientOptions {
 			}
 		},
 		PromptListChangedHandler: func(_ context.Context, _ *sdk.PromptListChangedRequest) {
-			slog.Debug("MCP prompt list changed", "server", serverName)
+			firlog.Debug("MCP prompt list changed", "server", serverName)
 		},
 		CreateMessageHandler: m.SamplingFn,
 		ElicitationHandler:   elicitHandler(m.ElicitationFn),
@@ -680,9 +680,9 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 			}
 		})
 		if surface {
-			slog.Warn("MCP reconnect failing", "server", name, "attempt", attempt+1, "err", err)
+			firlog.Warn("MCP reconnect failing", "server", name, "attempt", attempt+1, "err", err)
 		} else {
-			slog.Debug("MCP reconnect failed", "server", name, "attempt", attempt+1, "err", err)
+			firlog.Debug("MCP reconnect failed", "server", name, "attempt", attempt+1, "err", err)
 		}
 		return false
 	}
@@ -788,7 +788,7 @@ func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg Server
 	if lerr := session.SetLoggingLevel(ctx, &sdk.SetLoggingLevelParams{
 		Level: m.loggingLevel(),
 	}); lerr != nil {
-		slog.Debug("MCP SetLoggingLevel not supported", "server", name, "err", lerr)
+		firlog.Debug("MCP SetLoggingLevel not supported", "server", name, "err", lerr)
 	}
 
 	var tools []agent.AgentTool
@@ -926,7 +926,7 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 			}
 		})
 		if err := item.session.Close(); err != nil {
-			slog.Warn("MCP Reload: error closing session", "server", item.name, "err", err)
+			firlog.Warn("MCP Reload: error closing session", "server", item.name, "err", err)
 		}
 	}
 
@@ -956,7 +956,7 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 			m.withEntry(name, func(e *serverEntry) {
 				e.err = err
 			})
-			slog.Warn("MCP Reload: failed to start server", "server", name, "err", err)
+			firlog.Warn("MCP Reload: failed to start server", "server", name, "err", err)
 		}
 	}
 
