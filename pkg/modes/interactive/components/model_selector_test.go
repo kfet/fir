@@ -90,3 +90,44 @@ func TestSortModels_ZeroCostCopilotNotTreatedAsFree(t *testing.T) {
 		t.Fatalf("did not expect FREE badge for Copilot model, got:\n%s", rendered)
 	}
 }
+
+func TestFilterModels_SearchesAcrossFields(t *testing.T) {
+	current := &ai.Model{ID: "current", Provider: "p"}
+	settings := config.NewInMemorySettingsManager(config.Settings{})
+	tmpDir := t.TempDir()
+	authStorage := auth.NewAuthStorage(tmpDir)
+	registry := models.NewModelRegistry(authStorage, "")
+	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+
+	free := &ai.Model{ID: "claude-free", Name: "Claude Free", Provider: "poe"}
+	paid := &ai.Model{ID: "gpt-paid", Name: "GPT Paid", Provider: "openai",
+		Cost: ai.ModelCost{Input: 3, Output: 15}, ContextWindow: 128000, SWEScore: 70}
+	items := []ModelItem{
+		{Provider: free.Provider, ID: free.ID, Model: free},
+		{Provider: paid.Provider, ID: paid.ID, Model: paid},
+	}
+	c.activeModels = items
+	c.allModels = items
+
+	cases := []struct {
+		query   string
+		wantID  string
+		wantLen int
+	}{
+		{"[free", "claude-free", 1},
+		{"FREE", "claude-free", 1},
+		{"128k", "gpt-paid", 1},
+		{"openai", "gpt-paid", 1},
+		{"[openai]", "gpt-paid", 1},
+		{"SWE:70", "gpt-paid", 1},
+	}
+	for _, tc := range cases {
+		c.filterModels(tc.query)
+		if len(c.filteredModels) != tc.wantLen {
+			t.Fatalf("query %q: expected %d results, got %d", tc.query, tc.wantLen, len(c.filteredModels))
+		}
+		if c.filteredModels[0].ID != tc.wantID {
+			t.Fatalf("query %q: expected %q, got %q", tc.query, tc.wantID, c.filteredModels[0].ID)
+		}
+	}
+}

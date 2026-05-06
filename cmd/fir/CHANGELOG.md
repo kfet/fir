@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Model picker search now matches across all rendered fields, not just `id` and `provider`. Typing `[free` (or `FREE`) filters to the FREE-tagged models; typing `128k` filters by context window; `[openai]` filters by provider badge; `SWE:70` filters by SWE-bench score. `pkg/modes/interactive/components/model_selector.go` builds a richer haystack including the model display name, the `[FREE]` / cost / context / SWE badges, and the bracketed provider badge, then passes that to `tui.FuzzyFilter`. Test in `pkg/modes/interactive/components/model_selector_test.go`.
+
 ## [0.43.2] - 2026-05-05
 
 ### Changed

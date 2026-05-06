@@ -158,12 +158,48 @@ func (c *ModelSelectorComponent) filterModels(query string) {
 	if query == "" {
 		c.filteredModels = c.activeModels
 	} else {
-		c.filteredModels = tui.FuzzyFilter(c.activeModels, query, func(item ModelItem) string {
-			return item.ID + " " + item.Provider
-		})
+		c.filteredModels = tui.FuzzyFilter(c.activeModels, query, modelHaystack)
 	}
 	c.clampSelection()
 	c.updateList()
+}
+
+// modelHaystack returns the searchable text for a model item — combining
+// every field rendered in the row so the user can match by ID, provider,
+// display name, or any badge ([FREE], cost, context size, SWE score).
+func modelHaystack(item ModelItem) string {
+	var b strings.Builder
+	b.WriteString(item.ID)
+	b.WriteByte(' ')
+	b.WriteString(item.Provider)
+	b.WriteString(" [")
+	b.WriteString(item.Provider)
+	b.WriteByte(']')
+	if item.Model != nil {
+		if item.Model.Name != "" {
+			b.WriteByte(' ')
+			b.WriteString(item.Model.Name)
+		}
+		if isFreeModel(item.Model) {
+			b.WriteString(" [FREE] free")
+		}
+		if cb := formatCostBadge(item.Model.Cost); cb != "" {
+			b.WriteByte(' ')
+			b.WriteString(cb)
+		}
+		if ctx := formatContextBadge(item.Model.ContextWindow); ctx != "" {
+			b.WriteByte(' ')
+			b.WriteString(ctx)
+		}
+		if item.Model.SWEScore > 0 {
+			if item.Model.SWEInferred {
+				fmt.Fprintf(&b, " [SWE:~%.0f%%]", item.Model.SWEScore)
+			} else {
+				fmt.Fprintf(&b, " [SWE:%.0f%%]", item.Model.SWEScore)
+			}
+		}
+	}
+	return b.String()
 }
 
 func formatCostBadge(cost ai.ModelCost) string {
