@@ -33,6 +33,18 @@
 - `TestBridge_KeepAlive_UpdatesLastActivity` and `TestBridge_KeepAlive_ExtendsDuringSlowSideQuery` in `pkg/extension/bridge_test.go` no longer flake under `-race` / loaded CI. Both relied on a fixed `time.Sleep` to wait for a background ticker goroutine to emit at least one tick, but under the race detector the goroutine can be delayed past that single sleep window. Replaced both with bounded polling (3s deadline, 10ms intervals) that checks the same invariant deterministically. Per `AGENTS.md` testing guidance: avoid wall-clock waits in tests.
 
 ### Changed
+- `extract-module` skill: add idiomatic-Go review pass — when extracting
+  a package into its own repo, treat the copy-paste as the starting state
+  and rework naming/errors/interfaces/docs/options for a standalone Go
+  module before the first commit. Behaviour stays identical; shape and
+  ergonomics get a fresh-start treatment.
+
+### Changed
+- `extract-module` skill: insist on a 100% coverage gate in the new module's
+  Makefile (copy the exact recipe from skipstone/firpty rather than rolling
+  your own). Plugs the loophole that produced a coverage-gate-less Makefile
+  during the pinoauth extraction.
+### Changed
 
 - Model picker search now matches across all rendered fields, not just `id` and `provider`. Typing `[free` (or `FREE`) filters to the FREE-tagged models; typing `128k` filters by context window; `[openai]` filters by provider badge; `SWE:70` filters by SWE-bench score. `pkg/modes/interactive/components/model_selector.go` builds a richer haystack including the model display name, the `[FREE]` / cost / context / SWE badges, and the bracketed provider badge, then passes that to `tui.FuzzyFilter`. Test in `pkg/modes/interactive/components/model_selector_test.go`.
 
