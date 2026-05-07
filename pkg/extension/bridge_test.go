@@ -346,11 +346,19 @@ func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
 	params := json.RawMessage(`{"question":"test"}`)
 	_ = extCodec.WriteRequest(1, "side_query", &params)
 
-	// Wait 100ms — keepAlive should have ticked multiple times by now.
-	time.Sleep(100 * time.Millisecond)
-	activity := time.Unix(0, b.lastActivity.Load())
-	age := time.Since(activity)
-	if age > 50*time.Millisecond {
+	// Poll for a recent keepAlive tick — under race detector / CI load the
+	// goroutine can be delayed well past a single tick interval.
+	deadline := time.Now().Add(3 * time.Second)
+	var age time.Duration
+	for time.Now().Before(deadline) {
+		activity := time.Unix(0, b.lastActivity.Load())
+		age = time.Since(activity)
+		if age < 50*time.Millisecond {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if age >= 50*time.Millisecond {
 		t.Fatalf("expected recent lastActivity from keepAlive (age %v), keepAlive may not be running", age)
 	}
 
@@ -446,12 +454,18 @@ func TestBridge_KeepAlive_UpdatesLastActivity(t *testing.T) {
 	b.lastActivity.Store(0) // clear
 
 	stop := b.keepAlive()
-	time.Sleep(50 * time.Millisecond) // wait for several ticks
-	stop()
+	defer stop()
 
-	if b.lastActivity.Load() == 0 {
-		t.Fatal("expected keepAlive to update lastActivity")
+	// Poll instead of sleeping — under race detector / CI load the goroutine
+	// can take well over 50ms to get its first tick in.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b.lastActivity.Load() != 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatal("expected keepAlive to update lastActivity")
 }
 
 func TestBridge_CallHook_Success(t *testing.T) {
