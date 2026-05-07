@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.43.3] - 2026-05-06
+
 ### Fixed
 
 - `TestBridge_KeepAlive_UpdatesLastActivity` and `TestBridge_KeepAlive_ExtendsDuringSlowSideQuery` in `pkg/extension/bridge_test.go` no longer flake under `-race` / loaded CI. Both relied on a fixed `time.Sleep` to wait for a background ticker goroutine to emit at least one tick, but under the race detector the goroutine can be delayed past that single sleep window. Replaced both with bounded polling (3s deadline, 10ms intervals) that checks the same invariant deterministically. Per `AGENTS.md` testing guidance: avoid wall-clock waits in tests.
