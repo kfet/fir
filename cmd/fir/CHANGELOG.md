@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `wt` skill now covers discussion/design sessions, not just autonomous task delegation. Description rewritten so the skill fires whenever the user wants the work *or* the conversation about it to happen in a separate window — including "let's discuss / design / propose this over there". Added explicit do-mode vs discuss-mode distinction with discuss as the safe default on ambiguity, and an anti-pattern note: don't draft designs inline in response to a wt-shaped cue.
+
 ## [0.43.3] - 2026-05-06
 
 ### Fixed

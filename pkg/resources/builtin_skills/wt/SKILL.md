@@ -1,18 +1,27 @@
 ---
 builtin: true
 name: wt
-description: Delegate a task to a fresh fir agent in a new tmux window on its own git worktree. Use when the user asks to "kick off", "spin up", "delegate", or "start a worktree for" a task — i.e. wants another agent to do it, not you. If the user wants you to do the work, follow the worktree discipline in `AGENTS.md` instead.
+description: Spawn a fresh fir agent in a new tmux window on its own git worktree. Use whenever the user wants the work — or the conversation about the work — to happen over there, not here. Doing it, designing it, or just talking it through all count. If the user points at this skill, that alone is the cue — spawn, don't inline.
 ---
 
-# wt — spawn a delegated agent in a worktree
+# wt — spawn an agent in a worktree
 
-Spawn the agent in a new tmux window and continue the task over there. Don't do any of the work — investigation, design, edits — in the current session.
+The work happens over there. Not here.
+
+Two flavours:
+
+- **do-mode** — the user wants the task done. The spawned agent owns it.
+- **discuss-mode** — the user wants to think it through with a fresh agent. The spawned agent waits for them and does no code work until they say go.
+
+If unsure, pick discuss-mode. It is the safer default.
+
+If you catch yourself drafting a design or digging into code here in response to a wt-shaped cue, stop. That belongs in the new window.
 
 ## Recipe
 
-1. Pick a **feature name**: short kebab-case (2–4 words) summarising the whole task. Read the full task — don't latch onto the first word.
+1. Pick a short kebab-case feature name from the whole task.
 
-2. Create the worktree + branch as a sibling of the project root:
+2. Create the worktree as a sibling of the project root:
    ```bash
    FEATURE="<feature-name>"
    BRANCH="work/${FEATURE}"
@@ -20,12 +29,14 @@ Spawn the agent in a new tmux window and continue the task over there. Don't do 
    git worktree add "$WORKTREE" -b "$BRANCH"
    ```
 
-3. Open a new tmux window running fir in the worktree, passing the full task:
+3. Open a tmux window running fir there. Pass the full task plus the mode:
    ```bash
    tmux new-window -n "$FEATURE" -c "$WORKTREE" \
-     "fir --session-name '$FEATURE' '<full task description>'; exec \$SHELL"
+     "fir --session-name '$FEATURE' '<full task>. Mode: <do|discuss>.'; exec \$SHELL"
    ```
 
-4. Report back to the user: worktree path, branch name, tmux window name.
+   In discuss-mode, say so plainly in the prompt — the spawned agent will know what that means.
 
-Then stop — the spawned agent owns the task from here. Cleanup (merge, `worktree remove`, branch delete) is its responsibility per `AGENTS.md`.
+4. Tell the user the worktree path, branch, and window name. Then stop.
+
+Cleanup (merge, `worktree remove`, branch delete) belongs to the spawned agent per `AGENTS.md`.
