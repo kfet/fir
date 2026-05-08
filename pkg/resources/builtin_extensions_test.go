@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -120,5 +122,55 @@ func TestBuiltinExtensionsHash_Stable(t *testing.T) {
 	}
 	if len(h1) != 16 {
 		t.Fatalf("BuiltinExtensionsHash() length = %d, want 16", len(h1))
+	}
+}
+
+func TestExtractBuiltinExtensionsTo_ReExtractsWhenIncomplete(t *testing.T) {
+	base := t.TempDir()
+
+	dir, err := extractBuiltinExtensionsTo(base)
+	if err != nil {
+		t.Fatalf("first extract: %v", err)
+	}
+	demo := filepath.Join(dir, "demo.py")
+	if _, err := os.Stat(demo); err != nil {
+		t.Fatalf("demo.py missing after extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".complete")); err != nil {
+		t.Fatalf(".complete sentinel missing after extract: %v", err)
+	}
+
+	// Second call must reuse the cache (sentinel present) and not error.
+	dir2, err := extractBuiltinExtensionsTo(base)
+	if err != nil || dir2 != dir {
+		t.Fatalf("reuse failed: dir=%q dir2=%q err=%v", dir, dir2, err)
+	}
+
+	// Simulate macOS partial temp purge: wipe extension files and the
+	// sentinel, leave the directory itself intact (this is exactly the
+	// state that produced the original 'no such file or directory'
+	// startup failures).
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			t.Fatalf("simulate purge: %v", err)
+		}
+	}
+
+	dir3, err := extractBuiltinExtensionsTo(base)
+	if err != nil {
+		t.Fatalf("re-extract after purge: %v", err)
+	}
+	if dir3 != dir {
+		t.Fatalf("expected same hashed dir, got %q vs %q", dir3, dir)
+	}
+	if _, err := os.Stat(filepath.Join(dir3, "demo.py")); err != nil {
+		t.Fatalf("demo.py missing after re-extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir3, ".complete")); err != nil {
+		t.Fatalf(".complete missing after re-extract: %v", err)
 	}
 }

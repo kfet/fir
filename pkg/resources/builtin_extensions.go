@@ -184,92 +184,84 @@ func parseCommaSeparatedList(value string) []string {
 // directory so extension scripts can be executed as subprocesses.
 func extractBuiltinExtensions() (string, error) {
 	builtinExtExtractOnce.Do(func() {
-		// Use a content hash of all embedded extension files so the cache
-		// directory is stable across runs with the same binary but
-		// invalidated when extensions change (new build).
-		hash := BuiltinExtensionsHash()
-
 		cacheBase := filepath.Join(os.TempDir(), "fir-builtin-extensions")
-		dir := filepath.Join(cacheBase, hash)
-
-		// If the directory already exists AND has files, reuse it (includes .pyc caches).
-		// macOS periodically purges temp file contents while leaving directories intact,
-		// so we verify at least one file exists before reusing the cache.
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			entries, _ := os.ReadDir(dir)
-			hasFiles := false
-			for _, e := range entries {
-				if !e.IsDir() {
-					hasFiles = true
-					break
-				}
-			}
-			if hasFiles {
-				builtinExtExtractDir = dir
-				return
-			}
-			// Directory exists but is empty — remove and re-extract.
-			os.RemoveAll(dir)
-		}
-
-		if err := os.MkdirAll(cacheBase, 0o755); err != nil {
-			builtinExtExtractErr = fmt.Errorf("create cache dir for builtin extensions: %w", err)
-			return
-		}
-
-		// Extract to a temp dir then rename atomically.
-		tmp, err := os.MkdirTemp(cacheBase, ".extract-")
-		if err != nil {
-			builtinExtExtractErr = fmt.Errorf("create temp dir for builtin extensions: %w", err)
-			return
-		}
-		success := false
-		defer func() {
-			if !success {
-				os.RemoveAll(tmp)
-			}
-		}()
-
-		err = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			rel := strings.TrimPrefix(path, "builtin_extensions/")
-			if rel == "" || path == "builtin_extensions" {
-				return nil
-			}
-			target := filepath.Join(tmp, rel)
-			if d.IsDir() {
-				return os.MkdirAll(target, 0o755)
-			}
-			data, err := BuiltinExtensionsFS.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(target, data, 0o755); err != nil {
-				return err
-			}
-			return nil
-		})
-		if err != nil {
-			builtinExtExtractErr = fmt.Errorf("extract builtin extensions: %w", err)
-			return
-		}
-
-		if err := os.Rename(tmp, dir); err != nil {
-			// Rename may fail if another process created it concurrently.
-			if _, statErr := os.Stat(dir); statErr == nil {
-				os.RemoveAll(tmp)
-				builtinExtExtractDir = dir
-				return
-			}
-			builtinExtExtractErr = fmt.Errorf("rename builtin extensions dir: %w", err)
-			return
-		}
-		success = true
-		builtinExtExtractDir = dir
+		builtinExtExtractDir, builtinExtExtractErr = extractBuiltinExtensionsTo(cacheBase)
 	})
 	return builtinExtExtractDir, builtinExtExtractErr
+}
+
+// extractBuiltinExtensionsTo materialises the embedded builtin_extensions tree
+// under cacheBase/<hash>/ and returns the resulting directory. It is safe to
+// call repeatedly: a sentinel `.complete` file is written last on extraction,
+// and its presence on a subsequent call means the cached directory is whole
+// (so we can reuse it). If the directory is missing the sentinel — empty,
+// partially purged by macOS temp cleanup, or otherwise incomplete — we wipe
+// and re-extract.
+func extractBuiltinExtensionsTo(cacheBase string) (string, error) {
+	hash := BuiltinExtensionsHash()
+	dir := filepath.Join(cacheBase, hash)
+	sentinel := filepath.Join(dir, ".complete")
+
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		if _, sErr := os.Stat(sentinel); sErr == nil {
+			return dir, nil
+		}
+		// Directory exists but is incomplete — remove and re-extract.
+		os.RemoveAll(dir)
+	}
+
+	if err := os.MkdirAll(cacheBase, 0o755); err != nil {
+		return "", fmt.Errorf("create cache dir for builtin extensions: %w", err)
+	}
+
+	tmp, err := os.MkdirTemp(cacheBase, ".extract-")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir for builtin extensions: %w", err)
+	}
+	success := false
+	defer func() {
+		if !success {
+			os.RemoveAll(tmp)
+		}
+	}()
+
+	err = fs.WalkDir(BuiltinExtensionsFS, "builtin_extensions", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel := strings.TrimPrefix(path, "builtin_extensions/")
+		if rel == "" || path == "builtin_extensions" {
+			return nil
+		}
+		target := filepath.Join(tmp, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := BuiltinExtensionsFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o755)
+	})
+	if err != nil {
+		return "", fmt.Errorf("extract builtin extensions: %w", err)
+	}
+
+	// Write sentinel marker last, so its presence guarantees a complete extraction.
+	if err := os.WriteFile(filepath.Join(tmp, ".complete"), nil, 0o644); err != nil {
+		return "", fmt.Errorf("write builtin extensions sentinel: %w", err)
+	}
+
+	if err := os.Rename(tmp, dir); err != nil {
+		// Rename may fail if another process created it concurrently.
+		if _, statErr := os.Stat(dir); statErr == nil {
+			os.RemoveAll(tmp)
+			return dir, nil
+		}
+		return "", fmt.Errorf("rename builtin extensions dir: %w", err)
+	}
+	success = true
+	return dir, nil
 }
 
 // BuiltinExtension describes a builtin extension discovered from the embedded FS.

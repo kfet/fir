@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Builtin extensions (`demo`, `hello`, etc.) no longer fail to start with `fork/exec .../fir-builtin-extensions/<hash>/<name>.py: no such file or directory` when the temp cache directory has been partially purged (e.g. by macOS periodic temp cleanup). Extraction now writes a `.complete` sentinel file last and the cache-reuse check requires the sentinel to be present — if any file is missing the cache is wiped and re-extracted. Previously the check only verified that *some* top-level file existed, so a partial purge that left `.pyc` caches but removed the actual `.py` scripts would silently reuse a broken cache. `pkg/resources/builtin_extensions.go` + test in `builtin_extensions_test.go`.
+
 ### Changed
 
 - `wt` skill now covers discussion/design sessions, not just autonomous task delegation. Description rewritten so the skill fires whenever the user wants the work *or* the conversation about it to happen in a separate window — including "let's discuss / design / propose this over there". Added explicit do-mode vs discuss-mode distinction with discuss as the safe default on ambiguity, and an anti-pattern note: don't draft designs inline in response to a wt-shaped cue.
