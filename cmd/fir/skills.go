@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -38,7 +39,32 @@ func runSkills() error {
 		return runSkillsInstall(name, user, force)
 	}
 
-	return fmt.Errorf("unknown skills subcommand: %s\nUsage: fir skills [list | install <name> [--user] [--force]]", args[0])
+	// "show <name>" or bare "<name>" shorthand.
+	rest := args
+	if args[0] == "show" {
+		rest = args[1:]
+	}
+	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		return fmt.Errorf("unknown skills subcommand: %s\nUsage: fir skills [list | install <name> [--user] [--force] | show <name> [--full] [--json] [--path]]", args[0])
+	}
+	name := rest[0]
+	var full, jsonOut, pathOnly bool
+	for _, a := range rest[1:] {
+		switch a {
+		case "--full", "-f":
+			full = true
+		case "--json":
+			jsonOut = true
+		case "--path":
+			pathOnly = true
+		default:
+			return fmt.Errorf("unknown flag: %s", a)
+		}
+	}
+	if jsonOut && pathOnly {
+		return fmt.Errorf("--json and --path are mutually exclusive")
+	}
+	return runSkillsShow(name, full, jsonOut, pathOnly)
 }
 
 // runSkillsList lists all loaded skills in a table.
@@ -154,5 +180,83 @@ func runSkillsInstall(name string, user, force bool) error {
 		scope = "user"
 	}
 	fmt.Printf("Installed skill %q to %s (%s)\n", name, targetDir, scope)
+	return nil
+}
+
+// runSkillsShow prints metadata (and optionally the body) for a single skill.
+func runSkillsShow(name string, full, jsonOut, pathOnly bool) error {
+	cwd, _ := os.Getwd()
+	agentDir := resolveAgentDir()
+	result := resources.LoadSkills(resources.LoadSkillsOptions{
+		Cwd:             cwd,
+		AgentDir:        agentDir,
+		IncludeDefaults: true,
+	})
+
+	var match *resources.Skill
+	for i := range result.Skills {
+		if result.Skills[i].Name == name {
+			match = &result.Skills[i]
+			break
+		}
+	}
+	if match == nil {
+		var suggestions []string
+		needle := strings.ToLower(name)
+		for _, s := range result.Skills {
+			if strings.Contains(strings.ToLower(s.Name), needle) {
+				suggestions = append(suggestions, s.Name)
+			}
+		}
+		sort.Strings(suggestions)
+		msg := fmt.Sprintf("skill %q not found", name)
+		if len(suggestions) > 0 {
+			if len(suggestions) > 5 {
+				suggestions = suggestions[:5]
+			}
+			msg += "\nDid you mean: " + strings.Join(suggestions, ", ")
+		}
+		return fmt.Errorf("%s", msg)
+	}
+
+	if pathOnly {
+		fmt.Println(match.FilePath)
+		return nil
+	}
+
+	var body string
+	if full || jsonOut {
+		data, err := os.ReadFile(match.FilePath)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", match.FilePath, err)
+		}
+		body = string(data)
+	}
+
+	if jsonOut {
+		out := struct {
+			resources.Skill
+			Body string `json:"body,omitempty"`
+		}{Skill: *match}
+		if full {
+			out.Body = body
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+
+	fmt.Printf("Name:        %s\n", match.Name)
+	fmt.Printf("Source:      %s\n", match.Source)
+	fmt.Printf("Description: %s\n", match.Description)
+	fmt.Printf("File:        %s\n", match.FilePath)
+	fmt.Printf("BaseDir:     %s\n", match.BaseDir)
+	if full {
+		fmt.Println("---")
+		fmt.Print(body)
+		if !strings.HasSuffix(body, "\n") {
+			fmt.Println()
+		}
+	}
 	return nil
 }

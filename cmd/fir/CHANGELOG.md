@@ -5,6 +5,9 @@
 ### Changed
 
 - `wt` skill now covers discussion/design sessions, not just autonomous task delegation. Description rewritten so the skill fires whenever the user wants the work *or* the conversation about it to happen in a separate window — including "let's discuss / design / propose this over there". Added explicit do-mode vs discuss-mode distinction with discuss as the safe default on ambiguity, and an anti-pattern note: don't draft designs inline in response to a wt-shaped cue.
+### Added
+
+- `fir skills show <name>` subcommand inspects a single skill — prints metadata (name, source, description, file path, base dir). Flags: `--full`/`-f` appends the SKILL.md body, `--json` emits machine-readable output (with `body` field when combined with `--full`), `--path` prints only the file path for piping (e.g. `bat $(fir skills show foo --path)`). Bare-name shorthand `fir skills <name>` dispatches to `show` when `<name>` isn't a known subcommand. Unknown names suggest substring matches. Implemented in `cmd/fir/skills.go`.
 
 ## [0.43.3] - 2026-05-06
 

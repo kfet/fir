@@ -184,7 +184,7 @@ Extensions can also register top-level CLI verbs via the `cli_verbs:` frontmatte
 
 Skills are Markdown instruction files at `.fir/skills/<name>/SKILL.md` with YAML frontmatter. They provide specialized workflows the agent can follow. Skills are auto-discovered from project, user, and builtin directories.
 
-Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills and `fir skills install <name>` to extract a builtin skill for customisation.
+Use `/skills` to list loaded skills, `/reload` to pick up changes. Use `fir skills` to list all skills, `fir skills show <name>` (or shorthand `fir skills <name>`) to inspect one — flags `--full` to dump the SKILL.md body, `--json` for machine-readable output, `--path` to print only the file path — and `fir skills install <name>` to extract a builtin skill for customisation.
 
 Skills can also be invoked directly from the CLI: `fir /<skill-name> [task...]` rewrites into an initial agent message that points at the named skill and supplies the rest of the positional arguments as the task body. Composes with all flags (`-p`, `--model`, `-c`, …). Bash and zsh completion enumerate `/<skill>` candidates dynamically from `fir skills list`.
 
