@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -45,26 +44,21 @@ func runSkills() error {
 		rest = args[1:]
 	}
 	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-		return fmt.Errorf("unknown skills subcommand: %s\nUsage: fir skills [list | install <name> [--user] [--force] | show <name> [--full] [--json] [--path]]", args[0])
+		return fmt.Errorf("unknown skills subcommand: %s\nUsage: fir skills [list | install <name> [--user] [--force] | show <name> [--full] [--path]]", args[0])
 	}
 	name := rest[0]
-	var full, jsonOut, pathOnly bool
+	var full, pathOnly bool
 	for _, a := range rest[1:] {
 		switch a {
 		case "--full", "-f":
 			full = true
-		case "--json":
-			jsonOut = true
 		case "--path":
 			pathOnly = true
 		default:
 			return fmt.Errorf("unknown flag: %s", a)
 		}
 	}
-	if jsonOut && pathOnly {
-		return fmt.Errorf("--json and --path are mutually exclusive")
-	}
-	return runSkillsShow(name, full, jsonOut, pathOnly)
+	return runSkillsShow(name, full, pathOnly)
 }
 
 // runSkillsList lists all loaded skills in a table.
@@ -184,7 +178,7 @@ func runSkillsInstall(name string, user, force bool) error {
 }
 
 // runSkillsShow prints metadata (and optionally the body) for a single skill.
-func runSkillsShow(name string, full, jsonOut, pathOnly bool) error {
+func runSkillsShow(name string, full, pathOnly bool) error {
 	cwd, _ := os.Getwd()
 	agentDir := resolveAgentDir()
 	result := resources.LoadSkills(resources.LoadSkillsOptions{
@@ -224,34 +218,17 @@ func runSkillsShow(name string, full, jsonOut, pathOnly bool) error {
 		return nil
 	}
 
-	var body string
-	if full || jsonOut {
-		data, err := os.ReadFile(match.FilePath)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", match.FilePath, err)
-		}
-		body = string(data)
-	}
-
-	if jsonOut {
-		out := struct {
-			resources.Skill
-			Body string `json:"body,omitempty"`
-		}{Skill: *match}
-		if full {
-			out.Body = body
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(out)
-	}
-
 	fmt.Printf("Name:        %s\n", match.Name)
 	fmt.Printf("Source:      %s\n", match.Source)
 	fmt.Printf("Description: %s\n", match.Description)
 	fmt.Printf("File:        %s\n", match.FilePath)
 	fmt.Printf("BaseDir:     %s\n", match.BaseDir)
 	if full {
+		data, err := os.ReadFile(match.FilePath)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", match.FilePath, err)
+		}
+		body := string(data)
 		fmt.Println("---")
 		fmt.Print(body)
 		if !strings.HasSuffix(body, "\n") {
