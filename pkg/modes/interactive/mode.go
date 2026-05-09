@@ -262,6 +262,23 @@ func (m *InteractiveMode) NotifyMCPServerReady(name string, err error) {
 	}
 }
 
+// NotifyMCPServerConnecting shows UI feedback when an MCP server begins a
+// connection attempt (initial dial, or first attempt of a reconnect cycle
+// after a disconnect). Safe to call from any goroutine.
+func (m *InteractiveMode) NotifyMCPServerConnecting(name string) {
+	m.showMessage(fmt.Sprintf("MCP server %q connecting…", name))
+}
+
+// NotifyMCPServerDisconnected shows UI feedback when an active MCP server
+// session terminates unexpectedly. Safe to call from any goroutine.
+func (m *InteractiveMode) NotifyMCPServerDisconnected(name string, err error) {
+	if err != nil {
+		m.showWarning(fmt.Sprintf("MCP server %q disconnected: %v", name, err))
+	} else {
+		m.showMessage(fmt.Sprintf("MCP server %q disconnected", name))
+	}
+}
+
 // SetUpdateChannel supplies a channel that delivers a single update notice
 // string (or "") once the background version check completes.  When the
 // notice is non-empty it is shown in the TUI message area at startup.

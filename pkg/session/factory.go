@@ -63,6 +63,16 @@ type SetupOptions struct {
 	// a non-nil error. Optional.
 	OnMCPServerReady func(name string, err error)
 
+	// OnMCPServerConnecting is called when an MCP server begins a
+	// connection attempt (initial dial, or first attempt of a reconnect
+	// cycle after a disconnect). Optional.
+	OnMCPServerConnecting func(name string)
+
+	// OnMCPServerDisconnected is called when an active MCP server session
+	// terminates unexpectedly. Receives the server name and the disconnect
+	// error. Optional.
+	OnMCPServerDisconnected func(name string, err error)
+
 	// ExtReady is closed when extensions finish loading. Live model fetching
 	// for OAuth providers waits on this. When nil, OAuth fetching starts immediately.
 	ExtReady <-chan struct{}
@@ -189,7 +199,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	// --- Wire and start MCP servers ---
 	mcpMgr := StartMCPManagerWithOptions(ctx, result.Session, opts.MCPConfigs, MCPManagerOptions{
-		OnServerReady: opts.OnMCPServerReady,
+		OnServerReady:        opts.OnMCPServerReady,
+		OnServerConnecting:   opts.OnMCPServerConnecting,
+		OnServerDisconnected: opts.OnMCPServerDisconnected,
 	})
 
 	return &SetupResult{
@@ -210,6 +222,14 @@ type MCPManagerOptions struct {
 	// connection attempt. The callback receives the server name and nil on
 	// success, or a non-nil error on failure.
 	OnServerReady func(name string, err error)
+
+	// OnServerConnecting is called when an MCP server begins a connection
+	// attempt — initial dial or first attempt of a reconnect cycle.
+	OnServerConnecting func(name string)
+
+	// OnServerDisconnected is called when an active MCP server session
+	// terminates unexpectedly (not via a clean Close/Reload).
+	OnServerDisconnected func(name string, err error)
 }
 
 // StartMCPManager creates a new MCP Manager, wires it to the given session
@@ -297,6 +317,12 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 
 	if opts.OnServerReady != nil {
 		mgr.SetOnServerReady(opts.OnServerReady)
+	}
+	if opts.OnServerConnecting != nil {
+		mgr.SetOnServerConnecting(opts.OnServerConnecting)
+	}
+	if opts.OnServerDisconnected != nil {
+		mgr.SetOnServerDisconnected(opts.OnServerDisconnected)
 	}
 
 	mgr.Start(ctx)

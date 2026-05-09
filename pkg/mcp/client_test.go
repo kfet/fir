@@ -770,6 +770,189 @@ func TestManager_OnServerReady_Error(t *testing.T) {
 	}
 }
 
+// TestManager_OnServerConnecting_InitialAndReconnect verifies that
+// SetOnServerConnecting fires once at the initial dial and once at the
+// start of a reconnect cycle following a server-initiated disconnect.
+func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	connectingCh := make(chan string, 8)
+	mgr.SetOnServerConnecting(func(name string) { connectingCh <- name })
+
+	startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+
+	// Initial connect must fire connecting once.
+	select {
+	case name := <-connectingCh:
+		assert.Equal(t, "srv", name)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for initial onServerConnecting")
+	}
+
+	// Force a server-initiated disconnect; reconnect cycle should fire
+	// connecting again.
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss, "server must have an active session")
+	require.NoError(t, ss.Close())
+
+	select {
+	case name := <-connectingCh:
+		assert.Equal(t, "srv", name)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for reconnect onServerConnecting")
+	}
+}
+
+// TestManager_OnServerDisconnected fires the disconnected callback when
+// the server-side session is closed unexpectedly.
+func TestManager_OnServerDisconnected(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	// Succeed once, then fail forever — handleSessionEnd must surface a
+	// non-benign waitErr (the SDK reports the abrupt server-close as such).
+	var dialCount atomic.Int32
+	realDial := inMemoryDial(t, server)
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+		if dialCount.Add(1) == 1 {
+			return realDial(cfg)
+		}
+		return nil, errors.New("dial fails after first connect")
+	}
+
+	type discEvent struct {
+		name string
+		err  error
+	}
+	discCh := make(chan discEvent, 1)
+	mgr.SetOnServerDisconnected(func(name string, err error) {
+		select {
+		case discCh <- discEvent{name, err}:
+		default:
+		}
+	})
+
+	startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+
+	var ss *sdk.ServerSession
+	for s := range server.Sessions() {
+		ss = s
+		break
+	}
+	require.NotNil(t, ss, "server must have an active session")
+	require.NoError(t, ss.Close())
+
+	select {
+	case ev := <-discCh:
+		assert.Equal(t, "srv", ev.name)
+		// err may be nil for a clean server-side EOF; the event itself
+		// is what matters for surfacing the disconnect to the user.
+		if ev.err != nil {
+			assert.Contains(t, ev.err.Error(), "disconnected")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for onServerDisconnected callback")
+	}
+}
+
+// TestManager_OnServerDisconnected_NotFiredOnClose verifies that a clean
+// Manager.Close() does not surface a disconnected event — those are
+// reserved for unexpected session terminations.
+func TestManager_OnServerDisconnected_NotFiredOnClose(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	discCh := make(chan struct{}, 1)
+	mgr.SetOnServerDisconnected(func(_ string, _ error) {
+		select {
+		case discCh <- struct{}{}:
+		default:
+		}
+	})
+
+	startAndWait(t, mgr, context.Background())
+	require.NoError(t, mgr.Close())
+
+	// Give the reconnect loop a moment to drain.
+	select {
+	case <-discCh:
+		t.Fatal("onServerDisconnected must not fire on clean Close")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestManager_OnServerReady_FiresOnReconnect verifies that SetOnServerReady
+// fires a second time after a disconnect/reconnect cycle, matching the
+// connecting/connected lifecycle the user sees in the UI.
+func TestManager_OnServerReady_FiresOnReconnect(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	// Speed up reconnect so the test isn't bottlenecked on backoff.
+	shortenReconnectDelays(t)
+
+	type readyEvent struct {
+		name string
+		err  error
+	}
+	readyCh := make(chan readyEvent, 4)
+	mgr.SetOnServerReady(func(name string, err error) {
+		readyCh <- readyEvent{name, err}
+	})
+
+	startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+
+	// Initial ready.
+	select {
+	case ev := <-readyCh:
+		assert.Equal(t, "srv", ev.name)
+		assert.NoError(t, ev.err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for initial onServerReady")
+	}
+
+	// Force disconnect; reconnect should fire ready again.
+	closeServerSession(t, server)
+
+	select {
+	case ev := <-readyCh:
+		assert.Equal(t, "srv", ev.name)
+		assert.NoError(t, ev.err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for reconnect onServerReady")
+	}
+}
+
 // TestManager_Status_AfterServerDisconnect verifies that when a server
 // disconnects after the initial connection is established, Status() updates to
 // reflect Connected:false and a non-nil Error.

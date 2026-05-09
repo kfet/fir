@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- MCP server lifecycle: fir now surfaces `connecting…` and `disconnected` notifications in addition to the existing `connected` event, in both interactive (TUI) and ACP modes. The MCP `Manager` exposes two new callbacks — `SetOnServerConnecting(name)` (fires once at the initial dial and once at the start of each reconnect cycle, not per retry) and `SetOnServerDisconnected(name, err)` (fires when an active session terminates unexpectedly; clean `Close`/`Reload` are silent). `SetOnServerReady` now also fires on each successful reconnect (previously initial-connect only) so every `connecting…` is followed by a matching `connected`. `pkg/session/factory.go` plumbs the new callbacks through `MCPManagerOptions` / `SetupOptions.OnMCPServerConnecting` / `OnMCPServerDisconnected`. Interactive mode adds `NotifyMCPServerConnecting` / `NotifyMCPServerDisconnected`. Tests in `pkg/mcp/client_test.go`.
+
 ### Fixed
 
 - Builtin extensions (`demo`, `hello`, etc.) no longer fail to start with `fork/exec .../fir-builtin-extensions/<hash>/<name>.py: no such file or directory` when the temp cache directory has been partially purged (e.g. by macOS periodic temp cleanup). Extraction now writes a `.complete` sentinel file last and the cache-reuse check requires the sentinel to be present — if any file is missing the cache is wiped and re-extracted. Previously the check only verified that *some* top-level file existed, so a partial purge that left `.pyc` caches but removed the actual `.py` scripts would silently reuse a broken cache. `pkg/resources/builtin_extensions.go` + test in `builtin_extensions_test.go`.

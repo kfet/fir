@@ -940,6 +940,12 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 		setup.mcpManager.SetOnServerReady(func(name string, err error) {
 			mode.NotifyMCPServerReady(name, err)
 		})
+		setup.mcpManager.SetOnServerConnecting(func(name string) {
+			mode.NotifyMCPServerConnecting(name)
+		})
+		setup.mcpManager.SetOnServerDisconnected(func(name string, err error) {
+			mode.NotifyMCPServerDisconnected(name, err)
+		})
 	}
 
 	// ui is the stable interface contract used for all lifecycle calls.

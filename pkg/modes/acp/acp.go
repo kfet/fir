@@ -239,6 +239,16 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 				pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connected", name))
 			}
 		},
+		OnMCPServerConnecting: func(name string) {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connecting…", name))
+		},
+		OnMCPServerDisconnected: func(name string, err error) {
+			if err != nil {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q disconnected: %v", name, err))
+			} else {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q disconnected", name))
+			}
+		},
 		ResourceLoaderOptions: &resources.ResourceLoaderOptions{
 			Cwd:                           cwd,
 			AgentDir:                      agentDir,

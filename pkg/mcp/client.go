@@ -120,11 +120,27 @@ type Manager struct {
 	// May be nil.
 	onResourceUpdated atomic.Value // func(serverName, uri string)
 
-	// onServerReady is called (from a background goroutine) when an individual
-	// MCP server finishes its initial connection attempt. The first argument is
-	// the server name; the second is nil on success or the connection error.
-	// May be nil.
+	// onServerReady is called (from a background goroutine) when an
+	// individual MCP server's session becomes active — both for the initial
+	// connection and for each successful reconnect after a disconnect. The
+	// first argument is the server name; the second is nil on success or
+	// the connection error on initial-connect failure (reconnect failures
+	// don't fire this callback). May be nil.
 	onServerReady atomic.Value // func(name string, err error)
+
+	// onServerConnecting is called (from a background goroutine) when an
+	// individual MCP server begins a connection attempt — once for the
+	// initial dial, and once at the start of each reconnect cycle following
+	// a disconnect. Not fired for subsequent retries within the same
+	// reconnect cycle. May be nil.
+	onServerConnecting atomic.Value // func(name string)
+
+	// onServerDisconnected is called (from a background goroutine) when an
+	// active MCP server session terminates unexpectedly (i.e. not via a
+	// clean Close/Reload). The error is the wait error wrapped as
+	// "disconnected: ...", or nil if the session ended without a wait
+	// error (e.g. server-initiated EOF). May be nil.
+	onServerDisconnected atomic.Value // func(name string, err error)
 
 	// onChannelMessage is called when a channel-capable MCP server sends a
 	// notifications/claude/channel notification. May be nil.
@@ -228,12 +244,44 @@ func (m *Manager) loadOnServerReady() func(string, error) {
 	return nil
 }
 
-// SetOnServerReady sets the callback invoked when an individual MCP server
-// finishes its initial connection attempt. The callback receives the server
-// name and nil on success, or a non-nil error on failure.
+// SetOnServerReady sets the callback invoked when an MCP server's session
+// becomes active — both on initial connect and on each successful
+// reconnect. The callback receives the server name and nil on success, or
+// a non-nil error on initial-connect failure.
 // Safe to call concurrently with running servers.
 func (m *Manager) SetOnServerReady(fn func(name string, err error)) {
 	m.onServerReady.Store(fn)
+}
+
+// loadOnServerConnecting returns the current onServerConnecting callback, or nil.
+func (m *Manager) loadOnServerConnecting() func(string) {
+	if v := m.onServerConnecting.Load(); v != nil {
+		return v.(func(string))
+	}
+	return nil
+}
+
+// SetOnServerConnecting sets the callback invoked when an individual MCP
+// server begins a connection attempt (initial connect, or the first attempt
+// of a reconnect cycle after a disconnect). Safe to call concurrently with
+// running servers.
+func (m *Manager) SetOnServerConnecting(fn func(name string)) {
+	m.onServerConnecting.Store(fn)
+}
+
+// loadOnServerDisconnected returns the current onServerDisconnected callback, or nil.
+func (m *Manager) loadOnServerDisconnected() func(string, error) {
+	if v := m.onServerDisconnected.Load(); v != nil {
+		return v.(func(string, error))
+	}
+	return nil
+}
+
+// SetOnServerDisconnected sets the callback invoked when an active MCP
+// server session terminates unexpectedly (not via a clean Close/Reload).
+// Safe to call concurrently with running servers.
+func (m *Manager) SetOnServerDisconnected(fn func(name string, err error)) {
+	m.onServerDisconnected.Store(fn)
 }
 
 // loadOnResourceUpdated returns the current onResourceUpdated callback, or nil.
@@ -405,6 +453,9 @@ func (m *Manager) subscribeOnce(session *sdk.ClientSession, serverName string) s
 // re-dials internally without re-entering this function.
 func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig) ([]agent.AgentTool, error) {
 	firlog.Debug("mcp connecting", "server", name, "command", cfg.Command)
+	if cb := m.loadOnServerConnecting(); cb != nil {
+		cb(name)
+	}
 	session, tools, caps, err := m.dialAndInitialize(ctx, name, cfg)
 	if err != nil {
 		return nil, err
@@ -609,11 +660,16 @@ func (m *Manager) reconnectLoop(ctx context.Context, name string) {
 // on the next generation, and (for non-benign waitErrs) records the error.
 // Resets the dial-attempt counter so reconnect backoff starts at zero.
 func (m *Manager) handleSessionEnd(name string, session *sdk.ClientSession, waitErr error) {
+	var (
+		stillCurrent  bool
+		disconnectErr error
+	)
 	m.withEntry(name, func(e *serverEntry) {
 		if e.session != session {
 			// Replaced/closed by Reload or Close — nothing to do.
 			return
 		}
+		stillCurrent = true
 		e.session = nil
 		e.tools = nil
 		// Replace ready chan so any CallTool that arrives next sees an open
@@ -622,13 +678,19 @@ func (m *Manager) handleSessionEnd(name string, session *sdk.ClientSession, wait
 		e.ready = make(chan struct{})
 		e.attempt = 0
 		if waitErr != nil && !isBenignCloseErr(waitErr) {
-			e.err = fmt.Errorf("disconnected: %w", waitErr)
+			disconnectErr = fmt.Errorf("disconnected: %w", waitErr)
+			e.err = disconnectErr
 		} else {
 			e.err = nil
 		}
 	})
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
+	}
+	if stillCurrent {
+		if cb := m.loadOnServerDisconnected(); cb != nil {
+			cb(name, disconnectErr)
+		}
 	}
 }
 
@@ -658,6 +720,12 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 		case <-timer.C:
 		case <-kick:
 			timer.Stop()
+		}
+	} else {
+		// First attempt of this reconnect cycle — surface the
+		// "connecting" event once per cycle (not per retry).
+		if cb := m.loadOnServerConnecting(); cb != nil {
+			cb(name)
 		}
 	}
 	// Drain any pending kick so the next backoff cycle starts cleanly.
@@ -716,6 +784,9 @@ func (m *Manager) installReconnectedSession(name string, sess *sdk.ClientSession
 	close(ready)
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
+	}
+	if cb := m.loadOnServerReady(); cb != nil {
+		cb(name, nil)
 	}
 }
 
