@@ -2,8 +2,9 @@
 //
 // Embeds the static completion scripts under completions/ and prints the one
 // matching the requested shell. The scripts are also shipped to disk (e.g. by
-// Homebrew or install.sh) so users can install once; this subcommand exists as
-// a fallback for users who installed fir via `go install` or a raw download.
+// Homebrew or the kfet/fir-dist install.sh) so users can install once; this
+// subcommand exists as a fallback for users who installed fir via
+// `go install` or a raw download.
 package main
 
 import (

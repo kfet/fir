@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- The top-level `install.sh` is gone from this repo. The canonical install script lives at [`kfet/fir-dist`](https://github.com/kfet/fir-dist/blob/main/install.sh) and is what `curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | sh` fetches. Self-skill, README, and `cmd/fir/completion.go` doc comment updated to match.
+
 ### Changed
 
 - README install instructions now point at `https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh` (the canonical install source on the public binary distribution repo) instead of `kfet/fir/main/install.sh`.
