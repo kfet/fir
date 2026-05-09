@@ -20,6 +20,7 @@
 
 ### Changed
 
+- `pipe` builtin extension now returns only **leaf** step outputs to the LLM. A leaf is a step whose output is not referenced by any later step via `{{prev}}`, `{{step:N}}`, or `{{step:N.field}}`. Non-leaf steps still execute and feed forward into substitutions, but their outputs are replaced in the final markdown by a one-line size marker (`## Step N: tool (intermediate, X bytes — omitted)`). Single-step pipes remain transparent passthrough. Errors that abort the pipe always surface the failing step's output regardless of leaf status. This enables large data pipelines whose intermediate blobs never enter LLM context. `pkg/resources/builtin_extensions/pipe.py` + tests in `pkg/resources/testdata/pipe_test.py`.
 - `wt` skill now covers discussion/design sessions, not just autonomous task delegation. Description rewritten so the skill fires whenever the user wants the work *or* the conversation about it to happen in a separate window — including "let's discuss / design / propose this over there". Added explicit do-mode vs discuss-mode distinction with discuss as the safe default on ambiguity, and an anti-pattern note: don't draft designs inline in response to a wt-shaped cue.
 ### Added
 

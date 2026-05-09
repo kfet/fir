@@ -67,6 +67,41 @@ def _truncate(text: str) -> str:
 _TOKEN_RE = re.compile(r"\{\{\s*(prev|step:(\d+))(?:\.([A-Za-z_][\w.]*))?\s*\}\}")
 
 
+def _collect_refs(value: Any, current_idx: int, refs: set[int]) -> None:
+    """Walk a params value and record which earlier step indices it references.
+
+    Only refs strictly *earlier* than ``current_idx`` count — self-references
+    and forward references substitute to an empty string at runtime and do
+    not actually consume any step's output."""
+    if isinstance(value, str):
+        for m in _TOKEN_RE.finditer(value):
+            kind = m.group(1)
+            if kind == "prev":
+                if current_idx > 0:
+                    refs.add(current_idx - 1)
+            else:
+                target = int(m.group(2))
+                if target < current_idx:
+                    refs.add(target)
+    elif isinstance(value, dict):
+        for v in value.values():
+            _collect_refs(v, current_idx, refs)
+    elif isinstance(value, list):
+        for v in value:
+            _collect_refs(v, current_idx, refs)
+
+
+def _leaf_indices(steps: list[dict]) -> set[int]:
+    """Return the set of step indices whose outputs are *not* referenced by any
+    later step. The final step is always a leaf by construction."""
+    referenced: set[int] = set()
+    for j, step in enumerate(steps):
+        # _collect_refs is self-guarding — only refs strictly < j count, so
+        # step 0 contributes nothing regardless.
+        _collect_refs(step.get("params") or {}, j, referenced)
+    return {i for i in range(len(steps)) if i not in referenced}
+
+
 def _lookup_field(text: str, path: str) -> str:
     """Try to parse text as JSON and walk a dotted field path through dict
     keys. Returns the raw text on parse failure or any missing/non-dict
@@ -171,6 +206,7 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
     prior_text: list[str] = []
     results: list[dict] = []
     any_error = False
+    leaves = _leaf_indices(steps)
 
     for i, step in enumerate(steps):
         name = step["tool"]
@@ -187,7 +223,7 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
             result = ctx.call_tool(name, params)
         except Exception as exc:
             text = _truncate(f"error calling tool: {exc}")
-            results.append({"name": name, "output": text, "is_error": True})
+            results.append({"name": name, "output": text, "is_error": True, "leaf": i in leaves})
             prior_text.append(text)
             any_error = True
             if cont:
@@ -196,7 +232,7 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
 
         is_error = bool(result.get("is_error", False))
         text = _truncate(_result_text(result))
-        results.append({"name": name, "output": text, "is_error": is_error})
+        results.append({"name": name, "output": text, "is_error": is_error, "leaf": i in leaves})
         prior_text.append(text)
         if is_error:
             any_error = True
@@ -230,8 +266,16 @@ def _format_results_markdown(results: list[dict]) -> str:
     parts: list[str] = []
     for i, r in enumerate(results, 1):
         tag = " [ERROR]" if r["is_error"] else ""
-        parts.append(f"## Step {i}: {r['name']}{tag}")
-        parts.append(r["output"])
+        # Errored steps are always shown, even if non-leaf — the LLM needs
+        # to see the failure output regardless of how the pipe ended up here.
+        if r.get("leaf", True) or r["is_error"]:
+            parts.append(f"## Step {i}: {r['name']}{tag}")
+            parts.append(r["output"])
+        else:
+            size = len(r["output"])
+            parts.append(
+                f"## Step {i}: {r['name']}{tag} (intermediate, {size} bytes — omitted)"
+            )
         parts.append("")
     return "\n".join(parts).rstrip() + "\n"
 
@@ -249,7 +293,14 @@ _PIPE_DESCRIPTION = (
     "an out-of-range {{step:N}} substitutes an empty string. Aborts on "
     "the first error unless that step has continue_on_error: true. Each "
     "step's output is capped at 50KB. Returns the raw result for a single "
-    "step, or a markdown block of all step outputs otherwise.\n\n"
+    "step. For multi-step pipes, only **leaf** step outputs are returned to "
+    "the LLM — a leaf is a step whose output is not referenced by any later "
+    "step via {{prev}}, {{step:N}}, or {{step:N.field}}. Non-leaf step "
+    "outputs are still fed (in full, post-truncation) into later steps' "
+    "substitutions, but are omitted from the final result and replaced by a "
+    "one-line size marker. The last step is always a leaf; errored steps "
+    "are always shown regardless of leaf status. This lets you build large "
+    "data pipelines without polluting LLM context with intermediate blobs.\n\n"
     "[SYS_EXT] Reach for pipe when you already know the full chain of "
     "tool calls upfront and intermediate outputs are bulky or only the "
     "final result matters — it skips the LLM round-trips and avoids "

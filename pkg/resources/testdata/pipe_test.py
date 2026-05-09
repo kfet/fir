@@ -159,8 +159,9 @@ class TestMultiStep(unittest.TestCase):
         self.assertFalse(out["is_error"])
         self.assertEqual(captured[0], {"cmd": "echo FROM_FIRST"})
         text = out["content"][0]["text"]
-        self.assertIn("## Step 1: Read", text)
-        self.assertIn("FROM_FIRST", text)
+        # Step 1 is non-leaf (referenced by step 2 via {{prev}}) — omitted.
+        self.assertNotIn("FROM_FIRST", text)
+        self.assertIn("intermediate", text)
         self.assertIn("## Step 2: Bash", text)
         self.assertIn("done", text)
 
@@ -325,7 +326,8 @@ class TestTruncation(unittest.TestCase):
 
     def test_step_output_truncated_in_markdown(self):
         big = "A" * (self.mod._MAX_OUTPUT_LEN + 5000)
-        ctx = _make_ctx([_text_result(big), _text_result("done")])
+        # Make step 1 a leaf by having step 2 not reference it.
+        ctx = _make_ctx([_text_result("first"), _text_result(big)])
         steps = [{"tool": "Read"}, {"tool": "Bash"}]
         out = self.mod._run_pipe(steps, "", ctx)
         text = out["content"][0]["text"]
@@ -365,9 +367,144 @@ class TestDescription(unittest.TestCase):
     def test_description_mentions_sys_ext_guidance(self):
         mod = _load_pipe()
         self.assertIn("[SYS_EXT]", mod._PIPE_DESCRIPTION)
-        # Doc nits requested in review.
         self.assertIn("dict keys", mod._PIPE_DESCRIPTION)
         self.assertIn("empty string", mod._PIPE_DESCRIPTION)
+        # Leaf-only output is documented.
+        self.assertIn("leaf", mod._PIPE_DESCRIPTION.lower())
+
+
+# ---------------------------------------------------------------------------
+# Leaf detection / output filtering
+# ---------------------------------------------------------------------------
+
+
+class TestLeafDetection(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def test_last_step_always_leaf(self):
+        steps = [{"tool": "A"}, {"tool": "B"}, {"tool": "C"}]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertIn(2, leaves)
+
+    def test_prev_marks_predecessor_non_leaf(self):
+        steps = [
+            {"tool": "A"},
+            {"tool": "B", "params": {"x": "{{prev}}"}},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertEqual(leaves, {1})
+
+    def test_step_index_marks_target_non_leaf(self):
+        steps = [
+            {"tool": "A"},
+            {"tool": "B"},
+            {"tool": "C", "params": {"x": "{{step:0}}"}},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        # Step 0 referenced; step 1 unreferenced; step 2 last → leaf.
+        self.assertEqual(leaves, {1, 2})
+
+    def test_field_token_also_counts_as_reference(self):
+        steps = [
+            {"tool": "A"},
+            {"tool": "B", "params": {"x": "{{step:0.field}}"}},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertEqual(leaves, {1})
+
+    def test_refs_inside_nested_structures(self):
+        steps = [
+            {"tool": "A"},
+            {"tool": "B", "params": {"nested": {"k": ["{{step:0}}"]}}},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertEqual(leaves, {1})
+
+    def test_intermediate_output_omitted_but_substituted(self):
+        big = "X" * 10_000
+        captured = []
+
+        def first(name, params):
+            return _text_result(big)
+
+        def second(name, params):
+            captured.append(params)
+            return _text_result("FINAL")
+
+        ctx = _make_ctx([first, second])
+        steps = [
+            {"tool": "Read"},
+            {"tool": "Bash", "params": {"cmd": "{{prev}}"}},
+        ]
+        out = self.mod._run_pipe(steps, "", ctx)
+        self.assertFalse(out["is_error"])
+        # Substitution still happened with the full intermediate text.
+        self.assertEqual(captured[0]["cmd"], big)
+        text = out["content"][0]["text"]
+        # Big intermediate blob is NOT in the LLM-visible output.
+        self.assertNotIn(big, text)
+        self.assertIn("intermediate", text)
+        self.assertIn(str(len(big)), text)
+        # Leaf output (final step) is included.
+        self.assertIn("FINAL", text)
+
+    def test_all_leaves_when_no_refs(self):
+        ctx = _make_ctx([_text_result("one"), _text_result("two")])
+        steps = [{"tool": "Read"}, {"tool": "Bash"}]
+        out = self.mod._run_pipe(steps, "", ctx)
+        text = out["content"][0]["text"]
+        self.assertIn("one", text)
+        self.assertIn("two", text)
+
+    def test_self_reference_does_not_mark_step_non_leaf(self):
+        # {{step:1}} inside step 1 is a self-ref that substitutes to "" at
+        # runtime — it doesn't actually consume step 1's output, so step 1
+        # must remain a leaf.
+        steps = [
+            {"tool": "A"},
+            {"tool": "B", "params": {"x": "{{step:1}}"}},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertEqual(leaves, {0, 1})
+
+    def test_forward_reference_does_not_mark_step_non_leaf(self):
+        steps = [
+            {"tool": "A", "params": {"x": "{{step:5}}"}},
+            {"tool": "B"},
+        ]
+        leaves = self.mod._leaf_indices(steps)
+        self.assertEqual(leaves, {0, 1})
+
+    def test_errored_non_leaf_visible_under_continue_on_error(self):
+        # Step 0 is non-leaf (referenced by step 1), errors, but continues.
+        # The LLM must still see the error output.
+        ctx = _make_ctx([
+            _text_result("FAIL_OUTPUT", is_error=True),
+            _text_result("after"),
+        ])
+        steps = [
+            {"tool": "Read", "continue_on_error": True},
+            {"tool": "Bash", "params": {"cmd": "{{prev}}"}},
+        ]
+        out = self.mod._run_pipe(steps, "", ctx)
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("FAIL_OUTPUT", text)
+        self.assertIn("[ERROR]", text)
+        self.assertIn("after", text)
+
+    def test_error_step_visible_even_if_non_leaf(self):
+        # Step 0 is non-leaf (referenced by step 1), but if it errors and
+        # aborts, its output must still surface so the LLM sees the failure.
+        ctx = _make_ctx([_text_result("BOOM", is_error=True), _text_result("never")])
+        steps = [
+            {"tool": "Read"},
+            {"tool": "Bash", "params": {"cmd": "{{prev}}"}},
+        ]
+        out = self.mod._run_pipe(steps, "", ctx)
+        self.assertTrue(out["is_error"])
+        self.assertIn("BOOM", out["content"][0]["text"])
 
 
 if __name__ == "__main__":
