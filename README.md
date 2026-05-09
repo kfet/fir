@@ -41,14 +41,14 @@ to the rolling latest with `brew unlink fir@0.29 && brew install kfet/fir/fir`.
 ### Install script (macOS, Linux, Raspberry Pi)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | sh
 ```
 
 Binaries are served from the public [`kfet/fir-dist`](https://github.com/kfet/fir-dist)
 mirror — no authentication required. To install a specific version:
 
 ```bash
-VERSION=0.30.0 curl -fsSL https://raw.githubusercontent.com/kfet/fir/main/install.sh | sh
+VERSION=0.30.0 curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | sh
 ```
 
 ### Go install

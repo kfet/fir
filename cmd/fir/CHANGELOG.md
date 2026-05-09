@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- README install instructions now point at `https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh` (the canonical install source on the public binary distribution repo) instead of `kfet/fir/main/install.sh`.
+
 ### Added
 
 - MCP server lifecycle: fir now surfaces `connecting…` and `disconnected` notifications in addition to the existing `connected` event, in both interactive (TUI) and ACP modes. The MCP `Manager` exposes two new callbacks — `SetOnServerConnecting(name)` (fires once at the initial dial and once at the start of each reconnect cycle, not per retry) and `SetOnServerDisconnected(name, err)` (fires when an active session terminates unexpectedly; clean `Close`/`Reload` are silent). `SetOnServerReady` now also fires on each successful reconnect (previously initial-connect only) so every `connecting…` is followed by a matching `connected`. `pkg/session/factory.go` plumbs the new callbacks through `MCPManagerOptions` / `SetupOptions.OnMCPServerConnecting` / `OnMCPServerDisconnected`. Interactive mode adds `NotifyMCPServerConnecting` / `NotifyMCPServerDisconnected`. Tests in `pkg/mcp/client_test.go`.
