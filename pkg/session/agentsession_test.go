@@ -2134,18 +2134,18 @@ func TestAgentSession_ExecuteBash(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	result, err := session.ExecuteBash("echo hello", nil)
+	result, err := session.ExecuteBash("echo hello", nil, false)
 	if err != nil {
 		t.Fatalf("ExecuteBash failed: %v", err)
 	}
 	if result.ExitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", result.ExitCode)
 	}
-	if result.Output == "" {
-		t.Error("expected non-empty output")
+	if !strings.Contains(result.Output, "hello") {
+		t.Errorf("expected output to contain 'hello', got %q", result.Output)
 	}
 
-	// Verify it was recorded in the session
+	// Verify it was recorded in the session and survives LLM-conversion.
 	ctx := session.SessionStore.BuildSessionContext()
 	if len(ctx.Messages) == 0 {
 		t.Fatal("expected bash execution to be recorded in session")
@@ -2156,12 +2156,36 @@ func TestAgentSession_ExecuteBash_CommandFails(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	result, err := session.ExecuteBash("exit 42", nil)
+	result, err := session.ExecuteBash("exit 42", nil, false)
 	if err != nil {
 		t.Fatalf("ExecuteBash failed: %v", err)
 	}
 	if result.ExitCode != 42 {
 		t.Errorf("expected exit code 42, got %d", result.ExitCode)
+	}
+}
+
+func TestAgentSession_ExecuteBash_OnChunk(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	var mu sync.Mutex
+	var chunks []string
+	result, err := session.ExecuteBash("echo chunk1; echo chunk2", func(chunk string) {
+		mu.Lock()
+		chunks = append(chunks, chunk)
+		mu.Unlock()
+	}, false)
+	if err != nil {
+		t.Fatalf("ExecuteBash failed: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(chunks) == 0 {
+		t.Error("expected onChunk to be called")
 	}
 }
 
@@ -2179,30 +2203,6 @@ func TestAgentSession_IsBashRunning_InitiallyFalse(t *testing.T) {
 
 	if session.IsBashRunning() {
 		t.Error("expected IsBashRunning to be false initially")
-	}
-}
-
-func TestAgentSession_ExecuteBash_OnChunk(t *testing.T) {
-	session, _ := newTestAgentSession(t)
-	defer session.Close()
-
-	var chunks []string
-	var mu sync.Mutex
-	result, err := session.ExecuteBash("echo chunk1; echo chunk2", func(chunk string) {
-		mu.Lock()
-		chunks = append(chunks, chunk)
-		mu.Unlock()
-	})
-	if err != nil {
-		t.Fatalf("ExecuteBash failed: %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Errorf("expected exit code 0, got %d", result.ExitCode)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(chunks) == 0 {
-		t.Error("expected onChunk to be called")
 	}
 }
 

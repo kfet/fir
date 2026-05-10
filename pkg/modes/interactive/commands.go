@@ -399,7 +399,7 @@ func (m *InteractiveMode) handleBashCommand(command string, excludeFromContext b
 	m.ui.RequestRender(false)
 
 	if m.session != nil {
-		result, err := m.session.ExecuteBashWithOptions(command, func(chunk string) {
+		result, err := m.session.ExecuteBash(command, func(chunk string) {
 			bc := m.bashComponent.Load()
 			if bc != nil {
 				bc.AppendOutput(chunk)

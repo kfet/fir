@@ -3,7 +3,6 @@
 package exec
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -17,13 +16,6 @@ import (
 
 	"github.com/kfet/fir/pkg/agent/tools"
 )
-
-// BashExecutorOptions configures bash execution.
-type BashExecutorOptions struct {
-	// OnChunk is called with raw output chunks (ANSI preserved) during execution,
-	// suitable for display. For LLM context the final BashResult.Output is stripped.
-	OnChunk func(chunk string)
-}
 
 // BashResult holds the result of a bash command execution.
 type BashResult struct {
@@ -56,20 +48,20 @@ func sanitizeBinaryOutput(s string) string {
 
 // ExecuteBash executes a bash command with optional streaming and cancellation.
 //
-// When OnChunk is set, environment variables (CLICOLOR_FORCE, FORCE_COLOR)
+// When onChunk is non-nil, environment variables (CLICOLOR_FORCE, FORCE_COLOR)
 // are injected so tools that check for TTY color support still emit ANSI
 // codes even though stdout is a pipe. The raw output (with colors) is
-// streamed via OnChunk for display, while BashResult.Output is ANSI-stripped
+// streamed via onChunk for display, while BashResult.Output is ANSI-stripped
 // for LLM context.
 //
 // Features:
-//   - Streams raw output (ANSI preserved) via OnChunk callback for display
+//   - Streams raw output (ANSI preserved) via onChunk callback for display
 //   - Injects color-forcing env vars when streaming for display
 //   - Writes large output to temp file
 //   - Supports cancellation via context — kills entire process group
 //   - Sanitizes stored output (strips ANSI, removes binary, normalizes newlines)
 //   - Truncates output if exceeds default max bytes
-func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions) (BashResult, error) {
+func ExecuteBash(ctx context.Context, command string, onChunk func(chunk string)) (BashResult, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -83,7 +75,7 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 
 	// When streaming for display, inject env vars that tell CLI tools to
 	// emit ANSI colors even when stdout is not a TTY.
-	if opts != nil && opts.OnChunk != nil {
+	if onChunk != nil {
 		cmd.Env = tools.AppendColorEnv(cmd.Env)
 	}
 
@@ -121,8 +113,8 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		rawText = strings.ReplaceAll(rawText, "\r", "")
 
 		// Stream raw (ANSI-preserved) output to display callback
-		if opts != nil && opts.OnChunk != nil {
-			opts.OnChunk(rawText)
+		if onChunk != nil {
+			onChunk(rawText)
 		}
 
 		// Strip ANSI for LLM context storage
@@ -217,33 +209,4 @@ func ExecuteBash(ctx context.Context, command string, opts *BashExecutorOptions)
 		Truncated:      truncationResult.Truncated,
 		FullOutputPath: tempFilePath,
 	}, nil
-}
-
-// ExecuteBashSimple runs a bash command and returns the output as a string.
-// This is a convenience wrapper for simple use cases.
-func ExecuteBashSimple(ctx context.Context, command string) (string, int, error) {
-	result, err := ExecuteBash(ctx, command, nil)
-	if err != nil {
-		return "", -1, err
-	}
-	return result.Output, result.ExitCode, nil
-}
-
-// ExecuteBashCapture runs a bash command and captures output.
-// Returns the combined stdout+stderr.
-func ExecuteBashCapture(command string) (string, error) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell, "-c", command)
-	cmd.Env = os.Environ()
-
-	var combined bytes.Buffer
-	cmd.Stdout = &combined
-	cmd.Stderr = &combined
-
-	err := cmd.Run()
-	return combined.String(), err
 }

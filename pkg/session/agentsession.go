@@ -1256,14 +1256,9 @@ func (s *AgentSession) Reload() error {
 // Bash execution
 // ============================================================================
 
-// ExecuteBash executes a bash command and records the result in session history.
-func (s *AgentSession) ExecuteBash(command string, onChunk func(string)) (exec.BashResult, error) {
-	return s.ExecuteBashWithOptions(command, onChunk, false)
-}
-
-// ExecuteBashWithOptions executes a bash command with optional streaming, cancellation,
+// ExecuteBash executes a bash command with optional streaming, cancellation,
 // and the option to exclude the result from context.
-func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(string), excludeFromContext bool) (exec.BashResult, error) {
+func (s *AgentSession) ExecuteBash(command string, onChunk func(string), excludeFromContext bool) (exec.BashResult, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.bashCancelMu.Lock()
 	s.bashCancel = cancel
@@ -1283,9 +1278,7 @@ func (s *AgentSession) ExecuteBashWithOptions(command string, onChunk func(strin
 		resolvedCommand = prefix + "\n" + command
 	}
 
-	result, err := exec.ExecuteBash(ctx, resolvedCommand, &exec.BashExecutorOptions{
-		OnChunk: onChunk,
-	})
+	result, err := exec.ExecuteBash(ctx, resolvedCommand, onChunk)
 	if err != nil {
 		return result, err
 	}

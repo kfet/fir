@@ -64,14 +64,12 @@ func TestExecuteBash_Cancellation(t *testing.T) {
 
 func TestExecuteBash_OnChunk(t *testing.T) {
 	var chunks []string
-	opts := &BashExecutorOptions{
-		OnChunk: func(chunk string) {
-			chunks = append(chunks, chunk)
-		},
+	onChunk := func(chunk string) {
+		chunks = append(chunks, chunk)
 	}
 
 	ctx := context.Background()
-	result, err := ExecuteBash(ctx, "echo line1; echo line2", opts)
+	result, err := ExecuteBash(ctx, "echo line1; echo line2", onChunk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,15 +87,13 @@ func TestExecuteBash_OnChunk(t *testing.T) {
 
 func TestExecuteBash_OnChunkPreservesANSI(t *testing.T) {
 	var chunks []string
-	opts := &BashExecutorOptions{
-		OnChunk: func(chunk string) {
-			chunks = append(chunks, chunk)
-		},
+	onChunk := func(chunk string) {
+		chunks = append(chunks, chunk)
 	}
 
 	ctx := context.Background()
 	// printf emits raw ANSI regardless of pipe
-	result, err := ExecuteBash(ctx, `printf '\033[32mgreen\033[0m'`, opts)
+	result, err := ExecuteBash(ctx, `printf '\033[32mgreen\033[0m'`, onChunk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,14 +120,12 @@ func TestExecuteBash_OnChunkPreservesANSI(t *testing.T) {
 
 func TestExecuteBash_OnChunkInjectsColorEnv(t *testing.T) {
 	var chunks []string
-	opts := &BashExecutorOptions{
-		OnChunk: func(chunk string) {
-			chunks = append(chunks, chunk)
-		},
+	onChunk := func(chunk string) {
+		chunks = append(chunks, chunk)
 	}
 
 	ctx := context.Background()
-	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, onChunk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,14 +149,12 @@ func TestExecuteBash_OnChunkRespectsExistingColorEnv(t *testing.T) {
 	t.Setenv("FORCE_COLOR", "0")
 
 	var chunks []string
-	opts := &BashExecutorOptions{
-		OnChunk: func(chunk string) {
-			chunks = append(chunks, chunk)
-		},
+	onChunk := func(chunk string) {
+		chunks = append(chunks, chunk)
 	}
 
 	ctx := context.Background()
-	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, opts)
+	result, err := ExecuteBash(ctx, `echo "COLOR=$CLICOLOR CLI=$CLICOLOR_FORCE FORCE=$FORCE_COLOR"`, onChunk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,29 +199,6 @@ func TestExecuteBash_EmptyOutput(t *testing.T) {
 	}
 	if result.ExitCode != 0 {
 		t.Errorf("exit code = %d, want 0", result.ExitCode)
-	}
-}
-
-func TestExecuteBashSimple(t *testing.T) {
-	output, exitCode, err := ExecuteBashSimple(context.Background(), "echo hi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if exitCode != 0 {
-		t.Errorf("exit code = %d", exitCode)
-	}
-	if !strings.Contains(output, "hi") {
-		t.Errorf("output = %q", output)
-	}
-}
-
-func TestExecuteBashCapture(t *testing.T) {
-	output, err := ExecuteBashCapture("echo captured")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output, "captured") {
-		t.Errorf("output = %q", output)
 	}
 }
 
