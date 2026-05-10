@@ -25,13 +25,18 @@ type BashToolParams struct {
 	Timeout *float64 `json:"timeout,omitempty"` // seconds
 }
 
+// DefaultBashTimeout is applied when the agent does not pass an explicit
+// timeout. Agents can override (up or down) via the "timeout" parameter.
+// It is a var (not const) so tests can shorten it.
+var DefaultBashTimeout = 10 * time.Second
+
 // NewBashTool creates the bash tool for the given working directory.
 func NewBashTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: ai.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
-				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
+				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
 				runtime.GOOS, runtime.GOARCH, DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
@@ -43,7 +48,7 @@ func NewBashTool(cwd string) agent.AgentTool {
 					},
 					"timeout": map[string]any{
 						"type":        "number",
-						"description": "Timeout in seconds (optional, no default timeout)",
+						"description": "Timeout in seconds. Defaults to 10s if omitted; pass an explicit value to override (e.g. 60 for slower commands).",
 					},
 				},
 				"required": []string{"command"},
@@ -59,6 +64,8 @@ func NewBashTool(cwd string) agent.AgentTool {
 			var timeout time.Duration
 			if t, ok := params["timeout"].(float64); ok && t > 0 {
 				timeout = time.Duration(t * float64(time.Second))
+			} else {
+				timeout = DefaultBashTimeout
 			}
 
 			return executeBash(ctx, command, cwd, timeout)

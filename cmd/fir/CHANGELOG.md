@@ -12,6 +12,8 @@
 
 ### Added
 
+- Bash tool now applies a 10-second default timeout when the agent does not pass an explicit `timeout` parameter. Previously a missing timeout meant "no timeout", which let runaway commands (e.g. `strings` on a large binary) hang a session indefinitely. Agents can still override up or down by passing `timeout` explicitly. `pkg/agent/tools/bash.go` (new `DefaultBashTimeout` var) + tests in `bash_test.go`.
+
 - MCP server lifecycle: fir now surfaces `connecting…` and `disconnected` notifications in addition to the existing `connected` event, in both interactive (TUI) and ACP modes. The MCP `Manager` exposes two new callbacks — `SetOnServerConnecting(name)` (fires once at the initial dial and once at the start of each reconnect cycle, not per retry) and `SetOnServerDisconnected(name, err)` (fires when an active session terminates unexpectedly; clean `Close`/`Reload` are silent). `SetOnServerReady` now also fires on each successful reconnect (previously initial-connect only) so every `connecting…` is followed by a matching `connected`. `pkg/session/factory.go` plumbs the new callbacks through `MCPManagerOptions` / `SetupOptions.OnMCPServerConnecting` / `OnMCPServerDisconnected`. Interactive mode adds `NotifyMCPServerConnecting` / `NotifyMCPServerDisconnected`. Tests in `pkg/mcp/client_test.go`.
 
 ### Fixed

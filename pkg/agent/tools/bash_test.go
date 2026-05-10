@@ -63,6 +63,50 @@ func TestBashTool_Timeout(t *testing.T) {
 	}
 }
 
+// TestBashTool_DefaultTimeout verifies that omitting the timeout parameter
+// applies DefaultBashTimeout rather than hanging forever.
+func TestBashTool_DefaultTimeout(t *testing.T) {
+	// Temporarily shorten the default so the test stays fast.
+	orig := DefaultBashTimeout
+	t.Cleanup(func() { DefaultBashTimeout = orig })
+	DefaultBashTimeout = 200 * time.Millisecond
+
+	tool := NewBashTool(t.TempDir())
+	start := time.Now()
+	_, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "sleep 10",
+	}, nil)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error when no timeout passed")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error = %q, want contains 'timed out'", err.Error())
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Execute took %v — default timeout not applied", elapsed)
+	}
+}
+
+// TestBashTool_ExplicitTimeoutOverridesDefault verifies that the agent can
+// pass an explicit timeout larger than the default.
+func TestBashTool_ExplicitTimeoutOverridesDefault(t *testing.T) {
+	orig := DefaultBashTimeout
+	t.Cleanup(func() { DefaultBashTimeout = orig })
+	DefaultBashTimeout = 50 * time.Millisecond
+
+	tool := NewBashTool(t.TempDir())
+	// Sleep 300ms, but pass an explicit 5s timeout > default 50ms.
+	// Should succeed, not time out.
+	_, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "sleep 0.3",
+		"timeout": float64(5),
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error with explicit timeout override: %v", err)
+	}
+}
+
 func TestBashTool_Abort(t *testing.T) {
 	tool := NewBashTool(t.TempDir())
 
