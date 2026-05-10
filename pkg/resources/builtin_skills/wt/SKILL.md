@@ -21,22 +21,11 @@ If you catch yourself drafting a design or digging into code here in response to
 
 1. Pick a short kebab-case feature name from the whole task.
 
-2. Create the worktree as a sibling of the project root:
+2. Run the spawn script. It creates the worktree + branch, launches fir in a new tmux window, and verifies the window stuck:
    ```bash
-   FEATURE="<feature-name>"
-   BRANCH="work/${FEATURE}"
-   WORKTREE="${PWD}-wt-${FEATURE}"
-   git worktree add "$WORKTREE" -b "$BRANCH"
+   bash "$SKILL_DIR/scripts/spawn.sh" <feature-name> "<full task text including 'Mode: do.' or 'Mode: discuss.'>"
    ```
 
-3. Open a tmux window running fir there. Pass the full task plus the mode:
-   ```bash
-   tmux new-window -n "$FEATURE" -c "$WORKTREE" \
-     "fir --session-name '$FEATURE' '<full task>. Mode: <do|discuss>.'; exec \$SHELL"
-   ```
+   In discuss-mode, say so plainly in the task text — the spawned agent will know what that means.
 
-   In discuss-mode, say so plainly in the prompt — the spawned agent will know what that means.
-
-4. Tell the user the worktree path, branch, and window name. Then stop.
-
-Cleanup (merge, `worktree remove`, branch delete) belongs to the spawned agent per `AGENTS.md`.
+3. Tell the user the worktree path, branch, and window name (the script prints them). Then stop.

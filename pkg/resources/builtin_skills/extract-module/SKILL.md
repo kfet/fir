@@ -7,6 +7,12 @@ description: Extract a self-contained Go package out of fir into its own repo at
 
 Use when the user wants to carve a self-contained subtree (typically under `pkg/`) into a standalone module published at `github.com/kfet/<name>`.
 
+## One candidate at a time — not a competition
+
+When deliberating with the user about *which* subtree to extract, evaluate each candidate on its own merits, not against the others. Extraction isn't a winner-take-one process — multiple candidates can ship, in any order, independently. A package either clears the bar (self-contained, valuable on its own, niche has room) or it doesn't.
+
+Avoid producing ranked tables that invite "pick the top one." Instead, for each candidate the user is considering, give a self-contained verdict — *extract / park / replace internally / not a library at all* — with the reasoning visible. The user decides which (possibly several) to act on.
+
 ## Discover the precedent — don't reinvent
 
 There are already extracted siblings under `/Users/kfet/dev/ai/`. **Find them, study them, adopt what applies.**
@@ -76,6 +82,31 @@ Don't change behaviour during this pass — semantics stay identical. This is sh
    Empty → proceed. Non-empty → refactor inside fir first.
 2. **`make all` green** on the source branch.
 3. **Name availability**: `github.com/kfet/<name>` repo slot is 404, no module published on `pkg.go.dev/github.com/kfet/<name>`.
+4. **Incumbent check — does this niche already have a winner?** Before extracting, survey the Go ecosystem for what already exists. Stars are a poor signal; **pkg.go.dev "imported by" count is the real one.** Many candidate niches have a long tail of low-star repos that no one actually depends on — landing as the Nth such entry is not worth a publish.
+
+   ```bash
+   # Stars + activity for a candidate competitor
+   curl -sL "https://api.github.com/repos/<owner>/<repo>" \
+     | jq -r '"stars=\(.stargazers_count) pushed=\(.pushed_at) archived=\(.archived) desc=\(.description)"'
+
+   # Real adoption — pkg.go.dev importers (the number that matters)
+   curl -sL "https://pkg.go.dev/<module-path>?tab=importedby" \
+     | grep -oE 'Known importer[s]?:</strong>[^<]*[0-9,]+'
+   ```
+
+   Three outcomes, three different decisions:
+   - **Niche has a clear winner** (high stars *and* high importers, e.g. >50): don't extract — replace fir's internal use with the incumbent and delete the in-fir copy.
+   - **Niche is empty** (no comparable libs, or all <10 importers): extraction is greenfield — proceed.
+   - **Stars ≫ importers across the field** (the diagnostic pattern): the *idea* is popular but adoption is nil. This usually means the use case is narrow enough that everyone rolls their own ~300 LOC port. Extracting fir's port lands you in the same tier — neither winning nor useful. Park the extraction; revisit only if you're willing to invest in the canonical version (different shape of work — a research project, not a copy-paste).
+
+   Three signals stack to confirm the "stars ≫ importers" diagnosis. Look for all three before parking:
+   1. **Low importer counts** (≤1 each on pkg.go.dev) — no real adoption.
+   2. **Stars ≫ importers** across the field — people upvote the idea, don't use the code.
+   3. **Long maintenance silence in a fast-moving niche** (>12 months stale where the surrounding ecosystem turns over in weeks) — the authors themselves don't depend on what they shipped.
+
+   When all three line up, nobody — including the authors — runs these libraries in production. That's a strictly stronger conclusion than any one signal alone, and it's what makes "park the extraction" the right call rather than "ship and hope."
+
+   Bring this finding to the user before committing to the extraction. The "stars ≫ importers" outcome in particular is non-obvious and changes the decision.
 
 ## Decisions to confirm with the user before writing files
 
