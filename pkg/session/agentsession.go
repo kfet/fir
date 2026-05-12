@@ -17,11 +17,11 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/overflow"
 	"github.com/kfet/fir/pkg/config"
-	"github.com/kfet/fir/pkg/exec"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/pinexec"
 )
 
 // ============================================================================
@@ -1258,7 +1258,7 @@ func (s *AgentSession) Reload() error {
 
 // ExecuteBash executes a bash command with optional streaming, cancellation,
 // and the option to exclude the result from context.
-func (s *AgentSession) ExecuteBash(command string, onChunk func(string), excludeFromContext bool) (exec.BashResult, error) {
+func (s *AgentSession) ExecuteBash(command string, onChunk func(string), excludeFromContext bool) (pinexec.Result, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.bashCancelMu.Lock()
 	s.bashCancel = cancel
@@ -1278,7 +1278,7 @@ func (s *AgentSession) ExecuteBash(command string, onChunk func(string), exclude
 		resolvedCommand = prefix + "\n" + command
 	}
 
-	result, err := exec.ExecuteBash(ctx, resolvedCommand, onChunk)
+	result, err := pinexec.Execute(ctx, resolvedCommand, onChunk)
 	if err != nil {
 		return result, err
 	}
