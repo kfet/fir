@@ -7,8 +7,11 @@
 # ---
 """antigravity-auth — OAuth provider for Google Antigravity.
 
-Implements the full OAuth flow including PKCE, token exchange, user email
-lookup, and Cloud Code Assist project discovery.
+Declarative Google OAuth flow; the only Antigravity-specific work is
+project discovery (and email lookup for diagnostics) after the standard
+token exchange — handled in the ``auth/post_exchange`` hook. On refresh,
+the same hook receives the previous credentials and forwards the project
+ID through unchanged.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ import base64
 import json
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 
 import fir_ext
@@ -29,76 +31,53 @@ import fir_ext
 _CLIENT_ID = base64.b64decode(
     "MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ=="
 ).decode()
-
 _CLIENT_SECRET = base64.b64decode("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=").decode()
 
-_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-_TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
-# Local callback server — OS-assigned port (RFC 8252 §7.3).
-_CALLBACK_ADDR = "127.0.0.1:0"
-_CALLBACK_PATH = "/cb"
 _DEFAULT_PROJECT_ID = "rising-fact-p41fc"
 
-_SCOPES = [
-    "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/cclog",
-    "https://www.googleapis.com/auth/experimentsandconfigs",
-]
-
-# Pre-created short link. tests/antigravity_auth_test.py catches drift.
-# NOTE: TinyURL routes google.com destinations through redirect.viglink.com.
-# Functional but adds one hop. See gemini_cli_auth.py for details.
-_SHORT_URL = "https://tinyurl.com/fir-agr"
-
-
-def _static_auth_params() -> dict:
-    """Static (non per-session) OAuth params, in stable order."""
-    return {
-        "client_id": _CLIENT_ID,
-        "response_type": "code",
-        "scope": " ".join(_SCOPES),
-        "code_challenge_method": "S256",
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-
-# NOTE: The User-Agent and X-Goog-Api-Client headers intentionally impersonate
-# Google's Node.js client and VS Code Cloud Shell Editor. These values are ported
-# directly from the upstream TypeScript source and are required by the Cloud Code
-# Assist API to accept requests. Changing them breaks authentication.
+# NOTE: User-Agent + X-Goog-Api-Client headers intentionally impersonate
+# Google's Node.js client / VS Code Cloud Shell Editor. Required by the
+# Cloud Code Assist API; ported verbatim from upstream.
 _API_HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "google-api-nodejs-client/9.15.1",
     "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
 }
-
 _CODE_ASSIST_ENDPOINTS = [
     "https://cloudcode-pa.googleapis.com",
     "https://daily-cloudcode-pa.sandbox.googleapis.com",
 ]
 
 
-# ---------------------------------------------------------------------------
-# HTTP helpers
-# ---------------------------------------------------------------------------
+fir_ext.declare_oauth_provider(
+    provider_id="google-antigravity",
+    name="Antigravity (Gemini 3, Claude, GPT-OSS)",
+    client_id=_CLIENT_ID,
+    client_secret=_CLIENT_SECRET,
+    authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
+    token_url="https://oauth2.googleapis.com/token",  # noqa: S106
+    scope=(
+        "https://www.googleapis.com/auth/cloud-platform"
+        " https://www.googleapis.com/auth/userinfo.email"
+        " https://www.googleapis.com/auth/userinfo.profile"
+        " https://www.googleapis.com/auth/cclog"
+        " https://www.googleapis.com/auth/experimentsandconfigs"
+    ),
+    callback_addr="127.0.0.1:0",
+    callback_path="/cb",
+    auth_params_extra={"access_type": "offline", "prompt": "consent"},
+    open_url_instructions="Complete the sign-in in your browser.",
+    short_url_base="https://tinyurl.com/fir-agr",
+)
 
 
-def _http_post_form(url: str, data: dict[str, str]) -> dict:
-    """POST form-encoded data and return parsed JSON."""
-    if not url.startswith(("http:", "https:")):
-        raise ValueError("url must start with http or https: " + url)
-    encoded = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(  # noqa: S310
-        url, data=encoded, headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-        return json.loads(resp.read())
+# ---------------------------------------------------------------------------
+# Helpers (only what's left after dropping the auth-flow plumbing)
+# ---------------------------------------------------------------------------
 
 
 def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int, dict | None]:
-    """POST JSON data and return (status_code, parsed_json_or_None)."""
+    """POST JSON and return (status_code, parsed_json_or_None)."""
     if not url.startswith(("http:", "https:")):
         raise ValueError("url must start with http or https: " + url)
     encoded = json.dumps(body).encode()
@@ -118,11 +97,6 @@ def _http_post_json(url: str, body: dict, headers: dict[str, str]) -> tuple[int,
         return 0, None
 
 
-# ---------------------------------------------------------------------------
-# User info
-# ---------------------------------------------------------------------------
-
-
 def _get_user_email(access_token: str) -> str:
     """Fetch the user's email from Google's userinfo endpoint."""
     try:
@@ -137,17 +111,11 @@ def _get_user_email(access_token: str) -> str:
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Project discovery
-# ---------------------------------------------------------------------------
-
-
 def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
     """Discover an existing Google Cloud project for Antigravity."""
     ctx.progress("Checking for existing project...")
 
     headers = {**_API_HEADERS, "Authorization": f"Bearer {access_token}"}
-
     client_meta = json.dumps(
         {
             "ideType": "IDE_UNSPECIFIED",
@@ -169,8 +137,6 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
         status, data = _http_post_json(f"{endpoint}/v1internal:loadCodeAssist", body, headers)
         if status != 200 or data is None:
             continue
-
-        # Handle both string and object formats for cloudaicompanionProject
         project = data.get("cloudaicompanionProject")
         if isinstance(project, str) and project:
             return project
@@ -184,101 +150,50 @@ def _discover_project(access_token: str, ctx: fir_ext.AuthContext) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Auth provider handlers
+# Antigravity-specific hooks
 # ---------------------------------------------------------------------------
 
 
-@fir_ext.auth_provider(
-    provider_id="google-antigravity",
-    name="Antigravity (Gemini 3, Claude, GPT-OSS)",
-)
-def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
-    """Run the full Antigravity OAuth login flow."""
-    # 1. Generate PKCE
-    pkce = ctx.generate_pkce()
+@fir_ext.auth_post_exchange(provider="google-antigravity")
+def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
+    """Discover the user's GCP project (initial login) or carry it through (refresh).
 
-    # 2. Start callback server
-    try:
-        server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
-        redirect_uri = server["redirect_uri"]
-    except Exception as e:
-        raise RuntimeError(
-            f"Could not start local OAuth callback server: {e}"
-        ) from e
+    fir calls this hook after both the initial code exchange and each
+    refresh. ``previous_credentials`` is populated only on refresh — when
+    present we skip discovery and reuse the cached project ID.
+    """
+    tok = params.get("token", {})
+    access_token = tok.get("access_token", "")
+    refresh_token = tok.get("refresh_token", "")
+    expires_at = tok.get("expires_at")
 
-    # 3. Build authorization URL (full) + short URL.
-    session_params = {
-        "redirect_uri": redirect_uri,
-        "code_challenge": pkce["challenge"],
-        "state": pkce["verifier"],
-    }
-    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
-    auth_url = f"{_AUTH_URL}?{auth_params}"
-    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
-
-    # 4. Open browser
-    ctx.open_url(auth_url, short_url, "Complete the sign-in in your browser.")
-    ctx.progress("Waiting for OAuth callback...")
-
-    # 5. Wait for callback
-    if server is not None:
-        try:
-            result = ctx.await_callback()
-        finally:
-            ctx.stop_callback_server()
-    else:
-        raw = ctx.prompt(
-            "Paste the authorization code or full redirect URL:",
-            placeholder=redirect_uri,
-        )
-        if raw.startswith("http"):
-            parsed = urllib.parse.urlparse(raw)
-            qs = urllib.parse.parse_qs(parsed.query)
-            result = {"code": qs.get("code", [""])[0], "state": qs.get("state", [""])[0]}
-        else:
-            result = {"code": raw, "state": pkce["verifier"]}
-
-    code = result.get("code", "")
-    state = result.get("state", "")
-    if not code:
-        raise RuntimeError("No authorization code received")
-    if state != pkce["verifier"]:
-        raise RuntimeError("OAuth state mismatch — possible CSRF attack")
-
-    # 6. Exchange code for tokens
-    ctx.progress("Exchanging authorization code for tokens...")
-    token_data = _http_post_form(
-        _TOKEN_URL,
-        {
-            "client_id": _CLIENT_ID,
-            "client_secret": _CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-            "code_verifier": pkce["verifier"],
-        },
-    )
-
-    refresh_token = token_data.get("refresh_token", "")
-    access_token = token_data.get("access_token", "")
-    expires_in = token_data.get("expires_in", 0)
-
+    if not access_token:
+        raise RuntimeError("Token response missing access_token")
+    if not refresh_token:
+        # Google sometimes omits refresh_token on a refresh response.
+        # Fall back to the previous one when refreshing.
+        refresh_token = (params.get("previous_credentials") or {}).get("refresh", "")
     if not refresh_token:
         raise RuntimeError("No refresh token received. Please try again.")
 
-    # 7. Get user email (optional)
-    ctx.progress("Getting user info...")
-    email = _get_user_email(access_token)
+    # 5-minute safety buffer
+    if expires_at is not None:
+        expires_at = int(expires_at) - 5 * 60 * 1000
+    else:
+        expires_at = int(time.time() * 1000) + 60 * 60 * 1000
 
-    # 8. Discover project
-    project_id = _discover_project(access_token, ctx)
-
-    # 9. Return credentials
-    expires_at = int(time.time() * 1000) + expires_in * 1000 - 5 * 60 * 1000
-
-    extra: dict = {"projectId": project_id}
-    if email:
-        extra["email"] = email
+    previous = params.get("previous_credentials") or {}
+    if previous:
+        # Refresh path: preserve projectId (and email) from existing creds.
+        extra = dict(previous.get("extra") or {})
+    else:
+        # Initial login: do user-info + project discovery.
+        ctx.progress("Getting user info...")
+        email = _get_user_email(access_token)
+        project_id = _discover_project(access_token, ctx)
+        extra: dict = {"projectId": project_id}
+        if email:
+            extra["email"] = email
 
     return {
         "access": access_token,
@@ -288,42 +203,13 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     }
 
 
-@fir_ext.auth_refresh(provider="google-antigravity")
-def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
-    """Refresh an expired Antigravity token."""
-    creds = params.get("credentials", {})
-    refresh_token = creds.get("refresh", "")
-    extra = creds.get("extra", {})
-    project_id = extra.get("projectId", "")
-
-    if not project_id:
-        raise RuntimeError("Antigravity credentials missing projectId")
-
-    token_data = _http_post_form(
-        _TOKEN_URL,
-        {
-            "client_id": _CLIENT_ID,
-            "client_secret": _CLIENT_SECRET,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token",
-        },
-    )
-
-    new_refresh = token_data.get("refresh_token", "") or refresh_token
-    new_access = token_data.get("access_token", "")
-    expires_in = token_data.get("expires_in", 0)
-
-    return {
-        "access": new_access,
-        "refresh": new_refresh,
-        "expires": int(time.time() * 1000) + expires_in * 1000 - 5 * 60 * 1000,
-        "extra": {"projectId": project_id},
-    }
-
-
 @fir_ext.auth_api_key(provider="google-antigravity")
 def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
-    """Extract the API key — JSON-encoded token + projectId."""
+    """Return a JSON-encoded ``{token, projectId}`` blob.
+
+    The Cloud Code Assist Api wire-protocol envelope wants the project ID
+    alongside the bearer token, so we ship both as a single key.
+    """
     creds = params.get("credentials", {})
     project_id = creds.get("extra", {}).get("projectId", "")
     return json.dumps({"token": creds.get("access", ""), "projectId": project_id})
@@ -333,9 +219,9 @@ def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
 def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
     """List available models.
 
-    The Cloud Code Assist API exposes retrieveUserQuota which returns quota
-    buckets per base model ID, but antigravity uses different model IDs
-    (e.g. gemini-3-pro-high, claude-sonnet-4-5) that don't appear in quota.
+    The Cloud Code Assist API's retrieveUserQuota returns quota buckets
+    per base model ID, but antigravity uses different model IDs (e.g.
+    gemini-3-pro-high, claude-sonnet-4-5) that don't appear in quota.
     Returning None keeps permissive mode so no valid models are filtered out.
     """
     return None
@@ -374,14 +260,14 @@ _ANTIGRAVITY_SYSTEM_INSTRUCTION = (
 )
 
 _ANTIGRAVITY_ENVELOPE = (
-    '{'
+    "{"
     '"project":"${creds.project_id}",'
     '"model":"${model.id}",'
     '"request":"$inner",'
     '"requestType":"agent",'
     '"userAgent":"antigravity",'
     '"requestId":"${fn.rand_id(antigravity)}"'
-    '}'
+    "}"
 )
 
 fir_ext.register_api(

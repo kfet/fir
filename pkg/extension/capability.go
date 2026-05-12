@@ -40,10 +40,108 @@ type CommandSpec struct {
 }
 
 // AuthProviderSpec describes an OAuth auth provider registered by an extension.
+//
+// Extensions choose between two flow models:
+//
+//  1. Declarative (preferred): set Flow with the static OAuth config —
+//     fir drives the entire PKCE+authcode flow itself via pinoauth and
+//     only calls back into the extension for genuinely provider-specific
+//     steps (post-exchange enrichment, api_key, list_models,
+//     modify_models, custom refresh). See [OAuthFlowSpec].
+//
+//  2. Imperative (legacy / non-standard flows): leave Flow nil; fir
+//     calls the extension's auth/login JSON-RPC handler which orchestrates
+//     the whole flow itself. Use when the provider needs a non-standard
+//     flow (e.g. GitHub Copilot's device-code grant).
 type AuthProviderSpec struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	UsesCallbackServer bool   `json:"uses_callback_server"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	UsesCallbackServer bool           `json:"uses_callback_server"`
+	Flow               *OAuthFlowSpec `json:"flow,omitempty"`
+}
+
+// OAuthFlowSpec is the static configuration for a standard OAuth 2.0
+// authorization-code-with-PKCE flow (RFC 6749 §4.1 + RFC 7636). When
+// present on an [AuthProviderSpec], fir drives the whole flow without
+// JSON-RPC bridge calls for the generic steps (PKCE generation, callback
+// server, browser open, code exchange).
+//
+// Extensions may still register optional JSON-RPC hooks for steps that
+// genuinely vary per provider:
+//
+//   - HasPostExchange  → auth/post_exchange after the token endpoint
+//     returns; the hook receives the parsed token and returns the final
+//     credentials (used e.g. by codex to extract chatgpt_account_id from
+//     the access-token JWT).
+//   - HasCustomRefresh → auth/refresh replaces the default
+//     pinoauth.Refresh call; use when the provider has a non-standard
+//     refresh endpoint or shape.
+//
+// When neither hook is set, fir uses sensible defaults: access/refresh
+// tokens from the standard fields, expires from expires_in, and the
+// standard refresh-token grant.
+type OAuthFlowSpec struct {
+	// ClientID is the OAuth client identifier (RFC 6749 §2.2).
+	ClientID string `json:"client_id"`
+	// ClientSecret is the OAuth client secret. Native apps (RFC 8252)
+	// typically have no secret; leave empty in that case.
+	ClientSecret string `json:"client_secret,omitempty"`
+	// AuthorizeURL is the authorization endpoint (RFC 6749 §3.1).
+	AuthorizeURL string `json:"authorize_url"`
+	// TokenURL is the token endpoint (RFC 6749 §3.2).
+	TokenURL string `json:"token_url"`
+	// Scope is the space-separated list of requested scopes
+	// (RFC 6749 §3.3); may be empty.
+	Scope string `json:"scope,omitempty"`
+	// CallbackAddr is the host:port the local callback server binds
+	// to. Defaults to "127.0.0.1:0" (auto-pick port).
+	CallbackAddr string `json:"callback_addr,omitempty"`
+	// CallbackPath is the URL path of the callback endpoint.
+	// Defaults to "/callback".
+	CallbackPath string `json:"callback_path,omitempty"`
+	// DisableCallbackServer skips binding a local callback server and
+	// forces the manual-paste flow. Use when the redirect URI is not
+	// localhost (e.g. a custom-registered OAuth client whose redirect
+	// is fixed at a non-loopback URL).
+	DisableCallbackServer bool `json:"disable_callback_server,omitempty"`
+	// ManualRedirectURI is the redirect URI used when the local
+	// callback server cannot bind (port in use, sandboxed env, etc.)
+	// and the user must paste the redirect URL or code by hand.
+	// Empty means manual fallback is unavailable; a callback-server
+	// failure becomes a hard error.
+	ManualRedirectURI string `json:"manual_redirect_uri,omitempty"`
+	// AuthParamsExtra adds or overrides query parameters on the
+	// authorization URL. Useful for provider-specific knobs
+	// ("originator=fir", "id_token_add_organizations=true", …).
+	AuthParamsExtra map[string]string `json:"auth_params_extra,omitempty"`
+	// TokenBodyJSON, when true, encodes the token-request body as
+	// JSON instead of application/x-www-form-urlencoded. Anthropic
+	// requires this; most providers do not.
+	TokenBodyJSON bool `json:"token_body_json,omitempty"`
+	// TokenHeaders are added to the token-request HTTP request
+	// (e.g. a custom User-Agent). Content-Type is owned by the body
+	// encoder and any caller-supplied value is dropped.
+	TokenHeaders map[string]string `json:"token_headers,omitempty"`
+	// OpenURLInstructions is the human-readable text shown to the
+	// user alongside the authorization URL ("Complete login in your
+	// browser…").
+	OpenURLInstructions string `json:"open_url_instructions,omitempty"`
+	// ShortURLBase, if non-empty, is the base of a pre-created URL
+	// shortener (e.g. "https://tinyurl.com/fir-ant") whose stored
+	// target is the static (non-per-session) portion of the
+	// authorize URL. fir appends the per-session params (state,
+	// code_challenge, redirect_uri) to ShortURLBase to produce
+	// AuthInfo.ShortURL; the URL shortener merges them with the
+	// stored target. Cuts worst-case auth URLs from ~600+ chars to
+	// ~200 — handy in terminals/QR codes.
+	ShortURLBase string `json:"short_url_base,omitempty"`
+	// HasPostExchange opts the extension into the auth/post_exchange
+	// JSON-RPC hook (called after both initial code-exchange and
+	// each refresh) for credential-shape customisation.
+	HasPostExchange bool `json:"has_post_exchange,omitempty"`
+	// HasCustomRefresh opts the extension into the auth/refresh
+	// JSON-RPC hook, replacing the default pinoauth.Refresh call.
+	HasCustomRefresh bool `json:"has_custom_refresh,omitempty"`
 }
 
 // ApiSpec describes a wire-protocol adapter registered by an extension.

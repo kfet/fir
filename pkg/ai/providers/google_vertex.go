@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/pinoauth"
 )
 
 // --- Vertex AI configuration ---
@@ -30,12 +30,6 @@ type adcCredentials struct {
 	ClientSecret string `json:"client_secret"`
 	RefreshToken string `json:"refresh_token"`
 	Type         string `json:"type"`
-}
-
-type adcTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
-	TokenType   string `json:"token_type"`
 }
 
 // adcTokenCache caches the access token to avoid refreshing on every request.
@@ -91,36 +85,24 @@ func getVertexAccessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	// Exchange refresh token for access token
-	resp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
-		"client_id":     {creds.ClientID},
-		"client_secret": {creds.ClientSecret},
-		"refresh_token": {creds.RefreshToken},
-		"grant_type":    {"refresh_token"},
+	// Exchange refresh token for access token via the standard OAuth 2.0
+	// refresh-token grant (RFC 6749 §6).
+	client := &pinoauth.Client{
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		ClientID:     creds.ClientID,
+		ClientSecret: creds.ClientSecret,
+	}
+	tok, err := client.Refresh(ctx, pinoauth.RefreshRequest{
+		RefreshToken: creds.RefreshToken,
 	})
 	if err != nil {
-		return "", fmt.Errorf("token refresh request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("reading token response: %w", err)
+		return "", fmt.Errorf("token refresh failed: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token refresh failed (%d): %s", resp.StatusCode, string(body))
-	}
+	adcTokenCache.token = tok.AccessToken
+	adcTokenCache.expiresAt = tok.ExpiresAt
 
-	var tokenResp adcTokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", fmt.Errorf("parsing token response: %w", err)
-	}
-
-	adcTokenCache.token = tokenResp.AccessToken
-	adcTokenCache.expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
-
-	return tokenResp.AccessToken, nil
+	return tok.AccessToken, nil
 }
 
 // --- Stream function ---

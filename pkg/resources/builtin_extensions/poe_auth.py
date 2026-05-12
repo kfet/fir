@@ -7,217 +7,94 @@
 # ---
 """poe-auth — OAuth provider for Poe (poe.com).
 
-Implements the "Sign in with Poe" OAuth 2.0 Authorization Code + PKCE flow
-documented at https://creator.poe.com/docs/external-applications/sign-in-with-poe.
+Declarative provider implementing the "Sign in with Poe" OAuth 2.0
+Authorization Code + PKCE flow documented at
+https://creator.poe.com/docs/external-applications/sign-in-with-poe.
 
 The token endpoint returns a plain ``api_key`` plus an optional
 ``api_key_expires_in``. There is no refresh token — when the key expires
-the user must re-authenticate.
+the user must re-authenticate (the registered refresh handler raises a
+descriptive error).
 
 A default client ID for the "fir" OAuth app is baked in; override it via
-``FIR_POE_CLIENT_ID`` (and optionally ``FIR_POE_REDIRECT_URI``) if you
-register your own client at https://poe.com/api/clients.
-``localhost``/``127.0.0.1`` redirect URIs do not need to be registered.
+``FIR_POE_CLIENT_ID`` (and optionally ``FIR_POE_REDIRECT_URI`` for a
+custom-registered client whose redirect is not loopback).
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import os
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import fir_ext
 
 # ---------------------------------------------------------------------------
-# Constants
+# Constants & overridable config (read once at extension load).
 # ---------------------------------------------------------------------------
 
-_AUTHORIZE_URL = "https://poe.com/oauth/authorize"
-_TOKEN_URL = "https://api.poe.com/token"  # noqa: S105
-_SCOPE = "apikey:create"
-# Default Client ID for the "fir" OAuth app registered at
-# https://poe.com/api/clients. Override with FIR_POE_CLIENT_ID.
+# Default Client ID for the "fir" OAuth app at https://poe.com/api/clients.
 _DEFAULT_CLIENT_ID = "client_9962de5dfb824c669587e4069666c5ee"
+_CLIENT_ID = os.environ.get("FIR_POE_CLIENT_ID", "").strip() or _DEFAULT_CLIENT_ID
 
-# Local callback server — OS-assigned port (RFC 8252 §7.3, public clients
-# may use any loopback port). The redirect URI is constructed at runtime
-# from the actual bound port and travels as a per-session query param on
-# the short URL.
-_CALLBACK_ADDR = "127.0.0.1:0"
-_CALLBACK_PATH = "/cb"
-
-# Static OAuth parameters (everything except per-session state /
-# code_challenge / redirect_uri). The short link at _SHORT_URL is
-# pre-created to point at _AUTHORIZE_URL + these params, urlencoded in
-# this exact order. Drift between this dict and the short link is caught
-# by tests/poe_auth_test.py — if they fail, re-create the short URL.
-def _static_auth_params(client_id: str) -> dict:
-    return {
-        "client_id": client_id,
-        "response_type": "code",
-        "scope": _SCOPE,
-        "code_challenge_method": "S256",
-    }
-
-
-_SHORT_URL = "https://tinyurl.com/fir-poe"
+# When the user registers their own Poe OAuth client with a non-loopback
+# redirect URI, FIR_POE_REDIRECT_URI lets them route the redirect there;
+# fir then drives a manual-paste fallback flow instead of binding a local
+# callback server.
+_REDIRECT_URI_OVERRIDE = os.environ.get("FIR_POE_REDIRECT_URI", "").strip()
 
 
 # ---------------------------------------------------------------------------
-# Config helpers
+# Provider declaration
 # ---------------------------------------------------------------------------
 
-
-def _client_id() -> str:
-    return os.environ.get("FIR_POE_CLIENT_ID", "").strip() or _DEFAULT_CLIENT_ID
-
-
-def _redirect_uri_override() -> str:
-    return os.environ.get("FIR_POE_REDIRECT_URI", "").strip()
-
-
-# ---------------------------------------------------------------------------
-# HTTP helpers
-# ---------------------------------------------------------------------------
-
-
-def _http_post_form(url: str, data: dict[str, str]) -> dict:
-    """POST form-encoded data and return parsed JSON."""
-    if not url.startswith(("http:", "https:")):
-        raise ValueError("url must start with http or https: " + url)
-    encoded = urllib.parse.urlencode(data).encode()
-    req = urllib.request.Request(  # noqa: S310
-        url,
-        data=encoded,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+if _REDIRECT_URI_OVERRIDE:
+    fir_ext.declare_oauth_provider(
+        provider_id="poe",
+        name="Poe (poe.com)",
+        client_id=_CLIENT_ID,
+        authorize_url="https://poe.com/oauth/authorize",
+        token_url="https://api.poe.com/token",  # noqa: S106
+        scope="apikey:create",
+        disable_callback_server=True,
+        manual_redirect_uri=_REDIRECT_URI_OVERRIDE,
+        open_url_instructions="Approve the connection in your browser to continue.",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = ""
-        with contextlib.suppress(Exception):
-            body = e.read().decode("utf-8", errors="replace")
-        # Surface Poe's structured error fields when present.
-        try:
-            parsed = json.loads(body)
-            err = parsed.get("error", "") or str(e.code)
-            desc = parsed.get("error_description", "")
-            msg = f"Poe token endpoint returned {e.code} {err}"
-            if desc:
-                msg += f": {desc}"
-            raise RuntimeError(msg) from e
-        except json.JSONDecodeError:
-            raise RuntimeError(f"Poe token endpoint returned {e.code}: {body[:200]}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Poe token endpoint unreachable: {e.reason}") from e
-    except TimeoutError as e:
-        raise RuntimeError("Poe token endpoint timed out after 30s") from e
-
-
-# ---------------------------------------------------------------------------
-# Auth provider handlers
-# ---------------------------------------------------------------------------
-
-
-@fir_ext.auth_provider(
-    provider_id="poe",
-    name="Poe (poe.com)",
-)
-def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
-    """Run the Poe OAuth authorization code + PKCE flow."""
-    client_id = _client_id()
-
-    # 1. PKCE
-    pkce = ctx.generate_pkce()
-
-    # 2. Start callback server (unless the caller pinned a non-localhost URI).
-    override = _redirect_uri_override()
-    server = None
-    redirect_uri = override
-
-    if not override:
-        try:
-            server = ctx.start_callback_server(
-                addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"]
-            )
-            redirect_uri = server["redirect_uri"]
-        except Exception:
-            # OS-assigned port should almost never fail; fall back to manual
-            # paste flow with a generic placeholder if it does.
-            server = None
-            redirect_uri = "http://localhost/cb"
-
-    # 3. Authorization URL (full) + short URL (pre-shortened static prefix
-    # + click-time per-session params merged by the shortener).
-    static_params = _static_auth_params(client_id)
-    session_params = {
-        "redirect_uri": redirect_uri,
-        "code_challenge": pkce["challenge"],
-        "state": pkce["verifier"],
-    }
-    auth_params = urllib.parse.urlencode({**static_params, **session_params})
-    auth_url = f"{_AUTHORIZE_URL}?{auth_params}"
-    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
-
-    # 4. Open browser
-    ctx.open_url(auth_url, short_url, "Approve the connection in your browser to continue.")
-    ctx.progress("Waiting for OAuth callback...")
-
-    # 5. Wait for callback (or manual paste)
-    if server is not None:
-        try:
-            result = ctx.await_callback()
-        finally:
-            ctx.stop_callback_server()
-    else:
-        raw = ctx.prompt(
-            "Paste the authorization code or full redirect URL:",
-            placeholder=redirect_uri,
-        )
-        if raw.startswith("http"):
-            parsed = urllib.parse.urlparse(raw)
-            qs = urllib.parse.parse_qs(parsed.query)
-            result = {
-                "code": qs.get("code", [""])[0],
-                "state": qs.get("state", [""])[0],
-            }
-        else:
-            result = {"code": raw, "state": pkce["verifier"]}
-
-    code = result.get("code", "")
-    state = result.get("state", "")
-    if not code:
-        err = result.get("error", "")
-        desc = result.get("error_description", "")
-        if err:
-            raise RuntimeError(f"Poe authorization failed: {err}: {desc}".rstrip(": "))
-        raise RuntimeError("No authorization code received")
-    if state and state != pkce["verifier"]:
-        raise RuntimeError("OAuth state mismatch — possible CSRF attack")
-
-    # 6. Exchange code for api_key
-    ctx.progress("Exchanging authorization code for API key...")
-    token_data = _http_post_form(
-        _TOKEN_URL,
-        {
-            "grant_type": "authorization_code",
-            "client_id": client_id,
-            "code": code,
-            "redirect_uri": redirect_uri,
-            "code_verifier": pkce["verifier"],
-        },
+else:
+    fir_ext.declare_oauth_provider(
+        provider_id="poe",
+        name="Poe (poe.com)",
+        client_id=_CLIENT_ID,
+        authorize_url="https://poe.com/oauth/authorize",
+        token_url="https://api.poe.com/token",  # noqa: S106
+        scope="apikey:create",
+        callback_addr="127.0.0.1:0",
+        callback_path="/cb",
+        manual_redirect_uri="",
+        open_url_instructions="Approve the connection in your browser to continue.",
+        short_url_base="https://tinyurl.com/fir-poe",
     )
 
-    api_key_val = token_data.get("api_key", "")
+
+# ---------------------------------------------------------------------------
+# Poe-specific hooks
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.auth_post_exchange(provider="poe")
+def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
+    """Map Poe's non-standard token response to fir credentials.
+
+    Poe returns ``{"api_key": "...", "api_key_expires_in": ...}`` instead
+    of ``{"access_token", "refresh_token", "expires_in"}``. Pluck the key
+    out of ``token.raw`` and apply a 60-second safety margin.
+    """
+    tok = params.get("token", {})
+    raw = tok.get("raw", {}) or {}
+    api_key_val = raw.get("api_key", "") or tok.get("access_token", "")
     if not api_key_val:
         raise RuntimeError("Poe token response missing api_key")
 
-    expires_in = token_data.get("api_key_expires_in")
+    expires_in = raw.get("api_key_expires_in")
     if expires_in is None:
         expires_at = 0  # 0 means "never expires" in fir's auth storage.
     else:
@@ -237,13 +114,6 @@ def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
     raise RuntimeError(
         "Poe API key has expired. Run `fir --login poe` to obtain a new key."
     )
-
-
-@fir_ext.auth_api_key(provider="poe")
-def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
-    """Return the stored Poe API key."""
-    creds = params.get("credentials", {})
-    return creds.get("access", "")
 
 
 # NOTE: intentionally no ``@fir_ext.auth_list_models`` handler.

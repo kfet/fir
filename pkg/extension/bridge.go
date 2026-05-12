@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/pinoauth"
 )
 
 // NotifyFunc is called when an extension sends a "notify" request.
@@ -46,12 +46,19 @@ type Bridge struct {
 	sessionData   map[string]string
 
 	// authCallbacks holds the active login callbacks for UI dispatch during auth/login.
+	// authCtx is the active login's context, threaded through to callback-server
+	// hooks. Both are guarded by authCallbacksMu and set/cleared together.
 	authCallbacksMu sync.RWMutex
-	authCallbacks   *oauth.LoginCallbacks
+	authCallbacks   *pinoauth.LoginCallbacks
+	authCtx         context.Context
 
-	// authProviders holds the extAuthProvider instances for this bridge.
-	authProvidersMu sync.RWMutex
-	authProviders   []*extAuthProvider
+	// authProviders holds the imperative-flow extAuthProvider instances
+	// for this bridge (extensions that implement auth/login themselves).
+	// genericAuthProviders holds the declarative-flow providers (Go
+	// drives the flow; ext only handles optional hooks).
+	authProvidersMu      sync.RWMutex
+	authProviders        []*extAuthProvider
+	genericAuthProviders []*genericAuthProvider
 
 	// providers holds the hosted-provider registrations contributed by
 	// this extension at handshake.

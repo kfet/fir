@@ -757,6 +757,145 @@ after compaction):
 
 ---
 
+## Auth Providers (OAuth)
+
+Extensions can register OAuth providers (Anthropic, Codex, Antigravity, …)
+that integrate with fir's auth storage. Two flow models are supported:
+
+1. **Declarative** (preferred): the extension supplies a static
+   [`OAuthFlowSpec`](#oauth-flow-spec) at init time and fir drives the
+   entire authorization-code-with-PKCE flow itself via the
+   [`pinoauth`](https://github.com/kfet/pinoauth) module — PKCE
+   generation, callback server, browser opening, code exchange, and
+   token refresh. The extension only handles genuinely
+   provider-specific work via optional hooks (`auth/post_exchange`,
+   `auth/api_key`, `auth/list_models`, `auth/modify_models`,
+   `auth/refresh`).
+
+2. **Imperative** (legacy / non-standard flows): the extension leaves
+   `flow` empty and implements `auth/login` itself. fir invokes
+   `auth/login` and the extension calls back through the bridge for
+   PKCE, callback server, prompts, etc. Use only when the provider
+   has a non-standard flow that doesn't fit the static spec — the
+   GitHub Copilot device-code grant is the only built-in example.
+
+### Init payload
+
+```json
+{
+  "auth_providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic (Claude Pro/Max)",
+      "uses_callback_server": true,
+      "flow": {
+        "client_id": "...",
+        "authorize_url": "https://claude.ai/oauth/authorize",
+        "token_url": "https://platform.claude.com/v1/oauth/token",
+        "scope": "org:create_api_key user:profile ...",
+        "callback_addr": "127.0.0.1:53692",
+        "callback_path": "/callback",
+        "manual_redirect_uri": "https://platform.claude.com/oauth/code/callback",
+        "auth_params_extra": {"code": "true"},
+        "token_body_json": true,
+        "token_headers": {"User-Agent": "claude-cli/2.1.112 ..."},
+        "open_url_instructions": "Complete login in your browser.",
+        "has_post_exchange": true,
+        "has_custom_refresh": false
+      }
+    }
+  ]
+}
+```
+
+### OAuth flow spec
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `client_id` | string | OAuth client identifier (RFC 6749 §2.2). |
+| `client_secret` | string | OAuth client secret. Empty for native apps (RFC 8252). |
+| `authorize_url` | string | Authorization endpoint URL (RFC 6749 §3.1). |
+| `token_url` | string | Token endpoint URL (RFC 6749 §3.2). |
+| `scope` | string | Space-separated requested scopes. |
+| `callback_addr` | string | Local callback bind addr (default `127.0.0.1:0`). |
+| `callback_path` | string | Local callback URL path (default `/callback`). |
+| `disable_callback_server` | bool | Force the manual-paste flow (custom non-loopback redirect URIs). |
+| `manual_redirect_uri` | string | Redirect URI for the manual-paste fallback. |
+| `auth_params_extra` | object | Extra query params on the authorize URL (provider-specific). |
+| `token_body_json` | bool | Encode the token request body as JSON instead of form. |
+| `token_headers` | object | Extra HTTP headers on token requests. |
+| `open_url_instructions` | string | Text shown alongside the authorize URL. |
+| `has_post_exchange` | bool | Extension implements `auth/post_exchange`. |
+| `has_custom_refresh` | bool | Extension implements `auth/refresh` (overrides default). |
+
+### fir → extension methods
+
+| Method | When called | Required? |
+|--------|-------------|-----------|
+| `auth/login` | Imperative providers only — fir delegates the full flow. | Yes for imperative |
+| `auth/post_exchange` | After both initial code exchange and each refresh. Receives the parsed token plus, on refresh, the previous credentials so the extension can carry through extras (project IDs, account IDs). | Iff `has_post_exchange: true` |
+| `auth/refresh` | When fir needs to refresh a token. | Iff `has_custom_refresh: true` (or imperative) |
+| `auth/api_key` | When fir resolves a model's API key from credentials. | Optional (defaults to `creds.access`) |
+| `auth/list_models` | When fir asks the provider to enumerate live model IDs. | Optional (returns `{"models": null}` to keep the static catalog) |
+| `auth/modify_models` | When fir applies provider-specific HTTP headers to outbound model requests. | Optional |
+| `auth/model_defaults` | When fir needs metadata for a live-listed model not in the built-in registry. | Optional |
+
+#### `auth/post_exchange` shape
+
+Request:
+
+```json
+{
+  "provider_id": "google-gemini-cli",
+  "token": {
+    "access_token": "ya29...",
+    "refresh_token": "1//...",
+    "token_type": "Bearer",
+    "scope": "...",
+    "expires_at": 1731000000000,
+    "raw": {"access_token": "...", "expires_in": 3599, "..." : "..."}
+  },
+  "previous_credentials": {       // Only present on refresh.
+    "access": "...",
+    "refresh": "...",
+    "expires": 1730000000000,
+    "extra": {"projectId": "rising-fact-p41fc"}
+  }
+}
+```
+
+Response: a `Credentials` shape under `credentials` (the SDK can return
+the bare credential dict and it will be wrapped automatically):
+
+```json
+{
+  "credentials": {
+    "access": "...",
+    "refresh": "...",
+    "expires": 1731000000000,
+    "extra": {"projectId": "rising-fact-p41fc"}
+  }
+}
+```
+
+### extension → fir helpers (imperative flow only)
+
+The bridge exposes these JSON-RPC methods for imperative `auth/login`
+handlers. Declarative providers do **not** need them — fir drives the
+equivalent steps internally.
+
+| Method | Purpose |
+|--------|---------|
+| `auth/generate_pkce` | Generate a PKCE verifier/challenge pair. |
+| `auth/start_callback_server` | Bind a local HTTP server for the OAuth redirect. |
+| `auth/await_callback` | Block until the redirect arrives (or the user pastes manually). |
+| `auth/stop_callback_server` | Clean up the local server. |
+| `auth/open_url` | Open the authorize URL in the user's browser (and surface it on screen). |
+| `auth/progress` | Show a status message in fir's UI. |
+| `auth/prompt` | Ask the user for free-form text input. |
+
+---
+
 ## Comment Frontmatter
 
 Extension files may declare metadata in a comment frontmatter block placed

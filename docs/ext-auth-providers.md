@@ -363,14 +363,14 @@ func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credenti
 When an extension completes its init handshake and declares `auth_providers`:
 
 1. For each `AuthProviderSpec`, create an `extAuthProvider` adapter.
-2. Call `oauth.RegisterProvider(adapter)` to register it.
-3. The provider now appears in `oauth.GetProviders()` and the OAuth selector UI.
+2. Call `ai.RegisterOAuthProvider(adapter)` to register it.
+3. The provider now appears in `ai.GetOAuthProviders()` and the OAuth selector UI.
 
 When the extension is unloaded (process exit, `/reload`, shutdown):
 
-1. Call `oauth.UnregisterProvider(spec.ID)` for each provider.
-2. If it shadows a built-in, the built-in is restored automatically (existing
-   behavior in `UnregisterProvider`).
+1. Call `ai.UnregisterOAuthProvider(spec.ID)` for each provider.
+2. The registry entry is removed. There are no Go-side built-in OAuth
+   providers, so unregistration cleanly removes the provider.
 
 ### Helper RPC Handlers
 

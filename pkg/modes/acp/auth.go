@@ -10,11 +10,11 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/pinoauth"
 )
 
 // providerKeyLink returns the URL where users obtain an API key for the given
@@ -238,7 +238,7 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("auth storage not initialized")
 	}
 
-	provider := oauth.GetProvider(providerID)
+	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("unknown OAuth provider: %s", providerID)
 	}
@@ -253,9 +253,8 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 			formatProviderName(providerID), envkeys.ProviderEnvVar(providerID))
 	}
 
-	err := authStorage.Login(providerID, oauth.LoginCallbacks{
-		Ctx: ctx,
-		OnAuth: func(info oauth.AuthInfo) {
+	err := authStorage.Login(ctx, providerID, pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
 			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
 			firlog.Info("acp oauth: opening browser", "url", openURL, "short_url", info.ShortURL)
 			if err := session.OpenBrowser(openURL); err != nil {

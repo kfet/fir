@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
@@ -163,7 +162,7 @@ func (r *ModelRegistry) startOAuthModelFetch(ctx context.Context, cacheDir strin
 		}
 	}
 
-	// OAuth providers: use oauth.Provider.ListModels.
+	// OAuth providers: use ai.OAuthProvider.ListModels.
 	for _, oauthProvider := range r.authStorage.GetOAuthProviders() {
 		providerID := oauthProvider.ID()
 		if !r.authStorage.HasAuth(providerID) {
@@ -197,7 +196,7 @@ func (r *ModelRegistry) startOAuthModelFetch(ctx context.Context, cacheDir strin
 	}
 }
 
-func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string, provider oauth.Provider, creds *oauth.Credentials, state *liveModelState, cacheDir string) {
+func (r *ModelRegistry) fetchOAuthModels(ctx context.Context, providerID string, provider ai.OAuthProvider, creds *ai.OAuthCredentials, state *liveModelState, cacheDir string) {
 	// Ensure the token is fresh — GetApiKey auto-refreshes expired OAuth tokens.
 	_ = r.authStorage.GetApiKey(providerID)
 	// Re-read credentials after potential refresh.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // TestSetupAuthProviders_RegistersOnly discovers extensions with auth_providers
@@ -38,7 +38,7 @@ func TestSetupAuthProviders_RegistersOnly(t *testing.T) {
 	}
 
 	// Register provider in oauth registry on setup; clean up afterwards.
-	t.Cleanup(func() { oauth.UnregisterProvider("my-test-provider") })
+	t.Cleanup(func() { ai.UnregisterOAuthProvider("my-test-provider") })
 
 	result, err := SetupAuthProviders(AuthSetupOptions{
 		ProjectDir:     dir,
@@ -74,7 +74,7 @@ func TestSetupAuthProviders_RegistersOnly(t *testing.T) {
 	}
 
 	// And the oauth provider should now be registered globally.
-	if p := oauth.GetProvider("my-test-provider"); p == nil {
+	if p := ai.GetOAuthProvider("my-test-provider"); p == nil {
 		t.Error("oauth provider my-test-provider not registered")
 	}
 }

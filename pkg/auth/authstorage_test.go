@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/pinoauth"
 )
 
 func TestAuthStorage_SetAndGet(t *testing.T) {
@@ -157,8 +157,8 @@ func TestAuthStorage_GetApiKey_OAuth(t *testing.T) {
 
 	// With a registered OAuth provider, the token should be returned.
 	mock := &mockOAuthProvider{id: "anthropic"}
-	oauth.RegisterProvider(mock)
-	defer oauth.UnregisterProvider("anthropic")
+	ai.RegisterOAuthProvider(mock)
+	defer ai.UnregisterOAuthProvider("anthropic")
 
 	key = s.GetApiKey("anthropic")
 	if key != "sk-ant-oat01-test-token" {
@@ -213,12 +213,12 @@ func TestAuthStorage_HasAuth(t *testing.T) {
 	}
 }
 
-// mockOAuthProvider implements oauth.Provider for testing.
+// mockOAuthProvider implements ai.OAuthProvider for testing.
 type mockOAuthProvider struct {
 	id           string
 	refreshCalls int
-	loginCreds   *oauth.Credentials
-	refreshCreds *oauth.Credentials
+	loginCreds   *ai.OAuthCredentials
+	refreshCreds *ai.OAuthCredentials
 	refreshErr   error
 }
 
@@ -226,15 +226,15 @@ func (m *mockOAuthProvider) ID() string               { return m.id }
 func (m *mockOAuthProvider) Name() string             { return "Mock " + m.id }
 func (m *mockOAuthProvider) UsesCallbackServer() bool { return false }
 
-func (m *mockOAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error) {
+func (m *mockOAuthProvider) Login(_ context.Context, callbacks pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 	return m.loginCreds, nil
 }
 
-func (m *mockOAuthProvider) ListModels(_ context.Context, _ *oauth.Credentials) ([]string, error) {
+func (m *mockOAuthProvider) ListModels(_ context.Context, _ *ai.OAuthCredentials) ([]string, error) {
 	return nil, nil
 }
 
-func (m *mockOAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
+func (m *mockOAuthProvider) RefreshToken(_ context.Context, creds *ai.OAuthCredentials) (*ai.OAuthCredentials, error) {
 	m.refreshCalls++
 	if m.refreshErr != nil {
 		return nil, m.refreshErr
@@ -242,12 +242,16 @@ func (m *mockOAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Crede
 	return m.refreshCreds, nil
 }
 
-func (m *mockOAuthProvider) GetAPIKey(creds *oauth.Credentials) string {
+func (m *mockOAuthProvider) GetAPIKey(creds *ai.OAuthCredentials) string {
 	return creds.Access
 }
 
-func (m *mockOAuthProvider) ModifyModels(models []*ai.Model, _ *oauth.Credentials) []*ai.Model {
+func (m *mockOAuthProvider) ModifyModels(models []*ai.Model, _ *ai.OAuthCredentials) []*ai.Model {
 	return models
+}
+
+func (m *mockOAuthProvider) ModelDefaults(_ string, _ []*ai.Model) *ai.Model {
+	return nil
 }
 
 func TestAuthStorage_GetApiKey_OAuthRefresh(t *testing.T) {
@@ -256,13 +260,13 @@ func TestAuthStorage_GetApiKey_OAuthRefresh(t *testing.T) {
 
 	mp := &mockOAuthProvider{
 		id: "test-refresh-provider",
-		refreshCreds: &oauth.Credentials{
+		refreshCreds: &ai.OAuthCredentials{
 			Access:  "new-access-token",
 			Refresh: "new-refresh-token",
 			Expires: time.Now().UnixMilli() + 3600000,
 		},
 	}
-	oauth.RegisterProvider(mp)
+	ai.RegisterOAuthProvider(mp)
 	defer func() {
 		// Can't unregister, but won't affect other tests
 	}()
@@ -309,7 +313,7 @@ func TestAuthStorage_GetApiKey_OAuthNotExpired(t *testing.T) {
 	mp := &mockOAuthProvider{
 		id: "test-no-refresh",
 	}
-	oauth.RegisterProvider(mp)
+	ai.RegisterOAuthProvider(mp)
 
 	s := NewAuthStorage(path)
 
@@ -338,7 +342,7 @@ func TestAuthStorage_GetApiKey_OAuthRefreshFails(t *testing.T) {
 		id:         "test-refresh-fail",
 		refreshErr: errors.New("refresh failed"),
 	}
-	oauth.RegisterProvider(mp)
+	ai.RegisterOAuthProvider(mp)
 
 	s := NewAuthStorage(path)
 
@@ -374,19 +378,19 @@ func TestAuthStorage_Login(t *testing.T) {
 
 	mp := &mockOAuthProvider{
 		id: "test-login-provider",
-		loginCreds: &oauth.Credentials{
+		loginCreds: &ai.OAuthCredentials{
 			Access:  "login-token",
 			Refresh: "login-refresh",
 			Expires: time.Now().UnixMilli() + 3600000,
 		},
 	}
-	oauth.RegisterProvider(mp)
+	ai.RegisterOAuthProvider(mp)
 
 	s := NewAuthStorage(path)
 
-	err := s.Login("test-login-provider", oauth.LoginCallbacks{
-		OnAuth: func(_ oauth.AuthInfo) {},
-		OnPrompt: func(_ oauth.Prompt) (string, error) {
+	err := s.Login(context.Background(), "test-login-provider", pinoauth.LoginCallbacks{
+		OnAuth: func(_ pinoauth.AuthInfo) {},
+		OnPrompt: func(_ pinoauth.Prompt) (string, error) {
 			return "code", nil
 		},
 	})
@@ -411,7 +415,7 @@ func TestAuthStorage_Login_UnknownProvider(t *testing.T) {
 	path := filepath.Join(dir, "auth.json")
 	s := NewAuthStorage(path)
 
-	err := s.Login("nonexistent-provider", oauth.LoginCallbacks{})
+	err := s.Login(context.Background(), "nonexistent-provider", pinoauth.LoginCallbacks{})
 	if err == nil {
 		t.Error("expected error for unknown provider")
 	}
@@ -482,5 +486,60 @@ func TestInMemoryAuthStorage_SetAndGet(t *testing.T) {
 	}
 	if cred.Key != "sk-openai" {
 		t.Errorf("Key = %q, want sk-openai", cred.Key)
+	}
+}
+
+// TestAuthCredOAuthCreds_RoundTripExtra is a regression test for a
+// pinoauth v0.2.0-migration-era footgun: AuthCredential's on-disk shape
+// only knew about ProjectID as a top-level column, so any other
+// provider-specific Extra key (codex's accountId, antigravity's email,
+// etc.) silently dropped on persistence even though the fir-side
+// ai.OAuthCredentials.Extra map promised general round-tripping.
+func TestAuthCredOAuthCreds_RoundTripExtra(t *testing.T) {
+	in := &ai.OAuthCredentials{
+		Access:  "AT",
+		Refresh: "RT",
+		Expires: 12345,
+		Extra: map[string]any{
+			"projectId": "rising-fact-p41fc",
+			"accountId": "acc-123",
+			"email":     "user@example.com",
+		},
+	}
+	stored := OAuthCredsToAuthCred(in)
+	if stored.ProjectID != "rising-fact-p41fc" {
+		t.Errorf("ProjectID legacy column = %q, want rising-fact-p41fc", stored.ProjectID)
+	}
+	out := AuthCredToOAuthCreds(&stored)
+	if out.Access != "AT" || out.Refresh != "RT" || out.Expires != 12345 {
+		t.Errorf("core fields lost: %+v", out)
+	}
+	if out.Extra["projectId"] != "rising-fact-p41fc" {
+		t.Errorf("projectId lost: %+v", out.Extra)
+	}
+	if out.Extra["accountId"] != "acc-123" {
+		t.Errorf("accountId lost: %+v", out.Extra)
+	}
+	if out.Extra["email"] != "user@example.com" {
+		t.Errorf("email lost: %+v", out.Extra)
+	}
+}
+
+// TestAuthCredToOAuthCreds_LegacyProjectID covers the on-disk back-compat
+// path: an AuthCredential written by an older fir build has only the
+// ProjectID column populated (no Extra map). Reading it must lift the
+// projectId into the new Extra["projectId"] slot transparently.
+func TestAuthCredToOAuthCreds_LegacyProjectID(t *testing.T) {
+	legacy := &AuthCredential{
+		Type:      CredentialTypeOAuth,
+		Access:    "AT",
+		Refresh:   "RT",
+		Expires:   1,
+		ProjectID: "legacy-proj",
+		// Extra intentionally nil — older on-disk shape.
+	}
+	out := AuthCredToOAuthCreds(legacy)
+	if out.Extra["projectId"] != "legacy-proj" {
+		t.Errorf("legacy ProjectID column not lifted into Extra: %+v", out.Extra)
 	}
 }

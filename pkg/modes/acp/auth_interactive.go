@@ -10,13 +10,14 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/pinoauth"
 )
 
 // Two-call interactive OAuth protocol.
 //
-// Reuses the existing oauth.LoginCallbacks plumbing — same Login flow as
+// Reuses the existing pinoauth.LoginCallbacks plumbing — same Login flow as
 // the TUI runs in cmd/fir/login.go. The only difference is the transport:
 // the URL goes out in the response of the first `authenticate` call, and
 // the pasted redirect URL comes in via the request of a second
@@ -58,7 +59,7 @@ type pendingAuth struct {
 
 	// authInfo is the URL+instructions captured from OnAuth. Buffered(1)
 	// so the goroutine never blocks if the RPC handler isn't waiting yet.
-	authInfo chan oauth.AuthInfo
+	authInfo chan pinoauth.AuthInfo
 	// paste receives the redirect URL (or raw code) submitted via call 2.
 	paste chan string
 	// done receives the final result of authStorage.Login.
@@ -149,7 +150,7 @@ func (pa *firAgent) startPendingAuth(reqCtx context.Context, method *ExtendedAut
 	if authStorage == nil {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("auth storage not initialized")
 	}
-	if oauth.GetProvider(providerID) == nil {
+	if ai.GetOAuthProvider(providerID) == nil {
 		return acpsdk.AuthenticateResponse{}, fmt.Errorf("unknown OAuth provider: %s", providerID)
 	}
 
@@ -158,7 +159,7 @@ func (pa *firAgent) startPendingAuth(reqCtx context.Context, method *ExtendedAut
 		id:       newPendingID(),
 		methodID: method.Id,
 		cancel:   cancel,
-		authInfo: make(chan oauth.AuthInfo, 1),
+		authInfo: make(chan pinoauth.AuthInfo, 1),
 		paste:    make(chan string, 1),
 		done:     make(chan error, 1),
 	}
@@ -169,9 +170,8 @@ func (pa *firAgent) startPendingAuth(reqCtx context.Context, method *ExtendedAut
 	// to the RPC handler (which returns it to the relay); OnManualCodeInput
 	// blocks until call 2 supplies the pasted redirect URL.
 	go func() {
-		err := authStorage.Login(providerID, oauth.LoginCallbacks{
-			Ctx: loginCtx,
-			OnAuth: func(info oauth.AuthInfo) {
+		err := authStorage.Login(loginCtx, providerID, pinoauth.LoginCallbacks{
+			OnAuth: func(info pinoauth.AuthInfo) {
 				select {
 				case pending.authInfo <- info:
 				default:

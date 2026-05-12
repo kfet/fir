@@ -8,9 +8,9 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/pinoauth"
 )
 
 func TestBuildAuthMethods_EnvVarMethods(t *testing.T) {
@@ -250,8 +250,8 @@ func TestAuthenticateOAuth_RejectsManualCodeProvider(t *testing.T) {
 	// rejected in ACP mode without making network calls.
 	// Register a temporary fake provider that returns UsesCallbackServer=false.
 	fake := &fakeNoCallbackProvider{}
-	oauth.RegisterProvider(fake)
-	t.Cleanup(func() { oauth.UnregisterProvider(fake.ID()) })
+	ai.RegisterOAuthProvider(fake)
+	t.Cleanup(func() { ai.UnregisterOAuthProvider(fake.ID()) })
 
 	authStore := auth.NewInMemoryAuthStorage(nil)
 	pa := &firAgent{
@@ -283,18 +283,21 @@ type fakeNoCallbackProvider struct{}
 func (f *fakeNoCallbackProvider) ID() string               { return "fake-device-code" }
 func (f *fakeNoCallbackProvider) Name() string             { return "Fake Device Code" }
 func (f *fakeNoCallbackProvider) UsesCallbackServer() bool { return false }
-func (f *fakeNoCallbackProvider) Login(_ oauth.LoginCallbacks) (*oauth.Credentials, error) {
+func (f *fakeNoCallbackProvider) Login(_ context.Context, _ pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (f *fakeNoCallbackProvider) RefreshToken(_ *oauth.Credentials) (*oauth.Credentials, error) {
+func (f *fakeNoCallbackProvider) RefreshToken(_ context.Context, _ *ai.OAuthCredentials) (*ai.OAuthCredentials, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (f *fakeNoCallbackProvider) GetAPIKey(_ *oauth.Credentials) string { return "" }
-func (f *fakeNoCallbackProvider) ListModels(_ context.Context, _ *oauth.Credentials) ([]string, error) {
+func (f *fakeNoCallbackProvider) GetAPIKey(_ *ai.OAuthCredentials) string { return "" }
+func (f *fakeNoCallbackProvider) ListModels(_ context.Context, _ *ai.OAuthCredentials) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeNoCallbackProvider) ModifyModels(models []*ai.Model, _ *oauth.Credentials) []*ai.Model {
+func (f *fakeNoCallbackProvider) ModifyModels(models []*ai.Model, _ *ai.OAuthCredentials) []*ai.Model {
 	return models
+}
+func (f *fakeNoCallbackProvider) ModelDefaults(_ string, _ []*ai.Model) *ai.Model {
+	return nil
 }
 
 func TestAuthenticateOAuth_NilAuthStorage(t *testing.T) {

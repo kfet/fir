@@ -43,7 +43,7 @@ func (r *AuthSetupResult) Stop() {
 }
 
 // SetupAuthProviders discovers extensions declaring auth_providers in their
-// frontmatter and starts them in parallel so that oauth.GetProvider(id)
+// frontmatter and starts them in parallel so that ai.GetOAuthProvider(id)
 // returns them for subsequent AuthMethod enumeration.
 //
 // Parallelism: the underlying Manager.Start already spawns one goroutine per

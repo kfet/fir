@@ -9,8 +9,8 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/pinoauth"
 )
 
 // scriptedOAuthProvider is a test double that runs a user-supplied script
@@ -18,38 +18,41 @@ import (
 // (URL emit, paste request, error, etc.).
 type scriptedOAuthProvider struct {
 	id    string
-	login func(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error)
+	login func(callbacks pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error)
 }
 
 func (p *scriptedOAuthProvider) ID() string               { return p.id }
 func (p *scriptedOAuthProvider) Name() string             { return "Scripted " + p.id }
 func (p *scriptedOAuthProvider) UsesCallbackServer() bool { return true }
-func (p *scriptedOAuthProvider) Login(cb oauth.LoginCallbacks) (*oauth.Credentials, error) {
+func (p *scriptedOAuthProvider) Login(_ context.Context, cb pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 	return p.login(cb)
 }
-func (p *scriptedOAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
+func (p *scriptedOAuthProvider) RefreshToken(_ context.Context, creds *ai.OAuthCredentials) (*ai.OAuthCredentials, error) {
 	return creds, nil
 }
-func (p *scriptedOAuthProvider) GetAPIKey(creds *oauth.Credentials) string {
+func (p *scriptedOAuthProvider) GetAPIKey(creds *ai.OAuthCredentials) string {
 	if creds == nil {
 		return ""
 	}
 	return creds.Access
 }
-func (p *scriptedOAuthProvider) ListModels(_ context.Context, _ *oauth.Credentials) ([]string, error) {
+func (p *scriptedOAuthProvider) ListModels(_ context.Context, _ *ai.OAuthCredentials) ([]string, error) {
 	return nil, nil
 }
-func (p *scriptedOAuthProvider) ModifyModels(models []*ai.Model, _ *oauth.Credentials) []*ai.Model {
+func (p *scriptedOAuthProvider) ModifyModels(models []*ai.Model, _ *ai.OAuthCredentials) []*ai.Model {
 	return models
+}
+func (p *scriptedOAuthProvider) ModelDefaults(_ string, _ []*ai.Model) *ai.Model {
+	return nil
 }
 
 // newAgentForAuthTest returns a firAgent ready for interactive auth tests,
 // with a single scripted OAuth provider registered. It returns a cleanup
 // that unregisters the provider.
-func newAgentForAuthTest(t *testing.T, providerID string, login func(oauth.LoginCallbacks) (*oauth.Credentials, error)) (*firAgent, func()) {
+func newAgentForAuthTest(t *testing.T, providerID string, login func(pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error)) (*firAgent, func()) {
 	t.Helper()
 	prov := &scriptedOAuthProvider{id: providerID, login: login}
-	oauth.RegisterProvider(prov)
+	ai.RegisterOAuthProvider(prov)
 	pa := &firAgent{
 		sessions:     make(map[string]*firSession),
 		pendingAuths: make(map[string]*pendingAuth),
@@ -58,7 +61,7 @@ func newAgentForAuthTest(t *testing.T, providerID string, login func(oauth.Login
 			{Id: "oauth-" + providerID, Name: "Scripted", Type: AuthMethodTypeAgent},
 		},
 	}
-	return pa, func() { oauth.UnregisterProvider(providerID) }
+	return pa, func() { ai.UnregisterOAuthProvider(providerID) }
 }
 
 func TestInteractiveAuth_HappyPath(t *testing.T) {
@@ -66,14 +69,14 @@ func TestInteractiveAuth_HappyPath(t *testing.T) {
 	const wantPaste = "https://localhost/cb?code=abc&state=xyz"
 
 	pasted := make(chan string, 1)
-	pa, cleanup := newAgentForAuthTest(t, "scripted-happy", func(cb oauth.LoginCallbacks) (*oauth.Credentials, error) {
-		cb.OnAuth(oauth.AuthInfo{URL: wantURL, Instructions: "go here"})
+	pa, cleanup := newAgentForAuthTest(t, "scripted-happy", func(cb pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
+		cb.OnAuth(pinoauth.AuthInfo{URL: wantURL, Instructions: "go here"})
 		v, err := cb.OnManualCodeInput()
 		if err != nil {
 			return nil, err
 		}
 		pasted <- v
-		return &oauth.Credentials{Access: "tok"}, nil
+		return &ai.OAuthCredentials{Access: "tok"}, nil
 	})
 	defer cleanup()
 
@@ -132,8 +135,8 @@ func TestInteractiveAuth_HappyPath(t *testing.T) {
 
 func TestInteractiveAuth_CachedCredsNoUserInput(t *testing.T) {
 	// Login completes immediately without ever calling OnAuth (cached creds).
-	pa, cleanup := newAgentForAuthTest(t, "scripted-cached", func(_ oauth.LoginCallbacks) (*oauth.Credentials, error) {
-		return &oauth.Credentials{Access: "tok"}, nil
+	pa, cleanup := newAgentForAuthTest(t, "scripted-cached", func(_ pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
+		return &ai.OAuthCredentials{Access: "tok"}, nil
 	})
 	defer cleanup()
 
@@ -162,7 +165,7 @@ func TestInteractiveAuth_CachedCredsNoUserInput(t *testing.T) {
 
 func TestInteractiveAuth_LoginErrorBeforeURL(t *testing.T) {
 	bad := errors.New("boom")
-	pa, cleanup := newAgentForAuthTest(t, "scripted-err", func(_ oauth.LoginCallbacks) (*oauth.Credentials, error) {
+	pa, cleanup := newAgentForAuthTest(t, "scripted-err", func(_ pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 		return nil, bad
 	})
 	defer cleanup()
@@ -187,8 +190,8 @@ func TestInteractiveAuth_LoginErrorBeforeURL(t *testing.T) {
 
 func TestInteractiveAuth_Cancel(t *testing.T) {
 	releaseLogin := make(chan struct{})
-	pa, cleanup := newAgentForAuthTest(t, "scripted-cancel", func(cb oauth.LoginCallbacks) (*oauth.Credentials, error) {
-		cb.OnAuth(oauth.AuthInfo{URL: "https://example/auth"})
+	pa, cleanup := newAgentForAuthTest(t, "scripted-cancel", func(cb pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
+		cb.OnAuth(pinoauth.AuthInfo{URL: "https://example/auth"})
 		// Block in OnManualCodeInput until the test cancels us.
 		_, err := cb.OnManualCodeInput()
 		<-releaseLogin
@@ -230,8 +233,8 @@ func TestInteractiveAuth_Cancel(t *testing.T) {
 }
 
 func TestInteractiveAuth_RedirectWithoutPending(t *testing.T) {
-	pa, cleanup := newAgentForAuthTest(t, "scripted-orphan", func(_ oauth.LoginCallbacks) (*oauth.Credentials, error) {
-		return &oauth.Credentials{Access: "tok"}, nil
+	pa, cleanup := newAgentForAuthTest(t, "scripted-orphan", func(_ pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
+		return &ai.OAuthCredentials{Access: "tok"}, nil
 	})
 	defer cleanup()
 
@@ -257,7 +260,7 @@ func TestInteractiveAuth_LegacyPathUnchanged(t *testing.T) {
 	// it bypasses the "interactive input not supported" guard, but the
 	// legacy path runs the full Login synchronously.
 	called := make(chan struct{}, 1)
-	pa, cleanup := newAgentForAuthTest(t, "scripted-legacy", func(cb oauth.LoginCallbacks) (*oauth.Credentials, error) {
+	pa, cleanup := newAgentForAuthTest(t, "scripted-legacy", func(cb pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 		// Legacy callbacks: OnAuth tries to open a browser server-side
 		// (we don't actually open one here; just confirm the path is taken
 		// by observing that no OnManualCodeInput is ever wired).
@@ -265,7 +268,7 @@ func TestInteractiveAuth_LegacyPathUnchanged(t *testing.T) {
 			t.Error("legacy path should not wire OnManualCodeInput")
 		}
 		called <- struct{}{}
-		return &oauth.Credentials{Access: "tok"}, nil
+		return &ai.OAuthCredentials{Access: "tok"}, nil
 	})
 	defer cleanup()
 
@@ -298,9 +301,9 @@ func TestInteractiveAuth_ConcurrentSameMethod(t *testing.T) {
 		{paste: make(chan string), done: make(chan string, 1)},
 	}
 
-	pa, cleanup := newAgentForAuthTest(t, "scripted-concurrent", func(cb oauth.LoginCallbacks) (*oauth.Credentials, error) {
+	pa, cleanup := newAgentForAuthTest(t, "scripted-concurrent", func(cb pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
 		idx := int(calls.Add(1)) - 1
-		cb.OnAuth(oauth.AuthInfo{URL: "https://login/" + string(rune('A'+idx))})
+		cb.OnAuth(pinoauth.AuthInfo{URL: "https://login/" + string(rune('A'+idx))})
 		// Tie this Login goroutine's paste read to its dedicated channel.
 		// The OnManualCodeInput callback registered by startPendingAuth
 		// reads from the pending's internal paste channel — we don't have
@@ -312,7 +315,7 @@ func TestInteractiveAuth_ConcurrentSameMethod(t *testing.T) {
 			return nil, err
 		}
 		slots[idx].done <- v
-		return &oauth.Credentials{Access: "tok"}, nil
+		return &ai.OAuthCredentials{Access: "tok"}, nil
 	})
 	defer cleanup()
 

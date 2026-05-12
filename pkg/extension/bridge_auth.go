@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/pinoauth"
 )
 
 // extAuthProvider adapts an extension-provided auth provider to the
-// oauth.Provider interface. It sends JSON-RPC requests to the extension
+// ai.OAuthProvider interface. It sends JSON-RPC requests to the extension
 // process and handles bidirectional communication during login.
 type extAuthProvider struct {
 	spec   AuthProviderSpec
@@ -24,29 +24,30 @@ type extAuthProvider struct {
 	// callbackMu protects the active callback server state.
 	callbackMu  sync.Mutex
 	callbackSrv *http.Server
-	callbackCh  <-chan *oauth.CallbackResult
+	callbackCh  <-chan *pinoauth.CallbackResult
 }
 
 func (p *extAuthProvider) ID() string               { return p.spec.ID }
 func (p *extAuthProvider) Name() string             { return p.spec.Name }
 func (p *extAuthProvider) UsesCallbackServer() bool { return p.spec.UsesCallbackServer }
 
-func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credentials, error) {
-	// Store callbacks so the bridge can dispatch UI requests from the extension.
-	p.bridge.setAuthCallbacks(&callbacks)
-	defer p.bridge.setAuthCallbacks(nil)
+func (p *extAuthProvider) Login(ctx context.Context, callbacks pinoauth.LoginCallbacks) (*ai.OAuthCredentials, error) {
+	// Store callbacks + ctx so the bridge can dispatch UI requests and
+	// callback-server hooks from the extension.
+	p.bridge.setAuthCallbacks(ctx, &callbacks)
+	defer p.bridge.setAuthCallbacks(nil, nil)
 
 	params := map[string]any{
 		"provider_id": p.spec.ID,
 	}
 	// Use a long timeout for login (5 minutes) since it's interactive.
-	raw, err := p.bridge.CallHook(context.Background(), "auth/login", params, 5*time.Minute)
+	raw, err := p.bridge.CallHook(ctx, "auth/login", params, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("auth/login: %w", err)
 	}
 
 	var result struct {
-		Credentials *oauth.Credentials `json:"credentials"`
+		Credentials *ai.OAuthCredentials `json:"credentials"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("auth/login: invalid response: %w", err)
@@ -57,93 +58,29 @@ func (p *extAuthProvider) Login(callbacks oauth.LoginCallbacks) (*oauth.Credenti
 	return result.Credentials, nil
 }
 
-func (p *extAuthProvider) ListModels(ctx context.Context, creds *oauth.Credentials) ([]string, error) {
-	params := map[string]any{
-		"provider_id": p.spec.ID,
-		"credentials": creds,
-	}
-	raw, err := p.bridge.CallHook(ctx, "auth/list_models", params, 30*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("auth/list_models: %w", err)
-	}
-
-	if len(raw) == 0 {
-		// Extension returned empty response — treat as "not supported".
-		return nil, nil
-	}
-
-	var result struct {
-		Models []string `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("auth/list_models: invalid response: %w", err)
-	}
-	return result.Models, nil
+func (p *extAuthProvider) ListModels(ctx context.Context, creds *ai.OAuthCredentials) ([]string, error) {
+	return p.bridge.callExtListModels(ctx, p.spec.ID, creds)
 }
 
-func (p *extAuthProvider) RefreshToken(creds *oauth.Credentials) (*oauth.Credentials, error) {
-	params := map[string]any{
-		"provider_id": p.spec.ID,
-		"credentials": creds,
-	}
-	raw, err := p.bridge.CallHook(context.Background(), "auth/refresh", params, 30*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("auth/refresh: %w", err)
-	}
-
-	var result struct {
-		Credentials *oauth.Credentials `json:"credentials"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("auth/refresh: invalid response: %w", err)
-	}
-	if result.Credentials == nil {
-		return nil, fmt.Errorf("auth/refresh: no credentials returned")
-	}
-	return result.Credentials, nil
+func (p *extAuthProvider) RefreshToken(ctx context.Context, creds *ai.OAuthCredentials) (*ai.OAuthCredentials, error) {
+	return p.bridge.callExtRefresh(ctx, p.spec.ID, creds)
 }
 
-func (p *extAuthProvider) GetAPIKey(creds *oauth.Credentials) string {
-	params := map[string]any{
-		"provider_id": p.spec.ID,
-		"credentials": creds,
+func (p *extAuthProvider) GetAPIKey(creds *ai.OAuthCredentials) string {
+	if key, ok := p.bridge.callExtAPIKey(p.spec.ID, creds); ok {
+		return key
 	}
-	raw, err := p.bridge.CallHook(context.Background(), "auth/api_key", params, 10*time.Second)
-	if err != nil {
-		// Fallback: return access token directly.
-		return creds.Access
+	if creds == nil {
+		return ""
 	}
-
-	var result struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return creds.Access
-	}
-	return result.APIKey
+	return creds.Access
 }
 
-func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credentials) []*ai.Model {
-	params := map[string]any{
-		"provider_id": p.spec.ID,
-		"credentials": creds,
-		"models":      models,
-	}
-	raw, err := p.bridge.CallHook(context.Background(), "auth/modify_models", params, 10*time.Second)
-	if err != nil {
-		return nil
-	}
-
-	var result struct {
-		Models []*ai.Model `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil
-	}
-	return result.Models
+func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *ai.OAuthCredentials) []*ai.Model {
+	return p.bridge.callExtModifyModels(p.spec.ID, creds, models)
 }
 
-// ModelDefaults satisfies oauth.ModelDefaulter. Extensions can implement the
+// ModelDefaults satisfies ai.OAuthProvider. Extensions can implement the
 // "auth/model_defaults" JSON-RPC hook to provide metadata for live-listed
 // model IDs not in the built-in registry. Returning nil (or omitting the
 // hook) defers to the generic sibling-clone fallback.
@@ -153,26 +90,7 @@ func (p *extAuthProvider) ModifyModels(models []*ai.Model, creds *oauth.Credenti
 // info themselves). Keeps the RPC payload small even for providers with
 // hundreds of registered models.
 func (p *extAuthProvider) ModelDefaults(modelID string, siblings []*ai.Model) *ai.Model {
-	siblingIDs := make([]string, len(siblings))
-	for i, s := range siblings {
-		siblingIDs[i] = s.ID
-	}
-	params := map[string]any{
-		"provider_id": p.spec.ID,
-		"model_id":    modelID,
-		"sibling_ids": siblingIDs,
-	}
-	raw, err := p.bridge.CallHook(context.Background(), "auth/model_defaults", params, 5*time.Second)
-	if err != nil || len(raw) == 0 {
-		return nil
-	}
-	var result struct {
-		Model *ai.Model `json:"model"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil
-	}
-	return result.Model
+	return p.bridge.callExtModelDefaults(p.spec.ID, modelID, siblings)
 }
 
 // StartCallbackServer starts a local OAuth callback server for the extension.
@@ -184,7 +102,7 @@ func (p *extAuthProvider) StartCallbackServer(ctx context.Context, addr, path, s
 		return "", "", fmt.Errorf("callback server already running")
 	}
 
-	srv, ch, resolvedAddr, err := oauth.StartOAuthCallbackServer(ctx, path, addr, state)
+	srv, ch, resolvedAddr, err := pinoauth.StartCallbackServer(ctx, path, addr, state)
 	if err != nil {
 		return "", "", err
 	}
@@ -219,6 +137,14 @@ func (p *extAuthProvider) AwaitCallback(ctx context.Context) (string, string, er
 	}
 }
 
+// callbackChan returns the active callback channel, or nil if no callback
+// server is running.
+func (p *extAuthProvider) callbackChan() <-chan *pinoauth.CallbackResult {
+	p.callbackMu.Lock()
+	defer p.callbackMu.Unlock()
+	return p.callbackCh
+}
+
 // StopCallbackServer stops the callback server.
 func (p *extAuthProvider) StopCallbackServer() {
 	p.callbackMu.Lock()
@@ -231,17 +157,23 @@ func (p *extAuthProvider) StopCallbackServer() {
 }
 
 // RegisterAuthProviders registers all auth providers from the extension with
-// the global oauth registry.
+// the global oauth registry. Each spec is dispatched to either the
+// declarative genericAuthProvider (when spec.Flow is non-nil) or the
+// imperative extAuthProvider (when the extension drives the whole login
+// itself via JSON-RPC).
 func (b *Bridge) RegisterAuthProviders() {
 	b.authProvidersMu.Lock()
 	defer b.authProvidersMu.Unlock()
 	for _, spec := range b.caps.AuthProviders {
-		provider := &extAuthProvider{
-			spec:   spec,
-			bridge: b,
+		if spec.Flow != nil {
+			provider := &genericAuthProvider{spec: spec, bridge: b}
+			b.genericAuthProviders = append(b.genericAuthProviders, provider)
+			ai.RegisterOAuthProvider(provider)
+			continue
 		}
+		provider := &extAuthProvider{spec: spec, bridge: b}
 		b.authProviders = append(b.authProviders, provider)
-		oauth.RegisterProvider(provider)
+		ai.RegisterOAuthProvider(provider)
 	}
 }
 
@@ -254,9 +186,10 @@ func (b *Bridge) UnregisterAuthProviders() {
 		p.StopCallbackServer()
 	}
 	for _, spec := range b.caps.AuthProviders {
-		oauth.UnregisterProvider(spec.ID)
+		ai.UnregisterOAuthProvider(spec.ID)
 	}
 	b.authProviders = nil
+	b.genericAuthProviders = nil
 }
 
 // UnregisterAuthProvider removes a single auth provider by ID from this
@@ -264,7 +197,7 @@ func (b *Bridge) UnregisterAuthProviders() {
 func (b *Bridge) UnregisterAuthProvider(id string) {
 	b.authProvidersMu.Lock()
 	defer b.authProvidersMu.Unlock()
-	oauth.UnregisterProvider(id)
+	ai.UnregisterOAuthProvider(id)
 	kept := b.authProviders[:0]
 	for _, p := range b.authProviders {
 		if p.spec.ID == id {
@@ -274,6 +207,14 @@ func (b *Bridge) UnregisterAuthProvider(id string) {
 		kept = append(kept, p)
 	}
 	b.authProviders = kept
+	keptGeneric := b.genericAuthProviders[:0]
+	for _, p := range b.genericAuthProviders {
+		if p.spec.ID == id {
+			continue
+		}
+		keptGeneric = append(keptGeneric, p)
+	}
+	b.genericAuthProviders = keptGeneric
 }
 
 // ReregisterAuthProvider re-registers a specific auth provider owned by this
@@ -284,24 +225,41 @@ func (b *Bridge) ReregisterAuthProvider(id string) {
 	defer b.authProvidersMu.RUnlock()
 	for _, p := range b.authProviders {
 		if p.spec.ID == id {
-			oauth.RegisterProvider(p)
+			ai.RegisterOAuthProvider(p)
+			return
+		}
+	}
+	for _, p := range b.genericAuthProviders {
+		if p.spec.ID == id {
+			ai.RegisterOAuthProvider(p)
 			return
 		}
 	}
 }
 
-// setAuthCallbacks stores/clears the login callbacks for UI dispatch.
-func (b *Bridge) setAuthCallbacks(cb *oauth.LoginCallbacks) {
+// setAuthCallbacks stores/clears the login callbacks and ctx for UI dispatch.
+func (b *Bridge) setAuthCallbacks(ctx context.Context, cb *pinoauth.LoginCallbacks) {
 	b.authCallbacksMu.Lock()
 	defer b.authCallbacksMu.Unlock()
 	b.authCallbacks = cb
+	b.authCtx = ctx
 }
 
 // getAuthCallbacks returns the current login callbacks, or nil.
-func (b *Bridge) getAuthCallbacks() *oauth.LoginCallbacks {
+func (b *Bridge) getAuthCallbacks() *pinoauth.LoginCallbacks {
 	b.authCallbacksMu.RLock()
 	defer b.authCallbacksMu.RUnlock()
 	return b.authCallbacks
+}
+
+// getAuthCtx returns the active login ctx, or context.Background() if none.
+func (b *Bridge) getAuthCtx() context.Context {
+	b.authCallbacksMu.RLock()
+	defer b.authCallbacksMu.RUnlock()
+	if b.authCtx != nil {
+		return b.authCtx
+	}
+	return context.Background()
 }
 
 // handleAuthHelperRPC handles auth/* helper RPCs from the extension.
@@ -309,10 +267,7 @@ func (b *Bridge) getAuthCallbacks() *oauth.LoginCallbacks {
 func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (any, *Error, bool) {
 	switch method {
 	case "auth/generate_pkce":
-		pkce, err := oauth.GeneratePKCE()
-		if err != nil {
-			return nil, &Error{Code: -32000, Message: err.Error()}, true
-		}
+		pkce := pinoauth.GeneratePKCE()
 		return map[string]any{
 			"verifier":  pkce.Verifier,
 			"challenge": pkce.Challenge,
@@ -342,10 +297,7 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 			return nil, &Error{Code: -32000, Message: "no active auth login"}, true
 		}
 
-		ctx := context.Background()
-		if cb := b.getAuthCallbacks(); cb != nil && cb.Ctx != nil {
-			ctx = cb.Ctx
-		}
+		ctx := b.getAuthCtx()
 
 		addr, redirectURI, err := provider.StartCallbackServer(ctx, p.Addr, p.Path, p.State)
 		if err != nil {
@@ -362,49 +314,31 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 			return nil, &Error{Code: -32000, Message: "no active auth login"}, true
 		}
 
-		ctx := context.Background()
+		ch := provider.callbackChan()
+		if ch == nil {
+			return nil, &Error{Code: -32000, Message: "no callback server running"}, true
+		}
+
+		ctx := b.getAuthCtx()
 		cb := b.getAuthCallbacks()
-		if cb != nil && cb.Ctx != nil {
-			ctx = cb.Ctx
+
+		var manualInput func() (string, error)
+		var onDismiss func()
+		if cb != nil {
+			manualInput = cb.OnManualCodeInput
+			onDismiss = cb.OnDismissManualInput
 		}
 
 		// Race the callback server against a manual paste prompt.
 		// If the browser can't reach localhost the user can paste the
 		// redirect URL instead of waiting forever.
-		type result struct {
-			code, state string
-			err         error
-		}
-		resCh := make(chan result, 2)
-
-		go func() {
-			code, state, err := provider.AwaitCallback(ctx)
-			resCh <- result{code, state, err}
-		}()
-
-		if cb != nil && cb.OnManualCodeInput != nil {
-			go func() {
-				input, err := cb.OnManualCodeInput()
-				if err != nil {
-					resCh <- result{err: err}
-					return
-				}
-				code, state := oauth.ParseAuthorizationInput(input)
-				resCh <- result{code: code, state: state}
-			}()
-		}
-
-		r := <-resCh
-		// Dismiss the manual-input prompt if the callback won.
-		if cb != nil && cb.OnDismissManualInput != nil {
-			cb.OnDismissManualInput()
-		}
-		if r.err != nil {
-			return nil, &Error{Code: -32000, Message: r.err.Error()}, true
+		code, state, err := pinoauth.AwaitAuthCode(ctx, ch, manualInput, onDismiss)
+		if err != nil {
+			return nil, &Error{Code: -32000, Message: err.Error()}, true
 		}
 		return map[string]any{
-			"code":  r.code,
-			"state": r.state,
+			"code":  code,
+			"state": state,
 		}, nil, true
 
 	case "auth/stop_callback_server":
@@ -427,7 +361,7 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 		}
 		firlog.Debug("ext auth/open_url", "url", p.URL, "short_url", p.ShortURL)
 		if cb := b.getAuthCallbacks(); cb != nil && cb.OnAuth != nil {
-			cb.OnAuth(oauth.AuthInfo{URL: p.URL, ShortURL: p.ShortURL, Instructions: p.Instructions})
+			cb.OnAuth(pinoauth.AuthInfo{URL: p.URL, ShortURL: p.ShortURL, Instructions: p.Instructions})
 		}
 		return map[string]any{"ok": true}, nil, true
 
@@ -460,7 +394,7 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 		if cb == nil || cb.OnPrompt == nil {
 			return nil, &Error{Code: -32000, Message: "no prompt handler available"}, true
 		}
-		value, err := cb.OnPrompt(oauth.Prompt{
+		value, err := cb.OnPrompt(pinoauth.Prompt{
 			Message:     p.Message,
 			Placeholder: p.Placeholder,
 			AllowEmpty:  p.AllowEmpty,

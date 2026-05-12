@@ -656,5 +656,108 @@ class TestHost(unittest.TestCase):
         self.assertFalse(host.stderr_is_tty)
 
 
+class DeclareOauthProviderTests(unittest.TestCase):
+    """Regression tests for the declarative OAuth provider registration.
+
+    Exercises ``fir_ext.declare_oauth_provider`` + ``@auth_post_exchange``
+    + the ``_finalise_auth_specs`` step that auto-derives the
+    ``has_post_exchange`` / ``has_custom_refresh`` flags from which
+    decorators the extension actually used.
+    """
+
+    def setUp(self):
+        # The SDK's auth registries are module-level — clear them so each
+        # test starts from a clean slate and tests don't interact.
+        fir_ext._auth_providers.clear()
+        fir_ext._auth_post_exchange_handlers.clear()
+        fir_ext._auth_refresh_handlers.clear()
+
+    def tearDown(self):
+        fir_ext._auth_providers.clear()
+        fir_ext._auth_post_exchange_handlers.clear()
+        fir_ext._auth_refresh_handlers.clear()
+
+    def test_declare_minimal(self):
+        fir_ext.declare_oauth_provider(
+            provider_id="t1",
+            name="T1",
+            client_id="cid",
+            authorize_url="https://x/auth",
+            token_url="https://x/token",
+        )
+        fir_ext._finalise_auth_specs()
+        self.assertEqual(len(fir_ext._auth_providers), 1)
+        spec = fir_ext._auth_providers[0]
+        self.assertEqual(spec["id"], "t1")
+        self.assertEqual(spec["name"], "T1")
+        self.assertTrue(spec["uses_callback_server"])
+        flow = spec["flow"]
+        self.assertEqual(flow["client_id"], "cid")
+        self.assertEqual(flow["authorize_url"], "https://x/auth")
+        self.assertEqual(flow["token_url"], "https://x/token")
+        # Auto-derived: no decorators registered → both False.
+        self.assertFalse(flow["has_post_exchange"])
+        self.assertFalse(flow["has_custom_refresh"])
+        # The internal scaffolding fields should be cleaned up.
+        self.assertNotIn("_pending_provider_id", flow)
+        self.assertNotIn("_explicit_post_exchange", flow)
+        self.assertNotIn("_explicit_custom_refresh", flow)
+
+    def test_finalise_detects_post_exchange_handler(self):
+        fir_ext.declare_oauth_provider(
+            provider_id="t2",
+            name="T2",
+            client_id="c",
+            authorize_url="https://x/auth",
+            token_url="https://x/token",
+        )
+
+        @fir_ext.auth_post_exchange(provider="t2")
+        def _post_exchange(params, ctx):
+            return {"access": "a", "refresh": "r", "expires": 0}
+
+        fir_ext._finalise_auth_specs()
+        self.assertTrue(fir_ext._auth_providers[0]["flow"]["has_post_exchange"])
+        self.assertFalse(fir_ext._auth_providers[0]["flow"]["has_custom_refresh"])
+
+    def test_finalise_detects_refresh_handler(self):
+        fir_ext.declare_oauth_provider(
+            provider_id="t3",
+            name="T3",
+            client_id="c",
+            authorize_url="https://x/auth",
+            token_url="https://x/token",
+        )
+
+        @fir_ext.auth_refresh(provider="t3")
+        def _refresh(params, ctx):
+            return {"access": "a", "refresh": "r", "expires": 0}
+
+        fir_ext._finalise_auth_specs()
+        self.assertFalse(fir_ext._auth_providers[0]["flow"]["has_post_exchange"])
+        self.assertTrue(fir_ext._auth_providers[0]["flow"]["has_custom_refresh"])
+
+    def test_explicit_overrides(self):
+        # Caller passing has_post_exchange=False should win even when a
+        # decorator is registered (escape hatch for unusual setups).
+        fir_ext.declare_oauth_provider(
+            provider_id="t4",
+            name="T4",
+            client_id="c",
+            authorize_url="https://x/auth",
+            token_url="https://x/token",
+            has_post_exchange=False,
+            has_custom_refresh=True,
+        )
+
+        @fir_ext.auth_post_exchange(provider="t4")
+        def _pe(params, ctx):
+            return {"access": "a", "refresh": "r", "expires": 0}
+
+        fir_ext._finalise_auth_specs()
+        self.assertFalse(fir_ext._auth_providers[0]["flow"]["has_post_exchange"])
+        self.assertTrue(fir_ext._auth_providers[0]["flow"]["has_custom_refresh"])
+
+
 if __name__ == "__main__":
     unittest.main()

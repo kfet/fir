@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
@@ -20,6 +20,7 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/pinoauth"
 )
 
 // runLogin executes the interactive OAuth login flow for a given provider.
@@ -27,9 +28,9 @@ import (
 // It requires auth providers to be registered first (typically via extension
 // loading). Unknown providers print an available-provider list and fail.
 func runLogin(providerID string) error {
-	provider := oauth.GetProvider(providerID)
+	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
-		providers := oauth.GetProviders()
+		providers := ai.GetOAuthProviders()
 		fmt.Fprintf(os.Stderr, "Unknown OAuth provider: %s\n\nAvailable providers:\n", providerID)
 		for _, p := range providers {
 			fmt.Fprintf(os.Stderr, "  %s - %s\n", p.ID(), p.Name())
@@ -42,8 +43,8 @@ func runLogin(providerID string) error {
 
 	fmt.Fprintf(os.Stderr, "Logging in to %s...\n", provider.Name())
 
-	callbacks := oauth.LoginCallbacks{
-		OnAuth: func(info oauth.AuthInfo) {
+	callbacks := pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
 			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
 			browserOpened := session.OpenBrowser(openURL) == nil
 			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
@@ -56,7 +57,7 @@ func runLogin(providerID string) error {
 				fmt.Fprintf(os.Stderr, "%s\n", info.Instructions)
 			}
 		},
-		OnPrompt: func(prompt oauth.Prompt) (string, error) {
+		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
 			fmt.Fprintf(os.Stderr, "%s ", prompt.Message)
 			var input string
 			_, err := fmt.Scanln(&input)
@@ -77,7 +78,7 @@ func runLogin(providerID string) error {
 		},
 	}
 
-	err := authStorage.Login(providerID, callbacks)
+	err := authStorage.Login(context.Background(), providerID, callbacks)
 	if err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
@@ -175,7 +176,7 @@ func runLoginList(args *Args) error {
 	}
 	defer cleanup()
 
-	ps := oauth.GetProviders()
+	ps := ai.GetOAuthProviders()
 	if len(ps) == 0 {
 		fmt.Fprintln(os.Stderr, "No OAuth providers registered. Ensure auth extensions are installed and enabled.")
 		return nil

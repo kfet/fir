@@ -7,18 +7,16 @@
 # ---
 """anthropic-auth — OAuth provider for Anthropic (Claude Pro/Max).
 
-Implements the full OAuth authorization code flow with PKCE, token exchange,
-and refresh via the Anthropic platform API.
+Declarative provider: fir drives the standard authorization-code+PKCE flow
+using the static config below. The extension only carries Anthropic-specific
+bits — JSON-encoded token body, Claude-Code User-Agent, OAuth-mode header
+injection on outbound model requests, and the fir→Claude-Code tool-name map.
 """
 
 from __future__ import annotations
 
 import base64
-import json
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import fir_ext
 
@@ -27,188 +25,64 @@ import fir_ext
 # ---------------------------------------------------------------------------
 
 _CLIENT_ID = base64.b64decode("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl").decode()
-_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
-_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"  # noqa: S105
-# Local callback server — OS-assigned port (RFC 8252 §7.3).
-_CALLBACK_ADDR = "127.0.0.1:0"
-_CALLBACK_PATH = "/cb"
-# Static redirect URI for the manual-paste fallback flow (when the local
-# callback server can't be started). Registered with Anthropic.
-_MANUAL_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
-_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
-
-# Pre-created short link. tests/anthropic_auth_test.py catches drift.
-_SHORT_URL = "https://tinyurl.com/fir-ant"
-
-
-def _static_auth_params() -> dict:
-    """Static (non per-session) OAuth params, in stable order. Per-session
-    params (state, code_challenge, redirect_uri) are appended at click
-    time."""
-    return {
-        "code": "true",
-        "client_id": _CLIENT_ID,
-        "response_type": "code",
-        "scope": _SCOPES,
-        "code_challenge_method": "S256",
-    }
-
-
 _CLAUDE_CODE_VERSION = "2.1.112"
+_USER_AGENT = f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)"
 
 
 # ---------------------------------------------------------------------------
-# HTTP helpers
+# Provider declaration — fir drives the entire flow.
 # ---------------------------------------------------------------------------
 
-
-def _http_post_json(url: str, data: dict) -> dict:
-    """POST JSON data and return parsed JSON response."""
-    if not url.startswith(("http:", "https:")):
-        raise ValueError("url must start with http or https: " + url)
-    encoded = json.dumps(data).encode()
-    req = urllib.request.Request(  # noqa: S310
-        url,
-        data=encoded,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-        return json.loads(resp.read())
-
-
-# ---------------------------------------------------------------------------
-# Token helpers
-# ---------------------------------------------------------------------------
-
-
-def _exchange_token(body: dict) -> dict:
-    """Send a token request to the Anthropic OAuth endpoint and return credentials."""
-    token_data = _http_post_json(_TOKEN_URL, body)
-
-    access_token = token_data.get("access_token", "")
-    refresh_token = token_data.get("refresh_token", "")
-    expires_in = token_data.get("expires_in")
-
-    if not access_token or not refresh_token or expires_in is None:
-        raise RuntimeError("Token response missing required fields")
-
-    # Calculate expiry: current time + expires_in - 5 min buffer
-    expires_at = int(time.time() * 1000) + int(expires_in) * 1000 - 5 * 60 * 1000
-
-    return {
-        "access": access_token,
-        "refresh": refresh_token,
-        "expires": expires_at,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Auth provider handlers
-# ---------------------------------------------------------------------------
-
-
-@fir_ext.auth_provider(
+fir_ext.declare_oauth_provider(
     provider_id="anthropic",
     name="Anthropic (Claude Pro/Max)",
+    client_id=_CLIENT_ID,
+    authorize_url="https://claude.ai/oauth/authorize",
+    token_url="https://platform.claude.com/v1/oauth/token",  # noqa: S106
+    scope=(
+        "org:create_api_key user:profile user:inference user:sessions:claude_code "
+        "user:mcp_servers user:file_upload"
+    ),
+    callback_addr="127.0.0.1:0",
+    callback_path="/cb",
+    manual_redirect_uri="https://platform.claude.com/oauth/code/callback",
+    auth_params_extra={"code": "true"},
+    token_body_json=True,
+    token_headers={"User-Agent": _USER_AGENT},
+    open_url_instructions=(
+        "Complete login in your browser. If the browser is on another machine, "
+        "paste the final redirect URL here."
+    ),
+    short_url_base="https://tinyurl.com/fir-ant",
 )
-def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
-    """Run the Anthropic OAuth authorization code + PKCE flow."""
-    # 1. Generate PKCE
-    pkce = ctx.generate_pkce()
 
-    # 2. Start callback server
-    try:
-        server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
-        redirect_uri = server["redirect_uri"]
-    except Exception:
-        redirect_uri = _MANUAL_REDIRECT_URI
-        server = None
 
-    # 3. Build authorization URL (full) + short URL.
-    session_params = {
-        "redirect_uri": redirect_uri,
-        "code_challenge": pkce["challenge"],
-        "state": pkce["verifier"],
-    }
-    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
-    auth_url = f"{_AUTHORIZE_URL}?{auth_params}"
-    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
+# ---------------------------------------------------------------------------
+# Provider-specific hooks
+# ---------------------------------------------------------------------------
 
-    # 4. Open browser
-    ctx.open_url(
-        auth_url,
-        short_url,
-        "Complete login in your browser. If the browser is on another machine, paste the final redirect URL here.",
-    )
-    ctx.progress("Waiting for OAuth callback...")
 
-    # 5. Wait for callback
-    if server is not None:
-        try:
-            result = ctx.await_callback()
-        finally:
-            ctx.stop_callback_server()
+@fir_ext.auth_post_exchange(provider="anthropic")
+def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
+    """Apply Anthropic's 5-minute refresh-window safety buffer.
+
+    The token endpoint returns a normal access/refresh/expires_at triple;
+    we just shorten the effective expiry by 5 minutes so fir refreshes
+    early instead of mid-request.
+    """
+    tok = params.get("token", {})
+    expires_at = tok.get("expires_at")
+    if expires_at is not None:
+        # 5-minute safety buffer
+        expires_at = int(expires_at) - 5 * 60 * 1000
     else:
-        raw = ctx.prompt(
-            "Paste the authorization code or full redirect URL:",
-            placeholder=_MANUAL_REDIRECT_URI,
-        )
-        if raw.startswith("http"):
-            parsed = urllib.parse.urlparse(raw)
-            qs = urllib.parse.parse_qs(parsed.query)
-            result = {"code": qs.get("code", [""])[0], "state": qs.get("state", [""])[0]}
-        else:
-            result = {"code": raw, "state": pkce["verifier"]}
-
-    code = result.get("code", "")
-    state = result.get("state", "")
-    if not code:
-        raise RuntimeError("No authorization code received")
-    if not state:
-        state = pkce["verifier"]
-    if state != pkce["verifier"]:
-        raise RuntimeError("OAuth state mismatch")
-
-    # 6. Exchange code for tokens
-    ctx.progress("Exchanging authorization code for tokens...")
-    return _exchange_token(
-        {
-            "grant_type": "authorization_code",
-            "client_id": _CLIENT_ID,
-            "code": code,
-            "state": state,
-            "redirect_uri": redirect_uri,
-            "code_verifier": pkce["verifier"],
-        }
-    )
-
-
-@fir_ext.auth_refresh(provider="anthropic")
-def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
-    """Refresh an expired Anthropic OAuth token."""
-    creds = params.get("credentials", {})
-    refresh_token = creds.get("refresh", "")
-
-    if not refresh_token:
-        raise RuntimeError("No refresh token available")
-
-    return _exchange_token(
-        {
-            "grant_type": "refresh_token",
-            "client_id": _CLIENT_ID,
-            "refresh_token": refresh_token,
-        }
-    )
-
-
-@fir_ext.auth_api_key(provider="anthropic")
-def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
-    """Return the access token as the API key."""
-    creds = params.get("credentials", {})
-    return creds.get("access", "")
+        # No expiry returned — fall back to a short default.
+        expires_at = int(time.time() * 1000) + 60 * 60 * 1000
+    return {
+        "access": tok.get("access_token", ""),
+        "refresh": tok.get("refresh_token", ""),
+        "expires": expires_at,
+    }
 
 
 @fir_ext.auth_modify_models(provider="anthropic")
@@ -216,16 +90,16 @@ def modify_models(params: dict, ctx: fir_ext.AuthContext) -> list[dict] | None:
     """Set OAuth-specific headers on all anthropic models."""
     creds = params.get("credentials", {})
     models = params.get("models", [])
-    access_token = creds.get("access", "")
-
-    if not access_token:
+    if not creds.get("access"):
         return None
 
     oauth_headers = {
-        "user-agent": f"claude-cli/{_CLAUDE_CODE_VERSION} (external, cli)",
+        "user-agent": _USER_AGENT,
         "x-app": "cli",
         "x-anthropic-oauth-beta-prefix": "claude-code-20250219,oauth-2025-04-20",
-        "x-anthropic-oauth-system-prefix": "You are Claude Code, Anthropic's official CLI for Claude.",
+        "x-anthropic-oauth-system-prefix": (
+            "You are Claude Code, Anthropic's official CLI for Claude."
+        ),
     }
 
     result = []
@@ -236,12 +110,6 @@ def modify_models(params: dict, ctx: fir_ext.AuthContext) -> list[dict] | None:
             m["headers"] = {**existing, **oauth_headers}
         result.append(m)
     return result
-
-
-@fir_ext.auth_list_models(provider="anthropic")
-def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
-    """List available models — not supported (statically defined)."""
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +126,6 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
 # Bash, BashOutput, Edit, Glob, Grep, KillShell, Read, ScheduleWakeup,
 # Skill, ToolSearch, Write.
 # Every fir tool currently has an entry below — the map is complete.
-#
-# Collected once at init time and registered globally by fir's extension
-# manager; no per-turn cost.
 fir_ext.register_tool_name_map(
     {
         "read": "Read",

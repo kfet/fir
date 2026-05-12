@@ -3,13 +3,13 @@
 package interactive
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -17,6 +17,7 @@ import (
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/pinoauth"
 )
 
 // ============================================================================
@@ -336,7 +337,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 		selectItems := make([]tuicomp.SelectItem, len(loggedIn))
 		for i, id := range loggedIn {
 			name := id
-			if p := oauth.GetProvider(id); p != nil {
+			if p := ai.GetOAuthProvider(id); p != nil {
 				name = p.Name()
 			}
 			selectItems[i] = tuicomp.SelectItem{Label: name, Value: id, Description: "logged in"}
@@ -347,7 +348,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 			list.OnSelect = func(item tuicomp.SelectItem) {
 				done()
 				providerName := item.Value
-				if p := oauth.GetProvider(item.Value); p != nil {
+				if p := ai.GetOAuthProvider(item.Value); p != nil {
 					providerName = p.Name()
 				}
 				if err := authStorage.Logout(item.Value); err != nil {
@@ -364,7 +365,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 	}
 
 	// Login mode — show all available OAuth providers
-	oauthProviders := oauth.GetProviders()
+	oauthProviders := ai.GetOAuthProviders()
 	if len(oauthProviders) == 0 {
 		m.showWarning("No OAuth providers available")
 		return
@@ -392,7 +393,7 @@ func (m *InteractiveMode) showOAuthSelector(mode string) {
 
 func (m *InteractiveMode) performOAuthLogin(providerID string) {
 	providerName := providerID
-	if p := oauth.GetProvider(providerID); p != nil {
+	if p := ai.GetOAuthProvider(providerID); p != nil {
 		providerName = p.Name()
 	}
 
@@ -412,7 +413,7 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 	var manualInputMu sync.Mutex
 	var manualInputCancel func()
 
-	promptUser := func(prompt oauth.Prompt) (string, error) {
+	promptUser := func(prompt pinoauth.Prompt) (string, error) {
 		type promptResult struct {
 			value string
 			err   error
@@ -479,8 +480,8 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		return result.value, result.err
 	}
 
-	callbacks := oauth.LoginCallbacks{
-		OnAuth: func(info oauth.AuthInfo) {
+	callbacks := pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
 			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
 			// Try to auto-open the browser.
 			browserOpened := session.OpenBrowser(openURL) == nil
@@ -500,7 +501,7 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		},
 		OnPrompt: promptUser,
 		OnManualCodeInput: func() (string, error) {
-			return promptUser(oauth.Prompt{
+			return promptUser(pinoauth.Prompt{
 				Message: "Paste the redirect URL or authorization code from your browser:",
 			})
 		},
@@ -518,7 +519,7 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		},
 	}
 
-	err := authStorage.Login(providerID, callbacks)
+	err := authStorage.Login(context.Background(), providerID, callbacks)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg != "Login cancelled" {

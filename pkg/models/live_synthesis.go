@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -90,13 +89,11 @@ func (r *ModelRegistry) synthesise(provider, id string) *ai.Model {
 // runSynthesisPipeline resolves metadata for an unknown model ID using
 // provider-specific defaulters, falling back to a sibling-clone heuristic.
 func runSynthesisPipeline(provider, id string, siblings []*ai.Model) *ai.Model {
-	if oauthProv := oauth.GetProvider(provider); oauthProv != nil {
-		if d, ok := oauthProv.(oauth.ModelDefaulter); ok {
-			if m := d.ModelDefaults(id, siblings); m != nil {
-				m.Provider = provider
-				m.ID = id
-				return m
-			}
+	if oauthProv := ai.GetOAuthProvider(provider); oauthProv != nil {
+		if m := oauthProv.ModelDefaults(id, siblings); m != nil {
+			m.Provider = provider
+			m.ID = id
+			return m
 		}
 	}
 	if lister := GetModelLister(provider); lister != nil {

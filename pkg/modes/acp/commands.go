@@ -13,11 +13,11 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
+	"github.com/kfet/pinoauth"
 )
 
 // ============================================================================
@@ -401,8 +401,8 @@ func cmdLogin(ctx *commandContext, args string) {
 	loginCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	err := authStorage.Login(args, oauth.LoginCallbacks{
-		OnAuth: func(info oauth.AuthInfo) {
+	err := authStorage.Login(loginCtx, args, pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) {
 			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
 			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formatted)
 			if info.Instructions != "" {
@@ -413,11 +413,10 @@ func cmdLogin(ctx *commandContext, args string) {
 		OnProgress: func(message string) {
 			ctx.sendMessage(message)
 		},
-		OnPrompt: func(prompt oauth.Prompt) (string, error) {
+		OnPrompt: func(prompt pinoauth.Prompt) (string, error) {
 			ctx.sendMessage(prompt.Message + " (using default)")
 			return "", nil
 		},
-		Ctx: loginCtx,
 	})
 	if err != nil {
 		if loginCtx.Err() != nil {

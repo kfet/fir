@@ -3,7 +3,7 @@ package extension
 import (
 	"testing"
 
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 func TestValidateAuthProviderID(t *testing.T) {
@@ -48,8 +48,8 @@ func TestAuthProviderSpecInInitResult(t *testing.T) {
 
 func TestRegisterUnregisterAuthProviders(t *testing.T) {
 	// Clean state
-	oauth.ResetProviders()
-	defer oauth.ResetProviders()
+	ai.ResetOAuthProviders()
+	defer ai.ResetOAuthProviders()
 
 	caps := &InitResult{
 		Name: "test-ext",
@@ -60,14 +60,14 @@ func TestRegisterUnregisterAuthProviders(t *testing.T) {
 	bridge := NewBridge(nil, caps)
 
 	// Before registration
-	if p := oauth.GetProvider("test-provider"); p != nil {
+	if p := ai.GetOAuthProvider("test-provider"); p != nil {
 		t.Fatal("provider should not exist before registration")
 	}
 
 	bridge.RegisterAuthProviders()
 
 	// After registration
-	p := oauth.GetProvider("test-provider")
+	p := ai.GetOAuthProvider("test-provider")
 	if p == nil {
 		t.Fatal("provider should exist after registration")
 	}
@@ -84,7 +84,7 @@ func TestRegisterUnregisterAuthProviders(t *testing.T) {
 	bridge.UnregisterAuthProviders()
 
 	// After unregistration
-	if p := oauth.GetProvider("test-provider"); p != nil {
+	if p := ai.GetOAuthProvider("test-provider"); p != nil {
 		t.Fatal("provider should not exist after unregistration")
 	}
 }

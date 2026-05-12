@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/fir/pkg/ai"
 )
 
 // builtinToolCount is the number of tools registered by builtin extensions
@@ -852,7 +852,7 @@ func TestManager_AuthProviderConflict_ProjectWins(t *testing.T) {
 	pollToolCount(api, builtinToolCount, 5*time.Second)
 
 	// The project-scope extension should win the auth provider registration.
-	provider := oauth.GetProvider("test-auth")
+	provider := ai.GetOAuthProvider("test-auth")
 	if provider == nil {
 		t.Fatal("expected test-auth provider to be registered")
 	}
@@ -891,7 +891,7 @@ func TestManager_AuthProviderConflict_SameScopeTiebreak(t *testing.T) {
 
 	pollToolCount(api, builtinToolCount, 5*time.Second)
 
-	provider := oauth.GetProvider("tie-auth")
+	provider := ai.GetOAuthProvider("tie-auth")
 	if provider == nil {
 		t.Fatal("expected tie-auth provider to be registered")
 	}

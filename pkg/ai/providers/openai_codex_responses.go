@@ -14,7 +14,6 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/ai/oauth"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
@@ -24,6 +23,9 @@ const (
 	defaultCodexBaseURL = "https://chatgpt.com/backend-api"
 	codexMaxRetries     = 3
 	codexBaseDelayMS    = 1000
+
+	// codexJWTClaimPath is the JWT claim key for OpenAI auth data.
+	codexJWTClaimPath = "https://api.openai.com/auth"
 )
 
 // codexToolCallProviders is the set of providers whose tool call IDs need normalization.
@@ -49,7 +51,7 @@ func extractAccountID(token string) (string, error) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return "", fmt.Errorf("failed to extract accountId from token: %w", err)
 	}
-	authClaim, ok := claims[oauth.JWTClaimPath].(map[string]any)
+	authClaim, ok := claims[codexJWTClaimPath].(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("failed to extract accountId from token: no auth claim")
 	}

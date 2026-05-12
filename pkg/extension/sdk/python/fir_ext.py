@@ -1350,11 +1350,13 @@ __all__ = [
     "auth_api_key",
     "auth_list_models",
     "auth_modify_models",
+    "auth_post_exchange",
     "auth_provider",
     "auth_refresh",
     "cli_verb",
     "command",
     "config_path",
+    "declare_oauth_provider",
     "is_cancelled",
     "load_config",
     "on",
@@ -1396,6 +1398,7 @@ _auth_refresh_handlers: dict[str, Callable] = {}
 _auth_api_key_handlers: dict[str, Callable] = {}
 _auth_list_models_handlers: dict[str, Callable] = {}
 _auth_modify_models_handlers: dict[str, Callable] = {}
+_auth_post_exchange_handlers: dict[str, Callable] = {}
 
 # Hosted-provider registries — populated by register_provider() and the
 # provider_* decorators, consumed by run() to build the init payload and to
@@ -1699,6 +1702,185 @@ def auth_list_models(provider: str) -> Callable:
         return fn
 
     return decorator
+
+
+def declare_oauth_provider(
+    *,
+    provider_id: str,
+    name: str,
+    client_id: str,
+    authorize_url: str,
+    token_url: str,
+    scope: str = "",
+    client_secret: str = "",
+    callback_addr: str = "",
+    callback_path: str = "",
+    disable_callback_server: bool = False,
+    manual_redirect_uri: str = "",
+    auth_params_extra: dict[str, str] | None = None,
+    token_body_json: bool = False,
+    token_headers: dict[str, str] | None = None,
+    open_url_instructions: str = "",
+    short_url_base: str = "",
+    has_post_exchange: bool | None = None,
+    has_custom_refresh: bool | None = None,
+    uses_callback_server: bool = True,
+) -> None:
+    """Declare a standard authorization-code+PKCE OAuth provider.
+
+    fir drives the entire flow — PKCE generation, callback server, browser
+    open, code exchange, and token refresh — using the static config
+    supplied here. The extension only needs to register the optional
+    hooks it actually requires:
+
+    * :func:`auth_post_exchange` — enrich credentials after the token
+      endpoint returns (e.g. extract an account ID from a JWT).
+    * :func:`auth_api_key` — override the trivial "access token = api key"
+      default.
+    * :func:`auth_list_models` — provider-specific model discovery.
+    * :func:`auth_modify_models` — inject provider-specific HTTP headers
+      onto outbound model requests (User-Agent impersonation, etc.).
+    * :func:`auth_refresh` — replace the default standard refresh with a
+      custom flow.
+
+    Compared to the imperative :func:`auth_provider` (which receives a
+    bare ``ctx`` and orchestrates the whole flow itself), this avoids
+    one JSON-RPC round-trip per generic step (PKCE, callback, browser,
+    exchange, parse) and dramatically shrinks the extension surface.
+
+    Parameters
+    ----------
+    provider_id : str
+        Stable provider identifier (matches the ``auth_providers``
+        frontmatter value).
+    name : str
+        Human-readable display name.
+    client_id : str
+        OAuth client identifier (RFC 6749 §2.2).
+    authorize_url : str
+        Authorization endpoint URL (RFC 6749 §3.1).
+    token_url : str
+        Token endpoint URL (RFC 6749 §3.2).
+    scope : str, optional
+        Space-separated list of requested scopes.
+    client_secret : str, optional
+        OAuth client secret. Native apps (RFC 8252) typically omit this.
+    callback_addr : str, optional
+        ``host:port`` the local callback server binds to. Defaults to
+        ``"127.0.0.1:0"`` (auto-pick).
+    callback_path : str, optional
+        URL path of the callback endpoint. Defaults to ``"/callback"``.
+    manual_redirect_uri : str, optional
+        Redirect URI used when the local callback server cannot bind
+        and the user must paste the code by hand. Empty means no
+        manual fallback.
+    auth_params_extra : dict[str, str], optional
+        Extra query parameters appended to the authorization URL.
+    token_body_json : bool, optional
+        Encode the token-request body as JSON instead of
+        ``application/x-www-form-urlencoded``. Anthropic requires this.
+    token_headers : dict[str, str], optional
+        Extra HTTP headers on the token request (e.g. custom
+        User-Agent). Content-Type is owned by the body encoder.
+    open_url_instructions : str, optional
+        Human-readable text shown alongside the authorization URL.
+    short_url_base : str, optional
+        Base of a pre-created URL shortener (e.g.
+        ``"https://tinyurl.com/fir-ant"``) whose stored target is the
+        static portion of the authorize URL. fir appends the per-session
+        params (state, code_challenge, redirect_uri) at click time; the
+        shortener merges them with the stored target. Cuts worst-case
+        auth URLs from ~600+ chars to ~200 — friendlier in terminals/QR
+        codes. Empty to disable.
+    has_post_exchange, has_custom_refresh : bool, optional
+        Override the auto-detection of which hooks the extension
+        provides. Normally left as ``None`` — the SDK populates these
+        from whether the corresponding decorators were called.
+    uses_callback_server : bool, optional
+        Whether the provider's flow can complete without interactive
+        prompts (used by ACP mode to decide whether to surface the
+        provider). Defaults to True since the generic flow always
+        starts a callback server.
+    """
+    _auth_providers.append(
+        {
+            "id": provider_id,
+            "name": name,
+            "uses_callback_server": uses_callback_server,
+            "flow": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "authorize_url": authorize_url,
+                "token_url": token_url,
+                "scope": scope,
+                "callback_addr": callback_addr,
+                "callback_path": callback_path,
+                "disable_callback_server": disable_callback_server,
+                "manual_redirect_uri": manual_redirect_uri,
+                "auth_params_extra": dict(auth_params_extra) if auth_params_extra else {},
+                "token_body_json": token_body_json,
+                "token_headers": dict(token_headers) if token_headers else {},
+                "open_url_instructions": open_url_instructions,
+                "short_url_base": short_url_base,
+                # has_post_exchange / has_custom_refresh are filled in at
+                # init time from the decorator registries — see
+                # _finalise_auth_specs.
+                "_pending_provider_id": provider_id,
+                "_explicit_post_exchange": has_post_exchange,
+                "_explicit_custom_refresh": has_custom_refresh,
+            },
+        }
+    )
+
+
+def auth_post_exchange(provider: str) -> Callable:
+    """Register a post-exchange enrichment handler for a declarative auth
+    provider.
+
+    Called after the initial code exchange and after each *default*
+    refresh (the one fir runs via ``pinoauth.Refresh``). When the provider
+    spec sets ``has_custom_refresh=True`` the extension's ``auth/refresh``
+    hook owns the entire refresh including any post-exchange enrichment,
+    so this hook is **not** invoked on top of a custom refresh.
+
+    Receives ``params = {"provider_id": ..., "token": {access_token,
+    refresh_token, expires_at, token_type, scope, raw}, "previous_credentials":
+    {access, refresh, expires, extra}}`` (``previous_credentials`` is
+    populated only on refresh) and must return ``{"credentials": {"access":
+    ..., "refresh": ..., "expires": ..., "extra": ...}}`` (the expires field
+    is epoch milliseconds; matches fir's stored shape).
+
+    Use this when the provider's token response carries provider-specific
+    fields you need to extract — e.g. extracting ``chatgpt_account_id`` from
+    a JWT, capturing an embedded API key, or applying a refresh-window
+    safety buffer.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_post_exchange_handlers[provider] = fn
+        return fn
+
+    return decorator
+
+
+def _finalise_auth_specs() -> None:
+    """Fill in HasPostExchange / HasCustomRefresh on flow specs based on
+    which decorators the extension actually used. Called once during the
+    init handshake.
+    """
+    for spec in _auth_providers:
+        flow = spec.get("flow")
+        if not isinstance(flow, dict):
+            continue
+        pid = flow.pop("_pending_provider_id", spec.get("id", ""))
+        explicit_pe = flow.pop("_explicit_post_exchange", None)
+        explicit_cr = flow.pop("_explicit_custom_refresh", None)
+        flow["has_post_exchange"] = (
+            bool(explicit_pe) if explicit_pe is not None else pid in _auth_post_exchange_handlers
+        )
+        flow["has_custom_refresh"] = (
+            bool(explicit_cr) if explicit_cr is not None else pid in _auth_refresh_handlers
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2771,6 +2953,23 @@ def run(
                     result = {"models": result}
                 _write_message(_make_response(msg_id, result), out_stream)
 
+            elif method == "auth/post_exchange":
+                handler = _auth_post_exchange_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(
+                        _make_error(
+                            msg_id,
+                            -32601,
+                            f"No post_exchange handler for provider: {provider_id}",
+                        ),
+                        out_stream,
+                    )
+                    return
+                result = handler(params, auth_ctx)
+                if isinstance(result, dict) and "access" in result:
+                    result = {"credentials": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
             else:
                 _write_message(
                     _make_error(msg_id, -32601, f"Unknown auth method: {method}"), out_stream
@@ -2960,6 +3159,7 @@ def run(
                 "events": subscribed_events,
             }
             if _auth_providers:
+                _finalise_auth_specs()
                 init_result["auth_providers"] = list(_auth_providers)
             if _apis:
                 init_result["apis"] = list(_apis)

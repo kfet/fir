@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/ai/oauth"
+	"github.com/kfet/pinoauth"
 )
 
 // CredentialType identifies the kind of stored credential.
@@ -31,10 +33,21 @@ type AuthCredential struct {
 	Key string `json:"key,omitempty"`
 
 	// For oauth type
-	Access    string `json:"access,omitempty"`
-	Refresh   string `json:"refresh,omitempty"`
-	Expires   int64  `json:"expires,omitempty"`
-	ProjectID string `json:"projectId,omitempty"` // Google providers
+	Access  string `json:"access,omitempty"`
+	Refresh string `json:"refresh,omitempty"`
+	Expires int64  `json:"expires,omitempty"`
+	// ProjectID is a legacy back-compat column for Google OAuth
+	// providers that pre-date the generic Extra map. New providers
+	// should put provider-specific data in Extra. Reads still consult
+	// ProjectID and lift it into Extra["projectId"]; writes mirror
+	// Extra["projectId"] back into ProjectID so older fir builds
+	// reading newer auth.json files continue to find it.
+	ProjectID string `json:"projectId,omitempty"`
+	// Extra carries provider-specific OAuth credential data
+	// (chatgpt_account_id for codex, email for the Google providers,
+	// etc.) that survives across refreshes. The shape is
+	// provider-defined; persisted as-is into auth.json.
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 // AuthStorageData is the on-disk format: provider → credential.
@@ -396,7 +409,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 			return cred.Key
 		}
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
-			oauthProvider := oauth.GetProvider(provider)
+			oauthProvider := ai.GetOAuthProvider(provider)
 			if oauthProvider == nil {
 				// OAuth extension not loaded — token can't be refreshed and
 				// the provider won't know to send it as Bearer auth. Return
@@ -438,7 +451,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 }
 
 // refreshOAuthToken handles token refresh using the storage backend lock.
-func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Provider) string {
+func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthProvider) string {
 	type refreshResult struct {
 		apiKey      string
 		updatedData AuthStorageData
@@ -458,9 +471,12 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 			return refreshResult{apiKey: oauthProvider.GetAPIKey(oauthCreds), updatedData: currentData}, nil, nil
 		}
 
-		// Perform the refresh
+		// Perform the refresh.
+		// TODO(pinoauth-migration): RefreshToken now takes a context, but
+		// the synchronous GetApiKey path has no natural ctx to thread.
+		// Using Background until/unless GetApiKey grows a ctx parameter.
 		oauthCreds := AuthCredToOAuthCreds(&cred)
-		newCreds, err := oauthProvider.RefreshToken(oauthCreds)
+		newCreds, err := oauthProvider.RefreshToken(context.Background(), oauthCreds)
 		if err != nil {
 			return refreshResult{updatedData: currentData}, nil, fmt.Errorf("OAuth token refresh failed for %s: %w", provider, err)
 		}
@@ -508,26 +524,52 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider oauth.Pro
 	return ""
 }
 
-// AuthCredToOAuthCreds converts an AuthCredential to an oauth.Credentials.
-func AuthCredToOAuthCreds(cred *AuthCredential) *oauth.Credentials {
-	c := &oauth.Credentials{
+// AuthCredToOAuthCreds converts an AuthCredential to an ai.OAuthCredentials.
+// The provider-specific Extra map is round-tripped verbatim; the legacy
+// ProjectID column (preserved on disk for back-compat with older fir
+// builds) is lifted into Extra["projectId"] when the map doesn't
+// already carry one.
+func AuthCredToOAuthCreds(cred *AuthCredential) *ai.OAuthCredentials {
+	c := &ai.OAuthCredentials{
 		Access:  cred.Access,
 		Refresh: cred.Refresh,
 		Expires: cred.Expires,
 	}
+	if len(cred.Extra) > 0 {
+		c.Extra = make(map[string]any, len(cred.Extra))
+		for k, v := range cred.Extra {
+			c.Extra[k] = v
+		}
+	}
 	if cred.ProjectID != "" {
-		c.Extra = map[string]any{"projectId": cred.ProjectID}
+		if c.Extra == nil {
+			c.Extra = make(map[string]any, 1)
+		}
+		// Don't overwrite an Extra["projectId"] the caller has set
+		// — Extra wins over the legacy column.
+		if _, ok := c.Extra["projectId"]; !ok {
+			c.Extra["projectId"] = cred.ProjectID
+		}
 	}
 	return c
 }
 
-// OAuthCredsToAuthCred converts oauth.Credentials to an AuthCredential.
-func OAuthCredsToAuthCred(creds *oauth.Credentials) AuthCredential {
+// OAuthCredsToAuthCred converts ai.OAuthCredentials to an AuthCredential.
+// Extra is persisted verbatim. As a back-compat measure, Extra["projectId"]
+// is also mirrored into the dedicated ProjectID column so older fir
+// builds reading the auth.json file still find the project.
+func OAuthCredsToAuthCred(creds *ai.OAuthCredentials) AuthCredential {
 	ac := AuthCredential{
 		Type:    CredentialTypeOAuth,
 		Access:  creds.Access,
 		Refresh: creds.Refresh,
 		Expires: creds.Expires,
+	}
+	if len(creds.Extra) > 0 {
+		ac.Extra = make(map[string]any, len(creds.Extra))
+		for k, v := range creds.Extra {
+			ac.Extra[k] = v
+		}
 	}
 	if projectID, ok := creds.Extra["projectId"].(string); ok {
 		ac.ProjectID = projectID
@@ -547,13 +589,13 @@ func (s *AuthStorage) GetAll() AuthStorageData {
 }
 
 // Login performs OAuth login for the given provider and stores credentials.
-func (s *AuthStorage) Login(providerID string, callbacks oauth.LoginCallbacks) error {
-	provider := oauth.GetProvider(providerID)
+func (s *AuthStorage) Login(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks) error {
+	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
 		return fmt.Errorf("unknown OAuth provider: %s", providerID)
 	}
 
-	creds, err := provider.Login(callbacks)
+	creds, err := provider.Login(ctx, callbacks)
 	if err != nil {
 		return err
 	}
@@ -567,6 +609,6 @@ func (s *AuthStorage) Logout(provider string) error {
 }
 
 // GetOAuthProviders returns all registered OAuth providers.
-func (s *AuthStorage) GetOAuthProviders() []oauth.Provider {
-	return oauth.GetProviders()
+func (s *AuthStorage) GetOAuthProviders() []ai.OAuthProvider {
+	return ai.GetOAuthProviders()
 }
