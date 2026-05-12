@@ -43,10 +43,28 @@ _SCOPE = "apikey:create"
 # https://poe.com/api/clients. Override with FIR_POE_CLIENT_ID.
 _DEFAULT_CLIENT_ID = "client_9962de5dfb824c669587e4069666c5ee"
 
-# Default callback server — matches Poe's localhost-friendly handling.
-_CALLBACK_ADDR = "127.0.0.1:1456"
-_CALLBACK_PATH = "/auth/callback"
-_DEFAULT_REDIRECT_URI = "http://localhost:1456/auth/callback"
+# Local callback server — OS-assigned port (RFC 8252 §7.3, public clients
+# may use any loopback port). The redirect URI is constructed at runtime
+# from the actual bound port and travels as a per-session query param on
+# the short URL.
+_CALLBACK_ADDR = "127.0.0.1:0"
+_CALLBACK_PATH = "/cb"
+
+# Static OAuth parameters (everything except per-session state /
+# code_challenge / redirect_uri). The short link at _SHORT_URL is
+# pre-created to point at _AUTHORIZE_URL + these params, urlencoded in
+# this exact order. Drift between this dict and the short link is caught
+# by tests/poe_auth_test.py — if they fail, re-create the short URL.
+def _static_auth_params(client_id: str) -> dict:
+    return {
+        "client_id": client_id,
+        "response_type": "code",
+        "scope": _SCOPE,
+        "code_challenge_method": "S256",
+    }
+
+
+_SHORT_URL = "https://tinyurl.com/fir-poe"
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +138,7 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     # 2. Start callback server (unless the caller pinned a non-localhost URI).
     override = _redirect_uri_override()
     server = None
-    redirect_uri = override or _DEFAULT_REDIRECT_URI
+    redirect_uri = override
 
     if not override:
         try:
@@ -129,25 +147,25 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
             )
             redirect_uri = server["redirect_uri"]
         except Exception:
+            # OS-assigned port should almost never fail; fall back to manual
+            # paste flow with a generic placeholder if it does.
             server = None
-            redirect_uri = _DEFAULT_REDIRECT_URI
+            redirect_uri = "http://localhost/cb"
 
-    # 3. Authorization URL
-    auth_params = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": _SCOPE,
-            "code_challenge": pkce["challenge"],
-            "code_challenge_method": "S256",
-            "state": pkce["verifier"],
-        }
-    )
+    # 3. Authorization URL (full) + short URL (pre-shortened static prefix
+    # + click-time per-session params merged by the shortener).
+    static_params = _static_auth_params(client_id)
+    session_params = {
+        "redirect_uri": redirect_uri,
+        "code_challenge": pkce["challenge"],
+        "state": pkce["verifier"],
+    }
+    auth_params = urllib.parse.urlencode({**static_params, **session_params})
     auth_url = f"{_AUTHORIZE_URL}?{auth_params}"
+    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
 
     # 4. Open browser
-    ctx.open_url(auth_url, "Approve the connection in your browser to continue.")
+    ctx.open_url(auth_url, short_url, "Approve the connection in your browser to continue.")
     ctx.progress("Waiting for OAuth callback...")
 
     # 5. Wait for callback (or manual paste)

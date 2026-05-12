@@ -102,13 +102,16 @@ func parseAuthMeta(meta any) authMetaIn {
 }
 
 // authResponseMeta builds the `_meta.auth` payload for a response.
-func authResponseMeta(state, id, url, instructions string) map[string]any {
+func authResponseMeta(state, id, url, shortURL, instructions string) map[string]any {
 	a := map[string]any{"state": state}
 	if id != "" {
 		a["id"] = id
 	}
 	if url != "" {
 		a["url"] = url
+	}
+	if shortURL != "" {
+		a["short_url"] = shortURL
 	}
 	if instructions != "" {
 		a["instructions"] = instructions
@@ -122,7 +125,7 @@ func authResponseMeta(state, id, url, instructions string) map[string]any {
 func (pa *firAgent) authenticateOAuthInteractive(reqCtx context.Context, method *ExtendedAuthMethod, in authMetaIn) (acpsdk.AuthenticateResponse, error) {
 	if in.Cancel {
 		pa.cancelPendingAuth(in.ID)
-		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateCancelled, in.ID, "", "")}, nil
+		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateCancelled, in.ID, "", "", "")}, nil
 	}
 
 	// Call 2: a redirect was supplied → submit to the parked Login.
@@ -198,9 +201,9 @@ func (pa *firAgent) startPendingAuth(reqCtx context.Context, method *ExtendedAut
 	// was cancelled by the relay.
 	select {
 	case info := <-pending.authInfo:
-		firlog.Info("acp oauth interactive: auth url ready", "method", method.Id, "id", pending.id, "url", info.URL)
+		firlog.Info("acp oauth interactive: auth url ready", "method", method.Id, "id", pending.id, "url", info.URL, "short_url", info.ShortURL)
 		return acpsdk.AuthenticateResponse{
-			Meta: authResponseMeta(authStateNeedsRedirect, pending.id, info.URL, info.Instructions),
+			Meta: authResponseMeta(authStateNeedsRedirect, pending.id, info.URL, info.ShortURL, info.Instructions),
 		}, nil
 	case err := <-pending.done:
 		// Login finished without ever producing a URL.
@@ -210,7 +213,7 @@ func (pa *firAgent) startPendingAuth(reqCtx context.Context, method *ExtendedAut
 			return acpsdk.AuthenticateResponse{}, fmt.Errorf("oauth login failed for %s: %w", providerID, err)
 		}
 		pa.refreshAllModelRegistries()
-		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, pending.id, "", "")}, nil
+		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, pending.id, "", "", "")}, nil
 	case <-reqCtx.Done():
 		// Caller went away before we got a URL. Tear down — without a URL
 		// there's nothing meaningful to resume on a follow-up call.
@@ -241,7 +244,7 @@ func (pa *firAgent) completePendingAuth(reqCtx context.Context, id, redirect str
 			return acpsdk.AuthenticateResponse{}, err
 		}
 		pa.refreshAllModelRegistries()
-		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, id, "", "")}, nil
+		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, id, "", "", "")}, nil
 	case <-reqCtx.Done():
 		// Caller hung up before we could submit. Cancel the parked goroutine
 		// so it doesn't sit on the paste channel forever.
@@ -259,7 +262,7 @@ func (pa *firAgent) completePendingAuth(reqCtx context.Context, id, redirect str
 		}
 		pa.refreshAllModelRegistries()
 		firlog.Info("acp oauth interactive: login completed", "method", pending.methodID, "id", id)
-		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, id, "", "")}, nil
+		return acpsdk.AuthenticateResponse{Meta: authResponseMeta(authStateOK, id, "", "", "")}, nil
 	case <-reqCtx.Done():
 		// Submitted the paste but caller hung up before Login finished.
 		// Cancel the goroutine and unregister so the entry doesn't orphan

@@ -44,12 +44,13 @@ func runLogin(providerID string) error {
 
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
-			browserOpened := session.OpenBrowser(info.URL) == nil
-			formattedURL := session.FormatAuthURL(info.URL)
+			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
+			browserOpened := session.OpenBrowser(openURL) == nil
+			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
 			if browserOpened {
-				fmt.Fprintf(os.Stderr, "Opening browser… if it doesn't appear:\n%s\n", formattedURL)
+				fmt.Fprintf(os.Stderr, "Opening browser… if it doesn't appear:\n%s\n", formatted)
 			} else {
-				fmt.Fprintf(os.Stderr, "Open this URL to authenticate:\n%s\n", formattedURL)
+				fmt.Fprintf(os.Stderr, "Open this URL to authenticate:\n%s\n", formatted)
 			}
 			if info.Instructions != "" {
 				fmt.Fprintf(os.Stderr, "%s\n", info.Instructions)

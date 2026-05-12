@@ -29,12 +29,31 @@ import fir_ext
 _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
 _TOKEN_URL = "https://auth.openai.com/oauth/token"  # noqa: S105
-_CALLBACK_ADDR = "127.0.0.1:1455"
-_CALLBACK_PATH = "/auth/callback"
-_REDIRECT_URI = "http://localhost:1455/auth/callback"
+# Local callback server — OS-assigned port (RFC 8252 §7.3).
+_CALLBACK_ADDR = "127.0.0.1:0"
+_CALLBACK_PATH = "/cb"
 _SCOPE = "openid profile email offline_access"
 _JWT_CLAIM_PATH = "https://api.openai.com/auth"
 _MODELS_URL = "https://chatgpt.com/backend-api/models"
+
+# Pre-created short link. Points at _AUTHORIZE_URL + _static_auth_params()
+# urlencoded in this exact order; tests/codex_auth_test.py catches drift.
+_SHORT_URL = "https://tinyurl.com/fir-cdx"
+
+
+def _static_auth_params() -> dict:
+    """Static (non per-session) OAuth params. The short link is pre-created
+    to point at _AUTHORIZE_URL + urlencode(this dict). Per-session params
+    (state, code_challenge, redirect_uri) are appended at click time."""
+    return {
+        "response_type": "code",
+        "client_id": _CLIENT_ID,
+        "scope": _SCOPE,
+        "code_challenge_method": "S256",
+        "id_token_add_organizations": "true",
+        "codex_cli_simplified_flow": "true",
+        "originator": "fir",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -102,29 +121,23 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     try:
         server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
         redirect_uri = server["redirect_uri"]
-    except Exception:
-        redirect_uri = _REDIRECT_URI
-        server = None
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not start local OAuth callback server: {e}"
+        ) from e
 
-    # 3. Build authorization URL
-    auth_params = urllib.parse.urlencode(
-        {
-            "response_type": "code",
-            "client_id": _CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "scope": _SCOPE,
-            "code_challenge": pkce["challenge"],
-            "code_challenge_method": "S256",
-            "state": pkce["verifier"],
-            "id_token_add_organizations": "true",
-            "codex_cli_simplified_flow": "true",
-            "originator": "fir",
-        }
-    )
+    # 3. Build authorization URL (full) + short URL.
+    session_params = {
+        "redirect_uri": redirect_uri,
+        "code_challenge": pkce["challenge"],
+        "state": pkce["verifier"],
+    }
+    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
     auth_url = f"{_AUTHORIZE_URL}?{auth_params}"
+    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
 
     # 4. Open browser
-    ctx.open_url(auth_url, "Complete the sign-in in your browser.")
+    ctx.open_url(auth_url, short_url, "Complete the sign-in in your browser.")
     ctx.progress("Waiting for OAuth callback...")
 
     # 5. Wait for callback
@@ -136,7 +149,7 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     else:
         raw = ctx.prompt(
             "Paste the authorization code or full redirect URL:",
-            placeholder=_REDIRECT_URI,
+            placeholder=redirect_uri,
         )
         if raw.startswith("http"):
             parsed = urllib.parse.urlparse(raw)

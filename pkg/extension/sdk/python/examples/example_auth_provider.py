@@ -47,7 +47,7 @@ def login(params, ctx):
     )
 
     # 4. Ask fir to open the URL in the user's browser
-    ctx.open_url(auth_url, "Complete login in your browser.")
+    ctx.open_url(auth_url, "", "Complete login in your browser.")
 
     # 5. Wait for the OAuth callback
     result = ctx.await_callback()

@@ -256,8 +256,9 @@ func (pa *firAgent) authenticateOAuth(ctx context.Context, method *ExtendedAuthM
 	err := authStorage.Login(providerID, oauth.LoginCallbacks{
 		Ctx: ctx,
 		OnAuth: func(info oauth.AuthInfo) {
-			firlog.Info("acp oauth: opening browser", "url", info.URL)
-			if err := session.OpenBrowser(info.URL); err != nil {
+			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
+			firlog.Info("acp oauth: opening browser", "url", openURL, "short_url", info.ShortURL)
+			if err := session.OpenBrowser(openURL); err != nil {
 				firlog.Info("acp oauth: failed to open browser", "error", err)
 			}
 		},

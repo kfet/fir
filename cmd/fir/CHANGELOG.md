@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- OAuth extensions can now hand fir a pre-shortened auth URL alongside the full one. `auth/open_url` (and the Python SDK `ctx.open_url`) gained an optional `short_url` parameter; `oauth.AuthInfo` gained a matching `ShortURL` field. Modes show the short URL prominently with the full URL on a fallback line (`session.FormatAuthURLs`) and open the short one in the browser (`session.PreferredAuthURL`). All five OAuth provider extensions (gemini-cli, antigravity, codex, anthropic, poe) now pre-shorten their authorize URL via `https://tinyurl.com/fir-{gem,agr,cdx,ant,poe}` — pre-created links whose stored target is the static (non per-session) portion of the URL; per-session params (`state`, `code_challenge`, `redirect_uri`) are appended client-side and merged by the shortener. Cuts the worst-case auth URL from 624 → ~200 chars. Drift between each provider's static URL and its short-link target is caught by per-provider unit tests in `pkg/resources/testdata/*_auth_test.py`. Note: TinyURL routes Google destinations through an affiliate redirect (`redirect.viglink.com`) — functional end-to-end, an extra hop for gemini/antigravity only.
+
+### Changed
+
+- OAuth extensions now bind their local callback server on an OS-assigned port (`127.0.0.1:0`, RFC 8252 §7.3) with a unified `/cb` callback path, instead of each provider hardcoding a fixed port (8085 / 51121 / 1455 / 1456 / 53692) and a provider-specific path. The fixed-port fallback paths in gemini-cli, antigravity, and codex (which were dead code — they pointed at a port no listener was on) are removed; on callback-server start failure these three now raise a clear error instead of silently using a broken redirect URI. Anthropic's manual-paste fallback to `https://platform.claude.com/oauth/code/callback` and poe's manual-paste fallback are preserved. `_REDIRECT_URI` constants removed where dead. Affected files: `pkg/resources/builtin_extensions/{gemini_cli,antigravity,codex,poe,anthropic}_auth.py`.
+
 ## [0.44.0] - 2026-05-10
 
 ### Removed

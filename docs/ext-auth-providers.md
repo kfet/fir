@@ -247,10 +247,16 @@ Ask fir to open a URL in the user's browser and/or display it.
   "method": "auth/open_url",
   "params": {
     "url": "https://my-corp.com/oauth/authorize?...",
+    "short_url": "https://tinyurl.com/example?state=...",
     "instructions": "Complete login in your browser."
   }
 }
 ```
+
+`short_url` is optional — a pre-shortened form of `url` (e.g. via a public
+URL shortener that forwards click-time query params). When present, fir
+typically shows it prominently with `url` as a fallback line, and opens
+`short_url` in the browser. Omit or pass `""` when no short form exists.
 
 #### `auth/progress` (notification)
 
@@ -431,8 +437,11 @@ class AuthContext:
 
     def stop_callback_server(self) -> None: ...
 
-    def open_url(self, url: str, instructions: str = "") -> None:
-        """Ask fir to open a URL / show it to the user."""
+    def open_url(self, url: str, short_url: str = "", instructions: str = "") -> None:
+        """Ask fir to open a URL / show it to the user.
+
+        short_url is an optional pre-shortened form of url; fir shows it
+        prominently with url as a fallback line."""
 
     def progress(self, message: str) -> None:
         """Show a progress message in the UI."""
@@ -469,7 +478,7 @@ def login(params, ctx):
         "state": pkce["verifier"],
     })
 
-    ctx.open_url(auth_url, "Complete login in your browser.")
+    ctx.open_url(auth_url, "", "Complete login in your browser.")
     result = ctx.await_callback()
     ctx.stop_callback_server()
 

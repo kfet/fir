@@ -31,8 +31,15 @@ type Prompt struct {
 }
 
 // AuthInfo describes a URL the user should visit for authorization.
+//
+// URL is the full authorize URL (always present). ShortURL is an optional
+// pre-shortened form produced by the extension (e.g. via a public URL
+// shortener that forwards click-time query params). Modes choose how to
+// present them: typically the short URL is shown prominently and the full
+// URL is shown as a fallback. Empty ShortURL means no short form exists.
 type AuthInfo struct {
 	URL          string
+	ShortURL     string
 	Instructions string
 }
 

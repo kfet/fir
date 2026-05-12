@@ -125,5 +125,43 @@ class TestApiKey(unittest.TestCase):
         self.assertEqual(out["projectId"], "proj_x")
 
 
+# The exact static URL that the pre-created short link
+# https://tinyurl.com/fir-gem currently points to. If you intentionally
+# change anything below, recreate the short link to point at the new URL
+# and update this constant.
+_FROZEN_STATIC_URL = (
+    "https://accounts.google.com/o/oauth2/v2/auth"
+    "?client_id=681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+    "&response_type=code"
+    "&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform"
+    "+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email"
+    "+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile"
+    "&code_challenge_method=S256"
+    "&access_type=offline"
+    "&prompt=consent"
+)
+
+
+class TestStaticURLDrift(unittest.TestCase):
+    """Drift detection between the static OAuth URL and the pre-created
+    short link target. See module docstring for repair steps."""
+
+    def test_short_url_constant(self):
+        import urllib.parse  # noqa: F401  (ensure available at module import)
+        self.assertEqual(_mod._SHORT_URL, "https://tinyurl.com/fir-gem")
+
+    def test_static_oauth_url_matches_short_link_target(self):
+        import urllib.parse
+        current = _mod._AUTH_URL + "?" + urllib.parse.urlencode(_mod._static_auth_params())
+        self.assertEqual(
+            current,
+            _FROZEN_STATIC_URL,
+            "\n\nStatic OAuth URL has drifted from the pre-created short link target.\n"
+            f"Re-create {_mod._SHORT_URL} to point at the new URL below, then\n"
+            "update _FROZEN_STATIC_URL in this test file:\n\n"
+            f"  {current}\n",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,3 +43,22 @@ func FormatAuthURL(url string) string {
 	}
 	return "Copy this URL and open in browser:\n" + url
 }
+
+// FormatAuthURLs formats an auth URL pair for terminal display: the short
+// URL prominently, with the full URL on a separate line as a fallback.
+// If shortURL is empty, falls back to FormatAuthURL for the full URL.
+func FormatAuthURLs(fullURL, shortURL string) string {
+	if shortURL == "" {
+		return FormatAuthURL(fullURL)
+	}
+	return shortURL + "\n(if that doesn't work, use the full URL: " + fullURL + ")"
+}
+
+// PreferredAuthURL returns the URL most appropriate to open in the user's
+// browser: the short one if available, otherwise the full one.
+func PreferredAuthURL(fullURL, shortURL string) string {
+	if shortURL != "" {
+		return shortURL
+	}
+	return fullURL
+}

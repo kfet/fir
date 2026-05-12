@@ -403,8 +403,8 @@ func cmdLogin(ctx *commandContext, args string) {
 
 	err := authStorage.Login(args, oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
-			formattedURL := session.FormatAuthURL(info.URL)
-			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formattedURL)
+			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
+			msg := fmt.Sprintf("Open this URL to authenticate:\n%s", formatted)
 			if info.Instructions != "" {
 				msg += "\n\n" + info.Instructions
 			}

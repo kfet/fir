@@ -1203,6 +1203,7 @@ class CallbackResult(TypedDict, total=False):
 
 class AuthOpenURLParams(TypedDict, total=False):
     url: str
+    short_url: str
     instructions: str
 
 
@@ -2450,9 +2451,18 @@ class AuthContext(Context):
         """Stop the local callback server."""
         self._call("auth/stop_callback_server", {}, timeout=timeout)
 
-    def open_url(self, url: str, instructions: str = "") -> None:
-        """Ask fir to open a URL in the user's browser and/or display it."""
-        self._call("auth/open_url", {"url": url, "instructions": instructions})
+    def open_url(self, url: str, short_url: str = "", instructions: str = "") -> None:
+        """Ask fir to open a URL in the user's browser and/or display it.
+
+        ``short_url`` is an optional pre-shortened form of ``url`` (e.g. via a
+        public URL shortener that forwards click-time query params). Modes
+        typically present it prominently with ``url`` as a fallback. Pass an
+        empty string when no short form is available.
+        """
+        self._call(
+            "auth/open_url",
+            {"url": url, "short_url": short_url, "instructions": instructions},
+        )
 
     def progress(self, message: str) -> None:
         """Show a progress/status message in fir's UI."""

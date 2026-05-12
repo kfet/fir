@@ -481,16 +481,17 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 
 	callbacks := oauth.LoginCallbacks{
 		OnAuth: func(info oauth.AuthInfo) {
+			openURL := session.PreferredAuthURL(info.URL, info.ShortURL)
 			// Try to auto-open the browser.
-			browserOpened := session.OpenBrowser(info.URL) == nil
+			browserOpened := session.OpenBrowser(openURL) == nil
 
 			// Format the URL for terminal display (handles long URLs gracefully)
-			formattedURL := session.FormatAuthURL(info.URL)
+			formatted := session.FormatAuthURLs(info.URL, info.ShortURL)
 			var msg string
 			if browserOpened {
-				msg = fmt.Sprintf("Opening browser… if it doesn't appear:\n%s", formattedURL)
+				msg = fmt.Sprintf("Opening browser… if it doesn't appear:\n%s", formatted)
 			} else {
-				msg = fmt.Sprintf("Open this URL to authenticate:\n%s", formattedURL)
+				msg = fmt.Sprintf("Open this URL to authenticate:\n%s", formatted)
 			}
 			if info.Instructions != "" {
 				msg += "\n" + info.Instructions

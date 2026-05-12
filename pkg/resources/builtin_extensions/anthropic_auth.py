@@ -29,10 +29,29 @@ import fir_ext
 _CLIENT_ID = base64.b64decode("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl").decode()
 _AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
 _TOKEN_URL = "https://platform.claude.com/v1/oauth/token"  # noqa: S105
-_CALLBACK_ADDR = "127.0.0.1:53692"
-_CALLBACK_PATH = "/callback"
+# Local callback server — OS-assigned port (RFC 8252 §7.3).
+_CALLBACK_ADDR = "127.0.0.1:0"
+_CALLBACK_PATH = "/cb"
+# Static redirect URI for the manual-paste fallback flow (when the local
+# callback server can't be started). Registered with Anthropic.
 _MANUAL_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 _SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+
+# Pre-created short link. tests/anthropic_auth_test.py catches drift.
+_SHORT_URL = "https://tinyurl.com/fir-ant"
+
+
+def _static_auth_params() -> dict:
+    """Static (non per-session) OAuth params, in stable order. Per-session
+    params (state, code_challenge, redirect_uri) are appended at click
+    time."""
+    return {
+        "code": "true",
+        "client_id": _CLIENT_ID,
+        "response_type": "code",
+        "scope": _SCOPES,
+        "code_challenge_method": "S256",
+    }
 
 
 _CLAUDE_CODE_VERSION = "2.1.112"
@@ -108,24 +127,20 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
         redirect_uri = _MANUAL_REDIRECT_URI
         server = None
 
-    # 3. Build authorization URL
-    auth_params = urllib.parse.urlencode(
-        {
-            "code": "true",
-            "client_id": _CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": redirect_uri,
-            "scope": _SCOPES,
-            "code_challenge": pkce["challenge"],
-            "code_challenge_method": "S256",
-            "state": pkce["verifier"],
-        }
-    )
+    # 3. Build authorization URL (full) + short URL.
+    session_params = {
+        "redirect_uri": redirect_uri,
+        "code_challenge": pkce["challenge"],
+        "state": pkce["verifier"],
+    }
+    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
     auth_url = f"{_AUTHORIZE_URL}?{auth_params}"
+    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
 
     # 4. Open browser
     ctx.open_url(
         auth_url,
+        short_url,
         "Complete login in your browser. If the browser is on another machine, paste the final redirect URL here.",
     )
     ctx.progress("Waiting for OAuth callback...")

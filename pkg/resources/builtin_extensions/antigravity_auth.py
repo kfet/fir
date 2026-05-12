@@ -34,9 +34,9 @@ _CLIENT_SECRET = base64.b64decode("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQ
 
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
-_CALLBACK_ADDR = "127.0.0.1:51121"
-_CALLBACK_PATH = "/oauth-callback"
-_REDIRECT_URI = "http://localhost:51121/oauth-callback"
+# Local callback server — OS-assigned port (RFC 8252 §7.3).
+_CALLBACK_ADDR = "127.0.0.1:0"
+_CALLBACK_PATH = "/cb"
 _DEFAULT_PROJECT_ID = "rising-fact-p41fc"
 
 _SCOPES = [
@@ -46,6 +46,23 @@ _SCOPES = [
     "https://www.googleapis.com/auth/cclog",
     "https://www.googleapis.com/auth/experimentsandconfigs",
 ]
+
+# Pre-created short link. tests/antigravity_auth_test.py catches drift.
+# NOTE: TinyURL routes google.com destinations through redirect.viglink.com.
+# Functional but adds one hop. See gemini_cli_auth.py for details.
+_SHORT_URL = "https://tinyurl.com/fir-agr"
+
+
+def _static_auth_params() -> dict:
+    """Static (non per-session) OAuth params, in stable order."""
+    return {
+        "client_id": _CLIENT_ID,
+        "response_type": "code",
+        "scope": " ".join(_SCOPES),
+        "code_challenge_method": "S256",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
 
 # NOTE: The User-Agent and X-Goog-Api-Client headers intentionally impersonate
 # Google's Node.js client and VS Code Cloud Shell Editor. These values are ported
@@ -184,28 +201,23 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     try:
         server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
         redirect_uri = server["redirect_uri"]
-    except Exception:
-        redirect_uri = _REDIRECT_URI
-        server = None
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not start local OAuth callback server: {e}"
+        ) from e
 
-    # 3. Build authorization URL
-    auth_params = urllib.parse.urlencode(
-        {
-            "client_id": _CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": redirect_uri,
-            "scope": " ".join(_SCOPES),
-            "code_challenge": pkce["challenge"],
-            "code_challenge_method": "S256",
-            "state": pkce["verifier"],
-            "access_type": "offline",
-            "prompt": "consent",
-        }
-    )
+    # 3. Build authorization URL (full) + short URL.
+    session_params = {
+        "redirect_uri": redirect_uri,
+        "code_challenge": pkce["challenge"],
+        "state": pkce["verifier"],
+    }
+    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
     auth_url = f"{_AUTH_URL}?{auth_params}"
+    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
 
     # 4. Open browser
-    ctx.open_url(auth_url, "Complete the sign-in in your browser.")
+    ctx.open_url(auth_url, short_url, "Complete the sign-in in your browser.")
     ctx.progress("Waiting for OAuth callback...")
 
     # 5. Wait for callback
@@ -217,7 +229,7 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     else:
         raw = ctx.prompt(
             "Paste the authorization code or full redirect URL:",
-            placeholder=_REDIRECT_URI,
+            placeholder=redirect_uri,
         )
         if raw.startswith("http"):
             parsed = urllib.parse.urlparse(raw)

@@ -36,15 +36,36 @@ _CLIENT_SECRET = base64.b64decode("R09DU1BYLTR1SGdNUG0tMW83U2stZ2VWNkN1NWNsWEZze
 _AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
 _CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com"
-_CALLBACK_ADDR = "127.0.0.1:8085"
-_CALLBACK_PATH = "/oauth2callback"
-_REDIRECT_URI = "http://localhost:8085/oauth2callback"
+# Local callback server — OS-assigned port (RFC 8252 §7.3, Google accepts
+# any loopback port for installed-app clients).
+_CALLBACK_ADDR = "127.0.0.1:0"
+_CALLBACK_PATH = "/cb"
 
 _SCOPES = [
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
 ]
+
+# Pre-created short link. tests/gemini_cli_auth_test.py catches drift.
+# NOTE: TinyURL routes redirects to google.com domains through their
+# affiliate wrapper (redirect.viglink.com → final). Functional end-to-end
+# (verified to merge our click-time params with `&` and forward to
+# accounts.google.com correctly), but adds one extra hop. Only affects
+# the two Google providers (this one + antigravity).
+_SHORT_URL = "https://tinyurl.com/fir-gem"
+
+
+def _static_auth_params() -> dict:
+    """Static (non per-session) OAuth params, in stable order."""
+    return {
+        "client_id": _CLIENT_ID,
+        "response_type": "code",
+        "scope": " ".join(_SCOPES),
+        "code_challenge_method": "S256",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
 
 _TIER_FREE = "free-tier"
 _TIER_LEGACY = "legacy-tier"
@@ -284,29 +305,23 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
     try:
         server = ctx.start_callback_server(addr=_CALLBACK_ADDR, path=_CALLBACK_PATH, state=pkce["verifier"])
         redirect_uri = server["redirect_uri"]
-    except Exception:
-        # Port unavailable — use the fixed redirect URI
-        redirect_uri = _REDIRECT_URI
-        server = None
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not start local OAuth callback server: {e}"
+        ) from e
 
-    # 3. Build authorization URL
-    auth_params = urllib.parse.urlencode(
-        {
-            "client_id": _CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": redirect_uri,
-            "scope": " ".join(_SCOPES),
-            "code_challenge": pkce["challenge"],
-            "code_challenge_method": "S256",
-            "state": pkce["verifier"],
-            "access_type": "offline",
-            "prompt": "consent",
-        }
-    )
+    # 3. Build authorization URL (full) + short URL.
+    session_params = {
+        "redirect_uri": redirect_uri,
+        "code_challenge": pkce["challenge"],
+        "state": pkce["verifier"],
+    }
+    auth_params = urllib.parse.urlencode({**_static_auth_params(), **session_params})
     auth_url = f"{_AUTH_URL}?{auth_params}"
+    short_url = f"{_SHORT_URL}?{urllib.parse.urlencode(session_params)}"
 
     # 4. Open browser
-    ctx.open_url(auth_url, "Complete the sign-in in your browser.")
+    ctx.open_url(auth_url, short_url, "Complete the sign-in in your browser.")
     ctx.progress("Waiting for OAuth callback...")
 
     # 5. Wait for callback
@@ -319,7 +334,7 @@ def login(params: dict, ctx: fir_ext.AuthContext) -> dict:
         # Fallback: ask user to paste the code
         raw = ctx.prompt(
             "Paste the authorization code or full redirect URL:",
-            placeholder=_REDIRECT_URI,
+            placeholder=redirect_uri,
         )
         # Parse code and state from URL or raw code
         if raw.startswith("http"):

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/oauth"
+	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // extAuthProvider adapts an extension-provided auth provider to the
@@ -416,6 +417,7 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 	case "auth/open_url":
 		var p struct {
 			URL          string `json:"url"`
+			ShortURL     string `json:"short_url"`
 			Instructions string `json:"instructions"`
 		}
 		if params != nil {
@@ -423,8 +425,9 @@ func (b *Bridge) handleAuthHelperRPC(method string, params *json.RawMessage) (an
 				return nil, &Error{Code: -32602, Message: "invalid params: " + err.Error()}, true
 			}
 		}
+		firlog.Debug("ext auth/open_url", "url", p.URL, "short_url", p.ShortURL)
 		if cb := b.getAuthCallbacks(); cb != nil && cb.OnAuth != nil {
-			cb.OnAuth(oauth.AuthInfo{URL: p.URL, Instructions: p.Instructions})
+			cb.OnAuth(oauth.AuthInfo{URL: p.URL, ShortURL: p.ShortURL, Instructions: p.Instructions})
 		}
 		return map[string]any{"ok": true}, nil, true
 
