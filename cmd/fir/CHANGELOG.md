@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-05-13
+
 ### Added
 
 - `pkg/exec` extracted to [`github.com/kfet/pinexec`](https://github.com/kfet/pinexec) v0.0.4 — now a standalone, dependency-free Go module (MIT, Go 1.21+, 100% coverage gate). The in-tree `pkg/exec/` directory is gone. `exec.ExecuteBash` → `pinexec.Execute`; `exec.BashResult` → `pinexec.Result`. Call site in `pkg/session/agentsession.go` updated. `pkg/agent/tools/{ansi,truncate}.go` (`StripAnsi`, `AppendColorEnv`, `TruncateHead`, `TruncateTail`, `TruncationOptions`, `TruncationResult`, `DefaultMaxBytes`, `DefaultMaxLines`, `GrepMaxLineLength`, `FormatSize`, `TruncateLine`) moved into pinexec — they live with the bash runner because they describe how its output is shaped. A small `pkg/agent/tools/exec_reexport.go` shim re-exports them as type aliases / vars so the dozens of existing in-fir call sites that import them from `tools` keep compiling unchanged; new code should import from pinexec directly. Temp-file prefix for the >50KB output spill changed from `fir-bash-` to `pinexec-`.
