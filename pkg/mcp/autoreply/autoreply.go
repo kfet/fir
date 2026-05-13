@@ -59,7 +59,7 @@ func (s *State) sendLoop() {
 	for req := range s.sendCh {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := s.reply(ctx, req.args); err != nil {
-			firlog.Debug("auto-reply chunk failed", "err", err)
+			firlog.Trace("auto-reply chunk failed", "err", err)
 		}
 		cancel()
 	}
@@ -114,7 +114,7 @@ func (s *State) SetMessageID(msgID string) {
 func (s *State) Wire(sub EventSubscriber) func() {
 	firlog.Info("auto-reply: Wire() subscribing to agent events")
 	return sub.Subscribe(func(ae agent.AgentEvent) {
-		firlog.Debug("auto-reply: event received", "type", ae.Type)
+		firlog.Trace("auto-reply: event received", "type", ae.Type)
 		switch ae.Type {
 		case agent.EventMessageUpdate:
 			if ae.AssistantMessageEvent == nil {
@@ -213,7 +213,7 @@ func (s *State) sendChunk(text string, final bool, replace bool) {
 	select {
 	case s.sendCh <- sendReq{args: args}:
 	default:
-		firlog.Debug("auto-reply send queue full, dropping chunk")
+		firlog.Trace("auto-reply send queue full, dropping chunk")
 	}
 }
 
@@ -236,7 +236,7 @@ func (s *State) finalize() {
 		"final":      true,
 	}}:
 	default:
-		firlog.Debug("auto-reply finalize: send queue full")
+		firlog.Trace("auto-reply finalize: send queue full")
 	}
 }
 

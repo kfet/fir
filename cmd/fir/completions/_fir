@@ -47,7 +47,7 @@ _fir() {
 
     _arguments -C -s \
         '(- *)'{-h,--help}'[Show help]' \
-        '(- *)'{-v,--version}'[Show version]' \
+        '(- *)'{-V,--version}'[Show version]' \
         '(-p --print)'{-p,--print}'[Non-interactive: process prompt and exit]' \
         '(-c --continue)'{-c,--continue}'[Continue previous session]' \
         '(-r --resume)'{-r,--resume}'[Select a session to resume]' \
@@ -81,6 +81,7 @@ _fir() {
         '--list-models=[List available models (optional pattern)]::pattern:' \
         '--list-available-models=[List authenticated, available models]::pattern:' \
         '--verbose[Force verbose startup]' \
+        '*-v[Increase log verbosity (-v Debug, -vv Trace)]' \
         '--debug[Enable debug logging]' \
         '--debug-log-file=[Debug log path]:file:_files' \
         '--login=[OAuth login for provider]:provider:->providers' \

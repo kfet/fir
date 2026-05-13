@@ -5,6 +5,20 @@
 ### Fixed
 
 - bash tool: race where a backgrounded subshell (`(sleep 30; ...) &`) could keep the stdout pipe open after bash exited and `killpg(SIGKILL)` returned success, blocking `Execute` for the full child duration. After reaping bash and killpg'ing the group, we now force-close the pipe's read end to unblock the drain — bash's own output is already in the kernel buffer by the time `Wait` returns and the concurrent drain goroutine has captured it. Matches the documented contract that backgrounded jobs are killed when the foreground command exits.
+### Added
+
+- Repeatable `-v` verbosity flags driving slog levels. `-v` enables Debug, `-vv` enables Trace (a new level below Debug, slog -8). `-vvv` and beyond clamp to `-vv` with a warning log line. New `FIR_LOG_LEVEL=info|debug|trace` environment variable (numeric slog levels also accepted) — wins over `FIR_DEBUG`. New `firlog.Trace` / `firlog.TraceEnabled` / `firlog.SetLevel` / `firlog.ParseLevel` API in `pkg/log` with a custom `LevelTrace` constant; the JSON handler renders the custom level as `"TRACE"`.
+
+### Changed
+
+- `-V` (and `--version`) now prints the version. The old short alias `-v` for `--version` is gone — `-v` now means verbose. When `fir -v` is invoked alone (no other args, matching the legacy version invocation pattern), a migration note is printed to stderr pointing at `-V` / `--version`. `FIR_DEBUG=1` still works as a Debug-level shortcut.
+- `pkg/ai/providers/cacheguard.go` prefix-invalidation logs moved from Debug to Trace. Run with `-vv` to see them.
+- MCP per-event Debug logs that fire dozens of times per turn (`typing indicator sent/failed`, auto-reply chunk/event/queue-full notices) moved from Debug to Trace.
+
+### Removed
+
+- `FIR_CACHE_DEBUG` environment variable. Use `-vv` (or `FIR_LOG_LEVEL=trace`) instead — cache invalidation logs are now at Trace level unconditionally.
+
 
 ## [0.45.0] - 2026-05-13
 ### Removed

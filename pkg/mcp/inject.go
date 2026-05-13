@@ -69,7 +69,7 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 			}
 			firlog.Info("channel message from reply-capable server", "server", serverName, "hasMsgID", cm.Meta["message_id"] != nil)
 			if err := SendTypingIndicator(context.Background(), mgr, serverName, cm.Meta); err != nil {
-				firlog.Debug("typing indicator failed", "err", err)
+				firlog.Trace("typing indicator failed", "err", err)
 			}
 			// Notify reply hook with message_id for auto-reply wiring.
 			// Only for Poe-style reply tools; skip telegram etc.

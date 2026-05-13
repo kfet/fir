@@ -55,11 +55,18 @@ type Args struct {
 	ListModels         any // true (bool) or string (search pattern)
 	ListAvailModels    any // true (bool) or string (search pattern)
 	Verbose            bool
-	Debug              bool
-	DebugLogFile       string
-	Login              string
-	Messages           []string
-	FileArgs           []string
+	// VerboseCount is the number of -v occurrences. 0=normal, 1=Debug,
+	// 2+=Trace. Values >2 are clamped to 2 with a warning.
+	VerboseCount int
+	// LegacyVersionHint is set when the user appears to have invoked the
+	// old `-v` alias for --version (i.e. lone `-v` with nothing else). The
+	// app surfaces a migration note pointing at -V / --version.
+	LegacyVersionHint bool
+	Debug             bool
+	DebugLogFile      string
+	Login             string
+	Messages          []string
+	FileArgs          []string
 }
 
 // ValidThinkingLevels lists all valid thinking level values.
@@ -73,6 +80,19 @@ func IsValidThinkingLevel(level string) bool {
 		}
 	}
 	return false
+}
+
+// isAllVs reports whether s consists entirely of the byte 'v' (len >= 1).
+func isAllVs(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] != 'v' {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseArgs parses CLI arguments into an Args struct.
@@ -89,8 +109,14 @@ func ParseArgs(args []string) *Args {
 		case arg == "--help" || arg == "-h":
 			result.Help = true
 
-		case arg == "--version" || arg == "-v":
+		case arg == "--version" || arg == "-V":
 			result.Version = true
+
+		// Repeated short verbose flag: -v / -vv / -vvv ... Each `v` adds
+		// one level. Pure-v short flags only (so we don't shadow -vvv-debug
+		// or similar) — and never the long --version (handled above).
+		case len(arg) >= 2 && arg[0] == '-' && arg[1] != '-' && isAllVs(arg[1:]):
+			result.VerboseCount += len(arg) - 1
 
 		case arg == "--mode" && i+1 < len(args):
 			i++
@@ -265,6 +291,13 @@ func ParseArgs(args []string) *Args {
 		}
 	}
 
+	// Legacy migration: `fir -v` used to print the version. Now it enables
+	// verbose logging. Detect a lone `-v` (single v, no positional args,
+	// no actions) and flag it so the app can print a migration hint.
+	if result.VerboseCount == 1 && len(args) == 1 && args[0] == "-v" {
+		result.LegacyVersionHint = true
+	}
+
 	return result
 }
 
@@ -328,10 +361,12 @@ Options:
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup
-  --debug                        Enable debug logging to file
+  -v, -vv                        Increase log verbosity (-v: Debug, -vv: Trace).
+                                 Also: FIR_LOG_LEVEL=info|debug|trace
+  --debug                        Enable debug logging to file (same as -v)
   --debug-log-file <path>        Debug log path (default: ~/.config/fir/debug.log)
   --help, -h                     Show this help
-  --version, -v                  Show version number
+  -V, --version                  Show version number
 
 Examples:
   # Interactive mode

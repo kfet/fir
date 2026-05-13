@@ -25,6 +25,6 @@ func SendTypingIndicator(ctx context.Context, mgr *Manager, serverName string, m
 	if _, err := mgr.CallTool(ctx, serverName, "reply", args); err != nil {
 		return fmt.Errorf("typing indicator: %w", err)
 	}
-	firlog.Debug("typing indicator sent", "server", serverName)
+	firlog.Trace("typing indicator sent", "server", serverName)
 	return nil
 }

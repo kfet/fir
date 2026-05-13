@@ -26,11 +26,51 @@ func TestParseArgs_Help(t *testing.T) {
 }
 
 func TestParseArgs_Version(t *testing.T) {
-	for _, flag := range []string{"--version", "-v"} {
+	for _, flag := range []string{"--version", "-V"} {
 		args := ParseArgs([]string{flag})
 		if !args.Version {
 			t.Errorf("expected Version=true for %s", flag)
 		}
+	}
+}
+
+func TestParseArgs_VerboseShort(t *testing.T) {
+	args := ParseArgs([]string{"-v"})
+	if args.Version {
+		t.Error("expected -v to NOT set Version (it now means verbose)")
+	}
+	if args.VerboseCount != 1 {
+		t.Errorf("expected VerboseCount=1, got %d", args.VerboseCount)
+	}
+	if !args.LegacyVersionHint {
+		t.Error("expected LegacyVersionHint=true for lone `-v`")
+	}
+}
+
+func TestParseArgs_VerboseShortRepeated(t *testing.T) {
+	cases := []struct {
+		args []string
+		want int
+	}{
+		{[]string{"-v"}, 1},
+		{[]string{"-vv"}, 2},
+		{[]string{"-vvv"}, 3},
+		{[]string{"-v", "-v"}, 2},
+		{[]string{"-v", "-vv"}, 3},
+		{[]string{"-vvvv"}, 4},
+	}
+	for _, tc := range cases {
+		got := ParseArgs(tc.args).VerboseCount
+		if got != tc.want {
+			t.Errorf("args=%v: VerboseCount=%d want %d", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestParseArgs_VerboseDoesNotSetLegacyHintWithOtherArgs(t *testing.T) {
+	args := ParseArgs([]string{"-v", "hello"})
+	if args.LegacyVersionHint {
+		t.Error("expected no LegacyVersionHint when other args present")
 	}
 }
 

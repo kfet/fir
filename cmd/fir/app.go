@@ -385,7 +385,11 @@ func run() error {
 	args := ParseArgs(os.Args[1:])
 
 	// Initialise debug logging (file-only, never stdout/stderr).
-	debugEnabled := args.Debug || os.Getenv("FIR_DEBUG") == "1"
+	// Determine effective log level from -v flags, --debug, FIR_LOG_LEVEL,
+	// FIR_DEBUG (in that precedence). Explicit FIR_LOG_LEVEL wins over
+	// FIR_DEBUG.
+	level, enabled := resolveLogLevel(args)
+	firlog.SetLevel(level)
 	debugPath := args.DebugLogFile
 	if debugPath == "" {
 		debugPath = os.Getenv("FIR_DEBUG_LOG")
@@ -393,13 +397,23 @@ func run() error {
 	if debugPath == "" {
 		debugPath = filepath.Join(resolveAgentDir(), "debug.log")
 	}
-	debugCleanup, err := firlog.Init(debugEnabled, debugPath)
+	debugCleanup, err := firlog.Init(enabled, debugPath)
 	if err != nil {
 		return fmt.Errorf("init debug log: %w", err)
 	}
 	defer debugCleanup()
 
-	firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath)
+	if args.VerboseCount > 2 {
+		firlog.Warn("verbose flag clamped",
+			"requested", args.VerboseCount, "clamped", 2,
+			"note", "-vv (Trace) is the maximum verbosity")
+	}
+	if args.LegacyVersionHint {
+		fmt.Fprintln(os.Stderr,
+			"note: -v now enables verbose logging. Use -V or --version to print the version.")
+	}
+
+	firlog.Info("fir starting", "version", version, "pid", os.Getpid(), "debugLog", debugPath, "logLevel", level.String())
 	firlog.Debug("args parsed", "provider", args.Provider, "model", args.Model, "mode", args.OutputMode)
 
 	if args.Help {

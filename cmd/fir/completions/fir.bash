@@ -88,7 +88,7 @@ _fir_complete() {
             --export --list-models --list-available-models
             --verbose --debug --debug-log-file
             --login -C --cwd --directory
-            -h -v -p -c -r -e -d
+            -h -V -v -vv -p -c -r -e -d
         "
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
         return

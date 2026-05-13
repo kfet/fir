@@ -21,29 +21,14 @@ package providers
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"os"
 	"sync"
 
 	firlog "github.com/kfet/fir/pkg/log"
 )
 
-// cacheDebugEnabled returns true when FIR_CACHE_DEBUG is set, which promotes
-// prefix-invalidation logs from Debug to Warn so they surface in normal runs.
-func cacheDebugEnabled() bool {
-	v := os.Getenv("FIR_CACHE_DEBUG")
-	return v != "" && v != "0" && v != "false"
-}
-
-func logCacheInvalidation(msg string, args ...any) {
-	if cacheDebugEnabled() {
-		firlog.Warn(msg, args...)
-	} else {
-		firlog.Debug(msg, args...)
-	}
-}
-
-// PrefixGuard tracks the serialized prefix of previous requests and warns
-// when it changes unexpectedly. Safe for concurrent use.
+// PrefixGuard tracks the serialized prefix of previous requests and emits
+// per-slot invalidation events at Trace level (run with -vv to surface them).
+// Safe for concurrent use.
 type PrefixGuard struct {
 	mu             sync.Mutex
 	prevHashes     []string // hash per message slot
@@ -56,7 +41,7 @@ func NewPrefixGuard() *PrefixGuard {
 }
 
 // Check compares the current request's system blocks and messages against the
-// previous call. It logs a warning for each prefix slot that changed.
+// previous call. It logs a Trace event for each prefix slot that changed.
 // Returns the number of prefix slots that were invalidated.
 func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[string]any) int {
 	pg.mu.Lock()
@@ -67,7 +52,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 	// Check system prompt
 	sysHash := hashJSON(systemBlocks)
 	if pg.prevSystemHash != "" && sysHash != pg.prevSystemHash {
-		logCacheInvalidation("cache prefix invalidated: system prompt changed")
+		firlog.Trace("cache prefix invalidated: system prompt changed")
 		invalidated++
 	}
 	pg.prevSystemHash = sysHash
@@ -85,7 +70,7 @@ func (pg *PrefixGuard) Check(systemBlocks []map[string]any, messages []map[strin
 
 	for i := 0; i < prefixLen; i++ {
 		if newHashes[i] != pg.prevHashes[i] {
-			logCacheInvalidation("cache prefix invalidated: message changed", "index", i)
+			firlog.Trace("cache prefix invalidated: message changed", "index", i)
 			invalidated++
 		}
 	}
