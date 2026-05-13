@@ -373,6 +373,41 @@ func TestIsTransientServerError(t *testing.T) {
 	}
 }
 
+func TestIsTransientNetworkError(t *testing.T) {
+	positives := []string{
+		"read tcp 192.168.50.98:49344->160.79.104.10:443: read: connection reset by peer",
+		"write tcp 10.0.0.1:443: write: broken pipe",
+		"dial tcp 10.0.0.1:443: connect: connection refused",
+		"dial tcp 10.0.0.1:443: connect: connection timed out",
+		"dial tcp: lookup api.anthropic.com: no such host",
+		"connect: network is unreachable",
+		"net/http: TLS handshake timeout",
+		"read tcp 10.0.0.1:443: i/o timeout",
+		"unexpected EOF",
+		"stream error: stream ID 5; INTERNAL_ERROR",
+		"http2: server sent GOAWAY and closed the connection",
+		"use of closed network connection",
+		"Post \"https://api.anthropic.com/v1/messages\": EOF",
+	}
+	for _, tc := range positives {
+		if !IsTransientNetworkError(tc) {
+			t.Errorf("IsTransientNetworkError(%q) = false, want true", tc)
+		}
+	}
+
+	negatives := []string{
+		"invalid_api_key",
+		"bad request: missing field",
+		"context canceled",
+		"context deadline exceeded",
+	}
+	for _, tc := range negatives {
+		if IsTransientNetworkError(tc) {
+			t.Errorf("IsTransientNetworkError(%q) = true, want false", tc)
+		}
+	}
+}
+
 func TestIsRetryableError(t *testing.T) {
 	// Rate limits
 	if !IsRetryableError("429 Too Many Requests") {
@@ -381,6 +416,13 @@ func TestIsRetryableError(t *testing.T) {
 	// Transient server errors
 	if !IsRetryableError("Internal server error") {
 		t.Error("expected server error to be retryable")
+	}
+	// Transient network errors
+	if !IsRetryableError("read tcp 192.168.50.98:49344->160.79.104.10:443: read: connection reset by peer") {
+		t.Error("expected connection reset to be retryable")
+	}
+	if !IsRetryableError("unexpected EOF") {
+		t.Error("expected unexpected EOF to be retryable")
 	}
 	// Not retryable
 	if IsRetryableError("invalid_api_key") {

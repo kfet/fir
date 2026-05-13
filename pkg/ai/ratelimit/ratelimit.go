@@ -62,21 +62,51 @@ var transientServerErrorPattern = regexp.MustCompile(
 	`(?i)` +
 		`internal\s+server\s+error` +
 		`|502\b` + // Bad Gateway
-		`|503\b`, // Service Unavailable
+		`|503\b` + // Service Unavailable
+		`|504\b`, // Gateway Timeout
 )
 
 // IsTransientServerError returns true if the error text indicates a transient
-// server-side failure (e.g. "Internal server error", HTTP 502/503) that is
+// server-side failure (e.g. "Internal server error", HTTP 502/503/504) that is
 // worth retrying, especially when no tokens have been consumed.
 func IsTransientServerError(text string) bool {
 	return transientServerErrorPattern.MatchString(text)
 }
 
-// IsRetryableError returns true if the error text is either a rate-limit
-// condition or a transient server error — i.e. safe to retry when streaming
-// has not yet begun.
+// transientNetworkErrorPattern matches well-known transient network/transport
+// failure phrases that surface from Go's net stack or HTTP client. These are
+// connection-level errors (not protocol-level) that are safe to retry when
+// streaming has not yet begun.
+var transientNetworkErrorPattern = regexp.MustCompile(
+	`(?i)` +
+		`connection\s+reset\s+by\s+peer` +
+		`|broken\s+pipe` +
+		`|connection\s+refused` +
+		`|connection\s+timed\s+out` +
+		`|no\s+such\s+host` +
+		`|network\s+is\s+unreachable` +
+		`|tls\s+handshake\s+timeout` +
+		`|i/o\s+timeout` +
+		`|unexpected\s+EOF` +
+		`|stream\s+error.*INTERNAL_ERROR` + // HTTP/2 stream resets
+		`|http2:\s+server\s+sent\s+GOAWAY` +
+		`|use\s+of\s+closed\s+network\s+connection` +
+		`|EOF\s*$`, // bare trailing "EOF" from net/http when server hangs up
+)
+
+// IsTransientNetworkError returns true if the error text indicates a transient
+// transport-level failure (TCP reset, broken pipe, DNS hiccup, TLS handshake
+// timeout, HTTP/2 GOAWAY, unexpected EOF, …) that is safe to retry when
+// streaming has not yet begun.
+func IsTransientNetworkError(text string) bool {
+	return transientNetworkErrorPattern.MatchString(text)
+}
+
+// IsRetryableError returns true if the error text is a rate-limit condition,
+// a transient server error, or a transient network/transport error — i.e.
+// safe to retry when streaming has not yet begun.
 func IsRetryableError(text string) bool {
-	return IsRateLimitText(text) || IsTransientServerError(text)
+	return IsRateLimitText(text) || IsTransientServerError(text) || IsTransientNetworkError(text)
 }
 
 // ExtractRetryDelayFromText parses a retry delay from the error message text alone
