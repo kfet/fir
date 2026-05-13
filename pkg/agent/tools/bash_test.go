@@ -164,7 +164,7 @@ func TestBashTool_BackgroundChildHoldsPipe(t *testing.T) {
 	tool := NewBashTool(t.TempDir())
 
 	start := time.Now()
-	_, err := tool.Execute(context.Background(), "call-1", map[string]any{
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
 		"command": "(sleep 30; echo done) &\necho started",
 	}, nil)
 	elapsed := time.Since(start)
@@ -174,6 +174,11 @@ func TestBashTool_BackgroundChildHoldsPipe(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("Execute took %v — backgrounded child held pipe open", elapsed)
+	}
+	// Foreground bash output must still be captured — the drain must not
+	// race-discard "started\n" when we force-close the read end.
+	if got := result.Content[0].Text; !strings.Contains(got, "started") {
+		t.Errorf("output = %q, want contains 'started' (foreground output lost)", got)
 	}
 }
 

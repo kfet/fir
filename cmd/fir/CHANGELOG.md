@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- bash tool: race where a backgrounded subshell (`(sleep 30; ...) &`) could keep the stdout pipe open after bash exited and `killpg(SIGKILL)` returned success, blocking `Execute` for the full child duration. After reaping bash and killpg'ing the group, we now force-close the pipe's read end to unblock the drain — bash's own output is already in the kernel buffer by the time `Wait` returns and the concurrent drain goroutine has captured it. Matches the documented contract that backgrounded jobs are killed when the foreground command exits.
+
 ## [0.45.0] - 2026-05-13
 
 ### Added

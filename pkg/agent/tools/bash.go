@@ -176,11 +176,20 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	close(mainExited)
 
 	// Reap any orphaned children still in the group (backgrounded `&` jobs
-	// that inherit the pipe and would otherwise block the drain). ESRCH is
-	// expected when no group members remain.
+	// that inherit the pipe; without this they would block the drain
+	// indefinitely). ESRCH is expected when no group members remain.
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 
-	// Now safe to wait for pipe drain — all writers are gone.
+	// Force the drain to unblock. Bash flushed and exited before Wait
+	// returned, so its output is already in the kernel pipe buffer and the
+	// drain goroutine has been reading it concurrently throughout. Closing
+	// pr now makes io.Copy return promptly even if a just-forked descendant
+	// of a backgrounded subshell still briefly holds the write end past our
+	// killpg (a kernel race we've observed on macOS where killpg returns
+	// success but the pipe stays open). The drain goroutine's own pr.Close
+	// after io.Copy returns is a safe double-close. We accept the documented
+	// trade-off: tail output from killed backgrounded jobs may be discarded.
+	_ = pr.Close()
 	<-drained
 
 	// Synthesise an exec.ExitError on non-zero exit so downstream code keeps
