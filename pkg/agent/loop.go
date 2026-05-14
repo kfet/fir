@@ -115,6 +115,72 @@ func runLoop(
 
 			// Stream assistant response
 			message := streamAssistantResponse(ctx, currentCtx, config, streamFn, events)
+
+			// Mid-tool-call stream error: the connection dropped after a
+			// tool_use block opened but before input_json_delta finished, so
+			// the stored partial has empty Arguments. Such a turn is wire-
+			// poison: Anthropic rejects replays of tool_use without matching
+			// tool_result, and "{}" args are unreplayable. Drop it from
+			// history and retry transparently.
+			if hasIncompleteToolCall(message) {
+				dropTrailingPartialAssistant(currentCtx)
+				lastErr := message.ErrorMessage
+				for attempt := 1; attempt <= len(midToolCallRetryBackoffs); attempt++ {
+					events <- AgentEvent{
+						Type:         EventStreamRetry,
+						RetryAttempt: attempt,
+						ErrorMessage: lastErr,
+					}
+					select {
+					case <-ctx.Done():
+					case <-time.After(midToolCallRetryBackoffs[attempt-1]):
+					}
+					if ctx.Err() != nil {
+						break
+					}
+					retryMsg := streamAssistantResponse(ctx, currentCtx, config, streamFn, events)
+					if !hasIncompleteToolCall(retryMsg) {
+						message = retryMsg
+						break
+					}
+					dropTrailingPartialAssistant(currentCtx)
+					lastErr = retryMsg.ErrorMessage
+					message = retryMsg
+				}
+
+				if hasIncompleteToolCall(message) {
+					// Retries exhausted. Drop is already done; inject a
+					// regular user-role note so the next assistant turn has
+					// accurate context about the interruption. Do NOT append
+					// the broken assistant message to history or newMessages.
+					note := NewAgentMessage(ai.NewUserMsg(streamErrorNote(lastErr), time.Now().UnixMilli()))
+					currentCtx.Messages = append(currentCtx.Messages, note)
+					newMessages = append(newMessages, note)
+					events <- AgentEvent{Type: EventMessageStart, Message: &note}
+					events <- AgentEvent{Type: EventMessageEnd, Message: &note}
+
+					am := note
+					events <- AgentEvent{
+						Type:        EventTurnEnd,
+						TurnMessage: &am,
+						ToolResults: nil,
+					}
+
+					// Honour the same follow-up-on-error contract as the
+					// plain error exit below.
+					if config.GetFollowUpMessages != nil {
+						followUp, err := config.GetFollowUpMessages()
+						if err == nil && len(followUp) > 0 {
+							pendingMessages = followUp
+							hasMoreToolCalls = false
+							continue
+						}
+					}
+					events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
+					return newMessages
+				}
+			}
+
 			newMessages = append(newMessages, NewAgentMessage(ai.NewAssistantMsg(*message)))
 
 			if message.StopReason == ai.StopReasonError || message.StopReason == ai.StopReasonAborted {
@@ -206,6 +272,74 @@ func runLoop(
 
 	events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
 	return newMessages
+}
+
+// midToolCallRetryBackoffs controls how long the agent loop waits before each
+// retry when a stream error tears the connection in the middle of a tool_use
+// block. Length determines the maximum number of retries. It is a package var
+// rather than a const so tests can shorten it.
+var midToolCallRetryBackoffs = []time.Duration{
+	250 * time.Millisecond,
+	750 * time.Millisecond,
+	2 * time.Second,
+}
+
+// hasIncompleteToolCall reports whether an assistant message is the wire-poison
+// shape produced when the Anthropic stream drops mid-tool-call: stop_reason is
+// "error" AND at least one tool_use content block has empty/nil Arguments
+// because input_json_delta never completed.
+//
+// Such a message must never be persisted to history: Anthropic rejects replays
+// of any tool_use block without matching tool_result, and "{}" arguments are
+// unreplayable. Anything with stop_reason != error (including a normally
+// completed zero-arg tool call where stop_reason=toolUse) is left alone.
+func hasIncompleteToolCall(m *ai.AssistantMessage) bool {
+	if m == nil || m.StopReason != ai.StopReasonError {
+		return false
+	}
+	for _, c := range m.Content {
+		if !c.IsToolCall() || c.ToolCall == nil {
+			continue
+		}
+		if len(c.ToolCall.Arguments) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// dropTrailingPartialAssistant drops a trailing assistant message from
+// agentCtx.Messages if it matches hasIncompleteToolCall. streamAssistantResponse
+// appends the in-progress partial as soon as EventStart fires, so the broken
+// turn always lives in the last slot when we detect the failure.
+func dropTrailingPartialAssistant(agentCtx *AgentContext) {
+	n := len(agentCtx.Messages)
+	if n == 0 {
+		return
+	}
+	last := agentCtx.Messages[n-1]
+	if last.Role() != "assistant" {
+		return
+	}
+	a := last.Message.AsAssistant()
+	if !hasIncompleteToolCall(a) {
+		return
+	}
+	agentCtx.Messages = agentCtx.Messages[:n-1]
+}
+
+// streamErrorNote builds the user-role note injected when all mid-tool-call
+// retries have been exhausted. It is a real user message (no SYS_EXT marker)
+// so the next assistant turn sees accurate context about what happened.
+func streamErrorNote(errMsg string) string {
+	if errMsg == "" {
+		errMsg = "unknown stream error"
+	}
+	return fmt.Sprintf(
+		"Note: your previous response was cut off mid-tool-call by a network/stream error (%s). "+
+			"The tool did NOT execute. Please acknowledge the interruption and decide whether to retry.",
+		errMsg,
+	)
 }
 
 // streamAssistantResponse streams an LLM response, handling context transforms.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -607,5 +608,168 @@ func TestAgentLoop_NoFollowUpAfterError(t *testing.T) {
 	last := allEvents[len(allEvents)-1]
 	if last.Type != EventAgentEnd {
 		t.Errorf("last event = %s, want agent_end", last.Type)
+	}
+}
+
+func init() {
+	// Speed up mid-tool-call retries for tests.
+	midToolCallRetryBackoffs = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+}
+
+// partialToolCallError builds an assistant message representing a stream that
+// dropped mid-tool-call: stop_reason=error, content has a tool_use block with
+// empty/nil arguments because input_json_delta never completed.
+func partialToolCallError(toolName string, partialText string) *ai.AssistantMessage {
+	content := []ai.AssistantContent{}
+	if partialText != "" {
+		content = append(content, ai.NewTextContent(partialText))
+	}
+	content = append(content, ai.NewToolCallContent("toolu_partial", toolName, nil))
+	return &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      content,
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "read tcp 1.2.3.4:443: i/o timeout (Anthropic stream ended before message_stop)",
+		Timestamp:    time.Now().UnixMilli(),
+	}
+}
+
+// TestAgentLoop_DropsPartialToolCallAndRetries verifies that when the Anthropic
+// streaming connection dies mid-tool-call (stop_reason=error + tool_use block
+// with empty Arguments), the agent loop drops the broken partial message from
+// history and transparently retries. A subsequent successful response must be
+// the only assistant turn that ends up in history.
+func TestAgentLoop_DropsPartialToolCallAndRetries(t *testing.T) {
+	events := make(chan AgentEvent, 200)
+
+	broken := partialToolCallError("Bash", "I'll check the logs")
+	recovered := simpleResponse("Logs look fine")
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+		// (retry backoff overridden via midToolCallRetryBackoffs in init below)
+	}
+
+	streamFn := mockStreamFn(broken, recovered)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Show me the logs", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+
+	allEvents := collectEvents(events)
+	<-done
+
+	// The partial mid-tool-call assistant message must NOT survive in the
+	// returned newMessages set.
+	for i, m := range returned {
+		if m.Role() != "assistant" {
+			continue
+		}
+		a := m.Message.AsAssistant()
+		if a == nil {
+			continue
+		}
+		if a.StopReason == ai.StopReasonError {
+			t.Errorf("returned[%d]: partial mid-tool-call error message survived: %+v", i, a)
+		}
+	}
+
+	sawRetry := false
+	sawRecovered := false
+	for _, e := range allEvents {
+		if e.Type == EventStreamRetry {
+			sawRetry = true
+		}
+		if e.Type == EventMessageEnd && e.Message != nil {
+			if a := e.Message.Message.AsAssistant(); a != nil {
+				for _, c := range a.Content {
+					if c.IsText() && c.Text.Text == "Logs look fine" {
+						sawRecovered = true
+					}
+				}
+			}
+		}
+	}
+	if !sawRetry {
+		t.Error("expected EventStreamRetry to be emitted after mid-tool-call stream error")
+	}
+	if !sawRecovered {
+		t.Error("expected recovered response to appear in event stream")
+	}
+}
+
+// TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote verifies that when
+// retries are exhausted (3 attempts all return mid-tool-call errors), the loop
+// drops every partial and injects a regular user-role note into history so the
+// next turn has accurate context.
+func TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote(t *testing.T) {
+	events := make(chan AgentEvent, 200)
+
+	b1 := partialToolCallError("Bash", "checking")
+	b2 := partialToolCallError("Bash", "checking")
+	b3 := partialToolCallError("Bash", "checking")
+	b4 := partialToolCallError("Bash", "checking")
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+	}
+
+	streamFn := mockStreamFn(b1, b2, b3, b4)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Check logs", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+
+	_ = collectEvents(events)
+	<-done
+
+	// No partial assistant error turn must survive in the returned messages.
+	for i, m := range returned {
+		if m.Role() != "assistant" {
+			continue
+		}
+		a := m.Message.AsAssistant()
+		if a != nil && a.StopReason == ai.StopReasonError {
+			t.Errorf("returned[%d]: partial error message survived after exhausted retries: %+v", i, a)
+		}
+	}
+
+	// A synthetic user-role note must have been injected, mentioning that
+	// the previous turn was cut off mid-tool-call.
+	sawNote := false
+	for _, m := range returned {
+		if m.Role() != "user" {
+			continue
+		}
+		u := m.Message.AsUser()
+		if u == nil {
+			continue
+		}
+		text, _ := u.Content.(string)
+		if text != "" && strings.Contains(text, "cut off") && strings.Contains(text, "tool") {
+			sawNote = true
+		}
+	}
+	if !sawNote {
+		t.Errorf("expected a synthetic user-role note about the mid-tool-call cutoff in returned messages; got=%+v", returned)
 	}
 }

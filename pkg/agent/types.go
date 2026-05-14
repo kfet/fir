@@ -251,6 +251,11 @@ const (
 	EventToolExecutionStart  AgentEventType = "tool_execution_start"
 	EventToolExecutionUpdate AgentEventType = "tool_execution_update"
 	EventToolExecutionEnd    AgentEventType = "tool_execution_end"
+	// EventStreamRetry is emitted when the agent loop detects a mid-tool-call
+	// stream error (stop_reason=error with an incomplete tool_use block whose
+	// Arguments never finished streaming) and is about to retry the request
+	// after dropping the broken partial from history.
+	EventStreamRetry AgentEventType = "stream_retry"
 )
 
 // AgentEvent represents a lifecycle event from the agent.
@@ -283,4 +288,8 @@ type AgentEvent struct {
 	// For tool_execution_end
 	Result  any
 	IsError bool
+
+	// For stream_retry
+	RetryAttempt int    // 1-based attempt number of the upcoming retry
+	ErrorMessage string // the stream error that triggered the retry
 }

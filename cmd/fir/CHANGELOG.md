@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anthropic streaming connection dying mid-tool-call no longer silently commits a wire-poison partial assistant turn to history and exits. When the SSE stream drops after a `tool_use` block opens but before `input_json_delta` finishes (e.g. `read tcp ... operation timed out`), the resulting assistant message has `stop_reason=error` plus a `tool_use` content block with empty `Arguments` — unreplayable through Anthropic's API and previously the cause of the agent appearing to "stop mid-sentence" and then gaslighting the user about what happened. The agent loop now detects this shape (`hasIncompleteToolCall`: `StopReason==error` AND any `tool_use` with empty Arguments), drops the partial from history, and transparently retries up to 3 times with backoff (250ms / 750ms / 2s), emitting a new `EventStreamRetry` lifecycle event each attempt. If all retries fail it drops the partial entirely and injects a regular user-role note ("your previous response was cut off mid-tool-call by a network/stream error … the tool did NOT execute") so the next assistant turn has accurate context. Clean pre-content errors (e.g. 429 with empty `Content`) are deliberately left untouched so the existing follow-up-after-error path keeps working. Fix lives in `pkg/agent/loop.go` (core), so both CLI and ACP modes inherit it. Regression coverage: `TestAgentLoop_DropsPartialToolCallAndRetries` and `TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote` in `pkg/agent/loop_test.go`.
+
 ## [0.46.4] - 2026-05-14
 
 ### Changed
