@@ -121,60 +121,22 @@ func runLoop(
 			// the stored partial has empty Arguments. Such a turn is wire-
 			// poison: Anthropic rejects replays of tool_use without matching
 			// tool_result, and "{}" args are unreplayable. Drop it from
-			// history and retry transparently.
+			// history and retry transparently; if all retries fail, inject a
+			// user-role note so the next turn has accurate context.
 			if hasIncompleteToolCall(message) {
-				dropTrailingPartialAssistant(currentCtx)
-				lastErr := message.ErrorMessage
-				for attempt := 1; attempt <= len(midToolCallRetryBackoffs); attempt++ {
-					events <- AgentEvent{
-						Type:         EventStreamRetry,
-						RetryAttempt: attempt,
-						ErrorMessage: lastErr,
-					}
-					select {
-					case <-ctx.Done():
-					case <-time.After(midToolCallRetryBackoffs[attempt-1]):
-					}
-					if ctx.Err() != nil {
-						break
-					}
-					retryMsg := streamAssistantResponse(ctx, currentCtx, config, streamFn, events)
-					if !hasIncompleteToolCall(retryMsg) {
-						message = retryMsg
-						break
-					}
-					dropTrailingPartialAssistant(currentCtx)
-					lastErr = retryMsg.ErrorMessage
-					message = retryMsg
-				}
-
+				message = retryMidToolCall(ctx, currentCtx, config, streamFn, events, message)
 				if hasIncompleteToolCall(message) {
-					// Retries exhausted. Drop is already done; inject a
-					// regular user-role note so the next assistant turn has
-					// accurate context about the interruption. Do NOT append
-					// the broken assistant message to history or newMessages.
-					note := NewAgentMessage(ai.NewUserMsg(streamErrorNote(lastErr), time.Now().UnixMilli()))
+					note := NewAgentMessage(ai.NewUserMsg(streamErrorNote(message.ErrorMessage), time.Now().UnixMilli()))
 					currentCtx.Messages = append(currentCtx.Messages, note)
 					newMessages = append(newMessages, note)
 					events <- AgentEvent{Type: EventMessageStart, Message: &note}
 					events <- AgentEvent{Type: EventMessageEnd, Message: &note}
+					events <- AgentEvent{Type: EventTurnEnd, TurnMessage: &note}
 
-					am := note
-					events <- AgentEvent{
-						Type:        EventTurnEnd,
-						TurnMessage: &am,
-						ToolResults: nil,
-					}
-
-					// Honour the same follow-up-on-error contract as the
-					// plain error exit below.
-					if config.GetFollowUpMessages != nil {
-						followUp, err := config.GetFollowUpMessages()
-						if err == nil && len(followUp) > 0 {
-							pendingMessages = followUp
-							hasMoreToolCalls = false
-							continue
-						}
+					if followUp := drainFollowUps(config); len(followUp) > 0 {
+						pendingMessages = followUp
+						hasMoreToolCalls = false
+						continue
 					}
 					events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
 					return newMessages
@@ -194,13 +156,10 @@ func runLoop(
 				// Before exiting, check for follow-up messages (e.g. channel
 				// messages that arrived during the failed turn). Without this,
 				// injected messages are silently dropped after an error.
-				if config.GetFollowUpMessages != nil {
-					followUp, err := config.GetFollowUpMessages()
-					if err == nil && len(followUp) > 0 {
-						pendingMessages = followUp
-						hasMoreToolCalls = false
-						continue
-					}
+				if followUp := drainFollowUps(config); len(followUp) > 0 {
+					pendingMessages = followUp
+					hasMoreToolCalls = false
+					continue
 				}
 
 				events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
@@ -298,34 +257,74 @@ func hasIncompleteToolCall(m *ai.AssistantMessage) bool {
 		return false
 	}
 	for _, c := range m.Content {
-		if !c.IsToolCall() || c.ToolCall == nil {
-			continue
-		}
-		if len(c.ToolCall.Arguments) == 0 {
+		if c.IsToolCall() && c.ToolCall != nil && len(c.ToolCall.Arguments) == 0 {
 			return true
 		}
 	}
 	return false
 }
 
-// dropTrailingPartialAssistant drops a trailing assistant message from
-// agentCtx.Messages if it matches hasIncompleteToolCall. streamAssistantResponse
-// appends the in-progress partial as soon as EventStart fires, so the broken
-// turn always lives in the last slot when we detect the failure.
-func dropTrailingPartialAssistant(agentCtx *AgentContext) {
+// retryMidToolCall drops the trailing partial assistant turn that
+// streamAssistantResponse just appended to agentCtx (it tracks the in-flight
+// partial in the last slot from EventStart onwards) and re-streams up to
+// len(midToolCallRetryBackoffs) times. Returns the final message: either a
+// clean response, or the last broken response if every retry also failed.
+// In all cases, the trailing partial has been dropped from agentCtx on return.
+func retryMidToolCall(
+	ctx context.Context,
+	agentCtx *AgentContext,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	events chan<- AgentEvent,
+	broken *ai.AssistantMessage,
+) *ai.AssistantMessage {
+	message := broken
+	dropTrailingPartial(agentCtx)
+	for attempt, backoff := range midToolCallRetryBackoffs {
+		events <- AgentEvent{
+			Type:         EventStreamRetry,
+			RetryAttempt: attempt + 1,
+			ErrorMessage: message.ErrorMessage,
+		}
+		select {
+		case <-ctx.Done():
+			return message
+		case <-time.After(backoff):
+		}
+		message = streamAssistantResponse(ctx, agentCtx, config, streamFn, events)
+		if !hasIncompleteToolCall(message) {
+			return message
+		}
+		dropTrailingPartial(agentCtx)
+	}
+	return message
+}
+
+// dropTrailingPartial removes the last message from agentCtx if it is an
+// assistant message in the wire-poison "incomplete tool_use" shape.
+func dropTrailingPartial(agentCtx *AgentContext) {
 	n := len(agentCtx.Messages)
 	if n == 0 {
 		return
 	}
-	last := agentCtx.Messages[n-1]
-	if last.Role() != "assistant" {
-		return
+	if a := agentCtx.Messages[n-1].Message.AsAssistant(); hasIncompleteToolCall(a) {
+		agentCtx.Messages = agentCtx.Messages[:n-1]
 	}
-	a := last.Message.AsAssistant()
-	if !hasIncompleteToolCall(a) {
-		return
+}
+
+// drainFollowUps returns any follow-up messages queued via
+// config.GetFollowUpMessages, or nil if none / the hook isn't configured.
+// Errors from the hook are treated as "no messages" — same contract as the
+// previous inline call sites.
+func drainFollowUps(config *AgentLoopConfig) []AgentMessage {
+	if config.GetFollowUpMessages == nil {
+		return nil
 	}
-	agentCtx.Messages = agentCtx.Messages[:n-1]
+	msgs, err := config.GetFollowUpMessages()
+	if err != nil {
+		return nil
+	}
+	return msgs
 }
 
 // streamErrorNote builds the user-role note injected when all mid-tool-call
