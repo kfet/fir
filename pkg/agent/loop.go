@@ -235,12 +235,9 @@ func runLoop(
 		}
 
 		// Agent would stop. Check for follow-up messages.
-		if config.GetFollowUpMessages != nil {
-			followUp, err := config.GetFollowUpMessages()
-			if err == nil && len(followUp) > 0 {
-				pendingMessages = followUp
-				continue
-			}
+		if followUp := drainFollowUps(config); len(followUp) > 0 {
+			pendingMessages = followUp
+			continue
 		}
 
 		break
@@ -331,14 +328,15 @@ func dropTrailingPartial(agentCtx *AgentContext) {
 
 // drainFollowUps returns any follow-up messages queued via
 // config.GetFollowUpMessages, or nil if none / the hook isn't configured.
-// Errors from the hook are treated as "no messages" — same contract as the
-// previous inline call sites.
+// Errors from the hook are logged and treated as "no messages" so the loop
+// continues best-effort — callers rely on this contract.
 func drainFollowUps(config *AgentLoopConfig) []AgentMessage {
 	if config.GetFollowUpMessages == nil {
 		return nil
 	}
 	msgs, err := config.GetFollowUpMessages()
 	if err != nil {
+		firlog.Warn("GetFollowUpMessages hook failed", "err", err)
 		return nil
 	}
 	return msgs

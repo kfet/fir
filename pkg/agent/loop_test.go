@@ -616,6 +616,46 @@ func init() {
 	midToolCallRetryBackoffs = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
 }
 
+// TestAgentLoop_FollowUpHookError verifies that when GetFollowUpMessages
+// returns an error, the loop logs it and continues (exits) without panicking.
+func TestAgentLoop_FollowUpHookError(t *testing.T) {
+	events := make(chan AgentEvent, 100)
+
+	errorMsg := &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{},
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: "429 rate_limit_error",
+		Timestamp:    time.Now().UnixMilli(),
+	}
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+		GetFollowUpMessages: func() ([]AgentMessage, error) {
+			return nil, fmt.Errorf("simulated hook failure")
+		},
+	}
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	go func() {
+		AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, mockStreamFn(errorMsg), events)
+		close(events)
+	}()
+
+	allEvents := collectEvents(events)
+
+	last := allEvents[len(allEvents)-1]
+	if last.Type != EventAgentEnd {
+		t.Errorf("last event = %s, want agent_end", last.Type)
+	}
+}
+
 // partialToolCallError builds an assistant message representing a stream that
 // dropped mid-tool-call: stop_reason=error, content has a tool_use block with
 // empty/nil arguments because input_json_delta never completed.
