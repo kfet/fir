@@ -76,6 +76,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		}
 
 		firlog.Debug("bedrock request", "model", model.ID, "messageCount", len(prompt.Messages))
+		traceWireMessages("bedrock", input)
 
 		respStream, err := client.ConverseStream(ctx, input)
 		if err != nil {

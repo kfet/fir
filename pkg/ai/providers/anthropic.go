@@ -378,6 +378,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 
 		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
+		traceWireMessages("anthropic", params)
 
 		var maxDelayMs *int
 		if options != nil {

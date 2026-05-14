@@ -640,6 +640,7 @@ func streamDeclGoogle(
 	if err != nil {
 		return fmt.Errorf("marshaling request: %w", err)
 	}
+	traceWireMessages("declgoogle", bodyJSON)
 
 	baseHdrs, err := resolveDeclGoogleHeaders(cfg, model, creds)
 	if err != nil {

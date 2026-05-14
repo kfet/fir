@@ -170,6 +170,7 @@ func streamVertexHTTP(
 		}
 	}
 
+	traceWireMessages("vertex", body)
 	apiKey := resolveVertexAPIKey(options)
 
 	var vertexURL string

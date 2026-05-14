@@ -132,6 +132,7 @@ func StreamOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Conte
 		}
 
 		firlog.Debug("openai-responses request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
+		traceWireMessages("openai-responses", body)
 
 		const maxRetries = 3
 		var lastErr error

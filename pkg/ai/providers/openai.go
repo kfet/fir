@@ -391,6 +391,7 @@ func streamOpenAIHTTP(
 	url := openAIChatCompletionsURL(ResolveCloudflareBaseURL(model))
 
 	firlog.Debug("openai request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
+	traceWireMessages("openai", body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {

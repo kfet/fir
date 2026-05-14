@@ -182,6 +182,7 @@ func streamGoogleHTTP(
 		strings.TrimRight(baseURL, "/"), model.ID)
 
 	firlog.Debug("google request", "model", model.ID, "messageCount", len(prompt.Messages))
+	traceWireMessages("google", body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
