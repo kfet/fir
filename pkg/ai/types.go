@@ -271,33 +271,16 @@ type ImageContent struct {
 }
 
 // ServerContent is a generic passthrough for provider-side content blocks
-// that fir does not interpret semantically — for example Anthropic's
-// `server_tool_use`, `web_search_tool_result`, `code_execution_tool_result`,
-// `web_fetch_tool_result`, `tool_invocation`, and `tool_output`. Storing
-// the original JSON verbatim lets fir replay these blocks to the provider
-// on subsequent turns without losing structure.
-//
-// The Anthropic `messages` API will 400 on replay with "thinking blocks
-// cannot be modified" when fir flattens a server-side block into text
-// and then prunes the placeholder, leaving two signed thinking blocks
-// adjacent on disk. Round-tripping via ServerContent preserves the
-// original structural separator and avoids that class of bug. See
-// BACKLOG.md for the broader motivation.
+// that fir does not interpret semantically (e.g. Anthropic's
+// `server_tool_use`, `web_search_tool_result`, …). Raw carries the
+// original content_block JSON byte-stable for replay; Display is a
+// pre-formatted human-readable rendering for the transcript. See
+// BACKLOG.md for the motivation.
 type ServerContent struct {
-	Type string `json:"type"` // fir-internal discriminator, always "server"
-	// ProviderType is the original block type as emitted by the provider
-	// (e.g. "server_tool_use", "web_search_tool_result"). Used by display
-	// renderers to decide how to format the block.
-	ProviderType string `json:"providerType"`
-	// Raw is the original content_block JSON as received from the
-	// provider, preserved verbatim for byte-stable replay.
-	Raw json.RawMessage `json:"raw"`
-	// Display is a pre-formatted human-readable rendering of the block
-	// for the TUI / ACP transcript. Captured at stream time so display
-	// renderers don't need to know provider-specific formatting rules
-	// or to re-parse Raw. Pure display — never participates in the
-	// wire replay.
-	Display string `json:"display,omitempty"`
+	Type         string          `json:"type"` // fir-internal discriminator, always "server"
+	ProviderType string          `json:"providerType"`
+	Raw          json.RawMessage `json:"raw"`
+	Display      string          `json:"display,omitempty"`
 }
 
 // ToolCall represents a tool invocation by the assistant.
@@ -412,8 +395,12 @@ func (c AssistantContent) DeepCopy() AssistantContent {
 	}
 	if c.Server != nil {
 		t := *c.Server
-		// json.RawMessage is a []byte slice — share the bytes since we
-		// treat it as immutable. Callers must not mutate.
+		// Deep-copy the Raw byte slice so callers mutating one copy
+		// don't poison the other. Raw is the wire-replay payload — must
+		// remain byte-stable.
+		if t.Raw != nil {
+			t.Raw = append(json.RawMessage(nil), t.Raw...)
+		}
 		c.Server = &t
 	}
 	return c
@@ -509,11 +496,8 @@ func NewToolCallContent(id, name string, args map[string]any) AssistantContent {
 }
 
 // NewServerContent creates an AssistantContent wrapping a ServerContent.
-// The provider-side block type ("server_tool_use", "web_search_tool_result",
-// etc.) lives inside ServerContent.ProviderType. Raw carries the original
-// content-block JSON verbatim so it can be replayed without re-marshalling
-// through a shape that might mutate field order. Display is a pre-formatted
-// human-readable rendering for the TUI / ACP transcript.
+// Raw is the original provider content-block JSON; Display is the
+// pre-formatted transcript rendering.
 func NewServerContent(providerType string, raw json.RawMessage, display string) AssistantContent {
 	return AssistantContent{Server: &ServerContent{
 		Type:         ContentTypeServer,

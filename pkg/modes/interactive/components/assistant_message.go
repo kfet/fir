@@ -63,17 +63,25 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 
 	t := theme.GetTheme()
 
-	hasVisibleContent := false
-	for _, c := range message.Content {
+	// hasVisibleBody reports whether a content block carries any
+	// non-whitespace renderable body — text, thinking text, or a
+	// server-content display string.
+	hasVisibleBody := func(c ai.AssistantContent) bool {
 		if c.Text != nil && strings.TrimSpace(c.Text.Text) != "" {
-			hasVisibleContent = true
-			break
+			return true
 		}
 		if c.Thinking != nil && strings.TrimSpace(c.Thinking.Thinking) != "" {
-			hasVisibleContent = true
-			break
+			return true
 		}
 		if c.Server != nil && strings.TrimSpace(c.Server.Display) != "" {
+			return true
+		}
+		return false
+	}
+
+	hasVisibleContent := false
+	for _, c := range message.Content {
+		if hasVisibleBody(c) {
 			hasVisibleContent = true
 			break
 		}
@@ -92,15 +100,7 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 			// Check if another visible content block follows
 			hasVisibleAfter := false
 			for _, c := range message.Content[i+1:] {
-				if c.Text != nil && strings.TrimSpace(c.Text.Text) != "" {
-					hasVisibleAfter = true
-					break
-				}
-				if c.Thinking != nil && strings.TrimSpace(c.Thinking.Thinking) != "" {
-					hasVisibleAfter = true
-					break
-				}
-				if c.Server != nil && strings.TrimSpace(c.Server.Display) != "" {
+				if hasVisibleBody(c) {
 					hasVisibleAfter = true
 					break
 				}

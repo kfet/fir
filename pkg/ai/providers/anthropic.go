@@ -505,27 +505,17 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						"web_fetch_tool_result",
 						"tool_invocation",
 						"tool_output":
-						// Server-side / provider-internal content blocks.
-						// fir does not interpret these semantically — it just
-						// needs to round-trip them faithfully so that signed
-						// thinking blocks that originally sandwiched them
-						// keep their structural separators on replay (see
+						// Server-side / provider-internal content blocks
+						// captured verbatim for round-trip replay (see
 						// req_011Cb1vcfcbfqsJWGM7KfmyT and BACKLOG.md).
-						//
-						// We capture the original content_block JSON verbatim
-						// as ServerContent.Raw and emit a display-only text
-						// event so the TUI / ACP can show formatted output
-						// (URLs, code-execution results, etc.) via the
-						// format helpers at render time.
+						// Display text is pre-formatted for the transcript.
 						rawJSON, _ := json.Marshal(cb)
 						display := formatServerContentForDisplay(blockType, cb)
 						output.Content = append(output.Content, ai.NewServerContent(blockType, rawJSON, display))
-						blocks[idx] = &blockInfo{contentIdx: contentIdx}
 						if display != "" {
 							stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
 							stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: display, Partial: output})
 						}
-						continue // skip default blocks[idx] assignment below
 					}
 					blocks[idx] = &blockInfo{contentIdx: contentIdx}
 
@@ -1243,11 +1233,10 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 						"input": c.ToolCall.Arguments,
 					})
 				} else if c.IsServerContent() {
-					// Server-side passthrough block: emit the original
-					// content_block JSON verbatim. The stored Raw bytes
-					// were captured by the streamer and unchanged since.
+					// Server-side passthrough block: emit the stored
+					// content_block JSON verbatim.
 					var raw map[string]any
-					if err := json.Unmarshal(c.Server.Raw, &raw); err == nil && raw != nil {
+					if err := json.Unmarshal(c.Server.Raw, &raw); err == nil {
 						blocks = append(blocks, raw)
 					}
 				}
@@ -1373,13 +1362,14 @@ func isThinkingType(t string) bool {
 // generic passthrough content variant — is tracked in BACKLOG.md.
 // This function is the band-aid until that lands.
 func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
-	isThinking := func(b map[string]any) bool {
-		t, _ := b["type"].(string)
-		return isThinkingType(t)
+	adjacent := func(i int) bool {
+		a, _ := blocks[i-1]["type"].(string)
+		b, _ := blocks[i]["type"].(string)
+		return isThinkingType(a) && isThinkingType(b)
 	}
 	needsFix := false
 	for i := 1; i < len(blocks); i++ {
-		if isThinking(blocks[i-1]) && isThinking(blocks[i]) {
+		if adjacent(i) {
 			needsFix = true
 			break
 		}
@@ -1389,7 +1379,7 @@ func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
 	}
 	out := make([]map[string]any, 0, len(blocks)+2)
 	for i, b := range blocks {
-		if i > 0 && isThinking(blocks[i-1]) && isThinking(b) {
+		if i > 0 && adjacent(i) {
 			out = append(out, map[string]any{
 				"type": "text",
 				"text": "(thinking-block separator inserted by fir)",
@@ -1547,14 +1537,9 @@ func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
 	return tool
 }
 
-// formatWebSearchResult formats a web_search_tool_result content block as readable text.
 // formatServerContentForDisplay renders a server-side content block as a
 // human-readable string for the TUI / ACP transcript. The wire-replay form
 // is preserved separately via ServerContent.Raw; this is display-only.
-//
-// Used both by the streamer (to emit text deltas as the block arrives) and
-// by the display-time renderers (to materialise a stored ServerContent
-// back into visible text on resume).
 func formatServerContentForDisplay(providerType string, cb map[string]any) string {
 	switch providerType {
 	case "server_tool_use":
