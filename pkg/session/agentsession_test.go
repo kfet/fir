@@ -3170,7 +3170,7 @@ func TestSideQuery_DoesNotModifySessionMessages(t *testing.T) {
 	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
 			stream.End(nil)
 		}()
 		return stream
@@ -3202,7 +3202,7 @@ func TestSideQuery_IncludesExistingContextInCall(t *testing.T) {
 		capturedMsgs = llmCtx.Messages
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
 			stream.End(nil)
 		}()
 		return stream
@@ -3238,7 +3238,7 @@ func TestSideQuery_OverrideModel_NotFound(t *testing.T) {
 	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
 			stream.End(nil)
 		}()
 		return stream
@@ -3275,7 +3275,7 @@ func TestSideQuery_OverrideEffort_PassesThrough(t *testing.T) {
 		}
 		stream := ai.NewAssistantMessageEventStream()
 		go func() {
-			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{}})
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("ok")}}})
 			stream.End(nil)
 		}()
 		return stream

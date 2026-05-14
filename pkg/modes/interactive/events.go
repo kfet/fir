@@ -223,6 +223,8 @@ func (m *InteractiveMode) handleEvent(event session.AgentSessionEvent) {
 		m.onToolExecEnd(ae)
 	case agent.EventAgentEnd:
 		m.onAgentEnd()
+	case agent.EventStreamRetry:
+		m.showStatus(fmt.Sprintf("Stream error (mid-tool-call): retrying — attempt %d", ae.RetryAttempt))
 	}
 }
 

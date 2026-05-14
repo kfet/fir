@@ -584,3 +584,122 @@ func TestSimplePrompt_OverrideReasoning(t *testing.T) {
 		t.Errorf("agent thinking level mutated: got %s, want %s", a.State().ThinkingLevel, ThinkingOff)
 	}
 }
+
+// TestSimplePrompt_ThinkingOnlyReturnsMarker verifies that a response which
+// contains only thinking blocks (no text, no tool_use) still produces useful
+// output: the thinking content is surfaced with a [think] marker rather than
+// silently returned as an empty string.
+func TestSimplePrompt_ThinkingOnlyReturnsMarker(t *testing.T) {
+	resp := &ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			ai.NewThinkingContent("weighed options A and B"),
+		},
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		Model: "test-model", StopReason: ai.StopReasonStop,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	got, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "[think]") || !strings.Contains(got, "weighed options A and B") {
+		t.Errorf("expected [think] marker with content, got: %q", got)
+	}
+}
+
+// TestSimplePrompt_ToolCallOnlyReturnsMarker verifies that a response which
+// only requested tool calls (no text, no thinking) surfaces a [tool ...]
+// marker for each call. Useful signal: the advisor wanted to run a tool that
+// SimplePrompt callers can't execute.
+func TestSimplePrompt_ToolCallOnlyReturnsMarker(t *testing.T) {
+	resp := &ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			ai.NewToolCallContent("toolu_x", "Bash", map[string]any{"command": "ls"}),
+		},
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		Model: "test-model", StopReason: ai.StopReasonToolUse,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	got, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "[tool Bash") || !strings.Contains(got, `"command":"ls"`) {
+		t.Errorf("expected [tool Bash ...] marker with args, got: %q", got)
+	}
+}
+
+// TestSimplePrompt_MixedContent verifies text + thinking + tool_use are all
+// surfaced together, in order, with the appropriate markers.
+func TestSimplePrompt_MixedContent(t *testing.T) {
+	resp := &ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			ai.NewTextContent("here's my take."),
+			ai.NewThinkingContent("comparing options"),
+			ai.NewToolCallContent("toolu_y", "Read", map[string]any{"path": "/x"}),
+		},
+		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		Model: "test-model", StopReason: ai.StopReasonToolUse,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	got, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, want := range []string{"here's my take.", "[think] comparing options", "[tool Read"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected output to contain %q; got: %q", want, got)
+		}
+	}
+	// Order: text first, then thinking, then tool.
+	iText := strings.Index(got, "here's my take.")
+	iThink := strings.Index(got, "[think]")
+	iTool := strings.Index(got, "[tool ")
+	if !(iText < iThink && iThink < iTool) {
+		t.Errorf("expected text < thinking < tool order; positions: text=%d think=%d tool=%d (got %q)", iText, iThink, iTool, got)
+	}
+}
+
+// TestSimplePrompt_EmptyContentReturnsError verifies that a response with
+// zero content blocks returns a clear error (rather than an empty string).
+func TestSimplePrompt_EmptyContentReturnsError(t *testing.T) {
+	resp := &ai.AssistantMessage{
+		Role:       "assistant",
+		Content:    []ai.AssistantContent{},
+		Api:        ai.ApiAnthropicMessages,
+		Provider:   ai.ProviderAnthropic,
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	_, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("expected error on empty response")
+	}
+	if !strings.Contains(err.Error(), "no content") && !strings.Contains(err.Error(), "empty") && !strings.Contains(err.Error(), "no usable content") {
+		t.Errorf("expected 'no content' / 'empty' error, got: %v", err)
+	}
+}

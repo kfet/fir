@@ -264,6 +264,12 @@ def _run_aside(
             synthesis = ctx.side_query(instructions, model=sq_model, provider=sq_provider, effort=sq_effort)
         except Exception as exc:
             return _side_query_error(exc)
+        # Belt-and-suspenders: SideQuery should now return an error on truly
+        # empty responses, but if something slips through (e.g. whitespace-
+        # only output from a provider we don't handle as carefully), surface
+        # it as an explicit error so the caller doesn't see a bare trace line.
+        if not synthesis or not synthesis.strip():
+            return _error("advisor returned no content")
         return {
             "content": [{"type": "text", "text": _prefix_advisor(synthesis, advisor_used)}],
             "is_error": False,
@@ -348,6 +354,8 @@ def _run_aside(
         synthesis = ctx.side_query(prompt, model=sq_model, provider=sq_provider, effort=sq_effort)
     except Exception as exc:
         return _side_query_error(exc)
+    if not synthesis or not synthesis.strip():
+        return _error("advisor returned no content")
 
     # Include raw tool outputs in details for TUI display (not sent to LLM).
     # Truncate individual outputs to avoid bloating the JSON-RPC response.

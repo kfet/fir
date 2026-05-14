@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -659,13 +660,46 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 	if msg.ErrorMessage != "" {
 		return "", fmt.Errorf("%s", msg.ErrorMessage)
 	}
-	var sb strings.Builder
-	for _, c := range msg.Content {
-		if c.Text != nil {
-			sb.WriteString(c.Text.Text)
+	return renderSimplePromptContent(msg.Content)
+}
+
+// renderSimplePromptContent flattens an assistant message's content blocks
+// into a single string suitable for SimplePrompt / SideQuery callers.
+//
+// Text blocks are emitted verbatim. Thinking blocks are surfaced with a
+// `[think] ...` prefix (useful signal even though we can't replay them).
+// ToolCall blocks become `[tool <name> <compact-json-args>]` markers — the
+// caller has no tools to execute, but knowing the advisor *wanted* to run a
+// tool is still informative. Blocks are joined with newlines in source order.
+//
+// Returns an error when there is no usable content at all (no text, no
+// thinking, no tool call) — that previously surfaced as a silent empty
+// string, leaving callers unable to distinguish "advisor said nothing" from
+// "advisor was never called".
+func renderSimplePromptContent(content []ai.AssistantContent) (string, error) {
+	var parts []string
+	for _, c := range content {
+		switch {
+		case c.Text != nil:
+			if c.Text.Text != "" {
+				parts = append(parts, c.Text.Text)
+			}
+		case c.Thinking != nil:
+			if c.Thinking.Thinking != "" {
+				parts = append(parts, "[think] "+c.Thinking.Thinking)
+			}
+		case c.ToolCall != nil:
+			argsJSON, err := json.Marshal(c.ToolCall.Arguments)
+			if err != nil {
+				argsJSON = []byte("{}")
+			}
+			parts = append(parts, fmt.Sprintf("[tool %s %s]", c.ToolCall.Name, string(argsJSON)))
 		}
 	}
-	return sb.String(), nil
+	if len(parts) == 0 {
+		return "", fmt.Errorf("response had no usable content (no text, thinking, or tool call)")
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 func (a *Agent) dequeueSteeringMessages() []AgentMessage {
