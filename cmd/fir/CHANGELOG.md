@@ -1,11 +1,14 @@
 # Changelog
 
 ## [Unreleased]
+
+## [0.46.3] - 2026-05-13
+
 ### Fixed
+
+- Anthropic 400 "thinking or redacted_thinking blocks in the latest assistant message cannot be modified" on resume of sessions containing a server-side tool block (e.g. `web_search`). Root cause: fir's stream parser flattens server-side content blocks (`server_tool_use`, `web_search_tool_result`, `code_execution_tool_result`, `web_fetch_tool_result`, `tool_invocation`, `tool_output`) into plain `text` blocks during streaming, and the `server_tool_use` invocation in particular became an **empty** text placeholder that `pruneEmptyAssistantTextBlocks` stripped end-of-stream — leaving the two signed `thinking` blocks that originally sandwiched it adjacent on disk. Anthropic's input validator rejects assistant messages with two consecutive thinking blocks (a structural rule), reporting it with the misleading "blocks cannot be modified" error string and a non-actionable cumulative-position pointer (e.g. `messages.1.content.12`). Confirmed by reproducing the failing wire 1:1 against `/v1/messages` with the user's actual signed-thinking bytes via `curl`, then bisecting to the adjacency rule. Two band-aids land in this release: the `server_tool_use` placeholder is now a non-empty `[server tool: <name>]` text block so the pruner leaves it in place; and a new `separateAdjacentThinkingBlocks` pass at wire-build time splices a synthetic text separator between any thinking blocks that would otherwise be emitted adjacent, preserving every signed block byte-for-byte. The proper structural fix — generic passthrough storage for server-side blocks so they round-trip verbatim — is tracked in `BACKLOG.md`. Regression coverage in `pkg/ai/providers/anthropic_adjacent_thinking_test.go`; existing `anthropic_thinking_invariants_test.go` updated to reflect the new wire-build invariant.
 
 - Skill loading: every builtin `SKILL.md` now carries `override: true` in its frontmatter so that when the same file is also discovered via a project skills directory (the in-repo `.fir/skills` symlink at the builtin source tree, or a user-copied skill), the project-origin copy shadows the builtin-origin copy instead of coexisting under disambiguated `builtin__`/`project__` IDs. `LoadBuiltinSkills` deliberately drops the `Override` claim on the builtin self-load so the two copies don't both claim override and trigger an `override-conflict` diagnostic.
-
-### Fixed
 
 - `fir -c` on first invocation in a project (no prior session) now correctly stamps the user's `SessionInvocation` so a subsequent `fir -c` can restore `--mcp-config` / `--model` / `--extension` / etc. Previously `createSessionStore` reported `isResumed=true` whenever `--continue` (or a `--session <path>` to a non-existent file) was passed, even when `ContinueRecentSession` had silently fallen back to creating a fresh session — so `maybeRestoreInvocation` took the "resume" branch, found no stamped invocation, and skipped stamping. New `SessionStore.WasResumed()` is the single source of truth: it returns true only when an existing header was successfully loaded from disk. Doc on `maybeRestoreInvocation` corrected to match actual stderr-notice behaviour (drift/missing warnings only).
 
