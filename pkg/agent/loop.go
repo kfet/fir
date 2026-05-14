@@ -126,14 +126,31 @@ func runLoop(
 			if hasIncompleteToolCall(message) {
 				message = retryMidToolCall(ctx, currentCtx, config, streamFn, events, message)
 				if hasIncompleteToolCall(message) {
-					note := NewAgentMessage(ai.NewUserMsg(streamErrorNote(message.ErrorMessage), time.Now().UnixMilli()))
+					// Drain follow-ups FIRST. If any exist we must avoid
+					// producing two adjacent user-role messages — Anthropic
+					// rejects non-alternating roles — so the cutoff note is
+					// folded into the first follow-up's text instead of
+					// being appended as its own user turn.
+					noteText := streamErrorNote(message.ErrorMessage)
+					followUp := drainFollowUps(config)
+					if len(followUp) > 0 {
+						if foldStreamErrorNoteIntoFirstUser(followUp, noteText) {
+							pendingMessages = followUp
+							hasMoreToolCalls = false
+							continue
+						}
+						// First follow-up isn't user-role (unusual) — fall
+						// through and inject as standalone, then queue.
+					}
+
+					note := NewAgentMessage(ai.NewUserMsg(noteText, time.Now().UnixMilli()))
 					currentCtx.Messages = append(currentCtx.Messages, note)
 					newMessages = append(newMessages, note)
 					events <- AgentEvent{Type: EventMessageStart, Message: &note}
 					events <- AgentEvent{Type: EventMessageEnd, Message: &note}
 					events <- AgentEvent{Type: EventTurnEnd, TurnMessage: &note}
 
-					if followUp := drainFollowUps(config); len(followUp) > 0 {
+					if len(followUp) > 0 {
 						pendingMessages = followUp
 						hasMoreToolCalls = false
 						continue
@@ -339,6 +356,29 @@ func streamErrorNote(errMsg string) string {
 			"The tool did NOT execute. Please acknowledge the interruption and decide whether to retry.",
 		errMsg,
 	)
+}
+
+// foldStreamErrorNoteIntoFirstUser prepends `note` to the first user-role
+// message in `msgs`, in place. Returns true on success; false if the first
+// message isn't user-role or its content isn't a plain string (the only
+// shape we can safely splice text into). Used to merge the mid-tool-call
+// cutoff note with a queued follow-up message rather than producing two
+// adjacent user turns (which Anthropic's API rejects).
+func foldStreamErrorNoteIntoFirstUser(msgs []AgentMessage, note string) bool {
+	if len(msgs) == 0 {
+		return false
+	}
+	u := msgs[0].Message.AsUser()
+	if u == nil {
+		return false
+	}
+	existing, ok := u.Content.(string)
+	if !ok {
+		return false
+	}
+	merged := ai.NewUserMsg(note+"\n\n"+existing, u.Timestamp)
+	msgs[0] = NewAgentMessage(merged)
+	return true
 }
 
 // streamAssistantResponse streams an LLM response, handling context transforms.

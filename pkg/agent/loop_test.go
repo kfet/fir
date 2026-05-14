@@ -773,3 +773,90 @@ func TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote(t *testing.T) {
 		t.Errorf("expected a synthetic user-role note about the mid-tool-call cutoff in returned messages; got=%+v", returned)
 	}
 }
+
+// TestAgentLoop_MidToolCallExhaustedWithFollowUpsFoldsNote verifies that
+// when retries are exhausted AND follow-up messages exist, the cutoff note
+// is folded into the first follow-up rather than being appended as its own
+// user turn. Anthropic's API tolerates consecutive user-role messages (it
+// effectively concatenates them) but folding still keeps the note attached
+// to the follow-up that motivated the next turn and avoids gratuitous
+// fragmentation of history.
+func TestAgentLoop_MidToolCallExhaustedWithFollowUpsFoldsNote(t *testing.T) {
+	events := make(chan AgentEvent, 200)
+
+	b1 := partialToolCallError("Bash", "")
+	b2 := partialToolCallError("Bash", "")
+	b3 := partialToolCallError("Bash", "")
+	b4 := partialToolCallError("Bash", "")
+	recovered := simpleResponse("ok")
+
+	followUpDelivered := false
+	followUpMsg := NewAgentMessage(ai.NewUserMsg("channel follow-up", time.Now().UnixMilli()))
+
+	config := &AgentLoopConfig{
+		Model:        testModel(),
+		ConvertToLLM: testConvertToLLM,
+		GetFollowUpMessages: func() ([]AgentMessage, error) {
+			if !followUpDelivered {
+				followUpDelivered = true
+				return []AgentMessage{followUpMsg}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	streamFn := mockStreamFn(b1, b2, b3, b4, recovered)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Show me logs", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+	_ = collectEvents(events)
+	<-done
+
+	// The cutoff context must be folded INTO the follow-up user message
+	// (single combined user message), not appear as a separate user turn.
+	var foldedCount int
+	for _, m := range returned {
+		if m.Role() != "user" {
+			continue
+		}
+		u := m.Message.AsUser()
+		if u == nil {
+			continue
+		}
+		text, _ := u.Content.(string)
+		if strings.Contains(text, "cut off") && strings.Contains(text, "channel follow-up") {
+			foldedCount++
+		}
+	}
+	if foldedCount != 1 {
+		t.Errorf("expected exactly one user message carrying both the cutoff note and the follow-up text (folded); got %d. returned=%+v", foldedCount, returned)
+	}
+
+	// No standalone synthetic note should remain as a separate user message
+	// alongside the folded follow-up.
+	standaloneNotes := 0
+	for _, m := range returned {
+		if m.Role() != "user" {
+			continue
+		}
+		u := m.Message.AsUser()
+		if u == nil {
+			continue
+		}
+		text, _ := u.Content.(string)
+		if strings.Contains(text, "cut off") && !strings.Contains(text, "channel follow-up") {
+			standaloneNotes++
+		}
+	}
+	if standaloneNotes != 0 {
+		t.Errorf("expected the cutoff note to be folded into the follow-up, not appear as a standalone user message; standalone count=%d", standaloneNotes)
+	}
+}
