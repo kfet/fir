@@ -445,143 +445,29 @@ func originPrecedence(origin string) int {
 	}
 }
 
+// Skill satisfies the Overridable interface so it can use ResolveOverrides.
+func (s Skill) GetID() string       { return s.ID }
+func (s Skill) GetName() string     { return s.Name }
+func (s Skill) GetOrigin() string   { return s.Origin }
+func (s Skill) GetOverride() string { return s.Override }
+func (s Skill) GetPath() string     { return s.FilePath }
+
 // resolveOverrides applies override semantics to a flat list of skills.
-// Returns the surviving skills (in input order, with Overridden populated)
-// and any diagnostics (shadowed/override-conflict).
+// Thin wrapper around the generic ResolveOverrides; preserves the previous
+// return shape (survivors with Overridden populated, plus diagnostics).
 func resolveOverrides(skills []Skill) ([]Skill, []ResourceDiagnostic) {
-	var diagnostics []ResourceDiagnostic
-
-	// Index skills by ID for explicit-target overrides.
-	byID := make(map[string]int, len(skills))
-	for i, s := range skills {
-		byID[s.ID] = i
-	}
-
-	// Collect override actions: which IDs are slated for removal, and by whom.
-	type killEntry struct {
-		killerID  string
-		killerIdx int
-	}
-	killed := make(map[string]killEntry) // victim ID -> killer
-
-	// First pass: explicit-ID overrides.
-	for i, s := range skills {
-		if s.Override == "" || s.Override == "true" {
-			continue
-		}
-		// Allow callers to write the target either as the raw origin form
-		// (e.g. "path:foo__bar", "pkg:github.com/x/y__skill") or the
-		// already-sanitized ID. Look up by both.
-		target := s.Override
-		victimIdx, ok := byID[target]
-		if !ok {
-			// Try sanitizing the origin portion: split on the LAST "__".
-			if cut := strings.LastIndex(target, "__"); cut > 0 {
-				sanitized := SanitizeOriginForID(target[:cut]) + "__" + target[cut+2:]
-				if vi, ok2 := byID[sanitized]; ok2 {
-					victimIdx, ok = vi, true
-				}
-			}
-		}
-		if !ok {
-			diagnostics = append(diagnostics, ResourceDiagnostic{
-				Type:    "warning",
-				Path:    s.FilePath,
-				Message: fmt.Sprintf("skill %q declares override: %q but no such skill is loaded", s.ID, s.Override),
-			})
-			continue
-		}
-		if victimIdx == i {
-			diagnostics = append(diagnostics, ResourceDiagnostic{
-				Type:    "warning",
-				Path:    s.FilePath,
-				Message: fmt.Sprintf("skill %q cannot override itself", s.ID),
-			})
-			continue
-		}
-		killed[skills[victimIdx].ID] = killEntry{killerID: s.ID, killerIdx: i}
-	}
-
-	// Second pass: `override: true`. For each name, group all skills with
-	// override:true; the highest-precedence wins; that winner kills every
-	// other same-named skill (including non-overriders); losing overriders
-	// produce an override-conflict warning but otherwise coexist.
-	byName := make(map[string][]int, len(skills))
-	for i, s := range skills {
-		byName[s.Name] = append(byName[s.Name], i)
-	}
-	for name, idxs := range byName {
-		if len(idxs) < 2 {
-			continue
-		}
-		// Find override:true claimants (skipping ones already killed).
-		var claimants []int
-		for _, i := range idxs {
-			if _, dead := killed[skills[i].ID]; dead {
-				continue
-			}
-			if skills[i].Override == "true" {
-				claimants = append(claimants, i)
-			}
-		}
-		if len(claimants) == 0 {
-			continue
-		}
-		// Pick highest-precedence claimant; tie → first by index for determinism.
-		winner := claimants[0]
-		for _, c := range claimants[1:] {
-			if originPrecedence(skills[c].Origin) > originPrecedence(skills[winner].Origin) {
-				winner = c
-			}
-		}
-		if len(claimants) > 1 {
-			var others []string
-			for _, c := range claimants {
-				if c != winner {
-					others = append(others, skills[c].ID)
-				}
-			}
-			diagnostics = append(diagnostics, ResourceDiagnostic{
-				Type:    "override-conflict",
-				Path:    skills[winner].FilePath,
-				Message: fmt.Sprintf("multiple skills claim override of %q; %q won (others: %s)", name, skills[winner].ID, strings.Join(others, ", ")),
-			})
-		}
-		// Winner kills every other same-named skill that isn't itself.
-		for _, i := range idxs {
-			if i == winner {
-				continue
-			}
-			if _, already := killed[skills[i].ID]; already {
-				continue
-			}
-			killed[skills[i].ID] = killEntry{killerID: skills[winner].ID, killerIdx: winner}
-		}
-	}
-
-	// Build surviving list and collect Overridden lists for survivors.
-	overriddenBy := make(map[int][]string)
-	for victimID, k := range killed {
-		overriddenBy[k.killerIdx] = append(overriddenBy[k.killerIdx], victimID)
-	}
-
+	keep, overriddenBy, diags := ResolveOverrides(skills, "skill")
 	var survivors []Skill
 	for i, s := range skills {
-		if k, dead := killed[s.ID]; dead {
-			diagnostics = append(diagnostics, ResourceDiagnostic{
-				Type:    "shadowed",
-				Path:    s.FilePath,
-				Message: fmt.Sprintf("skill %q shadowed by override from %q", s.ID, k.killerID),
-			})
+		if !keep[i] {
 			continue
 		}
 		if extras := overriddenBy[i]; len(extras) > 0 {
-			sort.Strings(extras)
 			s.Overridden = append(s.Overridden, extras...)
 		}
 		survivors = append(survivors, s)
 	}
-	return survivors, diagnostics
+	return survivors, diags
 }
 
 // LoadSkillsOptions configures skill loading.

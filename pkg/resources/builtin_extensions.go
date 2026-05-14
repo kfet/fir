@@ -63,7 +63,11 @@ type ExtensionFrontmatter struct {
 	Modes         []string
 	AuthProviders []string // auth provider IDs this extension registers
 	CLIVerbs      []string // top-level `fir <verb>` names this extension claims
-	Present       bool     // true when a valid frontmatter block was found
+	// Override declares this extension replaces another with the same name.
+	// "" = coexist (default); "true" = replace any other same-named extension;
+	// "<full-id>" = replace specifically that target.
+	Override string
+	Present  bool // true when a valid frontmatter block was found
 }
 
 // ParseCommentFrontmatter parses frontmatter from comment-delimited blocks.
@@ -128,6 +132,8 @@ func ParseCommentFrontmatter(content string) ExtensionFrontmatter {
 			fm.AuthProviders = parseCommaSeparatedList(value)
 		case "cli_verb", "cli_verbs":
 			fm.CLIVerbs = parseCommaSeparatedList(value)
+		case "override":
+			fm.Override = value
 		}
 	}
 
