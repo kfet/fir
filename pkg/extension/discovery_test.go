@@ -375,27 +375,30 @@ func TestDiscover_OriginAndID(t *testing.T) {
 	dir := t.TempDir()
 	globalDir := filepath.Join(dir, "global")
 	projectDir := filepath.Join(dir, "project")
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
+	pkgDir := filepath.Join(dir, "pkg")
+	for _, d := range []string{globalDir, projectDir, pkgDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	mkExt := func(parent, name string) {
+	mkExt := func(parent, name string) string {
 		body := "#!/usr/bin/env bash\n# ---\n# name: " + name + "\n# description: t\n# ---\necho\n"
 		p := filepath.Join(parent, name+".sh")
 		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		return p
 	}
 	mkExt(globalDir, "g")
 	mkExt(projectDir, "p")
+	pkgPath := mkExt(pkgDir, "k")
 
 	configs, err := DiscoverWithDirs(globalDir, projectDir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	configs = append(configs, ConfigsFromFiles([]string{pkgPath})...)
 
 	byName := map[string]ExtProcConfig{}
 	for _, c := range configs {
@@ -406,6 +409,7 @@ func TestDiscover_OriginAndID(t *testing.T) {
 	}{
 		{"g", "user", "user__g"},
 		{"p", "project", "project__p"},
+		{"k", "package", "package__k"},
 	}
 	for _, tc := range cases {
 		c, ok := byName[tc.name]
@@ -419,5 +423,33 @@ func TestDiscover_OriginAndID(t *testing.T) {
 		if c.ID != tc.wantID {
 			t.Errorf("%s: ID=%q, want %q", tc.name, c.ID, tc.wantID)
 		}
+	}
+}
+
+// TestLoadBuiltinExtensions_OriginAndID verifies builtin extensions
+// discovered via the top-level Discover() carry the "builtin" origin.
+func TestLoadBuiltinExtensions_OriginAndID(t *testing.T) {
+	// Use Discover with an empty project dir so only builtins surface.
+	dir := t.TempDir()
+	configs, err := Discover(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawBuiltin bool
+	for _, c := range configs {
+		if c.Scope != "builtin" {
+			continue
+		}
+		sawBuiltin = true
+		if c.Origin != "builtin" {
+			t.Errorf("builtin %s: Origin=%q, want %q", c.Name, c.Origin, "builtin")
+		}
+		want := "builtin__" + c.Name
+		if c.ID != want {
+			t.Errorf("builtin %s: ID=%q, want %q", c.Name, c.ID, want)
+		}
+	}
+	if !sawBuiltin {
+		t.Skip("no builtin extensions discovered in this environment")
 	}
 }

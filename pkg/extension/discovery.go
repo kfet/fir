@@ -23,19 +23,15 @@ type ExtProcConfig struct {
 }
 
 // originForScope maps the existing Scope label to the Origin label used by
-// the resource-coexistence model. Today this is a straight 1:1 translation
-// (global → user, others identity-mapped); package extensions get a generic
-// "package" origin without source attribution. When Phase 2 eventually
-// wires per-package source threading, replace this with the real source.
+// the resource-coexistence model. Today only `global` translates (→ `user`);
+// `project`, `builtin`, and `package` pass through unchanged. When Phase 2
+// eventually wires per-package source threading, package origins will become
+// `pkg:<source>` and this helper will need the package source threaded in.
 func originForScope(scope string) string {
-	switch scope {
-	case "global":
+	if scope == "global" {
 		return "user"
-	case "project", "builtin", "package":
-		return scope
-	default:
-		return scope
 	}
+	return scope
 }
 
 // makeExtConfig builds an ExtProcConfig with Origin and ID populated from
