@@ -250,13 +250,11 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			}
 		},
 		ResourceLoaderOptions: &resources.ResourceLoaderOptions{
-			Cwd:                           cwd,
-			AgentDir:                      agentDir,
-			SettingsManager:               settingsManager,
-			NoSkills:                      pa.options.NoSkills,
-			AdditionalSkillPaths:          pa.options.AdditionalSkillPaths,
-			AdditionalPromptTemplatePaths: pa.options.AdditionalPromptTemplatePaths,
-			NoPromptTemplates:             pa.options.NoPromptTemplates,
+			Cwd:                  cwd,
+			AgentDir:             agentDir,
+			SettingsManager:      settingsManager,
+			NoSkills:             pa.options.NoSkills,
+			AdditionalSkillPaths: pa.options.AdditionalSkillPaths,
 		},
 		CompactionRunner: &compaction.DefaultRunner{
 			SettingsManager: settingsManager,
@@ -437,12 +435,6 @@ func (pa *firAgent) sendAvailableCommands(sessionID string) {
 	}
 
 	commands := builtInCommands()
-
-	// Add prompt template commands
-	templates, _ := entry.session.ResourceLoader().GetPrompts()
-	for _, t := range templates {
-		commands = append(commands, acpsdk.AvailableCommand{Name: t.Name, Description: t.Description})
-	}
 
 	// Add skill commands
 	if entry.settingsManager == nil || entry.settingsManager.GetEnableSkillCommands() {

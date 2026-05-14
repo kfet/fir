@@ -13,7 +13,6 @@ import (
 type FirManifest struct {
 	Extensions []string `json:"extensions"`
 	Skills     []string `json:"skills"`
-	Prompts    []string `json:"prompts"`
 	Themes     []string `json:"themes"`
 }
 
@@ -21,7 +20,6 @@ type FirManifest struct {
 type PackageResources struct {
 	Extensions []string
 	Skills     []string
-	Prompts    []string
 	Themes     []string
 }
 
@@ -53,10 +51,6 @@ func expandManifest(dir string, m *FirManifest) (*PackageResources, error) {
 		return nil, err
 	}
 	res.Skills, err = globPatterns(dir, m.Skills)
-	if err != nil {
-		return nil, err
-	}
-	res.Prompts, err = globPatterns(dir, m.Prompts)
 	if err != nil {
 		return nil, err
 	}

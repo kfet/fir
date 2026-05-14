@@ -61,7 +61,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"export", "Export session to an HTML file (usage: /export [path])", cmdExport})
 	r.register(slashCommand{"login", "Login with OAuth provider (usage: /login [provider-id])", cmdLogin})
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
-	r.register(slashCommand{"reload", "Reload extensions, skills, prompts", cmdReload})
+	r.register(slashCommand{"reload", "Reload extensions, skills, themes, and MCP servers", cmdReload})
 	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
 	r.register(slashCommand{"mcp", "Show MCP servers summary, or /mcp <name> for full tool details", cmdMCP})
 	return r
@@ -125,22 +125,7 @@ func (pa *firAgent) handleSlashCommand(sessionID string, entry *firSession, comm
 		}
 	}
 
-	// 3. Prompt templates.
-	templates, _ := entry.session.ResourceLoader().GetPrompts()
-	for _, t := range templates {
-		if t.Name == command {
-			fullCmd := "/" + command
-			if args != "" {
-				fullCmd += " " + args
-			}
-			if expanded := resources.ExpandPromptTemplate(fullCmd, templates); expanded != fullCmd {
-				_ = entry.session.Prompt(expanded)
-			}
-			return true
-		}
-	}
-
-	// 4. Skill commands.
+	// 3. Skill commands.
 	if strings.HasPrefix(command, "skill:") && (entry.settingsManager == nil || entry.settingsManager.GetEnableSkillCommands()) {
 		skillName := strings.TrimPrefix(command, "skill:")
 		skills, _ := entry.session.ResourceLoader().GetSkills()

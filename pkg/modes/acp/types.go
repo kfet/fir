@@ -16,12 +16,8 @@ import acpsdk "github.com/coder/acp-go-sdk"
 type Options struct {
 	// Additional skill paths from --skill flags.
 	AdditionalSkillPaths []string
-	// Additional prompt template paths from --prompt-template flags.
-	AdditionalPromptTemplatePaths []string
 	// Disable skill discovery (--no-skills).
 	NoSkills bool
-	// Disable prompt template discovery (--no-prompt-templates).
-	NoPromptTemplates bool
 	// Disable extension loading (--no-extensions).
 	NoExtensions bool
 	// Disable MCP server integration (--no-mcp).

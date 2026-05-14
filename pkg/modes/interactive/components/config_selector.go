@@ -19,14 +19,12 @@ type ResourceType string
 const (
 	ResourceTypeExtensions ResourceType = "extensions"
 	ResourceTypeSkills     ResourceType = "skills"
-	ResourceTypePrompts    ResourceType = "prompts"
 	ResourceTypeThemes     ResourceType = "themes"
 )
 
 var resourceTypeLabels = map[ResourceType]string{
 	ResourceTypeExtensions: "Extensions",
 	ResourceTypeSkills:     "Skills",
-	ResourceTypePrompts:    "Prompts",
 	ResourceTypeThemes:     "Themes",
 }
 
@@ -69,7 +67,6 @@ type ResolvedResource struct {
 type ResolvedPaths struct {
 	Extensions []ResolvedResource
 	Skills     []ResolvedResource
-	Prompts    []ResolvedResource
 	Themes     []ResolvedResource
 }
 
@@ -147,7 +144,6 @@ func buildGroups(resolved ResolvedPaths) []*ResourceGroup {
 
 	addToGroup(resolved.Extensions, ResourceTypeExtensions)
 	addToGroup(resolved.Skills, ResourceTypeSkills)
-	addToGroup(resolved.Prompts, ResourceTypePrompts)
 	addToGroup(resolved.Themes, ResourceTypeThemes)
 
 	// Sort groups: packages first, then by scope
@@ -169,7 +165,7 @@ func buildGroups(resolved ResolvedPaths) []*ResourceGroup {
 	// Sort subgroups and items
 	typeOrder := map[ResourceType]int{
 		ResourceTypeExtensions: 0, ResourceTypeSkills: 1,
-		ResourceTypePrompts: 2, ResourceTypeThemes: 3,
+		ResourceTypeThemes: 2,
 	}
 	for _, g := range groups {
 		sort.Slice(g.Subgroups, func(i, j int) bool {

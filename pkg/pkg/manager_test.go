@@ -214,7 +214,7 @@ func TestResolveEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rr.Extensions)+len(rr.Skills)+len(rr.Prompts)+len(rr.Themes) != 0 {
+	if len(rr.Extensions)+len(rr.Skills)+len(rr.Themes) != 0 {
 		t.Error("expected all empty slices")
 	}
 }

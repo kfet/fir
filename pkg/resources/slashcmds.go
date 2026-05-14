@@ -57,7 +57,7 @@ var BuiltinSlashCommands = []BuiltinSlashCommand{
 	{Name: "changelog", Description: "Show changelog entries"},
 	{Name: "login", Description: "Login with OAuth provider"},
 	{Name: "logout", Description: "Logout from OAuth provider"},
-	{Name: "reload", Description: "Reload extensions, skills, prompts, themes, and MCP servers"},
+	{Name: "reload", Description: "Reload extensions, skills, themes, and MCP servers"},
 	{Name: "skills", Description: "List loaded skills, or install a builtin skill"},
 	{Name: "update", Description: "Update fir to the latest version in-place and restart"},
 	{Name: "reexec", Description: "Re-exec into the current or a specified binary, preserving the session, message queue, and pending input. Usage: /reexec [<path>] [-- <prompt>]  |  /reexec <prompt>"},

@@ -149,9 +149,6 @@ type noopResourceLoader struct{}
 func (n noopResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) {
 	return nil, nil
 }
-func (n noopResourceLoader) GetPrompts() ([]resources.PromptTemplate, []resources.ResourceDiagnostic) {
-	return nil, nil
-}
 func (n noopResourceLoader) GetAgentsFiles() []resources.AgentsFile             { return nil }
 func (n noopResourceLoader) GetSystemPrompt() string                            { return "" }
 func (n noopResourceLoader) GetAppendSystemPrompt() []string                    { return nil }

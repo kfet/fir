@@ -1,31 +1,32 @@
 # Resource Lookup Paths
 
-fir discovers skills, prompts, themes, and extensions from multiple locations. This document explains the lookup order, how to configure additional paths via settings, and how path resolution works.
+fir discovers skills, themes, and extensions from multiple locations. This document explains the lookup order, how to configure additional paths via settings, and how path resolution works.
 
 ## Lookup Order
 
-Resources are discovered in priority order. On name collisions, earlier sources win:
+Resources are discovered from these sources:
 
-| Priority | Source | Skills | Prompts | Extensions | Themes |
-|----------|--------|--------|---------|------------|--------|
-| 1 | CLI flags | `--skill <path>` | `--prompt-template <path>` | `--extension <name>` | `--theme <path>` |
-| 2 | Project dir | `.fir/skills/` | `.fir/prompts/` | `.fir/extensions/` | — |
-| 3 | User dir | `~/.config/fir/skills/` | `~/.config/fir/prompts/` | `~/.config/fir/extensions/` | — |
-| 4 | Settings paths | `"skills"` array | `"prompts"` array | `"extensions"` array* | `"themes"` array |
-| 5 | Packages | installed via `fir install` | installed via `fir install` | installed via `fir install` | installed via `fir install` |
-| 6 | Builtins | embedded in binary | — | embedded in binary | — |
+| Priority | Source | Skills | Extensions | Themes |
+|----------|--------|--------|------------|--------|
+| 1 | CLI flags | `--skill <path>` | `--extension <name>` | `--theme <path>` |
+| 2 | Project dir | `.fir/skills/` | `.fir/extensions/` | — |
+| 3 | User dir | `~/.config/fir/skills/` | `~/.config/fir/extensions/` | — |
+| 4 | Settings paths | `"skills"` array | `"extensions"` array* | `"themes"` array |
+| 5 | Packages | installed via `fir install` | installed via `fir install` | installed via `fir install` |
+| 6 | Builtins | embedded in binary | embedded in binary | — |
 
-\* The `"extensions"` setting is a **name allowlist**, not a path list. It filters which discovered extensions to activate. The other arrays (`"skills"`, `"prompts"`, `"themes"`) are **additional path lists**.
+\* The `"extensions"` setting is a **name allowlist**, not a path list. It filters which discovered extensions to activate. The other arrays (`"skills"`, `"themes"`) are **additional path lists**.
+
+For skills, **same-named entries from different sources coexist by default**; each gets a unique ID of the form `<origin>__<name>` (e.g. `user__release`, `pkg_github_com_kfet_foo__release`). To replace another same-named skill, add `override: true` or `override: <full-id>` to its frontmatter. See the `self` skill for details.
 
 ## Configuring Additional Paths
 
-Add paths to `"skills"`, `"prompts"`, or `"themes"` in `settings.json` (global or project):
+Add paths to `"skills"` or `"themes"` in `settings.json` (global or project):
 
 ```jsonc
 // ~/.config/fir/settings.json (global)
 {
   "skills": ["skills", "~/shared-skills"],
-  "prompts": ["prompts"],
   "themes": ["~/my-themes"]
 }
 ```
@@ -62,12 +63,6 @@ Relative paths resolve against the **current working directory** at startup — 
 
 With this single global setting, fir will look for a `skills/` directory in whatever project you're working in. Projects that have a `skills/` folder get those skills loaded automatically; projects that don't simply skip it (missing paths are silently ignored).
 
-This lets you establish team conventions like:
-- `skills/` — project-specific agent skills
-- `prompts/` — project-specific prompt templates
-
-...and have fir discover them everywhere without per-project `.fir/settings.json` configuration.
-
 ### XDG Support
 
 If `$XDG_CONFIG_HOME` is set, the global config directory is `$XDG_CONFIG_HOME/fir/` instead of `~/.config/fir/`. The agent directory can also be overridden with `$FIR_AGENT_DIR`.
@@ -94,12 +89,3 @@ Any project with a `skills/` directory will have those skills auto-loaded.
 ```
 
 The project config replaces the global `skills` array, so include all desired paths.
-
-### Custom prompt templates
-
-```jsonc
-// ~/.config/fir/settings.json
-{ "prompts": ["prompts", "~/shared-prompts"] }
-```
-
-Looks for `prompts/` in the current project and `~/shared-prompts/` globally.

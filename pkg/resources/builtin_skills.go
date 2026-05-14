@@ -123,6 +123,9 @@ func LoadBuiltinSkills() LoadSkillsResult {
 			FilePath:    filepath.Join(extractDir, rel),
 			BaseDir:     filepath.Join(extractDir, skillDir),
 			Source:      "builtin",
+			Origin:      "builtin",
+			ID:          MakeSkillID("builtin", name),
+			Override:    fm.Override,
 		})
 		return nil
 	})

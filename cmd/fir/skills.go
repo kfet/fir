@@ -74,7 +74,10 @@ func runSkillsList() error {
 
 	skills := result.Skills
 	sort.Slice(skills, func(i, j int) bool {
-		return skills[i].Name < skills[j].Name
+		if skills[i].Name != skills[j].Name {
+			return skills[i].Name < skills[j].Name
+		}
+		return skills[i].ID < skills[j].ID
 	})
 
 	if len(skills) == 0 {
@@ -82,10 +85,18 @@ func runSkillsList() error {
 		return nil
 	}
 
-	// Compute column widths
-	nameW := 4   // "NAME"
-	sourceW := 6 // "SOURCE"
+	// Pre-compute name occurrence counts so we can mark ambiguous entries.
+	nameCount := make(map[string]int, len(skills))
 	for _, s := range skills {
+		nameCount[s.Name]++
+	}
+
+	// Compute column widths.
+	idW, nameW, sourceW := 2, 4, 6 // "ID", "NAME", "SOURCE"
+	for _, s := range skills {
+		if len(s.ID) > idW {
+			idW = len(s.ID)
+		}
 		if len(s.Name) > nameW {
 			nameW = len(s.Name)
 		}
@@ -94,13 +105,18 @@ func runSkillsList() error {
 		}
 	}
 
-	fmt.Printf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION")
+	fmt.Printf("%-*s  %-*s  %-*s  %s\n", idW, "ID", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION")
 	for _, s := range skills {
 		desc := s.Description
-		if len(desc) > 60 {
-			desc = desc[:57] + "..."
+		if len(s.Overridden) > 0 {
+			desc = "[overrides " + strings.Join(s.Overridden, ", ") + "] " + desc
+		} else if nameCount[s.Name] > 1 {
+			desc = "[ambiguous] " + desc
 		}
-		fmt.Printf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, s.Source, desc)
+		if len(desc) > 80 {
+			desc = desc[:77] + "..."
+		}
+		fmt.Printf("%-*s  %-*s  %-*s  %s\n", idW, s.ID, nameW, s.Name, sourceW, s.Source, desc)
 	}
 	return nil
 }
@@ -187,19 +203,36 @@ func runSkillsShow(name string, full, pathOnly bool) error {
 		IncludeDefaults: true,
 	})
 
+	// Match by ID first (exact), then by bare name. If the bare name is
+	// ambiguous (multiple origins), require the caller to disambiguate.
 	var match *resources.Skill
+	var byName []*resources.Skill
 	for i := range result.Skills {
-		if result.Skills[i].Name == name {
+		if result.Skills[i].ID == name {
 			match = &result.Skills[i]
 			break
 		}
+		if result.Skills[i].Name == name {
+			byName = append(byName, &result.Skills[i])
+		}
+	}
+	if match == nil && len(byName) == 1 {
+		match = byName[0]
+	}
+	if match == nil && len(byName) > 1 {
+		var ids []string
+		for _, s := range byName {
+			ids = append(ids, s.ID)
+		}
+		sort.Strings(ids)
+		return fmt.Errorf("skill %q is ambiguous; specify one of: %s", name, strings.Join(ids, ", "))
 	}
 	if match == nil {
 		var suggestions []string
 		needle := strings.ToLower(name)
 		for _, s := range result.Skills {
-			if strings.Contains(strings.ToLower(s.Name), needle) {
-				suggestions = append(suggestions, s.Name)
+			if strings.Contains(strings.ToLower(s.Name), needle) || strings.Contains(strings.ToLower(s.ID), needle) {
+				suggestions = append(suggestions, s.ID)
 			}
 		}
 		sort.Strings(suggestions)
@@ -218,11 +251,19 @@ func runSkillsShow(name string, full, pathOnly bool) error {
 		return nil
 	}
 
+	fmt.Printf("ID:          %s\n", match.ID)
 	fmt.Printf("Name:        %s\n", match.Name)
+	fmt.Printf("Origin:      %s\n", match.Origin)
 	fmt.Printf("Source:      %s\n", match.Source)
 	fmt.Printf("Description: %s\n", match.Description)
 	fmt.Printf("File:        %s\n", match.FilePath)
 	fmt.Printf("BaseDir:     %s\n", match.BaseDir)
+	if match.Override != "" {
+		fmt.Printf("Override:    %s\n", match.Override)
+	}
+	if len(match.Overridden) > 0 {
+		fmt.Printf("Overrode:    %s\n", strings.Join(match.Overridden, ", "))
+	}
 	if full {
 		data, err := os.ReadFile(match.FilePath)
 		if err != nil {

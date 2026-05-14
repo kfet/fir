@@ -536,11 +536,8 @@ func (s *AgentSession) Prompt(text string, opts ...*PromptOptions) error {
 		planVersionBefore = s.planVersionNum()
 	}
 
-	// Expand skill commands (/skill:name args) and prompt templates (/template args)
+	// Expand skill commands (/skill:name args).
 	content := s.expandSkillCommand(text)
-	if templates, _ := s.resourceLoader.GetPrompts(); len(templates) > 0 {
-		content = resources.ExpandPromptTemplate(content, templates)
-	}
 
 	ts := time.Now().UnixMilli()
 

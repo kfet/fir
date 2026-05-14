@@ -114,7 +114,6 @@ func spawnACP(t *testing.T, extraEnv ...string) (*acpsdk.ClientSideConnection, *
 		"--mode", "acp",
 		"--no-extensions",
 		"--no-skills",
-		"--no-prompt-templates",
 		"--no-themes",
 		"--no-session",
 	)

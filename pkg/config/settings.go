@@ -82,7 +82,6 @@ type Settings struct {
 	Extensions             []string                  `json:"extensions,omitempty"`
 	ExtensionPaths         []string                  `json:"extensionPaths,omitempty"`
 	Skills                 []string                  `json:"skills,omitempty"`
-	Prompts                []string                  `json:"prompts,omitempty"`
 	Themes                 []string                  `json:"themes,omitempty"`
 	EnableSkillCommands    *bool                     `json:"enableSkillCommands,omitempty"`
 	EnableSysExtensions    *bool                     `json:"enableSysExtensions,omitempty"`
@@ -134,9 +133,6 @@ func deepMergeSettings(base, overrides Settings) Settings {
 	}
 	if overrides.Skills != nil {
 		r.Skills = overrides.Skills
-	}
-	if overrides.Prompts != nil {
-		r.Prompts = overrides.Prompts
 	}
 	if overrides.Themes != nil {
 		r.Themes = overrides.Themes
@@ -892,15 +888,6 @@ func (sm *SettingsManager) GetSkillPaths() []string {
 	return out
 }
 
-// GetPromptPaths returns extra prompt template directories/files from settings.
-func (sm *SettingsManager) GetPromptPaths() []string {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	out := make([]string, len(sm.settings.Prompts))
-	copy(out, sm.settings.Prompts)
-	return out
-}
-
 func (sm *SettingsManager) GetEnableSkillCommands() bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -1053,16 +1040,6 @@ func (sm *SettingsManager) SetProjectSkillPaths(paths []string) {
 	projectSettings := deepCopySettings(sm.projectSettings)
 	projectSettings.Skills = paths
 	sm.markProjectModified("skills")
-	sm.saveProjectSettings(projectSettings)
-}
-
-// SetProjectPromptTemplatePaths sets the prompts setting in the project settings file.
-func (sm *SettingsManager) SetProjectPromptTemplatePaths(paths []string) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	projectSettings := deepCopySettings(sm.projectSettings)
-	projectSettings.Prompts = paths
-	sm.markProjectModified("prompts")
 	sm.saveProjectSettings(projectSettings)
 }
 

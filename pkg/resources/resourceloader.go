@@ -26,15 +26,30 @@ type PathMetadata struct {
 // ResourcePackageResolver is implemented by the package manager to contribute
 // resource paths without creating an import cycle between pkg/resources and pkg/pkg.
 type ResourcePackageResolver interface {
-	// ResolvePackageResources returns the paths of extensions, skills, prompts,
-	// and themes contributed by all installed packages.
-	ResolvePackageResources() (extensions, skills, prompts, themes []string, err error)
+	// ResolvePackageResources returns the paths of extensions, skills, and
+	// themes contributed by all installed packages.
+	ResolvePackageResources() (extensions, skills, themes []string, err error)
+
+	// ResolvePackageContributions returns per-package attribution for each
+	// resource path so that loaders can tag origin as `pkg:<source>`.
+	// Implementations should return contributions for every installed package
+	// whether or not it actually contains a given resource type.
+	ResolvePackageContributions() ([]PackageContribution, error)
+}
+
+// PackageContribution describes one installed package and its resource paths.
+type PackageContribution struct {
+	Source      string   // package source string, e.g. "github.com/kfet/foo"
+	Scope       string   // "user" or "project"
+	InstallPath string   // root of the package on disk
+	Extensions  []string // contributed extension paths
+	Skills      []string // contributed skill paths
+	Themes      []string // contributed theme paths
 }
 
 // ResourceExtensionPaths contains paths provided by extensions to extend resources.
 type ResourceExtensionPaths struct {
-	SkillPaths  []PathEntry
-	PromptPaths []PathEntry
+	SkillPaths []PathEntry
 }
 
 // PathEntry pairs a path with its metadata.
@@ -43,10 +58,9 @@ type PathEntry struct {
 	Metadata PathMetadata
 }
 
-// ResourceLoader provides access to loaded resources (skills, prompts, agents files, system prompt).
+// ResourceLoader provides access to loaded resources (skills, agents files, system prompt).
 type ResourceLoader interface {
 	GetSkills() ([]Skill, []ResourceDiagnostic)
-	GetPrompts() ([]PromptTemplate, []ResourceDiagnostic)
 	GetAgentsFiles() []AgentsFile
 	GetSystemPrompt() string
 	GetAppendSystemPrompt() []string
@@ -81,11 +95,9 @@ type ResourceLoaderOptions struct {
 
 	PackageResolver ResourcePackageResolver
 
-	AdditionalSkillPaths          []string
-	AdditionalPromptTemplatePaths []string
+	AdditionalSkillPaths []string
 
-	NoSkills          bool
-	NoPromptTemplates bool
+	NoSkills bool
 
 	SystemPrompt       string
 	AppendSystemPrompt string
@@ -99,11 +111,9 @@ type DefaultResourceLoader struct {
 	settingsManager *config.SettingsManager
 	pkgResolver     ResourcePackageResolver
 
-	additionalSkillPaths  []string
-	additionalPromptPaths []string
+	additionalSkillPaths []string
 
-	noSkills  bool
-	noPrompts bool
+	noSkills bool
 
 	systemPromptSource       string
 	appendSystemPromptSource string
@@ -111,15 +121,12 @@ type DefaultResourceLoader struct {
 	// Loaded state
 	skills             []Skill
 	skillDiagnostics   []ResourceDiagnostic
-	prompts            []PromptTemplate
-	promptDiagnostics  []ResourceDiagnostic
 	agentsFiles        []AgentsFile
 	systemPrompt       string
 	appendSystemPrompt []string
 	pathMetadata       map[string]PathMetadata
 
-	lastSkillPaths  []string
-	lastPromptPaths []string
+	lastSkillPaths []string
 
 	// Package-contributed paths for systems outside the resource loader
 	// (extensions are handled by pkg/extension; themes by the TUI theme loader).
@@ -150,9 +157,7 @@ func NewResourceLoader(opts ResourceLoaderOptions) *DefaultResourceLoader {
 		settingsManager:          sm,
 		pkgResolver:              opts.PackageResolver,
 		additionalSkillPaths:     opts.AdditionalSkillPaths,
-		additionalPromptPaths:    opts.AdditionalPromptTemplatePaths,
 		noSkills:                 opts.NoSkills,
-		noPrompts:                opts.NoPromptTemplates,
 		systemPromptSource:       opts.SystemPrompt,
 		appendSystemPromptSource: opts.AppendSystemPrompt,
 		pathMetadata:             make(map[string]PathMetadata),
@@ -165,10 +170,6 @@ func NewResourceLoader(opts ResourceLoaderOptions) *DefaultResourceLoader {
 
 func (r *DefaultResourceLoader) GetSkills() ([]Skill, []ResourceDiagnostic) {
 	return r.skills, r.skillDiagnostics
-}
-
-func (r *DefaultResourceLoader) GetPrompts() ([]PromptTemplate, []ResourceDiagnostic) {
-	return r.prompts, r.promptDiagnostics
 }
 
 func (r *DefaultResourceLoader) GetAgentsFiles() []AgentsFile {
@@ -215,69 +216,72 @@ func (r *DefaultResourceLoader) ExtendResources(paths ResourceExtensionPaths) {
 		r.lastSkillPaths = mergePaths(r.cwd, r.lastSkillPaths, newPaths)
 		r.updateSkillsFromPaths(r.lastSkillPaths, skillPaths)
 	}
-
-	if len(paths.PromptPaths) > 0 {
-		promptPaths := r.normalizeExtensionPaths(paths.PromptPaths)
-		newPaths := make([]string, len(promptPaths))
-		for i, e := range promptPaths {
-			newPaths[i] = e.Path
-		}
-		r.lastPromptPaths = mergePaths(r.cwd, r.lastPromptPaths, newPaths)
-		r.updatePromptsFromPaths(r.lastPromptPaths, promptPaths)
-	}
 }
 
 // Reload reloads all resources from disk.
 func (r *DefaultResourceLoader) Reload() error {
 	r.pathMetadata = make(map[string]PathMetadata)
 
-	// Load skills — merge defaults, settings paths, and CLI paths.
-	skillPaths := r.additionalSkillPaths
+	// Build typed roots for skills (preserves origin → package source mapping).
+	var skillRoots []SkillRoot
 	if !r.noSkills {
-		skillPaths = mergePaths(r.cwd, defaultSkillPaths(r.cwd, r.agentDir), skillPaths)
+		// Defaults: user agent dir, then project .fir, then builtin (handled
+		// separately inside LoadSkills via IncludeDefaults).
+		if dir := filepath.Join(r.agentDir, "skills"); dirExists(dir) {
+			skillRoots = append(skillRoots, SkillRoot{Path: dir, Source: "user", Origin: "user"})
+		}
+		if dir := filepath.Join(r.cwd, config.ConfigDirName, "skills"); dirExists(dir) {
+			skillRoots = append(skillRoots, SkillRoot{Path: dir, Source: "project", Origin: "project"})
+		}
+	}
+	// Settings + CLI extra paths get path:<basename> origins.
+	for _, p := range r.additionalSkillPaths {
+		skillRoots = append(skillRoots, SkillRoot{Path: p, Source: "path", Origin: "path:" + filepath.Base(p)})
 	}
 	if r.settingsManager != nil {
-		skillPaths = mergePaths(r.cwd, skillPaths, r.settingsManager.GetSkillPaths())
-	}
-
-	// Load prompt templates — merge defaults, settings paths, and CLI paths.
-	promptPaths := r.additionalPromptPaths
-	if !r.noPrompts {
-		promptPaths = mergePaths(r.cwd, defaultPromptPaths(r.cwd, r.agentDir), promptPaths)
-	}
-	if r.settingsManager != nil {
-		promptPaths = mergePaths(r.cwd, promptPaths, r.settingsManager.GetPromptPaths())
-	}
-
-	// Append package resources if a resolver is configured.
-	var pkgSkillEntries, pkgPromptEntries []PathEntry
-	if r.pkgResolver != nil {
-		pkgExtensions, pkgSkills, pkgPrompts, pkgThemes, err := r.pkgResolver.ResolvePackageResources()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: package resources: %v\n", err)
-		} else {
-			// Store extension and theme paths for callers that handle those systems.
-			r.pkgExtensionPaths = pkgExtensions
-			r.pkgThemePaths = pkgThemes
-
-			for _, p := range pkgSkills {
-				meta := PathMetadata{Source: "package", Scope: r.scopeForPath(p), Origin: "package"}
-				pkgSkillEntries = append(pkgSkillEntries, PathEntry{Path: p, Metadata: meta})
-				skillPaths = append(skillPaths, p)
-			}
-			for _, p := range pkgPrompts {
-				meta := PathMetadata{Source: "package", Scope: r.scopeForPath(p), Origin: "package"}
-				pkgPromptEntries = append(pkgPromptEntries, PathEntry{Path: p, Metadata: meta})
-				promptPaths = append(promptPaths, p)
-			}
+		for _, p := range r.settingsManager.GetSkillPaths() {
+			skillRoots = append(skillRoots, SkillRoot{Path: p, Source: "path", Origin: "path:" + filepath.Base(p)})
 		}
 	}
 
-	r.lastSkillPaths = skillPaths
-	r.updateSkillsFromPaths(skillPaths, pkgSkillEntries)
+	// Append package resources if a resolver is configured.
+	var pkgSkillEntries []PathEntry
+	if r.pkgResolver != nil {
+		// Per-package attribution for skills (origin = pkg:<source>).
+		contribs, contribErr := r.pkgResolver.ResolvePackageContributions()
+		if contribErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: package contributions: %v\n", contribErr)
+		} else {
+			for _, c := range contribs {
+				origin := "pkg:" + c.Source
+				for _, p := range c.Skills {
+					skillRoots = append(skillRoots, SkillRoot{Path: p, Source: "package", Origin: origin})
+					pkgSkillEntries = append(pkgSkillEntries, PathEntry{
+						Path:     p,
+						Metadata: PathMetadata{Source: "package", Scope: c.Scope, Origin: "package"},
+					})
+				}
+			}
+		}
 
-	r.lastPromptPaths = promptPaths
-	r.updatePromptsFromPaths(promptPaths, pkgPromptEntries)
+		// Extensions/themes still go through the legacy flat list
+		// until they get the same Origin/ID treatment in a follow-up.
+		pkgExtensions, _, pkgThemes, err := r.pkgResolver.ResolvePackageResources()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: package resources: %v\n", err)
+		} else {
+			r.pkgExtensionPaths = pkgExtensions
+			r.pkgThemePaths = pkgThemes
+		}
+	}
+
+	// Track flat skill paths for back-compat callers/extension metadata.
+	flatSkillPaths := make([]string, 0, len(skillRoots))
+	for _, sr := range skillRoots {
+		flatSkillPaths = append(flatSkillPaths, sr.Path)
+	}
+	r.lastSkillPaths = flatSkillPaths
+	r.updateSkillsFromRoots(skillRoots, pkgSkillEntries)
 
 	// Load AGENTS.md / CLAUDE.md files
 	r.agentsFiles = loadProjectContextFiles(r.cwd, r.agentDir)
@@ -344,7 +348,15 @@ func (r *DefaultResourceLoader) classifySkillSource(s Skill) string {
 // ============================================================================
 
 func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionPaths []PathEntry) {
-	if r.noSkills && len(paths) == 0 {
+	roots := make([]SkillRoot, 0, len(paths))
+	for _, p := range paths {
+		roots = append(roots, SkillRoot{Path: p, Source: "path", Origin: "path:" + filepath.Base(p)})
+	}
+	r.updateSkillsFromRoots(roots, extensionPaths)
+}
+
+func (r *DefaultResourceLoader) updateSkillsFromRoots(roots []SkillRoot, extensionPaths []PathEntry) {
+	if r.noSkills && len(roots) == 0 {
 		r.skills = nil
 		r.skillDiagnostics = nil
 		return
@@ -353,25 +365,33 @@ func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionP
 	result := LoadSkills(LoadSkillsOptions{
 		Cwd:             r.cwd,
 		AgentDir:        r.agentDir,
-		SkillPaths:      paths,
-		IncludeDefaults: false, // We pre-include defaults in paths
+		Roots:           roots,
+		IncludeDefaults: false, // We pre-include defaults in roots
 	})
 	r.skills = result.Skills
 	r.skillDiagnostics = result.Diagnostics
 
-	// Append builtin skills that aren't already loaded (lowest priority).
+	// Append builtin skills that aren't already loaded by ID (lowest priority).
 	if !r.noSkills {
 		existing := make(map[string]bool, len(r.skills))
 		for _, s := range r.skills {
-			existing[s.Name] = true
+			existing[s.ID] = true
 		}
 		builtins := LoadBuiltinSkills()
 		r.skillDiagnostics = append(r.skillDiagnostics, builtins.Diagnostics...)
+		// Apply override semantics with current skills + builtins together so
+		// `override: true` declared by a user/project skill correctly shadows
+		// a builtin of the same name.
+		var combined []Skill
+		combined = append(combined, r.skills...)
 		for _, s := range builtins.Skills {
-			if !existing[s.Name] {
-				r.skills = append(r.skills, s)
+			if !existing[s.ID] {
+				combined = append(combined, s)
 			}
 		}
+		survivors, diags := resolveOverrides(combined)
+		r.skills = survivors
+		r.skillDiagnostics = append(r.skillDiagnostics, diags...)
 	}
 	// Reclassify Source by FilePath location so listings show meaningful
 	// scopes ("user", "project", "package") instead of the generic "path"
@@ -379,37 +399,12 @@ func (r *DefaultResourceLoader) updateSkillsFromPaths(paths []string, extensionP
 	for i := range r.skills {
 		r.skills[i].Source = r.classifySkillSource(r.skills[i])
 	}
-	// Sort once more after appending builtins — without this, the system
-	// prompt's <available_skills> ordering depends on builtin walk order
-	// vs user/project order, which can shift when paths change.
-	sort.Slice(r.skills, func(i, j int) bool { return r.skills[i].Name < r.skills[j].Name })
+	// Sort by ID for deterministic ordering.
+	sort.Slice(r.skills, func(i, j int) bool { return r.skills[i].ID < r.skills[j].ID })
 	r.applyExtensionMetadata(extensionPaths, skillFilePaths(r.skills))
 
 	for _, skill := range r.skills {
 		r.addDefaultMetadataForPath(skill.FilePath)
-	}
-}
-
-func (r *DefaultResourceLoader) updatePromptsFromPaths(paths []string, extensionPaths []PathEntry) {
-	if r.noPrompts && len(paths) == 0 {
-		r.prompts = nil
-		r.promptDiagnostics = nil
-		return
-	}
-
-	prompts := LoadPromptTemplates(LoadPromptTemplatesOptions{
-		Cwd:             r.cwd,
-		AgentDir:        r.agentDir,
-		PromptPaths:     paths,
-		IncludeDefaults: false,
-	})
-	deduped, diags := dedupePrompts(prompts)
-	r.prompts = deduped
-	r.promptDiagnostics = diags
-	r.applyExtensionMetadata(extensionPaths, promptFilePaths(r.prompts))
-
-	for _, prompt := range r.prompts {
-		r.addDefaultMetadataForPath(prompt.FilePath)
 	}
 }
 
@@ -521,11 +516,9 @@ func (r *DefaultResourceLoader) addDefaultMetadataForPath(filePath string) {
 
 	agentRoots := []string{
 		filepath.Join(r.agentDir, "skills"),
-		filepath.Join(r.agentDir, "prompts"),
 	}
 	projectRoots := []string{
 		filepath.Join(r.cwd, config.ConfigDirName, "skills"),
-		filepath.Join(r.cwd, config.ConfigDirName, "prompts"),
 	}
 
 	for _, root := range agentRoots {
@@ -556,19 +549,6 @@ func defaultSkillPaths(cwd, agentDir string) []string {
 	}
 	// Project skill dir
 	projectDir := filepath.Join(cwd, config.ConfigDirName, "skills")
-	if dirExists(projectDir) {
-		paths = append(paths, projectDir)
-	}
-	return paths
-}
-
-func defaultPromptPaths(cwd, agentDir string) []string {
-	var paths []string
-	globalDir := filepath.Join(agentDir, "prompts")
-	if dirExists(globalDir) {
-		paths = append(paths, globalDir)
-	}
-	projectDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
 	if dirExists(projectDir) {
 		paths = append(paths, projectDir)
 	}
@@ -711,44 +691,4 @@ func skillFilePaths(skills []Skill) []string {
 		paths[i] = s.FilePath
 	}
 	return paths
-}
-
-func promptFilePaths(prompts []PromptTemplate) []string {
-	paths := make([]string, len(prompts))
-	for i, p := range prompts {
-		paths[i] = p.FilePath
-	}
-	return paths
-}
-
-// dedupePrompts removes duplicate prompt templates by name, keeping the first occurrence.
-func dedupePrompts(prompts []PromptTemplate) ([]PromptTemplate, []ResourceDiagnostic) {
-	seen := make(map[string]PromptTemplate)
-	var diags []ResourceDiagnostic
-
-	for _, p := range prompts {
-		if existing, ok := seen[p.Name]; ok {
-			diags = append(diags, ResourceDiagnostic{
-				Type:    "collision",
-				Message: fmt.Sprintf("name \"/%s\" collision", p.Name),
-				Path:    p.FilePath,
-			})
-			_ = existing // keep first
-		} else {
-			seen[p.Name] = p
-		}
-	}
-
-	result := make([]PromptTemplate, 0, len(seen))
-	// Preserve order: re-iterate prompts, include only first occurrences
-	added := make(map[string]bool)
-	for _, p := range prompts {
-		if !added[p.Name] {
-			if _, ok := seen[p.Name]; ok {
-				result = append(result, seen[p.Name])
-				added[p.Name] = true
-			}
-		}
-	}
-	return result, diags
 }

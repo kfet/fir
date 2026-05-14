@@ -35,7 +35,7 @@ import (
 // ============================================================================
 
 // isBuiltinSlashCommand checks if text is a known builtin slash command.
-// Returns false for skill commands (/skill:*), prompt templates, and unknowns
+// Returns false for skill commands (/skill:*) and unknowns
 // so they can be sent to session.Prompt() for expansion.
 func (m *InteractiveMode) isBuiltinSlashCommand(text string) bool {
 	parts := strings.Fields(text)
@@ -228,7 +228,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		}
 	default:
 		// Not a builtin command.
-		// Check if it's a skill or prompt template command before declaring unknown.
+		// Check if it's a skill command before declaring unknown.
 		m.showWarning(fmt.Sprintf("Unknown command: %s. Type /help for available commands.", cmd))
 	}
 }
@@ -1043,9 +1043,9 @@ func (m *InteractiveMode) handleReloadCommand() {
 		return
 	}
 
-	m.showStatus("Reloading extensions, skills, prompts, themes, and MCP servers...")
+	m.showStatus("Reloading extensions, skills, themes, and MCP servers...")
 
-	// Reload session (re-reads settings.json, skills, prompts, system prompt).
+	// Reload session (re-reads settings.json, skills, system prompt).
 	if err := m.session.Reload(); err != nil {
 		m.showWarning(fmt.Sprintf("Reload failed: %v", err))
 		return
@@ -1073,7 +1073,7 @@ func (m *InteractiveMode) handleReloadCommand() {
 
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
-	m.showStatus("Reloaded extensions, skills, prompts, themes, MCP servers")
+	m.showStatus("Reloaded extensions, skills, themes, MCP servers")
 }
 
 func (m *InteractiveMode) handleSkillsCommand(args []string) {
@@ -1691,7 +1691,7 @@ func (m *InteractiveMode) showHelp() {
   /export         - Export session to HTML file
   /share          - Share session as a secret GitHub gist
   /changelog      - Show changelog entries
-  /reload         - Reload extensions, skills, prompts, themes, and MCP servers
+  /reload         - Reload extensions, skills, themes, and MCP servers
   /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
   /mcp            - Show MCP servers (or /mcp <name> for full details)
   /reexec [path] - Re-exec into specified or current binary (%s), preserving the session

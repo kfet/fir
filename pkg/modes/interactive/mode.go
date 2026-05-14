@@ -389,7 +389,7 @@ func (m *InteractiveMode) Init() error {
 	return nil
 }
 
-// showLoadedResources displays skill/prompt diagnostics (collisions, parse errors) in the chat area.
+// showLoadedResources displays skill diagnostics (collisions, parse errors) in the chat area.
 func (m *InteractiveMode) showLoadedResources() {
 	if m.session == nil {
 		return
@@ -398,16 +398,9 @@ func (m *InteractiveMode) showLoadedResources() {
 
 	// Show skill diagnostics
 	_, skillDiags := m.session.ResourceLoader().GetSkills()
-	_, promptDiags := m.session.ResourceLoader().GetPrompts()
 
 	if len(skillDiags) > 0 {
 		lines := formatDiagnostics(t, "Skill conflicts", skillDiags)
-		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
-		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
-	}
-
-	if len(promptDiags) > 0 {
-		lines := formatDiagnostics(t, "Prompt conflicts", promptDiags)
 		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
 		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	}
@@ -590,8 +583,8 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		}
 
 		// Handle slash commands — known builtins are dispatched locally;
-		// everything else (skill commands, prompt templates) falls through
-		// to session.Prompt which expands them.
+		// everything else (skill commands) falls through to session.Prompt
+		// which expands them.
 		if strings.HasPrefix(text, "/") && m.isBuiltinSlashCommand(text) {
 			m.editor.AddToHistory(text)
 			m.editor.SetText("")
@@ -808,7 +801,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 		})
 	}
 
-	// Add skill commands and prompt templates from the resource loader
+	// Add skill commands from the resource loader
 	if m.session != nil {
 		rl := m.session.ResourceLoader()
 		if rl != nil {
@@ -820,14 +813,6 @@ func (m *InteractiveMode) setupAutocomplete() {
 							Description: skill.Description,
 						})
 					}
-				}
-			}
-			if prompts, _ := rl.GetPrompts(); len(prompts) > 0 {
-				for _, prompt := range prompts {
-					commands = append(commands, SlashCommand{
-						Name:        prompt.Name,
-						Description: prompt.Description,
-					})
 				}
 			}
 		}

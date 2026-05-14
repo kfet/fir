@@ -27,7 +27,6 @@ Optional file at the package root. If absent, auto-discovery runs.
 {
   "extensions": ["extensions/", "*.py"],
   "skills":     ["skills/"],
-  "prompts":    ["prompts/"],
   "themes":     ["themes/"]
 }
 ```
@@ -35,7 +34,6 @@ Optional file at the package root. If absent, auto-discovery runs.
 Auto-discovery (no manifest):
 - Extensions: `*.py`, `*.sh` at any depth (excluding `.git/`, `node_modules/`)
 - Skills: `SKILL.md` in subdirs; `*.md` at the package root
-- Prompts: nothing auto-discovered (must be in manifest)
 - Themes: `*.json` files named `theme.json` or in a `themes/` dir
 
 ## Settings Integration
@@ -107,7 +105,7 @@ Git operations using `os/exec`:
 ## New File: `pkg/pkg/resources.go`
 
 Scan an installed package dir, apply manifest or auto-discover:
-- Return lists of extension paths, skill paths, prompt paths, theme paths
+- Return lists of extension paths, skill paths, theme paths
 
 ## Settings — New Methods on `SettingsManager`
 

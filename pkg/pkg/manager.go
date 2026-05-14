@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kfet/fir/pkg/resources"
 )
 
 // SettingsBackend abstracts the settings persistence needed by Manager.
@@ -31,7 +33,6 @@ type InstalledPackage struct {
 type ResolvedResources struct {
 	Extensions []string
 	Skills     []string
-	Prompts    []string
 	Themes     []string
 }
 
@@ -93,8 +94,8 @@ func (m *Manager) Install(source string, local bool) error {
 	installPath := m.installPath(src, local)
 	res, err := ScanPackageResources(installPath)
 	if err == nil {
-		fmt.Printf("Discovered: %d skill(s), %d extension(s), %d prompt(s), %d theme(s)\n",
-			len(res.Skills), len(res.Extensions), len(res.Prompts), len(res.Themes))
+		fmt.Printf("Discovered: %d skill(s), %d extension(s), %d theme(s)\n",
+			len(res.Skills), len(res.Extensions), len(res.Themes))
 	}
 	return nil
 }
@@ -185,7 +186,6 @@ func (m *Manager) Resolve() (*ResolvedResources, error) {
 		}
 		rr.Extensions = append(rr.Extensions, p.Resources.Extensions...)
 		rr.Skills = append(rr.Skills, p.Resources.Skills...)
-		rr.Prompts = append(rr.Prompts, p.Resources.Prompts...)
 		rr.Themes = append(rr.Themes, p.Resources.Themes...)
 	}
 	return rr, nil
@@ -362,13 +362,39 @@ func gitDirBase(src *Source) string {
 }
 
 // ResolvePackageResources implements resources.ResourcePackageResolver.
-// It returns the aggregate extension, skill, prompt, and theme paths
+// It returns the aggregate extension, skill, and theme paths
 // from all installed packages so the resource loader can include them
 // without importing pkg/pkg directly.
-func (m *Manager) ResolvePackageResources() (extensions, skills, prompts, themes []string, err error) {
+func (m *Manager) ResolvePackageResources() (extensions, skills, themes []string, err error) {
 	rr, err := m.Resolve()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
-	return rr.Extensions, rr.Skills, rr.Prompts, rr.Themes, nil
+	return rr.Extensions, rr.Skills, rr.Themes, nil
+}
+
+// ResolvePackageContributions implements resources.ResourcePackageResolver.
+// Returns one entry per installed package with its source string and
+// per-resource-type paths, so loaders can attribute each resource back to
+// the package that contributed it (origin = `pkg:<source>`).
+func (m *Manager) ResolvePackageContributions() ([]resources.PackageContribution, error) {
+	pkgs, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]resources.PackageContribution, 0, len(pkgs))
+	for _, p := range pkgs {
+		c := resources.PackageContribution{
+			Source:      p.Source.Raw,
+			Scope:       p.Scope,
+			InstallPath: p.InstallPath,
+		}
+		if p.Resources != nil {
+			c.Extensions = append(c.Extensions, p.Resources.Extensions...)
+			c.Skills = append(c.Skills, p.Resources.Skills...)
+			c.Themes = append(c.Themes, p.Resources.Themes...)
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }

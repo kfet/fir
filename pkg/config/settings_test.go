@@ -354,9 +354,6 @@ func TestSettingsManager_ProjectSetters(t *testing.T) {
 	sm.SetProjectSkillPaths([]string{"/skills/a"})
 	assert.Equal(t, []string{"/skills/a"}, sm.GetSkillPaths())
 
-	sm.SetProjectPromptTemplatePaths([]string{"/prompts/a"})
-	assert.Equal(t, []string{"/prompts/a"}, sm.GetPromptPaths())
-
 	sm.SetProjectThemePaths([]string{"/themes/a"})
 	assert.Equal(t, []string{"/themes/a"}, sm.GetThemePaths())
 
@@ -366,7 +363,6 @@ func TestSettingsManager_ProjectSetters(t *testing.T) {
 	proj := sm.GetProjectSettings()
 	assert.Equal(t, []string{"/ext/a", "/ext/b"}, proj.Extensions)
 	assert.Equal(t, []string{"/skills/a"}, proj.Skills)
-	assert.Equal(t, []string{"/prompts/a"}, proj.Prompts)
 	assert.Equal(t, []string{"/themes/a"}, proj.Themes)
 	assert.Equal(t, []string{"/ext-search/a", "/ext-search/b"}, proj.ExtensionPaths)
 }

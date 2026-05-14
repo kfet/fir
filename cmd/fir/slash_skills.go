@@ -35,7 +35,7 @@ func hasSlashSkillPrefix(s string) bool {
 }
 
 // loadAllSkills returns every discoverable skill (project + user + builtin),
-// de-duplicated by name and sorted.
+// sorted by ID. Same-named skills are kept (each carries a unique ID).
 func loadAllSkills() []resources.Skill {
 	cwd, _ := os.Getwd()
 	res := resources.LoadSkills(resources.LoadSkillsOptions{
@@ -43,33 +43,63 @@ func loadAllSkills() []resources.Skill {
 		AgentDir:        resolveAgentDir(),
 		IncludeDefaults: true,
 	})
-	seen := make(map[string]bool, len(res.Skills))
-	out := make([]resources.Skill, 0, len(res.Skills))
-	for _, s := range res.Skills {
-		if seen[s.Name] {
-			continue
-		}
-		seen[s.Name] = true
-		out = append(out, s)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	out := make([]resources.Skill, len(res.Skills))
+	copy(out, res.Skills)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
-// findSkillByName returns the named skill plus the full sorted name list.
-// The caller can use the names slice to render an "available" message on
-// miss without re-loading.
-func findSkillByName(name string) (*resources.Skill, []string) {
+// findSkillByRef resolves a skill reference (bare name or full ID) against
+// the loaded set. Returns the matched skill, a sorted list of all known
+// references suitable for error messages, and an error when the bare name
+// is ambiguous.
+func findSkillByRef(ref string) (*resources.Skill, []string, error) {
 	skills := loadAllSkills()
-	names := make([]string, len(skills))
-	var found *resources.Skill
-	for i := range skills {
-		names[i] = skills[i].Name
-		if skills[i].Name == name {
-			found = &skills[i]
+	refs := make([]string, 0, len(skills))
+	seenRef := make(map[string]bool)
+	addRef := func(r string) {
+		if !seenRef[r] {
+			seenRef[r] = true
+			refs = append(refs, r)
 		}
 	}
-	return found, names
+
+	var byID *resources.Skill
+	var byName []*resources.Skill
+	nameCount := make(map[string]int)
+	for _, s := range skills {
+		nameCount[s.Name]++
+	}
+	for i := range skills {
+		s := &skills[i]
+		if nameCount[s.Name] == 1 {
+			addRef(s.Name)
+		} else {
+			addRef(s.ID)
+		}
+		if s.ID == ref {
+			byID = s
+		}
+		if s.Name == ref {
+			byName = append(byName, s)
+		}
+	}
+	sort.Strings(refs)
+	if byID != nil {
+		return byID, refs, nil
+	}
+	if len(byName) == 1 {
+		return byName[0], refs, nil
+	}
+	if len(byName) > 1 {
+		var ids []string
+		for _, s := range byName {
+			ids = append(ids, s.ID)
+		}
+		sort.Strings(ids)
+		return nil, refs, fmt.Errorf("skill %q is ambiguous; specify one of: %s", ref, strings.Join(ids, ", "))
+	}
+	return nil, refs, nil
 }
 
 // rewriteSlashSkillMessages inspects args.Messages and, if the first message
@@ -89,7 +119,10 @@ func rewriteSlashSkillMessages(args *Args) error {
 		return nil
 	}
 	name := first[1:]
-	skill, available := findSkillByName(name)
+	skill, available, err := findSkillByRef(name)
+	if err != nil {
+		return err
+	}
 	if skill == nil {
 		return fmt.Errorf("unknown skill %q\nAvailable skills: %s\nRun `fir skills list` for descriptions", name, strings.Join(available, ", "))
 	}

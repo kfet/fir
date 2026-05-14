@@ -139,16 +139,14 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	// Resource loader
 	pkgMgr := firpkg.New(agentDir, cwd, settingsManager)
 	rl := resources.NewResourceLoader(resources.ResourceLoaderOptions{
-		Cwd:                           cwd,
-		AgentDir:                      agentDir,
-		SettingsManager:               settingsManager,
-		PackageResolver:               pkgMgr,
-		SystemPrompt:                  args.SystemPrompt,
-		AppendSystemPrompt:            args.AppendSystemPrompt,
-		NoSkills:                      args.NoSkills,
-		AdditionalSkillPaths:          args.Skills,
-		AdditionalPromptTemplatePaths: args.PromptTemplates,
-		NoPromptTemplates:             args.NoPromptTemplates,
+		Cwd:                  cwd,
+		AgentDir:             agentDir,
+		SettingsManager:      settingsManager,
+		PackageResolver:      pkgMgr,
+		SystemPrompt:         args.SystemPrompt,
+		AppendSystemPrompt:   args.AppendSystemPrompt,
+		NoSkills:             args.NoSkills,
+		AdditionalSkillPaths: args.Skills,
 	})
 	if err := rl.Reload(); err != nil {
 		return nil, fmt.Errorf("reload resources: %w", err)
@@ -848,16 +846,14 @@ func runAcpMode(args *Args) error {
 	// fir instead of re-execing it and leaking MCP subprocess trees.
 	// /reexec is triggered via the explicit command path, not SIGHUP.
 	return acpmode.RunAcpMode(acpmode.Options{
-		AdditionalSkillPaths:          args.Skills,
-		AdditionalPromptTemplatePaths: args.PromptTemplates,
-		NoSkills:                      args.NoSkills,
-		NoPromptTemplates:             args.NoPromptTemplates,
-		NoExtensions:                  args.NoExtensions,
-		NoMCP:                         args.NoMCP,
-		MCPConfig:                     args.MCPConfig,
-		WaitMCP:                       args.WaitMCP,
-		EnabledExtensions:             args.Extensions,
-		DisabledExtensions:            args.DisabledExtensions,
+		AdditionalSkillPaths: args.Skills,
+		NoSkills:             args.NoSkills,
+		NoExtensions:         args.NoExtensions,
+		NoMCP:                args.NoMCP,
+		MCPConfig:            args.MCPConfig,
+		WaitMCP:              args.WaitMCP,
+		EnabledExtensions:    args.Extensions,
+		DisabledExtensions:   args.DisabledExtensions,
 	})
 }
 
@@ -1181,7 +1177,7 @@ func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
 
 // resolveSettingsExtensionPaths resolves extensionPaths entries from settings
 // (merged global + project) against cwd, matching the semantics used for
-// skills/prompts/themes path settings. Relative paths resolve against cwd,
+// skills/themes path settings. Relative paths resolve against cwd,
 // '~' expands to $HOME, and absolute paths pass through unchanged.
 func resolveSettingsExtensionPaths(cwd string, sm *config.SettingsManager) []string {
 	if sm == nil {

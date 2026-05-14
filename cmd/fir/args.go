@@ -50,8 +50,6 @@ type Args struct {
 	Export             string
 	NoSkills           bool
 	Skills             []string
-	PromptTemplates    []string
-	NoPromptTemplates  bool
 	Themes             []string
 	NoThemes           bool
 	ListModels         any // true (bool) or string (search pattern)
@@ -209,19 +207,12 @@ func ParseArgs(args []string) *Args {
 			i++
 			result.Skills = append(result.Skills, args[i])
 
-		case arg == "--prompt-template" && i+1 < len(args):
-			i++
-			result.PromptTemplates = append(result.PromptTemplates, args[i])
-
 		case arg == "--theme" && i+1 < len(args):
 			i++
 			result.Themes = append(result.Themes, args[i])
 
 		case arg == "--no-skills":
 			result.NoSkills = true
-
-		case arg == "--no-prompt-templates":
-			result.NoPromptTemplates = true
 
 		case arg == "--no-themes":
 			result.NoThemes = true
@@ -332,8 +323,6 @@ Options:
     -d <name>
   --skill <path>                 Load a skill file or directory
   --no-skills                    Disable skills
-  --prompt-template <path>       Load a prompt template file or directory
-  --no-prompt-templates          Disable prompt template discovery
   --theme <path>                 Load a theme file or directory
   --no-themes                    Disable theme discovery
   --export <file>                Export session file to HTML and exit

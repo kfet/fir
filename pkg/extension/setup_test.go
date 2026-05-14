@@ -41,9 +41,6 @@ type stubResourceLoader struct{}
 func (s *stubResourceLoader) GetSkills() ([]resources.Skill, []resources.ResourceDiagnostic) {
 	return nil, nil
 }
-func (s *stubResourceLoader) GetPrompts() ([]resources.PromptTemplate, []resources.ResourceDiagnostic) {
-	return nil, nil
-}
 func (s *stubResourceLoader) GetAgentsFiles() []resources.AgentsFile { return nil }
 func (s *stubResourceLoader) GetSystemPrompt() string                { return "" }
 func (s *stubResourceLoader) GetAppendSystemPrompt() []string        { return nil }

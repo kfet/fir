@@ -27,7 +27,7 @@ fir completion zsh  > "${fpath[1]}/_fir" && compinit
 
 The completion covers every flag and subcommand and dynamically completes `--provider`, `--model`, `--extension`, `--skill`, `--session`, and installed packages by shelling out to `fir --list-models`, `fir extensions list`, etc. A build-time test (`cmd/fir/completion_test.go`) parses `args.go` and fails CI if any new flag/subcommand is missing from the completion scripts.
 
-Not to be confused with `fir install <source>`, which installs *packages* (skills/extensions/prompts/themes) into an existing fir install — see "External Packages" below.
+Not to be confused with `fir install <source>`, which installs *packages* (skills/extensions/themes) into an existing fir install — see "External Packages" below.
 
 ## Modes
 
@@ -54,7 +54,6 @@ All settings fields are optional. Project settings are merged on top of global s
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 | `skills/` | User-level skills (shared across projects) |
-| `prompts/` | User-level prompt templates (shared across projects) |
 | `extensions/` | User-level extensions (shared across projects) |
 | `packages/` | Installed external packages (user scope) |
 
@@ -65,7 +64,6 @@ All settings fields are optional. Project settings are merged on top of global s
 | `settings.json` | Project-level setting overrides |
 | `keybindings.json` | Project-level keybinding overrides (merged on top of global) |
 | `skills/` | Project-specific skills (auto-discovered) |
-| `prompts/` | Project-specific prompt templates |
 | `extensions/` | Project-specific extensions (auto-discovered) |
 | `packages/` | Installed external packages (project scope, via `--local`) |
 | `mcp.json` | MCP server configuration (project-level) |
@@ -190,7 +188,7 @@ Skills can also be invoked directly from the CLI: `fir /<skill-name> [task...]` 
 
 ## External Packages
 
-Install/manage external packages (git repos or local paths) that contribute skills, extensions, prompts, and themes:
+Install/manage external packages (git repos or local paths) that contribute skills, extensions, and themes:
 
 ```
 fir install github.com/user/fir-pack        # install to user scope (~/.config/fir/packages/)
@@ -200,22 +198,88 @@ fir packages list                           # list installed packages (source, s
 fir packages update [source]                # pull latest for one or all packages
 ```
 
-Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, prompts, extensions, and themes are automatically loaded.
+Packages are stored in `settings.json` under `"packages"`. Each entry is a string (`"github.com/user/repo"`) or an object with `"source"` and optional per-type filters. Installed package skills, extensions, and themes are automatically loaded.
 
 ## Resource Lookup Paths
 
-Skills, prompts, and themes are discovered from multiple locations, merged in priority order (earlier wins on name collisions):
+Skills and themes are discovered from multiple locations. Each
+loaded resource is tagged with an **origin** that identifies where it came
+from:
 
-1. **CLI flags** — `--skill <path>`, `--prompt-template <path>`, etc.
-2. **Project directory** — `.fir/skills/`, `.fir/prompts/`, `.fir/extensions/`
-3. **User directory** — `~/.config/fir/skills/`, `~/.config/fir/prompts/`, `~/.config/fir/extensions/`
-4. **Settings paths** — the `"skills"`, `"prompts"`, and `"themes"` arrays in `settings.json`
-5. **Installed packages** — skills/prompts/extensions/themes contributed by `fir install`-ed packages
-6. **Builtins** — embedded in the binary
+| Origin | Where |
+|--------|-------|
+| `builtin` | embedded in the binary |
+| `user` | `~/.config/fir/skills/` (and equivalents for themes) |
+| `project` | `<cwd>/.fir/skills/` |
+| `pkg:<source>` | installed package, e.g. `pkg:github.com/kfet/foo` |
+| `path:<basename>` | path supplied via `--skill <path>` or the `"skills"` settings array |
+
+Origins are surfaced via the `<name>__<id>` form below; they are not
+hierarchical "wins one, loses another" priorities.
+
+### Coexistence and Disambiguation
+
+**Same-named skills coexist by default.** A user skill called `release` and a
+package skill called `release` will both load. Each gets a unique ID of the
+form `<sanitized-origin>__<name>`, e.g. `user__release` and
+`pkg_github_com_kfet_release_tools__release` (every character outside
+`[a-z0-9_]` in the origin is replaced with `_`, MCP-tool-name style).
+
+The agent references skills by **bare name when unique**, and by **full ID
+when ambiguous**. The `<available_skills>` block in the system prompt
+automatically switches to the disambiguated form when a name conflict
+exists, and notes this to the agent.
+
+`fir skills list` shows the ID column and tags rows with `[ambiguous]` or
+`[overrides …]`. `fir skills show <name-or-id>` accepts either form; if a
+bare name is ambiguous it prints the candidate IDs and exits non-zero.
+Slash invocations (`fir /<name>`) follow the same rule.
+
+### Overriding Another Skill
+
+To replace another same-named skill instead of coexisting with it, add
+`override:` to your skill's frontmatter:
+
+```yaml
+---
+name: release
+description: My customised release flow
+override: true                  # replace any other skill named "release"
+---
+```
+
+Two forms are supported:
+
+- **`override: true`** — your skill replaces every other skill with the same
+  bare name. Use this for the common case ("I want my `release` to *be* the
+  release skill"). When two skills both claim `override: true`, the
+  highest-precedence origin wins (user > project > path > pkg > builtin),
+  the loser stays loaded under its disambiguated ID, and a warning is
+  emitted.
+- **`override: <full-id>`** — your skill replaces one specific target.
+  Useful when you want to coexist with some same-named variants but
+  shadow one in particular:
+
+  ```yaml
+  override: pkg_github_com_kfet_release_tools__release
+  ```
+
+  The origin portion may be written either as the raw form (`pkg:github.com/…`)
+  or the sanitized form (`pkg_github_com_…`); both are accepted.
+
+Diagnostics emitted at load time:
+
+- `duplicate-name` (info) — same-named skills coexist; reference by ID.
+- `shadowed` (warning) — a skill was suppressed by an override.
+- `override-conflict` (warning) — multiple skills claimed `override: true`
+  for the same name; the highest-precedence one won.
+
+The same scheme applies to extensions and themes (rolling out;
+skills are first).
 
 ### Settings Path Resolution
 
-Paths in `"skills"`, `"prompts"`, `"themes"`, and `"extensionPaths"` settings arrays support three forms:
+Paths in `"skills"`, `"themes"`, and `"extensionPaths"` settings arrays support three forms:
 
 | Form | Example | Resolves to |
 |------|---------|-------------|
@@ -229,7 +293,6 @@ Paths in `"skills"`, `"prompts"`, `"themes"`, and `"extensionPaths"` settings ar
 // In ~/.config/fir/settings.json (global):
 {
   "skills": ["skills"],       // → finds ./skills/ in any project that has one
-  "prompts": ["prompts"],     // → finds ./prompts/ in any project that has one
   "extensionPaths": ["extensions"]  // → finds ./extensions/ in any project
 }
 ```
@@ -359,7 +422,7 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   // Model filtering (glob patterns; empty = all)
   "enabledModels": ["claude-*", "gpt-4*"],
 
-  // Extension/skill/prompt/theme allowlists (empty = all)
+  // Extension/skill/theme allowlists (empty = all)
   "extensions": [],
 
   // Extension search directories (relative paths resolve against cwd)
@@ -372,7 +435,6 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
   //   "skills": ["skills"]  → looks for ./skills/ in every project you open
   //   "skills": ["~/shared-skills"]  → always points to the same directory
   "skills": [],
-  "prompts": [],
   "themes": [],
   "enableSkillCommands": true,           // Allow /skills slash commands
   "enableSysExtensions": true,           // Allow extensions to prepend [SYS_EXT] context blocks

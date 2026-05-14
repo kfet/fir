@@ -165,17 +165,16 @@ func TestEscapeXml(t *testing.T) {
 	}
 }
 
-func TestLoadSkills_CollisionDiagnostics(t *testing.T) {
-	// Create two directories with skills that have the same name
+func TestLoadSkills_DuplicateNameCoexistence(t *testing.T) {
+	// Two roots with same-named skills now coexist (no shadowing); a
+	// "duplicate-name" diagnostic surfaces the ambiguity.
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
 
-	// Skill in dir1 (winner)
 	skill1Dir := filepath.Join(dir1, "myskill")
 	os.MkdirAll(skill1Dir, 0755)
 	os.WriteFile(filepath.Join(skill1Dir, "SKILL.md"), []byte("---\nname: myskill\ndescription: First one\n---\nContent1"), 0644)
 
-	// Skill in dir2 (loser — same name)
 	skill2Dir := filepath.Join(dir2, "myskill")
 	os.MkdirAll(skill2Dir, 0755)
 	os.WriteFile(filepath.Join(skill2Dir, "SKILL.md"), []byte("---\nname: myskill\ndescription: Second one\n---\nContent2"), 0644)
@@ -186,35 +185,105 @@ func TestLoadSkills_CollisionDiagnostics(t *testing.T) {
 		SkillPaths:      []string{dir1, dir2},
 	})
 
-	// Should have exactly one skill (the winner)
-	if len(result.Skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(result.Skills))
+	if len(result.Skills) != 2 {
+		t.Fatalf("expected both skills to coexist, got %d", len(result.Skills))
 	}
-	if result.Skills[0].Description != "First one" {
-		t.Errorf("expected first skill to win, got description %q", result.Skills[0].Description)
+	// Two distinct path:<basename> origins → distinct IDs.
+	if result.Skills[0].ID == result.Skills[1].ID {
+		t.Errorf("expected distinct IDs, both = %q", result.Skills[0].ID)
 	}
 
-	// Should have a collision diagnostic
-	var collisions []ResourceDiagnostic
+	var dup ResourceDiagnostic
 	for _, d := range result.Diagnostics {
-		if d.Type == "collision" {
-			collisions = append(collisions, d)
+		if d.Type == "duplicate-name" {
+			dup = d
+			break
 		}
 	}
-	if len(collisions) != 1 {
-		t.Fatalf("expected 1 collision diagnostic, got %d", len(collisions))
+	if dup.Type == "" {
+		t.Fatalf("expected duplicate-name diagnostic, got %+v", result.Diagnostics)
 	}
-	if collisions[0].Collision == nil {
-		t.Fatal("expected collision details to be non-nil")
+	if !strings.Contains(dup.Message, "myskill") {
+		t.Errorf("diagnostic should mention skill name; got %q", dup.Message)
 	}
-	if collisions[0].Collision.Name != "myskill" {
-		t.Errorf("expected collision name 'myskill', got %q", collisions[0].Collision.Name)
+}
+
+func TestLoadSkills_OverrideTrueExplicit(t *testing.T) {
+	// override: <full-id> shadows that exact target only.
+	dir1 := t.TempDir()
+	dir2 := t.TempDir()
+	dir3 := t.TempDir()
+
+	makeSkill := func(root, body string) {
+		sd := filepath.Join(root, "shared")
+		os.MkdirAll(sd, 0o755)
+		os.WriteFile(filepath.Join(sd, "SKILL.md"), []byte(body), 0o644)
 	}
-	if collisions[0].Collision.WinnerPath == "" {
-		t.Error("expected winner path to be set")
+	makeSkill(dir1, "---\nname: shared\ndescription: A\n---\n")
+	makeSkill(dir2, "---\nname: shared\ndescription: B\n---\n")
+	// Skill in dir3 overrides only the dir1 variant.
+	makeSkill(dir3, "---\nname: shared\ndescription: C\noverride: path:"+filepath.Base(dir1)+"__shared\n---\n")
+
+	result := LoadSkills(LoadSkillsOptions{
+		Cwd:             t.TempDir(),
+		IncludeDefaults: false,
+		SkillPaths:      []string{dir1, dir2, dir3},
+	})
+	if len(result.Skills) != 2 {
+		t.Fatalf("expected 2 surviving skills (dir2 + dir3), got %d: %+v", len(result.Skills), result.Skills)
 	}
-	if collisions[0].Collision.LoserPath == "" {
-		t.Error("expected loser path to be set")
+	dir1ID := MakeSkillID("path:"+filepath.Base(dir1), "shared")
+	for _, s := range result.Skills {
+		if s.ID == dir1ID {
+			t.Errorf("dir1 skill should have been overridden, but survived: %+v", s)
+		}
+	}
+}
+
+// TestLoadSkills_OverrideTrueConflict verifies that when two skills both
+// declare `override: true` for the same name, origin precedence (user >
+// project > path:* > pkg:* > builtin) picks the winner and an
+// override-conflict diagnostic surfaces the losers.
+func TestLoadSkills_OverrideTrueConflict(t *testing.T) {
+	dir1 := t.TempDir() // path:<basename> origin (precedence 3)
+	dir2 := t.TempDir() // another path:<basename> origin (precedence 3, tie → lower index wins)
+
+	makeSkill := func(root string) {
+		sd := filepath.Join(root, "rival")
+		if err := os.MkdirAll(sd, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: rival\ndescription: from " + filepath.Base(root) + "\noverride: true\n---\n"
+		if err := os.WriteFile(filepath.Join(sd, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeSkill(dir1)
+	makeSkill(dir2)
+
+	result := LoadSkills(LoadSkillsOptions{
+		Cwd:             t.TempDir(),
+		IncludeDefaults: false,
+		SkillPaths:      []string{dir1, dir2},
+	})
+
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected exactly 1 surviving skill after override:true conflict, got %d: %+v", len(result.Skills), result.Skills)
+	}
+	// dir1 came first so it wins on tie.
+	wantID := MakeSkillID("path:"+filepath.Base(dir1), "rival")
+	if result.Skills[0].ID != wantID {
+		t.Errorf("winner ID = %q, want %q (first-encountered wins on precedence tie)", result.Skills[0].ID, wantID)
+	}
+
+	var sawConflict bool
+	for _, d := range result.Diagnostics {
+		if d.Type == "override-conflict" && strings.Contains(d.Message, "rival") {
+			sawConflict = true
+		}
+	}
+	if !sawConflict {
+		t.Errorf("expected override-conflict diagnostic, got %+v", result.Diagnostics)
 	}
 }
 

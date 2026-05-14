@@ -239,13 +239,6 @@ func TestParseArgs_Skills(t *testing.T) {
 	}
 }
 
-func TestParseArgs_PromptTemplates(t *testing.T) {
-	args := ParseArgs([]string{"--prompt-template", "tmpl.md"})
-	if len(args.PromptTemplates) != 1 {
-		t.Fatalf("expected 1 prompt template, got %d", len(args.PromptTemplates))
-	}
-}
-
 func TestParseArgs_Themes(t *testing.T) {
 	args := ParseArgs([]string{"--theme", "dark.json"})
 	if len(args.Themes) != 1 {
@@ -257,13 +250,6 @@ func TestParseArgs_NoSkills(t *testing.T) {
 	args := ParseArgs([]string{"--no-skills"})
 	if !args.NoSkills {
 		t.Error("expected NoSkills=true")
-	}
-}
-
-func TestParseArgs_NoPromptTemplates(t *testing.T) {
-	args := ParseArgs([]string{"--no-prompt-templates"})
-	if !args.NoPromptTemplates {
-		t.Error("expected NoPromptTemplates=true")
 	}
 }
 

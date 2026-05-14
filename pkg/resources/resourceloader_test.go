@@ -127,56 +127,6 @@ func TestMergePaths_Empty(t *testing.T) {
 }
 
 // ============================================================================
-// dedupePrompts
-// ============================================================================
-
-func TestDedupePrompts_NoDupes(t *testing.T) {
-	prompts := []PromptTemplate{
-		{Name: "a", FilePath: "/a.md"},
-		{Name: "b", FilePath: "/b.md"},
-	}
-	result, diags := dedupePrompts(prompts)
-	if len(result) != 2 {
-		t.Errorf("expected 2, got %d", len(result))
-	}
-	if len(diags) != 0 {
-		t.Errorf("expected 0 diags, got %d", len(diags))
-	}
-}
-
-func TestDedupePrompts_WithDupes(t *testing.T) {
-	prompts := []PromptTemplate{
-		{Name: "a", FilePath: "/first.md", Content: "first"},
-		{Name: "a", FilePath: "/second.md", Content: "second"},
-		{Name: "b", FilePath: "/b.md"},
-	}
-	result, diags := dedupePrompts(prompts)
-	if len(result) != 2 {
-		t.Errorf("expected 2, got %d", len(result))
-	}
-	// First occurrence should win
-	if result[0].Content != "first" {
-		t.Errorf("expected first occurrence, got %s", result[0].Content)
-	}
-	if len(diags) != 1 {
-		t.Errorf("expected 1 diagnostic, got %d", len(diags))
-	}
-	if diags[0].Type != "collision" {
-		t.Errorf("expected collision diagnostic, got %s", diags[0].Type)
-	}
-}
-
-func TestDedupePrompts_Empty(t *testing.T) {
-	result, diags := dedupePrompts(nil)
-	if len(result) != 0 {
-		t.Errorf("expected 0, got %d", len(result))
-	}
-	if len(diags) != 0 {
-		t.Errorf("expected 0 diags, got %d", len(diags))
-	}
-}
-
-// ============================================================================
 // resolvePromptInput
 // ============================================================================
 
@@ -205,7 +155,7 @@ func TestResolvePromptInput_FromFile(t *testing.T) {
 }
 
 // ============================================================================
-// defaultSkillPaths / defaultPromptPaths
+// defaultSkillPaths
 // ============================================================================
 
 func TestDefaultSkillPaths_ExistingDirs(t *testing.T) {
@@ -232,19 +182,6 @@ func TestDefaultSkillPaths_NoDirs(t *testing.T) {
 	paths := defaultSkillPaths(cwd, agentDir)
 	if len(paths) != 0 {
 		t.Errorf("expected 0 paths, got %d", len(paths))
-	}
-}
-
-func TestDefaultPromptPaths_ExistingDirs(t *testing.T) {
-	cwd, agentDir := setupResourceDir(t)
-	globalPrompts := filepath.Join(agentDir, "prompts")
-	projectPrompts := filepath.Join(cwd, config.ConfigDirName, "prompts")
-	os.MkdirAll(globalPrompts, 0o755)
-	os.MkdirAll(projectPrompts, 0o755)
-
-	paths := defaultPromptPaths(cwd, agentDir)
-	if len(paths) != 2 {
-		t.Fatalf("expected 2 paths, got %d", len(paths))
 	}
 }
 
@@ -382,14 +319,6 @@ func TestReload_Empty(t *testing.T) {
 		t.Errorf("expected 0 diags, got %d", len(diags))
 	}
 
-	prompts, pDiags := loader.GetPrompts()
-	if len(prompts) != 0 {
-		t.Errorf("expected 0 prompts, got %d", len(prompts))
-	}
-	if len(pDiags) != 0 {
-		t.Errorf("expected 0 prompt diags, got %d", len(pDiags))
-	}
-
 	if len(loader.GetAgentsFiles()) != 0 {
 		t.Error("expected 0 agents files")
 	}
@@ -516,28 +445,6 @@ Content`)
 	skills, _ := loader.GetSkills()
 	if len(skills) != 0 {
 		t.Errorf("expected 0 skills with NoSkills=true, got %d", len(skills))
-	}
-}
-
-func TestReload_NoPromptTemplates(t *testing.T) {
-	cwd, agentDir := setupResourceDir(t)
-	promptDir := filepath.Join(cwd, config.ConfigDirName, "prompts")
-	os.MkdirAll(promptDir, 0o755)
-	writeFile(t, filepath.Join(promptDir, "test.md"), `---
-description: should be skipped
----
-Content`)
-
-	loader := NewResourceLoader(ResourceLoaderOptions{
-		Cwd:               cwd,
-		AgentDir:          agentDir,
-		NoPromptTemplates: true,
-	})
-	loader.Reload()
-
-	prompts, _ := loader.GetPrompts()
-	if len(prompts) != 0 {
-		t.Errorf("expected 0 prompts with NoPromptTemplates=true, got %d", len(prompts))
 	}
 }
 
