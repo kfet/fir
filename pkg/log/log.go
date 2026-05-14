@@ -14,7 +14,8 @@
 //	        per stream chunk). Recurring dozens+ of times per turn.
 //
 // Trace is implemented as a custom slog level (slog.LevelDebug - 4 = -8)
-// so it sorts below Debug and is enabled by --verbose --verbose / -vv.
+// so it sorts below Debug and is enabled by `-vv` on the CLI or
+// FIR_LOG_LEVEL=trace.
 package log
 
 import (
@@ -38,15 +39,12 @@ const levelDisabled slog.Level = slog.LevelError + 4 // 12
 // wired to read from this so SetLevel takes effect immediately.
 var levelVar = new(slog.LevelVar)
 
-func init() {
-	levelVar.Set(levelDisabled)
-}
-
 // logger is the global debug logger, accessed atomically. It defaults to a
 // discard handler so calls before Init (or when logging is disabled) are no-ops.
 var logger atomic.Pointer[slog.Logger]
 
 func init() {
+	levelVar.Set(levelDisabled)
 	l := slog.New(discardHandler{})
 	logger.Store(l)
 	// Also redirect the global slog default so any stray slog.* call (or
