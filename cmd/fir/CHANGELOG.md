@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `fir -c` on first invocation in a project (no prior session) now correctly stamps the user's `SessionInvocation` so a subsequent `fir -c` can restore `--mcp-config` / `--model` / `--extension` / etc. Previously `createSessionStore` reported `isResumed=true` whenever `--continue` (or a `--session <path>` to a non-existent file) was passed, even when `ContinueRecentSession` had silently fallen back to creating a fresh session — so `maybeRestoreInvocation` took the "resume" branch, found no stamped invocation, and skipped stamping. New `SessionStore.WasResumed()` is the single source of truth: it returns true only when an existing header was successfully loaded from disk. Doc on `maybeRestoreInvocation` corrected to match actual stderr-notice behaviour (drift/missing warnings only).
+
 ## [0.46.0] - 2026-05-13
 ### Added
 

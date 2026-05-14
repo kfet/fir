@@ -166,6 +166,7 @@ type SessionStore struct {
 	labelsById  map[string]string
 	leafID      string       // empty = before first entry
 	lock        *sessionLock // flock on .meta.json; nil if in-memory or lock failed
+	resumed     bool         // true iff opened an existing session file (header loaded from disk)
 }
 
 // NewSessionStore creates a persisted session.
@@ -302,6 +303,7 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 		ss.entries = entries
 		ss.buildIndex()
 		ss.flushed = true
+		ss.resumed = true
 		firlog.Debug("session loaded", "sessionID", header.ID, "entries", len(entries))
 	} else {
 		ss.newSession(nil)
@@ -337,6 +339,7 @@ func (ss *SessionStore) newSession(opts *NewSessionOptions) string {
 	ss.labelsById = make(map[string]string)
 	ss.leafID = ""
 	ss.flushed = false
+	ss.resumed = false
 
 	if ss.persist && ss.sessionDir != "" {
 		// Release any previously held lock before creating a new session file.
@@ -479,6 +482,18 @@ func (ss *SessionStore) StampInvocation(inv *SessionInvocation) {
 		// so the on-disk header reflects the stamped invocation.
 		ss.rewriteFile()
 	}
+}
+
+// WasResumed reports whether this store opened an already-existing session
+// file (header loaded from disk) versus created a fresh one. False for
+// in-memory stores and for stores that fell back to newSession() because
+// the target path didn't exist or its header was corrupted. Used by the
+// CLI startup path to decide between stamping a new SessionInvocation and
+// restoring the persisted one.
+func (ss *SessionStore) WasResumed() bool {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.resumed
 }
 
 // GetInvocation returns the persisted invocation from the loaded session

@@ -708,9 +708,12 @@ func runExport(args *Args) error {
 }
 
 // createSessionStore creates the appropriate session manager based on CLI args.
-// Returns the store and whether the store reopened an existing session
-// (--continue / --session) rather than creating a fresh one. In-memory
-// sessions count as "not resumed".
+// Returns the store and whether the store reopened an existing session on
+// disk (`true`) rather than creating a fresh one (`false`). The boolean is
+// derived from the store's own `WasResumed()` — single source of truth —
+// so `fir -c` / `--session <path>` correctly report "fresh" when no prior
+// session file existed, allowing maybeRestoreInvocation to stamp instead of
+// (vacuously) restore. In-memory sessions count as "not resumed".
 func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, bool) {
 	sessionDir := args.SessionDir
 	if sessionDir == "" {
@@ -725,17 +728,18 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 		if forked {
 			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
 		}
-		return sm, true
+		return sm, sm.WasResumed()
 	}
 	if args.Continue {
 		sm, forked := store.ContinueRecentSession(cwd, sessionDir)
 		if forked {
 			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
 		}
-		// ContinueRecentSession creates a fresh session if no prior session
-		// exists; sm.GetInvocation() being absent on a "resumed" store is
-		// fine — maybeRestoreInvocation handles the legacy/empty case.
-		return sm, true
+		// ContinueRecentSession falls back to NewSessionStore when no
+		// prior session exists; the store's WasResumed() correctly
+		// reports false in that case so maybeRestoreInvocation will
+		// stamp the current invocation instead of trying to restore.
+		return sm, sm.WasResumed()
 	}
 	return store.NewSessionStore(cwd, sessionDir), false
 }

@@ -102,10 +102,37 @@ func TestCreateSessionStore_Continue_NoExisting(t *testing.T) {
 	sessionDir := filepath.Join(agentDir, "sessions-empty")
 
 	args := &Args{Continue: true, SessionDir: sessionDir}
-	sm, _ := createSessionStore(args, cwd, agentDir)
+	sm, isResumed := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("continue with no existing session should still create persisted session")
+	}
+	// Regression: `fir -c` with no prior session must be treated as a
+	// fresh session so maybeRestoreInvocation stamps the user's intent.
+	// Otherwise the very first `-c` silently loses --mcp-config / --model.
+	if isResumed {
+		t.Error("continue with no existing session must report isResumed=false")
+	}
+}
+
+// TestCreateSessionStore_Continue_FirstInvocationStamps verifies the
+// end-to-end fix: `fir -c --model X` with no prior session stamps the
+// invocation so a subsequent `fir -c` would restore it.
+func TestCreateSessionStore_Continue_FirstInvocationStamps(t *testing.T) {
+	cwd := t.TempDir()
+	agentDir := t.TempDir()
+	sessionDir := filepath.Join(agentDir, "sessions-fresh-c")
+
+	args := &Args{Continue: true, SessionDir: sessionDir, Model: "claude-x", Seen: map[string]bool{"--model": true}}
+	sm, isResumed := createSessionStore(args, cwd, agentDir)
+	maybeRestoreInvocation(args, sm, isResumed, nil)
+
+	inv := sm.GetInvocation()
+	if inv == nil {
+		t.Fatal("expected invocation to be stamped on `fir -c` with no prior session")
+	}
+	if inv.Model != "claude-x" {
+		t.Errorf("stamped model: got %q want claude-x", inv.Model)
 	}
 }
 

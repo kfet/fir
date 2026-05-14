@@ -146,12 +146,13 @@ func ApplyInvocation(args *Args, inv *store.SessionInvocation, warn func(string)
 }
 
 // maybeRestoreInvocation is the startup-path entry point: if the session
-// store opened (or continued) an existing session that carries a stamped
-// invocation, merge it onto args. Otherwise, stamp the args's invocation
-// onto the session header so future resumes can restore it. Writes a single
-// stderr notice when a restore happens.
+// store reopened an existing session (sm.WasResumed()) that carries a
+// stamped invocation, merge it onto args. Otherwise — fresh session —
+// stamp the args's invocation onto the new session header so future
+// resumes can restore it. Per-field drift/missing warnings for
+// --mcp-config are written to stderr; no other notice is emitted.
 //
-// stderr may be nil (writes are skipped).
+// stderr may be nil (warnings are silently dropped).
 func maybeRestoreInvocation(args *Args, sm *store.SessionStore, isResumed bool, stderr io.Writer) {
 	if sm == nil {
 		return
