@@ -506,6 +506,11 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 						SessionId: sid,
 						Update:    acpsdk.UpdateAgentMessageText(c.Text.Text),
 					})
+				} else if c.IsServerContent() && c.Server != nil && c.Server.Display != "" {
+					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+						SessionId: sid,
+						Update:    acpsdk.UpdateAgentMessageText(c.Server.Display),
+					})
 				} else if c.IsThinking() && c.Thinking != nil {
 					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
 						SessionId: sid,

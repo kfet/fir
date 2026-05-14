@@ -499,60 +499,33 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						}
 						output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
 						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
-					case "server_tool_use":
-						// Server-side tool invocation (web_search, code_execution, etc.)
-						// We emit a *non-empty* text placeholder showing which server
-						// tool is running. Non-empty is critical: the end-of-stream
-						// pruner (pruneEmptyAssistantTextBlocks) drops empty text
-						// blocks, and if a server_tool_use sits between two thinking
-						// blocks the prune would make the thinkings adjacent on
-						// disk — which Anthropic rejects on replay with the
-						// misleading "thinking blocks cannot be modified" 400
-						// (see req_011Cb1vcfcbfqsJWGM7KfmyT). This is a band-aid;
-						// the proper fix (preserve server-side blocks verbatim
-						// via a generic passthrough variant) lives in BACKLOG.md.
-						toolName, _ := cb["name"].(string)
-						if toolName == "" {
-							toolName = "server_tool_use"
-						}
-						placeholder := fmt.Sprintf("[server tool: %s]", toolName)
-						output.Content = append(output.Content, ai.NewTextContent(placeholder))
+					case "server_tool_use",
+						"web_search_tool_result",
+						"code_execution_tool_result",
+						"web_fetch_tool_result",
+						"tool_invocation",
+						"tool_output":
+						// Server-side / provider-internal content blocks.
+						// fir does not interpret these semantically — it just
+						// needs to round-trip them faithfully so that signed
+						// thinking blocks that originally sandwiched them
+						// keep their structural separators on replay (see
+						// req_011Cb1vcfcbfqsJWGM7KfmyT and BACKLOG.md).
+						//
+						// We capture the original content_block JSON verbatim
+						// as ServerContent.Raw and emit a display-only text
+						// event so the TUI / ACP can show formatted output
+						// (URLs, code-execution results, etc.) via the
+						// format helpers at render time.
+						rawJSON, _ := json.Marshal(cb)
+						display := formatServerContentForDisplay(blockType, cb)
+						output.Content = append(output.Content, ai.NewServerContent(blockType, rawJSON, display))
 						blocks[idx] = &blockInfo{contentIdx: contentIdx}
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: placeholder, Partial: output})
+						if display != "" {
+							stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+							stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: display, Partial: output})
+						}
 						continue // skip default blocks[idx] assignment below
-					case "web_search_tool_result":
-						// Server-side web search results — format as text summary.
-						text := formatWebSearchResult(cb)
-						output.Content = append(output.Content, ai.NewTextContent(text))
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-					case "code_execution_tool_result":
-						// Server-side code execution results — format as text.
-						text := formatCodeExecutionResult(cb)
-						output.Content = append(output.Content, ai.NewTextContent(text))
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-					case "web_fetch_tool_result":
-						// Server-side web fetch results — format as text.
-						text := formatWebFetchResult(cb)
-						output.Content = append(output.Content, ai.NewTextContent(text))
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-					case "tool_invocation":
-						// Programmatic tool calling — server-side tool invocation.
-						// These are informational; the API handles execution.
-						toolName, _ := cb["tool_name"].(string)
-						text := fmt.Sprintf("[calling %s]\n", toolName)
-						output.Content = append(output.Content, ai.NewTextContent(text))
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
-					case "tool_output":
-						// Programmatic tool calling — server-side tool result.
-						text := formatToolOutput(cb)
-						output.Content = append(output.Content, ai.NewTextContent(text))
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
-						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: text, Partial: output})
 					}
 					blocks[idx] = &blockInfo{contentIdx: contentIdx}
 
@@ -1269,6 +1242,14 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 						"name":  name,
 						"input": c.ToolCall.Arguments,
 					})
+				} else if c.IsServerContent() {
+					// Server-side passthrough block: emit the original
+					// content_block JSON verbatim. The stored Raw bytes
+					// were captured by the streamer and unchanged since.
+					var raw map[string]any
+					if err := json.Unmarshal(c.Server.Raw, &raw); err == nil && raw != nil {
+						blocks = append(blocks, raw)
+					}
 				}
 			}
 			if len(blocks) > 0 {
@@ -1567,6 +1548,36 @@ func convertAnthropicServerTool(st ai.AnthropicServerTool) map[string]any {
 }
 
 // formatWebSearchResult formats a web_search_tool_result content block as readable text.
+// formatServerContentForDisplay renders a server-side content block as a
+// human-readable string for the TUI / ACP transcript. The wire-replay form
+// is preserved separately via ServerContent.Raw; this is display-only.
+//
+// Used both by the streamer (to emit text deltas as the block arrives) and
+// by the display-time renderers (to materialise a stored ServerContent
+// back into visible text on resume).
+func formatServerContentForDisplay(providerType string, cb map[string]any) string {
+	switch providerType {
+	case "server_tool_use":
+		name, _ := cb["name"].(string)
+		if name == "" {
+			name = "server_tool_use"
+		}
+		return fmt.Sprintf("[server tool: %s]", name)
+	case "web_search_tool_result":
+		return formatWebSearchResult(cb)
+	case "code_execution_tool_result":
+		return formatCodeExecutionResult(cb)
+	case "web_fetch_tool_result":
+		return formatWebFetchResult(cb)
+	case "tool_invocation":
+		name, _ := cb["tool_name"].(string)
+		return fmt.Sprintf("[calling %s]\n", name)
+	case "tool_output":
+		return formatToolOutput(cb)
+	}
+	return ""
+}
+
 func formatWebSearchResult(cb map[string]any) string {
 	content, _ := cb["content"].([]any)
 	if len(content) == 0 {

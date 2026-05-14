@@ -23,6 +23,7 @@ const (
 	ContentTypeThinking = "thinking"
 	ContentTypeImage    = "image"
 	ContentTypeToolCall = "toolCall"
+	ContentTypeServer   = "server"
 )
 
 // --- API and Provider identifiers ---
@@ -269,6 +270,36 @@ type ImageContent struct {
 	MimeType string `json:"mimeType"`
 }
 
+// ServerContent is a generic passthrough for provider-side content blocks
+// that fir does not interpret semantically — for example Anthropic's
+// `server_tool_use`, `web_search_tool_result`, `code_execution_tool_result`,
+// `web_fetch_tool_result`, `tool_invocation`, and `tool_output`. Storing
+// the original JSON verbatim lets fir replay these blocks to the provider
+// on subsequent turns without losing structure.
+//
+// The Anthropic `messages` API will 400 on replay with "thinking blocks
+// cannot be modified" when fir flattens a server-side block into text
+// and then prunes the placeholder, leaving two signed thinking blocks
+// adjacent on disk. Round-tripping via ServerContent preserves the
+// original structural separator and avoids that class of bug. See
+// BACKLOG.md for the broader motivation.
+type ServerContent struct {
+	Type string `json:"type"` // fir-internal discriminator, always "server"
+	// ProviderType is the original block type as emitted by the provider
+	// (e.g. "server_tool_use", "web_search_tool_result"). Used by display
+	// renderers to decide how to format the block.
+	ProviderType string `json:"providerType"`
+	// Raw is the original content_block JSON as received from the
+	// provider, preserved verbatim for byte-stable replay.
+	Raw json.RawMessage `json:"raw"`
+	// Display is a pre-formatted human-readable rendering of the block
+	// for the TUI / ACP transcript. Captured at stream time so display
+	// renderers don't need to know provider-specific formatting rules
+	// or to re-parse Raw. Pure display — never participates in the
+	// wire replay.
+	Display string `json:"display,omitempty"`
+}
+
 // ToolCall represents a tool invocation by the assistant.
 type ToolCall struct {
 	Type             string         `json:"type"` // always "toolCall"
@@ -356,12 +387,13 @@ func (m *AssistantMessage) SnapshotContent() *AssistantMessage {
 	return &cp
 }
 
-// AssistantContent is a discriminated union: TextContent | ThinkingContent | ToolCall.
-// Exactly one of Text, Thinking, or ToolCall will be non-nil.
+// AssistantContent is a discriminated union: TextContent | ThinkingContent |
+// ToolCall | ServerContent. Exactly one of the four pointers will be non-nil.
 type AssistantContent struct {
 	Text     *TextContent     `json:"text,omitempty"`
 	Thinking *ThinkingContent `json:"thinking,omitempty"`
 	ToolCall *ToolCall        `json:"toolCall,omitempty"`
+	Server   *ServerContent   `json:"server,omitempty"`
 }
 
 // DeepCopy returns a deep copy of the content block.
@@ -378,6 +410,12 @@ func (c AssistantContent) DeepCopy() AssistantContent {
 		t := *c.ToolCall
 		c.ToolCall = &t
 	}
+	if c.Server != nil {
+		t := *c.Server
+		// json.RawMessage is a []byte slice — share the bytes since we
+		// treat it as immutable. Callers must not mutate.
+		c.Server = &t
+	}
 	return c
 }
 
@@ -392,6 +430,9 @@ func (c *AssistantContent) ContentType() string {
 	if c.ToolCall != nil {
 		return ContentTypeToolCall
 	}
+	if c.Server != nil {
+		return ContentTypeServer
+	}
 	return ""
 }
 
@@ -403,6 +444,10 @@ func (c *AssistantContent) IsThinking() bool { return c.Thinking != nil }
 
 // IsToolCall returns true if this content block is a tool call.
 func (c *AssistantContent) IsToolCall() bool { return c.ToolCall != nil }
+
+// IsServerContent returns true if this content block is a server-side
+// passthrough block (e.g. Anthropic's server_tool_use, web_search_tool_result).
+func (c *AssistantContent) IsServerContent() bool { return c.Server != nil }
 
 // MarshalJSON produces the flat JSON form matching the TS wire format:
 //
@@ -416,6 +461,9 @@ func (c AssistantContent) MarshalJSON() ([]byte, error) {
 	}
 	if c.ToolCall != nil {
 		return json.Marshal(c.ToolCall)
+	}
+	if c.Server != nil {
+		return json.Marshal(c.Server)
 	}
 	return []byte("null"), nil
 }
@@ -438,6 +486,9 @@ func (c *AssistantContent) UnmarshalJSON(data []byte) error {
 	case ContentTypeToolCall:
 		c.ToolCall = &ToolCall{}
 		return json.Unmarshal(data, c.ToolCall)
+	case ContentTypeServer:
+		c.Server = &ServerContent{}
+		return json.Unmarshal(data, c.Server)
 	}
 	return nil
 }
@@ -455,6 +506,21 @@ func NewThinkingContent(thinking string) AssistantContent {
 // NewToolCallContent creates an AssistantContent wrapping a ToolCall.
 func NewToolCallContent(id, name string, args map[string]any) AssistantContent {
 	return AssistantContent{ToolCall: &ToolCall{Type: ContentTypeToolCall, ID: id, Name: name, Arguments: args}}
+}
+
+// NewServerContent creates an AssistantContent wrapping a ServerContent.
+// The provider-side block type ("server_tool_use", "web_search_tool_result",
+// etc.) lives inside ServerContent.ProviderType. Raw carries the original
+// content-block JSON verbatim so it can be replayed without re-marshalling
+// through a shape that might mutate field order. Display is a pre-formatted
+// human-readable rendering for the TUI / ACP transcript.
+func NewServerContent(providerType string, raw json.RawMessage, display string) AssistantContent {
+	return AssistantContent{Server: &ServerContent{
+		Type:         ContentTypeServer,
+		ProviderType: providerType,
+		Raw:          raw,
+		Display:      display,
+	}}
 }
 
 // ToolResultMessage is the result of a tool invocation.

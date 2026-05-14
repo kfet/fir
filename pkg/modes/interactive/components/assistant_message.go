@@ -73,6 +73,10 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 			hasVisibleContent = true
 			break
 		}
+		if c.Server != nil && strings.TrimSpace(c.Server.Display) != "" {
+			hasVisibleContent = true
+			break
+		}
 	}
 
 	if hasVisibleContent {
@@ -82,6 +86,8 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 	for i, content := range message.Content {
 		if content.Text != nil && strings.TrimSpace(content.Text.Text) != "" {
 			a.contentContainer.AddChild(tuicomp.NewMarkdown(strings.TrimSpace(content.Text.Text), 1, 0, a.markdownThm, nil))
+		} else if content.Server != nil && strings.TrimSpace(content.Server.Display) != "" {
+			a.contentContainer.AddChild(tuicomp.NewMarkdown(strings.TrimSpace(content.Server.Display), 1, 0, a.markdownThm, nil))
 		} else if content.Thinking != nil && strings.TrimSpace(content.Thinking.Thinking) != "" {
 			// Check if another visible content block follows
 			hasVisibleAfter := false
@@ -91,6 +97,10 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 					break
 				}
 				if c.Thinking != nil && strings.TrimSpace(c.Thinking.Thinking) != "" {
+					hasVisibleAfter = true
+					break
+				}
+				if c.Server != nil && strings.TrimSpace(c.Server.Display) != "" {
 					hasVisibleAfter = true
 					break
 				}

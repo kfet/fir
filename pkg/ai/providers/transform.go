@@ -101,6 +101,21 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 					}
 					newContent = append(newContent, ai.AssistantContent{ToolCall: &tc})
 
+				case block.IsServerContent():
+					// Server-side passthrough blocks (Anthropic
+					// server_tool_use, web_search_tool_result, …) are
+					// provider-specific and only meaningful on replay
+					// to the same provider+API. Drop when crossing
+					// providers — keeping them risks the target API
+					// rejecting an unrecognised block type, and the
+					// stored Display text is the only part that was
+					// ever meant for the user.
+					if isSameProvider {
+						newContent = append(newContent, block)
+					} else if b := block.Server; b != nil && b.Display != "" {
+						newContent = append(newContent, ai.NewTextContent(b.Display))
+					}
+
 				default:
 					newContent = append(newContent, block)
 				}

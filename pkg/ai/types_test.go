@@ -243,6 +243,7 @@ func TestAssistantContentDeepCopyCoversAllFields(t *testing.T) {
 		"Text":     true,
 		"Thinking": true,
 		"ToolCall": true,
+		"Server":   true,
 	}
 	typ := reflect.TypeOf(AssistantContent{})
 	if typ.NumField() != len(covered) {
