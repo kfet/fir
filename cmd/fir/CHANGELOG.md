@@ -14,9 +14,13 @@
 
 - bash tool: secondary race in the pipe-drain unblock path. The unconditional `pr.Close()` after `cmd.Process.Wait()` could win the race against the drain goroutine's first `Read` under Linux + race detector, truncating output to empty (`TestBashTool_Echo` failed in CI). Now wait for drain to finish naturally with a 50ms grace period, falling back to force-close only if a held-open descendant keeps the pipe alive past our killpg.
 - bash tool: race where a backgrounded subshell (`(sleep 30; ...) &`) could keep the stdout pipe open after bash exited and `killpg(SIGKILL)` returned success, blocking `Execute` for the full child duration. After reaping bash and killpg'ing the group, we now force-close the pipe's read end to unblock the drain — bash's own output is already in the kernel buffer by the time `Wait` returns and the concurrent drain goroutine has captured it. Matches the documented contract that backgrounded jobs are killed when the foreground command exits.
+
+## [0.46.1] - 2026-05-13
+
 ### Added
 
 - Repeatable `-v` verbosity flags driving slog levels. `-v` enables Debug, `-vv` enables Trace (a new level below Debug, slog -8). `-vvv` and beyond clamp to `-vv` with a warning log line. New `FIR_LOG_LEVEL=info|debug|trace` environment variable (numeric slog levels also accepted) — wins over `FIR_DEBUG`. New `firlog.Trace` / `firlog.TraceEnabled` / `firlog.SetLevel` / `firlog.ParseLevel` API in `pkg/log` with a custom `LevelTrace` constant; the JSON handler renders the custom level as `"TRACE"`.
+- Anthropic provider emits one Trace line per outgoing wire message at `-vv` summarising role, block count, and per-block-type structure (thinking-block signature lengths, tool_use names, text lengths). No body bytes — bounded cost per request; safe to leave on for whole sessions. Diagnostic aid for Anthropic 400 "thinking blocks cannot be modified" errors.
 
 ### Changed
 
