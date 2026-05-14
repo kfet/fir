@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+## [0.46.4] - 2026-05-14
+
 ### Changed
+
+- Anthropic server-side content blocks (`server_tool_use`, `web_search_tool_result`, `code_execution_tool_result`, `web_fetch_tool_result`, `tool_invocation`, `tool_output`) now round-trip verbatim via a new generic passthrough variant `ai.ServerContent` (carries the provider's block-type tag, the raw `content_block` JSON, and a pre-formatted display string). The Anthropic streamer captures the original bytes; `convertAnthropicMessages` writes them back on the wire unchanged; `TransformMessages` drops them when crossing providers (replacing with the display text so user intent survives) since the wire shape is Anthropic-specific. Replaces six special-case handlers in the streamer with a single generic branch — future Anthropic server-side block types round-trip automatically. The TUI / ACP transcript renders `ServerContent.Display` so output looks identical to before. The v0.46.3 band-aids (`separateAdjacentThinkingBlocks` wire-time splice, non-empty `[server tool: <name>]` placeholder) are kept as defence-in-depth for sessions whose history was stored under the older text-flattened format; they can be removed once such sessions age out. `BACKLOG.md` marks the work done.
 
 - Anthropic server-side tool invocations (`server_tool_use`, e.g. `web_search`, `code_execution`) now render as a visible `[server tool: <name>]` text marker in the TUI / ACP transcript instead of an invisible empty placeholder. Side effect of the v0.46.3 fix — the marker exists so the placeholder survives `pruneEmptyAssistantTextBlocks` (which would otherwise drop it and leave adjacent thinking blocks on disk). Will be replaced by proper passthrough rendering once the structural fix in `BACKLOG.md` lands.
 
