@@ -180,17 +180,22 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	// indefinitely). ESRCH is expected when no group members remain.
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 
-	// Force the drain to unblock. Bash flushed and exited before Wait
-	// returned, so its output is already in the kernel pipe buffer and the
-	// drain goroutine has been reading it concurrently throughout. Closing
-	// pr now makes io.Copy return promptly even if a just-forked descendant
-	// of a backgrounded subshell still briefly holds the write end past our
-	// killpg (a kernel race we've observed on macOS where killpg returns
-	// success but the pipe stays open). The drain goroutine's own pr.Close
-	// after io.Copy returns is a safe double-close. We accept the documented
-	// trade-off: tail output from killed backgrounded jobs may be discarded.
-	_ = pr.Close()
-	<-drained
+	// Wait for the drain to finish naturally. Bash flushed and exited before
+	// Wait returned, and after killpg above all group members are gone, so
+	// io.Copy should hit EOF promptly. If a just-forked descendant of a
+	// backgrounded subshell still briefly holds the write end past our
+	// killpg (a kernel race observed on macOS where killpg returns success
+	// but the pipe stays open), fall back to force-closing pr after a short
+	// grace period. We must NOT close pr eagerly: under Linux + race
+	// detector the close can win the race against the drain's first Read,
+	// truncating the output to empty. Tail output from such held-open
+	// descendants may still be discarded — that is the documented trade-off.
+	select {
+	case <-drained:
+	case <-time.After(50 * time.Millisecond):
+		_ = pr.Close()
+		<-drained
+	}
 
 	// Synthesise an exec.ExitError on non-zero exit so downstream code keeps
 	// working (cmd.Wait normally does this for us).

@@ -85,6 +85,14 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	firlog.Debug("settings loaded", "cwd", cwd, "agentDir", agentDir)
 	reportSettingsErrors(settingsManager, "startup")
 
+	// Open the session store early so we can restore the persisted
+	// SessionInvocation (--mcp-config / --extension / --model / ...) before
+	// any of the downstream args-derived setup runs. For brand-new sessions
+	// this also stamps the current invocation into the header so future
+	// `fir -c` invocations can restore the same config.
+	sessionStore, isResumed := createSessionStore(args, cwd, agentDir)
+	maybeRestoreInvocation(args, sessionStore, isResumed, os.Stderr)
+
 	// Apply Claude Code-style env vars: CLAUDE_CODE_USE_BEDROCK=1 + ANTHROPIC_MODEL
 	// route the model through Amazon Bedrock. ANTHROPIC_MODEL can be a model id
 	// (e.g. "us.anthropic.claude-opus-4-6-v1") or a Bedrock ARN
@@ -159,7 +167,7 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 		AuthStorage:     authStorage,
 		ModelRegistry:   modelRegistry,
 		SettingsManager: settingsManager,
-		SessionStore:    createSessionStore(args, cwd, agentDir),
+		SessionStore:    sessionStore,
 		Model:           model,
 		Tools:           resolveTools(args, cwd),
 		ResourceLoader:  rl,
@@ -700,30 +708,36 @@ func runExport(args *Args) error {
 }
 
 // createSessionStore creates the appropriate session manager based on CLI args.
-func createSessionStore(args *Args, cwd, agentDir string) *store.SessionStore {
+// Returns the store and whether the store reopened an existing session
+// (--continue / --session) rather than creating a fresh one. In-memory
+// sessions count as "not resumed".
+func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, bool) {
 	sessionDir := args.SessionDir
 	if sessionDir == "" {
 		sessionDir = store.DefaultSessionDir(agentDir, cwd)
 	}
 
 	if args.NoSession {
-		return store.InMemorySessionStore()
+		return store.InMemorySessionStore(), false
 	}
 	if args.Session != "" {
 		sm, forked := store.OpenSessionStore(filepath.Join(sessionDir, args.Session))
 		if forked {
 			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
 		}
-		return sm
+		return sm, true
 	}
 	if args.Continue {
 		sm, forked := store.ContinueRecentSession(cwd, sessionDir)
 		if forked {
 			fmt.Fprintln(os.Stderr, "fir: session is active in another window — branched with history preserved")
 		}
-		return sm
+		// ContinueRecentSession creates a fresh session if no prior session
+		// exists; sm.GetInvocation() being absent on a "resumed" store is
+		// fine — maybeRestoreInvocation handles the legacy/empty case.
+		return sm, true
 	}
-	return store.NewSessionStore(cwd, sessionDir)
+	return store.NewSessionStore(cwd, sessionDir), false
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.

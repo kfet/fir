@@ -24,7 +24,7 @@ func TestCreateSessionStore_Default(t *testing.T) {
 	agentDir := t.TempDir()
 
 	args := &Args{}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("default session manager should be persisted")
@@ -36,7 +36,7 @@ func TestCreateSessionStore_NoSession(t *testing.T) {
 	agentDir := t.TempDir()
 
 	args := &Args{NoSession: true}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if sm.IsPersisted() {
 		t.Error("--no-session should create non-persisted session manager")
@@ -50,7 +50,7 @@ func TestCreateSessionStore_NamedSession(t *testing.T) {
 	os.MkdirAll(sessionDir, 0o755)
 
 	args := &Args{Session: "my-session.jsonl"}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("named session should be persisted")
@@ -67,7 +67,7 @@ func TestCreateSessionStore_CustomSessionDir(t *testing.T) {
 	customDir := t.TempDir()
 
 	args := &Args{SessionDir: customDir, Session: "test.jsonl"}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("custom session dir should still persist")
@@ -89,7 +89,7 @@ func TestCreateSessionStore_Continue(t *testing.T) {
 	os.Chtimes(sessionFile, time.Now(), time.Now())
 
 	args := &Args{Continue: true, SessionDir: sessionDir}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("continue session should be persisted")
@@ -102,7 +102,7 @@ func TestCreateSessionStore_Continue_NoExisting(t *testing.T) {
 	sessionDir := filepath.Join(agentDir, "sessions-empty")
 
 	args := &Args{Continue: true, SessionDir: sessionDir}
-	sm := createSessionStore(args, cwd, agentDir)
+	sm, _ := createSessionStore(args, cwd, agentDir)
 
 	if !sm.IsPersisted() {
 		t.Error("continue with no existing session should still create persisted session")

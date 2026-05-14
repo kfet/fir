@@ -32,6 +32,14 @@ type SessionHeader struct {
 	Timestamp     string `json:"timestamp"`               //
 	Cwd           string `json:"cwd"`                     //
 	ParentSession string `json:"parentSession,omitempty"` //
+
+	// Invocation records the user-intent runtime config (--mcp-config flags,
+	// --extension allowlist, model selection, ...) that was passed when this
+	// session was first created. Stamped once at creation; never rewritten on
+	// resume. Read on `fir -c` / `/resume` to restore the same config so the
+	// resumed session has the same tool/extension/MCP set as the original.
+	// Absent on sessions created before this feature shipped.
+	Invocation *SessionInvocation `json:"invocation,omitempty"`
 }
 
 // --- Session entry ---
@@ -440,6 +448,52 @@ func (ss *SessionStore) rewriteFile() {
 		fmt.Fprintf(os.Stderr, "session: write %s: %v\n", ss.sessionFile, err)
 	}
 	ss.updateSidecar()
+}
+
+// StampInvocation stores the user-intent runtime config on the session header
+// so a later `fir -c` / `/resume` can re-apply it. Safe to call only at
+// session creation, before any entries have been appended; calls after that
+// are no-ops (preserving the original stamp). Calls on resumed sessions are
+// no-ops too — Invocation is stamped exactly once per session, never
+// overwritten. Rewrites the header on disk if the session is persistent.
+func (ss *SessionStore) StampInvocation(inv *SessionInvocation) {
+	if inv == nil || inv.IsEmpty() {
+		return
+	}
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.header == nil {
+		return
+	}
+	if ss.header.Invocation != nil {
+		// Already stamped — never overwrite.
+		return
+	}
+	if len(ss.entries) > 0 {
+		// Too late: would invalidate readers that already saw the header.
+		return
+	}
+	ss.header.Invocation = inv
+	if ss.persist && ss.sessionFile != "" {
+		// The header has already been written by newSession(); rewrite it
+		// so the on-disk header reflects the stamped invocation.
+		ss.rewriteFile()
+	}
+}
+
+// GetInvocation returns the persisted invocation from the loaded session
+// header, or nil if none is stamped (e.g. legacy session or no flags worth
+// recording).
+func (ss *SessionStore) GetInvocation() *SessionInvocation {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	if ss.header == nil {
+		return nil
+	}
+	if ss.header.Invocation.IsEmpty() {
+		return nil
+	}
+	return ss.header.Invocation
 }
 
 // ForceFlush writes the session to disk regardless of whether an assistant

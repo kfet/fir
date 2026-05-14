@@ -67,6 +67,17 @@ type Args struct {
 	Login             string
 	Messages          []string
 	FileArgs          []string
+
+	// Seen records which CLI flags appeared in the argv that produced this
+	// Args. Used by --continue / --resume merge logic to distinguish "field
+	// is at zero value because user didn't pass the flag" from "user
+	// explicitly passed it". Keys are canonical long-form flag names
+	// (e.g. "--model", "--mcp-config", "--no-extensions").
+	Seen map[string]bool
+
+	// NoRestoreConfig disables the default `-c` / `-r` behaviour of
+	// re-applying the persisted SessionInvocation from the resumed session.
+	NoRestoreConfig bool
 }
 
 // ValidThinkingLevels lists all valid thinking level values.
@@ -100,7 +111,9 @@ func ParseArgs(args []string) *Args {
 	result := &Args{
 		Messages: []string{},
 		FileArgs: []string{},
+		Seen:     make(map[string]bool),
 	}
+	mark := func(flag string) { result.Seen[flag] = true }
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -127,44 +140,59 @@ func ParseArgs(args []string) *Args {
 
 		case arg == "--continue" || arg == "-c":
 			result.Continue = true
+			mark("--continue")
 
 		case arg == "--resume" || arg == "-r":
 			result.Resume = true
+			mark("--resume")
+
+		case arg == "--no-restore-config":
+			result.NoRestoreConfig = true
+			mark("--no-restore-config")
 
 		case arg == "--provider" && i+1 < len(args):
 			i++
 			result.Provider = args[i]
+			mark("--provider")
 
 		case arg == "--model" && i+1 < len(args):
 			i++
 			result.Model = args[i]
+			mark("--model")
 
 		case arg == "--api-key" && i+1 < len(args):
 			i++
 			result.ApiKey = args[i]
+			mark("--api-key")
 
 		case arg == "--system-prompt" && i+1 < len(args):
 			i++
 			result.SystemPrompt = args[i]
+			mark("--system-prompt")
 
 		case arg == "--append-system-prompt" && i+1 < len(args):
 			i++
 			result.AppendSystemPrompt = args[i]
+			mark("--append-system-prompt")
 
 		case arg == "--no-session":
 			result.NoSession = true
+			mark("--no-session")
 
 		case arg == "--session" && i+1 < len(args):
 			i++
 			result.Session = args[i]
+			mark("--session")
 
 		case arg == "--session-name" && i+1 < len(args):
 			i++
 			result.SessionName = args[i]
+			mark("--session-name")
 
 		case arg == "--session-dir" && i+1 < len(args):
 			i++
 			result.SessionDir = args[i]
+			mark("--session-dir")
 
 		case arg == "--models" && i+1 < len(args):
 			i++
@@ -176,19 +204,24 @@ func ParseArgs(args []string) *Args {
 					result.Models = append(result.Models, s)
 				}
 			}
+			mark("--models")
 
 		case arg == "--no-tools":
 			result.NoTools = true
+			mark("--no-tools")
 
 		case arg == "--no-mcp":
 			result.NoMCP = true
+			mark("--no-mcp")
 
 		case arg == "--mcp-config" && i+1 < len(args):
 			i++
 			result.MCPConfig = args[i]
+			mark("--mcp-config")
 
 		case arg == "--wait-mcp":
 			result.WaitMCP = true
+			mark("--wait-mcp")
 
 		case arg == "--tools" && i+1 < len(args):
 			i++
@@ -200,12 +233,14 @@ func ParseArgs(args []string) *Args {
 					result.Tools = append(result.Tools, s)
 				}
 			}
+			mark("--tools")
 
 		case arg == "--thinking" && i+1 < len(args):
 			i++
 			level := args[i]
 			if IsValidThinkingLevel(level) {
 				result.Thinking = agent.ThinkingLevel(level)
+				mark("--thinking")
 			} else {
 				fmt.Fprintf(os.Stderr, "Warning: Invalid thinking level %q. Valid values: %s\n",
 					level, strings.Join(ValidThinkingLevels, ", "))
@@ -213,35 +248,44 @@ func ParseArgs(args []string) *Args {
 
 		case arg == "--print" || arg == "-p":
 			result.Print = true
+			mark("--print")
 
 		case arg == "--export" && i+1 < len(args):
 			i++
 			result.Export = args[i]
+			mark("--export")
 
 		case arg == "--no-extensions":
 			result.NoExtensions = true
+			mark("--no-extensions")
 
 		case (arg == "--extension" || arg == "-e") && i+1 < len(args):
 			i++
 			result.Extensions = append(result.Extensions, args[i])
+			mark("--extension")
 
 		case (arg == "--disable-extension" || arg == "-d") && i+1 < len(args):
 			i++
 			result.DisabledExtensions = append(result.DisabledExtensions, args[i])
+			mark("--disable-extension")
 
 		case arg == "--skill" && i+1 < len(args):
 			i++
 			result.Skills = append(result.Skills, args[i])
+			mark("--skill")
 
 		case arg == "--theme" && i+1 < len(args):
 			i++
 			result.Themes = append(result.Themes, args[i])
+			mark("--theme")
 
 		case arg == "--no-skills":
 			result.NoSkills = true
+			mark("--no-skills")
 
 		case arg == "--no-themes":
 			result.NoThemes = true
+			mark("--no-themes")
 
 		case arg == "--list-models":
 			// Check if next arg is a search pattern (not a flag or file arg)
@@ -331,8 +375,14 @@ Options:
   --append-system-prompt <text>  Append text or file contents to the system prompt
   --mode <mode>                  Output mode: text (default), json, or acp
   --print, -p                    Non-interactive mode: process prompt and exit
-  --continue, -c                 Continue previous session
+  --continue, -c                 Continue previous session (restores its
+                                 original --mcp-config / --extension /
+                                 --model / etc. by default; pass
+                                 --no-restore-config to opt out)
   --resume, -r                   Select a session to resume
+  --no-restore-config            With -c / -r / /resume, do not re-apply
+                                 the resumed session's recorded invocation
+                                 config (start with only the current argv)
   --session <path>               Use specific session file
   --session-name <name>          Set display name for the session
   --session-dir <dir>            Directory for session storage and lookup

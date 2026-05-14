@@ -51,6 +51,7 @@ _fir() {
         '(-p --print)'{-p,--print}'[Non-interactive: process prompt and exit]' \
         '(-c --continue)'{-c,--continue}'[Continue previous session]' \
         '(-r --resume)'{-r,--resume}'[Select a session to resume]' \
+        '--no-restore-config[Do not re-apply persisted config on -c/-r]' \
         '--mode=[Output mode]:mode:(text json acp)' \
         '--thinking=[Thinking level]:level:(off minimal low medium high xhigh max)' \
         '--provider=[Provider name]:provider:->providers' \
