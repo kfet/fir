@@ -157,6 +157,7 @@ def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
         "properties": {
             "prompt": {"type": "string"},
             "confirm": {"type": "string"},
+            "prepend_context": {"type": "string"},
         },
         "required": ["prompt"],
     },
@@ -164,7 +165,11 @@ def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
 def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
     if params.get("confirm") != "yes-really":
         return {"ok": False, "skipped": True}
-    ctx.restart_session(params["prompt"])                   # restart_session
+    # restart_session: optional prepend_context demonstrates the
+    # [SYS_EXT]-wrapped briefing carried into the new session.
+    ctx.restart_session(
+        params["prompt"], prepend_context=params.get("prepend_context", "")
+    )
     return {"ok": True}
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ---
 # name: handoff
-# description: Reliable self-handoff — validate handoff doc, write atomically, restart with clean LLM context
+# description: Reliable self-handoff — validate handoff doc and restart with a clean LLM context, briefing carried in-context
 # builtin: true
 # modes: tui
 # ---
@@ -10,21 +10,22 @@
 Single tool ``self_handoff(content)``:
 
   1. Validates ``content`` (length, structure).
-  2. Writes it atomically to ``<cwd>/.fir/handoff-<timestamp>.md``.
-  3. Verifies the file is readable and non-empty.
-  4. Calls the ``restart_session`` bridge RPC, which aborts the in-flight
-     stream synchronously and starts a fresh session whose first user
-     message points at the doc.
+  2. Calls the ``restart_session`` bridge RPC with the briefing carried
+     in ``prepend_context``. The bridge aborts the in-flight stream
+     synchronously and starts a fresh session whose conversation begins
+     with the briefing as a ``[SYS_EXT]``-wrapped user message, followed
+     by a short fixed prompt telling the new agent to continue.
 
 Validation runs to completion BEFORE any restart fires. Bad input yields
 a normal tool error and the session continues. Only after every check
 passes does the restart trigger.
+
+No filesystem artifact is produced — the briefing lives in the new
+session's conversation log (and therefore the session jsonl on disk).
 """
 
 from __future__ import annotations
 
-import os
-import time
 from typing import Any
 
 import fir_ext
@@ -44,10 +45,10 @@ MIN_NON_BLANK_LINES = 3        # a briefing has structure
 
 _TOOL_DESCRIPTION = """Hand off to a fresh fir session with a clean LLM context.
 
-Atomically: validates the handoff doc, writes it to \
-<cwd>/.fir/handoff-<timestamp>.md, then aborts the current turn and \
-starts a new session whose first user message instructs the new agent \
-to read the doc and continue.
+Atomically: validates the handoff doc, aborts the current turn, and \
+starts a new session whose conversation begins with your briefing as \
+an authoritative [SYS_EXT] message followed by a short prompt telling \
+the new agent to continue.
 
 Use when:
   - context window is filling up (>60-70% used)
@@ -63,6 +64,9 @@ external state, concrete next steps.
 Validation rejects content shorter than 200 chars (after strip), longer \
 than 64 KB, or with fewer than 3 non-blank lines. On rejection the \
 session continues — you can fix and retry.
+
+The briefing is carried in-context to the new session (no filesystem \
+artifact is written). The new session's jsonl log preserves it.
 
 After validation passes the calling turn is aborted. Do not call any \
 other tools after this one and do not emit further explanatory text — \
@@ -96,56 +100,6 @@ def _err(text: str) -> dict:
 
 def _ok(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}], "is_error": False}
-
-
-def _project_dir() -> str:
-    """Best-effort project directory (cwd reported by fir at init)."""
-    cwd = getattr(fir_ext, "cwd", "") or ""
-    return cwd or os.getcwd()
-
-
-def _default_path() -> str:
-    base = os.path.join(_project_dir(), ".fir")
-    os.makedirs(base, exist_ok=True)
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    return os.path.abspath(os.path.join(base, f"handoff-{ts}.md"))
-
-
-def _atomic_write(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = f"{path}.tmp.{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-
-
-def _verify_readable(path: str) -> str | None:
-    """Return None on success, error string on failure.
-
-    Verifies the file exists, is a regular file, is readable, and is
-    non-empty. Run after writing to catch filesystem oddities (full
-    disk, permissions, race with external rm).
-    """
-    if not os.path.exists(path):
-        return f"handoff doc not found at {path} after write."
-    if not os.path.isfile(path):
-        return f"{path} is not a regular file."
-    try:
-        st = os.stat(path)
-    except OSError as exc:
-        return f"could not stat {path}: {exc}."
-    if st.st_size == 0:
-        return f"handoff doc at {path} is empty after write."
-    try:
-        with open(path, "rb") as f:
-            chunk = f.read(64)
-    except OSError as exc:
-        return f"could not read {path}: {exc}."
-    if not chunk:
-        return f"handoff doc at {path} read back empty."
-    return None
 
 
 def _validate_content(raw: Any) -> tuple[str | None, str]:
@@ -196,33 +150,20 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
     if err is not None:
         return _err(err)
 
-    path = _default_path()
-    try:
-        _atomic_write(path, normalised)
-    except OSError as exc:
-        return _err(f"self_handoff: failed to write {path}: {exc}.")
-
-    verr = _verify_readable(path)
-    if verr is not None:
-        return _err(f"self_handoff: post-write check failed: {verr}")
-
-    prompt = (
-        f"Read and follow the self-handoff document at {path} — "
-        "continue where the previous session left off."
-    )
+    # Short prompt that reads naturally after the [SYS_EXT]-wrapped briefing
+    # the bridge will inject ahead of it.
+    prompt = "Continue from the handoff briefing above."
 
     try:
-        ctx.restart_session(prompt)
+        ctx.restart_session(prompt, prepend_context=normalised)
     except Exception as exc:
         return _err(
             f"self_handoff: restart_session failed: {exc}. The current "
-            "mode may not support session restart (interactive only). "
-            f"The handoff doc was written to {path}; you can recover it "
-            "manually."
+            "mode may not support session restart (interactive only)."
         )
 
     # Calling turn is being aborted; this result is informational only.
-    return _ok(f"Handing off via {path}…")
+    return _ok("Handing off…")
 
 
 # ---------------------------------------------------------------------------

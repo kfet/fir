@@ -310,8 +310,9 @@ func (b *SessionBridge) ReportProgress(message string) {}
 //
 // The function is invoked from a fresh goroutine *after* the in-flight
 // stream has been aborted; it should clear UI state, call NewSessionCmd,
-// and submit prompt via session.Prompt. See InteractiveMode.handleHandoff.
-type RestartFn func(prompt string) error
+// (optionally) inject prependContext via session.PrependContext, and
+// submit prompt via session.Prompt. See InteractiveMode.handleHandoff.
+type RestartFn func(prompt, prependContext string) error
 
 // SetRestartFn registers a mode-specific restart handler. Pass nil to
 // remove. Safe to call after the bridge is in use; the field is read on
@@ -323,9 +324,10 @@ func (b *SessionBridge) SetRestartFn(fn RestartFn) {
 }
 
 // RestartSession aborts the in-flight stream synchronously and schedules
-// session clear + prompt submission asynchronously. Returns an error when
-// no RestartFn is registered (the current mode does not support restart).
-func (b *SessionBridge) RestartSession(prompt string) error {
+// session clear + optional prepend-context + prompt submission asynchronously.
+// Returns an error when no RestartFn is registered (the current mode does
+// not support restart).
+func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	b.restartMu.RLock()
 	fn := b.restartFn
 	b.restartMu.RUnlock()
@@ -341,7 +343,7 @@ func (b *SessionBridge) RestartSession(prompt string) error {
 	// holding the JSON-RPC handler open, and the mode callback may need
 	// to acquire UI locks that the dispatcher must not block on.
 	go func() {
-		_ = fn(prompt)
+		_ = fn(prompt, prependContext)
 	}()
 	return nil
 }

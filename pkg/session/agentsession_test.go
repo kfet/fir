@@ -3423,3 +3423,57 @@ func TestAgentSession_Prompt_WaitsForExtReady(t *testing.T) {
 		t.Fatal("Prompt did not return after turn finished")
 	}
 }
+
+// ============================================================================
+// PrependContext
+// ============================================================================
+
+// TestAgentSession_PrependContext_AlwaysInjects verifies that PrependContext
+// injects a [SYS_EXT]-wrapped user-role message regardless of the
+// enableSysExtensions setting. The setting controls whether the static
+// "[SYS_EXT] is authoritative" hook line is present in the system prompt
+// (i.e. how already-injected blocks are interpreted), not whether content
+// is delivered at all. Silently dropping content when the setting is off
+// was a real footgun for the self_handoff extension.
+func TestAgentSession_PrependContext_AlwaysInjects(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		name := "sysext_on"
+		if !enabled {
+			name = "sysext_off"
+		}
+		t.Run(name, func(t *testing.T) {
+			session, _ := newTestAgentSession(t)
+			session.SettingsManager.SetEnableSysExtensions(enabled)
+
+			before := len(session.Agent.State().Messages)
+			session.PrependContext("briefing-body")
+			msgs := session.Agent.State().Messages
+			if len(msgs) != before+1 {
+				t.Fatalf("expected 1 message appended (enabled=%v), got %d new", enabled, len(msgs)-before)
+			}
+			last := msgs[len(msgs)-1]
+			um := last.AsUser()
+			if um == nil {
+				t.Fatalf("expected user message, got role %q", last.Role())
+			}
+			text, _ := um.Content.(string)
+			if !strings.Contains(text, "[SYS_EXT]") {
+				t.Fatalf("expected [SYS_EXT] wrapper, got: %q", text)
+			}
+			if !strings.Contains(text, "briefing-body") {
+				t.Fatalf("expected briefing-body in message, got: %q", text)
+			}
+		})
+	}
+}
+
+// TestAgentSession_PrependContext_EmptyIsNoop verifies that empty content
+// is the only thing that suppresses injection.
+func TestAgentSession_PrependContext_EmptyIsNoop(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	before := len(session.Agent.State().Messages)
+	session.PrependContext("")
+	if got := len(session.Agent.State().Messages); got != before {
+		t.Fatalf("empty PrependContext appended %d messages, want 0", got-before)
+	}
+}

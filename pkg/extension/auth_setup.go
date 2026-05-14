@@ -195,7 +195,7 @@ func (n *nopBridgeAPI) ReportProgress(_ string) {}
 func (n *nopBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{Version: n.version, Mode: n.mode}
 }
-func (n *nopBridgeAPI) RestartSession(_ string) error {
+func (n *nopBridgeAPI) RestartSession(_, _ string) error {
 	return fmt.Errorf("session restart not available outside a session")
 }
 

@@ -529,22 +529,26 @@ Response: `{"ok": true}`
 #### `restart_session`
 
 Abort the in-flight stream and start a fresh session, with `prompt` as
-the first user message of the new context. Used by the `self_handoff`
-builtin extension to implement reliable session handoff.
+the first user-typed message of the new context. Used by the
+`self_handoff` builtin extension to implement reliable session handoff.
 
-| Param    | Type   | Notes                                                                  |
-|----------|--------|-------------------------------------------------------------------------|
-| `prompt` | string | Required. First user message of the fresh session (e.g. "Read /tmp/handoff.md and continue."). |
+| Param             | Type   | Notes                                                                                              |
+|-------------------|--------|----------------------------------------------------------------------------------------------------|
+| `prompt`          | string | Required. First user-typed message of the fresh session (e.g. "Continue from the handoff above."). |
+| `prepend_context` | string | Optional. Injected into the fresh session as a `[SYS_EXT]`-wrapped user message ahead of `prompt`. |
 
 ```json
-{"jsonrpc":"2.0","id":1013,"method":"restart_session","params":{"prompt":"Read /tmp/handoff.md and continue."}}
+{"jsonrpc":"2.0","id":1013,"method":"restart_session","params":{"prompt":"Continue from the handoff briefing above.","prepend_context":"# Self-Handoff\n…briefing body…"}}
 ```
 
 Behaviour: fir calls `Agent.Abort()` synchronously (so the calling tool's
 result writeback is short-circuited), then asynchronously waits for idle,
-clears UI, calls `NewSessionCmd()`, and submits `prompt` via `Prompt()`.
-This RPC is the primitive behind the `handoff` builtin extension's
-`self_handoff` tool.
+clears UI, calls `NewSessionCmd()`, optionally calls
+`session.PrependContext(prepend_context)` to inject a `[SYS_EXT]`-wrapped
+user message, and submits `prompt` via `Prompt()`. This RPC is the
+primitive behind the `handoff` builtin extension's `self_handoff` tool —
+the briefing is carried via `prepend_context`, no filesystem artifact
+is written.
 
 Response: `{"ok": true}` — but extensions should not rely on receiving it;
 the calling agent turn is being torn down.

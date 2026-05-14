@@ -2421,12 +2421,14 @@ class Context:
         """Trigger the agent to continue without injecting any message."""
         self._call("continue_session", timeout=60.0)
 
-    def restart_session(self, prompt: str) -> None:
+    def restart_session(self, prompt: str, prepend_context: str = "") -> None:
         """Abort the in-flight stream and start a fresh session.
 
         Aborts any current LLM stream synchronously, clears the session
-        (LLM history, plan, system-prompt rebuild), clears UI state, and
-        submits ``prompt`` as the first user message of the new session.
+        (LLM history, plan, system-prompt rebuild), clears UI state,
+        optionally injects ``prepend_context`` into the fresh session as
+        a ``[SYS_EXT]``-wrapped user message, and submits ``prompt`` as
+        the first user-typed message of the new session.
 
         This is the primitive behind the ``self_handoff`` tool. It is
         only supported in modes that register a restart callback
@@ -2434,15 +2436,24 @@ class Context:
 
         Note: when called from inside a tool handler, the tool's result
         will be discarded — the calling turn is being aborted. The new
-        session begins with ``prompt`` as its first message.
+        session begins with ``prepend_context`` (if any, marked
+        ``[SYS_EXT]``) followed by ``prompt``.
 
         Parameters
         ----------
         prompt : str
-            The first user message of the fresh session. Typically a short
-            instruction pointing at a handoff document on disk.
+            The first user-typed message of the fresh session. Typically
+            a short instruction.
+        prepend_context : str, optional
+            Briefing content injected ahead of ``prompt`` as a
+            ``[SYS_EXT]``-wrapped user message via
+            :py:meth:`AgentSession.PrependContext`. Empty string (the
+            default) skips injection.
         """
-        self._call("restart_session", {"prompt": prompt})
+        params: dict[str, Any] = {"prompt": prompt}
+        if prepend_context:
+            params["prepend_context"] = prepend_context
+        self._call("restart_session", params)
 
     def side_query(
         self,

@@ -30,6 +30,7 @@ type mockBridgeAPI struct {
 	toolsRegistered []ToolDefinition
 	sessionData     map[string]string
 	restartPrompts  []string
+	restartPrepends []string
 	restartErr      error
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
@@ -116,10 +117,11 @@ func (m *mockBridgeAPI) Introspect() session.Introspection {
 }
 
 // restartCalls / restartErr are used by TestBridge_RestartSession.
-func (m *mockBridgeAPI) RestartSession(prompt string) error {
+func (m *mockBridgeAPI) RestartSession(prompt, prependContext string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.restartPrompts = append(m.restartPrompts, prompt)
+	m.restartPrepends = append(m.restartPrepends, prependContext)
 	return m.restartErr
 }
 
@@ -725,7 +727,7 @@ func TestBridge_RestartSession_RPC(t *testing.T) {
 	defer cancel()
 	go func() { _ = b.Run(ctx, api) }()
 
-	params := json.RawMessage(`{"prompt":"read /tmp/handoff.md"}`)
+	params := json.RawMessage(`{"prompt":"read /tmp/handoff.md","prepend_context":"briefing-body"}`)
 	_ = extCodec.WriteRequest(7, "restart_session", &params)
 
 	msg, err := extCodec.ReadMessage()
@@ -746,6 +748,9 @@ func TestBridge_RestartSession_RPC(t *testing.T) {
 	defer api.mu.Unlock()
 	if api.restartPrompts[0] != "read /tmp/handoff.md" {
 		t.Fatalf("got prompt %q, want %q", api.restartPrompts[0], "read /tmp/handoff.md")
+	}
+	if len(api.restartPrepends) == 0 || api.restartPrepends[0] != "briefing-body" {
+		t.Fatalf("got prepend %v, want [briefing-body]", api.restartPrepends)
 	}
 }
 
@@ -779,25 +784,31 @@ func TestBridge_RestartSession_PropagatesError(t *testing.T) {
 func TestSessionBridge_RestartSession_NoCallback(t *testing.T) {
 	// Without a registered RestartFn, RestartSession must error.
 	sb := &SessionBridge{}
-	if err := sb.RestartSession("x"); err == nil {
+	if err := sb.RestartSession("x", ""); err == nil {
 		t.Fatal("expected error when no RestartFn is registered")
 	}
 }
 
 func TestSessionBridge_RestartSession_InvokesCallback(t *testing.T) {
 	sb := &SessionBridge{}
-	got := make(chan string, 1)
-	sb.SetRestartFn(func(prompt string) error {
-		got <- prompt
+	type call struct {
+		prompt, prepend string
+	}
+	got := make(chan call, 1)
+	sb.SetRestartFn(func(prompt, prependContext string) error {
+		got <- call{prompt, prependContext}
 		return nil
 	})
-	if err := sb.RestartSession("hello"); err != nil {
+	if err := sb.RestartSession("hello", "briefing"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	select {
-	case p := <-got:
-		if p != "hello" {
-			t.Fatalf("got prompt %q, want hello", p)
+	case c := <-got:
+		if c.prompt != "hello" {
+			t.Fatalf("got prompt %q, want hello", c.prompt)
+		}
+		if c.prepend != "briefing" {
+			t.Fatalf("got prepend %q, want briefing", c.prepend)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RestartFn was not invoked")

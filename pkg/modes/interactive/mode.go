@@ -221,8 +221,8 @@ func (m *InteractiveMode) SetExtensionSetup(setup *extension.SetupResult) {
 		// in-flight stream; we wait for idle, clear UI state, start a
 		// new session, and submit the handoff prompt as the first
 		// message of the fresh context.
-		setup.Bridge.SetRestartFn(func(prompt string) error {
-			m.handleHandoff(prompt)
+		setup.Bridge.SetRestartFn(func(prompt, prependContext string) error {
+			m.handleHandoff(prompt, prependContext)
 			return nil
 		})
 	}
@@ -717,7 +717,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.cycleModel("backward")
 	})
 	m.editor.OnAction(tui.ActionNewSession, func() {
-		go m.handleClearCommand("")
+		go m.handleClearCommand("", "")
 	})
 	m.editor.OnAction(tui.ActionTree, func() {
 		m.showTreeSelector()

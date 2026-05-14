@@ -472,6 +472,28 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected restart_session call")
         assert msg is not None
         self.assertEqual(msg["params"]["prompt"], "read /tmp/h.md")
+        # prepend_context omitted when empty (SDK filters it out).
+        self.assertNotIn("prepend_context", msg["params"])
+        fake.stop()
+
+    def test_restart_demo_with_prepend_context(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(
+            2,
+            "restart_demo",
+            {
+                "prompt": "continue",
+                "confirm": "yes-really",
+                "prepend_context": "briefing-body",
+            },
+        )
+        msg = fake.wait_for_method("restart_session")
+        self.assertIsNotNone(msg, "expected restart_session call")
+        assert msg is not None
+        self.assertEqual(msg["params"]["prompt"], "continue")
+        self.assertEqual(msg["params"]["prepend_context"], "briefing-body")
         fake.stop()
 
     # -- batch_example -------------------------------------------------------

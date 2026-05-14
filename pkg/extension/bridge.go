@@ -388,7 +388,7 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		if err := api.RestartSession(p.Prompt); err != nil {
+		if err := api.RestartSession(p.Prompt, p.PrependContext); err != nil {
 			rpcErr = &Error{Code: -32000, Message: err.Error()}
 		} else {
 			result = okTrue

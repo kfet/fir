@@ -19,6 +19,13 @@
 
 - `FIR_CACHE_DEBUG` environment variable. Use `-vv` (or `FIR_LOG_LEVEL=trace`) instead — cache invalidation logs are now at Trace level unconditionally.
 
+### Changed
+
+- `self_handoff` no longer writes `.fir/handoff-<ts>.md` to the user's cwd. The briefing is now carried in-context to the new session via a new optional `prepend_context` parameter on the `restart_session` extension RPC, which injects the briefing as a `[SYS_EXT]`-wrapped user message ahead of the (now-short) restart prompt. No filesystem artifact, no `.fir/` directory created in repos that did not opt into it. The briefing persists in the new session's jsonl log like any other message. Slimmer `handoff.py` (dropped `_default_path`, `_atomic_write`, `_verify_readable`). Wire-level: `restart_session` gains an optional `prepend_context: string`; SDK signature is `ctx.restart_session(prompt, prepend_context="")`. Tool description updated; restart prompt is now `"Continue from the handoff briefing above."`.
+
+### Fixed
+
+- `AgentSession.PrependContext` no longer silently drops the message when the `enableSysExtensions` setting is off. The setting now governs only how already-injected `[SYS_EXT]` blocks are *interpreted* — via the static authority hook line in the system prompt — so flipping it mid-session naturally re-interprets prior injections. Injection itself is unconditional; we never silently lose extension-supplied context. Previously self_handoff would have appeared to no-op for users who disabled SYS_EXT.
 
 ## [0.45.0] - 2026-05-13
 ### Removed

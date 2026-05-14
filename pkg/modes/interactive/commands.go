@@ -163,7 +163,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		if len(parts) > 1 {
 			initialPrompt = strings.Join(parts[1:], " ")
 		}
-		go m.handleClearCommand(initialPrompt)
+		go m.handleClearCommand(initialPrompt, "")
 	case "/compact":
 		var instructions string
 		if len(parts) > 1 {
@@ -615,17 +615,18 @@ func (m *InteractiveMode) handleExternalEditor() {
 // triggers a session restart (e.g. via the self_handoff tool). The bridge
 // has already called Agent.Abort() synchronously to short-circuit the
 // in-flight tool call's result writeback; this method handles the rest:
-// wait for idle, clear UI, NewSessionCmd, and submit the handoff prompt.
+// wait for idle, clear UI, NewSessionCmd, optionally PrependContext, and
+// submit the handoff prompt.
 //
 // Runs on a goroutine spawned by the bridge.
-func (m *InteractiveMode) handleHandoff(prompt string) {
+func (m *InteractiveMode) handleHandoff(prompt, prependContext string) {
 	if m.session != nil {
 		m.session.Agent.WaitForIdle()
 	}
-	m.handleClearCommand(prompt)
+	m.handleClearCommand(prompt, prependContext)
 }
 
-func (m *InteractiveMode) handleClearCommand(initialPrompt string) {
+func (m *InteractiveMode) handleClearCommand(initialPrompt, prependContext string) {
 	if m.session != nil {
 		// Cancel any in-progress LLM stream before starting a new session.
 		if m.session.IsStreaming() {
@@ -660,6 +661,11 @@ func (m *InteractiveMode) handleClearCommand(initialPrompt string) {
 	// race condition of sending /new and a follow-up message as separate
 	// inputs via tmux send-keys.
 	if initialPrompt != "" && m.session != nil {
+		// Inject the [SYS_EXT]-wrapped briefing (if any) before the prompt
+		// so it appears ahead of the user message in the new session.
+		if prependContext != "" {
+			m.session.PrependContext(prependContext)
+		}
 		m.AddUserMessage(initialPrompt)
 		if err := m.session.Prompt(initialPrompt); err != nil {
 			m.showWarning(fmt.Sprintf("Failed to send message: %v", err))

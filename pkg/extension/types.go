@@ -119,8 +119,15 @@ type reportProgressParams struct {
 }
 
 // restartSessionParams maps to "restart_session".
+//
+// PrependContext, if non-empty, is injected into the freshly-started
+// session via AgentSession.PrependContext before Prompt is submitted —
+// i.e. it appears as a [SYS_EXT]-wrapped user message ahead of the
+// initial prompt. Used by self_handoff to carry the briefing across
+// the session boundary without writing a file.
 type restartSessionParams struct {
-	Prompt string `json:"prompt"`
+	Prompt         string `json:"prompt"`
+	PrependContext string `json:"prepend_context,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

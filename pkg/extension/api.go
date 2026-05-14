@@ -56,11 +56,18 @@ type BridgeAPI interface {
 	// the first message of the fresh session. Returns an error when the
 	// active mode does not support restart (e.g. ACP, headless).
 	//
+	// If prependContext is non-empty, it is injected into the fresh
+	// session via AgentSession.PrependContext (a [SYS_EXT]-wrapped user
+	// message) before prompt is submitted. Used by self_handoff to carry
+	// the briefing across the session boundary in-context, without a
+	// filesystem artifact.
+	//
 	// The call is "fire-and-forget on the agent loop": Abort() is invoked
 	// synchronously so the in-flight tool call's result is short-circuited;
-	// the rest (clear + Prompt) happens asynchronously. Callers therefore
-	// must not rely on any state from the *current* turn surviving.
-	RestartSession(prompt string) error
+	// the rest (clear + PrependContext + Prompt) happens asynchronously.
+	// Callers therefore must not rely on any state from the *current* turn
+	// surviving.
+	RestartSession(prompt, prependContext string) error
 }
 
 // ExecResult is the result of a shell command.

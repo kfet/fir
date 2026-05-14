@@ -1029,11 +1029,15 @@ func (s *AgentSession) GetSystemPrompt() string {
 // the model to treat [SYS_EXT] content as authoritative, so this achieves
 // the same effect as extending the system prompt — without mutating it and
 // without invalidating the Anthropic prompt cache.
+//
+// The injection is unconditional: whether the model actually treats the
+// [SYS_EXT] block as authoritative is governed by whether the static hook
+// line is present in the base system prompt (see buildSystemPrompt and
+// GetEnableSysExtensions). That gating happens at system-prompt construction
+// time, so flipping the setting later naturally reinterprets already-
+// injected messages on the next render. We never silently drop content.
 func (s *AgentSession) PrependContext(content string) {
 	if content == "" {
-		return
-	}
-	if s.SettingsManager != nil && !s.SettingsManager.GetEnableSysExtensions() {
 		return
 	}
 	msg := fmt.Sprintf("[SYS_EXT]\n%s\n[/SYS_EXT]", content)

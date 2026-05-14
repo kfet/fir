@@ -4,9 +4,11 @@
 Covers the validation logic in ``handoff.py``:
 
 * content type / emptiness / length floor / length ceiling / line count;
-* atomic-write + post-write readability check;
-* default path is absolute;
-* the restart prompt embeds the doc path verbatim.
+* normalisation (trailing newline);
+* end-to-end self_handoff handler calls restart_session with the briefing
+  in ``prepend_context`` and a short natural prompt;
+* the /handoff slash command injects a user-message asking the agent to
+  write a briefing.
 
 The ``ctx.restart_session`` round-trip itself is exercised through the
 ``demo_ext_test.py`` ``restart_demo`` tool — here we only verify the
@@ -43,7 +45,7 @@ def _load_handoff(cwd: str):
     """(Re-)import handoff.py with fir_ext.cwd pointed at ``cwd``.
 
     Forcing a re-import gives every test an isolated copy of the module's
-    state and lets us redirect the default-path logic at a tempdir.
+    state.
     """
     if "handoff" in sys.modules:
         del sys.modules["handoff"]
@@ -56,19 +58,20 @@ def _load_handoff(cwd: str):
 class _StubContext:
     """Minimal stub of fir_ext.Context used by the tool handler.
 
-    Captures restart_session calls; everything else either no-ops or
-    raises (so accidental usage during validation is surfaced).
+    Captures restart_session calls (both prompt and prepend_context);
+    everything else either no-ops or raises (so accidental usage during
+    validation is surfaced).
     """
 
     def __init__(self, raise_on_restart: bool = False):
-        self.restart_calls: list[str] = []
+        self.restart_calls: list[tuple[str, str]] = []
         self.user_messages: list[str] = []
         self.raise_on_restart = raise_on_restart
 
-    def restart_session(self, prompt: str) -> None:
+    def restart_session(self, prompt: str, prepend_context: str = "") -> None:
         if self.raise_on_restart:
             raise RuntimeError("simulated restart failure")
-        self.restart_calls.append(prompt)
+        self.restart_calls.append((prompt, prepend_context))
 
     def send_user_message(self, content: str, deliver_as: str | None = None) -> None:
         del deliver_as
@@ -85,8 +88,8 @@ def _good_content() -> str:
         "\n"
         "## Context\n"
         "Working on the reliable-self-handoff branch. The handoff extension "
-        "writes a doc atomically and restarts the session pointing the new "
-        "agent at the doc.\n"
+        "carries the briefing in-context via restart_session's "
+        "prepend_context, no filesystem artifact is written.\n"
         "\n"
         "## Next\n"
         "Run review-and-fix; merge to main.\n"
@@ -134,7 +137,6 @@ class TestValidateContent(unittest.TestCase):
         self.assertIn("too long", err)
 
     def test_rejects_too_few_lines(self) -> None:
-        # 220 chars on a single line.
         single = "x" * 220
         err, _ = self.handoff._validate_content(single)
         self.assertIsNotNone(err)
@@ -151,77 +153,6 @@ class TestValidateContent(unittest.TestCase):
         _, normalised = self.handoff._validate_content(body)
         self.assertTrue(normalised.endswith("\n"))
         self.assertFalse(normalised.endswith("\n\n"))
-
-
-# ---------------------------------------------------------------------------
-# Default path
-# ---------------------------------------------------------------------------
-
-
-class TestDefaultPath(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.mkdtemp()
-        self.handoff = _load_handoff(self.tmp)
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_default_path_is_absolute(self) -> None:
-        path = self.handoff._default_path()
-        self.assertTrue(os.path.isabs(path), f"path not absolute: {path}")
-
-    def test_default_path_lives_under_dot_fir(self) -> None:
-        path = self.handoff._default_path()
-        dot_fir = os.path.join(self.tmp, ".fir")
-        self.assertTrue(
-            path.startswith((os.path.realpath(dot_fir), dot_fir)),
-            f"unexpected path: {path}",
-        )
-
-    def test_default_path_creates_dot_fir(self) -> None:
-        self.handoff._default_path()
-        self.assertTrue(os.path.isdir(os.path.join(self.tmp, ".fir")))
-
-
-# ---------------------------------------------------------------------------
-# Atomic write + verify_readable
-# ---------------------------------------------------------------------------
-
-
-class TestAtomicWriteAndVerify(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.mkdtemp()
-        self.handoff = _load_handoff(self.tmp)
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_write_then_verify(self) -> None:
-        path = os.path.join(self.tmp, "h.md")
-        self.handoff._atomic_write(path, "# hello\nbody body body\n")
-        self.assertIsNone(self.handoff._verify_readable(path))
-        with open(path) as f:
-            self.assertIn("body body body", f.read())
-
-    def test_verify_rejects_missing(self) -> None:
-        msg = self.handoff._verify_readable(os.path.join(self.tmp, "nope.md"))
-        self.assertIsNotNone(msg)
-        assert msg is not None
-        self.assertIn("not found", msg)
-
-    def test_verify_rejects_directory(self) -> None:
-        msg = self.handoff._verify_readable(self.tmp)
-        self.assertIsNotNone(msg)
-        assert msg is not None
-        self.assertIn("not a regular file", msg)
-
-    def test_verify_rejects_empty(self) -> None:
-        path = os.path.join(self.tmp, "empty.md")
-        open(path, "w").close()
-        msg = self.handoff._verify_readable(path)
-        self.assertIsNotNone(msg)
-        assert msg is not None
-        self.assertIn("empty", msg)
 
 
 # ---------------------------------------------------------------------------
@@ -249,24 +180,31 @@ class TestSelfHandoffHandler(unittest.TestCase):
         self.assertTrue(result.get("is_error"))
         self.assertEqual(ctx.restart_calls, [])
 
-    def test_happy_path_writes_file_and_calls_restart(self) -> None:
+    def test_happy_path_passes_briefing_via_prepend_context(self) -> None:
         ctx = _StubContext()
-        result = self.handoff.self_handoff({"content": _good_content()}, ctx)
+        good = _good_content()
+        result = self.handoff.self_handoff({"content": good}, ctx)
         self.assertFalse(result.get("is_error"), result)
         self.assertEqual(len(ctx.restart_calls), 1)
-        prompt = ctx.restart_calls[0]
-        # Prompt embeds a path that exists on disk.
-        # Extract the path between "at " and " — ".
-        marker = "at "
-        idx = prompt.index(marker) + len(marker)
-        end = prompt.index(" — ", idx)
-        path = prompt[idx:end]
-        self.assertTrue(os.path.isabs(path), f"prompt path not absolute: {path}")
-        self.assertTrue(os.path.isfile(path), f"prompt path missing: {path}")
-        with open(path) as f:
-            body = f.read()
-        # Post-strip equality: written body matches input modulo trailing nl.
-        self.assertEqual(body.rstrip("\n"), _good_content().rstrip("\n"))
+        prompt, prepend = ctx.restart_calls[0]
+        # Prompt is short and natural.
+        self.assertTrue(0 < len(prompt) < 100, f"unexpected prompt: {prompt!r}")
+        self.assertIn("handoff", prompt.lower())
+        # Briefing travels in prepend_context, modulo trailing-newline
+        # normalisation done by _validate_content.
+        self.assertEqual(prepend.rstrip("\n"), good.rstrip("\n"))
+
+    def test_no_filesystem_artifact_written(self) -> None:
+        """Handoff must not create .fir/ or any file in the cwd."""
+        ctx = _StubContext()
+        self.handoff.self_handoff({"content": _good_content()}, ctx)
+        # No .fir directory should be created by the handoff.
+        self.assertFalse(
+            os.path.exists(os.path.join(self.tmp, ".fir")),
+            "handoff must not create .fir/ in cwd",
+        )
+        # Cwd should remain empty.
+        self.assertEqual(os.listdir(self.tmp), [])
 
     def test_restart_failure_surfaces_as_tool_error(self) -> None:
         ctx = _StubContext(raise_on_restart=True)
@@ -274,8 +212,6 @@ class TestSelfHandoffHandler(unittest.TestCase):
         self.assertTrue(result.get("is_error"))
         text = result["content"][0]["text"]
         self.assertIn("restart_session failed", text)
-        # The doc was still written; the error message should mention the path.
-        self.assertIn(self.tmp, text)
 
 
 # ---------------------------------------------------------------------------
@@ -312,10 +248,7 @@ class TestSlashCommand(unittest.TestCase):
         ctx = _StubContext()
         self.handoff.cmd_handoff([], ctx)
         self.assertEqual(ctx.restart_calls, [])
-        # No handoff doc should have been written by the slash command.
-        base = os.path.join(self.tmp, ".fir")
-        if os.path.isdir(base):
-            self.assertEqual(os.listdir(base), [])
+        self.assertEqual(os.listdir(self.tmp), [])
 
 
 if __name__ == "__main__":

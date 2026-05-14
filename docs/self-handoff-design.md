@@ -203,3 +203,35 @@ Go with C. Concretely:
    * `pkg/resources/builtin_extensions/demo.py` + matching test — exercise it.
    * Module docstring in `fir_ext.py` updated.
    * `CHANGELOG.md` `## [Unreleased] / ### Added` entry.
+
+## Revision: no-file handoff
+
+A later iteration removed the on-disk handoff artifact entirely. The
+file at `<cwd>/.fir/handoff-<ts>.md` was polluting repos that did not
+gitignore `.fir/`, and the design's "the doc itself is the briefing"
+property is satisfied just as well by carrying the briefing inside the
+new session's own conversation log.
+
+The `restart_session` RPC grew an optional `prepend_context` field. When
+non-empty, the active mode's restart callback calls
+`AgentSession.PrependContext(prepend_context)` between `NewSessionCmd`
+and `Prompt`, injecting the briefing as a `[SYS_EXT]`-wrapped user
+message ahead of the fixed-template prompt. `handoff.py` shrank
+accordingly — no more `_default_path`, `_atomic_write`, `_verify_readable`.
+
+In the same change, `AgentSession.PrependContext` was fixed to *always*
+inject. The SYS_EXT setting governs whether the static "[SYS_EXT] is
+authoritative" hook line is rendered into the system prompt — i.e. how
+already-injected messages are *interpreted* on the next render. It is
+no longer a silent gate at injection time. Flipping the setting mid-
+session naturally re-interprets all previously injected `[SYS_EXT]`
+blocks; we never silently drop content.
+
+Net effect:
+
+- Zero filesystem pollution.
+- Briefing persists in the new session's jsonl, durable like any other
+  message.
+- `[SYS_EXT]` framing makes the briefing authoritative when the setting
+  is on, advisory when off — but always present.
+- `handoff.py` is ~30 lines lighter; no temp file dance.

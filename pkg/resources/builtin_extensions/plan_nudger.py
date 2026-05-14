@@ -158,9 +158,9 @@ def on_tool_execution_end(params, ctx):
 _TAG = "[plan-status — keeping plan visible to the user]"
 
 _HANDOFF_LINE = (
-    "Note: context isn't a hard wall — the `self_handoff` tool writes "
-    "a doc and starts fresh; work continues. Stopping early is not the "
-    "only escape from context pressure."
+    "Note: context isn't a hard wall — the `self_handoff` tool carries "
+    "a briefing into a fresh session; work continues. Stopping early is "
+    "not the only escape from context pressure."
 )
 
 _METRIC_TIP = (
