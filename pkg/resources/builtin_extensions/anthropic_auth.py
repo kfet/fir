@@ -43,8 +43,12 @@ fir_ext.declare_oauth_provider(
         "org:create_api_key user:profile user:inference user:sessions:claude_code "
         "user:mcp_servers user:file_upload"
     ),
+    # Anthropic's OAuth client accepts any loopback port (RFC 8252 §7.3
+    # wildcard-port works) but the path is whitelisted exactly — only
+    # "/callback" is accepted; "/cb" yields "Redirect URI ... is not
+    # supported by client". Empirically verified 2026-05-14.
     callback_addr="127.0.0.1:0",
-    callback_path="/cb",
+    callback_path="/callback",
     manual_redirect_uri="https://platform.claude.com/oauth/code/callback",
     auth_params_extra={"code": "true"},
     token_body_json=True,

@@ -84,6 +84,15 @@ class TestStaticURLDrift(unittest.TestCase):
             f"  {current}\n",
         )
 
+    def test_callback_redirect_uri_frozen(self):
+        # Anthropic accepts any loopback port (RFC 8252 §7.3) but the
+        # path is whitelisted exactly — only "/callback" is accepted;
+        # "/cb" yields "Redirect URI ... is not supported by client".
+        # Empirically verified 2026-05-14. Regression guard for the
+        # short-link refactor that briefly switched the path to /cb.
+        self.assertEqual(self.flow.get("callback_addr"), "127.0.0.1:0")
+        self.assertEqual(self.flow.get("callback_path"), "/callback")
+
 
 if __name__ == "__main__":
     unittest.main()

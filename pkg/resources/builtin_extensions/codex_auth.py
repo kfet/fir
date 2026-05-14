@@ -38,8 +38,11 @@ fir_ext.declare_oauth_provider(
     authorize_url="https://auth.openai.com/oauth/authorize",
     token_url="https://auth.openai.com/oauth/token",  # noqa: S106
     scope="openid profile email offline_access",
-    callback_addr="127.0.0.1:0",
-    callback_path="/cb",
+    # Codex's OAuth client only whitelists this exact loopback redirect
+    # (fixed port 1455 + /auth/callback). Empirically verified
+    # 2026-05-14: wildcard port AND different path are both rejected.
+    callback_addr="127.0.0.1:1455",
+    callback_path="/auth/callback",
     auth_params_extra={
         "id_token_add_organizations": "true",
         "codex_cli_simplified_flow": "true",

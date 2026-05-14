@@ -75,6 +75,16 @@ class TestStaticURLDrift(unittest.TestCase):
             f"  {current}\n",
         )
 
+    def test_callback_redirect_uri_frozen(self):
+        # Codex's OAuth client only whitelists this exact loopback
+        # redirect — wildcard port and different paths are both rejected
+        # with "Redirect URI ... is not supported by client".
+        # Empirically verified 2026-05-14. Regression guard for the
+        # short-link refactor that briefly switched this to
+        # 127.0.0.1:0 + /cb.
+        self.assertEqual(self.flow.get("callback_addr"), "127.0.0.1:1455")
+        self.assertEqual(self.flow.get("callback_path"), "/auth/callback")
+
 
 if __name__ == "__main__":
     unittest.main()
