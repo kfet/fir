@@ -110,6 +110,21 @@ func expectedFingerprintFromContent(cs []ai.AssistantContent) thinkingFingerprin
 			fp.BlockTypes = append(fp.BlockTypes, "tool_use")
 		}
 	}
+	// Mirror separateAdjacentThinkingBlocks: a synthetic "text" block is
+	// spliced between any two adjacent thinking/redacted_thinking entries
+	// before the wire goes out. The fingerprint must reflect that or it
+	// will spuriously diverge from the converter output.
+	isThinkingType := func(t string) bool { return t == "thinking" || t == "redacted_thinking" }
+	if len(fp.BlockTypes) > 1 {
+		spliced := make([]string, 0, len(fp.BlockTypes)+2)
+		for i, t := range fp.BlockTypes {
+			if i > 0 && isThinkingType(fp.BlockTypes[i-1]) && isThinkingType(t) {
+				spliced = append(spliced, "text")
+			}
+			spliced = append(spliced, t)
+		}
+		fp.BlockTypes = spliced
+	}
 	fp.TotalBlockCount = len(fp.BlockTypes)
 	return fp
 }

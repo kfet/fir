@@ -501,10 +501,25 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
 					case "server_tool_use":
 						// Server-side tool invocation (web_search, code_execution, etc.)
-						// We emit a text block showing the tool is running.
-						output.Content = append(output.Content, ai.NewTextContent(""))
+						// We emit a *non-empty* text placeholder showing which server
+						// tool is running. Non-empty is critical: the end-of-stream
+						// pruner (pruneEmptyAssistantTextBlocks) drops empty text
+						// blocks, and if a server_tool_use sits between two thinking
+						// blocks the prune would make the thinkings adjacent on
+						// disk — which Anthropic rejects on replay with the
+						// misleading "thinking blocks cannot be modified" 400
+						// (see req_011Cb1vcfcbfqsJWGM7KfmyT). This is a band-aid;
+						// the proper fix (preserve server-side blocks verbatim
+						// via a generic passthrough variant) lives in BACKLOG.md.
+						toolName, _ := cb["name"].(string)
+						if toolName == "" {
+							toolName = "server_tool_use"
+						}
+						placeholder := fmt.Sprintf("[server tool: %s]", toolName)
+						output.Content = append(output.Content, ai.NewTextContent(placeholder))
 						blocks[idx] = &blockInfo{contentIdx: contentIdx}
 						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextStart, ContentIndex: contentIdx, Partial: output})
+						stream.Push(ai.AssistantMessageEvent{Type: ai.EventTextDelta, ContentIndex: contentIdx, Delta: placeholder, Partial: output})
 						continue // skip default blocks[idx] assignment below
 					case "web_search_tool_result":
 						// Server-side web search results — format as text summary.
@@ -1257,6 +1272,7 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 				}
 			}
 			if len(blocks) > 0 {
+				blocks = separateAdjacentThinkingBlocks(blocks)
 				params = append(params, map[string]any{"role": "assistant", "content": blocks})
 			}
 
@@ -1333,6 +1349,57 @@ func pruneEmptyAssistantTextBlocks(content []ai.AssistantContent) []ai.Assistant
 			continue
 		}
 		out = append(out, c)
+	}
+	return out
+}
+
+// separateAdjacentThinkingBlocks splices a synthetic non-thinking text block
+// between any two adjacent `thinking` / `redacted_thinking` blocks in the
+// outbound wire content of an assistant message.
+//
+// Why: Anthropic's input validator rejects assistant messages containing
+// adjacent thinking blocks with a misleading 400 "thinking or
+// redacted_thinking blocks in the latest assistant message cannot be
+// modified" (request id req_011Cb1vcfcbfqsJWGM7KfmyT) — what actually
+// trips is the structural rule "no two thinking blocks in a row". This
+// can happen even when each thinking block is byte-identical to what
+// Anthropic emitted, because fir flattens server-side blocks
+// (server_tool_use, web_search_tool_result, …) into text during
+// streaming and the end-of-stream pruner then drops the empty
+// placeholders that used to sit between consecutive thinkings.
+//
+// Inserting a non-thinking sibling between the two thinkings is
+// empirically accepted by the Anthropic validator (verified against
+// the failing wire shape with real signed thinking bytes). No thinking
+// block is mutated; the splice is the only change.
+//
+// The proper fix — preserving server-side blocks verbatim via a
+// generic passthrough content variant — is tracked in BACKLOG.md.
+// This function is the band-aid until that lands.
+func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
+	isThinking := func(b map[string]any) bool {
+		t, _ := b["type"].(string)
+		return t == "thinking" || t == "redacted_thinking"
+	}
+	needsFix := false
+	for i := 1; i < len(blocks); i++ {
+		if isThinking(blocks[i-1]) && isThinking(blocks[i]) {
+			needsFix = true
+			break
+		}
+	}
+	if !needsFix {
+		return blocks
+	}
+	out := make([]map[string]any, 0, len(blocks)+2)
+	for i, b := range blocks {
+		if i > 0 && isThinking(blocks[i-1]) && isThinking(b) {
+			out = append(out, map[string]any{
+				"type": "text",
+				"text": "(server tool block omitted on replay)",
+			})
+		}
+		out = append(out, b)
 	}
 	return out
 }
