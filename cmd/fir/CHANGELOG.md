@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ## [0.46.3] - 2026-05-13
+### Changed
+
+- Skill/extension override resolver: an explicit `override:` (either `override: true` or `override: <full-id>`) no longer emits a "shadowed" warning for the displaced item — intentional overrides are silent. The killer→victim relationship is still returned via `overriddenBy` for listings/doctor. Genuinely ambiguous cases (`override-conflict`, unresolved override targets, `duplicate-name` coexistence) still warn.
 
 ### Fixed
 

@@ -65,7 +65,9 @@ type ResourceCollision struct {
 // Type values:
 //   - "warning"        — generic load problem (bad frontmatter, etc.)
 //   - "error"          — fatal load problem
-//   - "shadowed"       — skill suppressed by an override or by real-path dedup
+//   - "shadowed"       — suppressed: explicit overrides intentionally shadow
+//     their target and emit no diagnostic. (Type retained for forward
+//     compatibility / external consumers.)
 //   - "duplicate-name" — informational; multiple skills coexist under the same
 //     bare name and must be referenced by ID
 //   - "override-conflict" — multiple skills claim override of the same name

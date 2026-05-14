@@ -173,6 +173,13 @@ Custom research skill.
 	if !overrodeBuiltin {
 		t.Errorf("expected Overridden to contain builtin__research, got %v", researches[0].Overridden)
 	}
+	// An explicit `override: true` is intentional — no shadow warning should
+	// be emitted. Only ambiguous/unintentional collisions deserve a diag.
+	for _, d := range result.Diagnostics {
+		if d.Type == "shadowed" {
+			t.Errorf("unexpected shadowed diagnostic for explicit override: %+v", d)
+		}
+	}
 }
 
 func TestLoadSkills_ProjectCoexistsWithBuiltin(t *testing.T) {

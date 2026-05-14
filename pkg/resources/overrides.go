@@ -150,15 +150,14 @@ func ResolveOverrides[T Overridable](items []T, kind string) (keep []bool, overr
 	for idx := range overriddenBy {
 		sort.Strings(overriddenBy[idx])
 	}
-	for i, it := range items {
-		if k, dead := killed[it.GetID()]; dead {
-			keep[i] = false
-			diags = append(diags, ResourceDiagnostic{
-				Type:    "shadowed",
-				Path:    it.GetPath(),
-				Message: fmt.Sprintf("%s %q shadowed by override from %q", kind, it.GetID(), k.killerID),
-			})
-		}
+	// Drop killed items. No diagnostic is emitted: an explicit `override:`
+	// (either `override: true` or `override: <full-id>`) intentionally
+	// shadows the target. The killer→victim relationship is surfaced via
+	// the returned overriddenBy map for listings/doctor. Only genuinely
+	// ambiguous cases (override-conflict, unresolved override targets,
+	// duplicate-name coexistence) warrant a warning.
+	for victimID := range killed {
+		keep[byID[victimID]] = false
 	}
 	return keep, overriddenBy, diags
 }
