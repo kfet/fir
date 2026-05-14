@@ -1,6 +1,7 @@
 ---
 name: pebble-emu
 description: Build, run, and observe Pebble watchapps/watchfaces in the Rebble pebble-tool emulator. Captures emulator output as PNGs (and optionally VNC/noVNC) so an AI agent can see what the watch is showing and iterate on apps without a physical Pebble.
+override: true
 ---
 
 # Pebble emulator — AI-friendly recipe

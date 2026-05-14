@@ -2,6 +2,7 @@
 builtin: true
 name: rebase-on-main
 description: Rebase the current feature branch onto local main to pick up recent main changes without merging. Verifies no main content is lost during conflict resolution.
+override: true
 ---
 
 1. `git rebase main`. When conflicts arise, preserve main's content and re-apply only the feature's intended changes on top.

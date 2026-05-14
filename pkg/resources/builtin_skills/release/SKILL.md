@@ -1,6 +1,7 @@
 ---
 name: release
 description: Release a new version. Confirms reviews and tests pass, updates VERSION and CHANGELOG.md, commits, tags, and installs.
+override: true
 ---
 
 # Release Skill

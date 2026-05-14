@@ -2,6 +2,7 @@
 name: review-and-fix
 description: Review all branch changes, fix all issues, then commit.
 builtin: true
+override: true
 ---
 
 # High-level flow

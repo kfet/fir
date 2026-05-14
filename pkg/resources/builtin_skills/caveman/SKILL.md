@@ -1,6 +1,7 @@
 ---
 name: caveman
 description: Ultra-compressed caveman-speech mode that cuts token usage ~75% while keeping full technical accuracy. Activate when the user says "caveman mode", "go caveman", or asks for terse/compressed replies; revert on "stop caveman" or "normal mode".
+override: true
 ---
 
 # Caveman Mode

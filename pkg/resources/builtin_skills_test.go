@@ -214,3 +214,84 @@ description: Project notify variant
 		t.Fatalf("expected project and builtin notify skills to coexist; sawProject=%v sawBuiltin=%v", sawProject, sawBuiltin)
 	}
 }
+
+// TestLoadSkills_ProjectMirrorOfBuiltinShadows verifies the in-repo
+// convention where `.fir/skills` is symlinked at (or copied from) the
+// builtin source tree: each builtin SKILL.md carries `override: true` in its
+// frontmatter so the project-origin copy shadows the builtin-origin copy.
+// The builtin self-load must drop its own override claim, otherwise both
+// copies would claim it and an override-conflict diagnostic would fire.
+func TestLoadSkills_ProjectMirrorOfBuiltinShadows(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentDir := filepath.Join(tmpDir, "agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Mirror the builtin "notify" skill — same name, with override: true,
+	// as every builtin SKILL.md now carries.
+	skillDir := filepath.Join(tmpDir, ".fir", "skills", "notify")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: notify
+description: Project mirror of builtin notify
+builtin: true
+override: true
+---
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := LoadSkills(LoadSkillsOptions{
+		Cwd:             tmpDir,
+		AgentDir:        agentDir,
+		IncludeDefaults: true,
+	})
+
+	var notifies []Skill
+	for _, s := range result.Skills {
+		if s.Name == "notify" {
+			notifies = append(notifies, s)
+		}
+	}
+	if len(notifies) != 1 {
+		t.Fatalf("expected exactly one notify skill after project override, got %d", len(notifies))
+	}
+	if notifies[0].Origin != "project" {
+		t.Errorf("surviving notify origin=%q, want project", notifies[0].Origin)
+	}
+	var overrodeBuiltin bool
+	for _, id := range notifies[0].Overridden {
+		if id == "builtin__notify" {
+			overrodeBuiltin = true
+		}
+	}
+	if !overrodeBuiltin {
+		t.Errorf("expected Overridden to contain builtin__notify, got %v", notifies[0].Overridden)
+	}
+
+	// And no override-conflict diagnostic should fire.
+	for _, d := range result.Diagnostics {
+		if d.Type == "override-conflict" && strings.Contains(d.Message, "notify") {
+			t.Errorf("unexpected override-conflict diagnostic: %s", d.Message)
+		}
+	}
+
+	// Also assert: with no project mirror, the agent listing must not
+	// contain any duplicate-name diagnostics for builtin skills against
+	// themselves — i.e. the builtin self-load is single-origin.
+	plain := LoadSkills(LoadSkillsOptions{
+		Cwd:             t.TempDir(),
+		AgentDir:        filepath.Join(tmpDir, "agent-empty"),
+		IncludeDefaults: true,
+	})
+	for _, d := range plain.Diagnostics {
+		if d.Type == "duplicate-name" {
+			t.Errorf("unexpected duplicate-name diagnostic on plain load: %s", d.Message)
+		}
+		if d.Type == "override-conflict" {
+			t.Errorf("unexpected override-conflict diagnostic on plain load: %s", d.Message)
+		}
+	}
+}

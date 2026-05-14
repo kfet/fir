@@ -1,6 +1,7 @@
 ---
 name: binary-size
 description: Analyze fir binary size per-package, identify bloat contributors, and check the size guard baseline.
+override: true
 ---
 
 # Binary Size Analysis

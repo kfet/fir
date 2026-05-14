@@ -2,6 +2,7 @@
 builtin: true
 name: extension-creator
 description: Create or modify a fir extension — write a Python script in .fir/extensions/ using the fir_ext SDK with tool handlers and event subscriptions.
+override: true
 ---
 
 # Extensions

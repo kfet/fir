@@ -1,6 +1,7 @@
 ---
 name: demo-plan
 description: Run a demo plan with simulated work steps to showcase the TUI plan visualization feature.
+override: true
 ---
 
 # Demo Plan

@@ -1,6 +1,7 @@
 ---
 name: sync
 description: Sync with an upstream source repo — detect changed files, apply equivalent downstream edits, update the baseline, and report any new features or non-trivial changes picked up.
+override: true
 ---
 
 # Upstream Sync

@@ -2,6 +2,7 @@
 builtin: true
 name: wt
 description: Spawn a fresh fir agent in a new tmux window on its own git worktree. Use whenever the user wants the work — or the conversation about the work — to happen over there, not here. Doing it, designing it, or just talking it through all count. If the user points at this skill, that alone is the cue — spawn, don't inline.
+override: true
 ---
 
 # wt — spawn an agent in a worktree

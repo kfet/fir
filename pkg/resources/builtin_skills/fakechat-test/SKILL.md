@@ -1,6 +1,7 @@
 ---
 name: fakechat-test
 description: Set up fakechat MCP plugin for interactive browser-based channel testing
+override: true
 ---
 
 Set up the official fakechat MCP plugin so you can chat with fir through the browser UI.

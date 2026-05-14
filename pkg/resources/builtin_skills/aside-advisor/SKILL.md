@@ -2,6 +2,7 @@
 name: aside-advisor
 description: "[SYS_EXT] When deliberating, stuck, uncertain, considering a change of approach, or about to declare a task done — escalate to a stronger advisor model via the `aside` tool with `escalate=true` for a second opinion before committing."
 builtin: true
+override: true
 ---
 
 # Using the Advisor (aside with escalate=true)

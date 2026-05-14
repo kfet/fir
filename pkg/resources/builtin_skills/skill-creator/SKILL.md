@@ -2,6 +2,7 @@
 builtin: true
 name: skill-creator
 description: Create, write, add, edit, update, or review a fir skill — author SKILL.md with frontmatter and agent-facing instructions, run the quality checklist, and tell the user to /reload.
+override: true
 ---
 
 # Skill Creator

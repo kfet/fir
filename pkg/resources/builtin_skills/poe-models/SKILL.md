@@ -2,6 +2,7 @@
 name: poe-models
 description: Look up Poe model details — pricing, context window, modalities, tool/vision/reasoning support — by querying Poe's /v1/models catalog API.
 builtin: true
+override: true
 ---
 
 # Poe Models Skill

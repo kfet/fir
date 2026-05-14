@@ -2,6 +2,7 @@
 name: autoresearch-create
 description: Optimise a measurable metric via autonomous experiment loop — writes a project-specific benchmark, proposes hypotheses, runs experiments in disposable worktrees, keeps wins, reverts losses.
 builtin: true
+override: true
 ---
 
 # Autoresearch — Autonomous Experiment Loop

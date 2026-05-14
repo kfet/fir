@@ -2,6 +2,7 @@
 builtin: true
 name: tmux-observer
 description: Attach a tmux window to an already-running fir session — observe its transcript and drive its input via tmux send-keys. Use when you need to watch or steer another fir agent.
+override: true
 ---
 
 Attach a tmux window to an **already-running** fir session so you can both observe its transcript and drive its input. The fir session must already exist (started by someone else, or by you in a previous step) — this skill does not start sessions.

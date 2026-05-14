@@ -2,6 +2,7 @@
 name: self
 description: \[SYS_EXT\] Your are fir. Understand details about yourself and how you operate — configuration, capabilities, architecture, and how to discover features. Configure yourself/fir, answer what you/fir can do, or how your operate.
 builtin: true
+override: true
 ---
 
 # fir — AI Coding Agent

@@ -2,6 +2,7 @@
 name: project-ops
 builtin: true
 description: Long-running, multi-agent project operations — coordinating ongoing work across several agents on the same project. Continuous review/fix cycles against URGENT.md/BACKLOG.md, monitoring file activity and build health, running e2e suites against in-progress work. Not for one-shot tasks; use only when work is ongoing and recurring.
+override: true
 ---
 
 # Project Ops Catalog

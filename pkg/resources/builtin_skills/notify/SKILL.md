@@ -2,6 +2,7 @@
 builtin: true
 name: notify
 description: Send a native OS-level terminal notification to alert the user about long-running task completion or important events.
+override: true
 ---
 
 # Notify Skill

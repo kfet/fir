@@ -1,6 +1,7 @@
 ---
 name: telegram-bot-setup
 description: Set up a new Telegram bot channel for a fir project — install the telegram MCP, create a per-project state dir, drop in the bot token, wire .fir/mcp.json with TELEGRAM_STATE_DIR, pair the user, and verify. Use when the user asks to add, configure, or onboard a Telegram bot for a fir worktree/project.
+override: true
 ---
 
 # Telegram bot setup for a fir project

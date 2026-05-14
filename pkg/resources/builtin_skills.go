@@ -125,7 +125,14 @@ func LoadBuiltinSkills() LoadSkillsResult {
 			Source:      "builtin",
 			Origin:      "builtin",
 			ID:          MakeSkillID("builtin", name),
-			Override:    fm.Override,
+			// Builtin skills carry `override: true` in their frontmatter so
+			// that when the same file is also discovered via a project skills
+			// directory (e.g. `.fir/skills` symlinked at the builtin source
+			// tree, or a user-copied skill), the project-origin copy wins.
+			// The builtin-origin self-load must not claim override itself,
+			// otherwise both copies would claim it and trigger an
+			// override-conflict diagnostic.
+			Override: "",
 		})
 		return nil
 	})

@@ -2,6 +2,7 @@
 builtin: true
 name: tmux-driver
 description: Drive interactive CLIs (python, gdb, etc.) via named tmux sessions with multi-window support. Falls back to fir's built-in PTY driver when tmux is unavailable.
+override: true
 ---
 
 Drive interactive programs through named sessions. Automatically uses tmux if installed, otherwise uses fir's built-in PTY driver (no external dependencies needed).

@@ -1,6 +1,7 @@
 ---
 name: extract-module
 description: Extract a self-contained Go package out of fir into its own repo at github.com/kfet/<name>. Use when carving a subtree out of pkg/ for reuse — e.g. firpty, skipstone, pinoauth precedent. While using this skill, update it in place when a genuinely new, non-obvious high-level pattern emerges that the current instructions wouldn't have produced — skip anything an AI would already do by default.
+override: true
 ---
 
 # Extract a Go module out of fir into its own repo

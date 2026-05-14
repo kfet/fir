@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Skill loading: every builtin `SKILL.md` now carries `override: true` in its frontmatter so that when the same file is also discovered via a project skills directory (the in-repo `.fir/skills` symlink at the builtin source tree, or a user-copied skill), the project-origin copy shadows the builtin-origin copy instead of coexisting under disambiguated `builtin__`/`project__` IDs. `LoadBuiltinSkills` deliberately drops the `Override` claim on the builtin self-load so the two copies don't both claim override and trigger an `override-conflict` diagnostic.
 
 ### Fixed
 
