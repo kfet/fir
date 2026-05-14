@@ -60,12 +60,10 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_SpliceSeparator(t *testing.T) {
 		t.Fatal("assistant content empty")
 	}
 	// Walk and assert no adjacency.
-	isThinking := func(b map[string]any) bool {
-		t, _ := b["type"].(string)
-		return t == "thinking" || t == "redacted_thinking"
-	}
 	for i := 1; i < len(blocks); i++ {
-		if isThinking(blocks[i-1]) && isThinking(blocks[i]) {
+		t0, _ := blocks[i-1]["type"].(string)
+		t1, _ := blocks[i]["type"].(string)
+		if isThinkingType(t0) && isThinkingType(t1) {
 			t.Fatalf("adjacent thinking blocks at idx %d-%d still present: %+v", i-1, i, blocks)
 		}
 	}
@@ -73,7 +71,8 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_SpliceSeparator(t *testing.T) {
 	// fix may not drop or mutate any signed block.
 	gotSigs := []string{}
 	for _, b := range blocks {
-		if isThinking(b) {
+		bt, _ := b["type"].(string)
+		if isThinkingType(bt) {
 			if sig, _ := b["signature"].(string); sig != "" {
 				gotSigs = append(gotSigs, sig)
 			}
@@ -122,9 +121,42 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_NoOpWhenSafe(t *testing.T) {
 		t.Fatalf("want 2 wire blocks (thinking + tool_use), got %d: %+v", len(blocks), blocks)
 	}
 	for _, b := range blocks {
-		if txt, _ := b["text"].(string); strings.Contains(txt, "omitted on replay") {
+		if txt, _ := b["text"].(string); strings.Contains(txt, "separator inserted by fir") {
 			t.Errorf("adjacency guard fired when it shouldn't: %+v", blocks)
 		}
+	}
+}
+
+// pruneEmptyAssistantTextBlocks must NOT strip the `[server tool: <name>]`
+// placeholder that the streamer now emits for `server_tool_use` content
+// blocks. If it did, two thinking blocks that originally sandwiched the
+// server_tool_use would end up adjacent on disk — which is exactly the
+// shape that triggered the original 400.
+func TestPruneEmptyAssistantTextBlocks_KeepsServerToolPlaceholder(t *testing.T) {
+	sig := strings.Repeat("s", 64)
+	t0 := ai.NewThinkingContent("")
+	t0.Thinking.ThinkingSignature = sig
+	t1 := ai.NewThinkingContent("")
+	t1.Thinking.ThinkingSignature = sig + "x"
+	in := []ai.AssistantContent{
+		t0,
+		ai.NewTextContent("[server tool: web_search]"), // placeholder under test
+		t1,
+		ai.NewTextContent(""), // empty — must be dropped
+		ai.NewToolCallContent("tu", "Bash", map[string]any{"cmd": "date"}),
+	}
+	out := pruneEmptyAssistantTextBlocks(in)
+	// Empty trailing text must be gone; placeholder must remain.
+	if got, want := len(out), 4; got != want {
+		t.Fatalf("len: want %d, got %d (%+v)", want, got, out)
+	}
+	if !out[1].IsText() || !strings.Contains(out[1].Text.Text, "server tool") {
+		t.Errorf("placeholder block missing or mutated at idx 1: %+v", out)
+	}
+	// And the thinking blocks must remain separated by the placeholder —
+	// not adjacent.
+	if out[0].IsThinking() && out[1].IsThinking() {
+		t.Errorf("placeholder did not survive — thinking blocks now adjacent")
 	}
 }
 
@@ -189,7 +221,7 @@ func TestSeparateAdjacentThinkingBlocks(t *testing.T) {
 			}
 			spliced := false
 			for _, b := range out {
-				if txt, _ := b["text"].(string); strings.Contains(txt, "omitted on replay") {
+				if txt, _ := b["text"].(string); strings.Contains(txt, "separator inserted by fir") {
 					spliced = true
 				}
 			}

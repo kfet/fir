@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Anthropic server-side tool invocations (`server_tool_use`, e.g. `web_search`, `code_execution`) now render as a visible `[server tool: <name>]` text marker in the TUI / ACP transcript instead of an invisible empty placeholder. Side effect of the v0.46.3 fix — the marker exists so the placeholder survives `pruneEmptyAssistantTextBlocks` (which would otherwise drop it and leave adjacent thinking blocks on disk). Will be replaced by proper passthrough rendering once the structural fix in `BACKLOG.md` lands.
+
 ## [0.46.3] - 2026-05-13
 ### Changed
 

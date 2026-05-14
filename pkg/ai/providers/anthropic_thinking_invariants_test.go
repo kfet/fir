@@ -114,7 +114,6 @@ func expectedFingerprintFromContent(cs []ai.AssistantContent) thinkingFingerprin
 	// spliced between any two adjacent thinking/redacted_thinking entries
 	// before the wire goes out. The fingerprint must reflect that or it
 	// will spuriously diverge from the converter output.
-	isThinkingType := func(t string) bool { return t == "thinking" || t == "redacted_thinking" }
 	if len(fp.BlockTypes) > 1 {
 		spliced := make([]string, 0, len(fp.BlockTypes)+2)
 		for i, t := range fp.BlockTypes {

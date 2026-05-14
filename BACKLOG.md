@@ -27,12 +27,21 @@ keep us correct but are not the right shape long-term.
 
    ```go
    type ServerContent struct {
-       Type string         // "server_tool_use", "web_search_tool_result", …
-       Raw  map[string]any // the entire content_block payload, verbatim
+       Type string          // "server_tool_use", "web_search_tool_result", …
+       Raw  json.RawMessage // the entire content_block payload, preserved verbatim
    }
    ```
 
    Plus helpers `IsServerContent()`, `NewServerContent(...)`.
+
+   **Critical: store the raw JSON bytes, not a `map[string]any`.** Go's
+   `encoding/json` sorts map keys alphabetically on marshal, so a
+   round-trip through `map[string]any` would not be byte-identical to
+   what Anthropic sent. If Anthropic's signature validation is at any
+   point byte-sensitive (the assistant-message-level validation we've
+   observed appears purely structural, but we don't know for sure), a
+   map-based round-trip would silently break. `json.RawMessage` writes
+   the original bytes through unchanged.
 
 2. **Streaming side** (`pkg/ai/providers/anthropic.go`,
    `content_block_start` switch): replace the six special cases for

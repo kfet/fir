@@ -1353,6 +1353,13 @@ func pruneEmptyAssistantTextBlocks(content []ai.AssistantContent) []ai.Assistant
 	return out
 }
 
+// isThinkingType reports whether a wire block's `type` field denotes a
+// thinking variant (signed `thinking` or `redacted_thinking`). Used by
+// separateAdjacentThinkingBlocks and the related tests.
+func isThinkingType(t string) bool {
+	return t == "thinking" || t == "redacted_thinking"
+}
+
 // separateAdjacentThinkingBlocks splices a synthetic non-thinking text block
 // between any two adjacent `thinking` / `redacted_thinking` blocks in the
 // outbound wire content of an assistant message.
@@ -1369,9 +1376,17 @@ func pruneEmptyAssistantTextBlocks(content []ai.AssistantContent) []ai.Assistant
 // placeholders that used to sit between consecutive thinkings.
 //
 // Inserting a non-thinking sibling between the two thinkings is
-// empirically accepted by the Anthropic validator (verified against
-// the failing wire shape with real signed thinking bytes). No thinking
-// block is mutated; the splice is the only change.
+// empirically accepted by the Anthropic validator for the
+// `signed-thinking + signed-thinking` case (verified against the
+// failing wire shape with real signed thinking bytes). The
+// `redacted_thinking + signed-thinking` and `redacted + redacted`
+// cases are treated the same by this code by analogy but have NOT
+// been independently curl-verified — generating a redacted_thinking
+// block on demand is impractical. If a future report shows redacted
+// adjacency is handled differently by the validator, tighten this
+// rule then.
+//
+// No thinking block is mutated; the splice is the only change.
 //
 // The proper fix — preserving server-side blocks verbatim via a
 // generic passthrough content variant — is tracked in BACKLOG.md.
@@ -1379,7 +1394,7 @@ func pruneEmptyAssistantTextBlocks(content []ai.AssistantContent) []ai.Assistant
 func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
 	isThinking := func(b map[string]any) bool {
 		t, _ := b["type"].(string)
-		return t == "thinking" || t == "redacted_thinking"
+		return isThinkingType(t)
 	}
 	needsFix := false
 	for i := 1; i < len(blocks); i++ {
@@ -1396,7 +1411,7 @@ func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
 		if i > 0 && isThinking(blocks[i-1]) && isThinking(b) {
 			out = append(out, map[string]any{
 				"type": "text",
-				"text": "(server tool block omitted on replay)",
+				"text": "(thinking-block separator inserted by fir)",
 			})
 		}
 		out = append(out, b)
