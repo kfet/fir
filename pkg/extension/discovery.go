@@ -12,11 +12,49 @@ import (
 type ExtProcConfig struct {
 	Name          string   // derived from filename or sub-directory name
 	Path          string   // absolute path to the executable
-	Scope         string   // "project", "global", or "builtin"
+	Scope         string   // "project", "global", "package", or "builtin"
+	Origin        string   // precise provenance: "builtin"|"user"|"project"|"package"
+	ID            string   // canonical disambiguated ID: "<sanitized-origin>__<name>"
+	Override      string   // frontmatter override value: "", "true", or "<id>" target
 	Modes         []string // optional mode allowlist from comment frontmatter
 	AuthProviders []string // auth provider IDs declared in frontmatter
 	CLIVerbs      []string // top-level `fir <verb>` names declared in frontmatter
 	Explicit      bool     // when true, extension is opt-in: only loaded when named via -e
+}
+
+// originForScope maps the existing Scope label to the Origin label used by
+// the resource-coexistence model. Today this is a straight 1:1 translation
+// (global → user, others identity-mapped); package extensions get a generic
+// "package" origin without source attribution. When Phase 2 eventually
+// wires per-package source threading, replace this with the real source.
+func originForScope(scope string) string {
+	switch scope {
+	case "global":
+		return "user"
+	case "project", "builtin", "package":
+		return scope
+	default:
+		return scope
+	}
+}
+
+// makeExtConfig builds an ExtProcConfig with Origin and ID populated from
+// scope + name. Centralises the derivation so every constructor stays in
+// sync if the origin scheme changes.
+func makeExtConfig(name, path, scope string, fm resources.ExtensionFrontmatter) ExtProcConfig {
+	origin := originForScope(scope)
+	return ExtProcConfig{
+		Name:          name,
+		Path:          path,
+		Scope:         scope,
+		Origin:        origin,
+		ID:            resources.MakeResourceID(origin, name),
+		Override:      fm.Override,
+		Modes:         fm.Modes,
+		AuthProviders: fm.AuthProviders,
+		CLIVerbs:      fm.CLIVerbs,
+		Explicit:      fm.Explicit,
+	}
 }
 
 // Discover scans global (~/.config/fir/extensions/) and project-local
@@ -35,15 +73,7 @@ func Discover(projectDir string) ([]ExtProcConfig, error) {
 	if err == nil {
 		for _, b := range builtins {
 			fm := extensionFrontmatterFromPath(b.Path)
-			byName[b.Name] = ExtProcConfig{
-				Name:          b.Name,
-				Path:          b.Path,
-				Scope:         "builtin",
-				Modes:         fm.Modes,
-				AuthProviders: fm.AuthProviders,
-				CLIVerbs:      fm.CLIVerbs,
-				Explicit:      fm.Explicit,
-			}
+			byName[b.Name] = makeExtConfig(b.Name, b.Path, "builtin", fm)
 		}
 	}
 
@@ -145,15 +175,7 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			continue
 		}
 		name := stripExt(filepath.Base(filePath))
-		byName[name] = ExtProcConfig{
-			Name:          name,
-			Path:          filePath,
-			Scope:         "package",
-			Modes:         fm.Modes,
-			AuthProviders: fm.AuthProviders,
-			CLIVerbs:      fm.CLIVerbs,
-			Explicit:      fm.Explicit,
-		}
+		byName[name] = makeExtConfig(name, filePath, "package", fm)
 	}
 	result := make([]ExtProcConfig, 0, len(byName))
 	for _, cfg := range byName {
@@ -194,15 +216,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 				continue
 			}
 			fm := extensionFrontmatterFromPath(entryPoint)
-			byName[name] = ExtProcConfig{
-				Name:          name,
-				Path:          entryPoint,
-				Scope:         scope,
-				Modes:         fm.Modes,
-				AuthProviders: fm.AuthProviders,
-				CLIVerbs:      fm.CLIVerbs,
-				Explicit:      fm.Explicit,
-			}
+			byName[name] = makeExtConfig(name, entryPoint, scope, fm)
 			continue
 		}
 		info, err := e.Info()
@@ -228,15 +242,7 @@ func scanExtDir(dir, scope string, byName map[string]ExtProcConfig) error {
 			}
 		}
 
-		byName[name] = ExtProcConfig{
-			Name:          name,
-			Path:          filePath,
-			Scope:         scope,
-			Modes:         fm.Modes,
-			AuthProviders: fm.AuthProviders,
-			CLIVerbs:      fm.CLIVerbs,
-			Explicit:      fm.Explicit,
-		}
+		byName[name] = makeExtConfig(name, filePath, scope, fm)
 	}
 	return nil
 }

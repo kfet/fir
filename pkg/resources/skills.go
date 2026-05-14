@@ -123,6 +123,14 @@ func MakeSkillID(origin, name string) string {
 	return SanitizeOriginForID(origin) + "__" + name
 }
 
+// MakeResourceID returns the canonical disambiguated ID for any coexistence-
+// aware resource (skills, extensions, …). The format `<sanitized-origin>__<name>`
+// matches the MCP tool-name convention. Identical to MakeSkillID; the alias
+// exists so non-skill callers don't have to import "skill" naming.
+func MakeResourceID(origin, name string) string {
+	return SanitizeOriginForID(origin) + "__" + name
+}
+
 // LoadSkillsFromDir loads skills from a directory.
 // Discovery rules:
 // - Direct .md children in the root

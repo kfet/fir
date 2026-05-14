@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ## [0.46.0] - 2026-05-13
+### Added
+
+- Discovered extensions now carry `Origin` and `ID` fields (`<sanitized-origin>__<name>`, MCP-style) on `ExtProcConfig`, plus an `Override` field parsed from comment frontmatter. Origin maps Scope to the resource-coexistence vocabulary (`global` → `user`; `project`/`builtin`/`package` identity-mapped). Behaviour is unchanged — same-named extensions still shadow by name on discovery; the new fields exist for diagnostics and to lay groundwork for future coexistence/override support. The shared `ResolveOverrides[T Overridable]` helper used by skills now lives in `pkg/resources/overrides.go` and is reusable by any future Origin/ID-aware resource type. `resources.MakeResourceID` is the generic alias of `MakeSkillID` for non-skill callers.
 
 ### Fixed
 

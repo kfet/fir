@@ -366,3 +366,58 @@ func TestDiscover_SymlinkedSubdir(t *testing.T) {
 		}
 	}
 }
+
+// TestDiscover_OriginAndID verifies that every discovered ExtProcConfig has
+// Origin and ID populated from Scope + Name. Origin is the precise
+// provenance label (builtin/user/project/package) used by the coexistence
+// model; ID is "<sanitized-origin>__<name>".
+func TestDiscover_OriginAndID(t *testing.T) {
+	dir := t.TempDir()
+	globalDir := filepath.Join(dir, "global")
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mkExt := func(parent, name string) {
+		body := "#!/usr/bin/env bash\n# ---\n# name: " + name + "\n# description: t\n# ---\necho\n"
+		p := filepath.Join(parent, name+".sh")
+		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkExt(globalDir, "g")
+	mkExt(projectDir, "p")
+
+	configs, err := DiscoverWithDirs(globalDir, projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]ExtProcConfig{}
+	for _, c := range configs {
+		byName[c.Name] = c
+	}
+	cases := []struct {
+		name, wantOrigin, wantID string
+	}{
+		{"g", "user", "user__g"},
+		{"p", "project", "project__p"},
+	}
+	for _, tc := range cases {
+		c, ok := byName[tc.name]
+		if !ok {
+			t.Errorf("missing %s in %+v", tc.name, configs)
+			continue
+		}
+		if c.Origin != tc.wantOrigin {
+			t.Errorf("%s: Origin=%q, want %q", tc.name, c.Origin, tc.wantOrigin)
+		}
+		if c.ID != tc.wantID {
+			t.Errorf("%s: ID=%q, want %q", tc.name, c.ID, tc.wantID)
+		}
+	}
+}
