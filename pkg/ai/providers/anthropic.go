@@ -378,6 +378,9 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		headers := buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
 
 		firlog.Debug("anthropic request", "url", url, "model", model.ID, "messageCount", len(prompt.Messages))
+		if firlog.TraceEnabled() {
+			traceAnthropicWireMessages(params)
+		}
 
 		var maxDelayMs *int
 		if options != nil {
@@ -1141,6 +1144,51 @@ func getAnthropicCompat(model *ai.Model) resolvedAnthropicCompat {
 		}
 	}
 	return result
+}
+
+// traceAnthropicWireMessages emits one Trace line per outgoing wire message,
+// summarising role, block count, and per-block-type structure (signature
+// lengths for thinking blocks, tool_use names, text lengths). Intended to
+// discriminate prefix-reconstruction bugs that show up as Anthropic 400
+// "thinking blocks cannot be modified" errors — cheap enough to leave on
+// for whole sessions at -vv. Body bytes are never logged.
+func traceAnthropicWireMessages(params map[string]any) {
+	msgs, _ := params["messages"].([]map[string]any)
+	sys, _ := params["system"].([]map[string]any)
+	firlog.Trace("anthropic wire", "messages", len(msgs), "systemBlocks", len(sys))
+	for i, m := range msgs {
+		role, _ := m["role"].(string)
+		blocks, _ := m["content"].([]map[string]any)
+		var types []string
+		for _, b := range blocks {
+			t, _ := b["type"].(string)
+			switch t {
+			case "thinking":
+				th, _ := b["thinking"].(string)
+				sig, _ := b["signature"].(string)
+				types = append(types, fmt.Sprintf("thinking(th=%d,sig=%d)", len(th), len(sig)))
+			case "redacted_thinking":
+				d, _ := b["data"].(string)
+				types = append(types, fmt.Sprintf("redacted_thinking(data=%d)", len(d)))
+			case "text":
+				tx, _ := b["text"].(string)
+				types = append(types, fmt.Sprintf("text(%d)", len(tx)))
+			case "tool_use":
+				name, _ := b["name"].(string)
+				types = append(types, fmt.Sprintf("tool_use(%s)", name))
+			case "tool_result":
+				id, _ := b["tool_use_id"].(string)
+				types = append(types, fmt.Sprintf("tool_result(%s)", id))
+			case "image":
+				types = append(types, "image")
+			default:
+				types = append(types, t)
+			}
+		}
+		firlog.Trace("anthropic wire msg",
+			"idx", i, "role", role, "blocks", len(blocks),
+			"types", strings.Join(types, ","))
+	}
 }
 
 func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken bool, retention ai.CacheRetention) []map[string]any {
