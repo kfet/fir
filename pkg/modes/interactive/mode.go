@@ -396,11 +396,22 @@ func (m *InteractiveMode) showLoadedResources() {
 	}
 	t := itheme.GetTheme()
 
-	// Show skill diagnostics
+	// Show skill diagnostics. Skip the routine name-collision noise
+	// (duplicate-name, override-conflict) — those are expected when the
+	// same skill exists in both a global and a local source, and the
+	// loader picks one deterministically. Only surface real issues
+	// (parse errors and anything else unexpected).
 	_, skillDiags := m.session.ResourceLoader().GetSkills()
+	filtered := skillDiags[:0:0]
+	for _, d := range skillDiags {
+		if d.Type == "duplicate-name" || d.Type == "override-conflict" {
+			continue
+		}
+		filtered = append(filtered, d)
+	}
 
-	if len(skillDiags) > 0 {
-		lines := formatDiagnostics(t, "Skill conflicts", skillDiags)
+	if len(filtered) > 0 {
+		lines := formatDiagnostics(t, "Skill conflicts", filtered)
 		m.messageContainer.AddChild(tuicomp.NewText(lines, 0, 0, nil))
 		m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	}
@@ -808,9 +819,13 @@ func (m *InteractiveMode) setupAutocomplete() {
 			if m.settings == nil || m.settings.GetEnableSkillCommands() {
 				if skills, _ := rl.GetSkills(); len(skills) > 0 {
 					for _, skill := range skills {
+						desc := skill.Description
+						if skill.FilePath != "" {
+							desc = fmt.Sprintf("[%s] %s", skill.FilePath, skill.Description)
+						}
 						commands = append(commands, SlashCommand{
 							Name:        "skill:" + skill.Name,
-							Description: skill.Description,
+							Description: desc,
 						})
 					}
 				}
