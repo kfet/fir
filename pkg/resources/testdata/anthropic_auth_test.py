@@ -93,6 +93,17 @@ class TestStaticURLDrift(unittest.TestCase):
         self.assertEqual(self.flow.get("callback_addr"), "127.0.0.1:0")
         self.assertEqual(self.flow.get("callback_path"), "/callback")
 
+    def test_state_echoed_in_token_body(self):
+        # Anthropic's https://platform.claude.com/v1/oauth/token requires
+        # the OAuth `state` value to be echoed back in the token-request
+        # body. This is a non-standard quirk of the Claude-Code OAuth
+        # client — without it the endpoint returns `invalid_request`.
+        # Regression guard for the v0.43.x → main extraction that lost
+        # the state passthrough. The "{state}" placeholder is
+        # substituted by fir with the per-session state value at
+        # request time.
+        self.assertEqual(self.flow.get("token_body_extra", {}).get("state"), "{state}")
+
 
 if __name__ == "__main__":
     unittest.main()

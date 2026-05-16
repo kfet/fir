@@ -802,6 +802,7 @@ that integrate with fir's auth storage. Two flow models are supported:
         "manual_redirect_uri": "https://platform.claude.com/oauth/code/callback",
         "auth_params_extra": {"code": "true"},
         "token_body_json": true,
+        "token_body_extra": {"audience": "api", "state": "{state}"},
         "token_headers": {"User-Agent": "claude-cli/2.1.112 ..."},
         "open_url_instructions": "Complete login in your browser.",
         "has_post_exchange": true,
@@ -827,6 +828,7 @@ that integrate with fir's auth storage. Two flow models are supported:
 | `manual_redirect_uri` | string | Redirect URI for the manual-paste fallback. |
 | `auth_params_extra` | object | Extra query params on the authorize URL (provider-specific). |
 | `token_body_json` | bool | Encode the token request body as JSON instead of form. |
+| `token_body_extra` | object | Extra fields injected into the token-request body (Exchange + Refresh). Values may contain the literal `"{state}"` placeholder, substituted at request time with the per-session OAuth state (empty on Refresh). Reserved keys (`grant_type`, `client_id`, `client_secret`, `code`, `code_verifier`, `redirect_uri`, `refresh_token`, `scope`) are rejected. |
 | `token_headers` | object | Extra HTTP headers on token requests. |
 | `open_url_instructions` | string | Text shown alongside the authorize URL. |
 | `has_post_exchange` | bool | Extension implements `auth/post_exchange`. |

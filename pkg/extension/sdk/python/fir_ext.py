@@ -1719,6 +1719,7 @@ def declare_oauth_provider(
     manual_redirect_uri: str = "",
     auth_params_extra: dict[str, str] | None = None,
     token_body_json: bool = False,
+    token_body_extra: dict[str, str] | None = None,
     token_headers: dict[str, str] | None = None,
     open_url_instructions: str = "",
     short_url_base: str = "",
@@ -1779,6 +1780,20 @@ def declare_oauth_provider(
     token_body_json : bool, optional
         Encode the token-request body as JSON instead of
         ``application/x-www-form-urlencoded``. Anthropic requires this.
+    token_body_extra : dict[str, str], optional
+        Extra fields injected into the token-request body on both
+        initial exchange and refresh. Useful for provider-specific
+        knobs (e.g. an audience parameter) and for providers whose
+        token endpoint requires fields RFC 6749 §4.1.3 does not list.
+        Values may contain the literal placeholder ``"{state}"``,
+        which fir replaces with the per-session OAuth state value
+        before sending the Exchange request (Refresh has no
+        per-session state and substitutes ``"{state}"`` with the
+        empty string). Keys must not collide with pinoauth-owned
+        form fields (``grant_type``, ``client_id``, ``client_secret``,
+        ``code``, ``code_verifier``, ``redirect_uri``,
+        ``refresh_token``, ``scope``); pinoauth rejects those at
+        request time.
     token_headers : dict[str, str], optional
         Extra HTTP headers on the token request (e.g. custom
         User-Agent). Content-Type is owned by the body encoder.
@@ -1819,6 +1834,7 @@ def declare_oauth_provider(
                 "manual_redirect_uri": manual_redirect_uri,
                 "auth_params_extra": dict(auth_params_extra) if auth_params_extra else {},
                 "token_body_json": token_body_json,
+                "token_body_extra": dict(token_body_extra) if token_body_extra else {},
                 "token_headers": dict(token_headers) if token_headers else {},
                 "open_url_instructions": open_url_instructions,
                 "short_url_base": short_url_base,

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -89,12 +90,31 @@ func (p *genericAuthProvider) Login(ctx context.Context, callbacks pinoauth.Logi
 		Code:         code,
 		CodeVerifier: pkce.Verifier,
 		RedirectURI:  redirectURI,
+		Extra:        expandTokenBodyExtra(fl, pkce.Verifier),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}
 
 	return p.tokenToCredentials(loginCtx, tok, nil)
+}
+
+// expandTokenBodyExtra materialises the spec's TokenBodyExtra into a
+// url.Values suitable for [pinoauth.ExchangeRequest.Extra] or
+// [pinoauth.RefreshRequest.Extra], substituting the "{state}"
+// placeholder in each value. state is the per-session OAuth state
+// value (typically the PKCE verifier); pass the empty string on
+// refresh, which has no per-session state. Returns nil when the
+// spec carries no extras (no allocation, no empty map on the wire).
+func expandTokenBodyExtra(fl *OAuthFlowSpec, state string) url.Values {
+	if len(fl.TokenBodyExtra) == 0 {
+		return nil
+	}
+	v := make(url.Values, len(fl.TokenBodyExtra))
+	for k, val := range fl.TokenBodyExtra {
+		v.Set(k, strings.ReplaceAll(val, "{state}", state))
+	}
+	return v
 }
 
 // tokenClient builds a pinoauth.Client from the static flow spec. The
@@ -193,6 +213,7 @@ func (p *genericAuthProvider) RefreshToken(ctx context.Context, creds *ai.OAuthC
 
 	tok, err := p.tokenClient(fl).Refresh(ctx, pinoauth.RefreshRequest{
 		RefreshToken: creds.Refresh,
+		Extra:        expandTokenBodyExtra(fl, ""),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("token refresh: %w", err)

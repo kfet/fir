@@ -52,6 +52,14 @@ fir_ext.declare_oauth_provider(
     manual_redirect_uri="https://platform.claude.com/oauth/code/callback",
     auth_params_extra={"code": "true"},
     token_body_json=True,
+    # Anthropic's token endpoint requires the OAuth `state` value to be
+    # echoed back in the token-request body — a non-standard quirk of
+    # the Claude-Code OAuth client (RFC 6749 §4.1.3 does not list state
+    # as a token-request parameter; the endpoint returns
+    # `invalid_request` without it). The "{state}" placeholder is
+    # substituted by fir with the per-session state value (currently
+    # pkce.Verifier) before the token request is sent.
+    token_body_extra={"state": "{state}"},
     token_headers={"User-Agent": _USER_AGENT},
     open_url_instructions=(
         "Complete login in your browser. If the browser is on another machine, "

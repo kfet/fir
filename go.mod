@@ -35,7 +35,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
-	github.com/kfet/pinoauth v0.2.3
+	github.com/kfet/pinoauth v0.3.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.3 // indirect

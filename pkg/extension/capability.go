@@ -118,6 +118,24 @@ type OAuthFlowSpec struct {
 	// JSON instead of application/x-www-form-urlencoded. Anthropic
 	// requires this; most providers do not.
 	TokenBodyJSON bool `json:"token_body_json,omitempty"`
+	// TokenBodyExtra are extra fields injected into the
+	// token-request body on both Exchange and Refresh. Useful for
+	// provider-specific knobs (e.g. an audience parameter) and for
+	// providers whose token endpoint requires fields that RFC 6749
+	// §4.1.3 does not list.
+	//
+	// Values may contain the literal placeholder "{state}", which
+	// fir replaces with the per-session OAuth state value (the same
+	// value sent to the authorize endpoint, currently the PKCE
+	// verifier) before sending the Exchange request. Refresh has no
+	// per-session state and substitutes "{state}" with the empty
+	// string. No other placeholders are recognised.
+	//
+	// Keys must not collide with pinoauth-owned form fields
+	// (grant_type, client_id, client_secret, code, code_verifier,
+	// redirect_uri, refresh_token, scope) — pinoauth rejects those
+	// at request time.
+	TokenBodyExtra map[string]string `json:"token_body_extra,omitempty"`
 	// TokenHeaders are added to the token-request HTTP request
 	// (e.g. a custom User-Agent). Content-Type is owned by the body
 	// encoder and any caller-supplied value is dropped.

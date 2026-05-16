@@ -227,6 +227,130 @@ func TestGenericAuthProvider_JSONBody(t *testing.T) {
 	}
 }
 
+// TestGenericAuthProvider_TokenBodyExtraStatePlaceholder verifies that
+// the "{state}" placeholder in TokenBodyExtra values is substituted
+// with the per-session OAuth state value on Exchange. This is the
+// mechanism by which providers whose token endpoint requires state in
+// the body (notably Anthropic's platform.claude.com — a non-standard
+// quirk of the Claude-Code OAuth client) get that field. Regression
+// guard for the v0.43.x → main extraction that briefly dropped the
+// state passthrough.
+func TestGenericAuthProvider_TokenBodyExtraStatePlaceholder(t *testing.T) {
+	ai.ResetOAuthProviders()
+	defer ai.ResetOAuthProviders()
+
+	srv := newFakeOAuthServer(t)
+
+	caps := &InitResult{
+		Name: "test-ext",
+		AuthProviders: []AuthProviderSpec{
+			{
+				ID:                 "test-state-echo",
+				Name:               "Test State Echo",
+				UsesCallbackServer: true,
+				Flow: &OAuthFlowSpec{
+					ClientID:          "test-client",
+					AuthorizeURL:      srv.authorizeURL(),
+					TokenURL:          srv.tokenURL(),
+					CallbackAddr:      "256.0.0.1:0",
+					ManualRedirectURI: "http://manual/callback",
+					TokenBodyJSON:     true,
+					TokenBodyExtra: map[string]string{
+						"state":    "{state}",
+						"audience": "test-aud",
+					},
+				},
+			},
+		},
+	}
+	bridge := NewBridge(nil, caps)
+	bridge.RegisterAuthProviders()
+	defer bridge.UnregisterAuthProviders()
+
+	provider := ai.GetOAuthProvider("test-state-echo")
+
+	var seenURL string
+	var capturedState string
+	_, err := provider.Login(context.Background(), pinoauth.LoginCallbacks{
+		OnAuth: func(info pinoauth.AuthInfo) { seenURL = info.URL },
+		OnManualCodeInput: func() (string, error) {
+			u, err := url.Parse(seenURL)
+			if err != nil {
+				return "", err
+			}
+			capturedState = u.Query().Get("state")
+			return fmt.Sprintf("http://manual/callback?code=C&state=%s", capturedState), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if capturedState == "" {
+		t.Fatal("did not observe state on authorize URL")
+	}
+
+	_, rawBody := srv.snapshot()
+	var body map[string]any
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("token body not JSON: %v (%q)", err, rawBody)
+	}
+	if body["state"] != capturedState {
+		t.Errorf("token body state=%v, want %q (body=%v)", body["state"], capturedState, body)
+	}
+	if body["audience"] != "test-aud" {
+		t.Errorf("token body audience=%v, want test-aud (no substitution on non-placeholder values)", body["audience"])
+	}
+}
+
+// TestGenericAuthProvider_RefreshIncludesTokenBodyExtra verifies that
+// TokenBodyExtra flows into the refresh request too — symmetry with
+// Exchange. Refresh has no per-session state, so "{state}"
+// placeholders substitute to the empty string on refresh.
+func TestGenericAuthProvider_RefreshIncludesTokenBodyExtra(t *testing.T) {
+	ai.ResetOAuthProviders()
+	defer ai.ResetOAuthProviders()
+
+	srv := newFakeOAuthServer(t)
+	srv.tokenResp = `{"access_token":"NEW","refresh_token":"NEW_RT","expires_in":60,"token_type":"Bearer"}`
+
+	caps := &InitResult{
+		Name: "test-ext",
+		AuthProviders: []AuthProviderSpec{
+			{
+				ID:                 "test-refresh-extra",
+				Name:               "Test Refresh Extra",
+				UsesCallbackServer: true,
+				Flow: &OAuthFlowSpec{
+					ClientID:     "test-client",
+					AuthorizeURL: srv.authorizeURL(),
+					TokenURL:     srv.tokenURL(),
+					TokenBodyExtra: map[string]string{
+						"audience": "test-aud",
+						"state":    "{state}", // → "" on refresh
+					},
+				},
+			},
+		},
+	}
+	bridge := NewBridge(nil, caps)
+	bridge.RegisterAuthProviders()
+	defer bridge.UnregisterAuthProviders()
+
+	provider := ai.GetOAuthProvider("test-refresh-extra")
+	_, err := provider.RefreshToken(context.Background(), &ai.OAuthCredentials{Refresh: "OLD_RT"})
+	if err != nil {
+		t.Fatalf("RefreshToken: %v", err)
+	}
+
+	_, body := srv.snapshot()
+	if !strings.Contains(string(body), "audience=test-aud") {
+		t.Errorf("refresh body missing audience: %q", body)
+	}
+	if !strings.Contains(string(body), "state=&") && !strings.HasSuffix(string(body), "state=") {
+		t.Errorf("refresh body should contain empty state= (placeholder → empty on refresh): %q", body)
+	}
+}
+
 // TestGenericAuthProvider_StandardRefresh exercises the default refresh
 // path (no custom hook) — pinoauth.Refresh is called with the spec's
 // token URL and credentials.
