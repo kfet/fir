@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.46.5] - 2026-05-16
+
 ### Fixed
 
 - Anthropic OAuth login (Claude Pro/Max) — token exchange now succeeds again against `https://platform.claude.com/v1/oauth/token`. Anthropic's token endpoint is a non-standard quirk of the Claude-Code OAuth client: it requires the OAuth `state` value to be echoed back in the token-request body. Until v0.43.x the Python `anthropic_auth` extension drove the exchange itself and included `state` in the body; commit `5bcc3d7b` extracted the flow into pinoauth and dropped state, so subsequent logins failed with `invalid_request`. Fixed by (a) bumping pinoauth to v0.3.0 which adds `ExchangeRequest.Extra` / `RefreshRequest.Extra` with reserved-key validation (callers can inject extra token-body fields without being able to overwrite security-critical fields like `client_id` or `code`); (b) extending `OAuthFlowSpec` with `TokenBodyExtra map[string]string` exposed on the wire / SDK as `token_body_extra`, whose values may contain the literal `"{state}"` placeholder that fir substitutes with the per-session state at request time (empty on refresh); (c) `anthropic_auth.py` declares `token_body_extra={"state": "{state}"}` — the Anthropic-specific quirk lives entirely in the Python extension, the core stays provider-agnostic. The extras path flows into Refresh too for provider-specific knobs that need to round-trip on both grants. Regression guard: `test_state_echoed_in_token_body` in `pkg/resources/testdata/anthropic_auth_test.py` and `TestGenericAuthProvider_TokenBodyExtraStatePlaceholder` / `TestGenericAuthProvider_RefreshIncludesTokenBodyExtra` in `pkg/extension/bridge_auth_generic_test.go`.
