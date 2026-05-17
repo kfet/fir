@@ -6,6 +6,10 @@
 
 - `/skills` listings and `/skill:` autocomplete no longer print full filesystem paths for skills installed under well-known locations. Built-in, project (`.fir/skills/`), and user-scope (`~/.config/fir/skills/`, `~/.config/fir/packages/...`) skills now render as `built-in`, `project`, or `user`; only ad-hoc paths still show the absolute location. New helper `resources.DisplayOrigin` centralises the mapping; used by `cmd/fir/skills.go` (CLI `fir skills list`), `pkg/modes/interactive/commands.go` and `mode.go` (TUI `/skills` list, `/skills <name>` detail, `/skill:` autocomplete), and `pkg/modes/acp/commands.go` (ACP `/skills`). Regression coverage: `TestDisplayOrigin` in `pkg/resources/skills_test.go`.
 
+### Fixed
+
+- `wt` skill's `spawn.sh` no longer false-negatives the "window stuck" verification step. The old check ran `tmux list-windows -a | grep -q " <feature> "`, which depended on the window name being surrounded by spaces in tmux's default list-windows output — but the actual format puts the name right after `: ` (no leading space) and often immediately follows it with a `*`/`-` activity marker, so the match failed intermittently depending on tmux config and window state. Replaced with id-based verification: `tmux new-window -P -F '#{window_id}'` captures the new window's stable `@N` handle, then `tmux display-message -t "$WIN_ID"` checks it's still alive, wrapped in a short retry loop (~5s with 100ms backoff) to also handle the fresh-tmux-server case and survive a brief crash-on-start window. Using the id (not the name) additionally eliminates false-positives from stale windows with the same feature-name in other sessions. The flat `sleep 1` is gone, so the success path is faster. When verification really does fail, the error now dumps `tmux list-windows -a` to stderr so the next investigator has something to look at.
+
 ## [0.46.5] - 2026-05-16
 
 ### Fixed
