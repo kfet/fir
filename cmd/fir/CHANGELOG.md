@@ -9,6 +9,13 @@
 ### Fixed
 
 - `wt` skill's `spawn.sh` no longer false-negatives the "window stuck" verification step. The old check ran `tmux list-windows -a | grep -q " <feature> "`, which depended on the window name being surrounded by spaces in tmux's default list-windows output — but the actual format puts the name right after `: ` (no leading space) and often immediately follows it with a `*`/`-` activity marker, so the match failed intermittently depending on tmux config and window state. Replaced with id-based verification: `tmux new-window -P -F '#{window_id}'` captures the new window's stable `@N` handle, then `tmux display-message -t "$WIN_ID"` checks it's still alive, wrapped in a short retry loop (~5s with 100ms backoff) to also handle the fresh-tmux-server case and survive a brief crash-on-start window. Using the id (not the name) additionally eliminates false-positives from stale windows with the same feature-name in other sessions. The flat `sleep 1` is gone, so the success path is faster. When verification really does fail, the error now dumps `tmux list-windows -a` to stderr so the next investigator has something to look at.
+### Fixed
+
+- Homebrew install/upgrade no longer fails with `brew: exec failed (EACCES): .../bin/fir` on the post-install completion step. Regression introduced in 0.33.x when `generate_completions_from_executable(bin/"fir", "completion")` was added to the goreleaser brews install block: the downloaded artifact is a raw binary (`archives.formats=binary`, no archive to carry a Unix mode), it lands in the cellar at 0644 because `bin.install` is just `FileUtils.mv` with no chmod, and exec'ing a non-executable file is EACCES. The kernel rejects the call before fir even starts, the install rolls back, and the user is left on the old version. Fixed by adding `chmod 0755, bin/"fir"` after `bin.install` in both the rolling `fir` formula and the per-minor `fir@X.Y` pinned formula blocks in `.goreleaser.yaml`. Older 0.32.0 installs were unaffected because that release predated the completion call.
+
+### Added
+
+- Release workflow has a new `brew-smoke` job that runs after the tap push and the kfet/fir-dist mirror step, on a matrix of `macos-latest` + `ubuntu-latest`. It does `brew tap kfet/fir && brew install kfet/fir/fir`, runs `fir --version`, exercises `fir completion bash|zsh` (the exact code path that broke with EACCES), and runs `brew test kfet/fir/fir`. Closes the gap that let the previous brew regression ship undetected for several releases — nothing in CI ever exercised the published tap end-to-end. `fail-fast: false` so a macOS-only or Linux-only break still surfaces both signals.
 
 ## [0.46.5] - 2026-05-16
 

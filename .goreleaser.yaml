@@ -76,6 +76,7 @@ brews:
     # ENOENT. Glob the staged artifact and rename it on install.
     install: |
       bin.install Dir["fir-*"].first => "fir"
+      chmod 0755, bin/"fir"
       generate_completions_from_executable(bin/"fir", "completion")
 
   # Pinned per-minor-version formula for rollback / version-pinning.
@@ -124,6 +125,7 @@ brews:
       system "#{bin}/fir", "--version"
     install: |
       bin.install Dir["fir-*"].first => "fir"
+      chmod 0755, bin/"fir"
       generate_completions_from_executable(bin/"fir", "completion")
 
 changelog:
