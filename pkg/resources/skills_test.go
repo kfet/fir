@@ -422,3 +422,26 @@ func TestLoadSkillsFromDir_SymlinkCycle(t *testing.T) {
 		t.Fatal("loader hung on symlink cycle")
 	}
 }
+
+func TestDisplayOrigin(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Skill
+		want string
+	}{
+		{"builtin", Skill{Source: "builtin", FilePath: "/tmp/xyz/SKILL.md"}, "built-in"},
+		{"project", Skill{Source: "project", FilePath: "/home/x/proj/.fir/skills/foo/SKILL.md"}, "project"},
+		{"user", Skill{Source: "user", FilePath: "/home/x/.config/fir/skills/foo/SKILL.md"}, "user"},
+		{"package", Skill{Source: "package", FilePath: "/home/x/.config/fir/packages/git/github.com/foo/bar/skills/baz/SKILL.md"}, "user"},
+		{"path", Skill{Source: "path", FilePath: "/somewhere/else/skill.md"}, "/somewhere/else/skill.md"},
+		{"unknown source falls back to path", Skill{Source: "weird", FilePath: "/x/y"}, "/x/y"},
+		{"unknown source no path falls back to source", Skill{Source: "weird"}, "weird"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := DisplayOrigin(c.in); got != c.want {
+				t.Fatalf("DisplayOrigin(%+v) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}

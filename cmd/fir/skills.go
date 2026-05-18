@@ -93,20 +93,22 @@ func runSkillsList() error {
 
 	// Compute column widths.
 	idW, nameW, sourceW := 2, 4, 6 // "ID", "NAME", "SOURCE"
-	for _, s := range skills {
+	origins := make([]string, len(skills))
+	for i, s := range skills {
+		origins[i] = resources.DisplayOrigin(s)
 		if len(s.ID) > idW {
 			idW = len(s.ID)
 		}
 		if len(s.Name) > nameW {
 			nameW = len(s.Name)
 		}
-		if len(s.Source) > sourceW {
-			sourceW = len(s.Source)
+		if len(origins[i]) > sourceW {
+			sourceW = len(origins[i])
 		}
 	}
 
 	fmt.Printf("%-*s  %-*s  %-*s  %s\n", idW, "ID", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION")
-	for _, s := range skills {
+	for i, s := range skills {
 		desc := s.Description
 		if len(s.Overridden) > 0 {
 			desc = "[overrides " + strings.Join(s.Overridden, ", ") + "] " + desc
@@ -116,7 +118,7 @@ func runSkillsList() error {
 		if len(desc) > 80 {
 			desc = desc[:77] + "..."
 		}
-		fmt.Printf("%-*s  %-*s  %-*s  %s\n", idW, s.ID, nameW, s.Name, sourceW, s.Source, desc)
+		fmt.Printf("%-*s  %-*s  %-*s  %s\n", idW, s.ID, nameW, s.Name, sourceW, origins[i], desc)
 	}
 	return nil
 }

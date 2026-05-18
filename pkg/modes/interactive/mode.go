@@ -820,8 +820,8 @@ func (m *InteractiveMode) setupAutocomplete() {
 				if skills, _ := rl.GetSkills(); len(skills) > 0 {
 					for _, skill := range skills {
 						desc := skill.Description
-						if skill.FilePath != "" {
-							desc = fmt.Sprintf("[%s] %s", skill.FilePath, skill.Description)
+						if origin := resources.DisplayOrigin(skill); origin != "" {
+							desc = fmt.Sprintf("[%s] %s", origin, skill.Description)
 						}
 						commands = append(commands, SlashCommand{
 							Name:        "skill:" + skill.Name,

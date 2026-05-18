@@ -1110,7 +1110,7 @@ func (m *InteractiveMode) handleSkillDetail(name string) {
 		if s.Name == name {
 			var sb strings.Builder
 			sb.WriteString(fmt.Sprintf("Name:        %s\n", s.Name))
-			sb.WriteString(fmt.Sprintf("Source:      %s\n", s.Source))
+			sb.WriteString(fmt.Sprintf("Source:      %s\n", resources.DisplayOrigin(s)))
 			sb.WriteString(fmt.Sprintf("Location:    %s\n", s.FilePath))
 			sb.WriteString(fmt.Sprintf("Description: %s", s.Description))
 			m.showStatus(sb.String())
@@ -1139,23 +1139,25 @@ func (m *InteractiveMode) handleSkillsList() {
 
 	nameW := 4
 	sourceW := 6
-	for _, s := range sorted {
+	origins := make([]string, len(sorted))
+	for i, s := range sorted {
+		origins[i] = resources.DisplayOrigin(s)
 		if len(s.Name) > nameW {
 			nameW = len(s.Name)
 		}
-		if len(s.Source) > sourceW {
-			sourceW = len(s.Source)
+		if len(origins[i]) > sourceW {
+			sourceW = len(origins[i])
 		}
 	}
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, "NAME", sourceW, "SOURCE", "DESCRIPTION"))
-	for _, s := range sorted {
+	for i, s := range sorted {
 		desc := s.Description
 		if len(desc) > 50 {
 			desc = desc[:47] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, s.Source, desc))
+		sb.WriteString(fmt.Sprintf("%-*s  %-*s  %s\n", nameW, s.Name, sourceW, origins[i], desc))
 	}
 
 	m.showStatus(strings.TrimRight(sb.String(), "\n"))

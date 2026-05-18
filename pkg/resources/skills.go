@@ -363,6 +363,31 @@ func parseFrontmatterSimple(content string) SkillFrontmatter {
 	return fm
 }
 
+// DisplayOrigin returns a short human-readable label for a skill's origin
+// when it lives in a well-known fir location, or the absolute FilePath
+// otherwise. Used to keep skill listings compact for skills installed via
+// the standard scopes (built-in, project, user/packages) while still
+// surfacing the full path for ad-hoc paths or anything unrecognised.
+//
+//   - Source "builtin"          -> "built-in"
+//   - Source "project"          -> "project"   (cwd/.fir/skills/)
+//   - Source "user" | "package" -> "user"      (~/.config/fir/{skills,packages}/...)
+//   - anything else             -> s.FilePath
+func DisplayOrigin(s Skill) string {
+	switch s.Source {
+	case "builtin":
+		return "built-in"
+	case "project":
+		return "project"
+	case "user", "package":
+		return "user"
+	}
+	if s.FilePath != "" {
+		return s.FilePath
+	}
+	return s.Source
+}
+
 // AgentReference returns the name the agent should use to invoke this skill,
 // given the full set of loaded skills. Bare name when unique, ID when not.
 func (s Skill) AgentReference(all []Skill) string {

@@ -510,7 +510,7 @@ func cmdSkillDetail(ctx *commandContext, name string) {
 		if s.Name == name {
 			ctx.sendMessage(fmt.Sprintf(
 				"Name:        %s\nSource:      %s\nLocation:    %s\nDescription: %s",
-				s.Name, s.Source, s.FilePath, s.Description,
+				s.Name, resources.DisplayOrigin(s), s.FilePath, s.Description,
 			))
 			return
 		}
@@ -532,7 +532,7 @@ func cmdSkillsList(ctx *commandContext) {
 	sb.WriteString("| Name | Source | Description |\n")
 	sb.WriteString("|------|--------|-------------|\n")
 	for _, s := range sorted {
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", s.Name, s.Source, s.Description))
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", s.Name, resources.DisplayOrigin(s), s.Description))
 	}
 	ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
 }
