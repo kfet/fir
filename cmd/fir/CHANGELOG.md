@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-05-17
+
 ### Changed
 
 - `/skills` listings and `/skill:` autocomplete no longer print full filesystem paths for skills installed under well-known locations. Built-in, project (`.fir/skills/`), and user-scope (`~/.config/fir/skills/`, `~/.config/fir/packages/...`) skills now render as `built-in`, `project`, or `user`; only ad-hoc paths still show the absolute location. New helper `resources.DisplayOrigin` centralises the mapping; used by `cmd/fir/skills.go` (CLI `fir skills list`), `pkg/modes/interactive/commands.go` and `mode.go` (TUI `/skills` list, `/skills <name>` detail, `/skill:` autocomplete), and `pkg/modes/acp/commands.go` (ACP `/skills`). Regression coverage: `TestDisplayOrigin` in `pkg/resources/skills_test.go`.
