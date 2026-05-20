@@ -180,6 +180,26 @@ func TestParseArgs_SessionDir(t *testing.T) {
 	}
 }
 
+func TestParseArgs_AgentDir(t *testing.T) {
+	args := ParseArgs([]string{"--agent-dir", "/tmp/fir-agent", "hello"})
+	if args.AgentDir != "/tmp/fir-agent" {
+		t.Errorf("expected agent dir, got %q", args.AgentDir)
+	}
+	if !args.Seen["--agent-dir"] {
+		t.Error("expected --agent-dir to be marked seen")
+	}
+	if len(args.Messages) != 1 || args.Messages[0] != "hello" {
+		t.Fatalf("expected message preserved, got %#v", args.Messages)
+	}
+}
+
+func TestParseArgs_AgentDirEquals(t *testing.T) {
+	args := ParseArgs([]string{"--agent-dir=/tmp/fir-agent"})
+	if args.AgentDir != "/tmp/fir-agent" {
+		t.Errorf("expected agent dir, got %q", args.AgentDir)
+	}
+}
+
 func TestParseArgs_SessionName(t *testing.T) {
 	args := ParseArgs([]string{"--session-name", "my cool session"})
 	if args.SessionName != "my cool session" {

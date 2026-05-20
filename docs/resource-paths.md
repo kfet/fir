@@ -10,7 +10,7 @@ Resources are discovered from these sources:
 |----------|--------|--------|------------|--------|
 | 1 | CLI flags | `--skill <path>` | `--extension <name>` | `--theme <path>` |
 | 2 | Project dir | `.fir/skills/` | `.fir/extensions/` | — |
-| 3 | User dir | `~/.config/fir/skills/` | `~/.config/fir/extensions/` | — |
+| 3 | User dir | `<agent-dir>/skills/` (`~/.config/fir/skills/` by default) | `<agent-dir>/extensions/` (`~/.config/fir/extensions/` by default) | — |
 | 4 | Settings paths | `"skills"` array | `"extensions"` array* | `"themes"` array |
 | 5 | Packages | installed via `fir install` | installed via `fir install` | installed via `fir install` |
 | 6 | Builtins | embedded in binary | embedded in binary | — |
@@ -65,7 +65,7 @@ With this single global setting, fir will look for a `skills/` directory in what
 
 ### XDG Support
 
-If `$XDG_CONFIG_HOME` is set, the global config directory is `$XDG_CONFIG_HOME/fir/` instead of `~/.config/fir/`. The agent directory can also be overridden with `$FIR_AGENT_DIR`.
+If `$XDG_CONFIG_HOME` is set, the global config directory is `$XDG_CONFIG_HOME/fir/` instead of `~/.config/fir/`. The agent directory can also be overridden with `$FIR_AGENT_DIR` or per-invocation with `fir --agent-dir <dir>` (CLI flag wins over the environment variable).
 
 ## Examples
 

@@ -76,9 +76,13 @@ func DefaultConfigPaths(projectDir string) (userPath, projectPath string) {
 }
 
 // defaultConfigDir returns the global fir config directory (~/.config/fir),
-// respecting $XDG_CONFIG_HOME. Must stay in sync with session.DefaultAgentDir;
-// duplicated here to avoid circular imports.
+// respecting $FIR_AGENT_DIR first and then $XDG_CONFIG_HOME. Must stay in sync
+// with session.DefaultAgentDir plus the FIR_AGENT_DIR override; duplicated here
+// to avoid circular imports.
 func defaultConfigDir() string {
+	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
+		return dir
+	}
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "fir")
 	}

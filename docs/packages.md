@@ -16,7 +16,7 @@ or local paths. Similar to pi-mono's `PackageManager` but simpler and Go-native.
 
 ## Scope
 
-- **User** (default): `~/.config/fir/packages/git/<host>/<path>/`
+- **User** (default): `<agent-dir>/packages/git/<host>/<path>/` (`~/.config/fir` unless overridden by `FIR_AGENT_DIR` or `--agent-dir`)
 - **Project** (`--local`): `.fir/packages/git/<host>/<path>/`
 
 ## Package Manifest — `fir.json`

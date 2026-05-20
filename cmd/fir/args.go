@@ -37,6 +37,7 @@ type Args struct {
 	Session            string
 	SessionName        string
 	SessionDir         string
+	AgentDir           string
 	Models             []string
 	Tools              []string
 	NoTools            bool
@@ -193,6 +194,15 @@ func ParseArgs(args []string) *Args {
 			i++
 			result.SessionDir = args[i]
 			mark("--session-dir")
+
+		case arg == "--agent-dir" && i+1 < len(args):
+			i++
+			result.AgentDir = args[i]
+			mark("--agent-dir")
+
+		case strings.HasPrefix(arg, "--agent-dir="):
+			result.AgentDir = strings.TrimPrefix(arg, "--agent-dir=")
+			mark("--agent-dir")
 
 		case arg == "--models" && i+1 < len(args):
 			i++
@@ -368,6 +378,8 @@ func PrintHelp() {
 	fmt.Printf(`
 Options:
   -C <dir>                       Run as if %s was started in <dir>
+  --agent-dir <dir>              Override the fir config/session root
+                                 (same as FIR_AGENT_DIR; CLI flag wins)
   --provider <name>              Provider name (default: from settings, else first provider with a valid API key)
   --model <id>                   Model ID
   --api-key <key>                API key (defaults to env vars)
@@ -414,7 +426,7 @@ Options:
   -v, -vv                        Increase log verbosity (-v: Debug, -vv: Trace).
                                  Also: FIR_LOG_LEVEL=info|debug|trace
   --debug                        Enable debug logging to file (same as -v)
-  --debug-log-file <path>        Debug log path (default: ~/.config/fir/debug.log)
+  --debug-log-file <path>        Debug log path (default: <agent-dir>/debug.log)
   --help, -h                     Show this help
   -V, --version                  Show version number
 

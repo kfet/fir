@@ -54,6 +54,7 @@ _fir() {
         '--no-restore-config[Do not re-apply persisted config on -c/-r]' \
         '--mode=[Output mode]:mode:(text json acp)' \
         '--thinking=[Thinking level]:level:(off minimal low medium high xhigh max)' \
+        '--agent-dir=[Override config/session root]:dir:_files -/' \
         '--provider=[Provider name]:provider:->providers' \
         '--model=[Model ID]:model:->models' \
         '--api-key=[API key]:key:' \

@@ -65,7 +65,7 @@ _fir_complete() {
             return ;;
         --session)
             COMPREPLY=( $(compgen -W "$(_fir_session_names)" -- "$cur") ); return ;;
-        -C|--cwd|--directory|--session-dir)
+        -C|--cwd|--directory|--session-dir|--agent-dir)
             _filedir -d; return ;;
         --skill|--prompt-template|--theme|--mcp-config|--export|--debug-log-file|--append-system-prompt)
             _filedir; return ;;
@@ -77,7 +77,7 @@ _fir_complete() {
     if [[ $cur == -* ]]; then
         local flags="
             --help --version --print --continue --resume --no-restore-config
-            --mode --thinking --provider --model --api-key
+            --mode --thinking --agent-dir --provider --model --api-key
             --system-prompt --append-system-prompt
             --session --session-name --session-dir --no-session
             --models --no-tools --tools --no-mcp --mcp-config --wait-mcp

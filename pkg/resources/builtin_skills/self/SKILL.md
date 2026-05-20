@@ -13,7 +13,7 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 
 ### Logging & verbosity
 
-- `-v` enables Debug logging to `~/.config/fir/debug.log` (same as `--debug`).
+- `-v` enables Debug logging to `<agent-dir>/debug.log` (same as `--debug`; `<agent-dir>` defaults to `~/.config/fir`).
 - `-vv` enables Trace logging — per micro-op events such as cache-prefix invalidations and MCP per-event chatter. `-vvv` and beyond clamp to `-vv` with a warning.
 - `-V` (or `--version`) prints the version. The old `-v` short alias for `--version` is gone; lone `fir -v` prints a migration note to stderr.
 - `FIR_LOG_LEVEL=info|debug|trace` (or a raw slog numeric level) sets the level via env; wins over `FIR_DEBUG=1`. CLI `-v`/`-vv` win over both.
@@ -47,13 +47,13 @@ Not to be confused with `fir install <source>`, which installs *packages* (skill
 
 Settings merge in order (later wins):
 
-1. **Global config** — `~/.config/fir/settings.json` (override dir with `FIR_AGENT_DIR`)
+1. **Global config** — `<agent-dir>/settings.json` (`~/.config/fir` by default; override with `FIR_AGENT_DIR` or `fir --agent-dir <dir>`, with the CLI flag winning)
 2. **Project config** — `.fir/settings.json` in project root
 3. **CLI flags** — override everything
 
 All settings fields are optional. Project settings are merged on top of global settings field-by-field; nested objects merge recursively, arrays and primitives from the override win.
 
-### Global Directory (`~/.config/fir/`)
+### Global Directory (`<agent-dir>/`, default `~/.config/fir/`)
 
 | File | Purpose |
 |------|---------|
@@ -90,7 +90,7 @@ Two methods:
 
 ## Login subcommand
 
-`fir login <provider-id>` runs the OAuth flow for a provider from the shell (no interactive TUI required) and writes credentials to `~/.config/fir/auth.json`. Because OAuth providers are contributed by auth extensions, `fir login` loads extensions before running the flow — honouring the `settings.json` `extensions` allowlist, `-e/--extension`, `-d/--disable-extension`, and `--no-extensions`, exactly like the main CLI. `fir login list` (or bare `fir login`) lists every provider registered after extensions load. Equivalent to the long-standing `--login <provider-id>` flag; both paths share the same session-bootstrap code.
+`fir login <provider-id>` runs the OAuth flow for a provider from the shell (no interactive TUI required) and writes credentials to `<agent-dir>/auth.json`. Because OAuth providers are contributed by auth extensions, `fir login` loads extensions before running the flow — honouring the `settings.json` `extensions` allowlist, `-e/--extension`, `-d/--disable-extension`, and `--no-extensions`, exactly like the main CLI. `fir login list` (or bare `fir login`) lists every provider registered after extensions load. Equivalent to the long-standing `--login <provider-id>` flag; both paths share the same session-bootstrap code.
 
 ## Session observation (`fir observe` / `fir send`)
 
@@ -172,7 +172,7 @@ Set `CLAUDE_CODE_USE_BEDROCK=1` and `ANTHROPIC_MODEL=<id-or-arn>` (plus standard
 
 ## Extensions
 
-Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `~/.config/fir/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
+Extensions are standalone scripts (Python, shell, etc.) in `.fir/extensions/` (project) or `<agent-dir>/extensions/` (global). They communicate with fir over JSON-RPC 2.0 on stdio and can register custom tools, slash commands, and event handlers.
 
 A Python SDK is provided (`fir_ext.py`). No code changes needed to add an extension — just drop a script in the directory.
 
@@ -199,7 +199,7 @@ Skills can also be invoked directly from the CLI: `fir /<skill-name> [task...]` 
 Install/manage external packages (git repos or local paths) that contribute skills, extensions, and themes:
 
 ```
-fir install github.com/user/fir-pack        # install to user scope (~/.config/fir/packages/)
+fir install github.com/user/fir-pack        # install to user scope (<agent-dir>/packages/)
 fir install ./local/path --local            # install to project scope (.fir/packages/)
 fir uninstall github.com/user/fir-pack      # remove a package
 fir packages list                           # list installed packages (source, scope, skill/ext counts, path)
@@ -217,7 +217,7 @@ from:
 | Origin | Where |
 |--------|-------|
 | `builtin` | embedded in the binary |
-| `user` | `~/.config/fir/skills/` (and equivalents for themes) |
+| `user` | `<agent-dir>/skills/` (and equivalents for themes) |
 | `project` | `<cwd>/.fir/skills/` |
 | `pkg:<source>` | installed package, e.g. `pkg:github.com/kfet/foo` |
 | `path:<basename>` | path supplied via `--skill <path>` or the `"skills"` settings array |
@@ -321,7 +321,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
 - **call_tool bridge** — extensions can call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)`. Results are returned directly and never enter conversation history. This enables extensions to build rich orchestration workflows.
 - **MCP channel servers** — MCP servers that advertise the `claude/channel` experimental capability can push messages into the running session via `notifications/claude/channel` notifications. Messages are injected into the agent conversation automatically. The server's `channel_reply` tool is a regular MCP tool. Configure channel servers in `.fir/mcp.json` like any other MCP server — no special config needed.
-- **MCP configuration** — configure MCP servers in `.fir/mcp.json` (project) or `~/.config/fir/mcp.json` (global). Three transports are supported:
+- **MCP configuration** — configure MCP servers in `.fir/mcp.json` (project) or `<agent-dir>/mcp.json` (global). Three transports are supported:
   - **stdio** (default) — launches a local subprocess:
     ```json
     {

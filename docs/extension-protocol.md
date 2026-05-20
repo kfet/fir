@@ -117,7 +117,7 @@ and marks it as failed.
 |-------|-------------|
 | `version` | Protocol version string.  Currently `"1"`. |
 | `cwd` | Project working directory. |
-| `config_dirs` | Priority-ordered list of directories the extension may use to read/write its per-extension config file (highest priority first). Typically `[projectDir/.fir, ~/.config/fir]`. Use the SDK helpers `load_config()` / `config_path()` rather than accessing this directly. |
+| `config_dirs` | Priority-ordered list of directories the extension may use to read/write its per-extension config file (highest priority first). Typically `[projectDir/.fir, <agent-dir>]`, where `<agent-dir>` defaults to `~/.config/fir` and can be overridden by `FIR_AGENT_DIR` or `--agent-dir`. Use the SDK helpers `load_config()` / `config_path()` rather than accessing this directly. |
 
 ### extension → fir
 
@@ -1305,7 +1305,7 @@ through `apikind` keeps that layer kind-agnostic.
 
 1. **Project-local** — `.fir/extensions/` in the current project.  Requires
    explicit trust (see below).
-2. **User-global** — `~/.config/fir/extensions/`.  Always trusted.
+2. **User-global** — `<agent-dir>/extensions/`.  Always trusted.
 3. **Package extras** — directories or individual files supplied by installed
    fir packages.
 

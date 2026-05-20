@@ -181,7 +181,7 @@ fir looks for extensions in two locations at startup:
 | Location | Scope | Description |
 |----------|-------|-------------|
 | `.fir/extensions/` | Project | Extensions for the current project only |
-| `~/.config/fir/extensions/` | Global | Extensions available in all projects |
+| `<agent-dir>/extensions/` (`~/.config/fir/extensions/` by default) | Global | Extensions available in all projects; override the agent dir with `FIR_AGENT_DIR` or `--agent-dir` |
 
 Extensions must be **executable files** (have the execute permission bit set). The extension name is derived from the filename without its extension (e.g., `wordcount.py` → `wordcount`).
 
@@ -236,7 +236,7 @@ On first encounter, fir:
 
 If the extension file changes (different hash), fir will prompt for re-approval.
 
-**Global extensions** (in `~/.config/fir/extensions/`) are always trusted — you installed them yourself.
+**Global extensions** (in `<agent-dir>/extensions/`) are always trusted — you installed them yourself.
 
 ## Troubleshooting
 

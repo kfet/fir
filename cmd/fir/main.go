@@ -82,8 +82,59 @@ func applyChdirFlag() error {
 	return nil
 }
 
+// parseAgentDirFlag scans args for `--agent-dir <dir>` or `--agent-dir=<dir>`.
+// It returns the target directory, the number of slice elements consumed
+// starting at the flag, the index where the flag was found, and whether a flag
+// was present. Only the first occurrence is honoured.
+func parseAgentDirFlag(args []string) (dir string, idx, consume int, found bool, err error) {
+	for i, a := range args {
+		switch {
+		case a == "--agent-dir":
+			if i+1 >= len(args) {
+				return "", i, 0, true, fmt.Errorf("--agent-dir requires a directory argument")
+			}
+			d := args[i+1]
+			if d == "" {
+				return "", i, 0, true, fmt.Errorf("--agent-dir: empty directory")
+			}
+			return d, i, 2, true, nil
+		case strings.HasPrefix(a, "--agent-dir="):
+			d := a[len("--agent-dir="):]
+			if d == "" {
+				return "", i, 0, true, fmt.Errorf("--agent-dir: empty directory")
+			}
+			return d, i, 1, true, nil
+		}
+	}
+	return "", 0, 0, false, nil
+}
+
+// applyAgentDirFlag scans os.Args for `--agent-dir`, applies it as a
+// process-local FIR_AGENT_DIR override, and strips it from os.Args so it works
+// before subcommand dispatch. CLI flag value takes precedence over any
+// inherited FIR_AGENT_DIR environment variable.
+func applyAgentDirFlag() error {
+	dir, idx, consume, found, err := parseAgentDirFlag(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if err := os.Setenv("FIR_AGENT_DIR", dir); err != nil {
+		return fmt.Errorf("set FIR_AGENT_DIR: %w", err)
+	}
+	start := idx + 1
+	os.Args = append(os.Args[:start], os.Args[start+consume:]...)
+	return nil
+}
+
 func main() {
 	if err := applyChdirFlag(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if err := applyAgentDirFlag(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

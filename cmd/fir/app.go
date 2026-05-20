@@ -390,6 +390,11 @@ func run() error {
 	// Register built-in API providers (Anthropic, OpenAI, Google, Bedrock)
 	providers.RegisterDefaultProviders()
 
+	// --agent-dir has already been stripped by main.applyAgentDirFlag
+	// (which sets FIR_AGENT_DIR before subcommand dispatch), so it never
+	// reaches ParseArgs here. The flag still has a parser case in args.go
+	// for help/completion coverage; behaviour is driven entirely by the
+	// process env that main set.
 	args := ParseArgs(os.Args[1:])
 
 	// Initialise debug logging (file-only, never stdout/stderr).
@@ -745,6 +750,7 @@ func createSessionStore(args *Args, cwd, agentDir string) (*store.SessionStore, 
 }
 
 // resolveAgentDir returns the agent directory, honouring FIR_AGENT_DIR if set.
+// main applies --agent-dir by setting FIR_AGENT_DIR before this helper runs.
 func resolveAgentDir() string {
 	if dir := os.Getenv("FIR_AGENT_DIR"); dir != "" {
 		return dir

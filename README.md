@@ -139,7 +139,7 @@ export AWS_PROFILE="..."           # for Bedrock
 
 ### Global config (`~/.config/fir/`)
 
-The global config directory (override with `FIR_AGENT_DIR`) holds:
+The global config directory (override with `FIR_AGENT_DIR` or the `--agent-dir <dir>` CLI flag) holds:
 
 | File | Purpose |
 |---|---|
@@ -172,9 +172,11 @@ in your project directory and they are automatically discovered and started.
 fir ships a Python SDK in `pkg/extension/sdk/python/fir_ext.py` that
 handles the JSON-RPC protocol for you.
 
-Extensions placed in `.fir/extensions/` (project) or `~/.config/fir/extensions/`
-(global) are discovered automatically. To restrict which extensions are loaded,
-set `extensions` in your settings file as a **name allowlist**:
+Extensions placed in `.fir/extensions/` (project) or `<agent-dir>/extensions/`
+(global; `~/.config/fir/extensions/` by default, override with `FIR_AGENT_DIR`
+or `fir --agent-dir <dir>`) are discovered automatically. To restrict which
+extensions are loaded, set `extensions` in your settings file as a **name
+allowlist**:
 
 ```jsonc
 // .fir/settings.json (project) or ~/.config/fir/settings.json (global)

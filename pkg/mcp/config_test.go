@@ -189,3 +189,13 @@ func TestLoadDefaultConfigs_MissingFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cfg.MCPServers)
 }
+
+func TestDefaultConfigPaths_UsesFIRAgentDir(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+
+	userPath, projectPath := DefaultConfigPaths("/project")
+	assert.Equal(t, filepath.Join(agentDir, "mcp.json"), userPath)
+	assert.Equal(t, "/project/.fir/mcp.json", projectPath)
+}
