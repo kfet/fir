@@ -77,7 +77,7 @@ brews:
     install: |
       bin.install Dir["fir-*"].first => "fir"
       chmod 0755, bin/"fir"
-      generate_completions_from_executable(bin/"fir", "completion")
+      generate_completions_from_executable(bin/"fir", "completion", shells: [:bash, :zsh])
 
   # Pinned per-minor-version formula for rollback / version-pinning.
   #
@@ -126,7 +126,7 @@ brews:
     install: |
       bin.install Dir["fir-*"].first => "fir"
       chmod 0755, bin/"fir"
-      generate_completions_from_executable(bin/"fir", "completion")
+      generate_completions_from_executable(bin/"fir", "completion", shells: [:bash, :zsh])
 
 changelog:
   use: github-native

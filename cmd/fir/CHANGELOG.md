@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.47.1] - 2026-05-17
+
+### Fixed
+
+- Homebrew install of `kfet/fir/fir` no longer fails with `unsupported shell: fish (supported: bash, zsh)`. Regression introduced in 0.47.0's brew-smoke CI surfaced — but the bug is older: Homebrew's `generate_completions_from_executable` defaults to invoking the binary for **bash, zsh, and fish**, and fir's `completion` subcommand only handles bash and zsh, exiting non-zero on `fish`. Under `brew install` that non-zero exit kills the whole install (`Failure while executing; \`{"SHELL" => "fish"} .../bin/fir completion fish\` exited with 1`). Fixed by passing `shells: [:bash, :zsh]` to `generate_completions_from_executable` in both the rolling `fir` and pinned `fir@X.Y` formula blocks of `.goreleaser.yaml`. The new brew-smoke job (added in 0.47.0) caught it on the first release — exactly the kind of end-to-end gap it was built to close. 0.47.0 binaries themselves are fine; only the brew install path is affected, and 0.47.1 supersedes it in the tap.
+
 ## [0.47.0] - 2026-05-17
 
 ### Changed
