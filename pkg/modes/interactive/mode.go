@@ -39,6 +39,7 @@ type InteractiveMode struct {
 	session     *session.AgentSession
 	keybindings *tui.KeybindingsManager
 	settings    *config.SettingsManager
+	agentDir    string
 
 	// TUI
 	ui              *tui.TUI
@@ -138,6 +139,9 @@ type InteractiveModeOptions struct {
 	ThemeName string
 	// ThemeSearchDirs are directories to search for custom theme JSON files.
 	ThemeSearchDirs []string
+	// AgentDir is the global config/session root. Defaults to FIR_AGENT_DIR,
+	// then session.DefaultAgentDir().
+	AgentDir string
 	// MCPStatus returns MCP server status for /session display (optional).
 	MCPStatus func() []mcp.ServerStatus
 	// MCPDetails returns detailed MCP server info for /mcp display (optional).
@@ -158,6 +162,14 @@ func NewInteractiveMode(
 	// Initialize theme
 	_ = itheme.InitTheme(opts.ThemeName, opts.ThemeSearchDirs)
 
+	agentDir := opts.AgentDir
+	if agentDir == "" {
+		agentDir = os.Getenv("FIR_AGENT_DIR")
+	}
+	if agentDir == "" {
+		agentDir = session.DefaultAgentDir()
+	}
+
 	cwd, _ := os.Getwd()
 
 	autoCompactMode := "client"
@@ -174,6 +186,7 @@ func NewInteractiveMode(
 		session:            asession,
 		keybindings:        keybindings,
 		settings:           settings,
+		agentDir:           agentDir,
 		autoCompactMode:    autoCompactMode,
 		footerDataProvider: NewFooterDataProvider(cwd),
 		ctx:                ctx,

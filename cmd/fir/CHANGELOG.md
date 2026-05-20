@@ -6,6 +6,10 @@
 
 - `fir --agent-dir <dir>` overrides the global config/session root for one invocation (same target as `FIR_AGENT_DIR`, with the CLI flag taking precedence), covering auth/settings/sessions/debug logs/packages and user-level MCP config.
 
+### Fixed
+
+- The interactive `/resume` selector's "all sessions" scope now uses the active agent dir (including `--agent-dir` / `FIR_AGENT_DIR`) instead of always scanning the default `~/.config/fir` session root.
+
 ## [0.47.1] - 2026-05-17
 
 ### Fixed

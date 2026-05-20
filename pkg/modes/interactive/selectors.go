@@ -5,6 +5,7 @@ package interactive
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -251,9 +252,7 @@ func (m *InteractiveMode) showSessionSelector() {
 		selector := components.NewSessionSelectorComponent(
 			sessions,
 			components.SessionScopeCurrent,
-			func() ([]store.SessionListInfo, error) {
-				return store.ListAllSessions(session.DefaultAgentDir(), session.PiAgentDir())
-			},
+			m.loadAllSessionsForSelector,
 			func(sessionPath string) {
 				done()
 				go m.handleResumeSession(sessionPath)
@@ -598,4 +597,15 @@ func (m *InteractiveMode) handleTreeNavigation(entryID string) {
 		m.editor.SetText(result.EditorText)
 	}
 	m.showStatus("Navigated to selected point")
+}
+
+func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo, error) {
+	agentDir := m.agentDir
+	if agentDir == "" {
+		agentDir = os.Getenv("FIR_AGENT_DIR")
+	}
+	if agentDir == "" {
+		agentDir = session.DefaultAgentDir()
+	}
+	return store.ListAllSessions(agentDir, session.PiAgentDir())
 }

@@ -962,6 +962,7 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			InitialPrompt:   initialPrompt,
 			ThemeName:       themeName,
 			ThemeSearchDirs: themeSearchDirs,
+			AgentDir:        setup.agentDir,
 			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
 			MCPDetails:      mcp.DetailsFunc(setup.mcpManager),
 			MCPReload:       mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args),

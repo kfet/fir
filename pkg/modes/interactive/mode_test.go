@@ -36,6 +36,16 @@ func TestNewInteractiveMode(t *testing.T) {
 	}
 }
 
+func TestNewInteractiveMode_AgentDirDefaultsToEnv(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
+	if m.agentDir != agentDir {
+		t.Fatalf("agentDir=%q, want %q", m.agentDir, agentDir)
+	}
+}
+
 func TestInteractiveMode_Shutdown(t *testing.T) {
 	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{})
 	// Should not panic
@@ -2239,5 +2249,47 @@ func TestInteractiveMode_StatusClearsOnNextTurn(t *testing.T) {
 	tm.mode.commandStatusContainer.Clear()
 	if len(tm.mode.commandStatusContainer.ChildrenSnapshot()) != 0 {
 		t.Error("expected commandStatusContainer to be cleared after Escape")
+	}
+}
+
+func TestInteractiveMode_LoadAllSessionsUsesConfiguredAgentDir(t *testing.T) {
+	defaultXDG := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", defaultXDG)
+
+	customAgentDir := t.TempDir()
+	customCwd := filepath.Join(t.TempDir(), "custom-project")
+	defaultCwd := filepath.Join(t.TempDir(), "default-project")
+	if err := os.MkdirAll(customCwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(defaultCwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	customStore := store.NewSessionStore(customCwd, store.DefaultSessionDir(customAgentDir, customCwd))
+	defer customStore.Close()
+	defaultStore := store.NewSessionStore(defaultCwd, store.DefaultSessionDir(session.DefaultAgentDir(), defaultCwd))
+	defer defaultStore.Close()
+
+	m := NewInteractiveMode(nil, nil, nil, InteractiveModeOptions{AgentDir: customAgentDir})
+	sessions, err := m.loadAllSessionsForSelector()
+	if err != nil {
+		t.Fatalf("load all sessions: %v", err)
+	}
+
+	var sawCustom, sawDefault bool
+	for _, s := range sessions {
+		if s.Cwd == customCwd {
+			sawCustom = true
+		}
+		if s.Cwd == defaultCwd {
+			sawDefault = true
+		}
+	}
+	if !sawCustom {
+		t.Fatalf("expected all-session selector to include session from configured agent dir %q; got %d sessions", customAgentDir, len(sessions))
+	}
+	if sawDefault {
+		t.Fatalf("expected all-session selector not to read default agent dir when AgentDir is configured")
 	}
 }
