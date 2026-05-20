@@ -5,7 +5,6 @@ package interactive
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -599,13 +598,9 @@ func (m *InteractiveMode) handleTreeNavigation(entryID string) {
 	m.showStatus("Navigated to selected point")
 }
 
+// loadAllSessionsForSelector lists every session across this fir agent's
+// session root (honouring --agent-dir / FIR_AGENT_DIR via m.agentDir, which
+// NewInteractiveMode resolves once) plus the legacy pi agent dir.
 func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo, error) {
-	agentDir := m.agentDir
-	if agentDir == "" {
-		agentDir = os.Getenv("FIR_AGENT_DIR")
-	}
-	if agentDir == "" {
-		agentDir = session.DefaultAgentDir()
-	}
-	return store.ListAllSessions(agentDir, session.PiAgentDir())
+	return store.ListAllSessions(m.agentDir, session.PiAgentDir())
 }
