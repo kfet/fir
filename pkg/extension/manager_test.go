@@ -974,3 +974,150 @@ func TestManager_ExplicitExtension_LoadedWhenAllowed(t *testing.T) {
 		t.Fatalf("expected 1 tool from opt-in-ext, got %d", n)
 	}
 }
+
+// writeSetStatusExtScript builds a tiny extension that calls set_status with a
+// fixed payload immediately on session_start, so a test can verify whether the
+// host-side callback was invoked.
+func writeSetStatusExtScript(t *testing.T, dir, name, statusValue string) string {
+	t.Helper()
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, name)
+	content := `#!/bin/sh
+# ---
+# name: ` + name + `
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[],"events":["session_start"]}}'
+# Wait for the session_start notification (we don't parse it; any line is fine).
+read line
+# Fire set_status with a fixed payload, then idle.
+echo '{"jsonrpc":"2.0","id":99,"method":"set_status","params":{"status":"` + statusValue + `"}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestManager_SetSetStatusFn_PropagatesToRunningBridges locks behaviour the
+// interactive mode depends on: callers register the SetStatus callback AFTER
+// extension.Setup has already started the bridges, because the callback is
+// constructed against the mode's footerDataProvider, which only exists after
+// TUI init. The fix makes SetSetStatusFn propagate to bridges that started
+// before the registration call so set_status invocations are honoured.
+func TestManager_SetSetStatusFn_PropagatesToRunningBridges(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeSetStatusExtScript(t, dir, "status-ext", "HELLO-LATE")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash, _ := ComputeHash(scriptPath)
+	_ = ts.RecordTrust(dir, "status-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	// Deliberately DO NOT call SetSetStatusFn before Start — mirroring the
+	// real interactive-mode flow.
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	// Register the callback after the bridge has started. The extension
+	// will fire set_status as soon as session_start is delivered (below).
+	type seen struct {
+		name string
+		text string
+	}
+	got := make(chan seen, 4)
+	mgr.SetSetStatusFn(func(name, status string) {
+		got <- seen{name: name, text: status}
+	})
+
+	// Trigger session_start; the extension reacts by sending set_status.
+	mgr.EmitEvent("session_start", nil)
+
+	select {
+	case s := <-got:
+		if s.name != "status-ext" || s.text != "HELLO-LATE" {
+			t.Fatalf("got name=%q status=%q; want status-ext / HELLO-LATE", s.name, s.text)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("SetStatusFn registered after Start was never invoked — " +
+			"set_status from a running bridge silently no-oped")
+	}
+}
+
+// writeNotifyExtScript builds a tiny extension that calls notify with a
+// fixed payload on session_start, so a test can verify whether the host-
+// side notify callback was invoked.
+func writeNotifyExtScript(t *testing.T, dir, name, msgValue string) string {
+	t.Helper()
+	extDir := filepath.Join(dir, ".fir", "extensions")
+	if err := os.MkdirAll(extDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(extDir, name)
+	content := `#!/bin/sh
+# ---
+# name: ` + name + `
+# ---
+read line
+echo '{"jsonrpc":"2.0","id":1,"result":{"name":"` + name + `","tools":[],"events":["session_start"]}}'
+read line
+echo '{"jsonrpc":"2.0","id":98,"method":"notify","params":{"level":"info","message":"` + msgValue + `"}}'
+cat >/dev/null
+`
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestManager_SetNotifyFn_PropagatesToRunningBridges is the symmetric
+// regression for SetSetStatusFn — both callbacks go through the same
+// late-registration path and the same atomic.Pointer plumbing on Bridge.
+func TestManager_SetNotifyFn_PropagatesToRunningBridges(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := writeNotifyExtScript(t, dir, "notify-ext", "HELLO-NOTIFY")
+
+	ts := NewTrustStoreWithPath(filepath.Join(dir, "trust.json"))
+	hash, _ := ComputeHash(scriptPath)
+	_ = ts.RecordTrust(dir, "notify-ext", hash)
+
+	mgr := NewManager(slog.Default())
+	mgr.SetTrustStore(ts)
+
+	api := newMockAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx, dir, dir, api); err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Stop() //nolint:errcheck
+
+	type seen struct{ level, msg string }
+	got := make(chan seen, 4)
+	mgr.SetNotifyFn(func(level, message string) {
+		got <- seen{level: level, msg: message}
+	})
+
+	mgr.EmitEvent("session_start", nil)
+
+	select {
+	case s := <-got:
+		if s.level != "info" || s.msg != "HELLO-NOTIFY" {
+			t.Fatalf("got level=%q msg=%q; want info / HELLO-NOTIFY", s.level, s.msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("NotifyFn registered after Start was never invoked — " +
+			"notify from a running bridge silently no-oped")
+	}
+}

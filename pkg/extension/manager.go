@@ -86,20 +86,40 @@ func (m *Manager) SetTrustStore(ts *TrustStore) {
 	m.trust = ts
 }
 
-// SetNotifyFn sets the notification callback applied to all new bridges.
-// Call before Start() or Reload() to take effect.
+// SetNotifyFn sets the notification callback applied to all new bridges
+// AND propagates it to bridges already running. Safe to call before or
+// after Start() — covers the common case where the host constructs the
+// callback against UI state that only exists after the TUI has booted
+// (interactive mode calls this from SetExtensionSetup, which runs after
+// the bridges have already been started in a background goroutine).
 func (m *Manager) SetNotifyFn(fn NotifyFunc) {
 	m.mu.Lock()
 	m.notifyFn = fn
+	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
+	for _, mb := range bridges {
+		if mb != nil && mb.bridge != nil {
+			mb.bridge.SetNotifyFn(fn)
+		}
+	}
 }
 
-// SetSetStatusFn sets the status callback applied to all new bridges.
-// Call before Start() or Reload() to take effect.
+// SetSetStatusFn sets the status callback applied to all new bridges
+// AND propagates it to bridges already running. Safe to call before or
+// after Start() — covers the common case where the host constructs the
+// callback against UI state that only exists after the TUI has booted
+// (interactive mode calls this from SetExtensionSetup, which runs after
+// the bridges have already been started in a background goroutine).
 func (m *Manager) SetSetStatusFn(fn SetStatusFunc) {
 	m.mu.Lock()
 	m.setStatusFn = fn
+	bridges := append([]*managedBridge(nil), m.bridges...)
 	m.mu.Unlock()
+	for _, mb := range bridges {
+		if mb != nil && mb.bridge != nil {
+			mb.bridge.SetSetStatusFn(fn)
+		}
+	}
 }
 
 // SetAllowedNames updates the optional extension allowlist.
@@ -362,26 +382,24 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 	m.logger.Info("ext startOne: done", "ext", cfg.Name, "total_ms", time.Since(startOneBegin).Milliseconds())
 
-	// Wire optional UI callbacks.
-	m.mu.Lock()
-	notifyFn := m.notifyFn
-	setStatusFn := m.setStatusFn
-	m.mu.Unlock()
-	if notifyFn != nil {
-		bridge.NotifyFn = notifyFn
-	}
-	if setStatusFn != nil {
-		bridge.SetStatusFn = setStatusFn
-	}
-
+	// Wire optional UI callbacks AND insert into m.bridges atomically.
+	// We must wire the bridge before starting its Run goroutine (otherwise
+	// an inbound set_status / notify arriving immediately after handshake
+	// would race past a nil pointer); and we must do the wire-then-append
+	// under a single critical section so a concurrent SetSetStatusFn /
+	// SetNotifyFn either sees this bridge in m.bridges (and updates it
+	// directly) OR runs before we even read m.{setStatus,notify}Fn (in
+	// which case we pick up its newly-written value here). Without that
+	// invariant the bridge could land in m.bridges holding a stale nil
+	// callback even though m.setStatusFn has already been updated.
 	bCtx, cancel := context.WithCancel(ctx)
-	go func() {
-		if err := bridge.Run(bCtx, api); err != nil && bCtx.Err() == nil {
-			m.logger.Warn("bridge exited", "ext", cfg.Name, "err", err)
-		}
-	}()
-
 	m.mu.Lock()
+	if m.notifyFn != nil {
+		bridge.SetNotifyFn(m.notifyFn)
+	}
+	if m.setStatusFn != nil {
+		bridge.SetSetStatusFn(m.setStatusFn)
+	}
 	m.bridges = append(m.bridges, &managedBridge{
 		cfg:    cfg,
 		proc:   proc,
@@ -389,6 +407,12 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 		cancel: cancel,
 	})
 	m.mu.Unlock()
+
+	go func() {
+		if err := bridge.Run(bCtx, api); err != nil && bCtx.Err() == nil {
+			m.logger.Warn("bridge exited", "ext", cfg.Name, "err", err)
+		}
+	}()
 
 	m.logger.Info("started extension", "ext", caps.Name,
 		"tools", len(caps.Tools), "events", len(caps.Events))

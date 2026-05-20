@@ -27,11 +27,15 @@ type Bridge struct {
 	// subscribedEvents is a set for fast lookup.
 	subscribedEvents map[string]bool
 
-	// NotifyFn is called for inbound "notify" requests. If nil, an error is returned.
-	NotifyFn NotifyFunc
-
-	// SetStatusFn is called for inbound "set_status" requests. If nil, an error is returned.
-	SetStatusFn SetStatusFunc
+	// Inbound-callback hooks. Manipulated via atomic.Pointer so the
+	// Manager can hot-swap them from any goroutine after the bridge has
+	// already been started (interactive mode constructs these against UI
+	// state that only exists after TUI init, which races with the
+	// bridge's worker goroutine reading them). Use the *Fn() getters and
+	// SetNotifyFn / SetSetStatusFn setters; never read the pointer
+	// directly.
+	notifyFn    atomic.Pointer[NotifyFunc]
+	setStatusFn atomic.Pointer[SetStatusFunc]
 
 	// nextID generates unique request IDs for outbound requests.
 	// Starts at 100 to avoid collision with handshake ID (1).
@@ -98,6 +102,44 @@ func NewBridge(proc *Process, caps *InitResult) *Bridge {
 	return b
 }
 
+// SetNotifyFn atomically installs (or clears, when fn is nil) the
+// inbound-notify callback. Safe to call from any goroutine at any time
+// during the bridge lifecycle.
+func (b *Bridge) SetNotifyFn(fn NotifyFunc) {
+	if fn == nil {
+		b.notifyFn.Store(nil)
+		return
+	}
+	b.notifyFn.Store(&fn)
+}
+
+// SetSetStatusFn atomically installs (or clears, when fn is nil) the
+// inbound-set_status callback. Safe to call from any goroutine at any
+// time during the bridge lifecycle.
+func (b *Bridge) SetSetStatusFn(fn SetStatusFunc) {
+	if fn == nil {
+		b.setStatusFn.Store(nil)
+		return
+	}
+	b.setStatusFn.Store(&fn)
+}
+
+// notifyFunc returns the current notify callback, or nil if unset.
+func (b *Bridge) notifyFunc() NotifyFunc {
+	if p := b.notifyFn.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// setStatusFunc returns the current set_status callback, or nil if unset.
+func (b *Bridge) setStatusFunc() SetStatusFunc {
+	if p := b.setStatusFn.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 // Run starts the dispatch loop, reading messages from the process and routing
 // them. It blocks until ctx is cancelled or the codec returns an error.
 func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
@@ -152,8 +194,8 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		if b.NotifyFn != nil {
-			b.NotifyFn(p.Level, p.Message)
+		if fn := b.notifyFunc(); fn != nil {
+			fn(p.Level, p.Message)
 		}
 		result = okTrue
 
@@ -255,8 +297,8 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
-		if b.SetStatusFn != nil {
-			b.SetStatusFn(b.caps.Name, p.Status)
+		if fn := b.setStatusFunc(); fn != nil {
+			fn(b.caps.Name, p.Status)
 		}
 		result = okTrue
 
