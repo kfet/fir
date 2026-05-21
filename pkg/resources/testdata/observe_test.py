@@ -12,6 +12,7 @@ events directly via the registered handlers.
 
 import json
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -887,294 +888,220 @@ class TestHtopHelpers(unittest.TestCase):
         self.assertIn("7/2", out)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestCards(unittest.TestCase):
+    """Verify the observable-cards reader path through observe.py."""
 
-
-
-# ---------------------------------------------------------------------------
-# Slash commands and AI tools (snapshot, not live tail)
-# ---------------------------------------------------------------------------
-
-
-class TestSlashCommandsAndTools(unittest.TestCase):
     def setUp(self) -> None:
-        self.state_dir = tempfile.mkdtemp(prefix="observe-test-state-")
-        self.sock_dir = f"/tmp/o{os.getpid()}-{int(time.time() * 1000) % 10000}"
-        os.makedirs(self.sock_dir, exist_ok=True)
-        _reset_observe_state(self.state_dir, self.sock_dir)
-        self.session_id = "abcd1234ef567890" + "0" * 20
-        # A pretend transcript file with a few JSONL entries.
-        self.transcript = os.path.join(self.state_dir, "transcript.jsonl")
-        with open(self.transcript, "w") as f:
-            f.write('{"type":"session","version":3,"id":"' + self.session_id + '","cwd":"/tmp"}\n')
-            f.write('{"type":"message","timestamp":"2026-04-27T12:00:00Z",'
-                    '"message":{"role":"user","content":"hello"}}\n')
-            f.write('{"type":"message","timestamp":"2026-04-27T12:00:05Z",'
-                    '"message":{"role":"assistant","content":"hi back"}}\n')
-        # Set up server-side socket via session_start so /send + tool_send work.
-        ctx = _make_ctx(session_file=self.transcript)
-        observe.on_session_start({"session_id": self.session_id}, ctx)
-        # Wait for socket bind.
-        sock_path = observe._socket_path(self.session_id)
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if os.path.exists(sock_path):
-                break
-            time.sleep(0.01)
-        self.server_ctx = ctx
+        self.tmpdir = tempfile.mkdtemp(prefix="observe-cards-")
+        self.session_id = "abc1234567890def" + "0" * 20
+        _reset_observe_state(self.tmpdir, self.tmpdir)
+        # The state dir resolver appends fir/agents — that's where the
+        # observe extension looks for sidecars, so create it now.
+        self.sidecar_dir = os.path.join(self.tmpdir, "fir", "agents")
+        os.makedirs(self.sidecar_dir, exist_ok=True)
 
     def tearDown(self) -> None:
-        observe.on_session_shutdown({}, _make_ctx())
-
-    # -- /observe -----------------------------------------------------------
-
-    def test_observe_command_no_args_lists_sessions(self) -> None:
-        result = observe.cmd_observe([], MagicMock())
-        self.assertIn("ID", result["message"])
-        self.assertIn(self.session_id[:8], result["message"])
-        self.assertTrue(result.get("print_response"))
-
-    def test_observe_command_id_prefix_returns_snapshot(self) -> None:
-        result = observe.cmd_observe([self.session_id[:8]], MagicMock())
-        self.assertIn("hello", result["message"])
-        self.assertIn("hi back", result["message"])
-
-    def test_observe_command_json_passthrough(self) -> None:
-        result = observe.cmd_observe([self.session_id[:8], "--json"], MagicMock())
-        # Raw JSONL should preserve the JSON structure verbatim.
-        self.assertIn('"role":"user"', result["message"])
-
-    def test_observe_command_unknown_flag(self) -> None:
-        result = observe.cmd_observe(["--bogus"], MagicMock())
-        self.assertIn("unknown flag", result["message"])
-
-    def test_observe_command_no_match(self) -> None:
-        result = observe.cmd_observe(["zzz-no-match"], MagicMock())
-        self.assertIn("no session matching", result["message"])
-
-    # -- observe_session tool ----------------------------------------------
-
-    def test_tool_observe_no_args_lists(self) -> None:
-        out = observe.tool_observe({}, MagicMock())
-        self.assertIn("ID", out)
-        self.assertIn(self.session_id[:8], out)
-
-    def test_tool_observe_snapshot(self) -> None:
-        out = observe.tool_observe(
-            {"id_prefix": self.session_id[:8], "lines": 50}, MagicMock(),
-        )
-        self.assertIn("hello", out)
-        self.assertIn("hi back", out)
-
-    def test_tool_observe_always_returns_full_text(self) -> None:
-        # Output must never be truncated regardless of message length.
-        long_msg = "x" * 500
-        with open(self.transcript, "a") as f:
-            f.write('{"type":"message","timestamp":"2026-04-27T12:00:10Z",'
-                    '"message":{"role":"user","content":"' + long_msg + '"}}\n')
-        out = observe.tool_observe(
-            {"id_prefix": self.session_id[:8], "lines": 50}, MagicMock(),
-        )
-        self.assertIn(long_msg, out)
-
-    def test_tool_observe_raises_tool_error_on_miss(self) -> None:
-        with self.assertRaises(fir_ext.ToolError):
-            observe.tool_observe({"id_prefix": "zzz-no-match"}, MagicMock())
-
-    # -- /send --------------------------------------------------------------
-
-    def test_send_command_round_trip(self) -> None:
-        # /send delivers via the per-session socket → server forwards via
-        # ctx.send_user_message. We registered the server in setUp.
-        result = observe.cmd_send(
-            [self.session_id[:8], "fix", "the", "bug"],
-            MagicMock(),
-        )
-        self.assertIn("sent", result["message"])
-        # Wait for the accept-loop thread to forward.
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if self.server_ctx.send_user_message.called:
-                break
-            time.sleep(0.01)
-        self.server_ctx.send_user_message.assert_called_with(
-            "fix the bug", deliver_as="",
-        )
-
-    def test_send_command_steer_flag(self) -> None:
-        observe.cmd_send(
-            [self.session_id[:8], "--steer", "stop", "and", "look"],
-            MagicMock(),
-        )
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if self.server_ctx.send_user_message.called:
-                break
-            time.sleep(0.01)
-        self.server_ctx.send_user_message.assert_called_with(
-            "stop and look", deliver_as="steer",
-        )
-
-    def test_send_command_sigil_overrides_default(self) -> None:
-        # --steer says steer, but the leading + sigil overrides to followUp.
-        observe.cmd_send(
-            [self.session_id[:8], "--steer", "+queue", "this"],
-            MagicMock(),
-        )
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if self.server_ctx.send_user_message.called:
-                break
-            time.sleep(0.01)
-        self.server_ctx.send_user_message.assert_called_with(
-            "queue this", deliver_as="followUp",
-        )
-
-    def test_send_command_missing_message(self) -> None:
-        result = observe.cmd_send([self.session_id[:8]], MagicMock())
-        self.assertIn("message text required", result["message"])
-
-    def test_send_command_no_id(self) -> None:
-        result = observe.cmd_send(["--steer", "msg"], MagicMock())
-        self.assertIn("required", result["message"])
-
-    # -- send_session tool --------------------------------------------------
-
-    def test_tool_send_round_trip(self) -> None:
-        out = observe.tool_send(
-            {"id_prefix": self.session_id[:8], "content": "review this"},
-            MagicMock(),
-        )
-        self.assertTrue(out.get("ok"))
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if self.server_ctx.send_user_message.called:
-                break
-            time.sleep(0.01)
-        self.server_ctx.send_user_message.assert_called_with(
-            "review this", deliver_as="",
-        )
-
-    def test_tool_send_deliver_as(self) -> None:
-        observe.tool_send(
-            {
-                "id_prefix": self.session_id[:8],
-                "content": "queue this",
-                "deliver_as": "followUp",
-            },
-            MagicMock(),
-        )
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if self.server_ctx.send_user_message.called:
-                break
-            time.sleep(0.01)
-        self.server_ctx.send_user_message.assert_called_with(
-            "queue this", deliver_as="followUp",
-        )
-
-    def test_tool_send_requires_id_or_cwd(self) -> None:
-        with self.assertRaises(fir_ext.ToolError):
-            observe.tool_send({"content": "no target"}, MagicMock())
-
-    def test_tool_send_invalid_deliver_as(self) -> None:
-        with self.assertRaises(fir_ext.ToolError):
-            observe.tool_send(
-                {"id_prefix": self.session_id[:8], "content": "x", "deliver_as": "bogus"},
-                MagicMock(),
-            )
-
-    # -- stop_session -------------------------------------------------------
-
-    def test_tool_stop_signals_host_pid(self) -> None:
-        with mock.patch.object(observe.os, "kill") as mk:
-            result = observe.tool_stop(
-                {"id_prefix": self.session_id[:8]}, MagicMock(),
-            )
-        import signal
-        # _resolve_sidecar also probes liveness with kill(pid, 0); assert
-        # the terminating signal landed on host_pid as the final call.
-        mk.assert_called_with(os.getppid(), signal.SIGTERM)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["host_pid"], os.getppid())
-        self.assertEqual(result["signal"], "SIGTERM")
-        self.assertEqual(result["session_id"], self.session_id)
-
-    def test_tool_stop_force_uses_sigkill(self) -> None:
-        with mock.patch.object(observe.os, "kill") as mk:
-            result = observe.tool_stop(
-                {"id_prefix": self.session_id[:8], "force": True}, MagicMock(),
-            )
-        import signal
-        mk.assert_called_with(os.getppid(), signal.SIGKILL)
-        self.assertEqual(result["signal"], "SIGKILL")
-
-    def test_tool_stop_requires_id_or_cwd(self) -> None:
-        with self.assertRaises(fir_ext.ToolError):
-            observe.tool_stop({}, MagicMock())
-
-    def test_tool_stop_unknown_target_raises(self) -> None:
-        with self.assertRaises(fir_ext.ToolError):
-            observe.tool_stop({"id_prefix": "ffffffff"}, MagicMock())
-
-    def test_tool_stop_dead_process_raises(self) -> None:
-        # Only fail the terminating signal; let the liveness probe (sig 0) pass.
-        def fake_kill(pid, sig):
-            if sig == 0:
-                return
-            raise ProcessLookupError
-        with mock.patch.object(observe.os, "kill", side_effect=fake_kill):
-            with self.assertRaises(fir_ext.ToolError):
-                observe.tool_stop(
-                    {"id_prefix": self.session_id[:8]}, MagicMock(),
-                )
-
-
-
-class TestTailLines(unittest.TestCase):
-    def setUp(self):
-        # Use mkstemp to avoid SIM115 (NamedTemporaryFile is a context manager).
-        fd, self.path = tempfile.mkstemp(suffix=".jsonl")
-        os.close(fd)
-
-    def tearDown(self):
         with suppress(FileNotFoundError):
-            os.unlink(self.path)
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _write(self, text: str) -> None:
-        with open(self.path, "w", encoding="utf-8") as f:
-            f.write(text)
+    def _write_cards(self, cards: list) -> str:
+        """Write a cards-file to disk and return its path.
 
-    def test_empty_file(self):
-        self._write("")
-        self.assertEqual(observe._tail_lines(self.path, 5), [])
+        ``cards`` is loosely typed because some test cases include
+        deliberately malformed entries (non-dicts) to exercise the
+        defensive filter in observe._read_cards.
+        """
+        path = os.path.join(self.tmpdir, "session.jsonl.cards")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cards, f)
+        return path
 
-    def test_zero_n(self):
-        self._write("a\nb\nc\n")
-        self.assertEqual(observe._tail_lines(self.path, 0), [])
+    def _plant_sidecar(self, store_path: str) -> None:
+        """Put a sidecar in the state dir so _resolve_sidecar finds us."""
+        sidecar = os.path.join(self.sidecar_dir, f"{self.session_id}.json")
+        with open(sidecar, "w") as f:
+            json.dump({
+                "session_id": self.session_id, "cwd": self.tmpdir,
+                "store_path": store_path,
+                "cards_path": store_path + ".cards",
+                "status": "running", "started_at": "2026-01-01T00:00:00Z",
+                "pid": os.getpid(), "host_pid": os.getppid(),
+                "socket_path": "", "schema": 1,
+            }, f)
 
-    def test_fewer_lines_than_n(self):
-        self._write("a\nb\n")
-        self.assertEqual(observe._tail_lines(self.path, 5), ["a", "b"])
+    def test_session_start_records_cards_path(self) -> None:
+        """observe sidecar must publish cards_path next to store_path."""
+        ctx = _make_ctx(session_file=os.path.join(self.tmpdir, "session.jsonl"))
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        with open(os.path.join(self.sidecar_dir, f"{self.session_id}.json")) as f:
+            d = json.load(f)
+        self.assertEqual(
+            d.get("cards_path"),
+            os.path.join(self.tmpdir, "session.jsonl.cards"),
+        )
 
-    def test_more_lines_than_n(self):
-        self._write("\n".join(str(i) for i in range(100)) + "\n")
-        out = observe._tail_lines(self.path, 5)
-        self.assertEqual(out, ["95", "96", "97", "98", "99"])
+    def test_read_cards_missing_file_returns_empty(self) -> None:
+        self.assertEqual(observe._read_cards(""), [])
+        self.assertEqual(observe._read_cards("/does/not/exist"), [])
 
-    def test_no_trailing_newline(self):
-        self._write("first\nsecond\nthird")
-        out = observe._tail_lines(self.path, 2)
-        self.assertEqual(out, ["second", "third"])
+    def test_read_cards_filters_malformed_entries(self) -> None:
+        path = self._write_cards([
+            {"source": "plan", "key": "active", "slug": "ok", "ts": "2026-01-01T00:00:00Z"},
+            {"source": "plan"},                       # missing key — dropped
+            {"key": "k"},                              # missing source — dropped
+            "not an object",                           # dropped
+        ])
+        got = observe._read_cards(path)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["slug"], "ok")
 
-    def test_exact_chunk_boundary(self):
-        # Force backward-read to span multiple chunks.
-        line = "x" * 100
-        self._write((line + "\n") * 200)
-        out = observe._tail_lines(self.path, 3, chunk_size=64)
-        self.assertEqual(out, [line, line, line])
+    def test_read_cards_corrupt_returns_empty(self) -> None:
+        path = os.path.join(self.tmpdir, "cards.json")
+        with open(path, "w") as f:
+            f.write("not json at all")
+        self.assertEqual(observe._read_cards(path), [])
 
-    def test_missing_file_returns_empty(self):
-        os.unlink(self.path)
-        self.assertEqual(observe._tail_lines(self.path, 5), [])
+    def test_header_orders_priority_sources_first(self) -> None:
+        cards = [
+            {"source": "zalpha",  "key": "k", "slug": "z-slug", "ts": "2026-01-01T00:00:01Z"},
+            {"source": "plan",    "key": "k", "slug": "3/8",    "ts": "2026-01-01T00:00:02Z"},
+            {"source": "mood",    "key": "k", "slug": "#engaged", "ts": "2026-01-01T00:00:03Z"},
+        ]
+        header = observe._render_cards_header(cards)
+        # plan first (priority 0), then mood (priority 1), then zalpha
+        # (everything else). The order is fixed regardless of timestamp.
+        self.assertEqual(
+            header,
+            "plan: 3/8  ·  mood: #engaged  ·  zalpha: z-slug",
+        )
+
+    def test_header_truncates_to_limit_with_more_marker(self) -> None:
+        # Five sources, header limit is 3, so two should collapse into
+        # the "…+2 more (--ext)" suffix.
+        cards = [
+            {"source": "plan",    "key": "k", "slug": "p", "ts": "2026-01-01T00:00:01Z"},
+            {"source": "mood",    "key": "k", "slug": "m", "ts": "2026-01-01T00:00:02Z"},
+            {"source": "model",   "key": "k", "slug": "M", "ts": "2026-01-01T00:00:03Z"},
+            {"source": "extA",    "key": "k", "slug": "a", "ts": "2026-01-01T00:00:04Z"},
+            {"source": "extB",    "key": "k", "slug": "b", "ts": "2026-01-01T00:00:05Z"},
+        ]
+        header = observe._render_cards_header(cards)
+        self.assertIn("plan: p", header)
+        self.assertIn("mood: m", header)
+        self.assertIn("model: M", header)
+        self.assertIn("…+2 more (--ext)", header)
+
+    def test_header_collapses_multiple_keys_per_source(self) -> None:
+        cards = [
+            {"source": "plan", "key": "a", "slug": "old",  "ts": "2026-01-01T00:00:01Z"},
+            {"source": "plan", "key": "b", "slug": "newer", "ts": "2026-01-01T00:00:02Z"},
+        ]
+        header = observe._render_cards_header(cards)
+        # The newer card wins; one line only.
+        self.assertEqual(header, "plan: newer")
+
+    def test_header_empty_for_no_cards(self) -> None:
+        self.assertEqual(observe._render_cards_header([]), "")
+
+    def test_render_card_detail_for_one_source(self) -> None:
+        cards = [
+            {
+                "source": "plan", "key": "active", "slug": "3/8",
+                "detail": "Step three",
+                "ts": "2026-01-01T00:00:00Z", "entry_id": "tc-1",
+            },
+            {
+                "source": "mood", "key": "current", "slug": "#engaged",
+                "detail": "Feeling good", "ts": "2026-01-01T00:00:00Z",
+            },
+        ]
+        plan_detail = observe._render_card_detail(cards, "plan")
+        self.assertIn("== cards: plan ==", plan_detail)
+        self.assertIn("[active] 3/8", plan_detail)
+        self.assertIn("entry=tc-1", plan_detail)
+        self.assertIn("Step three", plan_detail)
+        # mood not included.
+        self.assertNotIn("#engaged", plan_detail)
+
+    def test_render_card_detail_unknown_source(self) -> None:
+        self.assertIn(
+            "(no cards for source:",
+            observe._render_card_detail([], "ghost"),
+        )
+
+    def _write_minimal_session(self, path: str, include_message: bool = True) -> None:
+        """Write a minimal session JSONL with header and (optionally) one message."""
+        header = {
+            "type": "session", "version": 3, "id": self.session_id,
+            "timestamp": "2026-01-01T00:00:00Z", "cwd": self.tmpdir,
+        }
+        msg_entry = {
+            "type": "message", "id": "e1", "parentId": "",
+            "timestamp": "2026-01-01T00:00:01Z",
+            "message": {"role": "user", "content": "hello", "timestamp": 0},
+        }
+        with open(path, "w") as f:
+            f.write(json.dumps(header) + "\n")
+            if include_message:
+                f.write(json.dumps(msg_entry) + "\n")
+
+    def test_snapshot_transcript_prepends_card_header(self) -> None:
+        """End-to-end smoke: a session with cards + transcript renders both."""
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_minimal_session(store_path)
+        self._write_cards([
+            {
+                "source": "plan", "key": "active",
+                "slug": "1/3 in_progress", "detail": "Step 1",
+                "ts": "2026-01-01T00:00:00Z",
+            },
+            {
+                "source": "mood", "key": "current",
+                "slug": "#engaged", "detail": "good",
+                "ts": "2026-01-01T00:00:01Z",
+            },
+        ])
+        self._plant_sidecar(store_path)
+        out = observe._snapshot_transcript(self.session_id, "", 10, False)
+        self.assertIn("plan: 1/3 in_progress", out)
+        self.assertIn("mood: #engaged", out)
+        # transcript line still rendered.
+        self.assertIn("hello", out)
+
+    def test_snapshot_transcript_raw_json_includes_cards_array(self) -> None:
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_minimal_session(store_path, include_message=False)
+        self._write_cards([
+            {
+                "source": "plan", "key": "active", "slug": "1/3",
+                "detail": "x", "ts": "2026-01-01T00:00:00Z",
+            },
+        ])
+        self._plant_sidecar(store_path)
+        out = observe._snapshot_transcript(self.session_id, "", 10, True)
+        # The first section must be the cards JSON object.
+        self.assertIn('"cards"', out)
+        self.assertIn('"source": "plan"', out)
+
+    def test_snapshot_transcript_ext_expands_one_source(self) -> None:
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_minimal_session(store_path, include_message=False)
+        self._write_cards([
+            {
+                "source": "plan", "key": "active", "slug": "1/3",
+                "detail": "EXPAND ME", "ts": "2026-01-01T00:00:00Z",
+            },
+            {
+                "source": "mood", "key": "current", "slug": "x",
+                "detail": "not shown", "ts": "2026-01-01T00:00:00Z",
+            },
+        ])
+        self._plant_sidecar(store_path)
+        out = observe._snapshot_transcript(
+            self.session_id, "", 10, False, ext="plan",
+        )
+        self.assertIn("EXPAND ME", out)
+        self.assertNotIn("not shown", out)
+
+if __name__ == "__main__":
+    unittest.main()

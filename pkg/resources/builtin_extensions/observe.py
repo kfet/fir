@@ -107,6 +107,9 @@ _state: dict[str, Any] = {
     "host_pid": os.getppid(),
     "socket_path": "",
     "store_path": "",
+    # Observable-cards sidecar path; readers (observe_session, fir
+    # observe, /htop) follow this pointer. Empty for in-memory sessions.
+    "cards_path": "",
     "cwd": "",
     "started_at": "",
     "status": "running",
@@ -276,6 +279,7 @@ def on_session_start(params: dict[str, Any], ctx: fir_ext.Context) -> None:
         session_id=sid,
         socket_path=str(sock_path),
         store_path=store_path,
+        cards_path=store_path + ".cards",
         cwd=os.getcwd(),
         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         status="running",
@@ -764,22 +768,156 @@ def _tail_lines(path: str, n: int, chunk_size: int = 8192) -> list[str]:
     return lines[-n:]
 
 
+# ---------------------------------------------------------------------------
+# Observable cards — sibling reader
+# ---------------------------------------------------------------------------
+#
+# observe.py is a card *consumer*. It reads the per-session sidecar at
+# the cards_path published in this extension's discovery sidecar.
+
+# Header-priority sources land first; everything else falls alphabetically.
+_CARDS_HEADER_PRIORITY = ("plan", "mood", "model", "session")
+
+# Inline limit before truncating to "…+N more".
+_CARDS_HEADER_LIMIT = 3
+
+
+def _read_cards(cards_path: str) -> list[dict[str, Any]]:
+    """Read the cards JSON file. Returns [] on missing or malformed file."""
+    if not cards_path:
+        return []
+    try:
+        with open(cards_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [
+        item
+        for item in data
+        if isinstance(item, dict) and item.get("source") and item.get("key")
+    ]
+
+
+def _sort_cards(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order cards by (source-priority, source asc, ts desc).
+
+    Two stable sorts: inner ts-desc, then outer (priority, source) — the
+    inner pass survives because Python's sort is stable.
+    """
+    pri_index = {s: i for i, s in enumerate(_CARDS_HEADER_PRIORITY)}
+    fallback = len(_CARDS_HEADER_PRIORITY)
+    by_ts_desc = sorted(cards, key=lambda c: c.get("ts") or "", reverse=True)
+    return sorted(
+        by_ts_desc,
+        key=lambda c: (
+            pri_index.get(c.get("source") or "", fallback),
+            c.get("source") or "",
+        ),
+    )
+
+
+def _render_cards_header(cards: list[dict[str, Any]]) -> str:
+    """One-line header derived from card slugs.
+
+    Format::
+
+        plan: 3/8 in_progress  ·  mood: #engaged  ·  …+1 more (--ext)
+
+    Multiple keys per source collapse to the most recent slug.
+    Up to ``_CARDS_HEADER_LIMIT`` sources are inlined; the rest go to
+    the "…+N more (--ext)" suffix. Returns "" when there are no cards
+    or no non-empty slugs.
+    """
+    if not cards:
+        return ""
+    # Walk in priority/recency order; first card per source wins because
+    # _sort_cards already sorted ts-desc within each source.
+    slugs_by_source: dict[str, str] = {}
+    for c in _sort_cards(cards):
+        src = c.get("source") or ""
+        if src in slugs_by_source:
+            continue
+        slug = (c.get("slug") or "").strip()
+        if slug:
+            slugs_by_source[src] = slug
+
+    items = list(slugs_by_source.items())  # ordered by insertion
+    head, tail = items[:_CARDS_HEADER_LIMIT], items[_CARDS_HEADER_LIMIT:]
+    line = "  ·  ".join(f"{src}: {slug}" for src, slug in head)
+    if line and tail:
+        line += f"  ·  …+{len(tail)} more (--ext)"
+    return line
+
+
+def _render_card_detail(cards: list[dict[str, Any]], source: str) -> str:
+    """Expand the detail for a single source. Used by --ext."""
+    matching = [c for c in cards if (c.get("source") or "") == source]
+    if not matching:
+        return f"(no cards for source: {source})"
+    matching.sort(key=lambda c: c.get("ts") or "", reverse=True)
+    out_lines = [f"== cards: {source} =="]
+    for c in matching:
+        key = c.get("key", "") or ""
+        slug = c.get("slug", "") or ""
+        ts = c.get("ts", "") or ""
+        entry_id = c.get("entry_id", "") or ""
+        head = f"[{key}] {slug}"
+        if entry_id:
+            head += f"  (entry={entry_id})"
+        if ts:
+            head += f"  {ts}"
+        out_lines.append(head)
+        detail = c.get("detail", "") or ""
+        if detail:
+            out_lines.append(detail)
+        out_lines.append("")
+    return "\n".join(out_lines).rstrip("\n")
+
+
 def _snapshot_transcript(
     id_prefix: str,
     cwd_flag: str,
     lines: int,
     raw_json: bool,
+    ext: str = "",
 ) -> str:
-    """Return the last `lines` formatted (or raw) lines of a session transcript.
+    """Return the last `lines` formatted (or raw) lines of a session transcript,
+    prepended with a one-line observable-cards header.
 
     Snapshot semantics — does not live-tail. Use `fir observe` from another
     terminal for live observation.
+
+    Flags
+    -----
+    raw_json:
+        Include the raw cards JSON array as a top section and emit the
+        transcript lines unformatted.
+    ext:
+        Non-empty source name — expand that source's card detail above
+        the transcript instead of (or in addition to) the slug header.
     """
     s = _resolve_sidecar(id_prefix, cwd_flag)
     store_path = s.get("store_path", "") or ""
     if not store_path:
         sid8 = (s.get("session_id", "") or "")[:8]
         raise ValueError(f"session {sid8} has no transcript on disk (in-memory)")
+    cards = _read_cards(s.get("cards_path", "") or "")
+
+    sections: list[str] = []
+
+    if raw_json:
+        # Emit cards as a structured JSON object the model can parse,
+        # alongside the (raw) transcript lines.
+        sections.append(json.dumps({"cards": cards}, indent=2))
+    else:
+        header = _render_cards_header(cards)
+        if header:
+            sections.append(header)
+        if ext:
+            sections.append(_render_card_detail(cards, ext))
+
     try:
         tail = _tail_lines(store_path, max(1, lines))
     except OSError as e:
@@ -792,7 +930,9 @@ def _snapshot_transcript(
         rendered = fmt.render(ln)
         if rendered is not None:
             out.append(rendered)
-    return "\n".join(out) if out else "(no displayable lines)"
+    transcript = "\n".join(out) if out else "(no displayable lines)"
+    sections.append(transcript)
+    return "\n\n".join(sections)
 
 
 def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> None:
@@ -865,6 +1005,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     raw_json = False
     include_all = False
     lines = 50
+    ext = ""
     i = 0
     while i < len(args):
         a = args[i]
@@ -880,6 +1021,14 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
                 return {"message": "/observe: --cwd requires an argument"}
         elif a.startswith("--cwd="):
             cwd_flag = a[len("--cwd="):]
+        elif a == "--ext":
+            if i + 1 < len(args):
+                ext = args[i + 1]
+                i += 1
+            else:
+                return {"message": "/observe: --ext requires an argument"}
+        elif a.startswith("--ext="):
+            ext = a[len("--ext="):]
         elif a.startswith("--lines="):
             try:
                 lines = int(a[len("--lines="):])
@@ -893,7 +1042,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     if not id_prefix and not cwd_flag:
         return {"message": _snapshot_session_list(include_all=include_all), "print_response": True}
     try:
-        out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json)
+        out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, ext=ext)
     except ValueError as e:
         return {"message": str(e)}
     return {"message": out, "print_response": True}
@@ -962,9 +1111,10 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         "Inspect another running fir session. Without arguments, returns a "
         "table of live sessions. With id_prefix or cwd, returns a snapshot "
         "of the last `lines` formatted entries from that session's transcript "
-        "(does NOT live-tail). Useful for checking what a sibling agent is "
-        "doing or auditing a long-running session. id_prefix matches the "
-        "session id, session name, or basename(cwd)."
+        "(does NOT live-tail) prepended with a one-line observable-cards "
+        "header (mood: ...  ·  plan: ...). Useful for checking what a "
+        "sibling agent is doing or auditing a long-running session. "
+        "id_prefix matches the session id, session name, or basename(cwd)."
     ),
     parameters={
         "type": "object",
@@ -984,8 +1134,19 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             },
             "raw_json": {
                 "type": "boolean",
-                "description": "Return raw JSONL instead of formatted text. Default false.",
+                "description": (
+                    "Return raw JSONL transcript and include the full cards "
+                    "array as a JSON object. Default false."
+                ),
                 "default": False,
+            },
+            "ext": {
+                "type": "string",
+                "description": (
+                    "Expand the observable-cards detail for one source "
+                    "(e.g. 'mood', 'plan'). Header still shows other "
+                    "sources' slugs. Optional."
+                ),
             },
             "all": {
                 "type": "boolean",
@@ -1001,10 +1162,11 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     lines = int(params.get("lines") or 50)
     raw_json = bool(params.get("raw_json"))
     include_all = bool(params.get("all"))
+    ext = (params.get("ext") or "").strip()
     if not id_prefix and not cwd_flag:
         return _snapshot_session_list(include_all=include_all)
     try:
-        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json)
+        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, ext=ext)
     except ValueError as e:
         raise fir_ext.ToolError(str(e)) from e
 

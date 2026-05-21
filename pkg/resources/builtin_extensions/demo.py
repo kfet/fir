@@ -316,6 +316,8 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     ctx.get_session_file()                             # get_session_file
     ctx.get_session_name()                             # get_session_name
     ctx.get_session_id()                               # get_session_id
+    ctx.put_observable("hello", "ready", "demo extension up")  # put_observable
+    ctx.clear_observable("hello")                      # clear_observable
 
 
 @fir_ext.on("session_shutdown")

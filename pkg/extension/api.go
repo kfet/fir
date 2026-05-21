@@ -6,6 +6,7 @@ import (
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // BridgeAPI is the subset of the session API that external process
@@ -51,6 +52,10 @@ type BridgeAPI interface {
 	ReportProgress(message string)
 	// Introspect returns a snapshot of the session's runtime state.
 	Introspect() session.Introspection
+	// GetObservableStore returns the per-session observable cards
+	// store, or nil for hosts without one (e.g. the auth helper).
+	// Wired into Bridge at startOne.
+	GetObservableStore() *store.ObservableStore
 	// RestartSession aborts any in-flight stream, clears the session
 	// (LLM history, plan, system prompt rebuild) and submits prompt as
 	// the first message of the fresh session. Returns an error when the

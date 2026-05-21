@@ -167,6 +167,13 @@ type SessionStore struct {
 	leafID      string       // empty = before first entry
 	lock        *sessionLock // flock on .meta.json; nil if in-memory or lock failed
 	resumed     bool         // true iff opened an existing session file (header loaded from disk)
+
+	// observables is the session-scoped sidecar of cards exposed to
+	// extensions and observers. Bound to <sessionFile>.cards (or
+	// in-memory for non-persisted stores). Owned by the SessionStore
+	// so it follows the session across newSession / setSessionFile /
+	// CreateBranchedSession. Never nil for a constructed store.
+	observables *ObservableStore
 }
 
 // NewSessionStore creates a persisted session.
@@ -294,6 +301,7 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 			ss.sessionFile = absPath
 			ss.rewriteFile()
 			ss.flushed = true
+			ss.observables = NewObservableStore(CardsPath(absPath))
 			return forked
 		}
 
@@ -309,6 +317,12 @@ func (ss *SessionStore) setSessionFile(filePath string) bool {
 		ss.newSession(nil)
 		ss.sessionFile = absPath
 	}
+
+	// Bind the observable cards store to this session file.
+	// NewObservableStore reads existing cards from disk, so a resumed
+	// session sees last-known state before any producer re-Puts — the
+	// /reexec story.
+	ss.observables = NewObservableStore(CardsPath(ss.sessionFile))
 	return forked
 }
 
@@ -360,6 +374,9 @@ func (ss *SessionStore) newSession(opts *NewSessionOptions) string {
 		// persist, which would have been non-atomic vs concurrent readers.
 		ss.writeHeaderOnly()
 	}
+
+	// Fresh session: brand-new cards store at the new file's path.
+	ss.observables = NewObservableStore(CardsPath(ss.sessionFile))
 
 	firlog.Debug("new session created", "sessionID", ss.sessionID, "file", ss.sessionFile)
 	return ss.sessionFile
@@ -649,6 +666,15 @@ func (ss *SessionStore) GetSessionFile() string {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
 	return ss.sessionFile
+}
+
+// Observables returns the per-session observable cards store. Always
+// non-nil for a constructed SessionStore; backing file (if any) is
+// <sessionFile>.cards. See docs/design/observable-cards.md.
+func (ss *SessionStore) Observables() *ObservableStore {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.observables
 }
 func (ss *SessionStore) IsPersisted() bool {
 	ss.mu.RLock()
@@ -1009,6 +1035,9 @@ func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
 		ss.entries = append(pathWithoutLabels, labelEntries...)
 		ss.flushed = true
 		ss.buildIndex()
+		// Branched session has its own cards file; parent cards stay
+		// behind (the branch is a separate session — its producers re-Put).
+		ss.observables = NewObservableStore(CardsPath(newSessionFile))
 		return newSessionFile, nil
 	}
 

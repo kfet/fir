@@ -10,6 +10,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/pinoauth"
 )
 
@@ -84,6 +85,16 @@ type Bridge struct {
 	// Only one tool_call is ever in-flight per extension (agent loop is serial).
 	activeCtx            atomic.Pointer[context.Context]
 	activeReportProgress atomic.Pointer[func(string)]
+
+	// activeToolCallID is the tool_call_id of the in-flight tool call
+	// dispatched into this extension. currentEntryID() reads this to
+	// stamp Card.EntryID. Nil outside of a tool_call window.
+	activeToolCallID atomic.Pointer[string]
+
+	// store is the per-session observable cards store. Nil before
+	// SetObservableStore wires it; put/clear/set_status no-op until
+	// then.
+	store atomic.Pointer[store.ObservableStore]
 }
 
 // NewBridge creates a Bridge wrapping the given Process and its capabilities.
@@ -138,6 +149,30 @@ func (b *Bridge) setStatusFunc() SetStatusFunc {
 		return *p
 	}
 	return nil
+}
+
+// SetObservableStore wires the per-session observable cards store into
+// this bridge. Inbound put_observable / clear_observable / set_status
+// RPCs will route through this store. Safe to call at any point during
+// the bridge lifecycle; callers typically set it once just after
+// NewBridge from the SessionBridge's session. Passing nil detaches.
+func (b *Bridge) SetObservableStore(s *store.ObservableStore) {
+	b.store.Store(s)
+}
+
+// observableStore returns the current observable store, or nil.
+func (b *Bridge) observableStore() *store.ObservableStore {
+	return b.store.Load()
+}
+
+// currentEntryID returns the in-flight tool_call_id (stamped onto
+// observable cards as their EntryID), or "" outside a tool dispatch
+// window. See docs/design/observable-cards.md "Provenance".
+func (b *Bridge) currentEntryID() string {
+	if p := b.activeToolCallID.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 // Run starts the dispatch loop, reading messages from the process and routing
@@ -297,8 +332,57 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 				break
 			}
 		}
+		// Canonical write: route through the observable store as the
+		// "footer" card under this extension's source. Empty status
+		// clears the card so observers don't see a stale empty slug.
+		// The UI callback is invoked with the *untruncated* status
+		// because the TUI footer renders the full string; only the
+		// card slug is truncated host-side (SlugMaxLen).
+		if s := b.observableStore(); s != nil {
+			if p.Status == "" {
+				s.Clear(b.caps.Name, "footer")
+			} else {
+				s.Put(b.caps.Name, "footer", p.Status, "", b.currentEntryID())
+			}
+		}
 		if fn := b.setStatusFunc(); fn != nil {
 			fn(b.caps.Name, p.Status)
+		}
+		result = okTrue
+
+	case "put_observable":
+		var p putObservableParams
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if p.Key == "" {
+			rpcErr = &Error{Code: -32602, Message: "put_observable: key is required"}
+			break
+		}
+		if s := b.observableStore(); s != nil {
+			// Trust seam: source and EntryID are stamped here, never
+			// read from the payload.
+			s.Put(b.caps.Name, p.Key, p.Slug, p.Detail, b.currentEntryID())
+		}
+		result = okTrue
+
+	case "clear_observable":
+		var p clearObservableParams
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if p.Key == "" {
+			rpcErr = &Error{Code: -32602, Message: "clear_observable: key is required"}
+			break
+		}
+		if s := b.observableStore(); s != nil {
+			s.Clear(b.caps.Name, p.Key)
 		}
 		result = okTrue
 
@@ -607,6 +691,13 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 				// Store context so inbound call_tool requests use it.
 				b.activeCtx.Store(&ctx.Context)
 				defer b.activeCtx.Store(nil)
+
+				// Stamp tool_call_id so observable cards written from
+				// inside this Execute trace back to this transcript
+				// entry (see docs/design/observable-cards.md "Provenance").
+				toolCallID := ctx.ToolCallID
+				b.activeToolCallID.Store(&toolCallID)
+				defer b.activeToolCallID.Store(nil)
 
 				params := ToolCallHookPayload{
 					ToolCallID: ctx.ToolCallID,

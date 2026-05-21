@@ -3,14 +3,23 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // PlanUpdater is the interface the plan tool needs from a session.
+// In addition to updating the in-memory plan, the tool publishes an
+// observable card on every mutation so the plan is visible to sibling
+// agents through the cards file. See docs/design/observable-cards.md
+// "Producers in MVP".
 type PlanUpdater interface {
 	UpdatePlan(title string, entries []agent.PlanEntry, metadata map[string]string)
+	// Observables returns the session's observable cards store. Implementations
+	// may return nil; Put/Clear are nil-safe at the store layer.
+	Observables() *store.ObservableStore
 }
 
 // NewPlanTool creates the plan tool. It requires a PlanUpdater (typically
@@ -89,6 +98,10 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 
 			session.UpdatePlan(title, entries, metadata)
 
+			// Publish "plan/active" card in lockstep with UpdatePlan
+			// (the plan tool owns the source — see the design doc).
+			publishPlanCard(session.Observables(), title, entries, metadata, toolCallID)
+
 			var msg string
 			if len(entries) == 0 {
 				msg = "Plan cleared."
@@ -101,6 +114,79 @@ func NewPlanTool(session PlanUpdater) agent.AgentTool {
 			}, nil
 		},
 	}
+}
+
+// publishPlanCard writes (or clears) the canonical "plan/active" card
+// for the current plan state. Called from the plan tool's Execute on
+// every mutation. Slug prefers metadata.progress_metric; detail is a
+// bullet listing. Nil store is a silent no-op (store layer guarantee).
+func publishPlanCard(s *store.ObservableStore, title string, entries []agent.PlanEntry, metadata map[string]string, entryID string) {
+	if len(entries) == 0 {
+		s.Clear("plan", "active")
+		return
+	}
+	s.Put("plan", "active",
+		planSlug(entries, metadata),
+		planDetail(title, entries),
+		entryID,
+	)
+}
+
+// planSlug renders the short headline for the plan card.
+//
+//	progress_metric (if set, non-empty)
+//	  OR
+//	"<completed>/<total> <inflight-status>"
+//	  where inflight-status is "in_progress" if any entry is in progress,
+//	  "done" if all completed, else "pending"
+func planSlug(entries []agent.PlanEntry, metadata map[string]string) string {
+	if metric := strings.TrimSpace(metadata["progress_metric"]); metric != "" {
+		return metric
+	}
+	total := len(entries)
+	completed := 0
+	inProgress := false
+	for _, e := range entries {
+		switch e.Status {
+		case agent.PlanEntryStatusCompleted:
+			completed++
+		case agent.PlanEntryStatusInProgress:
+			inProgress = true
+		}
+	}
+	status := "pending"
+	switch {
+	case completed == total:
+		status = "done"
+	case inProgress:
+		status = "in_progress"
+	}
+	return fmt.Sprintf("%d/%d %s", completed, total, status)
+}
+
+// planDetail renders the bullet listing of plan entries. One line per
+// entry, with a status marker (✓ done, ▶ in progress, · pending) and
+// the entry's content. Title (when set) goes on the first line.
+func planDetail(title string, entries []agent.PlanEntry) string {
+	var sb strings.Builder
+	if t := strings.TrimSpace(title); t != "" {
+		sb.WriteString(t)
+		sb.WriteByte('\n')
+	}
+	for _, e := range entries {
+		marker := "·" // pending / unknown
+		switch e.Status {
+		case agent.PlanEntryStatusCompleted:
+			marker = "✓"
+		case agent.PlanEntryStatusInProgress:
+			marker = "▶"
+		}
+		sb.WriteString(marker)
+		sb.WriteByte(' ')
+		sb.WriteString(e.Content)
+		sb.WriteByte('\n')
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func parsePlanEntries(params map[string]any) ([]agent.PlanEntry, error) {

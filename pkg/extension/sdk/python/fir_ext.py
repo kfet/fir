@@ -347,6 +347,20 @@ otherwise noted.
 +------------------+---------------------------------------+---------------------------+
 | ``set_status``   | ``{status}``                          | ``{ok: true}``            |
 |                  | Empty string clears the status.       |                           |
+|                  | Also writes a ``footer`` observable   |                           |
+|                  | card under this extension's source.   |                           |
++------------------+---------------------------------------+---------------------------+
+| ``put_observable``| ``{key, slug, detail}``              | ``{ok: true}``            |
+|                  | Publishes an observable card. Source  |                           |
+|                  | + entry_id stamped by the host;       |                           |
+|                  | payload Source / EntryID fields are   |                           |
+|                  | ignored. Extensions cannot READ       |                           |
+|                  | other extensions' cards in v1.        |                           |
++------------------+---------------------------------------+---------------------------+
+| ``clear_         | ``{key}``                             | ``{ok: true}``            |
+| observable``     | Removes a card previously published   |                           |
+|                  | by this extension. Cannot clear       |                           |
+|                  | other extensions' cards.              |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``continue_      | *(none)*                              | ``{ok: true}``            |
 | session``        | Triggers a new agent turn.            | SDK timeout: 60 s         |
@@ -2252,6 +2266,11 @@ class Context:
         self._out = output_stream
         self._pending = pending if pending is not None else {}
         self._results = results if results is not None else {}
+        # tool_call_id is set by the SDK dispatcher for the lifetime of
+        # a tool_call handler, "" otherwise. Mirrors the value the host
+        # stamps on observable cards via put_observable; handlers can
+        # read it to persist the same id in their own state.
+        self.tool_call_id: str = ""
 
     def _call(self, method: str, params: Any = None, timeout: float = 10.0) -> Any:
         """Send a JSON-RPC request to fir and wait for the response."""
@@ -2348,6 +2367,37 @@ class Context:
     def set_status(self, text: str) -> None:
         """Set persistent status text in the footer."""
         self._call("set_status", {"status": text})
+
+    def put_observable(self, key: str, slug: str, detail: str = "") -> None:
+        """Publish an observable card.
+
+        Observable cards are a per-session sidecar of state summaries
+        that surface to humans and sibling agents through
+        ``observe_session``. See ``docs/design/observable-cards.md``.
+
+        Parameters
+        ----------
+        key : str
+            Identifier within this extension's namespace. Replacing a
+            card with the same key overwrites in place.
+        slug : str
+            Short headline (≤24 chars; host truncates rune-safely).
+        detail : str, optional
+            Pre-rendered plain text, expanded by ``observe_session
+            --ext <name>``.
+
+        Source and entry_id are stamped by the host — extensions
+        cannot impersonate other sources or fake an entry_id, and
+        cannot READ other extensions' cards in v1.
+        """
+        self._call("put_observable", {"key": key, "slug": slug, "detail": detail})
+
+    def clear_observable(self, key: str) -> None:
+        """Remove a card previously published by this extension.
+
+        Cannot clear other extensions' cards.
+        """
+        self._call("clear_observable", {"key": key})
 
     def set_session_name(self, name: str) -> None:
         """Set the display name for the session."""
@@ -2867,6 +2917,10 @@ def run(
             if handler is None:
                 _write_message(_make_error(msg_id, -32601, f"Unknown tool: {tool_name}"), out)
                 return
+            # Surface tool_call_id on ctx for the handler's lifetime
+            # (cleared in finally so an exception doesn't leak it).
+            prev_tool_call_id = ctx.tool_call_id
+            ctx.tool_call_id = params.get("tool_call_id", "") or ""
             try:
                 result = handler(params.get("params", {}), ctx)
                 # Wrap plain string results into structured format
@@ -2877,6 +2931,8 @@ def run(
                 _write_message(_make_error(msg_id, exc.code, str(exc)), out)
             except Exception as exc:
                 _write_message(_make_error(msg_id, -32000, str(exc)), out)
+            finally:
+                ctx.tool_call_id = prev_tool_call_id
             return
 
         # --- hooks ---

@@ -8,6 +8,7 @@ import (
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // AuthSetupOptions configures auth-provider-only extension startup.
@@ -195,6 +196,7 @@ func (n *nopBridgeAPI) ReportProgress(_ string) {}
 func (n *nopBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{Version: n.version, Mode: n.mode}
 }
+func (n *nopBridgeAPI) GetObservableStore() *store.ObservableStore { return nil }
 func (n *nopBridgeAPI) RestartSession(_, _ string) error {
 	return fmt.Errorf("session restart not available outside a session")
 }

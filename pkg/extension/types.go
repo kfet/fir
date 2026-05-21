@@ -83,6 +83,22 @@ type setStatusParams struct {
 	Status string `json:"status"`
 }
 
+// putObservableParams maps to "put_observable". Source and EntryID are
+// host-stamped at the bridge boundary (not read from payload), so they
+// are intentionally absent from this struct.
+type putObservableParams struct {
+	Key    string `json:"key"`
+	Slug   string `json:"slug"`
+	Detail string `json:"detail"`
+}
+
+// clearObservableParams maps to "clear_observable". Source is stamped
+// from the calling extension's name; extensions cannot clear other
+// extensions' cards.
+type clearObservableParams struct {
+	Key string `json:"key"`
+}
+
 // sideQueryParams maps to "side_query".
 type sideQueryParams struct {
 	Question string `json:"question"`

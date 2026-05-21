@@ -1271,7 +1271,8 @@ func (n *noopBridgeAPI) ReportProgress(_ string)         {}
 func (n *noopBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{}
 }
-func (n *noopBridgeAPI) RestartSession(_, _ string) error { return nil }
+func (n *noopBridgeAPI) GetObservableStore() *store.ObservableStore { return nil }
+func (n *noopBridgeAPI) RestartSession(_, _ string) error           { return nil }
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command

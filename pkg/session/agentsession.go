@@ -327,6 +327,14 @@ func (s *AgentSession) PlanEntries() []agent.PlanEntry {
 	return out
 }
 
+// Observables returns the per-session observable cards store, threaded
+// through to the underlying SessionStore. Producers (the plan tool,
+// mood extension) write through this; the bridge wires it into each
+// extension's RPC trust seam.
+func (s *AgentSession) Observables() *store.ObservableStore {
+	return s.SessionStore.Observables()
+}
+
 // allPlanEntriesCompleted reports whether every entry has status "completed".
 func allPlanEntriesCompleted(entries []agent.PlanEntry) bool {
 	if len(entries) == 0 {

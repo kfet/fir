@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,6 +299,12 @@ func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 
 func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
 	startOneBegin := time.Now()
+	// Reject extension names that collide with reserved core observable
+	// sources (see docs/design/observable-cards.md "Ownership").
+	if reservedSourceName(cfg.Name) {
+		return fmt.Errorf("extension name %q collides with a reserved core source (reserved: %s); "+
+			"rename the extension", cfg.Name, strings.Join(reservedSources, ", "))
+	}
 	// Allowlist check: skip extensions not in AllowedNames when the list is set.
 	m.mu.Lock()
 	allowed := m.AllowedNames
@@ -361,6 +368,8 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	}
 
 	bridge := NewBridge(proc, caps)
+	// Wire observable cards before handlers can fire (nil-safe).
+	bridge.SetObservableStore(api.GetObservableStore())
 	bridge.RegisterTools(api)
 	// Apis come first: a Provider may declare api="<id>" referencing an
 	// Api this same extension also ships, so the wire-protocol registry
@@ -945,4 +954,26 @@ func (m *Manager) EmitSessionStartWithData(reexecData map[string]map[string]stri
 		}
 		_ = mb.bridge.EmitEvent("session_start", payload)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Reserved observable-card source names
+// ---------------------------------------------------------------------------
+
+// reservedSources are Card.Source values owned by core. Extensions
+// cannot claim these names (matched case-insensitively); the trust
+// seam in bridge.go stamps source from cfg.Name, so a "plan" extension
+// would otherwise impersonate the plan tool's cards.
+var reservedSources = []string{"plan", "model", "session"}
+
+// reservedSourceName reports whether name collides with a reserved
+// core source (case-insensitive).
+func reservedSourceName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, r := range reservedSources {
+		if lower == r {
+			return true
+		}
+	}
+	return false
 }

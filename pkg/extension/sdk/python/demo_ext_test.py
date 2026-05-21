@@ -656,6 +656,24 @@ class TestDemoEvents(DemoTestCase):
         fake.stop()
         self.assertIsNotNone(msg, "expected get_session_name after session_start")
 
+    def test_session_start_calls_put_observable(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("put_observable")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected put_observable after session_start")
+        assert msg is not None
+        self.assertEqual(msg["params"]["key"], "hello")
+        self.assertEqual(msg["params"]["slug"], "ready")
+        self.assertEqual(msg["params"]["detail"], "demo extension up")
+
+    def test_session_start_calls_clear_observable(self) -> None:
+        fake = self._run_event("session_start")
+        msg = fake.wait_for_method("clear_observable")
+        fake.stop()
+        self.assertIsNotNone(msg, "expected clear_observable after session_start")
+        assert msg is not None
+        self.assertEqual(msg["params"]["key"], "hello")
+
     # -- session_shutdown ----------------------------------------------------
 
     def test_session_shutdown_calls_get_session_data(self) -> None:

@@ -512,6 +512,71 @@ Set persistent status text in the UI footer.  Pass an empty string to clear.
 
 Response: `{"ok": true}`
 
+Internally a thin wrapper over `put_observable`: the same call writes an
+observable card under this extension's source with `key="footer"` and
+`slug=status` so observers (e.g. `observe_session`) see the footer state
+through the canonical cards file. Empty `status` clears the footer card.
+The UI footer callback still receives the untruncated string; the card
+slug is rune-safely truncated to 24 chars host-side. See
+[observable-cards](design/observable-cards.md) for the design.
+
+---
+
+#### `put_observable`
+
+Publish an observable card under this extension's source.  Cards are a
+per-session sidecar of state summaries that humans and sibling agents can
+read through `observe_session`.  Source and `entry_id` are stamped
+host-side and **cannot be spoofed** from the payload.
+
+| Param    | Type   | Notes                                                            |
+|----------|--------|------------------------------------------------------------------|
+| `key`    | string | Required. Namespaced within the extension's source.              |
+| `slug`   | string | Short headline. Truncated rune-safely to 24 chars host-side.     |
+| `detail` | string | Pre-rendered plain text. May be empty.                           |
+
+```json
+{"jsonrpc":"2.0","id":1014,"method":"put_observable","params":{"key":"current","slug":"engaged","detail":"focused on cards design"}}
+```
+
+Response: `{"ok": true}`. Missing/empty `key` returns a JSON-RPC error.
+
+Host-stamped fields:
+
+* `source` — the calling extension's name. An extension named `my-ext`
+  always writes cards with `source="my-ext"` regardless of what its
+  payload contains; the typed param struct ignores any `source` field.
+* `entry_id` — the `tool_call_id` of the in-flight tool dispatch when
+  this RPC arrives during a `tool_call`. Empty (consumers fall back to
+  the card's `ts`) for event-driven puts with no clear trigger.
+
+Extensions named `plan`, `model`, or `session` collide with reserved
+core sources and are rejected at extension startup.
+
+Extensions **cannot read** other extensions' cards in v1 — the
+abstraction is deliberately one-directional. Reading is for observers
+(`observe_session`, the TUI footer, `fir observe`).
+
+See [observable-cards](design/observable-cards.md) for the full design.
+
+---
+
+#### `clear_observable`
+
+Remove a card previously published by this extension. Only clears cards
+under this extension's own source — cannot clear other extensions' cards.
+
+| Param | Type   | Notes              |
+|-------|--------|--------------------|
+| `key` | string | Required.          |
+
+```json
+{"jsonrpc":"2.0","id":1015,"method":"clear_observable","params":{"key":"current"}}
+```
+
+Response: `{"ok": true}`. Missing/empty `key` returns a JSON-RPC error.
+Clearing an absent key is a silent no-op.
+
 ---
 
 #### `continue_session`

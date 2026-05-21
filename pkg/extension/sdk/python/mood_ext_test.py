@@ -104,7 +104,8 @@ class Bridge:
         elif method == "set_session_data":
             self.session_data[params.get("key", "")] = params.get("value", "")
             result = {"ok": True}
-        elif method in ("set_status", "notify", "prepend_context", "send_message"):
+        elif method in ("set_status", "notify", "prepend_context", "send_message",
+                        "put_observable", "clear_observable"):
             result = {"ok": True}
         elif method == "call_tool":
             name = params.get("name", "")
@@ -196,6 +197,22 @@ def main() -> int:
         # session_data should now hold a mood_log entry
         log = json.loads(b.session_data.get("mood_log", "[]"))
         assert len(log) == 1 and log[0]["tag"] == "engaged", log
+        # New invariant: every mood entry made during a tool_call gets
+        # the tool_call_id stamped as entry_id for cross-reference with
+        # the observable card we publish in the same call.
+        assert log[0].get("entry_id") == "t1", log[0]
+        # Observable cards: mood_note must publish "current" (with the
+        # tag/slug + note as detail). Source/EntryID are stamped host-
+        # side so we don't see them in the fake — but we can verify the
+        # call was made with the right key/slug/detail.
+        put_calls = [r for r in b.requests
+                     if r.get("method") == "put_observable"]
+        assert any(
+            (r.get("params") or {}).get("key") == "current"
+            and (r.get("params") or {}).get("slug") == "engaged"
+            and (r.get("params") or {}).get("detail") == "focused on extension scaffolding"
+            for r in put_calls
+        ), put_calls
         print("✓ mood_note appends entry + sets tag")
 
         # --- mood_recent -----------------------------------------------------

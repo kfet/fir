@@ -46,6 +46,16 @@ func (b *SessionBridge) Introspect() session.Introspection {
 	})
 }
 
+// GetObservableStore returns the session's observable cards store, or
+// nil if the session isn't fully constructed (matches the nil pattern
+// of GetSessionFile / GetSessionID on this bridge).
+func (b *SessionBridge) GetObservableStore() *store.ObservableStore {
+	if b.session == nil || b.session.SessionStore == nil {
+		return nil
+	}
+	return b.session.SessionStore.Observables()
+}
+
 var _ BridgeAPI = (*SessionBridge)(nil)
 
 func (b *SessionBridge) Exec(command string, args []string) (ExecResult, error) {

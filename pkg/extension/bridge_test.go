@@ -12,6 +12,7 @@ import (
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/session"
+	"github.com/kfet/fir/pkg/session/store"
 )
 
 // mockBridgeAPI implements BridgeAPI for testing.
@@ -32,6 +33,7 @@ type mockBridgeAPI struct {
 	restartPrompts  []string
 	restartPrepends []string
 	restartErr      error
+	observableStore *store.ObservableStore
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
 	sideQueryOpts     *session.SideQueryOptions
@@ -114,6 +116,14 @@ func (m *mockBridgeAPI) ListTools() []ToolInfo   { return nil }
 func (m *mockBridgeAPI) ReportProgress(_ string) {}
 func (m *mockBridgeAPI) Introspect() session.Introspection {
 	return session.Introspection{}
+}
+
+// GetObservableStore returns the per-mock cards store. Tests exercising
+// observable-card RPC handlers set m.observableStore directly.
+func (m *mockBridgeAPI) GetObservableStore() *store.ObservableStore {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.observableStore
 }
 
 // restartCalls / restartErr are used by TestBridge_RestartSession.

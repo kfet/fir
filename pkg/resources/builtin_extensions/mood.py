@@ -263,7 +263,15 @@ def mood_note(params: dict, ctx: fir_ext.Context) -> dict:
     }
     if tag:
         entry["tag"] = tag
+    # Cross-reference the observable card the host stamps below.
+    if ctx.tool_call_id:
+        entry["entry_id"] = ctx.tool_call_id
     _append_entry(ctx, entry)
+
+    # Publish "mood/current" for observe_session --ext mood.
+    slug = tag or "noted"
+    with contextlib.suppress(Exception):  # observable failure is non-fatal
+        ctx.put_observable("current", slug, note)
     if tag:
         try:
             ctx.set_status(tag)
