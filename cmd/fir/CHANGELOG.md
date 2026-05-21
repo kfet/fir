@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-05-21
+
 ### Added
 
 - Observable cards (`<sessionFile>.cards`) — per-session sidecar of state summaries that producers (extensions, plan tool, core) publish through a single primitive. Designed in `docs/design/observable-cards.md`. Plan tool publishes `plan/active` on every mutation; mood extension publishes `mood/current`; `ctx.set_status` is reimplemented as a wrapper over `put_observable("footer", ...)`. Extension SDK gains `ctx.put_observable(key, slug, detail)` and `ctx.clear_observable(key)`; source and `entry_id` are stamped host-side and cannot be spoofed. Extension names `plan`, `model`, and `session` are reserved and rejected at startup. `observe_session` prepends a one-line cards header (`plan: 3/8 in_progress  ·  mood: #engaged`) and gains `--ext <name>` / `--raw_json` flags. Observe's discovery sidecar gains a `cards_path` field. Plan progress is now visible across sibling agents through `observe_session` without parsing transcripts.
