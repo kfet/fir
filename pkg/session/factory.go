@@ -248,8 +248,8 @@ func StartMCPManagerWithOptions(ctx context.Context, sess *AgentSession, configs
 	}
 	mgr := mcp.NewManager(configs, false)
 
-	// Auto-reply: when a poe channel message arrives, set up streaming
-	// so LLM output goes directly to the bridge without manual reply() calls.
+	// Auto-reply: when a channel message arrives from a message_id-addressed
+	// reply tool, stream LLM output directly without manual reply() calls.
 	var ar *autoreply.State
 	replyHook := func(serverName, messageID string) {
 		firlog.Info("auto-reply: replyHook fired", "server", serverName, "messageID", messageID)

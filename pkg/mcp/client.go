@@ -1372,8 +1372,8 @@ func DetailsFunc(mgr *Manager) func() []ServerDetail {
 
 // HasServerToolParam checks whether a server has a tool with the given name
 // whose input schema includes a specific property. Used to distinguish between
-// reply tools with different signatures (e.g. Poe reply with "message_id"
-// vs Telegram reply with "chat_id").
+// reply tools with different signatures (e.g. message_id-addressed replies
+// vs chat_id-addressed replies).
 func (m *Manager) HasServerToolParam(serverName, toolName, paramName string) bool {
 	var serverTools []agent.AgentTool
 	m.withEntry(serverName, func(e *serverEntry) {

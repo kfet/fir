@@ -1,6 +1,6 @@
-// Package autoreply wires agent session events to automatic Poe reply
+// Package autoreply wires agent session events to automatic channel reply
 // streaming. When active, LLM text deltas and tool call info are forwarded
-// to the Poe bridge via the reply tool — the LLM never needs to call
+// through a message_id-addressed reply tool — the LLM never needs to call
 // reply() manually.
 package autoreply
 
@@ -24,7 +24,7 @@ type EventSubscriber interface {
 	Subscribe(fn func(agent.AgentEvent)) func()
 }
 
-// State tracks the auto-reply stream for one Poe message.
+// State tracks the auto-reply stream for one channel message.
 type State struct {
 	mu         sync.Mutex
 	reply      ReplyFunc
@@ -97,7 +97,7 @@ func (s *State) InterceptReply(ctx context.Context, args map[string]any) (bool, 
 	return true, nil
 }
 
-// SetMessageID sets the Poe message_id for the current reply stream.
+// SetMessageID sets the channel message_id for the current reply stream.
 func (s *State) SetMessageID(msgID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -109,7 +109,7 @@ func (s *State) SetMessageID(msgID string) {
 	s.planUpdateCount = 0
 }
 
-// Wire subscribes to agent events and streams them to Poe.
+// Wire subscribes to agent events and streams them to the reply tool.
 // Returns an unsubscribe function.
 func (s *State) Wire(sub EventSubscriber) func() {
 	firlog.Info("auto-reply: Wire() subscribing to agent events")
@@ -139,7 +139,7 @@ func (s *State) Wire(sub EventSubscriber) func() {
 			}
 
 		case agent.EventToolExecutionStart:
-			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
+			if ae.ToolName != "" && !isReplyTool(ae.ToolName) {
 				// Capture plan args for rich rendering; skip the generic code block.
 				if isPlanTool(ae.ToolName) {
 					s.mu.Lock()
@@ -156,7 +156,7 @@ func (s *State) Wire(sub EventSubscriber) func() {
 			}
 
 		case agent.EventToolExecutionEnd:
-			if ae.ToolName != "" && ae.ToolName != "reply" && ae.ToolName != "mcp__poe__reply" {
+			if ae.ToolName != "" && !isReplyTool(ae.ToolName) {
 				if isPlanTool(ae.ToolName) {
 					s.mu.Lock()
 					args := s.planArgs
@@ -185,6 +185,12 @@ func (s *State) Wire(sub EventSubscriber) func() {
 			s.finalize()
 		}
 	})
+}
+
+// isReplyTool reports whether name is the direct reply tool or an MCP reply
+// tool imported from any server (mcp__<server>__reply).
+func isReplyTool(name string) bool {
+	return name == "reply" || strings.HasPrefix(name, "mcp__") && strings.HasSuffix(name, "__reply")
 }
 
 func (s *State) sendChunk(text string, final bool, replace bool) {
@@ -294,8 +300,8 @@ func formatToolArgs(toolName string, args any) string {
 }
 
 // truncateThreshold is the line count above which tool output is
-// truncated to keep the chat readable. Poe doesn't support <details>
-// so we truncate and show a line count instead.
+// truncated to keep channel messages readable. Markdown details support is
+// inconsistent across channels, so we truncate and show a line count instead.
 const truncateThreshold = 8
 
 func formatToolResult(result any, isError bool) string {
@@ -365,7 +371,7 @@ func isPlanTool(name string) bool {
 
 // formatPlanMarkdown renders plan tool args as rich markdown.
 // First update: full elegant plan with progress bar and all entries.
-// Subsequent updates: compact blockquote (Poe collapses these) with
+// Subsequent updates: compact blockquote with
 // just the progress bar and active items.
 func formatPlanMarkdown(args map[string]any, updateCount int, isError bool) string {
 	if isError {
@@ -462,7 +468,7 @@ func formatPlanMarkdown(args map[string]any, updateCount int, isError bool) stri
 			b.WriteString(formatPlanEntry(e.content, e.status, e.priority))
 		}
 	} else {
-		// ── Compact blockquote (Poe collapses) ────
+		// ── Compact blockquote ─────────────────────
 		//
 		// > 📋 **Deploy Service** `▓▓▓▓▓▓░░░░` 3/5
 		// > → **Integration tests**

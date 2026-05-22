@@ -25,8 +25,8 @@ func TestFormatMeta(t *testing.T) {
 		}, ` a="first" m="mid" z="last"`},
 		{"non-string value", map[string]any{"ts": 12345}, ` ts="12345"`},
 		{"history excluded", map[string]any{
-			"source": "poe", "history": []any{map[string]any{"role": "user", "content": "hi"}},
-		}, ` source="poe"`},
+			"source": "web", "history": []any{map[string]any{"role": "user", "content": "hi"}},
+		}, ` source="web"`},
 		{"user and history both excluded", map[string]any{
 			"user": "bob", "history": "big blob", "chat_id": "1",
 		}, ` chat_id="1"`},
@@ -42,7 +42,7 @@ func TestFormatMeta(t *testing.T) {
 }
 
 // TestWireChannelInjection_HistoryExcludedFromHeader is an e2e test that
-// verifies a channel message carrying meta["history"] (Poe conversation
+// verifies a channel message carrying meta["history"] (channel conversation
 // history) is injected correctly: the history blob must NOT appear in
 // the formatted message header, but the message content must come through.
 func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
@@ -56,23 +56,23 @@ func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
 		injectedTS = ts
 	})
 
-	// Simulate a Poe channel message with history in meta.
+	// Simulate a channel message with history in meta.
 	history := []map[string]any{
 		{"role": "user", "content": "what is 2+2?"},
-		{"role": "bot", "content": "4"},
+		{"role": "assistant", "content": "4"},
 		{"role": "user", "content": "what about 3+3?"},
-		{"role": "bot", "content": "6"},
+		{"role": "assistant", "content": "6"},
 	}
 	historyJSON, _ := json.Marshal(history)
 	var historyAny any
 	json.Unmarshal(historyJSON, &historyAny)
 
 	cm := ChannelMessage{
-		ServerName: "poe",
-		Content:    "<poe message_id=\"m-1\" conversation_id=\"c-1\" user_id=\"u-1\">\nand 10+10?\n</poe>",
+		ServerName: "chat",
+		Content:    "<message message_id=\"m-1\" conversation_id=\"c-1\" user_id=\"u-1\">\nand 10+10?\n</message>",
 		Meta: map[string]any{
 			"user":            "u-1",
-			"source":          "poe",
+			"source":          "web",
 			"conversation_id": "c-1",
 			"message_id":      "m-1",
 			"history":         historyAny,
@@ -91,10 +91,10 @@ func TestWireChannelInjection_HistoryExcludedFromHeader(t *testing.T) {
 	}
 
 	// Header should contain source, conversation_id, message_id but NOT history.
-	if !strings.Contains(injectedText, "Channel message from u-1 via poe") {
+	if !strings.Contains(injectedText, "Channel message from u-1 via chat") {
 		t.Errorf("missing header: %q", injectedText)
 	}
-	if !strings.Contains(injectedText, `source="poe"`) {
+	if !strings.Contains(injectedText, `source="web"`) {
 		t.Errorf("missing source in meta: %q", injectedText)
 	}
 	if !strings.Contains(injectedText, `conversation_id="c-1"`) {
@@ -127,10 +127,10 @@ func TestWireChannelInjection_HistoryPreambleOnEmptySession(t *testing.T) {
 
 	fn(ChannelMessage{
 		Content:    "and 3+3?",
-		ServerName: "poe",
+		ServerName: "chat",
 		Meta: map[string]any{
-			"source":  "poe",
-			"history": json.RawMessage(`[{"role":"user","content":"what is 2+2?"},{"role":"bot","content":"4"},{"role":"user","content":"and 3+3?"}]`),
+			"source":  "web",
+			"history": json.RawMessage(`[{"role":"user","content":"what is 2+2?"},{"role":"assistant","content":"4"},{"role":"user","content":"and 3+3?"}]`),
 		},
 	})
 
@@ -159,10 +159,10 @@ func TestWireChannelInjection_NoHistoryOnExistingSession(t *testing.T) {
 
 	fn(ChannelMessage{
 		Content:    "hello",
-		ServerName: "poe",
+		ServerName: "chat",
 		Meta: map[string]any{
-			"source":  "poe",
-			"history": json.RawMessage(`[{"role":"user","content":"old"},{"role":"bot","content":"reply"},{"role":"user","content":"hello"}]`),
+			"source":  "web",
+			"history": json.RawMessage(`[{"role":"user","content":"old"},{"role":"assistant","content":"reply"},{"role":"user","content":"hello"}]`),
 		},
 	})
 

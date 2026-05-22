@@ -138,7 +138,7 @@ func TestAutoReply_SkipsReplyTool(t *testing.T) {
 	})
 	sub.emit(agent.AgentEvent{
 		Type:     agent.EventToolExecutionStart,
-		ToolName: "mcp__poe__reply",
+		ToolName: "mcp__chat__reply",
 	})
 
 	// Give time for any erroneous sends

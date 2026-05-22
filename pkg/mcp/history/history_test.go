@@ -32,7 +32,7 @@ func TestFormatPreamble_SingleMessage(t *testing.T) {
 func TestFormatPreamble_WithHistory(t *testing.T) {
 	query := `[
 		{"role":"user","content":"what is 2+2?"},
-		{"role":"bot","content":"4"},
+		{"role":"assistant","content":"4"},
 		{"role":"user","content":"and 3+3?"}
 	]`
 	preamble, latest := FormatPreamble(json.RawMessage(query))
@@ -46,8 +46,8 @@ func TestFormatPreamble_WithHistory(t *testing.T) {
 	if !strings.Contains(preamble, "user: what is 2+2?") {
 		t.Errorf("preamble missing user msg: %q", preamble)
 	}
-	if !strings.Contains(preamble, "bot: 4") {
-		t.Errorf("preamble missing bot msg: %q", preamble)
+	if !strings.Contains(preamble, "assistant: 4") {
+		t.Errorf("preamble missing assistant msg: %q", preamble)
 	}
 	if !strings.Contains(preamble, "[End of history]") {
 		t.Errorf("preamble missing footer: %q", preamble)
@@ -73,8 +73,8 @@ func TestFormatPreamble_RoleMapping(t *testing.T) {
 	if !strings.Contains(preamble, "user: hi") {
 		t.Errorf("human→user mapping failed: %q", preamble)
 	}
-	if !strings.Contains(preamble, "bot: hello") {
-		t.Errorf("assistant→bot mapping failed: %q", preamble)
+	if !strings.Contains(preamble, "assistant: hello") {
+		t.Errorf("assistant role mapping failed: %q", preamble)
 	}
 	if !strings.Contains(preamble, "system: you are helpful") {
 		t.Errorf("system role failed: %q", preamble)
@@ -84,8 +84,8 @@ func TestFormatPreamble_RoleMapping(t *testing.T) {
 func TestFormatPreamble_SkipsEmptyContent(t *testing.T) {
 	query := `[
 		{"role":"user","content":"hi"},
-		{"role":"bot","content":""},
-		{"role":"bot","content":"  "},
+		{"role":"assistant","content":""},
+		{"role":"assistant","content":"  "},
 		{"role":"user","content":"bye"}
 	]`
 	preamble, _ := FormatPreamble(json.RawMessage(query))
@@ -111,7 +111,7 @@ func TestFormatPreamble_LongConversation(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		role := "user"
 		if i%2 == 1 {
-			role = "bot"
+			role = "assistant"
 		}
 		msgs = append(msgs, Message{Role: role, Content: "msg " + string(rune('A'+i))})
 	}

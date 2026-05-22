@@ -1,7 +1,7 @@
-// Package history formats Poe conversation history for injection into a
+// Package history formats channel conversation history for injection into a
 // new fir agent session. When an agent picks up an existing conversation,
-// the full query[] from Poe is formatted as a context preamble so the
-// model has the prior exchange.
+// a channel can provide prior role/content messages as metadata so the model
+// has the prior exchange.
 package history
 
 import (
@@ -10,14 +10,13 @@ import (
 	"strings"
 )
 
-// Message mirrors poe.ProtocolMessage but is defined here to avoid a
-// circular dependency. The fields match the Poe protocol JSON.
+// Message is the minimal role/content shape used by channel history metadata.
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-// FormatPreamble takes the raw Poe query[] JSON and formats it as a
+// FormatPreamble takes a raw JSON array of role/content messages and formats it as a
 // context preamble for fir. It returns the preamble text and the latest
 // user message separately. If there are fewer than 2 messages (i.e. no
 // prior history), preamble is empty and only the latest message is returned.
@@ -26,9 +25,9 @@ type Message struct {
 //
 //	[Prior conversation history]
 //	user: ...
-//	bot: ...
+//	assistant: ...
 //	user: ...
-//	bot: ...
+//	assistant: ...
 //	[End of history]
 func FormatPreamble(queryJSON json.RawMessage) (preamble string, latestUserMsg string) {
 	if len(queryJSON) == 0 {
@@ -69,13 +68,13 @@ func FormatPreamble(queryJSON json.RawMessage) (preamble string, latestUserMsg s
 	return b.String(), latestUserMsg
 }
 
-// mapRole normalizes Poe role names to human-readable labels.
+// mapRole normalizes common channel role aliases to human-readable labels.
 func mapRole(role string) string {
 	switch role {
 	case "user", "human":
 		return "user"
-	case "bot", "assistant":
-		return "bot"
+	case "assistant":
+		return "assistant"
 	case "system":
 		return "system"
 	default:

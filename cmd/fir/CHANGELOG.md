@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP channel history and auto-reply plumbing no longer carries Poe-specific wording or server-name assumptions; the core now describes and handles message history/replies by generic channel capabilities (`history` metadata and `message_id` reply tools).
+
 ## [0.48.1] - 2026-05-21
 
 ### Fixed

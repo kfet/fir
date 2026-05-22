@@ -59,9 +59,9 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 		// is still connecting (tools not loaded yet) — the tool will be available by
 		// the time the LLM responds.
 		hasReply := mgr.HasServerTools(serverName, "reply")
-		// Only wire auto-reply for Poe-style reply tools (message_id param).
+		// Only wire auto-reply for reply tools that address messages by message_id.
 		// Other reply tools (telegram chat_id, etc.) are left to the model.
-		isPoeReply := hasReply && mgr.HasServerToolParam(serverName, "reply", "message_id")
+		isMessageIDReply := hasReply && mgr.HasServerToolParam(serverName, "reply", "message_id")
 		serverConnecting := mgr.IsServerConnecting(serverName)
 		if hasReply || serverConnecting {
 			if serverConnecting {
@@ -72,8 +72,8 @@ func WireChannelInjectionWithReplyHook(mgr *Manager, inject MessageInjector, rep
 				firlog.Trace("typing indicator failed", "err", err)
 			}
 			// Notify reply hook with message_id for auto-reply wiring.
-			// Only for Poe-style reply tools; skip telegram etc.
-			if replyHook != nil && isPoeReply {
+			// Only for message_id-addressed reply tools; skip chat_id-addressed tools, etc.
+			if replyHook != nil && isMessageIDReply {
 				if msgID, ok := cm.Meta["message_id"].(string); ok && msgID != "" {
 					firlog.Info("calling replyHook", "msgID", msgID)
 					replyHook(serverName, msgID)
