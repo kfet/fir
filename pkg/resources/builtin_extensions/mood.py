@@ -2,6 +2,7 @@
 # ---
 # name: mood
 # description: Lightweight diary / mood-introspection — let the model notice and name its own functional states.
+# builtin: true
 # ---
 """mood.py — sanctioned introspection for the model.
 

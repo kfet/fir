@@ -22,16 +22,19 @@ import (
 //
 // Currently:
 //
-//	install: 4 tools (install_skill, install_extension, install_package, list_packages)
-//	aside:   1 tool  (aside)
-//	observe: 3 tools (observe_session, send_session, stop_session)
-//	notify:  1 tool  (notify_send) — included via builtin auto-load
-//	pipe:    1 tool  (pipe)
-//	doctor:  ... (varies, kept stable for tests)
+//	install:        4 tools (install_skill, install_extension, install_package, list_packages)
+//	aside:          1 tool  (aside)
+//	observe:        3 tools (observe_session, send_session, stop_session)
+//	notify:         1 tool  (notify_send) — included via builtin auto-load
+//	pipe:           1 tool  (pipe)
+//	agent-introspect: 1 tool  (agent_introspect)
+//	doctor:         2 tools (doctor_query, doctor_summary)
+//	mood:           2 tools (mood_note, mood_recent)
+//	autoresearch:   2 tools (run_experiment, log_experiment)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 13
+const builtinToolCount = 17
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

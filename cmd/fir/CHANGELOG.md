@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `mood` extension was bundled in v0.48.0 but missing `builtin: true` frontmatter, so the manager neither listed it (`fir extensions` omitted it) nor auto-loaded it — leaving the tool inert on fresh installs. The filter at `cmd/fir/extensions.go:106` and `pkg/resources/builtin_extensions.go:LoadBuiltinExtensions` skips any embedded script without `builtin: true` or `explicit: true`. Now correctly registered as a builtin. The bug was masked in the dev worktree because `.fir/extensions/` is a symlink to `pkg/resources/builtin_extensions/`, so project-scope discovery picked the file up regardless of frontmatter — only end users on fresh `brew install` / `fir update` saw the missing extension.
+- `autoresearch` extension had the same accidental defect (commit `b9cd9b89` introduced it as "builtin extension" per its own message, but the frontmatter never declared `builtin: true`). Same symptom: `run_experiment` / `log_experiment` / `/autoresearch` were unavailable on fresh installs while appearing to work in-repo via the project symlink. Now correctly registered as a builtin alongside `mood`. The `schedule` and `provider-usage` extensions both retain explicit `builtin: false` plus `modes: tui` — those are intentionally mode-restricted, not regressions, and remain untouched.
+
 ## [0.48.0] - 2026-05-21
 
 ### Added

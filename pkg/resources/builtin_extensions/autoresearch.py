@@ -2,6 +2,7 @@
 # ---
 # name: autoresearch
 # description: Autonomous experiment loop — run benchmarks, log results, and drive optimisation
+# builtin: true
 # ---
 """autoresearch.py — autonomous experiment loop for fir.
 
