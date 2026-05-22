@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-05-21
+
 ### Fixed
 
 - `mood` extension was bundled in v0.48.0 but missing `builtin: true` frontmatter, so the manager neither listed it (`fir extensions` omitted it) nor auto-loaded it — leaving the tool inert on fresh installs. The filter at `cmd/fir/extensions.go:106` and `pkg/resources/builtin_extensions.go:LoadBuiltinExtensions` skips any embedded script without `builtin: true` or `explicit: true`. Now correctly registered as a builtin. The bug was masked in the dev worktree because `.fir/extensions/` is a symlink to `pkg/resources/builtin_extensions/`, so project-scope discovery picked the file up regardless of frontmatter — only end users on fresh `brew install` / `fir update` saw the missing extension.
