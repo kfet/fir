@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `handoff` extension gains a new `bookmark(quote, note)` tool — pin any past turn (user message, assistant message, tool call, tool result, system message) as significant. Quotes are reverse-scanned against the session JSONL (substring-matched against decoded turn text, latest-first; most recent wins on ambiguity); the matched turn entry is copied as-is to `bookmarks-<session-id>.jsonl` next to the transcript, with the note injected as `_bookmark_note`. The file is kept sorted by the original turn's `timestamp` so it reads chronologically regardless of bookmark-call order. `self_handoff` appends a pointer line to its `prepend_context` when the bookmarks file is non-empty so the child session reads the high-fidelity highlight reel directly via `read`/`grep` — no new child-side tools, no model re-authoring at the moment of handoff. An observable card (`handoff/bookmarks`) is published on every bookmark call; survives `/reexec` via the cards-file-on-construct mechanism (no event reconciler needed). Designed in `docs/design/handoff-bookmarks.md`.
+
 ### Fixed
 
 - MCP channel history and auto-reply plumbing no longer carries Poe-specific wording or server-name assumptions; the core now describes and handles message history/replies by generic channel capabilities (`history` metadata and `message_id` reply tools).

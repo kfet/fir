@@ -63,10 +63,18 @@ class _StubContext:
     validation is surfaced).
     """
 
-    def __init__(self, raise_on_restart: bool = False):
+    def __init__(
+        self,
+        raise_on_restart: bool = False,
+        session_file: str = "",
+        session_id: str = "",
+    ):
         self.restart_calls: list[tuple[str, str]] = []
         self.user_messages: list[str] = []
         self.raise_on_restart = raise_on_restart
+        self.observable_writes: list[tuple[str, str, str]] = []
+        self._session_file = session_file
+        self._session_id = session_id
 
     def restart_session(self, prompt: str, prepend_context: str = "") -> None:
         if self.raise_on_restart:
@@ -76,6 +84,15 @@ class _StubContext:
     def send_user_message(self, content: str, deliver_as: str | None = None) -> None:
         del deliver_as
         self.user_messages.append(content)
+
+    def get_session_file(self) -> str:
+        return self._session_file
+
+    def get_session_id(self) -> str:
+        return self._session_id
+
+    def put_observable(self, key: str, slug: str, detail: str = "") -> None:
+        self.observable_writes.append((key, slug, detail))
 
 
 def _good_content() -> str:
@@ -249,6 +266,239 @@ class TestSlashCommand(unittest.TestCase):
         self.handoff.cmd_handoff([], ctx)
         self.assertEqual(ctx.restart_calls, [])
         self.assertEqual(os.listdir(self.tmp), [])
+
+
+# ---------------------------------------------------------------------------
+# Bookmark helpers — pure-function unit tests
+# ---------------------------------------------------------------------------
+
+
+def _write_jsonl(path: str, rows: list[dict]) -> None:
+    import json
+    with open(path, "wb") as f:
+        for row in rows:
+            f.write((json.dumps(row) + "\n").encode())
+
+
+class TestBookmarksPath(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_path_is_sibling_of_transcript(self) -> None:
+        session_file = os.path.join(self.tmp, "20250522-100000_abc-xyz.jsonl")
+        ctx = _StubContext(session_file=session_file, session_id="abc-xyz")
+        got = self.handoff._bookmarks_path(ctx)
+        self.assertEqual(got, os.path.join(self.tmp, "bookmarks-abc-xyz.jsonl"))
+
+    def test_no_session_file_returns_empty_string(self) -> None:
+        ctx = _StubContext(session_file="", session_id="abc")
+        self.assertEqual(self.handoff._bookmarks_path(ctx), "")
+
+
+class TestFindTurnByQuote(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+        self.path = os.path.join(self.tmp, "transcript.jsonl")
+        # Header first (no `type` field — must be skipped).
+        _write_jsonl(self.path, [
+            {"id": "test-session", "model": "test"},
+            {"type": "message", "id": "e1", "timestamp": "2025-05-22T14:00:00",
+             "message": {"role": "user", "content": "alpha bravo charlie"}},
+            {"type": "message", "id": "e2", "timestamp": "2025-05-22T14:05:00",
+             "message": {"role": "assistant", "content": "alpha delta"}},
+            {"type": "message", "id": "e3", "timestamp": "2025-05-22T14:10:00",
+             "message": {"role": "user", "content": "epsilon zeta"}},
+            {"type": "message", "id": "e4", "timestamp": "2025-05-22T14:15:00",
+             "message": {"role": "assistant", "content": "line one\nline two"}},
+        ])
+        # Go's encoding/json escapes HTML-sensitive bytes by default;
+        # a quote copied from context contains "<tag>", not the raw
+        # "\\u003ctag\\u003e" bytes in the transcript. Append one such
+        # line manually so the decoded-field search path is exercised.
+        with open(self.path, "ab") as f:
+            f.write(
+                b'{"type":"message","id":"e5",'
+                b'"timestamp":"2025-05-22T14:20:00",'
+                b'"message":{"role":"user",'
+                b'"content":"use \\u003ctag\\u003e now"}}\n'
+            )
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_exact_match_returns_entry(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(
+            self.path, "epsilon zeta")
+        assert entry is not None
+        self.assertEqual(entry["id"], "e3")
+        self.assertEqual(count, 1)
+
+    def test_ambiguous_match_returns_most_recent(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(self.path, "alpha")
+        assert entry is not None
+        # e2 is more recent than e1.
+        self.assertEqual(entry["id"], "e2")
+        self.assertEqual(count, 2)
+
+    def test_decoded_newline_match_returns_entry(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(
+            self.path, "line one\nline two")
+        assert entry is not None
+        self.assertEqual(entry["id"], "e4")
+        self.assertEqual(count, 1)
+
+    def test_decoded_go_html_escape_match_returns_entry(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(
+            self.path, "use <tag> now")
+        assert entry is not None
+        self.assertEqual(entry["id"], "e5")
+        self.assertEqual(count, 1)
+
+    def test_no_match_returns_none(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(
+            self.path, "nonexistent substring")
+        self.assertIsNone(entry)
+        self.assertEqual(count, 0)
+
+    def test_missing_file_returns_none(self) -> None:
+        entry, count = self.handoff._find_turn_by_quote(
+            os.path.join(self.tmp, "does-not-exist.jsonl"), "anything")
+        self.assertIsNone(entry)
+        self.assertEqual(count, 0)
+
+    def test_header_line_is_skipped(self) -> None:
+        # The header has neither `type` nor a message; substring match on
+        # "test-session" should find nothing bookmarkable.
+        entry, count = self.handoff._find_turn_by_quote(
+            self.path, "test-session")
+        self.assertIsNone(entry)
+        self.assertEqual(count, 0)
+
+
+class TestRenderCard(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_zero_bookmarks(self) -> None:
+        slug, detail = self.handoff._render_card("/p/bookmarks.jsonl", [])
+        self.assertEqual(slug, "0 pinned")
+        self.assertIn("/p/bookmarks.jsonl", detail)
+
+    def test_singular_phrasing(self) -> None:
+        rows = [{
+            "id": "e1", "timestamp": "2025-05-22T14:32:00",
+            "_bookmark_note": "schema",
+        }]
+        slug, detail = self.handoff._render_card("/p/b.jsonl", rows)
+        self.assertEqual(slug, "1 pinned")
+        self.assertIn("1 bookmark (", detail)  # singular, not "bookmarks"
+        self.assertIn("14:32  schema", detail)
+
+    def test_multiple_bookmarks_include_path_and_time_prefix(self) -> None:
+        rows = [
+            {"id": "e1", "timestamp": "2025-05-22T14:32:00",
+             "_bookmark_note": "schema"},
+            {"id": "e2", "timestamp": "2025-05-22T14:45:00",
+             "_bookmark_note": "skip auth"},
+        ]
+        slug, detail = self.handoff._render_card("/p/b.jsonl", rows)
+        self.assertEqual(slug, "2 pinned")
+        self.assertIn("2 bookmarks (/p/b.jsonl):", detail)
+        self.assertIn("14:32  schema", detail)
+        self.assertIn("14:45  skip auth", detail)
+
+    def test_slug_never_exceeds_24_chars(self) -> None:
+        rows = [{"_bookmark_note": f"n{i}",
+                 "timestamp": f"2025-05-22T14:{i:02d}:00", "id": f"e{i}"}
+                for i in range(999)]
+        slug, _detail = self.handoff._render_card("/p/b.jsonl", rows)
+        self.assertLessEqual(len(slug), 24, slug)
+
+
+class TestEntrySortKey(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_primary_key_is_original_timestamp(self) -> None:
+        a = {"id": "a", "timestamp": "2025-05-22T14:00:00"}
+        b = {"id": "b", "timestamp": "2025-05-22T13:00:00"}
+        # Sorting [a, b] ascending should put b first.
+        got = sorted([a, b], key=self.handoff._entry_sort_key)
+        self.assertEqual([e["id"] for e in got], ["b", "a"])
+
+    def test_id_breaks_ties(self) -> None:
+        a = {"id": "alpha", "timestamp": "2025-05-22T14:00:00"}
+        b = {"id": "bravo", "timestamp": "2025-05-22T14:00:00"}
+        got = sorted([b, a], key=self.handoff._entry_sort_key)
+        self.assertEqual([e["id"] for e in got], ["alpha", "bravo"])
+
+
+class TestSelfHandoffPointerStub(unittest.TestCase):
+    """Stub-context coverage for the pointer-line append in self_handoff."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+        self.session_file = os.path.join(self.tmp, "transcript.jsonl")
+        self.bookmarks = os.path.join(self.tmp, "bookmarks-sid.jsonl")
+        # Minimal transcript so any quote scan that happens during
+        # self_handoff (it shouldn't) doesn't crash.
+        _write_jsonl(self.session_file, [
+            {"id": "h", "model": "m"},
+            {"type": "message", "id": "e1", "timestamp": "2025-05-22T14:00:00",
+             "message": {"role": "user", "content": "hi"}},
+        ])
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _good(self) -> str:
+        return _good_content()
+
+    def test_no_bookmarks_file_no_pointer(self) -> None:
+        ctx = _StubContext(session_file=self.session_file, session_id="sid")
+        self.handoff.self_handoff({"content": self._good()}, ctx)
+        prepend = ctx.restart_calls[0][1]
+        self.assertNotIn("Bookmarks from parent session", prepend)
+
+    def test_empty_file_no_pointer(self) -> None:
+        open(self.bookmarks, "wb").close()
+        ctx = _StubContext(session_file=self.session_file, session_id="sid")
+        self.handoff.self_handoff({"content": self._good()}, ctx)
+        prepend = ctx.restart_calls[0][1]
+        self.assertNotIn("Bookmarks from parent session", prepend)
+
+    def test_non_empty_file_appends_pointer_with_absolute_path(self) -> None:
+        _write_jsonl(self.bookmarks, [{
+            "type": "message", "id": "e1",
+            "timestamp": "2025-05-22T14:00:00",
+            "message": {"role": "user", "content": "hi"},
+            "_bookmark_note": "the first turn",
+        }])
+        ctx = _StubContext(session_file=self.session_file, session_id="sid")
+        self.handoff.self_handoff({"content": self._good()}, ctx)
+        prepend = ctx.restart_calls[0][1]
+        self.assertIn("Bookmarks from parent session", prepend)
+        self.assertIn(self.bookmarks, prepend)
+        # Briefing body still present and ahead of the pointer.
+        self.assertIn("Self-Handoff", prepend)
+        self.assertLess(
+            prepend.index("Self-Handoff"),
+            prepend.index("Bookmarks from parent session"),
+        )
 
 
 if __name__ == "__main__":
