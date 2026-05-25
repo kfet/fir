@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import socket
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import fir_ext
 
@@ -217,14 +220,166 @@ def api_key(params: dict, ctx: fir_ext.AuthContext) -> str:
 
 @fir_ext.auth_list_models(provider="google-antigravity")
 def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
-    """List available models.
+    """List the Antigravity models that are actually live for *this* account.
 
-    The Cloud Code Assist API's retrieveUserQuota returns quota buckets
-    per base model ID, but antigravity uses different model IDs (e.g.
-    gemini-3-pro-high, claude-sonnet-4-5) that don't appear in quota.
-    Returning None keeps permissive mode so no valid models are filtered out.
+    Antigravity has no public list-models endpoint. The Cloud Code Assist
+    ``retrieveUserQuota`` returns quota buckets per *base* model ID, not the
+    Antigravity-suffixed IDs (``-high`` / ``-low`` / ``-lite`` / ``-thinking``)
+    that the wire actually accepts — so it can't be used for filtering.
+
+    Strategy: opportunistically probe ``/v1internal:streamGenerateContent``
+    with a 1-token request against each ID in the **static catalogue**
+    (the list registered just below this function). Bucket each ID as live
+    (200 / 400 / 429 / 500) or missing (404). Return only the live IDs so
+    fir's model picker hides stale catalogue entries automatically.
+
+    fir already caches this result for 1 hour per provider (see
+    ``pkg/models/live_models.go`` ``liveCacheTTL``) and runs it in a
+    background goroutine, so the cost is amortised across many invocations.
+    Discovery of *new* IDs (ones not in the catalogue at all) is out of
+    scope here — that's what the ``antigravity-models`` skill does, with
+    a hand-curated candidate sweep.
+
+    Returns ``None`` on any unexpected failure so fir falls back to the
+    permissive built-in catalogue rather than masking everything.
     """
-    return None
+    creds = params.get("credentials") or {}
+    access = creds.get("access") or ""
+    project = (creds.get("extra") or {}).get("projectId") or creds.get("project_id") or ""
+    if not access or not project:
+        return None
+
+    # Opt-out for users who'd rather not spend tokens on a diagnostic probe.
+    if os.environ.get("FIR_ANTIGRAVITY_DISABLE_PROBE"):
+        return None
+
+    # Pull the canonical ID list straight from the provider we registered.
+    catalogue_ids = _antigravity_catalogue_ids()
+    if not catalogue_ids:
+        return None
+
+    # Pre-flight against a known-good ID. If auth/endpoint is broken, every
+    # probe will return 401/403/0 — we'd waste 12 more requests just to
+    # discover the same thing. Bail early.
+    if not _preflight_ok(access, project, catalogue_ids):
+        return None
+
+    ctx.progress(f"Probing {len(catalogue_ids)} Antigravity models...")
+    live, missing = _probe_models(access, project, catalogue_ids)
+    if not live and missing:
+        # Every probe came back 404 — overwhelmingly likely an auth/endpoint
+        # issue rather than every catalogue entry being stale. Stay permissive.
+        return None
+    if missing:
+        ctx.progress(f"Antigravity: {len(live)} live, {len(missing)} stale (hidden)")
+    return sorted(live)
+
+
+# Pre-flight uses the IDs most likely to be live across all tiers, in order
+# of preference. First one that returns a "model exists" status code is
+# enough proof that auth and endpoint are working.
+_PREFLIGHT_PROBE_IDS = ("gemini-3-flash", "gemini-3-pro-low", "gemini-3.1-pro-high")
+
+
+def _preflight_ok(access: str, project: str, catalogue_ids: list[str]) -> bool:
+    """Return True iff at least one preflight ID returns an existence code.
+
+    On 401/403/network-down we get neither EXISTS nor MISSING — every probe
+    is effectively useless, so we shouldn't fire the rest of the catalogue.
+    """
+    # Try our well-known stable IDs first, but fall back to anything in the
+    # catalogue if none of them is registered (paranoid future-proofing).
+    candidates = [m for m in _PREFLIGHT_PROBE_IDS if m in catalogue_ids] or catalogue_ids[:1]
+    for cid in candidates:
+        code = _probe_one(cid, access, project)
+        if code in _PROBE_EXISTS_STATUSES or code in _PROBE_MISSING_STATUSES:
+            return True
+    return False
+
+
+def _antigravity_catalogue_ids() -> list[str]:
+    """Return the IDs of the Antigravity provider we registered below."""
+    for prov in fir_ext._providers:
+        if prov.get("id") == "google-antigravity":
+            return [m["id"] for m in prov.get("models", []) if m.get("id")]
+    return []
+
+
+# Status codes that prove the model exists on the endpoint, even when the
+# specific request was rejected for unrelated reasons. 404 alone means the
+# model is genuinely not in the catalogue. Anything else (network failure,
+# 401/403) is "don't know" — we treat as "exists" to stay permissive.
+_PROBE_EXISTS_STATUSES = frozenset({200, 400, 429, 500})
+_PROBE_MISSING_STATUSES = frozenset({404})
+
+# Endpoint used for the probe. The provider's wire-protocol Api lists three
+# endpoints with failover, but the probe only needs one — production
+# Cloud Code Assist accepts personal-tier OAuth tokens and returns 200/404
+# cleanly. We pick the same one the live extension prefers first.
+_PROBE_ENDPOINT = "https://cloudcode-pa.googleapis.com"
+_PROBE_TIMEOUT_S = 8.0
+_PROBE_WORKERS = 8
+
+
+def _probe_one(model_id: str, access: str, project: str) -> int:
+    """Send a 1-token request; return the HTTP status (0 on network error)."""
+    inner = {
+        "contents": [{"role": "user", "parts": [{"text": "."}]}],
+        "generationConfig": {
+            "maxOutputTokens": 1,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    body = {
+        "project": project,
+        "model": model_id,
+        "request": inner,
+        "requestType": "agent",
+        "userAgent": "antigravity",
+        "requestId": f"firprobe-{int(time.time() * 1000)}",
+    }
+    headers = {
+        "Authorization": f"Bearer {access}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "User-Agent": "antigravity/1.107.0 darwin/arm64",
+        "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    }
+    url = f"{_PROBE_ENDPOINT}/v1internal:streamGenerateContent?alt=sse"
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)  # noqa: S310
+    try:
+        with urllib.request.urlopen(req, timeout=_PROBE_TIMEOUT_S) as resp:  # noqa: S310
+            # Drain a tiny bit so the server doesn't keep streaming
+            # the full response on our behalf.
+            resp.read(64)
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except (urllib.error.URLError, socket.timeout, OSError):
+        # Narrowed catch: network/DNS/timeout returns 0 ("unknown"), but
+        # programming bugs (TypeError, KeyError, …) propagate so they
+        # surface in extension logs instead of being silently classified
+        # as a network blip.
+        return 0
+
+
+def _probe_models(access: str, project: str, ids: list[str]) -> tuple[list[str], list[str]]:
+    """Probe ``ids`` in parallel; return (live, missing).
+
+    Anything that isn't an unambiguous 404 (genuinely missing) counts as
+    live — including network errors and auth failures — so a transient
+    glitch can't accidentally empty the user's model menu. The pre-flight
+    in :func:`list_models` already eliminates the all-broken case.
+    """
+    live: list[str] = []
+    missing: list[str] = []
+    with ThreadPoolExecutor(max_workers=_PROBE_WORKERS) as ex:
+        for model_id, code in zip(ids, ex.map(lambda m: _probe_one(m, access, project), ids)):
+            if code in _PROBE_MISSING_STATUSES:
+                missing.append(model_id)
+            else:
+                live.append(model_id)
+    return live, missing
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +433,7 @@ fir_ext.register_api(
             "https://autopush-cloudcode-pa.sandbox.googleapis.com",
             "https://cloudcode-pa.googleapis.com",
         ],
-        headers={"User-Agent": "antigravity/1.21.9 ${os}/${arch}"},
+        headers={"User-Agent": "antigravity/1.107.0 ${os}/${arch}"},
         conditional_headers=[
             fir_ext.DeclGoogleConditional(
                 when_model_id_prefix="claude-",
@@ -388,7 +543,7 @@ fir_ext.register_provider(
                 swe_score=76.2,
             ),
             _antigravity_model(
-                "gemini-3.1-flash-light", "Gemini 3.1 Flash Light (Antigravity)",
+                "gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite (Antigravity)",
                 reasoning=True, context_window=1_048_576, max_tokens=65535,
                 cost_input=0.1, cost_output=0.4, cost_cache_read=0.01,
             ),
@@ -403,6 +558,11 @@ fir_ext.register_provider(
                 reasoning=True, context_window=1_048_576, max_tokens=65535,
                 cost_input=2, cost_output=12, cost_cache_read=0.2, cost_cache_write=2.375,
                 swe_score=80.6,
+            ),
+            _antigravity_model(
+                "gemini-3.5-flash-low", "Gemini 3.5 Flash Low (Antigravity)",
+                reasoning=True, context_window=1_048_576, max_tokens=65535,
+                cost_input=1.5, cost_output=9, cost_cache_read=0.15, cost_cache_write=0.083,
             ),
             _antigravity_model(
                 "gpt-oss-120b-medium", "GPT-OSS 120B Medium (Antigravity)",
