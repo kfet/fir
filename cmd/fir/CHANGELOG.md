@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-05-25
+
 ### Added
 
 - `antigravity-models` skill (non-bundled, global): probes Google Antigravity's `/v1internal:streamGenerateContent` endpoint with stored OAuth creds to discover which model IDs are actually live, plus a companion scraper that pulls the desktop-app fingerprint (version, User-Agent, X-Goog-Api-Client) from `/Applications/Antigravity.app`. Antigravity has no public list-models endpoint and ships its menu via a server-pushed protobuf gRPC stream that isn't trivially replayable, so probing is the only reliable way to keep `pkg/resources/builtin_extensions/antigravity_auth.py` in sync. Status-code classifier: `200/400/429/500` → exists; `404` → missing. Run the probe whenever a new Gemini/Claude release lands or after an Antigravity desktop-app update; diff against `antigravity_auth.py` and apply changes.
