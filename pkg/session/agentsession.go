@@ -1795,7 +1795,7 @@ func (s *AgentSession) Close() {
 // (e.g. the plan tool) to the agent's current tool set.
 func (s *AgentSession) RegisterSessionTools() {
 	s.Agent.UpdateTools(func(ts *agent.ToolSet) {
-		ts.Add(tools.NewPlanTool(s))
+		ts.Add(tools.NewPlanTool(s, planCardPublisher(s.Observables())))
 	})
 }
 

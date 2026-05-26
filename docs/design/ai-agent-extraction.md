@@ -1,0 +1,213 @@
+# AI / Agent extraction plan
+
+Status: **Phase 1 complete; Phase 2 next.**
+Owner: kfet.
+
+This document tracks the multi-phase refactor that carves a portable,
+model-agnostic Go coding-agent runtime out of fir. The refactor itself
+improves fir's architecture even if no external extraction ever ships;
+extraction is the *option* the refactor creates.
+
+## Goal
+
+Two new external repos, eventually:
+
+- `github.com/kfet/ai` — portable AI primitives. One module, types at the
+  root, specialisations in subpackages (`anthropic/`, `openai/`,
+  `gemini/`, `ratelimit/`, `overflow/`, `jsonparse/`, …). Pattern
+  mirrors `golang.org/x/oauth2`.
+- `github.com/kfet/agent` — the agent runtime: `Agent`, `AgentLoop`,
+  `AgentTool`, `ToolSet`, plus a `tools/` subpackage with the standard
+  coding toolbox (bash, read, write, edit, editdiff, find, grep,
+  imageresize, plan).
+
+`kfet/agent` imports only `kfet/ai`, stdlib, and `kfet/pinexec`.
+
+## What stays in fir
+
+Everything that makes fir a product, not a library:
+
+- TUI (`pkg/tui/`), modes (`pkg/modes/`).
+- Session store, sidecars, compaction (`pkg/session/...`).
+- Extension host (`pkg/extension/...`).
+- MCP runtime (`pkg/mcp/...`).
+- Provider catalog (`pkg/ai/models_generated.go`, `pkg/ai/providers/...`),
+  config (`pkg/config`), auth (`pkg/auth`), models (`pkg/models`).
+- All resources (`pkg/resources/...`).
+
+## Dependency rules (enforced by tests)
+
+Direction of allowed imports under `pkg/`:
+
+```
+pkg/agent          ←  pkg/agent/tools  ←  fir-side adapters
+pkg/agent          ←  pkg/session/*    (store may import agent)
+pkg/ai             ←  pkg/agent
+```
+
+Forbidden edges, asserted by `TestForbiddenImports` in `pkg/agent/`:
+`pkg/agent` and `pkg/agent/tools` must not import any of
+`pkg/session`, `pkg/mcp`, `pkg/extension`, `pkg/tui`, `pkg/config`,
+`pkg/auth`, `pkg/modes`, `pkg/resources`, `pkg/models`.
+
+Until phase 3 completes, `pkg/agent` and `pkg/agent/tools` may still
+import `pkg/ai` and `pkg/log`. Those become forbidden once the AI
+split + slog rebase land.
+
+## Pre-flight (Phase 0)
+
+Every `pkg/agent/*.go` carries a `// Ported from packages/agent/src/*.ts`
+header. Before any code can be published externally, the upstream
+license must be verified and the headers reconciled:
+
+- If the upstream license permits re-licensing under whatever we choose
+  for `kfet/agent`, phases 1–5 proceed as written.
+- If it forbids re-licensing, phases 1–4 still ship (the architectural
+  cleanup is valuable to fir on its own). Phase 5 then becomes a
+  clean-room rewrite using the in-tree-validated API, deferred to its
+  own design doc.
+
+Phase 0 is the **only** publication blocker; it does not gate the
+in-tree refactor.
+
+## Phased execution
+
+The *implementation* order deviates from the *strategic* order. We
+ship the smallest, lowest-risk cut first so the harder type-rewiring in
+Phase 2 lands on a clean tools boundary.
+
+### Phase 1 — Decouple `pkg/agent/tools` from `pkg/session/store`
+
+Smallest viable slice. Removes the only forbidden import inside
+`pkg/agent/tools` today.
+
+Concrete edits:
+
+1. Replace `PlanUpdater` (which exposed `Observables() *store.ObservableStore`)
+   with a smaller `PlanSink` interface:
+
+   ```go
+   type PlanSink interface {
+       UpdatePlan(title string, entries []agent.PlanEntry, metadata map[string]string)
+   }
+   ```
+
+2. Add a functional `CardPublisher` option for the fir-specific
+   observable-card publishing:
+
+   ```go
+   type CardPublisher func(title string, entries []agent.PlanEntry,
+       metadata map[string]string, entryID string)
+   ```
+
+   The publisher may be `nil` — the plan tool is silent when no
+   publisher is provided. No optional-interface type-assertion (silent
+   feature loss).
+
+3. New signature: `func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool`.
+
+4. Move `publishPlanCard`, `planSlug`, `planDetail` out of
+   `pkg/agent/tools/` into a fir-side adapter at
+   `pkg/session/plancard.go`. Behaviour is byte-identical.
+
+5. Update `pkg/session/agentsession.go RegisterSessionTools` to
+   construct a `CardPublisher` closure that calls the relocated
+   helpers and writes to `s.Observables()`.
+
+6. New test `pkg/agent/forbidden_imports_test.go` that calls
+   `go list -f '{{join .Imports "\n"}}' ./pkg/agent/...` and fails if
+   any forbidden path appears. Keeps the boundary from eroding.
+
+Acceptance:
+
+- `go list -f '{{join .Imports "\n"}}' ./pkg/agent/tools | grep pkg/session/store`
+  returns nothing.
+- `make all` green.
+- Observable card behaviour byte-identical (existing tests pass).
+- Plan-tool behaviour byte-identical (existing tests, adapted to the
+  new constructor, pass).
+
+Rollback: revert the interface, restore the direct
+`Observables()` method on `PlanUpdater`, drop the publisher closure
+and the relocated helpers, drop the forbidden-imports test.
+
+### Phase 2 — Split portable types out of `pkg/ai`
+
+Carve `pkg/ai` into:
+
+- Portable types: `Message`, `Tool`, `Usage`, `Context`, `Provider`,
+  `AssistantMessageEvent*`, `StreamFn`, `Model` (shape only — the
+  generated catalog stays in fir).
+- Fir-resident: `models_generated.go`, `provider_registry_builtins.go`,
+  the OAuth registry helpers wired to specific fir providers.
+
+Implementation strategy (TBD): either move types to a new subdirectory
+(`pkg/ai/core` or similar) and re-export from `pkg/ai`, or keep the
+existing path and tag the file boundary. Choice deferred until Phase 1
+lands and the call sites under `pkg/agent` are visible from the
+trimmed interface.
+
+Acceptance: `pkg/agent` and `pkg/agent/tools` import only the portable
+subset.
+
+Rollback: revert the move; consumers continue using the original
+identifiers.
+
+### Phase 3 — Rebase `pkg/agent` onto portable AI + `log/slog`
+
+Drop the `pkg/log` import from `pkg/agent` and `pkg/agent/tools`. Use
+`log/slog` directly with package-level handler hooks if fir needs to
+override.
+
+Acceptance: forbidden-imports test extended to forbid `pkg/ai` (fir
+catalog/policy surface) and `pkg/log`; only the portable subset
+import remains.
+
+### Phase 4 — Bake the boundary in-tree
+
+Live with the new shape for one fir release. Build one internal
+second consumer (e.g. a tiny non-interactive CLI that drives
+`pkg/agent` for batch jobs) to validate the API outside fir's product
+flows.
+
+No external extraction yet. The goal is to find ergonomics issues now,
+not after a `v0.1.0` tag freezes them.
+
+### Phase 5 — Extract
+
+When Phase 0 has cleared and the in-tree boundary has held for at
+least one release:
+
+1. Create `github.com/kfet/ai` with the portable types + `ratelimit/`,
+   `overflow/`, `jsonparse/`, and an initial provider subpackage.
+2. Create `github.com/kfet/agent` depending on `kfet/ai` and
+   `kfet/pinexec`.
+3. Switch fir to import the external modules; delete the in-tree
+   copies.
+
+Sibling repo conventions (`firpty`, `skipstone`, `pinexec`, `pinoauth`)
+apply: README, CHANGELOG, Makefile coverage gate, `.covignore`,
+testable examples, `doc.go`, strict static checks.
+
+## Decision log
+
+- **Single module `kfet/ai` over flat `kfet/ai-core`** — sibling
+  subpackages (`ratelimit`, `overflow`, `jsonparse`, providers) need
+  somewhere to land that isn't its own repo. Single module + dead-code
+  elimination keeps consumer binaries small. Migration to multi-module
+  is reversible if version coupling becomes painful.
+- **Functional `CardPublisher` over optional interface** — a tool that
+  silently loses functionality based on a type assertion is a debugging
+  trap. Explicit nullable function makes the seam visible.
+- **Keep the plan tool in `pkg/agent/tools`** — it is a generic agent
+  task-tracking primitive. The fir-specific card rendering moves out;
+  the tool itself stays portable.
+- **Phase order swaps strategic and implementation order** — Phase 1
+  (the cheapest cut) lands first so Phase 2's heavier type rewiring
+  meets a clean tools boundary, not two entangled problems at once.
+
+## Acceptance / verification
+
+Every phase ends with `make all` green and the forbidden-imports test
+asserting the current set of disallowed edges. Each phase has a
+documented rollback above.

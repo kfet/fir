@@ -43,6 +43,9 @@
   fixed escalating schedule (30s, 1m, 1.75m, 2m, …), gives up after 20 minutes
   of continuous failure, and resets on the first successful turn. Terminal
   errors (auth/400/context-length) are surfaced to the user, never resumed.
+### Changed
+
+- `tools.NewPlanTool` now takes a minimal `PlanSink` interface plus an optional `CardPublisher` callback, dropping the `pkg/session/store` import from `pkg/agent/tools`. Fir's observable-card wiring moved to `pkg/session/plancard.go`. First slice of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`. A new `TestForbiddenImports` in `pkg/agent/` keeps the boundary from eroding. Behaviour is byte-identical for in-tree consumers.
 
 ### Fixed
 
