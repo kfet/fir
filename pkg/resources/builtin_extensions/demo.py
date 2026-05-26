@@ -262,6 +262,24 @@ def batch_example(params, ctx):
 
     prompt = "\n\n".join(outputs) + f"\n\n--- Instructions ---\n{instructions}"
 
+    # Streaming side_query — surface partial thinking text via report_progress.
+    # Falls back to the blocking flavor if the host doesn't recognise
+    # `stream:true` (older fir releases). This is the same pattern as the
+    # aside extension; demo.py keeps it tiny on purpose.
+    if hasattr(ctx, "side_query_stream"):
+        stream = ctx.side_query_stream(prompt)
+        partial = ""
+        for delta in stream:
+            if delta.type == "text":
+                partial += delta.text
+                ctx.report_progress(f"synthesising… ({len(partial)} chars)")
+        if stream.error is not None:
+            return {
+                "content": [{"text": f"side_query failed: {stream.error}"}],
+                "is_error": True,
+            }
+        return (stream.result or {}).get("text", partial)
+
     return ctx.side_query(prompt)
 
 

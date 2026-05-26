@@ -61,6 +61,8 @@ The skill body provides detailed examples and decision guidance.
 from __future__ import annotations
 
 import json
+import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -212,6 +214,167 @@ def _build_synthesis_prompt(
 
 
 # ---------------------------------------------------------------------------
+# Card-publishing streaming wrapper
+# ---------------------------------------------------------------------------
+
+# Coalescing thresholds for card updates while a side_query is streaming.
+# Avoid hammering the atomic temp+rename cycle on every delta — at ~250ms
+# / 256-byte cadence the card slug is still snappy in observe_session
+# while the disk write rate stays sane.
+_CARD_THROTTLE_SECONDS = 0.25
+_CARD_THROTTLE_BYTES = 256
+
+# Maximum detail payload size we keep on the running card. Truncated from
+# the *tail* — the head of a long synthesis prompt is usually less
+# interesting for "what is this advisor saying right now?" debugging.
+_CARD_DETAIL_TAIL = 8000
+
+
+def _slug_for_progress(partial: str) -> str:
+    """Compact progress slug, e.g. "2.1kc" or "812c". Stays ≤ 24 chars."""
+    n = len(partial)
+    if n < 1024:
+        return f"{n}c"
+    return f"{n / 1024:.1f}kc"
+
+
+# Pattern that matches the block summary the host attaches to "no usable
+# content" errors, e.g.
+#   side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])
+# Extracted so the card slug can show the actual failure kind
+# (empty:thinking / empty:redacted / empty:noblocks) instead of a flat ERR.
+_EMPTY_BLOCKS_RE = re.compile(r"no usable content \(blocks: \[([^\]]*)\]\)")
+_BLOCK_TYPE_RE = re.compile(r"(\w+)\((th=(\d+),sig=(\d+)|len=(\d+))\)")
+
+
+def _classify_empty_blocks(blocks_str: str) -> str:
+    """Build a card slug for an empty-content side_query failure.
+
+    Inputs look like "thinking(th=0,sig=940), text(len=0)". We surface the
+    first non-empty block descriptor — sig_len > 0 with empty thinking is
+    the canonical redacted-thinking outcome.
+    """
+    if not blocks_str.strip():
+        return "empty:noblocks"
+    for m in _BLOCK_TYPE_RE.finditer(blocks_str):
+        kind = m.group(1)
+        if kind == "thinking":
+            th = int(m.group(3) or "0")
+            sig = int(m.group(4) or "0")
+            if th == 0 and sig > 0:
+                return "empty:redacted"
+            return "empty:thinking"
+        if kind == "text":
+            return "empty:text"
+        if kind == "toolCall":
+            return "empty:toolcall"
+    return "empty"
+
+
+def _run_side_query_with_card(
+    ctx: fir_ext.Context,
+    question: str,
+    *,
+    model: str | None,
+    provider: str | None,
+    effort: str | None,
+) -> tuple[str | None, str | None]:
+    """Run a streaming side_query and publish a card for the whole lifecycle.
+
+    Returns ``(text, error)`` — exactly one is non-None. On success the
+    full text is returned; on failure the error string is returned. The
+    card identified by ``query/<unix-ms>`` is updated in place: starts at
+    slug ``"running"``, ticks through size slugs as text accumulates, and
+    settles on the LLM's finish reason (``"stop"``), the block-summary
+    classification for empty responses (``"empty:redacted"`` etc.), or
+    ``"ERR"`` for everything else. The card is **not** cleared on
+    completion — its presence is the whole point.
+    """
+    call_id = int(time.time() * 1000)
+    key = f"query/{call_id}"
+
+    # Initial running card. Detail snapshots a head of the question so the
+    # card is self-describing even before any deltas arrive.
+    ctx.put_observable(key, slug="running", detail=question[:2000])
+
+    # Streaming side_query — fall back to the blocking flavor when the
+    # host doesn't have streaming (older fir releases). The card still
+    # gets a terminal state in both branches.
+    if not hasattr(ctx, "side_query_stream"):
+        try:
+            text = ctx.side_query(question, model=model, provider=provider, effort=effort)
+        except Exception as exc:
+            err = str(exc)
+            ctx.put_observable(key, slug="ERR", detail=err)
+            return None, err
+        if not text or not text.strip():
+            ctx.put_observable(key, slug="empty", detail="advisor returned no content")
+            return None, "advisor returned no content"
+        ctx.put_observable(key, slug="stop", detail=text)
+        return text, None
+
+    stream = ctx.side_query_stream(question, model=model, provider=provider, effort=effort)
+
+    partial = ""
+    last_flush = time.monotonic()
+    last_size = 0
+    try:
+        for delta in stream:
+            if delta.type == "text":
+                partial += delta.text
+            elif delta.type == "thinking":
+                # We don't fold thinking text into the final assistant
+                # text — but its arrival is liveness. Bump the card so
+                # observers see thinking-only periods as activity.
+                now = time.monotonic()
+                if (now - last_flush) >= _CARD_THROTTLE_SECONDS:
+                    ctx.put_observable(
+                        key,
+                        slug=f"think+{_slug_for_progress(partial)}" if partial else "thinking",
+                        detail=partial[-_CARD_DETAIL_TAIL:],
+                    )
+                    last_flush = now
+                continue
+            else:
+                # Unknown / usage delta — nothing to accumulate.
+                continue
+            now = time.monotonic()
+            if (now - last_flush) >= _CARD_THROTTLE_SECONDS or (
+                len(partial) - last_size
+            ) >= _CARD_THROTTLE_BYTES:
+                ctx.put_observable(
+                    key,
+                    slug=_slug_for_progress(partial),
+                    detail=partial[-_CARD_DETAIL_TAIL:],
+                )
+                last_flush = now
+                last_size = len(partial)
+    except Exception as exc:
+        msg = str(exc)
+        ctx.put_observable(key, slug="ERR", detail=f"{msg}\n\n{partial}")
+        return None, msg
+
+    if stream.error is not None:
+        err = stream.error
+        m = _EMPTY_BLOCKS_RE.search(err)
+        if m is not None:
+            slug = _classify_empty_blocks(m.group(1))
+            # Use the block summary as the detail — that's the whole
+            # point: post-mortem inspection without the raw response.
+            ctx.put_observable(key, slug=slug, detail=err)
+        else:
+            ctx.put_observable(key, slug="ERR", detail=f"{err}\n\n{partial}")
+        return None, err
+
+    result = stream.result or {}
+    text = result.get("text", partial)
+    finish = result.get("finish_reason") or "stop"
+    # Slug is the finish reason; the cards layer truncates to ≤24 chars.
+    ctx.put_observable(key, slug=str(finish) or "stop", detail=text)
+    return text, None
+
+
+# ---------------------------------------------------------------------------
 # Core: run an aside — side query with optional tool calls
 # ---------------------------------------------------------------------------
 
@@ -260,10 +423,11 @@ def _run_aside(
 
     # No tools — pure ephemeral side query.
     if not tools:
-        try:
-            synthesis = ctx.side_query(instructions, model=sq_model, provider=sq_provider, effort=sq_effort)
-        except Exception as exc:
-            return _side_query_error(exc)
+        synthesis, err = _run_side_query_with_card(
+            ctx, instructions, model=sq_model, provider=sq_provider, effort=sq_effort
+        )
+        if err is not None:
+            return _side_query_error(RuntimeError(err))
         # Belt-and-suspenders: SideQuery should now return an error on truly
         # empty responses, but if something slips through (e.g. whitespace-
         # only output from a provider we don't handle as carefully), surface
@@ -350,10 +514,11 @@ def _run_aside(
     # Synthesise collected outputs.
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
-    try:
-        synthesis = ctx.side_query(prompt, model=sq_model, provider=sq_provider, effort=sq_effort)
-    except Exception as exc:
-        return _side_query_error(exc)
+    synthesis, err = _run_side_query_with_card(
+        ctx, prompt, model=sq_model, provider=sq_provider, effort=sq_effort
+    )
+    if err is not None:
+        return _side_query_error(RuntimeError(err))
     if not synthesis or not synthesis.strip():
         return _error("advisor returned no content")
 

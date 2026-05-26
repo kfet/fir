@@ -1601,6 +1601,26 @@ type SideQueryOptions struct {
 	Effort ai.ThinkingLevel
 }
 
+// SideQueryDelta is a single streaming event from SideQueryStream. Type is
+// one of "text", "thinking", "usage"; the relevant payload field is
+// populated. Future kinds are additive — readers must ignore unknown types.
+type SideQueryDelta struct {
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	TokensOut int    `json:"tokens_out,omitempty"`
+}
+
+// SideQueryResult is the terminating value of a side query (streaming or
+// blocking). Text is the joined assistant text; Blocks is a per-block
+// summary suitable for diagnosing redacted/empty responses; FinishReason
+// mirrors the LLM's stop reason ("stop", "length", "toolUse", "error",
+// "aborted") and is empty when unknown.
+type SideQueryResult struct {
+	Text         string               `json:"text"`
+	Blocks       []agent.BlockSummary `json:"blocks"`
+	FinishReason string               `json:"finish_reason,omitempty"`
+}
+
 // SideQuery makes a one-shot, ephemeral LLM call using the current session
 // context plus the given question. No tools are provided and nothing is added
 // to the session history. Delegates to Agent.SimplePrompt which reuses the
@@ -1618,6 +1638,30 @@ type SideQueryOptions struct {
 // (the aside extension) can surface it to the main LLM as a meaningful
 // is_error tool result rather than silently swallowing the failure.
 func (s *AgentSession) SideQuery(ctx context.Context, question string, opts *SideQueryOptions) (string, error) {
+	result, err := s.SideQueryStream(ctx, question, opts, nil)
+	if err != nil {
+		return "", err
+	}
+	return result.Text, nil
+}
+
+// SideQueryStream is the streaming flavor of SideQuery. Behavior is
+// identical to SideQuery except:
+//
+//   - onDelta (when non-nil) is called synchronously for each streaming
+//     event from the LLM: text chunks, thinking chunks, and a single
+//     terminal "usage" delta when token counts are known. Unknown agent
+//     events are dropped at this layer.
+//   - Returns a SideQueryResult with the joined text, per-block summary,
+//     and the LLM's finish reason — rather than only a joined string.
+//
+// onDelta runs on the same goroutine that drives the LLM stream, so
+// callers must keep callback work cheap; the next event blocks until the
+// callback returns. onDelta=nil makes this exactly equivalent to SideQuery.
+//
+// NO-COMPACTION CONTRACT: SideQueryStream MUST NOT trigger auto-compaction.
+// Inherited from Agent.SimplePromptStream — see its contract comment.
+func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opts *SideQueryOptions, onDelta func(SideQueryDelta)) (SideQueryResult, error) {
 	// Snapshot current messages.
 	state := s.Agent.State()
 	msgs := make([]agent.AgentMessage, len(state.Messages))
@@ -1633,20 +1677,63 @@ func (s *AgentSession) SideQuery(ctx context.Context, question string, opts *Sid
 		if opts.Model != "" {
 			model, err := s.resolveSideQueryModel(opts.Model, opts.Provider)
 			if err != nil {
-				return "", fmt.Errorf("side-query: %w", err)
+				return SideQueryResult{}, fmt.Errorf("side-query: %w", err)
 			}
 			promptOpts.Model = model
 		}
 	}
 
-	result, err := s.Agent.SimplePrompt(ctx, msgs, promptOpts)
+	// Translate AgentEvents into SideQueryDeltas as they fire. We only care
+	// about text/thinking deltas mid-stream; the terminal usage delta is
+	// emitted from the final message_end below.
+	var onEvent func(agent.AgentEvent)
+	if onDelta != nil {
+		onEvent = func(ev agent.AgentEvent) {
+			if ev.Type != agent.EventMessageUpdate || ev.AssistantMessageEvent == nil {
+				return
+			}
+			ame := ev.AssistantMessageEvent
+			switch ame.Type {
+			case ai.EventTextDelta:
+				if ame.Delta != "" {
+					onDelta(SideQueryDelta{Type: "text", Text: ame.Delta})
+				}
+			case ai.EventThinkingDelta:
+				if ame.Delta != "" {
+					onDelta(SideQueryDelta{Type: "thinking", Text: ame.Delta})
+				}
+			}
+		}
+	}
+
+	text, msg, err := s.Agent.SimplePromptStream(ctx, msgs, promptOpts, onEvent)
 	if err != nil {
 		// Prefix with "side-query:" so callers (e.g. the aside extension) can
 		// surface a clear, attributable error to the main LLM instead of a
 		// raw, context-free API error string.
-		return "", fmt.Errorf("side-query: %w", err)
+		// Preserve any partial result available on the final message so the
+		// caller can persist what we did manage to get.
+		out := SideQueryResult{}
+		if msg != nil {
+			out.Blocks = agent.SummarizeBlocks(msg.Content)
+			out.FinishReason = string(msg.StopReason)
+		}
+		return out, fmt.Errorf("side-query: %w", err)
 	}
-	return result, nil
+
+	// SimplePromptStream guarantees msg is non-nil when err is nil — see its
+	// contract. Both fields below dereference msg unconditionally.
+
+	// Emit a final usage delta if we know the output token count.
+	if onDelta != nil && msg.Usage.Output > 0 {
+		onDelta(SideQueryDelta{Type: "usage", TokensOut: msg.Usage.Output})
+	}
+
+	return SideQueryResult{
+		Text:         text,
+		Blocks:       agent.SummarizeBlocks(msg.Content),
+		FinishReason: string(msg.StopReason),
+	}, nil
 }
 
 // resolveSideQueryModel finds a model in the registry by id and (optional)

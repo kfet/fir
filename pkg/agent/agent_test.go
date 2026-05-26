@@ -703,3 +703,87 @@ func TestSimplePrompt_EmptyContentReturnsError(t *testing.T) {
 		t.Errorf("expected 'no content' / 'empty' error, got: %v", err)
 	}
 }
+
+// TestSimplePrompt_EmptyContentErrorIncludesBlockSummary verifies that the
+// "no usable content" error from a side query with only a redacted thinking
+// block carries the per-block summary inline, so callers (e.g. the aside
+// extension) can classify the failure without parsing the raw message.
+func TestSimplePrompt_EmptyContentErrorIncludesBlockSummary(t *testing.T) {
+	resp := &ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			{Thinking: &ai.ThinkingContent{Thinking: "", ThinkingSignature: "REDACTED_PAYLOAD"}},
+		},
+		StopReason: ai.StopReasonStop,
+	}
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	_, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("expected error on empty response")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "blocks:") {
+		t.Errorf("error missing block summary: %v", err)
+	}
+	if !strings.Contains(msg, "thinking(th=0,sig=") {
+		t.Errorf("error missing thinking(th=, sig=) marker: %v", err)
+	}
+}
+
+// TestSimplePromptStream_ForwardsEventsAndMatchesSimplePrompt verifies the
+// streaming variant fires onEvent for each agent event and that the final
+// text matches what SimplePrompt would have produced with no callback.
+func TestSimplePromptStream_ForwardsEventsAndMatchesSimplePrompt(t *testing.T) {
+	respText := "streamed response"
+	resp := simpleResponse(respText)
+
+	a := NewAgent(AgentOptions{
+		StreamFn:     mockStreamFn(resp),
+		ConvertToLLM: DefaultConvertToLLM,
+	})
+	a.SetModel(testModel())
+
+	var events []AgentEvent
+	text, msg, err := a.SimplePromptStream(context.Background(), nil, nil, func(ev AgentEvent) {
+		events = append(events, ev)
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != respText {
+		t.Errorf("text = %q, want %q", text, respText)
+	}
+	if msg == nil {
+		t.Fatal("expected non-nil final message")
+	}
+	if len(events) == 0 {
+		t.Fatal("expected callback to fire at least once")
+	}
+	// Must include at least one message_start and one message_end.
+	sawStart, sawEnd := false, false
+	for _, ev := range events {
+		switch ev.Type {
+		case EventMessageStart:
+			sawStart = true
+		case EventMessageEnd:
+			sawEnd = true
+		}
+	}
+	if !sawStart || !sawEnd {
+		t.Errorf("missing lifecycle events: start=%v end=%v", sawStart, sawEnd)
+	}
+
+	// And the no-callback flavor must agree on the rendered text.
+	plain, err := a.SimplePrompt(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("SimplePrompt: %v", err)
+	}
+	if plain != respText {
+		t.Errorf("SimplePrompt text = %q, want %q", plain, respText)
+	}
+}

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Streaming `side_query` flavor across the extension API. New `ctx.side_query_stream(...)` Python SDK method returns an iterable yielding `SideQueryDelta` objects (text/thinking/usage) as the host streams them, with a final `SideQueryResult` on `.result`. Each delta resets the per-RPC deadline, so long-running advisor calls cannot trip the timeout. The blocking `ctx.side_query(...)` flavor keeps its byte-for-byte wire shape, but its default timeout is bumped from 120s to 600s and now honors `FIR_SIDE_QUERY_TIMEOUT` (seconds). Wire protocol uses correlated `side_query/delta` notifications keyed by the originating request id in `params.request_id`; SDK ignores unknown delta `type`s for forward compatibility. Spec: `docs/design/streaming-side-query.md`.
+- `aside` extension now publishes one observable card per side query (`source=aside`, `key=query/<unix-ms>`) and updates it in place as the stream runs — slug ticks through `running` → progress (e.g. `2.1kc`) → terminal `stop` / `empty:redacted` / `ERR`. Detail holds the running partial text, then the full text on success or the block summary on failure. The card is not cleared on completion: historical state is the whole point. Card layer is the cards sidecar from `docs/design/observable-cards.md` — no new persistence machinery.
+- `SimplePromptStream` on `*agent.Agent` + `SideQueryStream` on `*session.AgentSession`: the streaming primitives the extension wire builds on. Same NO-COMPACTION contract as their blocking counterparts.
+
+### Fixed
+
+- "Response had no usable content" errors from `SimplePrompt` / `SideQuery` now include a per-block summary inline (e.g. `(blocks: [thinking(th=0,sig=940)])`), so callers can classify redacted-thinking failures without keeping the raw response. Previously the raw response was thrown away and the error was uninformative.
+
 ## [0.49.0] - 2026-05-25
 
 ### Added

@@ -171,6 +171,10 @@ func (b *SessionBridge) SideQuery(question string, opts *session.SideQueryOption
 	return b.session.SideQuery(context.Background(), question, opts)
 }
 
+func (b *SessionBridge) SideQueryStream(question string, opts *session.SideQueryOptions, onDelta func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	return b.session.SideQueryStream(context.Background(), question, opts, onDelta)
+}
+
 // SetSessionData / GetSessionData on SessionBridge are no-ops: the real
 // per-extension routing is done by Bridge.handleInbound, which calls
 // Bridge.SetSessionData / Bridge.GetSessionData directly.

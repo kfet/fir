@@ -184,6 +184,9 @@ func (n *nopBridgeAPI) ContinueSession() error                                 {
 func (n *nopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
 	return "", fmt.Errorf("side query not available outside a session")
 }
+func (n *nopBridgeAPI) SideQueryStream(_ string, _ *session.SideQueryOptions, _ func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	return session.SideQueryResult{}, fmt.Errorf("side query not available outside a session")
+}
 func (n *nopBridgeAPI) RegisterTool(_ ToolDefinition)          {}
 func (n *nopBridgeAPI) SetSessionData(_, _ string)             {}
 func (n *nopBridgeAPI) GetSessionData(_ string) (string, bool) { return "", false }

@@ -627,26 +627,59 @@ supports restart.
 #### `side_query`
 
 Make a one-shot LLM call using the current session context.  No tools, no
-history persistence.  Blocks until the response is complete.  SDK timeout:
-120 s.
+history persistence.
+
+The SDK exposes two flavors:
+
+- **Blocking** (`ctx.side_query(...)`) — sends `stream:false` (or omits
+  the flag), waits for the terminating response. Default per-RPC timeout
+  is **600 s**, overridable via `FIR_SIDE_QUERY_TIMEOUT` (seconds) or
+  the `timeout=` kwarg.
+- **Streaming** (`ctx.side_query_stream(...)`) — sends `stream:true`,
+  yields `SideQueryDelta` objects (text / thinking / usage) as the LLM
+  produces them, then settles into a final `SideQueryResult` on
+  `stream.result`. Each delta resets the per-RPC deadline, so a
+  long-running advisor can stream indefinitely without tripping the
+  timeout.
 
 Optional params override the agent's current model/effort for this single
 call only — used by the `aside` extension to implement the "advisor"
 pattern (escalating to a stronger model when stuck):
 
-| Param      | Type   | Notes                                                              |
-|------------|--------|--------------------------------------------------------------------|
-| `question` | string | Required. The side question.                                        |
-| `model`    | string | Optional. Model id (e.g. `claude-opus-4-x`).                       |
-| `provider` | string | Optional. Provider id (e.g. `anthropic`); needed only to disambiguate. |
-| `effort`   | string | Optional. Reasoning level: `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`. |
+| Param      | Type    | Notes                                                              |
+|------------|---------|--------------------------------------------------------------------|
+| `question` | string  | Required. The side question.                                        |
+| `model`    | string  | Optional. Model id (e.g. `claude-opus-4-x`).                       |
+| `provider` | string  | Optional. Provider id (e.g. `anthropic`); needed only to disambiguate. |
+| `effort`   | string  | Optional. Reasoning level: `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`. |
+| `stream`   | boolean | Optional. When true, host emits `side_query/delta` notifications keyed by this request's id, then sends the terminating response. Defaults to false (legacy block-and-return). |
 
 ```json
 {"jsonrpc":"2.0","id":1013,"method":"side_query","params":{"question":"Summarise this in one sentence."}}
 {"jsonrpc":"2.0","id":1014,"method":"side_query","params":{"question":"Should I refactor this?","model":"claude-opus-4-x","effort":"high"}}
+{"jsonrpc":"2.0","id":1015,"method":"side_query","params":{"question":"long advisor question…","stream":true}}
 ```
 
-Response: `{"ok": true, "text": "A one-sentence summary."}`
+Response shape:
+
+- Non-streaming: `{"ok": true, "text": "A one-sentence summary."}`.
+- Streaming: a sequence of `side_query/delta` notifications (no `id`),
+  followed by a terminating response on the originating id with the
+  extended shape `{"ok": true, "text": "...", "blocks": [{"type":"text","len":42}, ...], "finish_reason": "stop"}`.
+  The `blocks` summary is also surfaced inline in the error string when
+  the response had no usable content (e.g. only a redacted thinking
+  block) — extensions can classify "empty:redacted" without keeping the
+  raw response.
+
+`side_query/delta` notification params:
+
+| Field        | Type   | Notes                                                  |
+|--------------|--------|--------------------------------------------------------|
+| `request_id` | int    | JSON-RPC id of the originating `side_query` request.   |
+| `type`       | string | One of `text`, `thinking`, `usage`. Additive — SDKs ignore unknown types. |
+| `text`       | string | For `text` and `thinking`. The streaming chunk.        |
+| `tokens_out` | int    | For `usage`. Output token count when known.            |
+| `seq`        | int    | Strictly increasing per-request, starting at 0.        |
 
 ---
 

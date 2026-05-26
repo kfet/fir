@@ -568,25 +568,44 @@ type SimplePromptOptions struct {
 }
 
 // SimplePrompt makes a single-turn LLM call with the given messages.
-// It reuses the agent's model, streamFn, api key resolution, and transport
-// config but sends no tools, runs no agent loop, and does not modify the
-// agent's state. The caller provides the full message list (including system
-// prompt via the agent's current state). Returns the assistant's text response.
-// Safe to call concurrently while the agent loop is running.
-//
-// opts may be nil. When non-nil, opts.Model and opts.Reasoning override the
-// agent's current model and thinking level for this single call only. State
-// is not mutated.
+// See SimplePromptStream for the full contract — this is a thin wrapper
+// that drops streaming events on the floor.
 //
 // NO-COMPACTION CONTRACT: SimplePrompt MUST NOT trigger auto-compaction, ever.
+// See SimplePromptStream's contract for the same guarantee.
+func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions) (string, error) {
+	text, _, err := a.SimplePromptStream(ctx, messages, opts, nil)
+	return text, err
+}
+
+// SimplePromptStream makes a single-turn LLM call with the given messages and
+// forwards each agent event to onEvent as it is emitted. Behavior is
+// otherwise identical to SimplePrompt:
+//
+//   - Reuses the agent's model, streamFn, api key resolution, and transport
+//     config but sends no tools, runs no agent loop, and does not modify the
+//     agent's state. The caller provides the full message list.
+//   - Safe to call concurrently while the agent loop is running.
+//
+// onEvent may be nil — events are then discarded. Callbacks are invoked
+// synchronously on the same goroutine that drains the stream, so callers
+// must keep their work cheap (the next event blocks until the callback
+// returns).
+//
+// Returns the rendered text, the final assistant message (or nil on error),
+// and any error. On "no usable content" the error string includes a
+// per-block summary so callers can diagnose redacted/empty responses
+// without losing the raw message.
+//
+// NO-COMPACTION CONTRACT: SimplePromptStream MUST NOT trigger auto-compaction.
 // This is guaranteed by two design choices that must be preserved:
 //  1. The AgentLoopConfig built here intentionally omits the Compaction field,
 //     so no server-side compaction is requested.
-//  2. The events channel is a private, local channel drained by a throwaway
-//     goroutine — events never reach AgentSession.checkAutoCompaction.
+//  2. The events channel is a private, local channel drained synchronously by
+//     this function — events never reach AgentSession.checkAutoCompaction.
 //
 // Do not forward these events to the session or add Compaction to the config.
-func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions) (string, error) {
+func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions, onEvent func(AgentEvent)) (string, *ai.AssistantMessage, error) {
 	a.mu.Lock()
 	model := a.state.Model
 	systemPrompt := a.state.SystemPrompt
@@ -614,7 +633,7 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 	}
 
 	if model == nil {
-		return "", fmt.Errorf("no model selected")
+		return "", nil, fmt.Errorf("no model selected")
 	}
 
 	if streamFn == nil {
@@ -624,7 +643,7 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 	}
 
 	if convertToLLM == nil {
-		return "", fmt.Errorf("no ConvertToLLM function configured")
+		return "", nil, fmt.Errorf("no ConvertToLLM function configured")
 	}
 
 	agentCtx := &AgentContext{
@@ -644,27 +663,86 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 		GetApiKey:       getApiKey,
 	}
 
-	// Discard agent events — we don't emit them for simple prompts.
+	// Drain events synchronously: forward to onEvent (if any) and otherwise
+	// discard. Keeping this on the calling goroutine ensures the callback
+	// observes events in order without extra synchronization, and preserves
+	// the NO-COMPACTION contract (events never reach the session).
 	events := make(chan AgentEvent, 64)
+	doneCh := make(chan struct{})
 	go func() {
-		for range events {
+		defer close(doneCh)
+		for ev := range events {
+			if onEvent != nil {
+				onEvent(ev)
+			}
 		}
 	}()
 
 	msg := streamAssistantResponse(ctx, agentCtx, config, streamFn, events)
 	close(events)
+	<-doneCh
 
 	if msg == nil {
-		return "", fmt.Errorf("no response from model")
+		return "", nil, fmt.Errorf("no response from model")
 	}
 	if msg.ErrorMessage != "" {
-		return "", fmt.Errorf("%s", msg.ErrorMessage)
+		return "", msg, fmt.Errorf("%s", msg.ErrorMessage)
 	}
-	return renderSimplePromptContent(msg.Content)
+	text, _, err := renderSimplePromptContent(msg.Content)
+	return text, msg, err
+}
+
+// BlockSummary is a compact description of a single content block from an
+// assistant message. It carries enough to diagnose "empty" / redacted
+// responses (where a thinking block with sig_len>0 and len=0 is the smoking
+// gun) without keeping the raw payload around.
+type BlockSummary struct {
+	Type   string `json:"type"`
+	Len    int    `json:"len"`
+	SigLen int    `json:"sig_len,omitempty"`
+}
+
+// SummarizeBlocks produces a BlockSummary slice for the given content.
+// Exported so session-layer code can attach the same summary to a
+// SideQueryResult on success.
+func SummarizeBlocks(content []ai.AssistantContent) []BlockSummary {
+	out := make([]BlockSummary, 0, len(content))
+	for _, c := range content {
+		switch {
+		case c.Text != nil:
+			out = append(out, BlockSummary{Type: "text", Len: len(c.Text.Text)})
+		case c.Thinking != nil:
+			out = append(out, BlockSummary{
+				Type:   "thinking",
+				Len:    len(c.Thinking.Thinking),
+				SigLen: len(c.Thinking.ThinkingSignature),
+			})
+		case c.ToolCall != nil:
+			args, _ := json.Marshal(c.ToolCall.Arguments)
+			out = append(out, BlockSummary{Type: "toolCall", Len: len(args)})
+		case c.Server != nil:
+			out = append(out, BlockSummary{Type: "server", Len: len(c.Server.Raw)})
+		}
+	}
+	return out
+}
+
+func formatBlockSummary(blocks []BlockSummary) string {
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		switch b.Type {
+		case "thinking":
+			parts = append(parts, fmt.Sprintf("thinking(th=%d,sig=%d)", b.Len, b.SigLen))
+		default:
+			parts = append(parts, fmt.Sprintf("%s(len=%d)", b.Type, b.Len))
+		}
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // renderSimplePromptContent flattens an assistant message's content blocks
-// into a single string suitable for SimplePrompt / SideQuery callers.
+// into a single string suitable for SimplePrompt / SideQuery callers, and
+// returns a BlockSummary slice describing each input block.
 //
 // Text blocks are emitted verbatim. Thinking blocks are surfaced with a
 // `[think] ...` prefix (useful signal even though we can't replay them).
@@ -673,10 +751,11 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 // tool is still informative. Blocks are joined with newlines in source order.
 //
 // Returns an error when there is no usable content at all (no text, no
-// thinking, no tool call) — that previously surfaced as a silent empty
-// string, leaving callers unable to distinguish "advisor said nothing" from
-// "advisor was never called".
-func renderSimplePromptContent(content []ai.AssistantContent) (string, error) {
+// thinking, no tool call). The error includes the block summary so callers
+// can distinguish "advisor said nothing" from "advisor only emitted a
+// redacted thinking block" — see SummarizeBlocks for the shape.
+func renderSimplePromptContent(content []ai.AssistantContent) (string, []BlockSummary, error) {
+	blocks := SummarizeBlocks(content)
 	var parts []string
 	for _, c := range content {
 		switch {
@@ -697,9 +776,9 @@ func renderSimplePromptContent(content []ai.AssistantContent) (string, error) {
 		}
 	}
 	if len(parts) == 0 {
-		return "", fmt.Errorf("response had no usable content (no text, thinking, or tool call)")
+		return "", blocks, fmt.Errorf("response had no usable content (blocks: %s)", formatBlockSummary(blocks))
 	}
-	return strings.Join(parts, "\n"), nil
+	return strings.Join(parts, "\n"), blocks, nil
 }
 
 func (a *Agent) dequeueSteeringMessages() []AgentMessage {

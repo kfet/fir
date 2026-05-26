@@ -1259,6 +1259,9 @@ func (n *noopBridgeAPI) ContinueSession() error                                 
 func (n *noopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
 	return "", nil
 }
+func (n *noopBridgeAPI) SideQueryStream(_ string, _ *session.SideQueryOptions, _ func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	return session.SideQueryResult{}, nil
+}
 func (n *noopBridgeAPI) RegisterTool(_ extension.ToolDefinition) {}
 func (n *noopBridgeAPI) SetSessionData(_, _ string)              {}
 func (n *noopBridgeAPI) GetSessionData(_ string) (string, bool)  { return "", false }

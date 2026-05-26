@@ -29,6 +29,26 @@ sys.path.insert(0, _sdk_dir)
 import fir_ext
 
 
+def _blocking_ctx():
+    """Return a MagicMock(spec=fir_ext.Context) with the streaming
+    side_query_stream attribute deleted.
+
+    aside.py prefers ctx.side_query_stream when present, so a MagicMock
+    spec — which auto-attaches every Context method — would force the
+    streaming code path on every test. Most tests want to assert on the
+    blocking ctx.side_query call instead; deleting the streaming
+    attribute makes aside.py's ``hasattr`` fall through to the blocking
+    flavor and keeps the legacy assertions valid.
+
+    The dedicated streaming tests build their own ctx with
+    side_query_stream wired up explicitly.
+    """
+    from unittest import mock as _mock
+    ctx = _mock.MagicMock(spec=fir_ext.Context)
+    del ctx.side_query_stream
+    return ctx
+
+
 def _load_aside():
     """(Re-)import aside.py, resetting registries and capturing handlers."""
     if "aside" in sys.modules:
@@ -127,7 +147,7 @@ class TestRunAside(unittest.TestCase):
 
     def _make_ctx(self, tool_results=None, side_query_result="synthesis", available_tools=None):
         """Create a mock context with call_tool, side_query, and list_tools."""
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         if tool_results is None:
             tool_results = {}
 
@@ -300,7 +320,7 @@ class TestAsideTool(unittest.TestCase):
 
     def test_handler_delegates_to_run_aside(self):
         handler = fir_ext._tool_handlers["aside"]
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         ctx.call_tool = mock.MagicMock(
             return_value={"content": [{"text": "ok"}], "is_error": False}
         )
@@ -337,7 +357,7 @@ class TestAsideCommand(unittest.TestCase):
 
     def test_no_args_returns_usage(self):
         handler = fir_ext._command_handlers["aside"]
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         result = handler([], ctx)
         self.assertIn("Usage", result["message"])
         ctx.send_user_message.assert_not_called()
@@ -346,7 +366,7 @@ class TestAsideCommand(unittest.TestCase):
     def test_short_question_runs_side_query(self):
         """Short text without tool keywords → pure side question."""
         handler = fir_ext._command_handlers["aside"]
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         ctx.side_query = mock.MagicMock(return_value="it means X")
         result = handler(["what", "does", "that", "mean?"], ctx)
         self.assertIn("aside:", result["message"])
@@ -356,7 +376,7 @@ class TestAsideCommand(unittest.TestCase):
     def test_tool_request_sends_user_message(self):
         """Longer text with tool keywords → delegate to agent."""
         handler = fir_ext._command_handlers["aside"]
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         args = [
             "read", "the", "5", "largest", ".go", "files",
             "and", "summarise", "their", "purpose",
@@ -416,7 +436,7 @@ class TestAdvisorEscalation(unittest.TestCase):
     """Tool-level behaviour when an advisor is configured and 'escalate' is set."""
 
     def _ctx(self, side_query_result="advisor reply"):
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         ctx.side_query = mock.MagicMock(return_value=side_query_result)
         return ctx
 
@@ -500,7 +520,7 @@ class TestAdvisorEscalation(unittest.TestCase):
 
         # Step 1: Cheap model gathers data (no escalate).
         # Build a proper mock context with call_tool, list_tools, and side_query.
-        ctx_gather = mock.MagicMock(spec=fir_ext.Context)
+        ctx_gather = _blocking_ctx()
         ctx_gather.call_tool = mock.MagicMock(
             return_value={"content": [{"text": "Found 3 .go files"}], "is_error": False}
         )
@@ -784,7 +804,7 @@ class TestAdviseCommand(unittest.TestCase):
         self.mod = _load_aside()
 
     def _ctx(self, side_query_result="advisor reply"):
-        ctx = mock.MagicMock(spec=fir_ext.Context)
+        ctx = _blocking_ctx()
         ctx.side_query = mock.MagicMock(return_value=side_query_result)
         return ctx
 
@@ -847,3 +867,175 @@ class TestAdviseCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Streaming side_query + observable card publication
+# ---------------------------------------------------------------------------
+
+
+class _FakeStream:
+    """Minimal in-process stand-in for fir_ext.SideQueryStream.
+
+    Wraps a list of deltas (dicts with type/text/tokens_out keys), exposes
+    the iterator protocol, and surfaces ``.result`` / ``.error`` after the
+    iterator is exhausted. ``deltas`` may be empty for the "no usable
+    content" case.
+    """
+
+    def __init__(self, deltas, result=None, error=None):
+        self._deltas = list(deltas)
+        self.result = result
+        self.error = error
+        self._i = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._i >= len(self._deltas):
+            raise StopIteration
+        d = self._deltas[self._i]
+        self._i += 1
+        return fir_ext.SideQueryDelta(
+            type=d.get("type", ""),
+            text=d.get("text", ""),
+            tokens_out=d.get("tokens_out", 0),
+            seq=self._i - 1,
+            raw=dict(d),
+        )
+
+
+def _streaming_ctx(stream_factory):
+    """Build a Context mock wired to a streaming side_query_stream.
+
+    stream_factory(question, model, provider, effort) -> _FakeStream.
+    """
+    ctx = mock.MagicMock(spec=fir_ext.Context)
+    ctx.put_observable = mock.MagicMock()
+    ctx.clear_observable = mock.MagicMock()
+    ctx.report_progress = mock.MagicMock()
+    ctx.list_tools = mock.MagicMock(return_value=[])
+    ctx.side_query_stream = mock.MagicMock(
+        side_effect=lambda question, model=None, provider=None, effort=None: stream_factory(
+            question, model, provider, effort
+        )
+    )
+    # Leave ctx.side_query alone — aside.py prefers side_query_stream when
+    # both are present.
+    return ctx
+
+
+class TestAsideStreamingCards(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_success_publishes_card_with_stop_slug(self):
+        deltas = [
+            {"type": "thinking", "text": "mulling…"},
+            {"type": "text", "text": "the answer "},
+            {"type": "text", "text": "is 42"},
+            {"type": "usage", "tokens_out": 12},
+        ]
+        result_dict = {
+            "text": "the answer is 42",
+            "blocks": [{"type": "text", "len": 16}],
+            "finish_reason": "stop",
+        }
+
+        def factory(*_a, **_kw):
+            return _FakeStream(deltas, result=result_dict)
+
+        ctx = _streaming_ctx(factory)
+        out = self.mod._run_aside([], "what?", ctx)
+
+        self.assertFalse(out["is_error"])
+        self.assertEqual(out["content"][0]["text"], "the answer is 42")
+        # At least one running card and one terminal "stop" card.
+        calls = list(ctx.put_observable.call_args_list)
+        self.assertGreaterEqual(len(calls), 2)
+        first_kwargs = calls[0].kwargs
+        self.assertTrue(
+            first_kwargs.get("slug") == "running"
+            or calls[0].args[1:2] == ("running",),
+            f"first card slug should be 'running', got {calls[0]}",
+        )
+        # Terminal card carries finish_reason as slug + full text as detail.
+        terminal = calls[-1]
+        slug = (
+            terminal.kwargs.get("slug")
+            or (terminal.args[1] if len(terminal.args) > 1 else "")
+        )
+        detail = (
+            terminal.kwargs.get("detail")
+            or (terminal.args[2] if len(terminal.args) > 2 else "")
+        )
+        self.assertEqual(slug, "stop")
+        self.assertEqual(detail, "the answer is 42")
+        # All cards share a "query/<unix-ms>" key.
+        keys = {
+            (c.kwargs.get("key") or c.args[0]) for c in calls
+        }
+        self.assertEqual(len(keys), 1, f"all cards should share one key, got {keys}")
+        only_key = next(iter(keys))
+        self.assertTrue(only_key.startswith("query/"), f"unexpected key: {only_key}")
+
+    def test_empty_redacted_response_emits_empty_slug(self):
+        # Mimics what the Go side sends back when the response only carried
+        # a redacted thinking block (th=0, sig>0): stream.error is set with
+        # the formatted block summary and stream.result has the blocks.
+        err = (
+            "side-query: response had no usable content "
+            "(blocks: [thinking(th=0,sig=940)])"
+        )
+
+        def factory(*_a, **_kw):
+            return _FakeStream([], result=None, error=err)
+
+        ctx = _streaming_ctx(factory)
+        out = self.mod._run_aside([], "q", ctx)
+        self.assertTrue(out["is_error"])
+        self.assertIn("aside LLM call failed", out["content"][0]["text"])
+        # Card slug should be empty:redacted (th=0,sig>0 ⇒ redacted).
+        terminal = ctx.put_observable.call_args_list[-1]
+        slug = terminal.kwargs.get("slug") or terminal.args[1]
+        self.assertEqual(slug, "empty:redacted")
+
+    def test_stream_iterator_exception_emits_err_slug(self):
+        class _Boom(_FakeStream):
+            def __next__(self):
+                raise RuntimeError("connection reset")
+
+        def factory(*_a, **_kw):
+            return _Boom([])
+
+        ctx = _streaming_ctx(factory)
+        out = self.mod._run_aside([], "q", ctx)
+        self.assertTrue(out["is_error"])
+        terminal = ctx.put_observable.call_args_list[-1]
+        slug = terminal.kwargs.get("slug") or terminal.args[1]
+        self.assertEqual(slug, "ERR")
+        detail = terminal.kwargs.get("detail") or terminal.args[2]
+        self.assertIn("connection reset", detail)
+
+    def test_advisor_override_routed_to_stream(self):
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-opus-4-x", "effort": "high"}
+
+        def factory(question, model, provider, effort):
+            # Capture call kwargs by reference in the closure so the test
+            # can verify advisor overrides reach the streaming flavor.
+            captured.update(
+                question=question, model=model, provider=provider, effort=effort
+            )
+            return _FakeStream(
+                [{"type": "text", "text": "advisor reply"}],
+                result={"text": "advisor reply", "finish_reason": "stop"},
+            )
+
+        captured: dict = {}
+        ctx = _streaming_ctx(factory)
+        out = self.mod._run_aside([], "design tradeoff?", ctx, escalate=True)
+        self.assertFalse(out["is_error"])
+        self.assertEqual(captured["model"], "claude-opus-4-x")
+        self.assertEqual(captured["provider"], "anthropic")
+        self.assertEqual(captured["effort"], "high")

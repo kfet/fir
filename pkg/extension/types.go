@@ -1,5 +1,7 @@
 package extension
 
+import "github.com/kfet/fir/pkg/agent"
+
 // This file defines typed structs for every JSON-RPC method and event
 // payload that crosses the extension wire boundary. They replace ad-hoc
 // `map[string]any{...}` literals scattered through the package so that:
@@ -100,11 +102,17 @@ type clearObservableParams struct {
 }
 
 // sideQueryParams maps to "side_query".
+//
+// Stream toggles the delta-stream wire shape. When true the bridge emits
+// correlated "side_query/delta" notifications keyed by the originating
+// request id, followed by a terminating response on the same id. When
+// false/absent the bridge does the legacy block-and-return.
 type sideQueryParams struct {
 	Question string `json:"question"`
 	Model    string `json:"model,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Effort   string `json:"effort,omitempty"`
+	Stream   bool   `json:"stream,omitempty"`
 }
 
 // setSessionDataParams maps to "set_session_data".
@@ -150,10 +158,32 @@ type restartSessionParams struct {
 // Bridge-method result shapes
 // ---------------------------------------------------------------------------
 
-// SideQueryResult is the result of a "side_query" bridge call.
+// SideQueryResult is the result of a "side_query" bridge call. Blocks and
+// FinishReason were added with the streaming wire shape (see
+// docs/design/streaming-side-query.md); they are emitted for stream:true
+// requests and remain zero/empty for legacy callers, who only inspect
+// {ok, text}. Extensions ignoring these fields stay forward-compatible.
 type SideQueryResult struct {
-	Ok   bool   `json:"ok"`
-	Text string `json:"text"`
+	Ok           bool                 `json:"ok"`
+	Text         string               `json:"text"`
+	Blocks       []agent.BlockSummary `json:"blocks,omitempty"`
+	FinishReason string               `json:"finish_reason,omitempty"`
+}
+
+// SideQueryDeltaParams is the params shape of a "side_query/delta" outbound
+// notification. The wire definition for streaming side_query — see
+// docs/design/streaming-side-query.md "Wire protocol".
+//
+// RequestID is the JSON-RPC id of the originating side_query request; the
+// terminating response will arrive on that same id. Type is one of
+// "text", "thinking", "usage"; the relevant payload field is populated.
+// Seq is a strictly increasing per-request counter starting at 0.
+type SideQueryDeltaParams struct {
+	RequestID int    `json:"request_id"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	TokensOut int    `json:"tokens_out,omitempty"`
+	Seq       int    `json:"seq"`
 }
 
 // GetSessionDataResult is the result of "get_session_data".

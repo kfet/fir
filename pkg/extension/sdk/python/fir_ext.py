@@ -494,6 +494,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue as _queue
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -1069,9 +1070,17 @@ class SideQueryParams(TypedDict, total=False):
     effort: str   # "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 
 
+class SideQueryBlock(TypedDict, total=False):
+    type: str
+    len: int
+    sig_len: int
+
+
 class SideQueryResult(TypedDict, total=False):
     ok: bool
     text: str
+    blocks: list[SideQueryBlock]
+    finish_reason: str
 
 
 class SetSessionDataParams(TypedDict, total=False):
@@ -2247,6 +2256,156 @@ def _alloc_id() -> int:
         return _next_id
 
 
+# Default per-RPC (blocking) / per-delta (streaming) timeout for side_query.
+# Raised from the legacy 120s to 600s; advisor-tier opus with medium thinking
+# routinely overshoots two minutes on a multi-KB prompt. Honors the
+# FIR_SIDE_QUERY_TIMEOUT env var so users can dial without code changes.
+_DEFAULT_SIDE_QUERY_TIMEOUT = 600.0
+
+
+def _default_side_query_timeout() -> float:
+    raw = os.environ.get("FIR_SIDE_QUERY_TIMEOUT", "").strip()
+    if not raw:
+        return _DEFAULT_SIDE_QUERY_TIMEOUT
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_SIDE_QUERY_TIMEOUT
+
+
+# Sentinel pushed into a SideQueryStream's queue by the dispatcher when the
+# terminating response arrives. Single shared instance — identity check only.
+_SIDE_QUERY_END = object()
+
+
+@dataclass
+class SideQueryDelta:
+    """One streaming event from :py:meth:`Context.side_query_stream`.
+
+    ``type`` is one of ``"text"``, ``"thinking"``, or ``"usage"``. The
+    relevant payload field is populated: ``text`` for text/thinking,
+    ``tokens_out`` for usage. Unknown future types are still surfaced —
+    callers should ignore deltas whose ``type`` they don't recognise.
+
+    ``seq`` is the strictly-increasing per-request sequence number,
+    starting at 0. ``raw`` carries the full notification params dict in
+    case the host adds fields we don't model yet.
+    """
+
+    type: str
+    text: str = ""
+    tokens_out: int = 0
+    seq: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+class SideQueryStream:
+    """Iterable + result holder for a streaming side_query.
+
+    Yielded items are :class:`SideQueryDelta` objects. After iteration
+    ends, ``.result`` holds the final :class:`SideQueryResult` (a dict
+    with ``text``, ``blocks``, ``finish_reason``) — or ``None`` if the
+    stream was abandoned via :py:meth:`close` before completion.
+
+    The iterator's deadline is *per delta*: every incoming event resets
+    the clock. Total wall-clock duration is unbounded as long as the host
+    keeps streaming. If no event arrives within ``idle_timeout`` seconds,
+    :class:`TimeoutError` is raised on the next ``next()`` call.
+    """
+
+    def __init__(
+        self,
+        rid: int,
+        queue_: _queue.Queue[Any],
+        pending: dict[int, threading.Event],
+        results: dict[int, Any],
+        delta_queues: dict[int, Any],
+        idle_timeout: float,
+    ):
+        self._rid = rid
+        self._queue = queue_
+        self._pending = pending
+        self._results = results
+        self._delta_queues = delta_queues
+        self._idle_timeout = idle_timeout
+        self._closed = False
+        self.result: SideQueryResult | None = None
+        self.error: str | None = None
+
+    def __iter__(self) -> SideQueryStream:
+        return self
+
+    def __next__(self) -> SideQueryDelta:
+        if self._closed:
+            raise StopIteration
+        try:
+            item = self._queue.get(timeout=self._idle_timeout)
+        except _queue.Empty:
+            self._close()
+            raise TimeoutError(
+                f"side_query_stream: no delta within {self._idle_timeout}s"
+            ) from None
+        if item is _SIDE_QUERY_END:
+            self._finalize()
+            raise StopIteration
+        return _delta_from_params(item)
+
+    def collect(self) -> str:
+        """Consume the stream and return the full assistant text.
+
+        Equivalent to looping the iterator and discarding deltas, then
+        returning ``self.result["text"]``. Raises :class:`RuntimeError`
+        if the host returned an error.
+        """
+        for _ in self:
+            pass
+        if self.error is not None:
+            raise RuntimeError(self.error)
+        if self.result is None:
+            return ""
+        return self.result.get("text", "")
+
+    def close(self) -> None:
+        """Abandon the stream, releasing its dispatcher slot.
+
+        After close, any further deltas for this rid are silently dropped
+        by the dispatcher (orphan). The terminating response, if it
+        arrives later, is also dropped. Idempotent.
+        """
+        self._close()
+
+    def _close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._delta_queues.pop(self._rid, None)
+        self._pending.pop(self._rid, None)
+        # Drop any already-arrived terminal response so it can't pile up
+        # in the results dict indefinitely.
+        self._results.pop(self._rid, None)
+
+    def _finalize(self) -> None:
+        resp = self._results.pop(self._rid, None)
+        if resp and "error" in resp:
+            self.error = resp["error"].get("message", "unknown error")
+        elif resp:
+            r = resp.get("result")
+            if isinstance(r, dict):
+                self.result = r  # type: ignore[assignment]
+        self._close()
+
+
+def _delta_from_params(params: dict[str, Any]) -> SideQueryDelta:
+    """Convert a side_query/delta notification's params into SideQueryDelta."""
+    return SideQueryDelta(
+        type=str(params.get("type", "")),
+        text=str(params.get("text", "") or ""),
+        tokens_out=int(params.get("tokens_out", 0) or 0),
+        seq=int(params.get("seq", 0) or 0),
+        raw=dict(params),
+    )
+
+
 class Context:
     """Provides outbound RPC helpers for extension → fir communication.
 
@@ -2256,16 +2415,19 @@ class Context:
     _out: WriteStream | None
     _pending: dict[int, threading.Event]
     _results: dict[int, Any]
+    _delta_queues: dict[int, Any]
 
     def __init__(
         self,
         output_stream: WriteStream | None = None,
         pending: dict[int, threading.Event] | None = None,
         results: dict[int, Any] | None = None,
+        delta_queues: dict[int, Any] | None = None,
     ):
         self._out = output_stream
         self._pending = pending if pending is not None else {}
         self._results = results if results is not None else {}
+        self._delta_queues = delta_queues if delta_queues is not None else {}
         # tool_call_id is set by the SDK dispatcher for the lifetime of
         # a tool_call handler, "" otherwise. Mirrors the value the host
         # stamps on observable cards via put_observable; handlers can
@@ -2524,7 +2686,7 @@ class Context:
     def side_query(
         self,
         question: str,
-        timeout: float = 120.0,
+        timeout: float | None = None,
         model: str | None = None,
         provider: str | None = None,
         effort: str | None = None,
@@ -2533,6 +2695,12 @@ class Context:
 
         Makes a one-shot LLM call with no tools and no history persistence.
         Returns the full response text. Blocks until the response is complete.
+
+        The default per-RPC ``timeout`` is **600 seconds**, overridable with
+        the ``FIR_SIDE_QUERY_TIMEOUT`` environment variable (seconds).
+        Pass ``timeout`` explicitly to override both. Use
+        :py:meth:`side_query_stream` when you need true no-timeout
+        behavior — its deadline resets on every delta.
 
         Optional overrides:
           model    Model id to route the side query to (e.g. ``"claude-opus-4-x"``).
@@ -2546,6 +2714,8 @@ class Context:
         These are used by the ``aside`` extension to implement the
         "advisor" pattern — escalating a side query to a stronger model.
         """
+        if timeout is None:
+            timeout = _default_side_query_timeout()
         params: dict[str, Any] = {"question": question}
         if model:
             params["model"] = model
@@ -2557,6 +2727,69 @@ class Context:
         if isinstance(result, dict):
             return result.get("text", "")
         return ""
+
+    def side_query_stream(
+        self,
+        question: str,
+        model: str | None = None,
+        provider: str | None = None,
+        effort: str | None = None,
+        idle_timeout: float | None = None,
+    ) -> SideQueryStream:
+        """Streaming flavor of :py:meth:`side_query`.
+
+        Returns a :class:`SideQueryStream` — an iterable yielding
+        :class:`SideQueryDelta` objects (``.type`` ∈ ``"text"``,
+        ``"thinking"``, ``"usage"``) as the host streams them, then ending
+        when the terminating response arrives. The full
+        :class:`SideQueryResult` is available on ``.result`` once the
+        iterator is exhausted.
+
+        Unlike the blocking flavor, the deadline is *per delta*: each
+        incoming event resets the clock, so a long-running advisor that
+        keeps producing tokens cannot trip a wall-clock timeout. Override
+        the per-delta idle timeout with ``idle_timeout`` (defaults to the
+        same value as :py:meth:`side_query`'s timeout).
+
+        Example::
+
+            stream = ctx.side_query_stream("question", model="...")
+            for delta in stream:
+                if delta.type == "thinking":
+                    ctx.report_progress(f"thinking… ({len(delta.text)} chars)")
+            text = stream.result["text"]
+
+        For the simple "I just want the text but with no wall-clock
+        timeout" case, call ``stream.collect()`` instead of iterating.
+        """
+        if idle_timeout is None:
+            idle_timeout = _default_side_query_timeout()
+        rid = _alloc_id()
+        q: _queue.Queue[Any] = _queue.Queue()
+        self._delta_queues[rid] = q
+        # Register the rid in _pending too so the dispatcher's terminal
+        # event.set() finds something (harmless) and so a future caller
+        # who introspects _pending sees the slot. The streaming iterator
+        # itself polls the queue; no thread blocks on the event.
+        self._pending[rid] = threading.Event()
+
+        params: dict[str, Any] = {"question": question, "stream": True}
+        if model:
+            params["model"] = model
+        if provider:
+            params["provider"] = provider
+        if effort:
+            params["effort"] = effort
+        _write_message(_make_request(rid, "side_query", params), self._out)
+
+        return SideQueryStream(
+            rid=rid,
+            queue_=q,
+            pending=self._pending,
+            results=self._results,
+            delta_queues=self._delta_queues,
+            idle_timeout=idle_timeout,
+        )
 
     def report_progress(self, message: str) -> None:
         """Send a transient progress message to the UI.
@@ -2888,8 +3121,18 @@ def run(
     # Pending outbound requests (extension→fir)
     pending: dict[int, threading.Event] = {}
     results: dict[int, Any] = {}
+    # Per-request delta queues for streaming RPCs (side_query_stream).
+    # Populated when a SideQueryStream is created; dispatcher pushes
+    # side_query/delta notifications keyed by request_id; sentinel
+    # _SIDE_QUERY_END is pushed when the terminating response arrives.
+    delta_queues: dict[int, Any] = {}
 
-    ctx = Context(output_stream=out, pending=pending, results=results)
+    ctx = Context(
+        output_stream=out,
+        pending=pending,
+        results=results,
+        delta_queues=delta_queues,
+    )
     _cli_host = Host(out=out)
 
     # Worker threads for handlers that may call back into fir
@@ -3372,9 +3615,28 @@ def run(
                 _track_worker(t)
             return
 
+        # --- streaming side_query deltas (notification, no id) ---
+        # Correlated to the originating side_query request via params.request_id.
+        # Unknown rids are dropped silently — they are orphans from a stream
+        # the SDK already abandoned via SideQueryStream.close().
+        if method == "side_query/delta":
+            rid = params.get("request_id")
+            if isinstance(rid, int):
+                q = delta_queues.get(rid)
+                if q is not None:
+                    q.put(params)
+            return
+
         # --- response to an outbound request we made ---
         if msg_id is not None and "method" not in msg:
             results[msg_id] = msg
+            # If this rid has a delta queue (a streaming call), wake the
+            # iterator by pushing the terminal sentinel. The stream
+            # finalizer pulls the response out of results on next().
+            if isinstance(msg_id, int):
+                q = delta_queues.get(msg_id)
+                if q is not None:
+                    q.put(_SIDE_QUERY_END)
             event = pending.get(msg_id)
             if event:
                 event.set()

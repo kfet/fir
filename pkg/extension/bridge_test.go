@@ -87,6 +87,24 @@ func (m *mockBridgeAPI) SideQuery(question string, opts *session.SideQueryOption
 	m.mu.Unlock()
 	return "mock response", nil
 }
+
+func (m *mockBridgeAPI) SideQueryStream(question string, opts *session.SideQueryOptions, onDelta func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	m.mu.Lock()
+	m.sideQueryQuestion = question
+	m.sideQueryOpts = opts
+	m.mu.Unlock()
+	// Emit a couple of deltas so streaming tests can observe wire shape.
+	if onDelta != nil {
+		onDelta(session.SideQueryDelta{Type: "thinking", Text: "thinking…"})
+		onDelta(session.SideQueryDelta{Type: "text", Text: "mock "})
+		onDelta(session.SideQueryDelta{Type: "text", Text: "response"})
+		onDelta(session.SideQueryDelta{Type: "usage", TokensOut: 42})
+	}
+	return session.SideQueryResult{
+		Text:         "mock response",
+		FinishReason: "stop",
+	}, nil
+}
 func (m *mockBridgeAPI) Exec(cmd string, args []string) (ExecResult, error) {
 	m.execCalled = true
 	m.execCmd = cmd
@@ -147,6 +165,11 @@ type slowSideQueryAPI struct {
 func (s *slowSideQueryAPI) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {
 	time.Sleep(s.delay)
 	return s.mockBridgeAPI.SideQuery(question, opts)
+}
+
+func (s *slowSideQueryAPI) SideQueryStream(question string, opts *session.SideQueryOptions, onDelta func(session.SideQueryDelta)) (session.SideQueryResult, error) {
+	time.Sleep(s.delay)
+	return s.mockBridgeAPI.SideQueryStream(question, opts, onDelta)
 }
 
 // pipePair creates a Bridge connected via pipes (no real process).
@@ -334,6 +357,136 @@ func TestBridge_CallHook_ActivityStopsTimeoutFires(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("expected timeout error, got: %v", err)
+	}
+}
+
+func TestBridge_SideQuery_StreamEmitsDeltasAndResponse(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// Send a streaming side_query (stream:true). The mock API will emit
+	// thinking/text/text/usage deltas and a final stop result.
+	params := json.RawMessage(`{"question":"q","stream":true}`)
+	if err := extCodec.WriteRequest(42, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect a sequence of notifications followed by a response on id=42.
+	var deltas []*Notification
+	var resp *Response
+	for {
+		msg, err := extCodec.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		switch m := msg.(type) {
+		case *Notification:
+			deltas = append(deltas, m)
+		case *Response:
+			resp = m
+		}
+		if resp != nil {
+			break
+		}
+		if len(deltas) > 16 {
+			t.Fatalf("got %d deltas without a response", len(deltas))
+		}
+	}
+
+	if resp.Error != nil {
+		t.Fatalf("expected ok response, got error: %v", resp.Error)
+	}
+	if len(deltas) == 0 {
+		t.Fatal("expected at least one side_query/delta notification")
+	}
+
+	// Every delta must be method=side_query/delta, params.request_id=42,
+	// and seq must be monotonically increasing from 0.
+	wantSeq := 0
+	sawText := false
+	sawUsage := false
+	for _, n := range deltas {
+		if n.Method != "side_query/delta" {
+			t.Errorf("delta method = %q, want side_query/delta", n.Method)
+			continue
+		}
+		var p SideQueryDeltaParams
+		if err := json.Unmarshal(*n.Params, &p); err != nil {
+			t.Fatalf("delta params: %v", err)
+		}
+		if p.RequestID != 42 {
+			t.Errorf("request_id = %d, want 42", p.RequestID)
+		}
+		if p.Seq != wantSeq {
+			t.Errorf("seq = %d, want %d", p.Seq, wantSeq)
+		}
+		wantSeq++
+		switch p.Type {
+		case "text":
+			sawText = true
+		case "usage":
+			sawUsage = true
+		}
+	}
+	if !sawText {
+		t.Error("expected at least one text delta")
+	}
+	if !sawUsage {
+		t.Error("expected a usage delta")
+	}
+
+	// Terminal response carries text + finish_reason in our extended shape.
+	var r SideQueryResult
+	if err := json.Unmarshal(*resp.Result, &r); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !r.Ok {
+		t.Error("result.ok should be true")
+	}
+	if r.Text != "mock response" {
+		t.Errorf("result.text = %q", r.Text)
+	}
+	if r.FinishReason != "stop" {
+		t.Errorf("result.finish_reason = %q", r.FinishReason)
+	}
+}
+
+func TestBridge_SideQuery_NonStreamMatchesLegacyShape(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	// stream:false (absent) — must produce zero notifications and a
+	// response body whose JSON is the legacy {ok, text} shape only.
+	params := json.RawMessage(`{"question":"q"}`)
+	if err := extCodec.WriteRequest(9, "side_query", &params); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok || resp.Error != nil {
+		t.Fatalf("expected ok Response, got %+v", msg)
+	}
+
+	// The raw JSON of the legacy response must not introduce blocks /
+	// finish_reason fields when the caller didn't ask for streaming.
+	raw := string(*resp.Result)
+	if strings.Contains(raw, "blocks") || strings.Contains(raw, "finish_reason") {
+		t.Errorf("non-streaming response leaked streaming fields: %s", raw)
+	}
+	if !strings.Contains(raw, `"text":"mock response"`) {
+		t.Errorf("non-streaming response missing legacy text field: %s", raw)
 	}
 }
 

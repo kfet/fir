@@ -29,6 +29,11 @@ type BridgeAPI interface {
 	SetModel(model *ai.Model) bool
 	ContinueSession() error
 	SideQuery(question string, opts *session.SideQueryOptions) (string, error)
+	// SideQueryStream is the streaming flavor of SideQuery. onDelta is
+	// called for each text/thinking/usage delta as the LLM streams; nil
+	// makes it equivalent to SideQuery. Returns the full result on
+	// completion. Same NO-COMPACTION contract as SideQuery.
+	SideQueryStream(question string, opts *session.SideQueryOptions, onDelta func(session.SideQueryDelta)) (session.SideQueryResult, error)
 	RegisterTool(def ToolDefinition)
 	// SetSessionData stores a key/value pair in the extension's session data
 	// store.  Values are persisted across /reexec via the reexec sidecar and

@@ -410,12 +410,48 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			}
 		}
 		stop := b.keepAlive()
-		text, err := api.SideQuery(p.Question, opts)
-		stop()
-		if err != nil {
-			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		if p.Stream {
+			// Streaming flavor — push each delta back to the extension as
+			// a "side_query/delta" notification correlated to this
+			// request's id, then send the terminating response below.
+			reqIDInt := jsonRPCIDAsInt(req.ID)
+			var seq int
+			onDelta := func(d session.SideQueryDelta) {
+				params := SideQueryDeltaParams{
+					RequestID: reqIDInt,
+					Type:      d.Type,
+					Text:      d.Text,
+					TokensOut: d.TokensOut,
+					Seq:       seq,
+				}
+				seq++
+				// Errors here are unrecoverable from the LLM stream's
+				// perspective — the extension will see the missing
+				// notifications and either time out or get a final
+				// response. We deliberately swallow the write error to
+				// keep the LLM stream draining cleanly.
+				_ = codec.WriteNotification("side_query/delta", params)
+			}
+			res, err := api.SideQueryStream(p.Question, opts, onDelta)
+			stop()
+			if err != nil {
+				rpcErr = &Error{Code: -32000, Message: err.Error()}
+			} else {
+				result = SideQueryResult{
+					Ok:           true,
+					Text:         res.Text,
+					Blocks:       res.Blocks,
+					FinishReason: res.FinishReason,
+				}
+			}
 		} else {
-			result = SideQueryResult{Ok: true, Text: text}
+			text, err := api.SideQuery(p.Question, opts)
+			stop()
+			if err != nil {
+				rpcErr = &Error{Code: -32000, Message: err.Error()}
+			} else {
+				result = SideQueryResult{Ok: true, Text: text}
+			}
 		}
 
 	case "set_session_data":
@@ -555,6 +591,25 @@ func (b *Bridge) handleNotification(n *Notification, api BridgeAPI) {
 	case "provider.stream.event":
 		b.handleProviderStreamEvent(n.Params)
 	}
+}
+
+// jsonRPCIDAsInt converts a JSON-RPC id (decoded as any) into an int when
+// possible. Returns 0 for non-numeric or absent ids; the request_id field
+// in side_query/delta notifications then echoes 0, which still uniquely
+// identifies "the call that has no id" for a given SDK session.
+func jsonRPCIDAsInt(id any) int {
+	switch v := id.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	}
+	return 0
 }
 
 // routeResponse delivers an inbound response to the waiting caller.

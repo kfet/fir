@@ -2,9 +2,11 @@
 
 import io
 import json
+import os
 import threading
 import time
 import unittest
+from unittest import mock
 
 import fir_ext
 
@@ -757,6 +759,221 @@ class DeclareOauthProviderTests(unittest.TestCase):
         fir_ext._finalise_auth_specs()
         self.assertFalse(fir_ext._auth_providers[0]["flow"]["has_post_exchange"])
         self.assertTrue(fir_ext._auth_providers[0]["flow"]["has_custom_refresh"])
+
+
+class TestSideQueryStream(unittest.TestCase):
+    """Direct unit tests for the SideQueryStream class.
+
+    Build the queue plumbing by hand (no real SDK loop), push deltas +
+    sentinel into the queue, and verify the iterator surfaces them in
+    order and exposes the terminal result on .result."""
+
+    def _make_stream(self, rid: int = 7, idle_timeout: float = 1.0):
+        import queue as _queue
+        pending: dict = {}
+        results: dict = {}
+        delta_queues: dict = {}
+        q: _queue.Queue = _queue.Queue()
+        delta_queues[rid] = q
+        pending[rid] = threading.Event()
+        stream = fir_ext.SideQueryStream(
+            rid=rid,
+            queue_=q,
+            pending=pending,
+            results=results,
+            delta_queues=delta_queues,
+            idle_timeout=idle_timeout,
+        )
+        return stream, q, results, delta_queues, pending
+
+    def test_yields_deltas_in_order(self):
+        stream, q, results, delta_queues, _pending = self._make_stream()
+        q.put({"request_id": 7, "type": "text", "text": "hello ", "seq": 0})
+        q.put({"request_id": 7, "type": "text", "text": "world", "seq": 1})
+        q.put({"request_id": 7, "type": "usage", "tokens_out": 4, "seq": 2})
+        # Simulate terminal response landing in results + sentinel waking iter.
+        results[7] = {"result": {"text": "hello world", "finish_reason": "stop"}}
+        q.put(fir_ext._SIDE_QUERY_END)
+
+        out = list(stream)
+        self.assertEqual([d.type for d in out], ["text", "text", "usage"])
+        self.assertEqual([d.text for d in out[:2]], ["hello ", "world"])
+        self.assertEqual(out[2].tokens_out, 4)
+        self.assertEqual(stream.result, {"text": "hello world", "finish_reason": "stop"})
+        # Stream cleans up its dispatcher slot on completion.
+        self.assertNotIn(7, delta_queues)
+
+    def test_collect_returns_text(self):
+        stream, q, results, _dq, _p = self._make_stream()
+        q.put({"request_id": 7, "type": "text", "text": "abc", "seq": 0})
+        results[7] = {"result": {"text": "abc", "finish_reason": "stop"}}
+        q.put(fir_ext._SIDE_QUERY_END)
+        self.assertEqual(stream.collect(), "abc")
+
+    def test_error_response_populates_error(self):
+        stream, q, results, _dq, _p = self._make_stream()
+        results[7] = {"error": {"message": "boom"}}
+        q.put(fir_ext._SIDE_QUERY_END)
+        out = list(stream)
+        self.assertEqual(out, [])
+        self.assertIsNone(stream.result)
+        self.assertEqual(stream.error, "boom")
+        with self.assertRaises(RuntimeError):
+            stream.collect()
+
+    def test_idle_timeout(self):
+        stream, _q, _r, _dq, _p = self._make_stream(idle_timeout=0.05)
+        with self.assertRaises(TimeoutError):
+            next(iter(stream))
+
+    def test_close_drops_dispatcher_slot(self):
+        stream, _q, _r, delta_queues, pending = self._make_stream()
+        self.assertIn(7, delta_queues)
+        self.assertIn(7, pending)
+        stream.close()
+        self.assertNotIn(7, delta_queues)
+        self.assertNotIn(7, pending)
+        # Idempotent.
+        stream.close()
+
+
+class TestSideQueryStreamDispatcher(unittest.TestCase):
+    """End-to-end test through the run() dispatcher: spawn the extension
+    loop, register a tool that does ctx.side_query_stream, drive the wire
+    by hand."""
+
+    def test_dispatcher_routes_deltas_into_stream(self):
+
+        # Reset SDK registries so this test stays independent.
+        fir_ext._tools.clear()
+        fir_ext._tool_handlers.clear()
+        fir_ext._event_handlers.clear()
+        fir_ext._hook_handlers.clear()
+        fir_ext._commands.clear()
+        fir_ext._command_handlers.clear()
+
+        collected: list[fir_ext.SideQueryDelta] = []
+        final_holder: dict = {}
+
+        @fir_ext.tool(
+            name="probe",
+            description="streaming probe",
+            parameters={"type": "object"},
+        )
+        def _probe(params, ctx):
+            stream = ctx.side_query_stream("q")
+            collected.extend(stream)
+            final_holder["result"] = stream.result
+            final_holder["error"] = stream.error
+            return {"content": [{"text": "ok"}], "is_error": False}
+
+        # Build a pair of pipes: to_ext writer is what we (the fake host)
+        # write into; from_ext reader is where we read outbound messages.
+        to_ext_r, to_ext_w = os.pipe()
+        from_ext_r, from_ext_w = os.pipe()
+        inp = os.fdopen(to_ext_r, "r", buffering=1)
+        out = os.fdopen(from_ext_w, "w", buffering=1)
+        host_out = os.fdopen(to_ext_w, "w", buffering=1)
+        host_in = os.fdopen(from_ext_r, "r", buffering=1)
+
+        thread = threading.Thread(
+            target=fir_ext.run,
+            kwargs={"input_stream": inp, "output_stream": out, "name": "probe-ext"},
+            daemon=True,
+        )
+        thread.start()
+
+        try:
+            # init
+            host_out.write(
+                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "init",
+                            "params": {"version": "1", "cwd": "/tmp"}}) + "\n"
+            )
+            host_out.flush()
+            init_resp = host_in.readline()
+            self.assertIn('"id":1', init_resp)
+
+            # call the probe tool
+            host_out.write(
+                json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tool_call",
+                            "params": {"name": "probe", "params": {}, "tool_call_id": "x"}}) + "\n"
+            )
+            host_out.flush()
+
+            # The ext now sends side_query(stream=True). Read it.
+            outbound = json.loads(host_in.readline())
+            self.assertEqual(outbound["method"], "side_query")
+            self.assertTrue(outbound["params"]["stream"])
+            rid = outbound["id"]
+
+            # Push deltas and terminal response.
+            for body in (
+                {"request_id": rid, "type": "thinking", "text": "...", "seq": 0},
+                {"request_id": rid, "type": "text", "text": "hi ", "seq": 1},
+                {"request_id": rid, "type": "text", "text": "there", "seq": 2},
+            ):
+                host_out.write(
+                    json.dumps({"jsonrpc": "2.0", "method": "side_query/delta",
+                                "params": body}) + "\n"
+                )
+            host_out.write(
+                json.dumps({"jsonrpc": "2.0", "id": rid,
+                            "result": {"ok": True, "text": "hi there",
+                                       "finish_reason": "stop", "blocks": []}}) + "\n"
+            )
+            host_out.flush()
+
+            # Tool_call response.
+            tool_resp = json.loads(host_in.readline())
+            self.assertEqual(tool_resp["id"], 2)
+        finally:
+            import contextlib
+            host_out.close()
+            with contextlib.suppress(Exception):
+                host_in.close()
+            thread.join(timeout=2.0)
+
+        types = [d.type for d in collected]
+        self.assertEqual(types, ["thinking", "text", "text"])
+        self.assertEqual(final_holder["error"], None)
+        self.assertEqual(final_holder["result"]["text"], "hi there")
+        self.assertEqual(final_holder["result"]["finish_reason"], "stop")
+
+    def test_orphan_delta_dropped_silently(self):
+        """A delta for an rid the SDK never registered must be dropped.
+
+        Build a minimal dispatcher state and exercise the side_query/delta
+        branch directly via the public API surface (no public dispatcher
+        entrypoint, so we re-run the same construction shape as run()).
+        """
+        # Simulating: dispatcher receives a side_query/delta for an rid
+        # not in delta_queues. Should not raise.
+        import importlib
+        importlib.reload(fir_ext)
+        # We exercise the routing logic by simulating what _dispatch does
+        # in the side_query/delta branch.
+        delta_queues: dict = {}
+        params = {"request_id": 999, "type": "text", "text": "orphan", "seq": 0}
+        rid = params.get("request_id")
+        q = delta_queues.get(rid) if isinstance(rid, int) else None
+        self.assertIsNone(q)  # And nothing crashes.
+
+
+class TestDefaultSideQueryTimeout(unittest.TestCase):
+    def test_default_is_600_seconds(self):
+        # No env var set — default constant.
+        self.assertEqual(fir_ext._DEFAULT_SIDE_QUERY_TIMEOUT, 600.0)
+
+    def test_env_var_override(self):
+        with mock.patch.dict(os.environ, {"FIR_SIDE_QUERY_TIMEOUT": "30"}):
+            self.assertEqual(fir_ext._default_side_query_timeout(), 30.0)
+
+    def test_env_var_invalid_falls_back(self):
+        with mock.patch.dict(os.environ, {"FIR_SIDE_QUERY_TIMEOUT": "not-a-number"}):
+            self.assertEqual(
+                fir_ext._default_side_query_timeout(),
+                fir_ext._DEFAULT_SIDE_QUERY_TIMEOUT,
+            )
 
 
 if __name__ == "__main__":

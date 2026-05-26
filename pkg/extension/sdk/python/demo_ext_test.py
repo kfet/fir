@@ -159,7 +159,34 @@ class FakeFir:
                 "is_error": False,
             }
         elif method == "side_query":
-            result = {"ok": True, "text": "mock synthesis"}
+            params_in = msg.get("params") or {}
+            if params_in.get("stream"):
+                # Streaming flavor — emit a couple of deltas then the
+                # terminating response on the same id.
+                def _notif(body):
+                    self._to_ext.put(
+                        json.dumps(
+                            {
+                                "jsonrpc": "2.0",
+                                "method": "side_query/delta",
+                                "params": body,
+                            }
+                        )
+                        + "\n"
+                    )
+
+                _notif({"request_id": rid, "type": "thinking", "text": "mulling…", "seq": 0})
+                _notif({"request_id": rid, "type": "text", "text": "mock ", "seq": 1})
+                _notif({"request_id": rid, "type": "text", "text": "synthesis", "seq": 2})
+                _notif({"request_id": rid, "type": "usage", "tokens_out": 7, "seq": 3})
+                result = {
+                    "ok": True,
+                    "text": "mock synthesis",
+                    "blocks": [{"type": "text", "len": 14}],
+                    "finish_reason": "stop",
+                }
+            else:
+                result = {"ok": True, "text": "mock synthesis"}
         elif method == "list_tools":
             result = [
                 {"name": "bash", "description": "mock"},
@@ -550,6 +577,30 @@ class TestDemoTools(DemoTestCase):
         result = resp["result"]
         # The mock side_query returns "mock synthesis" — could be wrapped in content
         self.assertIsNotNone(result)
+        fake.stop()
+
+    def test_batch_example_uses_side_query_stream(self) -> None:
+        """batch_example calls side_query_stream (when present on Context) and
+        receives deltas from the host before the terminal response."""
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        resp = fake.send_tool_call(2, "batch_example", {"directory": "/tmp/proj"})
+        # The outbound side_query call must carry stream:true so FakeFir
+        # emits deltas.
+        msg = fake.wait_for_method("side_query")
+        self.assertIsNotNone(msg)
+        assert msg is not None
+        self.assertTrue(msg["params"].get("stream"), "expected stream:true on side_query")
+        # The fake emits a few report_progress notifications as the
+        # iterator consumes text deltas.
+        progress = fake.wait_for_method("report_progress")
+        self.assertIsNotNone(progress, "expected progress updates during streaming")
+        # Final tool result is the synthesised text from the stream's
+        # terminating response.
+        self.assertIsNotNone(resp)
+        assert resp is not None
+        self.assertIsNone(resp.get("error"))
         fake.stop()
 
     def test_batch_example_with_extra_instructions(self) -> None:
