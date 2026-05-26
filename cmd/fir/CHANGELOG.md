@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-05-26
+
 ### Added
 
 - Streaming `side_query` flavor across the extension API. New `ctx.side_query_stream(...)` Python SDK method returns an iterable yielding `SideQueryDelta` objects (text/thinking/usage) as the host streams them, with a final `SideQueryResult` on `.result`. Each delta resets the per-RPC deadline, so long-running advisor calls cannot trip the timeout. The blocking `ctx.side_query(...)` flavor keeps its byte-for-byte wire shape, but its default timeout is bumped from 120s to 600s and now honors `FIR_SIDE_QUERY_TIMEOUT` (seconds). Wire protocol uses correlated `side_query/delta` notifications keyed by the originating request id in `params.request_id`; SDK ignores unknown delta `type`s for forward compatibility. Spec: `docs/design/streaming-side-query.md`.
