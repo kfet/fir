@@ -4,6 +4,18 @@ on:
   push:
     tags:
       - "v*"
+  # Manual re-run for a specific release. Useful when the original
+  # tag-push trigger was missed (e.g. GitHub Actions outage) or when
+  # we need to re-publish a tag's assets without retagging. The job
+  # checks out the resolved tag and feeds it to GoReleaser + mirror
+  # so the run is byte-equivalent to a fresh tag push.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.50.0). Leave empty to use the latest tag.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -12,9 +24,39 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Resolve the effective release tag:
+      #   - push:   github.ref_name (the pushed tag)
+      #   - manual: inputs.tag, or the latest tag if blank
+      # Exported via $GITHUB_ENV so downstream steps reference $TAG.
+      - name: Resolve release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PUSH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            TAG="$PUSH_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG=$(gh api "/repos/${{ github.repository }}/tags" --jq '.[0].name')
+            if [ -z "$TAG" ]; then
+              echo "::error::no tags found on repository"
+              exit 1
+            fi
+          fi
+          echo "Resolved tag: $TAG"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          # Check out the resolved tag so GoReleaser builds the right
+          # commit. fetch-depth: 0 preserves tag visibility for
+          # `git describe` inside GoReleaser.
+          ref: ${{ env.TAG }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -66,7 +108,8 @@ jobs:
         env:
           MIRROR_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
           SOURCE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          # TAG comes from the "Resolve release tag" step's $GITHUB_ENV
+          # export — works for both push and workflow_dispatch.
           MIRROR_REPO: kfet/fir-dist
           SOURCE_REPO: ${{ github.repository }}
         run: |
