@@ -102,7 +102,7 @@ func NewToolExecutionComponent(
 	// the tool's colored background box.
 	if displayHint != nil && !useBox && ui != nil {
 		tc.ui = ui
-		tc.spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		tc.spinnerFrames = []string{"|", "/", "-", "\\"}
 		tc.spinnerDone = make(chan struct{})
 		tc.spinnerTicker = time.NewTicker(80 * time.Millisecond)
 		go tc.runSpinner()

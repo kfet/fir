@@ -2,6 +2,7 @@ package components
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func TestLoader_SpinnerFrames(t *testing.T) {
 	// Check spinner char is one of the frames
 	spinner := lines1[1]
 	hasFrame := false
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frames := []string{"|", "/", "-", "\\"}
 	for _, f := range frames {
 		if strings.Contains(spinner, f) {
 			hasFrame = true
@@ -103,5 +104,94 @@ func TestLoader_SpinnerFrames(t *testing.T) {
 	}
 	if !hasFrame {
 		t.Errorf("expected spinner frame in output, got %q", spinner)
+	}
+}
+
+func TestLoader_AppendsElapsedAfterThreshold(t *testing.T) {
+	ui := &mockUI{}
+	l := NewLoader(ui, identity, identity, "Inferring...")
+	defer l.Stop()
+
+	// Advance the virtual clock past the threshold.
+	base := l.StartedAt()
+	l.SetClock(func() time.Time { return base.Add(45 * time.Second) })
+
+	l.mu.Lock()
+	l.updateDisplay()
+	l.mu.Unlock()
+
+	lines := l.Render(80)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Inferring... 45s") {
+		t.Errorf("expected elapsed counter '45s' appended, got %q", joined)
+	}
+}
+
+func TestLoader_NoElapsedBeforeThreshold(t *testing.T) {
+	ui := &mockUI{}
+	l := NewLoader(ui, identity, identity, "Inferring...")
+	defer l.Stop()
+
+	base := l.StartedAt()
+	l.SetClock(func() time.Time { return base.Add(10 * time.Second) })
+	l.mu.Lock()
+	l.updateDisplay()
+	l.mu.Unlock()
+
+	lines := l.Render(80)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "10s") {
+		t.Errorf("expected no elapsed counter before threshold, got %q", joined)
+	}
+}
+
+func TestLoader_SetMessageResetsElapsed(t *testing.T) {
+	ui := &mockUI{}
+	l := NewLoader(ui, identity, identity, "phase1")
+	defer l.Stop()
+
+	base := l.StartedAt()
+	// Simulate 50s elapsed, then SetMessage — clock advances by another 5s.
+	var nowMu sync.Mutex
+	now := base.Add(50 * time.Second)
+	l.SetClock(func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	})
+	l.SetMessage("phase2")
+	// startedAt is now reset to 'now'. Advance only 5s more — below threshold.
+	nowMu.Lock()
+	now = now.Add(5 * time.Second)
+	nowMu.Unlock()
+	l.mu.Lock()
+	l.updateDisplay()
+	l.mu.Unlock()
+
+	lines := l.Render(80)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "5s") || strings.Contains(joined, "55s") {
+		t.Errorf("SetMessage should reset elapsed; got %q", joined)
+	}
+}
+
+func TestFormatElapsed(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{30 * time.Second, "30s"},
+		{59 * time.Second, "59s"},
+		{60 * time.Second, "1m00s"},
+		{125 * time.Second, "2m05s"},
+		{3600 * time.Second, "1h00m"},
+		{3660 * time.Second, "1h01m"},
+	}
+	for _, c := range cases {
+		got := formatElapsed(c.in)
+		if got != c.want {
+			t.Errorf("formatElapsed(%v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

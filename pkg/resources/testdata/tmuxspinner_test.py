@@ -3,6 +3,7 @@
 
 import os
 import sys
+import threading
 import time
 import unittest
 from unittest import mock
@@ -34,6 +35,9 @@ for k in ("TMUX", "TMUX_PANE"):
 with mock.patch.object(fir_ext, "run"):
     import tmuxspinner
 
+# Keep lifecycle tests fast; production uses a one-second tmux title tick.
+tmuxspinner.TICK_INTERVAL = 0.01
+
 # Restore env.
 os.environ.update(_orig_env)
 
@@ -42,32 +46,52 @@ class TestStripSpinnerSuffix(unittest.TestCase):
     def test_no_suffix(self):
         self.assertEqual(tmuxspinner._strip_spinner_suffix("fir"), "fir")
 
-    def test_one_spinner_char(self):
-        self.assertEqual(tmuxspinner._strip_spinner_suffix("fir ⠋"), "fir")
-
-    def test_multiple_spinner_chars(self):
-        # Should strip one at a time, but since they're always single char + space:
-        self.assertEqual(tmuxspinner._strip_spinner_suffix("fir ⠋"), "fir")
-
-    def test_stacked_suffixes(self):
-        # The while loop strips ALL trailing spinner suffixes.
-        self.assertEqual(tmuxspinner._strip_spinner_suffix("fir ⠋ ⠙"), "fir")
-
     def test_empty_string(self):
         self.assertEqual(tmuxspinner._strip_spinner_suffix(""), "")
 
-    def test_only_spinner(self):
-        # " ⠋" has len 2, last char is braille, second-to-last is space.
-        self.assertEqual(tmuxspinner._strip_spinner_suffix(" ⠋"), "")
-
-    def test_braille_range_boundary(self):
-        # \u2800 is the lowest braille char.
-        self.assertEqual(tmuxspinner._strip_spinner_suffix("x \u2800"), "x")
-        # \u28ff is the highest braille char.
-        self.assertEqual(tmuxspinner._strip_spinner_suffix("x \u28ff"), "x")
-
-    def test_non_braille_not_stripped(self):
+    def test_non_glyph_not_stripped(self):
         self.assertEqual(tmuxspinner._strip_spinner_suffix("fir A"), "fir A")
+
+    def test_counter_suffix_no_match(self):
+        self.assertEqual(
+            tmuxspinner._strip_spinner_suffix("fir foo bar"), "fir foo bar"
+        )
+
+    def test_strip_glyph_only(self):
+        # Each of the spinner frames is peeled when preceded by a space.
+        for frame in tmuxspinner.SPINNER_FRAMES:
+            self.assertEqual(tmuxspinner._strip_spinner_suffix(f"fir {frame}"), "fir")
+            self.assertEqual(
+                tmuxspinner._strip_spinner_suffix(f"fir mysess {frame}"), "fir mysess"
+            )
+
+
+class TestTrimAndFit(unittest.TestCase):
+    def test_trim_to_width_unchanged_when_short(self):
+        self.assertEqual(tmuxspinner._trim_to_width("short", 10), "short")
+
+    def test_trim_to_width_adds_ellipsis(self):
+        out = tmuxspinner._trim_to_width("abcdef", 4)
+        self.assertEqual(out, "abc…")
+        self.assertLessEqual(len(out), 4)
+
+    def test_fit_title_preserves_status_drops_tab(self):
+        title = tmuxspinner._fit_title(
+            "very-long-window-name-from-shell", "", "|"
+        )
+        self.assertLessEqual(len(title), tmuxspinner.MAX_TITLE_LEN)
+        self.assertTrue(title.endswith(" |"))
+        self.assertIn("…", title)
+
+    def test_fit_title_keeps_session_drops_tab(self):
+        # Long tab, short session — tab should be trimmed/dropped, session kept whole.
+        title = tmuxspinner._fit_title("very-long-tab-name", "ms", "|")
+        self.assertLessEqual(len(title), tmuxspinner.MAX_TITLE_LEN)
+        self.assertIn("ms |", title)
+
+    def test_fit_title_three_part_fits(self):
+        title = tmuxspinner._fit_title("fir", "sess", "|")
+        self.assertEqual(title, "fir sess |")
 
 
 class TestInTmux(unittest.TestCase):
@@ -161,6 +185,45 @@ class TestSpinnerBasic(unittest.TestCase):
             mock_rn.assert_not_called()
 
 
+class TestSpinnerRender(unittest.TestCase):
+    def test_render_title_basic(self):
+        s = tmuxspinner.Spinner()
+        s._original_name = "fir"
+        self.assertEqual(s._render_title(), f"fir {tmuxspinner.SPINNER_FRAMES[0]}")
+
+    def test_render_title_with_session(self):
+        s = tmuxspinner.Spinner()
+        s._original_name = "fir"
+        s._session_name = "mysess"
+        self.assertEqual(s._render_title(), f"fir mysess {tmuxspinner.SPINNER_FRAMES[0]}")
+
+    def test_render_title_drops_tab_first_when_overflow(self):
+        # Session + status fits, but with the tab the title would overflow.
+        s = tmuxspinner.Spinner()
+        s._original_name = "very-long-window-name-from-shell"  # 32 chars
+        s._session_name = "mysess-with-extra-padding-chars"
+        title = s._render_title()
+        self.assertLessEqual(len(title), tmuxspinner.MAX_TITLE_LEN)
+        # Session and status must survive; tab is trimmed or dropped.
+        self.assertTrue(title.endswith(" " + tmuxspinner.SPINNER_FRAMES[0]))
+
+    def test_render_title_trims_long_base(self):
+        s = tmuxspinner.Spinner()
+        s._original_name = "very-long-window-name-from-shell"
+        title = s._render_title()
+        self.assertLessEqual(len(title), tmuxspinner.MAX_TITLE_LEN)
+        self.assertTrue(title.endswith(" " + tmuxspinner.SPINNER_FRAMES[0]))
+
+    def test_render_title_advances_glyph(self):
+        s = tmuxspinner.Spinner()
+        s._original_name = "fir"
+        with s._lock:
+            t1 = s._title_locked(advance_frame=True)
+            t2 = s._title_locked(advance_frame=True)
+        self.assertEqual(t1[-1], tmuxspinner.SPINNER_FRAMES[1])
+        self.assertEqual(t2[-1], tmuxspinner.SPINNER_FRAMES[2])
+
+
 class TestSpinnerStartStop(unittest.TestCase):
     """Test start/stop lifecycle with mocked tmux calls."""
 
@@ -173,7 +236,7 @@ class TestSpinnerStartStop(unittest.TestCase):
             s.start()
             self.assertTrue(s._running)
             # Let spinner loop iterate at least once.
-            time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
+            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.stop()
             self.assertFalse(s._running)
             # Last rename should restore the display name (original + session).
@@ -188,7 +251,7 @@ class TestSpinnerStartStop(unittest.TestCase):
 
         with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn:
             s.start()
-            time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
+            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.stop()
             last_call = mock_rn.call_args
             # stop() keeps session name in display
@@ -224,24 +287,29 @@ class TestSpinnerDetectsUserRename(unittest.TestCase):
         s._original_name = "fir"
 
         rename_calls = []
+        renamed_event = threading.Event()
 
         def fake_rename(target, name):
             rename_calls.append(name)
+            renamed_event.set()
 
         read_count = [0]
+        user_renamed_seen = threading.Event()
 
         def fake_read(target):
             read_count[0] += 1
             if read_count[0] >= 2:
-                # Simulate user renaming the window.
+                user_renamed_seen.set()
                 return "user-renamed"
             return rename_calls[-1] if rename_calls else "fir"
 
         with mock.patch.object(tmuxspinner, "_rename_window", side_effect=fake_rename):
             with mock.patch.object(tmuxspinner, "_read_window_name", side_effect=fake_read):
                 s.start()
-                # Wait for a few iterations.
-                time.sleep(tmuxspinner.SPIN_INTERVAL * 5)
+                # Wait deterministically for the loop to observe the user rename.
+                self.assertTrue(user_renamed_seen.wait(timeout=2.0))
+                # Give the loop one more iteration to apply the update.
+                time.sleep(tmuxspinner.TICK_INTERVAL * 3)
                 s.stop()
                 self.assertEqual(s._original_name, "user-renamed")
 
@@ -289,7 +357,7 @@ class TestSpinnerShutdown(unittest.TestCase):
         with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
              mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset:
             s.start()
-            time.sleep(tmuxspinner.SPIN_INTERVAL * 2)
+            time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.shutdown()
             self.assertFalse(s._running)
             # Should restore original name WITHOUT session suffix.

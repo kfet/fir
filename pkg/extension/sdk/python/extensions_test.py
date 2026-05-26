@@ -42,20 +42,17 @@ class TestStripSpinnerSuffix(unittest.TestCase):
     def test_plain(self):
         self.assertEqual(self._strip("hello"), "hello")
 
-    def test_single_suffix(self):
-        self.assertEqual(self._strip("fir ⠋"), "fir")
-
-    def test_multiple_suffixes(self):
-        self.assertEqual(self._strip("fir ⠋ ⠙"), "fir")
-
     def test_empty(self):
         self.assertEqual(self._strip(""), "")
 
-    def test_just_braille(self):
-        self.assertEqual(self._strip(" ⠋"), "")
+    def test_no_space_before_glyph(self):
+        self.assertEqual(self._strip("fir◐"), "fir◐")
 
-    def test_no_space_before_braille(self):
-        self.assertEqual(self._strip("fir⠋"), "fir⠋")
+    def test_glyph_suffix(self):
+        # Each of the spinner frames is peeled when preceded by a space.
+        for frame in _tmuxspinner.SPINNER_FRAMES:
+            self.assertEqual(self._strip(f"fir {frame}"), "fir")
+            self.assertEqual(self._strip(f"fir mysess {frame}"), "fir mysess")
 
 
 class TestNotifyFormats(unittest.TestCase):

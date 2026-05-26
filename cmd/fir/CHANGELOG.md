@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `tmuxspinner` extension overhauled: the timer-driven braille spinner is replaced with a box-drawing spinner glyph (`│ ╱ ─ ╲`, U+2502/2571/2500/2572) in the tmux window title. Title layout: `{tab} {session} {glyph}` (e.g. `fir mysess │`). The glyph cycles at 1 Hz as a peripheral-vision liveness cue. Box Drawing is the Unicode block screen readers (NVDA/VoiceOver/JAWS/Orca) commonly skip at normal verbosity, so a11y stays quiet. ASCII alternatives with a backslash frame don't survive tmux's `rename-window`, which runs titles through `strvis(3)` for terminal-escape-injection defense (cascades a literal backslash on every format-expand pass — tmux issue #2070). When the composed title exceeds 30 display columns, parts are dropped in priority order: tab first, then session — the glyph is always preserved. Crash-recovery via the stashed `@fir_original_name` window option still works. Pure stdlib — no `wcwidth` dependency, so the extension works on a fresh macOS install with no extra setup.
+- TUI loader (`pkg/tui/components/loader.go`) now uses an ASCII spinner (`| / - \`) instead of the braille frames, fixing tofu rendering in terminals/SSH sessions without the U+2800–U+28FF block. The same change is applied to the inline tool-execution spinner. After 30 s of spinning without a `SetMessage` (i.e. no streaming progress), the loader appends a compact elapsed counter (`Inferring... 45s`, `1m05s`, `1h05m`).
+
 ## [0.50.0] - 2026-05-26
 
 ### Added
@@ -15,7 +20,6 @@
 - "Response had no usable content" errors from `SimplePrompt` / `SideQuery` now include a per-block summary inline (e.g. `(blocks: [thinking(th=0,sig=940)])`), so callers can classify redacted-thinking failures without keeping the raw response. Previously the raw response was thrown away and the error was uninformative.
 
 ## [0.49.0] - 2026-05-25
-
 ### Added
 
 - `antigravity-models` skill (non-bundled, global): probes Google Antigravity's `/v1internal:streamGenerateContent` endpoint with stored OAuth creds to discover which model IDs are actually live, plus a companion scraper that pulls the desktop-app fingerprint (version, User-Agent, X-Goog-Api-Client) from `/Applications/Antigravity.app`. Antigravity has no public list-models endpoint and ships its menu via a server-pushed protobuf gRPC stream that isn't trivially replayable, so probing is the only reliable way to keep `pkg/resources/builtin_extensions/antigravity_auth.py` in sync. Status-code classifier: `200/400/429/500` → exists; `404` → missing. Run the probe whenever a new Gemini/Claude release lands or after an Antigravity desktop-app update; diff against `antigravity_auth.py` and apply changes.

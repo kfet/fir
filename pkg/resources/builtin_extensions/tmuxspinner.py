@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
 # ---
 # name: tmuxspinner
-# description: Animate a spinner in the tmux window name while the agent is working
+# description: Show agent work status in the tmux window name
 # builtin: true
 # modes: tui
 # ---
-"""Animate a spinner in the tmux window name while the agent is working.
+"""Show agent work status in the tmux window name while the agent is working.
 
 When the agent is idle, the original window name is restored.
 Uses `tmux rename-window` to set the window name.
 No-op when not running inside tmux ($TMUX unset).
 
-This is a Python port of pkg/extensions/tmuxspinner.
+Title layout while running:
+
+    {tab} {session} {glyph}
+
+A box-drawing spinner glyph (4 frames at codepoints U+2502, U+2571,
+U+2500, U+2572 — vertical, diagonal-up, horizontal, diagonal-down)
+cycles once per tick (1 Hz) as a peripheral-vision liveness cue. The Box
+Drawing block is the one Unicode range that NVDA, VoiceOver, JAWS, and
+Orca all commonly categorise as "drawing characters" and skip at normal
+verbosity, so a11y stays quiet. ASCII alternatives with a backslash frame
+don't survive tmux's `rename-window`: tmux runs the title through
+`strvis(3)` for terminal-escape-injection defense, which encodes a literal
+backslash as two backslashes (and cascades on every format-expand pass -
+tmux issue #2070).
+
+When the composed title exceeds MAX_TITLE_LEN columns, parts are dropped
+in priority order: tab first, then session; the glyph is always preserved.
 """
 
 import atexit
@@ -22,8 +38,9 @@ import threading
 
 import fir_ext
 
-FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-SPIN_INTERVAL = 0.15  # seconds
+TICK_INTERVAL = 1.0
+MAX_TITLE_LEN = 30
+SPINNER_FRAMES = ("│", "╱", "─", "╲")  # noqa: RUF001
 
 
 def _in_tmux():
@@ -66,14 +83,54 @@ def _unset_window_option(target, option):
     _run_tmux("set-window-option", "-t", target, "-u", option)
 
 
+def _trim_to_width(s, max_w):
+    """Trim to at most max_w columns, appending an ellipsis if trimmed.
+
+    Assumes ASCII / narrow chars — `len()` is used as the width function.
+    """
+    if max_w <= 0:
+        return ""
+    if len(s) <= max_w:
+        return s
+    ellipsis = "…"
+    if max_w <= len(ellipsis):
+        return ellipsis
+    return s[: max_w - len(ellipsis)] + ellipsis
+
+
+def _fit_title(tab, session, status, max_len=MAX_TITLE_LEN):
+    """Compose '<tab> <session> <status>' within max_len columns.
+
+    Drop priority (lowest first): tab, then session. The status block is
+    always preserved; only truncated if it alone exceeds max_len.
+    """
+    if len(status) >= max_len:
+        return _trim_to_width(status, max_len)
+
+    # Try increasingly-stripped prefixes. For each, fit-whole or trim the
+    # leftmost (lowest-priority) piece. If trimming would leave no room,
+    # drop the piece entirely and try the next combination.
+    for parts in ((tab, session, status), (session, status), (status,)):
+        parts = [p for p in parts if p]
+        if not parts:
+            continue
+        candidate = " ".join(parts)
+        if len(candidate) <= max_len:
+            return candidate
+        if len(parts) >= 2:
+            fixed = " ".join(parts[1:])
+            avail = max_len - len(fixed) - 1
+            if avail > 0:
+                trimmed = _trim_to_width(parts[0], avail)
+                if trimmed:
+                    return f"{trimmed} {fixed}"
+    return status
+
+
 def _strip_spinner_suffix(name):
-    """Remove trailing ' <braille>' suffixes."""
-    while len(name) >= 2:
-        last = name[-1]
-        if name[-2] == " " and "\u2800" <= last <= "\u28ff":
-            name = name[:-2]
-        else:
-            break
+    """Strip the trailing ' <glyph>' suffix we may have appended."""
+    if len(name) >= 2 and name[-2] == " " and name[-1] in SPINNER_FRAMES:
+        name = name[:-2]
     return name
 
 
@@ -81,17 +138,19 @@ class Spinner:
     def __init__(self):
         self._lock = threading.Lock()
         self._pane_id = ""
-        self._original_name = ""  # actual tmux window name (before fir touched it)
-        self._session_name = ""  # fir session name to append
+        self._original_name = ""  # actual tmux window name (tab) before fir touched it
+        self._session_name = ""  # fir session name
+        self._frame_idx = 0
+        self._last_set = ""
         self._stop_event = None
         self._thread = None
         self._running = False
 
     def _display_name(self):
-        """Compute display name: original window name with session name appended."""
-        if self._session_name:
+        """Idle display (no status block): tab + session, space-joined."""
+        if self._session_name and self._original_name:
             return f"{self._original_name} {self._session_name}"
-        return self._original_name
+        return self._session_name or self._original_name
 
     def _init_pane(self):
         """Initialise pane ID and original window name if not done yet. Caller holds lock."""
@@ -102,7 +161,7 @@ class Spinner:
                 # Recover stashed name from a previous session that crashed/was killed.
                 stashed = _get_window_option(self._pane_id, "@fir_original_name")
                 if stashed:
-                    self._original_name = stashed
+                    self._original_name = _strip_spinner_suffix(stashed)
                 else:
                     self._original_name = _strip_spinner_suffix(
                         _read_window_name(self._pane_id) or "fir"
@@ -110,27 +169,50 @@ class Spinner:
                 # Stash for crash recovery by future sessions.
                 _set_window_option(self._pane_id, "@fir_original_name", self._original_name)
 
+    def _title_locked(self, advance_frame=False):
+        if advance_frame:
+            self._frame_idx = (self._frame_idx + 1) % len(SPINNER_FRAMES)
+        status = SPINNER_FRAMES[self._frame_idx]
+        return _fit_title(self._original_name, self._session_name, status)
+
+    def _render_title(self):
+        """Render the current title. Intended for tests; does not rename tmux."""
+        with self._lock:
+            return self._title_locked()
+
+    def _rename_to_current_title(self, advance_frame=True):
+        with self._lock:
+            target = self._pane_id
+            if not target:
+                return ""
+            name = self._title_locked(advance_frame=advance_frame)
+
+        _rename_window(target, name)
+        with self._lock:
+            self._last_set = name
+        return name
+
     def set_session_name(self, name):
-        """Append the fir session name to the window name."""
+        """Update the fir session name component of the window title."""
         with self._lock:
             self._init_pane()
             old = self._session_name
             self._session_name = name
 
-            # If the original window name ends with the OLD session suffix
-            # (e.g. after a reexec where the previous process left it),
-            # strip it so we don't stack names.
-            if old and self._original_name.endswith(" " + old):
-                self._original_name = self._original_name[: -(len(old) + 1)]
+            # If the stashed/recovered original_name ends with the OLD or
+            # NEW session suffix (e.g. crash recovery from a previous fir
+            # process that had baked the session name into the window), peel
+            # it off so _display_name() doesn't double-print it.
+            for suffix in (old, name):
+                if suffix and self._original_name.endswith(" " + suffix):
+                    self._original_name = self._original_name[: -(len(suffix) + 1)]
 
-            # If the original window name ends with the NEW session suffix
-            # (e.g. reexec preserved "fir myname" and we're told name="myname"),
-            # strip it so _display_name() doesn't duplicate it.
-            if name and self._original_name.endswith(" " + name):
-                self._original_name = self._original_name[: -(len(name) + 1)]
+            pane = self._pane_id
+            should_rename = pane and not self._running
+            display_name = self._display_name()
 
-            if self._pane_id and not self._running:
-                _rename_window(self._pane_id, self._display_name())
+        if should_rename:
+            _rename_window(pane, display_name)
 
     def start(self):
         with self._lock:
@@ -140,10 +222,15 @@ class Spinner:
             if not self._pane_id:
                 return
 
+            self._frame_idx = 0
+            self._last_set = ""
             self._stop_event = threading.Event()
             self._running = True
             self._thread = threading.Thread(target=self._loop, daemon=True)
             self._thread.start()
+
+        # Show status promptly instead of waiting for the first one-second tick.
+        self._rename_to_current_title(advance_frame=False)
 
     def stop(self):
         with self._lock:
@@ -155,8 +242,9 @@ class Spinner:
             thread = self._thread
             pane = self._pane_id
             base = self._display_name()
+            self._last_set = ""
 
-        # Wait for the spinner loop to finish so no rename races with us.
+        # Wait for the ticker loop to finish so no rename races with us.
         if thread:
             thread.join(timeout=2)
 
@@ -165,8 +253,8 @@ class Spinner:
             _rename_window(pane, base)
 
     def shutdown(self):
-        """Full cleanup: stop spinner, restore original name, remove stashed state."""
-        # Stop the spinner loop first.
+        """Full cleanup: stop ticker, restore original name, remove stashed state."""
+        # Stop the ticker loop first.
         with self._lock:
             if self._running:
                 assert self._stop_event is not None
@@ -177,6 +265,7 @@ class Spinner:
                 thread = None
             pane = self._pane_id
             original = self._original_name
+            self._last_set = ""
 
         if thread:
             thread.join(timeout=2)
@@ -187,31 +276,20 @@ class Spinner:
 
     def _loop(self):
         assert self._stop_event is not None
-        i = 0
-        last_set = ""
-        while not self._stop_event.wait(SPIN_INTERVAL):
-            # Re-check after waking — stop() may have been called during the wait.
-            if self._stop_event.is_set():
-                break
-
+        while not self._stop_event.wait(TICK_INTERVAL):
             with self._lock:
                 target = self._pane_id
+                last_set = self._last_set
 
             # Detect user renames: if the window name changed from what we last set,
-            # update the original name (stripping any spinner suffix we may have added).
-            if last_set:
+            # update the original name (stripping any status suffix we may have added).
+            if target and last_set:
                 current = _read_window_name(target)
                 if current and current != last_set:
                     with self._lock:
                         self._original_name = _strip_spinner_suffix(current)
 
-            with self._lock:
-                base = self._display_name()
-
-            name = f"{base} {FRAMES[i % len(FRAMES)]}"
-            _rename_window(target, name)
-            last_set = name
-            i += 1
+            self._rename_to_current_title()
 
 
 def _has_controlling_terminal():
@@ -226,7 +304,7 @@ def _has_controlling_terminal():
 
 # Only activate if inside tmux AND we have a controlling terminal.
 # When fir is spawned as a subprocess (e.g. ACP mode), there's no
-# controlling terminal so the spinner stays dormant.
+# controlling terminal so the status updater stays dormant.
 if _in_tmux() and _has_controlling_terminal():
     _spinner = Spinner()
 
