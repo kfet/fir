@@ -105,7 +105,7 @@ Branch: `work/pluggable-providers`. Scope: an extension alone must be able to ad
 
 | File | Symbol | What it encodes | Fix |
 |---|---|---|---|
-| `pkg/ai/types.go` | `Provider*`/`Api*` constants | Just IDs; no switches. | Keep as docs of well-known IDs. Built-ins move them to providers/ subpkg; nothing else may grow this list. |
+| `pkg/ai/core/types.go` | `Provider*`/`Api*` constants (re-exported via `pkg/ai/aliases.go`) | Just IDs; no switches. | Keep as docs of well-known IDs. Built-ins move them to providers/ subpkg; nothing else may grow this list. |
 | `pkg/ai/envkeys/envkeys.go` | switch on provider→env-var | API-key env var name per provider | Replace with a registry: each provider self-registers an `EnvKeySpec` (primary + fallbacks + special "<authenticated>" providers like bedrock/vertex). |
 | `pkg/ai/oauth/registry.go` `builtInProviders` | sync.Map seeded by `init()` of each oauth provider file | Already pluggable — fine. | Keep. Document. |
 | `pkg/extension/capability.go` `builtinAuthProviderIDs` | hardcoded set of "reserved" auth provider IDs | Prevents extensions overriding built-ins by accident | Replace with `oauth.IsBuiltInProviderID(id)` derived from the registry's "built-in snapshot" set. |

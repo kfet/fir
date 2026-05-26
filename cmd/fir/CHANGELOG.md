@@ -45,6 +45,8 @@
   errors (auth/400/context-length) are surfaced to the user, never resumed.
 ### Changed
 
+- Portable AI primitives (`Message`, `Tool`, `Model`, `Usage`, `Context`, streaming types, etc.) moved from `pkg/ai` into a new `pkg/ai/core` subpackage; `pkg/ai` re-exports every symbol via type aliases so existing call sites are unchanged. Phase 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
+
 - `tools.NewPlanTool` now takes a minimal `PlanSink` interface plus an optional `CardPublisher` callback, dropping the `pkg/session/store` import from `pkg/agent/tools`. Fir's observable-card wiring moved to `pkg/session/plancard.go`. First slice of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`. A new `TestForbiddenImports` in `pkg/agent/` keeps the boundary from eroding. Behaviour is byte-identical for in-tree consumers.
 
 ### Fixed

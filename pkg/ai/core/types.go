@@ -1,6 +1,6 @@
 // Ported from: packages/ai/src/types.ts
 // Upstream hash: 036bde0a
-package ai
+package core
 
 import (
 	"context"

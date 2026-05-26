@@ -1,6 +1,6 @@
 // Ported from: packages/ai/src/utils/event-stream.ts
 // Upstream hash: 1caadb2e
-package ai
+package core
 
 import (
 	"sync"

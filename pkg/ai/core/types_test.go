@@ -1,6 +1,6 @@
 // Ported from: packages/ai/src/types.ts
 // Upstream hash: 1caadb2e
-package ai
+package core
 
 import (
 	"encoding/json"

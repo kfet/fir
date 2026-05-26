@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phase 1 complete; Phase 2 next.**
+Status: **Phase 1 complete; Phase 2 in progress.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -136,22 +136,34 @@ and the relocated helpers, drop the forbidden-imports test.
 Carve `pkg/ai` into:
 
 - Portable types: `Message`, `Tool`, `Usage`, `Context`, `Provider`,
-  `AssistantMessageEvent*`, `StreamFn`, `Model` (shape only — the
+  `AssistantMessageEvent*`, `StreamFunction`, `Model` (shape only — the
   generated catalog stays in fir).
 - Fir-resident: `models_generated.go`, `provider_registry_builtins.go`,
-  the OAuth registry helpers wired to specific fir providers.
+  the OAuth registry helpers wired to specific fir providers, `Registry`
+  (the API transport registry with its extension-source-tracking
+  policy), `stream.go` (uses `Registry`).
 
-Implementation strategy (TBD): either move types to a new subdirectory
-(`pkg/ai/core` or similar) and re-export from `pkg/ai`, or keep the
-existing path and tag the file boundary. Choice deferred until Phase 1
-lands and the call sites under `pkg/agent` are visible from the
-trimmed interface.
+**Implementation chosen (Phase 2 part 1):** subpackage move with
+re-export aliases.
 
-Acceptance: `pkg/agent` and `pkg/agent/tools` import only the portable
-subset.
+- `pkg/ai/types.go` and `pkg/ai/eventstream.go` moved verbatim to
+  `pkg/ai/core/` (package renamed `ai → core`).
+- `pkg/ai/aliases.go` re-exports every public symbol from core via
+  `type X = core.X`, `var X = core.X`, `const X = core.X`. The 150+
+  existing call sites see no change.
+- `pkg/ai/stream.go`, `registry.go`, `models.go`, `models_generated.go`,
+  `oauthreg.go`, `provider_registry*.go` stay in `pkg/ai` and continue
+  to reference types by their alias names.
 
-Rollback: revert the move; consumers continue using the original
-identifiers.
+`pkg/agent` and `pkg/agent/tools` still import `pkg/ai` after Phase 2
+part 1; switching them to `pkg/ai/core` directly is Phase 2 part 2 (or
+folded into Phase 3 alongside the `log/slog` rebase).
+
+Acceptance: `pkg/ai/core` builds standalone with no fir-side imports;
+all in-tree tests pass unchanged.
+
+Rollback: revert the move; re-merge `pkg/ai/aliases.go` content back
+into `types.go`/`eventstream.go`.
 
 ### Phase 3 — Rebase `pkg/agent` onto portable AI + `log/slog`
 

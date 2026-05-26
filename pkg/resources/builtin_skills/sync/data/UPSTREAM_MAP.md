@@ -14,9 +14,9 @@ fir has diverged enough that syncing them costs more than it saves.
 
 | TS Source (relative to `pi-mono/packages/`) | Go File | Status |
 |---|---|---|
-| `ai/src/types.ts` | `pkg/ai/types.go` | ✅ |
+| `ai/src/types.ts` | `pkg/ai/core/types.go` | ✅ |
 | `ai/src/stream.ts` | `pkg/ai/stream.go` | ✅ |
-| `ai/src/utils/event-stream.ts` | `pkg/ai/eventstream.go` | ✅ |
+| `ai/src/utils/event-stream.ts` | `pkg/ai/core/eventstream.go` | ✅ |
 | `ai/src/env-api-keys.ts` | `pkg/ai/envkeys.go` | ✅ |
 | `ai/src/api-registry.ts` | `pkg/ai/registry.go` | ✅ |
 | `ai/src/utils/overflow.ts` | `pkg/ai/overflow.go` | ✅ |
