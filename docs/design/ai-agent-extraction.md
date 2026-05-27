@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phases 1, 2, 3, and 3.5 complete; Phase 4 (bake-in-tree) next.**
+Status: **Phases 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -229,6 +229,35 @@ flows.
 
 No external extraction yet. The goal is to find ergonomics issues now,
 not after a `v0.1.0` tag freezes them.
+
+**Status: started.** `pkg/agent/doc.go` adds a package-level overview;
+`pkg/agent/example_test.go` provides the second internal consumer in
+the form of testable examples (`Example`, `ExampleAgent_SimplePrompt`,
+`ExampleDefaultStreamFn`, `ExampleClampThinkingLevel`). They drive the
+public API with a fake StreamFn and zero fir-side imports, proving
+the boundary is self-sufficient.
+
+Ergonomic friction surfaced while writing the examples is captured in
+`docs/design/ai-agent-extraction-phase4-feedback.md` for later review.
+No API changes land in this phase — that is the explicit point of
+baking the boundary in-tree.
+
+### Phase 4.5 — API polish (optional, pre-extraction)
+
+After Phase 4's bake-in, group the keepers from
+`docs/design/ai-agent-extraction-phase4-feedback.md` into a single
+API-polish commit. Each entry there records what hurt and what'd
+change; not every entry will earn a fix, and a "considered and
+rejected" section at the bottom documents the negative decisions so
+future reviewers don't re-litigate them.
+
+The slice ships before Phase 5 starts. Phase 5 is supposed to be
+mechanical extraction; mixing API churn into it would muddy the
+boundary between "what fir already lives with" and "what external
+consumers see".
+
+If no entries survive review, Phase 4.5 is a no-op and we go straight
+to Phase 5.
 
 ### Phase 5 — Extract
 

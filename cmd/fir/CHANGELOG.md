@@ -43,6 +43,10 @@
   fixed escalating schedule (30s, 1m, 1.75m, 2m, …), gives up after 20 minutes
   of continuous failure, and resets on the first successful turn. Terminal
   errors (auth/400/context-length) are surfaced to the user, never resumed.
+### Added
+
+- `pkg/agent/doc.go` documenting the package-level API surface, and `pkg/agent/example_test.go` with four testable examples (`Example`, `ExampleAgent_SimplePrompt`, `ExampleDefaultStreamFn`, `ExampleClampThinkingLevel`) that drive `pkg/agent` with a fake `StreamFn` and zero fir-side imports. This is the second internal consumer required by Phase 4 of the extraction plan; ergonomic friction surfaced during the exercise is captured in `docs/design/ai-agent-extraction-phase4-feedback.md` for later API polish.
+
 ### Changed
 
 - `pkg/agent` is now self-contained — its only fir-side import is `pkg/ai/core`. Phase 3.5 of the extraction refactor moved `AvailableThinkingLevelsForModel` to `pkg/session/thinkinglevels.go` (the fir-side model-ID knowledge belongs there) and replaced the default-StreamFn closure with an injectable `agent.DefaultStreamFn` hook installed by `pkg/session/defaultstream.go`. The forbidden-imports test now bans `pkg/ai` (with an explicit `pkg/ai/core` exemption). See `docs/design/ai-agent-extraction.md`.
