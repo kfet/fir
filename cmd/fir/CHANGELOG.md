@@ -18,6 +18,22 @@
   is hidden. New `ActionDismissAside` keybinding (`pkg/tui/keybindings.go`)
   and `ToolExecutionComponent.Dismiss`/`IsDismissable` (`pkg/modes/interactive/components/tool_execution.go`).
 
+- Phase 0 of the `kfet/ai` / `kfet/agent` extraction plan cleared: upstream `github.com/badlogic/pi-mono` is MIT-licensed (Mario Zechner, 2025). Documented in `docs/design/ai-agent-extraction.md`. No code change; this is the publication unblock — Phase 5 (mechanical extraction to external repos) is now decision-cleared and waits only on Phase 4 bake-in and Phase 4.5 polish.
+
+- `pkg/agent/doc.go` documenting the package-level API surface, and `pkg/agent/example_test.go` with four testable examples (`Example`, `ExampleAgent_SimplePrompt`, `ExampleDefaultStreamFn`, `ExampleClampThinkingLevel`) that drive `pkg/agent` with a fake `StreamFn` and zero fir-side imports. This is the second internal consumer required by Phase 4 of the extraction plan; ergonomic friction surfaced during the exercise is captured in `docs/design/ai-agent-extraction-phase4-feedback.md` for later API polish.
+
+### Changed
+
+- `pkg/agent` is now self-contained — its only fir-side import is `pkg/ai/core`. Phase 3.5 of the extraction refactor moved `AvailableThinkingLevelsForModel` to `pkg/session/thinkinglevels.go` (the fir-side model-ID knowledge belongs there) and replaced the default-StreamFn closure with an injectable `agent.DefaultStreamFn` hook installed by `pkg/session/defaultstream.go`. The forbidden-imports test now bans `pkg/ai` (with an explicit `pkg/ai/core` exemption). See `docs/design/ai-agent-extraction.md`.
+
+- `pkg/agent/tools` switched from `pkg/ai` to `pkg/ai/core` for all type references; `pkg/agent` switched its pure-type files (`types.go`, `loop.go`) the same way and kept `pkg/ai` only in `agent.go` and `clamp.go` where four fir-policy helpers (`ai.StreamSimple`, `ai.DefaultRegistry`, `ai.SupportsXhigh`, `ai.SupportsMax`) still live. Phase 2 part 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
+
+- `pkg/agent` and `pkg/agent/tools` no longer depend on fir's `pkg/log` — debug/warn calls now go through `log/slog` directly. Fir's `pkg/log.Init` already mirrors its handler onto `slog.SetDefault` so end-user log routing is unchanged. The `forbidden_imports_test` now bans `pkg/log` from the agent boundary. Phase 3 of the extraction refactor.
+
+- Portable AI primitives (`Message`, `Tool`, `Model`, `Usage`, `Context`, streaming types, etc.) moved from `pkg/ai` into a new `pkg/ai/core` subpackage; `pkg/ai` re-exports every symbol via type aliases so existing call sites are unchanged. Phase 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
+
+- `tools.NewPlanTool` now takes a minimal `PlanSink` interface plus an optional `CardPublisher` callback, dropping the `pkg/session/store` import from `pkg/agent/tools`. Fir's observable-card wiring moved to `pkg/session/plancard.go`. First slice of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`. A new `TestForbiddenImports` in `pkg/agent/` keeps the boundary from eroding. Behaviour is byte-identical for in-tree consumers.
+
 ## [0.55.0] - 2026-06-02
 
 ### Added
@@ -43,21 +59,6 @@
   fixed escalating schedule (30s, 1m, 1.75m, 2m, …), gives up after 20 minutes
   of continuous failure, and resets on the first successful turn. Terminal
   errors (auth/400/context-length) are surfaced to the user, never resumed.
-### Added
-
-- `pkg/agent/doc.go` documenting the package-level API surface, and `pkg/agent/example_test.go` with four testable examples (`Example`, `ExampleAgent_SimplePrompt`, `ExampleDefaultStreamFn`, `ExampleClampThinkingLevel`) that drive `pkg/agent` with a fake `StreamFn` and zero fir-side imports. This is the second internal consumer required by Phase 4 of the extraction plan; ergonomic friction surfaced during the exercise is captured in `docs/design/ai-agent-extraction-phase4-feedback.md` for later API polish.
-
-### Changed
-
-- `pkg/agent` is now self-contained — its only fir-side import is `pkg/ai/core`. Phase 3.5 of the extraction refactor moved `AvailableThinkingLevelsForModel` to `pkg/session/thinkinglevels.go` (the fir-side model-ID knowledge belongs there) and replaced the default-StreamFn closure with an injectable `agent.DefaultStreamFn` hook installed by `pkg/session/defaultstream.go`. The forbidden-imports test now bans `pkg/ai` (with an explicit `pkg/ai/core` exemption). See `docs/design/ai-agent-extraction.md`.
-
-- `pkg/agent/tools` switched from `pkg/ai` to `pkg/ai/core` for all type references; `pkg/agent` switched its pure-type files (`types.go`, `loop.go`) the same way and kept `pkg/ai` only in `agent.go` and `clamp.go` where four fir-policy helpers (`ai.StreamSimple`, `ai.DefaultRegistry`, `ai.SupportsXhigh`, `ai.SupportsMax`) still live. Phase 2 part 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
-
-- `pkg/agent` and `pkg/agent/tools` no longer depend on fir's `pkg/log` — debug/warn calls now go through `log/slog` directly. Fir's `pkg/log.Init` already mirrors its handler onto `slog.SetDefault` so end-user log routing is unchanged. The `forbidden_imports_test` now bans `pkg/log` from the agent boundary. Phase 3 of the extraction refactor.
-
-- Portable AI primitives (`Message`, `Tool`, `Model`, `Usage`, `Context`, streaming types, etc.) moved from `pkg/ai` into a new `pkg/ai/core` subpackage; `pkg/ai` re-exports every symbol via type aliases so existing call sites are unchanged. Phase 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
-
-- `tools.NewPlanTool` now takes a minimal `PlanSink` interface plus an optional `CardPublisher` callback, dropping the `pkg/session/store` import from `pkg/agent/tools`. Fir's observable-card wiring moved to `pkg/session/plancard.go`. First slice of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`. A new `TestForbiddenImports` in `pkg/agent/` keeps the boundary from eroding. Behaviour is byte-identical for in-tree consumers.
 
 ### Fixed
 

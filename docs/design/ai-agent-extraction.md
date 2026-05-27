@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phases 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release.**
+Status: **Phases 0, 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -59,17 +59,31 @@ four fir-policy helpers — Phase 3.5 closes that gap, after which
 
 Every `pkg/agent/*.go` carries a `// Ported from packages/agent/src/*.ts`
 header. Before any code can be published externally, the upstream
-license must be verified and the headers reconciled:
+license must be verified.
 
-- If the upstream license permits re-licensing under whatever we choose
-  for `kfet/agent`, phases 1–5 proceed as written.
-- If it forbids re-licensing, phases 1–4 still ship (the architectural
-  cleanup is valuable to fir on its own). Phase 5 then becomes a
-  clean-room rewrite using the in-tree-validated API, deferred to its
-  own design doc.
+**Status: cleared.** Upstream pi-mono (`github.com/badlogic/pi-mono`)
+is **MIT licensed** — single repo-root `LICENSE` plus matching
+`license: "MIT"` in every relevant `packages/*/package.json`
+(`packages/ai/`, `packages/agent/`, `packages/coding-agent/`,
+`packages/tui/`). Author/copyright holder: **Mario Zechner**.
 
-Phase 0 is the **only** publication blocker; it does not gate the
-in-tree refactor.
+Implications for `kfet/ai` and `kfet/agent` at extraction time:
+
+- License both repos as **MIT** (matches fir, matches upstream, no
+  copyleft propagation).
+- Each repo's `LICENSE` carries the fir copyright (Kalin Fetvadjiev,
+  current year).
+- Each repo's `LICENSE` (or a sibling `NOTICE` file) records the
+  upstream attribution: "Portions ported from pi-mono (MIT,
+  Copyright (c) 2025 Mario Zechner)". A one-paragraph note in the
+  README pointing at `github.com/badlogic/pi-mono` covers MIT's
+  attribution requirement.
+- The existing `// Ported from: packages/<pkg>/src/<file>.ts` header
+  comments stay — they're sub-file provenance and a useful
+  resync anchor.
+
+No further license action is needed before Phase 5. Phases 1–4.5 are
+unaffected.
 
 ## Phased execution
 
