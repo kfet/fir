@@ -489,10 +489,7 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 			}
 			text := extractUserText(um.Content)
 			if text != "" {
-				_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-					SessionId: sid,
-					Update:    acpsdk.UpdateUserMessageText(text),
-				})
+				_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateUserMessageText(text)))
 			}
 
 		case "assistant":
@@ -502,20 +499,11 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 			}
 			for _, c := range am.Content {
 				if c.IsText() && c.Text != nil {
-					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-						SessionId: sid,
-						Update:    acpsdk.UpdateAgentMessageText(c.Text.Text),
-					})
+					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateAgentMessageText(c.Text.Text)))
 				} else if c.IsServerContent() && c.Server != nil && c.Server.Display != "" {
-					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-						SessionId: sid,
-						Update:    acpsdk.UpdateAgentMessageText(c.Server.Display),
-					})
+					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateAgentMessageText(c.Server.Display)))
 				} else if c.IsThinking() && c.Thinking != nil {
-					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-						SessionId: sid,
-						Update:    acpsdk.UpdateAgentThoughtText(c.Thinking.Thinking),
-					})
+					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateAgentThoughtText(c.Thinking.Thinking)))
 				} else if c.IsToolCall() && c.ToolCall != nil {
 					tc := c.ToolCall
 					pendingTools[tc.ID] = pendingTool{name: tc.Name, args: tc.Arguments}
@@ -530,10 +518,7 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 					if len(locs) > 0 {
 						startOpts = append(startOpts, acpsdk.WithStartLocations(locs))
 					}
-					_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-						SessionId: sid,
-						Update:    acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitle(tc.Name, tc.Arguments), startOpts...),
-					})
+					_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.StartToolCall(acpsdk.ToolCallId(tc.ID), BuildToolTitle(tc.Name, tc.Arguments), startOpts...)))
 				}
 			}
 
@@ -575,10 +560,7 @@ func (pa *firAgent) replaySessionHistory(sessionID string, entry *firSession) {
 				updateOpts = append(updateOpts, acpsdk.WithUpdateLocations(locations))
 			}
 
-			_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: sid,
-				Update:    acpsdk.UpdateToolCall(acpsdk.ToolCallId(tr.ToolCallID), updateOpts...),
-			})
+			_ = pa.conn.SessionUpdate(context.Background(), entry.notification(sid, acpsdk.UpdateToolCall(acpsdk.ToolCallId(tr.ToolCallID), updateOpts...)))
 		}
 	}
 }
@@ -650,15 +632,9 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		msg := ev.AssistantMessageEvent
 		switch msg.Type {
 		case "text_delta":
-			_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: acpsdk.SessionId(sessionID),
-				Update:    acpsdk.UpdateAgentMessageText(msg.Delta),
-			})
+			_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateAgentMessageText(msg.Delta)))
 		case "thinking_delta":
-			_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-				SessionId: acpsdk.SessionId(sessionID),
-				Update:    acpsdk.UpdateAgentThoughtText(msg.Delta),
-			})
+			_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateAgentThoughtText(msg.Delta)))
 		}
 
 	case agent.EventToolExecutionStart:
@@ -683,10 +659,7 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			startOpts = append(startOpts, acpsdk.WithStartContent(initContent))
 		}
 
-		_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-			SessionId: acpsdk.SessionId(sessionID),
-			Update:    acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitle(ev.ToolName, argsMap), startOpts...),
-		})
+		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitle(ev.ToolName, argsMap), startOpts...)))
 
 	case agent.EventToolExecutionEnd:
 		var argsMap map[string]any
@@ -721,10 +694,7 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			}
 		}
 
-		_ = pa.conn.SessionUpdate(context.Background(), acpsdk.SessionNotification{
-			SessionId: acpsdk.SessionId(sessionID),
-			Update:    acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...),
-		})
+		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...)))
 
 	case agent.EventMessageEnd:
 		// Surface inference errors (e.g. Bedrock API failures) to the ACP client.
