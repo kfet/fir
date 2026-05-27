@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-05-26
+
 ### Changed
 
 - `tmuxspinner` extension overhauled: the timer-driven braille spinner is replaced with a box-drawing spinner glyph (`│ ╱ ─ ╲`, U+2502/2571/2500/2572) in the tmux window title. Title layout: `{tab} {session} {glyph}` (e.g. `fir mysess │`). The glyph cycles at 1 Hz as a peripheral-vision liveness cue. Box Drawing is the Unicode block screen readers (NVDA/VoiceOver/JAWS/Orca) commonly skip at normal verbosity, so a11y stays quiet. ASCII alternatives with a backslash frame don't survive tmux's `rename-window`, which runs titles through `strvis(3)` for terminal-escape-injection defense (cascades a literal backslash on every format-expand pass — tmux issue #2070). When the composed title exceeds 30 display columns, parts are dropped in priority order: tab first, then session — the glyph is always preserved. Crash-recovery via the stashed `@fir_original_name` window option still works. Pure stdlib — no `wcwidth` dependency, so the extension works on a fresh macOS install with no extra setup.
