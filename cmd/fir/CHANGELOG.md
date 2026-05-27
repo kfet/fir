@@ -45,6 +45,8 @@
   errors (auth/400/context-length) are surfaced to the user, never resumed.
 ### Changed
 
+- `pkg/agent` is now self-contained — its only fir-side import is `pkg/ai/core`. Phase 3.5 of the extraction refactor moved `AvailableThinkingLevelsForModel` to `pkg/session/thinkinglevels.go` (the fir-side model-ID knowledge belongs there) and replaced the default-StreamFn closure with an injectable `agent.DefaultStreamFn` hook installed by `pkg/session/defaultstream.go`. The forbidden-imports test now bans `pkg/ai` (with an explicit `pkg/ai/core` exemption). See `docs/design/ai-agent-extraction.md`.
+
 - `pkg/agent/tools` switched from `pkg/ai` to `pkg/ai/core` for all type references; `pkg/agent` switched its pure-type files (`types.go`, `loop.go`) the same way and kept `pkg/ai` only in `agent.go` and `clamp.go` where four fir-policy helpers (`ai.StreamSimple`, `ai.DefaultRegistry`, `ai.SupportsXhigh`, `ai.SupportsMax`) still live. Phase 2 part 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
 
 - `pkg/agent` and `pkg/agent/tools` no longer depend on fir's `pkg/log` — debug/warn calls now go through `log/slog` directly. Fir's `pkg/log.Init` already mirrors its handler onto `slog.SetDefault` so end-user log routing is unchanged. The `forbidden_imports_test` now bans `pkg/log` from the agent boundary. Phase 3 of the extraction refactor.

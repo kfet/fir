@@ -2,13 +2,10 @@
 // fir's product-shaped subsystems so they can eventually be extracted
 // as a standalone module (see docs/design/ai-agent-extraction.md).
 //
-// pkg/log was removed as a dependency in Phase 3 (firlog → log/slog).
-// pkg/ai (the fir-side catalog/registry surface) remains allowed only
-// because clamp.go and agent.go still reach into four fir-policy
-// helpers — ai.SupportsXhigh, ai.SupportsMax, ai.StreamSimple,
-// ai.DefaultRegistry. Those are scheduled to migrate out in Phase 3.5
-// (the next slice), after which pkg/ai joins this forbidden list and
-// agent depends only on pkg/ai/core.
+// pkg/ai joined the forbidden list in Phase 3.5 — the four residual
+// fir-policy helpers (StreamSimple, DefaultRegistry, SupportsXhigh,
+// SupportsMax) were removed from pkg/agent in that phase. pkg/agent
+// now depends only on pkg/ai/core, log/slog, and stdlib.
 
 package agent_test
 
@@ -33,6 +30,14 @@ var forbiddenPaths = []string{
 	"github.com/kfet/fir/pkg/resources",
 	"github.com/kfet/fir/pkg/models",
 	"github.com/kfet/fir/pkg/log",
+	"github.com/kfet/fir/pkg/ai",
+}
+
+// allowedPaths exempts specific subpackages from forbidden-prefix
+// propagation. pkg/ai is forbidden but pkg/ai/core is the portable
+// types subpackage — explicitly allowed.
+var allowedPaths = map[string]struct{}{
+	"github.com/kfet/fir/pkg/ai/core": {},
 }
 
 // targets lists the packages whose import sets are checked.
@@ -66,12 +71,16 @@ func TestForbiddenImports(t *testing.T) {
 			if _, ok := imported[banned]; ok {
 				t.Errorf("%s transitively imports forbidden package %s", target, banned)
 			}
-			// Subpackages are forbidden too.
+			// Subpackages are forbidden too, unless explicitly allowed.
 			prefix := banned + "/"
 			for path := range imported {
-				if strings.HasPrefix(path, prefix) {
-					t.Errorf("%s transitively imports forbidden package %s", target, path)
+				if !strings.HasPrefix(path, prefix) {
+					continue
 				}
+				if _, ok := allowedPaths[path]; ok {
+					continue
+				}
+				t.Errorf("%s transitively imports forbidden package %s", target, path)
 			}
 		}
 	}

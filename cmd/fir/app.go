@@ -326,7 +326,7 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 	if thinking == "" || s.Model() == nil {
 		return
 	}
-	available := agent.AvailableThinkingLevelsForModel(s.Model())
+	available := session.AvailableThinkingLevelsForModel(s.Model())
 	effective := string(agent.ClampThinkingLevel(thinking, available))
 	if effective != s.ThinkingLevel() {
 		firlog.Debug("thinking level", "requested", string(thinking), "clamped", effective)

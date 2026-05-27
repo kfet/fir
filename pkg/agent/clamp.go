@@ -1,10 +1,5 @@
 package agent
 
-import (
-	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/core"
-)
-
 // CanonicalThinkingLadder lists thinking levels from highest to lowest.
 // ClampThinkingLevel walks down this ladder when the requested level is not
 // available for a given model.
@@ -18,32 +13,7 @@ var CanonicalThinkingLadder = []ThinkingLevel{
 	ThinkingOff,
 }
 
-// AvailableThinkingLevelsForModel returns the thinking levels supported by
-// the given model. It mirrors AgentSession.GetAvailableThinkingLevels so the
-// same set of options is offered everywhere (CLI, ACP, interactive UI).
-//
-// A nil model or a non-reasoning model only supports ThinkingOff.
-func AvailableThinkingLevelsForModel(model *core.Model) []ThinkingLevel {
-	if model == nil || !model.Reasoning {
-		return []ThinkingLevel{ThinkingOff}
-	}
-	levels := []ThinkingLevel{
-		ThinkingOff,
-		ThinkingMinimal,
-		ThinkingLow,
-		ThinkingMedium,
-		ThinkingHigh,
-	}
-	if ai.SupportsXhigh(model) {
-		levels = append(levels, ThinkingXHigh)
-	}
-	if ai.SupportsMax(model) {
-		levels = append(levels, ThinkingMax)
-	}
-	return levels
-}
-
-// IsCanonicalThinkingLevel reports whether l is one of the recognised
+// ClampThinkingLevel reports whether l is one of the recognised
 // thinking levels (off, minimal, low, medium, high, xhigh, max).
 func IsCanonicalThinkingLevel(l ThinkingLevel) bool {
 	for _, c := range CanonicalThinkingLadder {

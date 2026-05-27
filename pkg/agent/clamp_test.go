@@ -1,10 +1,7 @@
 package agent
 
 import (
-	"reflect"
 	"testing"
-
-	"github.com/kfet/fir/pkg/ai/core"
 )
 
 func TestIsCanonicalThinkingLevel(t *testing.T) {
@@ -112,30 +109,5 @@ func TestClampThinkingLevel_UnknownLevel(t *testing.T) {
 	got2 := ClampThinkingLevel(ThinkingLevel("bogus"), avail2)
 	if got2 != ThinkingLevel("bogus") {
 		t.Errorf("got %q, want bogus", got2)
-	}
-}
-
-func TestAvailableThinkingLevelsForModel_Nil(t *testing.T) {
-	got := AvailableThinkingLevelsForModel(nil)
-	want := []ThinkingLevel{ThinkingOff}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestAvailableThinkingLevelsForModel_NonReasoning(t *testing.T) {
-	got := AvailableThinkingLevelsForModel(&core.Model{Reasoning: false})
-	want := []ThinkingLevel{ThinkingOff}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-func TestAvailableThinkingLevelsForModel_Reasoning(t *testing.T) {
-	// Plain reasoning model with no xhigh/max.
-	got := AvailableThinkingLevelsForModel(&core.Model{Reasoning: true})
-	want := []ThinkingLevel{ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
 	}
 }

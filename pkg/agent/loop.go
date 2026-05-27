@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai/core"
-	"github.com/kfet/fir/pkg/ai/ratelimit"
 )
 
 // AutoResumeMarker is the single-symbol user message the agent loop injects to
@@ -43,7 +42,7 @@ func isResumableStreamError(errMsg string) bool {
 	if strings.TrimSpace(errMsg) == "" {
 		return false
 	}
-	if ratelimit.IsTransientNetworkError(errMsg) {
+	if core.IsTransientNetworkError(errMsg) {
 		return true
 	}
 	// Stream truncation guards emitted by the providers / agent loop itself

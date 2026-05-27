@@ -1003,7 +1003,7 @@ func (s *AgentSession) RecordCommand(command, args string) {
 
 // GetAvailableThinkingLevels returns the thinking levels available for the current model.
 func (s *AgentSession) GetAvailableThinkingLevels() []agent.ThinkingLevel {
-	return agent.AvailableThinkingLevelsForModel(s.Model())
+	return AvailableThinkingLevelsForModel(s.Model())
 }
 
 // SetHooks sets the extension hooks and wraps the agent's tools with hook interception.

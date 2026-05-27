@@ -11,9 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/core"
-	"github.com/kfet/fir/pkg/ai/ratelimit"
 )
 
 // simplePromptRetryBackoffs controls retries of a single-shot SimplePrompt /
@@ -267,6 +265,31 @@ func (a *Agent) SetMaxRetryDelayMs(ms *int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.maxRetryDelayMs = ms
+}
+
+// DefaultStreamFn is consulted when an Agent's per-instance StreamFn is
+// nil. Hosts (typically fir's pkg/session) install a factory here that
+// closes over their provider registry; external consumers of pkg/agent
+// either pass StreamFn explicitly or set DefaultStreamFn themselves.
+//
+// The factory receives the call-site context.Context so the closure it
+// returns can thread cancellation through to the provider stream.
+//
+// A nil DefaultStreamFn plus a nil per-call StreamFn yields a
+// "no stream function configured" error from Prompt / SimplePrompt.
+var DefaultStreamFn func(ctx context.Context) StreamFn
+
+// resolveStreamFn returns the effective StreamFn for the given context
+// and per-call override, falling back to DefaultStreamFn. Returns nil
+// when neither is set.
+func resolveStreamFn(ctx context.Context, override StreamFn) StreamFn {
+	if override != nil {
+		return override
+	}
+	if DefaultStreamFn != nil {
+		return DefaultStreamFn(ctx)
+	}
+	return nil
 }
 
 // SetStreamFn overrides the stream function used for LLM calls.
@@ -657,10 +680,9 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 		return "", nil, fmt.Errorf("no model selected")
 	}
 
+	streamFn = resolveStreamFn(ctx, streamFn)
 	if streamFn == nil {
-		streamFn = func(m *core.Model, c core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
-			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, opts)
-		}
+		return "", nil, fmt.Errorf("no stream function configured: set agent.DefaultStreamFn or pass SimplePromptOptions.StreamFn")
 	}
 
 	if convertToLLM == nil {
@@ -716,7 +738,7 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 			lastErr = fmt.Errorf("%s", msg.ErrorMessage)
 			// Only transport/stream errors are worth a re-roll; a genuine
 			// model/API rejection (400, auth, context-length) is terminal.
-			if !ratelimit.IsRetryableError(msg.ErrorMessage) {
+			if !core.IsRetryableError(msg.ErrorMessage) {
 				return "", msg, lastErr
 			}
 			// Transport error — keep the original reasoning level on retry.
@@ -937,11 +959,17 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 	}
 	copy(agentCtx.Messages, a.state.Messages)
 
-	streamFn := a.streamFn
+	streamFn := resolveStreamFn(ctx, a.streamFn)
 	if streamFn == nil {
-		streamFn = func(m *core.Model, c core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
-			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, opts)
-		}
+		// No stream function: surface the error through agent state
+		// and abort before kicking off the loop goroutine.
+		a.state.IsStreaming = false
+		a.state.Error = "no stream function configured: set agent.DefaultStreamFn or AgentOptions.StreamFn"
+		cancel()
+		a.abortCancel = nil
+		close(idleCh)
+		a.mu.Unlock()
+		return
 	}
 
 	skipSteering := skipInitialSteeringPoll

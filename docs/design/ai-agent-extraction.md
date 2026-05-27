@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phases 1, 2 part 1, 2 part 2, and 3 (slog rebase) complete; Phase 3.5 next.**
+Status: **Phases 1, 2, 3, and 3.5 complete; Phase 4 (bake-in-tree) next.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -195,19 +195,30 @@ hook, then add `pkg/ai` to the forbidden-imports list.
 
 ### Phase 3.5 — Eliminate residual `pkg/ai` coupling
 
-Two cuts:
+Two cuts, both shipped:
 
-1. Move `AvailableThinkingLevelsForModel` out of `pkg/agent/clamp.go`
-   into a fir-side helper (`pkg/session` or `pkg/models`). The agent
-   keeps the canonical ladder and `ClampThinkingLevel`; the host
-   computes the available set for any given `*core.Model`.
-2. Remove the default StreamFn from `pkg/agent/agent.go`. Either make
-   `StreamFn` required (caller-set) or expose an injectable hook the
-   host fills at init. Fir-side wiring constructs the closure that
-   calls `ai.StreamSimple` against `ai.DefaultRegistry`.
+1. `AvailableThinkingLevelsForModel` moved out of `pkg/agent/clamp.go`
+   into `pkg/session/thinkinglevels.go`. The agent keeps the canonical
+   ladder plus `IsCanonicalThinkingLevel` and `ClampThinkingLevel`; the
+   host computes the available set for any `*core.Model`. Two callers
+   (`cmd/fir/app.go` and `pkg/session/agentsession.go`) updated to use
+   the session-side helper. Tests moved alongside.
 
-Acceptance: `pkg/agent` directly imports only `pkg/ai/core`, `log/slog`,
-and stdlib. `pkg/ai` joins the forbidden-imports list.
+2. The default StreamFn closure in `pkg/agent/agent.go` removed.
+   Replaced by `agent.DefaultStreamFn func(ctx context.Context) StreamFn`,
+   a package-level factory hook. When a per-call StreamFn is nil and
+   `DefaultStreamFn` is also nil, the agent surfaces a clear
+   "no stream function configured" error via the agent state.
+   `pkg/session/defaultstream.go` installs the fir-side default
+   (calling `ai.StreamSimple` against `ai.DefaultRegistry`) in its
+   `init()`, so existing fir call sites keep working without changing
+   their `AgentOptions`.
+
+After these cuts, `pkg/agent` and `pkg/agent/tools` import only
+`pkg/ai/core`, `log/slog`, and stdlib. The forbidden-imports test
+gained `pkg/ai` to the banned list (with an `allowedPaths` exemption
+for the `pkg/ai/core` subpackage that the prefix-match would otherwise
+catch).
 
 ### Phase 4 — Bake the boundary in-tree
 
