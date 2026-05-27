@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
-	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/ai/core"
+	"log/slog"
 )
 
 // WriteToolParams are the parameters for the write tool.
@@ -22,7 +22,7 @@ type WriteToolParams struct {
 // NewWriteTool creates the write tool for the given working directory.
 func NewWriteTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name:        "write",
 			Description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
 			Parameters: map[string]any{
@@ -51,7 +51,7 @@ func NewWriteTool(cwd string) agent.AgentTool {
 
 			absolutePath := ResolveToCwd(path, cwd)
 
-			firlog.Debug("write file", "path", path, "contentLen", len(content))
+			slog.Debug("write file", "path", path, "contentLen", len(content))
 
 			// Check context cancellation
 			if ctx.Err() != nil {
@@ -75,7 +75,7 @@ func NewWriteTool(cwd string) agent.AgentTool {
 			}
 
 			return agent.AgentToolResult{
-				Content: []ai.ToolResultContent{
+				Content: []core.ToolResultContent{
 					{Type: "text", Text: fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)},
 				},
 			}, nil
@@ -104,7 +104,7 @@ func NewWriteToolWithWriter(cwd string, writeFn WriteFileFn) agent.AgentTool {
 			return agent.AgentToolResult{}, fmt.Errorf("failed to write file %s: %w", path, err)
 		}
 		return agent.AgentToolResult{
-			Content: []ai.ToolResultContent{
+			Content: []core.ToolResultContent{
 				{Type: "text", Text: fmt.Sprintf("Successfully wrote %d bytes to %s", len(content), path)},
 			},
 		}, nil

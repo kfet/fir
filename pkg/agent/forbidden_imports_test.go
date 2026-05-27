@@ -2,9 +2,13 @@
 // fir's product-shaped subsystems so they can eventually be extracted
 // as a standalone module (see docs/design/ai-agent-extraction.md).
 //
-// Until Phase 3 lands, pkg/ai (the fir provider catalog/policy surface)
-// and pkg/log remain allowed and are not listed here. They are added
-// to forbiddenPaths once that phase begins.
+// pkg/log was removed as a dependency in Phase 3 (firlog → log/slog).
+// pkg/ai (the fir-side catalog/registry surface) remains allowed only
+// because clamp.go and agent.go still reach into four fir-policy
+// helpers — ai.SupportsXhigh, ai.SupportsMax, ai.StreamSimple,
+// ai.DefaultRegistry. Those are scheduled to migrate out in Phase 3.5
+// (the next slice), after which pkg/ai joins this forbidden list and
+// agent depends only on pkg/ai/core.
 
 package agent_test
 
@@ -28,6 +32,7 @@ var forbiddenPaths = []string{
 	"github.com/kfet/fir/pkg/modes",
 	"github.com/kfet/fir/pkg/resources",
 	"github.com/kfet/fir/pkg/models",
+	"github.com/kfet/fir/pkg/log",
 }
 
 // targets lists the packages whose import sets are checked.

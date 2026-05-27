@@ -3,21 +3,21 @@ package agent
 import (
 	"testing"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 func TestToAIThinkingLevel(t *testing.T) {
 	tests := []struct {
 		level ThinkingLevel
-		want  ai.ThinkingLevel
+		want  core.ThinkingLevel
 	}{
 		{ThinkingOff, ""},
-		{ThinkingMinimal, ai.ThinkingMinimal},
-		{ThinkingLow, ai.ThinkingLow},
-		{ThinkingMedium, ai.ThinkingMedium},
-		{ThinkingHigh, ai.ThinkingHigh},
-		{ThinkingXHigh, ai.ThinkingXHigh},
-		{ThinkingMax, ai.ThinkingMax},
+		{ThinkingMinimal, core.ThinkingMinimal},
+		{ThinkingLow, core.ThinkingLow},
+		{ThinkingMedium, core.ThinkingMedium},
+		{ThinkingHigh, core.ThinkingHigh},
+		{ThinkingXHigh, core.ThinkingXHigh},
+		{ThinkingMax, core.ThinkingMax},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.level), func(t *testing.T) {
@@ -30,7 +30,7 @@ func TestToAIThinkingLevel(t *testing.T) {
 }
 
 func TestNewAgentMessage(t *testing.T) {
-	msg := ai.NewUserMsg("hello", 1000)
+	msg := core.NewUserMsg("hello", 1000)
 	am := NewAgentMessage(msg)
 	if am.Role() != "user" {
 		t.Errorf("Role() = %q, want user", am.Role())
@@ -57,7 +57,7 @@ func TestAgentState_Initial(t *testing.T) {
 
 func TestAgentToolResult(t *testing.T) {
 	result := AgentToolResult{
-		Content: []ai.ToolResultContent{
+		Content: []core.ToolResultContent{
 			{Type: "text", Text: "file contents here"},
 		},
 		Details: map[string]any{"lineCount": 42},

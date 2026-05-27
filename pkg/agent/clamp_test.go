@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 func TestIsCanonicalThinkingLevel(t *testing.T) {
@@ -124,7 +124,7 @@ func TestAvailableThinkingLevelsForModel_Nil(t *testing.T) {
 }
 
 func TestAvailableThinkingLevelsForModel_NonReasoning(t *testing.T) {
-	got := AvailableThinkingLevelsForModel(&ai.Model{Reasoning: false})
+	got := AvailableThinkingLevelsForModel(&core.Model{Reasoning: false})
 	want := []ThinkingLevel{ThinkingOff}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -133,7 +133,7 @@ func TestAvailableThinkingLevelsForModel_NonReasoning(t *testing.T) {
 
 func TestAvailableThinkingLevelsForModel_Reasoning(t *testing.T) {
 	// Plain reasoning model with no xhigh/max.
-	got := AvailableThinkingLevelsForModel(&ai.Model{Reasoning: true})
+	got := AvailableThinkingLevelsForModel(&core.Model{Reasoning: true})
 	want := []ThinkingLevel{ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)

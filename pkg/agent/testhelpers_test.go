@@ -3,27 +3,27 @@ package agent
 import (
 	"time"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 // testModel creates a test model for agent tests.
-func testModel() *ai.Model {
-	return &ai.Model{
+func testModel() *core.Model {
+	return &core.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           ai.ApiAnthropicMessages,
-		Provider:      ai.ProviderAnthropic,
+		Api:           core.ApiAnthropicMessages,
+		Provider:      core.ProviderAnthropic,
 		ContextWindow: 200000,
 		MaxTokens:     4096,
 	}
 }
 
 // mockStreamFn creates a StreamFn that returns canned responses.
-func mockStreamFn(responses ...*ai.AssistantMessage) StreamFn {
+func mockStreamFn(responses ...*core.AssistantMessage) StreamFn {
 	callIdx := 0
-	return func(model *ai.Model, ctx ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
-		s := ai.NewAssistantMessageEventStream()
-		var msg *ai.AssistantMessage
+	return func(model *core.Model, ctx core.Context, options *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
+		s := core.NewAssistantMessageEventStream()
+		var msg *core.AssistantMessage
 		if callIdx < len(responses) {
 			msg = responses[callIdx]
 			callIdx++
@@ -31,8 +31,8 @@ func mockStreamFn(responses ...*ai.AssistantMessage) StreamFn {
 			msg = responses[len(responses)-1]
 		}
 		go func() {
-			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
-			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: msg.StopReason, Message: msg})
+			s.Push(core.AssistantMessageEvent{Type: core.EventStart, Partial: msg})
+			s.Push(core.AssistantMessageEvent{Type: core.EventDone, Reason: msg.StopReason, Message: msg})
 			s.End(nil)
 		}()
 		return s
@@ -40,14 +40,14 @@ func mockStreamFn(responses ...*ai.AssistantMessage) StreamFn {
 }
 
 // simpleResponse creates a simple text assistant response.
-func simpleResponse(text string) *ai.AssistantMessage {
-	return &ai.AssistantMessage{
+func simpleResponse(text string) *core.AssistantMessage {
+	return &core.AssistantMessage{
 		Role:       "assistant",
-		Content:    []ai.AssistantContent{ai.NewTextContent(text)},
-		Api:        ai.ApiAnthropicMessages,
-		Provider:   ai.ProviderAnthropic,
+		Content:    []core.AssistantContent{core.NewTextContent(text)},
+		Api:        core.ApiAnthropicMessages,
+		Provider:   core.ProviderAnthropic,
 		Model:      "test-model",
-		StopReason: ai.StopReasonStop,
+		StopReason: core.StopReasonStop,
 		Timestamp:  time.Now().UnixMilli(),
 	}
 }
@@ -55,18 +55,18 @@ func simpleResponse(text string) *ai.AssistantMessage {
 // transportError creates an assistant message that ended with a transport/
 // stream error (stop_reason=error) after emitting partialText. When partialText
 // is empty the message carries no content, simulating a reset before any output.
-func transportError(partialText, errMsg string) *ai.AssistantMessage {
-	content := []ai.AssistantContent{}
+func transportError(partialText, errMsg string) *core.AssistantMessage {
+	content := []core.AssistantContent{}
 	if partialText != "" {
-		content = append(content, ai.NewTextContent(partialText))
+		content = append(content, core.NewTextContent(partialText))
 	}
-	return &ai.AssistantMessage{
+	return &core.AssistantMessage{
 		Role:         "assistant",
 		Content:      content,
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: errMsg,
 		Timestamp:    time.Now().UnixMilli(),
 	}

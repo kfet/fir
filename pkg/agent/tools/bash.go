@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
-	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/ai/core"
+	"log/slog"
 )
 
 // BashToolParams are the parameters for the bash tool.
@@ -34,7 +34,7 @@ var DefaultBashTimeout = 10 * time.Second
 // NewBashTool creates the bash tool for the given working directory.
 func NewBashTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
 				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Optionally provide `cwd` to run in a specific directory instead of the session's working directory (absolute path, or relative to the session directory); use this to recover if the session's working directory was deleted. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
@@ -120,7 +120,7 @@ func truncateForLog(s string, max int) string {
 
 // executeBash runs a bash command and returns the result.
 func executeBash(ctx context.Context, command, cwd string, timeout time.Duration) (agent.AgentToolResult, error) {
-	firlog.Debug("bash exec", "command", truncateForLog(command, 200), "cwd", cwd, "timeout", timeout)
+	slog.Debug("bash exec", "command", truncateForLog(command, 200), "cwd", cwd, "timeout", timeout)
 	start := time.Now()
 	// If the working directory no longer exists, refuse to run rather than
 	// silently executing somewhere else. The cwd can be deleted out from under
@@ -131,7 +131,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	// never pointed at. Instead, surface the situation so the model can decide
 	// (recreate the dir, or target an existing path with an explicit `cd`).
 	if !isDir(cwd) {
-		firlog.Warn("bash cwd missing", "cwd", cwd)
+		slog.Warn("bash cwd missing", "cwd", cwd)
 		msg := fmt.Sprintf(
 			"working directory no longer exists: %s\n\n"+
 				"It was likely removed after this session started (a git worktree was "+
@@ -143,7 +143,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 			cwd,
 		)
 		return agent.AgentToolResult{
-			Content: []ai.ToolResultContent{{Type: "text", Text: msg}},
+			Content: []core.ToolResultContent{{Type: "text", Text: msg}},
 			IsError: true,
 		}, nil
 	}
@@ -295,16 +295,16 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 
 		// Process exited with non-zero code
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			firlog.Debug("bash done", "exitCode", exitErr.ExitCode(), "outputLen", len(output), "elapsed", time.Since(start))
+			slog.Debug("bash done", "exitCode", exitErr.ExitCode(), "outputLen", len(output), "elapsed", time.Since(start))
 			outputText += fmt.Sprintf("\n\nCommand exited with code %d", exitErr.ExitCode())
 			return agent.AgentToolResult{}, errors.New(outputText)
 		}
 
-		firlog.Warn("bash error", "err", err, "elapsed", time.Since(start))
+		slog.Warn("bash error", "err", err, "elapsed", time.Since(start))
 		return agent.AgentToolResult{}, err
 	}
 
-	firlog.Debug("bash done", "exitCode", 0, "outputLen", len(output), "truncated", truncResult.Truncated, "elapsed", time.Since(start))
+	slog.Debug("bash done", "exitCode", 0, "outputLen", len(output), "truncated", truncResult.Truncated, "elapsed", time.Since(start))
 
 	details := map[string]any{}
 	if fullOutputPath != "" {
@@ -317,7 +317,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	details["rawOutput"] = rawTrunc.Content
 
 	return agent.AgentToolResult{
-		Content: []ai.ToolResultContent{
+		Content: []core.ToolResultContent{
 			{Type: "text", Text: outputText},
 		},
 		Details: details,

@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 const grepDefaultLimit = 100
@@ -40,7 +40,7 @@ type GrepToolDetails struct {
 // NewGrepTool creates the grep tool for the given working directory.
 func NewGrepTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name: "grep",
 			Description: fmt.Sprintf(
 				"Search file contents for a pattern. Returns matching lines with file paths and line numbers. "+
@@ -217,7 +217,7 @@ func grepWithRipgrep(ctx context.Context, rgPath, pattern, searchPath string, is
 
 	if matchCount == 0 {
 		return agent.AgentToolResult{
-			Content: []ai.ToolResultContent{
+			Content: []core.ToolResultContent{
 				{Type: "text", Text: "No matches found"},
 			},
 		}, nil
@@ -321,7 +321,7 @@ func grepWithRipgrep(ctx context.Context, rgPath, pattern, searchPath string, is
 	}
 
 	result := agent.AgentToolResult{
-		Content: []ai.ToolResultContent{
+		Content: []core.ToolResultContent{
 			{Type: "text", Text: output},
 		},
 	}
@@ -353,7 +353,7 @@ func grepFallback(ctx context.Context, pattern, searchPath string, isDirectory, 
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return agent.AgentToolResult{
-				Content: []ai.ToolResultContent{
+				Content: []core.ToolResultContent{
 					{Type: "text", Text: "No matches found"},
 				},
 			}, nil
@@ -364,7 +364,7 @@ func grepFallback(ctx context.Context, pattern, searchPath string, isDirectory, 
 	output := strings.TrimSpace(string(out))
 	if output == "" {
 		return agent.AgentToolResult{
-			Content: []ai.ToolResultContent{
+			Content: []core.ToolResultContent{
 				{Type: "text", Text: "No matches found"},
 			},
 		}, nil
@@ -402,7 +402,7 @@ func grepFallback(ctx context.Context, pattern, searchPath string, isDirectory, 
 	}
 
 	return agent.AgentToolResult{
-		Content: []ai.ToolResultContent{
+		Content: []core.ToolResultContent{
 			{Type: "text", Text: resultOutput},
 		},
 	}, nil

@@ -3,26 +3,26 @@ package agent
 import (
 	"testing"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 // asstMsg builds an assistant AgentMessage from content blocks.
-func asstMsg(content ...ai.AssistantContent) AgentMessage {
-	return NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+func asstMsg(content ...core.AssistantContent) AgentMessage {
+	return NewAgentMessage(core.NewAssistantMsg(core.AssistantMessage{
 		Role:    "assistant",
 		Content: content,
 	}))
 }
 
 func userMsg(text string) AgentMessage {
-	return NewAgentMessage(ai.NewUserMsg(text, 0))
+	return NewAgentMessage(core.NewUserMsg(text, 0))
 }
 
 func toolResultMsg(id string) AgentMessage {
-	return NewAgentMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+	return NewAgentMessage(core.NewToolResultMsg(core.ToolResultMessage{
 		Role:       "toolResult",
 		ToolCallID: id,
-		Content:    []ai.ToolResultContent{{Type: "text", Text: "ok"}},
+		Content:    []core.ToolResultContent{{Type: "text", Text: "ok"}},
 	}))
 }
 
@@ -47,9 +47,9 @@ func TestStripUnmatchedToolCalls_RemovesInFlightCall(t *testing.T) {
 	msgs := []AgentMessage{
 		userMsg("do the task"),
 		asstMsg(
-			ai.NewTextContent("Let me plan and escalate."),
-			ai.NewToolCallContent("plan_1", "plan", map[string]any{}),
-			ai.NewToolCallContent("aside_1", "aside", map[string]any{"escalate": true}),
+			core.NewTextContent("Let me plan and escalate."),
+			core.NewToolCallContent("plan_1", "plan", map[string]any{}),
+			core.NewToolCallContent("aside_1", "aside", map[string]any{"escalate": true}),
 		),
 		toolResultMsg("plan_1"),
 	}
@@ -76,7 +76,7 @@ func TestStripUnmatchedToolCalls_DropsEmptyAssistantMessage(t *testing.T) {
 	// after stripping it the message is empty and must be dropped entirely.
 	msgs := []AgentMessage{
 		userMsg("hi"),
-		asstMsg(ai.NewToolCallContent("aside_1", "aside", map[string]any{})),
+		asstMsg(core.NewToolCallContent("aside_1", "aside", map[string]any{})),
 	}
 
 	got := StripUnmatchedToolCalls(msgs)
@@ -94,11 +94,11 @@ func TestStripUnmatchedToolCalls_KeepsMatchedCalls(t *testing.T) {
 	msgs := []AgentMessage{
 		userMsg("hi"),
 		asstMsg(
-			ai.NewTextContent("calling tool"),
-			ai.NewToolCallContent("t1", "read", map[string]any{}),
+			core.NewTextContent("calling tool"),
+			core.NewToolCallContent("t1", "read", map[string]any{}),
 		),
 		toolResultMsg("t1"),
-		asstMsg(ai.NewTextContent("done")),
+		asstMsg(core.NewTextContent("done")),
 	}
 
 	got := StripUnmatchedToolCalls(msgs)
@@ -113,8 +113,8 @@ func TestStripUnmatchedToolCalls_KeepsMatchedCalls(t *testing.T) {
 
 func TestStripUnmatchedToolCalls_DoesNotMutateInput(t *testing.T) {
 	orig := asstMsg(
-		ai.NewTextContent("x"),
-		ai.NewToolCallContent("a", "aside", map[string]any{}),
+		core.NewTextContent("x"),
+		core.NewToolCallContent("a", "aside", map[string]any{}),
 	)
 	msgs := []AgentMessage{userMsg("hi"), orig}
 
@@ -130,13 +130,13 @@ func TestStripUnmatchedToolCalls_DropsThinkingOnlyLeftover(t *testing.T) {
 	// Stripping the unmatched call leaves only a thinking block — a
 	// non-actionable in-flight remnant that must be dropped, not kept as a
 	// lone thinking-only assistant message before the appended user turn.
-	think := ai.AssistantContent{Thinking: &ai.ThinkingContent{
+	think := core.AssistantContent{Thinking: &core.ThinkingContent{
 		Thinking:          "deliberating",
 		ThinkingSignature: "sig",
 	}}
 	msgs := []AgentMessage{
 		userMsg("hi"),
-		asstMsg(think, ai.NewToolCallContent("aside_1", "aside", map[string]any{})),
+		asstMsg(think, core.NewToolCallContent("aside_1", "aside", map[string]any{})),
 	}
 
 	got := StripUnmatchedToolCalls(msgs)
@@ -152,10 +152,10 @@ func TestStripUnmatchedToolCalls_DropsThinkingOnlyLeftover(t *testing.T) {
 func TestStripUnmatchedToolCalls_KeepsThinkingWithText(t *testing.T) {
 	// When text survives alongside the stripped call, the message (with its
 	// thinking) is kept — it's a substantive, complete turn.
-	think := ai.AssistantContent{Thinking: &ai.ThinkingContent{Thinking: "x", ThinkingSignature: "s"}}
+	think := core.AssistantContent{Thinking: &core.ThinkingContent{Thinking: "x", ThinkingSignature: "s"}}
 	msgs := []AgentMessage{
 		userMsg("hi"),
-		asstMsg(think, ai.NewTextContent("here goes"), ai.NewToolCallContent("aside_1", "aside", map[string]any{})),
+		asstMsg(think, core.NewTextContent("here goes"), core.NewToolCallContent("aside_1", "aside", map[string]any{})),
 	}
 
 	got := StripUnmatchedToolCalls(msgs)

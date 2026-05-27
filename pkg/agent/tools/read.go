@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
-	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/ai/core"
+	"log/slog"
 )
 
 // ReadToolParams are the parameters for the read tool.
@@ -40,7 +40,7 @@ var SupportedImageExtensions = map[string]string{
 // NewReadTool creates the read tool for the given working directory.
 func NewReadTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name: "read",
 			Description: fmt.Sprintf(
 				"Read the contents of a file. Supports text files and images (jpg, png, gif, webp). "+
@@ -97,7 +97,7 @@ func NewReadTool(cwd string) agent.AgentTool {
 
 // executeRead reads a file and returns the result.
 func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, error) {
-	firlog.Debug("read file", "path", path, "cwd", cwd)
+	slog.Debug("read file", "path", path, "cwd", cwd)
 	absolutePath := ResolveReadPath(path, cwd)
 
 	// Check if file exists and is readable
@@ -151,7 +151,7 @@ func readImage(absolutePath, displayPath, mimeType string) (agent.AgentToolResul
 	}
 
 	return agent.AgentToolResult{
-		Content: []ai.ToolResultContent{
+		Content: []core.ToolResultContent{
 			{Type: "text", Text: textNote},
 			{Type: "image", Data: resized.Data, MimeType: resized.MimeType},
 		},
@@ -259,7 +259,7 @@ func formatPartialRead(path string, collected []string, startLine, totalLines in
 			outputText := fmt.Sprintf("[Line %d is %s, exceeds %s limit. Use bash: sed -n '%dp' %s | head -c %d]",
 				startLineDisplay, firstLineSize, FormatSize(DefaultMaxBytes), startLineDisplay, path, DefaultMaxBytes)
 			return agent.AgentToolResult{
-				Content: []ai.ToolResultContent{{Type: "text", Text: outputText}},
+				Content: []core.ToolResultContent{{Type: "text", Text: outputText}},
 			}, nil
 		}
 		if byteCount+lineBytes+1 > DefaultMaxBytes && i > 0 {
@@ -291,7 +291,7 @@ func formatPartialRead(path string, collected []string, startLine, totalLines in
 	}
 
 	return agent.AgentToolResult{
-		Content: []ai.ToolResultContent{{Type: "text", Text: output}},
+		Content: []core.ToolResultContent{{Type: "text", Text: output}},
 	}, nil
 }
 
@@ -360,7 +360,7 @@ func applyReadFilters(path, textContent string, offset, limit *int) (agent.Agent
 	}
 
 	result := agent.AgentToolResult{
-		Content: []ai.ToolResultContent{{Type: "text", Text: outputText}},
+		Content: []core.ToolResultContent{{Type: "text", Text: outputText}},
 	}
 	if details != nil {
 		result.Details = details

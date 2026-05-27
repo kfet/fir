@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
 // PlanSink is the minimal interface the plan tool needs from a session:
@@ -31,7 +31,7 @@ type CardPublisher func(title string, entries []agent.PlanEntry, metadata map[st
 //     the plan state into a card store, status bar, telemetry sink, etc.
 func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name: "plan",
 			Description: "Create or update a plan for tracking task progress. " +
 				"You MUST create a plan before starting any task that involves 3 or more non-trivial steps. " +
@@ -93,7 +93,7 @@ func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 			entries, err := parsePlanEntries(params)
 			if err != nil {
 				return agent.AgentToolResult{
-					Content: []ai.ToolResultContent{{Type: "text", Text: err.Error()}},
+					Content: []core.ToolResultContent{{Type: "text", Text: err.Error()}},
 					IsError: true,
 				}, nil
 			}
@@ -115,7 +115,7 @@ func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 			}
 
 			return agent.AgentToolResult{
-				Content: []ai.ToolResultContent{{Type: "text", Text: msg}},
+				Content: []core.ToolResultContent{{Type: "text", Text: msg}},
 			}, nil
 		},
 	}

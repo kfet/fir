@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phase 1 complete; Phase 2 in progress.**
+Status: **Phases 1, 2 part 1, 2 part 2, and 3 (slog rebase) complete; Phase 3.5 next.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -50,9 +50,10 @@ Forbidden edges, asserted by `TestForbiddenImports` in `pkg/agent/`:
 `pkg/session`, `pkg/mcp`, `pkg/extension`, `pkg/tui`, `pkg/config`,
 `pkg/auth`, `pkg/modes`, `pkg/resources`, `pkg/models`.
 
-Until phase 3 completes, `pkg/agent` and `pkg/agent/tools` may still
-import `pkg/ai` and `pkg/log`. Those become forbidden once the AI
-split + slog rebase land.
+`pkg/log` is forbidden from Phase 3 onward. `pkg/ai` remains allowed
+only because `pkg/agent/clamp.go` and `pkg/agent/agent.go` still call
+four fir-policy helpers — Phase 3.5 closes that gap, after which
+`pkg/ai` joins the forbidden set too.
 
 ## Pre-flight (Phase 0)
 
@@ -174,6 +175,39 @@ override.
 Acceptance: forbidden-imports test extended to forbid `pkg/ai` (fir
 catalog/policy surface) and `pkg/log`; only the portable subset
 import remains.
+
+**Status: shipped except for the four fir-policy hooks.** `pkg/log` is
+removed; the forbidden-imports test now bans it. `pkg/agent/tools`
+imports only `pkg/ai/core` plus `log/slog`. `pkg/agent` still imports
+`pkg/ai` for four fir-policy helpers in two files:
+
+- `pkg/agent/clamp.go` uses `ai.SupportsXhigh` and `ai.SupportsMax`
+  inside `AvailableThinkingLevelsForModel`. Those helpers encode
+  hardcoded knowledge of specific model IDs (gpt-5.2, opus-4-7, etc.)
+  and belong on the fir side.
+- `pkg/agent/agent.go` uses `ai.StreamSimple` and `ai.DefaultRegistry`
+  inside the default-StreamFn closure that runs when callers leave
+  `AgentOptions.StreamFn` and `SimplePromptOptions.StreamFn` nil.
+
+Phase 3.5 finishes the job: move `AvailableThinkingLevelsForModel`
+fir-side, replace the default StreamFn with an explicit-or-injectable
+hook, then add `pkg/ai` to the forbidden-imports list.
+
+### Phase 3.5 — Eliminate residual `pkg/ai` coupling
+
+Two cuts:
+
+1. Move `AvailableThinkingLevelsForModel` out of `pkg/agent/clamp.go`
+   into a fir-side helper (`pkg/session` or `pkg/models`). The agent
+   keeps the canonical ladder and `ClampThinkingLevel`; the host
+   computes the available set for any given `*core.Model`.
+2. Remove the default StreamFn from `pkg/agent/agent.go`. Either make
+   `StreamFn` required (caller-set) or expose an injectable hook the
+   host fills at init. Fir-side wiring constructs the closure that
+   calls `ai.StreamSimple` against `ai.DefaultRegistry`.
+
+Acceptance: `pkg/agent` directly imports only `pkg/ai/core`, `log/slog`,
+and stdlib. `pkg/ai` joins the forbidden-imports list.
 
 ### Phase 4 — Bake the boundary in-tree
 

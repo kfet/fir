@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/kfet/fir/pkg/ai"
+import "github.com/kfet/fir/pkg/ai/core"
 
 // StripUnmatchedToolCalls returns a copy of msgs with every assistant
 // tool-call content block removed when no ToolResult message in msgs carries a
@@ -57,7 +57,7 @@ func StripUnmatchedToolCalls(msgs []AgentMessage) []AgentMessage {
 		// Rebuild without the unmatched tool calls. Snapshot first so the
 		// shared, live message is never mutated.
 		snap := am.SnapshotContent()
-		filtered := make([]ai.AssistantContent, 0, len(snap.Content))
+		filtered := make([]core.AssistantContent, 0, len(snap.Content))
 		for _, c := range snap.Content {
 			if tc := c.ToolCall; tc != nil {
 				if _, ok := resultIDs[tc.ID]; !ok {
@@ -79,7 +79,7 @@ func StripUnmatchedToolCalls(msgs []AgentMessage) []AgentMessage {
 			// remaining tool_use the thinking must stay paired with.
 			continue
 		}
-		out = append(out, NewAgentMessage(ai.NewAssistantMsg(*snap)))
+		out = append(out, NewAgentMessage(core.NewAssistantMsg(*snap)))
 	}
 	return out
 }
@@ -88,7 +88,7 @@ func StripUnmatchedToolCalls(msgs []AgentMessage) []AgentMessage {
 // stand on its own in a turn — text, a tool call, or server content. A
 // thinking block alone is not substantive: it only makes sense paired with a
 // following text or tool_use block.
-func hasSubstantiveContent(content []ai.AssistantContent) bool {
+func hasSubstantiveContent(content []core.AssistantContent) bool {
 	for _, c := range content {
 		if c.Text != nil || c.ToolCall != nil || c.Server != nil {
 			return true

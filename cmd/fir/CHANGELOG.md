@@ -45,6 +45,10 @@
   errors (auth/400/context-length) are surfaced to the user, never resumed.
 ### Changed
 
+- `pkg/agent/tools` switched from `pkg/ai` to `pkg/ai/core` for all type references; `pkg/agent` switched its pure-type files (`types.go`, `loop.go`) the same way and kept `pkg/ai` only in `agent.go` and `clamp.go` where four fir-policy helpers (`ai.StreamSimple`, `ai.DefaultRegistry`, `ai.SupportsXhigh`, `ai.SupportsMax`) still live. Phase 2 part 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
+
+- `pkg/agent` and `pkg/agent/tools` no longer depend on fir's `pkg/log` — debug/warn calls now go through `log/slog` directly. Fir's `pkg/log.Init` already mirrors its handler onto `slog.SetDefault` so end-user log routing is unchanged. The `forbidden_imports_test` now bans `pkg/log` from the agent boundary. Phase 3 of the extraction refactor.
+
 - Portable AI primitives (`Message`, `Tool`, `Model`, `Usage`, `Context`, streaming types, etc.) moved from `pkg/ai` into a new `pkg/ai/core` subpackage; `pkg/ai` re-exports every symbol via type aliases so existing call sites are unchanged. Phase 2 of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`.
 
 - `tools.NewPlanTool` now takes a minimal `PlanSink` interface plus an optional `CardPublisher` callback, dropping the `pkg/session/store` import from `pkg/agent/tools`. Fir's observable-card wiring moved to `pkg/session/plancard.go`. First slice of the `kfet/agent` / `kfet/ai` extraction refactor — see `docs/design/ai-agent-extraction.md`. A new `TestForbiddenImports` in `pkg/agent/` keeps the boundary from eroding. Behaviour is byte-identical for in-tree consumers.

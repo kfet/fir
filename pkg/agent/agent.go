@@ -6,13 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 	"github.com/kfet/fir/pkg/ai/ratelimit"
-	firlog "github.com/kfet/fir/pkg/log"
 )
 
 // simplePromptRetryBackoffs controls retries of a single-shot SimplePrompt /
@@ -34,8 +35,8 @@ var simplePromptRetryBackoffs = []time.Duration{
 }
 
 // DefaultConvertToLLM keeps only LLM-compatible messages.
-func DefaultConvertToLLM(messages []AgentMessage) ([]ai.Message, error) {
-	var out []ai.Message
+func DefaultConvertToLLM(messages []AgentMessage) ([]core.Message, error) {
+	var out []core.Message
 	for _, m := range messages {
 		role := m.Role()
 		if role == "user" || role == "assistant" || role == "toolResult" {
@@ -52,7 +53,7 @@ type AgentOptions struct {
 
 	// ConvertToLLM converts AgentMessages to LLM Messages before each call.
 	// Default filters to user/assistant/toolResult.
-	ConvertToLLM func(messages []AgentMessage) ([]ai.Message, error)
+	ConvertToLLM func(messages []AgentMessage) ([]core.Message, error)
 
 	// TransformContext is applied before ConvertToLLM for context pruning etc.
 	TransformContext func(ctx context.Context, messages []AgentMessage) ([]AgentMessage, error)
@@ -73,23 +74,23 @@ type AgentOptions struct {
 	GetApiKey func(provider string) (string, error)
 
 	// ThinkingBudgets sets custom token budgets for thinking levels.
-	ThinkingBudgets *ai.ThinkingBudgets
+	ThinkingBudgets *core.ThinkingBudgets
 
 	// Transport is the preferred transport for providers that support multiple transports.
-	Transport ai.Transport
+	Transport core.Transport
 
 	// MaxRetryDelayMs caps how long to wait for server-requested retries.
 	MaxRetryDelayMs *int
 
 	// ServerTools configures Anthropic server-side tools (web search, code execution, etc.).
-	ServerTools []ai.AnthropicServerTool
+	ServerTools []core.AnthropicServerTool
 
 	// Compaction configures Anthropic server-side context compaction.
-	Compaction *ai.AnthropicCompaction
+	Compaction *core.AnthropicCompaction
 
 	// OnPayload is an optional callback to inspect or replace provider payloads before sending.
 	// Return nil to keep the original payload unchanged.
-	OnPayload func(payload any, model *ai.Model) any
+	OnPayload func(payload any, model *core.Model) any
 }
 
 // Agent orchestrates the agent loop with state management and event dispatch.
@@ -101,7 +102,7 @@ type Agent struct {
 	listeners       map[int]func(AgentEvent)
 	nextListenerID  int
 	abortCancel     context.CancelFunc
-	convertToLLM    func([]AgentMessage) ([]ai.Message, error)
+	convertToLLM    func([]AgentMessage) ([]core.Message, error)
 	transformCtx    func(context.Context, []AgentMessage) ([]AgentMessage, error)
 	steeringQueue   []AgentMessage
 	followUpQueue   []AgentMessage
@@ -110,12 +111,12 @@ type Agent struct {
 	streamFn        StreamFn
 	sessionID       string
 	getApiKey       func(string) (string, error)
-	thinkingBudgets *ai.ThinkingBudgets
-	transport       ai.Transport
+	thinkingBudgets *core.ThinkingBudgets
+	transport       core.Transport
 	maxRetryDelayMs *int
-	serverTools     []ai.AnthropicServerTool
-	compaction      *ai.AnthropicCompaction
-	onPayload       func(any, *ai.Model) any
+	serverTools     []core.AnthropicServerTool
+	compaction      *core.AnthropicCompaction
+	onPayload       func(any, *core.Model) any
 
 	// idleCh is closed when the agent finishes processing.
 	idleCh chan struct{}
@@ -187,7 +188,7 @@ func NewAgent(opts AgentOptions) *Agent {
 	if opts.Transport != "" {
 		a.transport = opts.Transport
 	} else {
-		a.transport = ai.TransportAuto
+		a.transport = core.TransportAuto
 	}
 	if opts.MaxRetryDelayMs != nil {
 		a.maxRetryDelayMs = opts.MaxRetryDelayMs
@@ -227,28 +228,28 @@ func (a *Agent) SetSessionID(id string) {
 }
 
 // GetThinkingBudgets returns the current thinking budgets.
-func (a *Agent) GetThinkingBudgets() *ai.ThinkingBudgets {
+func (a *Agent) GetThinkingBudgets() *core.ThinkingBudgets {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.thinkingBudgets
 }
 
 // SetThinkingBudgets sets custom thinking budgets.
-func (a *Agent) SetThinkingBudgets(tb *ai.ThinkingBudgets) {
+func (a *Agent) SetThinkingBudgets(tb *core.ThinkingBudgets) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.thinkingBudgets = tb
 }
 
 // GetTransport returns the current preferred transport.
-func (a *Agent) GetTransport() ai.Transport {
+func (a *Agent) GetTransport() core.Transport {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.transport
 }
 
 // SetTransport sets the preferred transport.
-func (a *Agent) SetTransport(t ai.Transport) {
+func (a *Agent) SetTransport(t core.Transport) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.transport = t
@@ -297,7 +298,7 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 }
 
 // SetModel sets the model.
-func (a *Agent) SetModel(m *ai.Model) {
+func (a *Agent) SetModel(m *core.Model) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.state.Model = m
@@ -339,14 +340,14 @@ func (a *Agent) GetFollowUpMode() string {
 }
 
 // SetServerTools updates the Anthropic server-side tools (web search, code execution, etc.).
-func (a *Agent) SetServerTools(tools []ai.AnthropicServerTool) {
+func (a *Agent) SetServerTools(tools []core.AnthropicServerTool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.serverTools = tools
 }
 
 // SetCompaction updates the Anthropic server-side compaction settings.
-func (a *Agent) SetCompaction(c *ai.AnthropicCompaction) {
+func (a *Agent) SetCompaction(c *core.AnthropicCompaction) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.compaction = c
@@ -503,7 +504,7 @@ func (a *Agent) Reset() {
 // Prompt sends a text prompt to the agent.
 func (a *Agent) Prompt(input string) error {
 	msg := AgentMessage{
-		Message: ai.NewUserMsg(input, time.Now().UnixMilli()),
+		Message: core.NewUserMsg(input, time.Now().UnixMilli()),
 	}
 	return a.PromptMessages([]AgentMessage{msg})
 }
@@ -558,7 +559,7 @@ func (a *Agent) Continue() error {
 		// Queue a synthetic "continue" as a steering message (invisible to the
 		// user) and kick off the loop with an empty prompt so the steering
 		// poll picks it up on the first iteration.
-		continueMsg := NewAgentMessage(ai.NewUserMsg("continue", 0))
+		continueMsg := NewAgentMessage(core.NewUserMsg("continue", 0))
 		a.mu.Lock()
 		a.steeringQueue = append(a.steeringQueue, continueMsg)
 		a.mu.Unlock()
@@ -579,12 +580,12 @@ type SimplePromptOptions struct {
 	// Model overrides the LLM model used for this call.
 	// When non-nil, the provider is implied by Model.Api and the appropriate
 	// API key is resolved via the agent's GetApiKey for that provider.
-	Model *ai.Model
+	Model *core.Model
 
 	// Reasoning overrides the thinking/reasoning effort.
 	// Empty string ("") inherits the agent's current ThinkingLevel.
-	// Use ai.ThinkingOff explicitly to disable thinking for this call.
-	Reasoning ai.ThinkingLevel
+	// Use core.ThinkingOff explicitly to disable thinking for this call.
+	Reasoning core.ThinkingLevel
 }
 
 // SimplePrompt makes a single-turn LLM call with the given messages.
@@ -625,11 +626,11 @@ func (a *Agent) SimplePrompt(ctx context.Context, messages []AgentMessage, opts 
 //     this function — events never reach AgentSession.checkAutoCompaction.
 //
 // Do not forward these events to the session or add Compaction to the config.
-func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions, onEvent func(AgentEvent)) (string, *ai.AssistantMessage, error) {
+func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage, opts *SimplePromptOptions, onEvent func(AgentEvent)) (string, *core.AssistantMessage, error) {
 	a.mu.Lock()
 	model := a.state.Model
 	systemPrompt := a.state.SystemPrompt
-	reasoning := ai.ThinkingOff
+	reasoning := core.ThinkingOff
 	if a.state.ThinkingLevel != ThinkingOff {
 		reasoning = ToAIThinkingLevel(a.state.ThinkingLevel)
 	}
@@ -657,7 +658,7 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 	}
 
 	if streamFn == nil {
-		streamFn = func(m *ai.Model, c ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		streamFn = func(m *core.Model, c core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
 			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, opts)
 		}
 	}
@@ -691,14 +692,14 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 	baseReasoning := config.Reasoning
 	forceNoThinking := false
 	var (
-		msg     *ai.AssistantMessage
+		msg     *core.AssistantMessage
 		text    string
 		lastErr error
 	)
 	maxAttempts := len(simplePromptRetryBackoffs) + 1
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if forceNoThinking {
-			config.Reasoning = ai.ThinkingOff
+			config.Reasoning = core.ThinkingOff
 		} else {
 			config.Reasoning = baseReasoning
 		}
@@ -735,7 +736,7 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 		}
 
 		if attempt < maxAttempts-1 {
-			firlog.Warn("SimplePrompt transient result, retrying",
+			slog.Warn("SimplePrompt transient result, retrying",
 				"attempt", attempt+1, "err", lastErr)
 			select {
 			case <-ctx.Done():
@@ -760,7 +761,7 @@ func streamSinglePrompt(
 	config *AgentLoopConfig,
 	streamFn StreamFn,
 	onEvent func(AgentEvent),
-) *ai.AssistantMessage {
+) *core.AssistantMessage {
 	agentCtx := &AgentContext{
 		SystemPrompt: systemPrompt,
 		Messages:     messages,
@@ -797,7 +798,7 @@ type BlockSummary struct {
 // SummarizeBlocks produces a BlockSummary slice for the given content.
 // Exported so session-layer code can attach the same summary to a
 // SideQueryResult on success.
-func SummarizeBlocks(content []ai.AssistantContent) []BlockSummary {
+func SummarizeBlocks(content []core.AssistantContent) []BlockSummary {
 	out := make([]BlockSummary, 0, len(content))
 	for _, c := range content {
 		switch {
@@ -846,7 +847,7 @@ func formatBlockSummary(blocks []BlockSummary) string {
 // thinking, no tool call). The error includes the block summary so callers
 // can distinguish "advisor said nothing" from "advisor only emitted a
 // redacted thinking block" — see SummarizeBlocks for the shape.
-func renderSimplePromptContent(content []ai.AssistantContent) (string, []BlockSummary, error) {
+func renderSimplePromptContent(content []core.AssistantContent) (string, []BlockSummary, error) {
 	blocks := SummarizeBlocks(content)
 	var parts []string
 	for _, c := range content {
@@ -924,7 +925,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 	a.state.StreamMessage = nil
 	a.state.Error = ""
 
-	var reasoning ai.ThinkingLevel
+	var reasoning core.ThinkingLevel
 	if a.state.ThinkingLevel != ThinkingOff {
 		reasoning = ToAIThinkingLevel(a.state.ThinkingLevel)
 	}
@@ -938,7 +939,7 @@ func (a *Agent) runLoop(messages []AgentMessage, skipInitialSteeringPoll bool) {
 
 	streamFn := a.streamFn
 	if streamFn == nil {
-		streamFn = func(m *ai.Model, c ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		streamFn = func(m *core.Model, c core.Context, opts *core.SimpleStreamOptions) *core.AssistantMessageEventStream {
 			return ai.StreamSimple(ctx, ai.DefaultRegistry, m, c, opts)
 		}
 	}

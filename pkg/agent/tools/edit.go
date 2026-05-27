@@ -10,8 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai"
-	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/fir/pkg/ai/core"
+	"log/slog"
 )
 
 // EditToolParams are the parameters for the edit tool.
@@ -32,7 +32,7 @@ type editResult struct {
 // replacement to the given content. It is the shared core of both NewEditTool and
 // NewEditToolWithReadWriter.
 func applyEditLogic(content, oldText, newText, path string) (editResult, error) {
-	firlog.Debug("edit file", "path", path, "oldLen", len(oldText), "newLen", len(newText))
+	slog.Debug("edit file", "path", path, "oldLen", len(oldText), "newLen", len(newText))
 	bom := ""
 	if strings.HasPrefix(content, "\uFEFF") {
 		bom = "\uFEFF"
@@ -69,7 +69,7 @@ func applyEditLogic(content, oldText, newText, path string) (editResult, error) 
 // NewEditTool creates the edit (find-and-replace) tool.
 func NewEditTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name:        "edit",
 			Description: "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
 			Parameters: map[string]any{
@@ -139,7 +139,7 @@ func NewEditTool(cwd string) agent.AgentTool {
 			}
 
 			return agent.AgentToolResult{
-				Content: []ai.ToolResultContent{
+				Content: []core.ToolResultContent{
 					{Type: "text", Text: fmt.Sprintf("Successfully replaced text in %s.", path)},
 				},
 				Details: &EditToolDetails{
@@ -180,7 +180,7 @@ func NewEditToolWithReadWriter(cwd string, readFn ReadFileFn, writeFn WriteFileF
 			return agent.AgentToolResult{}, fmt.Errorf("failed to write %s: %w", path, err)
 		}
 		return agent.AgentToolResult{
-			Content: []ai.ToolResultContent{
+			Content: []core.ToolResultContent{
 				{Type: "text", Text: fmt.Sprintf("Successfully replaced text in %s.", path)},
 			},
 			Details: &EditToolDetails{

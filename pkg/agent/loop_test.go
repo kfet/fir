@@ -7,25 +7,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/core"
 )
 
-func toolCallResponse(toolName, toolID string, args map[string]any) *ai.AssistantMessage {
-	return &ai.AssistantMessage{
+func toolCallResponse(toolName, toolID string, args map[string]any) *core.AssistantMessage {
+	return &core.AssistantMessage{
 		Role: "assistant",
-		Content: []ai.AssistantContent{
-			ai.NewToolCallContent(toolID, toolName, args),
+		Content: []core.AssistantContent{
+			core.NewToolCallContent(toolID, toolName, args),
 		},
-		Api:        ai.ApiAnthropicMessages,
-		Provider:   ai.ProviderAnthropic,
+		Api:        core.ApiAnthropicMessages,
+		Provider:   core.ProviderAnthropic,
 		Model:      "test-model",
-		StopReason: ai.StopReasonToolUse,
+		StopReason: core.StopReasonToolUse,
 		Timestamp:  time.Now().UnixMilli(),
 	}
 }
 
-func testConvertToLLM(messages []AgentMessage) ([]ai.Message, error) {
-	var result []ai.Message
+func testConvertToLLM(messages []AgentMessage) ([]core.Message, error) {
+	var result []core.Message
 	for _, m := range messages {
 		result = append(result, m.Message)
 	}
@@ -48,7 +48,7 @@ func TestAgentLoop_SingleTurn(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		SystemPrompt: "You are helpful.",
 		Messages:     []AgentMessage{},
@@ -84,7 +84,7 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 	events := make(chan AgentEvent, 100)
 
 	readTool := AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name:        "read",
 			Description: "Read a file",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}},
@@ -92,7 +92,7 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 		Label: "Read",
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate AgentToolUpdateCallback) (AgentToolResult, error) {
 			return AgentToolResult{
-				Content: []ai.ToolResultContent{{Type: "text", Text: "file contents"}},
+				Content: []core.ToolResultContent{{Type: "text", Text: "file contents"}},
 			}, nil
 		},
 	}
@@ -102,7 +102,7 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Read test.txt", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Read test.txt", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		SystemPrompt: "You are helpful.",
 		Messages:     []AgentMessage{},
@@ -146,13 +146,13 @@ func TestAgentLoop_ToolCall(t *testing.T) {
 func TestAgentLoop_ErrorResponse(t *testing.T) {
 	events := make(chan AgentEvent, 100)
 
-	errorMsg := &ai.AssistantMessage{
+	errorMsg := &core.AssistantMessage{
 		Role:         "assistant",
-		Content:      []ai.AssistantContent{},
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Content:      []core.AssistantContent{},
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: "rate limited",
 		Timestamp:    time.Now().UnixMilli(),
 	}
@@ -162,7 +162,7 @@ func TestAgentLoop_ErrorResponse(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 	}
@@ -189,7 +189,7 @@ func TestAgentLoop_ToolNotFound(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Do something", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Do something", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 		Tools:    nil, // No tools registered
@@ -225,7 +225,7 @@ func TestAgentLoop_SteeringAfterAllToolCalls(t *testing.T) {
 	var toolExecutions []string
 
 	slowTool := AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name:        "slow",
 			Description: "Slow tool",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
@@ -234,22 +234,22 @@ func TestAgentLoop_SteeringAfterAllToolCalls(t *testing.T) {
 		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate AgentToolUpdateCallback) (AgentToolResult, error) {
 			toolExecutions = append(toolExecutions, toolCallID)
 			return AgentToolResult{
-				Content: []ai.ToolResultContent{{Type: "text", Text: "done"}},
+				Content: []core.ToolResultContent{{Type: "text", Text: "done"}},
 			}, nil
 		},
 	}
 
 	// Response with TWO tool calls
-	multiToolMsg := &ai.AssistantMessage{
+	multiToolMsg := &core.AssistantMessage{
 		Role: "assistant",
-		Content: []ai.AssistantContent{
-			ai.NewToolCallContent("call-1", "slow", map[string]any{}),
-			ai.NewToolCallContent("call-2", "slow", map[string]any{}),
+		Content: []core.AssistantContent{
+			core.NewToolCallContent("call-1", "slow", map[string]any{}),
+			core.NewToolCallContent("call-2", "slow", map[string]any{}),
 		},
-		Api:        ai.ApiAnthropicMessages,
-		Provider:   ai.ProviderAnthropic,
+		Api:        core.ApiAnthropicMessages,
+		Provider:   core.ProviderAnthropic,
 		Model:      "test-model",
-		StopReason: ai.StopReasonToolUse,
+		StopReason: core.StopReasonToolUse,
 		Timestamp:  time.Now().UnixMilli(),
 	}
 
@@ -263,14 +263,14 @@ func TestAgentLoop_SteeringAfterAllToolCalls(t *testing.T) {
 			// not after each individual tool call.
 			if steeringCalled == 2 {
 				return []AgentMessage{
-					NewAgentMessage(ai.NewUserMsg("Stop! New instruction.", time.Now().UnixMilli())),
+					NewAgentMessage(core.NewUserMsg("Stop! New instruction.", time.Now().UnixMilli())),
 				}, nil
 			}
 			return nil, nil
 		},
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Run two tools", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Run two tools", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 		Tools:    ToolSetFrom([]AgentTool{slowTool}),
@@ -311,14 +311,14 @@ func TestAgentLoop_FollowUpMessages(t *testing.T) {
 			followUpCalled++
 			if followUpCalled == 1 {
 				return []AgentMessage{
-					NewAgentMessage(ai.NewUserMsg("Follow up question", time.Now().UnixMilli())),
+					NewAgentMessage(core.NewUserMsg("Follow up question", time.Now().UnixMilli())),
 				}, nil
 			}
 			return nil, nil
 		},
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 	}
@@ -364,7 +364,7 @@ func TestAgentLoop_SteeringCallbackError(t *testing.T) {
 		},
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 	}
@@ -389,7 +389,7 @@ func TestAgentLoop_ContextCancellationDuringTool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	blockingTool := AgentTool{
-		Tool: ai.Tool{
+		Tool: core.Tool{
 			Name:        "blocking",
 			Description: "Blocks until cancelled",
 			Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
@@ -409,7 +409,7 @@ func TestAgentLoop_ContextCancellationDuringTool(t *testing.T) {
 		ConvertToLLM: testConvertToLLM,
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Do blocking thing", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Do blocking thing", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 		Tools:    ToolSetFrom([]AgentTool{blockingTool}),
@@ -467,12 +467,12 @@ func TestAgentLoopContinue_AssistantMessage(t *testing.T) {
 	}
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{
-			NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
-				Content:    []ai.AssistantContent{ai.NewTextContent("hello")},
-				Api:        ai.ApiAnthropicMessages,
-				Provider:   ai.ProviderAnthropic,
+			NewAgentMessage(core.NewAssistantMsg(core.AssistantMessage{
+				Content:    []core.AssistantContent{core.NewTextContent("hello")},
+				Api:        core.ApiAnthropicMessages,
+				Provider:   core.ProviderAnthropic,
 				Model:      "test",
-				StopReason: ai.StopReasonStop,
+				StopReason: core.StopReasonStop,
 			})),
 		},
 	}
@@ -494,19 +494,19 @@ func TestAgentLoop_FollowUpAfterError(t *testing.T) {
 	// messages that were queued via FollowUp().
 	events := make(chan AgentEvent, 100)
 
-	errorMsg := &ai.AssistantMessage{
+	errorMsg := &core.AssistantMessage{
 		Role:         "assistant",
-		Content:      []ai.AssistantContent{},
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Content:      []core.AssistantContent{},
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: "429 rate_limit_error",
 		Timestamp:    time.Now().UnixMilli(),
 	}
 
 	followUpDelivered := false
-	followUpMsg := NewAgentMessage(ai.NewUserMsg("follow-up after error", time.Now().UnixMilli()))
+	followUpMsg := NewAgentMessage(core.NewUserMsg("follow-up after error", time.Now().UnixMilli()))
 
 	config := &AgentLoopConfig{
 		Model:        testModel(),
@@ -523,7 +523,7 @@ func TestAgentLoop_FollowUpAfterError(t *testing.T) {
 	// First call returns error, second call (after follow-up) returns success.
 	streamFn := mockStreamFn(errorMsg, simpleResponse("recovered after error"))
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 	}
@@ -574,13 +574,13 @@ func TestAgentLoop_NoFollowUpAfterError(t *testing.T) {
 	// still exit cleanly (no hang, no panic).
 	events := make(chan AgentEvent, 100)
 
-	errorMsg := &ai.AssistantMessage{
+	errorMsg := &core.AssistantMessage{
 		Role:         "assistant",
-		Content:      []ai.AssistantContent{},
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Content:      []core.AssistantContent{},
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: "429 rate_limit_error",
 		Timestamp:    time.Now().UnixMilli(),
 	}
@@ -593,7 +593,7 @@ func TestAgentLoop_NoFollowUpAfterError(t *testing.T) {
 		},
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{
 		Messages: []AgentMessage{},
 	}
@@ -625,13 +625,13 @@ func init() {
 func TestAgentLoop_FollowUpHookError(t *testing.T) {
 	events := make(chan AgentEvent, 100)
 
-	errorMsg := &ai.AssistantMessage{
+	errorMsg := &core.AssistantMessage{
 		Role:         "assistant",
-		Content:      []ai.AssistantContent{},
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Content:      []core.AssistantContent{},
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: "429 rate_limit_error",
 		Timestamp:    time.Now().UnixMilli(),
 	}
@@ -644,7 +644,7 @@ func TestAgentLoop_FollowUpHookError(t *testing.T) {
 		},
 	}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hello!", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hello!", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	go func() {
@@ -663,19 +663,19 @@ func TestAgentLoop_FollowUpHookError(t *testing.T) {
 // partialToolCallError builds an assistant message representing a stream that
 // dropped mid-tool-call: stop_reason=error, content has a tool_use block with
 // empty/nil arguments because input_json_delta never completed.
-func partialToolCallError(toolName string, partialText string) *ai.AssistantMessage {
-	content := []ai.AssistantContent{}
+func partialToolCallError(toolName string, partialText string) *core.AssistantMessage {
+	content := []core.AssistantContent{}
 	if partialText != "" {
-		content = append(content, ai.NewTextContent(partialText))
+		content = append(content, core.NewTextContent(partialText))
 	}
-	content = append(content, ai.NewToolCallContent("toolu_partial", toolName, nil))
-	return &ai.AssistantMessage{
+	content = append(content, core.NewToolCallContent("toolu_partial", toolName, nil))
+	return &core.AssistantMessage{
 		Role:         "assistant",
 		Content:      content,
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonError,
+		StopReason:   core.StopReasonError,
 		ErrorMessage: "read tcp 1.2.3.4:443: i/o timeout (Anthropic stream ended before message_stop)",
 		Timestamp:    time.Now().UnixMilli(),
 	}
@@ -700,7 +700,7 @@ func TestAgentLoop_DropsPartialToolCallAndRetries(t *testing.T) {
 
 	streamFn := mockStreamFn(broken, recovered)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Show me the logs", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Show me the logs", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -724,7 +724,7 @@ func TestAgentLoop_DropsPartialToolCallAndRetries(t *testing.T) {
 		if a == nil {
 			continue
 		}
-		if a.StopReason == ai.StopReasonError {
+		if a.StopReason == core.StopReasonError {
 			t.Errorf("returned[%d]: partial mid-tool-call error message survived: %+v", i, a)
 		}
 	}
@@ -772,7 +772,7 @@ func TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote(t *testing.T) {
 
 	streamFn := mockStreamFn(b1, b2, b3, b4)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Check logs", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Check logs", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -792,7 +792,7 @@ func TestAgentLoop_MidToolCallRetryExhaustedInjectsUserNote(t *testing.T) {
 			continue
 		}
 		a := m.Message.AsAssistant()
-		if a != nil && a.StopReason == ai.StopReasonError {
+		if a != nil && a.StopReason == core.StopReasonError {
 			t.Errorf("returned[%d]: partial error message survived after exhausted retries: %+v", i, a)
 		}
 	}
@@ -835,7 +835,7 @@ func TestAgentLoop_MidToolCallExhaustedWithFollowUpsFoldsNote(t *testing.T) {
 	recovered := simpleResponse("ok")
 
 	followUpDelivered := false
-	followUpMsg := NewAgentMessage(ai.NewUserMsg("channel follow-up", time.Now().UnixMilli()))
+	followUpMsg := NewAgentMessage(core.NewUserMsg("channel follow-up", time.Now().UnixMilli()))
 
 	config := &AgentLoopConfig{
 		Model:        testModel(),
@@ -851,7 +851,7 @@ func TestAgentLoop_MidToolCallExhaustedWithFollowUpsFoldsNote(t *testing.T) {
 
 	streamFn := mockStreamFn(b1, b2, b3, b4, recovered)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Show me logs", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Show me logs", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -924,7 +924,7 @@ func TestAgentLoop_AutoResumeWithPartialContent(t *testing.T) {
 	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
 	streamFn := mockStreamFn(broken, recovered)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Check the logs", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Check the logs", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -970,7 +970,7 @@ func TestAgentLoop_AutoResumeWithPartialContent(t *testing.T) {
 
 	// No assistant error turn must survive — the partial prefix was sanitized.
 	for i, m := range returned {
-		if a := m.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+		if a := m.Message.AsAssistant(); a != nil && a.StopReason == core.StopReasonError {
 			t.Errorf("returned[%d]: error assistant turn survived auto-resume: %+v", i, a)
 		}
 	}
@@ -978,7 +978,7 @@ func TestAgentLoop_AutoResumeWithPartialContent(t *testing.T) {
 	// The recovered response must be the final assistant turn.
 	last := returned[len(returned)-1]
 	la := last.Message.AsAssistant()
-	if la == nil || la.StopReason != ai.StopReasonStop {
+	if la == nil || la.StopReason != core.StopReasonStop {
 		t.Fatalf("last message is not a clean assistant turn: %+v", last)
 	}
 	if len(la.Content) == 0 || !la.Content[0].IsText() || la.Content[0].Text.Text != "All good." {
@@ -1015,7 +1015,7 @@ func TestAgentLoop_AutoResumeEmptyPartialSilentRetry(t *testing.T) {
 	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
 	streamFn := mockStreamFn(broken, recovered)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Do the thing", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Do the thing", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -1048,13 +1048,13 @@ func TestAgentLoop_AutoResumeEmptyPartialSilentRetry(t *testing.T) {
 	}
 	// No empty error turn should survive.
 	for i, m := range returned {
-		if a := m.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+		if a := m.Message.AsAssistant(); a != nil && a.StopReason == core.StopReasonError {
 			t.Errorf("returned[%d]: empty error turn survived: %+v", i, a)
 		}
 	}
 	// Recovered response present.
 	last := returned[len(returned)-1].Message.AsAssistant()
-	if last == nil || last.StopReason != ai.StopReasonStop {
+	if last == nil || last.StopReason != core.StopReasonStop {
 		t.Fatalf("expected clean recovered assistant turn, got %+v", returned[len(returned)-1])
 	}
 }
@@ -1076,7 +1076,7 @@ func TestAgentLoop_AutoResumeCapExhausted(t *testing.T) {
 	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
 	streamFn := mockStreamFn(b1, b2, b3, b4, b5)
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Check", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Check", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	var returned []AgentMessage
@@ -1114,7 +1114,7 @@ func TestAgentLoop_NonRetryableErrorNotResumed(t *testing.T) {
 	broken := transportError("", "400 invalid request: messages.0 too long")
 	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hi", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hi", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	go func() {
@@ -1138,19 +1138,19 @@ func TestAgentLoop_NonRetryableErrorNotResumed(t *testing.T) {
 func TestAgentLoop_AbortedNotResumed(t *testing.T) {
 	events := make(chan AgentEvent, 100)
 
-	aborted := &ai.AssistantMessage{
+	aborted := &core.AssistantMessage{
 		Role:         "assistant",
-		Content:      []ai.AssistantContent{ai.NewTextContent("stopping")},
-		Api:          ai.ApiAnthropicMessages,
-		Provider:     ai.ProviderAnthropic,
+		Content:      []core.AssistantContent{core.NewTextContent("stopping")},
+		Api:          core.ApiAnthropicMessages,
+		Provider:     core.ProviderAnthropic,
 		Model:        "test-model",
-		StopReason:   ai.StopReasonAborted,
+		StopReason:   core.StopReasonAborted,
 		ErrorMessage: connResetErr,
 		Timestamp:    time.Now().UnixMilli(),
 	}
 	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
 
-	prompt := NewAgentMessage(ai.NewUserMsg("Hi", time.Now().UnixMilli()))
+	prompt := NewAgentMessage(core.NewUserMsg("Hi", time.Now().UnixMilli()))
 	agentCtx := &AgentContext{Messages: []AgentMessage{}}
 
 	go func() {
