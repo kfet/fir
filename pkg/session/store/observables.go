@@ -58,6 +58,14 @@ type ObservableStore struct {
 	// triple atomic with respect to other flushes; the main mu is
 	// still released so Put/Clear/List remain non-blocking.
 	flushMu sync.Mutex
+
+	// lastTs tracks the most recent Card.Ts stamped by Put. Two Puts
+	// in rapid succession can read the same wall-clock time (macOS
+	// time resolution, fast hardware) and break List's "latest wins"
+	// ordering. Bumping equal/earlier timestamps by 1ns gives Put
+	// strictly monotonic Ts without exposing the bump to callers.
+	// Guarded by mu.
+	lastTs time.Time
 }
 
 type cardKey struct{ source, key string }
@@ -114,6 +122,10 @@ func (s *ObservableStore) Put(source, key, slug, detail, entryID string) {
 		EntryID: entryID,
 	}
 	s.mu.Lock()
+	if !card.Ts.After(s.lastTs) {
+		card.Ts = s.lastTs.Add(time.Nanosecond)
+	}
+	s.lastTs = card.Ts
 	s.cards[cardKey{source, key}] = card
 	s.mu.Unlock()
 	s.flush()
@@ -181,6 +193,9 @@ func (s *ObservableStore) loadFromFile() {
 			continue
 		}
 		m[cardKey{c.Source, c.Key}] = c
+		if c.Ts.After(s.lastTs) {
+			s.lastTs = c.Ts
+		}
 	}
 	s.cards = m
 }
