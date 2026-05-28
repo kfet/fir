@@ -6,6 +6,10 @@
 
 - ACP mode now emits the `dev.acp-kit.status-line/v1` extension in `_meta` on every `session/update` notification, carrying the current mood and plan slugs from the observable cards store. ACP relays (poe-acp, slack-acp) use this to render a status header. When no mood/plan cards are present, the `_meta` key is omitted entirely.
 
+### Changed
+
+- `wt` builtin skill now instructs the parent agent to prepend an explicit worktree-discipline pin to the task text when spawning. Without it, spawned agents tend to misread "Repo: ~/dev/ai/foo" in the task as "cd there and commit to main" rather than staying in the dedicated worktree. The skill includes a template pin and calls out the failure mode by name.
+
 ## [0.50.1] - 2026-05-26
 
 ### Changed
