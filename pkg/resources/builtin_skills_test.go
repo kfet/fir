@@ -34,6 +34,7 @@ func TestLoadBuiltinSkills_ReturnsExpectedSkills(t *testing.T) {
 		"skill-creator":       false,
 		"tmux-driver":         false,
 		"tmux-observer":       false,
+		"wrap-up":             false,
 		"wt":                  false,
 	}
 

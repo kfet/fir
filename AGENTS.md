@@ -2,7 +2,11 @@ Use idiomatic Go. Keep it simple.
 
 Prefer `sync/atomic`, `sync.Once`, and channels over manual mutex management when appropriate.
 
-`.fir/skills` is a symlink to `pkg/core/builtin_skills/`. They are the same directory — don't treat them as separate copies.
+# Builtin and project skills
+
+`.fir/skills` is a symlink to `pkg/resources/builtin_skills/`. They are the same directory — don't treat them as separate copies.
+
+A skill or extension in that directory is only loaded by a deployed binary if its frontmatter sets `builtin: true`. Not setting it is handy for fir-specific skills you don't want to push onto every user.
 
 ## Python 3.9 minimum
 

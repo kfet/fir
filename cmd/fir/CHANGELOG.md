@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- `wrap-up` builtin skill — short recipe for finishing a feature branch: review/fix/simplify in a loop until clean, then ff-merge to main. Composes the existing `review-and-fix` and `merge-to-main` skills.
+
+### Changed
+
+- `antigravity-models` skill moved from the global user skills dir into `.fir/skills/` as a project-scoped (non-builtin) skill. It's fir-specific — references `pkg/resources/builtin_extensions/antigravity_auth.py` and this repo's `CHANGELOG.md` — so it now only loads when fir runs inside this repo, instead of polluting every other project's skill list.
+- `AGENTS.md` clarifies that `.fir/skills/` files only ship in the binary when frontmatter sets `builtin: true`; without it, the file lives in the embedded tree but loads as a `project`-scoped resource only inside this repo.
+
+### Fixed
+
+- Observable-card store: `Put` now stamps strictly monotonic timestamps even when two calls happen inside the same wall-clock tick. Fixes a latent flake where `buildStatusLineMeta` (ACP) could pick the older of two same-source cards because `time.Now()` returned identical values for both `Put` calls.
+
 ## [0.51.0] - 2026-05-27
 
 ### Added
