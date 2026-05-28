@@ -692,6 +692,8 @@ func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
 		modelID string
 		want    bool
 	}{
+		{"claude-opus-4.8-20260528", true},
+		{"claude-opus-4-8-20260528", true},
 		{"claude-opus-4.6-20260101", true},
 		{"claude-opus-4-6-20260101", true},
 		{"claude-sonnet-4-20250514", false},
@@ -721,7 +723,10 @@ func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 		{ai.ThinkingXHigh, "claude-opus-4-6", "high"},
 		{ai.ThinkingMax, "claude-opus-4-6", "max"},
 		{"", "claude-opus-4-6", "high"}, // default
-		// Opus 4.7: xhigh is its own distinct tier.
+		// Opus 4.7+: xhigh is its own distinct tier.
+		{ai.ThinkingHigh, "claude-opus-4-8", "high"},
+		{ai.ThinkingXHigh, "claude-opus-4-8", "xhigh"},
+		{ai.ThinkingMax, "claude-opus-4-8", "max"},
 		{ai.ThinkingHigh, "claude-opus-4-7", "high"},
 		{ai.ThinkingXHigh, "claude-opus-4-7", "xhigh"},
 		{ai.ThinkingMax, "claude-opus-4-7", "max"},

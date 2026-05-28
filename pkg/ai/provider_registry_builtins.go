@@ -27,7 +27,7 @@ func builtInProviders() []*RegisteredProvider {
 	return []*RegisteredProvider{
 		{
 			ID: ProviderAnthropic, DisplayName: "Anthropic", ShortName: "anth", Priority: 0,
-			DefaultModelID: "claude-opus-4-7",
+			DefaultModelID: "claude-opus-4-8",
 			KeyLink:        "https://console.anthropic.com/settings/keys",
 			EnvKeys: EnvKeySpec{
 				Primary:   "ANTHROPIC_API_KEY",

@@ -745,6 +745,7 @@ func supportsBedrockAdaptiveThinking(modelID, modelName string) bool {
 	candidates := modelMatchCandidates(modelID, modelName)
 	return anyContains(candidates, "opus-4-6") ||
 		anyContains(candidates, "opus-4-7") ||
+		anyContains(candidates, "opus-4-8") ||
 		anyContains(candidates, "sonnet-4-6")
 }
 
@@ -757,7 +758,7 @@ func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
+		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
 			return "xhigh"
 		}
 		return "high"

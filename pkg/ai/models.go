@@ -97,11 +97,11 @@ func CalculateCost(model *Model, usage *Usage) UsageCost {
 // false, callers should clamp "xhigh" down to whatever top tier the model
 // does support (typically "high").
 //
-// Anthropic: only Opus 4.7 exposes a separate xhigh tier. Opus 4.6 and
+// Anthropic: Opus 4.7+ expose a separate xhigh tier. Opus 4.6 and
 // Sonnet 4.6 have a "max" tier but no intermediate xhigh, so they clamp
 // xhigh to "high" here and use SupportsMax for their top tier. The check
-// works for first-party Anthropic IDs (`claude-opus-4-7`), Bedrock IDs
-// (`anthropic.claude-opus-4-7`), and Vertex IDs alike, because the model
+// works for first-party Anthropic IDs (`claude-opus-4-8`), Bedrock IDs
+// (`anthropic.claude-opus-4-8`), and Vertex IDs alike, because the model
 // family suffix is always present in the ID.
 //
 // OpenAI: gpt-5.2 and gpt-5.3 treat xhigh as a distinct effort value and
@@ -114,8 +114,8 @@ func SupportsXhigh(model *Model) bool {
 	if strings.Contains(id, "gpt-5.2") || strings.Contains(id, "gpt-5.3") || strings.Contains(id, "gpt-5.4") || strings.Contains(id, "gpt-5.5") {
 		return true
 	}
-	// Anthropic Opus 4.7 across first-party, Bedrock, Vertex, etc.
-	if strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") {
+	// Anthropic Opus 4.7+ across first-party, Bedrock, Vertex, etc.
+	if strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") || strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") {
 		return true
 	}
 	return false
@@ -123,7 +123,7 @@ func SupportsXhigh(model *Model) bool {
 
 // SupportsMax reports whether a model supports the "max" thinking level as
 // a distinct top tier. Anthropic adaptive-thinking models (Opus 4.6+,
-// Sonnet 4.6+, including Opus 4.7) all support max across every surface
+// Sonnet 4.6+, including Opus 4.8) all support max across every surface
 // (first-party, Bedrock, Vertex). For other models callers should clamp
 // "max" down to the highest tier the model supports.
 func SupportsMax(model *Model) bool {
@@ -133,6 +133,7 @@ func SupportsMax(model *Model) bool {
 	id := model.ID
 	return strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
 		strings.Contains(id, "opus-4-7") || strings.Contains(id, "opus-4.7") ||
+		strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
 		strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
 }
 

@@ -151,9 +151,12 @@ func TestSupportsXhigh_GPT53(t *testing.T) {
 	}
 }
 
-func TestSupportsXhigh_AnthropicOpus47(t *testing.T) {
+func TestSupportsXhigh_AnthropicOpus47Plus(t *testing.T) {
 	// Matches across first-party, Bedrock, and Vertex IDs.
 	for _, id := range []string{
+		"claude-opus-4-8", "claude-opus-4.8",
+		"anthropic.claude-opus-4-8", "us.anthropic.claude-opus-4-8",
+		"claude-opus-4-8@20260528",
 		"claude-opus-4-7", "claude-opus-4.7",
 		"anthropic.claude-opus-4-7", "us.anthropic.claude-opus-4-7",
 		"claude-opus-4-7@20250101",
@@ -189,9 +192,11 @@ func TestSupportsMax_AnthropicAdaptive(t *testing.T) {
 	for _, id := range []string{
 		"claude-opus-4-6", "claude-opus-4.6",
 		"claude-opus-4-7", "claude-opus-4.7",
+		"claude-opus-4-8", "claude-opus-4.8",
 		"claude-sonnet-4-6", "claude-sonnet-4.6",
 		"anthropic.claude-opus-4-6",
 		"us.anthropic.claude-opus-4-7",
+		"us.anthropic.claude-opus-4-8",
 		"eu.anthropic.claude-sonnet-4-6",
 	} {
 		m := &Model{ID: id, Api: ApiAnthropicMessages}

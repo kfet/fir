@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-05-28
+
 ### Added
 
+- Claude Opus 4.8 model metadata across Anthropic-compatible providers, including `claude-opus-4-8` as the Anthropic default, xhigh/max effort support, adaptive-thinking handling, and regenerated live model catalogs for Bedrock/Cloudflare/OpenRouter/Vercel surfaces.
 - `wrap-up` builtin skill — short recipe for finishing a feature branch: review/fix/simplify in a loop until clean, then ff-merge to main. Composes the existing `review-and-fix` and `merge-to-main` skills.
 
 ### Changed

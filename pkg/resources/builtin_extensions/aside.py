@@ -81,7 +81,7 @@ _CONFIG_FILENAME = "aside.json"
 # Anthropic Opus tier baked into fir's model registry. Drift is caught by
 # DefaultAdvisorTracksHighestAnthropicOpus in pkg/resources/testdata/aside_test.py
 # — bump this constant when fir adds a newer Opus.
-_DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-7"
+_DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-8"
 
 
 def _config_path() -> Path | None:

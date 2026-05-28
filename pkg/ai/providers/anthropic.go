@@ -190,6 +190,7 @@ func isAuthError(errType, errMsg string) bool {
 func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
 		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
+		strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") ||
 		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
 }
 
@@ -222,7 +223,8 @@ func supportsModelCompaction(model *ai.Model) bool {
 	// Legacy fallback until all built-ins include explicit capability metadata.
 	if len(model.ServerTools) == 0 {
 		id := model.ID
-		return strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
+		return strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
+			strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
 			strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
 	}
 	return false
@@ -230,8 +232,8 @@ func supportsModelCompaction(model *ai.Model) bool {
 
 // mapThinkingLevelToEffort maps a ThinkingLevel to the Anthropic adaptive
 // thinking "effort" header value. This is only consulted for models that
-// pass supportsAdaptiveThinking — they all support "max"; only Opus 4.7
-// (and later xhigh-aware models) keep a distinct "xhigh" effort, others
+// pass supportsAdaptiveThinking — they all support "max"; Opus 4.7+
+// keep a distinct "xhigh" effort, others
 // clamp xhigh down to "high".
 func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	switch level {
@@ -242,7 +244,7 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
+		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
 			return "xhigh"
 		}
 		return "high"

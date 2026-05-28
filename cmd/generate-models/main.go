@@ -237,10 +237,13 @@ type swePattern struct {
 //
 // init() validates this ordering at startup.
 var sweModelPatterns = []swePattern{
+	// --- Claude Opus 4.8 ---
+	// Source: Anthropic announcement — improved over Opus 4.7; use the latest
+	// known Opus score until the public system-card table is wired in.
+	{"claude-opus-4-8", "claude-opus-4-8", 80.9},
+	{"claude-opus-4.8", "claude-opus-4-8", 80.9},
 	// --- Claude Opus 4.7 ---
-	// 4.7 is a forward-projection placeholder in this codebase (no public
-	// system card yet). Use the latest known Opus score (4.5 = 80.9%) so
-	// the entry isn't ranked below mid-tier models.
+	// Source: Anthropic announcement / codebase baseline.
 	{"claude-opus-4-7", "claude-opus-4-7", 80.9},
 	{"claude-opus-4.7", "claude-opus-4-7", 80.9},
 	// --- Claude Opus 4.6 ---
@@ -350,10 +353,14 @@ var sweLeaderboardPatterns = []struct {
 	modelKey string
 }{
 	// Claude — specific versions first
-	// bash-only names: "Claude Opus 4.6", "Claude 4.5 Opus (high reasoning)",
+	// bash-only names: "Claude Opus 4.8", "Claude Opus 4.6", "Claude 4.5 Opus (high reasoning)",
 	//   "Claude 4.5 Opus medium", "Claude 4 Opus (20250514)",
 	//   "Claude 4.5 Sonnet (high reasoning)", "Claude 4.5 Sonnet (20250929)",
 	//   "Claude 4 Sonnet (20250514)", "Claude 4.5 Haiku (high reasoning)"
+	{"claude opus 48", "claude-opus-4-8"},
+	{"claude 48 opus", "claude-opus-4-8"},
+	{"claude opus 47", "claude-opus-4-7"},
+	{"claude 47 opus", "claude-opus-4-7"},
 	{"claude opus 46", "claude-opus-4-6"},
 	{"claude 46 opus", "claude-opus-4-6"},
 	{"claude 45 opus", "claude-opus-4-5"},
@@ -1834,6 +1841,21 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		})
 	}
 
+	// Add missing Claude Opus 4.8
+	if !hasModel(all, "anthropic", "claude-opus-4-8") {
+		all = append(all, modelSpec{
+			ID:        "claude-opus-4-8",
+			Name:      "Claude Opus 4.8",
+			API:       "anthropic-messages",
+			Provider:  "anthropic",
+			BaseURL:   "https://api.anthropic.com",
+			Reasoning: true,
+			Input:     []string{"text", "image"},
+			CostInput: 5, CostOutput: 25, CostCacheRead: 0.5, CostCacheWrite: 6.25,
+			ContextWindow: 1000000, MaxTokens: 128000,
+		})
+	}
+
 	// Add missing Claude Opus 4.7
 	if !hasModel(all, "anthropic", "claude-opus-4-7") {
 		all = append(all, modelSpec{
@@ -2176,7 +2198,8 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 				"code_execution_20250825",
 			}
 		}
-		if strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
+		if strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
+			strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") {
 			m.Compaction = true
 		}
@@ -2209,6 +2232,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		{ID: "claude-opus-4-5", Name: "Claude Opus 4.5 (latest)", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 5.0, CostOutput: 25.0, CostCacheRead: 0.5, CostCacheWrite: 6.25, ContextWindow: 200000, MaxTokens: 64000},
 		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6 (latest)", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 5.0, CostOutput: 25.0, CostCacheRead: 0.5, CostCacheWrite: 6.25, ContextWindow: 1000000, MaxTokens: 128000},
 		{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 5.0, CostOutput: 25.0, CostCacheRead: 0.5, CostCacheWrite: 6.25, ContextWindow: 1000000, MaxTokens: 128000},
+		{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 5.0, CostOutput: 25.0, CostCacheRead: 0.5, CostCacheWrite: 6.25, ContextWindow: 1000000, MaxTokens: 128000},
 		{ID: "claude-sonnet-4", Name: "Claude Sonnet 4 (latest)", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 3.0, CostOutput: 15.0, CostCacheRead: 0.3, CostCacheWrite: 3.75, ContextWindow: 200000, MaxTokens: 64000},
 		{ID: "claude-sonnet-4-5", Name: "Claude Sonnet 4.5 (latest)", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 3.0, CostOutput: 15.0, CostCacheRead: 0.3, CostCacheWrite: 3.75, ContextWindow: 200000, MaxTokens: 64000},
 		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", API: "anthropic-messages", Provider: "cloudflare-ai-gateway", BaseURL: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic", Reasoning: true, Input: []string{"text", "image"}, CostInput: 3.0, CostOutput: 15.0, CostCacheRead: 0.3, CostCacheWrite: 3.75, ContextWindow: 1000000, MaxTokens: 64000},

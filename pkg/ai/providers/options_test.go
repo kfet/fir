@@ -56,12 +56,15 @@ func TestClampReasoning(t *testing.T) {
 }
 
 func TestClampReasoningForModel(t *testing.T) {
+	opus48 := &ai.Model{ID: "claude-opus-4-8", Api: ai.ApiAnthropicMessages}
 	opus47 := &ai.Model{ID: "claude-opus-4-7", Api: ai.ApiAnthropicMessages}
 	opus46 := &ai.Model{ID: "claude-opus-4-6", Api: ai.ApiAnthropicMessages}
 	gpt53 := &ai.Model{ID: "gpt-5.3", Api: ai.ApiOpenAICompletions}
 	vanilla := &ai.Model{ID: "claude-sonnet-4-20250514", Api: ai.ApiAnthropicMessages}
 
-	// Opus 4.7: supports both xhigh and max — pass through.
+	// Opus 4.7+: supports both xhigh and max — pass through.
+	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingXHigh, opus48))
+	assert.Equal(t, ai.ThinkingMax, ClampReasoningForModel(ai.ThinkingMax, opus48))
 	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingXHigh, opus47))
 	assert.Equal(t, ai.ThinkingMax, ClampReasoningForModel(ai.ThinkingMax, opus47))
 
@@ -83,6 +86,10 @@ func TestClampReasoningForModel(t *testing.T) {
 }
 
 func TestBedrockThinkingLevelToEffort(t *testing.T) {
+	// Opus 4.8 — xhigh is its own effort value.
+	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-8"))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-8"))
+
 	// Opus 4.7 — xhigh is its own effort value.
 	assert.Equal(t, "low", bedrockThinkingLevelToEffort(ai.ThinkingMinimal, "anthropic.claude-opus-4-7"))
 	assert.Equal(t, "medium", bedrockThinkingLevelToEffort(ai.ThinkingMedium, "anthropic.claude-opus-4-7"))

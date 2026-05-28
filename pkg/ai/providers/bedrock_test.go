@@ -257,6 +257,7 @@ func TestSupportsBedrockThinkingSignature(t *testing.T) {
 func TestSupportsBedrockAdaptiveThinking(t *testing.T) {
 	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4-6-v1", ""))
 	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4.6-v1", ""))
+	assert.True(t, supportsBedrockAdaptiveThinking("anthropic.claude-opus-4-8", ""))
 	assert.False(t, supportsBedrockAdaptiveThinking("anthropic.claude-3-7-sonnet", ""))
 	assert.True(t, supportsBedrockAdaptiveThinking("arn:aws:bedrock:us-east-1:123:application-inference-profile/abcd", "Claude Opus 4.7"))
 }
