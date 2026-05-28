@@ -8,6 +8,7 @@
 
 ### Changed
 
+- `/schedule` extension is now builtin — it auto-loads in TUI mode without needing a project-local `.fir/extensions/` symlink or `-e schedule`.
 - `wt` builtin skill now instructs the parent agent to prepend an explicit worktree-discipline pin to the task text when spawning. Without it, spawned agents tend to misread "Repo: ~/dev/ai/foo" in the task as "cd there and commit to main" rather than staying in the dedicated worktree. The skill includes a template pin and calls out the failure mode by name.
 
 ## [0.50.1] - 2026-05-26
