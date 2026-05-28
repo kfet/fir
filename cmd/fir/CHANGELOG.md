@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-05-27
+
 ### Added
 
 - ACP mode now emits the `dev.acp-kit.status-line/v1` extension in `_meta` on every `session/update` notification, carrying the current mood and plan slugs from the observable cards store. ACP relays (poe-acp, slack-acp) use this to render a status header. When no mood/plan cards are present, the `_meta` key is omitted entirely.
