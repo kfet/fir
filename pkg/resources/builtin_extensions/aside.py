@@ -784,8 +784,9 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
     except Exception as exc:
         return {"message": _side_query_error_text(exc)}
     return {
-        "message": f"advise: {text}\n\n{_prefix_advisor(answer, advisor)}",
+        "message": f"**advise:** {text}\n\n{_prefix_advisor(answer, advisor)}",
         "print_response": True,
+        "markdown": True,
     }
 
 

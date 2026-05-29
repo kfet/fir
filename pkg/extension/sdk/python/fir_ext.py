@@ -908,6 +908,7 @@ class CommandHookResult(TypedDict, total=False):
 
     message: str
     print_response: bool
+    markdown: bool
 
 
 # -- event payloads ---------------------------------------------------------

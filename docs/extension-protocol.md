@@ -318,6 +318,18 @@ Response — optional `message` shown in the TUI:
 {"jsonrpc":"2.0","id":4,"result":{"message":"Done!"}}
 ```
 
+Optional result fields:
+
+- `message` (string) — text shown in the TUI. By default it appears in the
+  transient status line.
+- `print_response` (bool) — when true, `message` is printed to the main
+  scrollable conversation area instead of the status line. Use for
+  substantial output (e.g. an advisor response).
+- `markdown` (bool) — when true (and `print_response` is true), `message` is
+  rendered as markdown inside a high-contrast accent-bordered box. Use for
+  prose. Leave false for preformatted / whitespace-aligned output (e.g.
+  tables), which markdown would collapse.
+
 Return `null` or `{}` to show nothing.
 
 ---

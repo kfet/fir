@@ -119,7 +119,11 @@ func (m *InteractiveMode) handleExtensionSlashCommand(text string) {
 	}
 	if result.Message != "" {
 		if result.PrintResponse {
-			m.showMessage(result.Message)
+			if result.Markdown {
+				m.showResponse(result.Message)
+			} else {
+				m.showMessage(result.Message)
+			}
 		} else {
 			m.showStatus(result.Message)
 		}
@@ -1651,6 +1655,34 @@ func (m *InteractiveMode) showMessage(text string) {
 	t := itheme.GetTheme()
 	m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	m.messageContainer.AddChild(tuicomp.NewText(t.Fg("muted", text), 1, 0, nil))
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
+}
+
+// showResponse renders substantial command output (commands that set both
+// print_response and markdown, e.g. /advise) with high visual contrast: the
+// body is markdown-rendered in themed foreground text inside an accent-coloured
+// rounded border, so it stands out from the surrounding muted status chatter
+// and is easy to read. Contrast with showMessage, which renders flat muted grey
+// suitable for brief notices or preformatted output that must keep its
+// whitespace alignment (markdown would collapse it).
+func (m *InteractiveMode) showResponse(text string) {
+	if m.messageContainer == nil {
+		return
+	}
+	t := itheme.GetTheme()
+	border := tuicomp.NewRoundedBorder(
+		func(s string) string { return t.Fg("accent", s) },
+		1, // inner horizontal padding
+	)
+	border.AddChild(tuicomp.NewMarkdown(strings.TrimSpace(text), 0, 0, m.markdownTheme,
+		&tuicomp.DefaultTextStyle{
+			Color: func(s string) string { return t.Fg("text", s) },
+		}))
+	m.messageContainer.AddChild(tuicomp.NewSpacer(1))
+	m.messageContainer.AddChild(border)
+	m.messageContainer.AddChild(tuicomp.NewSpacer(1))
 	if m.ui != nil {
 		m.ui.RequestRender(false)
 	}

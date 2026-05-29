@@ -800,6 +800,12 @@ type CommandResult struct {
 	// (scrollable message list) instead of the transient status bar. Use this
 	// for commands that return substantial output (e.g. advisor responses).
 	PrintResponse bool `json:"print_response"`
+	// Markdown, when true (and PrintResponse is true), renders Message as
+	// markdown inside a high-contrast accent-bordered box rather than flat
+	// muted text. Use for prose responses (e.g. /advise). Leave false for
+	// preformatted/whitespace-aligned output (e.g. tables) where markdown
+	// would collapse alignment.
+	Markdown bool `json:"markdown"`
 }
 
 // DispatchCommand sends a hook/command call to the extension that owns name.

@@ -400,6 +400,37 @@ class TestDemoTools(DemoTestCase):
         self.assertIn("3", msg["params"]["message"])
         fake.stop()
 
+    # -- hook/command --------------------------------------------------------
+
+    def test_command_demo_echo(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        resp = fake.send_hook(
+            7, "hook/command", {"name": "demo-echo", "args": ["hello"]}
+        )
+        self.assertIsNotNone(resp)
+        assert resp is not None
+        result = resp["result"]
+        self.assertEqual(result["message"], "demo-echo: hello")
+        self.assertNotIn("markdown", result)
+        fake.stop()
+
+    def test_command_demo_markdown_sets_render_flags(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        resp = fake.send_hook(
+            8, "hook/command", {"name": "demo-markdown", "args": ["hi", "there"]}
+        )
+        self.assertIsNotNone(resp)
+        assert resp is not None
+        result = resp["result"]
+        self.assertIn("demo-markdown:", result["message"])
+        self.assertTrue(result["print_response"])
+        self.assertTrue(result["markdown"])
+        fake.stop()
+
     # -- shell_run -----------------------------------------------------------
 
     def test_shell_run_calls_exec(self) -> None:

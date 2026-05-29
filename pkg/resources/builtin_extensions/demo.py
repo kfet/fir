@@ -437,6 +437,23 @@ def cmd_demo_echo(
     return {"message": f"demo-echo: {msg}"}
 
 
+@fir_ext.command(
+    name="demo-markdown",
+    description="Echo arguments back as a high-contrast markdown response",
+)
+def cmd_demo_markdown(
+    args: list, ctx: fir_ext.Context
+) -> fir_ext.CommandHookResult:
+    """Demonstrate print_response + markdown: prose rendered in a high-contrast
+    accent-bordered box in the main conversation area (see /advise)."""
+    msg = " ".join(args) if args else "(no arguments)"
+    return {
+        "message": f"**demo-markdown:** {msg}",
+        "print_response": True,
+        "markdown": True,
+    }
+
+
 @fir_ext.tool(
     name="show_config_dirs",
     description="Return the host-advertised config dirs and demo's config path/contents.",

@@ -1265,6 +1265,30 @@ func TestInteractiveMode_ShowMessage(t *testing.T) {
 	}
 }
 
+func TestInteractiveMode_ShowResponseHighContrast(t *testing.T) {
+	tm := newTestMode(t)
+
+	initialCount := tm.messageCount()
+	tm.mode.showResponse("**advise:** question\n\nThe answer body.")
+	tm.waitRender()
+
+	// showResponse adds a Spacer + bordered markdown + Spacer = 3 children.
+	got := tm.messageCount()
+	if got != initialCount+3 {
+		t.Errorf("expected message count %d (initial %d + 3), got %d", initialCount+3, initialCount, got)
+	}
+
+	output := tm.renderedOutput()
+	// The body must be present and wrapped in a rounded border for contrast,
+	// rather than rendered as flat muted text.
+	if !strings.Contains(output, "The answer body.") {
+		t.Errorf("expected response body in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "╭") || !strings.Contains(output, "╰") {
+		t.Errorf("expected rounded border around response for contrast, got:\n%s", output)
+	}
+}
+
 func TestInteractiveMode_ShowWarningAppearsInStatus(t *testing.T) {
 	tm := newTestMode(t)
 

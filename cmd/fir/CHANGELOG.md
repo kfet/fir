@@ -28,7 +28,11 @@
   falls back to pausing for a human. Genuine API rejections (400, auth,
   context-length) and user aborts are never auto-resumed. Emits a new
   `EventAutoResume` agent event (surfaced as a status line in interactive mode).
+- Extension slash-command results gain an optional `markdown` field. When set with `print_response`, the message is rendered as markdown inside a high-contrast accent-bordered box in the conversation area. Documented in `docs/extension-protocol.md` and exercised by the `demo-markdown` command.
 
+### Changed
+
+- `/advise` output now renders with high visual contrast in the TUI: the advisor response is markdown-rendered in themed foreground text inside an accent-coloured rounded border, instead of the flat low-contrast muted grey used for brief status notices. It opts in via the new `markdown` result field; preformatted output like `/observe`'s aligned tables keeps its plain rendering so column alignment is preserved. Border and body colours are theme-driven (`accent`/`text`), so they follow the active theme.
 
 ## [0.52.0] - 2026-05-28
 
