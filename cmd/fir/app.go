@@ -970,17 +970,12 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 	)
 	interactive.SetVersion(version)
 
-	// Notify the TUI when MCP servers finish initializing.
+	// Surface MCP server lifecycle events (connecting/ready/disconnected) in
+	// the TUI. The Manager buffers these, so attaching the consumer here —
+	// after Setup has already begun dialing — still delivers the initial
+	// "connecting" events for slow or hanging servers.
 	if setup.mcpManager != nil {
-		setup.mcpManager.SetOnServerReady(func(name string, err error) {
-			mode.NotifyMCPServerReady(name, err)
-		})
-		setup.mcpManager.SetOnServerConnecting(func(name string) {
-			mode.NotifyMCPServerConnecting(name)
-		})
-		setup.mcpManager.SetOnServerDisconnected(func(name string, err error) {
-			mode.NotifyMCPServerDisconnected(name, err)
-		})
+		mode.ConsumeMCPServerEvents(setup.mcpManager.ServerEvents())
 	}
 
 	// ui is the stable interface contract used for all lifecycle calls.

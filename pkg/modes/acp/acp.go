@@ -232,23 +232,6 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		SessionStore:    store.NewSessionStore(cwd, store.DefaultSessionDir(agentDir, cwd)),
 		Tools:           toolList,
 		MCPConfigs:      mcpConfigs,
-		OnMCPServerReady: func(name string, err error) {
-			if err != nil {
-				pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q failed to connect: %v", name, err))
-			} else {
-				pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connected", name))
-			}
-		},
-		OnMCPServerConnecting: func(name string) {
-			pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connecting…", name))
-		},
-		OnMCPServerDisconnected: func(name string, err error) {
-			if err != nil {
-				pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q disconnected: %v", name, err))
-			} else {
-				pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q disconnected", name))
-			}
-		},
 		ResourceLoaderOptions: &resources.ResourceLoaderOptions{
 			Cwd:                  cwd,
 			AgentDir:             agentDir,
@@ -275,6 +258,39 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		termState:       newTerminalState(),
 		mcpManager:      result.MCPManager,
 		mcpStatus:       mcp.StatusFunc(result.MCPManager),
+	}
+
+	// Surface MCP server lifecycle events to the ACP client. The Manager
+	// buffers these, so attaching the consumer here — after Setup has begun
+	// dialing — still delivers the initial "connecting" events. The goroutine
+	// exits when the Manager is closed (session teardown).
+	if entry.mcpManager != nil {
+		mgr := entry.mcpManager
+		go func() {
+			for {
+				select {
+				case <-mgr.Done():
+					return
+				case ev := <-mgr.ServerEvents():
+					switch ev.Kind {
+					case mcp.ServerConnecting:
+						pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connecting…", ev.Name))
+					case mcp.ServerReady:
+						if ev.Err != nil {
+							pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q failed to connect: %v", ev.Name, ev.Err))
+						} else {
+							pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q connected", ev.Name))
+						}
+					case mcp.ServerDisconnected:
+						if ev.Err != nil {
+							pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ MCP server %q disconnected: %v", ev.Name, ev.Err))
+						} else {
+							pa.sendAgentMessage(sessionID, fmt.Sprintf("MCP server %q disconnected", ev.Name))
+						}
+					}
+				}
+			}
+		}()
 	}
 
 	// --wait-mcp: block session creation until every MCP server has finished

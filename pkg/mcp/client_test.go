@@ -702,6 +702,40 @@ func TestManager_Status_ConnectError(t *testing.T) {
 	assert.Error(t, statuses[0].Error)
 }
 
+// srvEvent mirrors a ServerEvent for test assertions.
+type srvEvent struct {
+	name string
+	err  error
+}
+
+// drainServerEvents forwards a Manager's lifecycle events into per-kind
+// channels until the Manager is closed. Buffers are generous so the forwarder
+// never blocks. Start it before mgr.Start to observe the initial events;
+// because ServerEvents is itself buffered, attaching later still works.
+func drainServerEvents(mgr *Manager) (connecting chan string, ready chan srvEvent, disconnected chan srvEvent) {
+	connecting = make(chan string, 16)
+	ready = make(chan srvEvent, 16)
+	disconnected = make(chan srvEvent, 16)
+	go func() {
+		for {
+			select {
+			case <-mgr.Done():
+				return
+			case ev := <-mgr.ServerEvents():
+				switch ev.Kind {
+				case ServerConnecting:
+					connecting <- ev.Name
+				case ServerReady:
+					ready <- srvEvent{ev.Name, ev.Err}
+				case ServerDisconnected:
+					disconnected <- srvEvent{ev.Name, ev.Err}
+				}
+			}
+		}
+	}()
+	return connecting, ready, disconnected
+}
+
 func TestManager_OnServerReady_Success(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
@@ -712,14 +746,7 @@ func TestManager_OnServerReady_Success(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	type readyEvent struct {
-		name string
-		err  error
-	}
-	readyCh := make(chan readyEvent, 1)
-	mgr.SetOnServerReady(func(name string, err error) {
-		readyCh <- readyEvent{name, err}
-	})
+	_, readyCh, _ := drainServerEvents(mgr)
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
 
@@ -728,7 +755,7 @@ func TestManager_OnServerReady_Success(t *testing.T) {
 		assert.Equal(t, "srv", ev.name)
 		assert.NoError(t, ev.err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for onServerReady callback")
+		t.Fatal("timeout waiting for ServerReady event")
 	}
 }
 
@@ -738,14 +765,7 @@ func TestManager_OnServerReady_Error(t *testing.T) {
 		return nil, errors.New("dial failed")
 	}
 
-	type readyEvent struct {
-		name string
-		err  error
-	}
-	readyCh := make(chan readyEvent, 1)
-	mgr.SetOnServerReady(func(name string, err error) {
-		readyCh <- readyEvent{name, err}
-	})
+	_, readyCh, _ := drainServerEvents(mgr)
 
 	toolsCh := make(chan []agent.AgentTool, 1)
 	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
@@ -766,12 +786,12 @@ func TestManager_OnServerReady_Error(t *testing.T) {
 		assert.Error(t, ev.err)
 		assert.Contains(t, ev.err.Error(), "dial failed")
 	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for onServerReady callback")
+		t.Fatal("timeout waiting for ServerReady event")
 	}
 }
 
-// TestManager_OnServerConnecting_InitialAndReconnect verifies that
-// SetOnServerConnecting fires once at the initial dial and once at the
+// TestManager_OnServerConnecting_InitialAndReconnect verifies that a
+// ServerConnecting event is emitted once at the initial dial and once at the
 // start of a reconnect cycle following a server-initiated disconnect.
 func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
@@ -783,8 +803,7 @@ func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	connectingCh := make(chan string, 8)
-	mgr.SetOnServerConnecting(func(name string) { connectingCh <- name })
+	connectingCh, _, _ := drainServerEvents(mgr)
 
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
@@ -815,6 +834,56 @@ func TestManager_OnServerConnecting_InitialAndReconnect(t *testing.T) {
 	}
 }
 
+// TestManager_ServerEvents_BufferedUntilConsumerAttaches verifies that a
+// consumer attached AFTER Start has begun dialing still observes the in-flight
+// "connecting" event, because ServerEvents is buffered. This mirrors the
+// interactive TUI path (cmd/fir/app.go), where the consumer is attached only
+// after session.Setup has already started the MCP servers.
+func TestManager_ServerEvents_BufferedUntilConsumerAttaches(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "ping", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
+	realDial := inMemoryDial(t, server)
+	dialEntered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+		// By the time dialFn runs, startServer has already emitted the
+		// "connecting" event into the buffered channel. Signal that, then
+		// hold the connection open so the server stays connecting.
+		select {
+		case dialEntered <- struct{}{}:
+		default:
+		}
+		<-release
+		return realDial(cfg)
+	}
+
+	// Start with NO consumer attached yet.
+	mgr.Start(context.Background())
+	defer mgr.Close()
+
+	// Wait until startServer has emitted the connecting event and the server
+	// is mid-connect.
+	<-dialEntered
+	require.True(t, mgr.IsServerConnecting("srv"))
+
+	// Attach the consumer late — the buffered event must still be delivered.
+	connectingCh, _, _ := drainServerEvents(mgr)
+
+	select {
+	case name := <-connectingCh:
+		assert.Equal(t, "srv", name)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for buffered ServerConnecting event")
+	}
+
+	close(release) // allow the dial to complete cleanly
+}
+
 // TestManager_OnServerDisconnected fires the disconnected callback when
 // the server-side session is closed unexpectedly.
 func TestManager_OnServerDisconnected(t *testing.T) {
@@ -836,17 +905,7 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 		return nil, errors.New("dial fails after first connect")
 	}
 
-	type discEvent struct {
-		name string
-		err  error
-	}
-	discCh := make(chan discEvent, 1)
-	mgr.SetOnServerDisconnected(func(name string, err error) {
-		select {
-		case discCh <- discEvent{name, err}:
-		default:
-		}
-	})
+	_, _, discCh := drainServerEvents(mgr)
 
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
@@ -868,7 +927,7 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 			assert.Contains(t, ev.err.Error(), "disconnected")
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for onServerDisconnected callback")
+		t.Fatal("timeout waiting for ServerDisconnected event")
 	}
 }
 
@@ -885,26 +944,26 @@ func TestManager_OnServerDisconnected_NotFiredOnClose(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = inMemoryDial(t, server)
 
-	discCh := make(chan struct{}, 1)
-	mgr.SetOnServerDisconnected(func(_ string, _ error) {
-		select {
-		case discCh <- struct{}{}:
-		default:
-		}
-	})
-
 	startAndWait(t, mgr, context.Background())
 	require.NoError(t, mgr.Close())
 
-	// Give the reconnect loop a moment to drain.
-	select {
-	case <-discCh:
-		t.Fatal("onServerDisconnected must not fire on clean Close")
-	case <-time.After(200 * time.Millisecond):
+	// Drain any buffered events directly (not via the Done-gated helper, so a
+	// spurious disconnect emitted at close time would still be observed) and
+	// assert none is a disconnect.
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case ev := <-mgr.ServerEvents():
+			if ev.Kind == ServerDisconnected {
+				t.Fatal("ServerDisconnected must not fire on clean Close")
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 
-// TestManager_OnServerReady_FiresOnReconnect verifies that SetOnServerReady
+// TestManager_OnServerReady_FiresOnReconnect verifies that a ServerReady event
 // fires a second time after a disconnect/reconnect cycle, matching the
 // connecting/connected lifecycle the user sees in the UI.
 func TestManager_OnServerReady_FiresOnReconnect(t *testing.T) {
@@ -920,14 +979,7 @@ func TestManager_OnServerReady_FiresOnReconnect(t *testing.T) {
 	// Speed up reconnect so the test isn't bottlenecked on backoff.
 	shortenReconnectDelays(t)
 
-	type readyEvent struct {
-		name string
-		err  error
-	}
-	readyCh := make(chan readyEvent, 4)
-	mgr.SetOnServerReady(func(name string, err error) {
-		readyCh <- readyEvent{name, err}
-	})
+	_, readyCh, _ := drainServerEvents(mgr)
 
 	startAndWait(t, mgr, context.Background())
 	defer mgr.Close()
@@ -938,7 +990,7 @@ func TestManager_OnServerReady_FiresOnReconnect(t *testing.T) {
 		assert.Equal(t, "srv", ev.name)
 		assert.NoError(t, ev.err)
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for initial onServerReady")
+		t.Fatal("timeout waiting for initial ServerReady")
 	}
 
 	// Force disconnect; reconnect should fire ready again.

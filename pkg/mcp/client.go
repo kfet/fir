@@ -104,6 +104,41 @@ func (m *Manager) forEachServer(fn func(name string, e *serverEntry) bool) {
 	})
 }
 
+// ServerEventKind classifies an MCP server lifecycle transition.
+type ServerEventKind int
+
+const (
+	// ServerConnecting is emitted when a server begins a connection attempt:
+	// once for the initial dial, and once at the start of each reconnect
+	// cycle following a disconnect (not for retries within a cycle).
+	ServerConnecting ServerEventKind = iota
+
+	// ServerReady is emitted when a server's session becomes active — both
+	// for the initial connection and for each successful reconnect. On an
+	// initial-connect failure it is emitted with a non-nil Err (reconnect
+	// failures do not emit it).
+	ServerReady
+
+	// ServerDisconnected is emitted when an active server session terminates
+	// unexpectedly (not via a clean Close/Reload). Err is the wait error
+	// wrapped as "disconnected: ...", or nil if the session ended without
+	// one (e.g. server-initiated EOF).
+	ServerDisconnected
+)
+
+// ServerEvent reports an MCP server lifecycle transition. Events for a single
+// server are delivered in order on the channel returned by Manager.ServerEvents.
+type ServerEvent struct {
+	Kind ServerEventKind
+	Name string
+	Err  error // set for ServerReady (initial-connect failure) and ServerDisconnected
+}
+
+// serverEventBuffer bounds the lifecycle-event channel. It only needs to hold
+// the burst emitted between Start and the consumer attaching; once draining it
+// empties quickly. Sized generously relative to realistic server counts.
+const serverEventBuffer = 64
+
 // Manager owns the lifecycle of all MCP client sessions for one fir session.
 type Manager struct {
 	servers  sync.Map // string → *serverEntry
@@ -120,27 +155,20 @@ type Manager struct {
 	// May be nil.
 	onResourceUpdated atomic.Value // func(serverName, uri string)
 
-	// onServerReady is called (from a background goroutine) when an
-	// individual MCP server's session becomes active — both for the initial
-	// connection and for each successful reconnect after a disconnect. The
-	// first argument is the server name; the second is nil on success or
-	// the connection error on initial-connect failure (reconnect failures
-	// don't fire this callback). May be nil.
-	onServerReady atomic.Value // func(name string, err error)
+	// serverEvents carries per-server lifecycle transitions (connecting,
+	// ready, disconnected) to a single consumer obtained via ServerEvents.
+	// It is buffered so events emitted before a consumer attaches — e.g. the
+	// initial "connecting" event fired during session setup, before the TUI
+	// that surfaces it has been built — are retained rather than dropped.
+	// Emitters never block: a full buffer drops the event (see emitServerEvent).
+	serverEvents chan ServerEvent
 
-	// onServerConnecting is called (from a background goroutine) when an
-	// individual MCP server begins a connection attempt — once for the
-	// initial dial, and once at the start of each reconnect cycle following
-	// a disconnect. Not fired for subsequent retries within the same
-	// reconnect cycle. May be nil.
-	onServerConnecting atomic.Value // func(name string)
-
-	// onServerDisconnected is called (from a background goroutine) when an
-	// active MCP server session terminates unexpectedly (i.e. not via a
-	// clean Close/Reload). The error is the wait error wrapped as
-	// "disconnected: ...", or nil if the session ended without a wait
-	// error (e.g. server-initiated EOF). May be nil.
-	onServerDisconnected atomic.Value // func(name string, err error)
+	// done is closed exactly once by Close to signal consumers (ServerEvents
+	// readers) to stop. serverEvents itself is never closed because
+	// background goroutines (in-flight Start, reconnect loops) may still emit
+	// during shutdown; closing it would risk a send-on-closed panic.
+	done      chan struct{}
+	closeOnce sync.Once
 
 	// onChannelMessage is called when a channel-capable MCP server sends a
 	// notifications/claude/channel notification. May be nil.
@@ -181,8 +209,10 @@ type Manager struct {
 // warnings and above are requested.
 func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
 	mgr := &Manager{
-		verbose: verbose,
-		dialFn:  createTransport,
+		verbose:      verbose,
+		dialFn:       createTransport,
+		serverEvents: make(chan ServerEvent, serverEventBuffer),
+		done:         make(chan struct{}),
 	}
 	for k, v := range configs {
 		mgr.servers.Store(k, newServerEntry(v))
@@ -236,52 +266,36 @@ func (m *Manager) loadOnChannelMessage() func(ChannelMessage) {
 	return nil
 }
 
-// loadOnServerReady returns the current onServerReady callback, or nil.
-func (m *Manager) loadOnServerReady() func(string, error) {
-	if v := m.onServerReady.Load(); v != nil {
-		return v.(func(string, error))
+// ServerEvents returns the channel on which MCP server lifecycle events are
+// delivered. There is a single logical consumer; events are buffered so those
+// emitted before the consumer attaches are retained. The channel is never
+// closed — a consumer must also select on Done to stop:
+//
+//	for {
+//		select {
+//		case <-mgr.Done():
+//			return
+//		case ev := <-mgr.ServerEvents():
+//			// handle ev
+//		}
+//	}
+func (m *Manager) ServerEvents() <-chan ServerEvent { return m.serverEvents }
+
+// Done returns a channel closed when the Manager is closed. Consumers of
+// ServerEvents select on it to stop draining.
+func (m *Manager) Done() <-chan struct{} { return m.done }
+
+// emitServerEvent delivers a lifecycle event to the ServerEvents channel
+// without ever blocking the caller: these emit sites run inside connection
+// and reconnect goroutines that must not stall. If the buffer is full the
+// event is dropped (logged), which only happens when no consumer is draining.
+func (m *Manager) emitServerEvent(ev ServerEvent) {
+	select {
+	case m.serverEvents <- ev:
+	default:
+		firlog.Warn("mcp server-event buffer full; dropping event",
+			"kind", ev.Kind, "server", ev.Name)
 	}
-	return nil
-}
-
-// SetOnServerReady sets the callback invoked when an MCP server's session
-// becomes active — both on initial connect and on each successful
-// reconnect. The callback receives the server name and nil on success, or
-// a non-nil error on initial-connect failure.
-// Safe to call concurrently with running servers.
-func (m *Manager) SetOnServerReady(fn func(name string, err error)) {
-	m.onServerReady.Store(fn)
-}
-
-// loadOnServerConnecting returns the current onServerConnecting callback, or nil.
-func (m *Manager) loadOnServerConnecting() func(string) {
-	if v := m.onServerConnecting.Load(); v != nil {
-		return v.(func(string))
-	}
-	return nil
-}
-
-// SetOnServerConnecting sets the callback invoked when an individual MCP
-// server begins a connection attempt (initial connect, or the first attempt
-// of a reconnect cycle after a disconnect). Safe to call concurrently with
-// running servers.
-func (m *Manager) SetOnServerConnecting(fn func(name string)) {
-	m.onServerConnecting.Store(fn)
-}
-
-// loadOnServerDisconnected returns the current onServerDisconnected callback, or nil.
-func (m *Manager) loadOnServerDisconnected() func(string, error) {
-	if v := m.onServerDisconnected.Load(); v != nil {
-		return v.(func(string, error))
-	}
-	return nil
-}
-
-// SetOnServerDisconnected sets the callback invoked when an active MCP
-// server session terminates unexpectedly (not via a clean Close/Reload).
-// Safe to call concurrently with running servers.
-func (m *Manager) SetOnServerDisconnected(fn func(name string, err error)) {
-	m.onServerDisconnected.Store(fn)
 }
 
 // loadOnResourceUpdated returns the current onResourceUpdated callback, or nil.
@@ -417,9 +431,7 @@ func (m *Manager) Start(ctx context.Context) {
 			if notify := m.loadOnToolsChanged(); notify != nil {
 				notify(m.allTools())
 			}
-			if ready := m.loadOnServerReady(); ready != nil {
-				ready(name, err)
-			}
+			m.emitServerEvent(ServerEvent{Kind: ServerReady, Name: name, Err: err})
 		}()
 		return true
 	})
@@ -453,9 +465,7 @@ func (m *Manager) subscribeOnce(session *sdk.ClientSession, serverName string) s
 // re-dials internally without re-entering this function.
 func (m *Manager) startServer(ctx context.Context, name string, cfg ServerConfig) ([]agent.AgentTool, error) {
 	firlog.Debug("mcp connecting", "server", name, "command", cfg.Command)
-	if cb := m.loadOnServerConnecting(); cb != nil {
-		cb(name)
-	}
+	m.emitServerEvent(ServerEvent{Kind: ServerConnecting, Name: name})
 	session, tools, caps, err := m.dialAndInitialize(ctx, name, cfg)
 	if err != nil {
 		return nil, err
@@ -688,9 +698,7 @@ func (m *Manager) handleSessionEnd(name string, session *sdk.ClientSession, wait
 		notify(m.allTools())
 	}
 	if stillCurrent {
-		if cb := m.loadOnServerDisconnected(); cb != nil {
-			cb(name, disconnectErr)
-		}
+		m.emitServerEvent(ServerEvent{Kind: ServerDisconnected, Name: name, Err: disconnectErr})
 	}
 }
 
@@ -724,9 +732,7 @@ func (m *Manager) tryReconnect(ctx context.Context, name string) bool {
 	} else {
 		// First attempt of this reconnect cycle — surface the
 		// "connecting" event once per cycle (not per retry).
-		if cb := m.loadOnServerConnecting(); cb != nil {
-			cb(name)
-		}
+		m.emitServerEvent(ServerEvent{Kind: ServerConnecting, Name: name})
 	}
 	// Drain any pending kick so the next backoff cycle starts cleanly.
 	select {
@@ -785,9 +791,7 @@ func (m *Manager) installReconnectedSession(name string, sess *sdk.ClientSession
 	if notify := m.loadOnToolsChanged(); notify != nil {
 		notify(m.allTools())
 	}
-	if cb := m.loadOnServerReady(); cb != nil {
-		cb(name, nil)
-	}
+	m.emitServerEvent(ServerEvent{Kind: ServerReady, Name: name})
 }
 
 // reconnectBackoff returns the sleep duration before reconnect attempt N
@@ -1047,6 +1051,10 @@ func configsEqual(a, b ServerConfig) bool {
 // session.
 func (m *Manager) Close() error {
 	firlog.Debug("mcp shutting down")
+	// Signal ServerEvents consumers to stop. serverEvents itself is left
+	// open: in-flight Start/reconnect goroutines may still emit during the
+	// teardown below, and a closed channel would panic on send.
+	m.closeOnce.Do(func() { close(m.done) })
 	var sessions []*sdk.ClientSession
 	var cancels []context.CancelFunc
 	m.forEachServer(func(name string, e *serverEntry) bool {

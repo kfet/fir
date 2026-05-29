@@ -274,6 +274,35 @@ func (m *InteractiveMode) NotifyExtensionFailures(failures []extension.StartFail
 	}
 }
 
+// ConsumeMCPServerEvents drains MCP server lifecycle events from ch and
+// surfaces each as a TUI notice. The goroutine exits when the mode context is
+// cancelled. Because ch is buffered by the Manager, events emitted before this
+// consumer attaches — notably the initial "connecting" event fired while
+// session.Setup dials the servers, before this mode exists — are not lost.
+// Safe to call once during startup with the Manager's ServerEvents channel.
+func (m *InteractiveMode) ConsumeMCPServerEvents(ch <-chan mcp.ServerEvent) {
+	if ch == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			case ev := <-ch:
+				switch ev.Kind {
+				case mcp.ServerConnecting:
+					m.NotifyMCPServerConnecting(ev.Name)
+				case mcp.ServerReady:
+					m.NotifyMCPServerReady(ev.Name, ev.Err)
+				case mcp.ServerDisconnected:
+					m.NotifyMCPServerDisconnected(ev.Name, ev.Err)
+				}
+			}
+		}
+	}()
+}
+
 // NotifyMCPServerReady shows UI feedback when an MCP server finishes its
 // initial connection attempt. Safe to call from any goroutine.
 func (m *InteractiveMode) NotifyMCPServerReady(name string, err error) {

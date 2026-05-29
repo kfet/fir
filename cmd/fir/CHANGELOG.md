@@ -171,6 +171,8 @@
   since a relative-path command would then hit real files the agent was never
   pointed at. To proceed, the model can pass the new `cwd` parameter pointing
   at an existing directory, or recreate the missing directory.
+- MCP "connecting…" indication now appears for the initial connect in interactive mode. The TUI consumer attaches only after `session.Setup` has already begun dialing, so the start-of-connection event was previously lost — the user saw only the success/failure notice on completion. MCP server lifecycle transitions (connecting/ready/disconnected) are now delivered over a single buffered `Manager.ServerEvents()` channel that retains events emitted before a consumer attaches, so slow or hanging MCP servers are visibly in progress. Replaces the three `SetOnServer*` callbacks (and the `OnMCPServer*` factory plumbing), removing the "callbacks must be wired before Start" constraint; both the interactive TUI and ACP now attach a consumer after Setup returns.
+
 
 ## [0.52.0] - 2026-05-28
 
