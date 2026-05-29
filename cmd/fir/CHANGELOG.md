@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- Single-shot `SimplePrompt`/`SideQuery` LLM calls (used by the `aside` tool
+  and advisor escalation) now retry on transient failures instead of
+  dead-ending. Previously a transport reset, or a degenerate "thinking-only /
+  empty" response from a thinking model, surfaced as
+  `side-query: response had no usable content` and the advisor call failed
+  outright — this path has no agent loop, tools, or auto-resume to fall back
+  on. Bounded retry (2 extra attempts with backoff) re-rolls transport-class
+  errors and no-usable-content generations; genuine API rejections (400, auth,
+  context-length) still surface immediately. On a no-usable-content result the
+  retry forces thinking OFF so the model is structurally required to emit text
+  (rather than re-rolling into the same thinking-only/budget-exhausted
+  outcome), and the surfaced error now includes the LLM `stop_reason` for
+  diagnosis.
+- Automatic resume of an assistant turn killed by a transport/stream error
+  (TCP reset, broken pipe, unexpected EOF, truncated stream, HTTP/2 GOAWAY).
+  Previously such a turn ended with `stopReason: error` and the session paused
+  until a human typed "continue". The agent loop now auto-resumes: when a
+  partial response was already emitted it sanitises the prefix and injects a
+  single-symbol resume marker (`▶`, `agent.AutoResumeMarker` — "press play to
+  resume the paused turn") as a user message so the model continues cleanly;
+  when nothing was emitted it retries transparently. Bounded by 3 consecutive resumes with backoff, after which it
+  falls back to pausing for a human. Genuine API rejections (400, auth,
+  context-length) and user aborts are never auto-resumed. Emits a new
+  `EventAutoResume` agent event (surfaced as a status line in interactive mode).
+
+
 ## [0.52.0] - 2026-05-28
 
 ### Added

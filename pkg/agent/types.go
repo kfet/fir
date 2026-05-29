@@ -256,6 +256,14 @@ const (
 	// Arguments never finished streaming) and is about to retry the request
 	// after dropping the broken partial from history.
 	EventStreamRetry AgentEventType = "stream_retry"
+	// EventAutoResume is emitted when an assistant turn ends with a transport/
+	// stream error (connection reset, broken pipe, unexpected EOF, …) rather
+	// than a clean stop or tool call, and the agent loop is auto-resuming the
+	// turn instead of pausing for a human. RetryAttempt is the 1-based resume
+	// number and ErrorMessage is the transport error that triggered it. When a
+	// partial response had already been emitted, the resume injects the
+	// AutoResumeMarker user message so the model continues cleanly.
+	EventAutoResume AgentEventType = "auto_resume"
 )
 
 // AgentEvent represents a lifecycle event from the agent.

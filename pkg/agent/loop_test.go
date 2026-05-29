@@ -614,6 +614,10 @@ func TestAgentLoop_NoFollowUpAfterError(t *testing.T) {
 func init() {
 	// Speed up mid-tool-call retries for tests.
 	midToolCallRetryBackoffs = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	// Speed up transport auto-resume backoffs for tests (length is the cap).
+	autoResumeBackoffs = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	// Speed up single-shot SimplePrompt/SideQuery retries for tests.
+	simplePromptRetryBackoffs = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond}
 }
 
 // TestAgentLoop_FollowUpHookError verifies that when GetFollowUpMessages
@@ -898,5 +902,306 @@ func TestAgentLoop_MidToolCallExhaustedWithFollowUpsFoldsNote(t *testing.T) {
 	}
 	if standaloneNotes != 0 {
 		t.Errorf("expected the cutoff note to be folded into the follow-up, not appear as a standalone user message; standalone count=%d", standaloneNotes)
+	}
+}
+
+// --- Transport/stream-error auto-resume ---------------------------------
+
+const connResetErr = "read tcp 192.168.50.98:56658->160.79.104.10:443: read: connection reset by peer"
+
+// TestAgentLoop_AutoResumeWithPartialContent verifies the primary bug
+// scenario: the assistant emits a short text prefix, the stream is killed by a
+// transport reset (stop_reason=error), and the loop auto-resumes by injecting
+// the single-symbol AutoResumeMarker user message and continuing — instead of
+// pausing for a human. The emitted prefix is preserved as a clean (non-error)
+// assistant turn and a subsequent successful response completes the turn.
+func TestAgentLoop_AutoResumeWithPartialContent(t *testing.T) {
+	events := make(chan AgentEvent, 200)
+
+	broken := transportError("Let me check the logs.", connResetErr)
+	recovered := simpleResponse("All good.")
+
+	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
+	streamFn := mockStreamFn(broken, recovered)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Check the logs", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+	allEvents := collectEvents(events)
+	<-done
+
+	// EventAutoResume must have been emitted exactly once.
+	resumeEvents := 0
+	for _, e := range allEvents {
+		if e.Type == EventAutoResume {
+			resumeEvents++
+			if e.RetryAttempt != 1 {
+				t.Errorf("first auto-resume RetryAttempt=%d, want 1", e.RetryAttempt)
+			}
+			if e.ErrorMessage != connResetErr {
+				t.Errorf("auto-resume ErrorMessage=%q, want connection reset", e.ErrorMessage)
+			}
+		}
+	}
+	if resumeEvents != 1 {
+		t.Fatalf("EventAutoResume count=%d, want 1", resumeEvents)
+	}
+
+	// The AutoResumeMarker must appear as a user message in history.
+	sawMarker := false
+	for _, m := range returned {
+		if m.Role() != "user" {
+			continue
+		}
+		if text, _ := m.Message.AsUser().Content.(string); text == AutoResumeMarker {
+			sawMarker = true
+		}
+	}
+	if !sawMarker {
+		t.Errorf("expected AutoResumeMarker %q user message in returned history; got %+v", AutoResumeMarker, returned)
+	}
+
+	// No assistant error turn must survive — the partial prefix was sanitized.
+	for i, m := range returned {
+		if a := m.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+			t.Errorf("returned[%d]: error assistant turn survived auto-resume: %+v", i, a)
+		}
+	}
+
+	// The recovered response must be the final assistant turn.
+	last := returned[len(returned)-1]
+	la := last.Message.AsAssistant()
+	if la == nil || la.StopReason != ai.StopReasonStop {
+		t.Fatalf("last message is not a clean assistant turn: %+v", last)
+	}
+	if len(la.Content) == 0 || !la.Content[0].IsText() || la.Content[0].Text.Text != "All good." {
+		t.Errorf("final assistant content = %+v, want recovered text", la.Content)
+	}
+
+	// The partial prefix must still be present (model continues, not duplicates).
+	sawPrefix := false
+	for _, m := range returned {
+		if a := m.Message.AsAssistant(); a != nil {
+			for _, c := range a.Content {
+				if c.IsText() && c.Text.Text == "Let me check the logs." {
+					sawPrefix = true
+				}
+			}
+		}
+	}
+	if !sawPrefix {
+		t.Errorf("expected the emitted partial prefix to be preserved in history")
+	}
+}
+
+// TestAgentLoop_AutoResumeEmptyPartialSilentRetry verifies that when the
+// transport reset happens before ANY content was emitted, the loop drops the
+// empty errored turn and retries transparently (no marker is injected, since
+// there is nothing to continue from and a trailing user marker would break
+// role alternation).
+func TestAgentLoop_AutoResumeEmptyPartialSilentRetry(t *testing.T) {
+	events := make(chan AgentEvent, 200)
+
+	broken := transportError("", "write tcp 10.0.0.1:443: write: broken pipe")
+	recovered := simpleResponse("Recovered.")
+
+	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
+	streamFn := mockStreamFn(broken, recovered)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Do the thing", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+	allEvents := collectEvents(events)
+	<-done
+
+	resumeEvents := 0
+	for _, e := range allEvents {
+		if e.Type == EventAutoResume {
+			resumeEvents++
+		}
+	}
+	if resumeEvents != 1 {
+		t.Fatalf("EventAutoResume count=%d, want 1", resumeEvents)
+	}
+
+	// No marker should be injected on the empty path.
+	for _, m := range returned {
+		if m.Role() == "user" {
+			if text, _ := m.Message.AsUser().Content.(string); text == AutoResumeMarker {
+				t.Errorf("AutoResumeMarker should NOT be injected on the empty-partial path")
+			}
+		}
+	}
+	// No empty error turn should survive.
+	for i, m := range returned {
+		if a := m.Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+			t.Errorf("returned[%d]: empty error turn survived: %+v", i, a)
+		}
+	}
+	// Recovered response present.
+	last := returned[len(returned)-1].Message.AsAssistant()
+	if last == nil || last.StopReason != ai.StopReasonStop {
+		t.Fatalf("expected clean recovered assistant turn, got %+v", returned[len(returned)-1])
+	}
+}
+
+// TestAgentLoop_AutoResumeCapExhausted verifies that consecutive transport
+// errors are capped: after len(autoResumeBackoffs) auto-resumes the loop falls
+// back to the normal behaviour (emit agent_end and stop) rather than looping
+// forever on a persistently dead network.
+func TestAgentLoop_AutoResumeCapExhausted(t *testing.T) {
+	events := make(chan AgentEvent, 400)
+
+	// More broken responses than the cap; every call fails.
+	b1 := transportError("partial", connResetErr)
+	b2 := transportError("partial", connResetErr)
+	b3 := transportError("partial", connResetErr)
+	b4 := transportError("partial", connResetErr)
+	b5 := transportError("partial", connResetErr)
+
+	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
+	streamFn := mockStreamFn(b1, b2, b3, b4, b5)
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Check", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	var returned []AgentMessage
+	done := make(chan struct{})
+	go func() {
+		returned = AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, streamFn, events)
+		close(events)
+		close(done)
+	}()
+	allEvents := collectEvents(events)
+	<-done
+
+	resumeEvents := 0
+	for _, e := range allEvents {
+		if e.Type == EventAutoResume {
+			resumeEvents++
+		}
+	}
+	if resumeEvents != len(autoResumeBackoffs) {
+		t.Errorf("EventAutoResume count=%d, want cap %d", resumeEvents, len(autoResumeBackoffs))
+	}
+
+	// Must terminate with agent_end, not loop forever.
+	if last := allEvents[len(allEvents)-1]; last.Type != EventAgentEnd {
+		t.Errorf("last event=%s, want agent_end after cap exhausted", last.Type)
+	}
+	_ = returned
+}
+
+// TestAgentLoop_NonRetryableErrorNotResumed verifies that a genuine model/API
+// rejection (e.g. 400 invalid request) is NOT auto-resumed.
+func TestAgentLoop_NonRetryableErrorNotResumed(t *testing.T) {
+	events := make(chan AgentEvent, 100)
+
+	broken := transportError("", "400 invalid request: messages.0 too long")
+	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Hi", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	go func() {
+		AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, mockStreamFn(broken), events)
+		close(events)
+	}()
+	allEvents := collectEvents(events)
+
+	for _, e := range allEvents {
+		if e.Type == EventAutoResume {
+			t.Errorf("400 error must not be auto-resumed")
+		}
+	}
+	if last := allEvents[len(allEvents)-1]; last.Type != EventAgentEnd {
+		t.Errorf("last event=%s, want agent_end", last.Type)
+	}
+}
+
+// TestAgentLoop_AbortedNotResumed verifies that a user-aborted turn is never
+// auto-resumed, even if its error text resembles a transport failure.
+func TestAgentLoop_AbortedNotResumed(t *testing.T) {
+	events := make(chan AgentEvent, 100)
+
+	aborted := &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      []ai.AssistantContent{ai.NewTextContent("stopping")},
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonAborted,
+		ErrorMessage: connResetErr,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+	config := &AgentLoopConfig{Model: testModel(), ConvertToLLM: testConvertToLLM}
+
+	prompt := NewAgentMessage(ai.NewUserMsg("Hi", time.Now().UnixMilli()))
+	agentCtx := &AgentContext{Messages: []AgentMessage{}}
+
+	go func() {
+		AgentLoop(context.Background(), []AgentMessage{prompt}, agentCtx, config, mockStreamFn(aborted), events)
+		close(events)
+	}()
+	allEvents := collectEvents(events)
+
+	for _, e := range allEvents {
+		if e.Type == EventAutoResume {
+			t.Errorf("aborted turn must not be auto-resumed")
+		}
+	}
+}
+
+func TestIsResumableStreamError(t *testing.T) {
+	resumable := []string{
+		connResetErr,
+		"write tcp 10.0.0.1:443: write: broken pipe",
+		"unexpected EOF",
+		"Anthropic stream ended before message_stop",
+		"stream ended without result",
+		"http2: server sent GOAWAY and closed the connection",
+	}
+	for _, s := range resumable {
+		if !isResumableStreamError(s) {
+			t.Errorf("isResumableStreamError(%q) = false, want true", s)
+		}
+	}
+	notResumable := []string{
+		"",
+		"   ",
+		"400 invalid request",
+		"401 authentication_error: invalid x-api-key",
+		"prompt is too long: 250000 tokens > 200000 maximum",
+	}
+	for _, s := range notResumable {
+		if isResumableStreamError(s) {
+			t.Errorf("isResumableStreamError(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestHasReplayableContent(t *testing.T) {
+	if hasReplayableContent(transportError("", connResetErr)) {
+		t.Error("empty content must not be replayable")
+	}
+	if !hasReplayableContent(transportError("hello", connResetErr)) {
+		t.Error("non-empty text must be replayable")
+	}
+	if hasReplayableContent(nil) {
+		t.Error("nil must not be replayable")
 	}
 }

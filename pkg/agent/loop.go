@@ -5,11 +5,105 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
+
+// AutoResumeMarker is the single-symbol user message the agent loop injects to
+// auto-resume an assistant turn that was killed by a transport/stream error
+// (e.g. "connection reset by peer" mid-stream) rather than a clean stop or tool
+// call. The "play" triangle is an unambiguous, documented signal that fir
+// resumed the turn automatically — NOT real human input — mapping onto the
+// situation: the turn was paused by the reset, and this presses play to resume
+// it. U+25B6 (no variation selector) is a single code point that renders
+// reliably across terminals, log files, and JSON transcripts.
+const AutoResumeMarker = "▶"
+
+// autoResumeBackoffs controls how long the agent loop waits before each
+// consecutive auto-resume after a transport/stream error tore the connection.
+// Its length is the cap on consecutive auto-resumes: once exhausted the loop
+// falls back to the normal behaviour (end the turn and wait for a human). It is
+// a package var rather than a const so tests can shorten it.
+var autoResumeBackoffs = []time.Duration{
+	500 * time.Millisecond,
+	1500 * time.Millisecond,
+	4 * time.Second,
+}
+
+// isResumableStreamError reports whether an assistant turn's error message is a
+// transport/stream-level failure that is safe to auto-resume — a TCP reset,
+// broken pipe, unexpected EOF, i/o timeout, HTTP/2 GOAWAY, or a truncated
+// stream. Genuine model/API rejections (400 bad request, auth failure,
+// context-length, etc.) are NOT matched and must not be auto-resumed.
+func isResumableStreamError(errMsg string) bool {
+	if strings.TrimSpace(errMsg) == "" {
+		return false
+	}
+	if ratelimit.IsTransientNetworkError(errMsg) {
+		return true
+	}
+	// Stream truncation guards emitted by the providers / agent loop itself
+	// when the connection drops without a clean end-of-message.
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "stream ended before message_stop") ||
+		strings.Contains(lower, "stream ended without result") ||
+		strings.Contains(lower, "stream ended unexpectedly")
+}
+
+// hasReplayableContent reports whether an assistant message carries content that
+// can be replayed to the model as a non-empty assistant turn — i.e. at least
+// one non-empty text block or a thinking block with content/signature. Used to
+// decide whether an auto-resume can keep the emitted prefix (and append the
+// AutoResumeMarker, preserving role alternation) or must drop it and retry.
+func hasReplayableContent(m *ai.AssistantMessage) bool {
+	if m == nil {
+		return false
+	}
+	for _, c := range m.Content {
+		if c.IsText() && strings.TrimSpace(c.Text.Text) != "" {
+			return true
+		}
+		if c.IsThinking() && c.Thinking != nil &&
+			(c.Thinking.ThinkingSignature != "" || strings.TrimSpace(c.Thinking.Thinking) != "") {
+			return true
+		}
+	}
+	return false
+}
+
+// sanitizeTrailingError rewrites the last message of msgs in place when it is an
+// assistant message whose StopReason is error: the stop reason becomes a clean
+// stop and the error text is cleared. This turns an emitted-but-truncated prefix
+// into a normal assistant turn so TransformMessages replays it (instead of
+// dropping all error turns) and the model continues cleanly from it.
+func sanitizeTrailingError(msgs []AgentMessage) {
+	n := len(msgs)
+	if n == 0 {
+		return
+	}
+	if a := msgs[n-1].Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+		a.StopReason = ai.StopReasonStop
+		a.ErrorMessage = ""
+	}
+}
+
+// dropTrailingErrorMessage returns msgs with its last element removed when that
+// element is an assistant message with StopReason error. Used to discard an
+// empty (contentless) errored partial before a transparent auto-resume retry.
+func dropTrailingErrorMessage(msgs []AgentMessage) []AgentMessage {
+	n := len(msgs)
+	if n == 0 {
+		return msgs
+	}
+	if a := msgs[n-1].Message.AsAssistant(); a != nil && a.StopReason == ai.StopReasonError {
+		return msgs[:n-1]
+	}
+	return msgs
+}
 
 // AgentLoop starts an agent loop with new prompt messages.
 // Events are emitted to the returned channel.
@@ -77,6 +171,11 @@ func runLoop(
 	events chan<- AgentEvent,
 ) []AgentMessage {
 	firstTurn := true
+
+	// autoResumeCount tracks consecutive auto-resumes after transport/stream
+	// errors. It is reset to 0 whenever a turn completes without a resumable
+	// transport error, and capped by len(autoResumeBackoffs).
+	autoResumeCount := 0
 
 	// Check for steering messages at start
 	var pendingMessages []AgentMessage
@@ -163,6 +262,55 @@ func runLoop(
 			newMessages = append(newMessages, NewAgentMessage(ai.NewAssistantMsg(*message)))
 
 			if message.StopReason == ai.StopReasonError || message.StopReason == ai.StopReasonAborted {
+				// Auto-resume on transient transport/stream errors (connection
+				// reset, broken pipe, unexpected EOF, truncated stream, …). A
+				// genuine model/API rejection (400, auth, context-length) or a
+				// user abort is NOT auto-resumed — those fall through to the
+				// normal "end the turn" behaviour below. Bounded by
+				// len(autoResumeBackoffs) with backoff so a dead network can't
+				// loop forever.
+				if message.StopReason == ai.StopReasonError &&
+					autoResumeCount < len(autoResumeBackoffs) &&
+					isResumableStreamError(message.ErrorMessage) {
+
+					backoff := autoResumeBackoffs[autoResumeCount]
+					autoResumeCount++
+					events <- AgentEvent{
+						Type:         EventAutoResume,
+						RetryAttempt: autoResumeCount,
+						ErrorMessage: message.ErrorMessage,
+					}
+					select {
+					case <-ctx.Done():
+						// Cancelled while backing off — fall through to the
+						// normal termination path below.
+					case <-time.After(backoff):
+						if hasReplayableContent(message) {
+							// The model emitted a partial prefix before the
+							// reset. Keep it as a clean assistant turn (so it
+							// replays and role alternation stays valid) and
+							// inject the single-symbol resume marker so the
+							// model continues cleanly from where it left off.
+							sanitizeTrailingError(currentCtx.Messages)
+							sanitizeTrailingError(newMessages)
+							marker := NewAgentMessage(ai.NewUserMsg(AutoResumeMarker, time.Now().UnixMilli()))
+							pendingMessages = []AgentMessage{marker}
+							hasMoreToolCalls = false
+							continue
+						}
+						// Nothing replayable was emitted before the reset.
+						// Drop the empty errored partial (TransformMessages
+						// would drop it anyway) and retry transparently — the
+						// dropped turn restores the exact context that produced
+						// the error, so no resume marker is needed and role
+						// alternation is preserved.
+						currentCtx.Messages = dropTrailingErrorMessage(currentCtx.Messages)
+						newMessages = dropTrailingErrorMessage(newMessages)
+						hasMoreToolCalls = true
+						continue
+					}
+				}
+
 				am := NewAgentMessage(ai.NewAssistantMsg(*message))
 				events <- AgentEvent{
 					Type:        EventTurnEnd,
@@ -182,6 +330,10 @@ func runLoop(
 				events <- AgentEvent{Type: EventAgentEnd, Messages: newMessages}
 				return newMessages
 			}
+
+			// Turn completed without a resumable transport error — reset the
+			// consecutive auto-resume counter.
+			autoResumeCount = 0
 
 			// Check for tool calls
 			var toolCalls []ai.ToolCall

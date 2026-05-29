@@ -787,3 +787,181 @@ func TestSimplePromptStream_ForwardsEventsAndMatchesSimplePrompt(t *testing.T) {
 		t.Errorf("SimplePrompt text = %q, want %q", plain, respText)
 	}
 }
+
+// --- SimplePrompt / SideQuery transient-result retry --------------------
+
+// thinkingOnlyResponse simulates the degenerate generation that recurs with
+// thinking models on side queries: a thinking block carrying a signature but
+// no thinking text, and no text block — a clean stop with no usable content.
+func thinkingOnlyResponse() *ai.AssistantMessage {
+	tc := ai.NewThinkingContent("")
+	tc.Thinking.ThinkingSignature = "sig-1300-chars-abcdefghij"
+	return &ai.AssistantMessage{
+		Role:       "assistant",
+		Content:    []ai.AssistantContent{tc},
+		Api:        ai.ApiAnthropicMessages,
+		Provider:   ai.ProviderAnthropic,
+		Model:      "test-model",
+		StopReason: ai.StopReasonStop,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+}
+
+// TestSimplePrompt_RetriesDegenerateThinkingOnly verifies that a thinking-only/
+// empty response is re-rolled rather than dead-ending the call — the recurring
+// "side-query: response had no usable content" advisor failure.
+func TestSimplePrompt_RetriesDegenerateThinkingOnly(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel()},
+		StreamFn:     mockStreamFn(thinkingOnlyResponse(), simpleResponse("the real answer")),
+	})
+
+	text, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "the real answer", text)
+}
+
+// TestSimplePrompt_RetriesTransportError verifies a transport/stream error is
+// re-rolled on the single-shot path (which has no agent-loop auto-resume).
+func TestSimplePrompt_RetriesTransportError(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel()},
+		StreamFn:     mockStreamFn(transportError("", connResetErr), simpleResponse("recovered")),
+	})
+
+	text, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "recovered", text)
+}
+
+// TestSimplePrompt_DoesNotRetryGenuineError verifies a non-transient API
+// rejection (e.g. 400) is surfaced immediately, without burning retries.
+func TestSimplePrompt_DoesNotRetryGenuineError(t *testing.T) {
+	calls := 0
+	streamFn := func(model *ai.Model, ctx ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		calls++
+		s := ai.NewAssistantMessageEventStream()
+		msg := transportError("", "400 invalid request: messages.0: too long")
+		go func() {
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: msg.StopReason, Message: msg})
+			s.End(nil)
+		}()
+		return s
+	}
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel()},
+		StreamFn:     streamFn,
+	})
+
+	_, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.Error(t, err)
+	assert.Equal(t, 1, calls, "genuine 400 error must not be retried")
+}
+
+// TestSimplePrompt_DisablesThinkingOnNoContentRetry verifies the refinement:
+// after a no-usable-content (thinking-only) result, the retry forces thinking
+// OFF so the model is structurally required to emit text. The first attempt
+// uses the configured reasoning level; the retry uses ThinkingOff.
+func TestSimplePrompt_DisablesThinkingOnNoContentRetry(t *testing.T) {
+	var reasonings []ai.ThinkingLevel
+	responses := []*ai.AssistantMessage{thinkingOnlyResponse(), simpleResponse("answer")}
+	idx := 0
+	streamFn := func(model *ai.Model, ctx ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		reasonings = append(reasonings, options.Reasoning)
+		s := ai.NewAssistantMessageEventStream()
+		msg := responses[idx]
+		if idx < len(responses)-1 {
+			idx++
+		}
+		go func() {
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: msg.StopReason, Message: msg})
+			s.End(nil)
+		}()
+		return s
+	}
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel(), ThinkingLevel: ThinkingMedium},
+		StreamFn:     streamFn,
+	})
+
+	text, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "answer", text)
+	require.Len(t, reasonings, 2)
+	assert.Equal(t, ai.ThinkingMedium, reasonings[0], "first attempt keeps configured reasoning")
+	assert.Equal(t, ai.ThinkingOff, reasonings[1], "no-content retry forces thinking off")
+}
+
+// TestSimplePrompt_KeepsReasoningOnTransportRetry verifies that a transport
+// error retry does NOT disable thinking (only no-content results do).
+func TestSimplePrompt_KeepsReasoningOnTransportRetry(t *testing.T) {
+	var reasonings []ai.ThinkingLevel
+	responses := []*ai.AssistantMessage{transportError("", connResetErr), simpleResponse("ok")}
+	idx := 0
+	streamFn := func(model *ai.Model, ctx ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		reasonings = append(reasonings, options.Reasoning)
+		s := ai.NewAssistantMessageEventStream()
+		msg := responses[idx]
+		if idx < len(responses)-1 {
+			idx++
+		}
+		go func() {
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: msg.StopReason, Message: msg})
+			s.End(nil)
+		}()
+		return s
+	}
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel(), ThinkingLevel: ThinkingMedium},
+		StreamFn:     streamFn,
+	})
+
+	_, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.NoError(t, err)
+	require.Len(t, reasonings, 2)
+	assert.Equal(t, ai.ThinkingMedium, reasonings[0])
+	assert.Equal(t, ai.ThinkingMedium, reasonings[1], "transport retry keeps configured reasoning")
+}
+
+// TestSimplePrompt_ExhaustsRetriesThenErrors verifies the retry cap: a
+// persistently degenerate response eventually surfaces the error rather than
+// looping forever.
+func TestSimplePrompt_ExhaustsRetriesThenErrors(t *testing.T) {
+	calls := 0
+	streamFn := func(model *ai.Model, ctx ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		calls++
+		s := ai.NewAssistantMessageEventStream()
+		msg := thinkingOnlyResponse()
+		go func() {
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: msg})
+			s.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: msg.StopReason, Message: msg})
+			s.End(nil)
+		}()
+		return s
+	}
+	a := NewAgent(AgentOptions{
+		InitialState: &AgentState{Model: testModel()},
+		StreamFn:     streamFn,
+	})
+
+	_, err := a.SimplePrompt(context.Background(), []AgentMessage{
+		NewAgentMessage(ai.NewUserMsg("advise me", time.Now().UnixMilli())),
+	}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no usable content")
+	assert.Contains(t, err.Error(), "stop_reason=", "error must surface the stop reason for diagnosis")
+	assert.Equal(t, len(simplePromptRetryBackoffs)+1, calls, "should attempt exactly maxAttempts times")
+}

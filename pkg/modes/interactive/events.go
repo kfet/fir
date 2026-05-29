@@ -225,6 +225,8 @@ func (m *InteractiveMode) handleEvent(event session.AgentSessionEvent) {
 		m.onAgentEnd()
 	case agent.EventStreamRetry:
 		m.showStatus(fmt.Sprintf("Stream error (mid-tool-call): retrying — attempt %d", ae.RetryAttempt))
+	case agent.EventAutoResume:
+		m.showStatus(fmt.Sprintf("Stream error (transport): auto-resuming ▶ — attempt %d", ae.RetryAttempt))
 	}
 }
 

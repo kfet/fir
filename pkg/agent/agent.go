@@ -11,7 +11,27 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
+	firlog "github.com/kfet/fir/pkg/log"
 )
+
+// simplePromptRetryBackoffs controls retries of a single-shot SimplePrompt /
+// SideQuery LLM call. Its length is the number of EXTRA attempts (so total
+// attempts = len+1). Retries cover two transient classes that would otherwise
+// dead-end an advisor/side query with no recourse (there is no agent loop or
+// tool result to react to here):
+//
+//   - transport/stream errors (connection reset, broken pipe, EOF, …)
+//   - degenerate generations that carry no usable content — e.g. a thinking
+//     model that emits an empty/thinking-only block with no text. A re-roll of
+//     an idempotent side query almost always returns text.
+//
+// A genuine model/API rejection (400, auth, context-length) is NOT retried.
+// Package var so tests can shorten the backoffs.
+var simplePromptRetryBackoffs = []time.Duration{
+	300 * time.Millisecond,
+	1 * time.Second,
+}
 
 // DefaultConvertToLLM keeps only LLM-compatible messages.
 func DefaultConvertToLLM(messages []AgentMessage) ([]ai.Message, error) {
@@ -646,12 +666,6 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 		return "", nil, fmt.Errorf("no ConvertToLLM function configured")
 	}
 
-	agentCtx := &AgentContext{
-		SystemPrompt: systemPrompt,
-		Messages:     messages,
-		Tools:        NewToolSet(), // empty — no tools
-	}
-
 	config := &AgentLoopConfig{
 		Model:           model,
 		Reasoning:       reasoning,
@@ -663,10 +677,96 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 		GetApiKey:       getApiKey,
 	}
 
-	// Drain events synchronously: forward to onEvent (if any) and otherwise
-	// discard. Keeping this on the calling goroutine ensures the callback
-	// observes events in order without extra synchronization, and preserves
-	// the NO-COMPACTION contract (events never reach the session).
+	// Single-shot streaming with bounded retry. Unlike the agent loop, this
+	// path has no tools, no steering, and no auto-resume — a single bad roll
+	// (transport reset, or a degenerate thinking-only/empty response from a
+	// thinking model) would otherwise dead-end the call with no recourse.
+	// Retry those transient classes; surface everything else immediately.
+	//
+	// Refinement for the no-usable-content case: rather than a blind re-roll
+	// (which can repeat a thinking-only / budget-exhausted outcome), the retry
+	// after such a result forces thinking OFF, so the model is structurally
+	// required to emit a text answer. The original reasoning level is used for
+	// the first attempt and for transport-error retries.
+	baseReasoning := config.Reasoning
+	forceNoThinking := false
+	var (
+		msg     *ai.AssistantMessage
+		text    string
+		lastErr error
+	)
+	maxAttempts := len(simplePromptRetryBackoffs) + 1
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if forceNoThinking {
+			config.Reasoning = ai.ThinkingOff
+		} else {
+			config.Reasoning = baseReasoning
+		}
+
+		// A fresh context per attempt ensures a failed partial is never
+		// replayed to the model on the next try.
+		msg = streamSinglePrompt(ctx, systemPrompt, messages, config, streamFn, onEvent)
+
+		switch {
+		case msg == nil:
+			lastErr = fmt.Errorf("no response from model")
+			forceNoThinking = false
+		case msg.ErrorMessage != "":
+			lastErr = fmt.Errorf("%s", msg.ErrorMessage)
+			// Only transport/stream errors are worth a re-roll; a genuine
+			// model/API rejection (400, auth, context-length) is terminal.
+			if !ratelimit.IsRetryableError(msg.ErrorMessage) {
+				return "", msg, lastErr
+			}
+			// Transport error — keep the original reasoning level on retry.
+			forceNoThinking = false
+		default:
+			var renderErr error
+			text, _, renderErr = renderSimplePromptContent(msg.Content)
+			if renderErr == nil {
+				return text, msg, nil
+			}
+			// Degenerate empty / thinking-only response. Surface the stop
+			// reason (stop vs length tells us "model chose silence" vs
+			// "budget exhausted") and force thinking OFF on the next attempt
+			// so the model must emit text instead of risking a repeat.
+			lastErr = fmt.Errorf("%w (stop_reason=%s)", renderErr, msg.StopReason)
+			forceNoThinking = true
+		}
+
+		if attempt < maxAttempts-1 {
+			firlog.Warn("SimplePrompt transient result, retrying",
+				"attempt", attempt+1, "err", lastErr)
+			select {
+			case <-ctx.Done():
+				return text, msg, ctx.Err()
+			case <-time.After(simplePromptRetryBackoffs[attempt]):
+			}
+		}
+	}
+
+	return text, msg, lastErr
+}
+
+// streamSinglePrompt runs one tool-less streaming LLM call and returns the
+// final assistant message. Events are forwarded to onEvent (if non-nil) on the
+// calling goroutine — preserving order without extra synchronization and the
+// NO-COMPACTION contract (events never reach the session). A fresh AgentContext
+// is built per call so a failed partial from a prior attempt is never replayed.
+func streamSinglePrompt(
+	ctx context.Context,
+	systemPrompt string,
+	messages []AgentMessage,
+	config *AgentLoopConfig,
+	streamFn StreamFn,
+	onEvent func(AgentEvent),
+) *ai.AssistantMessage {
+	agentCtx := &AgentContext{
+		SystemPrompt: systemPrompt,
+		Messages:     messages,
+		Tools:        NewToolSet(), // empty — no tools
+	}
+
 	events := make(chan AgentEvent, 64)
 	doneCh := make(chan struct{})
 	go func() {
@@ -681,15 +781,7 @@ func (a *Agent) SimplePromptStream(ctx context.Context, messages []AgentMessage,
 	msg := streamAssistantResponse(ctx, agentCtx, config, streamFn, events)
 	close(events)
 	<-doneCh
-
-	if msg == nil {
-		return "", nil, fmt.Errorf("no response from model")
-	}
-	if msg.ErrorMessage != "" {
-		return "", msg, fmt.Errorf("%s", msg.ErrorMessage)
-	}
-	text, _, err := renderSimplePromptContent(msg.Content)
-	return text, msg, err
+	return msg
 }
 
 // BlockSummary is a compact description of a single content block from an

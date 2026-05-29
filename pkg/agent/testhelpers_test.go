@@ -51,3 +51,23 @@ func simpleResponse(text string) *ai.AssistantMessage {
 		Timestamp:  time.Now().UnixMilli(),
 	}
 }
+
+// transportError creates an assistant message that ended with a transport/
+// stream error (stop_reason=error) after emitting partialText. When partialText
+// is empty the message carries no content, simulating a reset before any output.
+func transportError(partialText, errMsg string) *ai.AssistantMessage {
+	content := []ai.AssistantContent{}
+	if partialText != "" {
+		content = append(content, ai.NewTextContent(partialText))
+	}
+	return &ai.AssistantMessage{
+		Role:         "assistant",
+		Content:      content,
+		Api:          ai.ApiAnthropicMessages,
+		Provider:     ai.ProviderAnthropic,
+		Model:        "test-model",
+		StopReason:   ai.StopReasonError,
+		ErrorMessage: errMsg,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+}
