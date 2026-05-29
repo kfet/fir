@@ -11,17 +11,13 @@ Delegate all to a new agent!
 
 2. Construct the task text. The spawned agent will land in
    `<cwd>-wt-<feature>` on branch `work/<feature>` — that is its
-   workspace. It must do *all* work and commits there, never in the
-   source repo's main worktree. Agents routinely misread a phrase
-   like "Repo: ~/dev/ai/foo" as an instruction to `cd` and commit on
-   main; pre-empt that.
+   workspace. It must do *all* work and commits there.
 
    Prepend the task text with an explicit pin, e.g.:
 
    ```
    You are in a dedicated git worktree on branch work/<feature>.
-   Do all work and commits in this CWD. Do NOT cd into the source
-   repo or any sibling worktree, and do NOT commit to main.
+   Do all work and commits in this CWD.
 
    <original task here>
    ```
