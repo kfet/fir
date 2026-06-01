@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anthropic server tools `text_editor_code_execution` and `bash_code_execution`
+  wedged a session on the next turn with 400 "`text_editor_code_execution` tool
+  use with id ... was found without a corresponding
+  `text_editor_code_execution_tool_result` block"
+  (req_011Cbc9z9qxJmH2Yrg6vGVSa). The Anthropic stream parser's server-block
+  allow-list recognised `code_execution_tool_result`/`web_search_tool_result`/
+  `web_fetch_tool_result` but not the `bash_code_execution_tool_result` /
+  `text_editor_code_execution_tool_result` variants, so it captured the
+  `server_tool_use` half while silently dropping the result half — leaving an
+  orphaned server tool_use that the API rejects on replay. Both result types are
+  now captured (and rendered in the transcript). A defensive replay-side guard
+  also drops any `server_tool_use` whose paired `*_tool_result` is missing, so
+  already-wedged sessions recover and any future capture gap can't hard-fail a
+  turn. Confirmed live: before/after A/B on the reproducing session, 400 -> OK.
+
 ## [0.53.0] - 2026-05-31
 
 ### Fixed

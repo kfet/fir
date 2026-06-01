@@ -504,6 +504,8 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					case "server_tool_use",
 						"web_search_tool_result",
 						"code_execution_tool_result",
+						"bash_code_execution_tool_result",
+						"text_editor_code_execution_tool_result",
 						"web_fetch_tool_result",
 						"tool_invocation",
 						"tool_output":
@@ -1243,6 +1245,7 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 					}
 				}
 			}
+			blocks = dropOrphanedServerToolUse(blocks)
 			blocks = stripTrailingEmptyThinking(blocks)
 			if len(blocks) > 0 {
 				blocks = separateAdjacentThinkingBlocks(blocks)
@@ -1424,6 +1427,50 @@ func stripTrailingEmptyThinking(blocks []map[string]any) []map[string]any {
 	return blocks
 }
 
+// dropOrphanedServerToolUse removes a `server_tool_use` block whose matching
+// `*_tool_result` block is absent from the same assistant message.
+//
+// Anthropic server tools (web_search, web_fetch, code_execution and its
+// bash/text_editor variants) emit a `server_tool_use` block immediately
+// followed, in the same assistant turn, by a `*_tool_result` block carrying a
+// `tool_use_id` back-reference. If fir failed to capture the result half (e.g.
+// a result block type the stream parser did not yet recognise, or a stream
+// interrupted between the two), replaying the lone server_tool_use makes the
+// API reject the request with 400 "... tool use with id ... was found without a
+// corresponding ..._tool_result block" (req_011Cbc7jauS2DGLYFLxfs1Hz). Dropping
+// the orphan keeps the rest of the turn valid. Well-formed pairs are untouched.
+func dropOrphanedServerToolUse(blocks []map[string]any) []map[string]any {
+	// Collect the tool_use ids that a result block references.
+	resolved := map[string]bool{}
+	hasOrphan := false
+	for _, b := range blocks {
+		if id, ok := b["tool_use_id"].(string); ok && id != "" {
+			resolved[id] = true
+		}
+	}
+	for _, b := range blocks {
+		if t, _ := b["type"].(string); t == "server_tool_use" {
+			if id, _ := b["id"].(string); id == "" || !resolved[id] {
+				hasOrphan = true
+				break
+			}
+		}
+	}
+	if !hasOrphan {
+		return blocks
+	}
+	out := make([]map[string]any, 0, len(blocks))
+	for _, b := range blocks {
+		if t, _ := b["type"].(string); t == "server_tool_use" {
+			if id, _ := b["id"].(string); id == "" || !resolved[id] {
+				continue
+			}
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
 // convertToolResultContent converts tool result content to Anthropic format.
 // Text-only results return a single string. Mixed results with images return an array of blocks.
 func convertToolResultContent(content []ai.ToolResultContent, model *ai.Model) any {
@@ -1584,7 +1631,9 @@ func formatServerContentForDisplay(providerType string, cb map[string]any) strin
 		return fmt.Sprintf("[server tool: %s]", name)
 	case "web_search_tool_result":
 		return formatWebSearchResult(cb)
-	case "code_execution_tool_result":
+	case "code_execution_tool_result",
+		"bash_code_execution_tool_result",
+		"text_editor_code_execution_tool_result":
 		return formatCodeExecutionResult(cb)
 	case "web_fetch_tool_result":
 		return formatWebFetchResult(cb)
