@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-05-31
+
 ### Fixed
 
 - Anthropic turns could fail on resume/continuation with 400 "`thinking` or
