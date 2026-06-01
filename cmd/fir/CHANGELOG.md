@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-06-01
+
 ### Fixed
 
 - Anthropic server tools `text_editor_code_execution` and `bash_code_execution`
