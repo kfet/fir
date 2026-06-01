@@ -590,3 +590,70 @@ func TestAnthropicThinkingInvariant_EmptyTextFilteredWhenNoThinking(t *testing.T
 		t.Errorf("expected only the non-empty text to survive, got %v", blocks)
 	}
 }
+
+// TestAnthropic_TrailingEmptyThinkingStripped is a live-confirmed regression
+// for the 400 "`thinking` or `redacted_thinking` blocks in the latest
+// assistant message cannot be modified" (req_011Cbc2WRJXu2Q3UBWH3YChM,
+// messages.1.content.57). A stream interrupted mid-thought leaves an assistant
+// turn ending on a signed-but-EMPTY thinking block whose signature was issued
+// over text that is no longer present; replaying it fails verbatim validation.
+// The converter must drop only the *trailing empty-text* thinking block, while
+// preserving (a) non-trailing empty-text thinking that precedes a tool_use and
+// (b) a complete trailing thinking block that still carries its text.
+func TestAnthropic_TrailingEmptyThinkingStripped(t *testing.T) {
+	model := anthropicSameModelModel()
+
+	t.Run("trailing empty thinking is dropped", func(t *testing.T) {
+		am := mkAssistant(model,
+			mkSignedThinking("real reasoning", "sig-lead"),
+			ai.NewTextContent("doing the thing"),
+			ai.NewToolCallContent("tc1", "echo", map[string]any{"x": 1}),
+			mkSignedThinking("", "sig-dangling"), // interrupted-stream artifact
+		)
+		blocks := mustConvertAssistant(t, model, am)
+		if got := blocks[len(blocks)-1]["type"].(string); got == "thinking" {
+			t.Fatalf("trailing empty thinking must be stripped; last block is %q", got)
+		}
+		// The completed lead thinking block (non-empty text) must survive verbatim.
+		if n := len(extractThinkingBlocks(blocks)); n != 1 {
+			t.Fatalf("expected exactly the 1 completed thinking block to remain, got %d", n)
+		}
+	})
+
+	t.Run("non-trailing empty thinking before tool_use is preserved", func(t *testing.T) {
+		am := mkAssistant(model,
+			mkSignedThinking("", "sig-a"),
+			ai.NewToolCallContent("tc1", "echo", map[string]any{"x": 1}),
+		)
+		blocks := mustConvertAssistant(t, model, am)
+		if blocks[0]["type"].(string) != "thinking" {
+			t.Fatalf("non-trailing empty thinking before tool_use must be preserved, got %v", blocks)
+		}
+	})
+
+	t.Run("trailing thinking WITH text is preserved verbatim", func(t *testing.T) {
+		am := mkAssistant(model,
+			ai.NewToolCallContent("tc1", "echo", map[string]any{"x": 1}),
+			mkSignedThinking("a complete final thought", "sig-final"),
+		)
+		blocks := mustConvertAssistant(t, model, am)
+		last := blocks[len(blocks)-1]
+		if last["type"].(string) != "thinking" || last["thinking"].(string) != "a complete final thought" {
+			t.Fatalf("complete trailing thinking must be preserved verbatim, got %v", last)
+		}
+	})
+}
+
+func mustConvertAssistant(t *testing.T, model *ai.Model, am ai.AssistantMessage) []map[string]any {
+	t.Helper()
+	msgs := []ai.Message{ai.NewUserMsg("q", 1000), ai.NewAssistantMsg(am)}
+	result := convertAnthropicMessages(msgs, model, false, ai.CacheNone)
+	if len(result) < 2 {
+		t.Fatalf("expected >=2 wire messages, got %d", len(result))
+	}
+	blocks, ok := result[1]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("assistant content not []map, got %T", result[1]["content"])
+	}
+	return blocks
+}

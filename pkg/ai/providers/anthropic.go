@@ -1243,6 +1243,7 @@ func convertAnthropicMessages(messages []ai.Message, model *ai.Model, oauthToken
 					}
 				}
 			}
+			blocks = stripTrailingEmptyThinking(blocks)
 			if len(blocks) > 0 {
 				blocks = separateAdjacentThinkingBlocks(blocks)
 				params = append(params, map[string]any{"role": "assistant", "content": blocks})
@@ -1390,6 +1391,37 @@ func separateAdjacentThinkingBlocks(blocks []map[string]any) []map[string]any {
 		out = append(out, b)
 	}
 	return out
+}
+
+// stripTrailingEmptyThinking removes trailing `thinking` blocks that carry an
+// empty `thinking` string (signature only, no content) from a converted
+// assistant message.
+//
+// A well-formed assistant turn always ends in text or tool_use. A turn that
+// ends on an empty-text thinking block is the artifact of a stream interrupted
+// mid-thought (transport error, abort, provider 4xx/5xx while the thinking
+// block was still open). Replaying that orphaned block in the latest assistant
+// message makes the Anthropic API reject the whole request with 400 "`thinking`
+// or `redacted_thinking` blocks in the latest assistant message cannot be
+// modified" (req_011Cbc2WRJXu2Q3UBWH3YChM, messages.1.content.57): its
+// signature was issued over thinking text that is no longer present, so
+// verbatim-replay validation fails.
+//
+// Only empty-text blocks are stripped — a *complete* trailing thinking block
+// (non-empty text) is replayed verbatim, and `redacted_thinking` (whose content
+// lives in `data`, not `thinking`) is left untouched.
+func stripTrailingEmptyThinking(blocks []map[string]any) []map[string]any {
+	for len(blocks) > 0 {
+		last := blocks[len(blocks)-1]
+		if t, _ := last["type"].(string); t != "thinking" {
+			break
+		}
+		if txt, _ := last["thinking"].(string); strings.TrimSpace(txt) != "" {
+			break
+		}
+		blocks = blocks[:len(blocks)-1]
+	}
+	return blocks
 }
 
 // convertToolResultContent converts tool result content to Anthropic format.

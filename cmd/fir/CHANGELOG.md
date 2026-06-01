@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anthropic turns could fail on resume/continuation with 400 "`thinking` or
+  `redacted_thinking` blocks in the latest assistant message cannot be
+  modified" (e.g. req_011Cbc2WRJXu2Q3UBWH3YChM, messages.1.content.57). When a
+  response stream is interrupted mid-thought (transport error, abort, provider
+  4xx/5xx while a thinking block is still open), the assistant turn is persisted
+  ending on a signed-but-empty `thinking` block. Its signature was issued over
+  thinking text that is no longer present, so replaying it verbatim in the
+  latest assistant message fails Anthropic's validation and rejects the whole
+  request. The Anthropic converter now strips a *trailing empty-text* thinking
+  block on replay (only that case — completed thinking blocks and
+  redacted_thinking are still replayed verbatim). Confirmed against the live API
+  with a before/after A/B on the reproducing sessions.
+
 ### Added
 
 - Single-shot `SimplePrompt`/`SideQuery` LLM calls (used by the `aside` tool
