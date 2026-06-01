@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Anthropic server-side content blocks are now captured generically. The stream
+  parser previously enumerated the server `*_tool_result` block types it would
+  store, so each new Anthropic server tool silently dropped its result block
+  (orphaning the `server_tool_use` into a 400 on the next turn) until the type
+  was added by hand. The parser now captures any non-client block type
+  (everything except text/thinking/redacted_thinking/tool_use) verbatim as
+  ServerContent via a default passthrough, so new server tools round-trip with
+  no code change. The `dropOrphanedServerToolUse` guard remains as a safety net.
+
 ## [0.54.0] - 2026-06-01
 
 ### Fixed

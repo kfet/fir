@@ -280,3 +280,50 @@ func TestStreamAnthropic_CapturesTextEditorCodeExecResult(t *testing.T) {
 		t.Fatalf("text_editor_code_execution_tool_result not captured as ServerContent; content=%+v", res.Content)
 	}
 }
+
+// TestStreamAnthropic_CapturesUnknownServerBlock is the future-proofing
+// guarantee: a server block type the parser has never seen (a hypothetical new
+// Anthropic server tool) must still be captured verbatim as ServerContent via
+// the default passthrough, not silently dropped. This is what prevents the
+// "new server tool → dropped result → orphaned server_tool_use → 400" class
+// from recurring whenever Anthropic ships a new tool.
+func TestStreamAnthropic_CapturesUnknownServerBlock(t *testing.T) {
+	sse := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"id":"m","type":"message","role":"assistant","content":[],"model":"claude-opus-4-8","stop_reason":null,"usage":{"input_tokens":5,"output_tokens":0}}}`,
+		``,
+		`event: content_block_start`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"future_widget_tool_result","tool_use_id":"srv_new","content":{"ok":true}}}`,
+		``,
+		`event: content_block_stop`,
+		`data: {"type":"content_block_stop","index":0}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":1}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(sse))
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	model.ID = "claude-opus-4-8"
+	stream := StreamAnthropic(context.Background(), model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("go", 5)}}, &ai.StreamOptions{ApiKey: "k"})
+	collectEvents(t, stream)
+	res := stream.Result()
+	var found bool
+	for _, c := range res.Content {
+		if c.IsServerContent() && c.Server.ProviderType == "future_widget_tool_result" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unknown server block type must be captured via default passthrough; content=%+v", res.Content)
+	}
+}

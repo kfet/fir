@@ -501,18 +501,23 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						}
 						output.Content = append(output.Content, ai.NewToolCallContent(toolID, toolName, map[string]any{}))
 						stream.Push(ai.AssistantMessageEvent{Type: ai.EventToolcallStart, ContentIndex: contentIdx, Partial: output})
-					case "server_tool_use",
-						"web_search_tool_result",
-						"code_execution_tool_result",
-						"bash_code_execution_tool_result",
-						"text_editor_code_execution_tool_result",
-						"web_fetch_tool_result",
-						"tool_invocation",
-						"tool_output":
-						// Server-side / provider-internal content blocks
-						// captured verbatim for round-trip replay (see
-						// req_011Cb1vcfcbfqsJWGM7KfmyT and BACKLOG.md).
-						// Display text is pre-formatted for the transcript.
+					default:
+						// Generic passthrough for ANY block type that isn't a
+						// known client block (text/thinking/redacted_thinking/
+						// tool_use, handled above) — i.e. server-side /
+						// provider-internal blocks: server_tool_use and the
+						// *_tool_result family (web_search, web_fetch,
+						// code_execution and its bash/text_editor variants), plus
+						// tool_invocation/tool_output and anything Anthropic adds
+						// later. Anthropic keeps shipping new server tools, each
+						// with a new `*_tool_result` block type; capturing them
+						// verbatim here — rather than from a hardcoded allow-list
+						// — means a new server tool works with no code change,
+						// instead of silently dropping its result and orphaning
+						// the server_tool_use into a 400 (req_011Cbc9z9qxJmH2Yrg6vGVSa,
+						// req_011Cb1vcfcbfqsJWGM7KfmyT; see BACKLOG.md). The stored
+						// Raw is replayed verbatim; dropOrphanedServerToolUse is
+						// the safety net if a result half is ever still missing.
 						rawJSON, _ := json.Marshal(cb)
 						display := formatServerContentForDisplay(blockType, cb)
 						output.Content = append(output.Content, ai.NewServerContent(blockType, rawJSON, display))
