@@ -295,6 +295,11 @@ init response.
 | ``tool_execution_end``  | ``{"tool_call_id": "...", "tool_name": "...",  |
 |                         |   "is_error": false}``                         |
 +-------------------------+------------------------------------------------+
+| ``provider_error``      | ``{error_text, kind, retryable, provider?,     |
+|                         |   model?, retry_after_ms?}`` — turn ended in a |
+|                         |   provider error. kind: rate_limit/overloaded/ |
+|                         |   server/transport/terminal. See docs.         |
++-------------------------+------------------------------------------------+
 
 -------------------------------------------------------------------------------
 EXTENSION → FIR CALLS  (extension → fir, Request)
@@ -1001,6 +1006,15 @@ class ToolExecutionEndParams(TypedDict, total=False):
     error_text: str
 
 
+class ProviderErrorParams(TypedDict, total=False):
+    error_text: str
+    kind: str  # rate_limit | overloaded | server | transport | terminal
+    retryable: bool
+    provider: str
+    model: str
+    retry_after_ms: int
+
+
 # -- bridge method (extension → fir) params/results -------------------------
 #
 # Param shapes — used as the body of ctx._call() — and result shapes — what
@@ -1340,6 +1354,7 @@ __all__ = [
     "PlanInfo",
     "PrependContextParams",
     "Provider",
+    "ProviderErrorParams",
     "ProviderListModelsParams",
     "ProviderListModelsResult",
     "ProviderResolveCustomIDParams",

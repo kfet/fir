@@ -23,9 +23,9 @@ Inbound surface demonstrated (fir → extension):
   • Tool registration: word_count, shell_run, list_tools, pin_tools,
     change_model, inject_message, restart_demo, batch_example
   • hook/tool_call: blocks tools whose name starts with "blocked:"
-  • All ten events: session_start, session_shutdown, agent_start, agent_end,
+  • All eleven events: session_start, session_shutdown, agent_start, agent_end,
     turn_start, turn_end, message_start, message_end,
-    tool_execution_start, tool_execution_end
+    tool_execution_start, tool_execution_end, provider_error
 
 Type annotations:
   Handlers in this file use the TypedDicts re-exported from fir_ext
@@ -422,6 +422,25 @@ def on_tool_execution_end(
     tcid = params.get("tool_call_id", "")
     if tcid:
         ctx.clear_label(tcid)                         # clear_label
+
+
+@fir_ext.on("provider_error")
+def on_provider_error(
+    params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context
+) -> None:
+    # Emitted when a turn ends in a provider/LLM error. `retryable` tells you
+    # whether it is a transient class (overloaded/rate-limit/5xx/transport)
+    # worth auto-resuming, vs a terminal error (auth/400/context-length).
+    # `retry_after_ms` carries a provider-indicated delay when parseable.
+    if not params:
+        return
+    print(
+        f"demo: provider_error kind={params.get('kind', '')} "
+        f"retryable={params.get('retryable', False)} "
+        f"retry_after_ms={params.get('retry_after_ms', 0)} "
+        f"model={params.get('provider', '')}/{params.get('model', '')}",
+        file=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------

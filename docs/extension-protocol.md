@@ -358,6 +358,7 @@ the `events` array of the init response.  For hooks, use the full `hook/` name.
 | `message_end` | `{role, provider?, model?, stop_reason?, response_id?, usage?}` — LLM message block has finished. `role` is `"user"`, `"assistant"`, or `"toolResult"`. Assistant messages also carry `provider`, `model`, `stop_reason`, `response_id`, and a `usage` object: `{input, output, cache_read, cache_write, total_tokens, cost: {input, output, cache_read, cache_write, total}}`. Token counts are integers; cost values are USD floats from the upstream provider (zero when unavailable). |
 | `tool_execution_start` | `{"tool_call_id": "...", "tool_name": "..."}` |
 | `tool_execution_end` | `{"tool_call_id": "...", "tool_name": "...", "is_error": false}` |
+| `provider_error` | `{error_text, kind, retryable, provider?, model?, retry_after_ms?}` — emitted on `turn_end` when the turn ended with a provider/LLM error (assistant `stop_reason == error`). `kind` is one of `"rate_limit"`, `"overloaded"`, `"server"`, `"transport"`, `"terminal"`. `retryable` is true for transient classes (overloaded/rate-limit/5xx/transport) and false for terminal errors (auth/400/context-length). `retry_after_ms` is the provider-indicated delay in milliseconds when parseable, else absent. Use it to drive auto-resume/backoff. |
 
 ---
 

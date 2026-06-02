@@ -51,7 +51,7 @@ _id_counter = itertools.count(1)
 class _ScheduleEntry:
     """A single scheduled task."""
 
-    __slots__ = ("id", "message", "stop_event", "target", "thread")
+    __slots__ = ("auto", "id", "message", "stop_event", "target", "thread")
 
     def __init__(
         self,
@@ -60,12 +60,14 @@ class _ScheduleEntry:
         message: str | None,
         stop_event: threading.Event,
         thread: threading.Thread | None = None,
+        auto: bool = False,
     ):
         self.id = id
         self.target = target
         self.message = message
         self.stop_event = stop_event
         self.thread = thread
+        self.auto = auto
 
 
 def _next_id() -> str:
@@ -431,6 +433,7 @@ def _serialize_schedules() -> str:
     records = [
         {"id": e.id, "target_iso": e.target.isoformat(), "message": e.message}
         for e in entries
+        if not e.auto  # auto-resume entries are transient; never persist them
     ]
     return json.dumps(records)
 
@@ -513,6 +516,174 @@ def on_session_shutdown(params: dict, ctx: fir_ext.Context) -> None:
     serialized = _serialize_schedules()
     with contextlib.suppress(Exception):
         ctx.set_session_data(_SESSION_DATA_KEY, serialized)
+
+
+# ---------------------------------------------------------------------------
+# Auto-resume on transient provider errors
+# ---------------------------------------------------------------------------
+#
+# When an LLM turn ends in a *retryable* provider error (Anthropic Overloaded /
+# 529, rate limit / 429, transient 5xx) that the agent's own in-loop transport
+# retry does NOT cover, the session would otherwise sit stuck waiting for a
+# human. We auto-resume it with a backoff, bounded by a give-up window.
+#
+# Policy (user-locked — see DESIGN-provider-error-resume.md):
+#   • Only retryable errors. Terminal errors (auth/400/context-length) are left
+#     for the user; we just post a notice.
+#   • Honour the provider's retry_after when given; otherwise use the fixed
+#     escalating schedule below (no jitter — we are small-fish traffic).
+#   • Give up after _AR_GIVEUP_WINDOW of continuous failure.
+#   • Always on when this extension is loaded; no toggle.
+#   • Reset on the first successful assistant turn.
+
+# Fixed backoff schedule (seconds) used when the provider gives no retry_after.
+# Escalates then holds steady at the last value.
+_AR_BACKOFFS = [30, 60, 105, 120]
+
+# Give up after this much continuous failure (first failure → now).
+_AR_GIVEUP_WINDOW = timedelta(minutes=20)
+
+_ar_lock = threading.Lock()
+_ar_consecutive: int = 0
+_ar_first_failure: datetime | None = None
+_ar_entry_id: str | None = None
+
+
+def _ar_backoff_seconds(consecutive: int, retry_after_ms: int) -> float:
+    """Delay before the next resume attempt. Honour retry_after when given."""
+    if retry_after_ms and retry_after_ms > 0:
+        return retry_after_ms / 1000.0
+    idx = min(max(consecutive - 1, 0), len(_AR_BACKOFFS) - 1)
+    return float(_AR_BACKOFFS[idx])
+
+
+def _reset_autoresume(ctx: fir_ext.Context | None = None) -> None:
+    """Clear auto-resume state and cancel any pending resume timer."""
+    global _ar_consecutive, _ar_first_failure, _ar_entry_id
+    entry_id = None
+    with _ar_lock:
+        if _ar_consecutive == 0 and _ar_first_failure is None and _ar_entry_id is None:
+            return
+        _ar_consecutive = 0
+        _ar_first_failure = None
+        entry_id = _ar_entry_id
+        _ar_entry_id = None
+    if entry_id:
+        with _lock:
+            e = _schedules.pop(entry_id, None)
+        if e is not None:
+            e.stop_event.set()
+        if ctx is not None:
+            with contextlib.suppress(Exception):
+                _update_status(ctx)
+
+
+@fir_ext.on("provider_error")
+def on_provider_error(params: dict, ctx: fir_ext.Context) -> None:
+    """Auto-resume the session after a retryable provider/LLM turn error."""
+    global _ar_consecutive, _ar_first_failure, _ar_entry_id
+    params = params or {}
+    kind = params.get("kind", "unknown")
+    err_text = (params.get("error_text") or "").strip()
+
+    if not params.get("retryable"):
+        # Terminal error (auth/400/context-length): never auto-resume. Surface
+        # it so the user can act.
+        with contextlib.suppress(Exception):
+            ctx.send_message(
+                custom_type="provider_error",
+                content=(
+                    f"⛔ Provider error ({kind}) is not retryable — auto-resume "
+                    f"skipped. {err_text[:200]}"
+                ),
+                display=True,
+            )
+        return
+
+    now = _now()
+    with _ar_lock:
+        if _ar_first_failure is None:
+            _ar_first_failure = now
+        _ar_consecutive += 1
+        n = _ar_consecutive
+        first = _ar_first_failure
+    elapsed = now - first
+
+    # Give-up check: stop once we've been failing continuously past the window.
+    if elapsed > _AR_GIVEUP_WINDOW:
+        with contextlib.suppress(Exception):
+            ctx.send_message(
+                custom_type="provider_error",
+                content=(
+                    f"🛑 Provider has been failing ({kind}) for "
+                    f"{_format_countdown(elapsed)} across {n} attempts — "
+                    f"auto-resume given up. Prompt to retry manually. "
+                    f"Last error: {err_text[:200]}"
+                ),
+                display=True,
+            )
+        _reset_autoresume(ctx)
+        return
+
+    retry_after_ms = int(params.get("retry_after_ms") or 0)
+    delay = _ar_backoff_seconds(n, retry_after_ms)
+    target = now + timedelta(seconds=delay)
+
+    # Cancel any prior pending resume (shouldn't normally exist) and schedule a
+    # fresh one that re-prompts "continue".
+    stop = threading.Event()
+    sid = _next_id()
+    entry = _ScheduleEntry(
+        id=sid, target=target, message=None, stop_event=stop, auto=True,
+    )
+    t = threading.Thread(
+        target=_run_countdown,
+        args=(sid, target, stop, ctx, None),
+        daemon=True,
+    )
+    entry.thread = t
+
+    old_id = None
+    with _ar_lock:
+        old_id = _ar_entry_id
+        _ar_entry_id = sid
+    if old_id:
+        with _lock:
+            old = _schedules.pop(old_id, None)
+        if old is not None:
+            old.stop_event.set()
+
+    with _lock:
+        _schedules[sid] = entry
+    t.start()
+
+    with contextlib.suppress(Exception):
+        _update_status(ctx)
+    with contextlib.suppress(Exception):
+        src = "provider retry_after" if retry_after_ms > 0 else "backoff"
+        ctx.send_message(
+            custom_type="provider_error",
+            content=(
+                f"⏳ [{sid}] Provider error ({kind}, attempt {n}) — auto-resuming "
+                f"in {_format_countdown(target - now)} ({src}). "
+                f"Failing for {_format_countdown(elapsed)}; will give up after "
+                f"{_format_countdown(_AR_GIVEUP_WINDOW)}."
+            ),
+            display=True,
+        )
+
+
+@fir_ext.on("message_end")
+def on_message_end(params: dict, ctx: fir_ext.Context) -> None:
+    """Reset auto-resume state on the first successful assistant turn."""
+    params = params or {}
+    if params.get("role") != "assistant":
+        return
+    stop_reason = params.get("stop_reason")
+    # A successful (or merely non-error) assistant message means the provider
+    # recovered — clear the failure counter/timer.
+    if stop_reason and stop_reason != "error":
+        _reset_autoresume(ctx)
 
 
 fir_ext.run(name="schedule")

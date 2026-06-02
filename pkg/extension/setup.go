@@ -3,9 +3,12 @@ package extension
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/session"
 )
@@ -275,6 +278,9 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 			mgr.EmitEvent("turn_start", nil)
 		case agent.EventTurnEnd:
 			mgr.EmitEvent("turn_end", nil)
+			if p := providerErrorPayload(ae); p != nil {
+				mgr.EmitEvent("provider_error", p)
+			}
 		case agent.EventMessageStart:
 			mgr.EmitEvent("message_start", nil)
 		case agent.EventMessageEnd:
@@ -362,4 +368,58 @@ func messageEndPayload(ae *agent.AgentEvent) *MessageEndPayload {
 		},
 	}
 	return payload
+}
+
+// providerErrorPayload builds the extension payload for a `provider_error`
+// event from an `EventTurnEnd`. It returns nil unless the turn message is an
+// assistant message that stopped with an error and carries a non-empty error
+// text. The error is classified via pkg/ai/ratelimit into a stable `kind`
+// ("rate_limit", "overloaded", "server", "transport", "terminal") and tagged
+// with `retryable` so extensions can decide whether to auto-resume.
+func providerErrorPayload(ae *agent.AgentEvent) *ProviderErrorPayload {
+	if ae == nil || ae.TurnMessage == nil {
+		return nil
+	}
+	am := ae.TurnMessage.AsAssistant()
+	if am == nil || am.StopReason != ai.StopReasonError {
+		return nil
+	}
+	text := am.ErrorMessage
+	if text == "" {
+		return nil
+	}
+	retryable := ratelimit.IsRetryableError(text)
+	payload := &ProviderErrorPayload{
+		ErrorText: text,
+		Kind:      classifyProviderError(text),
+		Retryable: retryable,
+		Provider:  string(am.Provider),
+		Model:     am.Model,
+	}
+	if d := ratelimit.ExtractRetryDelayFromText(text); d > 0 {
+		payload.RetryAfterMs = d.Milliseconds()
+	}
+	return payload
+}
+
+// classifyProviderError maps an error text to a stable kind. "overloaded" is
+// distinguished from the broader rate-limit class (which also matches 529)
+// because Anthropic overload is a distinct operational signal even though both
+// are retryable. Order matters: overloaded is checked before the rate-limit
+// catch-all.
+func classifyProviderError(text string) string {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "overload") {
+		return "overloaded"
+	}
+	if ratelimit.IsRateLimitText(text) {
+		return "rate_limit"
+	}
+	if ratelimit.IsTransientServerError(text) {
+		return "server"
+	}
+	if ratelimit.IsTransientNetworkError(text) {
+		return "transport"
+	}
+	return "terminal"
 }

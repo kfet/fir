@@ -282,6 +282,20 @@ type MessageEndPayload struct {
 	Usage      *MessageEndUsage `json:"usage,omitempty"`
 }
 
+// ProviderErrorPayload is emitted on provider_error when a turn ends with an
+// assistant message carrying StopReason==error. It classifies the failure so
+// extensions can decide whether to auto-resume (retryable transient classes)
+// or surface it to the user (terminal). Kind is one of: "rate_limit",
+// "overloaded", "server", "transport", "terminal".
+type ProviderErrorPayload struct {
+	ErrorText    string `json:"error_text"`
+	Kind         string `json:"kind"`
+	Retryable    bool   `json:"retryable"`
+	Provider     string `json:"provider,omitempty"`
+	Model        string `json:"model,omitempty"`
+	RetryAfterMs int64  `json:"retry_after_ms,omitempty"`
+}
+
 // SessionStartPayload is the per-extension payload for session_start.
 // Both fields are optional: a fresh session emits no params at all (we
 // pass nil), a resumed session may carry session_id and previously

@@ -353,6 +353,7 @@ class TestDemoInit(DemoTestCase):
                 "turn_start", "turn_end",
                 "message_start", "message_end",
                 "tool_execution_start", "tool_execution_end",
+                "provider_error",
                 "hook/tool_call",
             },
         )
@@ -857,6 +858,9 @@ class TestDemoEvents(DemoTestCase):
 
     def test_message_end_no_crash(self) -> None:
         self._assert_no_crash("message_end")
+
+    def test_provider_error_no_crash(self) -> None:
+        self._assert_no_crash("provider_error")
 
 
 # ---------------------------------------------------------------------------
