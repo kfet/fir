@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `ship-it` workflow skills: `ship-it` (loop review-and-fix until clean →
+  ff-merge → optional worktree cleanup → instruction-friction log), `ship-wt`
+  (a `wt` variant that spawns a self-shipping worktree agent), and
+  `instruction-tune` (process the cross-project friction log into edits). The
+  `loop` skill gains a condition mode (iterate until an exit predicate holds,
+  re-printing the predicate each cycle to prevent loop collapse), and
+  `review-and-fix` now drives its iterate-until-clean repeat through it. See
+  `docs/ship-it-workflow.md`.
+
 ### Changed
 
 - Anthropic server-side content blocks are now captured generically. The stream

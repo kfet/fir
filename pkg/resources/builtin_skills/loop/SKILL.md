@@ -1,64 +1,80 @@
 ---
+builtin: true
 name: loop
-description: Repeatedly execute any user-provided prompt on a fixed interval. Ask the user what to repeat and how often, then keep looping until told to stop.
+description: Repeatedly execute a task — on a fixed time interval, or until an exit condition holds. Re-prints the task/exit banner each cycle so the loop does not collapse. Use for watch-style polling or iterate-until-clean loops.
 override: true
 ---
 
 # Loop Skill
 
-You are a general-purpose looping agent. You execute a user-defined task on repeat, sleeping between cycles.
+You execute a task on repeat. Two modes:
+
+- **interval** — repeat every N seconds until told to stop.
+- **condition** — repeat until an exit predicate holds.
+
+## Why the per-cycle banner is mandatory
+
+A loop stated once, at the top, decays as cycles append output: the original
+instruction sits far back, recent tokens dominate attention, and the
+locally-coherent continuation becomes "summarise and conclude" instead of
+"loop again". You counter this by emitting the loop invariant through a `bash`
+call **every cycle** — placing it at a recent position, behind a hard turn
+boundary, as external-looking output. This is not optional flavour; it is the
+mechanism that keeps the loop alive.
 
 ## Setup (first run only)
 
-If the user has not yet specified what to repeat, ask them:
+Establish, asking the user only for what is missing:
 
-1. **What should I repeat?** (the task/prompt to run every cycle)
-2. **How long should I wait between cycles?** (default: 30 seconds)
+- **Task** — what to run each cycle.
+- **Mode** — interval or condition.
+- **Interval** (interval mode) — seconds between cycles (default 30).
+- **Exit predicate** (condition mode) — the exact condition that ends the loop,
+  stated so it can be evaluated objectively.
+- **Banner slugs** (optional) — short keywords pointing back to the fuller task
+  definition (e.g. another skill's section headings). Re-emitted each cycle as
+  attention anchors; do **not** restate the full task content in the banner.
 
-Once you have both answers, begin the loop immediately.
+Then begin immediately.
 
-## Loop Cycle
+## Cycle — interval mode
 
-Each cycle follows this exact order:
+1. **Print the banner** (plain code block, survives session timeout):
+   ```
+   Next reminder command:
+   sleep <N> && echo "=== LOOP CYCLE <N+1> === Task: <task>. Slugs: <slugs>"
+   ```
+2. **Execute the task** fully — no truncation, no skipped steps.
+3. **Report** one line: `Cycle N complete: <summary>`.
+4. **Run the reminder command** with a bash timeout of `<N + 10>`s:
+   ```bash
+   sleep <N> && echo "=== LOOP CYCLE <N+1> === Task: <task>. Slugs: <slugs>"
+   ```
+   On seeing the output, return to step 1.
 
-### 0. Print the next reminder command
+## Cycle — condition mode
 
-Before doing anything else, output this as a plain code block so it's visible in the chat even if the session times out:
+No sleep. The banner alone re-grounds the loop, so its content carries the load.
 
-```
-Next reminder command:
-sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read this skill file and run the next cycle. Task: <the user's prompt>"
-```
-
-### 1. Re-read this skill file
-
-Re-read `this skill file` to keep instructions in context. Long-running agents drift — this is mandatory.
-
-### 2. Note your task and interval
-
-Confirm to yourself:
-- **Task:** `<the prompt the user gave you>`
-- **Interval:** `<N>` seconds
-
-### 3. Execute the task
-
-Carry out the user's prompt fully. Do whatever it asks — read files, run commands, write output, analyze results. Do not truncate or skip steps.
-
-### 4. Report
-
-Briefly summarize what happened this cycle:
-> Cycle N complete: <one-line summary of what you did or found>
-
-### 5. Run the reminder command
-
-```bash
-sleep <N> && echo "=== LOOP REMINDER === Cycle complete. Re-read this skill file and run the next cycle. Task: <the user's prompt>"
-```
-
-Use a timeout of `<N + 10>` seconds on the bash call. When you see the reminder output, immediately go back to step 0.
+1. **Print the banner** via bash, with the exit predicate stated **in full** and
+   the cycle counter incremented:
+   ```bash
+   echo "=== LOOP CYCLE <N> ===
+   Task slugs: <slugs>
+   EXIT ONLY IF: <exit predicate, in full>. Otherwise run another cycle."
+   ```
+2. **Execute the task** fully.
+3. **Re-print the banner** (same bash echo) immediately before deciding — the
+   moment right after a cycle looks done is when premature exit happens, so the
+   predicate must be the most salient recent text.
+4. **Evaluate the exit predicate.** If it holds, exit and report. Otherwise
+   increment N and return to step 1.
 
 ## Rules
 
-- **Carry the task verbatim.** Do not paraphrase or simplify the user's prompt between cycles — repeat it exactly as given.
-- **Report every cycle.** Always tell the user what happened, even if the answer is "nothing changed".
-- **Adjust interval on request.** If the user says "slow down" or "speed up", update the interval for the next cycle immediately.
+- **Carry the task verbatim.** Never paraphrase or simplify it between cycles.
+- **Exit predicate in full; task as slugs.** The predicate is what collapses, so
+  restate it fully each cycle. Slugs only point at the task definition.
+- **Report every cycle**, even if the outcome is "nothing changed".
+- **Adjust on request** — interval changes or predicate clarifications apply from
+  the next cycle.
