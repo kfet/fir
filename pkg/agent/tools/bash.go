@@ -23,6 +23,7 @@ import (
 type BashToolParams struct {
 	Command string   `json:"command"`
 	Timeout *float64 `json:"timeout,omitempty"` // seconds
+	Cwd     string   `json:"cwd,omitempty"`     // optional per-call working directory override
 }
 
 // DefaultBashTimeout is applied when the agent does not pass an explicit
@@ -36,7 +37,7 @@ func NewBashTool(cwd string) agent.AgentTool {
 		Tool: ai.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
-				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
+				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Optionally provide `cwd` to run in a specific directory instead of the session's working directory (absolute path, or relative to the session directory); use this to recover if the session's working directory was deleted. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
 				runtime.GOOS, runtime.GOARCH, DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
@@ -49,6 +50,10 @@ func NewBashTool(cwd string) agent.AgentTool {
 					"timeout": map[string]any{
 						"type":        "number",
 						"description": "Timeout in seconds. Defaults to 10s if omitted; pass an explicit value to override (e.g. 60 for slower commands).",
+					},
+					"cwd": map[string]any{
+						"type":        "string",
+						"description": "Optional working directory to run the command in, overriding the session's default. Absolute, or relative to the session directory. Useful to recover when the session's working directory has been deleted.",
 					},
 				},
 				"required": []string{"command"},
@@ -68,7 +73,17 @@ func NewBashTool(cwd string) agent.AgentTool {
 				timeout = DefaultBashTimeout
 			}
 
-			return executeBash(ctx, command, cwd, timeout)
+			// Allow a per-call working-directory override. Resolved against the
+			// session cwd (handles ~, absolute paths, and relative paths). This
+			// is the clean recovery path when the session cwd was deleted: the
+			// model can point bash at a directory that still exists instead of
+			// prefixing the command with `cd`.
+			runDir := cwd
+			if override, _ := params["cwd"].(string); override != "" {
+				runDir = ResolveToCwd(override, cwd)
+			}
+
+			return executeBash(ctx, command, runDir, timeout)
 		},
 	}
 }
@@ -107,9 +122,30 @@ func truncateForLog(s string, max int) string {
 func executeBash(ctx context.Context, command, cwd string, timeout time.Duration) (agent.AgentToolResult, error) {
 	firlog.Debug("bash exec", "command", truncateForLog(command, 200), "cwd", cwd, "timeout", timeout)
 	start := time.Now()
-	// Verify cwd exists
-	if _, err := os.Stat(cwd); err != nil {
-		return agent.AgentToolResult{}, fmt.Errorf("working directory does not exist: %s", cwd)
+	// If the working directory no longer exists, refuse to run rather than
+	// silently executing somewhere else. The cwd can be deleted out from under
+	// a live session (git worktree removed, temp dir cleaned up, branch switch
+	// deleting the dir). Falling back to a surviving directory — the nearest
+	// ancestor, $HOME, or a temp dir — is dangerous: a relative-path command
+	// (rm -rf *, git clean -fdx, mv * ...) would hit real files the agent was
+	// never pointed at. Instead, surface the situation so the model can decide
+	// (recreate the dir, or target an existing path with an explicit `cd`).
+	if !isDir(cwd) {
+		firlog.Warn("bash cwd missing", "cwd", cwd)
+		msg := fmt.Sprintf(
+			"working directory no longer exists: %s\n\n"+
+				"It was likely removed after this session started (a git worktree was "+
+				"deleted, a temp dir was cleaned up, or a branch switch removed it). "+
+				"The command was NOT run, to avoid executing in an unintended "+
+				"directory. To proceed, run in a directory that still exists — pass "+
+				"the `cwd` parameter with an existing absolute path (or recreate the "+
+				"missing directory).",
+			cwd,
+		)
+		return agent.AgentToolResult{
+			Content: []ai.ToolResultContent{{Type: "text", Text: msg}},
+			IsError: true,
+		}, nil
 	}
 
 	// Apply timeout if specified

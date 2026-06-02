@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -204,12 +206,110 @@ func TestBashTool_MissingCommand(t *testing.T) {
 }
 
 func TestBashTool_CwdDoesNotExist(t *testing.T) {
+	// When the cwd does not exist, bash must not run the command in some other
+	// directory. It returns a clear error result and does NOT execute.
 	tool := NewBashTool("/nonexistent/path")
-	_, err := tool.Execute(context.Background(), "call-1", map[string]any{
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
 		"command": "echo hello",
 	}, nil)
-	if err == nil {
-		t.Error("expected error for nonexistent cwd")
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError result for nonexistent cwd")
+	}
+	out := result.Content[0].Text
+	if strings.Contains(out, "hello") {
+		t.Errorf("command was executed despite missing cwd: %q", out)
+	}
+	if !strings.Contains(out, "no longer exists") {
+		t.Errorf("output = %q, want an explanatory notice", out)
+	}
+}
+
+func TestBashTool_CwdDeletedAtRuntime(t *testing.T) {
+	// Simulate a worktree/temp dir being removed out from under a live
+	// session: the cwd was valid when the tool was constructed but is gone
+	// by the time the command runs. The command must NOT run in a surviving
+	// ancestor — that could trash real files the agent was never pointed at.
+	parent := t.TempDir()
+	gone := filepath.Join(parent, "worktree")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tool := NewBashTool(gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatalf("remove cwd: %v", err)
+	}
+
+	// A destructive relative-path command must not touch the parent.
+	canary := filepath.Join(parent, "canary.txt")
+	if err := os.WriteFile(canary, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("write canary: %v", err)
+	}
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "rm -f *.txt; pwd",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected IsError result after cwd deleted")
+	}
+	if !strings.Contains(result.Content[0].Text, "no longer exists") {
+		t.Errorf("output = %q, want an explanatory notice", result.Content[0].Text)
+	}
+	if _, statErr := os.Stat(canary); statErr != nil {
+		t.Errorf("canary file was deleted — command ran in surviving ancestor: %v", statErr)
+	}
+}
+
+func TestBashTool_CwdParamOverride(t *testing.T) {
+	// The cwd parameter runs the command in a specified directory instead of
+	// the session default.
+	sessionDir := t.TempDir()
+	otherDir := t.TempDir()
+	tool := NewBashTool(sessionDir)
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "pwd",
+		"cwd":     otherDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %q", result.Content[0].Text)
+	}
+	// macOS reports /private-prefixed temp paths, so match on the basename.
+	if !strings.Contains(result.Content[0].Text, filepath.Base(otherDir)) {
+		t.Errorf("output = %q, want pwd under override dir %q", result.Content[0].Text, otherDir)
+	}
+}
+
+func TestBashTool_CwdParamRecoversDeletedSessionDir(t *testing.T) {
+	// When the session dir is gone, passing an existing cwd recovers cleanly
+	// without resorting to a `cd` prefix.
+	gone := filepath.Join(t.TempDir(), "worktree")
+	if err := os.Mkdir(gone, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tool := NewBashTool(gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatalf("remove cwd: %v", err)
+	}
+	alive := t.TempDir()
+	result, err := tool.Execute(context.Background(), "call-1", map[string]any{
+		"command": "echo recovered",
+		"cwd":     alive,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %q", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "recovered") {
+		t.Errorf("output = %q, want command to run via cwd override", result.Content[0].Text)
 	}
 }
 
@@ -282,5 +382,27 @@ func TestBashToolWithPrefix_NonStringCommandFallsThrough(t *testing.T) {
 	// The original bash tool returns an error for empty command.
 	if err == nil {
 		t.Error("expected error for non-string command param")
+	}
+}
+
+func TestBashToolWithPrefix_ForwardsCwd(t *testing.T) {
+	// The prefix wrapper (used by ACP mode) must forward the cwd override
+	// through its param copy, not drop it.
+	sessionDir := t.TempDir()
+	otherDir := t.TempDir()
+	tool := NewBashToolWithPrefix(sessionDir, "export MY_PREFIX_VAR=hi")
+	result, err := tool.Execute(context.Background(), "c1", map[string]any{
+		"command": "pwd; echo $MY_PREFIX_VAR",
+		"cwd":     otherDir,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := result.Content[0].Text
+	if !strings.Contains(out, "hi") {
+		t.Errorf("prefix not applied with cwd override: %q", out)
+	}
+	if !strings.Contains(out, filepath.Base(otherDir)) {
+		t.Errorf("cwd override not forwarded through prefix wrapper: %q", out)
 	}
 }

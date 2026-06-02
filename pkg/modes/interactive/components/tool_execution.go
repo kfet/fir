@@ -248,8 +248,16 @@ func (tc *ToolExecutionComponent) renderBashContent() {
 		timeoutSuffix = t.Fg("muted", fmt.Sprintf(" (timeout %.0fs)", timeout))
 	}
 
+	// Surface a non-default working directory as a shell-style prompt prefix
+	// (e.g. "/tmp/foo $ cmd") so it's never a mystery where a command ran (the
+	// model can override cwd per call).
+	cwdPrefix := ""
+	if cwd, _ := tc.args["cwd"].(string); cwd != "" {
+		cwdPrefix = t.Fg("muted", cwd) + " "
+	}
+
 	tc.contentBox.AddChild(tuicomp.NewText(
-		t.Fg("toolTitle", t.Bold("$ "+commandDisplay))+timeoutSuffix, 0, 0, nil))
+		cwdPrefix+t.Fg("toolTitle", t.Bold("$ "+commandDisplay))+timeoutSuffix, 0, 0, nil))
 
 	if tc.result != nil {
 		output := strings.TrimSpace(tc.getBashDisplayOutput())

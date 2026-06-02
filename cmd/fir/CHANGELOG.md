@@ -87,10 +87,28 @@
   context-length) and user aborts are never auto-resumed. Emits a new
   `EventAutoResume` agent event (surfaced as a status line in interactive mode).
 - Extension slash-command results gain an optional `markdown` field. When set with `print_response`, the message is rendered as markdown inside a high-contrast accent-bordered box in the conversation area. Documented in `docs/extension-protocol.md` and exercised by the `demo-markdown` command.
+- The `bash` tool gained an optional `cwd` parameter to run a command in a
+  specific directory (absolute, or relative to the session directory) instead
+  of the session default — useful for one-off commands in a subdirectory, and
+  as the recovery path when the session's working directory has been deleted.
+  When set, the interactive TUI renders the directory as a shell-style prompt
+  prefix (`/path $ cmd`) so it's always clear where a command ran.
 
 ### Changed
 
 - `/advise` output now renders with high visual contrast in the TUI: the advisor response is markdown-rendered in themed foreground text inside an accent-coloured rounded border, instead of the flat low-contrast muted grey used for brief status notices. It opts in via the new `markdown` result field; preformatted output like `/observe`'s aligned tables keeps its plain rendering so column alignment is preserved. Border and body colours are theme-driven (`accent`/`text`), so they follow the active theme.
+
+### Fixed
+
+- The `bash` tool no longer crashes with a cryptic `working directory does not
+  exist` when the session's CWD is deleted out from under a running session
+  (git worktree removed, temp dir cleaned up, branch switch deleting the dir).
+  It now returns a clear, actionable error result explaining the directory
+  vanished and that the command was **not** run — and deliberately does not
+  fall back to running in another directory (nearest ancestor, `$HOME`, etc.),
+  since a relative-path command would then hit real files the agent was never
+  pointed at. To proceed, the model can pass the new `cwd` parameter pointing
+  at an existing directory, or recreate the missing directory.
 
 ## [0.52.0] - 2026-05-28
 

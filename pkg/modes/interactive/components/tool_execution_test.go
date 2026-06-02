@@ -61,6 +61,31 @@ func TestToolExecution_BashWithResult(t *testing.T) {
 	}
 }
 
+func TestToolExecution_BashWithCwd(t *testing.T) {
+	args := map[string]any{"command": "pwd", "cwd": "/tmp/somewhere"}
+	comp := NewToolExecutionComponent("bash", args, nil, nil, nil)
+	joined := strings.Join(comp.Render(80), "\n")
+	if !strings.Contains(joined, "pwd") {
+		t.Errorf("expected command in output, got %q", joined)
+	}
+	// Rendered shell-style: the cwd appears as a prompt prefix, before "$ pwd".
+	dirIdx := strings.Index(joined, "/tmp/somewhere")
+	promptIdx := strings.Index(joined, "$ pwd")
+	if dirIdx < 0 || promptIdx < 0 || dirIdx > promptIdx {
+		t.Errorf("expected cwd before the prompt (/path$ cmd), got %q", joined)
+	}
+}
+
+func TestToolExecution_BashWithoutCwd(t *testing.T) {
+	// Default (no cwd override) renders the bare "$ " prompt with no path.
+	args := map[string]any{"command": "pwd"}
+	comp := NewToolExecutionComponent("bash", args, nil, nil, nil)
+	joined := strings.Join(comp.Render(80), "\n")
+	if !strings.Contains(joined, "$ pwd") {
+		t.Errorf("expected bare prompt, got %q", joined)
+	}
+}
+
 func TestToolExecution_EditWithDiff(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.go", "oldText": "foo", "newText": "bar"}
 	comp := NewToolExecutionComponent("edit", args, nil, nil, nil)

@@ -81,6 +81,12 @@ func ResolveToCwd(filePath string, cwd string) string {
 	return filepath.Join(cwd, expanded)
 }
 
+// isDir reports whether path exists and is a directory.
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
 // ResolveReadPath resolves a path for reading, trying macOS filename variants
 // if the literal path doesn't exist.
 func ResolveReadPath(filePath string, cwd string) string {
