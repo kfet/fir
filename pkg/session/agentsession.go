@@ -1667,6 +1667,16 @@ func (s *AgentSession) SideQueryStream(ctx context.Context, question string, opt
 	msgs := make([]agent.AgentMessage, len(state.Messages))
 	copy(msgs, state.Messages)
 
+	// Strip any in-flight tool call lacking a result before appending the
+	// question. The assistant turn is committed on EventMessageEnd *before*
+	// its tools run, so this snapshot can end with a dangling tool_use — most
+	// often the very `aside` invocation driving this side query. Appending a
+	// user question after a dangling tool_use yields a malformed context that
+	// makes the model role-play a continuation of the executor turn (e.g.
+	// narrating that the tool "failed") instead of answering. See
+	// agent.StripUnmatchedToolCalls.
+	msgs = agent.StripUnmatchedToolCalls(msgs)
+
 	// Append the side question.
 	msgs = append(msgs, agent.NewAgentMessage(ai.NewUserMsg(question, time.Now().UnixMilli())))
 

@@ -3187,6 +3187,73 @@ func TestSideQuery_DoesNotModifySessionMessages(t *testing.T) {
 	}
 }
 
+func TestSideQuery_StripsDanglingToolCallFromContext(t *testing.T) {
+	session, _ := newTestAgentSession(t)
+	defer session.Close()
+
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	session.Agent.SetModel(model)
+
+	// Reproduce the aside scenario: the in-flight assistant turn is committed
+	// with two tool calls; only the first ("plan") has a result. The second
+	// ("aside") is the call driving this side query and has no result yet.
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewUserMsg("do the task", 0)))
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
+		Role: "assistant",
+		Content: []ai.AssistantContent{
+			ai.NewTextContent("Let me plan and escalate."),
+			ai.NewToolCallContent("plan_1", "plan", map[string]any{}),
+			ai.NewToolCallContent("aside_1", "aside", map[string]any{"escalate": true}),
+		},
+	})))
+	session.Agent.AppendMessage(agent.NewAgentMessage(ai.NewToolResultMsg(ai.ToolResultMessage{
+		Role:       "toolResult",
+		ToolCallID: "plan_1",
+		Content:    []ai.ToolResultContent{{Type: "text", Text: "ok"}},
+	})))
+
+	var capturedMsgs []ai.Message
+	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
+		capturedMsgs = llmCtx.Messages
+		stream := ai.NewAssistantMessageEventStream()
+		go func() {
+			stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Message: &ai.AssistantMessage{Content: []ai.AssistantContent{ai.NewTextContent("advice")}}})
+			stream.End(nil)
+		}()
+		return stream
+	})
+
+	_, err := session.SideQuery(context.Background(), "should I bump the dep?", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The unmatched aside_1 tool call must not appear in the LLM context.
+	for _, m := range capturedMsgs {
+		if a := m.AsAssistant(); a != nil {
+			for _, c := range a.Content {
+				if c.ToolCall != nil && c.ToolCall.ID == "aside_1" {
+					t.Fatalf("dangling aside_1 tool call leaked into side-query context")
+				}
+			}
+		}
+	}
+	// The matched plan_1 call must still be present.
+	foundPlan := false
+	for _, m := range capturedMsgs {
+		if a := m.AsAssistant(); a != nil {
+			for _, c := range a.Content {
+				if c.ToolCall != nil && c.ToolCall.ID == "plan_1" {
+					foundPlan = true
+				}
+			}
+		}
+	}
+	if !foundPlan {
+		t.Fatalf("matched plan_1 tool call was unexpectedly stripped from context")
+	}
+}
+
 func TestSideQuery_IncludesExistingContextInCall(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()

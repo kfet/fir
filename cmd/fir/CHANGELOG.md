@@ -12,8 +12,22 @@
   re-printing the predicate each cycle to prevent loop collapse), and
   `review-and-fix` now drives its iterate-until-clean repeat through it. See
   `docs/ship-it-workflow.md`.
+### Fixed
+
+- Escalated `aside` side queries (and any other `SideQuery` caller) sometimes
+  returned role-confused narration instead of a real answer — e.g. the advisor
+  model "replying" with *"The aside tool errored... I'll proceed..."*. The
+  side-query snapshot is taken from live session state, where the assistant turn
+  is committed on `EventMessageEnd` *before* its tools run, so it could end with
+  a dangling tool_use (the very `aside` call driving the query) that had no
+  matching tool_result. Appending the question as a user turn after that
+  malformed shape made the model role-play a continuation of the executor's
+  turn. `SideQueryStream` now strips unmatched tool calls
+  (`agent.StripUnmatchedToolCalls`) before appending the question, yielding a
+  well-formed context that ends on a complete turn.
 
 ### Changed
+
 
 - Anthropic server-side content blocks are now captured generically. The stream
   parser previously enumerated the server `*_tool_result` block types it would
