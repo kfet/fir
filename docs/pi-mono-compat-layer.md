@@ -24,6 +24,8 @@ Maps pi-mono's `ExtensionAPI` surface to fir's `fir_ext.js` SDK:
 | `ctx.ui.confirm/select/input` | Stubs (confirm→true, select/input→undefined) |
 | `ctx.ui.setWidget/custom` | No-ops |
 | `pi.events.on/emit` | Local in-process event bus |
+| `pi.registerProvider(name, config)` | `fir.registerProvider(spec)` — declared at the init handshake |
+| `pi.unregisterProvider(name)` | No-op (providers are fixed at handshake) |
 | `pi.registerShortcut/registerFlag` | No-ops |
 
 Run standalone: `node pi_compat.js <extension-path>`
@@ -73,4 +75,22 @@ These require fir-side changes and are out of scope for this layer:
 - `pi.appendEntry()` — mapped to session data (key/value) as best-effort
 - `ctx.ui.custom()` — needs custom TUI component support
 - `pi.registerShortcut()` — needs keybinding support
-- `pi.registerProvider()` — needs dynamic provider registration
+
+## Hosted provider registration
+
+`pi.registerProvider(name, config)` is supported via fir's hosted-provider
+handshake. The shim maps the pi-mono `ProviderConfig` to a `fir.registerProvider`
+spec (`name`→`display_name`, `api`, `apiKey`→`env_keys.primary`, `baseUrl`→each
+model's `base_url`, and `models`). fir declares providers at the init handshake;
+because the shim awaits the extension factory before `fir.run()`, factory-time
+registration — including after async model discovery (as pi-llama does) — is
+captured. This makes a llama.cpp-style provider work end-to-end through
+`api: "openai-completions"` passthrough (fir streams natively).
+
+Constraints (warned + dropped): `oauth` (use fir's auth-provider API),
+`streamSimple` (custom JS streaming isn't bridged — use `api` passthrough),
+`headers`/`authHeader` (no provider-wire equivalent), and baseUrl-only overrides
+of built-in providers. `apiKey` must be an environment-variable *name* (fir's
+wire can't carry a literal secret, and the extension is a separate process from
+fir). `unregisterProvider()` and post-init `registerProvider()` calls are no-ops,
+since providers are fixed at the handshake.

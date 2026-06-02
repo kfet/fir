@@ -60,8 +60,13 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
 
 ### P2 — Nice to have
 
-9. **`pi.registerProvider()` / `pi.unregisterProvider()`**
-   Dynamic model provider registration. Currently no-ops. Low priority since most extensions don't use this.
+9. **`pi.registerProvider()` / `pi.unregisterProvider()`** — ✅ **Done.**
+   `registerProvider` is mapped to fir's hosted-provider handshake (see
+   `docs/pi-mono-compat-layer.md` § Hosted provider registration). Works for the
+   `api`-passthrough case (e.g. pi-llama via `openai-completions`). Not covered:
+   `oauth`, `streamSimple`, `headers`, literal `apiKey`, baseUrl-only overrides,
+   and live `unregisterProvider()` — all warn + degrade since providers are
+   fixed at the init handshake.
 
 10. **`pi.registerShortcut()` / `pi.registerFlag()`**
     Keyboard shortcuts and CLI flags. Currently no-ops. TUI-only features.

@@ -333,8 +333,17 @@ function createExtensionAPI() {
     registerMessageRenderer(_customType, _renderer) { /* no-op */ },
 
     // ── Provider registration ────────────────────────────────────────
-    registerProvider(_name, _config) { /* no-op */ },
-    unregisterProvider(_name) { /* no-op */ },
+    registerProvider(name, config) {
+      mapAndRegisterProvider(name, config || {});
+    },
+    unregisterProvider(name) {
+      // Providers are fixed at the init handshake, so a live unregister
+      // can't reach fir. No-op (warn once so authors aren't surprised).
+      process.stderr.write(
+        `pi_compat: unregisterProvider(${name}) is not supported — ` +
+          `providers are declared at startup and cannot be removed live.\n`
+      );
+    },
 
     // ── Event bus ────────────────────────────────────────────────────
     events: {
@@ -352,6 +361,77 @@ function createExtensionAPI() {
   };
 
   return api;
+}
+
+// ---------------------------------------------------------------------------
+// Provider mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a pi-mono ProviderConfig to fir's registerProvider spec and register it.
+ *
+ * Supported: `name`, `api`, `apiKey`, `baseUrl` (applied to each model), and
+ * `models` (id/name/reasoning/input/contextWindow/maxTokens/cost). Because fir
+ * declares providers at the init handshake and pi_compat awaits the extension
+ * factory before `fir.run()`, factory-time registration — including after async
+ * model discovery, as pi-llama does — is captured.
+ *
+ * `apiKey` is passed as fir's `env_keys.primary`, i.e. the NAME of an
+ * environment variable fir reads in its own process. Unlike pi-mono it is not
+ * a literal-key fallback: fir's provider wire cannot carry a literal secret,
+ * and the extension runs in a separate process so it cannot inject one into
+ * fir's environment. Authors should pass an env-var name (the recommended
+ * pi-mono pattern); a literal key won't authenticate. Local unauthenticated
+ * servers (e.g. llama.cpp) need no key.
+ *
+ * Not supported (warned, then dropped): `oauth` (use fir's auth-provider API),
+ * `streamSimple` (custom JS streaming isn't bridged; use `api` passthrough),
+ * and `headers`/`authHeader` (no equivalent in fir's provider wire).
+ *
+ * @param {string} name
+ * @param {Object} config — pi-mono ProviderConfig
+ */
+function mapAndRegisterProvider(name, config) {
+  const unsupported = [];
+  if (config.oauth) unsupported.push("oauth");
+  if (config.streamSimple) unsupported.push("streamSimple");
+  if (config.headers) unsupported.push("headers");
+  if (config.authHeader) unsupported.push("authHeader");
+  if (unsupported.length) {
+    process.stderr.write(
+      `pi_compat: provider '${name}' uses unsupported option(s) ` +
+        `[${unsupported.join(", ")}] — ignored.\n`
+    );
+  }
+
+  const models = (config.models || []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    baseUrl: m.baseUrl || config.baseUrl || undefined,
+    reasoning: !!m.reasoning,
+    input: m.input,
+    contextWindow: m.contextWindow,
+    maxTokens: m.maxTokens,
+    cost: m.cost,
+  }));
+
+  if (!models.length && config.baseUrl) {
+    // URL-only override of an existing provider isn't expressible via fir's
+    // handshake provider wire (which registers models, not URL patches).
+    process.stderr.write(
+      `pi_compat: provider '${name}' baseUrl-only override is not supported ` +
+        `without models — ignored.\n`
+    );
+    return;
+  }
+
+  fir.registerProvider({
+    id: name,
+    api: config.api,
+    displayName: config.name,
+    envKeys: config.apiKey ? { primary: config.apiKey } : undefined,
+    models,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,25 @@ const _authListModelsHandlers = new Map();
 /** @type {Map<string, Function>} */
 const _authModifyModelsHandlers = new Map();
 
+// Hosted-provider registries — populated by registerProvider() and the
+// provider* handler registrations, reported at the init handshake and
+// dispatched via provider/* RPCs.
+/** @type {Array<Object>} wire-form provider specs */
+const _providers = [];
+/** @type {Map<string, Function>} */
+const _providerStreamHandlers = new Map();
+/** @type {Map<string, Function>} */
+const _providerListModelsHandlers = new Map();
+/** @type {Map<string, Function>} */
+const _providerResolveCustomIdHandlers = new Map();
+/** @type {Map<string, {cancelled: boolean}>} per-stream cancel flags */
+const _streamCancels = new Map();
+// Set true once the init handshake response has been sent; provider
+// registration after this point can no longer reach fir (providers are
+// declared at handshake), so registerProvider() warns instead of silently
+// dropping.
+let _initialized = false;
+
 // ---------------------------------------------------------------------------
 // JSON-RPC I/O
 // ---------------------------------------------------------------------------
@@ -441,6 +460,143 @@ function authModifyModels(providerId, handler) {
 }
 
 // ---------------------------------------------------------------------------
+// Hosted-provider registration
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a friendly (camelCase) provider spec to its on-the-wire dict form.
+ * Mirrors the Python SDK's `_provider_to_wire`. Only non-empty fields are
+ * emitted so the wire payload matches fir's `ProviderSpec` expectations.
+ * @param {Object} p
+ * @returns {Object}
+ */
+function _providerToWire(p) {
+  const out = { id: p.id };
+  if (p.api) out.api = p.api;
+  if (p.displayName) out.display_name = p.displayName;
+  if (p.shortName) out.short_name = p.shortName;
+  if (p.priority) out.priority = p.priority;
+  if (p.defaultModelId) out.default_model_id = p.defaultModelId;
+  if (p.keyLink) out.key_link = p.keyLink;
+
+  const ek = {};
+  const envKeys = p.envKeys || {};
+  if (envKeys.primary) ek.primary = envKeys.primary;
+  if (envKeys.fallbacks && envKeys.fallbacks.length) ek.fallbacks = [...envKeys.fallbacks];
+  if (envKeys.authenticated) ek.authenticated = true;
+  if (Object.keys(ek).length) out.env_keys = ek;
+
+  if (p.oauthProviderId) out.oauth_provider_id = p.oauthProviderId;
+  if (p.claimsModelIdGlobs && p.claimsModelIdGlobs.length) {
+    out.claims_model_id_globs = [...p.claimsModelIdGlobs];
+  }
+  if (p.refuseFuzzyMatch) out.refuse_fuzzy_match = true;
+  if (p.supportsLiveList) out.supports_live_list = true;
+  if (p.supportsCustomId) out.supports_custom_id = true;
+
+  if (p.models && p.models.length) {
+    out.models = p.models.map((m) => {
+      const mw = { id: m.id };
+      if (m.name) mw.name = m.name;
+      if (m.baseUrl) mw.base_url = m.baseUrl;
+      if (m.reasoning) mw.reasoning = true;
+      if (m.input && m.input.length) mw.input = [...m.input];
+      if (m.contextWindow) mw.context_window = m.contextWindow;
+      if (m.maxTokens) mw.max_tokens = m.maxTokens;
+      const cost = m.cost || {};
+      if (cost.input) mw.cost_input = cost.input;
+      if (cost.output) mw.cost_output = cost.output;
+      if (cost.cacheRead) mw.cost_cache_read = cost.cacheRead;
+      if (cost.cacheWrite) mw.cost_cache_write = cost.cacheWrite;
+      if (m.serverTools && m.serverTools.length) mw.server_tools = [...m.serverTools];
+      if (m.compaction) mw.compaction = true;
+      if (m.reasoningEffortValues && m.reasoningEffortValues.length) {
+        mw.reasoning_effort_values = [...m.reasoningEffortValues];
+      }
+      if (m.sweScore) mw.swe_score = m.sweScore;
+      if (m.sweInferred) mw.swe_inferred = true;
+      return mw;
+    });
+  }
+  return out;
+}
+
+/**
+ * Declare a hosted AI provider this extension contributes.
+ *
+ * Adds the provider to the init-handshake payload so fir registers it (a
+ * synthetic `ext:<id>` API when no `api` is given, or a built-in wire
+ * protocol when `api` is set) and routes streaming/listing back to this
+ * extension. Pair with {@link providerStream} (when no `api`) and/or
+ * {@link providerListModels} (when `supportsLiveList` is set).
+ *
+ * Idempotent on `spec.id` — a later call overwrites the earlier spec.
+ *
+ * Must be called before {@link run} completes the init handshake (e.g. at
+ * module load or inside an awaited extension factory). Calls after init are
+ * warned about and ignored, since providers are fixed at the handshake.
+ *
+ * @param {Object} spec — provider spec (camelCase; see _providerToWire)
+ */
+function registerProvider(spec) {
+  if (!spec || !spec.id) throw new Error("registerProvider requires spec.id");
+  if (_initialized) {
+    process.stderr.write(
+      `fir_ext: registerProvider(${spec.id}) ignored — called after init ` +
+        `handshake; providers must be declared before run().\n`
+    );
+    return;
+  }
+  const wire = _providerToWire(spec);
+  const i = _providers.findIndex((p) => p.id === spec.id);
+  if (i >= 0) _providers[i] = wire;
+  else _providers.push(wire);
+}
+
+/**
+ * Register the streaming handler for a hosted provider (synthetic-API mode).
+ * The handler `(params, ctx)` must return an (async) iterable of
+ * AssistantMessageEvent dicts, ending with a terminal `done`/`error` event.
+ * @param {string} providerId
+ * @param {Function} handler
+ */
+function providerStream(providerId, handler) {
+  _providerStreamHandlers.set(providerId, handler);
+}
+
+/**
+ * Register the live model lister for a hosted provider. Invoked only when the
+ * provider was declared with `supportsLiveList: true`. Handler `(params, ctx)`
+ * returns an array of model-id strings (or `{ model_ids: [...] }`).
+ * @param {string} providerId
+ * @param {Function} handler
+ */
+function providerListModels(providerId, handler) {
+  _providerListModelsHandlers.set(providerId, handler);
+}
+
+/**
+ * Register a custom-ID resolver for a hosted provider. Handler `(params, ctx)`
+ * returns a wire-form model dict or null.
+ * @param {string} providerId
+ * @param {Function} handler
+ */
+function providerResolveCustomId(providerId, handler) {
+  _providerResolveCustomIdHandlers.set(providerId, handler);
+}
+
+/**
+ * Return true if fir has asked us to cancel this provider stream. Long-running
+ * {@link providerStream} generators should poll this between yields.
+ * @param {string} streamId
+ * @returns {boolean}
+ */
+function isCancelled(streamId) {
+  const c = _streamCancels.get(streamId);
+  return !!(c && c.cancelled);
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 
@@ -518,6 +674,10 @@ function dispatch(msg, name, subscribedEvents, ctx, authCtx, out) {
     if (_authProviders.length > 0) {
       initResult.auth_providers = [..._authProviders];
     }
+    if (_providers.length > 0) {
+      initResult.providers = [..._providers];
+    }
+    _initialized = true;
     writeMessage(makeResponse(id, initResult), out);
     return;
   }
@@ -537,6 +697,12 @@ function dispatch(msg, name, subscribedEvents, ctx, authCtx, out) {
   // --- auth/* ---
   if (method.startsWith("auth/")) {
     handleAuth(method, id, params, authCtx, out);
+    return;
+  }
+
+  // --- provider/* ---
+  if (method.startsWith("provider/")) {
+    handleProvider(method, id, params, ctx, out);
     return;
   }
 
@@ -677,6 +843,123 @@ async function handleAuth(method, id, params, authCtx, out) {
 }
 
 // ---------------------------------------------------------------------------
+// Hosted-provider dispatch
+// ---------------------------------------------------------------------------
+
+/** Emit a provider.stream.event notification carrying one event. */
+function sendProviderEvent(streamId, event, out) {
+  writeMessage(
+    { jsonrpc: "2.0", method: "provider.stream.event", params: { stream_id: streamId, event } },
+    out
+  );
+}
+
+/** Build a terminal error event with the given reason/message. */
+function terminalError(reason, message) {
+  return {
+    type: "error",
+    reason,
+    error: { role: "assistant", stopReason: reason, errorMessage: message },
+  };
+}
+
+/**
+ * Drive a providerStream handler and forward its events as notifications.
+ * The handler may return a sync/async iterable of event dicts. A terminal
+ * `done`/`error` event is synthesised if the iterable ends without one.
+ */
+async function runProviderStream(providerId, streamId, params, ctx, out) {
+  const cancel = _streamCancels.get(streamId);
+  const handler = _providerStreamHandlers.get(providerId);
+  if (!handler) {
+    sendProviderEvent(streamId, terminalError("error", `no providerStream handler for '${providerId}'`), out);
+    _streamCancels.delete(streamId);
+    return;
+  }
+  let terminalSeen = false;
+  try {
+    const iter = await handler(params, ctx);
+    if (iter != null) {
+      for await (const event of iter) {
+        if (!event || typeof event !== "object") continue;
+        const t = event.type || "";
+        if (t === "done" || t === "error") terminalSeen = true;
+        sendProviderEvent(streamId, event, out);
+        if (cancel && cancel.cancelled && !terminalSeen) break;
+      }
+    }
+  } catch (err) {
+    sendProviderEvent(streamId, terminalError("error", String(err.message || err)), out);
+    terminalSeen = true;
+  } finally {
+    if (!terminalSeen) {
+      const aborted = cancel && cancel.cancelled;
+      sendProviderEvent(
+        streamId,
+        terminalError(
+          aborted ? "aborted" : "error",
+          aborted ? "stream cancelled" : "provider generator exited without terminal event"
+        ),
+        out
+      );
+    }
+    _streamCancels.delete(streamId);
+  }
+}
+
+async function handleProvider(method, id, params, ctx, out) {
+  try {
+    if (method === "provider/stream/start") {
+      const streamId = params.stream_id || "";
+      if (!streamId) {
+        writeMessage(makeError(id, -32602, "missing stream_id"), out);
+        return;
+      }
+      // Pre-register cancel flag so a fast cancel can't be dropped, then ack
+      // immediately — events flow asynchronously via notifications.
+      _streamCancels.set(streamId, { cancelled: false });
+      writeMessage(makeResponse(id, {}), out);
+      runProviderStream(params.provider_id || "", streamId, params, ctx, out).catch((err) => {
+        process.stderr.write(`provider stream error: ${err}\n`);
+      });
+      return;
+    }
+
+    if (method === "provider/stream/cancel") {
+      const c = _streamCancels.get(params.stream_id || "");
+      if (c) c.cancelled = true;
+      writeMessage(makeResponse(id, { ok: true }), out);
+      return;
+    }
+
+    if (method === "provider/listModels") {
+      const providerId = params.provider_id || "";
+      const handler = _providerListModelsHandlers.get(providerId);
+      if (!handler) {
+        writeMessage(makeError(id, -32601, `no providerListModels handler for '${providerId}'`), out);
+        return;
+      }
+      let result = await handler(params, ctx);
+      if (Array.isArray(result)) result = { model_ids: result };
+      else if (!result || typeof result !== "object") result = { model_ids: [] };
+      writeMessage(makeResponse(id, result), out);
+      return;
+    }
+
+    if (method === "provider/resolveCustomId") {
+      const handler = _providerResolveCustomIdHandlers.get(params.provider_id || "");
+      const result = handler ? await handler(params, ctx) : null;
+      writeMessage(makeResponse(id, result ?? null), out);
+      return;
+    }
+
+    writeMessage(makeError(id, -32601, `Unknown provider method: ${method}`), out);
+  } catch (err) {
+    writeMessage(makeError(id, -32000, String(err.message || err)), out);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -689,6 +972,11 @@ module.exports = {
   authApiKey,
   authListModels,
   authModifyModels,
+  registerProvider,
+  providerStream,
+  providerListModels,
+  providerResolveCustomId,
+  isCancelled,
   run,
   ToolError,
   Context,

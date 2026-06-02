@@ -97,6 +97,19 @@
   turn. `SideQueryStream` now strips unmatched tool calls
   (`agent.StripUnmatchedToolCalls`) before appending the question, yielding a
   well-formed context that ends on a complete turn.
+- Pi-mono provider registration. The Node SDK (`fir_ext.js`) now exposes
+  `registerProvider`, `providerStream`, `providerListModels`,
+  `providerResolveCustomId`, and `isCancelled`, reporting providers in the init
+  handshake and dispatching the `provider/*` RPCs (mirroring the Python SDK). The
+  pi-mono compat shim (`pi_compat.js`) maps `pi.registerProvider(name, config)`
+  onto this, so pi-mono provider extensions (e.g. a llama.cpp provider with live
+  model discovery) work via `api` passthrough. Constraints — `oauth`,
+  `streamSimple`, `headers`, literal `apiKey`, and live `unregisterProvider()` —
+  warn and degrade, since providers are fixed at the handshake. Covered by a new
+  Node SDK test (`make test-node-sdk`, wired into `make all`).
+
+### Added
+
 - Pi-mono (JS/TS) extension compatibility layer. Fir can now run pi-mono
   extensions without core changes: a Node SDK (`pkg/extension/sdk/node/`) with a
   `fir_ext.js` shim and a `pi_compat.js` adapter that maps pi-mono's

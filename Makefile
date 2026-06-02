@@ -61,7 +61,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner check-licenses
+_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk check-licenses
 
 fmt:
 	@gofmt -s -w .
@@ -263,6 +263,11 @@ test-python: test-python-sdk test-python-ext test-python-schedule test-python-tm
 
 test-python-sdk: check-uv
 	$(call RUN,test python (sdk),PYTHONPATH=pkg/extension/sdk/python python3 -m unittest discover -s pkg/extension/sdk/python -p '*_test.py')
+
+# Node SDK tests (provider surface + pi-mono compat mapping). Skips cleanly
+# when node isn't installed, so the build still works on node-less hosts.
+test-node-sdk:
+	$(call RUN,test node (sdk),command -v node >/dev/null 2>&1 && node pkg/extension/sdk/node/fir_ext_test.js || echo "node not found — skipping node SDK tests")
 
 # Fast extension tests (bundled) — everything except the slow ones.
 _SLOW_EXT_TESTS := schedule_test.py tmuxspinner_test.py
