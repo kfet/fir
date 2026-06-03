@@ -4,6 +4,15 @@
 
 ### Added
 
+- ACP sessions now surface provider retry notices to the user. A new
+  `StreamOptions.OnRetry` callback plumbs from `pkg/ai/core` through the agent
+  loop, `agent.AgentOptions`, `session.SetupOptions`/`CreateAgentSessionOptions`
+  and into `pkg/modes/acp`, which emits a `⏳ Provider rate-limited/overloaded —
+  retrying in Ns …` message on each pre-stream retry. Invoked by the anthropic,
+  openai, openai-responses, google, and google-gemini-cli retry loops. Users
+  see feedback within ~half a second instead of staring at a blank stream for
+  up to 75s of provider backoff.
+
 ### Changed
 
 - Release and `make build`/`install` binaries are now built with
