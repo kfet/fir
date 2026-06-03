@@ -81,8 +81,8 @@ def _next_id() -> str:
 
 
 def _now() -> datetime:
-    """Return the current local time (timezone-aware)."""
-    return datetime.now(tz=timezone.utc).astimezone()
+    """Return the current time in UTC (timezone-aware)."""
+    return datetime.now(tz=timezone.utc)
 
 
 def _format_time(dt: datetime) -> str:
@@ -233,22 +233,22 @@ def _parse_target(raw: str) -> datetime | None:
             hour += 12
         elif meridiem == "am" and hour == 12:
             hour = 0
-        now = _now()
-        target = now.replace(
+        local_now = _now().astimezone()
+        target = local_now.replace(
             hour=hour, minute=minute, second=0, microsecond=0,
         )
-        if target <= now:
+        if target <= local_now:
             target += timedelta(days=1)
         return target
 
     m = _RE_24H.fullmatch(raw)
     if m:
         hour, minute = int(m.group(1)), int(m.group(2))
-        now = _now()
-        target = now.replace(
+        local_now = _now().astimezone()
+        target = local_now.replace(
             hour=hour, minute=minute, second=0, microsecond=0,
         )
-        if target <= now:
+        if target <= local_now:
             target += timedelta(days=1)
         return target
 

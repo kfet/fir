@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -127,9 +128,19 @@ class TestParseTarget(unittest.TestCase):
             schedule, "_now", return_value=self._fixed,
         )
         self._patch.start()
+        self._orig_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "UTC"
+        if hasattr(time, "tzset"):
+            time.tzset()
 
     def tearDown(self):
         self._patch.stop()
+        if self._orig_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._orig_tz
+        if hasattr(time, "tzset"):
+            time.tzset()
 
     def test_minutes(self):
         t = schedule._parse_target("45m")

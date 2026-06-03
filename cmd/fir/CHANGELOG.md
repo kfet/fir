@@ -4,6 +4,10 @@
 
 ### Added
 
+### Fixed
+
+- Fixed a timezone subtraction race/bug in the `schedule` extension's auto-resume countdown loop that caused it to fire immediately (within 20ms of scheduling) instead of waiting for the backoff window to cool down.
+
 - Aside response cards can now be cleared (collapsed to a single muted
   `(cleared)` line) without aborting the turn. In the interactive TUI the
   first `Escape` during a turn clears the most recent completed aside card
