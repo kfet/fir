@@ -202,19 +202,22 @@ func TestACP_E2E_MCP_ToolsAppearInSession(t *testing.T) {
 		t.Errorf("stopReason = %v, want EndTurn", promptResp.StopReason)
 	}
 
-	// Allow a short window for trailing notifications to arrive.
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify a tool-call notification for the specific echo tool arrived.
-	// Matching on the tool prefix "mcp__echo-srv__echo" rather than just "mcp__"
-	// avoids false positives from resource tools (list_resources, read_resource).
+	// Poll briefly for trailing notifications to arrive.
 	var gotToolCall bool
-	for _, n := range client.getNotifications() {
-		if n.Update.ToolCall != nil && strings.Contains(n.Update.ToolCall.Title, "echo-srv__echo") {
-			gotToolCall = true
+	pollDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(pollDeadline) {
+		for _, n := range client.getNotifications() {
+			if n.Update.ToolCall != nil && strings.Contains(n.Update.ToolCall.Title, "echo-srv__echo") {
+				gotToolCall = true
+				break
+			}
+		}
+		if gotToolCall {
 			break
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
+
 	if !gotToolCall {
 		t.Log("No tool call notification found. Notifications received:")
 		for _, n := range client.getNotifications() {

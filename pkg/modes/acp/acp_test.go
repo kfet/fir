@@ -1543,10 +1543,21 @@ func TestSessionNew_CommandsAfterResponse(t *testing.T) {
 	b = append(b, '\n')
 	_, _ = wn.Write(b)
 
-	// Give the goroutine time to send the notification.
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the goroutine to send the notification.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(messages)
+		mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	pw.Close()
-	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()

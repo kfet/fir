@@ -51,13 +51,19 @@ func TestCountdownTimer_Expiry(t *testing.T) {
 	})
 	_ = ct
 
-	// Wait for expiry (500ms → ceil = 1 remaining second, expires after 1 tick = 10ms)
-	time.Sleep(50 * time.Millisecond)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if !expired {
-		t.Error("expected timer to expire")
+	// Poll for expiry instead of sleeping a fixed duration.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		done := expired
+		mu.Unlock()
+		if done {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected timer to expire")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 
@@ -71,14 +77,25 @@ func TestCountdownTimer_TickSequence(t *testing.T) {
 	}, func() {})
 	_ = ct
 
-	// Wait for all ticks (2 remaining seconds → 2 ticks at 10ms each + initial)
-	time.Sleep(50 * time.Millisecond)
+	// Poll until we have at least 2 ticks.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		n := len(ticks)
+		mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			mu.Lock()
+			t.Fatalf("expected at least 2 ticks, got %d", len(ticks))
+			mu.Unlock()
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(ticks) < 2 {
-		t.Errorf("expected at least 2 ticks, got %d", len(ticks))
-	}
 	if ticks[0] != 2 {
 		t.Errorf("expected first tick 2, got %d", ticks[0])
 	}

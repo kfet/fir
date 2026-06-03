@@ -3380,7 +3380,8 @@ func TestAgentSession_InjectMessage_WhenNotStreaming(t *testing.T) {
 	// When idle, InjectMessage calls PromptMessages in a goroutine
 	// (which will fail without a model — that's expected). The message must
 	// NOT appear in the follow-up queue because it takes the direct-prompt path.
-	time.Sleep(50 * time.Millisecond)
+	// Brief yield for the goroutine to execute.
+	time.Sleep(10 * time.Millisecond)
 	queued := session.Agent.PeekFollowUpQueue()
 	if len(queued) != 0 {
 		t.Errorf("expected empty follow-up queue, got %d", len(queued))

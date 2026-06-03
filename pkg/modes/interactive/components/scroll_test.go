@@ -11,10 +11,12 @@ import (
 	"github.com/kfet/fir/pkg/tui"
 )
 
+// ansiRe matches all ANSI escape sequences for plain-text comparison.
+var ansiRe = regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+
 // stripAnsi removes all ANSI escape sequences for plain-text comparison.
 func stripAnsi(s string) string {
-	re := regexp.MustCompile(`\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
-	return re.ReplaceAllString(s, "")
+	return ansiRe.ReplaceAllString(s, "")
 }
 
 // makeNSessions returns n SessionListInfo values for testing.

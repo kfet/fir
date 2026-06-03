@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"image"
-	"image/color"
 	"image/png"
 	"strings"
 	"testing"
@@ -14,9 +13,18 @@ import (
 
 func createTestImage(w, h int) string {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// Fill pixels directly via the Pix slice — 100x faster than Set() per pixel.
+	pix := img.Pix
+	stride := img.Stride
 	for y := 0; y < h; y++ {
+		off := y * stride
+		g := uint8(y % 256)
 		for x := 0; x < w; x++ {
-			img.Set(x, y, color.RGBA{R: uint8(x % 256), G: uint8(y % 256), B: 128, A: 255})
+			i := off + x*4
+			pix[i] = uint8(x % 256) // R
+			pix[i+1] = g            // G
+			pix[i+2] = 128          // B
+			pix[i+3] = 255          // A
 		}
 	}
 	var buf bytes.Buffer

@@ -114,7 +114,7 @@ func TestBashTool_Abort(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
 
@@ -136,7 +136,7 @@ func TestBashTool_AbortWithChildren(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		cancel()
 	}()
 

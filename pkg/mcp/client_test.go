@@ -68,7 +68,7 @@ func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.Agent
 	for {
 		select {
 		case last = <-ch:
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(20 * time.Millisecond):
 			return last
 		}
 	}

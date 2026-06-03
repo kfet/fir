@@ -191,7 +191,6 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
 		a.WaitForIdle()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	mu.Lock()
@@ -458,7 +457,6 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
 		a.WaitForIdle()
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	// 4th prompt triggers overflow → compaction → retry
@@ -467,10 +465,20 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 		t.Fatalf("Overflow prompt failed: %v", err)
 	}
 	a.WaitForIdle()
-	// Wait for compaction + retry goroutine
-	time.Sleep(500 * time.Millisecond)
-	a.WaitForIdle()
-	time.Sleep(200 * time.Millisecond)
+	// Poll for compaction + retry. The overflow triggers compaction, then a retry
+	// prompt. We need to wait for the retry's agent_end event.
+	pollDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(pollDeadline) {
+		a.WaitForIdle()
+		mu2.Lock()
+		calls := callCount
+		mu2.Unlock()
+		// 3 normal + 1 overflow + 1 retry = 5
+		if calls >= 5 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 
 	evMu.Lock()
 	defer evMu.Unlock()
@@ -629,7 +637,6 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
 		a.WaitForIdle()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	// msgCountBeforeCompaction was recorded before the last prompt
@@ -784,7 +791,6 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 		t.Fatalf("Prompt failed: %v", err)
 	}
 	a.WaitForIdle()
-	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -908,7 +914,6 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
 		a.WaitForIdle()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	mu.Lock()

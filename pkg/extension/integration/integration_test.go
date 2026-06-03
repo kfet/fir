@@ -234,7 +234,6 @@ fir_ext.run(name="word_count")
 		Params: map[string]any{},
 	})
 	// Verify process still alive with another tool call.
-	time.Sleep(50 * time.Millisecond)
 
 	send(jrpcReq{
 		JSONRPC: "2.0", ID: 4, Method: "tool_call",

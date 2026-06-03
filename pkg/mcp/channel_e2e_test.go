@@ -208,9 +208,8 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	tools := startAndWait(t, mgr, ctx)
 	t.Logf("Tools: %d", len(tools))
 
-	// Send channel notifications after a brief delay to ensure the SDK's
-	// internal read loop is running.
-	time.Sleep(100 * time.Millisecond)
+	// Send channel notifications — the SDK's internal read loop starts
+	// during startAndWait, so notifications can be sent immediately.
 	t.Log("Sending channel notifications...")
 	server.sendChannelNotification("telegram", "Hello from Telegram!")
 	server.sendChannelNotification("discord", "Hello from Discord!")

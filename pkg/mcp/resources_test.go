@@ -298,19 +298,26 @@ func TestManager_ResourceSubscription(t *testing.T) {
 	require.NoError(t, readErr)
 	require.False(t, result.IsError)
 
-	// Give the lazy subscribe goroutine time to complete.
-	time.Sleep(200 * time.Millisecond)
-
-	// Trigger a resource update from the server side.
-	updateErr := server.ResourceUpdated(ctx, &sdk.ResourceUpdatedNotificationParams{URI: resURI})
-	require.NoError(t, updateErr)
-
-	select {
-	case uri := <-updated:
-		assert.Equal(t, resURI, uri)
-	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for resource update notification")
+	// Wait for the lazy subscribe goroutine to complete by retrying the
+	// resource update until the subscription notification comes through.
+	var updateSent bool
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !updateSent {
+			updateErr := server.ResourceUpdated(ctx, &sdk.ResourceUpdatedNotificationParams{URI: resURI})
+			require.NoError(t, updateErr)
+			updateSent = true
+		}
+		select {
+		case uri := <-updated:
+			assert.Equal(t, resURI, uri)
+			return
+		case <-time.After(50 * time.Millisecond):
+			// Retry sending the update in case subscription wasn't ready yet.
+			updateSent = false
+		}
 	}
+	t.Fatal("timeout waiting for resource update notification")
 }
 
 // toolEntry is a helper to hold a pointer to an AgentTool without copying the

@@ -743,7 +743,6 @@ func testNoActionEvent(t *testing.T, eventName string) {
 	doInit(proc)
 
 	proc.sendEvent(eventName, nil)
-	time.Sleep(50 * time.Millisecond)
 
 	// Extension should still be alive — a subsequent tool call must succeed.
 	resp := proc.callTool("word_count", map[string]any{"text": "hello"})

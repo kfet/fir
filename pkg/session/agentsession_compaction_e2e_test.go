@@ -118,8 +118,6 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 
 	// Wait for the agent to complete
 	a.WaitForIdle()
-	// Give a bit of time for the compaction event to propagate
-	time.Sleep(100 * time.Millisecond)
 
 	// Check events
 	mu.Lock()
@@ -252,7 +250,6 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 	}
 
 	a.WaitForIdle()
-	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -358,7 +355,6 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 			t.Fatalf("Prompt %d failed: %v", i+1, err)
 		}
 		a.WaitForIdle()
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Check accumulated stats (old approach - sums ALL messages)
@@ -483,7 +479,6 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 		t.Fatalf("Prompt failed: %v", err)
 	}
 	a.WaitForIdle()
-	time.Sleep(100 * time.Millisecond)
 
 	if !runner.runCalled {
 		t.Fatal("compaction was not triggered")
@@ -594,7 +589,6 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 		t.Fatalf("Prompt failed: %v", err)
 	}
 	a.WaitForIdle()
-	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -780,7 +774,6 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	a.WaitForIdle()
-	time.Sleep(50 * time.Millisecond)
 
 	// --- Assertions ---
 

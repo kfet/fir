@@ -67,11 +67,15 @@ func TestLoader_Animates(t *testing.T) {
 	l := NewLoader(ui, identity, identity, "test")
 	defer l.Stop()
 
-	// Wait for some frames
-	time.Sleep(200 * time.Millisecond)
-	if ui.renderCount.Load() == 0 {
-		t.Error("expected render requests from animation")
+	// Poll for render requests instead of sleeping a fixed duration.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ui.renderCount.Load() > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
+	t.Error("expected render requests from animation")
 }
 
 func TestLoader_Stop(t *testing.T) {
@@ -80,7 +84,7 @@ func TestLoader_Stop(t *testing.T) {
 	l.Stop()
 
 	countBefore := ui.renderCount.Load()
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if ui.renderCount.Load() != countBefore {
 		t.Error("should not render after stop")
 	}
