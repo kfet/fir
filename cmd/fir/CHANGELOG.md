@@ -4,6 +4,13 @@
 
 ### Added
 
+### Changed
+
+- Release and `make build`/`install` binaries are now built with
+  `CGO_ENABLED=0`, producing a fully static, pure-Go binary (pure-Go `net` and
+  `os/user` resolvers, no libc dependency). This is transparent for normal use
+  and removes the need for a C toolchain to build fir.
+
 ### Fixed
 
 - Fixed a timezone subtraction race/bug in the `schedule` extension's auto-resume countdown loop that caused it to fire immediately (within 20ms of scheduling) instead of waiting for the backoff window to cool down.
