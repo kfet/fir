@@ -154,7 +154,7 @@ test-cover: tidy
 	go tool cover -func=$(BINDIR)/coverage.out
 
 test-race: tidy
-	$(call RUN,test (race),go test -race ./...)
+	$(call RUN,test (race),CGO_ENABLED=1 go test -race ./...)
 
 vet:
 	$(call RUN,vet,go vet ./...)
