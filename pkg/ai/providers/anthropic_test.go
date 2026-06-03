@@ -2941,6 +2941,7 @@ func TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip(t *testin
 		t.Error("redacted_thinking block must not have a 'thinking' field")
 	}
 }
+
 // TestAnthropic_OnRetryCallback verifies StreamOptions.OnRetry is invoked
 // once per retry with a 1-based attempt number, a non-zero (or zero via
 // our injection) delay, and the last provider error message.
