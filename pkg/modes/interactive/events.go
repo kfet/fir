@@ -312,6 +312,15 @@ func (m *InteractiveMode) onToolExecStart(ae *agent.AgentEvent) {
 	m.pendingTools[ae.ToolCallID] = comp
 	m.messageContainer.AddChild(comp)
 
+	// Track aside cards so they can be cleared (collapsed) on demand without
+	// aborting the turn — both via the first Escape and the dedicated key.
+	if ae.ToolName == "aside" {
+		m.asideMu.Lock()
+		m.asideCardsTurn = append(m.asideCardsTurn, comp)
+		m.asideCardsAll = append(m.asideCardsAll, comp)
+		m.asideMu.Unlock()
+	}
+
 	// Hide the main "Inferring..." spinner when a tool has its own inline
 	// spinner (hint-based tools like aside) to avoid visual duplication.
 	if comp.HasSpinner() {
@@ -410,6 +419,12 @@ func (m *InteractiveMode) onAgentEnd() {
 	m.activityContainer.Clear()
 	m.streamingComponent = nil
 	m.pendingTools = make(map[string]*components.ToolExecutionComponent)
+	// The turn is over: its aside cards are now plain history. Stop treating
+	// them as first-Escape-dismissable (the dedicated key still works on them
+	// via asideCardsAll).
+	m.asideMu.Lock()
+	m.asideCardsTurn = nil
+	m.asideMu.Unlock()
 	m.ui.RequestRender(false)
 }
 

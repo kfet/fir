@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -69,6 +70,14 @@ type InteractiveMode struct {
 	streamingComponent *components.AssistantMessageComponent
 	pendingTools       map[string]*components.ToolExecutionComponent
 	toolOutputExpanded bool
+
+	// Dismissable aside cards. asideCardsTurn tracks aside cards created
+	// during the in-flight turn (cleared when the turn ends) and drives the
+	// first-Escape "clear card" behaviour; asideCardsAll tracks every aside
+	// card in the session and drives the dedicated dismiss key.
+	asideMu        sync.Mutex
+	asideCardsTurn []*components.ToolExecutionComponent
+	asideCardsAll  []*components.ToolExecutionComponent
 
 	// Bash execution state
 	bashComponent atomic.Pointer[components.BashExecutionComponent]
@@ -674,6 +683,14 @@ func (m *InteractiveMode) setupEditorHandlers() {
 			return
 		}
 
+		// First Escape clears a completed aside card from the active turn
+		// (its bulky response collapses to one line) instead of aborting the
+		// turn. Press Escape again — once no dismissable card remains — to
+		// interrupt streaming as usual.
+		if m.dismissLatestAside(true) {
+			return
+		}
+
 		// If streaming, interrupt/abort
 		if m.session != nil && m.session.IsStreaming() {
 			m.session.Agent.Abort()
@@ -754,6 +771,14 @@ func (m *InteractiveMode) setupEditorHandlers() {
 	})
 	m.editor.OnAction(tui.ActionShowSession, func() {
 		m.handleSessionCommand()
+	})
+	m.editor.OnAction(tui.ActionDismissAside, func() {
+		// Dedicated "clear card" key: collapse the most recent completed,
+		// not-yet-dismissed aside card anywhere in the session, without
+		// touching the running turn.
+		if !m.dismissLatestAside(false) {
+			m.showWarning("No aside response to clear")
+		}
 	})
 	m.editor.OnAction(tui.ActionClear, func() {
 		m.handleCtrlC()

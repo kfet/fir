@@ -1712,6 +1712,36 @@ func (m *InteractiveMode) showWarning(message string) {
 	}
 }
 
+// dismissLatestAside collapses the most recent dismissable aside card. When
+// activeTurnOnly is true it only considers cards from the in-flight turn
+// (used by the first-Escape handler); otherwise it considers every aside card
+// in the session (used by the dedicated dismiss key). Returns true if a card
+// was dismissed.
+func (m *InteractiveMode) dismissLatestAside(activeTurnOnly bool) bool {
+	m.asideMu.Lock()
+	list := m.asideCardsAll
+	if activeTurnOnly {
+		list = m.asideCardsTurn
+	}
+	var target *components.ToolExecutionComponent
+	for i := len(list) - 1; i >= 0; i-- {
+		if list[i].IsDismissable() {
+			target = list[i]
+			break
+		}
+	}
+	m.asideMu.Unlock()
+
+	if target == nil {
+		return false
+	}
+	target.Dismiss()
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
+	return true
+}
+
 func (m *InteractiveMode) showHelp() {
 	helpText := `Available commands:
   /help           - Show this help / keyboard shortcuts
@@ -1742,7 +1772,7 @@ Keyboard shortcuts:
   Shift+Enter     - New line
   Ctrl+D          - Exit (when editor is empty)
   Ctrl+C          - Cancel autocomplete / abort streaming / clear editor
-  Escape          - Abort streaming / double-tap for sessions
+  Escape          - Clear aside card / abort streaming / double-tap for sessions
   Tab             - Path completion / accept autocomplete
   Shift+Tab       - Cycle thinking level
   Ctrl+P          - Cycle models
@@ -1751,6 +1781,7 @@ Keyboard shortcuts:
   Ctrl+T          - Toggle thinking block visibility
   Ctrl+R          - Toggle plan visibility
   Ctrl+S          - Show session info
+  Alt+A           - Clear latest aside response card
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands

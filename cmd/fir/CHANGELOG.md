@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Aside response cards can now be cleared (collapsed to a single muted
+  `(cleared)` line) without aborting the turn. In the interactive TUI the
+  first `Escape` during a turn clears the most recent completed aside card
+  from the active turn instead of interrupting streaming; press `Escape`
+  again (once no dismissable card remains) to abort as usual. A dedicated
+  `Alt+A` key clears the most recent completed aside card anywhere in the
+  session at any time. Cards stay in the transcript — only their bulky body
+  is hidden. New `ActionDismissAside` keybinding (`pkg/tui/keybindings.go`)
+  and `ToolExecutionComponent.Dismiss`/`IsDismissable` (`pkg/modes/interactive/components/tool_execution.go`).
+
 ## [0.55.0] - 2026-06-02
 
 ### Added

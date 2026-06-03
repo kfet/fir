@@ -47,6 +47,7 @@ type ToolExecutionComponent struct {
 	args        map[string]any
 	displayHint *agent.ToolDisplayHint
 	expanded    bool
+	dismissed   bool
 	showImages  bool
 	isPartial   bool
 	useBox      bool
@@ -130,6 +131,26 @@ func (tc *ToolExecutionComponent) UpdateResult(result *ToolResultData, isPartial
 func (tc *ToolExecutionComponent) SetExpanded(expanded bool) {
 	tc.expanded = expanded
 	tc.updateDisplay()
+}
+
+// Dismiss collapses the card to a single muted title line, hiding its body.
+// Used to clear a bulky completed result (e.g. an aside response) without
+// removing it from the transcript or affecting the running turn.
+func (tc *ToolExecutionComponent) Dismiss() {
+	tc.dismissed = true
+	tc.stopSpinner()
+	tc.updateDisplay()
+}
+
+// IsDismissed reports whether the card has been dismissed.
+func (tc *ToolExecutionComponent) IsDismissed() bool {
+	return tc.dismissed
+}
+
+// IsDismissable reports whether the card is a completed, not-yet-dismissed
+// result that can be cleared (it has a result and is no longer streaming).
+func (tc *ToolExecutionComponent) IsDismissable() bool {
+	return !tc.dismissed && !tc.isPartial && tc.result != nil
 }
 
 // SetStatusMessage updates the spinner's status text (e.g. "Calling Read...").
@@ -218,6 +239,20 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 		}
 	}
 
+	if tc.dismissed {
+		t := theme.GetTheme()
+		line := tc.dismissedLine(t)
+		if tc.useBox {
+			tc.contentBox.SetBgFn(bgFn)
+			tc.contentBox.Clear()
+			tc.contentBox.AddChild(tuicomp.NewText(line, 0, 0, nil))
+		} else {
+			tc.contentText.SetCustomBgFn(bgFn)
+			tc.contentText.SetText(line)
+		}
+		return
+	}
+
 	if tc.useBox {
 		tc.contentBox.SetBgFn(bgFn)
 		tc.contentBox.Clear()
@@ -226,6 +261,20 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 		tc.contentText.SetCustomBgFn(bgFn)
 		tc.contentText.SetText(tc.formatToolExecution() + tc.spinnerSuffix())
 	}
+}
+
+// dismissedLine renders the collapsed one-line form of a dismissed card: the
+// card's title (first rendered line) plus a muted "(cleared)" suffix.
+func (tc *ToolExecutionComponent) dismissedLine(t *theme.Theme) string {
+	full := tc.formatToolExecution()
+	firstLine := full
+	if i := strings.IndexByte(full, '\n'); i >= 0 {
+		firstLine = full[:i]
+	}
+	if strings.TrimSpace(firstLine) == "" {
+		firstLine = t.Fg("toolTitle", t.Bold(tc.toolName))
+	}
+	return firstLine + t.Fg("muted", "  (cleared)")
 }
 
 func (tc *ToolExecutionComponent) renderBashContent() {

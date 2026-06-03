@@ -368,3 +368,44 @@ func TestToolExecution_NoSpinnerForPlainTools(t *testing.T) {
 		t.Errorf("plain tools should not have a spinner, got %q", joined)
 	}
 }
+
+func TestToolExecution_Dismiss(t *testing.T) {
+	args := map[string]any{"command": "ls"}
+	comp := NewToolExecutionComponent("bash", args, nil, nil, nil)
+
+	// Pending (no result yet) is not dismissable.
+	if comp.IsDismissable() {
+		t.Fatalf("pending card should not be dismissable")
+	}
+
+	comp.UpdateResult(&ToolResultData{
+		Content: []ToolContentBlock{
+			{Type: "text", Text: "file1.txt\nfile2.txt\nfile3.txt"},
+		},
+	}, false)
+
+	if !comp.IsDismissable() {
+		t.Fatalf("completed card should be dismissable")
+	}
+
+	full := strings.Join(comp.Render(80), "\n")
+	if !strings.Contains(full, "file2.txt") {
+		t.Fatalf("expected body before dismiss, got %q", full)
+	}
+
+	comp.Dismiss()
+	if !comp.IsDismissed() {
+		t.Fatalf("expected IsDismissed after Dismiss")
+	}
+	if comp.IsDismissable() {
+		t.Fatalf("dismissed card should not be dismissable again")
+	}
+
+	collapsed := strings.Join(comp.Render(80), "\n")
+	if strings.Contains(collapsed, "file2.txt") {
+		t.Errorf("dismissed card should hide body, got %q", collapsed)
+	}
+	if !strings.Contains(collapsed, "cleared") {
+		t.Errorf("dismissed card should show '(cleared)', got %q", collapsed)
+	}
+}
