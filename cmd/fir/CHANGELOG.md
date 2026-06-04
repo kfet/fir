@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-06-03
+
 ### Added
 
 - ACP sessions now surface provider retry notices to the user. A new
