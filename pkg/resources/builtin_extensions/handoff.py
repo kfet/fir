@@ -130,7 +130,6 @@ def _bookmarks_filelock(bm_path: str, *, blocking: bool):
                 os.close(fd)
 
 
-
 # ---------------------------------------------------------------------------
 # self_handoff: tool description + validation
 # ---------------------------------------------------------------------------
