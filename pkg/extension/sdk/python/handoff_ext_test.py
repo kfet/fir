@@ -298,6 +298,48 @@ class _BookmarkBase(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class TestBookmarkExcludesBookmarkCall(_BookmarkBase):
+    """Regression: a quote must resolve to the real turn, not the call.
+
+    Reproduces the original bug — the assistant turn that invokes
+    bookmark() carries the quote verbatim in its tool-call arguments and
+    is the newest transcript entry, so an unguarded reverse-scan always
+    self-matched the call instead of the earlier turn the model meant to
+    pin. The scanner now skips bookmark-call turns.
+    """
+
+    QUOTE = "msgs = agent.StripUnmatchedToolCalls(msgs)"
+
+    def _populate_transcript(self) -> None:
+        self.entries = [
+            # The real turn the model wants to pin (a tool result).
+            _msg_entry("e-real", "2025-05-22T14:00:00", "assistant",
+                       f"Applied the fix:\n{self.QUOTE}\nbuild is green."),
+            # A *later* assistant turn that is itself a bookmark call,
+            # carrying the same quote in its arguments — the trap.
+            {
+                "type": "message", "id": "e-bmcall", "parentId": "",
+                "timestamp": "2025-05-22T14:09:00",
+                "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "name": "bookmark",
+                     "arguments": {"quote": self.QUOTE, "note": "the fix"}},
+                ]},
+            },
+        ]
+        _write_transcript(self.transcript_path, self.entries)
+
+    def test_resolves_to_real_turn_not_the_bookmark_call(self) -> None:
+        r = self.call_bookmark(self.QUOTE, "the fix")
+        self.assertFalse(r.get("is_error"), r)
+        rows = _read_jsonl(self.bookmarks_path)
+        self.assertEqual(len(rows), 1)
+        # Must be the substantive turn, never the bookmark-call turn.
+        self.assertEqual(rows[0]["id"], "e-real")
+        self.assertEqual(rows[0]["_bookmark_note"], "the fix")
+        # The bookmark call is excluded from the match count too.
+        self.assertIn("matches=1", _text_of(r))
+
+
 class TestInit(_BookmarkBase):
     def test_handshake_advertises_bookmark_and_self_handoff(self) -> None:
         result = self.init_result["result"]
@@ -310,13 +352,14 @@ class TestInit(_BookmarkBase):
         cmd_names = [c["name"] for c in result.get("commands", [])]
         self.assertIn("handoff", cmd_names)
 
-    def test_handshake_subscribes_no_events(self) -> None:
-        # Simplification: we no longer subscribe to session_start —
-        # the cards file is read on session construct, so the card
-        # survives /reexec without an extension-side reconciler.
+    def test_handshake_subscribes_session_start(self) -> None:
+        # We subscribe to session_start to run the one-time migration
+        # that repairs pre-existing (v1) bookmarks files whose entries
+        # self-matched the bookmark call. The card itself still survives
+        # /reexec via the cards file read on session construct.
         result = self.init_result["result"]
         events = result.get("events", [])
-        self.assertEqual(events, [])
+        self.assertEqual(events, ["session_start"])
 
     def test_bookmark_description_mentions_all_turn_types(self) -> None:
         result = self.init_result["result"]

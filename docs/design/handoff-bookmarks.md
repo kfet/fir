@@ -48,7 +48,13 @@ error if the quote matches nothing.
    its context, which is the decoded turn content — JSON escapes like
    `\n`, `\u003c`, `\u0026` don't matter.
 3. The first hit wins (most recent match). Keep counting the rest of
-   the file to surface a match count in the tool result.
+   the file to surface a match count in the tool result. **The
+   assistant turn that invokes `bookmark()` is itself skipped**
+   (`_is_bookmark_call`): it is persisted to the transcript before this
+   handler reverse-scans, with `quote` verbatim in its tool-call
+   arguments, so without this guard every quote self-matches the newest
+   entry — the call — instead of the earlier turn. Bookmarking a
+   bookmark is never meaningful.
 4. Duplicate the matched entry, inject `_bookmark_note`, append to
    `bookmarks-<session-id>.jsonl` (co-located with the session file).
 5. Re-sort the bookmarks file by the entry's original `timestamp`
@@ -157,3 +163,25 @@ Out of scope for this iteration:
   matches how the model usually wants to pin "the latest version".
 - **Sorted by original timestamp.** The file reads chronologically
   regardless of bookmark-call order.
+
+## Migration (v1 → v2)
+
+Bookmarks written before the `_is_bookmark_call` guard stored the
+bookmark-call turn instead of the substantive turn (every quote
+self-matched the call). A one-time, idempotent migration repairs them:
+
+- Triggered from a `session_start` handler — after a binary upgrade /
+  reexec the fixed code is present, and the next session start runs the
+  sweep. Guarded by a version marker (`.handoff-bookmarks-migration`
+  under the config dir) and an exclusive lock, so it runs once per host
+  per migration version even across concurrent session starts.
+- For each `bookmarks-<sid>.jsonl`, every entry whose body is itself a
+  bookmark call is repaired: the original `quote` is recovered from the
+  call's arguments and re-resolved against the sibling transcript with
+  the fixed scanner; the real turn replaces the entry, `_bookmark_note`
+  preserved. Entries that can't be re-resolved (missing transcript /
+  quote / no better match) are left untouched — a note is never lost.
+- The derived `handoff/bookmarks` card in the persisted `.cards` file is
+  re-rendered in place, since old (inactive) sessions never republish.
+- Idempotent: a repaired entry is no longer a bookmark call, so a
+  re-run finds nothing to fix.

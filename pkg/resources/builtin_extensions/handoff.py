@@ -36,6 +36,11 @@ The bookmarks file is the source of truth. An observable card
 construct (see ``docs/design/observable-cards.md``) so the card
 survives ``/reexec`` for free — no reconciler needed.
 
+A ``session_start`` handler additionally runs a one-time, idempotent
+migration that repairs pre-existing bookmarks files (and their cards)
+written before the self-match guard existed — see the migration block
+below.
+
 See ``docs/design/handoff-bookmarks.md``.
 """
 
@@ -146,7 +151,9 @@ debugging session converges.
 You may bookmark ANY past turn type: user message, assistant message, \
 tool call arguments, tool result, or system message. The quote is \
 matched as a substring against the decoded text of each transcript \
-turn, latest-first. If multiple turns match, the most recent wins.
+turn, latest-first. If multiple turns match, the most recent wins. \
+(Your own bookmark calls are never matched, so quoting text you just \
+wrote into a bookmark resolves to the original turn, not the call.)
 
 Arguments:
 - quote: minimum exact text that uniquely identifies the turn. Short \
@@ -284,6 +291,27 @@ def _json_contains(value: Any, quote: str) -> bool:
     return False
 
 
+def _is_bookmark_call(value: Any) -> bool:
+    """Return whether ``value`` is/contains a ``bookmark`` tool call.
+
+    The assistant turn that *invokes* ``bookmark()`` is persisted to the
+    transcript before this handler reverse-scans it, and it carries the
+    model's ``quote`` verbatim inside the tool-call arguments. Without
+    excluding it, every quote substring-matches its own bookmark call —
+    which is always the newest entry — so the scan would resolve to the
+    bookmark call instead of the earlier turn the model meant to pin.
+    Bookmarking a bookmark is never meaningful, so we skip these turns
+    entirely.
+    """
+    if isinstance(value, dict):
+        if value.get("type") == "toolCall" and value.get("name") == "bookmark":
+            return True
+        return any(_is_bookmark_call(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_is_bookmark_call(v) for v in value)
+    return False
+
+
 def _find_turn_by_quote(
     transcript_path: str, quote: str,
 ) -> tuple[dict | None, int]:
@@ -294,9 +322,10 @@ def _find_turn_by_quote(
     matched; ``match_count`` is the total number of matches (surfaced
     to the model so it knows when its quote was ambiguous).
 
-    The session header line (no ``type`` field) is skipped:
-    bookmarking the header has no meaning and confuses the timestamp
-    sort.
+    The session header line (no ``type`` field) and ``bookmark`` tool-
+    call turns (see ``_is_bookmark_call``) are skipped: bookmarking the
+    header or a bookmark call has no meaning and the latter would always
+    self-match the just-issued call.
     """
     try:
         with open(transcript_path, "rb") as f:
@@ -313,6 +342,8 @@ def _find_turn_by_quote(
             continue
         if not isinstance(obj, dict) or "type" not in obj:
             continue  # header or unparseable
+        if _is_bookmark_call(obj):
+            continue  # never self-match the bookmark call (see helper)
         if not _json_contains(obj, quote):
             continue
         count += 1
@@ -403,6 +434,215 @@ def _render_card(path: str, entries: list[dict]) -> tuple[str, str]:
         note = str(e.get("_bookmark_note") or "").strip()
         lines.append(f"- {hhmm}  {note}" if hhmm else f"- {note}")
     return (slug, "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# One-time migration: repair v1 bookmarks that self-matched the bookmark call
+# ---------------------------------------------------------------------------
+#
+# Before the ``_is_bookmark_call`` guard existed, every bookmark resolved
+# to its own ``bookmark()`` call turn (the quote always substring-matched
+# the call's own arguments, and that call is the newest transcript entry).
+# So existing bookmarks files store the bookmark-call turn instead of the
+# substantive turn, and the persisted ``handoff/bookmarks`` cards show the
+# call's timestamp. Those entries are self-describing — each carries the
+# original ``quote`` (in the tool-call args) and ``note`` — and the sibling
+# transcript still exists, so we can re-resolve and repair in place.
+#
+# The repair runs once per host on ``session_start`` (after a binary
+# upgrade / reexec the new code is present, then the next session start
+# triggers the sweep), guarded by a version marker under the config dir.
+# It is idempotent: a repaired entry is no longer a bookmark call, so a
+# re-run finds nothing to fix.
+
+# Bump when the migration logic changes in a way that should re-run.
+_MIGRATION_VERSION = 1
+_MIGRATION_MARKER = ".handoff-bookmarks-migration"
+
+
+def _bookmark_call_quote(value: Any) -> str | None:
+    """Extract the ``quote`` argument from a ``bookmark`` call in ``value``."""
+    if isinstance(value, dict):
+        if value.get("type") == "toolCall" and value.get("name") == "bookmark":
+            args = value.get("arguments")
+            if not isinstance(args, dict):
+                args = value.get("args")
+            if isinstance(args, dict):
+                q = args.get("quote")
+                if isinstance(q, str) and q.strip():
+                    return q.strip()
+        for v in value.values():
+            r = _bookmark_call_quote(v)
+            if r is not None:
+                return r
+    elif isinstance(value, list):
+        for v in value:
+            r = _bookmark_call_quote(v)
+            if r is not None:
+                return r
+    return None
+
+
+def _sibling_transcript(bm_path: str) -> str:
+    """Find the transcript file sitting next to a bookmarks file.
+
+    ``bookmarks-<sid>.jsonl`` lives beside ``<ts>_<sid>.jsonl``. Returns
+    "" when no sibling transcript can be located.
+    """
+    d = os.path.dirname(bm_path)
+    base = os.path.basename(bm_path)
+    if not base.startswith("bookmarks-") or not base.endswith(".jsonl"):
+        return ""
+    sid = base[len("bookmarks-"):-len(".jsonl")]
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return ""
+    for name in names:
+        if name.startswith("bookmarks-") or not name.endswith(".jsonl"):
+            continue
+        if name.endswith(f"{sid}.jsonl"):
+            return os.path.join(d, name)
+    return ""
+
+
+def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
+    """Re-render the handoff/bookmarks card in the sibling ``.cards`` file.
+
+    Old (inactive) sessions never republish their card, so we patch the
+    persisted ``.cards`` array directly. Best-effort: any error is
+    swallowed — the bookmarks file is the source of truth regardless.
+    """
+    transcript = _sibling_transcript(bm_path)
+    if not transcript:
+        return
+    cards_path = transcript + ".cards"
+    try:
+        with open(cards_path, "rb") as f:
+            cards = json.loads(f.read())
+    except (OSError, ValueError, TypeError):
+        return
+    if not isinstance(cards, list):
+        return
+    slug, detail = _render_card(bm_path, entries)
+    patched = False
+    for c in cards:
+        if (isinstance(c, dict) and c.get("key") == _CARD_KEY
+                and "handoff" in str(c.get("source", ""))):
+            c["slug"] = slug
+            c["detail"] = detail
+            patched = True
+    if not patched:
+        return
+    tmp = cards_path + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(json.dumps(cards, indent=2).encode("utf-8"))
+        os.replace(tmp, cards_path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+
+def _repair_bookmarks_file(bm_path: str) -> bool:
+    """Repair v1 self-matched entries in one bookmarks file in place.
+
+    For each entry whose stored turn body is itself a ``bookmark`` call,
+    recover the original ``quote``, re-resolve it against the sibling
+    transcript with the fixed (self-excluding) scanner, and swap in the
+    real turn — preserving ``_bookmark_note``. Entries that need no
+    repair, or can't be re-resolved (missing transcript / quote / no
+    better match), are left untouched so a note is never lost. Returns
+    whether anything changed.
+    """
+    entries = _read_bookmarks(bm_path)
+    if not entries:
+        return False
+    transcript = _sibling_transcript(bm_path)
+    changed = False
+    repaired: list[dict] = []
+    for e in entries:
+        if not _is_bookmark_call(e):
+            repaired.append(e)
+            continue
+        quote = _bookmark_call_quote(e)
+        if not transcript or not quote:
+            repaired.append(e)
+            continue
+        found, _count = _find_turn_by_quote(transcript, quote)
+        if found is None:
+            repaired.append(e)
+            continue
+        fixed = dict(found)
+        note = e.get("_bookmark_note")
+        if note is not None:
+            fixed["_bookmark_note"] = note
+        repaired.append(fixed)
+        changed = True
+    if not changed:
+        return False
+    repaired.sort(key=_entry_sort_key)
+    _write_bookmarks(bm_path, repaired)
+    _repair_card_file(bm_path, repaired)
+    return True
+
+
+def _sessions_root(ctx: fir_ext.Context) -> str:
+    """Resolve the sessions root from the current session-file path.
+
+    Layout: ``<config>/sessions/<slug>/<ts>_<sid>.jsonl``; the sessions
+    root is two levels up. Returns "" when there is no session file.
+    """
+    sf = ctx.get_session_file()
+    if not sf:
+        return ""
+    return os.path.dirname(os.path.dirname(sf))
+
+
+def _run_migration_once(ctx: fir_ext.Context) -> None:
+    """One-time idempotent repair of every v1 bookmarks file on this host.
+
+    Guarded by a version marker under the config dir so it runs once per
+    host per migration version, with an exclusive lock to elect a single
+    runner across concurrent session starts. Best-effort throughout.
+    """
+    root = _sessions_root(ctx)
+    if not root or os.path.basename(root) != "sessions" or not os.path.isdir(root):
+        return
+    config_dir = os.path.dirname(root)
+    marker = os.path.join(config_dir, _MIGRATION_MARKER)
+    try:
+        with open(marker) as f:
+            if int(f.read().strip() or "0") >= _MIGRATION_VERSION:
+                return
+    except (OSError, ValueError):
+        pass
+    lock = marker + ".lock"
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.close(fd)
+    except OSError:
+        return  # another session is already migrating
+    try:
+        for slug in os.listdir(root):
+            d = os.path.join(root, slug)
+            if not os.path.isdir(d):
+                continue
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            for name in names:
+                if name.startswith("bookmarks-") and name.endswith(".jsonl"):
+                    with contextlib.suppress(Exception):
+                        _repair_bookmarks_file(os.path.join(d, name))
+        tmp = marker + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(str(_MIGRATION_VERSION))
+        os.replace(tmp, marker)
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(lock)
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +783,23 @@ def cmd_handoff(args: list[str], ctx: fir_ext.Context) -> dict:
         prompt_lines.extend(["", f"Additional focus / notes from the user: {extra}"])
     ctx.send_user_message("\n".join(prompt_lines))
     return {"message": "Preparing self-handoff briefing…"}
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: one-time bookmarks repair migration
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.on("session_start")
+def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
+    """Run the one-time v1 bookmark repair on the first session post-upgrade.
+
+    Best-effort: never raise into session start. See
+    ``_run_migration_once`` and the migration block above.
+    """
+    del params
+    with contextlib.suppress(Exception):
+        _run_migration_once(ctx)
 
 
 fir_ext.run(name="handoff")

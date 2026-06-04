@@ -26,6 +26,21 @@
   warn and degrade, since providers are fixed at the handshake. Covered by a new
   Node SDK test (`make test-node-sdk`, wired into `make all`).
 
+### Fixed
+
+- Handoff bookmarks: `bookmark(quote, note)` always resolved to its own
+  `bookmark()` call turn instead of the earlier turn the model meant to pin.
+  The assistant turn that invokes `bookmark()` is persisted to the transcript
+  (with the `quote` verbatim in its tool-call arguments) before the extension
+  reverse-scans, so the quote always self-matched the newest entry. The scanner
+  now skips `bookmark` tool-call turns (`_is_bookmark_call`), so quotes resolve
+  to the real substantive turn. A one-time, idempotent `session_start` migration
+  repairs pre-existing `bookmarks-<sid>.jsonl` files and their persisted
+  `handoff/bookmarks` cards in place — the broken entries are self-describing
+  (they carry the original `quote`+`note`) and the sibling transcript is still
+  present, so each is re-resolved against the fixed scanner. Guarded by a
+  version marker under the config dir; runs once per host after upgrade/reexec.
+
 ## [0.56.0] - 2026-06-03
 
 ### Added

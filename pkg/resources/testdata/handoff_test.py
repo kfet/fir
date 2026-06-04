@@ -17,6 +17,7 @@ extension's *local* logic, with a stub ctx.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -280,6 +281,12 @@ def _write_jsonl(path: str, rows: list[dict]) -> None:
             f.write((json.dumps(row) + "\n").encode())
 
 
+def _read_jsonl(path: str) -> list[dict]:
+    with open(path, "rb") as f:
+        return [json.loads(line) for line in f.read().splitlines()
+                if line.strip()]
+
+
 class TestBookmarksPath(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
@@ -499,6 +506,115 @@ class TestSelfHandoffPointerStub(unittest.TestCase):
             prepend.index("Self-Handoff"),
             prepend.index("Bookmarks from parent session"),
         )
+
+
+class TestBookmarkMigration(unittest.TestCase):
+    """One-time repair of v1 bookmarks that self-matched the bookmark call."""
+
+    SID = "abc12345-dead-beef-0000-000000000001"
+    QUOTE = "msgs = agent.StripUnmatchedToolCalls(msgs)"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+        # Realistic layout: <config>/sessions/<slug>/<ts>_<sid>.jsonl
+        self.config = os.path.join(self.tmp, "config")
+        self.slug_dir = os.path.join(self.config, "sessions", "--proj--")
+        os.makedirs(self.slug_dir, exist_ok=True)
+        self.transcript = os.path.join(
+            self.slug_dir, f"2026-06-02T07-30-00Z_{self.SID}.jsonl")
+        self.bookmarks = os.path.join(
+            self.slug_dir, f"bookmarks-{self.SID}.jsonl")
+        self.cards = self.transcript + ".cards"
+
+        # Transcript: the real turn + a later bookmark-call turn.
+        self.real_turn = {
+            "type": "message", "id": "e-real", "parentId": "",
+            "timestamp": "2026-06-02T07:33:23",
+            "message": {"role": "assistant",
+                        "content": f"Applied:\n{self.QUOTE}\ngreen."},
+        }
+        self.bm_call_turn = {
+            "type": "message", "id": "e-bmcall", "parentId": "",
+            "timestamp": "2026-06-02T07:34:45",
+            "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "name": "bookmark",
+                 "arguments": {"quote": self.QUOTE, "note": "the fix"}},
+            ]},
+        }
+        _write_jsonl(self.transcript, [
+            {"id": self.SID, "model": "m"},
+            self.real_turn, self.bm_call_turn,
+        ])
+        # v1 bookmarks file: stores the bookmark-call turn (the bug).
+        v1_entry = dict(self.bm_call_turn)
+        v1_entry["_bookmark_note"] = "the fix"
+        _write_jsonl(self.bookmarks, [v1_entry])
+        # Persisted card with the wrong (bookmark-call) timestamp.
+        with open(self.cards, "w") as f:
+            json.dump([
+                {"source": "aside", "key": "query/1", "slug": "x",
+                 "detail": "unrelated"},
+                {"source": "handoff", "key": "bookmarks", "slug": "1 pinned",
+                 "detail": f"1 bookmark ({self.bookmarks}):\n- 07:34  the fix"},
+            ], f)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _stub_ctx(self):
+        return _StubContext(session_file=self.transcript, session_id=self.SID)
+
+    def test_repair_swaps_in_real_turn_and_preserves_note(self) -> None:
+        changed = self.handoff._repair_bookmarks_file(self.bookmarks)
+        self.assertTrue(changed)
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "e-real")
+        self.assertEqual(rows[0]["timestamp"], "2026-06-02T07:33:23")
+        self.assertEqual(rows[0]["_bookmark_note"], "the fix")
+        # The repaired entry is no longer a bookmark call.
+        self.assertFalse(self.handoff._is_bookmark_call(rows[0]))
+
+    def test_repair_patches_persisted_card(self) -> None:
+        self.handoff._repair_bookmarks_file(self.bookmarks)
+        with open(self.cards) as f:
+            cards = json.load(f)
+        bm = next(c for c in cards if c.get("key") == "bookmarks")
+        # Card now reflects the real turn's HH:MM (07:33), not 07:34.
+        self.assertIn("07:33", bm["detail"])
+        self.assertEqual(bm["slug"], "1 pinned")
+        # Unrelated card left intact.
+        self.assertTrue(any(c.get("source") == "aside" for c in cards))
+
+    def test_repair_is_idempotent(self) -> None:
+        self.assertTrue(self.handoff._repair_bookmarks_file(self.bookmarks))
+        # Second pass: nothing left to fix.
+        self.assertFalse(self.handoff._repair_bookmarks_file(self.bookmarks))
+
+    def test_repair_keeps_entry_when_transcript_missing(self) -> None:
+        os.remove(self.transcript)
+        # No sibling transcript → can't re-resolve → entry kept, note safe.
+        self.assertFalse(self.handoff._repair_bookmarks_file(self.bookmarks))
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(rows[0]["_bookmark_note"], "the fix")
+
+    def test_run_migration_once_repairs_and_marks_done(self) -> None:
+        ctx = self._stub_ctx()
+        self.handoff._run_migration_once(ctx)
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(rows[0]["id"], "e-real")
+        marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
+        self.assertTrue(os.path.exists(marker))
+
+    def test_run_migration_once_short_circuits_on_marker(self) -> None:
+        marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
+        with open(marker, "w") as f:
+            f.write(str(self.handoff._MIGRATION_VERSION))
+        self.handoff._run_migration_once(self._stub_ctx())
+        # Marker present at current version → no repair performed.
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(rows[0]["id"], "e-bmcall")
 
 
 if __name__ == "__main__":
