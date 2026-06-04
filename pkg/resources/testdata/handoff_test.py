@@ -616,6 +616,40 @@ class TestBookmarkMigration(unittest.TestCase):
         rows = _read_jsonl(self.bookmarks)
         self.assertEqual(rows[0]["id"], "e-bmcall")
 
+    def test_run_migration_once_leaves_no_sweep_lock(self) -> None:
+        # The old O_EXCL ".lock" elector is gone — nothing to leak/wedge.
+        self.handoff._run_migration_once(self._stub_ctx())
+        marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
+        self.assertFalse(os.path.exists(marker + ".lock"))
+
+    def test_repair_skips_file_locked_by_live_session(self) -> None:
+        import fcntl
+        # Simulate a concurrent live session holding the file lock.
+        lock_path = self.bookmarks + ".lock"
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            changed = self.handoff._repair_bookmarks_file(self.bookmarks)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+        # Migration backed off; the file is untouched (no lost update).
+        self.assertFalse(changed)
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(rows[0]["id"], "e-bmcall")
+
+    def test_session_start_self_heals_own_file_despite_marker(self) -> None:
+        # Straggler: a session upgraded AFTER the global sweep marked done
+        # still repairs its own file on session_start (covers /reexec,
+        # which keeps the same session id + file).
+        marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
+        with open(marker, "w") as f:
+            f.write(str(self.handoff._MIGRATION_VERSION))
+        self.handoff.on_session_start({}, self._stub_ctx())
+        rows = _read_jsonl(self.bookmarks)
+        self.assertEqual(rows[0]["id"], "e-real")
+        self.assertEqual(rows[0]["_bookmark_note"], "the fix")
+
 
 if __name__ == "__main__":
     unittest.main()

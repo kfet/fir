@@ -52,6 +52,11 @@ import os
 import threading
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX (fir targets unix)
+    fcntl = None  # ty: ignore[invalid-assignment]
+
 import fir_ext
 
 # ---------------------------------------------------------------------------
@@ -75,9 +80,55 @@ _CARD_KEY = "bookmarks"
 _CARD_MAX_BOOKMARKS_IN_DETAIL = 20
 
 # Serialises the bookmark file's read/append/sort/write critical
-# section. Multiple concurrent bookmark() calls on the same session
-# would otherwise race and lose entries.
+# section *within this process*. Multiple concurrent bookmark() calls on
+# the same session would otherwise race and lose entries. Cross-process
+# safety (bookmark() vs. the repair migration in another session's
+# extension) is handled separately by an flock sidecar — see
+# ``_bookmarks_filelock``.
 _bookmarks_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _bookmarks_filelock(bm_path: str, *, blocking: bool):
+    """Advisory cross-process lock on a sidecar beside the bookmarks file.
+
+    Yields ``True`` when the lock is held, ``False`` when ``blocking`` is
+    False and another process holds it. Shared by ``bookmark()``
+    (blocking — the write must complete) and the repair migration
+    (non-blocking — a held lock means a live session owns the file and
+    will reconcile it itself, so the sweep simply skips it).
+
+    The lock lives on a stable sidecar inode (``<bm_path>.lock``) rather
+    than the bookmarks file, because the file is replaced via atomic
+    temp+rename — an flock on the renamed-away inode would be invisible
+    to the next opener. flock is released automatically on close /
+    process death, so a crash never deadlocks. Degrades to a no-op
+    (always "held") when ``fcntl`` is unavailable.
+    """
+    if fcntl is None:
+        yield True
+        return
+    lock_path = bm_path + ".lock"
+    fd = None
+    try:
+        os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+        flags = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(fd, flags)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            with contextlib.suppress(OSError):
+                fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
 
 
 # ---------------------------------------------------------------------------
@@ -449,11 +500,15 @@ def _render_card(path: str, entries: list[dict]) -> tuple[str, str]:
 # original ``quote`` (in the tool-call args) and ``note`` — and the sibling
 # transcript still exists, so we can re-resolve and repair in place.
 #
-# The repair runs once per host on ``session_start`` (after a binary
-# upgrade / reexec the new code is present, then the next session start
-# triggers the sweep), guarded by a version marker under the config dir.
-# It is idempotent: a repaired entry is no longer a bookmark call, so a
-# re-run finds nothing to fix.
+# Repair happens on ``session_start`` in two parts (see
+# ``on_session_start``): each session first self-heals its own file
+# (so /reexec'd and late-upgraded sessions fix themselves), then a
+# one-time global backlog sweep — guarded by a version marker under the
+# config dir — fixes files of sessions that will never reopen. Per-file
+# safety against a live ``bookmark()`` comes from a non-blocking flock
+# sidecar (``_bookmarks_filelock``); no host-wide sweep lock is taken,
+# so a crash can never wedge the migration. It is idempotent: a repaired
+# entry is no longer a bookmark call, so a re-run finds nothing to fix.
 
 # Bump when the migration logic changes in a way that should re-run.
 _MIGRATION_VERSION = 1
@@ -547,6 +602,21 @@ def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
 def _repair_bookmarks_file(bm_path: str) -> bool:
     """Repair v1 self-matched entries in one bookmarks file in place.
 
+    Acquired under the cross-process file lock (non-blocking): if a live
+    session currently holds it, we skip — that session reconciles its own
+    file at ``session_start`` before it issues any ``bookmark()``, so a
+    held lock means there is nothing here for the sweep to fix. Returns
+    whether anything changed (``False`` also when skipped or clean).
+    """
+    with _bookmarks_filelock(bm_path, blocking=False) as held:
+        if not held:
+            return False
+        return _repair_bookmarks_locked(bm_path)
+
+
+def _repair_bookmarks_locked(bm_path: str) -> bool:
+    """Repair body — caller must hold the bookmarks file lock.
+
     For each entry whose stored turn body is itself a ``bookmark`` call,
     recover the original ``quote``, re-resolve it against the sibling
     transcript with the fixed (self-excluding) scanner, and swap in the
@@ -600,11 +670,21 @@ def _sessions_root(ctx: fir_ext.Context) -> str:
 
 
 def _run_migration_once(ctx: fir_ext.Context) -> None:
-    """One-time idempotent repair of every v1 bookmarks file on this host.
+    """One-time idempotent repair of the v1 bookmarks backlog on this host.
 
-    Guarded by a version marker under the config dir so it runs once per
-    host per migration version, with an exclusive lock to elect a single
-    runner across concurrent session starts. Best-effort throughout.
+    Sweeps every ``bookmarks-*.jsonl`` and repairs the v1 self-matched
+    entries, guarded by a version marker under the config dir so the full
+    pass runs once per host per migration version. No exclusive sweep
+    lock is taken: per-file safety comes from the non-blocking file lock
+    inside ``_repair_bookmarks_file`` (which serialises against any live
+    ``bookmark()`` and skips live files), and repairs are idempotent, so
+    two sessions starting at once can both sweep harmlessly — at worst a
+    little duplicated work. Crucially there is no lock to leak, so a
+    crash mid-sweep can never wedge the migration permanently. Files
+    owned by sessions that never reopen are fixed here; sessions that do
+    reopen also self-heal their own file at ``session_start`` (see
+    ``on_session_start``), which covers stragglers upgraded after the
+    marker is set. Best-effort throughout.
     """
     root = _sessions_root(ctx)
     if not root or os.path.basename(root) != "sessions" or not os.path.isdir(root):
@@ -617,32 +697,28 @@ def _run_migration_once(ctx: fir_ext.Context) -> None:
                 return
     except (OSError, ValueError):
         pass
-    lock = marker + ".lock"
+    for slug in os.listdir(root):
+        d = os.path.join(root, slug)
+        if not os.path.isdir(d):
+            continue
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith("bookmarks-") and name.endswith(".jsonl"):
+                with contextlib.suppress(Exception):
+                    _repair_bookmarks_file(os.path.join(d, name))
+    # Mark done (atomic). A concurrent sweep writing the same value is
+    # harmless; the marker only short-circuits the next host start.
+    tmp = marker + f".tmp.{os.getpid()}"
     try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        os.close(fd)
-    except OSError:
-        return  # another session is already migrating
-    try:
-        for slug in os.listdir(root):
-            d = os.path.join(root, slug)
-            if not os.path.isdir(d):
-                continue
-            try:
-                names = os.listdir(d)
-            except OSError:
-                continue
-            for name in names:
-                if name.startswith("bookmarks-") and name.endswith(".jsonl"):
-                    with contextlib.suppress(Exception):
-                        _repair_bookmarks_file(os.path.join(d, name))
-        tmp = marker + ".tmp"
         with open(tmp, "w") as f:
             f.write(str(_MIGRATION_VERSION))
         os.replace(tmp, marker)
-    finally:
+    except OSError:
         with contextlib.suppress(OSError):
-            os.remove(lock)
+            os.remove(tmp)
 
 
 # ---------------------------------------------------------------------------
@@ -688,8 +764,12 @@ def bookmark(params: dict, ctx: fir_ext.Context) -> dict:
     bookmarked = dict(entry)
     bookmarked["_bookmark_note"] = note
 
-    # Critical section: append + sort + write + card publish.
-    with _bookmarks_lock:
+    # Critical section: append + sort + write + card publish. The
+    # in-process lock serialises threads here; the file lock (blocking)
+    # serialises against the repair migration running in any other
+    # session's extension process. We read fresh inside both locks so
+    # there is no lost update.
+    with _bookmarks_lock, _bookmarks_filelock(bm_path, blocking=True):
         existing = _read_bookmarks(bm_path)
         existing.append(bookmarked)
         existing.sort(key=_entry_sort_key)
@@ -792,12 +872,26 @@ def cmd_handoff(args: list[str], ctx: fir_ext.Context) -> dict:
 
 @fir_ext.on("session_start")
 def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
-    """Run the one-time v1 bookmark repair on the first session post-upgrade.
+    """Repair bookmarks on session start (incl. /reexec — same session id).
 
-    Best-effort: never raise into session start. See
-    ``_run_migration_once`` and the migration block above.
+    Two best-effort steps, neither of which may raise into session start:
+
+    1. Self-heal THIS session's own bookmarks file. ``/reexec`` continues
+       the same session (same id + transcript) and re-emits
+       ``session_start``, so a session upgraded to the fixed code repairs
+       its own pre-fix entries here — even after the one-time global
+       marker is set — and does so *before* it issues any ``bookmark()``,
+       which keeps its file clean for the rest of its life.
+    2. Run the one-time global backlog sweep (marker-gated) for files
+       owned by sessions that will never reopen.
+
+    See ``_run_migration_once`` and the migration block above.
     """
     del params
+    with contextlib.suppress(Exception):
+        bm = _bookmarks_path(ctx)
+        if bm and os.path.exists(bm):
+            _repair_bookmarks_file(bm)
     with contextlib.suppress(Exception):
         _run_migration_once(ctx)
 

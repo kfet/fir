@@ -38,8 +38,15 @@
   repairs pre-existing `bookmarks-<sid>.jsonl` files and their persisted
   `handoff/bookmarks` cards in place — the broken entries are self-describing
   (they carry the original `quote`+`note`) and the sibling transcript is still
-  present, so each is re-resolved against the fixed scanner. Guarded by a
-  version marker under the config dir; runs once per host after upgrade/reexec.
+  present, so each is re-resolved against the fixed scanner. On `session_start`
+  each session first self-heals its own file (so `/reexec`'d and late-upgraded
+  sessions fix themselves — `/reexec` keeps the same session id/file), then runs
+  a one-time global backlog sweep (version-marker-gated) for files of sessions
+  that never reopen. Concurrency-safe: `bookmark()` and the repair share a
+  per-file advisory `flock` sidecar (blocking for the live writer, non-blocking
+  for the sweep, which skips files a live session holds), so there are no
+  cross-process lost updates; no host-wide sweep lock is taken, so a crash can
+  never wedge the migration.
 
 ## [0.56.0] - 2026-06-03
 

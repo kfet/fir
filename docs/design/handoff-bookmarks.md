@@ -172,9 +172,23 @@ self-matched the call). A one-time, idempotent migration repairs them:
 
 - Triggered from a `session_start` handler — after a binary upgrade /
   reexec the fixed code is present, and the next session start runs the
-  sweep. Guarded by a version marker (`.handoff-bookmarks-migration`
-  under the config dir) and an exclusive lock, so it runs once per host
-  per migration version even across concurrent session starts.
+  repair. `/reexec` continues the *same* session (same id + transcript)
+  and re-emits `session_start`.
+- Two parts per start: (1) the session **self-heals its own file**
+  before it issues any `bookmark()`, so any session that reaches the
+  fixed code — including ones upgraded *after* the global marker is set
+  — repairs its own pre-fix entries; (2) a **one-time global backlog
+  sweep**, gated by a version marker (`.handoff-bookmarks-migration`
+  under the config dir), fixes files of sessions that will never reopen.
+- **Concurrency.** `bookmark()` and the repair share a per-file advisory
+  lock on an `flock` sidecar (`<bm>.lock`, a stable inode — the
+  bookmarks file itself is replaced via atomic temp+rename). The live
+  writer takes it blocking; the sweep takes it non-blocking and *skips*
+  a file a live session holds (that session already self-healed its file
+  at start, so there is nothing to fix). Both read fresh inside the
+  lock, so there are no cross-process lost updates. No host-wide sweep
+  lock is taken — concurrent session starts may both sweep harmlessly
+  (idempotent), and a crash mid-sweep can never wedge the migration.
 - For each `bookmarks-<sid>.jsonl`, every entry whose body is itself a
   bookmark call is repaired: the original `quote` is recovered from the
   call's arguments and re-resolved against the sibling transcript with
