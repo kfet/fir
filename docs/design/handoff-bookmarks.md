@@ -195,7 +195,12 @@ self-matched the call). A one-time, idempotent migration repairs them:
   the fixed scanner; the real turn replaces the entry, `_bookmark_note`
   preserved. Entries that can't be re-resolved (missing transcript /
   quote / no better match) are left untouched — a note is never lost.
-- The derived `handoff/bookmarks` card in the persisted `.cards` file is
-  re-rendered in place, since old (inactive) sessions never republish.
+- The derived `handoff/bookmarks` card is updated race-safely against fir
+  core's observable store (which also writes `.cards` and does not honour
+  our flock): the **current** session republishes via `ctx.put_observable`
+  (fir core owns the write); the **sweep** rewrites `.cards` directly only
+  for inactive sessions and skips any recently-modified `.cards` as a
+  live-writer guard. The sweep runs in a daemon thread so a large backlog
+  never delays session start.
 - Idempotent: a repaired entry is no longer a bookmark call, so a
   re-run finds nothing to fix.

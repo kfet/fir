@@ -42,11 +42,20 @@
   each session first self-heals its own file (so `/reexec`'d and late-upgraded
   sessions fix themselves — `/reexec` keeps the same session id/file), then runs
   a one-time global backlog sweep (version-marker-gated) for files of sessions
-  that never reopen. Concurrency-safe: `bookmark()` and the repair share a
-  per-file advisory `flock` sidecar (blocking for the live writer, non-blocking
-  for the sweep, which skips files a live session holds), so there are no
-  cross-process lost updates; no host-wide sweep lock is taken, so a crash can
-  never wedge the migration.
+  that never reopen (off the hot path in a daemon thread so a large backlog
+  never delays startup). Card writes are race-safe with fir core's observable
+  store: the current session republishes its card via `put_observable` (fir core
+  owns the `.cards` write), while the sweep only rewrites `.cards` for inactive
+  sessions and skips any recently-modified `.cards`. Concurrency-safe on the
+  bookmarks file too: `bookmark()` and the repair share a per-file advisory
+  `flock` sidecar (blocking for the live writer, non-blocking for the sweep,
+  which skips files a live session holds), so there are no cross-process lost
+  updates; no host-wide sweep lock is taken, so a crash can never wedge the
+  migration.
+- `make deploy` now replaces the remote `fir` binary atomically (`scp` to a
+  temp path + `mv`, keeping a `fir.prev` backup) instead of overwriting the
+  running inode in place — avoids SIGBUS/crashes in fir processes executing the
+  old binary during a fleet rollout.
 
 ## [0.56.0] - 2026-06-03
 

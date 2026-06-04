@@ -50,6 +50,7 @@ import contextlib
 import json
 import os
 import threading
+import time
 from typing import Any
 
 try:
@@ -513,6 +514,12 @@ def _render_card(path: str, entries: list[dict]) -> tuple[str, str]:
 _MIGRATION_VERSION = 1
 _MIGRATION_MARKER = ".handoff-bookmarks-migration"
 
+# When directly patching a persisted ``.cards`` file, skip it if it was
+# written within this window — fir core (Go) owns ``.cards`` writes and
+# does not honour our flock, so a recent mtime means a live session may
+# be writing it; let that session republish instead of racing it.
+_CARDS_LIVE_WINDOW_S = 15
+
 
 def _bookmark_call_quote(value: Any) -> str | None:
     """Extract the ``quote`` argument from a ``bookmark`` call in ``value``."""
@@ -560,17 +567,27 @@ def _sibling_transcript(bm_path: str) -> str:
     return ""
 
 
-def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
-    """Re-render the handoff/bookmarks card in the sibling ``.cards`` file.
+def _rewrite_card_file(bm_path: str, slug: str, detail: str) -> None:
+    """Patch the persisted handoff/bookmarks card for an INACTIVE session.
 
-    Old (inactive) sessions never republish their card, so we patch the
-    persisted ``.cards`` array directly. Best-effort: any error is
-    swallowed — the bookmarks file is the source of truth regardless.
+    Only the global backlog sweep uses this — for sessions with no live
+    fir process, so there is no concurrent ``.cards`` writer to race. We
+    still skip a recently-modified ``.cards`` (see ``_CARDS_LIVE_WINDOW_S``)
+    as cheap insurance against an old-code session writing during the
+    upgrade window. The *current* session never takes this path; it
+    republishes via ``ctx.put_observable`` so fir core owns the write.
+    Best-effort: any error is swallowed (the bookmarks file is the source
+    of truth regardless).
     """
     transcript = _sibling_transcript(bm_path)
     if not transcript:
         return
     cards_path = transcript + ".cards"
+    try:
+        if time.time() - os.path.getmtime(cards_path) < _CARDS_LIVE_WINDOW_S:
+            return  # a live observable writer may be active — don't race it
+    except OSError:
+        return
     try:
         with open(cards_path, "rb") as f:
             cards = json.loads(f.read())
@@ -578,7 +595,6 @@ def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
         return
     if not isinstance(cards, list):
         return
-    slug, detail = _render_card(bm_path, entries)
     patched = False
     for c in cards:
         if (isinstance(c, dict) and c.get("key") == _CARD_KEY
@@ -588,7 +604,7 @@ def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
             patched = True
     if not patched:
         return
-    tmp = cards_path + ".tmp"
+    tmp = cards_path + f".tmp.{os.getpid()}"
     try:
         with open(tmp, "wb") as f:
             f.write(json.dumps(cards, indent=2).encode("utf-8"))
@@ -598,7 +614,7 @@ def _repair_card_file(bm_path: str, entries: list[dict]) -> None:
             os.remove(tmp)
 
 
-def _repair_bookmarks_file(bm_path: str) -> bool:
+def _repair_bookmarks_file(bm_path: str, *, publish=None) -> bool:
     """Repair v1 self-matched entries in one bookmarks file in place.
 
     Acquired under the cross-process file lock (non-blocking): if a live
@@ -606,14 +622,20 @@ def _repair_bookmarks_file(bm_path: str) -> bool:
     file at ``session_start`` before it issues any ``bookmark()``, so a
     held lock means there is nothing here for the sweep to fix. Returns
     whether anything changed (``False`` also when skipped or clean).
+
+    ``publish`` is an optional ``(slug, detail) -> None`` callback used to
+    update the observable card for the *current* session (it should wrap
+    ``ctx.put_observable`` so fir core owns the ``.cards`` write). When
+    omitted — the global backlog sweep over inactive sessions — the card
+    is patched directly via ``_rewrite_card_file``.
     """
     with _bookmarks_filelock(bm_path, blocking=False) as held:
         if not held:
             return False
-        return _repair_bookmarks_locked(bm_path)
+        return _repair_bookmarks_locked(bm_path, publish=publish)
 
 
-def _repair_bookmarks_locked(bm_path: str) -> bool:
+def _repair_bookmarks_locked(bm_path: str, *, publish=None) -> bool:
     """Repair body — caller must hold the bookmarks file lock.
 
     For each entry whose stored turn body is itself a ``bookmark`` call,
@@ -652,25 +674,20 @@ def _repair_bookmarks_locked(bm_path: str) -> bool:
         return False
     repaired.sort(key=_entry_sort_key)
     _write_bookmarks(bm_path, repaired)
-    _repair_card_file(bm_path, repaired)
+    slug, detail = _render_card(bm_path, repaired)
+    if publish is not None:
+        with contextlib.suppress(Exception):
+            publish(slug, detail)
+    else:
+        _rewrite_card_file(bm_path, slug, detail)
     return True
 
 
-def _sessions_root(ctx: fir_ext.Context) -> str:
-    """Resolve the sessions root from the current session-file path.
-
-    Layout: ``<config>/sessions/<slug>/<ts>_<sid>.jsonl``; the sessions
-    root is two levels up. Returns "" when there is no session file.
-    """
-    sf = ctx.get_session_file()
-    if not sf:
-        return ""
-    return os.path.dirname(os.path.dirname(sf))
-
-
-def _run_migration_once(ctx: fir_ext.Context) -> None:
+def _run_migration_once(session_file: str) -> None:
     """One-time idempotent repair of the v1 bookmarks backlog on this host.
 
+    Takes the current session's transcript path (so it can run off the
+    hot path in a background thread without touching the bridge ``ctx``).
     Sweeps every ``bookmarks-*.jsonl`` and repairs the v1 self-matched
     entries, guarded by a version marker under the config dir so the full
     pass runs once per host per migration version. No exclusive sweep
@@ -685,8 +702,10 @@ def _run_migration_once(ctx: fir_ext.Context) -> None:
     ``on_session_start``), which covers stragglers upgraded after the
     marker is set. Best-effort throughout.
     """
-    root = _sessions_root(ctx)
-    if not root or os.path.basename(root) != "sessions" or not os.path.isdir(root):
+    if not session_file:
+        return
+    root = os.path.dirname(os.path.dirname(session_file))
+    if os.path.basename(root) != "sessions" or not os.path.isdir(root):
         return
     config_dir = os.path.dirname(root)
     marker = os.path.join(config_dir, _MIGRATION_MARKER)
@@ -869,30 +888,53 @@ def cmd_handoff(args: list[str], ctx: fir_ext.Context) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _sweep_worker(session_file: str) -> None:
+    """Background-thread entry point for the global backlog sweep."""
+    with contextlib.suppress(Exception):
+        _run_migration_once(session_file)
+
+
 @fir_ext.on("session_start")
 def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
     """Repair bookmarks on session start (incl. /reexec — same session id).
 
     Two best-effort steps, neither of which may raise into session start:
 
-    1. Self-heal THIS session's own bookmarks file. ``/reexec`` continues
-       the same session (same id + transcript) and re-emits
-       ``session_start``, so a session upgraded to the fixed code repairs
-       its own pre-fix entries here — even after the one-time global
-       marker is set — and does so *before* it issues any ``bookmark()``,
-       which keeps its file clean for the rest of its life.
+    1. Self-heal THIS session's own bookmarks file (inline — one file).
+       ``/reexec`` continues the same session (same id + transcript) and
+       re-emits ``session_start``, so a session upgraded to the fixed
+       code repairs its own pre-fix entries here — even after the
+       one-time global marker is set — and does so *before* it issues any
+       ``bookmark()``, keeping its file clean for the rest of its life.
+       The card is republished via ``ctx.put_observable`` so fir core
+       owns the ``.cards`` write (no race against the observable store).
     2. Run the one-time global backlog sweep (marker-gated) for files
-       owned by sessions that will never reopen.
+       owned by sessions that will never reopen — off the hot path in a
+       daemon thread so a large backlog never delays session start. The
+       thread takes only the captured session-file path, not ``ctx``, so
+       it never touches the bridge from a background thread.
 
     See ``_run_migration_once`` and the migration block above.
     """
     del params
+    session_file = ""
+    with contextlib.suppress(Exception):
+        session_file = ctx.get_session_file()
     with contextlib.suppress(Exception):
         bm = _bookmarks_path(ctx)
         if bm and os.path.exists(bm):
-            _repair_bookmarks_file(bm)
-    with contextlib.suppress(Exception):
-        _run_migration_once(ctx)
+            _repair_bookmarks_file(
+                bm,
+                publish=lambda slug, detail: ctx.put_observable(
+                    _CARD_KEY, slug, detail),
+            )
+    if session_file:
+        threading.Thread(
+            target=_sweep_worker,
+            args=(session_file,),
+            name="handoff-bookmarks-migration",
+            daemon=True,
+        ).start()
 
 
 fir_ext.run(name="handoff")

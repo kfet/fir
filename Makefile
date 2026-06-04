@@ -237,8 +237,10 @@ deploy: build-all
 		*) echo "Unsupported platform: $$OS $$ARCH"; exit 1 ;; \
 	esac; \
 	echo "Deploying to $(HOST) ($$OS/$$ARCH → $$BIN)..."; \
-	scp -q $$BIN $(HOST):~/.local/bin/fir && \
-	ssh $(HOST) "chmod +x ~/.local/bin/fir && ~/.local/bin/fir --version"
+	scp -q $$BIN $(HOST):~/.local/bin/fir.new && \
+	ssh $(HOST) "chmod +x ~/.local/bin/fir.new && \
+		([ -f ~/.local/bin/fir ] && cp -f ~/.local/bin/fir ~/.local/bin/fir.prev || true) && \
+		mv -f ~/.local/bin/fir.new ~/.local/bin/fir && ~/.local/bin/fir --version"
 
 # ---------------------------------------------------------------------------
 # Python SDK & extensions

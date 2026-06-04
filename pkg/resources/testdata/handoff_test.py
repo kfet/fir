@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -558,6 +559,10 @@ class TestBookmarkMigration(unittest.TestCase):
                 {"source": "handoff", "key": "bookmarks", "slug": "1 pinned",
                  "detail": f"1 bookmark ({self.bookmarks}):\n- 07:34  the fix"},
             ], f)
+        # Simulate an INACTIVE session: backdate the .cards mtime so the
+        # direct-rewrite path's live-writer guard lets the sweep proceed.
+        old = time.time() - 3600
+        os.utime(self.cards, (old, old))
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -600,8 +605,7 @@ class TestBookmarkMigration(unittest.TestCase):
         self.assertEqual(rows[0]["_bookmark_note"], "the fix")
 
     def test_run_migration_once_repairs_and_marks_done(self) -> None:
-        ctx = self._stub_ctx()
-        self.handoff._run_migration_once(ctx)
+        self.handoff._run_migration_once(self.transcript)
         rows = _read_jsonl(self.bookmarks)
         self.assertEqual(rows[0]["id"], "e-real")
         marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
@@ -611,14 +615,14 @@ class TestBookmarkMigration(unittest.TestCase):
         marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
         with open(marker, "w") as f:
             f.write(str(self.handoff._MIGRATION_VERSION))
-        self.handoff._run_migration_once(self._stub_ctx())
+        self.handoff._run_migration_once(self.transcript)
         # Marker present at current version → no repair performed.
         rows = _read_jsonl(self.bookmarks)
         self.assertEqual(rows[0]["id"], "e-bmcall")
 
     def test_run_migration_once_leaves_no_sweep_lock(self) -> None:
         # The old O_EXCL ".lock" elector is gone — nothing to leak/wedge.
-        self.handoff._run_migration_once(self._stub_ctx())
+        self.handoff._run_migration_once(self.transcript)
         marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
         self.assertFalse(os.path.exists(marker + ".lock"))
 
@@ -645,10 +649,17 @@ class TestBookmarkMigration(unittest.TestCase):
         marker = os.path.join(self.config, self.handoff._MIGRATION_MARKER)
         with open(marker, "w") as f:
             f.write(str(self.handoff._MIGRATION_VERSION))
-        self.handoff.on_session_start({}, self._stub_ctx())
+        ctx = self._stub_ctx()
+        self.handoff.on_session_start({}, ctx)
         rows = _read_jsonl(self.bookmarks)
         self.assertEqual(rows[0]["id"], "e-real")
         self.assertEqual(rows[0]["_bookmark_note"], "the fix")
+        # The current session republishes its card via put_observable
+        # (fir core owns the .cards write) — it does NOT directly rewrite
+        # the .cards file for its own live session.
+        writes = [w for w in ctx.observable_writes if w[0] == "bookmarks"]
+        self.assertTrue(writes, "self-heal must publish via ctx.put_observable")
+        self.assertIn("07:33", writes[-1][2])
 
 
 if __name__ == "__main__":
