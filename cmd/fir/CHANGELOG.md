@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `acp-shepherd` skill in `.fir/skills/acp-shepherd/`: replaces the PTY-scraping `tmux-driver`+`shepherd` combo for **agent** orchestration by driving a fleet of `fir --mode acp` (or any ACP-speaking) subprocesses over JSON-RPC. Ships five Python tools — `acp_client.py` (async ACP client with `initialize`/`session/new`/`session/prompt`/`session/cancel`, auto-approves `session/request_permission`), `fleetd.py` (per-fleet daemon holding N agents alive behind a Unix control socket, appending every `session/update` to per-agent JSONL), `fleet.py` (CLI: `init|spawn|prompt|cancel|kill|status|tail|capture|log-path|shutdown`, `--provider`/`--model`/`--cwd`/`--cmd`/`--mcp-config`/`--env`, accepts both ACP-wire and Claude-Desktop MCP config shapes), `fleet_loop.py` (structured replacement for `tm-loop-tick`: prints a dashboard, flags dead/idle/no-tool-progress agents, optionally runs tests and writes `FLEET.md`), and `fleet_bridge.py` (ANSI renderer for tmux panes — `python3 fleet_bridge.py NAME` as a pane command gives you scrollback/copy-mode/detach/SSH-viewable observability without reimplementing a tmux server). `tmux-driver` stays for non-agent interactive CLIs (gdb, repls, servers); `acp-shepherd` becomes the default for fleets, skill+MCP A/B experiments, and mixed-provider coordination (cheap workers + expensive reviewer).
+
 ## [0.56.0] - 2026-06-03
 
 ### Added
