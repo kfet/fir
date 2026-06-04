@@ -36,12 +36,12 @@ function wrapContext(firCtx) {
     // ctx.ui.* — pi-mono UI namespace
     ui: {
       notify(message, level) {
-        return _ctx.notify(message, level || "info");
+        return firCtx.notify(message, level || "info");
       },
       setStatus(id, text) {
         // fir setStatus takes just text, no id — use "id: text" format
         const display = text ? `${id}: ${text}` : "";
-        return _ctx.setStatus(display);
+        return firCtx.setStatus(display);
       },
       setWidget(_id, _lines) {
         // Not supported in fir — silent no-op
@@ -64,7 +64,7 @@ function wrapContext(firCtx) {
         return Promise.resolve();
       },
       setTitle(title) {
-        return _ctx.setSessionName(title);
+        return firCtx.setSessionName(title);
       },
       setEditorText() { return Promise.resolve(); },
       getEditorText() { return Promise.resolve(""); },
@@ -238,7 +238,7 @@ function createExtensionAPI() {
 
     // ── Messages ─────────────────────────────────────────────────────
     sendMessage(message, opts) {
-      
+
       const deliverAs = (opts && opts.deliverAs) || "steer";
       const triggerTurn = (opts && opts.triggerTurn) || false;
       return _ctx.sendMessage(
@@ -249,7 +249,7 @@ function createExtensionAPI() {
     },
 
     sendUserMessage(content, opts) {
-      
+
       const deliverAs = (opts && opts.deliverAs) || undefined;
       return _ctx.sendUserMessage(
         typeof content === "string" ? content : JSON.stringify(content),
@@ -260,25 +260,25 @@ function createExtensionAPI() {
     // ── State persistence ────────────────────────────────────────────
     appendEntry(customType, data) {
       // Map to fir session data (best effort — fir uses key/value, not entries)
-      
+
       const key = `pi_entry_${customType}_${Date.now()}`;
       return _ctx.setSessionData(key, JSON.stringify(data));
     },
 
     // ── Session name ─────────────────────────────────────────────────
     setSessionName(name) {
-      
+
       return _ctx.setSessionName(name);
     },
 
     getSessionName() {
-      
+
       return _ctx.getSessionName();
     },
 
     // ── Labels ───────────────────────────────────────────────────────
     setLabel(entryId, label) {
-      
+
       if (label) {
         return _ctx.setLabel(entryId, label);
       }
@@ -287,23 +287,23 @@ function createExtensionAPI() {
 
     // ── Tools management ─────────────────────────────────────────────
     getActiveTools() {
-      
+
       return _ctx.getActiveTools();
     },
 
     getAllTools() {
-      
+
       return _ctx.listTools();
     },
 
     setActiveTools(names) {
-      
+
       return _ctx.setActiveTools(names);
     },
 
     // ── Model ────────────────────────────────────────────────────────
     async setModel(model) {
-      
+
       if (typeof model === "object" && model.provider && model.id) {
         return _ctx.setModel(model.provider, model.id);
       }
@@ -316,7 +316,7 @@ function createExtensionAPI() {
 
     // ── Exec ─────────────────────────────────────────────────────────
     exec(command, args, opts) {
-      
+
       const timeout = (opts && opts.timeout) || 10000;
       return _ctx.exec(command, args || [], timeout);
     },
@@ -581,4 +581,5 @@ module.exports = {
   wrapContext,
   loadAndRun,
   isToolCallEventType,
+  mapHookResult,
 };

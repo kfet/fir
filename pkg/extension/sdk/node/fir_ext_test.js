@@ -138,7 +138,74 @@ async function main() {
   console.log("ok - fir_ext provider surface + pi_compat mapping");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// --- pi_compat.wrapContext UI mapping (no live streams needed) -------------
+//
+// Regression guard: wrapContext().ui.* once referenced an out-of-scope `_ctx`
+// and threw ReferenceError on the first UI call. Assert each UI method routes
+// to the wrapped fir Context with the right RPC method + params.
+function testWrapContextUi() {
+  const calls = [];
+  const firCtx = new fir.Context();
+  firCtx._call = (method, params) => {
+    calls.push({ method, params });
+    return Promise.resolve({});
+  };
+  const ctx = piCompat.wrapContext(firCtx);
+
+  return Promise.resolve()
+    .then(() => ctx.ui.notify("hi", "warning"))
+    .then(() => ctx.ui.setStatus("ready", "all good"))
+    .then(() => ctx.ui.setTitle("my session"))
+    .then(() => {
+      assert.deepStrictEqual(calls[0], {
+        method: "notify",
+        params: { message: "hi", level: "warning" },
+      });
+      assert.deepStrictEqual(calls[1], {
+        method: "set_status",
+        params: { status: "ready: all good" },
+      });
+      assert.deepStrictEqual(calls[2], {
+        method: "set_session_name",
+        params: { name: "my session" },
+      });
+    });
+}
+
+// --- pi_compat.mapHookResult tool_call gating (security-relevant) ----------
+//
+// A pi-mono extension blocks a tool by returning {block:true}; fir's hook wire
+// expects {allow:false}. Getting this wrong would silently let blocked tools
+// run, so assert both the block and the allow paths explicitly.
+function testMapHookResultToolCall() {
+  assert.deepStrictEqual(
+    piCompat.mapHookResult("tool_call", { block: true, reason: "denied" }),
+    { allow: false, reason: "denied" },
+    "block:true → allow:false with reason"
+  );
+  assert.deepStrictEqual(
+    piCompat.mapHookResult("tool_call", { block: true }),
+    { allow: false, reason: "Blocked by extension" },
+    "block:true without reason → default reason"
+  );
+  assert.deepStrictEqual(
+    piCompat.mapHookResult("tool_call", {}),
+    { allow: true },
+    "no block → allow:true"
+  );
+  // A falsy/absent result must not accidentally allow or block — fir treats
+  // null as 'no opinion' (proceed). Ensure we return null, not {allow:...}.
+  assert.strictEqual(
+    piCompat.mapHookResult("tool_call", undefined),
+    null,
+    "undefined result → null (no opinion)"
+  );
+}
+
+main()
+  .then(testWrapContextUi)
+  .then(testMapHookResultToolCall)
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

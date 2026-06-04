@@ -61,21 +61,30 @@ def _has_shebang(path: str) -> bool:
 
 
 def _find_js_ts_entries(pkg_dir: str) -> list[str]:
-    """Find JS/TS extension entry points (no shebang) in known locations."""
-    # Only look for conventional entry point filenames
-    entry_names = {"index.ts", "index.js", "main.ts", "main.js"}
+    """Find JS/TS extension entry points (no shebang) in known locations.
+
+    Only conventional entry-point filenames (index/main/<dir>.ts|js) qualify, so
+    we never create a runtime wrapper in a directory that merely contains helper
+    modules. Walks at most one level into ``extensions``/``ext`` subdirs.
+    """
+    entry_basenames = ("index", "main")
     entries = []
     for root, dirs, files in os.walk(pkg_dir):
         for skip in (".git", "node_modules", "vendor", "__pycache__", "test", "tests", "dist", "build"):
             if skip in dirs:
                 dirs.remove(skip)
+        dirname = os.path.basename(root)
         for f in files:
-            if f in entry_names or (f.endswith((".ts", ".js")) and not f.endswith(".d.ts")):
-                full = os.path.join(root, f)
-                if not _has_shebang(full):
-                    entries.append(full)
-        # Only check one level deep per directory (don't recurse into src/ etc.)
-        # unless it contains an extensions/ subdir
+            stem, ext = os.path.splitext(f)
+            if ext not in (".ts", ".js") or f.endswith(".d.ts"):
+                continue
+            # Conventional entry points only: index.*, main.*, or <dirname>.*
+            if stem not in entry_basenames and stem != dirname:
+                continue
+            full = os.path.join(root, f)
+            if not _has_shebang(full):
+                entries.append(full)
+        # Only descend into extension subdirectories (don't recurse into src/).
         dirs[:] = [d for d in dirs if d in ("extensions", "ext")]
     return entries
 
