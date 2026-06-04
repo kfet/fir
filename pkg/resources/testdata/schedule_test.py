@@ -7,7 +7,6 @@ import os
 import signal
 import sys
 import threading
-import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -128,19 +127,9 @@ class TestParseTarget(unittest.TestCase):
             schedule, "_now", return_value=self._fixed,
         )
         self._patch.start()
-        self._orig_tz = os.environ.get("TZ")
-        os.environ["TZ"] = "UTC"
-        if hasattr(time, "tzset"):
-            time.tzset()
 
     def tearDown(self):
         self._patch.stop()
-        if self._orig_tz is None:
-            os.environ.pop("TZ", None)
-        else:
-            os.environ["TZ"] = self._orig_tz
-        if hasattr(time, "tzset"):
-            time.tzset()
 
     def test_minutes(self):
         t = schedule._parse_target("45m")
@@ -520,112 +509,6 @@ class TestIntegration(unittest.TestCase):
             threading.Event().wait(0.15)
             ctx.continue_session.assert_not_called()
             ctx.send_user_message.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Auto-resume on provider_error
-# ---------------------------------------------------------------------------
-
-
-def _reset_ar():
-    """Reset auto-resume module state between tests."""
-    schedule._reset_autoresume(None)
-    with schedule._ar_lock:
-        schedule._ar_consecutive = 0
-        schedule._ar_first_failure = None
-        schedule._ar_entry_id = None
-
-
-class TestAutoResume(unittest.TestCase):
-    def setUp(self):
-        _reset()
-        _reset_ar()
-
-    def tearDown(self):
-        _reset()
-        _reset_ar()
-
-    def test_terminal_error_no_resume(self):
-        ctx = _ctx()
-        schedule.on_provider_error(
-            {"kind": "terminal", "retryable": False, "error_text": "401 auth"},
-            ctx,
-        )
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 0)
-            self.assertIsNone(schedule._ar_entry_id)
-        # A notice is surfaced but no schedule is created.
-        with schedule._lock:
-            self.assertEqual(len(schedule._schedules), 0)
-
-    def test_retryable_schedules_resume(self):
-        ctx = _ctx()
-        schedule.on_provider_error(
-            {"kind": "overloaded", "retryable": True, "error_text": "Overloaded"},
-            ctx,
-        )
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 1)
-            self.assertIsNotNone(schedule._ar_entry_id)
-            sid = schedule._ar_entry_id
-        assert sid is not None
-        with schedule._lock:
-            entry = schedule._schedules[sid]
-        self.assertTrue(entry.auto)
-        # First backoff is 30s.
-        remaining = (entry.target - schedule._now()).total_seconds()
-        self.assertTrue(25 <= remaining <= 31, remaining)
-
-    def test_backoff_schedule(self):
-        self.assertEqual(schedule._ar_backoff_seconds(1, 0), 30.0)
-        self.assertEqual(schedule._ar_backoff_seconds(2, 0), 60.0)
-        self.assertEqual(schedule._ar_backoff_seconds(3, 0), 105.0)
-        self.assertEqual(schedule._ar_backoff_seconds(4, 0), 120.0)
-        # Holds steady after ramp.
-        self.assertEqual(schedule._ar_backoff_seconds(9, 0), 120.0)
-        # retry_after honoured.
-        self.assertEqual(schedule._ar_backoff_seconds(1, 45000), 45.0)
-
-    def test_reset_on_successful_turn(self):
-        ctx = _ctx()
-        schedule.on_provider_error(
-            {"kind": "overloaded", "retryable": True, "error_text": "x"}, ctx,
-        )
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 1)
-        schedule.on_message_end(
-            {"role": "assistant", "stop_reason": "stop"}, ctx,
-        )
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 0)
-            self.assertIsNone(schedule._ar_entry_id)
-
-    def test_error_message_end_does_not_reset(self):
-        ctx = _ctx()
-        schedule.on_provider_error(
-            {"kind": "overloaded", "retryable": True, "error_text": "x"}, ctx,
-        )
-        schedule.on_message_end(
-            {"role": "assistant", "stop_reason": "error"}, ctx,
-        )
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 1)
-
-    def test_give_up_after_window(self):
-        ctx = _ctx()
-        # Seed a first-failure timestamp well past the give-up window.
-        with schedule._ar_lock:
-            schedule._ar_first_failure = schedule._now() - timedelta(minutes=25)
-            schedule._ar_consecutive = 5
-        schedule.on_provider_error(
-            {"kind": "overloaded", "retryable": True, "error_text": "x"}, ctx,
-        )
-        # State reset, no pending resume scheduled.
-        with schedule._ar_lock:
-            self.assertEqual(schedule._ar_consecutive, 0)
-            self.assertIsNone(schedule._ar_entry_id)
-        with schedule._lock:
-            self.assertEqual(len(schedule._schedules), 0)
 
 
 if __name__ == "__main__":

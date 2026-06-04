@@ -22,6 +22,8 @@
 
 ### Fixed
 
+- Reverted the auto-resume in the `schedule` extension, since it kept braking and killing the rate limits
+
 - Fixed a timezone subtraction race/bug in the `schedule` extension's auto-resume countdown loop that caused it to fire immediately (within 20ms of scheduling) instead of waiting for the backoff window to cool down.
 
 - Aside response cards can now be cleared (collapsed to a single muted
