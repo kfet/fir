@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-06-05
+
 ### Added
 
 - New `wait` agent tool in the builtin `pipe` extension. Runs a probe tool-chain server-side on a fixed interval and returns to the model exactly once when it settles, replacing token-wasting in-context busy-poll loops (`watch` / `while-sleep`). Same step shape and `{{prev}}`/`{{step:N}}`/`{{step:N.field}}` substitution as `pipe`; the last step is the verdict step whose final stdout line must be `WAIT:done`, `WAIT:continue`, or `WAIT:fail <msg>`. Bounded by `interval` (default 5s), `timeout` (default 300s) and a mandatory `max_polls` circuit-breaker (default 60). Each probe step sees `WAIT_POLL` and `WAIT_STATE` (a stable per-wait scratch file) exported into Bash `command` params. Missing sentinel is a hard error; 3 consecutive verdict-step errors abort.
