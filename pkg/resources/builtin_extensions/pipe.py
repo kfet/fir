@@ -18,8 +18,13 @@ markdown block, one section per step.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import shlex
+import tempfile
+import time
 from typing import TYPE_CHECKING, Any
 
 import fir_ext
@@ -154,16 +159,22 @@ def _error(msg: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
+def _validate_steps(steps: list[dict], ctx: fir_ext.Context, prefix: str = "pipe") -> str | None:
+    """Validate a steps array and normalise tool names in-place.
+
+    Shared by ``pipe`` and ``wait``. Returns an error message string (using
+    *prefix* in user-facing text) on failure, or ``None`` if the steps are
+    valid. Tool names are normalised case-insensitively against the live
+    registry as a side effect."""
     if not isinstance(steps, list) or not steps:
-        return _error("pipe: steps must be a non-empty array")
+        return f"{prefix}: steps must be a non-empty array"
 
     # Shape validation up front so a bad spec fails fast.
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
-            return _error(f"pipe: steps[{i}] must be an object")
+            return f"{prefix}: steps[{i}] must be an object"
         if not step.get("tool"):
-            return _error(f"pipe: steps[{i}] missing 'tool'")
+            return f"{prefix}: steps[{i}] missing 'tool'"
 
     # Resolve and validate tool names + required params against the live
     # registry before firing any call. Mirrors aside.py's approach.
@@ -201,7 +212,14 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
             )
 
     if errors:
-        return _error("pipe validation failed:\n" + "\n".join(errors))
+        return f"{prefix} validation failed:\n" + "\n".join(errors)
+    return None
+
+
+def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
+    err = _validate_steps(steps, ctx, "pipe")
+    if err:
+        return _error(err)
 
     prior_text: list[str] = []
     results: list[dict] = []
@@ -278,6 +296,243 @@ def _format_results_markdown(results: list[dict]) -> str:
             )
         parts.append("")
     return "\n".join(parts).rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
+# wait — server-side poll loop
+# ---------------------------------------------------------------------------
+
+# The verdict step's final non-empty line must match this exactly.
+_WAIT_RE = re.compile(r"^WAIT:(done|continue|fail)( .*)?$")
+
+# Sleep is sliced into chunks this small so a cancelled/timed-out tool call
+# aborts promptly rather than blocking for the whole interval.
+_WAIT_SLEEP_SLICE = 0.25
+
+
+def _now() -> float:
+    """Monotonic clock seam — overridable in tests."""
+    return time.monotonic()
+
+
+def _sleep_sliced(seconds: float, heartbeat: Any = None, heartbeat_every: float = 10.0) -> None:
+    """Sleep *seconds* in small slices so cancellation aborts promptly.
+
+    If *heartbeat* is callable, it is invoked roughly every *heartbeat_every*
+    seconds during the sleep. This keeps the extension's bridge connection
+    marked active (the Go side resets its activity-aware tool-call deadline on
+    any message), so a large ``interval`` does not look like a hung tool."""
+    remaining = seconds
+    since_beat = 0.0
+    while remaining > 0:
+        chunk = _WAIT_SLEEP_SLICE if remaining > _WAIT_SLEEP_SLICE else remaining
+        time.sleep(chunk)
+        remaining -= chunk
+        since_beat += chunk
+        if heartbeat is not None and since_beat >= heartbeat_every and remaining > 0:
+            since_beat = 0.0
+            heartbeat()
+
+
+def _coerce_num(params: Mapping[str, Any], key: str, default: float, minimum: float) -> float:
+    """Coerce a numeric param, falling back to *default* on bad input and
+    clamping up to *minimum*."""
+    try:
+        v = float(params.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return v if v >= minimum else minimum
+
+
+def _inject_env(params: Any, poll: int, state_path: str) -> Any:
+    """Expose WAIT_POLL / WAIT_STATE to a probe step.
+
+    The Bash tool has no ``env`` parameter, so we prepend ``export`` lines to
+    any string ``command`` param. Steps without a command are passed through
+    unchanged."""
+    if isinstance(params, dict) and isinstance(params.get("command"), str):
+        prefix = (
+            f"export WAIT_POLL={poll}\n"
+            f"export WAIT_STATE={shlex.quote(state_path)}\n"
+        )
+        new = dict(params)
+        new["command"] = prefix + params["command"]
+        return new
+    return params
+
+
+def _run_probe(
+    steps: list[dict], label: str, poll: int, state_path: str, ctx: fir_ext.Context
+) -> tuple[bool, str, bool]:
+    """Run the probe chain once (reusing pipe's execution path).
+
+    Returns ``(reached_verdict, verdict_text, verdict_is_error)`` where the
+    verdict is the LAST step. ``reached_verdict`` is False if an earlier step
+    errored and aborted the chain before the verdict step could run — in that
+    case *verdict_text* holds the aborting step's output for diagnosis."""
+    prior_text: list[str] = []
+    last_index = len(steps) - 1
+    last_text = ""
+
+    for i, step in enumerate(steps):
+        name = step["tool"]
+        raw_params = step.get("params") or {}
+        params = _substitute(raw_params, prior_text)
+        params = _inject_env(params, poll, state_path)
+        cont = bool(step.get("continue_on_error", False))
+
+        progress = f"wait poll {poll}: step {i + 1}/{len(steps)} {name}"
+        if label:
+            progress = f"{label}: {progress}"
+        ctx.report_progress(progress)
+
+        try:
+            result = ctx.call_tool(name, params)
+        except Exception as exc:
+            text = _truncate(f"error calling tool: {exc}")
+            prior_text.append(text)
+            last_text = text
+            if cont:
+                continue
+            # Aborted before reaching the verdict step.
+            if i == last_index:
+                return True, text, True
+            return False, text, True
+
+        is_error = bool(result.get("is_error", False))
+        text = _truncate(_result_text(result))
+        prior_text.append(text)
+        last_text = text
+        if is_error and not cont:
+            if i == last_index:
+                return True, text, True
+            return False, text, True
+
+    # Reached the end — last step is the verdict.
+    return True, last_text, False
+
+
+def _parse_verdict(text: str) -> tuple[str | None, str]:
+    """Parse the final non-empty line of *text* for a WAIT: sentinel.
+
+    Returns ``(kind, message)`` where kind is one of done/continue/fail, or
+    ``(None, "")`` if no matching sentinel line is present."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None, ""
+    m = _WAIT_RE.match(lines[-1])
+    if not m:
+        return None, ""
+    return m.group(1), (m.group(2) or "").strip()
+
+
+def _strip_sentinel(text: str) -> str:
+    """Remove the bare WAIT: sentinel line (protocol noise) from probe output
+    while keeping the pre-sentinel debug lines. Only the final non-empty line
+    is removed, and only if it matches the sentinel regex."""
+    lines = text.splitlines()
+    # Find the last non-empty line index.
+    for idx in range(len(lines) - 1, -1, -1):
+        if lines[idx].strip():
+            if _WAIT_RE.match(lines[idx]):
+                del lines[idx]
+            break
+    return "\n".join(lines)
+
+
+def _wait_terminal(
+    outcome: str, polls: int, elapsed: float, message: str, diag: str
+) -> dict:
+    """Build the single terminal payload returned to the model."""
+    is_error = outcome in ("error", "timeout")
+    body = [
+        f"wait: {outcome}",
+        f"polls: {polls}",
+        f"elapsed: {elapsed:.1f}s",
+        f"message: {message}",
+    ]
+    cleaned = _strip_sentinel(diag).rstrip()
+    text = "\n".join(body)
+    if cleaned:
+        text += "\n\n## Last probe output\n" + cleaned
+    return {"content": [{"type": "text", "text": text}], "is_error": is_error}
+
+
+def _run_wait(
+    steps: list[dict],
+    interval: float,
+    timeout: float,
+    max_polls: int,
+    label: str,
+    ctx: fir_ext.Context,
+) -> dict:
+    err = _validate_steps(steps, ctx, "wait")
+    if err:
+        return _error(err)
+
+    # A stable per-wait scratch file the probe can read/write across polls
+    # (via $WAIT_STATE). Created once, cleaned up at the end.
+    fd, state_path = tempfile.mkstemp(prefix="wait-state-")
+    os.close(fd)
+
+    start = _now()
+    polls = 0
+    strikes = 0
+    last_verdict = "?"
+    try:
+        while True:
+            polls += 1
+            reached, vtext, vis_error = _run_probe(steps, label, polls, state_path, ctx)
+            elapsed = _now() - start
+
+            if not reached or vis_error:
+                # Verdict step (or the step that aborted before it) errored.
+                strikes += 1
+                last_verdict = "error"
+                if strikes >= 3:
+                    return _wait_terminal(
+                        "error", polls, elapsed,
+                        "wait: verdict step failed 3 polls in a row", vtext,
+                    )
+                # Treat as continue and fall through to the cap check / sleep.
+            else:
+                verdict, message = _parse_verdict(vtext)
+                if verdict is None:
+                    return _wait_terminal(
+                        "error", polls, elapsed,
+                        "wait: verdict step emitted no WAIT: sentinel", vtext,
+                    )
+                strikes = 0
+                last_verdict = verdict
+                if verdict == "done":
+                    return _wait_terminal(
+                        "success", polls, elapsed, message or "verdict: done", vtext,
+                    )
+                if verdict == "fail":
+                    return _wait_terminal(
+                        "error", polls, elapsed,
+                        "wait: " + (message or "verdict reported fail"), vtext,
+                    )
+                # verdict == "continue": fall through.
+
+            if elapsed >= timeout or polls >= max_polls:
+                return _wait_terminal(
+                    "timeout", polls, elapsed,
+                    f"wait: cap reached (polls={polls}, elapsed={elapsed:.1f}s)", vtext,
+                )
+
+            ctx.report_progress(
+                f"wait: poll {polls}/{max_polls}, {int(elapsed)}s, last={last_verdict}"
+            )
+            _sleep_sliced(
+                interval,
+                heartbeat=lambda p=polls, lv=last_verdict: ctx.report_progress(
+                    f"wait: waiting (poll {p}/{max_polls}, last={lv})"
+                ),
+            )
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(state_path)
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +616,112 @@ def pipe(params: dict, ctx: fir_ext.Context):
     steps = params.get("steps") or []
     label = params.get("label", "") or ""
     return _run_pipe(steps, label, ctx)
+
+
+_WAIT_DESCRIPTION = (
+    "Wait server-side until a probe condition is met — poll a tool chain on a "
+    "fixed interval and return to the model exactly ONCE when it settles. "
+    "Moves a watch / while-sleep poll loop off the model's context so growing "
+    "probe output never replays each iteration.\n\n"
+    "`steps` is the same shape as pipe (tool + params + optional "
+    "continue_on_error) with the SAME {{prev}} / {{step:N}} / {{step:N.field}} "
+    "substitution. The chain is re-run each poll cycle; the LAST step is the "
+    "verdict step. Print debug lines as you like, then make the FINAL "
+    "non-empty line of the verdict step's stdout one of:\n"
+    "  WAIT:done          — condition met, returns outcome=success.\n"
+    "  WAIT:fail <msg>     — give up now, returns outcome=error with <msg>.\n"
+    "  WAIT:continue       — not ready, keep polling.\n"
+    "Any other final line is a hard error (no defaulting to continue). If the "
+    "verdict step itself errors (nonzero exit / timeout) it counts as continue "
+    "but 3 consecutive errors abort with outcome=error.\n\n"
+    "Every probe step sees two env vars (exported into Bash `command` params): "
+    "WAIT_POLL (current poll index) and WAIT_STATE (a stable per-wait scratch "
+    "file path, reused across polls) so you can self-implement settle/delta "
+    "logic. `interval` (default 5s, no backoff), `timeout` (overall cap, "
+    "default 300s) and `max_polls` (mandatory circuit-breaker, default 60) "
+    "bound the loop; hitting either cap returns outcome=timeout. The terminal "
+    "payload reports outcome/polls/elapsed/message plus the last probe output "
+    "(the bare WAIT: line is stripped). Returns once — progress is UI-only.\n\n"
+    "[SYS_EXT] Reach for wait (not pipe) when you must BLOCK until something "
+    "becomes true — a build finishes, a file appears, a service comes up, a "
+    "log line is emitted. Use pipe for a one-shot chain you run immediately. "
+    "Never busy-poll in-context with watch or while-sleep loops; use wait so "
+    "the loop runs server-side and you pay for the result only once."
+)
+
+_WAIT_PARAMETERS: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "label": {
+            "type": "string",
+            "description": "Optional short label shown in UI progress.",
+        },
+        "steps": {
+            "type": "array",
+            "minItems": 1,
+            "description": (
+                "Probe chain re-run each poll. Same shape and substitution as "
+                "pipe. The last step is the verdict step: its final non-empty "
+                "stdout line must be WAIT:done, WAIT:continue, or WAIT:fail."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "description": "Name of the tool to call.",
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": (
+                            "Parameters for the tool. String values may "
+                            "contain {{prev}}, {{step:N}}, or "
+                            "{{step:N.field}} substitution tokens."
+                        ),
+                    },
+                    "continue_on_error": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, continue the probe chain when this step "
+                            "errors instead of aborting the poll."
+                        ),
+                    },
+                },
+                "required": ["tool"],
+            },
+        },
+        "interval": {
+            "type": "number",
+            "description": "Fixed seconds between polls (no backoff). Default 5.",
+        },
+        "timeout": {
+            "type": "number",
+            "description": "Overall wall-clock cap in seconds. Default 300.",
+        },
+        "max_polls": {
+            "type": "integer",
+            "description": "Mandatory circuit-breaker: max poll cycles. Default 60.",
+        },
+    },
+    "required": ["steps"],
+}
+
+
+@fir_ext.tool(
+    name="wait",
+    description=_WAIT_DESCRIPTION,
+    parameters=_WAIT_PARAMETERS,
+    display_hint={
+        "title_args": [{"name": "label", "style": "accent"}],
+    },
+)
+def wait(params: dict, ctx: fir_ext.Context):
+    steps = params.get("steps") or []
+    label = params.get("label", "") or ""
+    interval = _coerce_num(params, "interval", 5.0, 0.0)
+    timeout = _coerce_num(params, "timeout", 300.0, 0.0)
+    max_polls = int(_coerce_num(params, "max_polls", 60.0, 1.0))
+    return _run_wait(steps, interval, timeout, max_polls, label, ctx)
 
 
 fir_ext.run(name="pipe")

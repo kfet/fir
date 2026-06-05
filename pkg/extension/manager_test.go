@@ -26,7 +26,7 @@ import (
 //	aside:          1 tool  (aside)
 //	observe:        3 tools (observe_session, send_session, stop_session)
 //	notify:         1 tool  (notify_send) — included via builtin auto-load
-//	pipe:           1 tool  (pipe)
+//	pipe:           2 tools (pipe, wait)
 //	agent-introspect: 1 tool  (agent_introspect)
 //	doctor:         2 tools (doctor_query, doctor_summary)
 //	mood:           2 tools (mood_note, mood_recent)
@@ -35,7 +35,7 @@ import (
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 18
+const builtinToolCount = 19
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.

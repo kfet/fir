@@ -72,6 +72,11 @@ class TestRegistration(unittest.TestCase):
         names = [t["name"] for t in fir_ext._tools]
         self.assertIn("pipe", names)
 
+    def test_registers_wait_tool(self):
+        _load_pipe()
+        names = [t["name"] for t in fir_ext._tools]
+        self.assertIn("wait", names)
+
 
 # ---------------------------------------------------------------------------
 # Substitution
@@ -505,6 +510,273 @@ class TestLeafDetection(unittest.TestCase):
         out = self.mod._run_pipe(steps, "", ctx)
         self.assertTrue(out["is_error"])
         self.assertIn("BOOM", out["content"][0]["text"])
+
+
+# ---------------------------------------------------------------------------
+# wait — server-side poll loop
+# ---------------------------------------------------------------------------
+
+
+def _wait_ctx(self, mod, call_results, available=None):
+    """Build a ctx for wait tests and stub out the clock/sleep so polls are
+    instantaneous and the elapsed time advances 1s per poll deterministically."""
+    ctx = _make_ctx(call_results, available=available)
+    # Fake monotonic clock: advances by 1.0 on every read.
+    clock = {"t": 0.0}
+
+    def now():
+        v = clock["t"]
+        clock["t"] += 1.0
+        return v
+
+    p_now = mock.patch.object(mod, "_now", now)
+    p_sleep = mock.patch.object(mod, "_sleep_sliced", lambda *a, **k: None)
+    p_now.start()
+    p_sleep.start()
+    self.addCleanup(p_now.stop)
+    self.addCleanup(p_sleep.stop)
+    return ctx
+
+
+class TestWaitVerdict(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def _run(self, call_results, *, steps=None, interval=5, timeout=300,
+             max_polls=60, available=None):
+        ctx = _wait_ctx(self, self.mod, call_results, available=available)
+        steps = steps or [{"tool": "Bash", "params": {"command": "probe"}}]
+        out = self.mod._run_wait(steps, interval, timeout, max_polls, "", ctx)
+        return out, ctx
+
+    def test_done_first_poll(self):
+        out, ctx = self._run([_text_result("WAIT:done")])
+        self.assertFalse(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: success", text)
+        self.assertIn("polls: 1", text)
+        self.assertEqual(ctx.call_tool.call_count, 1)
+        # Bare sentinel stripped from visible output.
+        self.assertNotIn("WAIT:done", text)
+
+    def test_continue_then_done(self):
+        out, ctx = self._run([
+            _text_result("checking...\nWAIT:continue"),
+            _text_result("ready\nWAIT:done"),
+        ])
+        self.assertFalse(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: success", text)
+        self.assertIn("polls: 2", text)
+        self.assertEqual(ctx.call_tool.call_count, 2)
+        # Pre-sentinel debug line is kept; sentinel stripped.
+        self.assertIn("ready", text)
+        self.assertNotIn("WAIT:done", text)
+
+    def test_fail_returns_error_with_message(self):
+        out, _ = self._run([_text_result("boom\nWAIT:fail disk full")])
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: error", text)
+        self.assertIn("disk full", text)
+        # Debug line retained, sentinel stripped.
+        self.assertIn("boom", text)
+        self.assertNotIn("WAIT:fail", text)
+
+    def test_fail_without_message_uses_fallback(self):
+        out, _ = self._run([_text_result("WAIT:fail")])
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: error", text)
+        self.assertIn("verdict reported fail", text)
+
+    def test_missing_sentinel_hard_error(self):
+        out, ctx = self._run([_text_result("no verdict here")])
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("no WAIT: sentinel", text)
+        # Hard error after one poll — does not default to continue.
+        self.assertEqual(ctx.call_tool.call_count, 1)
+        # Diagnostic output preserved.
+        self.assertIn("no verdict here", text)
+
+    def test_max_polls_timeout(self):
+        results = [_text_result("WAIT:continue") for _ in range(5)]
+        out, ctx = self._run(results, max_polls=3)
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: timeout", text)
+        self.assertIn("polls: 3", text)
+        self.assertEqual(ctx.call_tool.call_count, 3)
+
+    def test_timeout_wall_clock(self):
+        # Clock advances 1s per read; with timeout=2 the cap is hit quickly.
+        results = [_text_result("WAIT:continue") for _ in range(20)]
+        out, _ = self._run(results, timeout=2, max_polls=60)
+        self.assertTrue(out["is_error"])
+        self.assertIn("wait: timeout", out["content"][0]["text"])
+
+    def test_verdict_error_strike_escalation(self):
+        # Three consecutive verdict-step errors -> outcome=error.
+        out, ctx = self._run([
+            _text_result("err1", is_error=True),
+            _text_result("err2", is_error=True),
+            _text_result("err3", is_error=True),
+        ])
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("failed 3 polls in a row", text)
+        self.assertEqual(ctx.call_tool.call_count, 3)
+
+    def test_verdict_error_strikes_reset_on_success(self):
+        # Two errors, then a successful continue resets strikes, then done.
+        out, ctx = self._run([
+            _text_result("e1", is_error=True),
+            _text_result("e2", is_error=True),
+            _text_result("WAIT:continue"),
+            _text_result("e3", is_error=True),
+            _text_result("WAIT:done"),
+        ])
+        self.assertFalse(out["is_error"])
+        self.assertIn("wait: success", out["content"][0]["text"])
+        self.assertEqual(ctx.call_tool.call_count, 5)
+
+
+class TestWaitSubstitutionAndEnv(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def test_substitution_chaining(self):
+        captured = []
+
+        def probe(name, params):
+            captured.append(params)
+            return _text_result("VALUE")
+
+        def verdict(name, params):
+            captured.append(params)
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe, verdict])
+        steps = [
+            {"tool": "Read", "params": {}},
+            {"tool": "Bash", "params": {"command": "check {{prev}}"}},
+        ]
+        out = self.mod._run_wait(steps, 5, 300, 60, "", ctx)
+        self.assertFalse(out["is_error"])
+        # {{prev}} substituted into the verdict step's command (after the
+        # injected env exports).
+        self.assertIn("check VALUE", captured[1]["command"])
+
+    def test_wait_poll_and_state_exposed(self):
+        captured = []
+
+        def probe(name, params):
+            captured.append(params["command"])
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        steps = [{"tool": "Bash", "params": {"command": "do_probe"}}]
+        out = self.mod._run_wait(steps, 5, 300, 60, "", ctx)
+        self.assertFalse(out["is_error"])
+        cmd = captured[0]
+        self.assertIn("export WAIT_POLL=1", cmd)
+        self.assertIn("export WAIT_STATE=", cmd)
+        self.assertIn("do_probe", cmd)
+
+    def test_wait_poll_increments(self):
+        captured = []
+
+        def probe(name, params):
+            captured.append(params["command"])
+            verdict = "WAIT:done" if len(captured) >= 2 else "WAIT:continue"
+            return _text_result(verdict)
+
+        ctx = _wait_ctx(self, self.mod, [probe, probe])
+        steps = [{"tool": "Bash", "params": {"command": "p"}}]
+        self.mod._run_wait(steps, 5, 300, 60, "", ctx)
+        self.assertIn("export WAIT_POLL=1", captured[0])
+        self.assertIn("export WAIT_POLL=2", captured[1])
+
+    def test_state_file_cleaned_up(self):
+        seen = {}
+
+        def probe(name, params):
+            cmd = params["command"]
+            # Extract the WAIT_STATE path from the export line.
+            for line in cmd.splitlines():
+                if line.startswith("export WAIT_STATE="):
+                    seen["path"] = line.split("=", 1)[1].strip("'")
+            return _text_result("WAIT:done")
+
+        ctx = _wait_ctx(self, self.mod, [probe])
+        steps = [{"tool": "Bash", "params": {"command": "p"}}]
+        self.mod._run_wait(steps, 5, 300, 60, "", ctx)
+        self.assertIn("path", seen)
+        self.assertFalse(os.path.exists(seen["path"]))
+
+
+class TestWaitSleepSlicing(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def test_sleep_sliced_emits_heartbeats(self):
+        beats = []
+        with mock.patch.object(self.mod.time, "sleep", lambda s: None):
+            self.mod._sleep_sliced(
+                30.0, heartbeat=lambda: beats.append(1), heartbeat_every=10.0
+            )
+        # 30s with a beat every 10s, none on the final slice -> 2 beats.
+        self.assertEqual(len(beats), 2)
+
+    def test_sleep_sliced_no_heartbeat_for_short_sleep(self):
+        beats = []
+        with mock.patch.object(self.mod.time, "sleep", lambda s: None):
+            self.mod._sleep_sliced(
+                1.0, heartbeat=lambda: beats.append(1), heartbeat_every=10.0
+            )
+        self.assertEqual(beats, [])
+
+
+class TestWaitValidationAndDescription(unittest.TestCase):
+    def setUp(self):
+        self.mod = _load_pipe()
+
+    def test_empty_steps_rejected(self):
+        ctx = _make_ctx([])
+        out = self.mod._run_wait([], 5, 300, 60, "", ctx)
+        self.assertTrue(out["is_error"])
+        self.assertIn("wait: steps must be a non-empty array", out["content"][0]["text"])
+
+    def test_unknown_tool_rejected(self):
+        ctx = _make_ctx([])
+        out = self.mod._run_wait([{"tool": "Nope"}], 5, 300, 60, "", ctx)
+        self.assertTrue(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait validation failed", text)
+        self.assertIn("Nope", text)
+
+    def test_description_mentions_sys_ext_and_sentinels(self):
+        self.assertIn("[SYS_EXT]", self.mod._WAIT_DESCRIPTION)
+        self.assertIn("WAIT:done", self.mod._WAIT_DESCRIPTION)
+        self.assertIn("WAIT_POLL", self.mod._WAIT_DESCRIPTION)
+        self.assertIn("WAIT_STATE", self.mod._WAIT_DESCRIPTION)
+
+    def test_earlier_step_abort_counts_as_strike(self):
+        # An earlier (non-verdict) step errors and aborts the chain before the
+        # verdict runs — treated as continue + strike, escalating after 3.
+        ctx = _wait_ctx(self, self.mod, [
+            _text_result("e1", is_error=True),
+            _text_result("e2", is_error=True),
+            _text_result("e3", is_error=True),
+        ])
+        steps = [
+            {"tool": "Bash", "params": {"command": "guard"}},
+            {"tool": "Bash", "params": {"command": "verdict"}},
+        ]
+        out = self.mod._run_wait(steps, 5, 300, 60, "", ctx)
+        self.assertTrue(out["is_error"])
+        self.assertIn("failed 3 polls in a row", out["content"][0]["text"])
 
 
 if __name__ == "__main__":
