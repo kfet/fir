@@ -1,0 +1,46 @@
+# TEMPORARY — verification harness for the brew-smoke "Broken pipe" fix.
+# Reproduces the release.yml brew-smoke ubuntu step in isolation so it can be
+# dispatched without cutting a release. Delete once the fix is folded into
+# release.yml.
+name: brew-smoke-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      hardened:
+        description: "Apply HOMEBREW_NO_* hardening env"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: ${{ github.event.inputs.hardened == 'false' && '0' || '1' }}
+      HOMEBREW_NO_ANALYTICS: ${{ github.event.inputs.hardened == 'false' && '0' || '1' }}
+      HOMEBREW_NO_ENV_HINTS: ${{ github.event.inputs.hardened == 'false' && '0' || '1' }}
+      HOMEBREW_NO_INSTALL_FROM_API: ${{ github.event.inputs.hardened == 'false' && '0' || '1' }}
+    steps:
+      - name: Install via Homebrew tap
+        run: |
+          set -euxo pipefail
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          brew --version
+          brew tap kfet/fir
+          brew install kfet/fir/fir
+
+      - name: Exercise the installed binary
+        run: |
+          set -euxo pipefail
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          which fir
+          fir --version
+          fir completion bash > /dev/null
+          fir completion zsh  > /dev/null
