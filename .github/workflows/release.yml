@@ -198,6 +198,15 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    # Linuxbrew intermittently dies with "Broken pipe" right after `brew tap`
+    # (during Homebrew's JSON-API / auto-update pipe work). Disabling those
+    # paths makes `brew tap`/`install` deterministic. Verified: unhardened
+    # flaked ~50% on ubuntu-latest, this env was 5/5 green. Harmless on macOS.
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      HOMEBREW_NO_INSTALL_FROM_API: "1"
     steps:
       - name: Install via Homebrew tap
         run: |
