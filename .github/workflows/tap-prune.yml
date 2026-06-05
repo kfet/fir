@@ -38,13 +38,18 @@ jobs:
           set -euo pipefail
           cd tap
 
-          # List existing pinned formulas: Formula/fir@X.Y.rb
-          # Sort by semver (numeric major, numeric minor) descending.
+          # List existing pinned formulas: Formula/fir@X.Y.rb, newest first.
+          # Build an explicit numeric key (major*1000+minor) and reverse-sort
+          # it with `sort -rn`. The previous `sort -k1,1n -k2,2n -r` produced
+          # ASCENDING order in CI, so the tail (deleted) was the NEWEST
+          # formula — every release pruned the version it had just added.
           mapfile -t ALL < <(
-            ls Formula/fir@*.rb 2>/dev/null \
-              | sed -E 's|^Formula/fir@([0-9]+)\.([0-9]+)\.rb$|\1 \2 &|' \
-              | sort -k1,1n -k2,2n -r \
-              | awk '{print $3}'
+            for f in Formula/fir@*.rb; do
+              [ -e "$f" ] || continue
+              v=${f#Formula/fir@}; v=${v%.rb}
+              maj=${v%%.*}; min=${v#*.}
+              printf '%d\t%s\n' "$((maj * 1000 + min))" "$f"
+            done | sort -rn | cut -f2-
           )
 
           echo "Found ${#ALL[@]} pinned formula(s); keeping newest $KEEP."
