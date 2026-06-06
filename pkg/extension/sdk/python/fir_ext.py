@@ -407,6 +407,13 @@ otherwise noted.
 | context``        | Adds a ``[SYS_EXT]`` block to the     |                           |
 |                  | system prompt (dynamic context).      |                           |
 +------------------+---------------------------------------+---------------------------+
+| ``reload_        | ``{name}``                            | ``{ok: true}``            |
+| extension``      | Reload one extension by name: stop    |                           |
+|                  | it, drop only its tools, re-spawn     |                           |
+|                  | the edited/new version (or unload if  |                           |
+|                  | its file was deleted). Builtins and   |                           |
+|                  | self-reload are refused.              |                           |
++------------------+---------------------------------------+---------------------------+
 
 -------------------------------------------------------------------------------
 COMMENT FRONTMATTER
@@ -2698,6 +2705,27 @@ class Context:
         if prepend_context:
             params["prepend_context"] = prepend_context
         self._call("restart_session", params)
+
+    def reload_extension(self, name: str) -> None:
+        """Reload exactly one extension by name (targeted single reload).
+
+        Stops the named extension's running process (if any), removes only
+        that extension's tools, and re-spawns the edited/new version from
+        disk. If the extension's file was deleted, this unloads it. Other
+        running extensions are left untouched.
+
+        Intended for an agent that has just created or modified an
+        extension mid-session and wants to pick up the change without a
+        full reload. Builtins cannot be reloaded, and an extension cannot
+        reload itself (that would kill the process servicing this call) —
+        both return a JSON-RPC error.
+
+        Parameters
+        ----------
+        name : str
+            The name of the extension to reload.
+        """
+        self._call("reload_extension", {"name": name})
 
     def side_query(
         self,

@@ -78,6 +78,13 @@ type BridgeAPI interface {
 	// Callers therefore must not rely on any state from the *current* turn
 	// surviving.
 	RestartSession(prompt, prependContext string) error
+	// ReloadExtension reloads exactly one extension by name: it stops the
+	// currently running instance (if any), removes only that extension's
+	// tools, and re-spawns the edited/new version from disk. A deleted
+	// file results in a stop-only unload. Builtins and self-reload are
+	// refused. Returns an error when reload is unsupported (no manager
+	// wired) or the target cannot be reloaded.
+	ReloadExtension(name string) error
 }
 
 // ExecResult is the result of a shell command.

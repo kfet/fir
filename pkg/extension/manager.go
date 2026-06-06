@@ -25,7 +25,13 @@ type Manager struct {
 	trust     *TrustStore
 	mu        sync.Mutex
 	bridges   []*managedBridge
+	stopped   bool // set true by Stop; startOne refuses to append after it
 	ConfirmFn ConfirmFunc
+
+	// reloadOneMu serializes ReloadOne calls so two concurrent reloads of
+	// the same extension cannot both miss the running instance and spawn
+	// duplicate bridges.
+	reloadOneMu sync.Mutex
 
 	// AllowedNames is an optional allowlist of extension names. When non-empty,
 	// only extensions whose Name appears in this list are started.
@@ -47,6 +53,7 @@ type Manager struct {
 	startFailures []StartFailure
 
 	// Saved from Start() for Reload().
+	startCtx            context.Context // lifetime ctx for (re)spawned bridges
 	projectDir          string
 	cwd                 string
 	api                 BridgeAPI
@@ -171,10 +178,27 @@ func (m *Manager) SetConfigDirs(dirs []string) {
 // parallel — there is no lazy/deferred startup.
 func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api BridgeAPI) error {
 	m.mu.Lock()
+	m.startCtx = ctx
+	m.stopped = false
 	m.projectDir = projectDir
 	m.cwd = cwd
 	m.api = api
 	m.mu.Unlock()
+
+	// Wire the targeted single-extension reload callback so the
+	// SessionBridge (which fields the inbound reload_extension RPC) can
+	// delegate back into this manager. Mirrors the type-assertion seam
+	// used by Reload to reach UnregisterExtensionTools.
+	if r, ok := api.(interface {
+		SetReloadFn(func(name string) error)
+	}); ok {
+		r.SetReloadFn(func(name string) error {
+			m.mu.Lock()
+			ctx := m.startCtx
+			m.mu.Unlock()
+			return m.ReloadOne(ctx, name)
+		})
+	}
 
 	configs, err := Discover(projectDir)
 	if err != nil {
@@ -403,6 +427,24 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 	// callback even though m.setStatusFn has already been updated.
 	bCtx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
+	// If the manager was stopped between process spawn and here (e.g. the
+	// session is shutting down while a reload respawns), do not register
+	// this bridge — Stop() has already drained m.bridges and would never
+	// tear this one down, orphaning the process. Roll it back instead.
+	if m.stopped {
+		m.mu.Unlock()
+		cancel()
+		bridge.UnregisterAuthProviders()
+		bridge.UnregisterProviders()
+		bridge.UnregisterApis()
+		if len(caps.ToolNameMap) > 0 {
+			providers.UnregisterToolNameAliases(caps.Name)
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = proc.Stop(stopCtx)
+		stopCancel()
+		return nil
+	}
 	if m.notifyFn != nil {
 		bridge.SetNotifyFn(m.notifyFn)
 	}
@@ -440,6 +482,7 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	m.mu.Lock()
 	bridges := m.bridges
 	m.bridges = nil
+	m.stopped = true
 	m.mu.Unlock()
 
 	// Build session_end payload.
@@ -521,6 +564,127 @@ func (m *Manager) Reload(ctx context.Context) error {
 		m.EmitEvent("session_named", SessionNamedPayload{Name: name})
 	}
 	return nil
+}
+
+// reloadGrace is the brief window ReloadOne waits after emitting an
+// extension's session_end before signalling its process, giving the
+// extension's dispatch loop a chance to service the event. Best-effort,
+// mirrors Stop's 250ms grace; a package var so tests can shrink it.
+var reloadGrace = 100 * time.Millisecond
+
+// ReloadOne reloads exactly one extension by name — the targeted counterpart
+// to Reload. An extension that created or edited another extension mid-session
+// can refresh just that one, without tearing down every other running
+// extension.
+//
+// Entirely internal, in order:
+//  1. Re-discover extensions and locate the cfg whose Name == name.
+//  2. Builtins are never reloadable; if the located cfg is builtin, return an
+//     error and touch nothing.
+//  3. If an extension with that name is currently running, emit its
+//     session_end, remove ONLY its tools (other extensions' tools are left
+//     intact), tear down its provider/auth/api registrations, cancel its
+//     context, stop its process, and drop it from m.bridges.
+//  4. If the cfg was found in discovery, startOne it to (re)spawn the
+//     edited/new version. If it was NOT found (the file was deleted), this is
+//     a stop-only unload.
+func (m *Manager) ReloadOne(ctx context.Context, name string) error {
+	// Serialize reloads so two concurrent ReloadOne(name) calls cannot both
+	// miss the running instance and spawn duplicate bridges.
+	m.reloadOneMu.Lock()
+	defer m.reloadOneMu.Unlock()
+
+	m.mu.Lock()
+	projectDir := m.projectDir
+	cwd := m.cwd
+	api := m.api
+	sdkEnv := m.sdkEnv
+	m.mu.Unlock()
+
+	if projectDir == "" || api == nil {
+		return fmt.Errorf("manager was not started; cannot reload extension %q", name)
+	}
+
+	// 1. Re-discover and locate the target cfg.
+	configs, err := Discover(projectDir)
+	if err != nil {
+		return err
+	}
+	var found *ExtProcConfig
+	for i := range configs {
+		if configs[i].Name == name {
+			cfg := configs[i]
+			found = &cfg
+			break
+		}
+	}
+
+	// 2. Builtins are never reloadable.
+	if found != nil && found.Scope == "builtin" {
+		return fmt.Errorf("extension %q is builtin and cannot be reloaded", name)
+	}
+
+	// 3. Stop the running instance (if any) and remove only its tools.
+	m.mu.Lock()
+	var running *managedBridge
+	kept := make([]*managedBridge, 0, len(m.bridges))
+	for _, mb := range m.bridges {
+		if mb.cfg.Name == name {
+			running = mb
+		} else {
+			kept = append(kept, mb)
+		}
+	}
+	m.bridges = kept
+	m.mu.Unlock()
+
+	if running != nil {
+		// Let the extension clean up before we tear it down. The grace
+		// gives its dispatch loop a brief window to service the event
+		// before the process is signalled (best-effort, like Stop).
+		_ = running.bridge.EmitEvent("session_end", SessionEndPayload{Reason: "reload"})
+		_ = running.bridge.EmitEvent("session_shutdown", nil)
+		if reloadGrace > 0 {
+			time.Sleep(reloadGrace)
+		}
+
+		// Remove ONLY this extension's tools from the session's tool set.
+		// The bridge already knows its own tool names from caps.Tools; we
+		// reuse the SessionBridge's ToolSet.Remove path internally without
+		// exposing a caller-visible "unregister by name" API.
+		if running.bridge != nil && running.bridge.caps != nil {
+			var toolNames []string
+			for _, t := range running.bridge.caps.Tools {
+				toolNames = append(toolNames, t.Name)
+			}
+			if len(toolNames) > 0 {
+				if r, ok := api.(interface {
+					removeExtensionTools(names []string)
+				}); ok {
+					r.removeExtensionTools(toolNames)
+				}
+			}
+		}
+
+		// Tear down provider/auth/api registrations (mirrors Stop) and
+		// cancel the bridge context, then stop the process.
+		running.bridge.UnregisterAuthProviders()
+		running.bridge.UnregisterProviders()
+		running.bridge.UnregisterApis()
+		if running.bridge.caps != nil && len(running.bridge.caps.ToolNameMap) > 0 {
+			providers.UnregisterToolNameAliases(running.bridge.caps.Name)
+		}
+		running.cancel()
+		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = running.proc.Stop(stopCtx)
+		cancel()
+	}
+
+	// 4. Respawn the edited/new version, or stop-only if the file was deleted.
+	if found == nil {
+		return nil
+	}
+	return m.startOne(ctx, *found, cwd, sdkEnv, api, projectDir)
 }
 
 // EmitEvent fans out a notification to all bridges.

@@ -334,6 +334,7 @@ class TestDemoInit(DemoTestCase):
             {
                 "word_count", "shell_run",
                 "change_model", "inject_message", "restart_demo",
+                "reload_ext_demo",
                 "batch_example", "show_config_dirs",
             },
         )
@@ -553,6 +554,19 @@ class TestDemoTools(DemoTestCase):
         assert msg is not None
         self.assertEqual(msg["params"]["prompt"], "continue")
         self.assertEqual(msg["params"]["prepend_context"], "briefing-body")
+        fake.stop()
+
+    # -- reload_ext_demo -----------------------------------------------------
+
+    def test_reload_ext_demo_calls_reload_extension(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "reload_ext_demo", {"name": "my-helper"})
+        msg = fake.wait_for_method("reload_extension")
+        self.assertIsNotNone(msg, "expected reload_extension call")
+        assert msg is not None
+        self.assertEqual(msg["params"]["name"], "my-helper")
         fake.stop()
 
     # -- batch_example -------------------------------------------------------

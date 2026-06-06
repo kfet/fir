@@ -154,6 +154,12 @@ type restartSessionParams struct {
 	PrependContext string `json:"prepend_context,omitempty"`
 }
 
+// reloadExtensionParams maps to "reload_extension". Name is the extension to
+// reload (re-spawn the edited/new version, or unload if its file was deleted).
+type reloadExtensionParams struct {
+	Name string `json:"name"`
+}
+
 // ---------------------------------------------------------------------------
 // Bridge-method result shapes
 // ---------------------------------------------------------------------------

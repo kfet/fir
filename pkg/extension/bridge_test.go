@@ -33,6 +33,9 @@ type mockBridgeAPI struct {
 	restartPrompts  []string
 	restartPrepends []string
 	restartErr      error
+	reloadNames     []string
+	reloadErr       error
+	reloadFn        func(name string) error
 	observableStore *store.ObservableStore
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
@@ -47,6 +50,44 @@ func (m *mockBridgeAPI) toolCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.toolsRegistered)
+}
+
+// toolNameSet returns the set of currently-registered tool names.
+func (m *mockBridgeAPI) toolNameSet() map[string]bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := make(map[string]bool, len(m.toolsRegistered))
+	for _, d := range m.toolsRegistered {
+		set[d.Name] = true
+	}
+	return set
+}
+
+// removeExtensionTools removes the named tools from toolsRegistered. It
+// satisfies the unexported interface that Manager.ReloadOne type-asserts
+// against the BridgeAPI so the manager can drop only one extension's tools.
+func (m *mockBridgeAPI) removeExtensionTools(names []string) {
+	remove := make(map[string]bool, len(names))
+	for _, n := range names {
+		remove[n] = true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.toolsRegistered[:0]
+	for _, d := range m.toolsRegistered {
+		if !remove[d.Name] {
+			kept = append(kept, d)
+		}
+	}
+	m.toolsRegistered = kept
+}
+
+// SetReloadFn captures the manager-wired reload callback so tests can drive
+// the closure that delegates into Manager.ReloadOne.
+func (m *mockBridgeAPI) SetReloadFn(fn func(name string) error) {
+	m.mu.Lock()
+	m.reloadFn = fn
+	m.mu.Unlock()
 }
 
 func (m *mockBridgeAPI) clearTools() {
@@ -151,6 +192,13 @@ func (m *mockBridgeAPI) RestartSession(prompt, prependContext string) error {
 	m.restartPrompts = append(m.restartPrompts, prompt)
 	m.restartPrepends = append(m.restartPrepends, prependContext)
 	return m.restartErr
+}
+
+func (m *mockBridgeAPI) ReloadExtension(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloadNames = append(m.reloadNames, name)
+	return m.reloadErr
 }
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.

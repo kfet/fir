@@ -204,5 +204,9 @@ func (n *nopBridgeAPI) RestartSession(_, _ string) error {
 	return fmt.Errorf("session restart not available outside a session")
 }
 
+func (n *nopBridgeAPI) ReloadExtension(_ string) error {
+	return fmt.Errorf("extension reload not available outside a session")
+}
+
 // Ensure agent import is used (ToolDefinition references agent.ToolDisplayHint
 // transitively); keep this to avoid goimports churn.

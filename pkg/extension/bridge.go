@@ -556,6 +556,31 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = okTrue
 		}
 
+	case "reload_extension":
+		var p reloadExtensionParams
+		if req.Params != nil {
+			if err := json.Unmarshal(*req.Params, &p); err != nil {
+				rpcErr = &Error{Code: -32602, Message: "invalid params: " + err.Error()}
+				break
+			}
+		}
+		if p.Name == "" {
+			rpcErr = &Error{Code: -32602, Message: "reload_extension: name is required"}
+			break
+		}
+		// Self-reload guard: reloading the calling extension would kill the
+		// process servicing this very RPC. The bridge knows which extension
+		// issued the call (b.caps.Name), so refuse it here.
+		if p.Name == b.caps.Name {
+			rpcErr = &Error{Code: -32000, Message: "reload_extension: an extension cannot reload itself"}
+			break
+		}
+		if err := api.ReloadExtension(p.Name); err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = okTrue
+		}
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {

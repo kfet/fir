@@ -637,6 +637,40 @@ supports restart.
 
 ---
 
+#### `reload_extension`
+
+Reload exactly one extension by name — the targeted counterpart to a full
+reload. An extension that has just created or modified another extension
+mid-session uses this to pick up the change without tearing down every
+other running extension.
+
+| Param  | Type   | Notes                                  |
+|--------|--------|----------------------------------------|
+| `name` | string | Required. The extension to reload.     |
+
+```json
+{"jsonrpc":"2.0","id":1014,"method":"reload_extension","params":{"name":"my-helper"}}
+```
+
+Behaviour: fir re-discovers extensions and locates the cfg whose name
+matches. If the named extension is currently running it emits that
+extension's `session_end`, removes **only** that extension's tools (other
+extensions' tools are untouched), tears down its provider/auth
+registrations, cancels its context, and stops its process. It then
+re-spawns the edited/new version from disk. If the extension's file was
+deleted, the call unloads it (stop-only).
+
+Refused with a JSON-RPC error when:
+
+- `name` is a builtin extension (builtins are never reloadable);
+- `name` is the calling extension itself (self-reload would kill the
+  process servicing this RPC);
+- no extension manager is wired for the session.
+
+Response: `{"ok": true}` on success.
+
+---
+
 #### `side_query`
 
 Make a one-shot LLM call using the current session context.  No tools, no

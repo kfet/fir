@@ -16,7 +16,7 @@ Outbound calls demonstrated (extension → fir):
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
-  report_progress · restart_session ·
+  report_progress · restart_session · reload_extension ·
   prepend
 
 Inbound surface demonstrated (fir → extension):
@@ -170,6 +170,28 @@ def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
     ctx.restart_session(
         params["prompt"], prepend_context=params.get("prepend_context", "")
     )
+    return {"ok": True}
+
+
+@fir_ext.tool(
+    name="reload_ext_demo",
+    description=(
+        "Demonstrate ctx.reload_extension(name). Reloads exactly one "
+        "extension by name — stops it, drops only its tools, and re-spawns "
+        "the edited/new version. Builtins and self-reload are refused by fir."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Extension to reload"},
+        },
+        "required": ["name"],
+    },
+)
+def reload_ext_demo(params: dict, ctx: fir_ext.Context) -> dict:
+    # reload_extension: targeted single-extension reload. Returns a
+    # JSON-RPC error for builtins / self-reload, surfaced here as a failure.
+    ctx.reload_extension(params["name"])               # reload_extension
     return {"ok": True}
 
 

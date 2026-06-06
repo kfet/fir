@@ -27,6 +27,9 @@ type SessionBridge struct {
 	restartMu sync.RWMutex
 	restartFn RestartFn
 
+	reloadMu sync.RWMutex
+	reloadFn func(name string) error
+
 	// Version and Mode are passed through into Introspect results.
 	// Populated by Setup.
 	Version string
@@ -315,6 +318,35 @@ func (b *SessionBridge) UnregisterExtensionTools() {
 	b.extTools = nil
 }
 
+// removeExtensionTools removes only the named extension tools from the
+// session's tool set, leaving every other extension's tools intact. It is
+// the targeted counterpart to UnregisterExtensionTools and is intentionally
+// unexported: only Manager.ReloadOne (same package) reaches it, via a type
+// assertion, so no caller-visible "unregister by name" surface is added.
+func (b *SessionBridge) removeExtensionTools(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remove := make(map[string]bool, len(names))
+	for _, n := range names {
+		remove[n] = true
+	}
+	b.session.Agent.UpdateTools(func(ts *agent.ToolSet) {
+		for _, name := range names {
+			ts.Remove(name)
+		}
+	})
+	kept := b.extTools[:0]
+	for _, n := range b.extTools {
+		if !remove[n] {
+			kept = append(kept, n)
+		}
+	}
+	b.extTools = kept
+}
+
 // ReportProgress is a no-op on the shared SessionBridge.
 // Bridge.handleInbound calls the active progress reporter directly.
 func (b *SessionBridge) ReportProgress(message string) {}
@@ -360,4 +392,27 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 		_ = fn(prompt, prependContext)
 	}()
 	return nil
+}
+
+// SetReloadFn registers the targeted single-extension reload handler. It is
+// wired by the extension Manager at Start so that the inbound
+// reload_extension RPC can delegate back into Manager.ReloadOne. Pass nil to
+// remove. Mirrors SetRestartFn.
+func (b *SessionBridge) SetReloadFn(fn func(name string) error) {
+	b.reloadMu.Lock()
+	b.reloadFn = fn
+	b.reloadMu.Unlock()
+}
+
+// ReloadExtension delegates to the manager-registered reload handler to
+// reload exactly one extension by name. Returns an error when no handler is
+// registered (reload unsupported) or the manager refuses the reload.
+func (b *SessionBridge) ReloadExtension(name string) error {
+	b.reloadMu.RLock()
+	fn := b.reloadFn
+	b.reloadMu.RUnlock()
+	if fn == nil {
+		return fmt.Errorf("extension reload is not supported in this session")
+	}
+	return fn(name)
 }

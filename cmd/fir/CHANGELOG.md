@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Extensions can now reload a single other extension mid-session via the new
+  `reload_extension` SDK method (`ctx.reload_extension(name)`). It stops the
+  named extension, removes **only** that extension's tools (others untouched),
+  and re-spawns the edited/new version from disk — or unloads it if its file
+  was deleted. Builtins are never reloadable, and an extension cannot reload
+  itself (the process servicing the call). Intended for an agent that has just
+  created or modified an extension and wants to pick up the change without a
+  full reload.
+
 ## [0.59.0] - 2026-06-06
 
 ### Changed
