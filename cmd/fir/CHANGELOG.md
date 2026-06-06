@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-06-06
+
 ### Fixed
 
 - `tmuxspinner` test isolation: the start/stop/shutdown lifecycle tests started
