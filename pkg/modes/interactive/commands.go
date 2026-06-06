@@ -1712,6 +1712,34 @@ func (m *InteractiveMode) showWarning(message string) {
 	}
 }
 
+// clearTransientSurfaces dismisses every kind of transient surface clutter
+// without aborting the running turn: aside response cards, lingering command
+// status / warning messages, and extension/notification statuses shown in the
+// footer. It is the action behind the dedicated Alt+A clear key, offered as a
+// safe alternative to Escape (which can interrupt streaming).
+func (m *InteractiveMode) clearTransientSurfaces() {
+	// Collapse all dismissable aside cards anywhere in the session.
+	for m.dismissLatestAside(false) {
+	}
+
+	// Clear lingering command status / warning messages.
+	if m.commandStatusContainer != nil {
+		m.commandStatusContainer.Clear()
+	}
+
+	// Clear extension/notification statuses shown in the footer.
+	if m.footerDataProvider != nil {
+		m.footerDataProvider.ClearExtensionStatuses()
+	}
+	if m.footerComponent != nil {
+		m.footerComponent.Invalidate()
+	}
+
+	if m.ui != nil {
+		m.ui.RequestRender(false)
+	}
+}
+
 // dismissLatestAside collapses the most recent dismissable aside card. When
 // activeTurnOnly is true it only considers cards from the in-flight turn
 // (used by the first-Escape handler); otherwise it considers every aside card
@@ -1781,7 +1809,7 @@ Keyboard shortcuts:
   Ctrl+T          - Toggle thinking block visibility
   Ctrl+R          - Toggle plan visibility
   Ctrl+S          - Show session info
-  Alt+A           - Clear latest aside response card
+  Alt+A           - Clear aside cards + status + notifications (no abort)
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands

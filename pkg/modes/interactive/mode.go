@@ -802,12 +802,12 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.handleSessionCommand()
 	})
 	m.editor.OnAction(tui.ActionDismissAside, func() {
-		// Dedicated "clear card" key: collapse the most recent completed,
-		// not-yet-dismissed aside card anywhere in the session, without
-		// touching the running turn.
-		if !m.dismissLatestAside(false) {
-			m.showWarning("No aside response to clear")
-		}
+		// Dedicated "clear" key (Alt+A): a safe alternative to Escape that
+		// never aborts the running turn. It clears, in order, every kind of
+		// transient surface clutter: aside response cards, lingering command
+		// status / warning messages, and extension/notification statuses in
+		// the footer.
+		m.clearTransientSurfaces()
 	})
 	m.editor.OnAction(tui.ActionClear, func() {
 		m.handleCtrlC()
