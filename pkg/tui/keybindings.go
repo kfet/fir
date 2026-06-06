@@ -32,7 +32,7 @@ const (
 	ActionResume             AppAction = "resume"
 	ActionTogglePlan         AppAction = "togglePlan"
 	ActionShowSession        AppAction = "showSession"
-	ActionDismissAside       AppAction = "dismissAside"
+	ActionDismiss            AppAction = "dismiss"
 )
 
 // DefaultAppKeybindings maps app actions to their default key bindings.
@@ -57,7 +57,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionResume:             {},
 	ActionTogglePlan:         {"ctrl+r"},
 	ActionShowSession:        {"ctrl+s"},
-	ActionDismissAside:       {"alt+a"},
+	ActionDismiss:            {"alt+a"},
 }
 
 // KeybindingsConfig is the JSON config mapping actions to key IDs.
@@ -119,6 +119,12 @@ func loadKeybindingsFile(path string) KeybindingsConfig {
 	return config
 }
 
+// legacyActionAliases maps deprecated action names accepted in
+// keybindings.json to their current AppAction, for backward compatibility.
+var legacyActionAliases = map[string]AppAction{
+	"dismissAside": ActionDismiss,
+}
+
 func (m *KeybindingsManager) buildMaps() {
 	// Start with defaults
 	for action, keys := range DefaultAppKeybindings {
@@ -128,6 +134,9 @@ func (m *KeybindingsManager) buildMaps() {
 	// Override with user config
 	for action, keys := range m.config {
 		appAction := AppAction(action)
+		if alias, ok := legacyActionAliases[action]; ok {
+			appAction = alias
+		}
 		if !isAppAction(appAction) {
 			continue
 		}
