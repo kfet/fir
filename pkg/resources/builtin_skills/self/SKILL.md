@@ -126,6 +126,15 @@ echo "nudge" | fir send <id>       # pipe a single message
 
 For multi-pane monitoring: run `fir observe <id>` in one tmux pane and `fir send <id>` in another.
 
+## Remote observation over SSH
+
+- `fir observe <id>` LIVE-tails by default — no `watch` loop needed.
+- Wrap in tmux so a dropped SSH link does not kill the view:
+  `ssh -t HOST 'tmux new -As watch "fir observe <id>"'`
+  `-t` allocates the PTY tmux needs; `Ctrl-\` detaches.
+- To steer (not just watch): `fir send <id>` or the `send_session` tool.
+- Reminder: the CLI is the LIVE path; tools/slash-commands are snapshots.
+
 ## Environment Variables
 
 {{FIR_ENV_VARS_TABLE}}
