@@ -42,6 +42,22 @@ tmuxspinner.TICK_INTERVAL = 0.01
 os.environ.update(_orig_env)
 
 
+def _echo_last_set(rename_mock):
+    """Return a _read_window_name side-effect that echoes back the last name
+    passed to the given _rename_window mock (mirroring real tmux). Without
+    this, the spin loop's user-rename detection reads the *real* tmux window
+    name when the suite runs inside an actual tmux pane and clobbers
+    _original_name, making these lifecycle tests environment-dependent.
+    """
+
+    def _read(_target):
+        if rename_mock.call_args:
+            return rename_mock.call_args[0][1]
+        return ""
+
+    return _read
+
+
 class TestStripSpinnerSuffix(unittest.TestCase):
     def test_no_suffix(self):
         self.assertEqual(tmuxspinner._strip_spinner_suffix("fir"), "fir")
@@ -232,7 +248,9 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._pane_id = "%1"
         s._original_name = "fir"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn:
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
+             mock.patch.object(tmuxspinner, "_read_window_name",
+                               side_effect=_echo_last_set(mock_rn)):
             s.start()
             self.assertTrue(s._running)
             # Let spinner loop iterate at least once.
@@ -249,7 +267,9 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._original_name = "fir"
         s._session_name = "mysess"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn:
+        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
+             mock.patch.object(tmuxspinner, "_read_window_name",
+                               side_effect=_echo_last_set(mock_rn)):
             s.start()
             time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.stop()
@@ -355,7 +375,9 @@ class TestSpinnerShutdown(unittest.TestCase):
         s._session_name = "mysess"
 
         with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
-             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset:
+             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset, \
+             mock.patch.object(tmuxspinner, "_read_window_name",
+                               side_effect=_echo_last_set(mock_rn)):
             s.start()
             time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.shutdown()

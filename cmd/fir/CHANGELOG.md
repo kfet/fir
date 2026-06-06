@@ -2,8 +2,25 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `tmuxspinner` test isolation: the start/stop/shutdown lifecycle tests started
+  the real spin loop without mocking `_read_window_name`, so when the suite ran
+  inside an actual tmux pane the loop's user-rename detection picked up the live
+  window name and clobbered `_original_name`, failing the assertions. The tests
+  now mock `_read_window_name` to echo back the last name set (mirroring tmux).
+
 ### Added
 
+- `pkg/agent` API polish (Phase 4.5, in-tree before extraction to `kfet/agent`):
+  `Agent.IdleChan() <-chan struct{}` exposes the idle channel so callers can
+  `select` agent idleness against their own ctx/timeout (`WaitForIdle` is now a
+  thin wrapper); `AgentMessage.Text()` returns the concatenated assistant text
+  (or "") instead of walking `AsAssistant().Content` by hand; `AgentOptions`
+  gains lifted `Model`/`SystemPrompt`/`ThinkingLevel`/`Tools` convenience fields
+  (`InitialState` is retained for bulk restore and wins when both set a field);
+  and `ConvertToLLM` now defaults to `DefaultConvertToLLM` when nil instead of
+  erroring.
 - New `pin` tool in the handoff extension: an argless 📌 reflex. The model calls it the instant it senses something worth keeping (no quote, no note, no deliberation); a `side_query` branch with full session context then decides which past turn(s) actually merit a bookmark and writes them via the existing bookmark path. Lowers the cost of *signalling* to near zero while moving the *judgement* off the main thread. The handoff extension is now also enabled in `acp` mode (was `tui`-only) so `pin`/`bookmark` work on ACP sessions; `self_handoff` degrades to a clear "interactive only" message there.
 - Extensions can now reload a single other extension mid-session via the new
   `reload_extension` SDK method (`ctx.reload_extension(name)`). It stops the

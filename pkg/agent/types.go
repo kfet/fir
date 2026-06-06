@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/kfet/fir/pkg/ai/core"
 )
@@ -119,6 +120,25 @@ type AgentMessage struct {
 // NewAgentMessage wraps an core.Message as an AgentMessage.
 func NewAgentMessage(msg core.Message) AgentMessage {
 	return AgentMessage{Message: msg}
+}
+
+// Text returns the concatenated text of an assistant message's text content
+// blocks (joined without separators, in source order), or "" if the message
+// is not an assistant message or carries no text. It is the smallest viable
+// way to pull the rendered answer out of an EventMessageEnd payload without
+// walking AsAssistant().Content by hand.
+func (m *AgentMessage) Text() string {
+	am := m.AsAssistant()
+	if am == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range am.Content {
+		if c.Text != nil {
+			b.WriteString(c.Text.Text)
+		}
+	}
+	return b.String()
 }
 
 // AgentState holds the current state of the agent.

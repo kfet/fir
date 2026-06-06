@@ -75,9 +75,8 @@ func textResponse(text string) *core.AssistantMessage {
 // to its events, send a prompt, wait for it to finish.
 func Example() {
 	a := agent.NewAgent(agent.AgentOptions{
-		InitialState: &agent.AgentState{Model: exampleModel()},
-		StreamFn:     fakeStreamFn(textResponse("Hello, world.")),
-		ConvertToLLM: agent.DefaultConvertToLLM,
+		Model:    exampleModel(),
+		StreamFn: fakeStreamFn(textResponse("Hello, world.")),
 	})
 
 	var got string
@@ -86,16 +85,10 @@ func Example() {
 		if ev.Type != agent.EventMessageEnd || ev.Message == nil {
 			return
 		}
-		am := ev.Message.AsAssistant()
-		if am == nil {
-			return
-		}
-		for _, c := range am.Content {
-			if c.Text.Text != "" {
-				mu.Lock()
-				got = c.Text.Text
-				mu.Unlock()
-			}
+		if text := ev.Message.Text(); text != "" {
+			mu.Lock()
+			got = text
+			mu.Unlock()
 		}
 	})
 	defer unsubscribe()
@@ -117,9 +110,8 @@ func Example() {
 // or for embedding the agent inside a larger non-interactive flow.
 func ExampleAgent_SimplePrompt() {
 	a := agent.NewAgent(agent.AgentOptions{
-		InitialState: &agent.AgentState{Model: exampleModel()},
-		StreamFn:     fakeStreamFn(textResponse("42")),
-		ConvertToLLM: agent.DefaultConvertToLLM,
+		Model:    exampleModel(),
+		StreamFn: fakeStreamFn(textResponse("42")),
 	})
 
 	out, err := a.SimplePrompt(context.Background(), []agent.AgentMessage{
@@ -147,9 +139,9 @@ func ExampleDefaultStreamFn() {
 	defer func() { agent.DefaultStreamFn = prev }()
 
 	a := agent.NewAgent(agent.AgentOptions{
-		InitialState: &agent.AgentState{Model: exampleModel()},
-		ConvertToLLM: agent.DefaultConvertToLLM,
+		Model: exampleModel(),
 		// No StreamFn — falls through to DefaultStreamFn.
+		// No ConvertToLLM — defaults to DefaultConvertToLLM.
 	})
 
 	out, _ := a.SimplePrompt(context.Background(), []agent.AgentMessage{

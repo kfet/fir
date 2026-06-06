@@ -965,3 +965,135 @@ func TestSimplePrompt_ExhaustsRetriesThenErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "stop_reason=", "error must surface the stop reason for diagnosis")
 	assert.Equal(t, len(simplePromptRetryBackoffs)+1, calls, "should attempt exactly maxAttempts times")
 }
+
+func TestNewAgent_LiftedConvenienceFields(t *testing.T) {
+	model := testModel()
+	tools := NewToolSet()
+	a := NewAgent(AgentOptions{
+		Model:         model,
+		SystemPrompt:  "lifted prompt",
+		ThinkingLevel: ThinkingMedium,
+		Tools:         tools,
+	})
+
+	state := a.State()
+	assert.Equal(t, model, state.Model)
+	assert.Equal(t, "lifted prompt", state.SystemPrompt)
+	assert.Equal(t, ThinkingMedium, state.ThinkingLevel)
+	assert.Same(t, tools, state.Tools)
+}
+
+func TestNewAgent_InitialStateWinsOverLifted(t *testing.T) {
+	lifted := testModel()
+	restored := testModel()
+	restored.ID = "restored-model"
+	a := NewAgent(AgentOptions{
+		Model:         lifted,
+		SystemPrompt:  "lifted prompt",
+		ThinkingLevel: ThinkingLow,
+		InitialState: &AgentState{
+			Model:         restored,
+			SystemPrompt:  "restored prompt",
+			ThinkingLevel: ThinkingHigh,
+			Tools:         NewToolSet(),
+			Messages:      []AgentMessage{NewAgentMessage(core.NewUserMsg("restored", 0))},
+		},
+	})
+
+	state := a.State()
+	assert.Equal(t, restored, state.Model)
+	assert.Equal(t, "restored prompt", state.SystemPrompt)
+	assert.Equal(t, ThinkingHigh, state.ThinkingLevel)
+	assert.Len(t, state.Messages, 1)
+}
+
+func TestNewAgent_DefaultsConvertToLLM(t *testing.T) {
+	a := NewAgent(AgentOptions{})
+	require.NotNil(t, a.convertToLLM)
+
+	msgs := []AgentMessage{
+		NewAgentMessage(core.NewUserMsg("hi", 0)),
+		NewAgentMessage(core.NewAssistantMsg(*simpleResponse("yo"))),
+	}
+	out, err := a.convertToLLM(msgs)
+	require.NoError(t, err)
+	assert.Len(t, out, 2)
+}
+
+func TestAgent_IdleChan_ClosedWhenNeverRun(t *testing.T) {
+	a := NewAgent(AgentOptions{})
+	select {
+	case <-a.IdleChan():
+		// idle as expected
+	default:
+		t.Fatal("never-run agent should read as idle")
+	}
+}
+
+func TestAgent_IdleChan_ComposesWithSelect(t *testing.T) {
+	a := NewAgent(AgentOptions{
+		Model:    testModel(),
+		StreamFn: mockStreamFn(simpleResponse("done")),
+	})
+	require.NoError(t, a.Prompt("go"))
+
+	select {
+	case <-a.IdleChan():
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not become idle")
+	}
+
+	// After idle, channel stays closed (immediately readable).
+	select {
+	case <-a.IdleChan():
+	default:
+		t.Fatal("idle channel should remain closed after run completes")
+	}
+}
+
+func TestAgentMessage_Text(t *testing.T) {
+	// Assistant message with multiple text blocks concatenates them.
+	am := AgentMessage{Message: core.NewAssistantMsg(core.AssistantMessage{
+		Role: core.RoleAssistant,
+		Content: []core.AssistantContent{
+			core.NewTextContent("Hello, "),
+			core.NewTextContent("world."),
+		},
+	})}
+	assert.Equal(t, "Hello, world.", am.Text())
+
+	// Non-assistant message returns "".
+	user := NewAgentMessage(core.NewUserMsg("hi", 0))
+	assert.Equal(t, "", user.Text())
+}
+
+func TestNewAgent_AllOptionsSet(t *testing.T) {
+	delay := 1000
+	budgets := &core.ThinkingBudgets{}
+	a := NewAgent(AgentOptions{
+		Model:            testModel(),
+		ConvertToLLM:     func(m []AgentMessage) ([]core.Message, error) { return nil, nil },
+		TransformContext: func(ctx context.Context, m []AgentMessage) ([]AgentMessage, error) { return m, nil },
+		SteeringMode:     "all",
+		FollowUpMode:     "all",
+		StreamFn:         mockStreamFn(simpleResponse("x")),
+		SessionID:        "sid",
+		GetApiKey:        func(string) (string, error) { return "k", nil },
+		ThinkingBudgets:  budgets,
+		Transport:        core.TransportAuto,
+		MaxRetryDelayMs:  &delay,
+		ServerTools:      []core.AnthropicServerTool{{}},
+		Compaction:       &core.AnthropicCompaction{},
+		OnPayload:        func(p any, m *core.Model) any { return nil },
+		OnRetry:          func(int, float64, string) {},
+	})
+	require.NotNil(t, a)
+	assert.Equal(t, budgets, a.GetThinkingBudgets())
+	assert.Equal(t, &delay, a.GetMaxRetryDelayMs())
+	assert.NotNil(t, a.onPayload)
+	assert.NotNil(t, a.onRetry)
+	assert.NotNil(t, a.getApiKey)
+	assert.NotNil(t, a.transformCtx)
+	assert.NotNil(t, a.compaction)
+	assert.Len(t, a.serverTools, 1)
+}

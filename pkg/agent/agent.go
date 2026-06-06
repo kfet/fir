@@ -46,11 +46,31 @@ func DefaultConvertToLLM(messages []AgentMessage) ([]core.Message, error) {
 
 // AgentOptions configures an Agent.
 type AgentOptions struct {
-	// InitialState overrides the default AgentState fields.
+	// Model is the LLM model the agent runs on. Convenience field lifted
+	// from AgentState — see InitialState for the precedence rules.
+	Model *core.Model
+
+	// SystemPrompt is the agent's system prompt. Convenience field lifted
+	// from AgentState — see InitialState for the precedence rules.
+	SystemPrompt string
+
+	// ThinkingLevel is the agent's reasoning level. Convenience field lifted
+	// from AgentState — see InitialState for the precedence rules.
+	ThinkingLevel ThinkingLevel
+
+	// Tools is the agent's tool set. Convenience field lifted from
+	// AgentState — see InitialState for the precedence rules.
+	Tools *ToolSet
+
+	// InitialState restores a full AgentState (bulk restore, e.g. replaying a
+	// snapshot). It is layered ON TOP of the convenience fields above, so any
+	// field set on InitialState wins over the matching convenience field.
+	// Leave it nil and use the convenience fields for the common case.
 	InitialState *AgentState
 
 	// ConvertToLLM converts AgentMessages to LLM Messages before each call.
-	// Default filters to user/assistant/toolResult.
+	// Defaults to DefaultConvertToLLM (filters to user/assistant/toolResult)
+	// when nil — callers only set this for exotic context shaping.
 	ConvertToLLM func(messages []AgentMessage) ([]core.Message, error)
 
 	// TransformContext is applied before ConvertToLLM for context pruning etc.
@@ -120,8 +140,18 @@ type Agent struct {
 	onPayload       func(any, *core.Model) any
 	onRetry         func(int, float64, string)
 
-	// idleCh is closed when the agent finishes processing.
+	// idleCh is closed when the agent finishes processing. It is never nil:
+	// it starts closed (a never-run agent is idle) and runLoop swaps in a
+	// fresh open channel for the duration of each run.
 	idleCh chan struct{}
+}
+
+// closedIdleCh returns a struct{} channel that is already closed, used as
+// the initial idle channel so a never-run agent reads as idle.
+func closedIdleCh() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 // NewAgent creates a new Agent with the given options.
@@ -141,7 +171,22 @@ func NewAgent(opts AgentOptions) *Agent {
 		convertToLLM: DefaultConvertToLLM,
 		steeringMode: "one-at-a-time",
 		followUpMode: "one-at-a-time",
-		idleCh:       nil,
+		idleCh:       closedIdleCh(),
+	}
+
+	// Convenience fields lifted onto AgentOptions for the common case.
+	// InitialState (below) is layered on top and wins when both are set.
+	if opts.Model != nil {
+		a.state.Model = opts.Model
+	}
+	if opts.SystemPrompt != "" {
+		a.state.SystemPrompt = opts.SystemPrompt
+	}
+	if opts.ThinkingLevel != "" {
+		a.state.ThinkingLevel = opts.ThinkingLevel
+	}
+	if opts.Tools != nil {
+		a.state.Tools = opts.Tools
 	}
 
 	if opts.InitialState != nil {
@@ -509,13 +554,28 @@ func (a *Agent) Abort() {
 }
 
 // WaitForIdle blocks until the agent finishes processing.
+// It is a thin convenience wrapper around IdleChan.
 func (a *Agent) WaitForIdle() {
+	<-a.IdleChan()
+}
+
+// IdleChan returns a channel that is closed when the agent is idle (not
+// currently processing a prompt). Unlike WaitForIdle it composes with
+// select, so callers can race agent idleness against their own
+// cancellation or timeout:
+//
+//	select {
+//	case <-a.IdleChan():
+//	case <-ctx.Done():
+//	}
+//
+// A freshly-created agent that has never run reads as idle (the returned
+// channel is already closed). While a run is in flight the channel is open
+// and is closed when the run completes.
+func (a *Agent) IdleChan() <-chan struct{} {
 	a.mu.Lock()
-	ch := a.idleCh
-	a.mu.Unlock()
-	if ch != nil {
-		<-ch
-	}
+	defer a.mu.Unlock()
+	return a.idleCh
 }
 
 // Reset clears all state except system prompt and model.
