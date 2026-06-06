@@ -24,11 +24,6 @@ endif
 
 LDFLAGS   := -s -w -X main.version=$(VERSION) -X main.licensesURL=https://github.com/kfet/fir-dist/releases/tag/v$(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
-# No cgo dependencies: build a static, pure-Go binary. Avoids invoking the C
-# toolchain, which noticeably speeds up builds on hosts with a slow C compiler
-# (e.g. Raspberry Pi) and removes the need for a C compiler at all.
-export CGO_ENABLED := 0
-
 # ---------------------------------------------------------------------------
 # Quiet build helpers — print a short step name, show output only on failure.
 # Usage: $(call RUN,label,command)
@@ -154,7 +149,7 @@ test-cover: tidy
 	go tool cover -func=$(BINDIR)/coverage.out
 
 test-race: tidy
-	$(call RUN,test (race),CGO_ENABLED=1 go test -race ./...)
+	$(call RUN,test (race),go test -race ./...)
 
 vet:
 	$(call RUN,vet,go vet ./...)

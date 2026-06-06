@@ -14,6 +14,17 @@
   created or modified an extension and wants to pick up the change without a
   full reload.
 
+### Changed
+
+- Reverted the `CGO_ENABLED=0` build default introduced in 0.56.0. Benchmarking
+  on Raspberry Pi / SBC hosts (armv6 single-core and low-RAM arm64) showed the
+  cgo flag makes no meaningful difference to fir's build time (~2% on armv6,
+  noise elsewhere) — the build is dominated by compiling the large pure-Go
+  dependency tree, which is identical either way. `make build`/`install` now use
+  Go's platform default again (cgo enabled where available); the `test-race`
+  target no longer needs its `CGO_ENABLED=1` override. The test sleep→poll and
+  image-fill speedups from that change are unaffected and remain.
+
 ## [0.59.0] - 2026-06-06
 
 ### Changed
