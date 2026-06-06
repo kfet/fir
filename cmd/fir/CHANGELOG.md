@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/session` (and `Ctrl+S`) now renders session info into a sticky, collapsible
+  overlay above the editor instead of dumping a large block into the transcript.
+  Toggling it closed removes it from the conversation stream entirely (snapshot
+  is rebuilt fresh each time it opens). `Alt+A` (clear key) now also collapses
+  any open session-info or plan overlay alongside aside cards and status
+  messages.
+
 ## [0.60.0] - 2026-06-06
 
 ### Fixed

@@ -196,6 +196,14 @@ func newTestModeInternal(t *testing.T, session *session.AgentSession) *testMode 
 	m.commandStatusContainer = &tui.Container{}
 	ui.AddChild(m.commandStatusContainer)
 
+	m.planContainer = &tui.Container{}
+	m.planHidden = true
+	ui.AddChild(m.planContainer)
+
+	m.sessionContainer = &tui.Container{}
+	m.sessionHidden = true
+	ui.AddChild(m.sessionContainer)
+
 	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
 		return m.getFooterData()
 	})
@@ -407,6 +415,56 @@ func TestInteractiveMode_CtrlSShowsNoSessionWarningWithoutCrash(t *testing.T) {
 	output := tm.renderedOutput()
 	if !strings.Contains(output, "No session available") {
 		t.Errorf("expected no-session warning, got %q", output)
+	}
+}
+
+func TestInteractiveMode_CtrlSTogglesSessionOverlay(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SetModel(&ai.Model{ID: "test-model", Provider: ai.ProviderAnthropic, ContextWindow: 10000})
+
+	// First press opens the overlay.
+	tm.pressCtrlS()
+	tm.waitRender()
+	if tm.mode.sessionHidden || !tm.mode.sessionInContainer {
+		t.Fatal("expected session overlay open after first Ctrl+S")
+	}
+	if len(tm.mode.sessionContainer.ChildrenSnapshot()) != 1 {
+		t.Fatalf("expected session component in container, got %d children", len(tm.mode.sessionContainer.ChildrenSnapshot()))
+	}
+	if !strings.Contains(tm.renderedOutput(), "Session Info") {
+		t.Fatalf("expected session overlay rendered, got %q", tm.renderedOutput())
+	}
+
+	// Second press closes it — the component must leave the container.
+	tm.pressCtrlS()
+	tm.waitRender()
+	if !tm.mode.sessionHidden || tm.mode.sessionInContainer {
+		t.Fatal("expected session overlay closed after second Ctrl+S")
+	}
+	if len(tm.mode.sessionContainer.ChildrenSnapshot()) != 0 {
+		t.Fatalf("expected empty session container after close, got %d children", len(tm.mode.sessionContainer.ChildrenSnapshot()))
+	}
+}
+
+func TestInteractiveMode_ClearTransientSurfacesCollapsesOverlays(t *testing.T) {
+	tm := newTestModeWithSession(t)
+	tm.mode.session.SetModel(&ai.Model{ID: "test-model", Provider: ai.ProviderAnthropic, ContextWindow: 10000})
+
+	// Open the session overlay.
+	tm.pressCtrlS()
+	tm.waitRender()
+	if tm.mode.sessionHidden || !tm.mode.sessionInContainer {
+		t.Fatal("expected session overlay open")
+	}
+
+	// Alt+A / clearTransientSurfaces should dismiss it.
+	tm.mode.clearTransientSurfaces()
+	tm.waitRender()
+	if !tm.mode.sessionHidden || tm.mode.sessionInContainer {
+		t.Fatal("expected session overlay dismissed by clearTransientSurfaces")
+	}
+	if len(tm.mode.sessionContainer.ChildrenSnapshot()) != 0 {
+		t.Fatalf("expected empty session container, got %d children", len(tm.mode.sessionContainer.ChildrenSnapshot()))
 	}
 }
 

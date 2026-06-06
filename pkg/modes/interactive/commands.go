@@ -833,10 +833,43 @@ func (m *InteractiveMode) handleNameCommand(text string) {
 }
 
 func (m *InteractiveMode) handleSessionCommand() {
+	m.toggleSessionVisibility()
+}
+
+// toggleSessionVisibility shows or hides the collapsible session-info overlay.
+// When opened, the session lines are rebuilt fresh so the snapshot is current
+// at open time. When closed, the component is removed from its container so it
+// leaves the conversation stream entirely (mirrors the plan overlay).
+func (m *InteractiveMode) toggleSessionVisibility() {
 	if m.session == nil {
 		m.showWarning("No session available")
 		return
 	}
+	m.sessionHidden = !m.sessionHidden
+	if m.sessionHidden {
+		if m.sessionInContainer {
+			m.sessionContainer.Clear()
+			m.sessionInContainer = false
+		}
+	} else {
+		lines := m.buildSessionInfoLines()
+		if m.sessionComponent == nil {
+			m.sessionComponent = components.NewSessionComponent(lines)
+		} else {
+			m.sessionComponent.SetLines(lines)
+		}
+		if !m.sessionInContainer {
+			m.sessionContainer.AddChild(m.sessionComponent)
+			m.sessionInContainer = true
+		}
+	}
+	m.ui.RequestRender(false)
+}
+
+// buildSessionInfoLines builds the themed session-info lines shown in the
+// session overlay (version, binary, name, file, id, extensions, model,
+// MCP servers, tools, paths, messages, tokens, cost).
+func (m *InteractiveMode) buildSessionInfoLines() []string {
 	stats := m.session.GetSessionStats()
 	sessionName := m.session.SessionStore.GetSessionName()
 	t := itheme.GetTheme()
@@ -953,7 +986,7 @@ func (m *InteractiveMode) handleSessionCommand() {
 		lines = append(lines, fmt.Sprintf("%s %.4f", t.Fg("dim", "Total:"), stats.Cost))
 	}
 
-	m.showMessage(strings.Join(lines, "\n"))
+	return lines
 }
 
 // formatSortedSection formats a titled section with sorted key-description pairs.
@@ -1714,9 +1747,10 @@ func (m *InteractiveMode) showWarning(message string) {
 
 // clearTransientSurfaces dismisses every kind of transient surface clutter
 // without aborting the running turn: aside response cards, lingering command
-// status / warning messages, and extension/notification statuses shown in the
-// footer. It is the action behind the dedicated Alt+A clear key, offered as a
-// safe alternative to Escape (which can interrupt streaming).
+// status / warning messages, any open session-info or plan overlay, and
+// extension/notification statuses shown in the footer. It is the action behind
+// the dedicated Alt+A clear key, offered as a safe alternative to Escape
+// (which can interrupt streaming).
 func (m *InteractiveMode) clearTransientSurfaces() {
 	// Collapse all dismissable aside cards anywhere in the session.
 	for m.dismissLatestAside(false) {
@@ -1725,6 +1759,24 @@ func (m *InteractiveMode) clearTransientSurfaces() {
 	// Clear lingering command status / warning messages.
 	if m.commandStatusContainer != nil {
 		m.commandStatusContainer.Clear()
+	}
+
+	// Collapse the session-info overlay if it is open.
+	if !m.sessionHidden {
+		m.sessionHidden = true
+		if m.sessionInContainer {
+			m.sessionContainer.Clear()
+			m.sessionInContainer = false
+		}
+	}
+
+	// Collapse the plan overlay if it is open.
+	if !m.planHidden {
+		m.planHidden = true
+		if m.planInContainer {
+			m.planContainer.Clear()
+			m.planInContainer = false
+		}
 	}
 
 	// Clear extension/notification statuses shown in the footer.
@@ -1781,7 +1833,7 @@ func (m *InteractiveMode) showHelp() {
   /new [prompt]   - Start a new session (optionally with an initial prompt)
   /compact        - Compact conversation context
   /resume         - Resume a different session
-  /session        - Show session info and stats
+  /session        - Toggle the session info overlay
   /name <name>    - Set session display name
   /login          - Login with OAuth provider
   /logout         - Logout from OAuth provider
@@ -1808,7 +1860,7 @@ Keyboard shortcuts:
   Ctrl+O          - Toggle tool output expansion
   Ctrl+T          - Toggle thinking block visibility
   Ctrl+R          - Toggle plan visibility
-  Ctrl+S          - Show session info
+  Ctrl+S          - Toggle session info overlay
   Alt+A           - Clear aside cards + status + notifications (no abort)
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
