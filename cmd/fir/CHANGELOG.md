@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-06-06
+
+### Changed
+
+- Interactive TUI: the dedicated `Alt+A` key is now a general-purpose **dismiss**
+  key, offered as a safe alternative to `Escape` that never aborts the running
+  turn. Previously it only collapsed the latest aside response card; it now
+  clears every kind of transient surface clutter at once — all dismissable aside
+  cards, lingering command status / warning messages, and extension/notification
+  statuses shown in the footer. The underlying keybinding action was renamed
+  `dismissAside` -> `dismiss` (`ActionDismissAside` -> `ActionDismiss`); existing
+  `keybindings.json` entries using the old `dismissAside` name keep working via a
+  backward-compatibility alias.
+
 ## [0.58.0] - 2026-06-05
 
 ### Added
