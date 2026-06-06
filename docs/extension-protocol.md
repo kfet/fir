@@ -12,6 +12,16 @@ For a user-facing overview, quickstart, and discovery rules see
 docstring of `pkg/extension/sdk/python/fir_ext.py`.  For a complete working
 example see `pkg/resources/builtin_extensions/demo.py`.
 
+SDKs ship for three languages:
+
+- **Python** – `pkg/extension/sdk/python/fir_ext.py` (extracted to an importable
+  path at runtime).
+- **Node** – `pkg/extension/sdk/node/fir_ext.js`.
+- **Go** – `pkg/extension/sdk/go/` (a dependency-free nested module
+  `github.com/kfet/fir/pkg/extension/sdk/go/firext`; build your extension to a
+  binary that fir discovers and execs). See its `README.md` and
+  `examples/demo`.
+
 The wire shapes documented below are also expressed as concrete typed
 structures in code:
 
