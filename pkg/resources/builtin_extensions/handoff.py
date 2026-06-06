@@ -3,7 +3,7 @@
 # name: handoff
 # description: Reliable self-handoff with bookmark-based continuity — validate handoff doc, pin significant turns, restart with a clean LLM context
 # builtin: true
-# modes: tui
+# modes: tui, acp
 # ---
 """handoff.py — reliable self-handoff for fir, with bookmarks.
 
@@ -23,6 +23,13 @@ Two tools and one slash command:
   ``_bookmark_note`` key. The file is kept sorted by the original
   turn's timestamp so it reads chronologically regardless of
   bookmark-call order.
+
+* ``pin()`` — argless reflex. The model calls 📌 the instant it senses
+  something worth keeping (no args, no deliberation). A side-query
+  branch with full session context then decides which turn(s) actually
+  merit a bookmark and anchors them via the same write path as
+  ``bookmark``. Keeps the cost of *signalling* near zero while moving
+  the *judgement* off the main thread.
 
 * ``/handoff`` — slash command. Asks the agent to write a curated
   briefing and call ``self_handoff``.
@@ -250,6 +257,82 @@ _BOOKMARK_PARAMS: dict[str, Any] = {
     "required": ["quote", "note"],
     "additionalProperties": False,
 }
+
+
+# ---------------------------------------------------------------------------
+# pin: argless reflex tool
+# ---------------------------------------------------------------------------
+
+_PIN_DESCRIPTION = """📌 Drop a pin the instant you notice something worth keeping.
+
+This is a free reflex, not a decision. The MOMENT you sense anything a \
+future agent (after a /handoff) would want — a design decision locked \
+in, a user constraint stated, a critical tool result, a non-obvious \
+discovery about the code, a debugging session converging — just call \
+📌 (pin). No arguments. No explanation. Don't deliberate, don't \
+summarise, don't quote anything. It costs you nothing.
+
+A separate branch with full context decides what (if anything) is \
+actually worth bookmarking and where to anchor it — including turns \
+from earlier in the session, not just the latest one. So pin freely \
+and often; over-pinning is harmless, missing a moment is not."""
+
+_PIN_PARAMS: dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
+
+# Prompt for the decision branch (a no-tools side query over full
+# session context). It returns a tiny line list, NOT a tool-call
+# protocol: one bookmark per line as ``quote ||| note``, or ``SKIP``.
+_PIN_BRANCH_PROMPT = """A 📌 pin was just dropped in this session: the \
+agent sensed that something recent (or earlier) is worth preserving as \
+a bookmark for a future handoff.
+
+Look back over the conversation and decide which specific turn(s), if \
+any, genuinely merit a bookmark. For each one, output exactly one line:
+
+    <verbatim quote from that turn> ||| <one-line note on why it matters>
+
+Rules:
+- The quote must be a short, distinctive substring copied VERBATIM from \
+that turn's text, so it can be matched in the transcript. Prefer the \
+shortest uniquely-identifying snippet.
+- The note is a terse label (e.g. 'final DB schema', 'user constraint: \
+no auth', 'fix for bug #42').
+- You may bookmark earlier turns, not just the latest.
+- Be selective: only turns a future agent would truly need. Skip \
+chit-chat, restated context, and anything already obvious.
+- If nothing genuinely merits a bookmark, reply with exactly: SKIP
+
+Output ONLY the lines (or SKIP). No preamble, no commentary, no \
+numbering, no code fences."""
+
+
+def _parse_pin_branch(out: str) -> list[tuple[str, str]]:
+    """Parse the decision branch's reply into (quote, note) pairs.
+
+    Tolerant of stray formatting: ignores blank lines, a lone SKIP,
+    code fences, and list bullets. Only lines containing the ``|||``
+    delimiter with non-empty both sides are kept.
+    """
+    pairs: list[tuple[str, str]] = []
+    for raw in (out or "").splitlines():
+        line = raw.strip()
+        if not line or line == "```" or line.upper() == "SKIP":
+            continue
+        # Strip common list bullets the model might prepend.
+        for bullet in ("- ", "* "):
+            if line.startswith(bullet):
+                line = line[len(bullet):].strip()
+        if "|||" not in line:
+            continue
+        quote, note = line.split("|||", 1)
+        quote, note = quote.strip(), note.strip()
+        if quote and note:
+            pairs.append((quote, note))
+    return pairs
 
 
 # ---------------------------------------------------------------------------
@@ -754,8 +837,20 @@ def _run_migration_once(session_file: str) -> None:
     },
 )
 def bookmark(params: dict, ctx: fir_ext.Context) -> dict:
-    quote = (params.get("quote") or "").strip()
-    note = (params.get("note") or "").strip()
+    return _write_bookmark(ctx, params.get("quote"), params.get("note"))
+
+
+def _write_bookmark(
+    ctx: fir_ext.Context, quote: str | None, note: str | None
+) -> dict:
+    """Resolve ``quote`` to a past turn and persist it with ``note``.
+
+    Shared by the model-facing ``bookmark`` tool and the argless
+    ``pin`` reflex (whose decision branch produces quote/note pairs).
+    Returns an ``_ok``/``_err`` payload.
+    """
+    quote = (quote or "").strip()
+    note = (note or "").strip()
     if not quote:
         return _err("bookmark: `quote` must be a non-empty string.")
     if not note:
@@ -804,6 +899,41 @@ def bookmark(params: dict, ctx: fir_ext.Context) -> dict:
 
 
 @fir_ext.tool(
+    name="pin",
+    description=_PIN_DESCRIPTION,
+    parameters=_PIN_PARAMS,
+    display_hint={"result_max_lines": 2},
+)
+def pin(params: dict, ctx: fir_ext.Context) -> dict:
+    """Argless reflex: delegate the real decision to a side-query branch.
+
+    The branch sees full session context and returns a list of
+    ``quote ||| note`` lines (or SKIP). We write each resolved pair via
+    the same path as the ``bookmark`` tool. Returns instantly with a
+    one-line summary; never errors back to the model (pinning is a free
+    reflex — failures are swallowed, not surfaced as friction).
+    """
+    try:
+        out = ctx.side_query(_PIN_BRANCH_PROMPT, timeout=120)
+    except Exception as exc:  # pragma: no cover - defensive
+        return _ok(f"📌 noted (branch unavailable: {exc})")
+
+    pairs = _parse_pin_branch(out)
+    if not pairs:
+        return _ok("📌 noted (nothing to bookmark)")
+
+    written = 0
+    for quote, note in pairs:
+        res = _write_bookmark(ctx, quote, note)
+        if not res.get("is_error"):
+            written += 1
+
+    if written == 0:
+        return _ok(f"📌 noted ({len(pairs)} candidate(s), none anchored)")
+    return _ok(f"📌 bookmarked {written} turn(s)")
+
+
+@fir_ext.tool(
     name="self_handoff",
     description=_TOOL_DESCRIPTION,
     parameters=_TOOL_PARAMS,
@@ -836,8 +966,9 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
         )
     except Exception as exc:
         return _err(
-            f"self_handoff: restart_session failed: {exc}. The current "
-            "mode may not support session restart (interactive only)."
+            "self_handoff is only available in interactive (tui) "
+            "sessions — this session's mode does not support session "
+            f"restart. (restart_session: {exc})"
         )
     # Calling turn is being aborted; this result is informational only.
     return _ok("Handing off…")

@@ -70,6 +70,8 @@ class _StubContext:
         raise_on_restart: bool = False,
         session_file: str = "",
         session_id: str = "",
+        side_query_reply: str = "",
+        raise_on_side_query: bool = False,
     ):
         self.restart_calls: list[tuple[str, str]] = []
         self.user_messages: list[str] = []
@@ -77,6 +79,16 @@ class _StubContext:
         self.observable_writes: list[tuple[str, str, str]] = []
         self._session_file = session_file
         self._session_id = session_id
+        self._side_query_reply = side_query_reply
+        self._raise_on_side_query = raise_on_side_query
+        self.side_query_calls: list[str] = []
+
+    def side_query(self, question: str, **kwargs) -> str:
+        del kwargs
+        self.side_query_calls.append(question)
+        if self._raise_on_side_query:
+            raise RuntimeError("simulated side_query failure")
+        return self._side_query_reply
 
     def restart_session(self, prompt: str, prepend_context: str = "") -> None:
         if self.raise_on_restart:
@@ -230,7 +242,8 @@ class TestSelfHandoffHandler(unittest.TestCase):
         result = self.handoff.self_handoff({"content": _good_content()}, ctx)
         self.assertTrue(result.get("is_error"))
         text = result["content"][0]["text"]
-        self.assertIn("restart_session failed", text)
+        self.assertIn("only available in interactive", text)
+        self.assertIn("simulated restart failure", text)
 
 
 # ---------------------------------------------------------------------------
@@ -660,6 +673,108 @@ class TestBookmarkMigration(unittest.TestCase):
         writes = [w for w in ctx.observable_writes if w[0] == "bookmarks"]
         self.assertTrue(writes, "self-heal must publish via ctx.put_observable")
         self.assertIn("07:33", writes[-1][2])
+
+
+class TestParsePinBranch(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_skip_returns_empty(self) -> None:
+        self.assertEqual(self.handoff._parse_pin_branch("SKIP"), [])
+        self.assertEqual(self.handoff._parse_pin_branch("  skip \n"), [])
+
+    def test_empty_returns_empty(self) -> None:
+        self.assertEqual(self.handoff._parse_pin_branch(""), [])
+        self.assertEqual(self.handoff._parse_pin_branch("\n\n"), [])
+
+    def test_single_pair(self) -> None:
+        got = self.handoff._parse_pin_branch("final schema ||| the DB schema")
+        self.assertEqual(got, [("final schema", "the DB schema")])
+
+    def test_multiple_pairs(self) -> None:
+        out = "alpha ||| note a\nbravo ||| note b\n"
+        self.assertEqual(
+            self.handoff._parse_pin_branch(out),
+            [("alpha", "note a"), ("bravo", "note b")],
+        )
+
+    def test_tolerates_bullets_and_fences(self) -> None:
+        out = "```\n- alpha ||| note a\n* bravo ||| note b\n```"
+        self.assertEqual(
+            self.handoff._parse_pin_branch(out),
+            [("alpha", "note a"), ("bravo", "note b")],
+        )
+
+    def test_skips_lines_without_delimiter_or_empty_sides(self) -> None:
+        out = "no delimiter here\n ||| empty quote\nquote ||| \nok ||| good"
+        self.assertEqual(self.handoff._parse_pin_branch(out), [("ok", "good")])
+
+    def test_note_keeps_internal_delimiter_split_once(self) -> None:
+        got = self.handoff._parse_pin_branch("q ||| a ||| b")
+        self.assertEqual(got, [("q", "a ||| b")])
+
+
+class TestPinTool(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        self.handoff = _load_handoff(self.tmp)
+        self.session_file = os.path.join(self.tmp, "20250522_sess.jsonl")
+        _write_jsonl(self.session_file, [
+            {"id": "sess", "model": "test"},
+            {"type": "message", "id": "e1", "timestamp": "2025-05-22T14:00:00",
+             "message": {"role": "user", "content": "alpha bravo charlie"}},
+            {"type": "message", "id": "e2", "timestamp": "2025-05-22T14:05:00",
+             "message": {"role": "assistant", "content": "epsilon zeta"}},
+        ])
+        self.bm_path = os.path.join(self.tmp, "bookmarks-sess.jsonl")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self, reply: str = "", **kw):
+        return _StubContext(
+            session_file=self.session_file, session_id="sess",
+            side_query_reply=reply, **kw)
+
+    def test_writes_resolved_bookmarks(self) -> None:
+        ctx = self._ctx("alpha bravo ||| first turn\nepsilon ||| second turn")
+        res = self.handoff.pin({}, ctx)
+        self.assertFalse(res["is_error"])
+        self.assertEqual(len(ctx.side_query_calls), 1)
+        rows = _read_jsonl(self.bm_path)
+        self.assertEqual(len(rows), 2)
+        notes = {r["_bookmark_note"] for r in rows}
+        self.assertEqual(notes, {"first turn", "second turn"})
+
+    def test_skip_writes_nothing(self) -> None:
+        ctx = self._ctx("SKIP")
+        res = self.handoff.pin({}, ctx)
+        self.assertFalse(res["is_error"])
+        self.assertFalse(os.path.exists(self.bm_path))
+
+    def test_unresolvable_quote_is_swallowed(self) -> None:
+        ctx = self._ctx("nonexistent quote text ||| nope")
+        res = self.handoff.pin({}, ctx)
+        # Never errors back to the model — pinning is a free reflex.
+        self.assertFalse(res["is_error"])
+        self.assertFalse(os.path.exists(self.bm_path))
+
+    def test_side_query_failure_is_swallowed(self) -> None:
+        ctx = self._ctx(raise_on_side_query=True)
+        res = self.handoff.pin({}, ctx)
+        self.assertFalse(res["is_error"])
+
+    def test_partial_resolution_counts_written(self) -> None:
+        ctx = self._ctx("alpha bravo ||| good\nnope nope ||| bad")
+        res = self.handoff.pin({}, ctx)
+        self.assertFalse(res["is_error"])
+        rows = _read_jsonl(self.bm_path)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["_bookmark_note"], "good")
 
 
 if __name__ == "__main__":

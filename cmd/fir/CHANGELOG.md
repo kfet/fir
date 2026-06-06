@@ -4,6 +4,7 @@
 
 ### Added
 
+- New `pin` tool in the handoff extension: an argless 📌 reflex. The model calls it the instant it senses something worth keeping (no quote, no note, no deliberation); a `side_query` branch with full session context then decides which past turn(s) actually merit a bookmark and writes them via the existing bookmark path. Lowers the cost of *signalling* to near zero while moving the *judgement* off the main thread. The handoff extension is now also enabled in `acp` mode (was `tui`-only) so `pin`/`bookmark` work on ACP sessions; `self_handoff` degrades to a clear "interactive only" message there.
 - Extensions can now reload a single other extension mid-session via the new
   `reload_extension` SDK method (`ctx.reload_extension(name)`). It stops the
   named extension, removes **only** that extension's tools (others untouched),

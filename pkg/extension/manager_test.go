@@ -31,11 +31,11 @@ import (
 //	doctor:         2 tools (doctor_query, doctor_summary)
 //	mood:           2 tools (mood_note, mood_recent)
 //	autoresearch:   2 tools (run_experiment, log_experiment)
-//	handoff:        2 tools (self_handoff, bookmark)
+//	handoff:        3 tools (self_handoff, bookmark, pin)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 19
+const builtinToolCount = 20
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
@@ -379,9 +379,10 @@ func TestManager_ActiveMode(t *testing.T) {
 	}
 	defer mgr.Stop() //nolint:errcheck
 
-	// handoff (modes: tui) registers self_handoff + bookmark so it is
-	// filtered out in acp mode along with its tools.
-	expected := builtinToolCount - 2 + 1 // builtins (minus tui-only) + acp-ext
+	// handoff is now modes: tui, acp, so its tools load in acp too. The
+	// only mode-filtered extension here is the synthetic tui-ext fixture
+	// (its tool is excluded); acp-ext (+1) loads.
+	expected := builtinToolCount + 1 // all builtins (acp-compatible) + acp-ext
 	if n := pollToolCount(api, expected, 5*time.Second); n != expected {
 		t.Fatalf("expected %d tools in acp mode, got %d", expected, n)
 	}
