@@ -441,6 +441,18 @@ func run() error {
 			url = "https://github.com/kfet/fir-dist/releases"
 		}
 		fmt.Println("License: MIT — " + url)
+		// Report whether a newer release is available (best-effort, cached).
+		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rel, err := update.CheckLatest(checkCtx, version, resolveAgentDir())
+		switch {
+		case err != nil:
+			fmt.Println("Update check failed: " + err.Error())
+		case rel != nil:
+			fmt.Println(update.UpdateNotice(rel.Version))
+		default:
+			fmt.Println("You are on the latest version.")
+		}
 		return nil
 	}
 
