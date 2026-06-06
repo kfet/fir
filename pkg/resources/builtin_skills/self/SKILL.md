@@ -109,7 +109,7 @@ The `observe` extension is a builtin and loads automatically in every session â€
 ```
 fir observe                        # list LIVE sessions (running/idle) across all fir processes
 fir observe --all                  # include ended + crashed sessions
-fir observe <id-prefix>            # tail-and-format the session transcript
+fir observe <id-prefix>            # LIVE tail-and-format the transcript (follows in real time; Ctrl-\ to detach)
 fir observe <id-prefix> --json     # raw JSONL passthrough
 fir observe --cwd .                # resolve by current directory
 fir observe <id> --interact        # also pipe stdin to session (single-pane convenience)
