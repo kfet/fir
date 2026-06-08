@@ -78,8 +78,10 @@ Prefer deterministic synchronization over `time.Sleep` and wall-clock polling:
 
 - **Channels over polling** — use `chan struct{}` signals, `sync.WaitGroup`, or callbacks instead of `require.Eventually` with arbitrary timeouts. When testing async behaviour (reconnects, event delivery), wire callbacks or subscribe to events and wait on channels.
 - **No `time.Sleep` in tests** — sleep-based tests are flaky under CI load and the race detector. If you need to wait for a goroutine, use a channel or sync primitive.
-- **`require.Eventually` is a last resort** — only for checking external state you can't subscribe to (e.g. polling a server's registration map). Use short poll intervals (10ms) and generous timeouts (3-5s) when unavoidable.
+- **`require.Eventually` is a last resort** — only for checking external state you can't subscribe to (e.g. polling a server's registration map). Use short poll intervals (10ms) and **generous timeouts (15-20s, not 2-3s)** when unavoidable. Early-exit poll loops pay nothing extra on the happy path, so a wide cap is free; tight 2-3s caps are the single most common CI flake here — they blow past under the race detector + parallel `make all` load on slow GitHub runners. This applies to Python tests too (e.g. polling a socket-handler thread): widen the deadline.
 - **Callbacks in Config, not after init** — if a struct spawns goroutines on creation, callbacks must be set via the config/options struct *before* construction, not after. Setting callbacks after init races with the goroutine.
+- **Tear down what a test spins up** — if a test creates a session/agent/subprocess that launches background goroutines (async setup, store writes, MCP), tear it down in `t.Cleanup` *before* `t.TempDir()` cleanup runs. Otherwise late background writes race `RemoveAll` and flake with `directory not empty`.
+- **Stop the producer before asserting final state** — when asserting the *last* action a background ticker/loop performed (e.g. "restore happened last"), signal stop and **join the goroutine** before the assertion, and have the loop re-check its stop flag before its final side effect. Do not rely on a `join(timeout=N)` safety valve to win the race — under load it times out and a lingering tick lands after your assertion.
 
 ## Extensions
 
