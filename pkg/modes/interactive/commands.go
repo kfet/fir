@@ -161,7 +161,7 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 
 	switch cmd {
 	case "/help":
-		m.showHelp()
+		m.toggleHelpVisibility()
 	case "/new":
 		var initialPrompt string
 		if len(parts) > 1 {
@@ -854,7 +854,7 @@ func (m *InteractiveMode) toggleSessionVisibility() {
 	} else {
 		lines := m.buildSessionInfoLines()
 		if m.sessionComponent == nil {
-			m.sessionComponent = components.NewSessionComponent(lines)
+			m.sessionComponent = components.NewOverlayComponent(lines)
 		} else {
 			m.sessionComponent.SetLines(lines)
 		}
@@ -1747,7 +1747,7 @@ func (m *InteractiveMode) showWarning(message string) {
 
 // clearTransientSurfaces dismisses every kind of transient surface clutter
 // without aborting the running turn: aside response cards, lingering command
-// status / warning messages, any open session-info or plan overlay, and
+// status / warning messages, any open session-info, plan, or help overlay, and
 // extension/notification statuses shown in the footer. It is the action behind
 // the dedicated Ctrl+L clear key, offered as a safe alternative to Escape
 // (which can interrupt streaming).
@@ -1776,6 +1776,15 @@ func (m *InteractiveMode) clearTransientSurfaces() {
 		if m.planInContainer {
 			m.planContainer.Clear()
 			m.planInContainer = false
+		}
+	}
+
+	// Collapse the help overlay if it is open.
+	if !m.helpHidden {
+		m.helpHidden = true
+		if m.helpInContainer {
+			m.helpContainer.Clear()
+			m.helpInContainer = false
 		}
 	}
 
@@ -1822,9 +1831,51 @@ func (m *InteractiveMode) dismissLatestAside(activeTurnOnly bool) bool {
 	return true
 }
 
-func (m *InteractiveMode) showHelp() {
-	helpText := `Available commands:
-  /help           - Show this help / keyboard shortcuts
+// toggleHelpVisibility shows or hides the collapsible help overlay.
+// When opened, the help lines are rebuilt fresh. When closed, the component is
+// removed from its container so it leaves the conversation stream entirely
+// (mirrors the session and plan overlays).
+func (m *InteractiveMode) toggleHelpVisibility() {
+	// helpContainer and m.ui are created together in Init; guarding the
+	// container also covers the no-UI case (bare dispatch unit tests).
+	if m.helpContainer == nil {
+		return
+	}
+	m.helpHidden = !m.helpHidden
+	if m.helpHidden {
+		if m.helpInContainer {
+			m.helpContainer.Clear()
+			m.helpInContainer = false
+		}
+	} else {
+		lines := m.buildHelpLines()
+		if m.helpComponent == nil {
+			m.helpComponent = components.NewOverlayComponent(lines)
+		} else {
+			m.helpComponent.SetLines(lines)
+		}
+		if !m.helpInContainer {
+			m.helpContainer.AddChild(m.helpComponent)
+			m.helpInContainer = true
+		}
+	}
+	m.ui.RequestRender(false)
+}
+
+// buildHelpLines builds the help / keyboard-shortcuts lines shown in the help
+// overlay. The shortcut list is kept accurate against
+// pkg/tui.DefaultAppKeybindings. The current binary path is substituted into
+// the /reexec line.
+func (m *InteractiveMode) buildHelpLines() []string {
+	bin, _ := os.Executable()
+	if bin == "" {
+		bin = "(unknown)"
+	} else if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(bin, home+"/") {
+		bin = "~/" + bin[len(home)+1:]
+	}
+
+	helpText := fmt.Sprintf(`Available commands:
+  /help           - Toggle this help / keyboard shortcuts overlay
   /model          - Select model (or /model <search>)
   /thinking       - Select thinking level
   /settings       - Open settings menu
@@ -1850,27 +1901,27 @@ func (m *InteractiveMode) showHelp() {
 Keyboard shortcuts:
   Enter           - Send message
   Shift+Enter     - New line
-  Ctrl+D          - Exit (when editor is empty)
+  Escape          - Interrupt streaming
   Ctrl+C          - Cancel autocomplete / abort streaming / clear editor
-  Escape          - Clear aside card / abort streaming / double-tap for sessions
+  Ctrl+D          - Exit (when editor is empty)
+  Ctrl+L          - Dismiss/clear: aside cards + status + notifications + collapse open overlay (no abort)
+  Ctrl+N          - Start a new session
+  Ctrl+Z          - Suspend to background
+  Ctrl+G          - Open external editor
+  Ctrl+V          - Paste image from clipboard
   Tab             - Path completion / accept autocomplete
   Shift+Tab       - Cycle thinking level
-  Ctrl+P          - Cycle models
+  Ctrl+P          - Cycle models forward
+  Shift+Ctrl+P    - Cycle models backward
   Alt+L           - Open model selector
   Ctrl+O          - Toggle tool output expansion
   Ctrl+T          - Toggle thinking block visibility
-  Ctrl+R          - Toggle plan visibility
+  Ctrl+R          - Toggle plan overlay
   Ctrl+S          - Toggle session info overlay
-  Ctrl+L          - Clear aside cards + status + notifications (no abort)
-  Ctrl+Z          - Suspend to background
-  Ctrl+V          - Paste image from clipboard
+  Alt+Enter       - Queue follow-up message
+  Alt+Up          - Dequeue last follow-up
   /               - Slash commands
-  !<command>      - Run bash command`
-	bin, _ := os.Executable()
-	if bin == "" {
-		bin = "(unknown)"
-	} else if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(bin, home+"/") {
-		bin = "~/" + bin[len(home)+1:]
-	}
-	m.showMessage(fmt.Sprintf(helpText, bin))
+  !<command>      - Run bash command`, bin)
+
+	return strings.Split(helpText, "\n")
 }

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `/help` now renders as a sticky, collapsible overlay above the editor (like
+  `/session`) instead of dumping into the conversation stream. Run `/help` to
+  toggle it; `Ctrl+L` (dismiss) also collapses it. The shortcut list was
+  corrected against the current keybindings (model selector is `Alt+L`,
+  dismiss/clear is `Ctrl+L`) and now includes `Ctrl+N`, `Ctrl+G`, `Alt+Enter`,
+  and `Alt+Up`. The session/help overlays share one generic `OverlayComponent`.
+  (`pkg/modes/interactive`)
+
 ## [0.62.0] - 2026-06-07
 
 ### Added

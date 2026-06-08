@@ -204,6 +204,10 @@ func newTestModeInternal(t *testing.T, session *session.AgentSession) *testMode 
 	m.sessionHidden = true
 	ui.AddChild(m.sessionContainer)
 
+	m.helpContainer = &tui.Container{}
+	m.helpHidden = true
+	ui.AddChild(m.helpContainer)
+
 	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
 		return m.getFooterData()
 	})
@@ -551,9 +555,84 @@ func TestInteractiveMode_SlashHelp(t *testing.T) {
 		t.Errorf("expected empty editor after /help, got %q", got)
 	}
 
-	// Help text should be added to message container
-	if tm.messageCount() == 0 {
-		t.Error("expected help message to be added to message container")
+	// /help now toggles a sticky overlay rather than dumping into the stream.
+	if tm.mode.helpHidden || !tm.mode.helpInContainer {
+		t.Fatal("expected help overlay open after /help")
+	}
+	if len(tm.mode.helpContainer.ChildrenSnapshot()) != 1 {
+		t.Fatalf("expected help component in container, got %d children", len(tm.mode.helpContainer.ChildrenSnapshot()))
+	}
+	if !strings.Contains(tm.renderedOutput(), "Available commands:") {
+		t.Fatalf("expected help overlay rendered, got %q", tm.renderedOutput())
+	}
+}
+
+func TestInteractiveMode_TogglesHelpOverlay(t *testing.T) {
+	tm := newTestMode(t)
+
+	// First toggle opens the overlay.
+	tm.mode.toggleHelpVisibility()
+	tm.waitRender()
+	if tm.mode.helpHidden || !tm.mode.helpInContainer {
+		t.Fatal("expected help overlay open after first toggle")
+	}
+	if len(tm.mode.helpContainer.ChildrenSnapshot()) != 1 {
+		t.Fatalf("expected help component in container, got %d children", len(tm.mode.helpContainer.ChildrenSnapshot()))
+	}
+
+	// Second toggle closes it — the component must leave the container.
+	tm.mode.toggleHelpVisibility()
+	tm.waitRender()
+	if !tm.mode.helpHidden || tm.mode.helpInContainer {
+		t.Fatal("expected help overlay closed after second toggle")
+	}
+	if len(tm.mode.helpContainer.ChildrenSnapshot()) != 0 {
+		t.Fatalf("expected empty help container after close, got %d children", len(tm.mode.helpContainer.ChildrenSnapshot()))
+	}
+}
+
+func TestInteractiveMode_ClearTransientSurfacesCollapsesHelp(t *testing.T) {
+	tm := newTestMode(t)
+
+	// Open the help overlay.
+	tm.mode.toggleHelpVisibility()
+	tm.waitRender()
+	if tm.mode.helpHidden || !tm.mode.helpInContainer {
+		t.Fatal("expected help overlay open")
+	}
+
+	// Ctrl+L / clearTransientSurfaces should dismiss it.
+	tm.mode.clearTransientSurfaces()
+	tm.waitRender()
+	if !tm.mode.helpHidden || tm.mode.helpInContainer {
+		t.Fatal("expected help overlay dismissed by clearTransientSurfaces")
+	}
+	if len(tm.mode.helpContainer.ChildrenSnapshot()) != 0 {
+		t.Fatalf("expected empty help container, got %d children", len(tm.mode.helpContainer.ChildrenSnapshot()))
+	}
+}
+
+func TestInteractiveMode_BuildHelpLinesAccurate(t *testing.T) {
+	tm := newTestMode(t)
+	lines := tm.mode.buildHelpLines()
+	joined := strings.Join(lines, "\n")
+
+	// Spot-check a handful of bindings that must match
+	// pkg/tui.DefaultAppKeybindings.
+	for _, want := range []string{
+		"Alt+L           - Open model selector",
+		"Ctrl+S          - Toggle session info overlay",
+		"Ctrl+R          - Toggle plan overlay",
+		"Ctrl+N          - Start a new session",
+		"Ctrl+G          - Open external editor",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected help lines to contain %q", want)
+		}
+	}
+	// Ctrl+L must describe overlay collapse.
+	if !strings.Contains(joined, "Ctrl+L") || !strings.Contains(joined, "collapse open overlay") {
+		t.Errorf("expected Ctrl+L line to mention overlay collapse, got:\n%s", joined)
 	}
 }
 
@@ -1074,7 +1153,7 @@ func TestInteractiveMode_HandleSlashCommandDispatch(t *testing.T) {
 		wantMessage  bool // something added to messageContainer
 		wantWarning  bool // something added to commandStatusContainer
 	}{
-		{"/help", false, true, false},
+		{"/help", false, false, false},
 		{"/quit", true, false, false},
 		{"/exit", true, false, false},
 		{"/bogus", false, false, true},
@@ -1216,13 +1295,16 @@ func TestInteractiveMode_FullWorkflow(t *testing.T) {
 		t.Errorf("step 2: editor not cleared by Ctrl+C, got %q", tm.editorText())
 	}
 
-	// 3. Use /help command
+	// 3. Use /help command — now toggles a sticky overlay.
 	tm.typeText("/help")
 	tm.pressEnter()
 	tm.waitRender()
-	if tm.messageCount() == 0 {
-		t.Error("step 3: /help should add message")
+	if tm.mode.helpHidden || !tm.mode.helpInContainer {
+		t.Error("step 3: /help should open the help overlay")
 	}
+	// Close it again so it doesn't linger over the rest of the workflow.
+	tm.mode.toggleHelpVisibility()
+	tm.waitRender()
 
 	// 4. Submit another prompt
 	tm.typeText("Second prompt")

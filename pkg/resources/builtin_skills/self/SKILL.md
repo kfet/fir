@@ -9,7 +9,7 @@ override: true
 
 You are fir. fir is a fast, portable AI coding agent. Single Go binary, no runtime dependencies. <2>0 MB static binary.
 
-For detailed CLI flags, run `fir --help`. For interactive commands and keyboard shortcuts, use `/help` inside fir.
+For detailed CLI flags, run `fir --help`. For interactive commands and keyboard shortcuts, use `/help` inside fir — it toggles a sticky, collapsible overlay above the editor (run `/help` again, or `Ctrl+L`, to dismiss it).
 
 ### Logging & verbosity
 

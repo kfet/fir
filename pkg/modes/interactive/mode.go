@@ -56,9 +56,13 @@ type InteractiveMode struct {
 	planHidden             bool           // true = plan widget collapsed (footer still shows progress)
 	planInContainer        bool           // true = planComponent is currently a child of planContainer
 	sessionContainer       *tui.Container // session-info overlay
-	sessionComponent       *components.SessionComponent
-	sessionHidden          bool // true = session overlay collapsed
-	sessionInContainer     bool // true = sessionComponent is currently a child of sessionContainer
+	sessionComponent       *components.OverlayComponent
+	sessionHidden          bool           // true = session overlay collapsed
+	sessionInContainer     bool           // true = sessionComponent is currently a child of sessionContainer
+	helpContainer          *tui.Container // help overlay
+	helpComponent          *components.OverlayComponent
+	helpHidden             bool // true = help overlay collapsed
+	helpInContainer        bool // true = helpComponent is currently a child of helpContainer
 	footerComponent        *components.FooterComponent
 	footerDataProvider     *FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
@@ -397,6 +401,11 @@ func (m *InteractiveMode) Init() error {
 	m.sessionContainer = &tui.Container{}
 	m.sessionHidden = true // start collapsed; /session or Ctrl+S to expand
 	m.ui.AddChild(m.sessionContainer)
+
+	// Create help container (collapsible overlay above the editor)
+	m.helpContainer = &tui.Container{}
+	m.helpHidden = true // start collapsed; /help to expand
+	m.ui.AddChild(m.helpContainer)
 
 	// Create editor container (holds editor or selector overlays)
 	m.editorContainer = &tui.Container{}
