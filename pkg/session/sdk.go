@@ -148,7 +148,11 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 
 	if model == nil && hasExistingSession && existingSession.Model != nil {
 		restored := modelRegistry.Find(existingSession.Model.Provider, existingSession.Model.ModelID)
-		if restored != nil && modelRegistry.GetApiKey(restored) != "" {
+		// Use HasConfiguredAuth (not GetApiKey != "") so OAuth-authenticated
+		// providers (e.g. Anthropic via /login) count as restorable. Otherwise
+		// every -c restore of an OAuth model spuriously falls back, often to the
+		// very same model: "Could not restore X. Using X."
+		if restored != nil && modelRegistry.HasConfiguredAuth(restored) {
 			model = restored
 		}
 		if model == nil {
@@ -171,7 +175,15 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 				modelFallbackMessage = "No models available. Use /login or set an API key environment variable."
 			}
 		} else if modelFallbackMessage != "" {
-			modelFallbackMessage += fmt.Sprintf(". Using %s/%s", model.Provider, model.ID)
+			// If we fell back to the exact same model that was recorded, the
+			// warning is meaningless noise — suppress it.
+			if existingSession.Model != nil &&
+				model.Provider == existingSession.Model.Provider &&
+				model.ID == existingSession.Model.ModelID {
+				modelFallbackMessage = ""
+			} else {
+				modelFallbackMessage += fmt.Sprintf(". Using %s/%s", model.Provider, model.ID)
+			}
 		}
 	}
 

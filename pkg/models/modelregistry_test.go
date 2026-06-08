@@ -596,6 +596,17 @@ func TestModelRegistry_IsUsingOAuth(t *testing.T) {
 	if !registry.IsUsingOAuth(m) {
 		t.Error("expected IsUsingOAuth to be true")
 	}
+
+	// Regression: OAuth-only providers have no API key, but MUST still count as
+	// having configured auth. Session restore (pkg/session/sdk.go) keys off
+	// HasConfiguredAuth, not GetApiKey; using GetApiKey here caused -c to
+	// spuriously fail to restore OAuth models ("Could not restore X. Using X.").
+	if registry.GetApiKey(m) != "" {
+		t.Errorf("expected empty API key for OAuth provider, got %q", registry.GetApiKey(m))
+	}
+	if !registry.HasConfiguredAuth(m) {
+		t.Error("expected HasConfiguredAuth to be true for OAuth provider")
+	}
 }
 
 func TestModelRegistry_AuthHeader(t *testing.T) {
