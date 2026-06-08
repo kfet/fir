@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kfet/ai/jsonparse"
+	"github.com/kfet/ai/ratelimit"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
-	"github.com/kfet/fir/pkg/ai/jsonparse"
-	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 

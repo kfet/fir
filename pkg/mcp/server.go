@@ -8,7 +8,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 // NewToolServer creates an MCP server that exposes the provided fir tools as

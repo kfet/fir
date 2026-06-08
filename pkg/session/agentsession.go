@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/agent"
+	"github.com/kfet/agent/tools"
+	"github.com/kfet/ai/overflow"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/overflow"
 	"github.com/kfet/fir/pkg/config"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"

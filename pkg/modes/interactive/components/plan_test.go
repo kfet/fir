@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 func TestPlanComponent_Empty(t *testing.T) {

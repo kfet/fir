@@ -5,7 +5,7 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 // planConn is the subset of acpConn needed by planTracker.

@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phases 0, 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release.**
+Status: **Phases 0, 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release. Phase 5 LOCAL extraction complete (pending publish) — see below.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -284,6 +284,52 @@ least one release:
    `kfet/pinexec`.
 3. Switch fir to import the external modules; delete the in-tree
    copies.
+
+**Status: LOCAL extraction complete (pending publish).** Done as a
+local-only mechanical move on branch `feat/extract-ai-agent`; nothing is
+pushed and no GitHub repos were created. The two new modules live as
+sibling repos and fir wires them via `replace` directives.
+
+What landed:
+
+- **`github.com/kfet/ai`** (`~/dev/ai/ai`). The portable types
+  (`pkg/ai/core/*` — `types.go`, `eventstream.go`, `retryclass.go`)
+  became the module root package `ai`. Subpackages `ratelimit/`,
+  `overflow/`, `jsonparse/` moved verbatim (import paths rewritten from
+  `pkg/ai` / `pkg/ai/core` to `github.com/kfet/ai`). Sibling conventions:
+  `README`, `CHANGELOG`, `Makefile` (gofmt + vet + staticcheck + race +
+  covgate **`-min=100`**), `.covignore`, `doc.go`, `LICENSE` (MIT, with
+  pi-mono attribution), `.github/workflows/test.yml`. A `coverage_test.go`
+  and `retryclass_test.go` were added to reach the 100% floor (the moved
+  packages were not independently 100% in-tree because fir has no
+  coverage gate). `make all` green.
+
+- **`github.com/kfet/agent`** (`~/dev/ai/agent`). `pkg/agent` and
+  `pkg/agent/tools` moved verbatim; `pkg/ai/core` references rewritten to
+  `core "github.com/kfet/ai"` (aliased import keeps `core.` call sites
+  byte-identical). Depends only on `kfet/ai`, `kfet/pinexec`, and
+  `golang.org/x/{image,text}`. `forbidden_imports_test.go` was rewritten
+  to assert that the transitive import graph contains only those
+  sanctioned modules + stdlib. A `staticcheck.conf` disables the ST10xx
+  stylecheck family (the ported code intentionally keeps "Ported from"
+  headers, `GetApiKey` spelling, and capitalised tool error strings —
+  all behaviour-/API-identical; SA correctness checks stay on). **Gate
+  floor is 85%, not 100%** — fir had no coverage gate, so runtime paths
+  exercised only by fir-side session/mode/e2e tests arrived without unit
+  coverage; raising to 100% is tracked follow-up. `make all` green.
+
+- **fir** rewired: `go.mod` gains `require github.com/kfet/ai v0.0.0`
+  and `github.com/kfet/agent v0.0.0` with `replace` directives pointing
+  at `../ai` and `../agent`. All fir imports of `pkg/ai/core`,
+  `pkg/ai/ratelimit`, `pkg/ai/overflow`, `pkg/ai/jsonparse`, `pkg/agent`,
+  and `pkg/agent/tools` repointed to the new module paths; the in-tree
+  copies were deleted. `pkg/ai/aliases.go` now re-exports from
+  `github.com/kfet/ai`. `make all` green. The forbidden-imports guard now
+  lives in (and passes within) `kfet/agent`.
+
+Remaining before this can ship as a fir release: publish `kfet/ai` and
+`kfet/agent` (tag + push), drop the `replace` directives, and pin real
+versions. Until then fir is intentionally non-shippable from this branch.
 
 Sibling repo conventions (`firpty`, `skipstone`, `pinexec`, `pinoauth`)
 apply: README, CHANGELOG, Makefile coverage gate, `.covignore`,

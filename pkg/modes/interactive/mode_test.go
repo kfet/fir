@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/envkeys"
 	"github.com/kfet/fir/pkg/auth"

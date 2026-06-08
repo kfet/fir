@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 // writeExtScriptTool writes a test extension that registers a single tool

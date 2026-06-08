@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/session/store"
 )

@@ -20,8 +20,8 @@ import (
 	skipstone "github.com/kfet/skipstone"
 	"github.com/kfet/skipstone/creds"
 
+	"github.com/kfet/ai/jsonparse"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/jsonparse"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 

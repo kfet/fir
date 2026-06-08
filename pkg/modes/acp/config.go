@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 	"github.com/kfet/fir/pkg/models"

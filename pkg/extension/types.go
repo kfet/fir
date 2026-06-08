@@ -1,6 +1,6 @@
 package extension
 
-import "github.com/kfet/fir/pkg/agent"
+import "github.com/kfet/agent"
 
 // This file defines typed structs for every JSON-RPC method and event
 // payload that crosses the extension wire boundary. They replace ad-hoc

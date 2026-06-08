@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kfet/ai/jsonparse"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/jsonparse"
 )
 
 // responsesSSEProcessor processes SSE events for the OpenAI Responses API format.

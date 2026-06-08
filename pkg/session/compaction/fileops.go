@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 // FileOperations tracks files read, written, and edited during a conversation.

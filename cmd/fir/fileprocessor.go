@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 )
 

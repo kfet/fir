@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 func TestToolExecution_ReadPending(t *testing.T) {

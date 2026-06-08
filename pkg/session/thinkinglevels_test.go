@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/ai/core"
+	"github.com/kfet/agent"
+	core "github.com/kfet/ai"
 )
 
 func TestAvailableThinkingLevelsForModel_Nil(t *testing.T) {

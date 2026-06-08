@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 )
 
 func TestParseArgs_Empty(t *testing.T) {

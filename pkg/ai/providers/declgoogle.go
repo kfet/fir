@@ -29,9 +29,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kfet/ai/ratelimit"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/ai/providers/declcfg"
-	"github.com/kfet/fir/pkg/ai/ratelimit"
 	firlog "github.com/kfet/fir/pkg/log"
 )
 

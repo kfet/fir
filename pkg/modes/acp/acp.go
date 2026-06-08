@@ -19,7 +19,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"

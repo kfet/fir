@@ -8,7 +8,7 @@
 // See docs/design/ai-agent-extraction.md (Phase 2).
 package ai
 
-import "github.com/kfet/fir/pkg/ai/core"
+import core "github.com/kfet/ai"
 
 // ---------------------------------------------------------------
 // Type re-exports from core

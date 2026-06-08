@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/agent"
+	"github.com/kfet/agent/tools"
 	"github.com/kfet/fir/pkg/session/store"
 )
 

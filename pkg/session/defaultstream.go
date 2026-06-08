@@ -14,9 +14,9 @@ package session
 import (
 	"context"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
+	core "github.com/kfet/ai"
 	"github.com/kfet/fir/pkg/ai"
-	"github.com/kfet/fir/pkg/ai/core"
 )
 
 func init() {

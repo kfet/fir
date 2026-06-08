@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/envvars"
 )
 

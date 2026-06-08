@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kfet/fir/pkg/agent"
-	"github.com/kfet/fir/pkg/agent/tools"
+	"github.com/kfet/agent"
+	"github.com/kfet/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
