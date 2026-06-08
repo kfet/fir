@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-06-07
+
 ### Fixed
 
 - ACP mode: fixed an unbounded session / python-sidecar leak that could OOM a
