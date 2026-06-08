@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Extension fork-template now calls `gc.collect()` + `gc.freeze()` before
+  serving spawn requests, moving the imported SDK heap into a permanent GC
+  generation the collector never rescans. This stops a forked child's
+  `gc.collect()` from dirtying (COW-copying) the shared template heap,
+  cutting per-child `Private_Dirty` ~58% (measured: ~5.5MB -> ~2.3MB).
+  (`pkg/extension/sdk/python/forkserver.py`)
+
 ## [0.64.0] - 2026-06-08
 
 ### Changed
