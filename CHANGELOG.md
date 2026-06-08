@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.64.1] - 2026-06-08
+
 ### Changed
 
 - Extension fork-template now calls `gc.collect()` + `gc.freeze()` before
