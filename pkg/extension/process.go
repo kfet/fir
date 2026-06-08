@@ -33,6 +33,13 @@ type Process struct {
 	backoff  time.Duration
 	stopped  bool
 
+	// Fork-template fields. When forkSrv is non-nil the process is a child of
+	// the fork template (not a direct exec.Cmd child): cmd is nil, transport is
+	// the unix-socket conn, and teardown/reaping is delegated to forkSrv.
+	forkSrv *ForkServer
+	forkPid int
+	conn    io.Closer
+
 	waitErr  error
 	waitDone chan struct{}
 }
@@ -72,6 +79,30 @@ func (p *Process) Start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.startLocked()
+}
+
+// StartForked spawns the extension as a fork of the warm template managed by
+// fs, instead of a fresh exec. The forked child inherits the template's
+// imported heap copy-on-write and reconnects its stdio to a per-extension unix
+// socket, which becomes this Process's Codec transport. On any error the caller
+// should fall back to Start (plain exec).
+func (p *Process) StartForked(fs *ForkServer) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	pid, conn, err := fs.Spawn(p.cfg.Name, p.cfg.Path, envSliceToMap(p.env))
+	if err != nil {
+		return err
+	}
+	p.forkSrv = fs
+	p.forkPid = pid
+	p.conn = conn
+	p.stdin = conn.(io.WriteCloser)
+	p.codec = NewCodec(conn, conn)
+	p.cmd = nil
+	p.stopped = false
+	p.waitDone = make(chan struct{})
+	return nil
 }
 
 func (p *Process) startLocked() error {
@@ -135,6 +166,9 @@ func (p *Process) Wait() error {
 func (p *Process) Pid() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.forkSrv != nil {
+		return p.forkPid
+	}
 	if p.cmd == nil || p.cmd.Process == nil {
 		return 0
 	}
@@ -144,6 +178,28 @@ func (p *Process) Pid() int {
 // Stop sends SIGTERM, waits up to 2s, then SIGKILL.
 func (p *Process) Stop(ctx context.Context) error {
 	p.mu.Lock()
+	if p.forkSrv != nil {
+		fs := p.forkSrv
+		pid := p.forkPid
+		conn := p.conn
+		done := p.waitDone
+		alreadyStopped := p.stopped
+		p.stopped = true
+		p.mu.Unlock()
+		if alreadyStopped {
+			return nil
+		}
+		// Close the socket so the child's read loop sees EOF and exits, then
+		// ask the template (its parent) to terminate and reap it.
+		if conn != nil {
+			_ = conn.Close()
+		}
+		_ = fs.StopChild(pid)
+		if done != nil {
+			close(done)
+		}
+		return nil
+	}
 	cmd := p.cmd
 	done := p.waitDone
 	p.stopped = true

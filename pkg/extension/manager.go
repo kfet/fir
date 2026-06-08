@@ -62,6 +62,12 @@ type Manager struct {
 	extraExtensionDirs  []string // extra dirs from installed packages
 	extraExtensionFiles []string // extra script files from installed packages
 	configDirs          []string // priority-ordered config dirs sent to extensions on init
+
+	// fork is the warm Python template used to COW-spawn builtin .py
+	// extensions. Lazily started in Start (only when at least one eligible
+	// extension exists) and torn down in StopWithReason. nil when disabled,
+	// unavailable, or no eligible extensions are present.
+	fork *ForkServer
 }
 
 type managedBridge struct {
@@ -263,6 +269,29 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 		toStart = append(toStart, cfg)
 	}
 
+	// Start the warm fork template once, before the parallel spawn loop, if any
+	// extension is fork-eligible (builtin .py) and the template is not
+	// disabled. Builtin .py extensions then COW-fork off it; everything else
+	// (and any fork failure) falls back to the plain exec path in startOne.
+	if sdkPath != "" && !forkServerDisabled() {
+		eligible := false
+		for _, cfg := range toStart {
+			if forkEligible(cfg) {
+				eligible = true
+				break
+			}
+		}
+		if eligible {
+			if fs, ferr := StartForkServer(sdkPath, sdkEnv, m.logger); ferr != nil {
+				m.logger.Warn("fork template unavailable; using exec spawn", "err", ferr)
+			} else {
+				m.mu.Lock()
+				m.fork = fs
+				m.mu.Unlock()
+			}
+		}
+	}
+
 	var wg sync.WaitGroup
 	var failMu sync.Mutex
 	var failures []StartFailure
@@ -321,6 +350,23 @@ func (m *Manager) shouldSkip(cfg ExtProcConfig) bool {
 	return false
 }
 
+// startProc spawns proc, preferring the warm fork template for eligible builtin
+// .py extensions and falling back to a plain exec spawn on any fork failure.
+func (m *Manager) startProc(proc *Process, cfg ExtProcConfig) error {
+	m.mu.Lock()
+	fs := m.fork
+	m.mu.Unlock()
+
+	if fs != nil && forkEligible(cfg) {
+		if err := proc.StartForked(fs); err != nil {
+			m.logger.Warn("fork spawn failed; falling back to exec", "ext", cfg.Name, "err", err)
+		} else {
+			return nil
+		}
+	}
+	return proc.Start()
+}
+
 func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, env []string, api BridgeAPI, projectDir string) error {
 	startOneBegin := time.Now()
 	// Reject extension names that collide with reserved core observable
@@ -372,7 +418,7 @@ func (m *Manager) startOne(ctx context.Context, cfg ExtProcConfig, cwd string, e
 
 	proc := NewProcess(cfg, env, m.logger)
 	t0 := time.Now()
-	if err := proc.Start(); err != nil {
+	if err := m.startProc(proc, cfg); err != nil {
 		return err
 	}
 	m.logger.Info("ext startOne: process started", "ext", cfg.Name, "elapsed_ms", time.Since(t0).Milliseconds())
@@ -483,6 +529,8 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	bridges := m.bridges
 	m.bridges = nil
 	m.stopped = true
+	fork := m.fork
+	m.fork = nil
 	m.mu.Unlock()
 
 	// Build session_end payload.
@@ -530,6 +578,12 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 		}(mb)
 	}
 	wg.Wait()
+
+	// Tear down the fork template after its forked children have been stopped
+	// and reaped (each proc.Stop above delegated reaping to it).
+	if fork != nil {
+		_ = fork.Close()
+	}
 	return nil
 }
 
@@ -1014,11 +1068,20 @@ func (m *Manager) DispatchCommand(name string, args []string, timeout time.Durat
 func (m *Manager) ExtensionPIDs() []int {
 	m.mu.Lock()
 	bridges := append([]*managedBridge(nil), m.bridges...)
+	fork := m.fork
 	m.mu.Unlock()
 
-	out := make([]int, 0, len(bridges))
+	out := make([]int, 0, len(bridges)+1)
 	for _, mb := range bridges {
 		if pid := mb.proc.Pid(); pid > 0 {
+			out = append(out, pid)
+		}
+	}
+	// Include the fork template itself so /reexec SIGKILLs it too (it is a
+	// direct child of this process; its forked children get reparented and
+	// exit on socket EOF).
+	if fork != nil {
+		if pid := fork.Pid(); pid > 0 {
 			out = append(out, pid)
 		}
 	}

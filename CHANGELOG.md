@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Python extension sidecars can now COW-share a single warm interpreter heap via
+  a fork template. fir starts one `forkserver.py` per session that imports the
+  `fir_ext` SDK + stdlib once, then `os.fork()`s a child per builtin Python
+  extension; each child inherits the warm heap copy-on-write (Shared_Clean) and
+  reconnects its JSON-RPC channel over a private unix socket, collapsing
+  per-sidecar private memory (~7MB×N → ~one shared heap + tiny deltas) and
+  skipping re-import on every spawn (~12× faster cold start, measured). Only
+  builtin `*.py` extensions are forked; shell/JS/project extensions keep the
+  exec path, and any fork failure falls back to exec. Disable with
+  `FIR_NO_FORKSERVER=1`. (`pkg/extension/forkserver.go`,
+  `pkg/extension/sdk/python/forkserver.py`)
+
 ## [0.61.3] - 2026-06-07
 
 ### Changed
