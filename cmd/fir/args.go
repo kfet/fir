@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 	"github.com/kfet/fir/pkg/envvars"
@@ -44,6 +45,9 @@ type Args struct {
 	NoMCP              bool
 	MCPConfig          string
 	WaitMCP            bool
+	// ACPSessionIdleTTL is how long an ACP in-memory session may sit idle
+	// before the background reaper tears it down. Defaults to 1h; 0 disables.
+	ACPSessionIdleTTL  time.Duration
 	Extensions         []string
 	DisabledExtensions []string
 	NoExtensions       bool
@@ -110,9 +114,10 @@ func isAllVs(s string) bool {
 // ParseArgs parses CLI arguments into an Args struct.
 func ParseArgs(args []string) *Args {
 	result := &Args{
-		Messages: []string{},
-		FileArgs: []string{},
-		Seen:     make(map[string]bool),
+		Messages:          []string{},
+		FileArgs:          []string{},
+		Seen:              make(map[string]bool),
+		ACPSessionIdleTTL: time.Hour,
 	}
 	mark := func(flag string) { result.Seen[flag] = true }
 
@@ -232,6 +237,15 @@ func ParseArgs(args []string) *Args {
 		case arg == "--wait-mcp":
 			result.WaitMCP = true
 			mark("--wait-mcp")
+
+		case arg == "--acp-session-idle-ttl" && i+1 < len(args):
+			i++
+			if d, err := time.ParseDuration(args[i]); err == nil {
+				result.ACPSessionIdleTTL = d
+				mark("--acp-session-idle-ttl")
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: invalid --acp-session-idle-ttl %q (want a Go duration like 1h, 30m, 0): %v\n", args[i], err)
+			}
 
 		case arg == "--tools" && i+1 < len(args):
 			i++
@@ -408,6 +422,9 @@ Options:
                                  their initial handshake (up to 30s) before the
                                  first prompt. Applies in all modes — print/JSON
                                  always waits; interactive and ACP opt in here.
+  --acp-session-idle-ttl <dur>   ACP mode: tear down in-memory sessions idle
+                                 longer than <dur> (e.g. 1h, 30m). Default 1h;
+                                 0 disables the idle reaper.
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: %s
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max

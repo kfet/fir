@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ACP mode: fixed an unbounded session / python-sidecar leak that could OOM a
+  long-running relay. fir kept one `*firSession` (each spawning ~25-30 persistent
+  python extension sidecars) per ACP session and only freed them on full
+  shutdown or exact same-id resume, so a relay that mapped conversations to
+  rotating session ids accumulated sessions forever. Two complementary fixes:
+  a new `session/release` ACP method (`{sessionId}`) that tears a session down
+  on demand, and a background idle-session reaper that tears down sessions idle
+  longer than `--acp-session-idle-ttl` (default 1h; `0` disables). Unknown-session
+  requests now return a stable typed JSON-RPC error code (`-32001`, session not
+  found) shared as the relay contract so a relay can detect a released/reaped
+  session and transparently re-create it. Session teardown (resume same-id,
+  shutdown, release, reap) is now funnelled through one `teardownSession` helper.
+
 ### Changed
 
 - `/session` (and `Ctrl+S`) now renders session info into a sticky, collapsible

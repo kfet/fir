@@ -904,6 +904,7 @@ func runAcpMode(args *Args) error {
 		WaitMCP:              args.WaitMCP,
 		EnabledExtensions:    args.Extensions,
 		DisabledExtensions:   args.DisabledExtensions,
+		IdleTTL:              args.ACPSessionIdleTTL,
 	})
 }
 

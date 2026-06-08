@@ -112,7 +112,7 @@ func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionC
 	entry, ok := pa.sessions[params.SessionId]
 	pa.mu.Unlock()
 	if !ok {
-		return SetSessionConfigOptionResponse{}, fmt.Errorf("session not found: %s", params.SessionId)
+		return SetSessionConfigOptionResponse{}, newSessionNotFound(params.SessionId)
 	}
 
 	switch params.ConfigId {

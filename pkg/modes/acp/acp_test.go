@@ -110,12 +110,16 @@ func TestPiAgent_Cancel_NonexistentSession(t *testing.T) {
 	pa := &firAgent{
 		sessions: make(map[string]*firSession),
 	}
-	// Should not panic
+	// Cancel on an unknown session returns the typed not-found error.
 	err := pa.Cancel(context.Background(), acpsdk.CancelNotification{
 		SessionId: "nonexistent",
 	})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	re, ok := err.(*acpsdk.RequestError)
+	if !ok {
+		t.Fatalf("expected *acpsdk.RequestError, got %T (%v)", err, err)
+	}
+	if re.Code != SessionNotFoundError {
+		t.Errorf("error code = %d, want %d", re.Code, SessionNotFoundError)
 	}
 }
 

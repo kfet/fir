@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kfet/fir/pkg/agent"
 )
@@ -493,5 +494,36 @@ func TestParseArgs_WaitMCPDefaultsFalse(t *testing.T) {
 	args := ParseArgs([]string{"hello"})
 	if args.WaitMCP {
 		t.Error("expected WaitMCP=false by default")
+	}
+}
+
+func TestParseArgs_ACPSessionIdleTTLDefault(t *testing.T) {
+	args := ParseArgs([]string{"hello"})
+	if args.ACPSessionIdleTTL != time.Hour {
+		t.Errorf("expected default ACPSessionIdleTTL=1h, got %v", args.ACPSessionIdleTTL)
+	}
+}
+
+func TestParseArgs_ACPSessionIdleTTL(t *testing.T) {
+	args := ParseArgs([]string{"--acp-session-idle-ttl", "30m", "hello"})
+	if args.ACPSessionIdleTTL != 30*time.Minute {
+		t.Errorf("expected ACPSessionIdleTTL=30m, got %v", args.ACPSessionIdleTTL)
+	}
+	if !args.Seen["--acp-session-idle-ttl"] {
+		t.Error("expected --acp-session-idle-ttl marked seen")
+	}
+}
+
+func TestParseArgs_ACPSessionIdleTTLZeroDisables(t *testing.T) {
+	args := ParseArgs([]string{"--acp-session-idle-ttl", "0"})
+	if args.ACPSessionIdleTTL != 0 {
+		t.Errorf("expected ACPSessionIdleTTL=0 (disabled), got %v", args.ACPSessionIdleTTL)
+	}
+}
+
+func TestParseArgs_ACPSessionIdleTTLInvalidKeepsDefault(t *testing.T) {
+	args := ParseArgs([]string{"--acp-session-idle-ttl", "notaduration"})
+	if args.ACPSessionIdleTTL != time.Hour {
+		t.Errorf("expected invalid value to keep default 1h, got %v", args.ACPSessionIdleTTL)
 	}
 }

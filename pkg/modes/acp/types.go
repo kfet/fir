@@ -6,7 +6,11 @@
 // Ported from: packages/coding-agent/src/modes/acp/acp-mode.ts
 package acp
 
-import acpsdk "github.com/coder/acp-go-sdk"
+import (
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+)
 
 // ============================================================================
 // ACP mode configuration
@@ -32,6 +36,10 @@ type Options struct {
 	EnabledExtensions []string
 	// DisabledExtensions is a denylist of extension names from --disable-extension flags.
 	DisabledExtensions []string
+	// IdleTTL is how long an in-memory session may sit idle before the
+	// background reaper tears it down (freeing extension sidecars and MCP
+	// subprocesses). Zero disables the reaper.
+	IdleTTL time.Duration
 }
 
 // ============================================================================
@@ -125,6 +133,33 @@ type ExtendedAuthMethod struct {
 
 // AuthRequiredError is the JSON-RPC error code for auth-required (-32000).
 const AuthRequiredError = -32000
+
+// SessionNotFoundError is the stable JSON-RPC error code returned when a
+// request references a sessionID that the agent does not currently hold in
+// memory. It is the shared contract between fir (ACP agent) and any relay
+// (e.g. poe-acp) so the relay can detect a released/reaped session and
+// transparently recover by re-creating it. Do NOT change this value.
+const SessionNotFoundError = -32001
+
+// newSessionNotFound builds the typed session-not-found JSON-RPC error.
+func newSessionNotFound(sessionID string) *acpsdk.RequestError {
+	return &acpsdk.RequestError{
+		Code:    SessionNotFoundError,
+		Message: "Session not found",
+		Data:    map[string]any{"sessionId": sessionID},
+	}
+}
+
+// ReleaseSessionRequest is the request for session/release. It instructs the
+// agent to tear down and forget the named in-memory session (freeing its
+// extension sidecars, MCP subprocesses, and goroutines). The on-disk session
+// file is left intact and can be resumed later.
+type ReleaseSessionRequest struct {
+	SessionId string `json:"sessionId"`
+}
+
+// ReleaseSessionResponse is the (empty) response for session/release.
+type ReleaseSessionResponse struct{}
 
 // ============================================================================
 // Session config types (not yet in the Go SDK v0.6.3)

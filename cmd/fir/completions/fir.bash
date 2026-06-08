@@ -80,7 +80,7 @@ _fir_complete() {
             --mode --thinking --agent-dir --provider --model --api-key
             --system-prompt --append-system-prompt
             --session --session-name --session-dir --no-session
-            --models --no-tools --tools --no-mcp --mcp-config --wait-mcp
+            --models --no-tools --tools --no-mcp --mcp-config --wait-mcp --acp-session-idle-ttl
             --no-extensions --extension --disable-extension
             --skill --no-skills
             --prompt-template --no-prompt-templates

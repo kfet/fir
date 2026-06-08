@@ -70,6 +70,7 @@ _fir() {
         '--no-mcp[Disable MCP server integration]' \
         '--mcp-config=[Additional MCP config file]:file:_files' \
         '--wait-mcp[Wait for MCP servers to finish handshake]' \
+        '--acp-session-idle-ttl[ACP: tear down sessions idle longer than this duration]:duration:' \
         '--no-extensions[Disable all extensions]' \
         '*'{-e,--extension=}'[Enable a specific extension]:extension:->exts' \
         '*'{-d,--disable-extension=}'[Disable a specific extension]:extension:->exts' \

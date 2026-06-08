@@ -209,6 +209,17 @@ func rawMethodHandler(pa *firAgent, wn *writeNotifier) acpsdk.MethodHandler {
 			}
 			return resp, nil
 
+		case "session/release":
+			var p ReleaseSessionRequest
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, acpsdk.NewInvalidParams(map[string]any{"error": err.Error()})
+			}
+			resp, err := pa.ReleaseSession(ctx, p)
+			if err != nil {
+				return nil, toReqErr(err)
+			}
+			return resp, nil
+
 		case "session/list":
 			methodStart := time.Now()
 			firlog.Info("acp dispatch: session/list start")

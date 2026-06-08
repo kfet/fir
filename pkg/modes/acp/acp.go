@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -64,6 +65,20 @@ type firSession struct {
 	mcpStatus        func() []mcp.ServerStatus   // status callback for /session display
 	extReady         chan struct{}               // closed when async extension setup completes
 	clientMCPConfigs map[string]mcp.ServerConfig // MCP configs from ACP client request, re-merged on reload
+	// lastActiveNs is the UnixNano timestamp of the last activity on this
+	// session (creation or a prompt). Accessed atomically. The idle reaper
+	// uses it to decide when a session has been idle longer than the TTL.
+	lastActiveNs int64
+}
+
+// touch records the session as active as of time t (atomic).
+func (s *firSession) touch(t time.Time) {
+	atomic.StoreInt64(&s.lastActiveNs, t.UnixNano())
+}
+
+// lastActive returns the last-activity time recorded for this session.
+func (s *firSession) lastActive() time.Time {
+	return time.Unix(0, atomic.LoadInt64(&s.lastActiveNs))
 }
 
 // getThinkingAccessor returns the thinkingAccessor for this session.
@@ -99,6 +114,29 @@ type firAgent struct {
 	// poe-acp-relay) can surface the auth URL to a remote user and feed
 	// the pasted redirect URL back into the login flow.
 	pendingAuths map[string]*pendingAuth
+
+	// idleTTL is how long a session may sit idle before the reaper tears it
+	// down. Zero disables the reaper.
+	idleTTL time.Duration
+	// nowFn returns the current time; injectable so tests use a fake clock.
+	// nil means time.Now.
+	nowFn func() time.Time
+	// reaperTick, when non-nil, drives the reaper loop in place of an
+	// internal ticker (test injection).
+	reaperTick <-chan time.Time
+	// reaperNotify, when non-nil, receives a signal after each reaper cycle
+	// completes (test synchronisation).
+	reaperNotify chan struct{}
+	stopReaper   chan struct{}
+	reaperDone   chan struct{}
+}
+
+// now returns the agent's current time, honouring the injected clock.
+func (pa *firAgent) now() time.Time {
+	if pa.nowFn != nil {
+		return pa.nowFn()
+	}
+	return time.Now()
 }
 
 // Compile-time interface check: firAgent must implement Agent.
@@ -119,7 +157,13 @@ func RunAcpMode(opts Options) error {
 		sessions:     make(map[string]*firSession),
 		commands:     newCommandRegistry(),
 		pendingAuths: make(map[string]*pendingAuth),
+		idleTTL:      opts.IdleTTL,
 	}
+
+	// Start the idle-session reaper so sessions abandoned by a relay (which
+	// may never send session/release) are eventually torn down instead of
+	// leaking their extension sidecars and MCP subprocesses forever.
+	pa.startIdleReaper(reaperIntervalFor(opts.IdleTTL))
 
 	// Use newRawConn instead of AgentSideConnection so that session/list and
 	// session/resume (not in the Go SDK's stable dispatch) are handled correctly.
@@ -142,31 +186,22 @@ func RunAcpMode(opts Options) error {
 	}
 	signal.Stop(sigCh)
 
-	// Clean up all sessions
+	// Clean up all sessions. Empty the map while snapshotting so that a
+	// concurrent session/release or resume (the connection may still be
+	// serving inbound RPCs) finds nothing to remove and cannot double-tear
+	// down an entry we already hold.
 	pa.mu.Lock()
-	sessions := make(map[string]*firSession, len(pa.sessions))
-	for k, v := range pa.sessions {
-		sessions[k] = v
-	}
+	sessions := pa.sessions
+	pa.sessions = make(map[string]*firSession)
 	pa.mu.Unlock()
+
+	// Stop the idle reaper before tearing down sessions so it doesn't race
+	// us on the sessions map.
+	pa.stopIdleReaper()
 
 	firlog.Debug("acp shutting down", "sessions", len(sessions))
 	for sid, entry := range sessions {
-		CleanupPendingBashTerminals(context.Background(), conn, entry.termState, sid)
-		CleanupBackgroundTerminals(context.Background(), conn, entry.termState, sid)
-		if entry.unsubscribe != nil {
-			entry.unsubscribe()
-		}
-		entry.session.Close()
-		if entry.extReady != nil {
-			<-entry.extReady
-		}
-		if entry.extSetup != nil {
-			entry.extSetup.EmitSessionShutdown()
-		}
-		if entry.mcpManager != nil {
-			_ = entry.mcpManager.Close()
-		}
+		pa.teardownSession(context.Background(), sid, entry)
 	}
 
 	// Stop the auth-provider extensions started in Initialize.
@@ -361,6 +396,8 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 	pa.mu.Lock()
 	pa.sessions[sessionID] = entry
 	pa.mu.Unlock()
+
+	entry.touch(pa.now())
 
 	firlog.Info("acp createSession: done", "total_ms", time.Since(createStart).Milliseconds(), "sessionID", sessionID)
 	return entry, nil

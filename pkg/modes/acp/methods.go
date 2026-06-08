@@ -152,8 +152,9 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
 	if !ok {
-		return acpsdk.PromptResponse{}, fmt.Errorf("session not found: %s", params.SessionId)
+		return acpsdk.PromptResponse{}, newSessionNotFound(string(params.SessionId))
 	}
+	entry.touch(pa.now())
 
 	// Wait for async extension setup to complete so hooks and event
 	// forwarding are wired before any tool calls execute.
@@ -206,7 +207,7 @@ func (pa *firAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) 
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
 	if !ok {
-		return nil
+		return newSessionNotFound(string(params.SessionId))
 	}
 	entry.session.Agent.Abort()
 	CleanupPendingBashTerminals(context.Background(), pa.conn, entry.termState, string(params.SessionId))
@@ -228,7 +229,7 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionM
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
 	if !ok {
-		return acpsdk.SetSessionModelResponse{}, fmt.Errorf("session not found: %s", params.SessionId)
+		return acpsdk.SetSessionModelResponse{}, newSessionNotFound(string(params.SessionId))
 	}
 
 	provider, modelID, err := ParseModelID(string(params.ModelId))
@@ -408,27 +409,8 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	// Close any existing session with the same ID before creating a new one.
 	// Without this, a client retry would overwrite the old session's unsubscribe,
 	// extSetup, and agent goroutine, leaking all three.
-	pa.mu.Lock()
-	if existing, ok := pa.sessions[sessionID]; ok {
-		delete(pa.sessions, sessionID)
-		pa.mu.Unlock()
-		CleanupPendingBashTerminals(ctx, pa.conn, existing.termState, sessionID)
-		CleanupBackgroundTerminals(ctx, pa.conn, existing.termState, sessionID)
-		if existing.unsubscribe != nil {
-			existing.unsubscribe()
-		}
-		existing.session.Close()
-		if existing.extReady != nil {
-			<-existing.extReady
-		}
-		if existing.extSetup != nil {
-			existing.extSetup.EmitSessionShutdown()
-		}
-		if existing.mcpManager != nil {
-			_ = existing.mcpManager.Close()
-		}
-	} else {
-		pa.mu.Unlock()
+	if existing, ok := pa.removeSession(sessionID); ok {
+		pa.teardownSession(ctx, sessionID, existing)
 	}
 
 	var resumeMCPConfigs map[string]mcp.ServerConfig
@@ -607,6 +589,11 @@ func toolResultToContent(content []ai.ToolResultContent) []any {
 // ============================================================================
 
 func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event session.AgentSessionEvent) {
+	// Mark the session active on every event so a session that is actively
+	// streaming a long turn (with no new prompt) is never seen as idle by the
+	// reaper and torn down mid-stream.
+	entry.touch(pa.now())
+
 	// Handle session-level events first (no AgentEvent required).
 	switch event.Type {
 	case "plan_update":
