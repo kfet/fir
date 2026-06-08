@@ -246,7 +246,7 @@ class Spinner:
 
         # Wait for the ticker loop to finish so no rename races with us.
         if thread:
-            thread.join(timeout=2)
+            thread.join(timeout=5)
 
         # Now restore the window name — guaranteed no more loop renames.
         if pane:
@@ -268,7 +268,7 @@ class Spinner:
             self._last_set = ""
 
         if thread:
-            thread.join(timeout=2)
+            thread.join(timeout=5)
 
         if pane:
             _rename_window(pane, original)
@@ -289,6 +289,11 @@ class Spinner:
                     with self._lock:
                         self._original_name = _strip_spinner_suffix(current)
 
+            # If shutdown/stop signalled us while we were mid-tick, do not
+            # emit another rename — otherwise it can land AFTER the restore
+            # rename and leave the window showing a stale spinner frame.
+            if self._stop_event.is_set():
+                break
             self._rename_to_current_title()
 
 
