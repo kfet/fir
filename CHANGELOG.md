@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.61.1] - 2026-06-08
+
+### Fixed
+
+- Session restore (`-c` / `--continue`) no longer spuriously fails for
+  OAuth-authenticated providers. `pkg/session/sdk.go` gated the recorded model
+  on `GetApiKey() != ""`, which is always empty for OAuth (e.g. Anthropic via
+  `/login`), so every continue fell back via `FindInitialModel` — often to the
+  exact same model, printing the nonsensical
+  `Could not restore model anthropic/claude-opus-4-8. Using anthropic/claude-opus-4-8`.
+  Restore now uses `HasConfiguredAuth` (matching `RestoreModelFromSession`), and
+  the fallback message is suppressed when it resolves to the identical model.
+
 ## [0.60.1] - 2026-06-08
 
 ### Changed
