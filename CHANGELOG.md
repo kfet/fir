@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `self_handoff` now works in ACP mode (any ACP client / chat relay), not just
+  interactive sessions. The agent-initiated handoff aborts the current turn,
+  resets the session, injects the briefing as a `[SYS_EXT]` message, and runs
+  the fresh continuation turn inline within the same prompt response so its
+  output streams to the client (a detached restart would be lost once the turn
+  closes). The bridge records the restart request synchronously before the
+  abort (`TakePendingRestart`); the ACP mode drains it after the aborted turn
+  unwinds. (`pkg/extension/session_bridge.go`, `pkg/modes/acp`)
+
 ### Changed
 
 - `/help` now renders as a sticky, collapsible overlay above the editor (like

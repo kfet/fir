@@ -234,6 +234,10 @@ const maxChainedHandoffs = 8
 // reset the session, inject the briefing, and submit the continuation prompt,
 // streaming its output over the same ACP session within the current prompt
 // response. Chained handoffs are followed up to maxChainedHandoffs times.
+//
+// Relies on ACP being per-session serial: the relay never issues two
+// concurrent Prompt() calls for one session, so the pendingRestart recorded
+// during this turn is always consumed by this turn and never by a sibling.
 func (pa *firAgent) runPendingHandoffs(sessionID string, entry *firSession) {
 	if entry == nil || entry.extSetup == nil || entry.extSetup.Bridge == nil {
 		return
