@@ -1,4 +1,4 @@
-# This is a template for the kfet/homebrew-fir tap.
+# This is a template for the kfet/homebrew-ai tap.
 #
 # Formula/fir.rb in the tap is regenerated automatically by GoReleaser on
 # every kfet/fir tag push (see the brews: block in .goreleaser.yaml).
@@ -6,8 +6,8 @@
 # the file Homebrew reads, and edits here do not affect users.
 #
 # Users install with:
-#   brew install kfet/fir/fir
-#   (or: brew tap kfet/fir && brew install fir)
+#   brew install kfet/ai/fir
+#   (or: brew tap kfet/ai && brew install fir)
 #
 # Download URLs point at the public kfet/fir-dist mirror so installation
 # works without GitHub authentication.

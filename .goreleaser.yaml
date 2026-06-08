@@ -45,9 +45,9 @@ release:
 # ---------------------------------------------------------------------------
 # Homebrew tap
 #
-# GoReleaser regenerates Formula/fir.rb on kfet/homebrew-fir on every
+# GoReleaser regenerates Formula/fir.rb on kfet/homebrew-ai on every
 # release. Download URLs point at the public kfet/fir-dist mirror so
-# `brew install kfet/fir/fir` works without GitHub authentication.
+# `brew install kfet/ai/fir` works without GitHub authentication.
 #
 # The default_install_dir reference to main.version keeps the formula's
 # embedded version aligned with the one baked into the binary.
@@ -56,7 +56,7 @@ brews:
   - name: fir
     repository:
       owner: kfet
-      name: homebrew-fir
+      name: homebrew-ai
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
@@ -86,7 +86,7 @@ brews:
   # (or pin) with:
   #
   #   brew unlink fir 2>/dev/null
-  #   brew install kfet/fir/fir@0.29   # or: brew link --overwrite fir@0.29
+  #   brew install kfet/ai/fir@0.29   # or: brew link --overwrite fir@0.29
   #
   # No keg_only, no conflicts_with: linking just clashes on bin/fir, so
   # `brew install fir@X.Y` lands the keg but the user must clobber the
@@ -96,7 +96,7 @@ brews:
   - name: "fir@{{ .Major }}.{{ .Minor }}"
     repository:
       owner: kfet
-      name: homebrew-fir
+      name: homebrew-ai
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
@@ -111,7 +111,7 @@ brews:
     skip_upload: auto
     caveats: |
       This is a pinned channel (fir@{{ .Major }}.{{ .Minor }}). It ships
-      its own bin/fir, which collides with the rolling kfet/fir/fir
+      its own bin/fir, which collides with the rolling kfet/ai/fir
       formula if you have both installed.
 
       To switch to this version (e.g. for rollback):

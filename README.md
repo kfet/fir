@@ -24,7 +24,7 @@ One additional feature is the native ACP mode: run fir as an [Agent Client Proto
 ### Homebrew (macOS, Linux)
 
 ```bash
-brew install kfet/fir/fir
+brew install kfet/ai/fir
 ```
 
 To pin or roll back to a specific minor channel (`fir@MAJOR.MINOR`, the
@@ -32,11 +32,11 @@ To pin or roll back to a specific minor channel (`fir@MAJOR.MINOR`, the
 
 ```bash
 brew unlink fir 2>/dev/null
-brew install kfet/fir/fir@0.29   # or: brew link --overwrite fir@0.29
+brew install kfet/ai/fir@0.29   # or: brew link --overwrite fir@0.29
 ```
 
 The pinned formula tracks the latest patch within that minor; jump back
-to the rolling latest with `brew unlink fir@0.29 && brew install kfet/fir/fir`.
+to the rolling latest with `brew unlink fir@0.29 && brew install kfet/ai/fir`.
 
 ### Install script (macOS, Linux, Raspberry Pi)
 

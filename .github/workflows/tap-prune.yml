@@ -1,7 +1,7 @@
 name: tap-prune
 
 # After every release, keep only the 10 most-recent fir@MAJOR.MINOR
-# formulas in kfet/homebrew-fir. Older pinned channels are deleted so
+# formulas in kfet/homebrew-ai. Older pinned channels are deleted so
 # the tap doesn't grow unbounded. The rolling Formula/fir.rb is never
 # touched.
 on:
@@ -27,7 +27,7 @@ jobs:
       - name: Checkout tap
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: kfet/homebrew-fir
+          repository: kfet/homebrew-ai
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 

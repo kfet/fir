@@ -179,7 +179,7 @@ jobs:
   #
   # This is the only thing standing between "tap pushed" and "user
   # runs `brew upgrade` and gets EACCES / sha mismatch / missing
-  # completion / signing breakage". Runs `brew install kfet/fir/fir`
+  # completion / signing breakage". Runs `brew install kfet/ai/fir`
   # on a real macOS and a real Linuxbrew box, then exercises the
   # binary just like a real user would.
   #
@@ -220,8 +220,8 @@ jobs:
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
           brew --version
-          brew tap kfet/fir
-          brew install kfet/fir/fir
+          brew tap kfet/ai
+          brew install kfet/ai/fir
 
       - name: Exercise the installed binary
         run: |
@@ -238,4 +238,4 @@ jobs:
           fir completion bash > /dev/null
           fir completion zsh  > /dev/null
           # Run the formula's own test block too, for good measure.
-          brew test kfet/fir/fir
+          brew test kfet/ai/fir
