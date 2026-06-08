@@ -75,16 +75,20 @@ func TestCreateSession_ReusesGlobalAuthStorage(t *testing.T) {
 	// session created afterward sees it.
 	globalAuth.SetRuntimeApiKey("test-provider", "test-key-123")
 
-	// createSession will fail downstream, but the authStorage passed to
+	// createSession may fail downstream, but the authStorage passed to
 	// the model registry should be the same object.
-	_, _ = pa.createSession(context.Background(), "s1", t.TempDir(), nil)
+	entry, _ := pa.createSession(context.Background(), "s1", t.TempDir(), nil)
 
-	// If a session was created (may fail for other reasons), verify it
-	// shares the same authStorage.
-	pa.mu.Lock()
-	entry, ok := pa.sessions["s1"]
-	pa.mu.Unlock()
-	if ok {
+	// If a session was created, tear it down so its background goroutines
+	// (async extension session_start, session-store writes, MCP) finish
+	// before the test's t.TempDir() cleanup runs. Otherwise late writes
+	// race with RemoveAll and the test flakes with "directory not empty".
+	if entry != nil {
+		t.Cleanup(func() {
+			pa.removeSession("s1")
+			pa.teardownSession(context.Background(), "s1", entry)
+		})
+
 		key := entry.modelRegistry.AuthStorage().GetApiKey("test-provider")
 		if key != "test-key-123" {
 			t.Errorf("session did not inherit global authStorage; got key %q", key)
