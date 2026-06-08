@@ -1749,7 +1749,7 @@ func (m *InteractiveMode) showWarning(message string) {
 // without aborting the running turn: aside response cards, lingering command
 // status / warning messages, any open session-info or plan overlay, and
 // extension/notification statuses shown in the footer. It is the action behind
-// the dedicated Alt+A clear key, offered as a safe alternative to Escape
+// the dedicated Ctrl+L clear key, offered as a safe alternative to Escape
 // (which can interrupt streaming).
 func (m *InteractiveMode) clearTransientSurfaces() {
 	// Collapse all dismissable aside cards anywhere in the session.
@@ -1856,12 +1856,12 @@ Keyboard shortcuts:
   Tab             - Path completion / accept autocomplete
   Shift+Tab       - Cycle thinking level
   Ctrl+P          - Cycle models
-  Ctrl+L          - Open model selector
+  Alt+L           - Open model selector
   Ctrl+O          - Toggle tool output expansion
   Ctrl+T          - Toggle thinking block visibility
   Ctrl+R          - Toggle plan visibility
   Ctrl+S          - Toggle session info overlay
-  Alt+A           - Clear aside cards + status + notifications (no abort)
+  Ctrl+L          - Clear aside cards + status + notifications (no abort)
   Ctrl+Z          - Suspend to background
   Ctrl+V          - Paste image from clipboard
   /               - Slash commands

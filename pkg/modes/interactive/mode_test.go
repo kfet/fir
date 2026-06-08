@@ -457,7 +457,7 @@ func TestInteractiveMode_ClearTransientSurfacesCollapsesOverlays(t *testing.T) {
 		t.Fatal("expected session overlay open")
 	}
 
-	// Alt+A / clearTransientSurfaces should dismiss it.
+	// Ctrl+L / clearTransientSurfaces should dismiss it.
 	tm.mode.clearTransientSurfaces()
 	tm.waitRender()
 	if !tm.mode.sessionHidden || tm.mode.sessionInContainer {

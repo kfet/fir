@@ -811,7 +811,7 @@ func (m *InteractiveMode) setupEditorHandlers() {
 		m.handleSessionCommand()
 	})
 	m.editor.OnAction(tui.ActionDismiss, func() {
-		// Dedicated "clear" key (Alt+A): a safe alternative to Escape that
+		// Dedicated "clear" key (Ctrl+L): a safe alternative to Escape that
 		// never aborts the running turn. It clears, in order, every kind of
 		// transient surface clutter: aside response cards, lingering command
 		// status / warning messages, and extension/notification statuses in

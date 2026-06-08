@@ -44,7 +44,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionCycleThinkingLevel: {"shift+tab"},
 	ActionCycleModelForward:  {"ctrl+p"},
 	ActionCycleModelBackward: {"shift+ctrl+p"},
-	ActionSelectModel:        {"ctrl+l"},
+	ActionSelectModel:        {"alt+l"},
 	ActionExpandTools:        {"ctrl+o"},
 	ActionToggleThinking:     {"ctrl+t"},
 	ActionExternalEditor:     {"ctrl+g"},
@@ -57,7 +57,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionResume:             {},
 	ActionTogglePlan:         {"ctrl+r"},
 	ActionShowSession:        {"ctrl+s"},
-	ActionDismiss:            {"alt+a"},
+	ActionDismiss:            {"ctrl+l"},
 }
 
 // KeybindingsConfig is the JSON config mapping actions to key IDs.

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Interactive TUI keybindings: the model selector moves from `Ctrl+L` to
+  `Alt+L`, and the general-purpose dismiss/clear key moves from `Alt+A` to
+  `Ctrl+L`.
+
+
 ## [0.61.2] - 2026-06-08
 
 ### Changed
