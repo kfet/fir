@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-06-07
+
 ### Added
 
 - Python extension sidecars can now COW-share a single warm interpreter heap via
