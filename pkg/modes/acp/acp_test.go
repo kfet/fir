@@ -1835,3 +1835,75 @@ func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
 		t.Errorf("expected 'Invalid provider ID' or 'No OAuth providers available' message, got: %q", msg)
 	}
 }
+
+// TestRunPendingHandoffs_NoBridge: no extSetup/Bridge → no-op, no panic.
+func TestRunPendingHandoffs_NoBridge(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	pa.runPendingHandoffs("s1", &firSession{termState: newTerminalState()})
+	pa.runPendingHandoffs("s1", &firSession{termState: newTerminalState(), extSetup: &extension.SetupResult{}})
+	// Nothing to assert beyond not panicking and emitting no updates.
+	if len(mc.getUpdates()) != 0 {
+		t.Fatalf("expected no updates, got %d", len(mc.getUpdates()))
+	}
+}
+
+// TestRunPendingHandoffs_NoPending: bridge present but nothing pending → no-op.
+func TestRunPendingHandoffs_NoPending(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	bridge := extension.NewSessionBridge(sess)
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+		extSetup:  &extension.SetupResult{Bridge: bridge},
+	}
+	pa.runPendingHandoffs("s1", entry)
+	if len(mc.getUpdates()) != 0 {
+		t.Fatalf("expected no updates with nothing pending, got %d", len(mc.getUpdates()))
+	}
+}
+
+// TestRunPendingHandoffs_RunsHandoff: a pending restart is consumed; the
+// session is reset and the continuation prompt is attempted. With no model
+// configured the inline Prompt fails fast (no network), exercising the reset +
+// prepend + prompt-error path and the surfaced failure message.
+func TestRunPendingHandoffs_RunsHandoff(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	sess.SessionStore.NewSession(nil)
+
+	bridge := extension.NewSessionBridge(sess)
+	bridge.SetRestartFn(func(_, _ string) error { return nil })
+	if err := bridge.RestartSession("Continue from the handoff briefing above.", "## Briefing\nline2\nline3"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+		extSetup:  &extension.SetupResult{Bridge: bridge},
+	}
+	pa.runPendingHandoffs("s1", entry)
+
+	// Pending consumed.
+	if _, _, ok := bridge.TakePendingRestart(); ok {
+		t.Fatal("expected pending restart to be consumed")
+	}
+	// The continuation Prompt fails without a model, surfaced as a message.
+	updates := mc.getUpdates()
+	var sawFailure bool
+	for _, u := range updates {
+		if u.Update.AgentMessageChunk != nil && u.Update.AgentMessageChunk.Content.Text != nil &&
+			strings.Contains(u.Update.AgentMessageChunk.Content.Text.Text, "Handoff: continuation prompt failed") {
+			sawFailure = true
+		}
+	}
+	if !sawFailure {
+		t.Fatalf("expected a continuation-failure agent message (no model configured); updates=%d", len(updates))
+	}
+}

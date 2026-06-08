@@ -966,9 +966,9 @@ def self_handoff(params: dict, ctx: fir_ext.Context) -> dict:
         )
     except Exception as exc:
         return _err(
-            "self_handoff is only available in interactive (tui) "
-            "sessions — this session's mode does not support session "
-            f"restart. (restart_session: {exc})"
+            "self_handoff is not available in this session's mode "
+            "(it requires session-restart support, e.g. interactive or "
+            f"ACP). (restart_session: {exc})"
         )
     # Calling turn is being aborted; this result is informational only.
     return _ok("Handing off…")

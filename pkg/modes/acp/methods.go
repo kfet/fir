@@ -209,10 +209,59 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 		return acpsdk.PromptResponse{}, err
 	}
 
+	// Run any self-handoff requested during the turn inline, so the fresh
+	// briefed turn's output streams within this same prompt response. The
+	// relay treats the prompt as complete once we return StopReason, so a
+	// handoff turn started on a detached goroutine (the interactive
+	// approach) would be lost.
+	pa.runPendingHandoffs(string(params.SessionId), entry)
+
 	// Clear plan at end of turn so the next turn starts fresh.
 	entry.plan.clear()
 
 	return acpsdk.PromptResponse{StopReason: acpsdk.StopReasonEndTurn}, nil
+}
+
+// maxChainedHandoffs bounds how many self_handoff hops a single ACP prompt
+// follows inline, so a briefing that immediately re-hands-off cannot loop
+// forever within one turn.
+const maxChainedHandoffs = 8
+
+// runPendingHandoffs consumes any self_handoff restart requested during the
+// just-finished turn and runs the fresh, briefed turn inline. The self_handoff
+// tool aborts the current turn and records the request synchronously on the
+// bridge (TakePendingRestart); here — after the aborted turn has unwound — we
+// reset the session, inject the briefing, and submit the continuation prompt,
+// streaming its output over the same ACP session within the current prompt
+// response. Chained handoffs are followed up to maxChainedHandoffs times.
+func (pa *firAgent) runPendingHandoffs(sessionID string, entry *firSession) {
+	if entry == nil || entry.extSetup == nil || entry.extSetup.Bridge == nil {
+		return
+	}
+	for i := 0; i < maxChainedHandoffs; i++ {
+		// The aborted turn must be fully unwound before we start a new one.
+		entry.session.Agent.WaitForIdle()
+		prompt, prepend, ok := entry.extSetup.Bridge.TakePendingRestart()
+		if !ok {
+			return
+		}
+		if _, err := entry.session.NewSessionCmd(); err != nil {
+			pa.sendAgentMessage(sessionID, fmt.Sprintf("Handoff failed: could not start a new session: %v", err))
+			return
+		}
+		if prepend != "" {
+			entry.session.PrependContext(prepend)
+		}
+		if prompt != "" {
+			if err := entry.session.Prompt(prompt); err != nil {
+				pa.sendAgentMessage(sessionID, fmt.Sprintf("Handoff: continuation prompt failed: %v", err))
+				return
+			}
+		}
+	}
+	// Hit the chain cap — surface it rather than silently swallow further
+	// pending handoffs.
+	pa.sendAgentMessage(sessionID, "Handoff: stopped after too many chained handoffs in one turn.")
 }
 
 func (pa *firAgent) Cancel(_ context.Context, params acpsdk.CancelNotification) error {
@@ -843,8 +892,13 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 			return
 		}
 		errText := msg.ErrorMessage
-		// Distinguish aborted (user cancel) from real errors to avoid noise.
-		if msg.StopReason == ai.StopReasonAborted {
+		// Suppress cancellation noise rather than surfacing it as an error.
+		// A user cancel reports StopReasonAborted; an abort that lands while an
+		// inference HTTP request is in flight (e.g. self_handoff aborting the
+		// turn to restart) instead surfaces the request's context-cancellation
+		// as StopReasonError with a "context canceled" message. Neither is a
+		// genuine model/API failure, so neither should reach the client.
+		if msg.StopReason == ai.StopReasonAborted || strings.Contains(errText, "context canceled") {
 			return
 		}
 		pa.sendAgentMessage(sessionID, fmt.Sprintf("⚠️ %s", errText))

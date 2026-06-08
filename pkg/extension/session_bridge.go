@@ -26,6 +26,12 @@ type SessionBridge struct {
 
 	restartMu sync.RWMutex
 	restartFn RestartFn
+	// pendingRestart records the most recent RestartSession request,
+	// captured synchronously before the in-flight turn is aborted. Modes
+	// that drive the new turn inline (ACP — see TakePendingRestart) consume
+	// it after the aborted turn unwinds; modes that restart via the async
+	// RestartFn (interactive) ignore it.
+	pendingRestart *restartReq
 
 	reloadMu sync.RWMutex
 	reloadFn func(name string) error
@@ -380,6 +386,14 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 	if fn == nil {
 		return fmt.Errorf("session restart is not supported in this mode")
 	}
+	// Record the request synchronously BEFORE the abort. A mode that runs
+	// the new turn inline (ACP) consumes it via TakePendingRestart after the
+	// aborted turn unwinds; this store happens-before Abort, which
+	// happens-before the in-flight Prompt() returns, so the consumer always
+	// observes it without racing the async RestartFn goroutine.
+	b.restartMu.Lock()
+	b.pendingRestart = &restartReq{Prompt: prompt, PrependContext: prependContext}
+	b.restartMu.Unlock()
 	// Abort synchronously so the tool-result writeback for the calling
 	// extension tool is short-circuited and never lands in the session.
 	if b.session != nil && b.session.Agent != nil {
@@ -392,6 +406,27 @@ func (b *SessionBridge) RestartSession(prompt, prependContext string) error {
 		_ = fn(prompt, prependContext)
 	}()
 	return nil
+}
+
+// restartReq is a captured RestartSession request awaiting inline consumption.
+type restartReq struct {
+	Prompt         string
+	PrependContext string
+}
+
+// TakePendingRestart returns and clears any restart request recorded by the
+// most recent RestartSession call. Modes that drive the restart inline
+// (rather than via the async RestartFn) call this after the aborted turn
+// unwinds. Returns ok=false when no restart is pending.
+func (b *SessionBridge) TakePendingRestart() (prompt, prependContext string, ok bool) {
+	b.restartMu.Lock()
+	defer b.restartMu.Unlock()
+	if b.pendingRestart == nil {
+		return "", "", false
+	}
+	req := b.pendingRestart
+	b.pendingRestart = nil
+	return req.Prompt, req.PrependContext, true
 }
 
 // SetReloadFn registers the targeted single-extension reload handler. It is

@@ -1194,3 +1194,28 @@ func TestBridge_ReportProgress_RPC(t *testing.T) {
 		t.Fatalf("unexpected RPC error: %v", resp.Error)
 	}
 }
+
+func TestSessionBridge_TakePendingRestart(t *testing.T) {
+	sb := &SessionBridge{}
+
+	// Nothing pending yet.
+	if _, _, ok := sb.TakePendingRestart(); ok {
+		t.Fatal("expected ok=false with no pending restart")
+	}
+
+	// RestartSession records the request synchronously (before any async
+	// callback runs), so it is observable immediately afterwards.
+	sb.SetRestartFn(func(_, _ string) error { return nil })
+	if err := sb.RestartSession("go", "briefing"); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+	prompt, prepend, ok := sb.TakePendingRestart()
+	if !ok || prompt != "go" || prepend != "briefing" {
+		t.Fatalf("TakePendingRestart = (%q,%q,%v), want (go,briefing,true)", prompt, prepend, ok)
+	}
+
+	// Consumed — a second take returns ok=false.
+	if _, _, ok := sb.TakePendingRestart(); ok {
+		t.Fatal("expected ok=false after consuming pending restart")
+	}
+}

@@ -242,7 +242,7 @@ class TestSelfHandoffHandler(unittest.TestCase):
         result = self.handoff.self_handoff({"content": _good_content()}, ctx)
         self.assertTrue(result.get("is_error"))
         text = result["content"][0]["text"]
-        self.assertIn("only available in interactive", text)
+        self.assertIn("requires session-restart support", text)
         self.assertIn("simulated restart failure", text)
 
 

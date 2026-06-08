@@ -400,6 +400,15 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 		firlog.Info("acp createSession: extension setup (eager)", "elapsed_ms", time.Since(t0).Milliseconds())
 		if err == nil && extSetup != nil {
 			entry.extSetup = extSetup
+			// Enable self_handoff in ACP mode. The async RestartFn is a
+			// no-op marker — its presence makes RestartSession report the
+			// feature as supported — while the actual restart is driven
+			// inline by Prompt() via TakePendingRestart, so the fresh
+			// briefed turn's output streams within the same prompt
+			// response. See runPendingHandoffs.
+			if extSetup.Bridge != nil {
+				extSetup.Bridge.SetRestartFn(func(_, _ string) error { return nil })
+			}
 			go func() {
 				t1 := time.Now()
 				extSetup.EmitSessionStart(nil)
