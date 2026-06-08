@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.61.2] - 2026-06-08
+
 ### Changed
 
 - ACP idle sessions now cost **zero** processes. The default
