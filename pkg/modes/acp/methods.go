@@ -152,7 +152,20 @@ func (pa *firAgent) Prompt(ctx context.Context, params acpsdk.PromptRequest) (ac
 	entry, ok := pa.sessions[string(params.SessionId)]
 	pa.mu.Unlock()
 	if !ok {
-		return acpsdk.PromptResponse{}, newSessionNotFound(string(params.SessionId))
+		// The session isn't in memory — it was likely reaped for idleness (an
+		// idle session holds ZERO sidecars), or it exists only on disk. Try to
+		// re-hydrate it in place under the SAME sessionID so waking an idle
+		// conversation is seamless: no ID churn, no session-not-found
+		// round-trip. Only surface session-not-found when there is genuinely
+		// nothing to resume.
+		rehydrated, err := pa.rehydrateForPrompt(ctx, string(params.SessionId))
+		if err != nil {
+			return acpsdk.PromptResponse{}, err
+		}
+		if rehydrated == nil {
+			return acpsdk.PromptResponse{}, newSessionNotFound(string(params.SessionId))
+		}
+		entry = rehydrated
 	}
 	entry.touch(pa.now())
 
@@ -406,36 +419,9 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 	// Use params.SessionId as the new session's ID so the client can reference it.
 	sessionID := params.SessionId
 
-	// Close any existing session with the same ID before creating a new one.
-	// Without this, a client retry would overwrite the old session's unsubscribe,
-	// extSetup, and agent goroutine, leaking all three.
-	if existing, ok := pa.removeSession(sessionID); ok {
-		pa.teardownSession(ctx, sessionID, existing)
-	}
-
-	var resumeMCPConfigs map[string]mcp.ServerConfig
-	if !pa.options.NoMCP {
-		resumeMCPConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
-	}
-	resumeMCPConfigs = mergeRequestMCPServers(resumeMCPConfigs, params.McpServers)
-	entry, err := pa.createSession(ctx, sessionID, cwd, resumeMCPConfigs)
+	entry, forked, err := pa.hydrateSessionFromFile(ctx, sessionID, sessionPath, cwd, params.McpServers)
 	if err != nil {
-		return ResumeSessionResponse{}, fmt.Errorf("create session: %w", err)
-	}
-	entry.clientMCPConfigs = mergeRequestMCPServers(nil, params.McpServers)
-
-	// Wait for async extension setup so the EmitSessionStart goroutine
-	// (which reads session state via GetSessionName) finishes before we
-	// mutate the session via SwitchSession.  Without this the two race on
-	// SessionStore internals.
-	if entry.extReady != nil {
-		<-entry.extReady
-	}
-
-	// Switch to the requested session file.
-	forked, err := entry.session.SwitchSession(sessionPath)
-	if err != nil {
-		return ResumeSessionResponse{}, fmt.Errorf("switch session: %w", err)
+		return ResumeSessionResponse{}, err
 	}
 	if forked {
 		pa.sendAgentMessage(sessionID, "Session is active in another window — branched with history preserved.")
@@ -446,6 +432,168 @@ func (pa *firAgent) ResumeSession(ctx context.Context, params ResumeSessionReque
 		models = BuildModelState(entry.modelRegistry, m)
 	}
 	return ResumeSessionResponse{Models: models}, nil
+}
+
+// hydrateSessionFromFile creates an in-memory session entry for sessionID and
+// switches it to the on-disk transcript at sessionPath. Any existing in-memory
+// session with the same ID is torn down first. It is the shared setup path used
+// by both session/resume and Prompt-driven lazy re-hydration. Returns the new
+// entry and whether the session was forked (active in another window).
+//
+// Heavy setup (createSession, extension start, SwitchSession) runs outside
+// pa.mu; createSession registers the entry in pa.sessions under the lock.
+func (pa *firAgent) hydrateSessionFromFile(ctx context.Context, sessionID, sessionPath, cwd string, mcpServers []acpsdk.McpServer) (*firSession, bool, error) {
+	// Close any existing session with the same ID before creating a new one.
+	// Without this, a client retry would overwrite the old session's
+	// unsubscribe, extSetup, and agent goroutine, leaking all three.
+	if existing, ok := pa.removeSession(sessionID); ok {
+		pa.teardownSession(ctx, sessionID, existing)
+	}
+
+	var mcpConfigs map[string]mcp.ServerConfig
+	if !pa.options.NoMCP {
+		mcpConfigs = loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
+	}
+	mcpConfigs = mergeRequestMCPServers(mcpConfigs, mcpServers)
+
+	entry, err := pa.createSession(ctx, sessionID, cwd, mcpConfigs)
+	if err != nil {
+		return nil, false, fmt.Errorf("create session: %w", err)
+	}
+	entry.clientMCPConfigs = mergeRequestMCPServers(nil, mcpServers)
+
+	// Wait for async extension setup so the EmitSessionStart goroutine
+	// (which reads session state via GetSessionName) finishes before we
+	// mutate the session via SwitchSession. Without this the two race on
+	// SessionStore internals.
+	if entry.extReady != nil {
+		<-entry.extReady
+	}
+
+	// Switch to the requested session file.
+	forked, err := entry.session.SwitchSession(sessionPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("switch session: %w", err)
+	}
+	return entry, forked, nil
+}
+
+// rehydrateForPrompt brings sessionID back into memory after it was reaped for
+// idleness (or when it lives only on disk), re-hydrating it under the SAME
+// sessionID. Returns the entry on success, (nil, nil) when there is no session
+// to resume (caller surfaces session-not-found), or (nil, err) when
+// re-hydration itself failed.
+func (pa *firAgent) rehydrateForPrompt(ctx context.Context, sessionID string) (*firSession, error) {
+	// Prefer the reaper's recorded transcript+cwd. The ACP sessionID has no
+	// on-disk link (the store names files by its own UUID), so this in-process
+	// map is the only reliable sessionID→file mapping.
+	if r, ok := pa.takeReaped(sessionID); ok {
+		cwd := r.cwd
+		if cwd == "" {
+			cwd = defaultPromptCwd()
+		}
+		var entry *firSession
+		var err error
+		if !fileExists(r.file) {
+			// Reaped session with no persisted transcript (empty path, or the
+			// file vanished): re-create it fresh under the same ID so the
+			// conversation continues seamlessly.
+			entry, err = pa.createSession(ctx, sessionID, cwd, pa.sessionMCPConfigs(cwd))
+		} else {
+			entry, _, err = pa.hydrateSessionFromFile(ctx, sessionID, r.file, cwd, nil)
+		}
+		if err != nil {
+			// Re-insert the record so a retry can still recover; a transient
+			// failure must not permanently lose the only sessionID→file
+			// mapping (which would force ID churn on the next prompt).
+			pa.restoreReaped(sessionID, r)
+			firlog.Warn("acp prompt: re-hydration failed", "sessionId", sessionID, "err", err)
+			return nil, err
+		}
+		firlog.Info("acp prompt: re-hydrated reaped session in place", "sessionId", sessionID)
+		return entry, nil
+	}
+
+	// No reaped record. A concurrent Prompt may have just re-hydrated this same
+	// id and consumed the record — re-check the live map before giving up so we
+	// don't spuriously surface session-not-found.
+	if entry := pa.lookupSession(sessionID); entry != nil {
+		return entry, nil
+	}
+
+	// See if sessionID resolves to an on-disk session file (an explicit path or
+	// store UUID the client retained). cwd is unknown here — fall back to the
+	// process cwd; the main reaped path above uses the recorded session cwd.
+	cwd := defaultPromptCwd()
+	sessionPath := pa.resolveSessionFilePath(sessionID, cwd)
+	if sessionPath == "" {
+		// Final re-check: another goroutine may have registered it meanwhile.
+		if entry := pa.lookupSession(sessionID); entry != nil {
+			return entry, nil
+		}
+		return nil, nil // genuinely unknown — caller surfaces session-not-found
+	}
+	entry, _, err := pa.hydrateSessionFromFile(ctx, sessionID, sessionPath, cwd, nil)
+	if err != nil {
+		firlog.Warn("acp prompt: on-disk re-hydration failed", "sessionId", sessionID, "err", err)
+		return nil, err
+	}
+	firlog.Info("acp prompt: hydrated on-disk session in place", "sessionId", sessionID)
+	return entry, nil
+}
+
+// lookupSession returns the in-memory session for sessionID, or nil.
+func (pa *firAgent) lookupSession(sessionID string) *firSession {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+	return pa.sessions[sessionID]
+}
+
+// sessionMCPConfigs loads the MCP server configs for a session at cwd, honouring
+// the --no-mcp option.
+func (pa *firAgent) sessionMCPConfigs(cwd string) map[string]mcp.ServerConfig {
+	if pa.options.NoMCP {
+		return nil
+	}
+	return loadProjectMCPConfigs(cwd, pa.options.MCPConfig)
+}
+
+// resolveSessionFilePath resolves a sessionID to an existing on-disk session
+// file path, or "" if none exists. It accepts either a bare UUID (resolved by
+// searching known session dirs) or an explicit path (validated to live within
+// a sessions directory).
+func (pa *firAgent) resolveSessionFilePath(sessionID, cwd string) string {
+	agentDir := resolveAgentDir()
+	if !strings.Contains(sessionID, string(filepath.Separator)) && !strings.Contains(sessionID, ".jsonl") {
+		return resolveSessionByUUID(sessionID, agentDir, cwd)
+	}
+	absPath, err := filepath.Abs(sessionID)
+	if err != nil {
+		return ""
+	}
+	if !isValidSessionPath(absPath, agentDir) || !fileExists(absPath) {
+		return ""
+	}
+	return absPath
+}
+
+// defaultPromptCwd returns the working directory to use when re-hydrating a
+// session whose original cwd is unknown.
+func defaultPromptCwd() string {
+	if cwd := os.Getenv("PWD"); cwd != "" {
+		return cwd
+	}
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
+// fileExists reports whether path names an existing file.
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // replaySessionHistory pushes the historical messages from a resumed session

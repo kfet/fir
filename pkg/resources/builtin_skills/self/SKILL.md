@@ -41,7 +41,7 @@ Not to be confused with `fir install <source>`, which installs *packages* (skill
 
 - **Interactive** (default) — full TUI with markdown rendering, streaming, slash commands, and live plan visualization (`/plan` to toggle)
 - **Print** (`-p` / `--print`) — non-interactive one-shot; process prompt and exit
-- **ACP** (`--mode acp`) — Agent Client Protocol, JSON-RPC 2.0 over stdio for IDE integrations (e.g. Zed). Supports the unstable `session/list`, `session/resume`, and `session/release` methods. To curb unbounded session/sidecar growth when a relay never releases sessions, fir auto-reaps in-memory ACP sessions idle longer than `--acp-session-idle-ttl` (default 1h; `0` disables). Unknown-session requests (prompt/release/set_model/etc.) return the typed JSON-RPC error code `-32001` (session not found) so relays can transparently re-create the session.
+- **ACP** (`--mode acp`) — Agent Client Protocol, JSON-RPC 2.0 over stdio for IDE integrations (e.g. Zed). Supports the unstable `session/list`, `session/resume`, and `session/release` methods. To curb unbounded session/sidecar growth when a relay never releases sessions, fir auto-reaps in-memory ACP sessions idle longer than `--acp-session-idle-ttl` (default 15m; `0` disables) — an idle session then holds zero extension sidecars. The next prompt on a reaped `sessionId` transparently re-hydrates the session in place (same ID, on-disk transcript restored), so waking an idle conversation is seamless. Unknown-session requests (prompt/release/set_model/etc.) return the typed JSON-RPC error code `-32001` (session not found) so relays can transparently re-create the session.
 
 ## Configuration Hierarchy
 

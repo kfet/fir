@@ -283,6 +283,70 @@ func TestACP_E2E_IdleReaper_FreesPythonSidecars(t *testing.T) {
 	}
 }
 
+// rawPrompt sends a session/prompt for sid and returns any RPC error. The agent
+// under test has no model configured, so the prompt resolves quickly with a
+// non-fatal error (e.g. auth-required) rather than running real inference — the
+// test only cares that it is NOT session-not-found.
+func rawPrompt(t *testing.T, conn *acpsdk.Connection, sid, text string) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	params := map[string]any{
+		"sessionId": sid,
+		"prompt":    []map[string]any{{"type": "text", "text": text}},
+	}
+	_, err := acpsdk.SendRequest[json.RawMessage](conn, ctx, "session/prompt", params)
+	return err
+}
+
+// TestACP_E2E_IdleSession_ZeroSidecars_ThenWake is the end-to-end proof of the
+// idle-zero design: an idle ACP session drops to ZERO python sidecars once it
+// exceeds the idle TTL, and the next prompt on the SAME sessionId transparently
+// re-hydrates it — no session-not-found, and the sidecars come back. This
+// demonstrates "idle costs nothing, waking is seamless" against a real
+// fir --mode acp subprocess.
+func TestACP_E2E_IdleSession_ZeroSidecars_ThenWake(t *testing.T) {
+	// 5s TTL → reaper ticks every ~1s.
+	conn, cmd, cleanup := spawnACPLeakAgent(t, "--acp-session-idle-ttl", "5s")
+	defer cleanup()
+	rootPID := cmd.Process.Pid
+
+	rawInitialize(t, conn)
+	baseline := waitForPythonCountStable(rootPID)
+
+	cwd := t.TempDir()
+	sid := rawNewSession(t, conn, cwd)
+
+	// The new session spawns at least one python sidecar.
+	if got := waitForPythonCountAtLeast(rootPID, baseline+1, 10*time.Second); got < baseline+1 {
+		t.Fatalf("after session/new: python sidecars = %d, want >= %d (baseline %d)",
+			got, baseline+1, baseline)
+	}
+
+	// Leaving the session idle past the 5s TTL must drop the sidecars back to
+	// baseline — an idle session holds ZERO of its own sidecars.
+	if got := waitForPythonCount(rootPID, baseline, 30*time.Second); got != baseline {
+		t.Fatalf("idle session did not reach zero sidecars: python sidecars = %d, want baseline %d",
+			got, baseline)
+	}
+
+	// Wake the SAME conversation. The prompt must re-hydrate the session in
+	// place: not session-not-found (-32001), and its sidecars must return.
+	if err := rawPrompt(t, conn, sid, "are you awake?"); err != nil {
+		if re, ok := err.(*acpsdk.RequestError); ok && re.Code == -32001 {
+			t.Fatalf("prompt after idle returned session-not-found (-32001); expected lazy re-hydration")
+		}
+		// Any other error (e.g. auth-required because no model) is fine — the
+		// session was still re-hydrated under the same id.
+	}
+
+	// Re-hydration must bring the session's sidecars back up.
+	if got := waitForPythonCountAtLeast(rootPID, baseline+1, 20*time.Second); got < baseline+1 {
+		t.Fatalf("waking the idle session did not restore its sidecars: python sidecars = %d, want >= %d (baseline %d)",
+			got, baseline+1, baseline)
+	}
+}
+
 // waitForPythonCountStable returns the python descendant count once it has
 // stopped changing for a short window (so all eager init extensions have
 // finished spawning before we record the baseline).

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Changed
+
+- ACP idle sessions now cost **zero** processes. The default
+  `--acp-session-idle-ttl` drops from 1h to **15m**, so an abandoned
+  conversation no longer squats ~25 python extension sidecars (~175MB) for a
+  full hour. Idle sessions are reaped down to zero sidecars; the next prompt on
+  the same `sessionId` transparently re-hydrates them in place (same ID, prior
+  transcript restored) instead of returning `session-not-found` — no ID churn,
+  no re-resume round-trip. See `pkg/modes/acp/release.go`,
+  `pkg/modes/acp/methods.go` (`hydrateSessionFromFile`, `rehydrateForPrompt`).
+
+
 ## [0.61.1] - 2026-06-08
 
 ### Fixed

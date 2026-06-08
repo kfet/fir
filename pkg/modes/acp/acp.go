@@ -90,6 +90,15 @@ func (s *firSession) getThinkingAccessor() thinkingAccessor {
 	return s.session
 }
 
+// reapedSession records where a reaped session's on-disk transcript lives so a
+// later Prompt can re-hydrate it under the same sessionID. file is empty when
+// the session had no persisted transcript (e.g. it was never prompted); in
+// that case re-hydration creates a fresh same-ID session.
+type reapedSession struct {
+	file string
+	cwd  string
+}
+
 // firAgent implements the ACP Agent interface.
 type firAgent struct {
 	conn     acpConn
@@ -118,6 +127,16 @@ type firAgent struct {
 	// idleTTL is how long a session may sit idle before the reaper tears it
 	// down. Zero disables the reaper.
 	idleTTL time.Duration
+	// reaped remembers, for sessions the idle reaper tore down, where their
+	// on-disk transcript lives and the cwd they ran in — keyed by the ACP
+	// sessionID. A subsequent Prompt for that sessionID uses this to
+	// transparently re-hydrate the session in place (same ID) instead of
+	// returning session-not-found. The entry is removed once re-hydrated.
+	// (The ACP sessionID has no on-disk link — the session store names files
+	// by its own UUID — so this in-process map is the only sessionID→file
+	// mapping. It is therefore best-effort: lost across a process restart,
+	// at which point the relay falls back to re-resuming via -32001.)
+	reaped map[string]reapedSession
 	// nowFn returns the current time; injectable so tests use a fake clock.
 	// nil means time.Now.
 	nowFn func() time.Time
@@ -155,6 +174,7 @@ func RunAcpMode(opts Options) error {
 	pa := &firAgent{
 		options:      opts,
 		sessions:     make(map[string]*firSession),
+		reaped:       make(map[string]reapedSession),
 		commands:     newCommandRegistry(),
 		pendingAuths: make(map[string]*pendingAuth),
 		idleTTL:      opts.IdleTTL,
@@ -395,6 +415,10 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 
 	pa.mu.Lock()
 	pa.sessions[sessionID] = entry
+	// This sessionID is live again: drop any stale reaped record so a future
+	// Prompt re-hydrates from this session's state, not a previously-reaped
+	// transcript for the same ID.
+	delete(pa.reaped, sessionID)
 	pa.mu.Unlock()
 
 	entry.touch(pa.now())

@@ -499,8 +499,8 @@ func TestParseArgs_WaitMCPDefaultsFalse(t *testing.T) {
 
 func TestParseArgs_ACPSessionIdleTTLDefault(t *testing.T) {
 	args := ParseArgs([]string{"hello"})
-	if args.ACPSessionIdleTTL != time.Hour {
-		t.Errorf("expected default ACPSessionIdleTTL=1h, got %v", args.ACPSessionIdleTTL)
+	if args.ACPSessionIdleTTL != 15*time.Minute {
+		t.Errorf("expected default ACPSessionIdleTTL=15m, got %v", args.ACPSessionIdleTTL)
 	}
 }
 
@@ -523,7 +523,7 @@ func TestParseArgs_ACPSessionIdleTTLZeroDisables(t *testing.T) {
 
 func TestParseArgs_ACPSessionIdleTTLInvalidKeepsDefault(t *testing.T) {
 	args := ParseArgs([]string{"--acp-session-idle-ttl", "notaduration"})
-	if args.ACPSessionIdleTTL != time.Hour {
-		t.Errorf("expected invalid value to keep default 1h, got %v", args.ACPSessionIdleTTL)
+	if args.ACPSessionIdleTTL != 15*time.Minute {
+		t.Errorf("expected invalid value to keep default 15m, got %v", args.ACPSessionIdleTTL)
 	}
 }

@@ -117,7 +117,7 @@ func ParseArgs(args []string) *Args {
 		Messages:          []string{},
 		FileArgs:          []string{},
 		Seen:              make(map[string]bool),
-		ACPSessionIdleTTL: time.Hour,
+		ACPSessionIdleTTL: 15 * time.Minute,
 	}
 	mark := func(flag string) { result.Seen[flag] = true }
 
@@ -423,8 +423,10 @@ Options:
                                  first prompt. Applies in all modes — print/JSON
                                  always waits; interactive and ACP opt in here.
   --acp-session-idle-ttl <dur>   ACP mode: tear down in-memory sessions idle
-                                 longer than <dur> (e.g. 1h, 30m). Default 1h;
-                                 0 disables the idle reaper.
+                                 longer than <dur> (e.g. 1h, 30m). Default 15m;
+                                 0 disables the idle reaper. Idle sessions cost
+                                 zero sidecars; the next prompt re-hydrates them
+                                 transparently under the same sessionId.
   --tools <tools>                Comma-separated list of tools to enable
                                  Available: %s
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max

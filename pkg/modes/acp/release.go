@@ -80,6 +80,13 @@ func (pa *firAgent) removeSession(sessionID string) (*firSession, bool) {
 func (pa *firAgent) ReleaseSession(ctx context.Context, params ReleaseSessionRequest) (ReleaseSessionResponse, error) {
 	entry, ok := pa.removeSession(params.SessionId)
 	if !ok {
+		// Not in memory — but it may have been idle-reaped, leaving a record
+		// that a later Prompt would re-hydrate from. An explicit release is
+		// authoritative: forget that record so the session is truly gone.
+		if _, reaped := pa.takeReaped(params.SessionId); reaped {
+			firlog.Info("acp session/release: forgot reaped session", "sessionId", params.SessionId)
+			return ReleaseSessionResponse{}, nil
+		}
 		return ReleaseSessionResponse{}, newSessionNotFound(params.SessionId)
 	}
 	firlog.Info("acp session/release: tearing down", "sessionId", params.SessionId)
@@ -114,9 +121,58 @@ func (pa *firAgent) reapIdle(now time.Time) []string {
 	for i, sid := range victims {
 		firlog.Info("acp idle reaper: tearing down idle session",
 			"sessionId", sid, "idleSeconds", now.Sub(entries[i].lastActive()).Seconds())
+		// Remember where this session's transcript lives (and its cwd) so a
+		// later Prompt can re-hydrate it in place under the same sessionID,
+		// rather than surfacing session-not-found. Capture before teardown
+		// closes the session.
+		pa.rememberReaped(sid, entries[i])
 		pa.teardownSession(context.Background(), sid, entries[i])
 	}
 	return victims
+}
+
+// rememberReaped records a reaped session's on-disk transcript path and cwd,
+// keyed by sessionID, so a subsequent Prompt can re-hydrate it under the same
+// ID. Safe to call with a nil entry.
+func (pa *firAgent) rememberReaped(sessionID string, entry *firSession) {
+	if entry == nil {
+		return
+	}
+	var file string
+	if entry.session != nil && entry.session.SessionStore != nil {
+		file = entry.session.SessionStore.GetSessionFile()
+	}
+	pa.mu.Lock()
+	if pa.reaped == nil {
+		pa.reaped = make(map[string]reapedSession)
+	}
+	pa.reaped[sessionID] = reapedSession{file: file, cwd: entry.cwd}
+	pa.mu.Unlock()
+}
+
+// takeReaped atomically looks up and removes the reaped record for sessionID.
+func (pa *firAgent) takeReaped(sessionID string) (reapedSession, bool) {
+	pa.mu.Lock()
+	defer pa.mu.Unlock()
+	r, ok := pa.reaped[sessionID]
+	if ok {
+		delete(pa.reaped, sessionID)
+	}
+	return r, ok
+}
+
+// restoreReaped re-inserts a reaped record removed by takeReaped, used when a
+// re-hydration attempt failed so a later retry can still recover the session.
+// It never clobbers a newer record (e.g. one written by a subsequent re-reap).
+func (pa *firAgent) restoreReaped(sessionID string, r reapedSession) {
+	pa.mu.Lock()
+	if pa.reaped == nil {
+		pa.reaped = make(map[string]reapedSession)
+	}
+	if _, exists := pa.reaped[sessionID]; !exists {
+		pa.reaped[sessionID] = r
+	}
+	pa.mu.Unlock()
 }
 
 // startIdleReaper launches the background goroutine that periodically reaps
