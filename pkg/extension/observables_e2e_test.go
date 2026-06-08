@@ -66,7 +66,7 @@ cat >/dev/null
 	// Wait for the card to land in the store. The store updates
 	// synchronously on Put; the only async piece is the extension's
 	// stdout being read by the bridge. Use a short poll.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	var got []store.Card
 	for time.Now().Before(deadline) {
 		got = st.List()

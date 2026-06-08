@@ -561,7 +561,7 @@ func TestBridge_KeepAlive_ExtendsDuringSlowSideQuery(t *testing.T) {
 
 	// Poll for a recent keepAlive tick — under race detector / CI load the
 	// goroutine can be delayed well past a single tick interval.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	var age time.Duration
 	for time.Now().Before(deadline) {
 		activity := time.Unix(0, b.lastActivity.Load())
@@ -671,7 +671,7 @@ func TestBridge_KeepAlive_UpdatesLastActivity(t *testing.T) {
 
 	// Poll instead of sleeping — under race detector / CI load the goroutine
 	// can take well over 50ms to get its first tick in.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if b.lastActivity.Load() != 0 {
 			return
@@ -805,7 +805,7 @@ func TestBridge_RegisterToolsAndExecute(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

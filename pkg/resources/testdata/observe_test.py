@@ -213,7 +213,7 @@ class TestSocket(unittest.TestCase):
             self.sock_dir, "fir", "observe", f"{self.session_id[:16]}.sock",
         )
 
-    def _connect(self, timeout: float = 2.0) -> socket.socket:
+    def _connect(self, timeout: float = 10.0) -> socket.socket:
         # Wait briefly for the accept thread to be up.
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -228,7 +228,7 @@ class TestSocket(unittest.TestCase):
         ctx = _make_ctx()
         observe.on_session_start({"session_id": self.session_id}, ctx)
         # Wait for bind.
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             if os.path.exists(self._socket_path()):
                 break
@@ -245,7 +245,7 @@ class TestSocket(unittest.TestCase):
             payload = json.dumps({"deliver_as": "", "content": "hello agent"}) + "\n"
             c.sendall(payload.encode())
             # Give the accept/handler threads a moment.
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
                     break
@@ -263,7 +263,7 @@ class TestSocket(unittest.TestCase):
                 json.dumps({"deliver_as": "steer", "content": "stop, look at foo.go"})
                 + "\n"
             ).encode())
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
                     break
@@ -283,7 +283,7 @@ class TestSocket(unittest.TestCase):
                 json.dumps({"deliver_as": "followUp", "content": "and update CHANGELOG"})
                 + "\n"
             ).encode())
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
                     break
@@ -302,7 +302,7 @@ class TestSocket(unittest.TestCase):
             c.sendall((
                 json.dumps({"deliver_as": "garbage", "content": "x"}) + "\n"
             ).encode())
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
                     break
@@ -323,7 +323,7 @@ class TestSocket(unittest.TestCase):
             c.sendall((
                 json.dumps({"content": "real message"}) + "\n"
             ).encode())
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
                     break
@@ -339,7 +339,7 @@ class TestSocket(unittest.TestCase):
         observe.on_session_start({"session_id": self.session_id}, ctx)
         path = self._socket_path()
         # Wait for bind.
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             if os.path.exists(path):
                 break
@@ -353,7 +353,7 @@ class TestSocket(unittest.TestCase):
         ctx = _make_ctx()
         observe.on_session_start({"session_id": self.session_id}, ctx)
         # Wait for bind.
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             if os.path.exists(self._socket_path()):
                 break
@@ -374,7 +374,7 @@ class TestSocket(unittest.TestCase):
             t.join()
 
         # Wait for handlers to drain.
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             if ctx.send_user_message.call_count >= 5:
                 break
