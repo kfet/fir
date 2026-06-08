@@ -3,6 +3,8 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -1332,6 +1334,13 @@ func findMostRecentSession(sessionDir string) string {
 		if err != nil {
 			continue
 		}
+		// Skip sessions with no messages (header-only "stillborn" sessions
+		// left by cancelled new-session attempts or crashes). Selecting one
+		// on --continue would resume into an empty session and bury real
+		// history, so they must never win the most-recent race.
+		if !sessionFileHasMessages(path, info.ModTime()) {
+			continue
+		}
 		files = append(files, fileInfo{path: path, mtime: info.ModTime()})
 	}
 
@@ -1346,6 +1355,29 @@ func findMostRecentSession(sessionDir string) string {
 		}
 	}
 	return best.path
+}
+
+// sessionFileHasMessages reports whether a session .jsonl contains at least
+// one conversation message. It prefers the metadata sidecar when current and
+// otherwise scans the file for a message entry. Used to keep empty/header-only
+// sessions from winning the most-recent-session selection.
+func sessionFileHasMessages(path string, mtime time.Time) bool {
+	if m := readSidecar(path, mtime); m != nil {
+		return m.MessageCount > 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		if bytes.Contains(scanner.Bytes(), []byte(`"type":"message"`)) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListSessions lists all sessions in a directory, sorted by modified time (most recent first).

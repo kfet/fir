@@ -526,6 +526,44 @@ func TestFindMostRecentSessionEmpty(t *testing.T) {
 	}
 }
 
+func TestFindMostRecentSessionSkipsEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Real session: header + one user message. Older filename + older mtime.
+	realPath := filepath.Join(tmpDir, "2026-01-01T00-00-00-000000000Z_real.jsonl")
+	realContent := `{"type":"session","version":3,"id":"real","timestamp":"2026-01-01T00:00:00Z","cwd":"x"}
+{"type":"message","id":"m1","parentId":"","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"hello"}}
+`
+	if err := os.WriteFile(realPath, []byte(realContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stillborn: header only, no messages. Newer filename + newer mtime.
+	emptyPath := filepath.Join(tmpDir, "2026-12-31T23-59-59-000000000Z_empty.jsonl")
+	emptyContent := `{"type":"session","version":3,"id":"empty","timestamp":"2026-12-31T23:59:59Z","cwd":"x"}
+{"type":"model_change","id":"a","parentId":"","timestamp":"2026-12-31T23:59:59Z","provider":"anthropic","modelId":"m"}
+`
+	if err := os.WriteFile(emptyPath, []byte(emptyContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the empty session strictly newest by mtime — without the guard it
+	// would win the most-recent race and resume into an amnesiac session.
+	old := time.Now().Add(-2 * time.Hour)
+	recent := time.Now()
+	if err := os.Chtimes(realPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(emptyPath, recent, recent); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findMostRecentSession(tmpDir)
+	if got != realPath {
+		t.Errorf("expected most-recent selection to skip empty session and pick %q, got %q", realPath, got)
+	}
+}
+
 func TestSessionStoreConcurrentAppendAndRead(t *testing.T) {
 	// This test should be run with -race to detect data races.
 	ss := InMemorySessionStore()
