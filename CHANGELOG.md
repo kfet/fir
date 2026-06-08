@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-06-08
+
 ### Added
 
 - `self_handoff` now works in ACP mode (any ACP client / chat relay), not just
