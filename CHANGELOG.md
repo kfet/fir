@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.61.3] - 2026-06-07
+
 ### Changed
 
 - Interactive TUI keybindings: the model selector moves from `Ctrl+L` to
