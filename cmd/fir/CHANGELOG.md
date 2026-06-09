@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-06-09
+
 ### Added
 
+- Claude Fable 5 (`claude-fable-5`) is now in the model catalog (Anthropic, plus OpenRouter and Vercel AI Gateway surfaces). It is Anthropic's Mythos-class flagship: 1M-token context window, 128k max output, $10/$50 per MTok, text+image input with vision. The Anthropic provider treats it like Opus 4.8 — always-on adaptive thinking (no extended-thinking toggle), `xhigh` effort support, and server-side context compaction. `claude-mythos-5` (limited availability) shares the same runtime capability detection. Catalog data is generated from upstream models.dev; the Compaction/adaptive-thinking/effort patterns for the Fable/Mythos 5 generation were added in `cmd/generate-models` and `pkg/ai/providers/anthropic.go`.
 - Session transcripts now record the fir binary version. The `session` header record carries a new `firVersion` field (and `commit` when the build embeds a VCS stamp), written once at session start — distinct from the schema `version` int. On resume, if the running binary differs from the version that last wrote to the session, an `agent_version` delta entry is appended so a session spanning two fir versions is visible. These records are never sent to the LLM.
 
 ### Changed
