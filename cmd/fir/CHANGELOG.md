@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.4] - 2026-06-09
+
+### Fixed
+
+- `cmd/generate-models` now runs the generated source through `go/format` before writing `pkg/ai/models_generated.go`, so the committed catalog is always gofmt-clean. A model with a long struct field (e.g. `ReasoningEffortValues` on the Poe `assistant` model) had widened the gofmt column alignment, so `make all`'s `fmt` step rewrote the file during release CI, leaving the tree dirty and failing GoReleaser's git-state check. This had blocked every release since v0.65.0 (fir-dist was stuck at v0.64.1). The catalog itself is also refreshed from upstream models.dev.
+
 ## [0.65.3] - 2026-06-09
 
 ### Fixed
