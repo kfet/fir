@@ -31,10 +31,12 @@ type ModelSelectorComponent struct {
 	filteredModels  []ModelItem
 	selectedIndex   int
 	currentModel    *ai.Model
+	defaultModel    *ai.Model
 	settingsManager *config.SettingsManager
 	modelRegistry   *models.ModelRegistry
 	keybindings     *tui.KeybindingsManager
 	onSelect        func(model *ai.Model)
+	onSetDefault    func(model *ai.Model)
 	onCancel        func()
 	errorMessage    string
 	focused         bool
@@ -47,19 +49,23 @@ var _ tui.Focusable = (*ModelSelectorComponent)(nil)
 // NewModelSelectorComponent creates a new ModelSelectorComponent.
 func NewModelSelectorComponent(
 	currentModel *ai.Model,
+	defaultModel *ai.Model,
 	settingsManager *config.SettingsManager,
 	modelRegistry *models.ModelRegistry,
 	keybindings *tui.KeybindingsManager,
 	onSelect func(model *ai.Model),
+	onSetDefault func(model *ai.Model),
 	onCancel func(),
 	initialSearch string,
 ) *ModelSelectorComponent {
 	c := &ModelSelectorComponent{
 		currentModel:    currentModel,
+		defaultModel:    defaultModel,
 		settingsManager: settingsManager,
 		modelRegistry:   modelRegistry,
 		keybindings:     keybindings,
 		onSelect:        onSelect,
+		onSetDefault:    onSetDefault,
 		onCancel:        onCancel,
 		listContainer:   &tui.Container{},
 	}
@@ -72,6 +78,8 @@ func NewModelSelectorComponent(
 
 	hintText := "Only showing models with configured API keys (see README for details)"
 	c.AddChild(tuicomp.NewText(t.Fg("warning", hintText), 0, 0, nil))
+	kbHint := "enter: use for this session  ·  ctrl+d: set as default"
+	c.AddChild(tuicomp.NewText(t.Fg("muted", kbHint), 0, 0, nil))
 	c.AddChild(tuicomp.NewSpacer(1))
 
 	// Search input
@@ -123,7 +131,8 @@ func (c *ModelSelectorComponent) loadModels() {
 	}
 
 	available := c.modelRegistry.GetAvailable()
-	sorted := models.SortModels(available, c.currentModel)
+	// Pin the configured default model to the top so it is always easy to find.
+	sorted := models.SortModels(available, c.defaultModel)
 	mdls := make([]ModelItem, len(sorted))
 	for i, m := range sorted {
 		mdls[i] = ModelItem{Provider: m.Provider, ID: m.ID, Model: m}
@@ -133,6 +142,14 @@ func (c *ModelSelectorComponent) loadModels() {
 	c.activeModels = c.allModels
 	c.filteredModels = c.activeModels
 	c.clampSelection()
+
+	// Open with the cursor on the active session model.
+	for i, it := range c.filteredModels {
+		if ai.ModelsAreEqual(c.currentModel, it.Model) {
+			c.selectedIndex = i
+			break
+		}
+	}
 }
 
 // isFreeModel is a thin wrapper over models.IsFreeModel kept for the badge
@@ -382,6 +399,10 @@ func (c *ModelSelectorComponent) updateList() {
 		if isCurrent {
 			checkmark = t.Fg("success", " ✓")
 		}
+		defaultMark := ""
+		if ai.ModelsAreEqual(c.defaultModel, item.Model) {
+			defaultMark = t.Fg("muted", " [default]")
+		}
 		priceBadge := buildPriceBadge(t, item)
 		ctxBadge := buildContextBadge(t, item)
 
@@ -395,6 +416,7 @@ func (c *ModelSelectorComponent) updateList() {
 		line += ctxBadge + padToWidth(ctxBadge, maxCtxWidth)
 		line += " "
 		line += sweBadge + padToWidth(sweBadge, maxSWEWidth)
+		line += defaultMark
 		line += checkmark
 		if isSelected {
 			line = t.Bg("selectedBg", line)
@@ -450,6 +472,10 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 		}
 	case tuicomp.MatchesEditorAction(data, tuicomp.ActSelectCancel):
 		c.onCancel()
+	case c.keybindings != nil && c.keybindings.Matches(data, tui.ActionSetDefaultModel):
+		if c.selectedIndex >= 0 && c.selectedIndex < len(c.filteredModels) {
+			c.onSetDefault(c.filteredModels[c.selectedIndex].Model)
+		}
 	case c.keybindings != nil && c.keybindings.Matches(data, tui.ActionSelectModel):
 		c.onCancel()
 	default:
@@ -459,7 +485,6 @@ func (c *ModelSelectorComponent) HandleInput(data string) {
 }
 
 func (c *ModelSelectorComponent) handleSelectModel(model *ai.Model) {
-	c.settingsManager.SetDefaultModelAndProvider(model.Provider, model.ID)
 	c.onSelect(model)
 }
 

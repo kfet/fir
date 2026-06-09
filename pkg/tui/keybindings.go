@@ -20,6 +20,7 @@ const (
 	ActionCycleModelForward  AppAction = "cycleModelForward"
 	ActionCycleModelBackward AppAction = "cycleModelBackward"
 	ActionSelectModel        AppAction = "selectModel"
+	ActionSetDefaultModel    AppAction = "setDefaultModel"
 	ActionExpandTools        AppAction = "expandTools"
 	ActionToggleThinking     AppAction = "toggleThinking"
 	ActionExternalEditor     AppAction = "externalEditor"
@@ -45,6 +46,7 @@ var DefaultAppKeybindings = map[AppAction][]string{
 	ActionCycleModelForward:  {"ctrl+p"},
 	ActionCycleModelBackward: {"shift+ctrl+p"},
 	ActionSelectModel:        {"alt+l"},
+	ActionSetDefaultModel:    {"ctrl+d"},
 	ActionExpandTools:        {"ctrl+o"},
 	ActionToggleThinking:     {"ctrl+t"},
 	ActionExternalEditor:     {"ctrl+g"},

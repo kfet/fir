@@ -8,6 +8,7 @@ import (
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/models"
+	"github.com/kfet/fir/pkg/tui"
 )
 
 func TestModelSelectorComponent_Render(t *testing.T) {
@@ -17,7 +18,7 @@ func TestModelSelectorComponent_Render(t *testing.T) {
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
 
-	comp := NewModelSelectorComponent(model, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	comp := NewModelSelectorComponent(model, nil, settings, registry, nil, func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
 	lines := comp.Render(80)
 	if len(lines) == 0 {
 		t.Fatal("expected rendered output")
@@ -33,7 +34,7 @@ func TestSortModels_FreeBeatsPaidForSameModel(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, nil, settings, registry, nil, func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
 
 	paid := &ai.Model{ID: "claude-paid", Name: "Claude", Provider: "poe",
 		Cost: ai.ModelCost{Input: 3, Output: 15}, SWEScore: 70}
@@ -54,7 +55,7 @@ func TestSortModels_FreeMarkedWithBadge(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, nil, settings, registry, nil, func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
 
 	free := &ai.Model{ID: "free-one", Name: "Free", Provider: "poe"}
 	c.filteredModels = []ModelItem{{Provider: "poe", ID: free.ID, Model: free}}
@@ -76,7 +77,7 @@ func TestSortModels_ZeroCostCopilotNotTreatedAsFree(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, nil, settings, registry, nil, func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
 
 	copilot := &ai.Model{ID: "claude-sonnet-4", Name: "Claude", Provider: ai.ProviderGitHubCopilot, SWEScore: 77}
 	if isFreeModel(copilot) {
@@ -97,7 +98,7 @@ func TestFilterModels_SearchesAcrossFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	authStorage := auth.NewAuthStorage(tmpDir)
 	registry := models.NewModelRegistry(authStorage, "")
-	c := NewModelSelectorComponent(current, settings, registry, nil, func(*ai.Model) {}, func() {}, "")
+	c := NewModelSelectorComponent(current, nil, settings, registry, nil, func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
 
 	free := &ai.Model{ID: "claude-free", Name: "Claude Free", Provider: "poe"}
 	paid := &ai.Model{ID: "gpt-paid", Name: "GPT Paid", Provider: "openai",
@@ -129,5 +130,55 @@ func TestFilterModels_SearchesAcrossFields(t *testing.T) {
 		if c.filteredModels[0].ID != tc.wantID {
 			t.Fatalf("query %q: expected %q, got %q", tc.query, tc.wantID, c.filteredModels[0].ID)
 		}
+	}
+}
+
+func TestModelSelector_SelectDoesNotChangeDefault(t *testing.T) {
+	m := &ai.Model{ID: "m1", Name: "M1", Provider: "test"}
+	settings := config.NewInMemorySettingsManager(config.Settings{})
+	registry := models.NewModelRegistry(auth.NewAuthStorage(t.TempDir()), "")
+	var selected *ai.Model
+	c := NewModelSelectorComponent(m, nil, settings, registry, nil,
+		func(x *ai.Model) { selected = x }, func(*ai.Model) {}, func() {}, "")
+	c.filteredModels = []ModelItem{{Provider: m.Provider, ID: m.ID, Model: m}}
+	c.selectedIndex = 0
+	c.handleSelectModel(m)
+	if selected != m {
+		t.Fatal("expected onSelect to fire")
+	}
+	if settings.GetDefaultModel() != "" {
+		t.Fatalf("selecting must not set default, got %q", settings.GetDefaultModel())
+	}
+}
+
+func TestModelSelector_SetDefaultKeybinding(t *testing.T) {
+	m := &ai.Model{ID: "m1", Name: "M1", Provider: "test"}
+	settings := config.NewInMemorySettingsManager(config.Settings{})
+	registry := models.NewModelRegistry(auth.NewAuthStorage(t.TempDir()), "")
+	kb := tui.NewKeybindingsManagerInMemory(nil)
+	var defaulted *ai.Model
+	c := NewModelSelectorComponent(m, nil, settings, registry, kb,
+		func(*ai.Model) {}, func(x *ai.Model) { defaulted = x }, func() {}, "")
+	c.filteredModels = []ModelItem{{Provider: m.Provider, ID: m.ID, Model: m}}
+	c.selectedIndex = 0
+	c.HandleInput("\x04") // ctrl+d
+	if defaulted != m {
+		t.Fatal("expected ctrl+d to trigger onSetDefault")
+	}
+}
+
+func TestModelSelector_DefaultBadgeRendered(t *testing.T) {
+	cur := &ai.Model{ID: "cur", Provider: "test"}
+	def := &ai.Model{ID: "def", Name: "Def", Provider: "test"}
+	settings := config.NewInMemorySettingsManager(config.Settings{})
+	registry := models.NewModelRegistry(auth.NewAuthStorage(t.TempDir()), "")
+	c := NewModelSelectorComponent(cur, def, settings, registry, nil,
+		func(*ai.Model) {}, func(*ai.Model) {}, func() {}, "")
+	c.filteredModels = []ModelItem{{Provider: def.Provider, ID: def.ID, Model: def}}
+	c.selectedIndex = 0
+	c.updateList()
+	rendered := strings.Join(c.listContainer.Render(80), "\n")
+	if !strings.Contains(rendered, "[default]") {
+		t.Fatalf("expected [default] badge, got:\n%s", rendered)
 	}
 }

@@ -45,8 +45,13 @@ func (m *InteractiveMode) showSelector(create func(done func()) (component tui.C
 
 func (m *InteractiveMode) showModelSelector(initialSearch string) {
 	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		var defaultModel *ai.Model
+		if dm := m.settings.GetDefaultModel(); dm != "" {
+			defaultModel = m.session.ModelRegistryRef().Find(m.settings.GetDefaultProvider(), dm)
+		}
 		selector := components.NewModelSelectorComponent(
 			m.session.Model(),
+			defaultModel,
 			m.settings,
 			m.session.ModelRegistryRef(),
 			m.keybindings,
@@ -56,6 +61,14 @@ func (m *InteractiveMode) showModelSelector(initialSearch string) {
 				m.updateEditorBorderColor()
 				done()
 				m.showStatus(fmt.Sprintf("Model: %s", model.ID))
+			},
+			func(model *ai.Model) {
+				m.settings.SetDefaultModelAndProvider(model.Provider, model.ID)
+				m.session.SetModel(model)
+				m.footerComponent.Invalidate()
+				m.updateEditorBorderColor()
+				done()
+				m.showStatus(fmt.Sprintf("Default model: %s", model.ID))
 			},
 			func() {
 				done()
