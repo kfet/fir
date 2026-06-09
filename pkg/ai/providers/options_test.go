@@ -87,23 +87,23 @@ func TestClampReasoningForModel(t *testing.T) {
 
 func TestBedrockThinkingLevelToEffort(t *testing.T) {
 	// Opus 4.8 — xhigh is its own effort value.
-	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-8"))
-	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-8"))
+	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: "anthropic.claude-opus-4-8"}))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, &ai.Model{ID: "anthropic.claude-opus-4-8"}))
 
 	// Opus 4.7 — xhigh is its own effort value.
-	assert.Equal(t, "low", bedrockThinkingLevelToEffort(ai.ThinkingMinimal, "anthropic.claude-opus-4-7"))
-	assert.Equal(t, "medium", bedrockThinkingLevelToEffort(ai.ThinkingMedium, "anthropic.claude-opus-4-7"))
-	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingHigh, "anthropic.claude-opus-4-7"))
-	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-7"))
-	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-7"))
+	assert.Equal(t, "low", bedrockThinkingLevelToEffort(ai.ThinkingMinimal, &ai.Model{ID: "anthropic.claude-opus-4-7"}))
+	assert.Equal(t, "medium", bedrockThinkingLevelToEffort(ai.ThinkingMedium, &ai.Model{ID: "anthropic.claude-opus-4-7"}))
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingHigh, &ai.Model{ID: "anthropic.claude-opus-4-7"}))
+	assert.Equal(t, "xhigh", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: "anthropic.claude-opus-4-7"}))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, &ai.Model{ID: "anthropic.claude-opus-4-7"}))
 
 	// Opus 4.6 — xhigh clamps to high, max still goes through.
-	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-opus-4-6"))
-	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-opus-4-6"))
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: "anthropic.claude-opus-4-6"}))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, &ai.Model{ID: "anthropic.claude-opus-4-6"}))
 
 	// Sonnet 4.6 — same rules as Opus 4.6.
-	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, "anthropic.claude-sonnet-4-6"))
-	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, "anthropic.claude-sonnet-4-6"))
+	assert.Equal(t, "high", bedrockThinkingLevelToEffort(ai.ThinkingXHigh, &ai.Model{ID: "anthropic.claude-sonnet-4-6"}))
+	assert.Equal(t, "max", bedrockThinkingLevelToEffort(ai.ThinkingMax, &ai.Model{ID: "anthropic.claude-sonnet-4-6"}))
 }
 
 func TestAdjustMaxTokensForThinking_Default(t *testing.T) {

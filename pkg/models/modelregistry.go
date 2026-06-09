@@ -86,35 +86,37 @@ type ModelCostConfig struct {
 
 // ModelDefinition is a custom model definition in models.json.
 type ModelDefinition struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name,omitempty"`
-	Api           string            `json:"api,omitempty"`
-	BaseURL       string            `json:"baseUrl,omitempty"`
-	Reasoning     *bool             `json:"reasoning,omitempty"`
-	Input         []string          `json:"input,omitempty"`
-	Cost          *ModelCostConfig  `json:"cost,omitempty"`
-	ContextWindow *int              `json:"contextWindow,omitempty"`
-	MaxTokens     *int              `json:"maxTokens,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Compat        *CompatConfig     `json:"compat,omitempty"`
-	ServerTools   []string          `json:"serverTools,omitempty"`
-	Compaction    *bool             `json:"compaction,omitempty"`
-	SWEScore      *float64          `json:"sweScore,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name,omitempty"`
+	Api              string            `json:"api,omitempty"`
+	BaseURL          string            `json:"baseUrl,omitempty"`
+	Reasoning        *bool             `json:"reasoning,omitempty"`
+	Input            []string          `json:"input,omitempty"`
+	Cost             *ModelCostConfig  `json:"cost,omitempty"`
+	ContextWindow    *int              `json:"contextWindow,omitempty"`
+	MaxTokens        *int              `json:"maxTokens,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Compat           *CompatConfig     `json:"compat,omitempty"`
+	ServerTools      []string          `json:"serverTools,omitempty"`
+	Compaction       *bool             `json:"compaction,omitempty"`
+	AdaptiveThinking *bool             `json:"adaptiveThinking,omitempty"`
+	SWEScore         *float64          `json:"sweScore,omitempty"`
 }
 
 // ModelOverride holds per-model overrides (all fields optional, merged with built-in model).
 type ModelOverride struct {
-	Name          string            `json:"name,omitempty"`
-	Reasoning     *bool             `json:"reasoning,omitempty"`
-	Input         []string          `json:"input,omitempty"`
-	Cost          *ModelCostConfig  `json:"cost,omitempty"`
-	ContextWindow *int              `json:"contextWindow,omitempty"`
-	MaxTokens     *int              `json:"maxTokens,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Compat        *CompatConfig     `json:"compat,omitempty"`
-	ServerTools   []string          `json:"serverTools,omitempty"`
-	Compaction    *bool             `json:"compaction,omitempty"`
-	SWEScore      *float64          `json:"sweScore,omitempty"`
+	Name             string            `json:"name,omitempty"`
+	Reasoning        *bool             `json:"reasoning,omitempty"`
+	Input            []string          `json:"input,omitempty"`
+	Cost             *ModelCostConfig  `json:"cost,omitempty"`
+	ContextWindow    *int              `json:"contextWindow,omitempty"`
+	MaxTokens        *int              `json:"maxTokens,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Compat           *CompatConfig     `json:"compat,omitempty"`
+	ServerTools      []string          `json:"serverTools,omitempty"`
+	Compaction       *bool             `json:"compaction,omitempty"`
+	AdaptiveThinking *bool             `json:"adaptiveThinking,omitempty"`
+	SWEScore         *float64          `json:"sweScore,omitempty"`
 }
 
 // ProviderConfig is the per-provider section in models.json.
@@ -259,6 +261,9 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 	}
 	if override.Compaction != nil {
 		result.Compaction = *override.Compaction
+	}
+	if override.AdaptiveThinking != nil {
+		result.AdaptiveThinking = *override.AdaptiveThinking
 	}
 	if override.SWEScore != nil {
 		result.SWEScore = *override.SWEScore
@@ -770,27 +775,33 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				compaction = *modelDef.Compaction
 			}
 
+			adaptiveThinking := false
+			if modelDef.AdaptiveThinking != nil {
+				adaptiveThinking = *modelDef.AdaptiveThinking
+			}
+
 			var sweScore float64
 			if modelDef.SWEScore != nil {
 				sweScore = *modelDef.SWEScore
 			}
 
 			models = append(models, &ai.Model{
-				ID:            modelDef.ID,
-				Name:          name,
-				Api:           api,
-				Provider:      providerName,
-				BaseURL:       baseURL,
-				Reasoning:     reasoning,
-				Input:         input,
-				Cost:          cost,
-				ContextWindow: contextWindow,
-				MaxTokens:     maxTokens,
-				Headers:       headers,
-				Compat:        compat,
-				ServerTools:   append([]string(nil), modelDef.ServerTools...),
-				Compaction:    compaction,
-				SWEScore:      sweScore,
+				ID:               modelDef.ID,
+				Name:             name,
+				Api:              api,
+				Provider:         providerName,
+				BaseURL:          baseURL,
+				Reasoning:        reasoning,
+				Input:            input,
+				Cost:             cost,
+				ContextWindow:    contextWindow,
+				MaxTokens:        maxTokens,
+				Headers:          headers,
+				Compat:           compat,
+				ServerTools:      append([]string(nil), modelDef.ServerTools...),
+				Compaction:       compaction,
+				AdaptiveThinking: adaptiveThinking,
+				SWEScore:         sweScore,
 			})
 		}
 	}

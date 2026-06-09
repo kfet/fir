@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -646,10 +647,12 @@ func bedrockToolSchema(params any) map[string]any {
 }
 
 func buildBedrockAdditionalFields(model *ai.Model, reasoning string, options *ai.StreamOptions) map[string]any {
-	if supportsBedrockAdaptiveThinking(model.ID, model.Name) {
+	// Prefer the declarative catalog capability; fall back to the ID/Name
+	// heuristic for runtime inference-profile ARNs that aren't in the catalog.
+	if model.AdaptiveThinking || supportsBedrockAdaptiveThinking(model.ID, model.Name) {
 		return map[string]any{
 			"thinking":      map[string]any{"type": "adaptive"},
-			"output_config": map[string]any{"effort": bedrockThinkingLevelToEffort(ai.ThinkingLevel(reasoning), model.ID)},
+			"output_config": map[string]any{"effort": bedrockThinkingLevelToEffort(ai.ThinkingLevel(reasoning), model)},
 		}
 	}
 
@@ -749,17 +752,27 @@ func supportsBedrockAdaptiveThinking(modelID, modelName string) bool {
 		anyContains(candidates, "sonnet-4-6")
 }
 
-func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
+func bedrockThinkingLevelToEffort(level ai.ThinkingLevel, model *ai.Model) string {
 	switch level {
-	case ai.ThinkingMinimal, ai.ThinkingLow:
+	case ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow:
 		return "low"
 	case ai.ThinkingMedium:
 		return "medium"
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
-			return "xhigh"
+		// Declarative: emit "xhigh" only when the model advertises it; otherwise
+		// fall back to the ID/Name heuristic for un-cataloged ARNs.
+		if model != nil {
+			if slices.Contains(model.ReasoningEffortValues, "xhigh") {
+				return "xhigh"
+			}
+			if len(model.ReasoningEffortValues) == 0 {
+				cands := modelMatchCandidates(model.ID, model.Name)
+				if anyContains(cands, "opus-4-7") || anyContains(cands, "opus-4-8") {
+					return "xhigh"
+				}
+			}
 		}
 		return "high"
 	case ai.ThinkingMax:

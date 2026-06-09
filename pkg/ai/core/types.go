@@ -842,22 +842,23 @@ type ModelCost struct {
 
 // Model describes a specific LLM model and how to call it.
 type Model struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Api           Api               `json:"api"`
-	Provider      Provider          `json:"provider"`
-	BaseURL       string            `json:"baseUrl"`
-	Reasoning     bool              `json:"reasoning"`
-	Input         []InputModality   `json:"input"`
-	Cost          ModelCost         `json:"cost"`
-	ContextWindow int               `json:"contextWindow"`
-	MaxTokens     int               `json:"maxTokens"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Compat        any               `json:"compat,omitempty"`      // *OpenAICompletionsCompat or *OpenAIResponsesCompat
-	ServerTools   []string          `json:"serverTools,omitempty"` // supported server tool types: "web_search", "web_fetch", "code_execution"
-	Compaction    bool              `json:"compaction,omitempty"`  // supports server-side context compaction
-	SWEScore      float64           `json:"sweScore,omitempty"`    // best known SWE-bench Verified score (0–100 %)
-	SWEInferred   bool              `json:"sweInferred,omitempty"` // true when SWEScore is inherited from a related model, not directly benchmarked
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Api              Api               `json:"api"`
+	Provider         Provider          `json:"provider"`
+	BaseURL          string            `json:"baseUrl"`
+	Reasoning        bool              `json:"reasoning"`
+	Input            []InputModality   `json:"input"`
+	Cost             ModelCost         `json:"cost"`
+	ContextWindow    int               `json:"contextWindow"`
+	MaxTokens        int               `json:"maxTokens"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Compat           any               `json:"compat,omitempty"`           // *OpenAICompletionsCompat or *OpenAIResponsesCompat
+	ServerTools      []string          `json:"serverTools,omitempty"`      // supported server tool types: "web_search", "web_fetch", "code_execution"
+	Compaction       bool              `json:"compaction,omitempty"`       // supports server-side context compaction
+	AdaptiveThinking bool              `json:"adaptiveThinking,omitempty"` // always-on adaptive thinking (effort-based; cannot disable thinking or set a token budget)
+	SWEScore         float64           `json:"sweScore,omitempty"`         // best known SWE-bench Verified score (0–100 %)
+	SWEInferred      bool              `json:"sweInferred,omitempty"`      // true when SWEScore is inherited from a related model, not directly benchmarked
 
 	// ReasoningEffortValues is the allowed enum of values for reasoning.effort /
 	// reasoning_effort when the provider exposes a bot-specific restriction

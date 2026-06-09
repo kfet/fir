@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -176,6 +177,14 @@ func joinBetaParts(parts ...string) string {
 
 // isAuthError returns true if the error indicates an authentication failure
 // (e.g. expired OAuth token) that may be resolved by refreshing credentials.
+// isThinkingDisabledUnsupported reports whether an API error indicates the
+// model does not accept thinking.type=disabled (i.e. an always-on adaptive
+// model we hadn't flagged). The Anthropic error reads: "thinking.type.disabled"
+// is not supported for this model.
+func isThinkingDisabledUnsupported(errMsg string) bool {
+	return strings.Contains(errMsg, "thinking.type.disabled")
+}
+
 func isAuthError(errType, errMsg string) bool {
 	if errType == "authentication_error" || errType == "permission_error" {
 		return true
@@ -185,14 +194,6 @@ func isAuthError(errType, errMsg string) bool {
 		strings.Contains(lower, "invalid authentication") ||
 		strings.Contains(lower, "invalid x-api-key") ||
 		strings.Contains(lower, "invalid api key")
-}
-
-func supportsAdaptiveThinking(modelID string) bool {
-	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
-		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
-		strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") ||
-		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6") ||
-		strings.Contains(modelID, "fable-5") || strings.Contains(modelID, "mythos-5")
 }
 
 func matchesServerToolCapability(model *ai.Model, toolType string) bool {
@@ -233,11 +234,11 @@ func supportsModelCompaction(model *ai.Model) bool {
 }
 
 // mapThinkingLevelToEffort maps a ThinkingLevel to the Anthropic adaptive
-// thinking "effort" header value. This is only consulted for models that
-// pass supportsAdaptiveThinking — they all support "max"; Opus 4.7+
-// keep a distinct "xhigh" effort, others
-// clamp xhigh down to "high".
-func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
+// thinking "effort" value. It is declarative: the "xhigh" tier is only
+// emitted when the model advertises it in ReasoningEffortValues (populated by
+// cmd/generate-models). Models that stop at "high" (e.g. Opus 4.6 / Sonnet
+// 4.6) clamp xhigh down to "high". No model-ID matching here.
+func mapThinkingLevelToEffort(level ai.ThinkingLevel, model *ai.Model) string {
 	switch level {
 	case ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow:
 		return "low"
@@ -246,7 +247,7 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") || strings.Contains(modelID, "fable-5") || strings.Contains(modelID, "mythos-5") {
+		if model != nil && slices.Contains(model.ReasoningEffortValues, "xhigh") {
 			return "xhigh"
 		}
 		return "high"
@@ -391,6 +392,48 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		lastErrMsg := ""
 
+		thinkingFallbackTried := false
+		startEmitted := false
+		// tryThinkingOffFallback rebuilds the request using adaptive thinking when
+		// a model rejects thinking.type=disabled. This is the generic "try the other
+		// way" safety net: if any model we have not declared AdaptiveThinking on
+		// turns out to be adaptive-only, a thinking-off request is transparently
+		// re-issued as adaptive at lowest effort. Fires at most once, only before
+		// any output has streamed.
+		tryThinkingOffFallback := func(errMsg string) bool {
+			if thinkingFallbackTried || startEmitted || !isThinkingDisabledUnsupported(errMsg) {
+				return false
+			}
+			if options == nil || options.Headers["x-anthropic-thinking-disabled"] != "true" {
+				return false
+			}
+			thinkingFallbackTried = true
+			newHeaders := map[string]string{}
+			for k, v := range options.Headers {
+				if k != "x-anthropic-thinking-disabled" {
+					newHeaders[k] = v
+				}
+			}
+			newHeaders["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(ai.ThinkingOff, model)
+			optCopy := *options
+			optCopy.Headers = newHeaders
+			options = &optCopy
+			params = buildAnthropicParams(model, prompt, oauthToken, options)
+			if options.OnPayload != nil {
+				if next := options.OnPayload(params, model); next != nil {
+					if m, ok := next.(map[string]any); ok {
+						params = m
+					}
+				}
+			}
+			if p, mErr := json.Marshal(params); mErr == nil {
+				payload = p
+			}
+			headers = buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
+			firlog.Info("anthropic thinking-off unsupported, retrying with adaptive thinking", "model", model.ID)
+			lastErrMsg = errMsg
+			return true
+		}
 		for attempt := 0; attempt < maxAnthropicRetries; attempt++ {
 			if attempt > 0 {
 				delay := anthropicRetryDelay(lastErrMsg, attempt-1, maxDelayMs)
@@ -428,7 +471,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 			// EventStart is emitted only after the first successful SSE event so that
 			// an early overloaded_error can be retried without the caller seeing anything.
-			startEmitted := false
+			startEmitted = false
 
 			// Track block indices from Anthropic to our content array indices.
 			type blockInfo struct {
@@ -644,6 +687,12 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						break sseLoop
 					}
 
+					// Thinking-off unsupported: retry transparently as adaptive.
+					if tryThinkingOffFallback(errMsg) {
+						retryNeeded = true
+						break sseLoop
+					}
+
 					// Not retryable (or already streaming): surface the error.
 					output.StopReason = ai.StopReasonError
 					output.ErrorMessage = errMsg
@@ -708,6 +757,12 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					lastErrMsg = errMsg
 					continue
 				}
+
+				// Thinking-off unsupported (HTTP 400): retry transparently as adaptive.
+				if tryThinkingOffFallback(errMsg) {
+					continue
+				}
+
 				output.StopReason = ai.StopReasonError
 				output.ErrorMessage = errMsg
 				if !startEmitted {
@@ -782,10 +837,11 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 	}
 
 	// Explicitly disable thinking when requested on a reasoning model.
-	// Adaptive-thinking models (Opus 4.6+, Fable/Mythos 5) cannot disable
-	// thinking — the API rejects thinking.type=disabled — so for those we
-	// fall through to adaptive thinking at the lowest effort instead.
-	if options.Reasoning == ai.ThinkingOff && model.Reasoning && !supportsAdaptiveThinking(model.ID) {
+	// Adaptive-thinking models cannot disable thinking — the API rejects
+	// thinking.type=disabled — so for those we fall through to adaptive thinking
+	// at the lowest effort instead. (A runtime safety net in StreamAnthropic
+	// also recovers if any model we haven't flagged rejects thinking-off.)
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning && !model.AdaptiveThinking {
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
@@ -793,13 +849,13 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
-	// For Opus 4.6+: adaptive thinking
-	if supportsAdaptiveThinking(model.ID) {
+	// Adaptive (always-on, effort-based) thinking models.
+	if model.AdaptiveThinking {
 		// Pass effort via header (custom extension)
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
-		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning, model.ID)
+		base.Headers["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(options.Reasoning, model)
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
@@ -882,7 +938,7 @@ func buildAnthropicHeaders(model *ai.Model, apiKey string, oauthToken bool, opti
 		if options.Headers["x-anthropic-thinking-disabled"] == "true" ||
 			options.Headers["x-anthropic-thinking-enabled"] == "true" ||
 			options.Headers["x-anthropic-thinking-effort"] != "" {
-			if !supportsAdaptiveThinking(model.ID) {
+			if !model.AdaptiveThinking {
 				betaFeatures = append(betaFeatures, "interleaved-thinking-2025-05-14")
 			}
 		}

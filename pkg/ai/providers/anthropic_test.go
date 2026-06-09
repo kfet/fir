@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -479,6 +480,77 @@ func TestAnthropic_OverloadedRetry(t *testing.T) {
 	}
 }
 
+func TestAnthropic_StreamSimple_ThinkingOffFallbackToAdaptive(t *testing.T) {
+	// A model not flagged AdaptiveThinking but which the API rejects when asked
+	// to disable thinking must transparently retry as adaptive ("try the other
+	// way").
+	prev := anthropicRetryDelayFn
+	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
+	t.Cleanup(func() { anthropicRetryDelayFn = prev })
+
+	disabledErr := []byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"\\\"thinking.type.disabled\\\" is not supported for this model.\"}}\n\n")
+	successData := loadFixture(t, "anthropic_simple_response.sse")
+
+	var bodies [][]byte
+	attempts := 0
+	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, b)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		attempts++
+		if attempts == 1 {
+			w.Write(disabledErr)
+		} else {
+			w.Write(successData)
+		}
+	})
+	defer srv.Close()
+
+	model := anthropicModel(srv.URL)
+	model.Reasoning = true
+	model.AdaptiveThinking = false // NOT flagged — exercises the runtime fallback
+	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hi", 1000)}}
+	opts := &ai.SimpleStreamOptions{
+		StreamOptions: ai.StreamOptions{ApiKey: "test-key"},
+		Reasoning:     ai.ThinkingOff,
+	}
+
+	stream := StreamSimpleAnthropic(context.Background(), model, ctx, opts)
+	events := collectEvents(t, stream)
+
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts (disabled-rejected + adaptive-retry), got %d", attempts)
+	}
+	result := stream.Result()
+	if result == nil || result.StopReason == ai.StopReasonError {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	for _, evt := range events {
+		if evt.Type == ai.EventError {
+			t.Fatal("unexpected EventError — fallback should be transparent")
+		}
+	}
+
+	// First request must have asked to disable thinking.
+	var first map[string]any
+	if err := json.Unmarshal(bodies[0], &first); err != nil {
+		t.Fatalf("unmarshal first body: %v", err)
+	}
+	if tk, _ := first["thinking"].(map[string]any); tk == nil || tk["type"] != "disabled" {
+		t.Errorf("expected first request thinking.type=disabled, got %v", first["thinking"])
+	}
+	// Retry must have switched to adaptive thinking.
+	var second map[string]any
+	if err := json.Unmarshal(bodies[1], &second); err != nil {
+		t.Fatalf("unmarshal second body: %v", err)
+	}
+	tk, _ := second["thinking"].(map[string]any)
+	if tk == nil || tk["type"] != "adaptive" {
+		t.Errorf("expected retry thinking.type=adaptive, got %v", second["thinking"])
+	}
+}
+
 func TestAnthropic_NoAPIKey(t *testing.T) {
 	model := &ai.Model{
 		ID:       "test-model",
@@ -687,55 +759,38 @@ func TestAnthropic_IsOAuthModel(t *testing.T) {
 	}
 }
 
-func TestAnthropic_SupportsAdaptiveThinking(t *testing.T) {
-	tests := []struct {
-		modelID string
-		want    bool
-	}{
-		{"claude-opus-4.8-20260528", true},
-		{"claude-opus-4-8-20260528", true},
-		{"claude-opus-4.6-20260101", true},
-		{"claude-opus-4-6-20260101", true},
-		{"claude-sonnet-4-20250514", false},
-		{"claude-opus-4-20250514", false},
-		{"gpt-4o", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := supportsAdaptiveThinking(tt.modelID); got != tt.want {
-			t.Errorf("supportsAdaptiveThinking(%q) = %v, want %v", tt.modelID, got, tt.want)
-		}
-	}
-}
-
 func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
+	// Declarative: "xhigh" is emitted only when the model advertises it in
+	// ReasoningEffortValues; otherwise it clamps down to "high". No model-ID
+	// matching.
+	noXHigh := &ai.Model{ID: "no-xhigh", ReasoningEffortValues: []string{"low", "medium", "high", "max"}}
+	withXHigh := &ai.Model{ID: "with-xhigh", ReasoningEffortValues: []string{"low", "medium", "high", "xhigh", "max"}}
 	tests := []struct {
-		level   ai.ThinkingLevel
-		modelID string
-		want    string
+		level ai.ThinkingLevel
+		model *ai.Model
+		want  string
 	}{
-		// Non-Opus-4.7 adaptive model (e.g. opus-4.6): xhigh clamps to high,
-		// max passes through.
-		{ai.ThinkingOff, "claude-opus-4-6", "low"}, // adaptive models cant disable; off => low effort
-		{ai.ThinkingMinimal, "claude-opus-4-6", "low"},
-		{ai.ThinkingLow, "claude-opus-4-6", "low"},
-		{ai.ThinkingMedium, "claude-opus-4-6", "medium"},
-		{ai.ThinkingHigh, "claude-opus-4-6", "high"},
-		{ai.ThinkingXHigh, "claude-opus-4-6", "high"},
-		{ai.ThinkingMax, "claude-opus-4-6", "max"},
-		{"", "claude-opus-4-6", "high"}, // default
-		// Opus 4.7+: xhigh is its own distinct tier.
-		{ai.ThinkingHigh, "claude-opus-4-8", "high"},
-		{ai.ThinkingXHigh, "claude-opus-4-8", "xhigh"},
-		{ai.ThinkingMax, "claude-opus-4-8", "max"},
-		{ai.ThinkingHigh, "claude-opus-4-7", "high"},
-		{ai.ThinkingXHigh, "claude-opus-4-7", "xhigh"},
-		{ai.ThinkingMax, "claude-opus-4-7", "max"},
+		// Model without an "xhigh" tier: xhigh clamps to high, max passes through.
+		{ai.ThinkingOff, noXHigh, "low"}, // adaptive models can't disable; off => low effort
+		{ai.ThinkingMinimal, noXHigh, "low"},
+		{ai.ThinkingLow, noXHigh, "low"},
+		{ai.ThinkingMedium, noXHigh, "medium"},
+		{ai.ThinkingHigh, noXHigh, "high"},
+		{ai.ThinkingXHigh, noXHigh, "high"},
+		{ai.ThinkingMax, noXHigh, "max"},
+		{"", noXHigh, "high"}, // default
+		// Model advertising "xhigh": it's a distinct tier.
+		{ai.ThinkingHigh, withXHigh, "high"},
+		{ai.ThinkingXHigh, withXHigh, "xhigh"},
+		{ai.ThinkingMax, withXHigh, "max"},
+		// nil model / no advertised enum: xhigh clamps to high (conservative).
+		{ai.ThinkingXHigh, nil, "high"},
+		{ai.ThinkingXHigh, &ai.Model{ID: "bare"}, "high"},
 	}
 	for _, tt := range tests {
-		got := mapThinkingLevelToEffort(tt.level, tt.modelID)
+		got := mapThinkingLevelToEffort(tt.level, tt.model)
 		if got != tt.want {
-			t.Errorf("mapThinkingLevelToEffort(%q, %q) = %q, want %q", tt.level, tt.modelID, got, tt.want)
+			t.Errorf("mapThinkingLevelToEffort(%q, %v) = %q, want %q", tt.level, tt.model, got, tt.want)
 		}
 	}
 }
@@ -1889,7 +1944,8 @@ func TestAnthropic_StreamSimple_AdaptiveThinking(t *testing.T) {
 	defer srv.Close()
 
 	model := anthropicModel(srv.URL)
-	model.ID = "claude-opus-4-6-20250101" // supports adaptive thinking
+	model.ID = "claude-opus-4-6-20250101"
+	model.AdaptiveThinking = true // supports adaptive thinking (declarative)
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Think hard!", 1000)},
 	}
@@ -1932,7 +1988,8 @@ func TestAnthropic_StreamSimple_BudgetThinking(t *testing.T) {
 	defer srv.Close()
 
 	model := anthropicModel(srv.URL)
-	model.ID = "claude-sonnet-4-20250514" // does NOT support adaptive thinking
+	model.ID = "claude-sonnet-4-20250514"
+	model.AdaptiveThinking = false // budget-based thinking (declarative)
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Think!", 1000)},
 	}

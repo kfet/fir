@@ -35,25 +35,26 @@ import (
 
 // modelSpec is the internal representation of a model used during generation.
 type modelSpec struct {
-	ID             string
-	Name           string
-	API            string
-	Provider       string
-	BaseURL        string
-	Reasoning      bool
-	Input          []string // "text", "image"
-	CostInput      float64
-	CostOutput     float64
-	CostCacheRead  float64
-	CostCacheWrite float64
-	ContextWindow  int
-	MaxTokens      int
-	Headers        map[string]string
-	Compat         *compatSpec
-	ServerTools    []string // "web_search", "web_fetch", "code_execution"
-	Compaction     bool
-	SWEScore       float64 // best known SWE-bench Verified score (0–100 %)
-	SWEInferred    bool    // true when SWEScore is inherited from family, not directly benchmarked
+	ID               string
+	Name             string
+	API              string
+	Provider         string
+	BaseURL          string
+	Reasoning        bool
+	Input            []string // "text", "image"
+	CostInput        float64
+	CostOutput       float64
+	CostCacheRead    float64
+	CostCacheWrite   float64
+	ContextWindow    int
+	MaxTokens        int
+	Headers          map[string]string
+	Compat           *compatSpec
+	ServerTools      []string // "web_search", "web_fetch", "code_execution"
+	Compaction       bool
+	AdaptiveThinking bool    // always-on adaptive thinking (effort-based; cannot disable or budget)
+	SWEScore         float64 // best known SWE-bench Verified score (0–100 %)
+	SWEInferred      bool    // true when SWEScore is inherited from family, not directly benchmarked
 
 	// ReasoningEffortValues is the allowed enum for reasoning.effort / reasoning_effort,
 	// when advertised by the upstream catalog (e.g. Poe's parameters[].schema.enum).
@@ -2210,6 +2211,28 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.Compaction = true
 		}
+		// Adaptive (always-on, effort-based) thinking models: Opus 4.6+, Sonnet
+		// 4.6, Fable/Mythos 5. These cannot disable thinking (no thinking.type=
+		// disabled) and use output_config.effort rather than a token budget.
+		if strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
+			strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
+			strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
+			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
+			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
+			m.AdaptiveThinking = true
+			// Advertise the supported effort enum so the provider clamps
+			// declaratively. The "xhigh" tier exists only on Opus 4.7+ and the
+			// Fable/Mythos 5 generation; 4.6/Sonnet-4.6 stop at "high".
+			if len(m.ReasoningEffortValues) == 0 {
+				if strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
+					strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
+					strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
+					m.ReasoningEffortValues = []string{"low", "medium", "high", "xhigh", "max"}
+				} else {
+					m.ReasoningEffortValues = []string{"low", "medium", "high", "max"}
+				}
+			}
+		}
 	}
 
 	// --- New providers added in upstream v0.71.x–v0.72.x: cloudflare, xiaomi, moonshotai ---
@@ -2461,6 +2484,9 @@ func generateGoSource(models []modelSpec) string {
 		}
 		if m.Compaction {
 			sb.WriteString("\t\tCompaction:    true,\n")
+		}
+		if m.AdaptiveThinking {
+			sb.WriteString("\t\tAdaptiveThinking: true,\n")
 		}
 		if m.SWEScore > 0 {
 			sb.WriteString(fmt.Sprintf("\t\tSWEScore:      %s,\n", formatFloat(m.SWEScore)))
