@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.2] - 2026-06-09
+
+### Fixed
+
+- Anthropic adaptive-thinking models (Opus 4.6+, Claude Fable 5 / Mythos 5) no longer send `thinking.type=disabled` when a thinking-off request is made (e.g. the `aside` side-query path). These models cannot disable thinking, and the API rejected the request with `"thinking.type.disabled" is not supported for this model`. Thinking-off now falls through to adaptive thinking at the lowest effort for these models; other reasoning models still disable thinking as before.
+
 ## [0.65.1] - 2026-06-09
 
 ### Changed
