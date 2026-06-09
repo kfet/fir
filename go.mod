@@ -8,8 +8,8 @@ require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.8.0
-	github.com/kfet/agent v0.0.0
-	github.com/kfet/ai v0.0.0
+	github.com/kfet/agent v0.0.1
+	github.com/kfet/ai v0.0.1
 	github.com/kfet/firpty v0.1.0
 	github.com/kfet/pinexec v0.0.4
 	github.com/kfet/skipstone v0.1.2
@@ -51,7 +51,3 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )
-
-replace github.com/kfet/ai => ../ai
-
-replace github.com/kfet/agent => ../agent

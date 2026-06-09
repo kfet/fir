@@ -1,6 +1,6 @@
 # AI / Agent extraction plan
 
-Status: **Phases 0, 1, 2, 3, and 3.5 shipped; Phase 4 underway (in-tree bake-in); Phases 4.5 and 5 await one fir release. Phase 5 LOCAL extraction complete (pending publish) — see below.**
+Status: **Phases 0, 1, 2, 3, 3.5, 4, and 4.5 shipped; Phase 5 complete — `github.com/kfet/ai` and `github.com/kfet/agent` published at `v0.0.1` and fir now depends on them directly (no `replace`). See below.**
 Owner: kfet.
 
 This document tracks the multi-phase refactor that carves a portable,
@@ -285,10 +285,9 @@ least one release:
 3. Switch fir to import the external modules; delete the in-tree
    copies.
 
-**Status: LOCAL extraction complete (pending publish).** Done as a
-local-only mechanical move on branch `feat/extract-ai-agent`; nothing is
-pushed and no GitHub repos were created. The two new modules live as
-sibling repos and fir wires them via `replace` directives.
+**Status: PUBLISHED — Phase 5 complete.** The two modules were extracted
+on branch `feat/extract-ai-agent`, published to public GitHub repos, and
+fir now depends on them at tagged versions (no `replace` directives).
 
 What landed:
 
@@ -318,18 +317,19 @@ What landed:
   exercised only by fir-side session/mode/e2e tests arrived without unit
   coverage; raising to 100% is tracked follow-up. `make all` green.
 
-- **fir** rewired: `go.mod` gains `require github.com/kfet/ai v0.0.0`
-  and `github.com/kfet/agent v0.0.0` with `replace` directives pointing
-  at `../ai` and `../agent`. All fir imports of `pkg/ai/core`,
-  `pkg/ai/ratelimit`, `pkg/ai/overflow`, `pkg/ai/jsonparse`, `pkg/agent`,
-  and `pkg/agent/tools` repointed to the new module paths; the in-tree
-  copies were deleted. `pkg/ai/aliases.go` now re-exports from
-  `github.com/kfet/ai`. `make all` green. The forbidden-imports guard now
-  lives in (and passes within) `kfet/agent`.
+- **fir** rewired: `go.mod` requires `github.com/kfet/ai v0.0.1` and
+  `github.com/kfet/agent v0.0.1` directly (the local `replace` directives
+  used during the local-extraction step were dropped on publish). All fir
+  imports of `pkg/ai/core`, `pkg/ai/ratelimit`, `pkg/ai/overflow`,
+  `pkg/ai/jsonparse`, `pkg/agent`, and `pkg/agent/tools` repointed to the
+  new module paths; the in-tree copies were deleted. `pkg/ai/aliases.go`
+  now re-exports from `github.com/kfet/ai`. `make all` green. The
+  forbidden-imports guard now lives in (and passes within) `kfet/agent`.
 
-Remaining before this can ship as a fir release: publish `kfet/ai` and
-`kfet/agent` (tag + push), drop the `replace` directives, and pin real
-versions. Until then fir is intentionally non-shippable from this branch.
+Published: `github.com/kfet/ai` and `github.com/kfet/agent`, both tagged
+`v0.0.1` (public). fir depends on them directly; the branch is shippable.
+The `kfet/agent` coverage floor is 85% — raising it to 100% is tracked
+follow-up (fir-side session/mode/e2e paths arrived without unit coverage).
 
 Sibling repo conventions (`firpty`, `skipstone`, `pinexec`, `pinoauth`)
 apply: README, CHANGELOG, Makefile coverage gate, `.covignore`,
