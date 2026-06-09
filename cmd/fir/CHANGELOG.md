@@ -2,22 +2,113 @@
 
 ## [Unreleased]
 
-## [0.61.0] - 2026-06-07
+### Changed
+
+- `observe_session` now supports partial-range retrieval (transcript-footprint P5): pass `start` (and optional `end`) to fetch a 1-indexed inclusive transcript line range instead of the trailing tail, for paging through a long session. The `/observe` command gains matching `--start=`/`--end=` flags. Default tail behaviour is unchanged.
+- Bash tool now carries a `hash` of its output and accepts an optional `if_hash` param (transcript-footprint P4): the command always executes, but if the fresh output matches the supplied `if_hash` you get back a tiny `unchanged` stub instead of the full output. Fresh data is always guaranteed because the command runs regardless.
+- Read tool now carries a content `hash` and accepts an optional `if_hash` param (transcript-footprint P2): when the model already holds a file's contents and only needs to confirm it is still current, passing `if_hash` returns a tiny `unchanged` stub instead of the full body. The hash is recomputed every call, so outside changes invalidate it automatically; omitting `if_hash` is a normal full read. No "unless you changed it" assumption.
+- Plan tool now uses a compressed wire form (transcript-footprint P3): entries are emitted as `{c,p,s}` (content/priority/status) with short enum codes (`h|m|l`, `p|i|x`), expanded to the canonical full-name form before validation. A new reusable, fail-closed schema-compression codec (`pkg/agent/tools/schemacodec.go`) drives this via explicitly-declared per-field aliases; it is enabled per-field, opt-in, and only `plan` uses it for now. Readers are tolerant — old transcripts using full keys/enum values still decode and render unchanged (no version header).
+- Tool descriptions now steer file I/O toward the dedicated tools (transcript-footprint P1): `bash` advises preferring `read` over `cat`/`sed -n`/`head`/`tail` for viewing and `edit`/`write` over `sed -i`/heredoc for modifying; `read`/`write`/`edit` carry reciprocal one-liners. Prose only, no behaviour change.
+
+## [0.64.1] - 2026-06-08
+
+### Changed
+
+- Extension fork-template now calls `gc.collect()` + `gc.freeze()` before
+  serving spawn requests, moving the imported SDK heap into a permanent GC
+  generation the collector never rescans. This stops a forked child's
+  `gc.collect()` from dirtying (COW-copying) the shared template heap,
+  cutting per-child `Private_Dirty` ~58% (measured: ~5.5MB -> ~2.3MB).
+  (`pkg/extension/sdk/python/forkserver.py`)
+
+## [0.64.0] - 2026-06-08
+
+### Changed
+
+- Homebrew tap renamed `kfet/homebrew-fir` -> `kfet/homebrew-ai` (the shared tap
+  also serves poe-acp and slack-acp). Install path is now
+  `brew install kfet/ai/fir` (pinned: `kfet/ai/fir@MAJOR.MINOR`). The old tap
+  name redirects on GitHub so existing installs keep working, but re-tap with
+  `brew untap kfet/fir && brew tap kfet/ai` is recommended. GoReleaser brews
+  target, the tap-prune workflow, the brew-smoke release job, README, the `self`
+  skill and the formula template were updated accordingly.
+
+## [0.63.0] - 2026-06-08
+
+### Added
+
+- `self_handoff` now works in ACP mode (any ACP client / chat relay), not just
+  interactive sessions. The agent-initiated handoff aborts the current turn,
+  resets the session, injects the briefing as a `[SYS_EXT]` message, and runs
+  the fresh continuation turn inline within the same prompt response so its
+  output streams to the client (a detached restart would be lost once the turn
+  closes). The bridge records the restart request synchronously before the
+  abort (`TakePendingRestart`); the ACP mode drains it after the aborted turn
+  unwinds. (`pkg/extension/session_bridge.go`, `pkg/modes/acp`)
+
+### Changed
+
+- `/help` now renders as a sticky, collapsible overlay above the editor (like
+  `/session`) instead of dumping into the conversation stream. Run `/help` to
+  toggle it; `Ctrl+L` (dismiss) also collapses it. The shortcut list was
+  corrected against the current keybindings (model selector is `Alt+L`,
+  dismiss/clear is `Ctrl+L`) and now includes `Ctrl+N`, `Ctrl+G`, `Alt+Enter`,
+  and `Alt+Up`. The session/help overlays share one generic `OverlayComponent`.
+  (`pkg/modes/interactive`)
+
+## [0.62.0] - 2026-06-07
+
+### Added
+
+- Python extension sidecars can now COW-share a single warm interpreter heap via
+  a fork template. fir starts one `forkserver.py` per session that imports the
+  `fir_ext` SDK + stdlib once, then `os.fork()`s a child per builtin Python
+  extension; each child inherits the warm heap copy-on-write (Shared_Clean) and
+  reconnects its JSON-RPC channel over a private unix socket, collapsing
+  per-sidecar private memory (~7MB×N → ~one shared heap + tiny deltas) and
+  skipping re-import on every spawn (~12× faster cold start, measured). Only
+  builtin `*.py` extensions are forked; shell/JS/project extensions keep the
+  exec path, and any fork failure falls back to exec. Disable with
+  `FIR_NO_FORKSERVER=1`. (`pkg/extension/forkserver.go`,
+  `pkg/extension/sdk/python/forkserver.py`)
+
+## [0.61.3] - 2026-06-07
+
+### Changed
+
+- Interactive TUI keybindings: the model selector moves from `Ctrl+L` to
+  `Alt+L`, and the general-purpose dismiss/clear key moves from `Alt+A` to
+  `Ctrl+L`.
+
+
+## [0.61.2] - 2026-06-08
+
+### Changed
+
+- ACP idle sessions now cost **zero** processes. The default
+  `--acp-session-idle-ttl` drops from 1h to **15m**, so an abandoned
+  conversation no longer squats ~25 python extension sidecars (~175MB) for a
+  full hour. Idle sessions are reaped down to zero sidecars; the next prompt on
+  the same `sessionId` transparently re-hydrates them in place (same ID, prior
+  transcript restored) instead of returning `session-not-found` — no ID churn,
+  no re-resume round-trip. See `pkg/modes/acp/release.go`,
+  `pkg/modes/acp/methods.go` (`hydrateSessionFromFile`, `rehydrateForPrompt`).
+
+
+## [0.61.1] - 2026-06-08
 
 ### Fixed
 
-- ACP mode: fixed an unbounded session / python-sidecar leak that could OOM a
-  long-running relay. fir kept one `*firSession` (each spawning ~25-30 persistent
-  python extension sidecars) per ACP session and only freed them on full
-  shutdown or exact same-id resume, so a relay that mapped conversations to
-  rotating session ids accumulated sessions forever. Two complementary fixes:
-  a new `session/release` ACP method (`{sessionId}`) that tears a session down
-  on demand, and a background idle-session reaper that tears down sessions idle
-  longer than `--acp-session-idle-ttl` (default 1h; `0` disables). Unknown-session
-  requests now return a stable typed JSON-RPC error code (`-32001`, session not
-  found) shared as the relay contract so a relay can detect a released/reaped
-  session and transparently re-create it. Session teardown (resume same-id,
-  shutdown, release, reap) is now funnelled through one `teardownSession` helper.
+- Session restore (`-c` / `--continue`) no longer spuriously fails for
+  OAuth-authenticated providers. `pkg/session/sdk.go` gated the recorded model
+  on `GetApiKey() != ""`, which is always empty for OAuth (e.g. Anthropic via
+  `/login`), so every continue fell back via `FindInitialModel` — often to the
+  exact same model, printing the nonsensical
+  `Could not restore model anthropic/claude-opus-4-8. Using anthropic/claude-opus-4-8`.
+  Restore now uses `HasConfiguredAuth` (matching `RestoreModelFromSession`), and
+  the fallback message is suppressed when it resolves to the identical model.
+
+## [0.60.1] - 2026-06-08
 
 ### Changed
 
