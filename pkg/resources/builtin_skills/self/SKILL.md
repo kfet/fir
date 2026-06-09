@@ -102,7 +102,7 @@ The same extension also exposes:
 - **`/observe`** and **`/send`** slash commands — usable from inside an interactive session for snapshot inspection / one-shot message injection.
 - **`observe_session`**, **`send_session`**, and **`stop_session`** AI tools — let the agent inspect, nudge, or terminate sibling sessions as part of a turn.
 
-Slash commands and tools take **snapshots** (last N transcript lines) and send single messages; they do not live-tail. Use `fir observe <id>` from another terminal for live observation.
+Slash commands and tools take **snapshots** (last N transcript lines) and send single messages; they do not live-tail. Use `fir observe <id>` from another terminal for live observation. `observe_session` / `/observe` also accept a partial-range slice (`start`/`end` tool params, or `--start=`/`--end=` flags) to page through a long transcript by line number instead of pulling the tail.
 
 The `observe` extension is a builtin and loads automatically in every session — no special flags needed. Observation commands run from any other terminal:
 

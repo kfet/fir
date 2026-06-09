@@ -5,8 +5,11 @@ package tools
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,11 +24,68 @@ type ReadToolParams struct {
 	Path   string `json:"path"`
 	Offset *int   `json:"offset,omitempty"` // 1-indexed line number
 	Limit  *int   `json:"limit,omitempty"`
+	IfHash string `json:"if_hash,omitempty"` // optional: confirm-unchanged opt-in
 }
 
-// ReadToolDetails contains details about truncation that occurred.
+// ReadToolDetails contains details about a read result.
 type ReadToolDetails struct {
 	Truncation *TruncationResult `json:"truncation,omitempty"`
+	// Hash is the content hash of the file (P2). Always set on a successful
+	// text/image read so the model can later pass it back as if_hash.
+	Hash string `json:"hash,omitempty"`
+	// Unchanged is true when an if_hash matched and the full body was elided.
+	Unchanged bool `json:"unchanged,omitempty"`
+}
+
+// readContentHash returns a short, stable content hash for if_hash comparison.
+func readContentHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// fileContentHash streams a file into the hash so we never hold the whole file
+// in memory (matters for the partial-read path, which deliberately avoids
+// loading large files).
+func fileContentHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// unchangedStub is the tiny result returned when a supplied if_hash matches the
+// current content hash: the model already holds the body and only needed to
+// confirm the file is still current.
+func unchangedStub(hash string) agent.AgentToolResult {
+	return agent.AgentToolResult{
+		Content: []core.ToolResultContent{{
+			Type: "text",
+			Text: fmt.Sprintf("[unchanged] content matches if_hash (hash: %s)", hash),
+		}},
+		Details: &ReadToolDetails{Hash: hash, Unchanged: true},
+	}
+}
+
+// appendReadHash attaches the content hash to a read result: a model-visible
+// trailing text block plus the structured detail.
+func appendReadHash(res agent.AgentToolResult, hash string) agent.AgentToolResult {
+	res.Content = append(res.Content, core.ToolResultContent{
+		Type: "text",
+		Text: fmt.Sprintf("[hash: %s]", hash),
+	})
+	switch d := res.Details.(type) {
+	case *ReadToolDetails:
+		d.Hash = hash
+	case nil:
+		res.Details = &ReadToolDetails{Hash: hash}
+	}
+	return res
 }
 
 // SupportedImageExtensions lists file extensions treated as images.
@@ -46,7 +106,11 @@ func NewReadTool(cwd string) agent.AgentTool {
 				"Read the contents of a file. Supports text files and images (jpg, png, gif, webp). "+
 					"Images are sent as attachments. For text files, output is truncated to %d lines or %dKB "+
 					"(whichever is hit first). Use offset/limit for large files. When you need the full file, "+
-					"continue with offset until complete.",
+					"continue with offset until complete. This is the preferred way to view file contents — "+
+					"do not shell out to cat/sed/head/tail for this. "+
+					"Each read returns a `hash`. If you already hold a file's contents and only need to confirm "+
+					"it is still current, pass `if_hash` to get back `unchanged` cheaply instead of the full body. "+
+					"Re-read freely whenever you actually need the content.",
 				DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
@@ -63,6 +127,10 @@ func NewReadTool(cwd string) agent.AgentTool {
 					"limit": map[string]any{
 						"type":        "number",
 						"description": "Maximum number of lines to read",
+					},
+					"if_hash": map[string]any{
+						"type":        "string",
+						"description": "Optional. For a whole-file read (no offset/limit): if you already hold this file's contents, pass the `hash` from your previous read. When it still matches, you get back a tiny `unchanged` stub instead of the full body; if it differs (your edit or any outside change), you get the full current content. Ignored for partial (offset/limit) reads.",
 					},
 				},
 				"required": []string{"path"},
@@ -90,13 +158,43 @@ func NewReadTool(cwd string) agent.AgentTool {
 				return agent.AgentToolResult{}, ctx.Err()
 			}
 
-			return executeRead(path, cwd, offset, limit)
+			ifHash, _ := params["if_hash"].(string)
+			return executeRead(path, cwd, offset, limit, ifHash)
 		},
 	}
 }
 
-// executeRead reads a file and returns the result.
-func executeRead(path, cwd string, offset, limit *int) (agent.AgentToolResult, error) {
+// executeRead reads a file, attaches a content hash, and honours the optional
+// if_hash confirm-unchanged opt-in (P2). The hash and if_hash apply to
+// WHOLE-FILE reads only: a partial read (offset/limit) targets a slice, but the
+// hash is a whole-file identity — honouring if_hash there could return
+// "unchanged" for a slice the model has never seen, and hashing the whole file
+// would defeat the partial-read path's large-file streaming. So partial reads
+// carry no hash and ignore if_hash. The hash is recomputed fresh on every call,
+// so outside changes invalidate it automatically — no staleness window, no
+// "who changed it" question.
+func executeRead(path, cwd string, offset, limit *int, ifHash string) (agent.AgentToolResult, error) {
+	fullRead := offset == nil && limit == nil
+	if fullRead {
+		absolutePath := ResolveReadPath(path, cwd)
+		if hash, herr := fileContentHash(absolutePath); herr == nil {
+			if ifHash != "" && ifHash == hash {
+				return unchangedStub(hash), nil
+			}
+			res, err := executeReadBase(path, cwd, offset, limit)
+			if err != nil {
+				return res, err
+			}
+			return appendReadHash(res, hash), nil
+		}
+		// File can't be hashed (missing/unreadable/dir) — fall through to the
+		// base read so it returns the canonical not-found/error result.
+	}
+	return executeReadBase(path, cwd, offset, limit)
+}
+
+// executeReadBase reads a file and returns the result (no hash handling).
+func executeReadBase(path, cwd string, offset, limit *int) (agent.AgentToolResult, error) {
 	slog.Debug("read file", "path", path, "cwd", cwd)
 	absolutePath := ResolveReadPath(path, cwd)
 
@@ -398,6 +496,18 @@ func NewReadToolWithReader(cwd string, readFn ReadFileFn) agent.AgentTool {
 		if v, ok := params["limit"].(float64); ok {
 			i := int(v)
 			limit = &i
+		}
+		// Hash + if_hash apply to whole-file reads only (see executeRead).
+		if offset == nil && limit == nil {
+			hash := readContentHash([]byte(content))
+			if ifHash, _ := params["if_hash"].(string); ifHash != "" && ifHash == hash {
+				return unchangedStub(hash), nil
+			}
+			res, err := applyReadFilters(path, content, offset, limit)
+			if err != nil {
+				return res, err
+			}
+			return appendReadHash(res, hash), nil
 		}
 		return applyReadFilters(path, content, offset, limit)
 	}

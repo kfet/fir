@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
@@ -723,8 +724,10 @@ func (tc *ToolExecutionComponent) formatPlan(t *theme.Theme) string {
 		header += " " + t.Fg("accent", title)
 	}
 
-	// Count entries by status while the tool call is in-flight
-	entries, _ := tc.args["entries"].([]any)
+	// Count entries by status while the tool call is in-flight. Decode the
+	// (possibly compressed) wire form to canonical full names first, so both
+	// old (content/full-enum) and new (c/short-code) transcripts render.
+	entries, _ := tools.DecodePlanParams(tc.args)["entries"].([]any)
 	if len(entries) == 0 {
 		if tc.result != nil {
 			return header + "\n\n" + t.Fg("toolOutput", tc.getTextOutput())

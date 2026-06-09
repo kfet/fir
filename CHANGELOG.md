@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `observe_session` now supports partial-range retrieval (transcript-footprint P5): pass `start` (and optional `end`) to fetch a 1-indexed inclusive transcript line range instead of the trailing tail, for paging through a long session. The `/observe` command gains matching `--start=`/`--end=` flags. Default tail behaviour is unchanged.
+- Bash tool now carries a `hash` of its output and accepts an optional `if_hash` param (transcript-footprint P4): the command always executes, but if the fresh output matches the supplied `if_hash` you get back a tiny `unchanged` stub instead of the full output. Fresh data is always guaranteed because the command runs regardless.
+- Read tool now carries a content `hash` and accepts an optional `if_hash` param (transcript-footprint P2): when the model already holds a file's contents and only needs to confirm it is still current, passing `if_hash` returns a tiny `unchanged` stub instead of the full body. The hash is recomputed every call, so outside changes invalidate it automatically; omitting `if_hash` is a normal full read. No "unless you changed it" assumption.
+- Plan tool now uses a compressed wire form (transcript-footprint P3): entries are emitted as `{c,p,s}` (content/priority/status) with short enum codes (`h|m|l`, `p|i|x`), expanded to the canonical full-name form before validation. A new reusable, fail-closed schema-compression codec (`pkg/agent/tools/schemacodec.go`) drives this via explicitly-declared per-field aliases; it is enabled per-field, opt-in, and only `plan` uses it for now. Readers are tolerant — old transcripts using full keys/enum values still decode and render unchanged (no version header).
+- Tool descriptions now steer file I/O toward the dedicated tools (transcript-footprint P1): `bash` advises preferring `read` over `cat`/`sed -n`/`head`/`tail` for viewing and `edit`/`write` over `sed -i`/heredoc for modifying; `read`/`write`/`edit` carry reciprocal one-liners. Prose only, no behaviour change.
+
 ## [0.64.1] - 2026-06-08
 
 ### Changed

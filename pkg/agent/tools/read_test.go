@@ -28,11 +28,14 @@ func TestReadTool_BasicFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Content) != 1 {
-		t.Fatalf("expected 1 content block, got %d", len(result.Content))
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (body + hash), got %d", len(result.Content))
 	}
 	if result.Content[0].Text != "line1\nline2\nline3" {
 		t.Errorf("unexpected content: %q", result.Content[0].Text)
+	}
+	if !strings.HasPrefix(result.Content[1].Text, "[hash: ") {
+		t.Errorf("expected hash block, got %q", result.Content[1].Text)
 	}
 }
 
@@ -201,6 +204,131 @@ func TestReadTool_OffsetAndLimit(t *testing.T) {
 	}
 	if !strings.Contains(text, "more lines") {
 		t.Error("should have 'more lines' notice")
+	}
+}
+
+func TestReadTool_IfHashIgnoredForPartialRead(t *testing.T) {
+	// Regression: if_hash is a whole-file identity, so it must NOT short-circuit
+	// a partial (offset/limit) read — otherwise the model gets "unchanged" for a
+	// slice it has never seen. Partial reads carry no hash and ignore if_hash.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "h.txt")
+	os.WriteFile(file, []byte("l1\nl2\nl3\nl4\nl5"), 0644)
+
+	tool := NewReadTool(dir)
+	// Learn the whole-file hash from a full read.
+	full, err := execRead(t, tool, map[string]any{"path": "h.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := full.Details.(*ReadToolDetails).Hash
+
+	// A partial read carrying that hash must return the actual slice, not a stub.
+	res, err := execRead(t, tool, map[string]any{"path": "h.txt", "offset": float64(3), "limit": float64(2), "if_hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := res.Details.(*ReadToolDetails); ok && d.Unchanged {
+		t.Fatal("partial read must not return an unchanged stub for a whole-file if_hash")
+	}
+	if !strings.Contains(res.Content[0].Text, "l3") {
+		t.Errorf("expected the requested slice (l3..), got %q", res.Content[0].Text)
+	}
+}
+
+func TestReadTool_IfHashMatchReturnsStub(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "h.txt")
+	os.WriteFile(file, []byte("alpha\nbeta\ngamma"), 0644)
+
+	tool := NewReadTool(dir)
+	// First read to learn the hash.
+	res1, err := execRead(t, tool, map[string]any{"path": "h.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1, ok := res1.Details.(*ReadToolDetails)
+	if !ok || d1.Hash == "" {
+		t.Fatalf("expected hash detail, got %+v", res1.Details)
+	}
+	hash := d1.Hash
+
+	// Second read with matching if_hash -> stub, no body.
+	res2, err := execRead(t, tool, map[string]any{"path": "h.txt", "if_hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, ok := res2.Details.(*ReadToolDetails)
+	if !ok || !d2.Unchanged || d2.Hash != hash {
+		t.Fatalf("expected unchanged stub, got %+v", res2.Details)
+	}
+	if strings.Contains(res2.Content[0].Text, "alpha") {
+		t.Errorf("stub should not contain body: %q", res2.Content[0].Text)
+	}
+}
+
+func TestReadTool_IfHashMismatchReturnsFull(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "h.txt")
+	os.WriteFile(file, []byte("original"), 0644)
+
+	tool := NewReadTool(dir)
+	// Stale/wrong hash -> full read with fresh hash.
+	res, err := execRead(t, tool, map[string]any{"path": "h.txt", "if_hash": "deadbeefdeadbeef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Content[0].Text, "original") {
+		t.Errorf("expected full body, got %q", res.Content[0].Text)
+	}
+	d, ok := res.Details.(*ReadToolDetails)
+	if !ok || d.Hash == "" || d.Unchanged {
+		t.Fatalf("expected full read with hash, got %+v", res.Details)
+	}
+}
+
+func TestReadTool_IfHashInvalidatedByChange(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "h.txt")
+	os.WriteFile(file, []byte("v1"), 0644)
+
+	tool := NewReadTool(dir)
+	res1, _ := execRead(t, tool, map[string]any{"path": "h.txt"})
+	hash := res1.Details.(*ReadToolDetails).Hash
+
+	// Outside change: rewrite the file. The recomputed hash differs, so the
+	// same if_hash now yields the fresh content.
+	os.WriteFile(file, []byte("v2-changed"), 0644)
+	res2, err := execRead(t, tool, map[string]any{"path": "h.txt", "if_hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res2.Content[0].Text, "v2-changed") {
+		t.Errorf("expected fresh content after change, got %q", res2.Content[0].Text)
+	}
+}
+
+func TestReadToolWithReader_IfHashMatch(t *testing.T) {
+	dir := t.TempDir()
+	readFn := ReadFileFn(func(_ context.Context, _ string) (string, error) {
+		return "delegated body", nil
+	})
+	tool := NewReadToolWithReader(dir, readFn)
+	res1, err := tool.Execute(context.Background(), "c1", map[string]any{"path": filepath.Join(dir, "f.txt")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := res1.Details.(*ReadToolDetails).Hash
+	if hash == "" {
+		t.Fatal("expected hash from delegated read")
+	}
+	res2, err := tool.Execute(context.Background(), "c2", map[string]any{"path": filepath.Join(dir, "f.txt"), "if_hash": hash}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := res2.Details.(*ReadToolDetails)
+	if !ok || !d.Unchanged {
+		t.Fatalf("expected unchanged stub, got %+v", res2.Details)
 	}
 }
 

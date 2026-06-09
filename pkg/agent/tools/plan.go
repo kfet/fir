@@ -38,7 +38,7 @@ func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 				"When in doubt, create a plan.\n\n" +
 				"Rules:\n" +
 				"- Create the plan BEFORE your first action — not midway through\n" +
-				"- Mark each step \"in_progress\" as you begin it, \"completed\" when done\n" +
+				"- Mark each step in_progress (s=\"i\") as you begin it, completed (s=\"x\") when done\n" +
 				"- Update the plan immediately whenever any item's status changes — do not batch status updates\n" +
 				"- Each call replaces the entire plan — always include all entries\n" +
 				"- Keep steps concrete and actionable, not vague\n" +
@@ -62,26 +62,26 @@ func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 					},
 					"entries": map[string]any{
 						"type":        "array",
-						"description": "The complete list of plan entries. Each entry has content, status, and priority.",
+						"description": "The complete list of plan entries. Each entry has c (content), p (priority), and s (status).",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
-								"content": map[string]any{
+								"c": map[string]any{
 									"type":        "string",
-									"description": "Description of this plan step",
+									"description": "content: description of this plan step",
 								},
-								"status": map[string]any{
+								"s": map[string]any{
 									"type":        "string",
-									"enum":        []string{"pending", "in_progress", "completed"},
-									"description": "Current status of this step",
+									"enum":        []string{"p", "i", "x"},
+									"description": "status: p (pending), i (in_progress), x (completed)",
 								},
-								"priority": map[string]any{
+								"p": map[string]any{
 									"type":        "string",
-									"enum":        []string{"high", "medium", "low"},
-									"description": "Priority of this step",
+									"enum":        []string{"h", "m", "l"},
+									"description": "priority: h (high), m (medium), l (low)",
 								},
 							},
-							"required": []string{"content", "status", "priority"},
+							"required": []string{"c", "s", "p"},
 						},
 					},
 				},
@@ -121,8 +121,56 @@ func NewPlanTool(sink PlanSink, publisher CardPublisher) agent.AgentTool {
 	}
 }
 
+// planCodec declares the per-field compression aliases for the plan tool's
+// `entries` records (transcript-footprint P3). The canonical full-name form
+// (content/priority/status, with full enum values) is the source of truth; the
+// model emits the compact wire form (c/p/s with short enum codes) and the codec
+// expands it before validation. Decode is tolerant, so old transcripts using
+// full keys and full enum values still decode and render unchanged.
+//
+// Only `plan` opts in for now; the codec is generic and enabled per-field.
+var planCodec = newSchemaCodec(
+	schemaField{
+		Full:    "entries",
+		IsArray: true,
+		Item: newSchemaCodec(
+			schemaField{Full: "content", Short: "c"},
+			schemaField{Full: "priority", Short: "p", Enum: map[string]string{
+				"high":   "h",
+				"medium": "m",
+				"low":    "l",
+			}},
+			schemaField{Full: "status", Short: "s", Enum: map[string]string{
+				"pending":     "p",
+				"in_progress": "i",
+				"completed":   "x",
+			}},
+		),
+	},
+)
+
+// DecodePlanParams expands a plan tool-call's (possibly compressed) arguments
+// to canonical full-name form. It is tolerant of full-keyed/full-enum input so
+// old transcripts still decode. Renderers that read raw plan args from the
+// transcript should run them through this first. On a structural error the
+// original params are returned unchanged so best-effort rendering can proceed.
+func DecodePlanParams(params map[string]any) map[string]any {
+	decoded, err := planCodec.Decode(params)
+	if err != nil {
+		return params
+	}
+	return decoded
+}
+
 func parsePlanEntries(params map[string]any) ([]agent.PlanEntry, error) {
-	rawEntries, ok := params["entries"]
+	// Expand the compact wire form (short keys c/p/s + short enum codes) to the
+	// canonical full-name form. Fail closed on a structural decode error.
+	decoded, err := planCodec.Decode(params)
+	if err != nil {
+		return nil, err
+	}
+
+	rawEntries, ok := decoded["entries"]
 	if !ok {
 		return nil, nil
 	}

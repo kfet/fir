@@ -768,6 +768,34 @@ def _tail_lines(path: str, n: int, chunk_size: int = 8192) -> list[str]:
     return lines[-n:]
 
 
+def _read_line_range(path: str, start: int, end: int) -> tuple[list[str], int]:
+    """Return transcript lines in the 1-indexed inclusive range [start, end]
+    plus the total line count.
+
+    ``start`` clamps to 1; ``end<=0`` (or beyond EOF) means "to the end of the
+    file". Streams the file line-by-line so we never hold the whole transcript
+    in memory — only the requested slice is retained. This gives observers a
+    way to page through a long transcript (e.g. turns N-M) instead of always
+    pulling the tail.
+    """
+    if start < 1:
+        start = 1
+    out: list[str] = []
+    total = 0
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for total, line in enumerate(f, start=1):
+                if total < start:
+                    continue
+                if end > 0 and total > end:
+                    # Keep counting to report an accurate total.
+                    continue
+                out.append(line.rstrip("\n"))
+    except OSError:
+        return [], 0
+    return out, total
+
+
 # ---------------------------------------------------------------------------
 # Observable cards — sibling reader
 # ---------------------------------------------------------------------------
@@ -882,12 +910,22 @@ def _snapshot_transcript(
     lines: int,
     raw_json: bool,
     ext: str = "",
+    start: int = 0,
+    end: int = 0,
 ) -> str:
-    """Return the last `lines` formatted (or raw) lines of a session transcript,
-    prepended with a one-line observable-cards header.
+    """Return formatted (or raw) lines of a session transcript, prepended with
+    a one-line observable-cards header.
 
     Snapshot semantics — does not live-tail. Use `fir observe` from another
     terminal for live observation.
+
+    Range vs tail
+    -------------
+    By default returns the last `lines` records (tail). When `start` > 0, it
+    instead returns the 1-indexed inclusive transcript line range
+    [start, end] (end<=0 means to the end of file) — a partial slice for
+    paging through a long transcript without pulling the whole thing. The tail
+    default is unchanged when no range is given.
 
     Flags
     -----
@@ -918,8 +956,14 @@ def _snapshot_transcript(
         if ext:
             sections.append(_render_card_detail(cards, ext))
 
+    range_note = ""
     try:
-        tail = _tail_lines(store_path, max(1, lines))
+        if start > 0:
+            tail, total = _read_line_range(store_path, start, end)
+            shown_end = end if (end > 0 and end < total) else total
+            range_note = f"[transcript lines {start}-{shown_end} of {total}]"
+        else:
+            tail = _tail_lines(store_path, max(1, lines))
     except OSError as e:
         raise ValueError(f"open transcript {store_path}: {e}") from e
     fmt = _Formatter(raw_json=raw_json, color=False)
@@ -931,6 +975,8 @@ def _snapshot_transcript(
         if rendered is not None:
             out.append(rendered)
     transcript = "\n".join(out) if out else "(no displayable lines)"
+    if range_note:
+        transcript = range_note + "\n" + transcript
     sections.append(transcript)
     return "\n\n".join(sections)
 
@@ -1006,6 +1052,8 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     include_all = False
     lines = 50
     ext = ""
+    start = 0
+    end = 0
     i = 0
     while i < len(args):
         a = args[i]
@@ -1034,6 +1082,16 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
                 lines = int(a[len("--lines="):])
             except ValueError:
                 return {"message": f"/observe: invalid --lines value: {a}"}
+        elif a.startswith("--start="):
+            try:
+                start = int(a[len("--start="):])
+            except ValueError:
+                return {"message": f"/observe: invalid --start value: {a}"}
+        elif a.startswith("--end="):
+            try:
+                end = int(a[len("--end="):])
+            except ValueError:
+                return {"message": f"/observe: invalid --end value: {a}"}
         elif a.startswith("--"):
             return {"message": f"/observe: unknown flag: {a}"}
         else:
@@ -1042,7 +1100,9 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     if not id_prefix and not cwd_flag:
         return {"message": _snapshot_session_list(include_all=include_all), "print_response": True}
     try:
-        out = _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, ext=ext)
+        out = _snapshot_transcript(
+            id_prefix, cwd_flag, lines, raw_json, ext=ext, start=start, end=end
+        )
     except ValueError as e:
         return {"message": str(e)}
     return {"message": out, "print_response": True}
@@ -1112,7 +1172,9 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
         "table of live sessions. With id_prefix or cwd, returns a snapshot "
         "of the last `lines` formatted entries from that session's transcript "
         "(does NOT live-tail) prepended with a one-line observable-cards "
-        "header (mood: ...  ·  plan: ...). Useful for checking what a "
+        "header (mood: ...  ·  plan: ...). Pass `start` (and optional `end`) "
+        "to fetch a partial transcript line range instead of the tail — handy "
+        "for paging through a long session. Useful for checking what a "
         "sibling agent is doing or auditing a long-running session. "
         "id_prefix matches the session id, session name, or basename(cwd)."
     ),
@@ -1153,6 +1215,23 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
                 "description": "When listing (no id_prefix/cwd), include ended/crashed sessions. Default false (live only).",
                 "default": False,
             },
+            "start": {
+                "type": "integer",
+                "description": (
+                    "Optional partial-range start: 1-indexed transcript line "
+                    "to begin at. When set, returns the slice [start, end] "
+                    "instead of the trailing `lines` tail — use to page "
+                    "through a long transcript (e.g. lines N-M)."
+                ),
+            },
+            "end": {
+                "type": "integer",
+                "description": (
+                    "Optional partial-range end: 1-indexed inclusive last "
+                    "transcript line. <=0 or omitted means to the end of the "
+                    "transcript. Only used when `start` is set."
+                ),
+            },
         },
     },
 )
@@ -1163,10 +1242,14 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
     raw_json = bool(params.get("raw_json"))
     include_all = bool(params.get("all"))
     ext = (params.get("ext") or "").strip()
+    start = int(params.get("start") or 0)
+    end = int(params.get("end") or 0)
     if not id_prefix and not cwd_flag:
         return _snapshot_session_list(include_all=include_all)
     try:
-        return _snapshot_transcript(id_prefix, cwd_flag, lines, raw_json, ext=ext)
+        return _snapshot_transcript(
+            id_prefix, cwd_flag, lines, raw_json, ext=ext, start=start, end=end
+        )
     except ValueError as e:
         raise fir_ext.ToolError(str(e)) from e
 

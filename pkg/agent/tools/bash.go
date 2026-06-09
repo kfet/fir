@@ -37,7 +37,7 @@ func NewBashTool(cwd string) agent.AgentTool {
 		Tool: core.Tool{
 			Name: "bash",
 			Description: fmt.Sprintf(
-				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Optionally provide `cwd` to run in a specific directory instead of the session's working directory (absolute path, or relative to the session directory); use this to recover if the session's working directory was deleted. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running.",
+				"Execute a bash command in the current working directory (%s/%s). Returns stdout and stderr. Output is truncated to last %d lines or %dKB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds (default 10s if omitted; pass an explicit value to override up or down). Optionally provide `cwd` to run in a specific directory instead of the session's working directory (absolute path, or relative to the session directory); use this to recover if the session's working directory was deleted. Background processes started with `&` (including under `nohup`) are killed when the foreground command exits, so the tool returns promptly instead of waiting on the inherited pipe. Daemons that detach via `setsid` or double-fork (tmux server, sshd, dockerd, etc.) escape this and keep running. For viewing file contents, prefer the `read` tool over `cat`/`sed -n`/`head`/`tail` — `read` output is tracked and de-duplicated. For modifying files, prefer `edit`/`write` over `sed -i` / heredoc rewrites. Each result carries a `hash` of the output; the command always executes, but if you pass `if_hash` and the fresh output matches it you get back a tiny `unchanged` stub instead of the full output.",
 				runtime.GOOS, runtime.GOARCH, DefaultMaxLines, DefaultMaxBytes/1024,
 			),
 			Parameters: map[string]any{
@@ -54,6 +54,10 @@ func NewBashTool(cwd string) agent.AgentTool {
 					"cwd": map[string]any{
 						"type":        "string",
 						"description": "Optional working directory to run the command in, overriding the session's default. Absolute, or relative to the session directory. Useful to recover when the session's working directory has been deleted.",
+					},
+					"if_hash": map[string]any{
+						"type":        "string",
+						"description": "Optional. If you already hold this command's output, pass the `hash` from your previous run. The command always re-executes; if the fresh output still matches, you get back a tiny `unchanged` stub instead of the full output.",
 					},
 				},
 				"required": []string{"command"},
@@ -83,7 +87,8 @@ func NewBashTool(cwd string) agent.AgentTool {
 				runDir = ResolveToCwd(override, cwd)
 			}
 
-			return executeBash(ctx, command, runDir, timeout)
+			ifHash, _ := params["if_hash"].(string)
+			return executeBash(ctx, command, runDir, timeout, ifHash)
 		},
 	}
 }
@@ -119,7 +124,7 @@ func truncateForLog(s string, max int) string {
 }
 
 // executeBash runs a bash command and returns the result.
-func executeBash(ctx context.Context, command, cwd string, timeout time.Duration) (agent.AgentToolResult, error) {
+func executeBash(ctx context.Context, command, cwd string, timeout time.Duration, ifHash string) (agent.AgentToolResult, error) {
 	slog.Debug("bash exec", "command", truncateForLog(command, 200), "cwd", cwd, "timeout", timeout)
 	start := time.Now()
 	// If the working directory no longer exists, refuse to run rather than
@@ -306,7 +311,21 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 
 	slog.Debug("bash done", "exitCode", 0, "outputLen", len(output), "truncated", truncResult.Truncated, "elapsed", time.Since(start))
 
-	details := map[string]any{}
+	// Hash the canonical (stripped, untruncated) output so the model can opt
+	// into the confirm-unchanged path (P4). The command always executed above;
+	// hashing only affects what we put in the transcript.
+	hash := readContentHash([]byte(output))
+	if ifHash != "" && ifHash == hash {
+		return agent.AgentToolResult{
+			Content: []core.ToolResultContent{{
+				Type: "text",
+				Text: fmt.Sprintf("[unchanged] command output matches if_hash (hash: %s)", hash),
+			}},
+			Details: map[string]any{"unchanged": true, "hash": hash},
+		}, nil
+	}
+
+	details := map[string]any{"hash": hash}
 	if fullOutputPath != "" {
 		details["fullOutputPath"] = fullOutputPath
 	}
@@ -319,6 +338,7 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	return agent.AgentToolResult{
 		Content: []core.ToolResultContent{
 			{Type: "text", Text: outputText},
+			{Type: "text", Text: fmt.Sprintf("[hash: %s]", hash)},
 		},
 		Details: details,
 	}, nil

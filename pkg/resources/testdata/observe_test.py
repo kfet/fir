@@ -1103,5 +1103,57 @@ class TestCards(unittest.TestCase):
         self.assertIn("EXPAND ME", out)
         self.assertNotIn("not shown", out)
 
+    def _write_multi_line_session(self, path: str, n: int) -> None:
+        """Write a session header + n user messages, one JSONL record each."""
+        header = {
+            "type": "session", "version": 3, "id": self.session_id,
+            "timestamp": "2026-01-01T00:00:00Z", "cwd": self.tmpdir,
+        }
+        with open(path, "w") as f:
+            f.write(json.dumps(header) + "\n")
+            for k in range(n):
+                f.write(json.dumps({
+                    "type": "message", "id": f"e{k}", "parentId": "",
+                    "timestamp": "2026-01-01T00:00:01Z",
+                    "message": {"role": "user", "content": f"msg{k}", "timestamp": 0},
+                }) + "\n")
+
+    def test_read_line_range_inclusive(self) -> None:
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_multi_line_session(store_path, 5)  # 1 header + 5 msgs = 6 lines
+        sliced, total = observe._read_line_range(store_path, 2, 4)
+        self.assertEqual(total, 6)
+        self.assertEqual(len(sliced), 3)  # lines 2,3,4
+        self.assertIn("msg0", sliced[0])  # line 2 is first message
+        self.assertIn("msg2", sliced[2])
+
+    def test_read_line_range_to_eof(self) -> None:
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_multi_line_session(store_path, 3)  # 4 lines
+        sliced, total = observe._read_line_range(store_path, 3, 0)
+        self.assertEqual(total, 4)
+        self.assertEqual(len(sliced), 2)  # lines 3,4
+
+    def test_snapshot_transcript_range_slice(self) -> None:
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_multi_line_session(store_path, 5)
+        self._plant_sidecar(store_path)
+        out = observe._snapshot_transcript(
+            self.session_id, "", 50, False, start=2, end=3,
+        )
+        self.assertIn("transcript lines 2-3 of 6", out)
+        self.assertIn("msg0", out)
+        self.assertIn("msg1", out)
+        self.assertNotIn("msg3", out)
+
+    def test_snapshot_transcript_default_is_tail(self) -> None:
+        """No start => unchanged tail behaviour, no range note."""
+        store_path = os.path.join(self.tmpdir, "session.jsonl")
+        self._write_multi_line_session(store_path, 3)
+        self._plant_sidecar(store_path)
+        out = observe._snapshot_transcript(self.session_id, "", 50, False)
+        self.assertNotIn("transcript lines", out)
+        self.assertIn("msg2", out)
+
 if __name__ == "__main__":
     unittest.main()

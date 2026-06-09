@@ -24,7 +24,7 @@ func NewWriteTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: core.Tool{
 			Name:        "write",
-			Description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+			Description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories. This is the preferred way to create or replace file contents — do not shell out to heredoc / `sed` for this.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

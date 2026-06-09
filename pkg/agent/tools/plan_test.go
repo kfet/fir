@@ -40,6 +40,84 @@ func newRecordingPublisher(out *[]recordedPublish) CardPublisher {
 	}
 }
 
+// TestPlanTool_CompactWireForm pins that the plan tool accepts the compressed
+// wire form (short keys c/p/s + short enum codes) and expands it to canonical
+// full-name entries (transcript-footprint P3).
+func TestPlanTool_CompactWireForm(t *testing.T) {
+	sink := &fakePlanSink{}
+	tool := NewPlanTool(sink, nil)
+
+	_, err := tool.Execute(context.Background(), "tc-compact", map[string]any{
+		"entries": []any{
+			map[string]any{"c": "step 1", "p": "h", "s": "i"},
+			map[string]any{"c": "step 2", "p": "l", "s": "x"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(sink.entries))
+	}
+	if sink.entries[0].Content != "step 1" ||
+		sink.entries[0].Priority != agent.PlanEntryPriorityHigh ||
+		sink.entries[0].Status != agent.PlanEntryStatusInProgress {
+		t.Errorf("entry 0 = %+v", sink.entries[0])
+	}
+	if sink.entries[1].Priority != agent.PlanEntryPriorityLow ||
+		sink.entries[1].Status != agent.PlanEntryStatusCompleted {
+		t.Errorf("entry 1 = %+v", sink.entries[1])
+	}
+}
+
+// TestPlanTool_TolerantOldKeys pins that the full-keyed/full-enum form (old
+// transcripts) still decodes unchanged alongside the new compact form.
+func TestPlanTool_TolerantOldKeys(t *testing.T) {
+	sink := &fakePlanSink{}
+	tool := NewPlanTool(sink, nil)
+
+	_, err := tool.Execute(context.Background(), "tc-old", map[string]any{
+		"entries": []any{
+			map[string]any{"content": "old", "priority": "medium", "status": "pending"},
+			map[string]any{"c": "new", "p": "h", "s": "x"}, // mixed in same call
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(sink.entries))
+	}
+	if sink.entries[0].Content != "old" || sink.entries[0].Priority != agent.PlanEntryPriorityMedium {
+		t.Errorf("entry 0 = %+v", sink.entries[0])
+	}
+	if sink.entries[1].Content != "new" || sink.entries[1].Status != agent.PlanEntryStatusCompleted {
+		t.Errorf("entry 1 = %+v", sink.entries[1])
+	}
+}
+
+// TestPlanTool_CompactMissingContentFailsClosed pins that a compact entry with
+// no content (c) is still rejected — validation runs on the canonical form.
+func TestPlanTool_CompactMissingContentFailsClosed(t *testing.T) {
+	sink := &fakePlanSink{}
+	tool := NewPlanTool(sink, nil)
+
+	result, err := tool.Execute(context.Background(), "tc-bad", map[string]any{
+		"entries": []any{
+			map[string]any{"p": "h", "s": "i"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Error("expected error result for missing content")
+	}
+	if sink.calls != 0 {
+		t.Error("should not have committed plan")
+	}
+}
+
 func TestPlanTool_Basic(t *testing.T) {
 	sink := &fakePlanSink{}
 	tool := NewPlanTool(sink, nil)

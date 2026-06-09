@@ -71,7 +71,7 @@ func NewEditTool(cwd string) agent.AgentTool {
 	return agent.AgentTool{
 		Tool: core.Tool{
 			Name:        "edit",
-			Description: "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
+			Description: "Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits. This is the preferred way to modify files — do not shell out to `sed -i` for this.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

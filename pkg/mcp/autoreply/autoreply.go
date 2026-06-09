@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/agent"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 )
@@ -380,7 +381,9 @@ func formatPlanMarkdown(args map[string]any, updateCount int, isError bool) stri
 
 	title, _ := args["title"].(string)
 	metadata, _ := args["metadata"].(map[string]any)
-	rawEntries, _ := args["entries"].([]any)
+	// Decode the (possibly compressed) wire form to canonical full names so
+	// both old (content/full-enum) and new (c/short-code) transcripts render.
+	rawEntries, _ := tools.DecodePlanParams(args)["entries"].([]any)
 
 	type entry struct {
 		content  string
