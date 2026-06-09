@@ -2200,7 +2200,8 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		}
 		if strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
-			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") {
+			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
+			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.Compaction = true
 		}
 	}

@@ -191,7 +191,8 @@ func supportsAdaptiveThinking(modelID string) bool {
 	return strings.Contains(modelID, "opus-4-6") || strings.Contains(modelID, "opus-4.6") ||
 		strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") ||
 		strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") ||
-		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6")
+		strings.Contains(modelID, "sonnet-4-6") || strings.Contains(modelID, "sonnet-4.6") ||
+		strings.Contains(modelID, "fable-5") || strings.Contains(modelID, "mythos-5")
 }
 
 func matchesServerToolCapability(model *ai.Model, toolType string) bool {
@@ -225,7 +226,8 @@ func supportsModelCompaction(model *ai.Model) bool {
 		id := model.ID
 		return strings.Contains(id, "opus-4-8") || strings.Contains(id, "opus-4.8") ||
 			strings.Contains(id, "opus-4-6") || strings.Contains(id, "opus-4.6") ||
-			strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6")
+			strings.Contains(id, "sonnet-4-6") || strings.Contains(id, "sonnet-4.6") ||
+			strings.Contains(id, "fable-5") || strings.Contains(id, "mythos-5")
 	}
 	return false
 }
@@ -244,7 +246,7 @@ func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	case ai.ThinkingHigh:
 		return "high"
 	case ai.ThinkingXHigh:
-		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") {
+		if strings.Contains(modelID, "opus-4-8") || strings.Contains(modelID, "opus-4.8") || strings.Contains(modelID, "opus-4-7") || strings.Contains(modelID, "opus-4.7") || strings.Contains(modelID, "fable-5") || strings.Contains(modelID, "mythos-5") {
 			return "xhigh"
 		}
 		return "high"
