@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.1] - 2026-06-09
+
+### Changed
+
+- Claude Fable 5 / Mythos 5 now carry their SWE-bench Verified score (95.5%, per Anthropic's announcement) in the model catalog, so the model picker and cost/capability surfaces rank them correctly.
+
 ## [0.65.0] - 2026-06-09
 
 ### Added

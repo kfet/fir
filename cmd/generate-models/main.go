@@ -237,6 +237,11 @@ type swePattern struct {
 //
 // init() validates this ordering at startup.
 var sweModelPatterns = []swePattern{
+	// --- Claude Fable 5 / Mythos 5 (Mythos-class flagship) ---
+	// Source: Anthropic announcement — 95.5% SWE-bench Verified.
+	// Mythos 5 is the same underlying model as Fable 5 (safeguards aside).
+	{"claude-fable-5", "claude-fable-5", 95.5},
+	{"claude-mythos-5", "claude-mythos-5", 95.5},
 	// --- Claude Opus 4.8 ---
 	// Source: Anthropic announcement — improved over Opus 4.7; use the latest
 	// known Opus score until the public system-card table is wired in.
