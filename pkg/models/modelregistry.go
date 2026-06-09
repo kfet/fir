@@ -99,6 +99,7 @@ type ModelDefinition struct {
 	Compat        *CompatConfig     `json:"compat,omitempty"`
 	ServerTools   []string          `json:"serverTools,omitempty"`
 	Compaction    *bool             `json:"compaction,omitempty"`
+	SWEScore      *float64          `json:"sweScore,omitempty"`
 }
 
 // ModelOverride holds per-model overrides (all fields optional, merged with built-in model).
@@ -113,6 +114,7 @@ type ModelOverride struct {
 	Compat        *CompatConfig     `json:"compat,omitempty"`
 	ServerTools   []string          `json:"serverTools,omitempty"`
 	Compaction    *bool             `json:"compaction,omitempty"`
+	SWEScore      *float64          `json:"sweScore,omitempty"`
 }
 
 // ProviderConfig is the per-provider section in models.json.
@@ -257,6 +259,9 @@ func applyModelOverride(model *ai.Model, override *ModelOverride) *ai.Model {
 	}
 	if override.Compaction != nil {
 		result.Compaction = *override.Compaction
+	}
+	if override.SWEScore != nil {
+		result.SWEScore = *override.SWEScore
 	}
 
 	// Merge cost (partial override)
@@ -765,6 +770,11 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				compaction = *modelDef.Compaction
 			}
 
+			var sweScore float64
+			if modelDef.SWEScore != nil {
+				sweScore = *modelDef.SWEScore
+			}
+
 			models = append(models, &ai.Model{
 				ID:            modelDef.ID,
 				Name:          name,
@@ -780,6 +790,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 				Compat:        compat,
 				ServerTools:   append([]string(nil), modelDef.ServerTools...),
 				Compaction:    compaction,
+				SWEScore:      sweScore,
 			})
 		}
 	}

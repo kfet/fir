@@ -58,7 +58,7 @@ All settings fields are optional. Project settings are merged on top of global s
 | File | Purpose |
 |------|---------|
 | `settings.json` | Default provider, model, thinking, compaction, retry, terminal, image settings |
-| `models.json` | Add or override models per provider (custom ids, base URLs, headers, costs) |
+| `models.json` | Add or override models per provider (custom ids, base URLs, headers, costs, sweScore) |
 | `keybindings.json` | Custom key bindings for interactive mode |
 | `sessions/` | Saved conversation sessions |
 | `skills/` | User-level skills (shared across projects) |
@@ -159,7 +159,8 @@ Drop a `models.json` in `~/.config/fir/` (global) or `.fir/` (project). Add mode
           "reasoning": true,
           "input": ["text", "image"],
           "contextWindow": 200000,
-          "maxTokens": 8192
+          "maxTokens": 8192,
+          "sweScore": 73.5
         }
       ]
     }
@@ -167,7 +168,7 @@ Drop a `models.json` in `~/.config/fir/` (global) or `.fir/` (project). Add mode
 }
 ```
 
-The same file also supports per-provider overrides (`baseUrl`, `apiKey`, `headers`, `authHeader`) and per-model overrides under `modelOverrides`.
+The same file also supports per-provider overrides (`baseUrl`, `apiKey`, `headers`, `authHeader`) and per-model overrides under `modelOverrides`. Most model fields (cost, `contextWindow`, `maxTokens`, `sweScore`, `compaction`, `serverTools`, …) can be set on a custom model or supplied via `modelOverrides` to patch a built-in. `sweScore` (SWE-bench Verified %, 0–100) shows up in the `/model` selector and drives its sort order.
 
 ### 2. Environment variables (Claude Code parity)
 

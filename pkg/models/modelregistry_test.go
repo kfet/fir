@@ -771,7 +771,8 @@ func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
         {
           "id": "my-claude-proxy",
           "serverTools": ["web_search_20260209", "web_fetch_20260209"],
-          "compaction": true
+          "compaction": true,
+          "sweScore": 73.5
         }
       ]
     }
@@ -792,6 +793,12 @@ func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
 	if !m.Compaction {
 		t.Fatal("expected compaction=true")
 	}
+	if m.SWEScore != 73.5 {
+		t.Fatalf("expected sweScore=73.5, got %v", m.SWEScore)
+	}
+	if m.SWEInferred {
+		t.Fatal("custom sweScore should be exact, not inferred")
+	}
 }
 
 func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
@@ -807,7 +814,8 @@ func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
       "modelOverrides": {
         "` + id + `": {
           "serverTools": ["web_search_20250305"],
-          "compaction": true
+          "compaction": true,
+          "sweScore": 81.2
         }
       }
     }
@@ -827,6 +835,9 @@ func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
 	}
 	if len(m.ServerTools) != 1 || m.ServerTools[0] != "web_search_20250305" {
 		t.Fatalf("unexpected serverTools override: %#v", m.ServerTools)
+	}
+	if m.SWEScore != 81.2 {
+		t.Fatalf("expected sweScore override=81.2, got %v", m.SWEScore)
 	}
 }
 
