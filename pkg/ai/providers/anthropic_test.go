@@ -716,6 +716,7 @@ func TestAnthropic_ThinkingLevelMapping(t *testing.T) {
 	}{
 		// Non-Opus-4.7 adaptive model (e.g. opus-4.6): xhigh clamps to high,
 		// max passes through.
+		{ai.ThinkingOff, "claude-opus-4-6", "low"}, // adaptive models cant disable; off => low effort
 		{ai.ThinkingMinimal, "claude-opus-4-6", "low"},
 		{ai.ThinkingLow, "claude-opus-4-6", "low"},
 		{ai.ThinkingMedium, "claude-opus-4-6", "medium"},

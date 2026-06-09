@@ -239,7 +239,7 @@ func supportsModelCompaction(model *ai.Model) bool {
 // clamp xhigh down to "high".
 func mapThinkingLevelToEffort(level ai.ThinkingLevel, modelID string) string {
 	switch level {
-	case ai.ThinkingMinimal, ai.ThinkingLow:
+	case ai.ThinkingOff, ai.ThinkingMinimal, ai.ThinkingLow:
 		return "low"
 	case ai.ThinkingMedium:
 		return "medium"
@@ -781,8 +781,11 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
-	// Explicitly disable thinking when requested on a reasoning model
-	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
+	// Explicitly disable thinking when requested on a reasoning model.
+	// Adaptive-thinking models (Opus 4.6+, Fable/Mythos 5) cannot disable
+	// thinking — the API rejects thinking.type=disabled — so for those we
+	// fall through to adaptive thinking at the lowest effort instead.
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning && !supportsAdaptiveThinking(model.ID) {
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
