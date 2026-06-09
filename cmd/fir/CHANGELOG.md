@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.3] - 2026-06-09
+
+### Fixed
+
+- Interactive TUI: plain-letter alt combos (e.g. `Alt+L` model selector, plus `Alt+D`/`Alt+Y` editor actions) no longer silently fail when the Kitty keyboard protocol is active but alt keys still arrive legacy-encoded — most notably Ghostty behind tmux, where fir negotiates Kitty and skips `modifyOtherKeys` yet tmux delivers `\x1bl`. The `alt+letter` (and `ctrl+alt+letter`) matchers in `MatchesKey` were gated on `!kitty`; the legacy `ESC`+<non-bracket> form never collides with a Kitty CSI-u sequence, so the guard is removed. (`Alt+B`/`Alt+F` only appeared to work because they also matched the unguarded `Alt+Left`/`Alt+Right` legacy aliases.)
+
 ## [0.65.2] - 2026-06-09
 
 ### Fixed
