@@ -678,3 +678,33 @@ func TestSplitKeySequences_KittySequence(t *testing.T) {
 		}
 	}
 }
+
+// TestMatchesKey_LegacyAltUnderKitty guards a regression where legacy
+// ESC-prefixed alt combos (e.g. "\x1bl" for alt+l) failed to match whenever
+// the Kitty keyboard protocol was active. This happens in real setups such as
+// Ghostty behind tmux: fir detects Ghostty and turns Kitty on (and skips
+// modifyOtherKeys), yet tmux still delivers alt keys legacy-encoded. The
+// alt+letter branch was guarded by !kitty, so alt+l/a/d/y silently did nothing
+// (alt+b/f appeared to work only via the unguarded alt+left/right aliases).
+func TestMatchesKey_LegacyAltUnderKitty(t *testing.T) {
+	SetKittyProtocolActive(true)
+	defer SetKittyProtocolActive(false)
+
+	for _, c := range []string{"l", "a", "d", "y", "k"} {
+		data := "\x1b" + c
+		if !MatchesKey(data, KeyID("alt+"+c)) {
+			t.Errorf("kitty active: %q should match alt+%s", data, c)
+		}
+	}
+	// Must not over-match: legacy alt+l is neither ctrl+l nor a bare letter.
+	if MatchesKey("\x1bl", "ctrl+l") {
+		t.Error("legacy alt+l must not match ctrl+l")
+	}
+	if MatchesKey("\x1bl", "l") {
+		t.Error("legacy alt+l must not match bare l")
+	}
+	// ctrl+alt legacy combos should also match under kitty.
+	if !MatchesKey("\x1b\x0c", "ctrl+alt+l") {
+		t.Error("kitty active: \\x1b\\x0c should match ctrl+alt+l")
+	}
+}

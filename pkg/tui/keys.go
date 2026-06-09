@@ -728,10 +728,15 @@ func MatchesKey(data string, keyID KeyID) bool {
 			codepoint := int(ch)
 			rc := rawCtrlChar(key)
 
-			if ctrl && alt && !shift && !kitty && rc != "" {
+			// Accept legacy ESC-prefixed alt combos even when the Kitty protocol is
+			// active: some setups negotiate Kitty (so kittyActive==true) yet still
+			// deliver alt keys legacy-encoded (e.g. Ghostty behind tmux without
+			// kitty passthrough, where modifyOtherKeys is also skipped). The legacy
+			// form ESC+<non-bracket byte> never collides with a Kitty CSI-u sequence.
+			if ctrl && alt && !shift && rc != "" {
 				return data == "\x1b"+rc
 			}
-			if alt && !ctrl && !shift && !kitty && ch >= 'a' && ch <= 'z' {
+			if alt && !ctrl && !shift && ch >= 'a' && ch <= 'z' {
 				if data == "\x1b"+key {
 					return true
 				}
