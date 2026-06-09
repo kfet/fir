@@ -356,7 +356,8 @@ func (tl *TreeList) applyFilter() {
 		// Apply filter mode
 		passesFilter := true
 		isSettingsEntry := entry.Type == "label" || entry.Type == "custom" ||
-			entry.Type == "model_change" || entry.Type == "thinking_level_change"
+			entry.Type == "model_change" || entry.Type == "thinking_level_change" ||
+			entry.Type == "agent_version"
 
 		switch tl.filter {
 		case filterUserOnly:
@@ -628,6 +629,8 @@ func (tl *TreeList) getSearchableText(node *store.SessionTreeNode) string {
 		parts = append(parts, "branch summary", entry.Summary)
 	case "model_change":
 		parts = append(parts, "model", entry.ModelID)
+	case "agent_version":
+		parts = append(parts, "fir version", entry.FirVersion)
 	case "thinking_level_change":
 		parts = append(parts, "thinking", entry.ThinkingLevel)
 	case "custom":
@@ -881,6 +884,9 @@ func (tl *TreeList) getEntryDisplayText(node *store.SessionTreeNode, isSelected 
 
 	case "model_change":
 		result = t.Fg("dim", fmt.Sprintf("[model: %s]", entry.ModelID))
+
+	case "agent_version":
+		result = t.Fg("dim", fmt.Sprintf("[fir version: %s]", entry.FirVersion))
 
 	case "thinking_level_change":
 		result = t.Fg("dim", fmt.Sprintf("[thinking: %s]", entry.ThinkingLevel))

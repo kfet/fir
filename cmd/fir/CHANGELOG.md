@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Session transcripts now record the fir binary version. The `session` header record carries a new `firVersion` field (and `commit` when the build embeds a VCS stamp), written once at session start — distinct from the schema `version` int. On resume, if the running binary differs from the version that last wrote to the session, an `agent_version` delta entry is appended so a session spanning two fir versions is visible. These records are never sent to the LLM.
+
 ### Changed
 
 - `observe_session` now supports partial-range retrieval (transcript-footprint P5): pass `start` (and optional `end`) to fetch a 1-indexed inclusive transcript line range instead of the trailing tail, for paging through a long session. The `/observe` command gains matching `--start=`/`--end=` flags. Default tail behaviour is unchanged.

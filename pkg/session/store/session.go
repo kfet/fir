@@ -35,6 +35,16 @@ type SessionHeader struct {
 	Cwd           string `json:"cwd"`                     //
 	ParentSession string `json:"parentSession,omitempty"` //
 
+	// FirVersion records the fir binary (agent) version that created this
+	// session, written once at session start. This is distinct from the
+	// Version field above, which is the transcript SCHEMA version. Absent on
+	// sessions created before this field shipped.
+	FirVersion string `json:"firVersion,omitempty"`
+
+	// Commit is the VCS revision the binary was built from, when the build
+	// carried a VCS stamp. Omitted when unavailable (e.g. `go test` builds).
+	Commit string `json:"commit,omitempty"`
+
 	// Invocation records the user-intent runtime config (--mcp-config flags,
 	// --extension allowlist, model selection, ...) that was passed when this
 	// session was first created. Stamped once at creation; never rewritten on
@@ -62,6 +72,13 @@ type SessionEntry struct {
 	// model_change
 	Provider string `json:"provider,omitempty"`
 	ModelID  string `json:"modelId,omitempty"`
+
+	// agent_version — records the fir binary version in effect at this point.
+	// Emitted on resume when the running binary differs from the version that
+	// last wrote to the session, so a session spanning two fir versions is
+	// visible as a delta. Never sent to the LLM (see BuildSessionContext).
+	FirVersion string `json:"firVersion,omitempty"`
+	Commit     string `json:"commit,omitempty"`
 
 	// compaction
 	Summary          string          `json:"summary,omitempty"`
@@ -340,11 +357,13 @@ func (ss *SessionStore) newSession(opts *NewSessionOptions) string {
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
 
 	ss.header = &SessionHeader{
-		Type:      "session",
-		Version:   CurrentSessionVersion,
-		ID:        ss.sessionID,
-		Timestamp: ts,
-		Cwd:       ss.cwd,
+		Type:       "session",
+		Version:    CurrentSessionVersion,
+		ID:         ss.sessionID,
+		Timestamp:  ts,
+		Cwd:        ss.cwd,
+		FirVersion: currentFirVersion(),
+		Commit:     firCommit(),
 	}
 	if opts != nil {
 		ss.header.ParentSession = opts.ParentSession
@@ -803,6 +822,48 @@ func (ss *SessionStore) AppendModelChange(provider, modelID string) string {
 	return ss.appendEntry(entry)
 }
 
+// MaybeRecordAgentVersionChange appends an "agent_version" entry when this
+// store resumed an existing session whose header (or most recent agent_version
+// entry) was written by a different fir binary than the one now running. This
+// makes a session that spans two fir versions visible as a delta, mirroring
+// how model_change records a mid-session model switch. It is a no-op for fresh
+// sessions (the header already carries the current version), in-memory stores,
+// and resumes where the version is unchanged. Returns the new entry ID, or ""
+// if nothing was appended.
+func (ss *SessionStore) MaybeRecordAgentVersionChange() string {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	if !ss.resumed || ss.header == nil {
+		return ""
+	}
+	current := currentFirVersion()
+	if current == "" {
+		return ""
+	}
+	// The last-recorded version is the most recent agent_version entry, or the
+	// header's FirVersion if no such entry exists yet.
+	last := ss.header.FirVersion
+	for _, e := range ss.entries {
+		if e.Type == "agent_version" && e.FirVersion != "" {
+			last = e.FirVersion
+		}
+	}
+	if last == current {
+		return ""
+	}
+
+	entry := &SessionEntry{
+		Type:       "agent_version",
+		ID:         ss.generateID(),
+		ParentID:   ss.leafID,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		FirVersion: current,
+		Commit:     firCommit(),
+	}
+	return ss.appendEntry(entry)
+}
+
 func (ss *SessionStore) AppendCompaction(summary, firstKeptEntryID string, tokensBefore int, details json.RawMessage, fromHook bool) string {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
@@ -963,11 +1024,13 @@ func (ss *SessionStore) CreateBranchedSession(leafId string) (string, error) {
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
 
 	header := &SessionHeader{
-		Type:      "session",
-		Version:   CurrentSessionVersion,
-		ID:        newSessionID,
-		Timestamp: ts,
-		Cwd:       ss.cwd,
+		Type:       "session",
+		Version:    CurrentSessionVersion,
+		ID:         newSessionID,
+		Timestamp:  ts,
+		Cwd:        ss.cwd,
+		FirVersion: currentFirVersion(),
+		Commit:     firCommit(),
 	}
 	if ss.persist {
 		header.ParentSession = previousSessionFile
@@ -1600,6 +1663,8 @@ func ForkFrom(sourcePath, targetCwd, sessionDir string) (*SessionStore, error) {
 		Timestamp:     ts,
 		Cwd:           targetCwd,
 		ParentSession: sourcePath,
+		FirVersion:    currentFirVersion(),
+		Commit:        firCommit(),
 	}
 
 	var lines []string

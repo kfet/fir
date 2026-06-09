@@ -90,8 +90,19 @@ func setupSession(args *Args, deferExtensions bool) (*sessionSetup, error) {
 	// any of the downstream args-derived setup runs. For brand-new sessions
 	// this also stamps the current invocation into the header so future
 	// `fir -c` invocations can restore the same config.
+	// Stamp the running fir binary version onto new session headers (and let
+	// resumed sessions detect a version change) before the store is created.
+	store.SetFirVersion(version)
+
 	sessionStore, isResumed := createSessionStore(args, cwd, agentDir)
 	maybeRestoreInvocation(args, sessionStore, isResumed, os.Stderr)
+
+	// If this resumed an existing session created by a different fir version,
+	// record an agent_version delta so the transcript shows it spans two
+	// versions (the common, unchanged case appends nothing).
+	if isResumed {
+		sessionStore.MaybeRecordAgentVersionChange()
+	}
 
 	// Apply Claude Code-style env vars: CLAUDE_CODE_USE_BEDROCK=1 + ANTHROPIC_MODEL
 	// route the model through Amazon Bedrock. ANTHROPIC_MODEL can be a model id

@@ -27,9 +27,9 @@ func TestRootChangelogIsSymlink(t *testing.T) {
 		t.Fatalf("lstat %s: %v", root, err)
 	}
 	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("repo-root CHANGELOG.md must be a symlink to cmd/fir/CHANGELOG.md "+
-			"(single source baked into the binary), but it is a regular file. "+
-			"A release likely materialised it; restore with:\n"+
+		t.Fatalf("repo-root CHANGELOG.md must be a symlink to cmd/fir/CHANGELOG.md " +
+			"(single source baked into the binary), but it is a regular file. " +
+			"A release likely materialised it; restore with:\n" +
 			"\trm CHANGELOG.md && ln -s cmd/fir/CHANGELOG.md CHANGELOG.md")
 	}
 	target, err := os.Readlink(root)
