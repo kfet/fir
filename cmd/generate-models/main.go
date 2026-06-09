@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/format"
 	"io"
 	"log"
 	"math"
@@ -2533,6 +2534,16 @@ func main() {
 
 	// Generate Go source
 	source := generateGoSource(all)
+
+	// gofmt the output so the committed file is always gofmt-clean. Without
+	// this, a model with a long field name (e.g. ReasoningEffortValues) widens
+	// struct-field alignment and `make all`'s fmt step rewrites the file in CI,
+	// leaving the tree dirty and failing the GoReleaser git-state check.
+	if formatted, ferr := format.Source([]byte(source)); ferr != nil {
+		log.Printf("Warning: gofmt of generated source failed (%v); writing unformatted", ferr)
+	} else {
+		source = string(formatted)
+	}
 
 	// Write output
 	if err := os.WriteFile(*out, []byte(source), 0o644); err != nil {
