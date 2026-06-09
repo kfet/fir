@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.65.5] - 2026-06-09
+
+### Changed
+
+- Anthropic adaptive thinking is now driven by declarative model metadata instead of provider-specific model-ID substring matching. `ai.Model` gains an `AdaptiveThinking` capability (always-on, effort-based thinking that cannot disable thinking or set a token budget), populated by `cmd/generate-models` for the Opus 4.6/4.7/4.8, Sonnet 4.6 and Fable/Mythos 5 generations and overridable via `models.json` (`adaptiveThinking`). The effort tier is likewise declarative: `xhigh` is emitted only when a model advertises it in `reasoningEffortValues`, otherwise it clamps to `high` — no model names in the runtime provider code. Bedrock prefers the declarative capability too, keeping the ID/Name heuristic only for runtime inference-profile ARNs that aren't in the catalog.
+
+### Fixed
+
+- Requesting thinking-off against a model that cannot disable thinking no longer surfaces as a user error. The Anthropic provider now catches the `"thinking.type.disabled" is not supported for this model` API error for **any** model and transparently re-issues the request as adaptive thinking before any output has streamed. This is a generic "try the other way" safety net, so even an adaptive-only model that wasn't flagged in the catalog recovers automatically (the original `/aside`-on-Fable failure class).
+
 ## [0.65.4] - 2026-06-09
 
 ### Fixed
