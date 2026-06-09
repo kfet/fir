@@ -1,11 +1,11 @@
 // Package ai is the fir-resident AI surface: provider catalog,
 // generated model registry, fir-side OAuth registry, and the API
 // transport registry. The portable type primitives (Message, Tool,
-// Model, Usage, Context, streaming primitives, etc.) live in
-// pkg/ai/core and are re-exported here so the existing 150+ call
-// sites in fir don't need to change.
+// Model, Usage, Context, streaming primitives, etc.) now live in the
+// external module github.com/kfet/ai and are re-exported here so the
+// existing 150+ call sites in fir don't need to change.
 //
-// See docs/design/ai-agent-extraction.md (Phase 2).
+// See docs/design/ai-agent-extraction.md (Phase 5).
 package ai
 
 import core "github.com/kfet/ai"

@@ -1,13 +1,14 @@
-// Wire fir's provider-registry-backed default StreamFn into pkg/agent.
+// Wire fir's provider-registry-backed default StreamFn into the agent
+// module (github.com/kfet/agent).
 //
-// Before Phase 3.5, pkg/agent shipped a hardcoded fallback closure
+// Before Phase 3.5, the agent code shipped a hardcoded fallback closure
 // that called ai.StreamSimple(ctx, ai.DefaultRegistry, ...). That
-// coupling is gone — pkg/agent now consults a pluggable factory in
-// agent.DefaultStreamFn whenever the per-call StreamFn is nil. Fir
+// coupling is gone — the agent module now consults a pluggable factory
+// in agent.DefaultStreamFn whenever the per-call StreamFn is nil. Fir
 // installs the factory here so existing call sites keep working
 // without changing their AgentOptions.
 //
-// See docs/design/ai-agent-extraction.md (Phase 3.5).
+// See docs/design/ai-agent-extraction.md (Phase 3.5 / Phase 5).
 
 package session
 

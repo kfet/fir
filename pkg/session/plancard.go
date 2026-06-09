@@ -11,9 +11,9 @@ import (
 
 // planCardPublisher returns a tools.CardPublisher that mirrors plan
 // state into the per-session observable cards store as a single
-// "plan/active" card. The implementation was hoisted out of
-// pkg/agent/tools to keep the tools package free of fir-specific
-// dependencies on pkg/session/store; see
+// "plan/active" card. The implementation was hoisted out of the agent
+// module's tools package (github.com/kfet/agent/tools) to keep the tools
+// package free of fir-specific dependencies on pkg/session/store; see
 // docs/design/ai-agent-extraction.md (Phase 1).
 //
 // observables may be nil — Put/Clear are nil-safe at the store layer,

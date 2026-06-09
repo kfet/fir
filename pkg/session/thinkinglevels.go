@@ -1,8 +1,9 @@
 // Thinking-level helpers that depend on fir's model catalog. The
-// agent-side ladder + clamp logic lives in pkg/agent; the catalog
-// knowledge (which specific model IDs support xhigh / max) stays here
-// so pkg/agent does not import pkg/ai. See
-// docs/design/ai-agent-extraction.md (Phase 3.5).
+// agent-side ladder + clamp logic lives in the agent module
+// (github.com/kfet/agent); the catalog knowledge (which specific model
+// IDs support xhigh / max) stays here so the agent module does not need
+// fir's model catalog. See
+// docs/design/ai-agent-extraction.md (Phase 3.5 / Phase 5).
 
 package session
 
