@@ -12,7 +12,7 @@ func codexTestModel() *ai.Model {
 	return &ai.Model{
 		ID:            "codex-mini-latest",
 		Name:          "Codex Mini",
-		Api:           ai.ApiOpenAICodexResponses,
+		API:           ai.ApiOpenAICodexResponses,
 		Provider:      ai.ProviderOpenAICodex,
 		BaseURL:       "",
 		Reasoning:     true,

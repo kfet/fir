@@ -10,7 +10,7 @@ import (
 )
 
 func TestTransformMessages_UserPassThrough(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{ai.NewUserMsg("hello", time.Now().UnixMilli())}
 	result := TransformMessages(messages, model, nil)
 	if len(result) != 1 {
@@ -22,10 +22,10 @@ func TestTransformMessages_UserPassThrough(t *testing.T) {
 }
 
 func TestTransformMessages_ThinkingSameModel(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-3",
 		Content: []ai.AssistantContent{
 			{Thinking: &ai.ThinkingContent{Type: ai.ContentTypeThinking, Thinking: "let me think", ThinkingSignature: "sig-1"}},
@@ -53,10 +53,10 @@ func TestTransformMessages_ThinkingSameModel(t *testing.T) {
 }
 
 func TestTransformMessages_ThinkingDifferentModel(t *testing.T) {
-	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, Api: ai.ApiOpenAICompletions}
+	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, API: ai.ApiOpenAICompletions}
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-3",
 		Content: []ai.AssistantContent{
 			{Thinking: &ai.ThinkingContent{Type: ai.ContentTypeThinking, Thinking: "let me think"}},
@@ -81,10 +81,10 @@ func TestTransformMessages_ThinkingDifferentModel(t *testing.T) {
 }
 
 func TestTransformMessages_EmptyThinkingSkipped(t *testing.T) {
-	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, Api: ai.ApiOpenAICompletions}
+	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, API: ai.ApiOpenAICompletions}
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-3",
 		Content: []ai.AssistantContent{
 			{Thinking: &ai.ThinkingContent{Type: ai.ContentTypeThinking, Thinking: ""}},
@@ -100,12 +100,12 @@ func TestTransformMessages_EmptyThinkingSkipped(t *testing.T) {
 }
 
 func TestTransformMessages_SkipErroredAssistant(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{
 		ai.NewUserMsg("hello", time.Now().UnixMilli()),
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider:   ai.ProviderAnthropic,
-			Api:        ai.ApiAnthropicMessages,
+			API:        ai.ApiAnthropicMessages,
 			Model:      "claude-3",
 			Content:    []ai.AssistantContent{ai.NewTextContent("partial")},
 			StopReason: ai.StopReasonError,
@@ -118,12 +118,12 @@ func TestTransformMessages_SkipErroredAssistant(t *testing.T) {
 }
 
 func TestTransformMessages_SkipAbortedAssistant(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{
 		ai.NewUserMsg("hello", time.Now().UnixMilli()),
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider:   ai.ProviderAnthropic,
-			Api:        ai.ApiAnthropicMessages,
+			API:        ai.ApiAnthropicMessages,
 			Model:      "claude-3",
 			Content:    []ai.AssistantContent{ai.NewTextContent("partial")},
 			StopReason: ai.StopReasonAborted,
@@ -136,11 +136,11 @@ func TestTransformMessages_SkipAbortedAssistant(t *testing.T) {
 }
 
 func TestTransformMessages_SyntheticToolResults(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider: ai.ProviderAnthropic,
-			Api:      ai.ApiAnthropicMessages,
+			API:      ai.ApiAnthropicMessages,
 			Model:    "claude-3",
 			Content: []ai.AssistantContent{
 				ai.NewToolCallContent("tc-1", "read", map[string]any{}),
@@ -168,7 +168,7 @@ func TestTransformMessages_SyntheticToolResults(t *testing.T) {
 }
 
 func TestTransformMessages_ToolCallIDNormalization(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	normalizer := func(id string, model *ai.Model, source *ai.AssistantMessage) string {
 		return "normalized-" + id
 	}
@@ -176,7 +176,7 @@ func TestTransformMessages_ToolCallIDNormalization(t *testing.T) {
 	messages := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider: ai.ProviderOpenAI,
-			Api:      ai.ApiOpenAICompletions,
+			API:      ai.ApiOpenAICompletions,
 			Model:    "gpt-4",
 			Content: []ai.AssistantContent{
 				ai.NewToolCallContent("original-id", "read", map[string]any{}),
@@ -210,11 +210,11 @@ func TestTransformMessages_ToolCallIDNormalization(t *testing.T) {
 }
 
 func TestTransformMessages_ThoughtSignatureStripped(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider: ai.ProviderGoogle,
-			Api:      ai.ApiGoogleGenerativeAI,
+			API:      ai.ApiGoogleGenerativeAI,
 			Model:    "gemini-pro",
 			Content: []ai.AssistantContent{
 				{ToolCall: &ai.ToolCall{Type: ai.ContentTypeToolCall, ID: "tc-1", Name: "read", Arguments: map[string]any{}, ThoughtSignature: "thought-sig"}},
@@ -239,12 +239,12 @@ func TestTransformMessages_ThoughtSignatureStripped(t *testing.T) {
 }
 
 func TestTransformMessages_SyntheticToolResultUsesAssistantTimestamp(t *testing.T) {
-	model := &ai.Model{ID: "claude-sonnet", Provider: "anthropic", Api: "anthropic-messages"}
+	model := &ai.Model{ID: "claude-sonnet", Provider: "anthropic", API: "anthropic-messages"}
 	assistantTS := int64(1700000000000)
 	msgs := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider:   "anthropic",
-			Api:        "anthropic-messages",
+			API:        "anthropic-messages",
 			Model:      "claude-sonnet",
 			StopReason: ai.StopReasonToolUse,
 			Content: []ai.AssistantContent{
@@ -289,12 +289,12 @@ func TestTransformMessages_ThinkingSignatureSameProviderDifferentModelID(t *test
 	model := &ai.Model{
 		ID:       "claude-opus-4-7-20250514",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 	}
 	// Stored assistant message uses the alias.
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7", // different ID → isSameModel = false
 		Content: []ai.AssistantContent{
 			{Thinking: &ai.ThinkingContent{
@@ -327,10 +327,10 @@ func TestTransformMessages_ThinkingSignatureSameProviderDifferentModelID(t *test
 // thinking block WITHOUT a signature from a different model is still converted
 // to plain text (existing behaviour for cross-provider thinking downgrade).
 func TestTransformMessages_ThinkingEmptySignatureDifferentModel(t *testing.T) {
-	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, Api: ai.ApiOpenAICompletions}
+	model := &ai.Model{ID: "gpt-4", Provider: ai.ProviderOpenAI, API: ai.ApiOpenAICompletions}
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-3",
 		Content: []ai.AssistantContent{
 			{Thinking: &ai.ThinkingContent{
@@ -362,7 +362,7 @@ func TestTransformMessages_RedactedThinkingSameProviderDifferentModelID(t *testi
 	model := &ai.Model{
 		ID:       "claude-opus-4-7-20250514",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 	}
 	redactedBlock := ai.NewThinkingContent("")
 	redactedBlock.Thinking.Redacted = true
@@ -370,7 +370,7 @@ func TestTransformMessages_RedactedThinkingSameProviderDifferentModelID(t *testi
 
 	msg := ai.AssistantMessage{
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7", // different ID → isSameModel = false
 		Content: []ai.AssistantContent{
 			redactedBlock,

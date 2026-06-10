@@ -39,10 +39,10 @@ github.com/hashicorp/go-retryablehttp v0.7.8 h1:ylXZWnqa7Lhqpk0L1P1LzDtGcCR0rPVU
 github.com/hashicorp/go-retryablehttp v0.7.8/go.mod h1:rjiScheydd+CxvumBsIrFKlx3iS0jrZ7LvzFGFmuKbw=
 github.com/hashicorp/go-version v1.8.0 h1:KAkNb1HAiZd1ukkxDFGmokVZe1Xy9HG6NUp+bPle2i4=
 github.com/hashicorp/go-version v1.8.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
-github.com/kfet/agent v0.0.2 h1:6vmq0ohgpwr69AUuei4DZvuoElK7PNmbJEfaSQoL8fc=
-github.com/kfet/agent v0.0.2/go.mod h1:7qlkg+kUgbVlfdSVdYSOuPy06r6ZvBPkZi+ZroDH0wY=
-github.com/kfet/ai v0.0.1 h1:0gL6oM2fpjIppJQb4LlyYmzmreGneVMlokhTXFKsJ7s=
-github.com/kfet/ai v0.0.1/go.mod h1:ori1yLW6C08jojmvil0re/K8by2LMslDPoZZZgrcpwk=
+github.com/kfet/agent v0.1.0 h1:wHtC/DJo6UEu7wU+Hv90U0JmKLSHhd3vjE7FN6bj8+s=
+github.com/kfet/agent v0.1.0/go.mod h1:da+tkJ+ftYaDm3am85tGuWjsIDXCmz3m/WrMM32VCeI=
+github.com/kfet/ai v0.1.1 h1:stPVyXyzsXT3KM1gu13OOmsgD5bUBO9pwTiz3mhIlaM=
+github.com/kfet/ai v0.1.1/go.mod h1:ori1yLW6C08jojmvil0re/K8by2LMslDPoZZZgrcpwk=
 github.com/kfet/firpty v0.1.0 h1:PaG8iN4EuzzCwNfuofCBbgFM+VBtVfrCjUkluG79DIk=
 github.com/kfet/firpty v0.1.0/go.mod h1:Pws8fENyxU9Rx1BXdJDR2/5GDnHYWfkhALbFu0Fz2+k=
 github.com/kfet/pinexec v0.0.4 h1:TQuS/QQXAbjGLra1fiyrl4WHvUnhcCPIj4/sVkAAf0Q=

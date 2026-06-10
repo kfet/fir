@@ -128,7 +128,7 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
 			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
+			API:        model.API,
 			Provider:   model.Provider,
 			Model:      model.ID,
 			Usage:      ai.ZeroUsage(),
@@ -142,7 +142,7 @@ func StreamAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.
 
 		apiKey := ""
 		if options != nil {
-			apiKey = options.ApiKey
+			apiKey = options.APIKey
 		}
 		if apiKey == "" {
 			apiKey = envkeys.GetEnvApiKey(model.Provider)
@@ -307,7 +307,7 @@ func buildAzureResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Stream
 func StreamSimpleAzureOpenAIResponses(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 	apiKey := ""
 	if options != nil {
-		apiKey = options.ApiKey
+		apiKey = options.APIKey
 	}
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)

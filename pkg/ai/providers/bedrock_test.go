@@ -33,7 +33,7 @@ func TestRegisterBedrock(t *testing.T) {
 func TestBuildConverseStreamInput_Basic(t *testing.T) {
 	model := &ai.Model{
 		ID:       "anthropic.claude-3-5-sonnet-20241022-v2:0",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 	}
 	ctx := ai.Context{
@@ -66,7 +66,7 @@ func TestBuildConverseStreamInput_Basic(t *testing.T) {
 func TestBuildConverseStreamInput_ToolChoice(t *testing.T) {
 	model := &ai.Model{
 		ID:       "test-model",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 	}
 	ctx := ai.Context{
@@ -100,7 +100,7 @@ func TestBuildConverseStreamInput_ToolChoice(t *testing.T) {
 func TestBuildConverseStreamInput_Thinking(t *testing.T) {
 	model := &ai.Model{
 		ID:        "anthropic.claude-opus-4-6-v1",
-		Api:       ai.ApiBedrockConverseStream,
+		API:       ai.ApiBedrockConverseStream,
 		Provider:  ai.ProviderAmazonBedrock,
 		Reasoning: true,
 	}
@@ -120,7 +120,7 @@ func TestBuildConverseStreamInput_Thinking(t *testing.T) {
 func TestBuildConverseStreamInput_ToolResults(t *testing.T) {
 	model := &ai.Model{
 		ID:       "test-model",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 	}
 
@@ -151,7 +151,7 @@ func TestBuildConverseStreamInput_ToolResults(t *testing.T) {
 func TestBuildConverseStreamInput_CachePoints(t *testing.T) {
 	model := &ai.Model{
 		ID:       "anthropic.claude-4-sonnet-20250514-v1:0",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 		Cost:     ai.ModelCost{CacheRead: 0.3, CacheWrite: 3.75},
 	}
@@ -174,7 +174,7 @@ func TestBuildConverseStreamInput_CachePoints(t *testing.T) {
 func TestBuildConverseStreamInput_AssistantThinking(t *testing.T) {
 	model := &ai.Model{
 		ID:        "anthropic.claude-3-7-sonnet-20250219-v1:0",
-		Api:       ai.ApiBedrockConverseStream,
+		API:       ai.ApiBedrockConverseStream,
 		Provider:  ai.ProviderAmazonBedrock,
 		Reasoning: true,
 	}
@@ -183,7 +183,7 @@ func TestBuildConverseStreamInput_AssistantThinking(t *testing.T) {
 		ai.NewUserMsg("Hello", 0),
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Provider: ai.ProviderAmazonBedrock,
-			Api:      ai.ApiBedrockConverseStream,
+			API:      ai.ApiBedrockConverseStream,
 			Model:    "anthropic.claude-3-7-sonnet-20250219-v1:0",
 			Content: []ai.AssistantContent{
 				{Thinking: &ai.ThinkingContent{Type: ai.ContentTypeThinking, Thinking: "I think...", ThinkingSignature: "sig-1"}},
@@ -293,7 +293,7 @@ func TestNewBedrockClient_SkipAuth(t *testing.T) {
 
 	model := &ai.Model{
 		ID:       "test-model",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 		BaseURL:  "https://my-proxy.example.com",
 	}
@@ -308,14 +308,14 @@ func TestNewBedrockClient_DefaultRegion(t *testing.T) {
 	t.Setenv("AWS_DEFAULT_REGION", "")
 	t.Setenv("AWS_BEDROCK_SKIP_AUTH", "1") // avoid touching ~/.aws
 
-	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
+	model := &ai.Model{ID: "test-model", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	client, err := newBedrockClient(model)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
 
 func TestConvertBedrockMessages_EmptyText(t *testing.T) {
-	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
+	model := &ai.Model{ID: "test-model", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	msgs := []ai.Message{ai.NewUserMsg("  ", 0)}
 	result := convertBedrockMessages(msgs, model, false, ai.CacheNone)
 	assert.Empty(t, result)
@@ -324,7 +324,7 @@ func TestConvertBedrockMessages_EmptyText(t *testing.T) {
 func TestConvertBedrockMessages_MultipartContent(t *testing.T) {
 	model := &ai.Model{
 		ID:       "test-model",
-		Api:      ai.ApiBedrockConverseStream,
+		API:      ai.ApiBedrockConverseStream,
 		Provider: ai.ProviderAmazonBedrock,
 		Input:    []ai.InputModality{ai.InputText, ai.InputImage},
 	}
@@ -343,7 +343,7 @@ func TestConvertBedrockMessages_MultipartContent(t *testing.T) {
 }
 
 func TestConvertBedrockMessages_ToolResultError(t *testing.T) {
-	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
+	model := &ai.Model{ID: "test-model", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	msgs := []ai.Message{
 		ai.NewUserMsg("Do something", 0),
 		ai.NewAssistantMsg(ai.AssistantMessage{Content: []ai.AssistantContent{
@@ -361,7 +361,7 @@ func TestConvertBedrockMessages_ToolResultError(t *testing.T) {
 }
 
 func TestBuildConverseStreamInput_NoOptions(t *testing.T) {
-	model := &ai.Model{ID: "test-model", Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
+	model := &ai.Model{ID: "test-model", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	input, err := buildConverseStreamInput(model, ctx, nil)

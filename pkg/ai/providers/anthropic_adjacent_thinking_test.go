@@ -28,7 +28,7 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_SpliceSeparator(t *testing.T) {
 	asst := ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			t0, t1, // adjacent — must be separated
@@ -38,7 +38,7 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_SpliceSeparator(t *testing.T) {
 		},
 		StopReason: ai.StopReasonToolUse,
 	}
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Reasoning: true}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Reasoning: true}
 	wire := convertAnthropicMessages([]ai.Message{
 		ai.NewUserMsg("go", 0),
 		ai.NewAssistantMsg(asst),
@@ -97,7 +97,7 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_NoOpWhenSafe(t *testing.T) {
 	asst := ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			thinking,
@@ -105,7 +105,7 @@ func TestConvertAnthropic_AdjacentThinkingBlocks_NoOpWhenSafe(t *testing.T) {
 		},
 		StopReason: ai.StopReasonToolUse,
 	}
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Reasoning: true}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Reasoning: true}
 	wire := convertAnthropicMessages([]ai.Message{
 		ai.NewUserMsg("go", 0),
 		ai.NewAssistantMsg(asst),

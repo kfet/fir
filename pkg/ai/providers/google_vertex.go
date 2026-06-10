@@ -115,7 +115,7 @@ func StreamGoogleVertex(ctx context.Context, model *ai.Model, prompt ai.Context,
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
 			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
+			API:        model.API,
 			Provider:   model.Provider,
 			Model:      model.ID,
 			Usage:      ai.ZeroUsage(),
@@ -251,8 +251,8 @@ const gcpVertexCredentialsMarker = "gcp-vertex-credentials"
 // When set, API key authentication is used instead of ADC (no project/location needed).
 func resolveVertexAPIKey(options *ai.StreamOptions) string {
 	key := ""
-	if options != nil && options.ApiKey != "" {
-		key = options.ApiKey
+	if options != nil && options.APIKey != "" {
+		key = options.APIKey
 	} else {
 		key = os.Getenv("GOOGLE_CLOUD_API_KEY")
 	}

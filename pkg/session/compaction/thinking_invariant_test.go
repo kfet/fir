@@ -39,7 +39,7 @@ func makeAssistantEntryWithThinking(id, thinkingText, signature, replyText, tool
 	am := ai.AssistantMessage{
 		Role:       ai.RoleAssistant,
 		Provider:   ai.ProviderAnthropic,
-		Api:        ai.ApiAnthropicMessages,
+		API:        ai.ApiAnthropicMessages,
 		Model:      "claude-opus-4-7",
 		Content:    content,
 		StopReason: ai.StopReasonToolUse,

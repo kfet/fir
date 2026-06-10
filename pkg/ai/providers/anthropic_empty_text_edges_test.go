@@ -76,10 +76,10 @@ func runStream(t *testing.T, fixture string) *ai.AssistantMessage {
 	model := anthropicModel(srv.URL)
 	model.ID = "claude-opus-4-7"
 	model.Provider = ai.ProviderAnthropic
-	model.Api = ai.ApiAnthropicMessages
+	model.API = ai.ApiAnthropicMessages
 	stream := StreamAnthropic(context.Background(), model,
 		ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 1000)}},
-		&ai.StreamOptions{ApiKey: "test-key"})
+		&ai.StreamOptions{APIKey: "test-key"})
 	for range stream.Events {
 	}
 	got := stream.Result()
@@ -113,7 +113,7 @@ func TestAnthropicStream_InterleavedThinking_AllEmptyTextsPruned(t *testing.T) {
 	}
 
 	// And on replay through the wire converter the fingerprint must match.
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
 	wire := convertAnthropicMessages([]ai.Message{
 		ai.NewUserMsg("q", 1000),
 		ai.NewAssistantMsg(*got),
@@ -153,7 +153,7 @@ func TestAnthropicStream_RedactedThinking_EmptyTextPruned(t *testing.T) {
 
 	// Wire roundtrip: the redacted_thinking block uses "data", not
 	// "signature". Ensure pruner did not touch it.
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
 	wire := convertAnthropicMessages([]ai.Message{
 		ai.NewUserMsg("q", 1000),
 		ai.NewAssistantMsg(*got),
@@ -208,14 +208,14 @@ func TestPruneEmptyAssistantTextBlocks_Idempotent(t *testing.T) {
 // emit those empty text blocks on the wire — otherwise the same recurring
 // 400 will fire on the very first request after resume.
 func TestAnthropic_ConvertMessages_DropsStoredEmptyTextFromOtherProvider(t *testing.T) {
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, MaxTokens: 64000, BaseURL: "https://api.anthropic.com"}
 
 	// Stored gemini assistant: thinking-no-signature → text(empty) →
 	// tool_use. After TransformMessages this becomes:
 	// text(from-thinking) → text(empty) → tool_use; then
 	// convertAnthropicMessages must drop the empty text.
 	geminiMsg := ai.AssistantMessage{
-		Role: ai.RoleAssistant, Provider: "google-gemini-cli", Api: "google-gemini-cli", Model: "gemini-2.5-flash",
+		Role: ai.RoleAssistant, Provider: "google-gemini-cli", API: "google-gemini-cli", Model: "gemini-2.5-flash",
 		StopReason: ai.StopReasonToolUse,
 		Content: []ai.AssistantContent{
 			ai.NewThinkingContent("ponder"),
@@ -278,7 +278,7 @@ func TestBedrock_PostStreamPruneRemovesWhitespaceText(t *testing.T) {
 	thinking.Thinking.ThinkingSignature = "bsig"
 	whitespaceText := ai.NewTextContent(" \n\t  ")
 	asst := ai.AssistantMessage{
-		Role: ai.RoleAssistant, Provider: "bedrock", Api: ai.ApiBedrockConverseStream, Model: "anthropic.claude-opus-4-7",
+		Role: ai.RoleAssistant, Provider: "bedrock", API: ai.ApiBedrockConverseStream, Model: "anthropic.claude-opus-4-7",
 		StopReason: ai.StopReasonToolUse,
 		Content: []ai.AssistantContent{
 			thinking,

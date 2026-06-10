@@ -2635,7 +2635,7 @@ func generateGoSource(models []modelSpec) string {
 		sb.WriteString("\tRegisterModel(&Model{\n")
 		sb.WriteString(fmt.Sprintf("\t\tID:            %s,\n", goString(m.ID)))
 		sb.WriteString(fmt.Sprintf("\t\tName:          %s,\n", goString(m.Name)))
-		sb.WriteString(fmt.Sprintf("\t\tApi:           %s,\n", goString(m.API)))
+		sb.WriteString(fmt.Sprintf("\t\tAPI:           %s,\n", goString(m.API)))
 		sb.WriteString(fmt.Sprintf("\t\tProvider:      %s,\n", goString(m.Provider)))
 		sb.WriteString(fmt.Sprintf("\t\tBaseURL:       %s,\n", goString(m.BaseURL)))
 		sb.WriteString(fmt.Sprintf("\t\tReasoning:     %v,\n", m.Reasoning))

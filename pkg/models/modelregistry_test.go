@@ -25,7 +25,7 @@ func TestModelRegistry_GetAll_BuiltIn(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "test-model-1",
 		Name:          "Test Model 1",
-		Api:           ai.ApiAnthropicMessages,
+		API:           ai.ApiAnthropicMessages,
 		Provider:      "test-provider-builtin",
 		BaseURL:       "https://api.test.com",
 		Reasoning:     false,
@@ -59,7 +59,7 @@ func TestModelRegistry_Find(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "find-me",
 		Name:          "Find Me",
-		Api:           ai.ApiAnthropicMessages,
+		API:           ai.ApiAnthropicMessages,
 		Provider:      "test-provider-find",
 		BaseURL:       "https://api.test.com",
 		Input:         []ai.InputModality{ai.InputText},
@@ -88,8 +88,8 @@ func TestModelRegistry_Find(t *testing.T) {
 	if m.ID != "nonexistent" || m.Provider != "test-provider-find" {
 		t.Errorf("expected synthesised model with correct ID/Provider, got %+v", m)
 	}
-	if m.Api != ai.ApiAnthropicMessages {
-		t.Errorf("expected synth to inherit sibling's Api, got %q", m.Api)
+	if m.API != ai.ApiAnthropicMessages {
+		t.Errorf("expected synth to inherit sibling's Api, got %q", m.API)
 	}
 	if m.BaseURL != "https://api.test.com" {
 		t.Errorf("expected synth to inherit sibling's BaseURL, got %q", m.BaseURL)
@@ -112,7 +112,7 @@ func TestModelRegistry_GetAvailable(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:       "avail-model",
 		Name:     "Available Model",
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Provider: "test-provider-avail",
 		BaseURL:  "https://api.test.com",
 		Input:    []ai.InputModality{ai.InputText},
@@ -148,7 +148,7 @@ func TestModelRegistry_GetApiKey(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:       "key-model",
 		Name:     "Key Model",
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Provider: "test-provider-key",
 		BaseURL:  "https://api.test.com",
 		Input:    []ai.InputModality{ai.InputText},
@@ -203,8 +203,8 @@ func TestModelRegistry_CustomModels(t *testing.T) {
 	if m.BaseURL != "http://localhost:11434" {
 		t.Errorf("expected baseURL 'http://localhost:11434', got %q", m.BaseURL)
 	}
-	if m.Api != "openai-completions" {
-		t.Errorf("expected api 'openai-completions', got %q", m.Api)
+	if m.API != "openai-completions" {
+		t.Errorf("expected api 'openai-completions', got %q", m.API)
 	}
 	// Should have default contextWindow.
 	if m.ContextWindow != 128000 {
@@ -219,7 +219,7 @@ func TestModelRegistry_CustomModels_WithOverrides(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "override-target",
 		Name:          "Original Name",
-		Api:           ai.ApiOpenAICompletions,
+		API:           ai.ApiOpenAICompletions,
 		Provider:      "test-provider-override",
 		BaseURL:       "https://api.original.com",
 		Reasoning:     false,
@@ -279,7 +279,7 @@ func TestModelRegistry_CustomModels_PartialCostOverride(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "cost-override-target",
 		Name:          "Cost Model",
-		Api:           ai.ApiOpenAICompletions,
+		API:           ai.ApiOpenAICompletions,
 		Provider:      "test-provider-cost",
 		BaseURL:       "https://api.test.com",
 		Input:         []ai.InputModality{ai.InputText},
@@ -481,7 +481,7 @@ func TestModelRegistry_CustomModels_MergeOverridesBuiltIn(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "merge-target",
 		Name:          "Built-in Model",
-		Api:           ai.ApiOpenAICompletions,
+		API:           ai.ApiOpenAICompletions,
 		Provider:      "test-provider-merge",
 		BaseURL:       "https://api.builtin.com",
 		Input:         []ai.InputModality{ai.InputText},
@@ -569,7 +569,7 @@ func TestModelRegistry_IsUsingOAuth(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:       "oauth-model",
 		Name:     "OAuth Model",
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Provider: "test-provider-oauth",
 		BaseURL:  "https://api.test.com",
 		Input:    []ai.InputModality{ai.InputText},
@@ -698,7 +698,7 @@ func TestModelRegistry_CompatOverride(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "compat-target",
 		Name:          "Compat Model",
-		Api:           ai.ApiOpenAICompletions,
+		API:           ai.ApiOpenAICompletions,
 		Provider:      "test-provider-compat",
 		BaseURL:       "https://api.test.com",
 		Input:         []ai.InputModality{ai.InputText},
@@ -808,7 +808,7 @@ func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
 func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
 	provider := "test-provider-override-capabilities"
 	id := "override-me"
-	ai.RegisterModel(&ai.Model{ID: id, Name: id, Api: ai.ApiAnthropicMessages, Provider: provider, BaseURL: "https://api.example.com", Input: []ai.InputModality{ai.InputText}, Cost: ai.ModelCost{}, ContextWindow: 128000, MaxTokens: 4096})
+	ai.RegisterModel(&ai.Model{ID: id, Name: id, API: ai.ApiAnthropicMessages, Provider: provider, BaseURL: "https://api.example.com", Input: []ai.InputModality{ai.InputText}, Cost: ai.ModelCost{}, ContextWindow: 128000, MaxTokens: 4096})
 
 	tmp := t.TempDir()
 	modelsPath := filepath.Join(tmp, "models.json")
@@ -856,7 +856,7 @@ func TestModelRegistry_AddRuntimeModel(t *testing.T) {
 
 	m := &ai.Model{
 		Provider: "amazon-bedrock", ID: "arn:aws:bedrock:us-east-1:1:foo/bar",
-		Name: "Custom", Api: ai.ApiBedrockConverseStream,
+		Name: "Custom", API: ai.ApiBedrockConverseStream,
 		ContextWindow: 200000, MaxTokens: 8192,
 	}
 	r.AddRuntimeModel(m)

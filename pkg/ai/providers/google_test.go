@@ -17,7 +17,7 @@ func googleTestModel(serverURL string) *ai.Model {
 	return &ai.Model{
 		ID:            "gemini-2.5-pro",
 		Name:          "Gemini 2.5 Pro",
-		Api:           ai.ApiGoogleGenerativeAI,
+		API:           ai.ApiGoogleGenerativeAI,
 		Provider:      ai.ProviderGoogle,
 		BaseURL:       serverURL,
 		Reasoning:     false,
@@ -35,7 +35,7 @@ func TestStreamGoogle_SimpleResponse(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "test-key"})
+	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -102,7 +102,7 @@ func TestStreamGoogle_ToolCall(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Read the file", 0)}}
 
-	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "test-key"})
+	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -146,7 +146,7 @@ func TestStreamGoogle_Thinking(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("What is the meaning of life?", 0)}}
 
-	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "test-key"})
+	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -197,7 +197,7 @@ func TestStreamGoogle_HTTPError(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "test-key"})
+	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-key"})
 	result := stream.Result()
 	require.NotNil(t, result)
 	assert.Equal(t, ai.StopReasonError, result.StopReason)
@@ -215,7 +215,7 @@ func TestStreamGoogle_ContextCancelled(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	stream := StreamGoogle(ctx, model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}, &ai.StreamOptions{ApiKey: "test-key"})
+	stream := StreamGoogle(ctx, model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}, &ai.StreamOptions{APIKey: "test-key"})
 
 	// Cancel the context immediately
 	cancel()
@@ -246,7 +246,7 @@ func TestStreamSimpleGoogle_WithApiKey(t *testing.T) {
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	stream := StreamSimpleGoogle(context.Background(), model, ctx, &ai.SimpleStreamOptions{
-		StreamOptions: ai.StreamOptions{ApiKey: "test-key"},
+		StreamOptions: ai.StreamOptions{APIKey: "test-key"},
 	})
 	result := stream.Result()
 	require.NotNil(t, result)
@@ -433,7 +433,7 @@ func TestStreamGoogle_RequestHeaders(t *testing.T) {
 	model := googleTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "test-api-key-123"})
+	stream := StreamGoogle(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "test-api-key-123"})
 	_ = stream.Result()
 
 	assert.Equal(t, "test-api-key-123", capturedHeaders.Get("X-Goog-Api-Key"))

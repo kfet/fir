@@ -10,9 +10,9 @@ import (
 // Stream calls the raw provider stream function.
 // If no provider is registered for the model's API, returns an error stream.
 func Stream(ctx context.Context, registry *Registry, model *Model, prompt Context, options *StreamOptions) *AssistantMessageEventStream {
-	provider := registry.GetApiProvider(model.Api)
+	provider := registry.GetApiProvider(model.API)
 	if provider == nil {
-		return errorStream(model, "no API provider registered for api: "+model.Api)
+		return errorStream(model, "no API provider registered for api: "+model.API)
 	}
 	return provider.Stream(ctx, model, prompt, options)
 }
@@ -37,9 +37,9 @@ func Complete(ctx context.Context, registry *Registry, model *Model, prompt Cont
 //     with minimal thinking. This is the generic "try the other way" net for
 //     any model/provider we have mis-flagged or do not know about.
 func StreamSimple(ctx context.Context, registry *Registry, model *Model, prompt Context, options *SimpleStreamOptions) *AssistantMessageEventStream {
-	provider := registry.GetApiProvider(model.Api)
+	provider := registry.GetApiProvider(model.API)
 	if provider == nil {
-		return errorStream(model, "no API provider registered for api: "+model.Api)
+		return errorStream(model, "no API provider registered for api: "+model.API)
 	}
 	options = resolveReasoning(model, options)
 	if options != nil && options.Reasoning == ThinkingOff && model != nil && model.Reasoning {
@@ -132,7 +132,7 @@ func errorStream(model *Model, message string) *AssistantMessageEventStream {
 		Role:         RoleAssistant,
 		Content:      []AssistantContent{},
 		Model:        model.ID,
-		Api:          model.Api,
+		API:          model.API,
 		Provider:     model.Provider,
 		StopReason:   StopReasonError,
 		ErrorMessage: message,

@@ -27,7 +27,7 @@ func TestStreamOpenAIResponses_EmptyMessageItem(t *testing.T) {
 	model := openaiResponsesTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 0)}}
 
-	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	for range stream.Events {
 	}
 	got := stream.Result()

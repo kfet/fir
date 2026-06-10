@@ -153,8 +153,8 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 	authStore := auth.NewAuthStorage("")
 	t.Setenv("ANTHROPIC_API_KEY", "test")
 
-	ai.RegisterModel(&ai.Model{ID: "real-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
-	ai.RegisterModel(&ai.Model{ID: "fake-model", Provider: "anthropic", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
+	ai.RegisterModel(&ai.Model{ID: "real-model", Provider: "anthropic", API: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
+	ai.RegisterModel(&ai.Model{ID: "fake-model", Provider: "anthropic", API: "anthropic-messages", BaseURL: "https://api.anthropic.com"})
 
 	registry := NewModelRegistry(authStore, "")
 
@@ -176,7 +176,7 @@ func TestGetAvailable_WithLiveFiltering(t *testing.T) {
 	// Simulate live fetch completing with only real-model
 	state := newLiveModelState()
 	state.set([]string{"real-model"}, []*ai.Model{
-		{ID: "real-model", Provider: "anthropic", Name: "Real Model", Api: "anthropic-messages", BaseURL: "https://api.anthropic.com", ContextWindow: 128000, MaxTokens: 4096},
+		{ID: "real-model", Provider: "anthropic", Name: "Real Model", API: "anthropic-messages", BaseURL: "https://api.anthropic.com", ContextWindow: 128000, MaxTokens: 4096},
 	})
 	registry.liveModelsMu.Lock()
 	registry.liveModels["anthropic"] = state

@@ -24,7 +24,7 @@ func mockStreamFn(text string) agent.StreamFn {
 			msg := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: text}}},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				Usage:      ai.Usage{Input: 10, Output: 5},
@@ -45,7 +45,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		Reasoning:     false,
@@ -61,7 +61,7 @@ func TestPrintMode_EndToEnd(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		StreamFn: mockStreamFn("Hello! How can I help you?"),
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-api-key", nil
 		},
 	})
@@ -120,7 +120,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -141,7 +141,7 @@ func TestPrintMode_EndToEnd_MultipleMessages(t *testing.T) {
 			callCount++
 			return mockStreamFn(responses[idx])(m, ctx, opts)
 		},
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-api-key", nil
 		},
 	})
@@ -198,7 +198,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -212,7 +212,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		StreamFn: mockStreamFn("JSON test response"),
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-api-key", nil
 		},
 	})
@@ -279,7 +279,7 @@ func TestPrintMode_EndToEnd_JSON(t *testing.T) {
 func TestPrintMode_NoMessage(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		ContextWindow: 200000,
 		MaxTokens:     8192,
@@ -291,7 +291,7 @@ func TestPrintMode_NoMessage(t *testing.T) {
 			ThinkingLevel: agent.ThinkingOff,
 		},
 		StreamFn: mockStreamFn("should not be called"),
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-api-key", nil
 		},
 	})

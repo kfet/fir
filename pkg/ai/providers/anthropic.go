@@ -323,7 +323,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		apiKey := ""
 		if options != nil {
-			apiKey = options.ApiKey
+			apiKey = options.APIKey
 		}
 		if apiKey == "" {
 			apiKey = envkeys.GetEnvApiKey(model.Provider)
@@ -332,7 +332,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			out := &ai.AssistantMessage{
 				Role:         ai.RoleAssistant,
 				Content:      []ai.AssistantContent{},
-				Api:          model.Api,
+				API:          model.API,
 				Provider:     model.Provider,
 				Model:        model.ID,
 				Usage:        ai.ZeroUsage(),
@@ -359,7 +359,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			out := &ai.AssistantMessage{
 				Role:         ai.RoleAssistant,
 				Content:      []ai.AssistantContent{},
-				Api:          model.Api,
+				API:          model.API,
 				Provider:     model.Provider,
 				Model:        model.ID,
 				Usage:        ai.ZeroUsage(),
@@ -395,7 +395,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				case <-ctx.Done():
 					out := &ai.AssistantMessage{
 						Role: ai.RoleAssistant, Content: []ai.AssistantContent{},
-						Api: model.Api, Provider: model.Provider, Model: model.ID,
+						API: model.API, Provider: model.Provider, Model: model.ID,
 						Usage: ai.ZeroUsage(), StopReason: ai.StopReasonError,
 						ErrorMessage: lastErrMsg, Timestamp: time.Now().UnixMilli(),
 					}
@@ -409,7 +409,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				Usage:      ai.ZeroUsage(),
@@ -613,8 +613,8 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 					// Auth error (e.g. expired OAuth token) — refresh the key and retry.
 					if !startEmitted && attempt < maxAnthropicRetries-1 && isAuthError(errType, errMsg) {
 						refreshed := ""
-						if options != nil && options.RefreshApiKey != nil {
-							refreshed = options.RefreshApiKey(model.Provider)
+						if options != nil && options.RefreshAPIKey != nil {
+							refreshed = options.RefreshAPIKey(model.Provider)
 						}
 						if refreshed == "" {
 							refreshed = envkeys.GetEnvApiKey(model.Provider)
@@ -682,8 +682,8 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 				// Auth error at HTTP level — refresh token and retry.
 				if !startEmitted && attempt < maxAnthropicRetries-1 && (sseStatusCode == 401 || sseStatusCode == 403) {
 					refreshed := ""
-					if options != nil && options.RefreshApiKey != nil {
-						refreshed = options.RefreshApiKey(model.Provider)
+					if options != nil && options.RefreshAPIKey != nil {
+						refreshed = options.RefreshAPIKey(model.Provider)
 					}
 					if refreshed == "" {
 						refreshed = envkeys.GetEnvApiKey(model.Provider)
@@ -748,7 +748,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 		// All retries exhausted — emit the last error.
 		out := &ai.AssistantMessage{
 			Role: ai.RoleAssistant, Content: []ai.AssistantContent{},
-			Api: model.Api, Provider: model.Provider, Model: model.ID,
+			API: model.API, Provider: model.Provider, Model: model.ID,
 			Usage: ai.ZeroUsage(), StopReason: ai.StopReasonError,
 			ErrorMessage: lastErrMsg, Timestamp: time.Now().UnixMilli(),
 		}
@@ -763,7 +763,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 	apiKey := ""
 	if options != nil {
-		apiKey = options.ApiKey
+		apiKey = options.APIKey
 	}
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)

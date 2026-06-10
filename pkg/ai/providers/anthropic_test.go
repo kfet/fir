@@ -46,7 +46,7 @@ func TestAnthropic_SimpleResponse(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -91,7 +91,7 @@ func TestAnthropic_ToolCall(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Read test.txt", 1000)},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -151,7 +151,7 @@ func TestAnthropic_Thinking(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("What is the meaning of life?", 1000)},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -204,7 +204,7 @@ func TestAnthropic_RedactedThinking(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("What is the meaning of life?", 1000)},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -258,7 +258,7 @@ func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
 	model := &ai.Model{
 		ID:        "claude-sonnet-4-6",
 		Provider:  ai.ProviderAnthropic,
-		Api:       ai.ApiAnthropicMessages,
+		API:       ai.ApiAnthropicMessages,
 		BaseURL:   "https://api.anthropic.com",
 		MaxTokens: 64000,
 	}
@@ -270,7 +270,7 @@ func TestAnthropic_ConvertMessages_RedactedThinking(t *testing.T) {
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-sonnet-4-6",
 		Content: []ai.AssistantContent{
 			redacted,
@@ -320,7 +320,7 @@ func TestAnthropic_ConvertMessages_DropsEmptyTextBesideThinking(t *testing.T) {
 	model := &ai.Model{
 		ID:        "claude-opus-4-7",
 		Provider:  ai.ProviderAnthropic,
-		Api:       ai.ApiAnthropicMessages,
+		API:       ai.ApiAnthropicMessages,
 		BaseURL:   "https://api.anthropic.com",
 		MaxTokens: 64000,
 	}
@@ -333,7 +333,7 @@ func TestAnthropic_ConvertMessages_DropsEmptyTextBesideThinking(t *testing.T) {
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			thinking,
@@ -385,7 +385,7 @@ func TestAnthropic_StreamingError(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -440,7 +440,7 @@ func TestAnthropic_OverloadedRetry(t *testing.T) {
 
 	model := anthropicModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -482,7 +482,7 @@ func TestAnthropic_OverloadedRetry(t *testing.T) {
 func TestAnthropic_NoAPIKey(t *testing.T) {
 	model := &ai.Model{
 		ID:       "test-model",
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Provider: "unknown-provider-no-key",
 		BaseURL:  "http://localhost:1",
 	}
@@ -530,7 +530,7 @@ func TestAnthropic_RequestPayload(t *testing.T) {
 			},
 		}},
 	}
-	opts := &ai.StreamOptions{ApiKey: "test-key"}
+	opts := &ai.StreamOptions{APIKey: "test-key"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	collectEvents(t, stream)
@@ -828,7 +828,7 @@ func TestAnthropic_BuildHeaders_ModelHeaders(t *testing.T) {
 func TestAnthropic_BuildHeaders_InternalHeadersStripped(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet", BaseURL: "https://api.anthropic.com"}
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		Headers: map[string]string{
 			"x-anthropic-thinking-enabled": "true",
 			"x-anthropic-thinking-budget":  "2048",
@@ -890,7 +890,7 @@ func TestAnthropic_BuildParams_ThinkingEnabled(t *testing.T) {
 
 	maxTokens := 16000
 	opts := &ai.StreamOptions{
-		ApiKey:    "test-key",
+		APIKey:    "test-key",
 		MaxTokens: &maxTokens,
 		Headers: map[string]string{
 			"x-anthropic-thinking-enabled": "true",
@@ -919,7 +919,7 @@ func TestAnthropic_BuildParams_AdaptiveThinking(t *testing.T) {
 	}
 
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		Headers: map[string]string{
 			"x-anthropic-thinking-effort": "medium",
 		},
@@ -951,7 +951,7 @@ func TestAnthropic_BuildParams_Temperature(t *testing.T) {
 
 	temp := 0.5
 	opts := &ai.StreamOptions{
-		ApiKey:      "test-key",
+		APIKey:      "test-key",
 		Temperature: &temp,
 	}
 
@@ -1479,13 +1479,13 @@ func TestAnthropic_ConvertMessages_AssistantContent(t *testing.T) {
 func TestAnthropic_ConvertMessages_ThinkingWithSignature(t *testing.T) {
 	model := &ai.Model{
 		ID: "claude-sonnet", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
-		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 	}
 
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-sonnet",
 		Content: []ai.AssistantContent{
 			ai.NewThinkingContent("Let me think..."),
@@ -1831,7 +1831,7 @@ func TestAnthropic_StreamSimple_NoReasoning(t *testing.T) {
 	ctx := ai.Context{
 		Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)},
 	}
-	opts := &ai.SimpleStreamOptions{StreamOptions: ai.StreamOptions{ApiKey: "test-key"}}
+	opts := &ai.SimpleStreamOptions{StreamOptions: ai.StreamOptions{APIKey: "test-key"}}
 
 	stream := StreamSimpleAnthropic(context.Background(), model, ctx, opts)
 	events := collectEvents(t, stream)
@@ -1878,7 +1878,7 @@ func TestAnthropic_StreamSimple_AdaptiveThinking(t *testing.T) {
 		Messages: []ai.Message{ai.NewUserMsg("Think hard!", 1000)},
 	}
 	opts := &ai.SimpleStreamOptions{
-		StreamOptions: ai.StreamOptions{ApiKey: "test-key"},
+		StreamOptions: ai.StreamOptions{APIKey: "test-key"},
 		Reasoning:     ai.ThinkingHigh,
 	}
 
@@ -1922,7 +1922,7 @@ func TestAnthropic_StreamSimple_BudgetThinking(t *testing.T) {
 		Messages: []ai.Message{ai.NewUserMsg("Think!", 1000)},
 	}
 	opts := &ai.SimpleStreamOptions{
-		StreamOptions: ai.StreamOptions{ApiKey: "test-key"},
+		StreamOptions: ai.StreamOptions{APIKey: "test-key"},
 		Reasoning:     ai.ThinkingMedium,
 	}
 
@@ -1978,7 +1978,7 @@ func TestAnthropic_ServerTools_InParams(t *testing.T) {
 	}
 
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		ServerTools: []ai.AnthropicServerTool{
 			{
 				Type:           "web_search_20250305",
@@ -2337,7 +2337,7 @@ func TestAnthropic_CompactionParams(t *testing.T) {
 		Messages: []ai.Message{ai.NewUserMsg("test", 1000)},
 	}
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		Compaction: &ai.AnthropicCompaction{
 			Enabled:       true,
 			TriggerTokens: 100000,
@@ -2425,7 +2425,7 @@ func TestAnthropic_ServerToolsSentForAnyModel(t *testing.T) {
 	// Backward-compatible: if model capabilities are not declared, send configured tools.
 	model := &ai.Model{ID: "custom-model", BaseURL: "https://my-proxy.example.com", MaxTokens: 8192}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
-	opts := &ai.StreamOptions{ApiKey: "test-key", ServerTools: []ai.AnthropicServerTool{{Type: "web_search_20250305"}}}
+	opts := &ai.StreamOptions{APIKey: "test-key", ServerTools: []ai.AnthropicServerTool{{Type: "web_search_20250305"}}}
 
 	params := buildAnthropicParams(model, ctx, false, opts)
 	tools, ok := params["tools"].([]map[string]any)
@@ -2442,7 +2442,7 @@ func TestAnthropic_ServerToolsFilteredByModelCapability(t *testing.T) {
 		ServerTools: []string{"web_search_20260209"},
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
-	opts := &ai.StreamOptions{ApiKey: "test-key", ServerTools: []ai.AnthropicServerTool{
+	opts := &ai.StreamOptions{APIKey: "test-key", ServerTools: []ai.AnthropicServerTool{
 		{Type: "web_search_20260209"},
 		{Type: "web_fetch_20260209"},
 	}}
@@ -2460,7 +2460,7 @@ func TestAnthropic_ServerToolsFilteredByModelCapability(t *testing.T) {
 func TestAnthropic_CompactionSkippedForUnsupportedModel(t *testing.T) {
 	model := &ai.Model{ID: "claude-sonnet-4-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192, Compaction: false}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("test", 1000)}}
-	opts := &ai.StreamOptions{ApiKey: "test-key", Compaction: &ai.AnthropicCompaction{Enabled: true, TriggerTokens: 100000}}
+	opts := &ai.StreamOptions{APIKey: "test-key", Compaction: &ai.AnthropicCompaction{Enabled: true, TriggerTokens: 100000}}
 
 	params := buildAnthropicParams(model, ctx, false, opts)
 	if _, ok := params["context_management"]; ok {
@@ -2494,7 +2494,7 @@ func TestAnthropic_OnPayload_Called(t *testing.T) {
 	model := anthropicModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		OnPayload: func(payload any, _ *ai.Model) any {
 			if m, ok := payload.(map[string]any); ok {
 				capturedPayload = m
@@ -2522,7 +2522,7 @@ func TestAnthropic_OnPayload_WrongTypeNoPanic(t *testing.T) {
 	model := anthropicModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		OnPayload: func(payload any, _ *ai.Model) any {
 			return "not-a-map" // wrong type — should be silently ignored
 		},
@@ -2565,7 +2565,7 @@ func TestAnthropic_ConvertMessages_StringUserGetsCacheControl(t *testing.T) {
 }
 
 // TestAnthropic_AuthErrorRefreshRetry verifies that a 401/authentication_error
-// triggers a token refresh via RefreshApiKey and retries successfully.
+// triggers a token refresh via RefreshAPIKey and retries successfully.
 func TestAnthropic_AuthErrorRefreshRetry(t *testing.T) {
 	prev := anthropicRetryDelayFn
 	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
@@ -2592,8 +2592,8 @@ func TestAnthropic_AuthErrorRefreshRetry(t *testing.T) {
 
 	refreshCalled := false
 	opts := &ai.StreamOptions{
-		ApiKey: "expired-token",
-		RefreshApiKey: func(provider string) string {
+		APIKey: "expired-token",
+		RefreshAPIKey: func(provider string) string {
 			refreshCalled = true
 			return "fresh-token"
 		},
@@ -2610,7 +2610,7 @@ func TestAnthropic_AuthErrorRefreshRetry(t *testing.T) {
 		t.Errorf("expected success after refresh, got error: %s", result.ErrorMessage)
 	}
 	if !refreshCalled {
-		t.Error("expected RefreshApiKey to be called on auth error")
+		t.Error("expected RefreshAPIKey to be called on auth error")
 	}
 	if attempts != 2 {
 		t.Errorf("expected 2 attempts (1 auth error + 1 success), got %d", attempts)
@@ -2646,8 +2646,8 @@ func TestAnthropic_AuthErrorHTTP401RefreshRetry(t *testing.T) {
 
 	refreshCalled := false
 	opts := &ai.StreamOptions{
-		ApiKey: "expired-token",
-		RefreshApiKey: func(provider string) string {
+		APIKey: "expired-token",
+		RefreshAPIKey: func(provider string) string {
 			refreshCalled = true
 			return "fresh-token"
 		},
@@ -2664,14 +2664,14 @@ func TestAnthropic_AuthErrorHTTP401RefreshRetry(t *testing.T) {
 		t.Errorf("expected success after refresh, got error: %s", result.ErrorMessage)
 	}
 	if !refreshCalled {
-		t.Error("expected RefreshApiKey to be called on HTTP 401")
+		t.Error("expected RefreshAPIKey to be called on HTTP 401")
 	}
 	if attempts != 2 {
 		t.Errorf("expected 2 attempts (1 HTTP 401 + 1 success), got %d", attempts)
 	}
 }
 
-// TestAnthropic_AuthErrorNoRefreshFails verifies that without RefreshApiKey,
+// TestAnthropic_AuthErrorNoRefreshFails verifies that without RefreshAPIKey,
 // an auth error is surfaced to the caller.
 func TestAnthropic_AuthErrorNoRefreshFails(t *testing.T) {
 	prev := anthropicRetryDelayFn
@@ -2689,7 +2689,7 @@ func TestAnthropic_AuthErrorNoRefreshFails(t *testing.T) {
 
 	model := anthropicModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello!", 1000)}}
-	opts := &ai.StreamOptions{ApiKey: "expired-token"}
+	opts := &ai.StreamOptions{APIKey: "expired-token"}
 
 	stream := StreamAnthropic(context.Background(), model, ctx, opts)
 	_ = collectEvents(t, stream)
@@ -2791,7 +2791,7 @@ func TestJoinBetaParts(t *testing.T) {
 func TestAnthropic_ConvertMessages_ThinkingEmptyTextWithSignature(t *testing.T) {
 	model := &ai.Model{
 		ID: "claude-opus-4-7", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
-		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 	}
 
 	// Simulate a thinking block where the model returned an empty thinking text
@@ -2799,7 +2799,7 @@ func TestAnthropic_ConvertMessages_ThinkingEmptyTextWithSignature(t *testing.T) 
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			func() ai.AssistantContent {
@@ -2846,13 +2846,13 @@ func TestAnthropic_ConvertMessages_ThinkingEmptyTextWithSignature(t *testing.T) 
 func TestAnthropic_ConvertMessages_ThinkingWhitespaceTextWithSignature(t *testing.T) {
 	model := &ai.Model{
 		ID: "claude-opus-4-7", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
-		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 	}
 
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			func() ai.AssistantContent {
@@ -2887,7 +2887,7 @@ func TestAnthropic_ConvertMessages_ThinkingWhitespaceTextWithSignature(t *testin
 func TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip(t *testing.T) {
 	model := &ai.Model{
 		ID: "claude-opus-4-7-20250514", BaseURL: "https://api.anthropic.com", MaxTokens: 8192,
-		Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+		API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 	}
 
 	// Simulate a redacted block that was preserved verbatim through TransformMessages.
@@ -2898,7 +2898,7 @@ func TestAnthropic_ConvertMessages_RedactedThinkingCrossModelRoundtrip(t *testin
 	assistantMsg := ai.AssistantMessage{
 		Role:     "assistant",
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7", // original model ID differs from current
 		Content: []ai.AssistantContent{
 			redactedBlock,
@@ -2958,7 +2958,7 @@ func TestAnthropic_OnRetryCallback(t *testing.T) {
 	}
 	var calls []call
 	opts := &ai.StreamOptions{
-		ApiKey: "test-key",
+		APIKey: "test-key",
 		OnRetry: func(attempt int, delaySeconds float64, errMsg string) {
 			calls = append(calls, call{attempt: attempt, errMsg: errMsg})
 		},

@@ -9,7 +9,7 @@ import (
 
 func TestStream_NoProvider(t *testing.T) {
 	r := NewRegistry()
-	model := &Model{Api: "nonexistent-api", ID: "m1", Provider: "p1"}
+	model := &Model{API: "nonexistent-api", ID: "m1", Provider: "p1"}
 	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
 
 	stream := Stream(context.Background(), r, model, prompt, nil)
@@ -34,7 +34,7 @@ func TestStream_NoProvider(t *testing.T) {
 
 func TestStreamSimple_NoProvider(t *testing.T) {
 	r := NewRegistry()
-	model := &Model{Api: "nonexistent-api", ID: "m1", Provider: "p1"}
+	model := &Model{API: "nonexistent-api", ID: "m1", Provider: "p1"}
 	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
 
 	result := CompleteSimple(context.Background(), r, model, prompt, nil)
@@ -69,7 +69,7 @@ func TestStream_WithProvider(t *testing.T) {
 		},
 	}, "")
 
-	model := &Model{Api: "test-api"}
+	model := &Model{API: "test-api"}
 	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
 
 	stream := Stream(context.Background(), r, model, prompt, nil)
@@ -107,7 +107,7 @@ func TestComplete_WithProvider(t *testing.T) {
 		},
 	}, "")
 
-	model := &Model{Api: "test-api"}
+	model := &Model{API: "test-api"}
 	result := Complete(context.Background(), r, model, Context{}, nil)
 	if result == nil {
 		t.Fatal("expected result")
@@ -198,7 +198,7 @@ func TestStreamSimple_ThinkingOffFallback(t *testing.T) {
 	// Model believed to support disabling thinking (Reasoning, not adaptive) so
 	// thinking-off passes through; the provider rejects it and the generic layer
 	// retries with minimal.
-	model := &Model{Api: "fb-api", ID: "m", Reasoning: true}
+	model := &Model{API: "fb-api", ID: "m", Reasoning: true}
 	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
 	opts := &SimpleStreamOptions{Reasoning: ThinkingOff}
 
@@ -241,7 +241,7 @@ func TestStreamSimple_AdaptiveOffNeverSendsOff(t *testing.T) {
 		},
 	}, "")
 
-	model := &Model{Api: "ad-api", ID: "m", Reasoning: true, AdaptiveThinking: true}
+	model := &Model{API: "ad-api", ID: "m", Reasoning: true, AdaptiveThinking: true}
 	prompt := Context{Messages: []Message{NewUserMsg("hi", 1000)}}
 	CompleteSimple(context.Background(), r, model, prompt, &SimpleStreamOptions{Reasoning: ThinkingOff})
 	if len(seen) != 1 || seen[0] != ThinkingMinimal {

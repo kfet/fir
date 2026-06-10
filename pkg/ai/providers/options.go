@@ -9,7 +9,7 @@ import (
 )
 
 // noAPIKeyError builds a descriptive error message when no API key is available.
-// apiKeyError is an optional detail string (e.g. from StreamOptions.ApiKeyError).
+// apiKeyError is an optional detail string (e.g. from StreamOptions.APIKeyError).
 func noAPIKeyError(provider string, apiKeyError string) string {
 	if apiKeyError != "" {
 		return fmt.Sprintf("no API key for provider %q: %s", provider, apiKeyError)
@@ -17,18 +17,18 @@ func noAPIKeyError(provider string, apiKeyError string) string {
 	return fmt.Sprintf("no API key for provider %q. Set an API key or run 'fir login %s'", provider, provider)
 }
 
-// apiKeyErrorFromOpts extracts ApiKeyError from options, handling nil.
+// apiKeyErrorFromOpts extracts APIKeyError from options, handling nil.
 func apiKeyErrorFromOpts(options *ai.StreamOptions) string {
 	if options != nil {
-		return options.ApiKeyError
+		return options.APIKeyError
 	}
 	return ""
 }
 
-// apiKeyErrorFromSimpleOpts extracts ApiKeyError from simple options, handling nil.
+// apiKeyErrorFromSimpleOpts extracts APIKeyError from simple options, handling nil.
 func apiKeyErrorFromSimpleOpts(options *ai.SimpleStreamOptions) string {
 	if options != nil {
-		return options.ApiKeyError
+		return options.APIKeyError
 	}
 	return ""
 }
@@ -46,7 +46,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		}
 		return &ai.StreamOptions{
 			MaxTokens: maxTokens,
-			ApiKey:    apiKey,
+			APIKey:    apiKey,
 		}
 	}
 
@@ -63,14 +63,14 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 
 	key := apiKey
 	if key == "" {
-		key = options.ApiKey
+		key = options.APIKey
 	}
 
 	return &ai.StreamOptions{
 		Temperature:     options.Temperature,
 		MaxTokens:       maxTokens,
-		ApiKey:          key,
-		ApiKeyError:     options.ApiKeyError,
+		APIKey:          key,
+		APIKeyError:     options.APIKeyError,
 		CacheRetention:  options.CacheRetention,
 		SessionID:       options.SessionID,
 		Headers:         options.Headers,
@@ -79,7 +79,7 @@ func BuildBaseOptions(model *ai.Model, options *ai.SimpleStreamOptions, apiKey s
 		MaxRetryDelayMs: options.MaxRetryDelayMs,
 		ServerTools:     options.ServerTools,
 		Compaction:      options.Compaction,
-		RefreshApiKey:   options.RefreshApiKey,
+		RefreshAPIKey:   options.RefreshAPIKey,
 		OnPayload:       options.OnPayload,
 		OnResponse:      options.OnResponse,
 		OnRetry:         options.OnRetry,

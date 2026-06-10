@@ -32,7 +32,7 @@ func registerFakeProvider(registry *ai.Registry, apiName, summaryText string) {
 			msg := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent(summaryText)},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				StopReason: ai.StopReasonStop,
@@ -52,7 +52,7 @@ func registerFakeProvider(registry *ai.Registry, apiName, summaryText string) {
 			msg := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent(summaryText)},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				StopReason: ai.StopReasonStop,
@@ -101,7 +101,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 	model := &ai.Model{
 		ID:            "e2e-model",
 		Provider:      "e2e-provider",
-		Api:           apiName,
+		API:           apiName,
 		ContextWindow: 50000,
 		MaxTokens:     4096,
 	}
@@ -127,7 +127,7 @@ func TestFullPipeline_ThresholdCompaction(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent(bigText)},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -334,7 +334,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 	model := &ai.Model{
 		ID:            "e2e-overflow-model",
 		Provider:      "e2e-provider",
-		Api:           apiName,
+		API:           apiName,
 		ContextWindow: 50000,
 		MaxTokens:     4096,
 	}
@@ -363,7 +363,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 				output := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{ai.NewTextContent(fmt.Sprintf("Normal response %d", n))},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					StopReason: ai.StopReasonStop,
@@ -379,7 +379,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 				output := &ai.AssistantMessage{
 					Role:         ai.RoleAssistant,
 					Content:      []ai.AssistantContent{},
-					Api:          m.Api,
+					API:          m.API,
 					Provider:     m.Provider,
 					Model:        m.ID,
 					StopReason:   ai.StopReasonError,
@@ -395,7 +395,7 @@ func TestFullPipeline_OverflowCompaction(t *testing.T) {
 				output := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{ai.NewTextContent("Post-compaction response")},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					StopReason: ai.StopReasonStop,
@@ -560,7 +560,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 	model := &ai.Model{
 		ID:            "e2e-rebuild-model",
 		Provider:      "e2e-provider",
-		Api:           apiName,
+		API:           apiName,
 		ContextWindow: 50000,
 		MaxTokens:     4096,
 	}
@@ -581,7 +581,7 @@ func TestFullPipeline_SessionRebuildAfterCompaction(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent(bigText)},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -720,7 +720,7 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -731,7 +731,7 @@ func TestFullPipeline_CompactionDisabled(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("Big response")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -824,7 +824,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 	model := &ai.Model{
 		ID:            "e2e-double-model",
 		Provider:      "e2e-provider",
-		Api:           apiName,
+		API:           apiName,
 		ContextWindow: 30000,
 		MaxTokens:     4096,
 	}
@@ -851,7 +851,7 @@ func TestFullPipeline_DoubleCompaction(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent(fmt.Sprintf("Response %d", turn))},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,

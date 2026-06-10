@@ -315,7 +315,7 @@ func buildSubstContext(model *ai.Model, creds map[string]string) *declcfg.Contex
 		"os":              runtime.GOOS,
 		"arch":            runtime.GOARCH,
 		"model.id":        model.ID,
-		"model.api":       model.Api,
+		"model.api":       model.API,
 		"model.provider":  model.Provider,
 		"model.base_url":  model.BaseURL,
 		"model.reasoning": model.Reasoning,
@@ -543,20 +543,20 @@ func resolveDeclGoogleEndpoints(
 // --- Stream entry points ---
 
 // StreamDeclGoogle is the generic streamer for any Cloud Code Assist Gemini
-// provider.  Resolves the registered config by model.Api.
+// provider.  Resolves the registered config by model.API.
 func StreamDeclGoogle(
 	ctx context.Context,
 	model *ai.Model,
 	prompt ai.Context,
 	options *ai.StreamOptions,
 ) *ai.AssistantMessageEventStream {
-	cfg := getDeclGoogleConfig(model.Api)
+	cfg := getDeclGoogleConfig(model.API)
 	stream := ai.NewAssistantMessageEventStream()
 	go func() {
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
 			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
+			API:        model.API,
 			Provider:   model.Provider,
 			Model:      model.ID,
 			Usage:      ai.ZeroUsage(),
@@ -565,12 +565,12 @@ func StreamDeclGoogle(
 		}
 		if cfg == nil {
 			output.StopReason = ai.StopReasonError
-			output.ErrorMessage = fmt.Sprintf("no DeclGoogleConfig registered for api %q", model.Api)
+			output.ErrorMessage = fmt.Sprintf("no DeclGoogleConfig registered for api %q", model.API)
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: output.StopReason, Error: output})
 			stream.End(nil)
 			return
 		}
-		firlog.Debug("declgoogle request", "api", model.Api, "model", model.ID, "messageCount", len(prompt.Messages))
+		firlog.Debug("declgoogle request", "api", model.API, "model", model.ID, "messageCount", len(prompt.Messages))
 		err := streamDeclGoogle(ctx, model, prompt, options, cfg, output, stream)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -583,7 +583,7 @@ func StreamDeclGoogle(
 			stream.End(nil)
 			return
 		}
-		firlog.Debug("declgoogle response complete", "api", model.Api, "model", model.ID, "stopReason", output.StopReason)
+		firlog.Debug("declgoogle response complete", "api", model.API, "model", model.ID, "stopReason", output.StopReason)
 		stream.Push(ai.AssistantMessageEvent{Type: ai.EventDone, Reason: output.StopReason, Message: output})
 		stream.End(nil)
 	}()
@@ -601,7 +601,7 @@ func streamDeclGoogle(
 ) error {
 	apiKeyRaw := ""
 	if options != nil {
-		apiKeyRaw = options.ApiKey
+		apiKeyRaw = options.APIKey
 	}
 	if apiKeyRaw == "" {
 		return fmt.Errorf("Google Cloud Code Assist requires OAuth authentication. Use /login to authenticate")
@@ -623,7 +623,7 @@ func streamDeclGoogle(
 		endpoints = eps
 	}
 	if len(endpoints) == 0 {
-		return fmt.Errorf("no endpoints configured for api %q", model.Api)
+		return fmt.Errorf("no endpoints configured for api %q", model.API)
 	}
 
 	reqBody, err := buildDeclGoogleBody(model, prompt, options, cfg, creds)
@@ -957,7 +957,7 @@ func StreamSimpleDeclGoogle(
 	prompt ai.Context,
 	options *ai.SimpleStreamOptions,
 ) *ai.AssistantMessageEventStream {
-	cfg := getDeclGoogleConfig(model.Api)
+	cfg := getDeclGoogleConfig(model.API)
 	prefix := ""
 	if cfg != nil {
 		prefix = cfg.ReasoningHeaderPrefix
@@ -968,7 +968,7 @@ func StreamSimpleDeclGoogle(
 
 	apiKey := ""
 	if options != nil {
-		apiKey = options.ApiKey
+		apiKey = options.APIKey
 	}
 	if apiKey == "" {
 		stream := ai.NewAssistantMessageEventStream()
@@ -976,7 +976,7 @@ func StreamSimpleDeclGoogle(
 			output := &ai.AssistantMessage{
 				Role:         ai.RoleAssistant,
 				Content:      []ai.AssistantContent{},
-				Api:          model.Api,
+				API:          model.API,
 				Provider:     model.Provider,
 				Model:        model.ID,
 				Usage:        ai.ZeroUsage(),

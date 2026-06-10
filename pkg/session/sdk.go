@@ -232,7 +232,7 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 		SteeringMode: settingsManager.GetSteeringMode(),
 		FollowUpMode: settingsManager.GetFollowUpMode(),
 		Transport:    ai.Transport(settingsManager.GetTransport()),
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			resolvedProvider := provider
 			if resolvedProvider == "" && model != nil {
 				resolvedProvider = model.Provider

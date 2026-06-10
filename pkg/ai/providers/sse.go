@@ -232,7 +232,7 @@ func errorStreamProvider(model *ai.Model, errMsg string) *ai.AssistantMessageEve
 		result := &ai.AssistantMessage{
 			Role:         ai.RoleAssistant,
 			Provider:     model.Provider,
-			Api:          model.Api,
+			API:          model.API,
 			Model:        model.ID,
 			Content:      []ai.AssistantContent{},
 			StopReason:   ai.StopReasonError,

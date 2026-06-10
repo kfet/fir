@@ -43,11 +43,11 @@ func TestAnthropicStream_PrunesEmptyTextBlocksBesideThinking(t *testing.T) {
 	model := anthropicModel(srv.URL)
 	model.ID = "claude-opus-4-7"
 	model.Provider = ai.ProviderAnthropic
-	model.Api = ai.ApiAnthropicMessages
+	model.API = ai.ApiAnthropicMessages
 
 	stream := StreamAnthropic(context.Background(), model,
 		ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 1000)}},
-		&ai.StreamOptions{ApiKey: "test-key"})
+		&ai.StreamOptions{APIKey: "test-key"})
 	for range stream.Events {
 	}
 	got := stream.Result()

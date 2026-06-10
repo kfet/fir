@@ -26,7 +26,7 @@ func TestConvertAnthropic_ServerContent_RoundTrip(t *testing.T) {
 	asst := ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			t0,
@@ -37,7 +37,7 @@ func TestConvertAnthropic_ServerContent_RoundTrip(t *testing.T) {
 		},
 		StopReason: ai.StopReasonToolUse,
 	}
-	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Reasoning: true}
+	model := &ai.Model{ID: "claude-opus-4-7", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Reasoning: true}
 	wire := convertAnthropicMessages([]ai.Message{
 		ai.NewUserMsg("go", 0),
 		ai.NewAssistantMsg(asst),
@@ -129,7 +129,7 @@ func TestTransformMessages_ServerContent_CrossProvider(t *testing.T) {
 	asst := ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7",
 		Content: []ai.AssistantContent{
 			ai.NewServerContent("server_tool_use", json.RawMessage(`{"type":"server_tool_use","name":"web_search"}`), "[server tool: web_search]"),
@@ -138,7 +138,7 @@ func TestTransformMessages_ServerContent_CrossProvider(t *testing.T) {
 		StopReason: ai.StopReasonToolUse,
 	}
 	// Target: OpenAI model.
-	target := &ai.Model{ID: "gpt-5", Provider: ai.ProviderOpenAI, Api: ai.ApiOpenAICompletions}
+	target := &ai.Model{ID: "gpt-5", Provider: ai.ProviderOpenAI, API: ai.ApiOpenAICompletions}
 	msgs := []ai.Message{
 		ai.NewUserMsg("q", 0),
 		ai.NewAssistantMsg(asst),
@@ -175,7 +175,7 @@ func TestTransformMessages_ServerContent_CrossProvider(t *testing.T) {
 // was never captured must be dropped on replay; a properly paired one must be
 // kept verbatim.
 func TestConvertAnthropic_OrphanedServerToolUse_Dropped(t *testing.T) {
-	model := &ai.Model{ID: "claude-opus-4-8", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Reasoning: true}
+	model := &ai.Model{ID: "claude-opus-4-8", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Reasoning: true}
 
 	mkServer := func(typ, raw string) ai.AssistantContent {
 		return ai.NewServerContent(typ, json.RawMessage(raw), "")
@@ -183,7 +183,7 @@ func TestConvertAnthropic_OrphanedServerToolUse_Dropped(t *testing.T) {
 	wireFor := func(content ...ai.AssistantContent) []map[string]any {
 		asst := ai.AssistantMessage{
 			Role: ai.RoleAssistant, Provider: ai.ProviderAnthropic,
-			Api: ai.ApiAnthropicMessages, Model: "claude-opus-4-8",
+			API: ai.ApiAnthropicMessages, Model: "claude-opus-4-8",
 			Content: content, StopReason: ai.StopReasonToolUse,
 		}
 		wire := convertAnthropicMessages([]ai.Message{ai.NewUserMsg("go", 0), ai.NewAssistantMsg(asst)}, model, false, ai.CacheNone)
@@ -264,7 +264,7 @@ func TestStreamAnthropic_CapturesTextEditorCodeExecResult(t *testing.T) {
 	model := anthropicModel(srv.URL)
 	model.ID = "claude-opus-4-8"
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("edit it", 10)}}
-	stream := StreamAnthropic(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "k"})
+	stream := StreamAnthropic(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "k"})
 	collectEvents(t, stream)
 	res := stream.Result()
 	if res == nil {
@@ -314,7 +314,7 @@ func TestStreamAnthropic_CapturesUnknownServerBlock(t *testing.T) {
 
 	model := anthropicModel(srv.URL)
 	model.ID = "claude-opus-4-8"
-	stream := StreamAnthropic(context.Background(), model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("go", 5)}}, &ai.StreamOptions{ApiKey: "k"})
+	stream := StreamAnthropic(context.Background(), model, ai.Context{Messages: []ai.Message{ai.NewUserMsg("go", 5)}}, &ai.StreamOptions{APIKey: "k"})
 	collectEvents(t, stream)
 	res := stream.Result()
 	var found bool

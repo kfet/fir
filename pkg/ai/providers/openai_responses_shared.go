@@ -624,7 +624,7 @@ func normalizeResponsesToolCallID(id string, model *ai.Model, source *ai.Assista
 	callID := normalizeIdPart(parts[0])
 
 	// Detect foreign tool calls (originating from a different provider/API)
-	isForeign := source != nil && (source.Provider != model.Provider || source.Api != model.Api)
+	isForeign := source != nil && (source.Provider != model.Provider || source.API != model.API)
 
 	var itemID string
 	if isForeign {

@@ -166,7 +166,7 @@ func TestConvertToLLM_MixedMessages(t *testing.T) {
 		agent.NewAgentMessage(ai.NewAssistantMsg(ai.AssistantMessage{
 			Role:       "assistant",
 			Content:    []ai.AssistantContent{ai.NewTextContent("hi")},
-			Api:        ai.ApiAnthropicMessages,
+			API:        ai.ApiAnthropicMessages,
 			Provider:   ai.ProviderAnthropic,
 			Model:      "test",
 			StopReason: ai.StopReasonStop,

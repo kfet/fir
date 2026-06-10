@@ -182,7 +182,7 @@ func TestBuildDeclGoogleRequest_ConfigA(t *testing.T) {
 	model := &ai.Model{
 		ID:        "gemini-2.0-flash",
 		Provider:  "test-decl-google-a",
-		Api:       "test-decl-google-a",
+		API:       "test-decl-google-a",
 		MaxTokens: 32000,
 	}
 	ctx := ai.Context{
@@ -252,7 +252,7 @@ func TestBuildDeclGoogleRequest_ConfigB(t *testing.T) {
 	model := &ai.Model{
 		ID:        "gemini-2.0-flash",
 		Provider:  "test-decl-google-b",
-		Api:       "test-decl-google-b",
+		API:       "test-decl-google-b",
 		MaxTokens: 32000,
 	}
 	ctx := ai.Context{
@@ -300,7 +300,7 @@ func TestStreamDeclGoogle_MissingCredentials(t *testing.T) {
 	model := &ai.Model{
 		ID:       "gemini-2.0-flash",
 		Provider: "test-decl-google-a",
-		Api:      "test-decl-google-a",
+		API:      "test-decl-google-a",
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 
@@ -321,12 +321,12 @@ func TestStreamDeclGoogle_InvalidCredentials(t *testing.T) {
 	model := &ai.Model{
 		ID:       "gemini-2.0-flash",
 		Provider: "test-decl-google-a",
-		Api:      "test-decl-google-a",
+		API:      "test-decl-google-a",
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 
 	stream := StreamDeclGoogle(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey: "not-json",
+		APIKey: "not-json",
 	})
 	var lastEvent ai.AssistantMessageEvent
 	for ev := range stream.Events {
@@ -395,14 +395,14 @@ func TestStreamDeclGoogle_Success(t *testing.T) {
 	model := &ai.Model{
 		ID:        "gemini-2.0-flash",
 		Provider:  "test-decl-google-a",
-		Api:       "test-decl-google-a",
+		API:       "test-decl-google-a",
 		BaseURL:   server.URL,
 		MaxTokens: 32000,
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 
 	stream := StreamDeclGoogle(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey: string(creds),
+		APIKey: string(creds),
 	})
 
 	var events []ai.AssistantMessageEvent
@@ -485,13 +485,13 @@ func TestStreamDeclGoogle_ToolCalls(t *testing.T) {
 
 	creds, _ := json.Marshal(map[string]string{"token": "tok", "projectId": "proj"})
 	model := &ai.Model{
-		ID: "gemini-2.0-flash", Provider: "test-decl-google-a", Api: "test-decl-google-a",
+		ID: "gemini-2.0-flash", Provider: "test-decl-google-a", API: "test-decl-google-a",
 		BaseURL: server.URL, MaxTokens: 32000,
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("read foo.txt", 0)}}
 
 	stream := StreamDeclGoogle(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey: string(creds),
+		APIKey: string(creds),
 	})
 
 	var events []ai.AssistantMessageEvent
@@ -525,7 +525,7 @@ func TestStreamDeclGoogle_ToolCalls(t *testing.T) {
 
 func TestStreamSimpleDeclGoogle_NoKey(t *testing.T) {
 	model := &ai.Model{
-		ID: "gemini-2.0-flash", Provider: "test-decl-google-a", Api: "test-decl-google-a",
+		ID: "gemini-2.0-flash", Provider: "test-decl-google-a", API: "test-decl-google-a",
 	}
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 
@@ -650,7 +650,7 @@ func TestEnvelopeHonoured(t *testing.T) {
 			"inner":         "$inner"
 		}`),
 	}
-	model := &ai.Model{ID: "gemini-x", Api: "test", Provider: "test"}
+	model := &ai.Model{ID: "gemini-x", API: "test", Provider: "test"}
 	prompt := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 	body, err := buildDeclGoogleBody(model, prompt, nil, cfg, map[string]string{})
 	if err != nil {
@@ -669,7 +669,7 @@ func TestEnvelopeHonoured(t *testing.T) {
 
 func TestEnvelopeNil_IdentityBody(t *testing.T) {
 	cfg := &DeclGoogleConfig{} // no envelope
-	model := &ai.Model{ID: "m", Api: "a", Provider: "p"}
+	model := &ai.Model{ID: "m", API: "a", Provider: "p"}
 	prompt := ai.Context{Messages: []ai.Message{ai.NewUserMsg("hi", 0)}}
 	body, err := buildDeclGoogleBody(model, prompt, nil, cfg, map[string]string{})
 	if err != nil {
@@ -722,7 +722,7 @@ func TestResolveHeaders_OSArchSubst(t *testing.T) {
 	cfg := &DeclGoogleConfig{
 		Headers: map[string]string{"User-Agent": "ua/${os}/${arch}"},
 	}
-	model := &ai.Model{ID: "m", Api: "a", Provider: "p"}
+	model := &ai.Model{ID: "m", API: "a", Provider: "p"}
 	hdrs, err := resolveDeclGoogleHeaders(cfg, model, nil)
 	if err != nil {
 		t.Fatal(err)

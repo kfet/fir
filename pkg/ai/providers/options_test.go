@@ -11,7 +11,7 @@ func TestBuildBaseOptions_NilOptions(t *testing.T) {
 	model := &ai.Model{MaxTokens: 8192}
 	opts := BuildBaseOptions(model, nil, "test-key")
 	assert.Equal(t, 8192, *opts.MaxTokens)
-	assert.Equal(t, "test-key", opts.ApiKey)
+	assert.Equal(t, "test-key", opts.APIKey)
 }
 
 func TestBuildBaseOptions_MaxTokensCapped(t *testing.T) {
@@ -28,22 +28,22 @@ func TestBuildBaseOptions_WithSimpleOptions(t *testing.T) {
 		StreamOptions: ai.StreamOptions{
 			Temperature: &temp,
 			MaxTokens:   &maxTok,
-			ApiKey:      "simple-key",
+			APIKey:      "simple-key",
 		},
 	}
 	opts := BuildBaseOptions(model, simple, "")
 	assert.Equal(t, 0.7, *opts.Temperature)
 	assert.Equal(t, 4096, *opts.MaxTokens)
-	assert.Equal(t, "simple-key", opts.ApiKey)
+	assert.Equal(t, "simple-key", opts.APIKey)
 }
 
 func TestBuildBaseOptions_ApiKeyPriority(t *testing.T) {
 	model := &ai.Model{MaxTokens: 8192}
 	simple := &ai.SimpleStreamOptions{
-		StreamOptions: ai.StreamOptions{ApiKey: "simple-key"},
+		StreamOptions: ai.StreamOptions{APIKey: "simple-key"},
 	}
 	opts := BuildBaseOptions(model, simple, "explicit-key")
-	assert.Equal(t, "explicit-key", opts.ApiKey)
+	assert.Equal(t, "explicit-key", opts.APIKey)
 }
 
 func TestClampReasoning(t *testing.T) {
@@ -56,11 +56,11 @@ func TestClampReasoning(t *testing.T) {
 }
 
 func TestClampReasoningForModel(t *testing.T) {
-	opus48 := &ai.Model{ID: "claude-opus-4-8", Api: ai.ApiAnthropicMessages}
-	opus47 := &ai.Model{ID: "claude-opus-4-7", Api: ai.ApiAnthropicMessages}
-	opus46 := &ai.Model{ID: "claude-opus-4-6", Api: ai.ApiAnthropicMessages}
-	gpt53 := &ai.Model{ID: "gpt-5.3", Api: ai.ApiOpenAICompletions}
-	vanilla := &ai.Model{ID: "claude-sonnet-4-20250514", Api: ai.ApiAnthropicMessages}
+	opus48 := &ai.Model{ID: "claude-opus-4-8", API: ai.ApiAnthropicMessages}
+	opus47 := &ai.Model{ID: "claude-opus-4-7", API: ai.ApiAnthropicMessages}
+	opus46 := &ai.Model{ID: "claude-opus-4-6", API: ai.ApiAnthropicMessages}
+	gpt53 := &ai.Model{ID: "gpt-5.3", API: ai.ApiOpenAICompletions}
+	vanilla := &ai.Model{ID: "claude-sonnet-4-20250514", API: ai.ApiAnthropicMessages}
 
 	// Opus 4.7+: supports both xhigh and max — pass through.
 	assert.Equal(t, ai.ThinkingXHigh, ClampReasoningForModel(ai.ThinkingXHigh, opus48))
@@ -147,7 +147,7 @@ func TestBuildBaseOptions_ServerToolsPassThrough(t *testing.T) {
 	model := &ai.Model{MaxTokens: 8192}
 	simple := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
-			ApiKey: "test-key",
+			APIKey: "test-key",
 			ServerTools: []ai.AnthropicServerTool{
 				{Type: "web_search_20250305"},
 				{Type: "code_execution_20250522"},
@@ -164,7 +164,7 @@ func TestBuildBaseOptions_CompactionPassThrough(t *testing.T) {
 	model := &ai.Model{MaxTokens: 8192}
 	simple := &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
-			ApiKey: "test-key",
+			APIKey: "test-key",
 			Compaction: &ai.AnthropicCompaction{
 				Enabled:       true,
 				TriggerTokens: 100000,

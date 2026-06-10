@@ -202,7 +202,7 @@ func GenerateSummary(
 	}, &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
 			MaxTokens: &maxTokens,
-			ApiKey:    apiKey,
+			APIKey:    apiKey,
 		},
 		Reasoning: ai.ThinkingHigh,
 	})
@@ -258,7 +258,7 @@ func generateTurnPrefixSummary(
 	}, &ai.SimpleStreamOptions{
 		StreamOptions: ai.StreamOptions{
 			MaxTokens: &maxTokens,
-			ApiKey:    apiKey,
+			APIKey:    apiKey,
 		},
 	})
 

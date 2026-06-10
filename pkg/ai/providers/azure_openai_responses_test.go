@@ -12,7 +12,7 @@ func azureTestModel() *ai.Model {
 	return &ai.Model{
 		ID:            "gpt-4o",
 		Name:          "GPT-4o",
-		Api:           ai.ApiAzureOpenAIResponses,
+		API:           ai.ApiAzureOpenAIResponses,
 		Provider:      ai.ProviderAzureOpenAIResponses,
 		BaseURL:       "",
 		Reasoning:     false,

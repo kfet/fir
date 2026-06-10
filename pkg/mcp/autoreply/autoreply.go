@@ -11,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-
+	"github.com/kfet/agent"
+	"github.com/kfet/fir/pkg/agent/tools"
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
 )

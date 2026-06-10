@@ -39,7 +39,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
 			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
+			API:        model.API,
 			Provider:   model.Provider,
 			Model:      model.ID,
 			Usage:      ai.ZeroUsage(),

@@ -25,7 +25,7 @@ func TestStreamOpenAICompletions_WhitespaceOnlyTextPruned(t *testing.T) {
 	model := openaiTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 0)}}
 
-	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	for range stream.Events {
 	}
 	got := stream.Result()

@@ -81,8 +81,8 @@ func TestRegisterUnregisterProviders(t *testing.T) {
 	if m == nil {
 		t.Fatal("model not registered")
 	}
-	if m.Api != "ext:test-cloud" {
-		t.Errorf("model Api = %q, want ext:test-cloud", m.Api)
+	if m.API != "ext:test-cloud" {
+		t.Errorf("model Api = %q, want ext:test-cloud", m.API)
 	}
 
 	// Lister registered.
@@ -157,8 +157,8 @@ func TestRegisterProvidersApiPassthrough(t *testing.T) {
 	if m == nil {
 		t.Fatal("model not registered under passthrough provider")
 	}
-	if m.Api != builtinApi {
-		t.Errorf("model.Api = %q, want %q", m.Api, builtinApi)
+	if m.API != builtinApi {
+		t.Errorf("model.API = %q, want %q", m.API, builtinApi)
 	}
 
 	// Unregister: must NOT touch the built-in Api.

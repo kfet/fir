@@ -1056,7 +1056,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -1075,7 +1075,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 				msg := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "test response"}}},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					Usage:      ai.Usage{Input: 10, Output: 5},
@@ -1087,7 +1087,7 @@ func TestAgentSession_Prompt_WaitsForCompletion(t *testing.T) {
 			}()
 			return stream
 		},
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-key", nil
 		},
 	})
@@ -2048,7 +2048,7 @@ func TestAgentSession_GetAvailableThinkingLevels_Opus46_MaxButNoXhigh(t *testing
 	session.Agent.SetModel(&ai.Model{
 		ID:        "claude-opus-4-6",
 		Provider:  "anthropic",
-		Api:       ai.ApiAnthropicMessages,
+		API:       ai.ApiAnthropicMessages,
 		Reasoning: true,
 	})
 
@@ -2075,7 +2075,7 @@ func TestAgentSession_GetAvailableThinkingLevels_Opus47_XhighAndMax(t *testing.T
 	session.Agent.SetModel(&ai.Model{
 		ID:        "claude-opus-4-7",
 		Provider:  "anthropic",
-		Api:       ai.ApiAnthropicMessages,
+		API:       ai.ApiAnthropicMessages,
 		Reasoning: true,
 	})
 
@@ -2799,7 +2799,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -2812,7 +2812,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 			msg := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				Usage:      ai.Usage{Input: 10, Output: 5},
@@ -2834,7 +2834,7 @@ func TestAgentSession_Prompt_ClearsPlanAfterNextTurn(t *testing.T) {
 		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 			return makeStream()
 		},
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-key", nil
 		},
 	})
@@ -2882,7 +2882,7 @@ func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -2895,7 +2895,7 @@ func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
 			msg := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
-				Api:        model.Api,
+				API:        model.API,
 				Provider:   model.Provider,
 				Model:      model.ID,
 				Usage:      ai.Usage{Input: 10, Output: 5},
@@ -2917,7 +2917,7 @@ func TestAgentSession_Prompt_ClearsCompletedPlanImmediately(t *testing.T) {
 		StreamFn: func(m *ai.Model, ctx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 			return makeStream()
 		},
-		GetApiKey: func(provider string) (string, error) {
+		GetAPIKey: func(provider string) (string, error) {
 			return "test-key", nil
 		},
 	})
@@ -2962,7 +2962,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -2981,7 +2981,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 				msg := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					Usage:      ai.Usage{Input: 10, Output: 5},
@@ -2993,7 +2993,7 @@ func TestAgentSession_Prompt_NoClearWhenNoPlanBeforeTurn(t *testing.T) {
 			}()
 			return stream
 		},
-		GetApiKey: func(provider string) (string, error) { return "test-key", nil },
+		GetAPIKey: func(provider string) (string, error) { return "test-key", nil },
 	})
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -3052,7 +3052,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           "test-api",
+		API:           "test-api",
 		Provider:      "test-provider",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
@@ -3071,7 +3071,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 				msg := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					Usage:      ai.Usage{Input: 10, Output: 5},
@@ -3083,7 +3083,7 @@ func TestAgentSession_UpdatePlan_PersistedToSession(t *testing.T) {
 			}()
 			return stream
 		},
-		GetApiKey: func(provider string) (string, error) { return "test-key", nil },
+		GetAPIKey: func(provider string) (string, error) { return "test-key", nil },
 	})
 
 	session := NewAgentSession(AgentSessionOptions{
@@ -3134,7 +3134,7 @@ func TestSideQuery_ReturnsResponse(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 
 	// Inject a fake stream via the agent's StreamFn.
@@ -3164,7 +3164,7 @@ func TestSideQuery_DoesNotModifySessionMessages(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 
 	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
@@ -3191,7 +3191,7 @@ func TestSideQuery_StripsDanglingToolCallFromContext(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 
 	// Reproduce the aside scenario: the in-flight assistant turn is committed
@@ -3258,7 +3258,7 @@ func TestSideQuery_IncludesExistingContextInCall(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 
 	// Pre-populate the session with one user message.
@@ -3300,7 +3300,7 @@ func TestSideQuery_OverrideModel_NotFound(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 	session.Agent.SetStreamFn(func(m *ai.Model, llmCtx ai.Context, opts *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 		stream := ai.NewAssistantMessageEventStream()
@@ -3332,7 +3332,7 @@ func TestSideQuery_OverrideEffort_PassesThrough(t *testing.T) {
 	session, _ := newTestAgentSession(t)
 	defer session.Close()
 
-	model := &ai.Model{ID: "test-model", Provider: "anthropic", Api: "anthropic"}
+	model := &ai.Model{ID: "test-model", Provider: "anthropic", API: "anthropic"}
 	session.Agent.SetModel(model)
 
 	var seenReasoning ai.ThinkingLevel
@@ -3412,7 +3412,7 @@ func TestAgentSession_Prompt_WaitsForExtReady(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "test-api",
+		API:           "test-api",
 		BaseURL:       "http://localhost",
 		ContextWindow: 200000,
 		MaxTokens:     8192,
@@ -3434,7 +3434,7 @@ func TestAgentSession_Prompt_WaitsForExtReady(t *testing.T) {
 				msg := &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{{Text: &ai.TextContent{Type: "text", Text: "ok"}}},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					Usage:      ai.Usage{Input: 1, Output: 1},
@@ -3446,7 +3446,7 @@ func TestAgentSession_Prompt_WaitsForExtReady(t *testing.T) {
 			}()
 			return stream
 		},
-		GetApiKey: func(_ string) (string, error) { return "test-key", nil },
+		GetAPIKey: func(_ string) (string, error) { return "test-key", nil },
 	})
 
 	extReady := make(chan struct{})

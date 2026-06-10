@@ -16,7 +16,7 @@ func openaiResponsesTestModel(serverURL string) *ai.Model {
 	return &ai.Model{
 		ID:            "gpt-4o",
 		Name:          "GPT-4o",
-		Api:           ai.ApiOpenAIResponses,
+		API:           ai.ApiOpenAIResponses,
 		Provider:      ai.ProviderOpenAI,
 		BaseURL:       serverURL,
 		Reasoning:     false,
@@ -34,7 +34,7 @@ func TestStreamOpenAIResponses_SimpleResponse(t *testing.T) {
 	model := openaiResponsesTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -81,7 +81,7 @@ func TestStreamOpenAIResponses_ToolCall(t *testing.T) {
 	model := openaiResponsesTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Read test.txt", 0)}}
 
-	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	_, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -111,7 +111,7 @@ func TestStreamOpenAIResponses_Error(t *testing.T) {
 	model := openaiResponsesTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	result := stream.Result()
 	require.NotNil(t, result)
 	assert.Equal(t, ai.StopReasonError, result.StopReason)
@@ -155,7 +155,7 @@ func TestStreamOpenAIResponses_ShellCall(t *testing.T) {
 	model := openaiResponsesTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Run echo hello world", 0)}}
 
-	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAIResponses(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -193,7 +193,7 @@ func TestBuildOpenAIResponsesBody_ShellTool(t *testing.T) {
 	model := &ai.Model{
 		ID:            "gpt-5",
 		Name:          "GPT-5",
-		Api:           ai.ApiOpenAIResponses,
+		API:           ai.ApiOpenAIResponses,
 		Provider:      ai.ProviderOpenAI,
 		BaseURL:       "http://localhost",
 		ContextWindow: 128000,
@@ -205,7 +205,7 @@ func TestBuildOpenAIResponsesBody_ShellTool(t *testing.T) {
 	}
 
 	// Without server tools — no shell tool
-	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	require.NoError(t, err)
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))
@@ -214,7 +214,7 @@ func TestBuildOpenAIResponsesBody_ShellTool(t *testing.T) {
 
 	// With code_execution server tool — adds shell tool
 	opts := &ai.StreamOptions{
-		ApiKey: "sk-test",
+		APIKey: "sk-test",
 		ServerTools: []ai.AnthropicServerTool{
 			{Type: "code_execution_20250825"},
 		},
@@ -234,7 +234,7 @@ func TestBuildOpenAIResponsesBody_ShellToolNoFunctionTools(t *testing.T) {
 	model := &ai.Model{
 		ID:            "gpt-5",
 		Name:          "GPT-5",
-		Api:           ai.ApiOpenAIResponses,
+		API:           ai.ApiOpenAIResponses,
 		Provider:      ai.ProviderOpenAI,
 		BaseURL:       "http://localhost",
 		ContextWindow: 128000,
@@ -246,7 +246,7 @@ func TestBuildOpenAIResponsesBody_ShellToolNoFunctionTools(t *testing.T) {
 
 	// With code_execution but no function tools — shell tool still added
 	opts := &ai.StreamOptions{
-		ApiKey: "sk-test",
+		APIKey: "sk-test",
 		ServerTools: []ai.AnthropicServerTool{
 			{Type: "code_execution_20250825"},
 		},
@@ -270,7 +270,7 @@ func TestBuildOpenAIResponsesBody_ShellToolUnsupportedModel(t *testing.T) {
 	}
 
 	opts := &ai.StreamOptions{
-		ApiKey: "sk-test",
+		APIKey: "sk-test",
 		ServerTools: []ai.AnthropicServerTool{
 			{Type: "code_execution_20250825"},
 		},
@@ -293,7 +293,7 @@ func TestConvertResponsesInput_ShellCallReplay(t *testing.T) {
 	assistantMsg := &ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderOpenAI,
-		Api:      ai.ApiOpenAIResponses,
+		API:      ai.ApiOpenAIResponses,
 		Model:    "gpt-4o",
 		Content: []ai.AssistantContent{
 			{Text: &ai.TextContent{Text: "[shell] ls\n", TextSignature: "shell:" + shellJSON}},
@@ -340,7 +340,7 @@ func TestBuildOpenAIResponsesBody_PoeCompat(t *testing.T) {
 	// - the `developer` role — only system/user/assistant allowed
 	model := &ai.Model{
 		ID:            "gpt-5.3-codex-spark",
-		Api:           ai.ApiOpenAIResponses,
+		API:           ai.ApiOpenAIResponses,
 		Provider:      ai.ProviderPoe,
 		BaseURL:       "https://api.poe.com/v1",
 		Reasoning:     true,
@@ -353,7 +353,7 @@ func TestBuildOpenAIResponsesBody_PoeCompat(t *testing.T) {
 	}
 
 	// No reasoning effort → `reasoning` field omitted entirely (not "none").
-	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	require.NoError(t, err)
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))
@@ -369,7 +369,7 @@ func TestBuildOpenAIResponsesBody_PoeCompat(t *testing.T) {
 
 	// With explicit reasoning effort → reasoning is sent but `include` is still omitted.
 	effort := ai.ThinkingHigh
-	opts := &ai.StreamOptions{ApiKey: "sk-test", ReasoningEffort: effort}
+	opts := &ai.StreamOptions{APIKey: "sk-test", ReasoningEffort: effort}
 	body, err = buildOpenAIResponsesBody(model, ctx, opts)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(body, &parsed))
@@ -384,7 +384,7 @@ func TestBuildOpenAIResponsesBody_OpenAIStillGetsEncryptedContent(t *testing.T) 
 	// includes from real OpenAI requests.
 	model := &ai.Model{
 		ID:            "gpt-5",
-		Api:           ai.ApiOpenAIResponses,
+		API:           ai.ApiOpenAIResponses,
 		Provider:      ai.ProviderOpenAI,
 		BaseURL:       "https://api.openai.com/v1",
 		Reasoning:     true,
@@ -396,7 +396,7 @@ func TestBuildOpenAIResponsesBody_OpenAIStillGetsEncryptedContent(t *testing.T) 
 		Messages:     []ai.Message{ai.NewUserMsg("hi", 0)},
 	}
 	effort := ai.ThinkingMedium
-	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{ApiKey: "sk", ReasoningEffort: effort})
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{APIKey: "sk", ReasoningEffort: effort})
 	require.NoError(t, err)
 	var parsed map[string]any
 	require.NoError(t, json.Unmarshal(body, &parsed))

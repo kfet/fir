@@ -165,7 +165,7 @@ func anthropicSameModelModel() *ai.Model {
 	return &ai.Model{
 		ID:        "claude-opus-4-7",
 		Provider:  ai.ProviderAnthropic,
-		Api:       ai.ApiAnthropicMessages,
+		API:       ai.ApiAnthropicMessages,
 		BaseURL:   "https://api.anthropic.com",
 		MaxTokens: 64000,
 	}
@@ -188,7 +188,7 @@ func mkAssistant(model *ai.Model, content ...ai.AssistantContent) ai.AssistantMe
 	return ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: model.Provider,
-		Api:      model.Api,
+		API:      model.API,
 		Model:    model.ID,
 		Content:  content,
 	}
@@ -381,7 +381,7 @@ func TestAnthropicThinkingInvariant_SameProviderDifferentModelID(t *testing.T) {
 	stored := ai.AssistantMessage{
 		Role:     ai.RoleAssistant,
 		Provider: ai.ProviderAnthropic,
-		Api:      ai.ApiAnthropicMessages,
+		API:      ai.ApiAnthropicMessages,
 		Model:    "claude-opus-4-7-20250514", // different ID, same provider+api
 		Content: []ai.AssistantContent{
 			mkSignedThinking("reasoning", "sig-XYZ"),
@@ -479,11 +479,11 @@ func TestAnthropicThinkingInvariant_StreamingThenReplayRoundtrip(t *testing.T) {
 	model := anthropicModel(srv.URL)
 	model.ID = "claude-opus-4-7"
 	model.Provider = ai.ProviderAnthropic
-	model.Api = ai.ApiAnthropicMessages
+	model.API = ai.ApiAnthropicMessages
 
 	stream := StreamAnthropic(context.Background(), model,
 		ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 1000)}},
-		&ai.StreamOptions{ApiKey: "test-key"})
+		&ai.StreamOptions{APIKey: "test-key"})
 	for range stream.Events {
 	}
 	got := stream.Result()
@@ -533,11 +533,11 @@ func TestAnthropicThinkingInvariant_RedactedStreamingRoundtrip(t *testing.T) {
 
 	model := anthropicModel(srv.URL)
 	model.Provider = ai.ProviderAnthropic
-	model.Api = ai.ApiAnthropicMessages
+	model.API = ai.ApiAnthropicMessages
 
 	stream := StreamAnthropic(context.Background(), model,
 		ai.Context{Messages: []ai.Message{ai.NewUserMsg("q", 1000)}},
-		&ai.StreamOptions{ApiKey: "test-key"})
+		&ai.StreamOptions{APIKey: "test-key"})
 	for range stream.Events {
 	}
 	got := stream.Result()

@@ -14,49 +14,49 @@ func testModels() []*ai.Model {
 	return []*ai.Model{
 		{
 			ID: "claude-sonnet-4-5", Name: "Claude Sonnet 4.5",
-			Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+			API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 			BaseURL: "https://api.anthropic.com", Reasoning: true,
 			Input: []string{"text", "image"}, Cost: ai.ModelCost{Input: 3.0, Output: 15.0},
 			ContextWindow: 200000, MaxTokens: 8192,
 		},
 		{
 			ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5 (Sep 2025)",
-			Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+			API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 			BaseURL: "https://api.anthropic.com", Reasoning: true,
 			Input: []string{"text", "image"}, Cost: ai.ModelCost{Input: 3.0, Output: 15.0},
 			ContextWindow: 200000, MaxTokens: 8192,
 		},
 		{
 			ID: "claude-opus-4-6", Name: "Claude Opus 4.6",
-			Api: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
+			API: ai.ApiAnthropicMessages, Provider: ai.ProviderAnthropic,
 			BaseURL: "https://api.anthropic.com", Reasoning: true,
 			Input: []string{"text", "image"}, Cost: ai.ModelCost{Input: 15.0, Output: 75.0},
 			ContextWindow: 200000, MaxTokens: 8192,
 		},
 		{
 			ID: "gpt-5.1-codex", Name: "GPT 5.1 Codex",
-			Api: ai.ApiOpenAICompletions, Provider: ai.ProviderOpenAI,
+			API: ai.ApiOpenAICompletions, Provider: ai.ProviderOpenAI,
 			BaseURL: "https://api.openai.com", Reasoning: false,
 			Input: []string{"text"}, Cost: ai.ModelCost{Input: 2.0, Output: 8.0},
 			ContextWindow: 128000, MaxTokens: 16384,
 		},
 		{
 			ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro",
-			Api: ai.ApiGoogleGenerativeAI, Provider: ai.ProviderGoogle,
+			API: ai.ApiGoogleGenerativeAI, Provider: ai.ProviderGoogle,
 			BaseURL: "https://generativelanguage.googleapis.com",
 			Input:   []string{"text", "image"}, Cost: ai.ModelCost{},
 			ContextWindow: 1000000, MaxTokens: 8192,
 		},
 		{
 			ID: "openai/gpt-5.1-codex", Name: "GPT 5.1 Codex (via OpenRouter)",
-			Api: ai.ApiOpenAICompletions, Provider: ai.ProviderOpenRouter,
+			API: ai.ApiOpenAICompletions, Provider: ai.ProviderOpenRouter,
 			BaseURL: "https://openrouter.ai/api",
 			Input:   []string{"text"}, Cost: ai.ModelCost{},
 			ContextWindow: 128000, MaxTokens: 16384,
 		},
 		{
 			ID: "model:exacto", Name: "Model with Colon",
-			Api: ai.ApiOpenAICompletions, Provider: "test-provider",
+			API: ai.ApiOpenAICompletions, Provider: "test-provider",
 			BaseURL: "https://api.test.com",
 			Input:   []string{"text"}, Cost: ai.ModelCost{},
 			ContextWindow: 128000, MaxTokens: 4096,
@@ -460,7 +460,7 @@ func TestResolveCliModel_PoeRefusesUnknownBot(t *testing.T) {
 	// error rather than a custom-id fallback that yields opaque 500s upstream.
 	registry := newTestRegistry(t, []*ai.Model{{
 		ID: "gemma-4-31b", Name: "Gemma-4-31B",
-		Api: ai.ApiOpenAICompletions, Provider: ai.ProviderPoe,
+		API: ai.ApiOpenAICompletions, Provider: ai.ProviderPoe,
 		BaseURL: "https://api.poe.com/v1",
 	}})
 	result := ResolveCliModel(ResolveCliModelOptions{
@@ -496,7 +496,7 @@ func TestResolveCliModel_OpenRouterSlashID(t *testing.T) {
 func TestResolveCliModel_BedrockARNPassthrough(t *testing.T) {
 	bedrockModel := &ai.Model{
 		ID: "us.anthropic.claude-opus-4-6-v1", Name: "Claude Opus 4.6 (Bedrock)",
-		Api: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock,
+		API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock,
 		Reasoning:     true,
 		Input:         []string{"text", "image"},
 		ContextWindow: 200000, MaxTokens: 8192,
@@ -524,8 +524,8 @@ func TestResolveCliModel_BedrockARNPassthrough(t *testing.T) {
 	if result.Model.Provider != string(ai.ProviderAmazonBedrock) {
 		t.Errorf("expected bedrock provider, got %q", result.Model.Provider)
 	}
-	if result.Model.Api != ai.ApiBedrockConverseStream {
-		t.Errorf("expected bedrock API, got %q", result.Model.Api)
+	if result.Model.API != ai.ApiBedrockConverseStream {
+		t.Errorf("expected bedrock API, got %q", result.Model.API)
 	}
 }
 

@@ -1233,7 +1233,7 @@ func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
 		// No bedrock model registered at all — synthesise a minimal one.
 		base = &ai.Model{
 			Provider:      string(ai.ProviderAmazonBedrock),
-			Api:           ai.ApiBedrockConverseStream,
+			API:           ai.ApiBedrockConverseStream,
 			Reasoning:     true,
 			Input:         []string{"text", "image"},
 			ContextWindow: 200000,

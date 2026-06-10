@@ -67,7 +67,7 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 		case msg.AsAssistant() != nil:
 			m := msg.AsAssistant()
 			isSameModel := m.Provider == model.Provider &&
-				m.Api == model.Api &&
+				m.API == model.API &&
 				m.Model == model.ID
 
 			// isSameProvider is true when the stored assistant message used the
@@ -77,7 +77,7 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 			// signature was issued by the same Anthropic back-end, so it must be
 			// forwarded verbatim — converting it to plain text would strip the
 			// signature and trigger a 400 "cannot be modified" on the next turn.
-			isSameProvider := m.Provider == model.Provider && m.Api == model.Api
+			isSameProvider := m.Provider == model.Provider && m.API == model.API
 
 			newContent := make([]ai.AssistantContent, 0, len(m.Content))
 			for _, block := range m.Content {

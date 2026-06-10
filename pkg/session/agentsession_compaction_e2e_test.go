@@ -31,7 +31,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -43,7 +43,7 @@ func TestAutoCompaction_E2E_ThresholdTriggered(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("This is a response with high usage")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -172,7 +172,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -183,7 +183,7 @@ func TestAutoCompaction_E2E_BelowThreshold(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("Short response")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -277,7 +277,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 200000,
 		MaxTokens:     4096,
 	}
@@ -297,7 +297,7 @@ func TestAutoCompaction_E2E_GetContextUsage(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("Response for turn")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -413,7 +413,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -424,7 +424,7 @@ func TestAutoCompaction_E2E_ContextUsageAfterCompaction(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("High usage response")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -520,7 +520,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -531,7 +531,7 @@ func TestAutoCompaction_E2E_CompactionDisabled(t *testing.T) {
 			output := &ai.AssistantMessage{
 				Role:       ai.RoleAssistant,
 				Content:    []ai.AssistantContent{ai.NewTextContent("Big response")},
-				Api:        m.Api,
+				API:        m.API,
 				Provider:   m.Provider,
 				Model:      m.ID,
 				StopReason: ai.StopReasonStop,
@@ -666,7 +666,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 	model := &ai.Model{
 		ID:            "test-model",
 		Provider:      "test-provider",
-		Api:           "openai-completions",
+		API:           "openai-completions",
 		ContextWindow: 100000,
 		MaxTokens:     4096,
 	}
@@ -688,7 +688,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 				output = &ai.AssistantMessage{
 					Role:         ai.RoleAssistant,
 					Content:      []ai.AssistantContent{},
-					Api:          m.Api,
+					API:          m.API,
 					Provider:     m.Provider,
 					Model:        m.ID,
 					StopReason:   ai.StopReasonError,
@@ -700,7 +700,7 @@ func TestAutoCompaction_E2E_OverflowRetry(t *testing.T) {
 				output = &ai.AssistantMessage{
 					Role:       ai.RoleAssistant,
 					Content:    []ai.AssistantContent{ai.NewTextContent("Response after compaction")},
-					Api:        m.Api,
+					API:        m.API,
 					Provider:   m.Provider,
 					Model:      m.ID,
 					StopReason: ai.StopReasonStop,

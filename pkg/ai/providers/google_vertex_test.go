@@ -15,7 +15,7 @@ func vertexTestModel() *ai.Model {
 	return &ai.Model{
 		ID:            "gemini-2.5-pro",
 		Name:          "Gemini 2.5 Pro",
-		Api:           ai.ApiGoogleVertex,
+		API:           ai.ApiGoogleVertex,
 		Provider:      ai.ProviderGoogleVertex,
 		BaseURL:       "",
 		Reasoning:     true,
@@ -197,7 +197,7 @@ func TestRegisterGoogleVertex(t *testing.T) {
 func TestResolveVertexAPIKey(t *testing.T) {
 	t.Run("from options", func(t *testing.T) {
 		t.Setenv("GOOGLE_CLOUD_API_KEY", "")
-		opts := &ai.StreamOptions{ApiKey: "options-key"}
+		opts := &ai.StreamOptions{APIKey: "options-key"}
 		if got := resolveVertexAPIKey(opts); got != "options-key" {
 			t.Errorf("got %q, want %q", got, "options-key")
 		}
@@ -210,7 +210,7 @@ func TestResolveVertexAPIKey(t *testing.T) {
 	})
 	t.Run("options takes precedence over env", func(t *testing.T) {
 		t.Setenv("GOOGLE_CLOUD_API_KEY", "env-key")
-		opts := &ai.StreamOptions{ApiKey: "options-key"}
+		opts := &ai.StreamOptions{APIKey: "options-key"}
 		if got := resolveVertexAPIKey(opts); got != "options-key" {
 			t.Errorf("got %q, want %q", got, "options-key")
 		}

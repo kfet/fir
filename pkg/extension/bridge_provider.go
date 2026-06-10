@@ -15,7 +15,7 @@ import (
 // extProviderRegistration tracks one hosted provider contributed by an
 // extension at handshake. The synthetic Api `ext:<id>` is registered in
 // ai.DefaultRegistry pointing at an extStreamAdapter so the agent's normal
-// Stream(model.Api, ...) path transparently dispatches via JSON-RPC.
+// Stream(model.API, ...) path transparently dispatches via JSON-RPC.
 //
 // When the spec opts in to Api passthrough (ProviderSpec.Api set to a
 // built-in wire protocol), the bridge skips synthetic-Api allocation and
@@ -85,7 +85,7 @@ func modelFromSpec(providerID string, api ai.Api, m ProviderModelSpec) *ai.Model
 	out := &ai.Model{
 		ID:                    m.ID,
 		Name:                  m.Name,
-		Api:                   api,
+		API:                   api,
 		Provider:              providerID,
 		BaseURL:               m.BaseURL,
 		Reasoning:             m.Reasoning,
@@ -273,7 +273,7 @@ func newExtStreamAdapter(b *Bridge, providerID string) ai.StreamFunction {
 					Error: &ai.AssistantMessage{
 						Role:         ai.RoleAssistant,
 						Model:        model.ID,
-						Api:          model.Api,
+						API:          model.API,
 						Provider:     model.Provider,
 						StopReason:   ai.StopReasonError,
 						ErrorMessage: fmt.Sprintf("ext provider %q: %v", providerID, err),

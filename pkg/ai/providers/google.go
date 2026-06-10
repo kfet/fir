@@ -79,7 +79,7 @@ func StreamGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, optio
 		output := &ai.AssistantMessage{
 			Role:       ai.RoleAssistant,
 			Content:    []ai.AssistantContent{},
-			Api:        model.Api,
+			API:        model.API,
 			Provider:   model.Provider,
 			Model:      model.ID,
 			Usage:      ai.ZeroUsage(),
@@ -154,7 +154,7 @@ func streamGoogleHTTP(
 ) error {
 	apiKey := ""
 	if options != nil {
-		apiKey = options.ApiKey
+		apiKey = options.APIKey
 	}
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)
@@ -521,7 +521,7 @@ func buildGoogleRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamO
 func StreamSimpleGoogle(ctx context.Context, model *ai.Model, prompt ai.Context, options *ai.SimpleStreamOptions) *ai.AssistantMessageEventStream {
 	apiKey := ""
 	if options != nil {
-		apiKey = options.ApiKey
+		apiKey = options.APIKey
 	}
 	if apiKey == "" {
 		apiKey = envkeys.GetEnvApiKey(model.Provider)

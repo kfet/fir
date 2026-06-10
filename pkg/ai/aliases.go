@@ -15,7 +15,7 @@ import core "github.com/kfet/ai"
 // ---------------------------------------------------------------
 
 type (
-	Api                         = core.Api
+	Api                         = core.API
 	Provider                    = core.Provider
 	ThinkingLevel               = core.ThinkingLevel
 	ThinkingBudgets             = core.ThinkingBudgets
@@ -36,7 +36,6 @@ type (
 	Usage                       = core.Usage
 	StopReason                  = core.StopReason
 	UserMessage                 = core.UserMessage
-	UserContentBlock            = core.UserContentBlock
 	AssistantMessage            = core.AssistantMessage
 	AssistantContent            = core.AssistantContent
 	ToolResultMessage           = core.ToolResultMessage
@@ -61,6 +60,11 @@ type (
 	SimpleStreamFunction        = core.SimpleStreamFunction
 	AssistantMessageEventStream = core.AssistantMessageEventStream
 )
+
+// UserContentBlock was dropped from core (github.com/kfet/ai) in v0.1.0; it
+// was always just `any`. Preserved here as a fir-local alias so existing
+// fir/extension references to ai.UserContentBlock keep compiling.
+type UserContentBlock = any
 
 // ---------------------------------------------------------------
 // Function re-exports from core
@@ -100,14 +104,14 @@ const (
 )
 
 const (
-	ApiOpenAICompletions     = core.ApiOpenAICompletions
-	ApiOpenAIResponses       = core.ApiOpenAIResponses
-	ApiAzureOpenAIResponses  = core.ApiAzureOpenAIResponses
-	ApiOpenAICodexResponses  = core.ApiOpenAICodexResponses
-	ApiAnthropicMessages     = core.ApiAnthropicMessages
-	ApiBedrockConverseStream = core.ApiBedrockConverseStream
-	ApiGoogleGenerativeAI    = core.ApiGoogleGenerativeAI
-	ApiGoogleVertex          = core.ApiGoogleVertex
+	ApiOpenAICompletions     = core.APIOpenAICompletions
+	ApiOpenAIResponses       = core.APIOpenAIResponses
+	ApiAzureOpenAIResponses  = core.APIAzureOpenAIResponses
+	ApiOpenAICodexResponses  = core.APIOpenAICodexResponses
+	ApiAnthropicMessages     = core.APIAnthropicMessages
+	ApiBedrockConverseStream = core.APIBedrockConverseStream
+	ApiGoogleGenerativeAI    = core.APIGoogleGenerativeAI
+	ApiGoogleVertex          = core.APIGoogleVertex
 )
 
 const (

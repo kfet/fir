@@ -102,7 +102,7 @@ func testModel(serverURL string, api ai.Api, provider ai.Provider) *ai.Model {
 	return &ai.Model{
 		ID:            "test-model",
 		Name:          "Test Model",
-		Api:           api,
+		API:           api,
 		Provider:      provider,
 		BaseURL:       serverURL,
 		Reasoning:     false,

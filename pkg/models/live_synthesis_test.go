@@ -46,9 +46,9 @@ func TestHumaniseID(t *testing.T) {
 
 func TestSynthesiseFromSibling(t *testing.T) {
 	siblings := []*ai.Model{
-		{ID: "a-1", Provider: "p", Api: "api1", BaseURL: "u1", ContextWindow: 100},
-		{ID: "claude-sonnet-4-5", Provider: "p", Api: "api2", BaseURL: "u2", ContextWindow: 200},
-		{ID: "claude-opus-4-1", Provider: "p", Api: "api3", BaseURL: "u3", ContextWindow: 300},
+		{ID: "a-1", Provider: "p", API: "api1", BaseURL: "u1", ContextWindow: 100},
+		{ID: "claude-sonnet-4-5", Provider: "p", API: "api2", BaseURL: "u2", ContextWindow: 200},
+		{ID: "claude-opus-4-1", Provider: "p", API: "api3", BaseURL: "u3", ContextWindow: 300},
 	}
 	// Should pick the longest-prefix match (claude-sonnet-4-5).
 	m := synthesiseFromSibling("claude-sonnet-4-7-20260601", siblings)
@@ -204,8 +204,8 @@ func TestAllDigits(t *testing.T) {
 
 func TestAnthropicDefaults(t *testing.T) {
 	siblings := []*ai.Model{
-		{ID: "claude-sonnet-4-5-20250101", Provider: "anthropic", Api: "anthropic-messages", ContextWindow: 200000, MaxTokens: 8192},
-		{ID: "claude-opus-4-1-20250930", Provider: "anthropic", Api: "anthropic-messages", ContextWindow: 200000, MaxTokens: 32000},
+		{ID: "claude-sonnet-4-5-20250101", Provider: "anthropic", API: "anthropic-messages", ContextWindow: 200000, MaxTokens: 8192},
+		{ID: "claude-opus-4-1-20250930", Provider: "anthropic", API: "anthropic-messages", ContextWindow: 200000, MaxTokens: 32000},
 	}
 	lister := &anthropicModelLister{}
 
@@ -234,7 +234,7 @@ func TestSynthesise_Pipeline(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
 		ID:            "synth-base",
 		Provider:      "synth-test-provider",
-		Api:           "anthropic-messages",
+		API:           "anthropic-messages",
 		BaseURL:       "https://example.com",
 		ContextWindow: 50000,
 		MaxTokens:     1000,
@@ -271,7 +271,7 @@ func TestSynthesise_NoSiblings_ReturnsNil(t *testing.T) {
 
 func TestFind_LiveListAuthoritative(t *testing.T) {
 	ai.RegisterModel(&ai.Model{
-		ID: "find-auth-real", Provider: "find-auth-test", Api: "anthropic-messages",
+		ID: "find-auth-real", Provider: "find-auth-test", API: "anthropic-messages",
 		BaseURL: "https://example.com", ContextWindow: 100000, MaxTokens: 4096,
 	})
 	authStore := auth.NewAuthStorage("")

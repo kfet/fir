@@ -17,7 +17,7 @@ func openaiTestModel(serverURL string) *ai.Model {
 	return &ai.Model{
 		ID:            "gpt-4o",
 		Name:          "GPT-4o",
-		Api:           ai.ApiOpenAICompletions,
+		API:           ai.ApiOpenAICompletions,
 		Provider:      ai.ProviderOpenAI,
 		BaseURL:       serverURL,
 		Reasoning:     false,
@@ -35,7 +35,7 @@ func TestStreamOpenAI_SimpleResponse(t *testing.T) {
 	model := openaiTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	events, result := stream.Collect()
 	require.NotNil(t, result)
 
@@ -108,7 +108,7 @@ func TestStreamOpenAI_RequestBody(t *testing.T) {
 	}
 
 	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey:      "sk-test",
+		APIKey:      "sk-test",
 		Temperature: &temp,
 	})
 	stream.Result()
@@ -136,7 +136,7 @@ func TestStreamOpenAI_Headers(t *testing.T) {
 	model := openaiTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	stream.Result()
 
 	assert.Equal(t, "Bearer sk-test", capturedHeaders.Get("Authorization"))
@@ -154,7 +154,7 @@ func TestStreamOpenAI_HTTPError(t *testing.T) {
 	model := openaiTestModel(srv.URL)
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
-	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{ApiKey: "sk-test"})
+	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{APIKey: "sk-test"})
 	result := stream.Result()
 	require.NotNil(t, result)
 	assert.Equal(t, ai.StopReasonError, result.StopReason)
@@ -594,7 +594,7 @@ func TestStreamOpenAI_OnPayload_Called(t *testing.T) {
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey: "sk-test",
+		APIKey: "sk-test",
 		OnPayload: func(payload any, _ *ai.Model) any {
 			if m, ok := payload.(map[string]any); ok {
 				capturedPayload = m
@@ -622,7 +622,7 @@ func TestStreamOpenAI_OnPayload_ReplacesBody(t *testing.T) {
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey: "sk-test",
+		APIKey: "sk-test",
 		OnPayload: func(payload any, _ *ai.Model) any {
 			m, _ := payload.(map[string]any)
 			m["x_custom"] = "injected"
@@ -648,7 +648,7 @@ func TestStreamOpenAI_OnPayload_NilKeepsOriginal(t *testing.T) {
 	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hello", 0)}}
 
 	stream := StreamOpenAICompletions(context.Background(), model, ctx, &ai.StreamOptions{
-		ApiKey:    "sk-test",
+		APIKey:    "sk-test",
 		OnPayload: func(payload any, _ *ai.Model) any { return nil },
 	})
 	stream.Result()

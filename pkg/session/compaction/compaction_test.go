@@ -715,18 +715,18 @@ func TestGenerateSummary_ProgressCallback(t *testing.T) {
 				partial1 := &ai.AssistantMessage{
 					Role:    ai.RoleAssistant,
 					Content: []ai.AssistantContent{ai.NewTextContent(part1)},
-					Api:     model.Api, Provider: model.Provider, Model: model.ID,
+					API:     model.API, Provider: model.Provider, Model: model.ID,
 				}
 				// partial after second delta (accumulated text)
 				partial2 := &ai.AssistantMessage{
 					Role:    ai.RoleAssistant,
 					Content: []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
-					Api:     model.Api, Provider: model.Provider, Model: model.ID,
+					API:     model.API, Provider: model.Provider, Model: model.ID,
 				}
 				final := &ai.AssistantMessage{
 					Role:    ai.RoleAssistant,
 					Content: []ai.AssistantContent{ai.NewTextContent(part1 + part2)},
-					Api:     model.Api, Provider: model.Provider, Model: model.ID,
+					API:     model.API, Provider: model.Provider, Model: model.ID,
 					StopReason: ai.StopReasonStop,
 				}
 				stream.Push(ai.AssistantMessageEvent{Type: ai.EventStart, Partial: partial1})
@@ -745,7 +745,7 @@ func TestGenerateSummary_ProgressCallback(t *testing.T) {
 	}, "test-progress-owner")
 	defer registry.UnregisterApiProviders("test-progress-owner")
 
-	model := &ai.Model{ID: "test", Provider: "test", Api: ai.Api(apiName)}
+	model := &ai.Model{ID: "test", Provider: "test", API: ai.Api(apiName)}
 
 	var phases []string
 	var deltas []string

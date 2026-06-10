@@ -661,7 +661,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 		d := struct {
 			api     ai.Api
 			baseURL string
-		}{api: builtIn[0].Api, baseURL: builtIn[0].BaseURL}
+		}{api: builtIn[0].API, baseURL: builtIn[0].BaseURL}
 		builtInDefaults[providerName] = d
 		return d.api, d.baseURL, true
 	}
@@ -788,7 +788,7 @@ func (r *ModelRegistry) parseModels(config *ModelsConfig) []*ai.Model {
 			models = append(models, &ai.Model{
 				ID:               modelDef.ID,
 				Name:             name,
-				Api:              api,
+				API:              api,
 				Provider:         providerName,
 				BaseURL:          baseURL,
 				Reasoning:        reasoning,

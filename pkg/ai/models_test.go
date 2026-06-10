@@ -18,8 +18,8 @@ func TestGetModel_Anthropic(t *testing.T) {
 	if m.Provider != ProviderAnthropic {
 		t.Errorf("expected provider %q, got %q", ProviderAnthropic, m.Provider)
 	}
-	if m.Api != ApiAnthropicMessages {
-		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.Api)
+	if m.API != ApiAnthropicMessages {
+		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.API)
 	}
 	if m.ContextWindow <= 0 {
 		t.Error("expected positive context window")
@@ -56,8 +56,8 @@ func TestGetModel_PoeAnthropicBaseURL(t *testing.T) {
 	if m == nil {
 		t.Fatal("expected claude-haiku-4.5 on poe to be registered")
 	}
-	if m.Api != ApiAnthropicMessages {
-		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.Api)
+	if m.API != ApiAnthropicMessages {
+		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.API)
 	}
 	if m.BaseURL != "https://api.poe.com" {
 		t.Errorf("expected BaseURL without /v1 suffix, got %q", m.BaseURL)
@@ -138,14 +138,14 @@ func assertClose(t *testing.T, name string, expected, actual float64) {
 }
 
 func TestSupportsXhigh_GPT52(t *testing.T) {
-	m := &Model{ID: "gpt-5.2-turbo", Api: ApiOpenAICompletions}
+	m := &Model{ID: "gpt-5.2-turbo", API: ApiOpenAICompletions}
 	if !SupportsXhigh(m) {
 		t.Error("expected xhigh support for gpt-5.2")
 	}
 }
 
 func TestSupportsXhigh_GPT53(t *testing.T) {
-	m := &Model{ID: "gpt-5.3", Api: ApiOpenAICompletions}
+	m := &Model{ID: "gpt-5.3", API: ApiOpenAICompletions}
 	if !SupportsXhigh(m) {
 		t.Error("expected xhigh support for gpt-5.3")
 	}
@@ -161,13 +161,13 @@ func TestSupportsXhigh_AnthropicOpus47Plus(t *testing.T) {
 		"anthropic.claude-opus-4-7", "us.anthropic.claude-opus-4-7",
 		"claude-opus-4-7@20250101",
 	} {
-		m := &Model{ID: id, Api: ApiAnthropicMessages}
+		m := &Model{ID: id, API: ApiAnthropicMessages}
 		if !SupportsXhigh(m) {
 			t.Errorf("expected xhigh support for %s", id)
 		}
 	}
 	// Bedrock path (different Api) must also work.
-	mb := &Model{ID: "anthropic.claude-opus-4-7", Api: ApiBedrockConverseStream}
+	mb := &Model{ID: "anthropic.claude-opus-4-7", API: ApiBedrockConverseStream}
 	if !SupportsXhigh(mb) {
 		t.Error("expected xhigh support for Bedrock opus-4-7")
 	}
@@ -176,11 +176,11 @@ func TestSupportsXhigh_AnthropicOpus47Plus(t *testing.T) {
 func TestSupportsXhigh_AnthropicOpus46_ClampsDown(t *testing.T) {
 	// Opus 4.6 has a "max" tier but NOT a distinct xhigh tier — xhigh must
 	// clamp to "high" for these models.
-	m := &Model{ID: "claude-opus-4-6", Api: ApiAnthropicMessages}
+	m := &Model{ID: "claude-opus-4-6", API: ApiAnthropicMessages}
 	if SupportsXhigh(m) {
 		t.Error("opus-4-6 must not report xhigh support (clamps to high)")
 	}
-	m2 := &Model{ID: "claude-opus-4.6", Api: ApiAnthropicMessages}
+	m2 := &Model{ID: "claude-opus-4.6", API: ApiAnthropicMessages}
 	if SupportsXhigh(m2) {
 		t.Error("opus-4.6 must not report xhigh support (clamps to high)")
 	}
@@ -199,12 +199,12 @@ func TestSupportsMax_AnthropicAdaptive(t *testing.T) {
 		"us.anthropic.claude-opus-4-8",
 		"eu.anthropic.claude-sonnet-4-6",
 	} {
-		m := &Model{ID: id, Api: ApiAnthropicMessages}
+		m := &Model{ID: id, API: ApiAnthropicMessages}
 		if !SupportsMax(m) {
 			t.Errorf("expected max support for %s (ApiAnthropicMessages)", id)
 		}
 		// Also verify it works for the Bedrock Api.
-		mb := &Model{ID: id, Api: ApiBedrockConverseStream}
+		mb := &Model{ID: id, API: ApiBedrockConverseStream}
 		if !SupportsMax(mb) {
 			t.Errorf("expected max support for %s (Bedrock Api)", id)
 		}
@@ -212,7 +212,7 @@ func TestSupportsMax_AnthropicAdaptive(t *testing.T) {
 }
 
 func TestSupportsMax_RegularModel(t *testing.T) {
-	m := &Model{ID: "claude-sonnet-4-20250514", Api: ApiAnthropicMessages}
+	m := &Model{ID: "claude-sonnet-4-20250514", API: ApiAnthropicMessages}
 	if SupportsMax(m) {
 		t.Error("expected no max support for pre-4.6 model")
 	}
@@ -225,7 +225,7 @@ func TestSupportsMax_NilModel(t *testing.T) {
 }
 
 func TestSupportsXhigh_RegularModel(t *testing.T) {
-	m := &Model{ID: "claude-sonnet-4-20250514", Api: ApiAnthropicMessages}
+	m := &Model{ID: "claude-sonnet-4-20250514", API: ApiAnthropicMessages}
 	if SupportsXhigh(m) {
 		t.Error("expected no xhigh support for regular model")
 	}
@@ -295,8 +295,8 @@ func TestGetModel_NewGemini31Models(t *testing.T) {
 			if m.Provider != tc.provider {
 				t.Errorf("Provider: expected %q, got %q", tc.provider, m.Provider)
 			}
-			if m.Api != tc.wantAPI {
-				t.Errorf("Api: expected %q, got %q", tc.wantAPI, m.Api)
+			if m.API != tc.wantAPI {
+				t.Errorf("API: expected %q, got %q", tc.wantAPI, m.API)
 			}
 			if m.ContextWindow != tc.wantCtxWindow {
 				t.Errorf("ContextWindow: expected %d, got %d", tc.wantCtxWindow, m.ContextWindow)
