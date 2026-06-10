@@ -263,19 +263,26 @@ _BOOKMARK_PARAMS: dict[str, Any] = {
 # pin: argless reflex tool
 # ---------------------------------------------------------------------------
 
-_PIN_DESCRIPTION = """📌 Drop a pin the instant you notice something worth keeping.
+_PIN_DESCRIPTION = """📌 pin — always call this the moment the \
+conversation produces something worth keeping.
 
-This is a free reflex, not a decision. The MOMENT you sense anything a \
-future agent (after a /handoff) would want — a design decision locked \
-in, a user constraint stated, a critical tool result, a non-obvious \
-discovery about the code, a debugging session converging — just call \
-📌 (pin). No arguments. No explanation. Don't deliberate, don't \
-summarise, don't quote anything. It costs you nothing.
+Whenever the latest turn contains ANY of the following, call pin (no \
+arguments) BEFORE you write your reply:
+- a decision or choice being finalized ("we'll go with…", "decision \
+is final", "let's commit to…")
+- a constraint, rule, or requirement stated ("must never…", \
+"always…", "the rule is…")
+- a root cause or key finding ("we found it", "the cause is…", \
+"turns out…", a bug's fix)
+- a non-obvious fact or gotcha about the code or system
+- a plan locked in or a milestone reached
 
-A separate branch with full context decides what (if anything) is \
-actually worth bookmarking and where to anchor it — including turns \
-from earlier in the session, not just the latest one. So pin freely \
-and often; over-pinning is harmless, missing a moment is not."""
+This is not optional. Do not deliberate and do not explain — just \
+call pin, then continue answering. Pinning is free and harmless; a \
+separate branch later decides what (if anything) to actually keep \
+and where to anchor it — including turns from earlier in the \
+session. Failing to pin loses the moment permanently, so when in \
+doubt, pin."""
 
 _PIN_PARAMS: dict[str, Any] = {
     "type": "object",
