@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-06-10
+
+### Added
+
+- Generic LLM-visible tool-result metadata: tool results carry a structured `Meta map[string]string` (core `ToolResultMessage`, agent `AgentToolResult`, extension `ToolResult`) rendered deterministically as trailing `[key: value]` lines on the provider-bound message only (shared transform pass, all providers). Bash/Read hashes use it instead of an extra text content block, so internal consumers (pipe `{{prev}}`, wait sentinels, extensions) see clean content; the extension bridge `call_tool` now also forwards `details` and `meta`.
+
 ## [0.66.1] - 2026-06-10
 
 ### Fixed
@@ -12,7 +18,6 @@
 
 ### Added
 
-- Generic LLM-visible tool-result metadata: tool results carry a structured `Meta map[string]string` (core `ToolResultMessage`, agent `AgentToolResult`, extension `ToolResult`) rendered deterministically as trailing `[key: value]` lines on the provider-bound message only (shared transform pass, all providers). Bash/Read hashes use it instead of an extra text content block, so internal consumers (pipe `{{prev}}`, wait sentinels, extensions) see clean content; the extension bridge `call_tool` now also forwards `details` and `meta`.
 - `aside` de-escalation via a new `delegate: bool` parameter — the opposite of `escalate`. When the executor runs an expensive flagship, context-heavy but low-judgement asides (bulk reads + synthesis, log summarisation, data extraction) can be routed down to a cheap delegate model (default `anthropic/claude-haiku-4-5`). Configured under the `"delegate"` key in `aside.json`, managed with a new `/aside-delegate` command (show / set / off); delegated results carry a `[delegate: provider/model]` trace line. `escalate` and `delegate` together are a validation error.
 
 ### Changed
