@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.7] - 2026-06-09
+
+### Added
+
+- Bedrock authentication now supports **Bedrock API keys** (bearer tokens). When `AWS_BEARER_TOKEN_BEDROCK` is set, requests authenticate with an `Authorization: Bearer <token>` header and SigV4 signing is skipped entirely, mirroring the AWS SDK. The bearer token takes precedence over any resolved SigV4 credentials. Previously a Bedrock API key produced `403 "The security token included in the request is invalid."` because the request was still SigV4-signed. (skipstone v0.1.2.)
+
 ## [0.65.6] - 2026-06-09
 
 ### Fixed
