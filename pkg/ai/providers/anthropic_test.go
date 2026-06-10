@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -477,77 +476,6 @@ func TestAnthropic_OverloadedRetry(t *testing.T) {
 	}
 	if hasErr {
 		t.Error("unexpected EventError — retry should have been transparent")
-	}
-}
-
-func TestAnthropic_StreamSimple_ThinkingOffFallbackToAdaptive(t *testing.T) {
-	// A model not flagged AdaptiveThinking but which the API rejects when asked
-	// to disable thinking must transparently retry as adaptive ("try the other
-	// way").
-	prev := anthropicRetryDelayFn
-	anthropicRetryDelayFn = func(_ string, _ int, _ *int) time.Duration { return 0 }
-	t.Cleanup(func() { anthropicRetryDelayFn = prev })
-
-	disabledErr := []byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"\\\"thinking.type.disabled\\\" is not supported for this model.\"}}\n\n")
-	successData := loadFixture(t, "anthropic_simple_response.sse")
-
-	var bodies [][]byte
-	attempts := 0
-	srv := mockSSEServerFunc(t, func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, b)
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		attempts++
-		if attempts == 1 {
-			w.Write(disabledErr)
-		} else {
-			w.Write(successData)
-		}
-	})
-	defer srv.Close()
-
-	model := anthropicModel(srv.URL)
-	model.Reasoning = true
-	model.AdaptiveThinking = false // NOT flagged — exercises the runtime fallback
-	ctx := ai.Context{Messages: []ai.Message{ai.NewUserMsg("Hi", 1000)}}
-	opts := &ai.SimpleStreamOptions{
-		StreamOptions: ai.StreamOptions{ApiKey: "test-key"},
-		Reasoning:     ai.ThinkingOff,
-	}
-
-	stream := StreamSimpleAnthropic(context.Background(), model, ctx, opts)
-	events := collectEvents(t, stream)
-
-	if attempts != 2 {
-		t.Fatalf("expected 2 attempts (disabled-rejected + adaptive-retry), got %d", attempts)
-	}
-	result := stream.Result()
-	if result == nil || result.StopReason == ai.StopReasonError {
-		t.Fatalf("expected success, got %+v", result)
-	}
-	for _, evt := range events {
-		if evt.Type == ai.EventError {
-			t.Fatal("unexpected EventError — fallback should be transparent")
-		}
-	}
-
-	// First request must have asked to disable thinking.
-	var first map[string]any
-	if err := json.Unmarshal(bodies[0], &first); err != nil {
-		t.Fatalf("unmarshal first body: %v", err)
-	}
-	if tk, _ := first["thinking"].(map[string]any); tk == nil || tk["type"] != "disabled" {
-		t.Errorf("expected first request thinking.type=disabled, got %v", first["thinking"])
-	}
-	// Retry must have switched to adaptive thinking.
-	var second map[string]any
-	if err := json.Unmarshal(bodies[1], &second); err != nil {
-		t.Fatalf("unmarshal second body: %v", err)
-	}
-	tk, _ := second["thinking"].(map[string]any)
-	if tk == nil || tk["type"] != "adaptive" {
-		t.Errorf("expected retry thinking.type=adaptive, got %v", second["thinking"])
 	}
 }
 

@@ -177,14 +177,6 @@ func joinBetaParts(parts ...string) string {
 
 // isAuthError returns true if the error indicates an authentication failure
 // (e.g. expired OAuth token) that may be resolved by refreshing credentials.
-// isThinkingDisabledUnsupported reports whether an API error indicates the
-// model does not accept thinking.type=disabled (i.e. an always-on adaptive
-// model we hadn't flagged). The Anthropic error reads: "thinking.type.disabled"
-// is not supported for this model.
-func isThinkingDisabledUnsupported(errMsg string) bool {
-	return strings.Contains(errMsg, "thinking.type.disabled")
-}
-
 func isAuthError(errType, errMsg string) bool {
 	if errType == "authentication_error" || errType == "permission_error" {
 		return true
@@ -392,48 +384,6 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 		lastErrMsg := ""
 
-		thinkingFallbackTried := false
-		startEmitted := false
-		// tryThinkingOffFallback rebuilds the request using adaptive thinking when
-		// a model rejects thinking.type=disabled. This is the generic "try the other
-		// way" safety net: if any model we have not declared AdaptiveThinking on
-		// turns out to be adaptive-only, a thinking-off request is transparently
-		// re-issued as adaptive at lowest effort. Fires at most once, only before
-		// any output has streamed.
-		tryThinkingOffFallback := func(errMsg string) bool {
-			if thinkingFallbackTried || startEmitted || !isThinkingDisabledUnsupported(errMsg) {
-				return false
-			}
-			if options == nil || options.Headers["x-anthropic-thinking-disabled"] != "true" {
-				return false
-			}
-			thinkingFallbackTried = true
-			newHeaders := map[string]string{}
-			for k, v := range options.Headers {
-				if k != "x-anthropic-thinking-disabled" {
-					newHeaders[k] = v
-				}
-			}
-			newHeaders["x-anthropic-thinking-effort"] = mapThinkingLevelToEffort(ai.ThinkingOff, model)
-			optCopy := *options
-			optCopy.Headers = newHeaders
-			options = &optCopy
-			params = buildAnthropicParams(model, prompt, oauthToken, options)
-			if options.OnPayload != nil {
-				if next := options.OnPayload(params, model); next != nil {
-					if m, ok := next.(map[string]any); ok {
-						params = m
-					}
-				}
-			}
-			if p, mErr := json.Marshal(params); mErr == nil {
-				payload = p
-			}
-			headers = buildAnthropicHeaders(model, apiKey, oauthToken, options, len(prompt.Tools) > 0)
-			firlog.Info("anthropic thinking-off unsupported, retrying with adaptive thinking", "model", model.ID)
-			lastErrMsg = errMsg
-			return true
-		}
 		for attempt := 0; attempt < maxAnthropicRetries; attempt++ {
 			if attempt > 0 {
 				delay := anthropicRetryDelay(lastErrMsg, attempt-1, maxDelayMs)
@@ -471,7 +421,7 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 			// EventStart is emitted only after the first successful SSE event so that
 			// an early overloaded_error can be retried without the caller seeing anything.
-			startEmitted = false
+			startEmitted := false
 
 			// Track block indices from Anthropic to our content array indices.
 			type blockInfo struct {
@@ -687,12 +637,6 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 						break sseLoop
 					}
 
-					// Thinking-off unsupported: retry transparently as adaptive.
-					if tryThinkingOffFallback(errMsg) {
-						retryNeeded = true
-						break sseLoop
-					}
-
 					// Not retryable (or already streaming): surface the error.
 					output.StopReason = ai.StopReasonError
 					output.ErrorMessage = errMsg
@@ -755,11 +699,6 @@ func StreamAnthropic(ctx context.Context, model *ai.Model, prompt ai.Context, op
 
 				if !startEmitted && attempt < maxAnthropicRetries-1 && ratelimit.IsRetryableError(errMsg) {
 					lastErrMsg = errMsg
-					continue
-				}
-
-				// Thinking-off unsupported (HTTP 400): retry transparently as adaptive.
-				if tryThinkingOffFallback(errMsg) {
 					continue
 				}
 
@@ -836,12 +775,10 @@ func StreamSimpleAnthropic(ctx context.Context, model *ai.Model, prompt ai.Conte
 		return StreamAnthropic(ctx, model, prompt, base)
 	}
 
-	// Explicitly disable thinking when requested on a reasoning model.
-	// Adaptive-thinking models cannot disable thinking — the API rejects
-	// thinking.type=disabled — so for those we fall through to adaptive thinking
-	// at the lowest effort instead. (A runtime safety net in StreamAnthropic
-	// also recovers if any model we haven't flagged rejects thinking-off.)
-	if options.Reasoning == ai.ThinkingOff && model.Reasoning && !model.AdaptiveThinking {
+	// Render an explicit thinking-off request as thinking.type=disabled. Policy
+	// (never sending thinking-off to a model that can't disable thinking) is
+	// handled generically in ai.StreamSimple, so the provider just renders.
+	if options.Reasoning == ai.ThinkingOff && model.Reasoning {
 		if base.Headers == nil {
 			base.Headers = map[string]string{}
 		}
