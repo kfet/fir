@@ -841,5 +841,76 @@ class TestHashBlockFiltering(unittest.TestCase):
         self.assertEqual(seen["cmd"], "use alpha")
 
 
+
+
+# ---------------------------------------------------------------------------
+# meta channel (post-llm-meta ROOT fix): the content hash now lives in
+# result["meta"], never in a [hash: ...] content block. So it structurally
+# cannot reach _result_text, the WAIT: verdict line, or {{prev}} subs. These
+# assert the real post-fix tool-result shape (the TestHashBlockFiltering class
+# above covers the legacy content-block path kept as mixed-fleet defense).
+# ---------------------------------------------------------------------------
+
+
+def _meta_result(text, h="0123456789abcdef", is_error=False):
+    """Mimic post-fix core Bash/Read results: one output content block plus a
+    sibling ``meta`` dict carrying the hash (no [hash: ...] content block)."""
+    return {
+        "content": [{"type": "text", "text": text}],
+        "meta": {"hash": h},
+        "is_error": is_error,
+    }
+
+
+class TestMetaChannel(unittest.TestCase):
+    def setUp(self):
+        self.pipe = _load_pipe()
+
+    def test_result_text_ignores_meta_field(self):
+        # The sibling meta dict must never bleed into the extracted text.
+        self.assertEqual(self.pipe._result_text(_meta_result("hello")), "hello")
+
+    def test_result_text_no_hash_leak(self):
+        out = self.pipe._result_text(_meta_result("hello", h="deadbeefcafef00d"))
+        self.assertNotIn("deadbeefcafef00d", out)
+        self.assertNotIn("hash", out)
+
+    def test_wait_verdict_parses_with_meta_hash(self):
+        ctx = _make_ctx([_meta_result("checking...\nWAIT:done")])
+        result = self.pipe._run_wait(
+            [{"tool": "Bash", "params": {"command": "true"}}],
+            0.01, 30, 5, "", ctx,
+        )
+        text = result["content"][0]["text"]
+        self.assertFalse(result.get("is_error", False), text)
+        self.assertIn("wait: success", text)
+
+    def test_wait_verdict_meta_hash_not_in_output(self):
+        ctx = _make_ctx([_meta_result("ready\nWAIT:done", h="deadbeefcafef00d")])
+        result = self.pipe._run_wait(
+            [{"tool": "Bash", "params": {"command": "true"}}],
+            0.01, 30, 5, "", ctx,
+        )
+        text = result["content"][0]["text"]
+        self.assertNotIn("deadbeefcafef00d", text)
+
+    def test_pipe_substitution_excludes_meta_hash(self):
+        seen = {}
+
+        def second(name, params):
+            seen["cmd"] = params["command"]
+            return _text_result("done")
+
+        ctx = _make_ctx([_meta_result("alpha", h="feedface00000000"), second])
+        self.pipe._run_pipe(
+            [
+                {"tool": "Bash", "params": {"command": "first"}},
+                {"tool": "Bash", "params": {"command": "use {{prev}}"}},
+            ],
+            "", ctx,
+        )
+        self.assertEqual(seen["cmd"], "use alpha")
+
+
 if __name__ == "__main__":
     unittest.main()
