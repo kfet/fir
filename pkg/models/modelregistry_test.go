@@ -990,3 +990,42 @@ func TestModelRegistry_ModelsD_InvalidFragment(t *testing.T) {
 		t.Error("expected error for malformed fragment, got none")
 	}
 }
+
+// /reload (both ACP and interactive) calls ModelRegistry.Refresh(); this
+// verifies Refresh re-reads a models.d fragment added after construction.
+func TestModelRegistry_ModelsD_RefreshPicksUpNewFragment(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, "models.json")
+	writeJSON(t, modelsPath, customProvider(ModelDefinition{ID: "base-model", Name: "Base"}))
+
+	hasExact := func(reg *ModelRegistry, id string) bool {
+		for _, m := range reg.GetAll() {
+			if m.Provider == "my-custom" && m.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	if hasExact(registry, "late-model") {
+		t.Fatal("late-model should not exist before fragment is added")
+	}
+
+	// Drop a fragment in after the registry already loaded.
+	dDir := filepath.Join(tmpDir, "models.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(dDir, "10-late.json"),
+		customProvider(ModelDefinition{ID: "late-model", Name: "Late"}))
+
+	registry.Refresh()
+
+	if !hasExact(registry, "late-model") {
+		t.Fatal("Refresh did not pick up new models.d fragment")
+	}
+	if !hasExact(registry, "base-model") {
+		t.Error("base model lost after Refresh")
+	}
+}

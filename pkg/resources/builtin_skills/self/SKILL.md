@@ -199,9 +199,11 @@ Load order and merge semantics:
     "contextWindow": 200000, "maxTokens": 64000 } ] } } }
 ```
 
-The catalog is read at process start (no hot-reload), so a newly added
-fragment is picked up by the **next** `fir` process — restart the relay, or
-just spawn a fresh `fir`, to use it.
+The catalog is read at process start, and re-read on `/reload` (which now
+also refreshes the model registry) and when the model selector opens. So a
+newly added fragment is picked up by `/reload` in a running session, by the
+next `fir` process, or — for the Poe relay's dropdown — after a relay
+restart (the relay snapshots the catalog once at its own startup).
 
 ### 2. Environment variables (Claude Code parity)
 

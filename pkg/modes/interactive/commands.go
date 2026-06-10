@@ -1114,9 +1114,13 @@ func (m *InteractiveMode) handleReloadCommand() {
 		}
 	}
 
+	// Re-read the model catalog from disk (models.json + models.d/ fragments)
+	// so newly added models appear without restarting.
+	m.session.ModelRegistryRef().Refresh()
+
 	m.setupAutocomplete()
 	m.rebuildChatFromMessages()
-	m.showStatus("Reloaded extensions, skills, themes, MCP servers")
+	m.showStatus("Reloaded extensions, skills, themes, MCP servers, models")
 }
 
 func (m *InteractiveMode) handleSkillsCommand(args []string) {

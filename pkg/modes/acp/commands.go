@@ -482,6 +482,12 @@ func cmdReload(ctx *commandContext, _ string) {
 		ctx.sendMessage(fmt.Sprintf("MCP reload failed: %v", err))
 	}
 	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
+	// Re-read the model catalog from disk (models.json + models.d/ fragments)
+	// so newly added models become visible to subsequent set_model / new
+	// sessions without restarting the agent process.
+	if entry.modelRegistry != nil {
+		entry.modelRegistry.Refresh()
+	}
 	ctx.agent.sendAvailableCommands(ctx.sessionID)
 	ctx.sendMessage("Reload completed successfully.")
 }
