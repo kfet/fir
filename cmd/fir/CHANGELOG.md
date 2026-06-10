@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.6] - 2026-06-09
+
+### Fixed
+
+- Bedrock requests using an **application-inference-profile ARN** (or any model ID whose path contains a `/`) no longer fail with `403 SignatureDoesNotMatch`. The bundled `skipstone` SigV4 signer (bumped to v0.1.1) now canonicalises the request path from `EscapedPath()` rather than the decoded path, so the in-ARN slash is correctly double-encoded to `%252F` in the canonical URI to match what AWS computes. Plain model IDs were unaffected; only slash-bearing ARNs hit the mismatch.
+
 ## [0.65.5] - 2026-06-09
 
 ### Changed
