@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/kfet/fir/pkg/ai"
@@ -512,21 +513,57 @@ func (r *ModelRegistry) AddRuntimeModel(m *ai.Model) {
 }
 
 func (r *ModelRegistry) loadCustomModels(modelsJsonPath string) *CustomModelsResult {
-	data, err := os.ReadFile(modelsJsonPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return emptyCustomModelsResult("")
+	// Layered load: the main models.json is the base layer, then every
+	// <agentDir>/models.d/*.json fragment is deep-merged on top in lexical
+	// filename order (use NN- prefixes to control ordering). This lets tools
+	// and agents drop in self-contained model/provider fragments without
+	// rewriting a single monolithic file. A fragment has the same shape as
+	// models.json; see mergeModelsConfig for the precise merge semantics.
+	config := &ModelsConfig{}
+	loadedAny := false
+
+	if data, err := os.ReadFile(modelsJsonPath); err == nil {
+		var base ModelsConfig
+		if err := json.Unmarshal(data, &base); err != nil {
+			return emptyCustomModelsResult(
+				fmt.Sprintf("Failed to parse models.json: %v\n\nFile: %s", err, modelsJsonPath),
+			)
 		}
+		mergeModelsConfig(config, &base)
+		loadedAny = true
+	} else if !os.IsNotExist(err) {
 		return emptyCustomModelsResult(
 			fmt.Sprintf("Failed to load models.json: %v\n\nFile: %s", err, modelsJsonPath),
 		)
 	}
 
-	var config ModelsConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return emptyCustomModelsResult(
-			fmt.Sprintf("Failed to parse models.json: %v\n\nFile: %s", err, modelsJsonPath),
-		)
+	fragDir := filepath.Join(filepath.Dir(modelsJsonPath), "models.d")
+	fragments, _ := filepath.Glob(filepath.Join(fragDir, "*.json"))
+	sort.Strings(fragments)
+	for _, frag := range fragments {
+		data, err := os.ReadFile(frag)
+		if err != nil {
+			return emptyCustomModelsResult(
+				fmt.Sprintf("Failed to load models.d fragment: %v\n\nFile: %s", err, frag),
+			)
+		}
+		var overlay ModelsConfig
+		if err := json.Unmarshal(data, &overlay); err != nil {
+			return emptyCustomModelsResult(
+				fmt.Sprintf("Failed to parse models.d fragment: %v\n\nFile: %s", err, frag),
+			)
+		}
+		if overlay.Providers == nil {
+			return emptyCustomModelsResult(
+				fmt.Sprintf("Invalid models.d fragment: missing \"providers\" field\n\nFile: %s", frag),
+			)
+		}
+		mergeModelsConfig(config, &overlay)
+		loadedAny = true
+	}
+
+	if !loadedAny {
+		return emptyCustomModelsResult("")
 	}
 
 	if config.Providers == nil {
@@ -535,8 +572,8 @@ func (r *ModelRegistry) loadCustomModels(modelsJsonPath string) *CustomModelsRes
 		)
 	}
 
-	// Validate config
-	if err := r.validateConfig(&config); err != nil {
+	// Validate the merged config
+	if err := r.validateConfig(config); err != nil {
 		return emptyCustomModelsResult(
 			fmt.Sprintf("%v\n\nFile: %s", err, modelsJsonPath),
 		)
@@ -570,12 +607,83 @@ func (r *ModelRegistry) loadCustomModels(modelsJsonPath string) *CustomModelsRes
 		}
 	}
 
-	models := r.parseModels(&config)
+	models := r.parseModels(config)
 	return &CustomModelsResult{
 		Models:         models,
 		Overrides:      overrides,
 		ModelOverrides: modelOverrides,
 	}
+}
+
+// mergeModelsConfig deep-merges overlay into base (overlay wins). Providers are
+// merged by name. Within a provider: scalar fields (baseUrl, apiKey, api) are
+// overwritten when the overlay sets them non-empty; authHeader is overwritten
+// when non-nil; header maps are key-merged; the models slice is concatenated
+// then de-duplicated by id with the last writer winning (order preserved); and
+// modelOverrides maps are key-merged.
+func mergeModelsConfig(base, overlay *ModelsConfig) {
+	if overlay == nil || overlay.Providers == nil {
+		return
+	}
+	if base.Providers == nil {
+		base.Providers = make(map[string]ProviderConfig)
+	}
+	for name, op := range overlay.Providers {
+		bp, ok := base.Providers[name]
+		if !ok {
+			base.Providers[name] = op
+			continue
+		}
+		if op.BaseURL != "" {
+			bp.BaseURL = op.BaseURL
+		}
+		if op.ApiKey != "" {
+			bp.ApiKey = op.ApiKey
+		}
+		if op.Api != "" {
+			bp.Api = op.Api
+		}
+		if op.AuthHeader != nil {
+			bp.AuthHeader = op.AuthHeader
+		}
+		if len(op.Headers) > 0 {
+			if bp.Headers == nil {
+				bp.Headers = make(map[string]string)
+			}
+			for k, v := range op.Headers {
+				bp.Headers[k] = v
+			}
+		}
+		if len(op.Models) > 0 {
+			bp.Models = mergeModelDefs(bp.Models, op.Models)
+		}
+		if len(op.ModelOverrides) > 0 {
+			if bp.ModelOverrides == nil {
+				bp.ModelOverrides = make(map[string]ModelOverride)
+			}
+			for id, ov := range op.ModelOverrides {
+				bp.ModelOverrides[id] = ov
+			}
+		}
+		base.Providers[name] = bp
+	}
+}
+
+// mergeModelDefs concatenates base and overlay model definitions, dropping any
+// base entry whose id is redefined in overlay (last writer wins) while
+// preserving order.
+func mergeModelDefs(base, overlay []ModelDefinition) []ModelDefinition {
+	overlayIDs := make(map[string]bool, len(overlay))
+	for _, m := range overlay {
+		overlayIDs[m.ID] = true
+	}
+	out := make([]ModelDefinition, 0, len(base)+len(overlay))
+	for _, m := range base {
+		if !overlayIDs[m.ID] {
+			out = append(out, m)
+		}
+	}
+	return append(out, overlay...)
 }
 
 func (r *ModelRegistry) validateConfig(config *ModelsConfig) error {

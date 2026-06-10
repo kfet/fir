@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- User-level `models.d` drop-ins: model/provider definitions can now be placed in `~/.config/fir/models.d/*.json` (or `$FIR_AGENT_DIR/models.d/`, and project-level `.fir/models.d/`). Each fragment has the same shape as `models.json`. Files load in lexical filename order and deep-merge on top of `models.json`: per provider, scalar fields (`baseUrl`/`apiKey`/`api`) and `authHeader` overwrite when set, `headers`/`modelOverrides` maps key-merge, and the `models` array concatenates then de-duplicates by `id` with the last writer winning. A fragment alone is sufficient (no `models.json` required); a malformed or `providers`-less fragment surfaces a load error instead of being silently skipped. Mirrors the existing `mcp.d` mechanism, letting tools/agents self-serve models by dropping in JSON files.
+
+### Changed
+- `/reload` now also refreshes the model registry (both ACP and interactive modes), re-reading `models.json` + `models.d/` from disk. Previously `/reload` reloaded extensions/skills/themes/MCP but left the model catalog stale until a login/logout or model-selector open, so newly added models were invisible mid-session.
+
 ## [0.68.1] - 2026-06-11
 
 ### Fixed

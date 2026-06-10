@@ -881,3 +881,112 @@ func TestModelRegistry_AddRuntimeModel(t *testing.T) {
 	// Nil is a no-op.
 	r.AddRuntimeModel(nil)
 }
+
+// --- models.d/ layered fragment loading ---
+
+func writeJSON(t *testing.T, path string, cfg ModelsConfig) {
+	t.Helper()
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func customProvider(models ...ModelDefinition) ModelsConfig {
+	return ModelsConfig{Providers: map[string]ProviderConfig{
+		"my-custom": {
+			BaseURL: "http://localhost:11434",
+			ApiKey:  "sk-custom-key",
+			Api:     "openai-completions",
+			Models:  models,
+		},
+	}}
+}
+
+// Fragment with no main models.json present still loads.
+func TestModelRegistry_ModelsD_FragmentOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, "models.json")
+	dDir := filepath.Join(tmpDir, "models.d")
+	if err := os.MkdirAll(dDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, filepath.Join(dDir, "10-a.json"),
+		customProvider(ModelDefinition{ID: "frag-model", Name: "Frag Model"}))
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	if registry.GetError() != "" {
+		t.Fatalf("unexpected load error: %s", registry.GetError())
+	}
+	if m := registry.Find("my-custom", "frag-model"); m == nil || m.Name != "Frag Model" {
+		t.Fatalf("fragment-only model not loaded: %+v", m)
+	}
+}
+
+// Main models.json is the base; fragments add to it.
+func TestModelRegistry_ModelsD_MergesWithBase(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, "models.json")
+	dDir := filepath.Join(tmpDir, "models.d")
+	os.MkdirAll(dDir, 0755)
+
+	writeJSON(t, modelsPath, customProvider(ModelDefinition{ID: "base-model", Name: "Base"}))
+	writeJSON(t, filepath.Join(dDir, "10-extra.json"),
+		customProvider(ModelDefinition{ID: "extra-model", Name: "Extra"}))
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	if m := registry.Find("my-custom", "base-model"); m == nil {
+		t.Error("base model missing after merge")
+	}
+	if m := registry.Find("my-custom", "extra-model"); m == nil {
+		t.Error("fragment model missing after merge")
+	}
+}
+
+// Later fragment (lexically) redefining a model id wins.
+func TestModelRegistry_ModelsD_OrderAndOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, "models.json")
+	dDir := filepath.Join(tmpDir, "models.d")
+	os.MkdirAll(dDir, 0755)
+
+	writeJSON(t, modelsPath, customProvider(ModelDefinition{ID: "dup", Name: "FromBase"}))
+	writeJSON(t, filepath.Join(dDir, "10-first.json"),
+		customProvider(ModelDefinition{ID: "dup", Name: "FromFirst"}))
+	writeJSON(t, filepath.Join(dDir, "20-second.json"),
+		customProvider(ModelDefinition{ID: "dup", Name: "FromSecond"}))
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	m := registry.Find("my-custom", "dup")
+	if m == nil {
+		t.Fatal("model 'dup' not found")
+	}
+	if m.Name != "FromSecond" {
+		t.Errorf("expected last-writer 'FromSecond', got %q", m.Name)
+	}
+	// Exactly one entry for the id.
+	n := 0
+	for _, mm := range registry.GetAll() {
+		if mm.Provider == "my-custom" && mm.ID == "dup" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("expected 1 'dup' model after dedup, got %d", n)
+	}
+}
+
+// A malformed fragment surfaces a load error (and does not silently drop).
+func TestModelRegistry_ModelsD_InvalidFragment(t *testing.T) {
+	tmpDir := t.TempDir()
+	modelsPath := filepath.Join(tmpDir, "models.json")
+	dDir := filepath.Join(tmpDir, "models.d")
+	os.MkdirAll(dDir, 0755)
+	writeJSON(t, modelsPath, customProvider(ModelDefinition{ID: "ok", Name: "OK"}))
+	os.WriteFile(filepath.Join(dDir, "99-bad.json"), []byte("{ not json"), 0644)
+
+	registry, _ := setupTestModelRegistry(t, modelsPath)
+	if registry.GetError() == "" {
+		t.Error("expected error for malformed fragment, got none")
+	}
+}

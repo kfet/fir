@@ -171,6 +171,38 @@ Drop a `models.json` in `~/.config/fir/` (global) or `.fir/` (project). Add mode
 
 The same file also supports per-provider overrides (`baseUrl`, `apiKey`, `headers`, `authHeader`) and per-model overrides under `modelOverrides`. Most model fields (cost, `contextWindow`, `maxTokens`, `sweScore`, `compaction`, `serverTools`, …) can be set on a custom model or supplied via `modelOverrides` to patch a built-in. `sweScore` (SWE-bench Verified %, 0–100) shows up in the `/model` selector and drives its sort order.
 
+#### Drop-in fragments: `models.d/`
+
+Alongside `models.json`, fir reads every `*.json` file in a `models.d/`
+directory next to it — `~/.config/fir/models.d/` (global) and
+`.fir/models.d/` (project). Each fragment has the **same shape** as
+`models.json`. This lets tools and agents add a model or provider by
+dropping in a self-contained file, with no edits to a shared monolith.
+
+Load order and merge semantics:
+
+- `models.json` is the **base layer**; fragments are deep-merged on top in
+  **lexical filename order** — use `NN-` prefixes (e.g. `10-fable.json`,
+  `20-internal.json`) to control precedence.
+- Within a provider: scalar fields (`baseUrl`, `apiKey`, `api`) and
+  `authHeader` are overwritten when a later layer sets them; `headers` and
+  `modelOverrides` maps are key-merged; the `models` array is concatenated
+  and **de-duplicated by `id`, last writer wins**.
+- A fragment alone is sufficient — `models.json` need not exist.
+- A malformed or `providers`-less fragment surfaces a load error (visible via
+  the registry error / `--list-models`), it is not silently skipped.
+
+```jsonc
+// ~/.config/fir/models.d/10-fable.json
+{ "providers": { "anthropic": { "models": [
+  { "id": "claude-fable-5", "name": "Claude Fable 5",
+    "contextWindow": 200000, "maxTokens": 64000 } ] } } }
+```
+
+The catalog is read at process start (no hot-reload), so a newly added
+fragment is picked up by the **next** `fir` process — restart the relay, or
+just spawn a fresh `fir`, to use it.
+
 ### 2. Environment variables (Claude Code parity)
 
 Set `CLAUDE_CODE_USE_BEDROCK=1` and `ANTHROPIC_MODEL=<id-or-arn>` (plus standard AWS auth — `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, optionally `AWS_REGION`). At startup fir registers the model under `amazon-bedrock` automatically so it appears in `/model`. Explicit `--provider`/`--model` flags still win.
