@@ -43,18 +43,30 @@ _MAX_OUTPUT_LEN = 50 * 1024
 # ---------------------------------------------------------------------------
 
 
+# Trailing metadata block appended by core tools (Bash/Read) carrying the
+# output content hash. Pure protocol noise for pipelines: it must not leak
+# into {{prev}}/{{step:N}} substitutions and must not displace the WAIT:
+# sentinel as the final line of a wait verdict step. Matched only when it is
+# a block's ENTIRE text, so genuine output lines are never dropped.
+_HASH_BLOCK_RE = re.compile(r"^\[hash: [0-9a-f]+\]$")
+
+
 def _result_text(result: Mapping[str, Any]) -> str:
-    """Extract text content from a call_tool result dict."""
+    """Extract text content from a call_tool result dict.
+
+    Drops standalone ``[hash: ...]`` metadata blocks (see _HASH_BLOCK_RE)."""
     content = result.get("content", [])
     if isinstance(content, list):
         parts = []
         for block in content:
             if isinstance(block, dict):
                 text = block.get("text") or block.get("Text", "")
-                if text:
-                    parts.append(text)
             elif isinstance(block, str):
-                parts.append(block)
+                text = block
+            else:
+                continue
+            if text and not _HASH_BLOCK_RE.match(text.strip()):
+                parts.append(text)
         return "\n".join(parts)
     if isinstance(content, str):
         return content

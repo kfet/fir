@@ -779,5 +779,67 @@ class TestWaitValidationAndDescription(unittest.TestCase):
         self.assertIn("failed 3 polls in a row", out["content"][0]["text"])
 
 
+
+# ---------------------------------------------------------------------------
+# [hash: ...] metadata block filtering (regression: wait sentinel displaced)
+# ---------------------------------------------------------------------------
+
+
+def _hashed_result(text, h="0123456789abcdef", is_error=False):
+    """Mimic core Bash/Read results: output block + trailing [hash: ...] block."""
+    return {
+        "content": [
+            {"type": "text", "text": text},
+            {"type": "text", "text": f"[hash: {h}]"},
+        ],
+        "is_error": is_error,
+    }
+
+
+class TestHashBlockFiltering(unittest.TestCase):
+    def setUp(self):
+        self.pipe = _load_pipe()
+
+    def test_result_text_drops_hash_block(self):
+        self.assertEqual(
+            self.pipe._result_text(_hashed_result("hello")), "hello"
+        )
+
+    def test_result_text_keeps_hash_like_line_inside_output(self):
+        # A [hash: ...] line embedded in a normal output block is real
+        # output (e.g. catting a file) and must survive.
+        text = "before\n[hash: 0123456789abcdef]\nafter"
+        self.assertEqual(
+            self.pipe._result_text(_text_result(text)), text
+        )
+
+    def test_wait_verdict_parses_despite_trailing_hash_block(self):
+        ctx = _make_ctx([_hashed_result("checking...\nWAIT:done")])
+        result = self.pipe._run_wait(
+            [{"tool": "Bash", "params": {"command": "true"}}],
+            0.01, 30, 5, "", ctx,
+        )
+        text = result["content"][0]["text"]
+        self.assertFalse(result.get("is_error", False), text)
+        self.assertIn("wait: success", text)
+
+    def test_pipe_substitution_excludes_hash_block(self):
+        seen = {}
+
+        def second(name, params):
+            seen["cmd"] = params["command"]
+            return _text_result("done")
+
+        ctx = _make_ctx([_hashed_result("alpha"), second])
+        self.pipe._run_pipe(
+            [
+                {"tool": "Bash", "params": {"command": "first"}},
+                {"tool": "Bash", "params": {"command": "use {{prev}}"}},
+            ],
+            "", ctx,
+        )
+        self.assertEqual(seen["cmd"], "use alpha")
+
+
 if __name__ == "__main__":
     unittest.main()
