@@ -180,6 +180,35 @@ func TestForkServer_CloseReapsTemplate(t *testing.T) {
 	}
 }
 
+// TestForkServer_StdinEOFRemovesSockDir verifies the template self-cleans its
+// socket dir when fir dies without calling Close (reexec, crash): closing the
+// control stdin makes the template exit and rmtree the dir it got via argv.
+func TestForkServer_StdinEOFRemovesSockDir(t *testing.T) {
+	fs, _ := forkTestSetup(t)
+	sockDir := fs.sockDir
+	if _, err := os.Stat(sockDir); err != nil {
+		t.Fatalf("sock dir missing before EOF: %v", err)
+	}
+
+	// Simulate fir going away: EOF the control pipe without Close() (so the
+	// Go side never runs its RemoveAll), then wait for the template to exit.
+	if err := fs.stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+	if err := fs.cmd.Wait(); err != nil {
+		t.Fatalf("template exit: %v", err)
+	}
+
+	if _, err := os.Stat(sockDir); !os.IsNotExist(err) {
+		t.Fatalf("expected template to remove sock dir %s on EOF, stat err = %v", sockDir, err)
+	}
+	// Neutralise the registered Cleanup Close: mark torn down so it no-ops
+	// (cmd.Wait was already consumed here).
+	fs.mu.Lock()
+	fs.closed = true
+	fs.mu.Unlock()
+}
+
 func TestForkEligible(t *testing.T) {
 	cases := []struct {
 		cfg  ExtProcConfig

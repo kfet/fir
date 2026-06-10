@@ -78,7 +78,11 @@ func StartForkServer(sdkDir string, env []string, logger *slog.Logger) (*ForkSer
 		}
 	}
 
-	cmd := exec.Command(python, script)
+	// The template receives the socket dir as argv[1] and removes it when it
+	// exits (stdin EOF / shutdown). That covers every teardown path — normal
+	// fir exit, /reexec (CLOEXEC closes the pipe), even a fir crash — without
+	// any Go-side exit hook; Close()'s RemoveAll remains as belt-and-braces.
+	cmd := exec.Command(python, script, sockDir)
 	cmd.Env = append(os.Environ(), env...)
 
 	stdin, err := cmd.StdinPipe()

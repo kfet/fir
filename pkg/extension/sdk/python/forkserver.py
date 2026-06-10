@@ -24,6 +24,9 @@
 #   fir -> {"id":N,"cmd":"shutdown"}
 #   srv -> {"id":N,"ok":true}            (then exits)
 # On startup the server emits {"ready":true} once fir_ext imported cleanly.
+# argv[1] (optional) is the socket directory fir created for per-child unix
+# sockets; the template removes it on exit so no /tmp/firfork* dir leaks even
+# when fir never gets to clean up (reexec, crash).
 
 import contextlib
 import gc
@@ -228,8 +231,14 @@ def main():
             break
         else:
             _writeln(1, {"id": msg.get("id"), "error": f"unknown cmd: {cmd!r}"})
-    # Best-effort: reap whatever is left so we don't leave zombies behind.
+    # Best-effort: reap whatever is left so we don't leave zombies behind,
+    # and remove the socket dir fir passed as argv[1] (fir's Close() also
+    # removes it, but fir may be gone — reexec, crash — by the time we exit).
     _reap_zombies()
+    if len(sys.argv) > 1 and sys.argv[1]:
+        import shutil
+
+        shutil.rmtree(sys.argv[1], ignore_errors=True)
 
 
 if __name__ == "__main__":
