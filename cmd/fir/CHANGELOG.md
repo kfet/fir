@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.67.2] - 2026-06-10
+
+### Changed
+- `cmd/generate-models` now verifies Poe models with an empty `supported_endpoints` list by probing `/v1/chat/completions` live, instead of trusting the empty list (and instead of the hand-maintained `poeUncallable` skip-list added in v0.66.1). Poe sometimes catalogs a model before enabling API access — it appears in `/v1/models` with full metadata but a 404 on call (first seen with `claude-fable-5`). No catalog field distinguishes these pre-release listings from genuinely callable empty-endpoint bots (e.g. `grok-4.20-multi-agent`), so the only reliable signal is a request. Only the ambiguous empty-endpoint set is probed (concurrently); models with explicit endpoints are trusted as-is. A model is dropped solely on a definitive `404 not_found`; any other outcome (success, rate-limit, bad-request, transient/5xx) keeps it, so a flaky probe never prunes a working model. The token comes from `POE_API_KEY` or fir's `auth.json`; with no token the probe is skipped and empty-endpoint models are kept (permissive default) with a warning.
+
+
 ## [0.67.1] - 2026-06-10
 
 ### Changed
