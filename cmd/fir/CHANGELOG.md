@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Python extension forkserver (warm COW fork template) is now a process-lifetime singleton shared across all sessions, keyed by SDK hash, instead of one per session. Under `fir --mode acp` (one process, many sessions) this collapses N byte-identical warm interpreters to one; session end / `session/release` still stops and reaps that session's forked children but leaves the shared template running.
+
 ## [0.65.8] - 2026-06-09
 
 ### Changed

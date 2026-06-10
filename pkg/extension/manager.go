@@ -64,9 +64,11 @@ type Manager struct {
 	configDirs          []string // priority-ordered config dirs sent to extensions on init
 
 	// fork is the warm Python template used to COW-spawn builtin .py
-	// extensions. Lazily started in Start (only when at least one eligible
-	// extension exists) and torn down in StopWithReason. nil when disabled,
-	// unavailable, or no eligible extensions are present.
+	// extensions. It is a process-lifetime singleton shared across all
+	// sessions/managers (see SharedForkServer), lazily acquired in Start
+	// when at least one eligible extension exists. StopWithReason stops this
+	// session's forked children but never closes the shared template. nil
+	// when disabled, unavailable, or no eligible extensions are present.
 	fork *ForkServer
 }
 
@@ -269,10 +271,12 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 		toStart = append(toStart, cfg)
 	}
 
-	// Start the warm fork template once, before the parallel spawn loop, if any
-	// extension is fork-eligible (builtin .py) and the template is not
-	// disabled. Builtin .py extensions then COW-fork off it; everything else
-	// (and any fork failure) falls back to the plain exec path in startOne.
+	// Acquire the process-wide warm fork template, before the parallel spawn
+	// loop, if any extension is fork-eligible (builtin .py) and the template
+	// is not disabled. The template is shared across sessions (keyed by SDK
+	// dir, i.e. sdk-hash); builtin .py extensions COW-fork off it; everything
+	// else (and any fork failure) falls back to the plain exec path in
+	// startOne.
 	if sdkPath != "" && !forkServerDisabled() {
 		eligible := false
 		for _, cfg := range toStart {
@@ -282,7 +286,7 @@ func (m *Manager) Start(ctx context.Context, projectDir string, cwd string, api 
 			}
 		}
 		if eligible {
-			if fs, ferr := StartForkServer(sdkPath, sdkEnv, m.logger); ferr != nil {
+			if fs, ferr := SharedForkServer(sdkPath, sdkEnv, m.logger); ferr != nil {
 				m.logger.Warn("fork template unavailable; using exec spawn", "err", ferr)
 			} else {
 				m.mu.Lock()
@@ -529,7 +533,6 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	bridges := m.bridges
 	m.bridges = nil
 	m.stopped = true
-	fork := m.fork
 	m.fork = nil
 	m.mu.Unlock()
 
@@ -579,11 +582,11 @@ func (m *Manager) StopWithReason(reason, errMsg string) error {
 	}
 	wg.Wait()
 
-	// Tear down the fork template after its forked children have been stopped
-	// and reaped (each proc.Stop above delegated reaping to it).
-	if fork != nil {
-		_ = fork.Close()
-	}
+	// Do NOT close the fork template: it is a process-lifetime singleton
+	// shared across sessions (see SharedForkServer). This session's forked
+	// children were stopped and reaped above (each proc.Stop delegated a
+	// stop{pid} to the template); other sessions' children — and the warm
+	// template itself — stay up.
 	return nil
 }
 

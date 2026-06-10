@@ -20,7 +20,9 @@ import (
 // fir_ext SDK once and forks a child per extension on demand. Forked children
 // inherit the template's interpreter heap copy-on-write, so the per-sidecar
 // private memory and import-time startup latency both collapse toward a single
-// shared baseline. See pkg/extension/sdk/python/forkserver.py for the template
+// shared baseline. A ForkServer is a process-lifetime singleton shared by all
+// sessions in this fir process, keyed by SDK dir — see SharedForkServer. See
+// pkg/extension/sdk/python/forkserver.py for the template
 // and /tmp/acp-fork-design.md for the architecture.
 //
 // Only builtin *.py extensions are forked; everything else keeps the plain
@@ -39,7 +41,8 @@ type ForkServer struct {
 	mu      sync.Mutex // serialises control writes + reply reads
 	nextID  int
 	sockSeq int
-	closed  bool
+	closed  bool // torn down by Close
+	dead    bool // control channel failed (template exited/crashed); Close still pending
 }
 
 // forkAcceptTimeout bounds how long Spawn waits for the forked child to connect
@@ -175,10 +178,18 @@ func (fs *ForkServer) control(req map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	if _, err := fs.stdin.Write(append(data, '\n')); err != nil {
+		// A dead control channel is irrecoverable (the template exited or
+		// crashed). Mark dead so SharedForkServer replaces this instance
+		// instead of handing back a permanently broken template — a crashed
+		// template lingers as a zombie (nobody Wait()ed it yet), so a
+		// liveness probe alone would keep reporting it alive. Close (which
+		// reaps and removes the sockDir) still runs at replacement time.
+		fs.dead = true
 		return nil, fmt.Errorf("forkserver: write control: %w", err)
 	}
 	line, err := fs.stdout.ReadBytes('\n')
 	if err != nil {
+		fs.dead = true
 		return nil, fmt.Errorf("forkserver: read reply: %w", err)
 	}
 	var reply map[string]any

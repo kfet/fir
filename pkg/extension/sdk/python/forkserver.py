@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # forkserver.py — COW fork template for fir Python extensions.
 #
-# NOT an extension. fir starts ONE of these per session. It imports the
+# NOT an extension. fir starts ONE of these per fir process per SDK hash —
+# a process-lifetime singleton shared by every session in that process (one
+# `fir --mode acp` process owns many sessions). It imports the
 # fir_ext SDK + stdlib exactly once (the ~7MB interpreter heap), then waits
 # in a single-threaded, unbuffered, newline-JSON control loop on stdin. On a
 # "spawn" request it os.fork()s; the child inherits the warm heap copy-on-write
