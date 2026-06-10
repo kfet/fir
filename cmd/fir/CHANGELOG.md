@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.65.8] - 2026-06-09
+
+### Changed
+
+- Thinking-off handling is now provider-agnostic: the policy and recovery live in the generic `ai.StreamSimple` (the single dispatch every provider goes through), instead of inside the Anthropic provider. A thinking-off request to a model that cannot disable thinking (an always-on adaptive model) is resolved to minimal effort up front, so the unsupported combination never reaches a provider; and if a thinking-off request is still rejected by the API before any output streams, it is transparently retried with minimal thinking — keyed on the error text, not the provider or model identity, so every provider (Anthropic, Bedrock, OpenAI, …) benefits without re-implementing it. Providers now only *render* a resolved reasoning level to their wire format.
+
 ## [0.65.7] - 2026-06-09
 
 ### Added
