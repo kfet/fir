@@ -2987,3 +2987,53 @@ func TestAnthropic_OnRetryCallback(t *testing.T) {
 		}
 	}
 }
+
+// TestAnthropic_ToolResultMeta_RenderedInRequest exercises the full
+// provider-bound path (TransformMessages -> convertAnthropicMessages) and
+// asserts the rendered meta line lands in the tool_result content string,
+// while the original persisted message stays clean.
+func TestAnthropic_ToolResultMeta_RenderedInRequest(t *testing.T) {
+	model := &ai.Model{ID: "claude-sonnet", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+
+	orig := ai.ToolResultMessage{
+		Role:       ai.RoleToolResult,
+		ToolCallID: "toolu_01",
+		ToolName:   "Bash",
+		Content:    []ai.ToolResultContent{{Type: "text", Text: "command output"}},
+		Meta:       map[string]string{"hash": "deadbeef00112233"},
+	}
+	msgs := []ai.Message{
+		ai.NewUserMsg("run it", 1000),
+		ai.NewAssistantMsg(ai.AssistantMessage{
+			Role:     "assistant",
+			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-sonnet",
+			Content: []ai.AssistantContent{
+				ai.NewToolCallContent("toolu_01", "Bash", map[string]any{"command": "echo hi"}),
+			},
+			StopReason: ai.StopReasonToolUse,
+		}),
+		ai.NewToolResultMsg(orig),
+	}
+
+	transformed := TransformMessages(msgs, model, normalizeAnthropicToolCallID)
+	// convertAnthropicMessages runs TransformMessages internally; calling it
+	// on already-transformed input also proves the meta render is idempotent.
+	result := convertAnthropicMessages(transformed, model, false, ai.CacheNone)
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(result))
+	}
+	content, ok := result[2]["content"].([]map[string]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected single tool_result block, got %v", result[2]["content"])
+	}
+	got, _ := content[0]["content"].(string)
+	want := "command output\n[hash: deadbeef00112233]"
+	if got != want {
+		t.Errorf("expected tool_result content %q, got %q", want, got)
+	}
+	// Persisted message untouched.
+	if len(orig.Content) != 1 || orig.Content[0].Text != "command output" {
+		t.Fatalf("original message mutated: %+v", orig.Content)
+	}
+}

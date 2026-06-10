@@ -160,6 +160,11 @@ type AgentToolResult struct {
 	Content []core.ToolResultContent
 	// Details for UI display or logging.
 	Details any
+	// Meta is small, structured metadata the LLM should see alongside the
+	// content (e.g. a content hash). Copied onto ToolResultMessage.Meta and
+	// rendered for the provider-bound message only — internal consumers
+	// that join content blocks never see it.
+	Meta map[string]string
 	// IsError signals that the tool result represents an error,
 	// even when Execute returns a nil error. Used by extension hooks
 	// to mark a modified result as an error.

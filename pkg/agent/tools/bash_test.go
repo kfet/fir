@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,14 @@ func TestBashTool_Echo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content blocks (output + hash), got %d", len(result.Content))
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content block (output only), got %d", len(result.Content))
 	}
 	if !strings.Contains(result.Content[0].Text, "hello") {
 		t.Errorf("output = %q, want contains hello", result.Content[0].Text)
 	}
-	if !strings.HasPrefix(result.Content[1].Text, "[hash: ") {
-		t.Errorf("expected hash block, got %q", result.Content[1].Text)
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(result.Meta["hash"]) {
+		t.Errorf("expected hash meta, got %q", result.Meta["hash"])
 	}
 }
 

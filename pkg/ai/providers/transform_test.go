@@ -394,3 +394,68 @@ func TestTransformMessages_RedactedThinkingSameProviderDifferentModelID(t *testi
 		t.Errorf("expected ThinkingSignature preserved, got %q", am.Content[0].Thinking.ThinkingSignature)
 	}
 }
+
+func TestTransformMessages_ToolResultMetaAppended(t *testing.T) {
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	orig := ai.ToolResultMessage{
+		Role:       ai.RoleToolResult,
+		ToolCallID: "tc-1",
+		ToolName:   "Bash",
+		Content:    []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: "output"}},
+		Meta:       map[string]string{"hash": "deadbeef", "alpha": "a"},
+	}
+	messages := []ai.Message{
+		ai.NewAssistantMsg(ai.AssistantMessage{
+			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-3",
+			Content:    []ai.AssistantContent{ai.NewToolCallContent("tc-1", "Bash", nil)},
+			StopReason: ai.StopReasonStop,
+		}),
+		ai.NewToolResultMsg(orig),
+	}
+
+	result := TransformMessages(messages, model, nil)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result))
+	}
+	tr := result[1].AsToolResult()
+	if tr == nil {
+		t.Fatal("expected tool result message")
+	}
+	if len(tr.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (output + rendered meta), got %d", len(tr.Content))
+	}
+	want := "[alpha: a]\n[hash: deadbeef]"
+	if tr.Content[1].Text != want {
+		t.Errorf("expected rendered meta %q, got %q", want, tr.Content[1].Text)
+	}
+	// The persisted message must be untouched: same content length, no
+	// mutation of the original slice.
+	if len(orig.Content) != 1 {
+		t.Fatalf("original message mutated: %d content blocks", len(orig.Content))
+	}
+	if orig.Content[0].Text != "output" {
+		t.Errorf("original content mutated: %q", orig.Content[0].Text)
+	}
+}
+
+func TestTransformMessages_ToolResultNoMetaPassThrough(t *testing.T) {
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	messages := []ai.Message{
+		ai.NewAssistantMsg(ai.AssistantMessage{
+			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-3",
+			Content:    []ai.AssistantContent{ai.NewToolCallContent("tc-1", "Bash", nil)},
+			StopReason: ai.StopReasonStop,
+		}),
+		ai.NewToolResultMsg(ai.ToolResultMessage{
+			Role:       ai.RoleToolResult,
+			ToolCallID: "tc-1",
+			ToolName:   "Bash",
+			Content:    []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: "output"}},
+		}),
+	}
+	result := TransformMessages(messages, model, nil)
+	tr := result[1].AsToolResult()
+	if len(tr.Content) != 1 {
+		t.Fatalf("expected pass-through single content block, got %d", len(tr.Content))
+	}
+}

@@ -244,6 +244,8 @@ When the AI invokes a tool registered by the extension during init, fir sends a
 |-------|-------------|
 | `content` | Array of content blocks.  Each block is `{"type":"text","text":"..."}`.  Only the `text` type is used today. |
 | `is_error` | `true` → the result is reported to the LLM as a tool error. |
+| `details` | Optional object with structured details for UI display/logging.  Never shown to the LLM. |
+| `meta` | Optional `{string: string}` map of small metadata the LLM *should* see (e.g. a content hash).  fir renders it as trailing `[key: value]` lines (keys sorted) on the provider-bound message only; `content` stays clean for internal consumers (pipe, wait, extensions). |
 
 If `content` is a plain string or non-structured JSON, fir wraps it
 automatically into a single text block.
@@ -830,9 +832,15 @@ Response:
 ```json
 {
   "content": [{"type": "text", "text": "# My Project\n..."}],
-  "is_error": false
+  "is_error": false,
+  "details": {"hash": "e2a922bc444a9271"},
+  "meta": {"hash": "e2a922bc444a9271"}
 }
 ```
+
+`details` (UI-only structured data) and `meta` (LLM-visible `[key: value]`
+metadata) are present when the tool sets them; the `content` text is never
+polluted with rendered meta on this path.
 
 On RPC-level error (tool not found, etc.) fir returns a JSON-RPC error rather
 than setting `is_error`.

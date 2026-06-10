@@ -38,9 +38,27 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 		case msg.AsToolResult() != nil:
 			tr := msg.AsToolResult()
 			normalizedID, ok := toolCallIDMap[tr.ToolCallID]
-			if ok && normalizedID != tr.ToolCallID {
+			needsID := ok && normalizedID != tr.ToolCallID
+			rendered := ai.RenderToolResultMeta(tr.Meta)
+			if needsID || rendered != "" {
+				// Copy-on-write: never mutate the persisted message or its
+				// content slice — transform output is LLM-bound only.
 				tr2 := *tr
-				tr2.ToolCallID = normalizedID
+				if needsID {
+					tr2.ToolCallID = normalizedID
+				}
+				if rendered != "" {
+					content := make([]ai.ToolResultContent, len(tr.Content), len(tr.Content)+1)
+					copy(content, tr.Content)
+					tr2.Content = append(content, ai.ToolResultContent{
+						Type: ai.ContentTypeText,
+						Text: rendered,
+					})
+					// Clear Meta on the LLM-bound copy so a repeated
+					// transform pass (some providers re-transform) is
+					// idempotent and never double-renders.
+					tr2.Meta = nil
+				}
 				transformed = append(transformed, ai.NewToolResultMsg(tr2))
 			} else {
 				transformed = append(transformed, msg)

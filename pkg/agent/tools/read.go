@@ -72,13 +72,13 @@ func unchangedStub(hash string) agent.AgentToolResult {
 	}
 }
 
-// appendReadHash attaches the content hash to a read result: a model-visible
-// trailing text block plus the structured detail.
+// appendReadHash attaches the content hash to a read result: model-visible
+// structured meta plus the structured detail.
 func appendReadHash(res agent.AgentToolResult, hash string) agent.AgentToolResult {
-	res.Content = append(res.Content, core.ToolResultContent{
-		Type: "text",
-		Text: fmt.Sprintf("[hash: %s]", hash),
-	})
+	if res.Meta == nil {
+		res.Meta = map[string]string{}
+	}
+	res.Meta["hash"] = hash
 	switch d := res.Details.(type) {
 	case *ReadToolDetails:
 		d.Hash = hash

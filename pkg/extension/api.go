@@ -145,6 +145,10 @@ type ToolResult struct {
 	Content []ai.ToolResultContent `json:"content"`
 	IsError bool                   `json:"is_error"`
 	Details map[string]any         `json:"details,omitempty"`
+	// Meta is small, structured metadata the LLM should see alongside the
+	// content (e.g. a content hash). Rendered into the provider-bound
+	// message by core; the text content stays clean for extensions.
+	Meta map[string]string `json:"meta,omitempty"`
 }
 
 // ToolInfo describes a registered tool's name and parameter schema.

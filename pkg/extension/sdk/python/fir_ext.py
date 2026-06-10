@@ -194,6 +194,12 @@ Result fields:
   Plain strings and non-structured JSON are automatically wrapped by fir.
 * ``is_error`` (bool) - when ``true`` the tool result is reported to the LLM
   as a tool error.
+* ``details`` (dict, optional) - structured details for UI display/logging.
+  Never shown to the LLM.
+* ``meta`` (dict[str, str], optional) - small structured metadata the LLM
+  *should* see (e.g. a content hash).  fir renders it as trailing
+  ``[key: value]`` lines (keys sorted) on the provider-bound message only;
+  the ``content`` blocks stay clean for internal consumers.
 
 To return a structured error use a JSON-RPC error response::
 
@@ -396,8 +402,10 @@ otherwise noted.
 |                  | ``session_start`` event params.       |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``call_tool``    | ``{name, params}``                    | ``{content: [...],        |
-|                  | Calls any registered tool directly,   | is_error: bool}``         |
-|                  | bypassing conversation history.       | SDK timeout: 60 s         |
+|                  | Calls any registered tool directly,   | is_error: bool,           |
+|                  | bypassing conversation history.       | details?: {...},          |
+|                  |                                       | meta?: {...}}``           |
+|                  |                                       | SDK timeout: 60 s         |
 +------------------+---------------------------------------+---------------------------+
 | ``list_tools``   | ``{}``                                | ``[{name,                 |
 |                  |                                       | description?,             |
@@ -565,6 +573,12 @@ class ToolResult(TypedDict, total=False):
 
     content: list[ContentBlock]
     is_error: bool
+    details: dict[str, Any]
+    # Small, structured metadata the LLM should see alongside the content
+    # (e.g. a content hash). fir renders it for the model as trailing
+    # "[key: value]" lines on the provider-bound message only; the text
+    # content above stays clean for extension consumers.
+    meta: dict[str, str]
 
 
 # -- tool / command / hook spec (init handshake) ----------------------------
@@ -2870,9 +2884,11 @@ class Context:
         Returns
         -------
         ToolResult
-            ``{"content": [...], "is_error": bool}``. On RPC-level errors
-            an entry with ``is_error=True`` and a text content block is
-            returned.
+            ``{"content": [...], "is_error": bool}`` plus optional
+            ``details`` (UI-only structured data) and ``meta``
+            (LLM-visible ``[key: value]`` metadata, e.g. content hashes).
+            On RPC-level errors an entry with ``is_error=True`` and a text
+            content block is returned.
         """
         result = self._call(
             "call_tool",

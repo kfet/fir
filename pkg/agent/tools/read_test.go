@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -28,14 +29,14 @@ func TestReadTool_BasicFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Content) != 2 {
-		t.Fatalf("expected 2 content blocks (body + hash), got %d", len(result.Content))
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content block (body only), got %d", len(result.Content))
 	}
 	if result.Content[0].Text != "line1\nline2\nline3" {
 		t.Errorf("unexpected content: %q", result.Content[0].Text)
 	}
-	if !strings.HasPrefix(result.Content[1].Text, "[hash: ") {
-		t.Errorf("expected hash block, got %q", result.Content[1].Text)
+	if !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(result.Meta["hash"]) {
+		t.Errorf("expected hash meta, got %q", result.Meta["hash"])
 	}
 }
 

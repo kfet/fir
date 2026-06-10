@@ -75,6 +75,7 @@ var (
 	NewUserMsg                     = core.NewUserMsg
 	NewAssistantMsg                = core.NewAssistantMsg
 	NewToolResultMsg               = core.NewToolResultMsg
+	RenderToolResultMeta           = core.RenderToolResultMeta
 	BoolPtr                        = core.BoolPtr
 	IntPtr                         = core.IntPtr
 	NewAssistantMessageEventStream = core.NewAssistantMessageEventStream

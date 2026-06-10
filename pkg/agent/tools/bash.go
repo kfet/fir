@@ -338,8 +338,8 @@ func executeBash(ctx context.Context, command, cwd string, timeout time.Duration
 	return agent.AgentToolResult{
 		Content: []core.ToolResultContent{
 			{Type: "text", Text: outputText},
-			{Type: "text", Text: fmt.Sprintf("[hash: %s]", hash)},
 		},
 		Details: details,
+		Meta:    map[string]string{"hash": hash},
 	}, nil
 }

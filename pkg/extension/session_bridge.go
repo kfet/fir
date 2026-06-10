@@ -229,7 +229,31 @@ func (b *SessionBridge) CallTool(ctx context.Context, name string, params map[st
 	return ToolResult{
 		Content: result.Content,
 		IsError: result.IsError,
+		Details: detailsAsMap(result.Details),
+		Meta:    result.Meta,
 	}, nil
+}
+
+// detailsAsMap converts an AgentToolResult.Details value (any) into the
+// map[string]any wire shape of extension ToolResult.Details. Non-map values
+// (e.g. typed detail structs) are converted via a JSON round-trip; values
+// that cannot be represented as a JSON object yield nil.
+func detailsAsMap(details any) map[string]any {
+	if details == nil {
+		return nil
+	}
+	if m, ok := details.(map[string]any); ok {
+		return m
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	return m
 }
 
 // ListTools returns info about all registered tools.
@@ -293,6 +317,7 @@ func (b *SessionBridge) RegisterTool(def ToolDefinition) {
 				Content: r.Content,
 				IsError: r.IsError,
 				Details: r.Details,
+				Meta:    r.Meta,
 			}, nil
 		},
 	}

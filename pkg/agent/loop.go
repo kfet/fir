@@ -777,6 +777,7 @@ func executeToolCalls(
 			ToolName:   tc.Name,
 			Content:    result.Content,
 			Details:    result.Details,
+			Meta:       result.Meta,
 			IsError:    isError,
 			Timestamp:  time.Now().UnixMilli(),
 		}

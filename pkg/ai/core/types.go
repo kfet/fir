@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"sort"
+	"strings"
 )
 
 // --- Role constants ---
@@ -520,8 +522,36 @@ type ToolResultMessage struct {
 	ToolName   string              `json:"toolName"`
 	Content    []ToolResultContent `json:"content"`
 	Details    any                 `json:"details,omitempty"`
-	IsError    bool                `json:"isError"`
-	Timestamp  int64               `json:"timestamp"` // Unix ms
+	// Meta is small, structured metadata the LLM should see alongside the
+	// tool result content (e.g. a content hash the model can echo back).
+	// It is NOT part of Content: internal consumers that join content
+	// blocks (pipe, wait, extensions) never see it. The provider-bound
+	// message copy gets it rendered as a trailing text block via
+	// RenderToolResultMeta in the shared transform pass.
+	Meta map[string]string `json:"meta,omitempty"`
+	// IsError signals the tool call failed.
+	IsError   bool  `json:"isError"`
+	Timestamp int64 `json:"timestamp"` // Unix ms
+}
+
+// RenderToolResultMeta renders tool-result meta into the deterministic text
+// form the LLM sees: one "[key: value]" line per entry, keys sorted, joined
+// by newlines. Returns "" for empty meta. Determinism matters — the rendered
+// bytes must be stable across turns so provider prompt caches stay valid.
+func RenderToolResultMeta(meta map[string]string) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, "["+k+": "+meta[k]+"]")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ToolResultContent is either a text or image result from a tool.

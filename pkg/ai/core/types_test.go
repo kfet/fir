@@ -256,3 +256,31 @@ func TestAssistantContentDeepCopyCoversAllFields(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderToolResultMeta_Empty(t *testing.T) {
+	if got := RenderToolResultMeta(nil); got != "" {
+		t.Errorf("nil meta: expected empty string, got %q", got)
+	}
+	if got := RenderToolResultMeta(map[string]string{}); got != "" {
+		t.Errorf("empty meta: expected empty string, got %q", got)
+	}
+}
+
+func TestRenderToolResultMeta_Deterministic(t *testing.T) {
+	meta := map[string]string{"zebra": "z1", "alpha": "a1", "hash": "deadbeef"}
+	want := "[alpha: a1]\n[hash: deadbeef]\n[zebra: z1]"
+	// Render repeatedly: keys must come out sorted, bytes identical every time
+	// (prompt-cache stability depends on this).
+	for range 20 {
+		if got := RenderToolResultMeta(meta); got != want {
+			t.Fatalf("expected %q, got %q", want, got)
+		}
+	}
+}
+
+func TestRenderToolResultMeta_SingleKey(t *testing.T) {
+	got := RenderToolResultMeta(map[string]string{"hash": "abc123"})
+	if got != "[hash: abc123]" {
+		t.Errorf("expected %q, got %q", "[hash: abc123]", got)
+	}
+}
