@@ -1,6 +1,6 @@
 ---
 name: aside-advisor
-description: "[SYS_EXT] When deliberating, stuck, uncertain, considering a change of approach, or about to declare a task done — escalate to a stronger advisor model via the `aside` tool with `escalate=true` for a second opinion before committing."
+description: "[SYS_EXT] Route asides by judgement density: when deliberating, stuck, uncertain, or about to declare done — escalate to a stronger advisor via `aside` with `escalate=true`. For context-heavy, low-judgement asides (bulk reads, log summarisation, data extraction) — route down with `delegate=true` to save cost."
 builtin: true
 override: true
 ---
@@ -38,3 +38,7 @@ Escalate when the cost of being wrong outweighs the cost of asking. Don't escala
 ## Ask for conciseness
 
 When framing the question, instruct the advisor to be brief: *"Respond in under 100 words using enumerated steps, not explanations."* This cuts advisor output by ~40 % without changing call frequency.
+
+## Delegating down (aside with delegate=true)
+
+The mirror of escalation. When you are running an expensive flagship model yourself, route context-heavy but low-judgement asides to the cheap delegate model with `delegate=true`: bulk file reads + synthesis, log summarisation, data extraction, mechanical reformatting. The principle is **judgement density, not size** — a huge log dump with a simple question is delegate work; a three-line diff with a subtle design question is not. Never set both `escalate` and `delegate` on one call. Configure with `/aside-delegate` (show / set / off).

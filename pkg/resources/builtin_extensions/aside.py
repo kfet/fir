@@ -31,7 +31,7 @@ to the advisor instead of the executor's own model — the "advisor
 strategy" pattern: a small, fast executor that escalates hard decisions
 to a stronger advisor without entering history.
 
-By default fir's bundled top-tier Anthropic Opus is used as the advisor,
+By default fir's bundled top-tier Anthropic flagship is used as the advisor,
 so the feature works out of the box with zero config (Anthropic auth
 required).  Override or disable it with one line:
 
@@ -46,6 +46,22 @@ first use so the host's config dirs are available from the init handshake.
 The ``escalate`` parameter only appears in the tool schema when an advisor
 is in effect, so users who explicitly disable it see no extra surface.
 Changes take effect on the next session start.
+
+Delegate de-escalation
+----------------------
+
+The mirror image of escalation: when the executor itself is an expensive
+flagship, context-heavy but low-judgement asides (bulk file reads +
+synthesis, log summarisation, data extraction) can be routed *down* to a
+fast/cheap model via the ``delegate: bool`` parameter.  Configured the
+same way, under the ``"delegate"`` key in aside.json:
+
+    /aside-delegate anthropic/claude-haiku-4-5        # pin a model
+    /aside-delegate                                   # show current
+    /aside-delegate off                               # disable delegation
+
+The default delegate is fir's cheapest current Anthropic tier.  Setting
+both ``escalate`` and ``delegate`` on one call is a validation error.
 
 Steering the executor
 ---------------------
@@ -77,11 +93,20 @@ if TYPE_CHECKING:
 
 _CONFIG_FILENAME = "aside.json"
 
-# Default advisor when no config file exists. Always points at the highest
-# Anthropic Opus tier baked into fir's model registry. Drift is caught by
-# DefaultAdvisorTracksHighestAnthropicOpus in pkg/resources/testdata/aside_test.py
-# — bump this constant when fir adds a newer Opus.
-_DEFAULT_ADVISOR_SPEC = "anthropic/claude-opus-4-8"
+# Default advisor when no config file exists. Always points at the strongest
+# Anthropic flagship baked into fir's model registry — the highest Fable,
+# falling back to the highest Opus only when no Fable exists. Drift is caught
+# by DefaultAdvisorTracksHighestAnthropicFlagship in
+# pkg/resources/testdata/aside_test.py — bump this constant when fir adds a
+# newer flagship.
+_DEFAULT_ADVISOR_SPEC = "anthropic/claude-fable-5"
+
+# Default delegate when no config file exists. Always points at the cheapest
+# current Anthropic tier (highest Haiku) baked into fir's model registry.
+# Drift is caught by DefaultDelegateTracksHighestAnthropicHaiku in
+# pkg/resources/testdata/aside_test.py — bump this constant when fir adds a
+# newer Haiku.
+_DEFAULT_DELEGATE_SPEC = "anthropic/claude-haiku-4-5"
 
 
 def _config_path() -> Path | None:
@@ -97,33 +122,42 @@ def _read_existing_config() -> dict | None:
     return fir_ext.load_config(_CONFIG_FILENAME)
 
 
-def _load_advisor_config() -> dict[str, str] | None:
-    """Read advisor model config from aside.json in the host-provided dirs.
+def _load_role_config(key: str, default_spec: str) -> dict[str, str] | None:
+    """Read a model-role config (advisor or delegate) from aside.json.
 
     Returns a dict with ``provider``, ``model`` and optional ``effort`` keys,
-    or ``None`` if no advisor is configured.  Malformed files are ignored
-    silently — the extension falls back to the default in that case.
+    or ``None`` if the role is explicitly disabled.  Malformed files are
+    ignored silently — the extension falls back to the default in that case.
 
     Resolution order:
-      1. Explicit ``"advisor": null`` (or ``"advisor": "off"``) → no advisor.
-      2. Explicit ``"advisor": "<spec>"`` → use it (validated; falls through
+      1. Explicit ``"<key>": null`` (or ``"<key>": "off"``) → disabled.
+      2. Explicit ``"<key>": "<spec>"`` → use it (validated; falls through
          to default on parse failure).
       3. File missing or unparsable → use the bundled default.
     """
     data = _read_existing_config()
-    if isinstance(data, dict) and "advisor" in data:
-        advisor = data["advisor"]
+    if isinstance(data, dict) and key in data:
+        value = data[key]
         # Explicit opt-out.
-        if advisor is None or (isinstance(advisor, str) and advisor.strip().lower() in ("", "off", "none")):
+        if value is None or (isinstance(value, str) and value.strip().lower() in ("", "off", "none")):
             return None
-        if isinstance(advisor, str):
-            parsed = _parse_advisor_spec(advisor)
+        if isinstance(value, str):
+            parsed = _parse_advisor_spec(value)
             if parsed is not None:
                 return parsed
         # Malformed entry — fall through to default rather than disable.
 
-    # Default: highest Anthropic Opus baked into fir at build time.
-    return _parse_advisor_spec(_DEFAULT_ADVISOR_SPEC)
+    return _parse_advisor_spec(default_spec)
+
+
+def _load_advisor_config() -> dict[str, str] | None:
+    """Advisor model config — defaults to the strongest bundled Anthropic flagship."""
+    return _load_role_config("advisor", _DEFAULT_ADVISOR_SPEC)
+
+
+def _load_delegate_config() -> dict[str, str] | None:
+    """Delegate model config — defaults to the cheapest bundled Anthropic tier."""
+    return _load_role_config("delegate", _DEFAULT_DELEGATE_SPEC)
 
 
 def _parse_advisor_spec(spec: str) -> dict[str, str] | None:
@@ -155,11 +189,12 @@ def _format_advisor_spec(cfg: dict[str, str]) -> str:
     return f"{base}:{effort}" if effort else base
 
 
-# Lazily-loaded advisor config — populated on first access (after the init
-# handshake has set fir_ext.config_dirs). Tests that want to inject a value
-# can assign to _ADVISOR directly.
+# Lazily-loaded advisor/delegate configs — populated on first access (after
+# the init handshake has set fir_ext.config_dirs). Tests that want to inject
+# a value can assign to _ADVISOR / _DELEGATE directly.
 _ADVISOR_UNSET = object()
 _ADVISOR: Any = _ADVISOR_UNSET
+_DELEGATE: Any = _ADVISOR_UNSET
 
 
 def _advisor() -> dict[str, str] | None:
@@ -167,6 +202,13 @@ def _advisor() -> dict[str, str] | None:
     if _ADVISOR is _ADVISOR_UNSET:
         _ADVISOR = _load_advisor_config()
     return _ADVISOR
+
+
+def _delegate() -> dict[str, str] | None:
+    global _DELEGATE
+    if _DELEGATE is _ADVISOR_UNSET:
+        _DELEGATE = _load_delegate_config()
+    return _DELEGATE
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +426,7 @@ def _run_aside(
     instructions: str,
     ctx: fir_ext.Context,
     escalate: bool = False,
+    delegate: bool = False,
 ) -> dict:
     """Execute *tools*, collect outputs, synthesise via side_query().
 
@@ -400,6 +443,10 @@ def _run_aside(
         When True (and an advisor model is configured), route the side query
         to the advisor model instead of the agent's current model.  Ignored
         when no advisor is configured.
+    delegate : bool
+        When True (and a delegate model is configured), route the side query
+        to the cheaper delegate model instead.  Ignored when no delegate is
+        configured.  Mutually exclusive with *escalate*.
 
     Returns
     -------
@@ -408,9 +455,12 @@ def _run_aside(
     """
     if not instructions:
         return _error("instructions are required")
+    if escalate and delegate:
+        return _error("escalate and delegate are mutually exclusive — pick one")
 
-    # Resolve advisor override if escalate is requested and configured.
+    # Resolve advisor/delegate override if requested and configured.
     advisor_used: dict[str, str] | None = None
+    delegate_used: dict[str, str] | None = None
     sq_model: str | None = None
     sq_provider: str | None = None
     sq_effort: str | None = None
@@ -420,6 +470,12 @@ def _run_aside(
         sq_provider = advisor["provider"]
         sq_effort = advisor.get("effort")
         advisor_used = advisor
+    delegate_cfg = _delegate()
+    if delegate and delegate_cfg is not None:
+        sq_model = delegate_cfg["model"]
+        sq_provider = delegate_cfg["provider"]
+        sq_effort = delegate_cfg.get("effort")
+        delegate_used = delegate_cfg
 
     # No tools — pure ephemeral side query.
     if not tools:
@@ -435,7 +491,7 @@ def _run_aside(
         if not synthesis or not synthesis.strip():
             return _error("advisor returned no content")
         return {
-            "content": [{"type": "text", "text": _prefix_advisor(synthesis, advisor_used)}],
+            "content": [{"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}],
             "is_error": False,
         }
 
@@ -538,7 +594,7 @@ def _run_aside(
         })
 
     return {
-        "content": [{"type": "text", "text": _prefix_advisor(synthesis, advisor_used)}],
+        "content": [{"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}],
         "is_error": False,
         "details": {"tool_outputs": tool_outputs},
     }
@@ -555,6 +611,27 @@ def _prefix_advisor(text: str, advisor: dict[str, str] | None) -> str:
         return text
     spec = _format_advisor_spec(advisor)
     return f"[advisor: {spec}]\n\n{text}"
+
+
+def _prefix_delegate(text: str, delegate: dict[str, str] | None) -> str:
+    """Prefix the synthesis with a single trace line when delegation was used.
+
+    Mirror of _prefix_advisor — makes the cheap-model routing visible so
+    both user and agent know the response came from the delegate.
+    """
+    if delegate is None:
+        return text
+    spec = _format_advisor_spec(delegate)
+    return f"[delegate: {spec}]\n\n{text}"
+
+
+def _prefix_trace(
+    text: str,
+    advisor: dict[str, str] | None,
+    delegate: dict[str, str] | None,
+) -> str:
+    """Apply whichever trace prefix applies (at most one can be non-None)."""
+    return _prefix_delegate(_prefix_advisor(text, advisor), delegate)
 
 
 def _error(msg: str) -> dict:
@@ -598,7 +675,7 @@ def _side_query_error_text(exc: Exception) -> str:
 
 
 def _aside_tool_description() -> str:
-    """Build the aside tool description, growing escalation guidance only when configured."""
+    """Build the aside tool description, growing escalation/delegation guidance only when configured."""
     base = (
         "Ephemeral side query with optional multi-tool orchestration. "
         "Everything happens off to the side — nothing enters conversation "
@@ -608,14 +685,22 @@ def _aside_tool_description() -> str:
         "Use your fast (current) model with this tool to gather data, collect context, "
         "ask quick questions, or investigate issues without polluting history."
     )
-    if _advisor() is None:
-        return base
-    return base + (
-        "\n\nAdvisor escalation: set 'escalate' to true to route this side query "
-        "to a stronger advisor model. See the session-start [SYS_EXT] note for "
-        "when escalation is warranted — the principle is judgement-call cost, "
-        "not a checklist of categories."
-    )
+    if _advisor() is not None:
+        base += (
+            "\n\nAdvisor escalation: set 'escalate' to true to route this side query "
+            "to a stronger advisor model. See the session-start [SYS_EXT] note for "
+            "when escalation is warranted — the principle is judgement-call cost, "
+            "not a checklist of categories."
+        )
+    if _delegate() is not None:
+        base += (
+            "\n\nDelegation: set 'delegate' to true to route this side query to a "
+            "fast, cheap delegate model. Use it for context-heavy, low-judgement "
+            "asides — bulk file reads + synthesis, log summarisation, data "
+            "extraction — where volume is high but the reasoning is mechanical. "
+            "Route by judgement density, not just size."
+        )
+    return base
 
 
 def _aside_tool_parameters() -> dict[str, Any]:
@@ -665,6 +750,16 @@ def _aside_tool_parameters() -> dict[str, Any]:
                 "— see the tool description for when escalation is warranted."
             ),
         }
+    if _delegate() is not None:
+        schema["properties"]["delegate"] = {
+            "type": "boolean",
+            "description": (
+                "When true, route this side query to the configured cheap "
+                "delegate model instead of the executor's current model. Use "
+                "for context-heavy, low-judgement work — see the tool "
+                "description. Mutually exclusive with 'escalate'."
+            ),
+        }
     return schema
 
 
@@ -680,7 +775,8 @@ def aside(params: dict, ctx: fir_ext.Context):
     tools = params.get("tools", [])
     instructions = params.get("instructions", "")
     escalate = bool(params.get("escalate", False))
-    return _run_aside(tools, instructions, ctx, escalate=escalate)
+    delegate = bool(params.get("delegate", False))
+    return _run_aside(tools, instructions, ctx, escalate=escalate, delegate=delegate)
 
 
 # ---------------------------------------------------------------------------
@@ -795,20 +891,22 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
 # ---------------------------------------------------------------------------
 
 
-def _save_advisor_config(cfg: dict[str, str] | None) -> str | None:
-    """Persist *cfg* to the advisor config file. Returns an error string on failure.
+def _save_role_config(key: str, cfg: dict[str, str] | None) -> str | None:
+    """Persist *cfg* under *key* in aside.json. Returns an error string on failure.
 
     When *cfg* is ``None``, persists the explicit opt-out marker
-    (``"advisor": "off"``) so the absence of a file remains the "use default
-    advisor" signal. This keeps the contract simple:
+    (``"<key>": "off"``) so the absence of a file remains the "use default"
+    signal. This keeps the contract simple:
 
-      file missing       → use built-in default advisor
-      "advisor": "off"   → escalation disabled
-      "advisor": "p/m"   → user-pinned advisor
+      file missing       → use built-in default
+      "<key>": "off"     → disabled
+      "<key>": "p/m"     → user-pinned model
+
+    Other keys in the file are preserved.
     """
     cfg_path = _config_path()
     if cfg_path is None:
-        return "no config dir advertised by host; cannot persist advisor config"
+        return f"no config dir advertised by host; cannot persist {key} config"
     try:
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         existing: dict[str, Any] = {}
@@ -816,13 +914,18 @@ def _save_advisor_config(cfg: dict[str, str] | None) -> str | None:
         if isinstance(loaded, dict):
             existing = loaded
         if cfg is None:
-            existing["advisor"] = "off"
+            existing[key] = "off"
         else:
-            existing["advisor"] = _format_advisor_spec(cfg)
+            existing[key] = _format_advisor_spec(cfg)
         cfg_path.write_text(json.dumps(existing, indent=2) + "\n")
         return None
     except OSError as exc:
         return f"failed to write {cfg_path}: {exc}"
+
+
+def _save_advisor_config(cfg: dict[str, str] | None) -> str | None:
+    """Persist *cfg* as the advisor model in aside.json."""
+    return _save_role_config("advisor", cfg)
 
 
 @fir_ext.command(
@@ -890,6 +993,80 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
     return {
         "message": (
             f"aside-advisor: set to {_format_advisor_spec(parsed)}.\n"
+            "Changes take effect on the next session start."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Command: /aside-delegate
+# ---------------------------------------------------------------------------
+
+
+@fir_ext.command(
+    name="aside-delegate",
+    description=(
+        "Show, set, or unset the cheap delegate model used by aside's delegate flag. "
+        "Usage: /aside-delegate [provider/model[:effort] | off]"
+    ),
+)
+def cmd_aside_delegate(args: list[str], ctx: fir_ext.Context):
+    """Handle /aside-delegate — manage the persisted delegate model config."""
+    spec = " ".join(args).strip()
+
+    # Show current.
+    if not spec:
+        delegate = _delegate()
+        if delegate is None:
+            return {
+                "message": (
+                    "aside-delegate: disabled (delegate: off in aside.json).\n\n"
+                    "Set one with:\n"
+                    "  /aside-delegate anthropic/claude-haiku-4-5\n\n"
+                    "Changes take effect on the next session start."
+                ),
+            }
+        cfg_path = _config_path()
+        is_default = cfg_path is None or not cfg_path.is_file()
+        suffix = " (default — no aside.json)" if is_default else f" (from {cfg_path})"
+        return {
+            "message": (
+                f"aside-delegate: {_format_advisor_spec(delegate)}{suffix}\n\n"
+                "Override:  /aside-delegate <provider>/<model>[:effort]\n"
+                "Disable:   /aside-delegate off"
+            ),
+        }
+
+    # Unset.
+    if spec.lower() in ("off", "none", "unset", "clear"):
+        err = _save_role_config("delegate", None)
+        if err:
+            return {"message": f"aside-delegate: {err}"}
+        return {
+            "message": (
+                "aside-delegate: disabled. The 'delegate' parameter will be "
+                "removed from the aside tool on next session start. "
+                "Run `/aside-delegate <provider>/<model>` to re-enable, or "
+                "delete aside.json to return to the built-in default."
+            ),
+        }
+
+    # Set.
+    parsed = _parse_advisor_spec(spec)
+    if parsed is None:
+        return {
+            "message": (
+                f"aside-delegate: malformed spec {spec!r}.\n"
+                "Expected 'provider/model' or 'provider/model:effort' "
+                "(e.g. 'anthropic/claude-haiku-4-5:low')."
+            ),
+        }
+    err = _save_role_config("delegate", parsed)
+    if err:
+        return {"message": f"aside-delegate: {err}"}
+    return {
+        "message": (
+            f"aside-delegate: set to {_format_advisor_spec(parsed)}.\n"
             "Changes take effect on the next session start."
         ),
     }

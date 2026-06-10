@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `aside` de-escalation via a new `delegate: bool` parameter — the opposite of `escalate`. When the executor runs an expensive flagship, context-heavy but low-judgement asides (bulk reads + synthesis, log summarisation, data extraction) can be routed down to a cheap delegate model (default `anthropic/claude-haiku-4-5`). Configured under the `"delegate"` key in `aside.json`, managed with a new `/aside-delegate` command (show / set / off); delegated results carry a `[delegate: provider/model]` trace line. `escalate` and `delegate` together are a validation error.
+
+### Changed
+
+- Default aside advisor is now `anthropic/claude-fable-5` (the Mythos-class flagship) instead of the highest Opus tier.
+
 ### Changed
 
 - The `pin` tool description was rewritten from soft reflex framing to an imperative with concrete trigger cues ("call pin BEFORE you write your reply whenever the latest turn contains ANY of…"). Benchmarked across 5 cheap models (poe gpt-4o-mini / GPT-5-mini / Gemini-2.5-Flash / claude-haiku-4.5, codex gpt-5): pin-firing accuracy went from 0.50 (recall 0.25) to 1.00 (recall 1.00, zero false fires on hardened negatives).

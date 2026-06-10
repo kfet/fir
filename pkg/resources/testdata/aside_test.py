@@ -610,18 +610,24 @@ class TestLoadAdvisorConfig(unittest.TestCase):
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
         # Default tracks _DEFAULT_ADVISOR_SPEC. If someone bumps it to a
-        # newer Opus, the test still passes — we only assert the family.
+        # newer flagship, the test still passes — we only assert the family.
         self.assertEqual(cfg["provider"], "anthropic")
-        self.assertTrue(cfg["model"].startswith("claude-opus-"))
+        self.assertTrue(cfg["model"].startswith("claude-"))
 
-    def test_default_is_at_least_opus_4_7(self):
+    def test_default_is_anthropic_flagship(self):
         # Floor for "no config" UX. Bump alongside _DEFAULT_ADVISOR_SPEC.
         spec = self.mod._DEFAULT_ADVISOR_SPEC
-        self.assertTrue(spec.startswith("anthropic/claude-opus-"))
-        # Compare numeric tail so 4-7, 4-8, 5-0 etc. all pass.
-        tail = spec.split("claude-opus-")[1]
-        major, minor = (int(p) for p in tail.split("-")[:2])
-        self.assertGreaterEqual((major, minor), (4, 7))
+        self.assertTrue(spec.startswith("anthropic/claude-"))
+        # Fable (the Mythos-class flagship) or a 4.7+ Opus are acceptable.
+        model = spec.split("/", 1)[1]
+        if model.startswith("claude-fable-"):
+            major = int(model.split("claude-fable-")[1].split("-")[0])
+            self.assertGreaterEqual(major, 5)
+        else:
+            self.assertTrue(model.startswith("claude-opus-"))
+            tail = model.split("claude-opus-")[1]
+            major, minor = (int(p) for p in tail.split("-")[:2])
+            self.assertGreaterEqual((major, minor), (4, 7))
 
     def test_explicit_off_returns_none(self):
         self._cfg_path.write_text('{"advisor": "off"}')
@@ -735,17 +741,300 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         self.assertEqual(data, {"advisor": "off", "future_key": "x"})
 
 
-class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
+# ---------------------------------------------------------------------------
+# Delegate configuration & de-escalation
+# ---------------------------------------------------------------------------
+
+
+class TestDelegateRouting(unittest.TestCase):
+    """Tool-level behaviour when a delegate is configured and 'delegate' is set."""
+
+    def _ctx(self, side_query_result="delegate reply"):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(return_value=side_query_result)
+        return ctx
+
+    def _load_with_delegate(self, delegate_cfg, advisor_cfg=None):
+        """Reload aside.py with patched _DELEGATE / _ADVISOR module globals."""
+        mod = _load_aside()
+        mod._DELEGATE = delegate_cfg
+        mod._ADVISOR = advisor_cfg
+        return mod
+
+    def test_delegate_routes_to_delegate_model(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5", "effort": "low"}
+        )
+        ctx = self._ctx(side_query_result="cheap summary")
+        result = mod._run_aside([], "summarise these logs", ctx, delegate=True)
+
+        self.assertFalse(result["is_error"])
+        ctx.side_query.assert_called_once()
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
+        self.assertEqual(kwargs["provider"], "anthropic")
+        self.assertEqual(kwargs["effort"], "low")
+        # Output prefixed with the delegate trace line.
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[delegate: anthropic/claude-haiku-4-5:low]"))
+        self.assertIn("cheap summary", text)
+
+    def test_delegate_without_effort_omits_effort_kwarg(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        )
+        ctx = self._ctx()
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertIsNone(kwargs["effort"])
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[delegate: anthropic/claude-haiku-4-5]"))
+
+    def test_no_delegate_uses_no_overrides(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        )
+        ctx = self._ctx(side_query_result="plain reply")
+        result = mod._run_aside([], "q", ctx, delegate=False)
+        self.assertEqual(
+            ctx.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
+        # No delegate prefix on the output.
+        self.assertEqual(result["content"][0]["text"], "plain reply")
+
+    def test_delegate_ignored_when_no_delegate_configured(self):
+        mod = self._load_with_delegate(None)
+        ctx = self._ctx(side_query_result="plain reply")
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        self.assertEqual(
+            ctx.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
+        self.assertEqual(result["content"][0]["text"], "plain reply")
+
+    def test_escalate_and_delegate_both_true_is_error(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"},
+            advisor_cfg={"provider": "anthropic", "model": "claude-fable-5"},
+        )
+        ctx = self._ctx()
+        result = mod._run_aside([], "q", ctx, escalate=True, delegate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("mutually exclusive", result["content"][0]["text"])
+        ctx.side_query.assert_not_called()
+
+    def test_delegate_with_tools_routes_synthesis_to_delegate(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        )
+        ctx = self._ctx(side_query_result="bulk synthesis")
+        ctx.call_tool = mock.MagicMock(
+            return_value={"content": [{"text": "log lines"}], "is_error": False}
+        )
+        ctx.list_tools = mock.MagicMock(return_value=[
+            {"name": "Bash", "description": "Run a command", "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            }},
+        ])
+        result = mod._run_aside(
+            [{"name": "Bash", "params": {"command": "cat big.log"}}],
+            "summarise the log",
+            ctx,
+            delegate=True,
+        )
+        self.assertFalse(result["is_error"])
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
+        self.assertEqual(kwargs["provider"], "anthropic")
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[delegate: anthropic/claude-haiku-4-5]"))
+
+    def test_tool_handler_passes_delegate_flag(self):
+        self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        )
+        handler = fir_ext._tool_handlers["aside"]
+        ctx = self._ctx(side_query_result="via handler")
+        result = handler({"instructions": "q", "delegate": True}, ctx)
+        self.assertFalse(result["is_error"])
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
+
+    def test_tool_schema_has_no_delegate_when_unconfigured(self):
+        mod = _load_aside()
+        mod._DELEGATE = None
+        params = mod._aside_tool_parameters()
+        self.assertNotIn("delegate", params["properties"])
+        self.assertNotIn("Delegation", mod._aside_tool_description())
+
+    def test_tool_schema_has_delegate_when_configured(self):
+        mod = self._load_with_delegate(
+            {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        )
+        params = mod._aside_tool_parameters()
+        self.assertIn("delegate", params["properties"])
+        self.assertIn("Delegation", mod._aside_tool_description())
+
+
+class TestLoadDelegateConfig(unittest.TestCase):
+    """Cover the default-vs-config matrix for _load_delegate_config."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._prev_dirs = list(fir_ext.config_dirs)
+        fir_ext.config_dirs = [self._tmp.name]
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", self._prev_dirs))
+        self.mod = _load_aside()
+        self._cfg_path = self.mod.Path(self._tmp.name) / "aside.json"
+
+    def test_missing_file_returns_default(self):
+        cfg = self.mod._load_delegate_config()
+        self.assertIsNotNone(cfg)
+        self.assertEqual(cfg["provider"], "anthropic")
+        self.assertTrue(cfg["model"].startswith("claude-haiku-"))
+
+    def test_explicit_off_returns_none(self):
+        self._cfg_path.write_text('{"delegate": "off"}')
+        self.assertIsNone(self.mod._load_delegate_config())
+
+    def test_explicit_null_returns_none(self):
+        self._cfg_path.write_text('{"delegate": null}')
+        self.assertIsNone(self.mod._load_delegate_config())
+
+    def test_pinned_spec_returns_pinned(self):
+        self._cfg_path.write_text('{"delegate": "openai/gpt-mini:low"}')
+        cfg = self.mod._load_delegate_config()
+        self.assertEqual(
+            cfg,
+            {"provider": "openai", "model": "gpt-mini", "effort": "low"},
+        )
+
+    def test_malformed_spec_falls_back_to_default(self):
+        self._cfg_path.write_text('{"delegate": "not-a-spec"}')
+        cfg = self.mod._load_delegate_config()
+        self.assertIsNotNone(cfg)
+        self.assertEqual(cfg["provider"], "anthropic")
+
+    def test_corrupt_json_falls_back_to_default(self):
+        self._cfg_path.write_text('not json')
+        cfg = self.mod._load_delegate_config()
+        self.assertIsNotNone(cfg)
+
+    def test_delegate_key_independent_of_advisor_key(self):
+        # Disabling the advisor must not disable the delegate, and vice versa.
+        self._cfg_path.write_text('{"advisor": "off"}')
+        self.assertIsNone(self.mod._load_advisor_config())
+        self.assertIsNotNone(self.mod._load_delegate_config())
+        self._cfg_path.write_text('{"delegate": "off"}')
+        self.assertIsNotNone(self.mod._load_advisor_config())
+        self.assertIsNone(self.mod._load_delegate_config())
+
+
+class TestAsideDelegateCommand(unittest.TestCase):
+    """The /aside-delegate slash command — show, set, off."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._prev_dirs = list(fir_ext.config_dirs)
+        fir_ext.config_dirs = [self._tmp.name]
+        self.addCleanup(lambda: setattr(fir_ext, "config_dirs", self._prev_dirs))
+        self.mod = _load_aside()
+        self._cfg_path = self.mod.Path(self._tmp.name) / "aside.json"
+
+    def _handler(self):
+        return fir_ext._command_handlers["aside-delegate"]
+
+    def test_registered(self):
+        names = {c["name"] for c in fir_ext._commands}
+        self.assertIn("aside-delegate", names)
+
+    def test_show_when_disabled(self):
+        self.mod._DELEGATE = None
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("disabled", result["message"])
+
+    def test_show_when_default(self):
+        self.mod._DELEGATE = {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("anthropic/claude-haiku-4-5", result["message"])
+        self.assertIn("default", result["message"])
+
+    def test_show_when_pinned(self):
+        self._cfg_path.write_text('{"delegate": "anthropic/claude-haiku-4-5"}')
+        self.mod._DELEGATE = {"provider": "anthropic", "model": "claude-haiku-4-5"}
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn("anthropic/claude-haiku-4-5", result["message"])
+        self.assertIn(str(self._cfg_path), result["message"])
+
+    def test_set_writes_config_file(self):
+        result = self._handler()(["anthropic/claude-haiku-4-5:low"], mock.MagicMock())
+        self.assertIn("set to anthropic/claude-haiku-4-5:low", result["message"])
+        self.assertTrue(self._cfg_path.is_file())
+        import json as _json
+        data = _json.loads(self._cfg_path.read_text())
+        self.assertEqual(data, {"delegate": "anthropic/claude-haiku-4-5:low"})
+
+    def test_set_rejects_malformed_spec(self):
+        result = self._handler()(["claude-haiku-4-5"], mock.MagicMock())
+        self.assertIn("malformed spec", result["message"])
+        self.assertFalse(self._cfg_path.is_file())
+
+    def test_off_writes_explicit_off_marker(self):
+        result = self._handler()(["off"], mock.MagicMock())
+        self.assertIn("disabled", result["message"])
+        self.assertTrue(self._cfg_path.is_file())
+        import json as _json
+        data = _json.loads(self._cfg_path.read_text())
+        self.assertEqual(data, {"delegate": "off"})
+
+    def test_off_preserves_other_keys(self):
+        # /aside-delegate off must only flip the delegate key — the advisor
+        # pin (and any future keys) must survive.
+        import json as _json
+        self._cfg_path.write_text(_json.dumps(
+            {"advisor": "anthropic/claude-fable-5", "delegate": "anthropic/claude-haiku-4-5"}
+        ))
+        self._handler()(["off"], mock.MagicMock())
+        data = _json.loads(self._cfg_path.read_text())
+        self.assertEqual(
+            data,
+            {"advisor": "anthropic/claude-fable-5", "delegate": "off"},
+        )
+
+    def test_set_preserves_advisor_key(self):
+        import json as _json
+        self._cfg_path.write_text('{"advisor": "off"}')
+        self._handler()(["anthropic/claude-haiku-4-5"], mock.MagicMock())
+        data = _json.loads(self._cfg_path.read_text())
+        self.assertEqual(
+            data,
+            {"advisor": "off", "delegate": "anthropic/claude-haiku-4-5"},
+        )
+
+
+class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
     """Guards aside.py's _DEFAULT_ADVISOR_SPEC.
 
     When no aside.json exists the extension falls back to a hard-coded model
-    spec — that spec must always point at the strongest Anthropic Opus baked
-    into fir's bundled model registry. We parse both sides as text and
-    compare.
+    spec — that spec must always point at the strongest Anthropic flagship
+    baked into fir's bundled model registry: the highest
+    claude-fable-<major>[-<minor>], falling back to the highest
+    claude-opus-X-Y only when no fable exists. We parse both sides as text
+    and compare.
 
     Date-suffixed aliases (claude-opus-4-1-20250805, claude-opus-4-20250514)
-    are intentionally ignored — those are short-lived; the bare X-Y form is
-    the long-lived alias users pin to.
+    are intentionally ignored — those are short-lived; the bare form is the
+    long-lived alias users pin to.
     """
 
     _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
@@ -754,7 +1043,7 @@ class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
         "..", "..", "ai", "models_generated.go",
     )
 
-    def test_default_advisor_matches_highest_opus(self):
+    def test_default_advisor_matches_highest_flagship(self):
         import re
 
         with open(self._ASIDE_PY, encoding="utf-8") as f:
@@ -767,10 +1056,81 @@ class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
 
-        # Each RegisterModel block has ID: "..." and Provider: "anthropic".
+        # Prefer the highest Fable: claude-fable-<major>[-<minor>], bare form
+        # only — minor capped at 2 digits to reject date stamps.
+        fable_re = re.compile(
+            r'ID:\s*"(claude-fable-(\d+)(?:-(\d{1,2}))?)"'
+            r'(?:[^}]*?)Provider:\s*"anthropic"',
+            re.DOTALL,
+        )
+        best = (-1, -1, "")
+        for match in fable_re.finditer(models_src):
+            full_id = match.group(1)
+            major = int(match.group(2))
+            minor = int(match.group(3) or 0)
+            if (major, minor) > (best[0], best[1]):
+                best = (major, minor, full_id)
+
+        if best[2] == "":
+            # No fable registered — fall back to the highest bare Opus X-Y.
+            opus_re = re.compile(
+                r'ID:\s*"(claude-opus-(\d+)-(\d{1,2}))"'
+                r'(?:[^}]*?)Provider:\s*"anthropic"',
+                re.DOTALL,
+            )
+            for match in opus_re.finditer(models_src):
+                full_id = match.group(1)
+                major, minor = int(match.group(2)), int(match.group(3))
+                if (major, minor) > (best[0], best[1]):
+                    best = (major, minor, full_id)
+
+        self.assertNotEqual(
+            best[2], "",
+            "no claude-fable or claude-opus models registered under anthropic provider",
+        )
+        want_spec = "anthropic/" + best[2]
+        self.assertEqual(
+            got, want_spec,
+            "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
+            f"  got:  {got}\n"
+            f"  want: {want_spec}\n"
+            f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
+            f"_DEFAULT_ADVISOR_SPEC to {want_spec!r}.",
+        )
+
+
+class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
+    """Guards aside.py's _DEFAULT_DELEGATE_SPEC.
+
+    The default delegate must always point at the cheapest current Anthropic
+    tier baked into fir's bundled model registry — the highest bare
+    claude-haiku-X-Y registered under the anthropic provider. Same
+    parse-both-sides-as-text approach as the advisor drift test;
+    date-suffixed aliases are ignored.
+    """
+
+    _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
+    _MODELS_GO = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "ai", "models_generated.go",
+    )
+
+    def test_default_delegate_matches_highest_haiku(self):
+        import re
+
+        with open(self._ASIDE_PY, encoding="utf-8") as f:
+            aside_src = f.read()
+        m = re.search(r'_DEFAULT_DELEGATE_SPEC\s*=\s*"([^"]+)"', aside_src)
+        self.assertIsNotNone(m, "aside.py: _DEFAULT_DELEGATE_SPEC literal not found")
+        assert m is not None  # for type checker
+        got = m.group(1)
+
+        with open(self._MODELS_GO, encoding="utf-8") as f:
+            models_src = f.read()
+
         # Bare X-Y form only — minor capped at 2 digits to reject date stamps.
         block_re = re.compile(
-            r'ID:\s*"(claude-opus-(\d+)-(\d{1,2}))"'
+            r'ID:\s*"(claude-haiku-(\d+)-(\d{1,2}))"'
             r'(?:[^}]*?)Provider:\s*"anthropic"',
             re.DOTALL,
         )
@@ -782,16 +1142,16 @@ class DefaultAdvisorTracksHighestAnthropicOpus(unittest.TestCase):
 
         self.assertNotEqual(
             best[2], "",
-            "no claude-opus-<major>-<minor> models registered under anthropic provider",
+            "no claude-haiku-<major>-<minor> models registered under anthropic provider",
         )
         want_spec = "anthropic/" + best[2]
         self.assertEqual(
             got, want_spec,
-            "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
+            "aside.py _DEFAULT_DELEGATE_SPEC out of sync with model registry:\n"
             f"  got:  {got}\n"
             f"  want: {want_spec}\n"
             f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
-            f"_DEFAULT_ADVISOR_SPEC to {want_spec!r}.",
+            f"_DEFAULT_DELEGATE_SPEC to {want_spec!r}.",
         )
 
 
