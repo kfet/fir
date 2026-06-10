@@ -10,7 +10,7 @@ require (
 	github.com/hashicorp/go-version v1.8.0
 	github.com/kfet/firpty v0.1.0
 	github.com/kfet/pinexec v0.0.4
-	github.com/kfet/skipstone v0.1.0
+	github.com/kfet/skipstone v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.3.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/stretchr/testify v1.11.1
