@@ -84,16 +84,33 @@ cat >/dev/null
 
 	// On-disk JSON must match the in-memory snapshot — the "sidecar
 	// IS canonical" invariant. Same syscall as a live reader.
-	data, err := os.ReadFile(cardsPath)
-	if err != nil {
-		t.Fatalf("cards file not written: %v", err)
-	}
+	//
+	// Poll for the file: Store.Put updates the in-memory map under its
+	// lock and releases it BEFORE calling flush() (the file write is a
+	// separate, flushMu-guarded step). So the List() poll above can
+	// observe the card a hair before the sidecar lands on disk. Under
+	// `-race` + CI load that sub-millisecond gap widens enough that an
+	// immediate ReadFile races the flush and 404s. Polling closes the
+	// gap without weakening the invariant (the file is still canonical;
+	// it just arrives a moment after the memory mutation).
 	var disk []store.Card
-	if err := json.Unmarshal(data, &disk); err != nil {
-		t.Fatalf("decode cards file: %v\nraw:\n%s", err, data)
-	}
-	if len(disk) != 1 || disk[0].Source != "synth-card" {
-		t.Fatalf("on-disk mismatch: %#v", disk)
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		data, err := os.ReadFile(cardsPath)
+		if err == nil {
+			if uerr := json.Unmarshal(data, &disk); uerr != nil {
+				t.Fatalf("decode cards file: %v\nraw:\n%s", uerr, data)
+			}
+			if len(disk) == 1 && disk[0].Source == "synth-card" {
+				break
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("cards file read error: %v", err)
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("cards file not written in time (last read err on missing file): %#v", disk)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
