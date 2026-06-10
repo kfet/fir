@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.67.1] - 2026-06-10
+
+### Changed
+
+- Test coverage only (no behaviour change). Added `TestMetaChannel` to the pipe/wait extension suite, locking in the post-`Meta` wait×hash contract: the tool-result content hash now travels in the `meta` sibling field, so it never reaches `_result_text`, the `WAIT:` verdict line, or `{{prev}}` substitutions (the prior `TestHashBlockFiltering` only covered the legacy `[hash: …]` content-block defense). Also hardened the flaky observable-cards sidecar e2e test.
+
+
 ## [0.67.0] - 2026-06-10
 
 ### Added
