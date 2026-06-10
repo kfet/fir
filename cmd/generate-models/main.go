@@ -862,6 +862,19 @@ type poeModel struct {
 	} `json:"parameters"`
 }
 
+// poeUncallable lists Poe model IDs that appear in the /v1/models catalog but
+// are NOT exposed over any API endpoint — calling them returns 404 "Model not
+// found". Poe sometimes publishes a model's catalog entry (with full pricing
+// and context metadata, and an empty supported_endpoints list) before it
+// enables API access. No catalog field distinguishes these from genuinely
+// callable empty-endpoint bots, so the list is maintained by hand. Remove an
+// entry once Poe enables its endpoint (verify with a /v1/chat/completions call).
+var poeUncallable = map[string]bool{
+	// Listed 2026-06-09, 404s as of 2026-06-10. Empty supported_endpoints.
+	// Reachable instead via anthropic/ or openrouter/ or amazon-bedrock/.
+	"claude-fable-5": true,
+}
+
 // poeContextDescRe captures context-window hints from free-text model
 // descriptions. Poe leaves the structured context_window field null for many
 // third-party bots but usually mentions the size in the description. Examples
@@ -1035,6 +1048,19 @@ func fetchPoeModels() ([]modelSpec, error) {
 		// /v1/chat/completions). Models that explicitly restrict
 		// themselves to non-chat, non-responses endpoints (/v1/videos,
 		// /v1/images, etc.) are excluded.
+		//
+		// poeUncallable lists IDs Poe catalogs but does NOT actually
+		// expose over any API endpoint: calling them 404s "Model not
+		// found". Poe sometimes lists a model (with full pricing/context
+		// metadata and an EMPTY supported_endpoints list) before enabling
+		// API access — first hit with claude-fable-5. No catalog field
+		// distinguishes these from working empty-endpoint bots (e.g.
+		// grok-4.20-multi-agent is empty-endpoint yet callable), so this
+		// is a deterministic manual skip-list. Remove an entry once Poe
+		// enables the endpoint.
+		if poeUncallable[m.ID] {
+			continue
+		}
 		eps := m.SupportedEndpoints
 		supportsChat := len(eps) == 0 || hasString(eps, "/v1/chat/completions")
 		supportsResponses := hasString(eps, "/v1/responses")

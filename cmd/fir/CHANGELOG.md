@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.66.1] - 2026-06-10
+
+### Fixed
+- Poe model catalog: drop `poe/claude-fable-5`. Poe lists it in `/v1/models` (with full pricing/context metadata and an empty `supported_endpoints`) but does not expose it over any API endpoint yet — calling it returns `404 "Model not found"`. No catalog field distinguishes such pre-release listings from genuinely callable empty-endpoint bots (e.g. `poe/grok-4.20-multi-agent` is empty-endpoint yet works), so `cmd/generate-models` now carries a small hand-maintained `poeUncallable` skip-list; the entry is removed once Poe enables the endpoint. Fable remains reachable via `anthropic/`, `openrouter/`, and `amazon-bedrock/` providers.
+
+
 ## [0.66.0] - 2026-06-10
 
 ### Added
