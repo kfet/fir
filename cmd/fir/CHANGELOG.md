@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.68.1] - 2026-06-11
+
+### Fixed
+
+- `pin` tool: the decision branch now runs with thinking **off** (`side_query(..., effort="off")`). Previously it inherited the session's reasoning level, and on thinking-enabled models the side-query produced `thinking.enabled.budget_tokens: Input should be >= 1024` -> a 400 that failed every pin (observed: 0% pin success on an opus/low-effort bot). The branch is mechanical quote-extraction and needs no reasoning, so disabling it is both correct and a fix.
+
 ### Changed
 
 - The Go extension SDK (`firext`) is now built and tested by `make all` via a

@@ -82,10 +82,11 @@ class _StubContext:
         self._side_query_reply = side_query_reply
         self._raise_on_side_query = raise_on_side_query
         self.side_query_calls: list[str] = []
+        self.side_query_kwargs: list[dict] = []
 
     def side_query(self, question: str, **kwargs) -> str:
-        del kwargs
         self.side_query_calls.append(question)
+        self.side_query_kwargs.append(kwargs)
         if self._raise_on_side_query:
             raise RuntimeError("simulated side_query failure")
         return self._side_query_reply
@@ -745,6 +746,10 @@ class TestPinTool(unittest.TestCase):
         res = self.handoff.pin({}, ctx)
         self.assertFalse(res["is_error"])
         self.assertEqual(len(ctx.side_query_calls), 1)
+        # The branch must run with thinking OFF — it is mechanical quote
+        # extraction, and leaving thinking on 400s on thinking-enabled models
+        # (budget_tokens < 1024). Regression guard for that production bug.
+        self.assertEqual(ctx.side_query_kwargs[0].get("effort"), "off")
         rows = _read_jsonl(self.bm_path)
         self.assertEqual(len(rows), 2)
         notes = {r["_bookmark_note"] for r in rows}

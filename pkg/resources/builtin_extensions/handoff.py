@@ -921,7 +921,10 @@ def pin(params: dict, ctx: fir_ext.Context) -> dict:
     reflex — failures are swallowed, not surfaced as friction).
     """
     try:
-        out = ctx.side_query(_PIN_BRANCH_PROMPT, timeout=120)
+        # effort="off": the branch is mechanical quote-extraction, not
+        # reasoning. It also sidesteps a 400 when the session has extended
+        # thinking enabled (side_query would inherit a budget_tokens < 1024).
+        out = ctx.side_query(_PIN_BRANCH_PROMPT, timeout=120, effort="off")
     except Exception as exc:  # pragma: no cover - defensive
         return _ok(f"📌 noted (branch unavailable: {exc})")
 
