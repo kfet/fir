@@ -1,4 +1,4 @@
-.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -56,7 +56,7 @@ build: tidy
 all: fmt tidy
 	@$(MAKE) -j --no-print-directory _all_parallel TIDY_DONE=1
 
-_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk check-licenses
+_all_parallel: vet test-race build-all lint-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-node-sdk test-go-sdk check-licenses
 
 fmt:
 	@gofmt -s -w .
@@ -265,6 +265,14 @@ test-python-sdk: check-uv
 # when node isn't installed, so the build still works on node-less hosts.
 test-node-sdk:
 	$(call RUN,test node (sdk),command -v node >/dev/null 2>&1 && node pkg/extension/sdk/node/fir_ext_test.js || echo "node not found — skipping node SDK tests")
+
+# Go SDK (firext) build + tests. The Go SDK is a nested module with no
+# dependencies — it is NOT embedded in the fir binary; extension authors
+# `go get` it and compile it into their own standalone binaries, so fir ships
+# nothing for it at runtime. This target keeps the external module from rotting
+# by building and testing it as part of `make all`.
+test-go-sdk:
+	$(call RUN,test go (sdk),cd pkg/extension/sdk/go && go build ./... && go test ./...)
 
 # Fast extension tests (bundled) — everything except the slow ones.
 _SLOW_EXT_TESTS := schedule_test.py tmuxspinner_test.py

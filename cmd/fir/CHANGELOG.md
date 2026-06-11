@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The Go extension SDK (`firext`) is now built and tested by `make all` via a
+  new `test-go-sdk` target. It remains a dependency-free nested module that is
+  **not** embedded in the fir binary (unlike the Python and Node SDKs, which are
+  `go:embed`-ed and extracted at runtime): Go extension authors `go get` it and
+  compile it into their own standalone binaries, so fir ships nothing for it at
+  runtime. Wiring it into the pipeline keeps the external module from rotting.
+
 ## [0.68.0] - 2026-06-11
 
 ### Fixed
