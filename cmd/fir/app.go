@@ -380,6 +380,38 @@ func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string,
 	}
 }
 
+// reloadMCPCallback returns a callback suitable for SessionBridge.SetReloadMCPFn.
+// It re-reads MCP configs from disk, applies the diff to the running manager,
+// and returns collisions and errors for the agent to see.
+func reloadMCPCallback(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string, args *Args) func() (extension.ReloadMCPResult, error) {
+	return func() (extension.ReloadMCPResult, error) {
+		// Load config with collision reporting.
+		_, collisions, err := mcp.LoadDefaultConfigsReport(cwd)
+		if err != nil {
+			return extension.ReloadMCPResult{
+				Errors: []extension.MCPServerError{{Message: err.Error()}},
+			}, nil
+		}
+
+		// Convert mcp.Collision to extension.MCPCollision.
+		extCollisions := make([]extension.MCPCollision, len(collisions))
+		for i, c := range collisions {
+			extCollisions[i] = extension.ConvertMCPCollision(c.Server, c.WonFile, c.ShadowedFiles)
+		}
+
+		// Perform the actual reload.
+		reloadErr := session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
+
+		result := extension.ReloadMCPResult{Collisions: extCollisions}
+		if reloadErr != nil {
+			result.Errors = append(result.Errors, extension.MCPServerError{
+				Message: reloadErr.Error(),
+			})
+		}
+		return result, nil
+	}
+}
+
 // waitMCPReady blocks until every MCP server has finished its initial
 // connect/handshake (or until 30s elapses). Timeouts emit a stderr warning
 // rather than aborting. Safe to call with a nil manager (no-op).
@@ -576,6 +608,10 @@ func run() error {
 
 	// Extension lifecycle for non-interactive modes
 	if setup.extSetup != nil {
+		// Wire the MCP reload callback so extensions can call reload_mcp.
+		if setup.extSetup.Bridge != nil {
+			setup.extSetup.Bridge.SetReloadMCPFn(reloadMCPCallback(&setup.mcpManager, setup.result.Session, setup.cwd, args))
+		}
 		setup.extSetup.EmitSessionStart(nil)
 		defer func() { setup.extSetup.EmitSessionShutdown() }()
 	}
@@ -1063,6 +1099,10 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 					}
 					return nil
 				})
+				// Wire the MCP reload callback so extensions can call reload_mcp.
+				if es.Bridge != nil {
+					es.Bridge.SetReloadMCPFn(reloadMCPCallback(&setup.mcpManager, setup.result.Session, setup.cwd, args))
+				}
 				refreshSessionModel(setup.result.Session, setup.result.Session.ModelRegistryRef())
 				es.EmitSessionStart(mode.ReexecExtData())
 				mode.NotifyExtensionFailures(es.StartFailures())

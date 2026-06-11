@@ -199,3 +199,172 @@ func TestDefaultConfigPaths_UsesFIRAgentDir(t *testing.T) {
 	assert.Equal(t, filepath.Join(agentDir, "mcp.json"), userPath)
 	assert.Equal(t, "/project/.fir/mcp.json", projectPath)
 }
+
+func TestLoadConfigDir_SortedMerge(t *testing.T) {
+	dir := t.TempDir()
+	// Write files out of lexical order to verify sorting.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`{"mcpServers":{"srv":{"command":"b-cmd"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"mcpServers":{"srv":{"command":"a-cmd"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"), []byte(`{"mcpServers":{"srv":{"command":"c-cmd"}}}`), 0o600))
+
+	cfg, collisions, sources, err := loadConfigDir(dir)
+	require.NoError(t, err)
+	// c.json (last lexically) should win.
+	assert.Equal(t, "c-cmd", cfg.MCPServers["srv"].Command)
+	assert.Equal(t, filepath.Join(dir, "c.json"), sources["srv"])
+	// One collision entry for "srv" since all three define it.
+	require.Len(t, collisions, 1)
+	assert.Equal(t, "srv", collisions[0].Server)
+	assert.Equal(t, filepath.Join(dir, "c.json"), collisions[0].WonFile)
+	assert.Contains(t, collisions[0].ShadowedFiles, filepath.Join(dir, "a.json"))
+	assert.Contains(t, collisions[0].ShadowedFiles, filepath.Join(dir, "b.json"))
+}
+
+func TestLoadConfigDir_MissingDir(t *testing.T) {
+	cfg, collisions, sources, err := loadConfigDir(filepath.Join(t.TempDir(), "no-such-dir"))
+	require.NoError(t, err)
+	assert.Empty(t, cfg.MCPServers)
+	assert.Empty(t, collisions)
+	assert.Empty(t, sources)
+}
+
+func TestLoadConfigDir_NoCollisions(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"mcpServers":{"srv1":{"command":"a"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`{"mcpServers":{"srv2":{"command":"b"}}}`), 0o600))
+
+	cfg, collisions, sources, err := loadConfigDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, cfg.MCPServers, 2)
+	assert.Empty(t, collisions)
+	assert.Equal(t, filepath.Join(dir, "a.json"), sources["srv1"])
+	assert.Equal(t, filepath.Join(dir, "b.json"), sources["srv2"])
+}
+
+func TestLoadConfigDir_IgnoresSubdirs(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "subdir")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subdir, "ignored.json"), []byte(`{"mcpServers":{"srv":{"command":"ignored"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"mcpServers":{"srv":{"command":"a"}}}`), 0o600))
+
+	cfg, _, _, err := loadConfigDir(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "a", cfg.MCPServers["srv"].Command)
+}
+
+func TestLoadConfigDir_IgnoresNonJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte(`not json`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`{"mcpServers":{"srv":{"command":"b"}}}`), 0o600))
+
+	cfg, collisions, _, err := loadConfigDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, cfg.MCPServers, 1)
+	assert.Empty(t, collisions)
+}
+
+func TestLoadConfigDir_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.json"), []byte(`not valid json`), 0o600))
+
+	_, _, _, err := loadConfigDir(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse")
+}
+
+func TestLoadDefaultConfigsReport_MergesUserDDropins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+
+	// User base config.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"mcpServers":{"base":{"command":"base-cmd"}}}`), 0o600))
+
+	// User drop-ins directory.
+	mcpDDir := filepath.Join(dir, "mcp.d")
+	require.NoError(t, os.Mkdir(mcpDDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "dropin.json"), []byte(`{"mcpServers":{"dropin":{"command":"dropin-cmd"}}}`), 0o600))
+
+	cfg, collisions, err := LoadDefaultConfigsReport("")
+	require.NoError(t, err)
+	assert.Equal(t, "base-cmd", cfg.MCPServers["base"].Command)
+	assert.Equal(t, "dropin-cmd", cfg.MCPServers["dropin"].Command)
+	assert.Empty(t, collisions)
+}
+
+func TestLoadDefaultConfigsReport_DropinShadowsBase(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+
+	// User base config.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"mcpServers":{"srv":{"command":"base-cmd"}}}`), 0o600))
+
+	// User drop-in that shadows the base.
+	mcpDDir := filepath.Join(dir, "mcp.d")
+	require.NoError(t, os.Mkdir(mcpDDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "shadow.json"), []byte(`{"mcpServers":{"srv":{"command":"dropin-cmd"}}}`), 0o600))
+
+	cfg, collisions, err := LoadDefaultConfigsReport("")
+	require.NoError(t, err)
+	assert.Equal(t, "dropin-cmd", cfg.MCPServers["srv"].Command)
+	require.Len(t, collisions, 1)
+	assert.Equal(t, "srv", collisions[0].Server)
+	assert.Equal(t, filepath.Join(mcpDDir, "shadow.json"), collisions[0].WonFile)
+	assert.Contains(t, collisions[0].ShadowedFiles, filepath.Join(dir, "mcp.json"))
+}
+
+func TestLoadDefaultConfigsReport_BaseAndMultipleDropins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+
+	// User base config.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"mcpServers":{"srv":{"command":"base-cmd"}}}`), 0o600))
+
+	// Multiple drop-ins that shadow base and each other.
+	mcpDDir := filepath.Join(dir, "mcp.d")
+	require.NoError(t, os.Mkdir(mcpDDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "a.json"), []byte(`{"mcpServers":{"srv":{"command":"a-cmd"}}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mcpDDir, "b.json"), []byte(`{"mcpServers":{"srv":{"command":"b-cmd"}}}`), 0o600))
+
+	cfg, collisions, err := LoadDefaultConfigsReport("")
+	require.NoError(t, err)
+	assert.Equal(t, "b-cmd", cfg.MCPServers["srv"].Command)
+	// Should have exactly ONE collision entry, not two (no duplicates).
+	require.Len(t, collisions, 1, "expected single collision entry, not duplicates")
+	assert.Equal(t, "srv", collisions[0].Server)
+	assert.Equal(t, filepath.Join(mcpDDir, "b.json"), collisions[0].WonFile)
+	// Should shadow both base and first drop-in.
+	assert.Contains(t, collisions[0].ShadowedFiles, filepath.Join(dir, "mcp.json"))
+	assert.Contains(t, collisions[0].ShadowedFiles, filepath.Join(mcpDDir, "a.json"))
+}
+
+func TestLoadDefaultConfigsReport_ProjectOverridesAll(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+
+	// User base config.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"mcpServers":{"srv":{"command":"user-cmd"}}}`), 0o600))
+
+	// Project config.
+	projectDir := filepath.Join(dir, "project")
+	projectFirDir := filepath.Join(projectDir, ".fir")
+	require.NoError(t, os.MkdirAll(projectFirDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectFirDir, "mcp.json"), []byte(`{"mcpServers":{"srv":{"command":"project-cmd"}}}`), 0o600))
+
+	cfg, _, err := LoadDefaultConfigsReport(projectDir)
+	require.NoError(t, err)
+	// Project overrides user, no collision reported (expected behavior).
+	assert.Equal(t, "project-cmd", cfg.MCPServers["srv"].Command)
+}
+
+func TestLoadDefaultConfigs_StillWorks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", dir)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"mcpServers":{"srv":{"command":"user-cmd"}}}`), 0o600))
+
+	// Verify LoadDefaultConfigs still returns merged config without collisions.
+	cfg, err := LoadDefaultConfigs("")
+	require.NoError(t, err)
+	assert.Equal(t, "user-cmd", cfg.MCPServers["srv"].Command)
+}

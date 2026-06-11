@@ -683,6 +683,47 @@ Response: `{"ok": true}` on success.
 
 ---
 
+#### `reload_mcp`
+
+Re-read MCP server configurations from disk and apply the diff to the
+running MCP servers. Intended for an agent that has just written a
+drop-in config file to `~/.config/fir/mcp.d/` and wants to activate
+those servers mid-session.
+
+No parameters required.
+
+```json
+{"jsonrpc":"2.0","id":1015,"method":"reload_mcp"}
+```
+
+Behaviour: fir loads MCP configs from all sources in precedence order
+(low → high):
+1. `~/.config/fir/mcp.json` (user base)
+2. `~/.config/fir/mcp.d/*.json` (user drop-ins, lexically sorted)
+3. `<project>/.fir/mcp.json` (project base)
+
+Servers with changed configs are restarted; unchanged servers keep their
+existing sessions; removed servers are stopped; new servers are started.
+
+Response: a result object with collision and error details:
+
+```json
+{
+  "collisions": [
+    {"server": "my-srv", "won_file": "/path/b.json", "shadowed_files": ["/path/a.json"]}
+  ],
+  "errors": [
+    {"server": "other-srv", "message": "failed to start: command not found"}
+  ]
+}
+```
+
+Collisions record when a server name from a later config file shadowed
+one from an earlier file. Errors record per-server or global errors from
+the reload. Both arrays may be empty on a clean reload.
+
+---
+
 #### `side_query`
 
 Make a one-shot LLM call using the current session context.  No tools, no

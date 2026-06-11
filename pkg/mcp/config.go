@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // ServerConfig describes a single MCP server to connect to.
@@ -64,6 +65,77 @@ func MergeConfigs(base, override *ConfigFile) *ConfigFile {
 	return merged
 }
 
+// Collision records when a server name is shadowed during config merging.
+type Collision struct {
+	Server        string   `json:"server"`
+	WonFile       string   `json:"won_file"`
+	ShadowedFiles []string `json:"shadowed_files"`
+}
+
+// loadConfigDir loads all *.json files from a directory, merging them in
+// lexical filename order (later files override earlier ones). Returns the
+// merged config, any collisions detected, a map from server name to the file
+// that provides it, and an error. A missing directory returns an empty config
+// with no error (mirrors LoadConfigFile behaviour).
+func loadConfigDir(dir string) (*ConfigFile, []Collision, map[string]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &ConfigFile{}, nil, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("read dir %s: %w", dir, err)
+	}
+
+	// Collect and sort JSON filenames lexically.
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if filepath.Ext(e.Name()) == ".json" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	// Track which file provided each server name for collision detection.
+	serverSource := make(map[string]string) // server name -> file path
+	var collisions []Collision
+	merged := &ConfigFile{MCPServers: make(map[string]ServerConfig)}
+
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		cfg, loadErr := LoadConfigFile(path)
+		if loadErr != nil {
+			return nil, nil, nil, loadErr
+		}
+		for serverName, serverCfg := range cfg.MCPServers {
+			if prevFile, exists := serverSource[serverName]; exists {
+				// Find or create collision entry for this server.
+				found := false
+				for i := range collisions {
+					if collisions[i].Server == serverName {
+						collisions[i].ShadowedFiles = append(collisions[i].ShadowedFiles, prevFile)
+						collisions[i].WonFile = path
+						found = true
+						break
+					}
+				}
+				if !found {
+					collisions = append(collisions, Collision{
+						Server:        serverName,
+						WonFile:       path,
+						ShadowedFiles: []string{prevFile},
+					})
+				}
+			}
+			merged.MCPServers[serverName] = serverCfg
+			serverSource[serverName] = path
+		}
+	}
+	return merged, collisions, serverSource, nil
+}
+
 // DefaultConfigPaths returns the canonical config file paths that LoadDefaultConfigs reads:
 //   - userPath: ~/.config/fir/mcp.json  (lower precedence)
 //   - projectPath: <projectDir>/.fir/mcp.json  (higher precedence)
@@ -97,26 +169,101 @@ func defaultConfigDir() string {
 // Missing files are silently skipped. Returns an empty ConfigFile when neither
 // file exists.
 func LoadDefaultConfigs(projectDir string) (*ConfigFile, error) {
+	cfg, _, err := LoadDefaultConfigsReport(projectDir)
+	return cfg, err
+}
+
+// LoadDefaultConfigsReport is like LoadDefaultConfigs but also returns any
+// collisions detected during merging. The collision list records when a server
+// name from a later config file shadows one from an earlier file. Precedence
+// (low → high):
+//  1. ~/.config/fir/mcp.json           (user base)
+//  2. ~/.config/fir/mcp.d/*.json       (user drop-ins, lexically sorted)
+//  3. <projectDir>/.fir/mcp.json       (project base)
+func LoadDefaultConfigsReport(projectDir string) (*ConfigFile, []Collision, error) {
+	configDir := defaultConfigDir()
 	userPath, projectPath := DefaultConfigPaths(projectDir)
 
-	var user, project *ConfigFile
-	var err error
+	// Track sources for collision detection across merge steps.
+	serverSource := make(map[string]string) // server name -> file path
+	collisionMap := make(map[string]*Collision)
+	merged := &ConfigFile{MCPServers: make(map[string]ServerConfig)}
 
+	// Helper to add or extend a collision.
+	addCollision := func(server, wonFile, shadowedFile string) {
+		if c, exists := collisionMap[server]; exists {
+			c.ShadowedFiles = append(c.ShadowedFiles, shadowedFile)
+			c.WonFile = wonFile
+		} else {
+			collisionMap[server] = &Collision{
+				Server:        server,
+				WonFile:       wonFile,
+				ShadowedFiles: []string{shadowedFile},
+			}
+		}
+	}
+
+	// 1. Load user base config.
 	if userPath != "" {
-		if user, err = LoadConfigFile(userPath); err != nil {
-			return nil, fmt.Errorf("user MCP config: %w", err)
+		userCfg, err := LoadConfigFile(userPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("user MCP config: %w", err)
 		}
-	} else {
-		user = &ConfigFile{}
+		for name, cfg := range userCfg.MCPServers {
+			merged.MCPServers[name] = cfg
+			serverSource[name] = userPath
+		}
 	}
 
+	// 2. Load user drop-ins (mcp.d/*.json).
+	mcpDDir := filepath.Join(configDir, "mcp.d")
+	dirCfg, dirCollisions, dirSources, err := loadConfigDir(mcpDDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("user MCP drop-ins: %w", err)
+	}
+
+	// Merge drop-ins into our tracking, detecting collisions with base config.
+	for name, cfg := range dirCfg.MCPServers {
+		if prevFile, exists := serverSource[name]; exists {
+			// Drop-in shadows the base config.
+			addCollision(name, dirSources[name], prevFile)
+		}
+		merged.MCPServers[name] = cfg
+		serverSource[name] = dirSources[name]
+	}
+
+	// Merge dir-internal collisions into our collision map.
+	for _, c := range dirCollisions {
+		if existing, exists := collisionMap[c.Server]; exists {
+			// Extend with additional shadowed files from the dir.
+			existing.ShadowedFiles = append(existing.ShadowedFiles, c.ShadowedFiles...)
+			existing.WonFile = c.WonFile
+		} else {
+			collisionMap[c.Server] = &Collision{
+				Server:        c.Server,
+				WonFile:       c.WonFile,
+				ShadowedFiles: append([]string(nil), c.ShadowedFiles...),
+			}
+		}
+	}
+
+	// 3. Load project config (highest precedence).
+	// Project shadowing user configs is expected, not reported as collision.
 	if projectPath != "" {
-		if project, err = LoadConfigFile(projectPath); err != nil {
-			return nil, fmt.Errorf("project MCP config: %w", err)
+		projCfg, err := LoadConfigFile(projectPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("project MCP config: %w", err)
 		}
-	} else {
-		project = &ConfigFile{}
+		for name, cfg := range projCfg.MCPServers {
+			merged.MCPServers[name] = cfg
+		}
 	}
 
-	return MergeConfigs(user, project), nil
+	// Convert collision map to slice.
+	var collisions []Collision
+	for _, c := range collisionMap {
+		collisions = append(collisions, *c)
+	}
+
+	return merged, collisions, nil
 }

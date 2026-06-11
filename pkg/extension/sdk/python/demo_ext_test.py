@@ -334,7 +334,7 @@ class TestDemoInit(DemoTestCase):
             {
                 "word_count", "shell_run",
                 "change_model", "inject_message", "restart_demo",
-                "reload_ext_demo",
+                "reload_ext_demo", "reload_mcp_demo",
                 "batch_example", "show_config_dirs",
             },
         )
@@ -567,6 +567,17 @@ class TestDemoTools(DemoTestCase):
         self.assertIsNotNone(msg, "expected reload_extension call")
         assert msg is not None
         self.assertEqual(msg["params"]["name"], "my-helper")
+        fake.stop()
+
+    # -- reload_mcp_demo -----------------------------------------------------
+
+    def test_reload_mcp_demo_calls_reload_mcp(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "reload_mcp_demo", {})
+        msg = fake.wait_for_method("reload_mcp")
+        self.assertIsNotNone(msg, "expected reload_mcp call")
         fake.stop()
 
     # -- batch_example -------------------------------------------------------

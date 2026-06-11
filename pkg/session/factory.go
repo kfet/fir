@@ -296,6 +296,13 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 // is an additional config file (e.g. from --mcp-config), pass "" to skip.
 // extraConfigs are additional server configs (e.g. client-provided via ACP)
 // that are merged last (highest precedence).
+//
+// Concurrency note: Manager.Reload serializes internally, but the nil-manager
+// creation path (*mgrPtr = StartMCPManager) is an unsynchronized pointer write.
+// Callers must not invoke ReloadMCP concurrently for the same mgrPtr when the
+// manager is nil. In practice, the TUI /reload and the extension reload_mcp
+// bridge are the two call sites; concurrent invocations are rare but could
+// create two managers and leak one if they race on a nil manager.
 func ReloadMCP(ctx context.Context, mgrPtr **mcp.Manager, sess *AgentSession, cwd, extraConfigPath string, extraConfigs map[string]mcp.ServerConfig) error {
 	cfg, err := mcp.LoadDefaultConfigs(cwd)
 	if err != nil {

@@ -85,6 +85,11 @@ type BridgeAPI interface {
 	// refused. Returns an error when reload is unsupported (no manager
 	// wired) or the target cannot be reloaded.
 	ReloadExtension(name string) error
+	// ReloadMCP re-reads MCP config from disk and applies the diff to
+	// the running MCP servers. Returns a result containing any collisions
+	// detected (when multiple config files define the same server name)
+	// and any errors from individual server starts/restarts.
+	ReloadMCP() (ReloadMCPResult, error)
 }
 
 // ExecResult is the result of a shell command.
@@ -156,4 +161,34 @@ type ToolInfo struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+// ReloadMCPResult is returned by ReloadMCP with collision and error details.
+type ReloadMCPResult struct {
+	// Collisions records server names that were shadowed during config merge.
+	Collisions []MCPCollision `json:"collisions,omitempty"`
+	// Errors records per-server or global errors from the reload.
+	Errors []MCPServerError `json:"errors,omitempty"`
+}
+
+// MCPCollision records when a server name is shadowed during config merging.
+// This is a local mirror of mcp.Collision to avoid a pkg/extension → pkg/mcp
+// import (which might create cycles in some call graphs). Conversion happens
+// at the app.go callback boundary.
+type MCPCollision struct {
+	Server        string   `json:"server"`
+	WonFile       string   `json:"won_file"`
+	ShadowedFiles []string `json:"shadowed_files"`
+}
+
+// MCPServerError records an error from an individual MCP server during reload.
+type MCPServerError struct {
+	Server  string `json:"server"`
+	Message string `json:"message"`
+}
+
+// ConvertMCPCollision converts a single collision struct. Used by callers
+// with access to mcp.Collision who need to populate ReloadMCPResult.
+func ConvertMCPCollision(server, wonFile string, shadowedFiles []string) MCPCollision {
+	return MCPCollision{Server: server, WonFile: wonFile, ShadowedFiles: shadowedFiles}
 }

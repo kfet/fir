@@ -1285,6 +1285,9 @@ func (n *noopBridgeAPI) Introspect() session.Introspection {
 func (n *noopBridgeAPI) GetObservableStore() *store.ObservableStore { return nil }
 func (n *noopBridgeAPI) RestartSession(_, _ string) error           { return nil }
 func (n *noopBridgeAPI) ReloadExtension(_ string) error             { return nil }
+func (n *noopBridgeAPI) ReloadMCP() (extension.ReloadMCPResult, error) {
+	return extension.ReloadMCPResult{}, nil
+}
 
 // writeCommandExtScript writes a Python extension script that:
 //   - responds to the init handshake with a "greet" command

@@ -36,6 +36,9 @@ type SessionBridge struct {
 	reloadMu sync.RWMutex
 	reloadFn func(name string) error
 
+	reloadMCPMu sync.RWMutex
+	reloadMCPFn func() (ReloadMCPResult, error)
+
 	// Version and Mode are passed through into Introspect results.
 	// Populated by Setup.
 	Version string
@@ -475,4 +478,27 @@ func (b *SessionBridge) ReloadExtension(name string) error {
 		return fmt.Errorf("extension reload is not supported in this session")
 	}
 	return fn(name)
+}
+
+// SetReloadMCPFn registers the MCP reload handler. It is wired by app.go at
+// session setup so that the inbound reload_mcp RPC can re-read config from
+// disk and apply it to the running MCP manager. Pass nil to remove.
+// Mirrors SetReloadFn.
+func (b *SessionBridge) SetReloadMCPFn(fn func() (ReloadMCPResult, error)) {
+	b.reloadMCPMu.Lock()
+	b.reloadMCPFn = fn
+	b.reloadMCPMu.Unlock()
+}
+
+// ReloadMCP delegates to the registered MCP reload handler to re-read config
+// from disk and apply changes. Returns an error when no handler is registered
+// (MCP reload unsupported).
+func (b *SessionBridge) ReloadMCP() (ReloadMCPResult, error) {
+	b.reloadMCPMu.RLock()
+	fn := b.reloadMCPFn
+	b.reloadMCPMu.RUnlock()
+	if fn == nil {
+		return ReloadMCPResult{}, fmt.Errorf("MCP reload is not supported in this session")
+	}
+	return fn()
 }

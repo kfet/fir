@@ -443,3 +443,106 @@ var errTestReload = errTest("boom")
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+// ---------------------------------------------------------------------------
+// SessionBridge: reload_mcp
+// ---------------------------------------------------------------------------
+
+// TestSessionBridge_ReloadMCP_NoCallback asserts an error when no manager has
+// wired a reload handler.
+func TestSessionBridge_ReloadMCP_NoCallback(t *testing.T) {
+	sb := &SessionBridge{}
+	_, err := sb.ReloadMCP()
+	if err == nil {
+		t.Fatal("expected error when no ReloadMCPFn is registered")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("expected 'not supported' in error, got %q", err.Error())
+	}
+}
+
+// TestSessionBridge_ReloadMCP_InvokesCallback asserts the wired handler is
+// called and returns the result.
+func TestSessionBridge_ReloadMCP_InvokesCallback(t *testing.T) {
+	sb := &SessionBridge{}
+	called := make(chan struct{}, 1)
+	expected := ReloadMCPResult{
+		Collisions: []MCPCollision{{Server: "srv", WonFile: "/a.json", ShadowedFiles: []string{"/b.json"}}},
+	}
+	sb.SetReloadMCPFn(func() (ReloadMCPResult, error) {
+		called <- struct{}{}
+		return expected, nil
+	})
+
+	result, err := sb.ReloadMCP()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("reload_mcp callback was not invoked")
+	}
+	if len(result.Collisions) != 1 || result.Collisions[0].Server != "srv" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bridge dispatch arm: reload_mcp
+// ---------------------------------------------------------------------------
+
+func TestBridge_ReloadMCP_RPC(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{Name: "caller-ext"})
+	api := newMockAPI()
+	api.mu.Lock()
+	api.reloadMCPResult = ReloadMCPResult{
+		Collisions: []MCPCollision{{Server: "test-srv", WonFile: "/test.json"}},
+	}
+	api.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(20, "reload_mcp", nil)
+
+	resp := mustResponse(t, extCodec)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	api.mu.Lock()
+	calls := api.reloadMCPCalls
+	api.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("expected 1 reload_mcp call, got %d", calls)
+	}
+
+	// Verify the result structure is returned.
+	var result ReloadMCPResult
+	if err := json.Unmarshal(*resp.Result, &result); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	if len(result.Collisions) != 1 || result.Collisions[0].Server != "test-srv" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestBridge_ReloadMCP_PropagatesError(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{Name: "caller-ext"})
+	api := newMockAPI()
+	api.mu.Lock()
+	api.reloadMCPErr = errTestReload
+	api.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(21, "reload_mcp", nil)
+
+	resp := mustResponse(t, extCodec)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "boom") {
+		t.Fatalf("expected propagated error, got %v", resp.Error)
+	}
+}

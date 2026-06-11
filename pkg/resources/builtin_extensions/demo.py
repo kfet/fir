@@ -16,7 +16,7 @@ Outbound calls demonstrated (extension → fir):
   set_label · clear_label ·
   set_model · send_message · send_user_message ·
   set_session_data · get_session_data · get_session_file · get_session_name · get_session_id · continue_session · side_query · call_tool ·
-  report_progress · restart_session · reload_extension ·
+  report_progress · restart_session · reload_extension · reload_mcp ·
   prepend
 
 Inbound surface demonstrated (fir → extension):
@@ -193,6 +193,24 @@ def reload_ext_demo(params: dict, ctx: fir_ext.Context) -> dict:
     # JSON-RPC error for builtins / self-reload, surfaced here as a failure.
     ctx.reload_extension(params["name"])               # reload_extension
     return {"ok": True}
+
+
+@fir_ext.tool(
+    name="reload_mcp_demo",
+    description=(
+        "Demonstrate ctx.reload_mcp(). Re-reads MCP server configurations "
+        "from disk (mcp.json, mcp.d/*.json) and applies the diff to running "
+        "servers. Returns collisions (shadowed configs) and errors."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+    },
+)
+def reload_mcp_demo(params: dict, ctx: fir_ext.Context) -> dict:
+    # reload_mcp: re-reads MCP config from disk and reloads servers.
+    # Returns a dict with 'collisions' and 'errors' arrays.
+    return ctx.reload_mcp()                             # reload_mcp
 
 
 @fir_ext.tool(

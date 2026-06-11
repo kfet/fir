@@ -36,6 +36,10 @@ type mockBridgeAPI struct {
 	reloadNames     []string
 	reloadErr       error
 	reloadFn        func(name string) error
+	reloadMCPFn     func() (ReloadMCPResult, error)
+	reloadMCPCalls  int
+	reloadMCPResult ReloadMCPResult
+	reloadMCPErr    error
 	observableStore *store.ObservableStore
 	// captures of the most recent SideQuery call
 	sideQueryQuestion string
@@ -199,6 +203,22 @@ func (m *mockBridgeAPI) ReloadExtension(name string) error {
 	defer m.mu.Unlock()
 	m.reloadNames = append(m.reloadNames, name)
 	return m.reloadErr
+}
+
+func (m *mockBridgeAPI) SetReloadMCPFn(fn func() (ReloadMCPResult, error)) {
+	m.mu.Lock()
+	m.reloadMCPFn = fn
+	m.mu.Unlock()
+}
+
+func (m *mockBridgeAPI) ReloadMCP() (ReloadMCPResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloadMCPCalls++
+	if m.reloadMCPFn != nil {
+		return m.reloadMCPFn()
+	}
+	return m.reloadMCPResult, m.reloadMCPErr
 }
 
 // Verify mockBridgeAPI satisfies BridgeAPI at compile time.

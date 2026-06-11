@@ -2741,6 +2741,35 @@ class Context:
         """
         self._call("reload_extension", {"name": name})
 
+    def reload_mcp(self) -> dict:
+        """Reload MCP server configurations from disk.
+
+        Re-reads MCP config files (``~/.config/fir/mcp.json``,
+        ``~/.config/fir/mcp.d/*.json``, and ``<project>/.fir/mcp.json``),
+        merges them with precedence, and applies the diff to the running
+        MCP servers. Servers with changed configs are restarted; unchanged
+        servers keep their existing sessions; removed servers are stopped;
+        new servers are started.
+
+        Returns a dict with:
+          collisions  List of dicts recording when a server name from a later
+                      config file shadowed one from an earlier file. Each has
+                      ``server``, ``won_file``, and ``shadowed_files`` keys.
+          errors      List of dicts recording per-server or global errors from
+                      the reload. Each has ``server`` (may be empty for global
+                      errors) and ``message`` keys.
+
+        Intended for an agent that has just written a drop-in config file
+        to ``~/.config/fir/mcp.d/`` and wants to activate those servers
+        mid-session.
+
+        Returns
+        -------
+        dict
+            The reload result with ``collisions`` and ``errors`` lists.
+        """
+        return self._call("reload_mcp")
+
     def side_query(
         self,
         question: str,

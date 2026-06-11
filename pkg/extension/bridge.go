@@ -581,6 +581,16 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 			result = okTrue
 		}
 
+	case "reload_mcp":
+		// No params required. The agent just wants to re-read MCP config
+		// from disk and apply changes.
+		mcpResult, err := api.ReloadMCP()
+		if err != nil {
+			rpcErr = &Error{Code: -32000, Message: err.Error()}
+		} else {
+			result = mcpResult
+		}
+
 	default:
 		// Try auth helper RPCs.
 		if result, rpcErr, handled := b.handleAuthHelperRPC(req.Method, req.Params); handled {

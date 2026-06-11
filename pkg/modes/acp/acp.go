@@ -408,6 +408,30 @@ func (pa *firAgent) createSession(ctx context.Context, sessionID, cwd string, mc
 			// response. See runPendingHandoffs.
 			if extSetup.Bridge != nil {
 				extSetup.Bridge.SetRestartFn(func(_, _ string) error { return nil })
+				// Wire the MCP reload callback so extensions can call reload_mcp.
+				extSetup.Bridge.SetReloadMCPFn(func() (extension.ReloadMCPResult, error) {
+					// Load config with collision reporting.
+					_, collisions, err := mcp.LoadDefaultConfigsReport(entry.cwd)
+					if err != nil {
+						return extension.ReloadMCPResult{
+							Errors: []extension.MCPServerError{{Message: err.Error()}},
+						}, nil
+					}
+					// Convert mcp.Collision to extension.MCPCollision.
+					extCollisions := make([]extension.MCPCollision, len(collisions))
+					for i, c := range collisions {
+						extCollisions[i] = extension.ConvertMCPCollision(c.Server, c.WonFile, c.ShadowedFiles)
+					}
+					// Perform the actual reload, including client-provided MCP configs.
+					reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, "", entry.clientMCPConfigs)
+					result := extension.ReloadMCPResult{Collisions: extCollisions}
+					if reloadErr != nil {
+						result.Errors = append(result.Errors, extension.MCPServerError{
+							Message: reloadErr.Error(),
+						})
+					}
+					return result, nil
+				})
 			}
 			go func() {
 				t1 := time.Now()
