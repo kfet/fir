@@ -21,7 +21,6 @@ package log
 import (
 	"context"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -99,8 +98,9 @@ func ParseLevel(s string) (slog.Level, bool) {
 // current SetLevel threshold (defaults to Debug if SetLevel was not called).
 // The file is created if it doesn't exist and appended to on each run,
 // so concurrent or successive fir processes share the same log safely.
+// The file is rotated in place when it grows past cfg.MaxSizeMB.
 // Returns a cleanup function that flushes and closes the log file.
-func Init(enabled bool, path string) (cleanup func(), err error) {
+func Init(enabled bool, path string, cfg RotateConfig) (cleanup func(), err error) {
 	if !enabled {
 		levelVar.Set(levelDisabled)
 		return func() {}, nil
@@ -111,12 +111,12 @@ func Init(enabled bool, path string) (cleanup func(), err error) {
 		levelVar.Set(slog.LevelDebug)
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	w, err := newRotatingWriter(path, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: levelVar,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			// Render our custom Trace level as "TRACE" instead of "DEBUG-4".
@@ -134,7 +134,7 @@ func Init(enabled bool, path string) (cleanup func(), err error) {
 	// dependency's) lands in the debug log file instead of stderr.
 	slog.SetDefault(l)
 
-	return func() { f.Close() }, nil
+	return func() { w.Close() }, nil
 }
 
 // Trace logs at trace level (more verbose than Debug). No-op when not enabled.

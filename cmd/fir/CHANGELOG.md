@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- In-place rotation for the debug log (`<agent-dir>/debug.log`). When the file passes a size cap it is raw-copied and truncated in place (same inode, no writer reopen) under an advisory `flock` that drains in-flight writes — loss-free and cross-process safe. Compression to `debug.log.N.gz` (standard gzip, `zcat`-readable) runs detached, never under the lock. Configurable via `settings.json` `"debugLog"`: `maxSizeMB` (100), `keep` (20), `compress` (true), `checkEveryWrites` (1000), `checkEverySeconds` (30).
+
 ## [0.67.2] - 2026-06-10
 
 ### Changed

@@ -135,7 +135,7 @@ func runLoginSubcommand() error {
 	if debugPath == "" {
 		debugPath = filepath.Join(resolveAgentDir(), "debug.log")
 	}
-	logCleanup, err := firlog.Init(debugEnabled, debugPath)
+	logCleanup, err := firlog.Init(debugEnabled, debugPath, resolveDebugLogConfig())
 	if err != nil {
 		return fmt.Errorf("init debug log: %w", err)
 	}

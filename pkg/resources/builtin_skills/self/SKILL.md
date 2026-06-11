@@ -17,6 +17,7 @@ For detailed CLI flags, run `fir --help`. For interactive commands and keyboard 
 - `-vv` enables Trace logging — per micro-op events such as cache-prefix invalidations and MCP per-event chatter. `-vvv` and beyond clamp to `-vv` with a warning.
 - `-V` (or `--version`) prints the version. The old `-v` short alias for `--version` is gone; lone `fir -v` prints a migration note to stderr.
 - `FIR_LOG_LEVEL=info|debug|trace` (or a raw slog numeric level) sets the level via env; wins over `FIR_DEBUG=1`. CLI `-v`/`-vv` win over both.
+- `debug.log` is rotated in place when it grows past a size cap. Tune via `settings.json` `"debugLog"` (global or project): `maxSizeMB` (default 100), `keep` (default 20 compressed backups), `compress` (default true), `checkEveryWrites` (default 1000), `checkEverySeconds` (default 30). Backups are standard gzip (`debug.log.1.gz`, `.2.gz`, …) readable by `gunzip`/`zcat`. Rotation is cross-process safe via an advisory flock on `debug.log.lock`.
 
 ## Installing fir
 
@@ -467,6 +468,14 @@ All fields are optional. Nested objects merge recursively; arrays and primitives
     "enabled": true,
     "triggerTokens": 150000,             // When to trigger (min 50000, default 150000)
     "instructions": ""                   // Custom summarization prompt (replaces default)
+  },
+
+  "debugLog": {                          // Debug log (debug.log) rotation
+    "maxSizeMB": 100,                    // Rotate when the file reaches this size
+    "keep": 20,                          // Number of compressed backups to retain
+    "compress": true,                    // gzip backups (debug.log.N.gz)
+    "checkEveryWrites": 1000,            // Stat the file at most once per N writes
+    "checkEverySeconds": 30              // ...or once per this many seconds
   },
 
   // Internal (managed by fir)

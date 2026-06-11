@@ -62,6 +62,15 @@ type MarkdownSettings struct {
 	CodeBlockIndent *string `json:"codeBlockIndent,omitempty"`
 }
 
+// DebugLogSettings controls rotation of the debug log file (<agent-dir>/debug.log).
+type DebugLogSettings struct {
+	MaxSizeMB         *int  `json:"maxSizeMB,omitempty"`
+	Keep              *int  `json:"keep,omitempty"`
+	Compress          *bool `json:"compress,omitempty"`
+	CheckEveryWrites  *int  `json:"checkEveryWrites,omitempty"`
+	CheckEverySeconds *int  `json:"checkEverySeconds,omitempty"`
+}
+
 // Settings is the full settings schema.
 type Settings struct {
 	DefaultProvider        string                    `json:"defaultProvider,omitempty"`
@@ -94,6 +103,7 @@ type Settings struct {
 	Markdown               *MarkdownSettings         `json:"markdown,omitempty"`
 	ServerTools            []string                  `json:"serverTools,omitempty"`
 	ServerCompaction       *ServerCompactionSettings `json:"serverCompaction,omitempty"`
+	DebugLog               *DebugLogSettings         `json:"debugLog,omitempty"`
 }
 
 // deepMergeSettings merges overrides into base, with nested objects merged recursively.
@@ -228,6 +238,19 @@ func deepMergeSettings(base, overrides Settings) Settings {
 			md := *r.Markdown
 			mergeStrPtr(&md.CodeBlockIndent, overrides.Markdown.CodeBlockIndent)
 			r.Markdown = &md
+		}
+	}
+	if overrides.DebugLog != nil {
+		if r.DebugLog == nil {
+			r.DebugLog = overrides.DebugLog
+		} else {
+			dl := *r.DebugLog
+			mergeInt(&dl.MaxSizeMB, overrides.DebugLog.MaxSizeMB)
+			mergeInt(&dl.Keep, overrides.DebugLog.Keep)
+			mergeBool(&dl.Compress, overrides.DebugLog.Compress)
+			mergeInt(&dl.CheckEveryWrites, overrides.DebugLog.CheckEveryWrites)
+			mergeInt(&dl.CheckEverySeconds, overrides.DebugLog.CheckEverySeconds)
+			r.DebugLog = &dl
 		}
 	}
 
@@ -832,6 +855,37 @@ type RetryResult struct {
 	MaxRetries  int
 	BaseDelayMs int
 	MaxDelayMs  int
+}
+
+// DebugLogResult holds resolved debug-log rotation settings.
+type DebugLogResult struct {
+	MaxSizeMB         int
+	Keep              int
+	Compress          bool
+	CheckEveryWrites  int
+	CheckEverySeconds int
+}
+
+// GetDebugLogSettings returns the resolved debug-log rotation settings,
+// applying defaults for any unset keys.
+func (sm *SettingsManager) GetDebugLogSettings() DebugLogResult {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	r := DebugLogResult{
+		MaxSizeMB:         100,
+		Keep:              20,
+		Compress:          true,
+		CheckEveryWrites:  1000,
+		CheckEverySeconds: 30,
+	}
+	if d := sm.settings.DebugLog; d != nil {
+		r.MaxSizeMB = intDefault(d.MaxSizeMB, r.MaxSizeMB)
+		r.Keep = intDefault(d.Keep, r.Keep)
+		r.Compress = boolDefault(d.Compress, r.Compress)
+		r.CheckEveryWrites = intDefault(d.CheckEveryWrites, r.CheckEveryWrites)
+		r.CheckEverySeconds = intDefault(d.CheckEverySeconds, r.CheckEverySeconds)
+	}
+	return r
 }
 
 func (sm *SettingsManager) SetHideThinkingBlock(hide bool) {

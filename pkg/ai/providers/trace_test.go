@@ -16,7 +16,7 @@ import (
 func withTraceLog(t *testing.T, fn func()) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "trace.log")
-	cleanup, err := firlog.Init(true, path)
+	cleanup, err := firlog.Init(true, path, firlog.RotateConfig{})
 	if err != nil {
 		t.Fatalf("firlog.Init: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestTraceWireMessages_AcceptsBytesAndString(t *testing.T) {
 
 func TestTraceWireMessages_NoOpWhenDisabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.log")
-	cleanup, err := firlog.Init(true, path)
+	cleanup, err := firlog.Init(true, path, firlog.RotateConfig{})
 	if err != nil {
 		t.Fatalf("firlog.Init: %v", err)
 	}

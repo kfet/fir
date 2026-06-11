@@ -17,7 +17,7 @@ func TestTraceEnabled(t *testing.T) {
 
 	// At Info: Trace disabled.
 	SetLevel(slog.LevelInfo)
-	cleanup, err := Init(true, path)
+	cleanup, err := Init(true, path, RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestLevelMapping(t *testing.T) {
 			resetLogger()
 			path := filepath.Join(t.TempDir(), "debug.log")
 			SetLevel(tc.level)
-			cleanup, err := Init(true, path)
+			cleanup, err := Init(true, path, RotateConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}

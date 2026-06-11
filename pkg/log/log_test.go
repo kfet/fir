@@ -16,7 +16,7 @@ func resetLogger() {
 
 func TestInit_Disabled(t *testing.T) {
 	resetLogger()
-	cleanup, err := Init(false, "")
+	cleanup, err := Init(false, "", RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestInit_Enabled_WritesJSON(t *testing.T) {
 	resetLogger()
 	path := filepath.Join(t.TempDir(), "debug.log")
 
-	cleanup, err := Init(true, path)
+	cleanup, err := Init(true, path, RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestInit_Enabled_WritesJSON(t *testing.T) {
 
 func TestInit_BadPath(t *testing.T) {
 	resetLogger()
-	_, err := Init(true, "/nonexistent/dir/file.log")
+	_, err := Init(true, "/nonexistent/dir/file.log", RotateConfig{})
 	if err == nil {
 		t.Fatal("expected error for bad path")
 	}
@@ -95,7 +95,7 @@ func TestInit_AppendsToExistingFile(t *testing.T) {
 	// Write some pre-existing content (valid JSON line).
 	os.WriteFile(path, []byte(`{"msg":"old"}`+"\n"), 0644)
 
-	cleanup, err := Init(true, path)
+	cleanup, err := Init(true, path, RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestWith_SubLogger(t *testing.T) {
 	resetLogger()
 	path := filepath.Join(t.TempDir(), "debug.log")
 
-	cleanup, err := Init(true, path)
+	cleanup, err := Init(true, path, RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestConcurrentLogDuringInit(t *testing.T) {
 		}
 	}()
 
-	cleanup, err := Init(true, path)
+	cleanup, err := Init(true, path, RotateConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

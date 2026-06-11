@@ -346,6 +346,24 @@ func clampThinkingLevel(s thinkingLevelSetter, thinking agent.ThinkingLevel) {
 }
 
 // reportSettingsErrors reports any settings load errors to stderr.
+// resolveDebugLogConfig loads debug-log rotation settings (global + project)
+// and returns them as a firlog.RotateConfig with defaults applied.
+func resolveDebugLogConfig() firlog.RotateConfig {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	sm := config.NewSettingsManager(cwd, resolveAgentDir())
+	d := sm.GetDebugLogSettings()
+	return firlog.RotateConfig{
+		MaxSizeMB:         d.MaxSizeMB,
+		Keep:              d.Keep,
+		Compress:          d.Compress,
+		CheckEveryWrites:  d.CheckEveryWrites,
+		CheckEverySeconds: d.CheckEverySeconds,
+	}
+}
+
 func reportSettingsErrors(settingsManager *config.SettingsManager, context string) {
 	for _, se := range settingsManager.DrainErrors() {
 		fmt.Fprintf(os.Stderr, "Warning (%s, %s settings): %v\n", context, se.Scope, se.Err)
@@ -421,7 +439,7 @@ func run() error {
 	if debugPath == "" {
 		debugPath = filepath.Join(resolveAgentDir(), "debug.log")
 	}
-	debugCleanup, err := firlog.Init(enabled, debugPath)
+	debugCleanup, err := firlog.Init(enabled, debugPath, resolveDebugLogConfig())
 	if err != nil {
 		return fmt.Errorf("init debug log: %w", err)
 	}
@@ -672,7 +690,7 @@ func runListAvailableModels(args *Args) error {
 		if debugPath == "" {
 			debugPath = filepath.Join(resolveAgentDir(), "debug.log")
 		}
-		cleanup, _ := firlog.Init(true, debugPath)
+		cleanup, _ := firlog.Init(true, debugPath, resolveDebugLogConfig())
 		if cleanup != nil {
 			defer cleanup()
 		}
