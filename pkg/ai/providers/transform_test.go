@@ -396,7 +396,7 @@ func TestTransformMessages_RedactedThinkingSameProviderDifferentModelID(t *testi
 }
 
 func TestTransformMessages_ToolResultMetaAppended(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	orig := ai.ToolResultMessage{
 		Role:       ai.RoleToolResult,
 		ToolCallID: "tc-1",
@@ -406,7 +406,7 @@ func TestTransformMessages_ToolResultMetaAppended(t *testing.T) {
 	}
 	messages := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
-			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-3",
+			Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Model: "claude-3",
 			Content:    []ai.AssistantContent{ai.NewToolCallContent("tc-1", "Bash", nil)},
 			StopReason: ai.StopReasonStop,
 		}),
@@ -439,10 +439,10 @@ func TestTransformMessages_ToolResultMetaAppended(t *testing.T) {
 }
 
 func TestTransformMessages_ToolResultNoMetaPassThrough(t *testing.T) {
-	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages}
+	model := &ai.Model{ID: "claude-3", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages}
 	messages := []ai.Message{
 		ai.NewAssistantMsg(ai.AssistantMessage{
-			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-3",
+			Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Model: "claude-3",
 			Content:    []ai.AssistantContent{ai.NewToolCallContent("tc-1", "Bash", nil)},
 			StopReason: ai.StopReasonStop,
 		}),

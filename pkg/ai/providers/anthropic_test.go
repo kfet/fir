@@ -2993,7 +2993,7 @@ func TestAnthropic_OnRetryCallback(t *testing.T) {
 // asserts the rendered meta line lands in the tool_result content string,
 // while the original persisted message stays clean.
 func TestAnthropic_ToolResultMeta_RenderedInRequest(t *testing.T) {
-	model := &ai.Model{ID: "claude-sonnet", Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
+	model := &ai.Model{ID: "claude-sonnet", Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, BaseURL: "https://api.anthropic.com", MaxTokens: 8192}
 
 	orig := ai.ToolResultMessage{
 		Role:       ai.RoleToolResult,
@@ -3006,7 +3006,7 @@ func TestAnthropic_ToolResultMeta_RenderedInRequest(t *testing.T) {
 		ai.NewUserMsg("run it", 1000),
 		ai.NewAssistantMsg(ai.AssistantMessage{
 			Role:     "assistant",
-			Provider: ai.ProviderAnthropic, Api: ai.ApiAnthropicMessages, Model: "claude-sonnet",
+			Provider: ai.ProviderAnthropic, API: ai.ApiAnthropicMessages, Model: "claude-sonnet",
 			Content: []ai.AssistantContent{
 				ai.NewToolCallContent("toolu_01", "Bash", map[string]any{"command": "echo hi"}),
 			},
