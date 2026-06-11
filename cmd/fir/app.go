@@ -473,7 +473,7 @@ func run() error {
 		// Report whether a newer release is available (best-effort, cached).
 		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		rel, err := update.CheckLatest(checkCtx, version, resolveAgentDir())
+		rel, err := update.CheckLatestFresh(checkCtx, version, resolveAgentDir())
 		switch {
 		case err != nil:
 			fmt.Println("Update check failed: " + err.Error())

@@ -213,6 +213,53 @@ func TestCheckLatest_StaleCache_TriesNetwork(t *testing.T) {
 	}
 }
 
+// CheckLatestFresh must ignore the cache and always hit the network, so an
+// explicit `fir -V` can't report a stale result right after a new release is
+// cut. We seed a FRESH cache advertising a newer version: the cached path
+// returns it straight from disk, while the fresh path must NOT (it goes to the
+// network instead). Pairing with a cancelled context keeps the network attempt
+// deterministic — it cannot succeed and return the cached value.
+func TestCheckLatestFresh_BypassesFreshCache(t *testing.T) {
+	dir := t.TempDir()
+	writeCache(filepath.Join(dir, "update-check.json"), &cacheEntry{
+		CheckedAt:     time.Now(), // fresh — within cacheTTL
+		LatestVersion: "v0.5.0",   // newer than current v0.4.0
+	})
+
+	// Cached path: returns the newer version straight from the fresh cache,
+	// no network needed (deterministic even with a cancelled context).
+	ctxA, cancelA := context.WithCancel(context.Background())
+	cancelA()
+	rel, err := CheckLatest(ctxA, "v0.4.0", dir)
+	if err != nil {
+		t.Fatalf("cached CheckLatest unexpected error: %v", err)
+	}
+	if rel == nil || rel.Version != "v0.5.0" {
+		t.Fatalf("cached CheckLatest should return cached v0.5.0, got %+v", rel)
+	}
+
+	// Fresh path: must bypass the cache. With a cancelled context the network
+	// attempt cannot succeed, so it can never reproduce the cached v0.5.0 —
+	// proving the fast-path cache read was skipped.
+	ctxB, cancelB := context.WithCancel(context.Background())
+	cancelB()
+	relFresh, _ := CheckLatestFresh(ctxB, "v0.4.0", dir)
+	if relFresh != nil && relFresh.Version == "v0.5.0" {
+		t.Error("CheckLatestFresh returned the cached v0.5.0 — it must bypass the cache, not read it")
+	}
+}
+
+func TestCheckLatestFresh_SkipsDevBuild(t *testing.T) {
+	dir := t.TempDir()
+	rel, err := CheckLatestFresh(context.Background(), "dev", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rel != nil {
+		t.Errorf("expected nil for dev build, got %+v", rel)
+	}
+}
+
 // ============================================================================
 // IsNewer edge cases
 // ============================================================================

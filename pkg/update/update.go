@@ -63,18 +63,33 @@ func repo() selfupdate.RepositorySlug {
 // skipped (dev build), or if the API call fails non-fatally.
 // cacheDir is the directory where update-check.json is written (agentDir).
 func CheckLatest(ctx context.Context, currentVersion, cacheDir string) (*Release, error) {
+	return checkLatest(ctx, currentVersion, cacheDir, false)
+}
+
+// CheckLatestFresh is like CheckLatest but skips the cache read and always
+// queries GitHub for the latest release. Use it for explicit, user-initiated
+// checks (e.g. `fir -V`) where a stale cache must not mask a just-published
+// release. It still refreshes the cache on success.
+func CheckLatestFresh(ctx context.Context, currentVersion, cacheDir string) (*Release, error) {
+	return checkLatest(ctx, currentVersion, cacheDir, true)
+}
+
+func checkLatest(ctx context.Context, currentVersion, cacheDir string, forceRefresh bool) (*Release, error) {
 	if currentVersion == "" || currentVersion == "dev" {
 		return nil, nil
 	}
 
 	cachePath := cacheDir + "/update-check.json"
 
-	// Fast path: use cached result if still fresh.
-	if entry, ok := readCache(cachePath); ok && time.Since(entry.CheckedAt) < cacheTTL {
-		if !IsNewer(entry.LatestVersion, currentVersion) {
-			return nil, nil
+	// Fast path: use cached result if still fresh. Skipped on a forced refresh
+	// so explicit checks never report a stale "up to date" result.
+	if !forceRefresh {
+		if entry, ok := readCache(cachePath); ok && time.Since(entry.CheckedAt) < cacheTTL {
+			if !IsNewer(entry.LatestVersion, currentVersion) {
+				return nil, nil
+			}
+			return &Release{Version: entry.LatestVersion}, nil
 		}
-		return &Release{Version: entry.LatestVersion}, nil
 	}
 
 	// Slow path: fetch from GitHub (no auth for background check).
