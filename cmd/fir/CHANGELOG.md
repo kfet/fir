@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-06-11
+
+### Fixed
+- `fir -V` now performs a fresh update check instead of reusing the 24-hour background cache. Previously, for up to 24h after a new release was published, an explicit `fir -V` kept printing "You are on the latest version" even when a newer release existed (the cache, written by the background startup check, masked it). The explicit version check now bypasses the cache read and always queries the distribution repo (still refreshing the cache); the background startup notice keeps using the cache to avoid hammering the API.
+
 ### Added
 - In-place rotation for the debug log (`<agent-dir>/debug.log`). When the file passes a size cap it is raw-copied and truncated in place (same inode, no writer reopen) under an advisory `flock` that drains in-flight writes — loss-free and cross-process safe. Compression to `debug.log.N.gz` (standard gzip, `zcat`-readable) runs detached, never under the lock. Configurable via `settings.json` `"debugLog"`: `maxSizeMB` (100), `keep` (20), `compress` (true), `checkEveryWrites` (1000), `checkEverySeconds` (30).
 
