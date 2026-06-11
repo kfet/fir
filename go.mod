@@ -9,7 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.8.0
 	github.com/kfet/agent v0.1.0
-	github.com/kfet/ai v0.1.1
+	github.com/kfet/ai v0.1.2
 	github.com/kfet/firpty v0.1.0
 	github.com/kfet/pinexec v0.0.4
 	github.com/kfet/skipstone v0.1.2
