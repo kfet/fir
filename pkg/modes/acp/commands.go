@@ -63,7 +63,7 @@ func newCommandRegistry() *commandRegistry {
 	r.register(slashCommand{"logout", "Log out from provider (usage: /logout [provider-id|all])", cmdLogout})
 	r.register(slashCommand{"reload", "Reload extensions, skills, themes, and MCP servers", cmdReload})
 	r.register(slashCommand{"skills", "List loaded skills (/skills <name> for details, /skills install <name> to install)", cmdSkills})
-	r.register(slashCommand{"mcp", "Show MCP servers summary, or /mcp <name> for full tool details", cmdMCP})
+	r.register(slashCommand{"mcp", "Show MCP servers summary; /mcp <name> for details; /mcp reload to reload configs", cmdMCP})
 	return r
 }
 
@@ -617,6 +617,14 @@ func cmdSkillsInstall(ctx *commandContext, parts []string) {
 
 func cmdMCP(ctx *commandContext, args string) {
 	entry := ctx.entry
+	serverName := strings.TrimSpace(args)
+
+	// Handle /mcp reload: targeted MCP-only reload.
+	if serverName == "reload" {
+		cmdMCPReload(ctx)
+		return
+	}
+
 	if entry.mcpManager == nil {
 		ctx.sendMessage("No MCP servers configured.")
 		return
@@ -626,8 +634,6 @@ func cmdMCP(ctx *commandContext, args string) {
 		ctx.sendMessage("No MCP servers configured.")
 		return
 	}
-
-	serverName := strings.TrimSpace(args)
 
 	// If a server name is given, show full details for that server.
 	if serverName != "" {
@@ -705,6 +711,49 @@ func cmdMCP(ctx *commandContext, args string) {
 	}
 	sb.WriteString("\nUse `/mcp <server-name>` to see full tool details.")
 	ctx.sendMessage(sb.String())
+}
+
+// cmdMCPReload performs an MCP-only reload: re-reads mcp.json and mcp.d/ from disk
+// and surfaces any collisions or errors without triggering a full session reload.
+func cmdMCPReload(ctx *commandContext) {
+	entry := ctx.entry
+	if entry.session == nil {
+		ctx.sendMessage("No session available.")
+		return
+	}
+
+	// Load config with collision reporting.
+	_, collisions, loadErr := mcp.LoadDefaultConfigsReport(entry.cwd)
+	var loadErrMsg string
+	if loadErr != nil {
+		loadErrMsg = loadErr.Error()
+	}
+
+	// Perform the actual reload.
+	reloadErr := session.ReloadMCP(context.Background(), &entry.mcpManager, entry.session, entry.cwd, ctx.agent.options.MCPConfig, entry.clientMCPConfigs)
+	entry.mcpStatus = mcp.StatusFunc(entry.mcpManager)
+
+	// Build response message.
+	var sb strings.Builder
+	if reloadErr != nil {
+		sb.WriteString(fmt.Sprintf("MCP reload failed: %v\n", reloadErr))
+	} else if loadErrMsg != "" {
+		sb.WriteString(fmt.Sprintf("MCP config warning: %s\n", loadErrMsg))
+		sb.WriteString("MCP servers reloaded.\n")
+	} else {
+		sb.WriteString("MCP servers reloaded successfully.\n")
+	}
+
+	// Report collisions if any.
+	if len(collisions) > 0 {
+		sb.WriteString("\n**Collisions detected:**\n")
+		for _, c := range collisions {
+			sb.WriteString(fmt.Sprintf("- `%s` — loaded from `%s`, shadows `%s`\n",
+				c.Server, c.WonFile, strings.Join(c.ShadowedFiles, ", ")))
+		}
+	}
+
+	ctx.sendMessage(strings.TrimRight(sb.String(), "\n"))
 }
 
 // ============================================================================

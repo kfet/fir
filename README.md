@@ -196,6 +196,14 @@ fir -e demo -e hello "do something"   # only these two
 fir --no-extensions "do something"     # none at all
 ```
 
+### MCP Servers
+
+fir integrates with [Model Context Protocol](https://modelcontextprotocol.io) (MCP) servers.
+Configure them in `.fir/mcp.json` (project) or `~/.config/fir/mcp.json` (global), or use
+drop-in files in `~/.config/fir/mcp.d/*.json`. Use `/mcp` to inspect configured servers and
+`/mcp reload` to pick up config changes without restarting. See [docs/mcp.md](docs/mcp.md)
+for full details.
+
 ## Build
 
 ```bash

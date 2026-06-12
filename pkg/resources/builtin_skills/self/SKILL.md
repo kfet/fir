@@ -417,7 +417,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
       }
     }
     ```
-- **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions.
+- **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Use `/mcp <name>` for detailed info about a specific server. Use `/mcp reload` to re-read MCP configs from disk without a full session reload.
 
 ## settings.json Reference
 

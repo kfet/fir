@@ -68,6 +68,44 @@ descriptive, as it appears in every tool name the server exposes.
 
 ---
 
+## Drop-in configs (`mcp.d/`)
+
+In addition to `mcp.json`, you can place individual config files in the global `mcp.d/`
+directory (`~/.config/fir/mcp.d/`). Each file must be a JSON file (`.json` suffix) with
+the same schema as `mcp.json`.
+
+**Resolution order:**
+1. `~/.config/fir/mcp.json` (global main config)
+2. `~/.config/fir/mcp.d/*.json` (global drop-ins, lexicographically sorted)
+3. `.fir/mcp.json` (project-level main config)
+
+Later entries shadow earlier ones when server names collide. fir reports collisions when you
+run `/mcp reload` or `/reload`. Note: project shadowing global configs is expected and not
+reported as a collision.
+
+**Use cases:**
+- Per-tool configs that don't clutter the main file
+- Atomic writes (one file per purpose — swap without editing a shared file)
+- Machine-generated configs that coexist with hand-edited main config
+
+**Example:** drop a `database.json` into `~/.config/fir/mcp.d/`:
+
+```json
+{
+  "mcpServers": {
+    "pg": {
+      "command": "/usr/local/bin/pg-mcp",
+      "args": ["--dsn", "postgres://localhost/mydb"]
+    }
+  }
+}
+```
+
+**Activating changes:** run `/mcp reload` to re-read configs without restarting the session, or
+`/reload` for a full reload. Collisions appear in the output.
+
+---
+
 ## How tools appear
 
 When fir connects to an MCP server it calls `tools/list` and registers each tool with the
@@ -118,8 +156,6 @@ supplement project defaults without modifying files on disk.
 
 ## Limitations
 
-- **No hot-reload.** MCP servers are started once at session creation. Adding or removing
-  servers requires starting a new session.
 - **No per-server authentication UI.** If an MCP server requires credentials, pass them via
   `env` in the config or ensure they are already in the environment. fir does not prompt for
   MCP credentials interactively.

@@ -226,7 +226,11 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handlePlanCommand()
 	case "/mcp":
 		if len(parts) > 1 {
-			m.handleMCPDetailCommand(parts[1])
+			if parts[1] == "reload" {
+				m.handleMCPReloadCommand()
+			} else {
+				m.handleMCPDetailCommand(parts[1])
+			}
 		} else {
 			m.handleMCPCommand()
 		}
@@ -1123,6 +1127,28 @@ func (m *InteractiveMode) handleReloadCommand() {
 	m.showStatus("Reloaded extensions, skills, themes, MCP servers, models")
 }
 
+// handleMCPReloadCommand performs an MCP-only reload without the full session reload.
+func (m *InteractiveMode) handleMCPReloadCommand() {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	if m.session.IsStreaming() {
+		m.showWarning("Wait for the current response to finish before reloading.")
+		return
+	}
+	if m.mcpReload == nil {
+		m.showWarning("MCP reload not available")
+		return
+	}
+
+	if err := m.mcpReload(); err != nil {
+		m.showWarning(fmt.Sprintf("MCP reload failed: %v", err))
+		return
+	}
+	m.showStatus("MCP servers reloaded")
+}
+
 func (m *InteractiveMode) handleSkillsCommand(args []string) {
 	if len(args) == 0 || args[0] == "list" {
 		m.handleSkillsList()
@@ -1898,7 +1924,7 @@ func (m *InteractiveMode) buildHelpLines() []string {
   /changelog      - Show changelog entries
   /reload         - Reload extensions, skills, themes, and MCP servers
   /skills         - List loaded skills (/skills <name> for details, /skills install <name> to install)
-  /mcp            - Show MCP servers (or /mcp <name> for full details)
+  /mcp            - Show MCP servers (/mcp <name> for details, /mcp reload to reload configs)
   /reexec [path] - Re-exec into specified or current binary (%s), preserving the session
   /quit           - Quit fir
 

@@ -1839,6 +1839,28 @@ func TestHandleSlashCommand_Login_InvalidProviderID(t *testing.T) {
 	}
 }
 
+func TestHandleSlashCommand_MCPReload(t *testing.T) {
+	mc := newMockConn()
+	pa := &firAgent{conn: mc, sessions: make(map[string]*firSession)}
+	sess := newMinimalSession(t)
+	defer sess.Close()
+	entry := &firSession{
+		termState: newTerminalState(),
+		session:   sess,
+		cwd:       t.TempDir(),
+	}
+
+	found := pa.handleSlashCommand("s1", entry, "mcp", "reload")
+	if !found {
+		t.Error("expected handleSlashCommand to return true for /mcp reload")
+	}
+	msg := getLastAgentMessage(mc.getUpdates())
+	// Should report success (no MCP servers configured is still a successful reload)
+	if !strings.Contains(msg, "reloaded") && !strings.Contains(msg, "Reloaded") {
+		t.Errorf("expected reload confirmation message, got: %q", msg)
+	}
+}
+
 // TestRunPendingHandoffs_NoBridge: no extSetup/Bridge → no-op, no panic.
 func TestRunPendingHandoffs_NoBridge(t *testing.T) {
 	mc := newMockConn()
