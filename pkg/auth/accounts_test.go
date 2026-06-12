@@ -286,3 +286,44 @@ type refreshingProvider struct {
 func (m *refreshingProvider) RefreshToken(_ context.Context, _ *ai.OAuthCredentials) (*ai.OAuthCredentials, error) {
 	return m.fresh, nil
 }
+
+// TestGetApiKey_AWSIAMEnvelope: an aws_iam account resolves to a decodable
+// Bedrock IAM envelope; a bearer (api_key) account resolves to the raw token.
+func TestGetApiKey_AWSIAMEnvelope(t *testing.T) {
+	s := NewInMemoryAuthStorage(AuthStorageData{
+		"amazon-bedrock": {
+			Type:  CredentialTypeAWSIAM,
+			Extra: map[string]any{"mode": "profile", "profile": "work", "region": "eu-west-1"},
+		},
+		"amazon-bedrock#bear": {
+			Type: CredentialTypeAPIKey,
+			Key:  "bedrock-bearer-xyz",
+		},
+	})
+
+	env := s.GetApiKey("amazon-bedrock")
+	iam, ok := ai.DecodeBedrockIAMCreds(env)
+	if !ok {
+		t.Fatalf("aws_iam GetApiKey did not produce an IAM envelope: %q", env)
+	}
+	if iam.Mode != "profile" || iam.Profile != "work" || iam.Region != "eu-west-1" {
+		t.Errorf("decoded IAM creds wrong: %+v", iam)
+	}
+
+	if got := s.GetApiKey("amazon-bedrock#bear"); got != "bedrock-bearer-xyz" {
+		t.Errorf("bearer GetApiKey = %q", got)
+	}
+}
+
+func TestBedrockIAMFromExtra_ModeDefault(t *testing.T) {
+	// No explicit mode but access key present -> "keys".
+	c := bedrockIAMFromExtra(map[string]any{"accessKey": "AK", "secretKey": "SK"})
+	if c.Mode != "keys" {
+		t.Errorf("mode = %q want keys", c.Mode)
+	}
+	// No mode, no keys -> "profile".
+	c2 := bedrockIAMFromExtra(map[string]any{"profile": "p"})
+	if c2.Mode != "profile" {
+		t.Errorf("mode = %q want profile", c2.Mode)
+	}
+}

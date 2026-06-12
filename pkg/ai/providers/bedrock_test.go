@@ -298,7 +298,7 @@ func TestNewBedrockClient_SkipAuth(t *testing.T) {
 		BaseURL:  "https://my-proxy.example.com",
 	}
 
-	client, err := newBedrockClient(model)
+	client, err := newBedrockClient(model, nil)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
@@ -309,7 +309,7 @@ func TestNewBedrockClient_DefaultRegion(t *testing.T) {
 	t.Setenv("AWS_BEDROCK_SKIP_AUTH", "1") // avoid touching ~/.aws
 
 	model := &ai.Model{ID: "test-model", API: ai.ApiBedrockConverseStream, Provider: ai.ProviderAmazonBedrock}
-	client, err := newBedrockClient(model)
+	client, err := newBedrockClient(model, nil)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }

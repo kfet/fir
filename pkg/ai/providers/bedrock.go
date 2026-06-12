@@ -57,7 +57,7 @@ func StreamBedrock(ctx context.Context, model *ai.Model, prompt ai.Context, opti
 			stream.Push(ai.AssistantMessageEvent{Type: ai.EventError, Reason: ai.StopReasonError, Error: output})
 		}
 
-		client, err := newBedrockClient(model)
+		client, err := newBedrockClient(model, options)
 		if err != nil {
 			emitError(fmt.Sprintf("creating bedrock client: %v", err))
 			return
@@ -304,8 +304,13 @@ func handleReasoningDelta(
 
 // --- skipstone client construction ---
 
-func newBedrockClient(model *ai.Model) (*skipstone.Client, error) {
+func newBedrockClient(model *ai.Model, options *ai.StreamOptions) (*skipstone.Client, error) {
 	var opts []skipstone.Option
+
+	apiKey := ""
+	if options != nil {
+		apiKey = options.APIKey
+	}
 
 	// Region: explicit env vars > AWS_PROFILE region (resolved by skipstone) > us-east-1.
 	if r := os.Getenv("AWS_REGION"); r != "" {
@@ -314,10 +319,21 @@ func newBedrockClient(model *ai.Model) (*skipstone.Client, error) {
 		opts = append(opts, skipstone.WithRegion(r))
 	}
 
-	// AWS_BEDROCK_SKIP_AUTH=1 — proxy/gateway scenario where SigV4 isn't enforced.
-	if os.Getenv("AWS_BEDROCK_SKIP_AUTH") == "1" {
+	choice := chooseBedrockAuth(apiKey, os.Getenv("AWS_BEDROCK_SKIP_AUTH") == "1")
+	if choice.Region != "" {
+		// Per-account region overrides any env region (applied last wins).
+		opts = append(opts, skipstone.WithRegion(choice.Region))
+	}
+	switch choice.Kind {
+	case bedrockAuthSkip:
 		opts = append(opts, skipstone.WithStaticCredentials("dummy-access-key", "dummy-secret-key", ""))
-	} else {
+	case bedrockAuthIAMKeys:
+		opts = append(opts, skipstone.WithStaticCredentials(choice.AccessKey, choice.SecretKey, choice.SessionToken))
+	case bedrockAuthIAMProfile:
+		opts = append(opts, skipstone.WithProfile(choice.Profile))
+	case bedrockAuthBearer:
+		opts = append(opts, skipstone.WithBearerToken(choice.Bearer))
+	default: // bedrockAuthDefaultChain
 		opts = append(opts, skipstone.WithCredentials(creds.DefaultChain(creds.Config{})))
 	}
 
@@ -326,6 +342,63 @@ func newBedrockClient(model *ai.Model) (*skipstone.Client, error) {
 	}
 
 	return skipstone.NewClient(opts...)
+}
+
+// bedrockAuthKind enumerates how a Bedrock client should authenticate.
+type bedrockAuthKind int
+
+const (
+	bedrockAuthDefaultChain bedrockAuthKind = iota // standard AWS chain (env/profile/IMDS)
+	bedrockAuthSkip                                // AWS_BEDROCK_SKIP_AUTH dummy creds
+	bedrockAuthIAMKeys                             // explicit static keys
+	bedrockAuthIAMProfile                          // named ~/.aws profile
+	bedrockAuthBearer                              // Bedrock bearer token (no SigV4)
+)
+
+// bedrockAuthChoice is the resolved authentication decision for a request.
+type bedrockAuthChoice struct {
+	Kind         bedrockAuthKind
+	Region       string
+	Profile      string
+	AccessKey    string
+	SecretKey    string
+	SessionToken string
+	Bearer       string
+}
+
+// chooseBedrockAuth decides how to authenticate a Bedrock request from the
+// resolved per-account API-key string (an IAM envelope, a bearer token, or
+// empty) and the AWS_BEDROCK_SKIP_AUTH flag. Pure and table-testable.
+func chooseBedrockAuth(apiKey string, skipAuth bool) bedrockAuthChoice {
+	if skipAuth {
+		return bedrockAuthChoice{Kind: bedrockAuthSkip}
+	}
+	// A prefixed-but-malformed envelope must NEVER fall through to the bearer
+	// branch — that would send the whole envelope (including a secret key) as an
+	// Authorization bearer token. Unreachable via EncodeBedrockIAMCreds today,
+	// but guard against any future producer bug.
+	if strings.HasPrefix(apiKey, ai.BedrockIAMEnvelopePrefix) {
+		iam, ok := ai.DecodeBedrockIAMCreds(apiKey)
+		if !ok {
+			return bedrockAuthChoice{Kind: bedrockAuthDefaultChain}
+		}
+		c := bedrockAuthChoice{Region: iam.Region}
+		switch {
+		case iam.Mode == "keys" && iam.AccessKey != "":
+			c.Kind = bedrockAuthIAMKeys
+			c.AccessKey, c.SecretKey, c.SessionToken = iam.AccessKey, iam.SecretKey, iam.SessionToken
+		case iam.Profile != "":
+			c.Kind = bedrockAuthIAMProfile
+			c.Profile = iam.Profile
+		default:
+			c.Kind = bedrockAuthDefaultChain
+		}
+		return c
+	}
+	if apiKey != "" {
+		return bedrockAuthChoice{Kind: bedrockAuthBearer, Bearer: apiKey}
+	}
+	return bedrockAuthChoice{Kind: bedrockAuthDefaultChain}
 }
 
 func mapBedrockStopReason(reason string) ai.StopReason {

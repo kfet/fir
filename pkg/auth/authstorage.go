@@ -24,6 +24,12 @@ type CredentialType string
 const (
 	CredentialTypeAPIKey CredentialType = "api_key"
 	CredentialTypeOAuth  CredentialType = "oauth"
+	// CredentialTypeAWSIAM is an Amazon Bedrock account that authenticates via
+	// AWS SigV4 — either a named ~/.aws profile or explicit static keys, plus a
+	// region. The configuration lives in AuthCredential.Extra (see
+	// bedrockIAMFromExtra); GetApiKey resolves it into a prefixed JSON envelope
+	// (ai.EncodeBedrockIAMCreds) that the Bedrock provider decodes.
+	CredentialTypeAWSIAM CredentialType = "aws_iam"
 )
 
 // AuthCredential represents a stored credential.
@@ -414,6 +420,10 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 			s.mu.RUnlock()
 			return cred.Key
 		}
+		if cred.Type == CredentialTypeAWSIAM {
+			s.mu.RUnlock()
+			return ai.EncodeBedrockIAMCreds(bedrockIAMFromExtra(cred.Extra))
+		}
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
 			oauthProvider := oauthProviderForSlot(provider)
 			if oauthProvider == nil {
@@ -738,6 +748,52 @@ func (s *AuthStorage) assignSlot(providerID string, creds *ai.OAuthCredentials) 
 // Logout removes credentials for a provider.
 func (s *AuthStorage) Logout(provider string) error {
 	return s.Remove(provider)
+}
+
+// StoreAccount stores a non-OAuth typed account (e.g. a Bedrock aws_iam or
+// bearer credential) under the appropriate slot and returns the slot key.
+//
+// Slot policy: the first account for a provider claims the bare default slot; a
+// re-store under the same named-account slot overwrites it in place; otherwise
+// a new named slot "<provider>#<name>" is created. (A name matching the default
+// account's label creates a new named slot rather than overwriting the default
+// — non-OAuth accounts have no stable identity to dedupe the default on.)
+// accountName is also recorded as the credential Label.
+func (s *AuthStorage) StoreAccount(provider, accountName string, cred AuthCredential) (string, error) {
+	cred.Label = accountName
+	existing := s.AccountsForProvider(provider)
+
+	hasDefault := false
+	for _, a := range existing {
+		if a.AccountID == "" {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		return provider, s.Set(provider, cred)
+	}
+
+	id := sanitizeAccountID(accountName)
+	if id == "" {
+		// No name and the default is taken — allocate a sequential slot.
+		for i := 2; ; i++ {
+			cand := SlotKey(provider, fmt.Sprintf("account%d", i))
+			taken := false
+			for _, a := range existing {
+				if a.SlotKey == cand {
+					taken = true
+					break
+				}
+			}
+			if !taken {
+				id = fmt.Sprintf("account%d", i)
+				break
+			}
+		}
+	}
+	slot := SlotKey(provider, id)
+	return slot, s.Set(slot, cred)
 }
 
 // GetOAuthProviders returns OAuth providers for use by the model registry and

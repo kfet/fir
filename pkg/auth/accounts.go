@@ -59,6 +59,7 @@ type Account struct {
 	SlotKey   string         // "anthropic" or "anthropic#<id>"
 	Label     string         // human label (email/profile), may be empty
 	Type      CredentialType // credential type of the stored account
+	Extra     map[string]any // provider-specific config (e.g. Bedrock region/ARNs)
 }
 
 // DisplayName returns a human label for the account, falling back to the
@@ -90,6 +91,7 @@ func (s *AuthStorage) AccountsForProvider(provider string) []Account {
 			SlotKey:   key,
 			Label:     cred.Label,
 			Type:      cred.Type,
+			Extra:     cred.Extra,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -124,6 +126,7 @@ func (s *AuthStorage) AllAccounts() []Account {
 			SlotKey:   key,
 			Label:     creds[key].Label,
 			Type:      creds[key].Type,
+			Extra:     creds[key].Extra,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -239,4 +242,64 @@ func (a *accountProvider) ModelDefaults(modelID string, siblings []*ai.Model) *a
 func oauthProviderForSlot(slotKey string) ai.OAuthProvider {
 	base, _ := SplitSlot(slotKey)
 	return ai.GetOAuthProvider(base)
+}
+
+// bedrockIAMFromExtra reconstructs an ai.BedrockIAMCreds from a stored
+// aws_iam credential's Extra map. Missing keys yield zero values; an unset
+// mode defaults to "profile".
+func bedrockIAMFromExtra(extra map[string]any) ai.BedrockIAMCreds {
+	get := func(k string) string {
+		if extra == nil {
+			return ""
+		}
+		if v, ok := extra[k].(string); ok {
+			return v
+		}
+		return ""
+	}
+	c := ai.BedrockIAMCreds{
+		Mode:         get("mode"),
+		Profile:      get("profile"),
+		AccessKey:    get("accessKey"),
+		SecretKey:    get("secretKey"),
+		SessionToken: get("sessionToken"),
+		Region:       get("region"),
+	}
+	if c.Mode == "" {
+		if c.AccessKey != "" {
+			c.Mode = "keys"
+		} else {
+			c.Mode = "profile"
+		}
+	}
+	return c
+}
+
+// AccountRegion returns the AWS region configured for an account (from Extra),
+// or "" if none. Applies to Bedrock accounts (aws_iam and bearer).
+func AccountRegion(extra map[string]any) string {
+	if extra == nil {
+		return ""
+	}
+	if v, ok := extra["region"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// AccountModelOverride returns a per-account model-id/ARN override for a base
+// model id (from Extra["modelOverrides"]), or "" if none. This lets a Bedrock
+// account map a logical model onto an account-specific inference-profile ARN.
+func AccountModelOverride(extra map[string]any, baseModelID string) string {
+	if extra == nil {
+		return ""
+	}
+	m, ok := extra["modelOverrides"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if v, ok := m[baseModelID].(string); ok {
+		return v
+	}
+	return ""
 }

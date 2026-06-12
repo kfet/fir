@@ -469,7 +469,8 @@ func (r *ModelRegistry) loadBuiltInModels(
 	// Fan out per-account clones for any provider that has additional named
 	// accounts. Each clone is presented under the account's composite slot id
 	// so the OAuth ModifyModels pass injects that account's credentials/headers
-	// and the selector groups it separately.
+	// and the selector groups it separately. Bedrock accounts additionally
+	// apply per-account region (regional endpoint) and model-id/ARN overrides.
 	for _, base := range result {
 		for _, acct := range r.authStorage.AccountsForProvider(base.Provider) {
 			if acct.AccountID == "" {
@@ -480,11 +481,28 @@ func (r *ModelRegistry) loadBuiltInModels(
 			if label := acct.DisplayName(); label != "" && label != "default" {
 				clone.Name = base.Name + " (" + label + ")"
 			}
+			applyBedrockAccountOverrides(&clone, base, acct)
 			result = append(result, &clone)
 		}
 	}
 
 	return result
+}
+
+// applyBedrockAccountOverrides rewrites a cloned Amazon Bedrock model with an
+// account's per-account region (regional endpoint) and model-id/ARN override.
+// No-op for non-Bedrock providers or accounts without overrides.
+func applyBedrockAccountOverrides(clone, base *ai.Model, acct auth.Account) {
+	baseProvider, _ := auth.SplitSlot(acct.SlotKey)
+	if baseProvider != "amazon-bedrock" {
+		return
+	}
+	if region := auth.AccountRegion(acct.Extra); region != "" {
+		clone.BaseURL = "https://bedrock-runtime." + region + ".amazonaws.com"
+	}
+	if override := auth.AccountModelOverride(acct.Extra, base.ID); override != "" {
+		clone.ID = override
+	}
 }
 
 // mergeCustomModels merges custom models into built-in list by provider+id (custom wins).

@@ -99,6 +99,16 @@ A provider can hold several accounts at once. Running `fir login <provider-id>` 
 
 Each account appears as its own labelled group in the model selector and `--list-models` (e.g. "Anthropic (Claude Pro/Max) (work@x.com)"), so switching accounts live is just selecting a model under that group — no env juggling, no restart. `fir login list` also prints the stored accounts. Remove a single account with `fir logout <provider[#account]>` (or `fir logout list` to see slots).
 
+### Amazon Bedrock accounts
+
+`fir login bedrock` configures one or more Bedrock accounts (these are credential configs, not OAuth flows). Three modes:
+
+- **iam-profile** — a named `~/.aws` profile (SigV4). Profiles are seeded from `~/.aws/config`.
+- **iam-keys** — explicit AWS access/secret (and optional session) keys (SigV4).
+- **bearer** — a Bedrock API key / bearer token (suppresses SigV4); seeded from `$AWS_BEARER_TOKEN_BEDROCK` if present.
+
+With no flags it prompts interactively; non-interactive flags: `--mode`, `--account NAME`, `--region`, `--profile`, `--access-key`, `--secret-key`, `--session-token`, `--token`. Each account can carry a per-account `region` (which selects the regional `bedrock-runtime` endpoint) and per-model inference-profile ARN overrides (stored in the credential's `extra.modelOverrides`). Like OAuth accounts, multiple Bedrock accounts coexist and switch live via the selector; the credential type is stored as `aws_iam` (profile/keys) or `api_key` (bearer) in `auth.json`.
+
 ## Session observation (`fir observe` / `fir send`)
 
 Every fir session writes a JSONL transcript to disk via `SessionStore`. The builtin `observe` extension registers a sidecar at `$XDG_STATE_HOME/fir/agents/<session-id>.json` containing discovery metadata (pid, socket path, transcript path, cwd, status, name) and listens on a Unix socket for input injection.

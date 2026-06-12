@@ -111,6 +111,15 @@ func runLogin(providerID string) error {
 func runLoginSubcommand() error {
 	subArgs := os.Args[2:] // skip "fir login"
 
+	// Bedrock setup takes its own flag set (--mode/--profile/--token/…) which
+	// the generic OAuth flag parser below would reject. Detect it up front and
+	// hand the raw args to the Bedrock setup flow.
+	for _, a := range subArgs {
+		if isBedrockAlias(a) {
+			return runBedrockSetup(subArgs)
+		}
+	}
+
 	// Parse flags that control extension loading and debug. Mirrors the
 	// main CLI semantics so users can narrow the auth extension set.
 	// `-h`/`--help` is accepted at any position.
@@ -166,15 +175,24 @@ func runLoginSubcommand() error {
 		return fmt.Errorf("fir login: expected one provider id, got %d arguments", len(positional))
 	}
 
+	// Bedrock is not an OAuth provider — it's an interactive credential setup
+	// (IAM profile/keys or bearer token). Intercept before the OAuth path.
+	if isBedrockAlias(positional[0]) {
+		return runBedrockSetup(subArgs)
+	}
+
 	return runLoginWithExtensions(args, positional[0])
 }
 
 // printLoginHelp prints the usage text for `fir login`.
 func printLoginHelp() {
 	fmt.Println("Usage: fir login <provider-id> [--no-extensions] [--extension name] [--disable-extension name] [--debug]")
+	fmt.Println("       fir login bedrock [--mode iam-profile|iam-keys|bearer] [--account NAME] [--region REGION] ...")
 	fmt.Println("       fir login list")
 	fmt.Println()
 	fmt.Println("Runs the OAuth login flow for the given provider and stores credentials.")
+	fmt.Println("`fir login bedrock` configures an Amazon Bedrock account (IAM profile/keys or bearer).")
+	fmt.Println("Logging in to the same provider again ADDS a second account; both are kept and switchable.")
 	fmt.Println("Auth providers are contributed by extensions, which are loaded automatically.")
 }
 
