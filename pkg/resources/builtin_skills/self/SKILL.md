@@ -93,6 +93,12 @@ Two methods:
 
 `fir login <provider-id>` runs the OAuth flow for a provider from the shell (no interactive TUI required) and writes credentials to `<agent-dir>/auth.json`. Because OAuth providers are contributed by auth extensions, `fir login` loads extensions before running the flow — honouring the `settings.json` `extensions` allowlist, `-e/--extension`, `-d/--disable-extension`, and `--no-extensions`, exactly like the main CLI. `fir login list` (or bare `fir login`) lists every provider registered after extensions load. Equivalent to the long-standing `--login <provider-id>` flag; both paths share the same session-bootstrap code.
 
+### Multiple accounts per provider
+
+A provider can hold several accounts at once. Running `fir login <provider-id>` a second time **adds** another account rather than evicting the first — e.g. a personal and a work Anthropic login coexist. Accounts are stored in `auth.json` under composite slot keys: the bare `<provider>` key is the default account, and extra accounts use `<provider>#<accountId>` (the account id is derived from the OAuth profile, e.g. email/uuid). Older fir builds reading the file still find the default account and ignore the `#account` keys.
+
+Each account appears as its own labelled group in the model selector and `--list-models` (e.g. "Anthropic (Claude Pro/Max) (work@x.com)"), so switching accounts live is just selecting a model under that group — no env juggling, no restart. `fir login list` also prints the stored accounts. Remove a single account with `fir logout <provider[#account]>` (or `fir logout list` to see slots).
+
 ## Session observation (`fir observe` / `fir send`)
 
 Every fir session writes a JSONL transcript to disk via `SessionStore`. The builtin `observe` extension registers a sidecar at `$XDG_STATE_HOME/fir/agents/<session-id>.json` containing discovery metadata (pid, socket path, transcript path, cwd, status, name) and listens on a Unix socket for input injection.

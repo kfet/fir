@@ -25,6 +25,7 @@ _fir() {
         'htop:Live top/htop-style monitor of fir sessions'
         'send:Send messages to a live fir session'
         'login:OAuth login for a provider'
+        'logout:Remove a stored account slot'
         'completion:Print shell completion script'
     )
 
@@ -115,6 +116,7 @@ _fir_first_arg() {
         'packages:List/update packages'
         'sessions:List sessions'
         'login:OAuth login'
+        'logout:Remove a stored account'
         'completion:Print shell completion script'
     )
     # Slash-prefixed skill invocation: `fir /<skill> ...` (cached per shell).

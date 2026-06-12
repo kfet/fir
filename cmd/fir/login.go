@@ -78,12 +78,22 @@ func runLogin(providerID string) error {
 		},
 	}
 
-	err := authStorage.Login(context.Background(), providerID, callbacks)
+	slot, label, err := authStorage.LoginAccount(context.Background(), providerID, callbacks)
 	if err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Logged in to %s. Credentials saved.\n", provider.Name())
+	if auth.IsSlotKey(slot) {
+		who := label
+		if who == "" {
+			_, who = auth.SplitSlot(slot)
+		}
+		fmt.Fprintf(os.Stderr, "Added %s account %q. Credentials saved.\n", provider.Name(), who)
+	} else if label != "" {
+		fmt.Fprintf(os.Stderr, "Logged in to %s as %s. Credentials saved.\n", provider.Name(), label)
+	} else {
+		fmt.Fprintf(os.Stderr, "Logged in to %s. Credentials saved.\n", provider.Name())
+	}
 	return nil
 }
 
@@ -185,6 +195,58 @@ func runLoginList(args *Args) error {
 	for _, p := range ps {
 		fmt.Printf("  %s - %s\n", p.ID(), p.Name())
 	}
+
+	// Show currently stored accounts (per provider, including named slots).
+	agentDir := resolveAgentDir()
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+	accts := authStorage.AllAccounts()
+	if len(accts) > 0 {
+		fmt.Println("\nStored accounts:")
+		for _, a := range accts {
+			tag := ""
+			if a.AccountID == "" {
+				tag = " (default)"
+			}
+			fmt.Printf("  %s  [%s]  %s%s\n", a.SlotKey, a.Type, a.DisplayName(), tag)
+		}
+		fmt.Println("\nRemove one with: fir logout <provider[#account]>")
+	}
+	return nil
+}
+
+// runLogoutSubcommand implements `fir logout <provider[#account]>`, removing a
+// single stored account slot. With no argument it lists stored accounts.
+func runLogoutSubcommand() error {
+	args := os.Args[2:]
+	agentDir := resolveAgentDir()
+	authStorage := auth.NewAuthStorage(filepath.Join(agentDir, "auth.json"))
+
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+		fmt.Println("Usage: fir logout <provider[#account]>")
+		fmt.Println("       fir logout list")
+		accts := authStorage.AllAccounts()
+		if len(accts) > 0 {
+			fmt.Println("\nStored accounts:")
+			for _, a := range accts {
+				fmt.Printf("  %s  [%s]  %s\n", a.SlotKey, a.Type, a.DisplayName())
+			}
+		}
+		return nil
+	}
+	if args[0] == "list" {
+		for _, a := range authStorage.AllAccounts() {
+			fmt.Printf("  %s  [%s]  %s\n", a.SlotKey, a.Type, a.DisplayName())
+		}
+		return nil
+	}
+	slot := args[0]
+	if !authStorage.Has(slot) {
+		return fmt.Errorf("no stored account for slot %q", slot)
+	}
+	if err := authStorage.Logout(slot); err != nil {
+		return fmt.Errorf("logout %s: %w", slot, err)
+	}
+	fmt.Fprintf(os.Stderr, "Removed account %s.\n", slot)
 	return nil
 }
 

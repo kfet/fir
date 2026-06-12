@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- Multiple accounts per provider, switchable live with no restart. A provider can now hold N named accounts at once (typed provider accounts): logging in to the same OAuth provider twice keeps both (`fir login anthropic` again ADDS a second account instead of evicting the first). Accounts are stored under composite slot keys (`<provider>#<account>`) in `auth.json`; the bare `<provider>` key is the default account and stays back-compatible with older fir builds (which read the default and ignore `#account` keys). Each account is fanned out into its own labelled model group in the selector and `--list-models`, and switching accounts is just picking a model under that group. New `fir login list` shows stored accounts; new `fir logout <provider[#account]>` removes a single account slot. The Anthropic OAuth provider captures the account profile (uuid/email) so accounts are labelled by email.
+
+
 ## [0.70.0] - 2026-06-11
 
 ### Added

@@ -105,5 +105,34 @@ class TestStaticURLDrift(unittest.TestCase):
         self.assertEqual(self.flow.get("token_body_extra", {}).get("state"), "{state}")
 
 
+class TestPostExchangeAccountCapture(unittest.TestCase):
+    """post_exchange must surface the account identity (uuid/email) so fir can
+    label the account and keep multiple Anthropic logins side by side."""
+
+    def setUp(self):
+        _load_spec(_PROVIDER_ID)
+        self.handler = fir_ext._auth_post_exchange_handlers[_PROVIDER_ID]
+
+    def _call(self, token):
+        return self.handler({"token": token}, None)
+
+    def test_captures_uuid_and_email(self):
+        out = self._call(
+            {
+                "access_token": "a",
+                "refresh_token": "r",
+                "expires_at": 10_000_000_000_000,
+                "raw": {"account": {"uuid": "u-123", "email_address": "me@x.com"}},
+            }
+        )
+        self.assertEqual(out["extra"]["accountId"], "u-123")
+        self.assertEqual(out["extra"]["label"], "me@x.com")
+        self.assertEqual(out["access"], "a")
+
+    def test_no_account_no_extra(self):
+        out = self._call({"access_token": "a", "refresh_token": "r", "raw": {}})
+        self.assertNotIn("extra", out)
+
+
 if __name__ == "__main__":
     unittest.main()

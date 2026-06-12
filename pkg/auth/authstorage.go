@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,11 @@ const (
 // AuthCredential represents a stored credential.
 type AuthCredential struct {
 	Type CredentialType `json:"type"`
+
+	// Label is a human-readable name for this account (e.g. the account
+	// email or profile name). Used to distinguish multiple accounts of the
+	// same provider in selectors. Empty for legacy/default credentials.
+	Label string `json:"label,omitempty"`
 
 	// For api_key type
 	Key string `json:"key,omitempty"`
@@ -409,7 +415,7 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 			return cred.Key
 		}
 		if cred.Type == CredentialTypeOAuth && cred.Access != "" {
-			oauthProvider := ai.GetOAuthProvider(provider)
+			oauthProvider := oauthProviderForSlot(provider)
 			if oauthProvider == nil {
 				// OAuth extension not loaded — token can't be refreshed and
 				// the provider won't know to send it as Bearer auth. Return
@@ -482,6 +488,27 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthP
 		}
 
 		currentData[provider] = OAuthCredsToAuthCred(newCreds)
+		// Preserve account metadata across refresh — RefreshToken returns only
+		// the token triple and may not re-derive the profile. Without this the
+		// account Label and identity (Extra.accountId) would evaporate, which
+		// would later spawn a duplicate slot on the next re-login of the same
+		// account (assignSlot keys on Extra.accountId).
+		if updated, ok := currentData[provider]; ok {
+			if cred.Label != "" {
+				updated.Label = cred.Label
+			}
+			if accountIDFromCreds(AuthCredToOAuthCreds(&updated)) == "" && len(cred.Extra) > 0 {
+				if updated.Extra == nil {
+					updated.Extra = make(map[string]any, len(cred.Extra))
+				}
+				for k, v := range cred.Extra {
+					if _, exists := updated.Extra[k]; !exists {
+						updated.Extra[k] = v
+					}
+				}
+			}
+			currentData[provider] = updated
+		}
 		b, _ := json.MarshalIndent(currentData, "", "  ")
 		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData}, b, nil
 	})
@@ -588,19 +615,124 @@ func (s *AuthStorage) GetAll() AuthStorageData {
 	return result
 }
 
-// Login performs OAuth login for the given provider and stores credentials.
+// Login performs OAuth login for the given provider and stores credentials
+// under the appropriate account slot. See LoginAccount.
 func (s *AuthStorage) Login(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks) error {
+	_, _, err := s.LoginAccount(ctx, providerID, callbacks)
+	return err
+}
+
+// LoginAccount runs the OAuth login flow for a provider and stores the result
+// as a typed account, returning the slot key it was stored under and the
+// account's display label.
+//
+// Slot assignment:
+//   - If the provider has no default account yet, the credential is stored
+//     under the bare provider key (the default account).
+//   - If an existing account (default or named) has the same account identity
+//     (derived from the credential's profile), that account is overwritten —
+//     re-logging in refreshes it in place.
+//   - Otherwise a new named slot "<provider>#<accountId>" is created, so a
+//     second login ADDS an account rather than evicting the first.
+func (s *AuthStorage) LoginAccount(ctx context.Context, providerID string, callbacks pinoauth.LoginCallbacks) (slotKey, label string, err error) {
 	provider := ai.GetOAuthProvider(providerID)
 	if provider == nil {
-		return fmt.Errorf("unknown OAuth provider: %s", providerID)
+		return "", "", fmt.Errorf("unknown OAuth provider: %s", providerID)
 	}
 
 	creds, err := provider.Login(ctx, callbacks)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
-	return s.Set(providerID, OAuthCredsToAuthCred(creds))
+	cred := OAuthCredsToAuthCred(creds)
+	cred.Label = labelFromCreds(creds)
+	slot := s.assignSlot(providerID, creds)
+	if err := s.Set(slot, cred); err != nil {
+		return "", "", err
+	}
+	return slot, cred.Label, nil
+}
+
+// accountIDFromCreds derives a stable account identity from an OAuth
+// credential's Extra map (set by the provider's post_exchange hook). Prefers
+// an explicit accountId, then email/label. Returns "" when none is available.
+func accountIDFromCreds(creds *ai.OAuthCredentials) string {
+	if creds == nil || creds.Extra == nil {
+		return ""
+	}
+	for _, k := range []string{"accountId", "account_id", "email", "label"} {
+		if v, ok := creds.Extra[k].(string); ok && v != "" {
+			return sanitizeAccountID(v)
+		}
+	}
+	return ""
+}
+
+// labelFromCreds derives a human label (email/profile) from Extra.
+func labelFromCreds(creds *ai.OAuthCredentials) string {
+	if creds == nil || creds.Extra == nil {
+		return ""
+	}
+	for _, k := range []string{"label", "email", "accountId", "account_id"} {
+		if v, ok := creds.Extra[k].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// sanitizeAccountID makes a value safe to embed in a slot key (no '#').
+func sanitizeAccountID(v string) string {
+	return strings.ReplaceAll(v, slotSep, "_")
+}
+
+// assignSlot decides which storage slot a freshly-logged-in credential goes
+// to. See LoginAccount for the policy.
+func (s *AuthStorage) assignSlot(providerID string, creds *ai.OAuthCredentials) string {
+	acctID := accountIDFromCreds(creds)
+	existing := s.AccountsForProvider(providerID)
+
+	// No default yet -> claim the default (bare) slot.
+	hasDefault := false
+	for _, a := range existing {
+		if a.AccountID == "" {
+			hasDefault = true
+			break
+		}
+	}
+	if !hasDefault {
+		return providerID
+	}
+
+	// Same identity as an existing account -> overwrite it in place.
+	if acctID != "" {
+		for _, a := range existing {
+			cred := s.Get(a.SlotKey)
+			if cred == nil {
+				continue
+			}
+			if accountIDFromCreds(AuthCredToOAuthCreds(cred)) == acctID {
+				return a.SlotKey
+			}
+		}
+		return SlotKey(providerID, acctID)
+	}
+
+	// No stable identity available -> allocate a sequential named slot.
+	for i := 2; ; i++ {
+		candidate := SlotKey(providerID, fmt.Sprintf("account%d", i))
+		taken := false
+		for _, a := range existing {
+			if a.SlotKey == candidate {
+				taken = true
+				break
+			}
+		}
+		if !taken {
+			return candidate
+		}
+	}
 }
 
 // Logout removes credentials for a provider.
@@ -608,7 +740,26 @@ func (s *AuthStorage) Logout(provider string) error {
 	return s.Remove(provider)
 }
 
-// GetOAuthProviders returns all registered OAuth providers.
+// GetOAuthProviders returns OAuth providers for use by the model registry and
+// selectors, fanning each base provider out into one entry per stored account.
+// The base provider itself always appears (covering the default slot and
+// enabling login when nothing is stored yet); each additional named account
+// appears as a delegating accountProvider with a composite ID.
 func (s *AuthStorage) GetOAuthProviders() []ai.OAuthProvider {
-	return ai.GetOAuthProviders()
+	bases := ai.GetOAuthProviders()
+	out := make([]ai.OAuthProvider, 0, len(bases))
+	for _, base := range bases {
+		out = append(out, base)
+		for _, acct := range s.AccountsForProvider(base.ID()) {
+			if acct.AccountID == "" {
+				continue // default account is covered by the base provider
+			}
+			out = append(out, &accountProvider{
+				base:    base,
+				slotKey: acct.SlotKey,
+				label:   acct.DisplayName(),
+			})
+		}
+	}
+	return out
 }

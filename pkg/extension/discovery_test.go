@@ -8,6 +8,8 @@ import (
 )
 
 func TestDiscover_Empty(t *testing.T) {
+	// Isolate from any real global ~/.config/fir/extensions on the dev box.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
 	configs, err := Discover(dir)
 	if err != nil {
@@ -21,6 +23,8 @@ func TestDiscover_Empty(t *testing.T) {
 }
 
 func TestDiscover_ProjectLocal(t *testing.T) {
+	// Isolate from any real global ~/.config/fir/extensions on the dev box.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
 	extDir := filepath.Join(dir, ".fir", "extensions")
 	if err := os.MkdirAll(extDir, 0o755); err != nil {

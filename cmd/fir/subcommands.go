@@ -72,7 +72,16 @@ var subcommands = []subcommand{
 		Run:  runLoginSubcommand,
 		Help: [][2]string{
 			{"fir login <provider-id>", "OAuth login for a provider (auth extensions loaded)"},
-			{"fir login list", "List available OAuth providers"},
+			{"fir login <provider-id> (again)", "Add a second account; both are kept and switchable"},
+			{"fir login list", "List available providers and stored accounts"},
+		},
+	},
+	{
+		Name: "logout",
+		Run:  runLogoutSubcommand,
+		Help: [][2]string{
+			{"fir logout <provider[#account]>", "Remove one stored account slot"},
+			{"fir logout list", "List stored accounts"},
 		},
 	},
 	{

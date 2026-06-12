@@ -90,11 +90,29 @@ def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
     else:
         # No expiry returned — fall back to a short default.
         expires_at = int(time.time() * 1000) + 60 * 60 * 1000
-    return {
+    result = {
         "access": tok.get("access_token", ""),
         "refresh": tok.get("refresh_token", ""),
         "expires": expires_at,
     }
+
+    # Capture the account identity so fir can label this account and keep
+    # multiple Anthropic logins (personal + work) side by side. The token
+    # endpoint echoes an `account` object (uuid + email) in the raw response;
+    # scope already includes `user:profile`.
+    raw = tok.get("raw") or {}
+    account = raw.get("account") or {}
+    email = account.get("email_address") or account.get("email") or ""
+    uuid = account.get("uuid") or ""
+    account_id = uuid or email
+    extra = {}
+    if account_id:
+        extra["accountId"] = account_id
+    if email:
+        extra["label"] = email
+    if extra:
+        result["extra"] = extra
+    return result
 
 
 @fir_ext.auth_modify_models(provider="anthropic")

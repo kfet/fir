@@ -466,6 +466,24 @@ func (r *ModelRegistry) loadBuiltInModels(
 		}
 	}
 
+	// Fan out per-account clones for any provider that has additional named
+	// accounts. Each clone is presented under the account's composite slot id
+	// so the OAuth ModifyModels pass injects that account's credentials/headers
+	// and the selector groups it separately.
+	for _, base := range result {
+		for _, acct := range r.authStorage.AccountsForProvider(base.Provider) {
+			if acct.AccountID == "" {
+				continue // default account uses the base models as-is
+			}
+			clone := *base
+			clone.Provider = acct.SlotKey
+			if label := acct.DisplayName(); label != "" && label != "default" {
+				clone.Name = base.Name + " (" + label + ")"
+			}
+			result = append(result, &clone)
+		}
+	}
+
 	return result
 }
 
