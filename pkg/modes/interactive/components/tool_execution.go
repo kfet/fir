@@ -916,6 +916,22 @@ func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {
 
 	// Build title line from TitleArgs
 	for _, ta := range hint.TitleArgs {
+		// Boolean args act as badges: render the (styled) label only when the
+		// flag is true, omitting the "true"/"false" value text entirely. This
+		// is how the aside tool surfaces escalate/delegate routing.
+		if raw, exists := tc.args[ta.Name]; exists {
+			if b, isBool := raw.(bool); isBool {
+				if b {
+					badge := ta.Label
+					if badge == "" {
+						badge = ta.Name
+					}
+					text += " " + styleTitleArgVal(t, ta.Style, badge)
+				}
+				continue
+			}
+		}
+
 		val, valid := strArgChecked(tc.args, ta.Name)
 		if !valid {
 			// Not a string — try to format as a number or generic value.
@@ -932,18 +948,7 @@ func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {
 		if ta.Label != "" {
 			prefix = t.Fg("toolOutput", ta.Label+" ")
 		}
-		var styled string
-		switch ta.Style {
-		case "path":
-			styled = t.Fg("accent", shortenPath(val))
-		case "pattern":
-			styled = t.Fg("accent", "/"+val+"/")
-		case "accent":
-			styled = t.Fg("accent", val)
-		default:
-			styled = t.Fg("toolOutput", val)
-		}
-		text += " " + prefix + styled
+		text += " " + prefix + styleTitleArgVal(t, ta.Style, val)
 	}
 
 	// Show tool_outputs from details (display-only, not in LLM context).
@@ -986,6 +991,28 @@ func (tc *ToolExecutionComponent) formatWithHint(t *theme.Theme) string {
 		}
 	}
 	return text
+}
+
+// styleTitleArgVal applies a TitleArg style to a value for the collapsed header.
+func styleTitleArgVal(t *theme.Theme, style, val string) string {
+	switch style {
+	case "path":
+		return t.Fg("accent", shortenPath(val))
+	case "pattern":
+		return t.Fg("accent", "/"+val+"/")
+	case "accent":
+		return t.Fg("accent", val)
+	case "warning":
+		return t.Fg("warning", val)
+	case "success":
+		return t.Fg("success", val)
+	case "muted":
+		return t.Fg("muted", val)
+	case "dim":
+		return t.Fg("dim", val)
+	default:
+		return t.Fg("toolOutput", val)
+	}
 }
 
 // strArg returns the string value of args[key], or "" if missing or wrong type.

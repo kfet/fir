@@ -215,6 +215,44 @@ func TestToolExecution_DisplayHint(t *testing.T) {
 	}
 }
 
+func TestToolExecution_DisplayHintBooleanBadge(t *testing.T) {
+	hint := &agent.ToolDisplayHint{
+		TitleArgs: []agent.TitleArg{
+			{Name: "title", Style: "accent"},
+			{Name: "escalate", Style: "warning", Label: "escalated"},
+			{Name: "delegate", Style: "muted", Label: "delegated"},
+		},
+	}
+
+	// escalate=true → badge shown; delegate=false → badge omitted.
+	comp := NewToolExecutionComponent("aside",
+		map[string]any{"title": "check files", "escalate": true, "delegate": false},
+		nil, hint, nil)
+	joined := strings.Join(comp.Render(120), "\n")
+	if !strings.Contains(joined, "escalated") {
+		t.Errorf("expected escalated badge, got %q", joined)
+	}
+	if strings.Contains(joined, "delegated") {
+		t.Errorf("delegate=false should omit badge, got %q", joined)
+	}
+	// Boolean flags must never render their literal "true"/"false" value.
+	if strings.Contains(joined, "true") || strings.Contains(joined, "false") {
+		t.Errorf("boolean flag value leaked into header, got %q", joined)
+	}
+
+	// delegate=true → badge shown; escalate absent → omitted.
+	comp = NewToolExecutionComponent("aside",
+		map[string]any{"title": "bulk read", "delegate": true},
+		nil, hint, nil)
+	joined = strings.Join(comp.Render(120), "\n")
+	if !strings.Contains(joined, "delegated") {
+		t.Errorf("expected delegated badge, got %q", joined)
+	}
+	if strings.Contains(joined, "escalated") {
+		t.Errorf("escalate absent should omit badge, got %q", joined)
+	}
+}
+
 func TestToolExecution_DisplayHintUseBox(t *testing.T) {
 	hint := &agent.ToolDisplayHint{UseBox: true}
 	args := map[string]any{"input": "test"}

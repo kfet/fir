@@ -768,7 +768,11 @@ def _aside_tool_parameters() -> dict[str, Any]:
     description=_aside_tool_description(),
     parameters=_aside_tool_parameters(),
     display_hint={
-        "title_args": [{"name": "title", "style": "accent"}],
+        "title_args": [
+            {"name": "title", "style": "accent"},
+            {"name": "escalate", "style": "warning", "label": "↑ escalated"},
+            {"name": "delegate", "style": "muted", "label": "↓ delegated"},
+        ],
     },
 )
 def aside(params: dict, ctx: fir_ext.Context):
