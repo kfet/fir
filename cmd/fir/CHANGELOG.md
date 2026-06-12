@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-06-11
+
+### Added
+- Tool cards now render boolean `title_args` as badges: the styled label shows only when the flag is `true` (the literal `true`/`false` value is never printed). The `aside` tool uses this to surface routing on its collapsed header — `↑ escalated` (advisor) and `↓ delegated` (cheap delegate). Hint styles gain `warning`/`success`/`muted`/`dim` alongside the existing `accent`/`path`/`pattern`.
+
+## [0.69.0] - 2026-06-11
+
 ### Added
 - User-level `models.d` drop-ins: model/provider definitions can now be placed in `~/.config/fir/models.d/*.json` (or `$FIR_AGENT_DIR/models.d/`, and project-level `.fir/models.d/`). Each fragment has the same shape as `models.json`. Files load in lexical filename order and deep-merge on top of `models.json`: per provider, scalar fields (`baseUrl`/`apiKey`/`api`) and `authHeader` overwrite when set, `headers`/`modelOverrides` maps key-merge, and the `models` array concatenates then de-duplicates by `id` with the last writer winning. A fragment alone is sufficient (no `models.json` required); a malformed or `providers`-less fragment surfaces a load error instead of being silently skipped. Mirrors the existing `mcp.d` mechanism, letting tools/agents self-serve models by dropping in JSON files.
-- Tool cards now render boolean `title_args` as badges: the styled label shows only when the flag is `true` (the literal `true`/`false` value is never printed). The `aside` tool uses this to surface routing on its collapsed header — `↑ escalated` (advisor) and `↓ delegated` (cheap delegate). Hint styles gain `warning`/`success`/`muted`/`dim` alongside the existing `accent`/`path`/`pattern`.
 
 ### Changed
 - `/reload` now also refreshes the model registry (both ACP and interactive modes), re-reading `models.json` + `models.d/` from disk. Previously `/reload` reloaded extensions/skills/themes/MCP but left the model catalog stale until a login/logout or model-selector open, so newly added models were invisible mid-session.
