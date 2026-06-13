@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-06-13
+
 ### Added
 - `/mcp reload` command (TUI and ACP): targeted MCP-only reload that re-reads `mcp.json` and `mcp.d/` configs without triggering a full session reload. Reports collisions when multiple files define the same server name. Use instead of `/reload` when you only need to pick up MCP config changes.
 - Amazon Bedrock multi-account support (Phase B). `fir login bedrock` configures one or more Bedrock accounts — `iam-profile` (named `~/.aws` profile, SigV4), `iam-keys` (explicit AWS keys, SigV4), or `bearer` (Bedrock API key, suppresses SigV4) — interactively or via flags (`--mode`/`--account`/`--region`/`--profile`/`--access-key`/`--secret-key`/`--session-token`/`--token`). Accounts are stored as `aws_iam` or `api_key` credentials and coexist/switch live like OAuth accounts. The Bedrock provider now threads the resolved per-account credential into the skipstone client (bearer token, IAM profile, or static keys), with per-account region (regional `bedrock-runtime` endpoint) and per-model inference-profile ARN overrides. Profiles are seeded from `~/.aws/config`; bearer seeded from `$AWS_BEARER_TOKEN_BEDROCK`.
