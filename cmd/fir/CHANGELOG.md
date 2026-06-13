@@ -8,6 +8,9 @@
 - Multiple accounts per provider, switchable live with no restart. A provider can now hold N named accounts at once (typed provider accounts): logging in to the same OAuth provider twice keeps both (`fir login anthropic` again ADDS a second account instead of evicting the first). Accounts are stored under composite slot keys (`<provider>#<account>`) in `auth.json`; the bare `<provider>` key is the default account and stays back-compatible with older fir builds (which read the default and ignore `#account` keys). Each account is fanned out into its own labelled model group in the selector and `--list-models`, and switching accounts is just picking a model under that group. New `fir login list` shows stored accounts; new `fir logout <provider[#account]>` removes a single account slot. The Anthropic OAuth provider captures the account profile (uuid/email) so accounts are labelled by email.
 
 
+### Fixed
+- Live model-list discovery now works for OAuth-authenticated Anthropic (Claude Pro/Max) accounts. The built-in Go lister authenticates with an `x-api-key` header, which Anthropic rejects for OAuth access tokens (HTTP 401), so the live catalogue never populated and fir silently fell back to the static built-in model list — meaning a model the account can no longer reach would still show in `--list-models`, the model selector, and downstream surfaces. `StartLiveModelFetch` now skips the bare API-key lister for OAuth-authed providers, and the `anthropic-auth` extension grows an `auth/list_models` hook that pages `GET /v1/models` with `Authorization: Bearer` + the `oauth-2025-04-20` beta header. The fetch stays permissive: on any failure fir falls back to the static catalogue rather than masking models.
+
 ## [0.70.0] - 2026-06-11
 
 ### Added

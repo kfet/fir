@@ -133,6 +133,14 @@ func (r *ModelRegistry) StartLiveModelFetch(ctx context.Context, cacheDir string
 			continue
 		}
 
+		// OAuth-authed providers must not use the bare API-key lister: it would
+		// send the OAuth access token as an x-api-key header (Anthropic returns
+		// HTTP 401). Skip them here so the OAuth path (auth/list_models extension
+		// hook) handles discovery instead.
+		if cred := r.authStorage.Get(provider); cred != nil && cred.Type == auth.CredentialTypeOAuth {
+			continue
+		}
+
 		state := newLiveModelState()
 		r.liveModelsMu.Lock()
 		r.liveModels[provider] = state

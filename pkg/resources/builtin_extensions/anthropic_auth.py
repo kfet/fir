@@ -16,7 +16,10 @@ injection on outbound model requests, and the fir→Claude-Code tool-name map.
 from __future__ import annotations
 
 import base64
+import json
 import time
+import urllib.error
+import urllib.request
 
 import fir_ext
 
@@ -140,6 +143,57 @@ def modify_models(params: dict, ctx: fir_ext.AuthContext) -> list[dict] | None:
             m["headers"] = {**existing, **oauth_headers}
         result.append(m)
     return result
+
+
+@fir_ext.auth_list_models(provider="anthropic")
+def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
+    """Live-list Anthropic models for OAuth (Claude Pro/Max) credentials.
+
+    fir built-in Go lister authenticates with an ``x-api-key`` header,
+    which Anthropic rejects for OAuth access tokens (HTTP 401
+    ``x-api-key header is required``). OAuth tokens must use
+    ``Authorization: Bearer`` plus the ``oauth-2025-04-20`` beta header.
+
+    Pages through ``GET /v1/models`` and returns the live model IDs so fir
+    can hide catalogue entries the account can no longer reach. Returns
+    ``None`` on any failure so fir falls back permissively to the static
+    built-in catalogue rather than masking everything.
+    """
+    creds = params.get("credentials") or {}
+    access = creds.get("access")
+    if not access:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {access}",
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": _USER_AGENT,
+    }
+
+    ids: list[str] = []
+    after_id = ""
+    try:
+        for _ in range(20):  # pagination safety cap
+            url = "https://api.anthropic.com/v1/models?limit=100"
+            if after_id:
+                url += f"&after_id={after_id}"
+            req = urllib.request.Request(url, headers=headers)  # noqa: S310
+            with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310
+                data = json.loads(resp.read().decode())
+            page = data.get("data") or []
+            for m in page:
+                mid = m.get("id")
+                if mid:
+                    ids.append(mid)
+            if not data.get("has_more") or not page:
+                break
+            after_id = page[-1].get("id") or ""
+            if not after_id:
+                break
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return ids or None
 
 
 # ---------------------------------------------------------------------------

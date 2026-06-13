@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,5 +280,73 @@ func TestRefreshLive_ClearsStateAndDiskCache(t *testing.T) {
 	// Unrelated file preserved.
 	if _, err := os.Stat(keepPath); err != nil {
 		t.Errorf("unrelated file was deleted: %v", err)
+	}
+}
+
+// recordingLister is a fake ModelLister that records how many times its
+// ListModels was invoked, without making any network call.
+type recordingLister struct{ called atomic.Int32 }
+
+func (l *recordingLister) ListModels(_ context.Context, _, _ string) ([]string, error) {
+	l.called.Add(1)
+	return []string{"x"}, nil
+}
+
+// TestStartLiveModelFetch_SkipsListerForOAuthProvider verifies the precedence
+// guard: an OAuth-authed provider must NOT be driven through the bare API-key
+// Go lister (which would send the OAuth access token as an x-api-key header and
+// get an HTTP 401). Discovery for such providers is left to the OAuth path
+// (the auth/list_models extension hook).
+func TestStartLiveModelFetch_SkipsListerForOAuthProvider(t *testing.T) {
+	const prov = "oauthlistertest"
+	lister := &recordingLister{}
+	RegisterModelLister(prov, lister)
+	t.Cleanup(func() { UnregisterModelLister(prov) })
+
+	authStore := auth.NewAuthStorage("")
+	if err := authStore.Set(prov, auth.AuthCredential{Type: auth.CredentialTypeOAuth, Access: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	// Make the resolved API key non-empty so that, absent the guard, the
+	// API-key lister path would actually fire (otherwise GetApiKey returns ""
+	// for an OAuth slot with no registered provider and the lister is skipped
+	// for an unrelated reason, making this test vacuous).
+	authStore.SetRuntimeApiKey(prov, "tok")
+	ai.RegisterModel(&ai.Model{ID: "m1", Provider: prov, BaseURL: "https://example.invalid"})
+	t.Cleanup(func() { ai.UnregisterProviderModels(prov) })
+
+	reg := NewModelRegistry(authStore, "")
+	reg.StartLiveModelFetch(context.Background(), t.TempDir(), nil)
+
+	time.Sleep(200 * time.Millisecond)
+	if n := lister.called.Load(); n != 0 {
+		t.Fatalf("OAuth provider should skip the API-key lister; got %d call(s)", n)
+	}
+}
+
+// TestStartLiveModelFetch_UsesListerForAPIKeyProvider is the positive control:
+// a genuine api-key provider must still use its API-key lister.
+func TestStartLiveModelFetch_UsesListerForAPIKeyProvider(t *testing.T) {
+	const prov = "apikeylistertest"
+	lister := &recordingLister{}
+	RegisterModelLister(prov, lister)
+	t.Cleanup(func() { UnregisterModelLister(prov) })
+
+	authStore := auth.NewAuthStorage("")
+	if err := authStore.Set(prov, auth.AuthCredential{Type: auth.CredentialTypeAPIKey, Key: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	ai.RegisterModel(&ai.Model{ID: "m1", Provider: prov, BaseURL: "https://example.invalid"})
+	t.Cleanup(func() { ai.UnregisterProviderModels(prov) })
+
+	reg := NewModelRegistry(authStore, "")
+	reg.StartLiveModelFetch(context.Background(), t.TempDir(), nil)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && lister.called.Load() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if lister.called.Load() == 0 {
+		t.Fatal("api-key provider should use the API-key lister; lister was not called")
 	}
 }
