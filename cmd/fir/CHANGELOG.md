@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- Multi-account Anthropic logins now distinguish accounts by **organization**, not just user. One Anthropic user can belong to several orgs and each OAuth login is org-scoped; previously two org logins for the same user collided on the same account id and overwrote each other. The account id now composes user-uuid + org-uuid and the selector label shows the org name (e.g. `me@example.com (Acme Corp)`), so a personal-org and a work-org login for the same user coexist and are switchable live.
+
+
 ## [0.71.0] - 2026-06-13
 
 ### Added

@@ -129,6 +129,34 @@ class TestPostExchangeAccountCapture(unittest.TestCase):
         self.assertEqual(out["extra"]["label"], "me@x.com")
         self.assertEqual(out["access"], "a")
 
+    def test_org_distinguishes_same_user(self):
+        # The SAME user in two different orgs must produce DIFFERENT account
+        # ids (so both logins coexist) and org-labelled display names.
+        def call(org_uuid, org_name):
+            return self._call(
+                {
+                    "access_token": "a",
+                    "refresh_token": "r",
+                    "expires_at": 10_000_000_000_000,
+                    "raw": {
+                        "account": {"uuid": "u-123", "email_address": "me@x.com"},
+                        "organization": {"uuid": org_uuid, "name": org_name},
+                    },
+                }
+            )
+
+        work = call("org-work", "Acme Corp")
+        personal = call("org-personal", "Personal")
+        self.assertEqual(work["extra"]["accountId"], "u-123.org-work")
+        self.assertEqual(personal["extra"]["accountId"], "u-123.org-personal")
+        self.assertNotEqual(
+            work["extra"]["accountId"], personal["extra"]["accountId"]
+        )
+        self.assertEqual(work["extra"]["label"], "me@x.com (Acme Corp)")
+        self.assertEqual(work["extra"]["orgId"], "org-work")
+        self.assertEqual(work["extra"]["orgName"], "Acme Corp")
+        self.assertEqual(work["extra"]["email"], "me@x.com")
+
     def test_no_account_no_extra(self):
         out = self._call({"access_token": "a", "refresh_token": "r", "raw": {}})
         self.assertNotIn("extra", out)

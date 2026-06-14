@@ -100,19 +100,56 @@ def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
     }
 
     # Capture the account identity so fir can label this account and keep
-    # multiple Anthropic logins (personal + work) side by side. The token
-    # endpoint echoes an `account` object (uuid + email) in the raw response;
-    # scope already includes `user:profile`.
+    # multiple Anthropic logins side by side. The token endpoint echoes an
+    # `account` object (uuid + email) and an `organization` object (uuid +
+    # name) in the raw response; scope already includes `user:profile`.
+    #
+    # Identity must distinguish the SAME user across DIFFERENT organizations:
+    # one Anthropic user can belong to several orgs and each OAuth login is
+    # org-scoped, so personal/work orgs must coexist rather than overwrite each
+    # other. We compose user-uuid + org-uuid for the account id and surface the
+    # org name in the label.
     raw = tok.get("raw") or {}
     account = raw.get("account") or {}
+    # The organization object may live at the top level or nested under the
+    # account, depending on the token-endpoint response shape; check both.
+    organization = raw.get("organization") or account.get("organization") or {}
     email = account.get("email_address") or account.get("email") or ""
-    uuid = account.get("uuid") or ""
-    account_id = uuid or email
+    user_uuid = account.get("uuid") or ""
+    org_uuid = (
+        organization.get("uuid")
+        or organization.get("organization_uuid")
+        or raw.get("organization_uuid")
+        or ""
+    )
+    org_name = (
+        organization.get("name")
+        or organization.get("organization_name")
+        or raw.get("organization_name")
+        or ""
+    )
+
+    id_parts = [p for p in (user_uuid, org_uuid) if p]
+    account_id = ".".join(id_parts) or email
+
+    if email and org_name:
+        label = f"{email} ({org_name})"
+    elif org_name:
+        label = org_name
+    else:
+        label = email
+
     extra = {}
     if account_id:
         extra["accountId"] = account_id
+    if label:
+        extra["label"] = label
     if email:
-        extra["label"] = email
+        extra["email"] = email
+    if org_uuid:
+        extra["orgId"] = org_uuid
+    if org_name:
+        extra["orgName"] = org_name
     if extra:
         result["extra"] = extra
     return result

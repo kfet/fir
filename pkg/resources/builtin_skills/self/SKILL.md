@@ -95,7 +95,7 @@ Two methods:
 
 ### Multiple accounts per provider
 
-A provider can hold several accounts at once. Running `fir login <provider-id>` a second time **adds** another account rather than evicting the first — e.g. a personal and a work Anthropic login coexist. Accounts are stored in `auth.json` under composite slot keys: the bare `<provider>` key is the default account, and extra accounts use `<provider>#<accountId>` (the account id is derived from the OAuth profile, e.g. email/uuid). Older fir builds reading the file still find the default account and ignore the `#account` keys.
+A provider can hold several accounts at once. Running `fir login <provider-id>` a second time **adds** another account rather than evicting the first — e.g. a personal and a work Anthropic login coexist. Accounts are stored in `auth.json` under composite slot keys: the bare `<provider>` key is the default account, and extra accounts use `<provider>#<accountId>` (the account id is derived from the OAuth profile). For Anthropic the identity composes the user uuid **and the organization uuid**, so the same user logged into two different orgs yields two distinct accounts (the selector label shows the org name, e.g. `me@example.com (Acme Corp)`). Older fir builds reading the file still find the default account and ignore the `#account` keys.
 
 Each account appears as its own labelled group in the model selector and `--list-models` (e.g. "Anthropic (Claude Pro/Max) (work@x.com)"), so switching accounts live is just selecting a model under that group — no env juggling, no restart. `fir login list` also prints the stored accounts. Remove a single account with `fir logout <provider[#account]>` (or `fir logout list` to see slots).
 
