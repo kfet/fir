@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- `forge` builtin extension: a single `forge_tool` lets the agent author a new fir extension and load it live this session. It writes `<name>.py` to the global (user) config dir's `extensions/` — never the project-local `.fir`, so it avoids the trust prompt that would silently skip it in headless/ACP mode — then calls `reload_extension` and reports the new tools the extension exposes (or the init/handshake error so the agent can fix and retry). Rejects unsafe names and refuses to self-reload (`name == "forge"`).
+
+
 ## [0.71.1] - 2026-06-14
 
 ### Fixed

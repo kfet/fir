@@ -32,10 +32,11 @@ import (
 //	mood:           2 tools (mood_note, mood_recent)
 //	autoresearch:   2 tools (run_experiment, log_experiment)
 //	handoff:        3 tools (self_handoff, bookmark, pin)
+//	forge:          1 tool  (forge_tool)
 //
 // The exact composition is tested elsewhere; this constant pins the total
 // for shape-checking tests in this file.
-const builtinToolCount = 20
+const builtinToolCount = 21
 
 // Write a test extension script that responds to the init handshake
 // and then stays alive reading from stdin.
