@@ -1,7 +1,6 @@
 # Session Stitch — emulating infinite context across fir sessions
 
 **Status**: design — accepted; v1 not yet built
-**Branch**: `work/session-stitch`
 
 > **This is a self-handoff.** It is written for the agent (probably me)
 > who will build this. Per the thesis it argues for, a handoff carries
