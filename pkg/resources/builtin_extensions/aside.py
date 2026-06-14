@@ -139,7 +139,9 @@ def _load_role_config(key: str, default_spec: str) -> dict[str, str] | None:
     if isinstance(data, dict) and key in data:
         value = data[key]
         # Explicit opt-out.
-        if value is None or (isinstance(value, str) and value.strip().lower() in ("", "off", "none")):
+        if value is None or (
+            isinstance(value, str) and value.strip().lower() in ("", "off", "none")
+        ):
             return None
         if isinstance(value, str):
             parsed = _parse_advisor_spec(value)
@@ -491,7 +493,9 @@ def _run_aside(
         if not synthesis or not synthesis.strip():
             return _error("advisor returned no content")
         return {
-            "content": [{"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}],
+            "content": [
+                {"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}
+            ],
             "is_error": False,
         }
 
@@ -586,15 +590,19 @@ def _run_aside(
         output = r["output"]
         if len(output) > max_output_len:
             output = output[:max_output_len] + "\n... (truncated)"
-        tool_outputs.append({
-            "name": r["name"],
-            "title": r.get("title", ""),
-            "output": output,
-            "is_error": r.get("is_error", False),
-        })
+        tool_outputs.append(
+            {
+                "name": r["name"],
+                "title": r.get("title", ""),
+                "output": output,
+                "is_error": r.get("is_error", False),
+            }
+        )
 
     return {
-        "content": [{"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}],
+        "content": [
+            {"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}
+        ],
         "is_error": False,
         "details": {"tool_outputs": tool_outputs},
     }
@@ -842,10 +850,7 @@ def cmd_aside(args: list[str], ctx: fir_ext.Context):
 
 @fir_ext.command(
     name="advise",
-    description=(
-        "Ask the configured advisor model a side question. "
-        "Usage: /advise <question>"
-    ),
+    description=("Ask the configured advisor model a side question. Usage: /advise <question>"),
 )
 def cmd_advise(args: list[str], ctx: fir_ext.Context):
     """Handle /advise — route a side question to the configured advisor model.
