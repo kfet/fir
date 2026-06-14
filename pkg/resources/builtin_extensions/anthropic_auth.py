@@ -77,6 +77,26 @@ fir_ext.declare_oauth_provider(
 # ---------------------------------------------------------------------------
 
 
+def _slugify(value: str) -> str:
+    """Turn a free-form string (email, org name) into a slot-key-safe token.
+
+    Keeps it human-readable: lowercases, keeps alphanumerics plus ``@ . _``,
+    turns every other run of characters into a single ``-``, and trims/collapses
+    dashes. ``#`` (fir's provider/account slot separator) is therefore always
+    stripped.
+    """
+    out = []
+    for ch in value.strip().lower():
+        if ch.isalnum() or ch in "@._":
+            out.append(ch)
+        else:
+            out.append("-")
+    slug = "".join(out)
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug.strip("-")
+
+
 @fir_ext.auth_post_exchange(provider="anthropic")
 def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
     """Apply Anthropic's 5-minute refresh-window safety buffer.
@@ -101,20 +121,35 @@ def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
 
     # Capture the account identity so fir can label this account and keep
     # multiple Anthropic logins side by side. The token endpoint echoes an
-    # `account` object (uuid + email) and an `organization` object (uuid +
-    # name) in the raw response; scope already includes `user:profile`.
+    # `account` object (uuid + email, sometimes a display name) and an
+    # `organization` object (uuid + name) in the raw response; scope already
+    # includes `user:profile`.
     #
     # Identity must distinguish the SAME user across DIFFERENT organizations:
     # one Anthropic user can belong to several orgs and each OAuth login is
     # org-scoped, so personal/work orgs must coexist rather than overwrite each
-    # other. We compose user-uuid + org-uuid for the account id and surface the
-    # org name in the label.
+    # other.
+    #
+    # We deliberately build a *human-readable* account id from email + org name
+    # (not the opaque uuids) because the account id becomes the storage slot key
+    # (`anthropic#<accountId>`) which is surfaced verbatim in the model selector
+    # badge, `fir login list`, and `fir logout`. A uuid there means nothing to a
+    # human. uuids are only used as a last-resort fallback when no email/org
+    # name is available.
     raw = tok.get("raw") or {}
     account = raw.get("account") or {}
     # The organization object may live at the top level or nested under the
     # account, depending on the token-endpoint response shape; check both.
     organization = raw.get("organization") or account.get("organization") or {}
     email = account.get("email_address") or account.get("email") or ""
+    # A human display name, if the profile provides one.
+    name = (
+        account.get("display_name")
+        or account.get("full_name")
+        or account.get("name")
+        or raw.get("name")
+        or ""
+    )
     user_uuid = account.get("uuid") or ""
     org_uuid = (
         organization.get("uuid")
@@ -129,21 +164,29 @@ def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
         or ""
     )
 
-    id_parts = [p for p in (user_uuid, org_uuid) if p]
-    account_id = ".".join(id_parts) or email
+    # Account id (storage slot): readable email + org slug, uuid only as a
+    # last resort. '#' is reserved (provider/account separator) so it is
+    # stripped by _slugify.
+    base_id = _slugify(email) or user_uuid
+    org_id = _slugify(org_name) or org_uuid
+    account_id = f"{base_id}-{org_id}" if base_id and org_id else base_id or org_id
 
-    if email and org_name:
-        label = f"{email} ({org_name})"
+    # Display label: prefer a real name, then email; always append the org.
+    who = name or email
+    if who and org_name:
+        label = f"{who} ({org_name})"
     elif org_name:
         label = org_name
     else:
-        label = email
+        label = who
 
     extra = {}
     if account_id:
         extra["accountId"] = account_id
     if label:
         extra["label"] = label
+    if name:
+        extra["name"] = name
     if email:
         extra["email"] = email
     if org_uuid:

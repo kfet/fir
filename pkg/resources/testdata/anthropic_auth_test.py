@@ -125,14 +125,15 @@ class TestPostExchangeAccountCapture(unittest.TestCase):
                 "raw": {"account": {"uuid": "u-123", "email_address": "me@x.com"}},
             }
         )
-        self.assertEqual(out["extra"]["accountId"], "u-123")
+        # Account id is the readable email, not the uuid.
+        self.assertEqual(out["extra"]["accountId"], "me@x.com")
         self.assertEqual(out["extra"]["label"], "me@x.com")
         self.assertEqual(out["access"], "a")
 
-    def test_org_distinguishes_same_user(self):
-        # The SAME user in two different orgs must produce DIFFERENT account
-        # ids (so both logins coexist) and org-labelled display names.
-        def call(org_uuid, org_name):
+    def test_org_distinguishes_same_user_readable(self):
+        # Same user in two orgs -> different, READABLE account ids (no uuid) and
+        # org-labelled display names.
+        def call(org_name):
             return self._call(
                 {
                     "access_token": "a",
@@ -140,22 +141,53 @@ class TestPostExchangeAccountCapture(unittest.TestCase):
                     "expires_at": 10_000_000_000_000,
                     "raw": {
                         "account": {"uuid": "u-123", "email_address": "me@x.com"},
-                        "organization": {"uuid": org_uuid, "name": org_name},
+                        "organization": {"uuid": "o-1", "name": org_name},
                     },
                 }
             )
 
-        work = call("org-work", "Acme Corp")
-        personal = call("org-personal", "Personal")
-        self.assertEqual(work["extra"]["accountId"], "u-123.org-work")
-        self.assertEqual(personal["extra"]["accountId"], "u-123.org-personal")
+        work = call("Acme Corp")
+        personal = call("Personal Space")
+        self.assertEqual(work["extra"]["accountId"], "me@x.com-acme-corp")
+        self.assertEqual(personal["extra"]["accountId"], "me@x.com-personal-space")
         self.assertNotEqual(
             work["extra"]["accountId"], personal["extra"]["accountId"]
         )
+        # No raw uuids in the slot-key-bound account id.
+        self.assertNotIn("u-123", work["extra"]["accountId"])
+        self.assertNotIn("o-1", work["extra"]["accountId"])
         self.assertEqual(work["extra"]["label"], "me@x.com (Acme Corp)")
-        self.assertEqual(work["extra"]["orgId"], "org-work")
-        self.assertEqual(work["extra"]["orgName"], "Acme Corp")
-        self.assertEqual(work["extra"]["email"], "me@x.com")
+
+    def test_prefers_display_name_in_label(self):
+        out = self._call(
+            {
+                "access_token": "a",
+                "refresh_token": "r",
+                "expires_at": 10_000_000_000_000,
+                "raw": {
+                    "account": {
+                        "uuid": "u-9",
+                        "email_address": "me@x.com",
+                        "display_name": "Ada Lovelace",
+                    },
+                    "organization": {"uuid": "o-2", "name": "Acme Corp"},
+                },
+            }
+        )
+        self.assertEqual(out["extra"]["label"], "Ada Lovelace (Acme Corp)")
+        self.assertEqual(out["extra"]["name"], "Ada Lovelace")
+        # Account id still keyed on email (stable), not the display name.
+        self.assertEqual(out["extra"]["accountId"], "me@x.com-acme-corp")
+
+    def test_uuid_fallback_when_no_email(self):
+        out = self._call(
+            {
+                "access_token": "a",
+                "refresh_token": "r",
+                "raw": {"account": {"uuid": "u-only"}},
+            }
+        )
+        self.assertEqual(out["extra"]["accountId"], "u-only")
 
     def test_no_account_no_extra(self):
         out = self._call({"access_token": "a", "refresh_token": "r", "raw": {}})
