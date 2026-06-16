@@ -1302,10 +1302,10 @@ func (m *InteractiveMode) handleUpdateCommand() {
 
 	m.showMessage("Checking for updates...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelCheck()
 
-	rel, err := update.FetchLatest(ctx)
+	rel, err := update.FetchLatest(checkCtx)
 	if err != nil {
 		m.showWarning(fmt.Sprintf("Failed to check for updates: %v", err))
 		return
@@ -1318,7 +1318,11 @@ func (m *InteractiveMode) handleUpdateCommand() {
 
 	m.showMessage(fmt.Sprintf("Updating fir %s → %s...", version, rel.Version))
 
-	if err := update.SelfUpdate(ctx, rel); err != nil {
+	// Separate, generous bound for the binary download so slow links don't
+	// trip a deadline mid-transfer (absolute cap, not a stall timer).
+	dlCtx, cancelDL := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancelDL()
+	if err := update.SelfUpdate(dlCtx, rel); err != nil {
 		m.showWarning(fmt.Sprintf("Update failed: %v", err))
 		return
 	}

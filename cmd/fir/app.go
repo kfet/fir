@@ -662,12 +662,13 @@ func run() error {
 // Downloads and replaces the running binary from the latest GitHub release.
 func runUpdate() error {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// Short bound for the metadata/version check.
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelCheck()
 
 	fmt.Fprintln(os.Stderr, "Checking for updates...")
 
-	rel, err := update.FetchLatest(ctx)
+	rel, err := update.FetchLatest(checkCtx)
 	if err != nil {
 		return fmt.Errorf("check for updates: %w", err)
 	}
@@ -678,7 +679,12 @@ func runUpdate() error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Updating fir %s → %s...\n", version, rel.Version)
-	if err := update.SelfUpdate(ctx, rel); err != nil {
+	// Generous, separate bound for the actual binary download so slow links
+	// don't trip a deadline mid-transfer. This is an absolute cap, not a
+	// stall timer, so keep it large enough for a multi-MB binary on a slow net.
+	dlCtx, cancelDL := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancelDL()
+	if err := update.SelfUpdate(dlCtx, rel); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 
