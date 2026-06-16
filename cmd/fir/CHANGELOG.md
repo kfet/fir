@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- `claude-usage` skill now reports usage for **every** stored Anthropic account instead of only the default. fir keeps multiple OAuth logins under composite slot keys in `auth.json` (the bare `anthropic` key is the default, extras live under `anthropic#<account>`); the skill previously read only `.anthropic.access` and silently ignored the rest. It now enumerates all `anthropic`/`anthropic#*` slots and prints one labelled section per account, with the default first. A failure on one account (e.g. an expired token) is reported under its header and no longer aborts the others (exit is non-zero if any failed); single-account output is unchanged. Under `--cached` only the default account uses the cache (which tracks one account) — additional accounts are fetched live. Falls back to the Claude Code credential only when no fir Anthropic account is stored; `FIR_AUTH_FILE` overrides the auth path.
+- `fir update` / `/update` no longer abort mid-download on slow links. The version check and the binary download previously shared a single hard wall-clock deadline (60s CLI, 30s in-session), so a multi-MB download couldn't finish in time and failed with `context deadline exceeded`. Split into a 30s bound for the metadata/version check and a separate 15min bound for the download.
+
 ### Changed
 - `fir observe --help` now documents the input sigils (plain → prompt, `!` → steer/interrupt, `+` → followUp, `\!`/`\+` → escaped literals) used by `--interact`, and references `fir send <id> '!...'` for one-shot steering without attaching. `fir send --help` clarifies the same sigil rules and one-shot steer usage.
 
