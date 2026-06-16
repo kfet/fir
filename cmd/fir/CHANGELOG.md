@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `fir observe --help` now documents the input sigils (plain → prompt, `!` → steer/interrupt, `+` → followUp, `\!`/`\+` → escaped literals) used by `--interact`, and references `fir send <id> '!...'` for one-shot steering without attaching. `fir send --help` clarifies the same sigil rules and one-shot steer usage.
+
 ## [0.72.0] - 2026-06-14
 
 ### Added

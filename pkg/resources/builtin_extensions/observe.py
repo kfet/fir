@@ -1360,6 +1360,17 @@ _OBSERVE_USAGE = """usage: fir observe [<id-prefix>] [--cwd <path>] [--all] [--j
   fir observe --cwd .          session in current directory (error if 0/many)
   fir observe <id> --json      raw JSONL transcript — no formatting
   fir observe <id> --interact  also pipe stdin to session as input (Enter to send)
+
+With --interact, each line you type is sent as one message (Enter sends it).
+First-line sigils control delivery:
+  message      → new prompt (default)
+  !message     → steer: INTERRUPTS the current turn
+  +message     → followUp: queued after the current turn
+  \\!message    → literal '!' (escaped); likewise \\+ for '+'
+
+To steer a running turn one-shot without attaching, use `fir send`:
+  fir send <id> '!stop and reconsider'   interrupt the current turn now
+See `fir send --help` for the full sender interface.
 """
 
 _SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow] [--cwd <path>]
@@ -1371,9 +1382,14 @@ _SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow] [--cwd <path>]
   echo "fix the bug" | fir send <id>   pipe a single message
 
 First-line sigils (override per-message):
-  !message     → steer (interrupt current turn)
-  +message     → followUp (queue after current turn)
-  \\!message    → literal '!' (escaped)
+  message      → new prompt (default)
+  !message     → steer: INTERRUPTS the current turn
+  +message     → followUp: queued after the current turn
+  \\!message    → literal '!' (escaped); likewise \\+ for '+'
+
+One-shot steer (no interactive attach):
+  echo '!stop and reconsider' | fir send <id>
+  printf '!reconsider\\n' | fir send <id>
 """
 
 
