@@ -207,12 +207,15 @@ type AuthStorage struct {
 	loadError        error
 	errors           []error
 	lastKeyErrors    map[string]error // per-provider last key resolution error
+	audit            *auditWriter     // append-only mutation log; nil for in-memory
 }
 
 // NewAuthStorage creates an AuthStorage backed by the given file path.
 // authPath must be non-empty.
 func NewAuthStorage(authPath string) *AuthStorage {
-	return newAuthStorage(NewFileAuthStorageBackend(authPath))
+	s := newAuthStorage(NewFileAuthStorageBackend(authPath))
+	s.audit = newAuditWriter(authPath)
+	return s
 }
 
 // NewInMemoryAuthStorage creates an AuthStorage backed by in-memory storage.
@@ -328,6 +331,7 @@ func (s *AuthStorage) Set(provider string, cred AuthCredential) error {
 	defer s.mu.Unlock()
 	s.data[provider] = cred
 	s.persistProviderChange(provider, &cred)
+	s.audit.record(AuditActionSet, provider, &cred, len(s.data))
 	return nil
 }
 
@@ -335,8 +339,14 @@ func (s *AuthStorage) Set(provider string, cred AuthCredential) error {
 func (s *AuthStorage) Remove(provider string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prev, existed := s.data[provider]
 	delete(s.data, provider)
 	s.persistProviderChange(provider, nil)
+	if existed {
+		s.audit.record(AuditActionRemove, provider, &prev, len(s.data))
+	} else {
+		s.audit.record(AuditActionRemove, provider, nil, len(s.data))
+	}
 	return nil
 }
 
@@ -430,8 +440,16 @@ func (s *AuthStorage) GetApiKey(provider string) string {
 				// OAuth extension not loaded — token can't be refreshed and
 				// the provider won't know to send it as Bearer auth. Return
 				// empty so the caller gets a clear "no API key" error instead
-				// of a confusing auth failure with x-api-key.
+				// of a confusing auth failure with x-api-key. Record a
+				// specific error so the surfaced message names the real cause
+				// (provider/extension not loaded) rather than the generic
+				// "credentials may have expired".
 				s.mu.RUnlock()
+				base, _ := SplitSlot(provider)
+				s.mu.Lock()
+				s.lastKeyErrors[provider] = fmt.Errorf(
+					"OAuth provider %q is not loaded — its auth extension failed to register; reload extensions or restart fir", base)
+				s.mu.Unlock()
 				return ""
 			}
 
@@ -471,6 +489,7 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthP
 	type refreshResult struct {
 		apiKey      string
 		updatedData AuthStorageData
+		wrote       bool
 	}
 
 	result, err := s.storage.WithLockFallible(func(current []byte) (any, []byte, error) {
@@ -520,7 +539,7 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthP
 			currentData[provider] = updated
 		}
 		b, _ := json.MarshalIndent(currentData, "", "  ")
-		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData}, b, nil
+		return refreshResult{apiKey: oauthProvider.GetAPIKey(newCreds), updatedData: currentData, wrote: true}, b, nil
 	})
 	// Update in-memory state now that the backend lock is released.
 	if r, ok := result.(refreshResult); ok {
@@ -530,8 +549,14 @@ func (s *AuthStorage) refreshOAuthToken(provider string, oauthProvider ai.OAuthP
 		if err == nil {
 			delete(s.lastKeyErrors, provider)
 		}
+		remain := len(s.data)
+		refreshedCred, hadCred := s.data[provider]
+		wrote := r.wrote
 		s.mu.Unlock()
 		if err == nil {
+			if wrote && hadCred {
+				s.audit.record(AuditActionRefresh, provider, &refreshedCred, remain)
+			}
 			return r.apiKey
 		}
 	}

@@ -247,6 +247,17 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 						"authentication failed for %q: %v. Run '/login %s' to re-authenticate",
 						resolvedProvider, keyErr, resolvedProvider)
 				}
+				// A named account slot ("provider#account") that no longer
+				// exists in storage: the account was logged out or removed.
+				// Don't claim "credentials expired" — name the real cause and
+				// point at the base provider (you can't /login a slot key).
+				if base, acct := auth.SplitSlot(resolvedProvider); acct != "" &&
+					!modelRegistry.AuthStorage().Has(resolvedProvider) {
+					return "", fmt.Errorf(
+						"account %q is no longer logged in (its credentials were removed from auth.json). "+
+							"Run '/login %s' to add it back, or '/model' to pick another account",
+						acct, base)
+				}
 				if model != nil && modelRegistry.IsUsingOAuth(model) {
 					return "", fmt.Errorf(
 						"authentication failed for %q. Credentials may have expired. Run '/login %s' to re-authenticate",

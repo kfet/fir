@@ -304,6 +304,18 @@ func TestAuthStorage_GetApiKey_OAuthRefresh(t *testing.T) {
 	if err := s.GetApiKeyError("test-refresh-provider"); err != nil {
 		t.Errorf("GetApiKeyError() = %v, want nil after successful refresh", err)
 	}
+
+	// The refresh must be recorded in the audit log (set + refresh).
+	entries := readAuditLog(t, dir)
+	var sawRefresh bool
+	for _, e := range entries {
+		if e.Action == AuditActionRefresh && e.Slot == "test-refresh-provider" {
+			sawRefresh = true
+		}
+	}
+	if !sawRefresh {
+		t.Errorf("no refresh entry in audit log: %+v", entries)
+	}
 }
 
 func TestAuthStorage_GetApiKey_OAuthNotExpired(t *testing.T) {
