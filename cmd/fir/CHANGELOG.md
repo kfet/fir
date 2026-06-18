@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-06-18
+
+### Added
+- Package install now accepts the `git:host/path[@ref]` URL scheme (e.g. `git:github.com/owner/repo`), and the `git://host/path` protocol form. Previously an unrecognized `git:` prefix fell through and was mangled into `https://git:host/...`, which git rejected with "Port number was not a decimal number". Refs and subdirectories are supported and the source resolves to the standard `https://` clone URL.
+
 ## [0.72.1] - 2026-06-16
 
 ### Fixed

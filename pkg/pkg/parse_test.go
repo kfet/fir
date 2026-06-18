@@ -197,6 +197,48 @@ func TestParseSource(t *testing.T) {
 			wantURL:  "https://gitlab.com/org/group/subgroup/repo",
 		},
 
+		// ---- git: URL scheme ----
+		{
+			name:     "git-url-basic",
+			input:    "git:github.com/huggingface/pi-llama",
+			wantType: "git",
+			wantHost: "github.com",
+			wantPath: "huggingface/pi-llama",
+			wantURL:  "https://github.com/huggingface/pi-llama",
+		},
+		{
+			name:       "git-url-with-ref",
+			input:      "git:github.com/huggingface/pi-llama@v0.1.0",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "huggingface/pi-llama",
+			wantURL:    "https://github.com/huggingface/pi-llama",
+			wantRef:    "v0.1.0",
+			wantPinned: true,
+		},
+		{
+			name:       "git-url-subdir",
+			input:      "git:github.com/anthropics/claude-plugins/external_plugins/telegram",
+			wantType:   "git",
+			wantHost:   "github.com",
+			wantPath:   "anthropics/claude-plugins",
+			wantSubDir: "external_plugins/telegram",
+			wantURL:    "https://github.com/anthropics/claude-plugins",
+		},
+		{
+			name:     "git-url-double-slash",
+			input:    "git://gitlab.example.com/org/proj",
+			wantType: "git",
+			wantHost: "gitlab.example.com",
+			wantPath: "org/proj",
+			wantURL:  "https://gitlab.example.com/org/proj",
+		},
+		{
+			name:    "git-url-no-path",
+			input:   "git:github.com",
+			wantErr: true,
+		},
+
 		// ---- no-dot host → local fallback ----
 		{
 			name:            "no-dot-host-treated-local",

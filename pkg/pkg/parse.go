@@ -26,6 +26,7 @@ type Source struct {
 //   - Local path:  ./rel, /abs, ~/home, C:\windows
 //   - SSH URL:     git@host:path[@ref]
 //   - HTTPS URL:   https://host/path[@ref]
+//   - Git URL:     git:host/path[@ref]  (also git://host/path[@ref])
 //   - Bare:        host/path[@ref]  (host must contain a ".")
 func ParseSource(s string) (*Source, error) {
 	if s == "" {
@@ -46,8 +47,14 @@ func ParseSource(s string) (*Source, error) {
 	}
 
 	// --- SSH URL: git@host:path[@ref] ---
+	// Checked before the "git:" scheme since both share the "git" prefix.
 	if strings.HasPrefix(s, "git@") {
 		return parseSSH(src, s)
+	}
+
+	// --- Git URL: git:host/path[@ref] (also git://host/path[@ref]) ---
+	if strings.HasPrefix(s, "git:") {
+		return parseGitScheme(src, s)
 	}
 
 	// --- HTTPS URL: https://host/path[@ref] ---
@@ -157,6 +164,22 @@ func parseHTTPS(src *Source, s string) (*Source, error) {
 	src.Pinned = ref != ""
 	src.URL = "https://" + src.Host + "/" + repo
 	return src, nil
+}
+
+// parseGitScheme handles the "git:host/path[@ref]" URL scheme.
+// It also tolerates the "git://host/path" protocol form.
+// The remainder after "git:" (and any leading slashes) is parsed exactly
+// like a bare host/path source.
+func parseGitScheme(src *Source, s string) (*Source, error) {
+	rest := strings.TrimPrefix(s, "git:")
+	rest = strings.TrimLeft(rest, "/") // tolerate git://host/path
+	if rest == "" {
+		return nil, fmt.Errorf("invalid git source %q: missing host/path", s)
+	}
+	if !strings.Contains(rest, "/") {
+		return nil, fmt.Errorf("invalid git source %q: missing path", s)
+	}
+	return parseBare(src, rest)
 }
 
 // parseBare handles host/path[@ref] (no scheme).
