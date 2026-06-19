@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Observe/send socket protocol gains an **abort** control: an external observer can now cancel a running turn — including a stuck/hung tool call — without killing the session (the ESC equivalent, `Agent.Abort()`). It threads through the existing `deliver_as` channel: `send_user_message` accepts `deliver_as="abort"` (content ignored), wired to `b.session.Agent.Abort()` in the session bridge. In the `fir send`/`fir observe --interact` CLI a bare `~` line sends abort (escape with `\~`), and `fir send <id> --abort` does a one-shot cancel. The `send_session` AI tool also accepts `deliver_as="abort"`. Previously the only out-of-band levers were steer/followUp (queued at turn boundaries, useless against a stuck tool) and `fir stop` (SIGTERMs the whole process).
+
 ### Fixed
 - Custom models from `models.json` can now declare `reasoningEffortValues`. The loader structs (`ModelDefinition` / `ModelOverride` in `pkg/models/modelregistry.go`) had no `reasoningEffortValues` field, so the value was silently dropped and the built `ai.Model` left it empty — meaning the outbound `reasoning.effort` clamp (`clampEffortToEnum`, guarded by `len(model.ReasoningEffortValues) > 0` on the Responses/Codex/Completions paths) never fired for custom models. A provider whose models only accept e.g. `{high, xhigh, max}` (fugu/fugu-ultra) would receive a raw `low` and 400. The field is now parsed for both custom model definitions and per-model overrides and propagated to `ai.Model`. Coverage extended in `TestModelRegistry_CustomModelCapabilities` / `TestModelRegistry_ModelOverrideCapabilities`.
 
@@ -22,7 +25,6 @@
 ### Changed
 
 - **aside advisor/delegate now memoizes unavailable models per session.** Anthropic still lists `claude-fable-5` in `/v1/models` but it 404s on use, so Layer A cannot pre-empt it. Previously every escalation re-probed the dead model and fell back to the executor. Now the first model-unavailability error is recorded for the session; `_degrade_role` treats memoized models as unavailable, so subsequent escalations degrade straight to the next live Anthropic flagship/Haiku (e.g. opus-4-8) instead of repeating the failed call.
-
 ## [0.74.0] - 2026-06-19
 
 ### Added

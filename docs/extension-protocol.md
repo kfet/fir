@@ -457,8 +457,10 @@ Inject a user-role message into the session.
 {"jsonrpc":"2.0","id":1004,"method":"send_user_message","params":{"content":"Hello","deliver_as":"steer"}}
 ```
 
-`deliver_as`: `"steer"` | `"followUp"` | omit (default: triggers a new prompt
-turn).
+`deliver_as`: `"steer"` | `"followUp"` | `"abort"` | omit (default: triggers a
+new prompt turn). `"abort"` cancels the in-flight turn (the ESC equivalent —
+propagates to a stuck/hung tool call) without killing the session; `content` is
+ignored in that case.
 
 Response: `{"ok": true}`
 

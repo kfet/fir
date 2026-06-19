@@ -239,12 +239,20 @@ def _handle_conn(conn: socket.socket, ctx: fir_ext.Context) -> None:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                deliver_as = msg.get("deliver_as", "")
+                if deliver_as not in ("", "steer", "followUp", "abort"):
+                    deliver_as = ""
+                if deliver_as == "abort":
+                    # Abort carries no content: it cancels the in-flight turn
+                    # (including a stuck tool) without killing the session.
+                    try:
+                        ctx.send_user_message("", deliver_as="abort")
+                    except Exception as e:
+                        print(f"observe: abort failed: {e}", file=sys.stderr)
+                    continue
                 content = msg.get("content", "")
                 if not isinstance(content, str) or not content:
                     continue
-                deliver_as = msg.get("deliver_as", "")
-                if deliver_as not in ("", "steer", "followUp"):
-                    deliver_as = ""
                 try:
                     ctx.send_user_message(content, deliver_as=deliver_as)
                 except Exception as e:
@@ -665,13 +673,19 @@ def _encode_send(line: str, default_deliver_as: str) -> bytes | None:
     Sigil rules (first-line only):
       !msg     → deliver_as=steer
       +msg     → deliver_as=followUp
+      ~        → deliver_as=abort (ESC-equivalent: cancels the current turn,
+                 including a stuck tool; any text after ~ is ignored)
       \\!msg   → escaped literal '!'
       \\+msg   → escaped literal '+'
-    Returns None if the line is empty after stripping.
+      \\~msg   → escaped literal '~'
+    Returns None if the line is empty after stripping (abort excepted).
     """
     deliver_as = default_deliver_as
-    if line.startswith(("\\!", "\\+")):
+    if line.startswith(("\\!", "\\+", "\\~")):
         line = line[1:]
+    elif line.startswith("~"):
+        # Abort is content-free; emit immediately regardless of trailing text.
+        return (json.dumps({"deliver_as": "abort", "content": ""}) + "\n").encode()
     elif line.startswith("!"):
         deliver_as = "steer"
         line = line[1:]
@@ -985,11 +999,12 @@ def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> N
     """Connect to the session's input socket and send one NDJSON message.
 
     Sigils on `content` are NOT parsed here — callers pre-parse if they want
-    that behaviour. `deliver_as` must be "", "steer", or "followUp".
+    that behaviour. `deliver_as` must be "", "steer", "followUp", or "abort".
+    "abort" carries no content (cancels the current turn).
     """
-    if deliver_as not in ("", "steer", "followUp"):
-        raise ValueError(f"deliver_as must be '', 'steer', or 'followUp' (got {deliver_as!r})")
-    if not content or not content.strip():
+    if deliver_as not in ("", "steer", "followUp", "abort"):
+        raise ValueError(f"deliver_as must be '', 'steer', 'followUp', or 'abort' (got {deliver_as!r})")
+    if deliver_as != "abort" and (not content or not content.strip()):
         raise ValueError("content is empty")
     s = _resolve_sidecar(id_prefix, cwd_flag)
     sock_path = s.get("socket_path", "") or ""
@@ -1282,8 +1297,8 @@ def tool_observe(params: dict[str, Any], ctx: fir_ext.Context) -> str:
             },
             "deliver_as": {
                 "type": "string",
-                "enum": ["prompt", "steer", "followUp"],
-                "description": "How to deliver: 'prompt' (default new turn), 'steer' (interrupt current turn), 'followUp' (queue post-turn).",
+                "enum": ["prompt", "steer", "followUp", "abort"],
+                "description": "How to deliver: 'prompt' (default new turn), 'steer' (interrupt current turn), 'followUp' (queue post-turn), 'abort' (cancel the current turn — incl. a stuck tool — content ignored).",
                 "default": "prompt",
             },
         },
@@ -1299,6 +1314,8 @@ def tool_send(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]:
         deliver_as = ""
     if not id_prefix and not cwd_flag:
         raise fir_ext.ToolError("one of id_prefix or cwd is required")
+    if deliver_as == "abort":
+        content = ""
     try:
         _send_one(id_prefix, cwd_flag, content, deliver_as)
     except (ValueError, OSError) as e:
@@ -1366,18 +1383,22 @@ First-line sigils control delivery:
   message      → new prompt (default)
   !message     → steer: INTERRUPTS the current turn
   +message     → followUp: queued after the current turn
-  \\!message    → literal '!' (escaped); likewise \\+ for '+'
+  ~            → abort: CANCELS the current turn (including a stuck tool),
+                 without killing the session (text after ~ is ignored)
+  \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
 
-To steer a running turn one-shot without attaching, use `fir send`:
+To steer or abort a running turn one-shot without attaching, use `fir send`:
   fir send <id> '!stop and reconsider'   interrupt the current turn now
+  fir send <id> --abort                  cancel the current turn now
 See `fir send --help` for the full sender interface.
 """
 
-_SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow] [--cwd <path>]
+_SEND_USAGE = """usage: fir send <id-prefix> [--steer | --follow | --abort] [--cwd <path>]
 
   fir send <id-prefix>            interactive: Enter to send each line, Ctrl-\\ to disconnect
   fir send <id-prefix> --steer    all messages sent as steer (interrupt)
   fir send <id-prefix> --follow   all messages sent as followUp (queue)
+  fir send <id-prefix> --abort    one-shot: cancel the current turn, then exit
   fir send --cwd .                resolve session by current directory
   echo "fix the bug" | fir send <id>   pipe a single message
 
@@ -1385,11 +1406,15 @@ First-line sigils (override per-message):
   message      → new prompt (default)
   !message     → steer: INTERRUPTS the current turn
   +message     → followUp: queued after the current turn
-  \\!message    → literal '!' (escaped); likewise \\+ for '+'
+  ~            → abort: CANCELS the current turn (including a stuck tool),
+                 without killing the session (text after ~ is ignored)
+  \\!message    → literal '!' (escaped); likewise \\+ for '+', \\~ for '~'
 
-One-shot steer (no interactive attach):
+One-shot steer / abort (no interactive attach):
   echo '!stop and reconsider' | fir send <id>
   printf '!reconsider\\n' | fir send <id>
+  fir send <id> --abort                  cancel the current turn now
+  echo '~' | fir send <id>               same, via the abort sigil
 """
 
 
@@ -1610,6 +1635,7 @@ def _parse_send_args(argv: list[str]) -> tuple[str, str, str, str | None]:
     cwd_flag = ""
     steer = False
     follow = False
+    abort = False
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -1617,6 +1643,8 @@ def _parse_send_args(argv: list[str]) -> tuple[str, str, str, str | None]:
             steer = True
         elif a == "--follow":
             follow = True
+        elif a == "--abort":
+            abort = True
         elif a == "--cwd":
             if i + 1 >= len(argv):
                 return ("", "", "", "--cwd requires an argument")
@@ -1633,11 +1661,13 @@ def _parse_send_args(argv: list[str]) -> tuple[str, str, str, str | None]:
                 return ("", "", "", f"unexpected extra argument: {a}")
             id_prefix = a
         i += 1
-    if steer and follow:
-        return ("", "", "", "--steer and --follow are mutually exclusive")
+    if sum((steer, follow, abort)) > 1:
+        return ("", "", "", "--steer, --follow, and --abort are mutually exclusive")
     if not id_prefix and not cwd_flag:
         return ("", "", "", "session id or --cwd required")
-    default_deliver_as = "steer" if steer else ("followUp" if follow else "")
+    default_deliver_as = (
+        "abort" if abort else ("steer" if steer else ("followUp" if follow else ""))
+    )
     return (id_prefix, cwd_flag, default_deliver_as, None)
 
 
@@ -1672,6 +1702,22 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         )
         return 1
 
+    # --abort is a one-shot: fire the ESC-equivalent and exit without
+    # reading any input. Cancels the current turn (including a stuck tool)
+    # without killing the session.
+    if default_deliver_as == "abort":
+        try:
+            conn.sendall((json.dumps({"deliver_as": "abort", "content": ""}) + "\n").encode())
+        except OSError as e:
+            host.eprintln(f"send: {e}")
+            return 1
+        finally:
+            with contextlib.suppress(Exception):
+                conn.close()
+        sid8 = (s.get("session_id", "") or "")[:8]
+        host.eprintln(f"aborted current turn of session {sid8}")
+        return 0
+
     if host.stdin_is_tty:
         sid8 = (s.get("session_id", "") or "")[:8]
         name = s.get("session_name", "") or sid8
@@ -1679,7 +1725,7 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         host.eprintln(
             f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect."
         )
-        host.eprintln("  ! prefix → steer (interrupt)   + prefix → followUp (queue)")
+        host.eprintln("  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn")
 
     try:
         while True:

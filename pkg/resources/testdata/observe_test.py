@@ -294,6 +294,22 @@ class TestSocket(unittest.TestCase):
             "and update CHANGELOG", deliver_as="followUp",
         )
 
+    def test_abort_deliver_as_passes_through_with_empty_content(self) -> None:
+        ctx = _make_ctx()
+        observe.on_session_start({"session_id": self.session_id}, ctx)
+        c = self._connect()
+        try:
+            # Abort carries no content — it cancels the current turn.
+            c.sendall((json.dumps({"deliver_as": "abort", "content": ""}) + "\n").encode())
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                if ctx.send_user_message.called:
+                    break
+                time.sleep(0.01)
+        finally:
+            c.close()
+        ctx.send_user_message.assert_called_with("", deliver_as="abort")
+
     def test_unknown_deliver_as_normalized_to_empty(self) -> None:
         ctx = _make_ctx()
         observe.on_session_start({"session_id": self.session_id}, ctx)
@@ -632,6 +648,21 @@ class TestEncodeSend(unittest.TestCase):
     def test_escaped_plus(self):
         d = self._decode(observe._encode_send("\\+literal plus", ""))
         self.assertEqual(d["content"], "+literal plus")
+
+    def test_tilde_sigil_abort(self):
+        d = self._decode(observe._encode_send("~", ""))
+        self.assertEqual(d["deliver_as"], "abort")
+        self.assertEqual(d["content"], "")
+
+    def test_tilde_sigil_abort_ignores_trailing_text(self):
+        d = self._decode(observe._encode_send("~ whatever", "steer"))
+        self.assertEqual(d["deliver_as"], "abort")
+        self.assertEqual(d["content"], "")
+
+    def test_escaped_tilde(self):
+        d = self._decode(observe._encode_send("\\~literal tilde", ""))
+        self.assertEqual(d["deliver_as"], "")
+        self.assertEqual(d["content"], "~literal tilde")
 
     def test_default_deliver_as_steer(self):
         d = self._decode(observe._encode_send("no sigil", "steer"))

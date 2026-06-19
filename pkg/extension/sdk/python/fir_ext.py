@@ -336,8 +336,10 @@ otherwise noted.
 |                  | agent turn after injecting.           |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``send_user_     | ``{content, deliver_as?}``            | ``{ok: true}``            |
-| message``        | ``deliver_as``: ``"steer"`` or        |                           |
-|                  | ``"followUp"`` (omit = prompt)        |                           |
+| message``        | ``deliver_as``: ``"steer"``,          |                           |
+|                  | ``"followUp"`` (omit = prompt), or    |                           |
+|                  | ``"abort"`` (cancel current turn —    |                           |
+|                  | content ignored)                      |                           |
 +------------------+---------------------------------------+---------------------------+
 | ``set_session_   | ``{name}``                            | ``{ok: true}``            |
 | name``           |                                       |                           |
@@ -2561,6 +2563,9 @@ class Context:
         deliver_as : str, optional
             How to deliver the message to the agent. One of ``"steer"`` or
             ``"followUp"``. When omitted the message triggers a new user turn.
+            Pass ``"abort"`` to cancel the in-flight turn (the ESC equivalent —
+            propagates to a stuck/hung tool call) without killing the session;
+            ``content`` is ignored in that case.
         """
         params: dict[str, Any] = {"content": content}
         if deliver_as is not None:

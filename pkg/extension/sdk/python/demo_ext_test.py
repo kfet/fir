@@ -515,6 +515,17 @@ class TestDemoTools(DemoTestCase):
         self.assertEqual(msg["params"]["content"], "hi agent")
         fake.stop()
 
+    def test_inject_abort_calls_send_user_message_with_abort(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        fake.send_init()
+        fake.send_tool_call(2, "inject_message", {"kind": "abort", "content": ""})
+        msg = fake.wait_for_method("send_user_message")
+        self.assertIsNotNone(msg, "expected send_user_message call")
+        assert msg is not None
+        self.assertEqual(msg["params"].get("deliver_as"), "abort")
+        fake.stop()
+
     # -- restart_demo --------------------------------------------------------
 
     def test_restart_demo_without_confirm_does_nothing(self) -> None:

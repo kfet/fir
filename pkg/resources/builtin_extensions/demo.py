@@ -127,12 +127,14 @@ def change_model(params: dict, ctx: fir_ext.Context) -> dict:
     name="inject_message",
     description=(
         "Inject a message into the session. "
-        "kind='custom' calls send_message; kind='user' calls send_user_message."
+        "kind='custom' calls send_message; kind='user' calls send_user_message; "
+        "kind='abort' calls send_user_message(deliver_as='abort') to cancel the "
+        "current turn."
     ),
     parameters={
         "type": "object",
         "properties": {
-            "kind": {"type": "string", "enum": ["custom", "user"]},
+            "kind": {"type": "string", "enum": ["custom", "user", "abort"]},
             "content": {"type": "string"},
         },
         "required": ["kind", "content"],
@@ -141,6 +143,8 @@ def change_model(params: dict, ctx: fir_ext.Context) -> dict:
 def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
     if params["kind"] == "user":
         ctx.send_user_message(params["content"])           # send_user_message
+    elif params["kind"] == "abort":
+        ctx.send_user_message("", deliver_as="abort")      # abort current turn
     else:
         ctx.send_message("demo_note", params["content"])   # send_message
     return {"ok": True}

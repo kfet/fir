@@ -119,6 +119,15 @@ func (b *SessionBridge) SendUserMessage(content string, opts *SendUserMessageOpt
 	if opts != nil {
 		deliverAs = opts.DeliverAs
 	}
+	// "abort" is the out-of-band ESC equivalent: cancel the in-flight run
+	// context (propagating to any stuck/hung tool call) without killing the
+	// session. It carries no content and never enqueues a message.
+	if deliverAs == "abort" {
+		if b.session != nil && b.session.Agent != nil {
+			b.session.Agent.Abort()
+		}
+		return
+	}
 	msg := agent.AgentMessage{
 		Message: ai.NewUserMsg(content, time.Now().UnixMilli()),
 	}
