@@ -5,34 +5,79 @@ _Updated 2025-03-24 after initial implementation and end-to-end testing_
 ## What Works Today
 
 - **Pi-mono compat shim** (`pi_compat.js`) — maps `ExtensionAPI` to `fir_ext.js`
-- **Generic runtime wrapper** (`run.sh`) — auto-detects runtime and pi-mono imports
-- **Install post-hook** (`install.py`) — symlinks `main` → `run.sh` for JS/TS packages
-- **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `<cache>/fir/sdks/<hash>/node/`
-- **Discovery** — reordered candidates in `discovery.go` (`.py` → `.sh` → `.ts` → `.js`)
-- **Tested end-to-end** — pi-mono TypeScript extension with `pi.registerTool()` works in a live fir session
+- **Generic runtime wrapper** (`run.sh`) — auto-detects runtime and pi-mono imports.
+  Now also: augments `PATH` with common runtime install locations (`~/.bun/bin`,
+  `~/.local/bin`, nvm/fnm/volta/pnpm/deno, `/usr/local/bin`, `/opt/homebrew/bin`)
+  so bun/node are found even when fir's spawn `PATH` is minimal; accepts the
+  extension directory as `$1`; and detects **both** the `@mariozechner/` and the
+  `@earendil-works/` `pi-coding-agent` import scopes as pi-mono.
+- **Core install wrapper generation** (`pkg/pkg/jswrapper.go`) — on every install
+  path (`fir install` CLI verb **and** the `/install` slash-command), fir scans the
+  package for JS/TS entry points and creates a `main → run.sh` symlink next to each
+  one. The `main` symlink is an extensionless executable entry point, so package
+  discovery picks it up via the same convention used for `.fir/extensions/<name>/main`
+  (see "Package discovery honours the `main`/binary convention" below). The install
+  extension (`install.py`) is now a thin shell-out to `fir install`, so generation has
+  a single source of truth in core.
+- **Package discovery honours the `main`/binary convention** — package
+  auto-discovery (`pkg/pkg` `autoDiscover`) now collects an extensionless executable
+  entry point (`main`, or a file named after its directory) in any package directory,
+  and `extension.ConfigsFromFiles` names such a frontmatter-free executable after its
+  **parent directory** — exactly like a `.fir/extensions/<name>/main` entry. This is
+  what lets installed packages ship **compiled binary** extensions (which cannot carry
+  a comment-frontmatter block) as well as the runtime-wrapped JS/TS case. Loose
+  `.py`/`.sh` scripts still require frontmatter and are named by filename. A
+  `main → run.sh` symlink left dangling by an SDK-cache change is **self-healed** to
+  the current SDK's `run.sh` at discovery time, so the extension keeps loading across
+  fir upgrades.
+- **SDK extraction** — `run.sh`, `pi_compat.js`, `fir_ext.js` all extracted to `~/.cache/fir/sdks/<hash>/node/`
+- **Discovery** — extensionless `main`/binary entries and frontmatter-bearing
+  `.py`/`.sh` scripts both flow through `ScanPackageResources` →
+  `GetPackageExtensionPaths` → `ConfigsFromFiles` into the extension manager.
+- **Tested end-to-end** — `fir install git:github.com/huggingface/pi-llama` now
+  reports `Discovered: … 1 extension(s)`, `fir packages` shows `EXTENSIONS 1`, and a
+  live session spawns the `pi-llama` extension (named after its package directory) and
+  completes its handshake (its `llama-cpp` provider registers only once a
+  `llama-server` is reachable — with no server it cleanly registers nothing). typebox
+  (P0 #2) is auto-installed by bun, so pi-llama runs to completion under the bun
+  runtime.
+
 
 ## Remaining Work
 
 ### P0 — Required for real-world use
 
-1. **Module resolution for `@mariozechner/pi-coding-agent` imports**
-   The current test extension uses `import type { ExtensionAPI }` which TypeScript strips at compile time. Real pi-mono extensions that `import { isToolCallEventType }` or other runtime values from `@mariozechner/pi-coding-agent` will fail with `MODULE_NOT_FOUND`. Need either:
-   - A `--loader` hook (Node/Bun) that intercepts the import and redirects to `pi_compat.js`
-   - A synthetic `node_modules/@mariozechner/pi-coding-agent/` with `package.json` pointing to our shim
-   - A bundler step at install time
-   
-   **Recommendation:** Create a shim `package.json` + `index.js` in a synthetic `node_modules/` dir and set `NODE_PATH` to include it. Install.py can do this at install time.
+1. **Module resolution for `@mariozechner/pi-coding-agent` / `@earendil-works/pi-coding-agent` runtime imports**
+   Type-only imports (`import type { ExtensionAPI }`) are stripped at compile time
+   and need no resolution — this is the common case (pi-llama uses it). Extensions
+   that import **runtime values** (`import { isToolCallEventType } from "…/pi-coding-agent"`)
+   still fail with `MODULE_NOT_FOUND`. The synthetic `node_modules/<scope>/pi-coding-agent`
+   + `NODE_PATH` shim recommended below is **not yet implemented** (deferred: marginal
+   ROI given bun is the documented runtime and the common case is type-only, and a
+   stray `node_modules` risks perturbing bun's resolution of other deps). Revisit if a
+   real extension needs it.
+   - **Recommendation (unchanged):** create a shim `package.json` + `index.js` re-exporting
+     `pi_compat.js`'s exports in a synthetic `node_modules/` and set `NODE_PATH`.
 
-2. **`@sinclair/typebox` dependency**
-   Most pi-mono extensions use `import { Type } from "@sinclair/typebox"` for tool parameter schemas. This is a runtime dependency. Options:
-   - Bundle a minimal typebox shim that returns passthrough JSON Schema objects
-   - Run `npm install` in the extension directory at install time
-   - Document that users need `npm install @sinclair/typebox` in their extension dir
+2. **`@sinclair/typebox` / `typebox` dependency** — ✅ **Effectively handled under bun.**
+   bun auto-installs bare imports (e.g. `typebox`, `typebox/compile`) into its global
+   cache (`~/.bun/install/cache/`) at run time, so pi-llama's schema definitions work
+   with no extra step. Under plain `node` (no auto-install) this still requires the
+   user to `npm install` the dep or a bundle step — document that bun is the
+   recommended runtime.
 
-3. **Frontmatter generation for discovered extensions**
-   The `run.sh` symlink has no frontmatter, so fir warns about missing event declarations. The install post-hook should either:
-   - Parse the extension source for `pi.on("event_name", ...)` calls and generate a frontmatter comment at the top of a wrapper script
-   - Or generate a small `.sh` wrapper (not a symlink) with the correct frontmatter that execs `run.sh`
+3. **Frontmatter generation for discovered extensions** — ✅ **Done (via the `main` convention, no synthetic frontmatter).**
+   Rather than generate a synthetic frontmatter wrapper, package discovery was taught
+   to honour the same extensionless entry-point convention as `.fir/extensions/<name>/`:
+   a `main` (or `<dirname>`) executable is an extension named after its directory, with
+   frontmatter optional (`pkg/pkg` `autoDiscover` + `extension.ConfigsFromFiles`). The
+   install hook (`pkg/pkg/jswrapper.go`, called from `Manager.Install`) creates a plain
+   `main → run.sh` symlink, so generation lives in core and every install path produces
+   a loadable package. This also unblocks **compiled binary** package extensions, which
+   cannot carry a frontmatter block at all. Events are still collected at the handshake,
+   not from frontmatter, so no `pi.on(...)` parsing is needed.
+
+
 
 ### P1 — Important for compatibility
 

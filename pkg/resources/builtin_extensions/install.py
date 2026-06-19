@@ -38,135 +38,6 @@ def _run(args: list[str]) -> str:
     return out if out else err
 
 
-# ── Post-install: JS/TS runtime wrapper setup ───────────────────────────
-
-
-def _get_run_sh_path() -> str | None:
-    """Find the extracted run.sh via NODE_PATH (set by fir SDK extraction)."""
-    node_path = os.environ.get("NODE_PATH", "")
-    for d in node_path.split(":"):
-        candidate = os.path.join(d, "run.sh")
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
-def _has_shebang(path: str) -> bool:
-    """Check if a file starts with #!"""
-    try:
-        with open(path, "rb") as f:
-            return f.read(2) == b"#!"
-    except OSError:
-        return False
-
-
-def _find_js_ts_entries(pkg_dir: str) -> list[str]:
-    """Find JS/TS extension entry points (no shebang) in known locations.
-
-    Only conventional entry-point filenames (index/main/<dir>.ts|js) qualify, so
-    we never create a runtime wrapper in a directory that merely contains helper
-    modules. Walks at most one level into ``extensions``/``ext`` subdirs.
-    """
-    entry_basenames = ("index", "main")
-    entries = []
-    for root, dirs, files in os.walk(pkg_dir):
-        for skip in (
-            ".git",
-            "node_modules",
-            "vendor",
-            "__pycache__",
-            "test",
-            "tests",
-            "dist",
-            "build",
-        ):
-            if skip in dirs:
-                dirs.remove(skip)
-        dirname = os.path.basename(root)
-        for f in files:
-            stem, ext = os.path.splitext(f)
-            if ext not in (".ts", ".js") or f.endswith(".d.ts"):
-                continue
-            # Conventional entry points only: index.*, main.*, or <dirname>.*
-            if stem not in entry_basenames and stem != dirname:
-                continue
-            full = os.path.join(root, f)
-            if not _has_shebang(full):
-                entries.append(full)
-        # Only descend into extension subdirectories (don't recurse into src/).
-        dirs[:] = [d for d in dirs if d in ("extensions", "ext")]
-    return entries
-
-
-def _setup_wrapper(ext_dir: str, run_sh: str) -> bool:
-    """Create an extensionless 'main' symlink → run.sh in ext_dir."""
-    link_path = os.path.join(ext_dir, "main")
-    if os.path.exists(link_path):
-        return False
-    try:
-        os.symlink(run_sh, link_path)
-        return True
-    except OSError:
-        return False
-
-
-def _post_install_hook(pkg_dir: str) -> str | None:
-    """Scan for JS/TS extensions and symlink run.sh wrappers."""
-    run_sh = _get_run_sh_path()
-    if not run_sh:
-        return None
-
-    js_ts_files = _find_js_ts_entries(pkg_dir)
-    if not js_ts_files:
-        return None
-
-    dirs_with_entries: set[str] = set()
-    for f in js_ts_files:
-        dirs_with_entries.add(os.path.dirname(f))
-
-    created = 0
-    for d in sorted(dirs_with_entries):
-        if _setup_wrapper(d, run_sh):
-            created += 1
-
-    if created > 0:
-        return f"Created {created} runtime wrapper(s) for JS/TS extensions."
-    return None
-
-
-def _get_installed_path(source: str) -> str | None:
-    """Resolve the install path for a package source from 'fir packages' output."""
-    try:
-        out = _run(["packages"])
-    except RuntimeError:
-        return None
-    for line in out.splitlines():
-        parts = line.split()
-        # First column is SOURCE, last column is PATH
-        if len(parts) >= 2 and parts[0] == source:
-            path = parts[-1]
-            if path.startswith("~/"):
-                path = os.path.expanduser(path)
-            if os.path.isdir(path):
-                return path
-    return None
-
-
-def _run_install_and_hook(args: list[str]) -> str:
-    """Run fir install, then post-install hook. Returns combined message."""
-    out = _run(["install", *args])
-    msg = out or "Package installed."
-
-    source = next((a for a in args if not a.startswith("--")), None)
-    if source:
-        pkg_dir = _get_installed_path(source)
-        if pkg_dir:
-            hook_msg = _post_install_hook(pkg_dir)
-            if hook_msg:
-                msg += "\n" + hook_msg
-    return msg
-
-
 # ── Slash commands ──────────────────────────────────────────────────────────
 
 
@@ -181,7 +52,8 @@ def cmd_install(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             "message": "Usage: /install <source> [--local]\n\nExamples:\n  /install github.com/user/repo\n  /install /path/to/local/pkg\n  /install github.com/user/repo@v1.2 --local"
         }
     try:
-        return {"message": _run_install_and_hook(args)}
+        out = _run(["install", *args])
+        return {"message": out or "Package installed."}
     except RuntimeError as e:
         return {"message": f"Error: {e}"}
 
@@ -253,7 +125,8 @@ def tool_install(params: dict[str, Any], ctx: fir_ext.Context) -> dict[str, Any]
     if params.get("local"):
         args.append("--local")
     try:
-        return {"content": [{"type": "text", "text": _run_install_and_hook(args)}]}
+        out = _run(["install", *args])
+        return {"content": [{"type": "text", "text": out or "Package installed."}]}
     except RuntimeError as e:
         return {"content": [{"type": "text", "text": str(e)}], "is_error": True}
 

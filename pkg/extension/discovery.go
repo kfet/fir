@@ -174,11 +174,23 @@ func DiscoverExtra(dirs []string) ([]ExtProcConfig, error) {
 	return result, nil
 }
 
-// ConfigsFromFiles builds extension configs from individual script file paths.
-// Each file must be executable and have valid comment frontmatter to be included.
-// Files that fail these checks are silently skipped.
-// The resulting configs have scope "package" and are intended to be merged at
-// lower priority than global/project extensions.
+// ConfigsFromFiles builds extension configs from individual extension entry
+// paths. Each path must be executable. Naming and the frontmatter requirement
+// mirror the .fir/extensions/ conventions:
+//
+//   - A script with comment frontmatter (e.g. foo.py with a `# name:` block)
+//     is named by its filename stem.
+//   - An extensionless executable WITHOUT frontmatter — a compiled binary, or a
+//     `main → run.sh` runtime-wrapper symlink — is named after its parent
+//     directory, exactly like a `.fir/extensions/<name>/main` entry point. This
+//     is what lets installed packages ship binary or runtime-wrapped extensions
+//     that cannot carry a comment-frontmatter block.
+//   - A .py/.sh script WITHOUT frontmatter is treated as a helper module and
+//     skipped.
+//
+// Files that fail these checks are silently skipped. The resulting configs have
+// scope "package" and are merged at lower priority than global/project
+// extensions.
 func ConfigsFromFiles(files []string) []ExtProcConfig {
 	byName := make(map[string]ExtProcConfig, len(files))
 	for _, filePath := range files {
@@ -190,10 +202,26 @@ func ConfigsFromFiles(files []string) []ExtProcConfig {
 			continue
 		}
 		fm := resources.ParseCommentFrontmatter(string(data))
-		if !fm.Present || fm.Builtin {
+		if fm.Builtin {
 			continue
 		}
-		name := stripExt(filepath.Base(filePath))
+		var name string
+		switch {
+		case fm.Present:
+			// Script declaring its own frontmatter → named by filename stem.
+			name = stripExt(filepath.Base(filePath))
+		case filepath.Ext(filePath) == "":
+			// Frontmatter-free extensionless executable (binary or `main`
+			// runtime-wrapper) → named after its parent directory, mirroring
+			// the .fir/extensions/<name>/ subdir convention.
+			name = filepath.Base(filepath.Dir(filePath))
+		default:
+			// A .py/.sh helper without frontmatter is not an extension.
+			continue
+		}
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			continue
+		}
 		byName[name] = makeExtConfig(name, filePath, "package", fm)
 	}
 	result := make([]ExtProcConfig, 0, len(byName))

@@ -138,6 +138,16 @@ func autoDiscover(dir string) (*PackageResources, error) {
 			if skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
+			// Directory-as-extension: a dir containing an extensionless
+			// executable entry point (`main` or `<dirname>`, frontmatter
+			// optional) is an extension named after the directory — the same
+			// convention as .fir/extensions/<name>/. This lets packages ship
+			// binary or runtime-wrapped (main → run.sh) extensions. Naming and
+			// the frontmatter rules are applied downstream in
+			// extension.ConfigsFromFiles.
+			if entry := dirEntryPoint(p); entry != "" {
+				res.Extensions = append(res.Extensions, entry)
+			}
 			return nil
 		}
 
@@ -181,4 +191,63 @@ func autoDiscover(dir string) (*PackageResources, error) {
 	})
 
 	return res, err
+}
+
+// dirEntryPoint returns the path to an extensionless executable entry point
+// (`main`, or a file named after the directory) directly inside dir, or "" if
+// none exists. It mirrors the entry-point convention used for
+// .fir/extensions/<name>/ subdirectories, so a package can ship a binary or a
+// `main → run.sh` runtime-wrapper extension that carries no comment
+// frontmatter. Scripts (.py/.sh) are intentionally excluded here — they are
+// collected as individual files and must declare frontmatter.
+//
+// os.Stat follows symlinks, so a `main → run.sh` symlink whose target is an
+// executable regular file qualifies. A dangling `main → …/run.sh` symlink
+// (whose SDK-cache target was pruned) is self-healed to the current SDK's
+// run.sh so the extension keeps loading across SDK upgrades.
+func dirEntryPoint(dir string) string {
+	for _, cand := range []string{"main", filepath.Base(dir)} {
+		if filepath.Ext(cand) != "" {
+			continue // only extensionless entry points
+		}
+		p := filepath.Join(dir, cand)
+		info, err := os.Stat(p)
+		if err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0 {
+			return p
+		}
+		// Self-heal a dangling runtime-wrapper symlink, then re-check.
+		if healRunShSymlink(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// healRunShSymlink repairs a dangling symlink at p that points at a `run.sh`
+// in a now-missing SDK cache directory, re-pointing it to the current SDK's
+// run.sh. Returns true only when p ends up a valid `run.sh` symlink. It is a
+// no-op (false) for non-symlinks, already-valid symlinks, and symlinks that do
+// not target a `run.sh` (so it never touches unrelated user symlinks).
+func healRunShSymlink(p string) bool {
+	target, err := os.Readlink(p)
+	if err != nil {
+		return false // not a symlink
+	}
+	if filepath.Base(target) != "run.sh" {
+		return false // not one of our runtime-wrapper symlinks
+	}
+	if _, err := os.Stat(p); err == nil {
+		return true // already resolves — nothing to heal
+	}
+	runSh, err := jsRunShPath()
+	if err != nil || runSh == "" {
+		return false
+	}
+	if err := os.Remove(p); err != nil {
+		return false
+	}
+	if err := os.Symlink(runSh, p); err != nil {
+		return false
+	}
+	return true
 }

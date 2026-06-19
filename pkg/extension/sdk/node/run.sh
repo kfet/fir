@@ -23,8 +23,45 @@
 #
 set -euo pipefail
 
+# ── Augment PATH with common runtime install locations ────────────────────
+# fir spawns extensions with its own (often minimal, non-interactive) PATH,
+# which frequently omits per-user runtime installs like ~/.bun/bin. Probe the
+# usual locations so bun/node/npx are found regardless of how fir was launched.
+for _rt_dir in \
+  "${HOME:-}/.bun/bin" \
+  "${HOME:-}/.local/bin" \
+  "${HOME:-}/.local/share/pnpm" \
+  "${HOME:-}/.volta/bin" \
+  "${HOME:-}/.deno/bin" \
+  "/usr/local/bin" \
+  "/opt/homebrew/bin"; do
+  if [ -n "$_rt_dir" ] && [ -d "$_rt_dir" ]; then
+    case ":$PATH:" in
+      *":$_rt_dir:"*) ;;
+      *) PATH="$PATH:$_rt_dir" ;;
+    esac
+  fi
+done
+# nvm / fnm install node under versioned dirs; add the newest if present.
+for _nvm_root in "${HOME:-}/.nvm/versions/node" "${HOME:-}/.local/share/fnm/node-versions"; do
+  if [ -d "$_nvm_root" ]; then
+    _nvm_bin="$(find "$_nvm_root" -maxdepth 2 -type d -name bin 2>/dev/null | sort -V | tail -1)"
+    if [ -n "$_nvm_bin" ]; then
+      case ":$PATH:" in
+        *":$_nvm_bin:"*) ;;
+        *) PATH="$PATH:$_nvm_bin" ;;
+      esac
+    fi
+  fi
+done
+export PATH
+
+# ── Resolve the extension directory ───────────────────────────────────────
+# Invoked via a `main` symlink (or directly), so the entry point lives in the
+# directory of $0 (the symlink, whose dirname is the extension dir).
 DIR="$(cd "$(dirname "$0")" && pwd)"
 DIRNAME="$(basename "$DIR")"
+
 
 # Locate the SDK dir. run.sh is extracted alongside fir_ext.js and pi_compat.js,
 # so follow the symlink back to the real script location.
@@ -70,8 +107,9 @@ fi
 # ── Detect if this is a pi-mono extension ─────────────────────────────────
 
 is_pi_mono_ext() {
-  # Check if the entry point imports from pi-mono SDK
-  grep -qE '(from\s+["'"'"']@mariozechner/pi-coding-agent|require\(["'"'"']@mariozechner/pi-coding-agent)' "$1" 2>/dev/null
+  # Check if the entry point imports from a pi-mono SDK package. Both the
+  # original @mariozechner scope and the @earendil-works fork are supported.
+  grep -qE '(from[[:space:]]+["'"'"']@(mariozechner|earendil-works)/pi-coding-agent|require\(["'"'"']@(mariozechner|earendil-works)/pi-coding-agent)' "$1" 2>/dev/null
 }
 
 # ── Exec with appropriate runtime ─────────────────────────────────────────

@@ -234,6 +234,22 @@ overrides `~/.config/fir/`):
 | `idleMinutes` | `65` | Idle gap after which the prompt cache is assumed dead |
 | `nudgeEvery` | `100000` | Further tokens before re-nudging an agent that keeps going |
 | `off` | `false` | Disable the nudge entirely |
+### Package extensions
+
+Installed packages (`fir install <source>`) can also contribute extensions. A
+package contributes an extension in either of two ways:
+
+- **A `.py`/`.sh` script with comment frontmatter** — named by its filename (e.g.
+  `tools.py` → `tools`), same as a loose extension file.
+- **An extensionless executable entry point** named `main` (or named after its
+  directory) — named after its **directory**, with frontmatter optional. This is the
+  same convention used for a `.fir/extensions/<name>/main` entry point, and it is how
+  packages ship **compiled binary** extensions (which cannot carry a frontmatter
+  block) and runtime-wrapped JS/TS extensions (where `fir install` drops a
+  `main → run.sh` symlink next to the JS/TS source). Package extensions load at lower
+  priority than global/project extensions and do not require the project-trust prompt.
+  A `main → run.sh` symlink that goes stale (its SDK-cache target was pruned) is
+  self-healed to the current SDK's `run.sh` when the package is next scanned.
 
 ### Optional mode targeting
 

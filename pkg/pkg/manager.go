@@ -89,6 +89,16 @@ func (m *Manager) Install(source string, local bool) error {
 	// Register in settings.
 	m.addPackage(source, local)
 
+	// Generate runtime wrappers for any JS/TS ("pi-style") extensions so they
+	// become discoverable. Done in core (not the install extension) so every
+	// install path produces a loadable package. Best-effort: a failure here
+	// must not abort an otherwise-successful install.
+	if n, werr := GenerateJSWrappers(installPath); werr != nil {
+		fmt.Printf("Warning: JS/TS wrapper generation: %v\n", werr)
+	} else if n > 0 {
+		fmt.Printf("Created %d runtime wrapper(s) for JS/TS extension(s).\n", n)
+	}
+
 	// Print discovered resources.
 	res, err := ScanPackageResources(installPath)
 	if err != nil {
