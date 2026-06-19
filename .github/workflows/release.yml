@@ -199,7 +199,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        # macos-latest = Apple Silicon (arm64); macos-13 = Intel (amd64),
+        # so we smoke-test the brew install path on BOTH mac architectures.
+        os: [macos-latest, macos-13, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # Linuxbrew intermittently dies with "Broken pipe" right after `brew tap`
     # (during Homebrew's JSON-API / auto-update pipe work). Disabling those
