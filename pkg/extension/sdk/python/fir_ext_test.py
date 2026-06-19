@@ -354,6 +354,48 @@ class TestContext(unittest.TestCase):
         )
 
 
+class TestAvailableModels(unittest.TestCase):
+    """Context.available_models() — happy path and old-host fallback."""
+
+    def _ctx(self):
+        return fir_ext.Context()
+
+    def test_happy_path_returns_model_dicts(self):
+        ctx = self._ctx()
+        with mock.patch.object(
+            ctx,
+            "_call",
+            return_value={
+                "models": [
+                    {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+                    {"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku"},
+                ]
+            },
+        ) as m:
+            got = ctx.available_models()
+        m.assert_called_once_with("available_models", {}, timeout=10.0)
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got[0]["id"], "claude-opus-4-8")
+        self.assertEqual(got[1]["provider"], "anthropic")
+
+    def test_old_host_rpc_error_returns_empty(self):
+        ctx = self._ctx()
+        with mock.patch.object(
+            ctx, "_call", side_effect=RuntimeError("method not found: available_models")
+        ):
+            self.assertEqual(ctx.available_models(), [])
+
+    def test_missing_models_key_returns_empty(self):
+        ctx = self._ctx()
+        with mock.patch.object(ctx, "_call", return_value={}):
+            self.assertEqual(ctx.available_models(), [])
+
+    def test_non_dict_result_returns_empty(self):
+        ctx = self._ctx()
+        with mock.patch.object(ctx, "_call", return_value=None):
+            self.assertEqual(ctx.available_models(), [])
+
+
 class TestDecorators(unittest.TestCase):
     def setUp(self):
         fir_ext._tools.clear()

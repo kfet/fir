@@ -28,6 +28,7 @@ type mockBridgeAPI struct {
 	userMsgOpts     []*SendUserMessageOptions
 	labels          map[string]string
 	modelSet        *ai.Model
+	availableModels []*ai.Model
 	toolsRegistered []ToolDefinition
 	sessionData     map[string]string
 	restartPrompts  []string
@@ -124,7 +125,12 @@ func (m *mockBridgeAPI) GetSessionID() string          { return "" }
 func (m *mockBridgeAPI) SetLabel(id, label string)     { m.labels[id] = label }
 func (m *mockBridgeAPI) ClearLabel(id string)          { delete(m.labels, id) }
 func (m *mockBridgeAPI) SetModel(model *ai.Model) bool { m.modelSet = model; return true }
-func (m *mockBridgeAPI) ContinueSession() error        { return nil }
+func (m *mockBridgeAPI) GetAvailableModels() []*ai.Model {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.availableModels
+}
+func (m *mockBridgeAPI) ContinueSession() error { return nil }
 func (m *mockBridgeAPI) SideQuery(question string, opts *session.SideQueryOptions) (string, error) {
 	m.mu.Lock()
 	m.sideQueryQuestion = question
@@ -751,6 +757,46 @@ func TestBridge_InboundExec(t *testing.T) {
 	}
 	if !api.execCalled {
 		t.Fatal("exec was not called on API")
+	}
+}
+
+func TestBridge_InboundAvailableModels(t *testing.T) {
+	b, extCodec := pipePair(&InitResult{})
+	api := newMockAPI()
+	api.availableModels = []*ai.Model{
+		{Provider: "anthropic", ID: "claude-opus-4-8", Name: "Claude Opus 4.8"},
+		{Provider: "anthropic", ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx, api) }()
+
+	_ = extCodec.WriteRequest(1, "available_models", nil)
+
+	msg, err := extCodec.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	var got AvailableModelsResult
+	if err := json.Unmarshal(*resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(got.Models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(got.Models), got.Models)
+	}
+	if got.Models[0].Provider != "anthropic" || got.Models[0].ID != "claude-opus-4-8" {
+		t.Fatalf("unexpected first model: %+v", got.Models[0])
+	}
+	if got.Models[1].ID != "claude-haiku-4-5" || got.Models[1].Name != "Claude Haiku 4.5" {
+		t.Fatalf("unexpected second model: %+v", got.Models[1])
 	}
 }
 

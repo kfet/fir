@@ -527,6 +527,30 @@ API key configured.
 
 ---
 
+#### `available_models`
+
+Return the models the session currently considers live and authed — the
+model registry's `GetAvailable()` set (only models confirmed live by the
+provider's model list and backed by configured auth). Extensions use this to
+adapt routing to runtime availability (e.g. the `aside` advisor degrades to
+the highest available flagship when its configured default has gone away).
+
+```json
+{"jsonrpc":"2.0","id":1010,"method":"available_models","params":{}}
+```
+
+Response:
+
+```json
+{"models":[{"provider":"anthropic","id":"claude-opus-4-8","name":"Claude Opus 4.8"}]}
+```
+
+Hosts that predate this verb reply with a method-not-found error; SDK helpers
+(`ctx.available_models()`) swallow it and return `[]` so callers degrade to
+their static configuration.
+
+---
+
 #### `set_status`
 
 Set persistent status text in the UI footer.  Pass an empty string to clear.

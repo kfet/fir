@@ -192,6 +192,12 @@ class FakeFir:
                 {"name": "bash", "description": "mock"},
                 {"name": "read", "description": "mock"},
             ]
+        elif method == "available_models":
+            result = {
+                "models": [
+                    {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+                ]
+            }
         elif method == "get_session_data":
             result = {"ok": True, "value": "mock_value"}
         elif method == "get_session_file":

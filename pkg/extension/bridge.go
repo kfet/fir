@@ -324,6 +324,23 @@ func (b *Bridge) handleInbound(req *Request, codec *Codec, api BridgeAPI) {
 		ok := api.SetModel(&ai.Model{Provider: p.Provider, ID: p.ID})
 		result = OkResult{Ok: ok}
 
+	case "available_models":
+		// No params. Returns the session registry's live-and-authed model
+		// set so extensions can adapt routing to runtime availability.
+		models := api.GetAvailableModels()
+		out := make([]AvailableModel, 0, len(models))
+		for _, m := range models {
+			if m == nil {
+				continue
+			}
+			out = append(out, AvailableModel{
+				Provider: m.Provider,
+				ID:       m.ID,
+				Name:     m.Name,
+			})
+		}
+		result = AvailableModelsResult{Models: out}
+
 	case "set_status":
 		var p setStatusParams
 		if req.Params != nil {

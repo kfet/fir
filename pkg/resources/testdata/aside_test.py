@@ -1046,6 +1046,8 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
     def test_default_advisor_matches_highest_flagship(self):
         import re
 
+        mod = _load_aside()
+
         with open(self._ASIDE_PY, encoding="utf-8") as f:
             aside_src = f.read()
         m = re.search(r'_DEFAULT_ADVISOR_SPEC\s*=\s*"([^"]+)"', aside_src)
@@ -1056,39 +1058,21 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
 
-        # Prefer the highest Fable: claude-fable-<major>[-<minor>], bare form
-        # only — minor capped at 2 digits to reject date stamps.
-        fable_re = re.compile(
-            r'ID:\s*"(claude-fable-(\d+)(?:-(\d{1,2}))?)"'
-            r'(?:[^}]*?)Provider:\s*"anthropic"',
-            re.DOTALL,
+        # Gather every model id registered under the anthropic provider, then
+        # pick the strongest flagship via the SAME ranking helper the runtime
+        # degrade path uses (_best_anthropic_flagship). This guarantees test
+        # and runtime agree on "which model is the flagship".
+        id_re = re.compile(
+            r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL
         )
-        best = (-1, -1, "")
-        for match in fable_re.finditer(models_src):
-            full_id = match.group(1)
-            major = int(match.group(2))
-            minor = int(match.group(3) or 0)
-            if (major, minor) > (best[0], best[1]):
-                best = (major, minor, full_id)
+        anthropic_ids = id_re.findall(models_src)
+        best = mod._best_anthropic_flagship(anthropic_ids)
 
-        if best[2] == "":
-            # No fable registered — fall back to the highest bare Opus X-Y.
-            opus_re = re.compile(
-                r'ID:\s*"(claude-opus-(\d+)-(\d{1,2}))"'
-                r'(?:[^}]*?)Provider:\s*"anthropic"',
-                re.DOTALL,
-            )
-            for match in opus_re.finditer(models_src):
-                full_id = match.group(1)
-                major, minor = int(match.group(2)), int(match.group(3))
-                if (major, minor) > (best[0], best[1]):
-                    best = (major, minor, full_id)
-
-        self.assertNotEqual(
-            best[2], "",
+        self.assertIsNotNone(
+            best,
             "no claude-fable or claude-opus models registered under anthropic provider",
         )
-        want_spec = "anthropic/" + best[2]
+        want_spec = "anthropic/" + best
         self.assertEqual(
             got, want_spec,
             "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
@@ -1118,6 +1102,8 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
     def test_default_delegate_matches_highest_haiku(self):
         import re
 
+        mod = _load_aside()
+
         with open(self._ASIDE_PY, encoding="utf-8") as f:
             aside_src = f.read()
         m = re.search(r'_DEFAULT_DELEGATE_SPEC\s*=\s*"([^"]+)"', aside_src)
@@ -1128,23 +1114,19 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
         with open(self._MODELS_GO, encoding="utf-8") as f:
             models_src = f.read()
 
-        # Bare X-Y form only — minor capped at 2 digits to reject date stamps.
-        block_re = re.compile(
-            r'ID:\s*"(claude-haiku-(\d+)-(\d{1,2}))"'
-            r'(?:[^}]*?)Provider:\s*"anthropic"',
-            re.DOTALL,
+        # Gather all anthropic ids and pick the highest Haiku via the same
+        # runtime ranking helper (_best_anthropic_haiku).
+        id_re = re.compile(
+            r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL
         )
-        best = (-1, -1, "")
-        for match in block_re.finditer(models_src):
-            full_id, major, minor = match.group(1), int(match.group(2)), int(match.group(3))
-            if (major, minor) > (best[0], best[1]):
-                best = (major, minor, full_id)
+        anthropic_ids = id_re.findall(models_src)
+        best = mod._best_anthropic_haiku(anthropic_ids)
 
-        self.assertNotEqual(
-            best[2], "",
+        self.assertIsNotNone(
+            best,
             "no claude-haiku-<major>-<minor> models registered under anthropic provider",
         )
-        want_spec = "anthropic/" + best[2]
+        want_spec = "anthropic/" + best
         self.assertEqual(
             got, want_spec,
             "aside.py _DEFAULT_DELEGATE_SPEC out of sync with model registry:\n"
@@ -1155,6 +1137,260 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
         )
 
 
+
+
+class TestRankingHelpers(unittest.TestCase):
+    """Ranking helpers shared by runtime degrade + drift tests."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_flagship_fable_beats_opus(self):
+        self.assertGreater(
+            self.mod._rank_flagship("claude-fable-5"),
+            self.mod._rank_flagship("claude-opus-4-9"),
+        )
+
+    def test_flagship_orders_by_version(self):
+        self.assertGreater(
+            self.mod._rank_flagship("claude-opus-4-8"),
+            self.mod._rank_flagship("claude-opus-4-7"),
+        )
+
+    def test_flagship_rejects_date_stamp_and_nonflagship(self):
+        self.assertIsNone(self.mod._rank_flagship("claude-opus-4-1-20250805"))
+        self.assertIsNone(self.mod._rank_flagship("claude-haiku-4-5"))
+
+    def test_best_flagship_picks_highest(self):
+        ids = ["claude-haiku-4-5", "claude-opus-4-7", "claude-opus-4-8"]
+        self.assertEqual(self.mod._best_anthropic_flagship(ids), "claude-opus-4-8")
+
+    def test_best_flagship_prefers_fable(self):
+        ids = ["claude-opus-4-9", "claude-fable-5", "claude-haiku-4-5"]
+        self.assertEqual(self.mod._best_anthropic_flagship(ids), "claude-fable-5")
+
+    def test_best_flagship_none_when_absent(self):
+        self.assertIsNone(self.mod._best_anthropic_haiku(["claude-opus-4-8"]))
+        self.assertIsNone(self.mod._best_anthropic_flagship(["claude-haiku-4-5"]))
+
+    def test_best_haiku_picks_highest(self):
+        ids = ["claude-haiku-4-5", "claude-haiku-3-5"]
+        self.assertEqual(self.mod._best_anthropic_haiku(ids), "claude-haiku-4-5")
+
+
+class TestModelUnavailableSignature(unittest.TestCase):
+    """_is_model_unavailable_error matching (Layer B)."""
+
+    def setUp(self):
+        self.mod = _load_aside()
+
+    def test_matches_not_found_and_404(self):
+        for s in (
+            "not_found_error: model X does not exist",
+            "HTTP 400: invalid model",
+            "the model is not available",
+            "404 page not found",
+            "unknown model claude-fable-5",
+        ):
+            self.assertTrue(self.mod._is_model_unavailable_error(s), s)
+
+    def test_does_not_match_overflow(self):
+        self.assertFalse(
+            self.mod._is_model_unavailable_error(
+                "side-query: Input exceeds context window limit"
+            )
+        )
+
+    def test_does_not_match_generic_error(self):
+        self.assertFalse(self.mod._is_model_unavailable_error("connection reset by peer"))
+
+
+class TestAvailabilityDegrade(unittest.TestCase):
+    """Layer A — degrade advisor/delegate to the highest available model."""
+
+    def _ctx(self, available, side_query_result="reply"):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(return_value=side_query_result)
+        ctx.available_models = mock.MagicMock(return_value=available)
+        return ctx
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def test_fable_unavailable_degrades_to_highest_opus(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        available = [
+            {"provider": "anthropic", "id": "claude-opus-4-7", "name": "Opus 4.7"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus 4.8"},
+            {"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku"},
+        ]
+        ctx = self._ctx(available, side_query_result="opus reply")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-opus-4-8")
+        self.assertEqual(kwargs["provider"], "anthropic")
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith(
+                "[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]"
+            ),
+            text,
+        )
+
+    def test_configured_model_available_used_as_is(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        ctx = self._ctx(available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-fable-5")
+        text = result["content"][0]["text"]
+        self.assertTrue(text.startswith("[advisor: anthropic/claude-fable-5]"), text)
+        self.assertNotIn("fallback", text)
+
+    def test_empty_available_uses_configured_spec(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        ctx = self._ctx([])
+        mod._run_aside([], "q", ctx, escalate=True)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-fable-5")
+
+    def test_no_anthropic_flagship_disables_escalation(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        # Only a Haiku available — no flagship to degrade to → advisor None.
+        available = [{"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku"}]
+        ctx = self._ctx(available, side_query_result="executor reply")
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertEqual(
+            ctx.side_query.call_args.kwargs,
+            {"model": None, "provider": None, "effort": None},
+        )
+        # No advisor prefix — escalation was disabled this session.
+        self.assertEqual(result["content"][0]["text"], "executor reply")
+
+    def test_delegate_degrades_to_highest_haiku(self):
+        mod = self._mod(delegate={"provider": "anthropic", "model": "claude-haiku-9-9"})
+        available = [
+            {"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku 4.5"},
+            {"provider": "anthropic", "id": "claude-haiku-3-5", "name": "Haiku 3.5"},
+        ]
+        ctx = self._ctx(available, side_query_result="cheap reply")
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith(
+                "[delegate: anthropic/claude-haiku-4-5 (fallback: claude-haiku-9-9 unavailable)]"
+            ),
+            text,
+        )
+
+    def test_effort_preserved_through_degrade(self):
+        mod = self._mod(
+            advisor={"provider": "anthropic", "model": "claude-fable-5", "effort": "high"}
+        )
+        available = [{"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"}]
+        ctx = self._ctx(available)
+        mod._run_aside([], "q", ctx, escalate=True)
+        self.assertEqual(ctx.side_query.call_args.kwargs["effort"], "high")
+
+
+class TestReactiveFallback(unittest.TestCase):
+    """Layer B — escalated/delegated call falls back to the executor model."""
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def _ctx(self, sq):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        # available_models returns [] (MagicMock) → configured spec used as-is.
+        return ctx
+
+    def test_unavailable_advisor_retries_on_executor(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is not None:
+                raise RuntimeError("not_found_error: model claude-fable-5 does not exist")
+            return "executor answer"
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "design tradeoff?", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[advisor unavailable — answered on executor model]"), text
+        )
+        self.assertIn("executor answer", text)
+        # Two calls: routed (failed) then executor (succeeded).
+        self.assertEqual(ctx.side_query.call_count, 2)
+
+    def test_unavailable_delegate_retries_on_executor(self):
+        mod = self._mod(delegate={"provider": "anthropic", "model": "claude-haiku-4-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is not None:
+                raise RuntimeError("HTTP 400: invalid model")
+            return "executor answer"
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[delegate unavailable — answered on executor model]"), text
+        )
+
+    def test_non_unavailability_error_still_surfaces(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError("connection reset by peer")
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("aside LLM call failed", result["content"][0]["text"])
+        # Only the routed call — no executor retry for a generic error.
+        self.assertEqual(ctx.side_query.call_count, 1)
+
+    def test_overflow_error_hits_hint_not_fallback(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            raise RuntimeError("side-query: Input exceeds context window limit")
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("context window full", text)
+        self.assertEqual(ctx.side_query.call_count, 1)
+
+    def test_executor_retry_also_failing_returns_original_error(self):
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is not None:
+                raise RuntimeError("not_found_error: model gone")
+            raise RuntimeError("not_found_error: still gone")
+
+        ctx = self._ctx(sq)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        self.assertIn("aside LLM call failed", result["content"][0]["text"])
 
 
 class TestAdviseCommand(unittest.TestCase):
@@ -1223,6 +1459,23 @@ class TestAdviseCommand(unittest.TestCase):
         ctx.side_query = mock.MagicMock(side_effect=RuntimeError("LLM down"))
         result = handler(["q"], ctx)
         self.assertIn("LLM down", result["message"])
+
+    def test_unavailable_advisor_answers_on_executor(self):
+        # Layer B: /advise degrades to the executor model on unavailability.
+        self.mod._ADVISOR = {"provider": "anthropic", "model": "claude-fable-5"}
+        handler = fir_ext._command_handlers["advise"]
+        ctx = self._ctx()
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model is not None:
+                raise RuntimeError("not_found_error: model claude-fable-5 does not exist")
+            return "executor answer"
+
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        result = handler(["what", "now"], ctx)
+        self.assertIn("[advisor unavailable — answered on executor model]", result["message"])
+        self.assertIn("executor answer", result["message"])
+        self.assertTrue(result.get("print_response"))
 
 
 if __name__ == "__main__":

@@ -27,6 +27,13 @@ type BridgeAPI interface {
 	SetLabel(entryID string, label string)
 	ClearLabel(entryID string)
 	SetModel(model *ai.Model) bool
+	// GetAvailableModels returns the set of models the session's model
+	// registry currently considers live and authed (registry.GetAvailable()).
+	// Extensions query this to adapt routing to runtime availability — e.g.
+	// the aside advisor degrades to the highest available flagship when its
+	// configured default has gone unavailable. Returns nil when no registry
+	// is reachable (e.g. the auth helper's nop bridge).
+	GetAvailableModels() []*ai.Model
 	ContinueSession() error
 	SideQuery(question string, opts *session.SideQueryOptions) (string, error)
 	// SideQueryStream is the streaming flavor of SideQuery. onDelta is

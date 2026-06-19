@@ -214,6 +214,191 @@ def _delegate() -> dict[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
+# Runtime availability adaptation (Layer A) + ranking helpers
+# ---------------------------------------------------------------------------
+#
+# The configured/default advisor & delegate specs are a *preference seed*, not
+# the final answer. Anthropic can make a model (e.g. claude-fable-5)
+# unavailable at runtime; fir's model registry already prunes it from
+# GetAvailable(). We query that set via ctx.available_models() and degrade to
+# the highest-ranked AVAILABLE Anthropic flagship (advisor) / Haiku (delegate)
+# rather than routing to a dead model.
+#
+# The ranking helpers below are the single source of truth: the drift tests
+# (DefaultAdvisorTracksHighestAnthropicFlagship /
+# DefaultDelegateTracksHighestAnthropicHaiku) reuse them so test and runtime
+# always agree on "which model is strongest/cheapest".
+
+# Bare X-Y forms only — minor capped at 2 digits to reject date stamps
+# (e.g. claude-opus-4-1-20250805). Fable's minor is optional; Opus requires it.
+_FABLE_RE = re.compile(r"^claude-fable-(\d+)(?:-(\d{1,2}))?$")
+_OPUS_RE = re.compile(r"^claude-opus-(\d+)-(\d{1,2})$")
+_HAIKU_RE = re.compile(r"^claude-haiku-(\d+)-(\d{1,2})$")
+
+
+def _rank_flagship(model_id: str) -> tuple[int, int, int] | None:
+    """Rank an Anthropic flagship model id. Higher tuple == stronger.
+
+    The Fable (Mythos-class) tier always outranks the Opus tier, then by
+    (major, minor). Returns None for non-flagship / date-stamped ids.
+    """
+    mid = model_id.strip()
+    m = _FABLE_RE.match(mid)
+    if m is not None:
+        return (1, int(m.group(1)), int(m.group(2) or 0))
+    m = _OPUS_RE.match(mid)
+    if m is not None:
+        return (0, int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _rank_haiku(model_id: str) -> tuple[int, int] | None:
+    """Rank an Anthropic Haiku model id by (major, minor). None if not Haiku."""
+    m = _HAIKU_RE.match(model_id.strip())
+    if m is None:
+        return None
+    return (int(m.group(1)), int(m.group(2)))
+
+
+def _best_anthropic_flagship(model_ids: list[str]) -> str | None:
+    """Pick the highest-ranked flagship id from *model_ids* (Fable > Opus)."""
+    best_id: str | None = None
+    best_rank: tuple[int, int, int] | None = None
+    for mid in model_ids:
+        r = _rank_flagship(mid)
+        if r is not None and (best_rank is None or r > best_rank):
+            best_rank, best_id = r, mid
+    return best_id
+
+
+def _best_anthropic_haiku(model_ids: list[str]) -> str | None:
+    """Pick the highest-ranked Haiku id from *model_ids*."""
+    best_id: str | None = None
+    best_rank: tuple[int, int] | None = None
+    for mid in model_ids:
+        r = _rank_haiku(mid)
+        if r is not None and (best_rank is None or r > best_rank):
+            best_rank, best_id = r, mid
+    return best_id
+
+
+def _query_available_models(ctx: fir_ext.Context) -> list[dict]:
+    """Query the host's live-available model set, tolerating old hosts.
+
+    Returns a list of ``{provider, id, name}`` dicts, or ``[]`` when the host
+    doesn't implement the verb, the call errors, or the result isn't a list.
+    An empty result means "availability unknown" — callers then use their
+    static config unchanged (no regression on older fir).
+    """
+    fn = getattr(ctx, "available_models", None)
+    if fn is None:
+        return []
+    try:
+        models = fn()
+    except Exception:
+        return []
+    if isinstance(models, list):
+        return [m for m in models if isinstance(m, dict)]
+    return []
+
+
+def _degrade_role(
+    cfg: dict[str, str] | None,
+    available: list[dict],
+    role: str,
+) -> dict[str, str] | None:
+    """Degrade a static role config to an AVAILABLE model when needed.
+
+    role is "advisor" or "delegate". Resolution:
+      1. cfg None / availability unknown ([]) → return cfg unchanged.
+      2. cfg's provider/model is in the available set → use it.
+      3. Not available, provider != anthropic → keep the static spec (no
+         ranking exists for other providers; avoid a regression).
+      4. Not available, anthropic → pick the highest available flagship
+         (advisor) / Haiku (delegate), preserving effort. The original model
+         id is recorded under ``_fallback`` for the trace line.
+      5. Not available, anthropic, but no rankable model available → None
+         (the role is disabled this session rather than routing to a dead
+         model).
+    """
+    if cfg is None or not available:
+        return cfg
+    in_available = any(
+        m.get("provider") == cfg["provider"] and m.get("id") == cfg["model"]
+        for m in available
+    )
+    if in_available:
+        return cfg
+    if cfg["provider"] != "anthropic":
+        return cfg
+    ids = [m.get("id", "") for m in available if m.get("provider") == "anthropic"]
+    best = _best_anthropic_haiku(ids) if role == "delegate" else _best_anthropic_flagship(ids)
+    if best is None:
+        return None
+    resolved: dict[str, str] = {"provider": "anthropic", "model": best, "_fallback": cfg["model"]}
+    if cfg.get("effort"):
+        resolved["effort"] = cfg["effort"]
+    return resolved
+
+
+def _resolve_advisor(ctx: fir_ext.Context) -> dict[str, str] | None:
+    """Availability-aware advisor resolution (Layer A)."""
+    cfg = _advisor()
+    if cfg is None:
+        return None
+    return _degrade_role(cfg, _query_available_models(ctx), "advisor")
+
+
+def _resolve_delegate(ctx: fir_ext.Context) -> dict[str, str] | None:
+    """Availability-aware delegate resolution (Layer A)."""
+    cfg = _delegate()
+    if cfg is None:
+        return None
+    return _degrade_role(cfg, _query_available_models(ctx), "delegate")
+
+
+# Substrings (case-insensitive) that signal a model-unavailability error from
+# a provider. Used by Layer B to auto-fall-back an escalated/delegated side
+# query to the executor's own model.
+_MODEL_UNAVAILABLE_SIGNATURES = (
+    "not_found_error",
+    "model not found",
+    "does not exist",
+    "not available",
+    "invalid model",
+    "unknown model",
+    " 400",
+    "400 ",
+    "http 400",
+    "404",
+)
+
+# Context-overflow markers — these have a dedicated hint path in
+# _side_query_error and must NOT be treated as model-unavailability.
+_OVERFLOW_MARKERS = (
+    "context window",
+    "context length",
+    "maximum context",
+    "token limit",
+    "too many tokens",
+    "exceeds",
+)
+
+
+def _is_model_unavailable_error(msg: str) -> bool:
+    """True when *msg* looks like a provider 'model unavailable' error.
+
+    Deliberately excludes context-overflow errors (which already have their
+    own hint path) so Layer B doesn't swallow them.
+    """
+    low = msg.lower()
+    if any(m in low for m in _OVERFLOW_MARKERS):
+        return False
+    return any(s in low for s in _MODEL_UNAVAILABLE_SIGNATURES)
+
+
+
+# ---------------------------------------------------------------------------
 # Helper: extract text from a tool result
 # ---------------------------------------------------------------------------
 
@@ -418,6 +603,44 @@ def _run_side_query_with_card(
     return text, None
 
 
+def _run_side_query_reactive(
+    ctx: fir_ext.Context,
+    question: str,
+    *,
+    model: str | None,
+    provider: str | None,
+    effort: str | None,
+    role_label: str | None,
+) -> tuple[str | None, str | None, str]:
+    """Run a side query with Layer B reactive fallback.
+
+    Runs the (possibly escalated/delegated) side query. When the call routed
+    to an advisor/delegate model (``model`` is set and ``role_label`` given)
+    and fails with a model-unavailability error, retry ONCE on the executor's
+    own model (no overrides). Returns ``(text, error, note)``:
+
+      * success on the routed model      → (text, None, "")
+      * unavailability → executor retry  → (text, None, "<note>\\n\\n")
+      * any other failure                → (None, error, "")
+
+    The note tells the caller the advisor/delegate was unavailable so the
+    answer came from the executor model; the caller drops the routing trace.
+    """
+    text, err = _run_side_query_with_card(
+        ctx, question, model=model, provider=provider, effort=effort
+    )
+    if err is None:
+        return text, None, ""
+    if model is not None and role_label and _is_model_unavailable_error(err):
+        text2, err2 = _run_side_query_with_card(
+            ctx, question, model=None, provider=None, effort=None
+        )
+        if err2 is None:
+            note = f"[{role_label} unavailable — answered on executor model]\n\n"
+            return text2, None, note
+    return None, err, ""
+
+
 # ---------------------------------------------------------------------------
 # Core: run an aside — side query with optional tool calls
 # ---------------------------------------------------------------------------
@@ -460,29 +683,41 @@ def _run_aside(
     if escalate and delegate:
         return _error("escalate and delegate are mutually exclusive — pick one")
 
-    # Resolve advisor/delegate override if requested and configured.
+    # Resolve advisor/delegate override if requested and configured. Layer A:
+    # resolution is availability-aware — it degrades to the highest available
+    # Anthropic flagship/Haiku when the configured default has gone away.
     advisor_used: dict[str, str] | None = None
     delegate_used: dict[str, str] | None = None
     sq_model: str | None = None
     sq_provider: str | None = None
     sq_effort: str | None = None
-    advisor = _advisor()
-    if escalate and advisor is not None:
-        sq_model = advisor["model"]
-        sq_provider = advisor["provider"]
-        sq_effort = advisor.get("effort")
-        advisor_used = advisor
-    delegate_cfg = _delegate()
-    if delegate and delegate_cfg is not None:
-        sq_model = delegate_cfg["model"]
-        sq_provider = delegate_cfg["provider"]
-        sq_effort = delegate_cfg.get("effort")
-        delegate_used = delegate_cfg
+    if escalate:
+        advisor = _resolve_advisor(ctx)
+        if advisor is not None:
+            sq_model = advisor["model"]
+            sq_provider = advisor["provider"]
+            sq_effort = advisor.get("effort")
+            advisor_used = advisor
+    if delegate:
+        delegate_cfg = _resolve_delegate(ctx)
+        if delegate_cfg is not None:
+            sq_model = delegate_cfg["model"]
+            sq_provider = delegate_cfg["provider"]
+            sq_effort = delegate_cfg.get("effort")
+            delegate_used = delegate_cfg
+
+    # Role label used by Layer B for the executor-fallback note.
+    role_label = "advisor" if advisor_used else ("delegate" if delegate_used else None)
 
     # No tools — pure ephemeral side query.
     if not tools:
-        synthesis, err = _run_side_query_with_card(
-            ctx, instructions, model=sq_model, provider=sq_provider, effort=sq_effort
+        synthesis, err, note = _run_side_query_reactive(
+            ctx,
+            instructions,
+            model=sq_model,
+            provider=sq_provider,
+            effort=sq_effort,
+            role_label=role_label,
         )
         if err is not None:
             return _side_query_error(RuntimeError(err))
@@ -492,10 +727,11 @@ def _run_aside(
         # it as an explicit error so the caller doesn't see a bare trace line.
         if not synthesis or not synthesis.strip():
             return _error("advisor returned no content")
+        # When note is set the answer came from the executor model (Layer B
+        # fallback) — drop the advisor/delegate trace prefix.
+        text = note + synthesis if note else _prefix_trace(synthesis, advisor_used, delegate_used)
         return {
-            "content": [
-                {"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}
-            ],
+            "content": [{"type": "text", "text": text}],
             "is_error": False,
         }
 
@@ -574,8 +810,13 @@ def _run_aside(
     # Synthesise collected outputs.
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
-    synthesis, err = _run_side_query_with_card(
-        ctx, prompt, model=sq_model, provider=sq_provider, effort=sq_effort
+    synthesis, err, note = _run_side_query_reactive(
+        ctx,
+        prompt,
+        model=sq_model,
+        provider=sq_provider,
+        effort=sq_effort,
+        role_label=role_label,
     )
     if err is not None:
         return _side_query_error(RuntimeError(err))
@@ -601,7 +842,12 @@ def _run_aside(
 
     return {
         "content": [
-            {"type": "text", "text": _prefix_trace(synthesis, advisor_used, delegate_used)}
+            {
+                "type": "text",
+                "text": (note + synthesis)
+                if note
+                else _prefix_trace(synthesis, advisor_used, delegate_used),
+            }
         ],
         "is_error": False,
         "details": {"tool_outputs": tool_outputs},
@@ -618,6 +864,9 @@ def _prefix_advisor(text: str, advisor: dict[str, str] | None) -> str:
     if advisor is None:
         return text
     spec = _format_advisor_spec(advisor)
+    fallback = advisor.get("_fallback")
+    if fallback:
+        return f"[advisor: {spec} (fallback: {fallback} unavailable)]\n\n{text}"
     return f"[advisor: {spec}]\n\n{text}"
 
 
@@ -630,6 +879,9 @@ def _prefix_delegate(text: str, delegate: dict[str, str] | None) -> str:
     if delegate is None:
         return text
     spec = _format_advisor_spec(delegate)
+    fallback = delegate.get("_fallback")
+    if fallback:
+        return f"[delegate: {spec} (fallback: {fallback} unavailable)]\n\n{text}"
     return f"[delegate: {spec}]\n\n{text}"
 
 
@@ -870,7 +1122,7 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
             ),
         }
 
-    advisor = _advisor()
+    advisor = _resolve_advisor(ctx)
     if advisor is None:
         return {
             "message": (
@@ -887,6 +1139,21 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
             effort=advisor.get("effort"),
         )
     except Exception as exc:
+        # Layer B: advisor unavailable → answer on the executor model.
+        if _is_model_unavailable_error(str(exc)):
+            try:
+                answer = ctx.side_query(text)
+            except Exception as exc2:
+                return {"message": _side_query_error_text(exc2)}
+            return {
+                "message": (
+                    f"**advise:** {text}\n\n"
+                    "[advisor unavailable — answered on executor model]\n\n"
+                    f"{answer}"
+                ),
+                "print_response": True,
+                "markdown": True,
+            }
         return {"message": _side_query_error_text(exc)}
     return {
         "message": f"**advise:** {text}\n\n{_prefix_advisor(answer, advisor)}",

@@ -411,6 +411,10 @@ otherwise noted.
 |                  |                                       | description?,             |
 |                  |                                       | parameters?}, …]``        |
 +------------------+---------------------------------------+---------------------------+
+| ``available_     | ``{}``                                | ``{models:[{provider,     |
+| models``         | Live-and-authed model set; ``[]`` on  | id, name}, …]}``          |
+|                  | old hosts.                            |                           |
++------------------+---------------------------------------+---------------------------+
 | ``prepend_       | ``{content}``                         | ``{ok: true}``            |
 | context``        | Adds a ``[SYS_EXT]`` block to the     |                           |
 |                  | system prompt (dynamic context).      |                           |
@@ -2940,6 +2944,32 @@ class Context:
         result = self._call("list_tools", {}, timeout=timeout)
         if isinstance(result, list):
             return result  # type: ignore[return-value]
+        return []
+
+    def available_models(self, timeout: float = 10.0) -> list[dict[str, str]]:
+        """Return the models the session currently considers live and authed.
+
+        Queries the host's ``available_models`` bridge verb, which returns
+        the session model registry's ``GetAvailable()`` set — only models
+        confirmed live by the provider's model list and backed by auth.
+        Each entry is a dict with ``provider``, ``id`` and ``name`` keys.
+
+        Extensions use this to adapt routing to runtime availability — e.g.
+        the aside advisor degrades to the highest available flagship when its
+        configured default has gone unavailable.
+
+        Tolerates older hosts that don't implement the verb: any RPC error
+        (method-not-found, etc.) is swallowed and ``[]`` is returned so
+        callers degrade gracefully to their static configuration.
+        """
+        try:
+            result = self._call("available_models", {}, timeout=timeout)
+        except Exception:
+            return []
+        if isinstance(result, dict):
+            models = result.get("models")
+            if isinstance(models, list):
+                return [m for m in models if isinstance(m, dict)]
         return []
 
     def prepend(self, content: str) -> None:

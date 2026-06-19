@@ -1298,6 +1298,7 @@ func (n *noopBridgeAPI) GetSessionID() string                                   
 func (n *noopBridgeAPI) SetLabel(_ string, _ string)                                                {}
 func (n *noopBridgeAPI) ClearLabel(_ string)                                                        {}
 func (n *noopBridgeAPI) SetModel(_ *ai.Model) bool                                                  { return false }
+func (n *noopBridgeAPI) GetAvailableModels() []*ai.Model                                            { return nil }
 func (n *noopBridgeAPI) ContinueSession() error                                                     { return nil }
 func (n *noopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
 	return "", nil

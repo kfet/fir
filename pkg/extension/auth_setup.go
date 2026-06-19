@@ -180,6 +180,7 @@ func (n *nopBridgeAPI) GetSessionID() string                                   {
 func (n *nopBridgeAPI) SetLabel(_, _ string)                                   {}
 func (n *nopBridgeAPI) ClearLabel(_ string)                                    {}
 func (n *nopBridgeAPI) SetModel(_ *ai.Model) bool                              { return false }
+func (n *nopBridgeAPI) GetAvailableModels() []*ai.Model                        { return nil }
 func (n *nopBridgeAPI) ContinueSession() error                                 { return nil }
 func (n *nopBridgeAPI) SideQuery(_ string, _ *session.SideQueryOptions) (string, error) {
 	return "", fmt.Errorf("side query not available outside a session")

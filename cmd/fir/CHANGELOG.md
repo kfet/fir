@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- Advisor/delegate runtime adaptation in the `aside` extension. The bundled default advisor (`anthropic/claude-fable-5`) and delegate are now a *preference seed*, not a fixed target. A new `available_models` host bridge verb (with `ctx.available_models()` in the Python/Go SDKs) exposes the session model registry's live-and-authed set. **Layer A (proactive):** when the configured advisor/delegate model isn't live, resolution degrades to the highest-ranked available Anthropic flagship (advisor) or Haiku (delegate), preserving effort and tracing the redirect (`[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]`); the ranking helper is shared with the drift tests so test and runtime agree. **Layer B (reactive):** an escalated/delegated side query that fails with a model-unavailability error (`not_found_error`, HTTP 400/404, "model not found", etc.) auto-retries once on the executor's own model and notes it (`[advisor unavailable — answered on executor model]`); context-overflow errors still hit their dedicated hint path. `/advise` degrades the same way. Older hosts without the verb degrade gracefully to the static config (no regression).
+
+
 ## [0.73.1] - 2026-06-18
 
 ### Fixed

@@ -174,6 +174,19 @@ func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	return true
 }
 
+// GetAvailableModels returns the session registry's live-and-authed model
+// set. Returns nil when the session has no model registry.
+func (b *SessionBridge) GetAvailableModels() []*ai.Model {
+	if b.session == nil {
+		return nil
+	}
+	mr := b.session.ModelRegistryRef()
+	if mr == nil {
+		return nil
+	}
+	return mr.GetAvailable()
+}
+
 func (b *SessionBridge) ContinueSession() error {
 	go func() { _ = b.session.Agent.Continue() }()
 	return nil

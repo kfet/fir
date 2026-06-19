@@ -213,6 +213,21 @@ type GetSessionNameResult struct {
 	Name string `json:"name"`
 }
 
+// AvailableModel is one entry in AvailableModelsResult. Provider/ID/Name
+// mirror the corresponding fields of ai.Model; only the identity fields
+// extensions need for routing are exposed.
+type AvailableModel struct {
+	Provider string `json:"provider"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+}
+
+// AvailableModelsResult is the result of "available_models" — the session
+// registry's live-and-authed model set.
+type AvailableModelsResult struct {
+	Models []AvailableModel `json:"models"`
+}
+
 // ---------------------------------------------------------------------------
 // Event payloads (fir → extension, notification)
 // ---------------------------------------------------------------------------

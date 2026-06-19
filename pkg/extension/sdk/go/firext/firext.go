@@ -592,6 +592,31 @@ func (c *Context) SideQuery(question string, timeoutSec int) (string, error) {
 	return obj.Text, nil
 }
 
+// AvailableModel is one entry returned by Context.AvailableModels.
+type AvailableModel struct {
+	Provider string `json:"provider"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+}
+
+// AvailableModels returns the models the session currently considers live
+// and authed (the host's available_models bridge verb → registry
+// GetAvailable()). Tolerates older hosts: on any RPC error it returns an
+// empty slice and nil error so callers degrade to static configuration.
+func (c *Context) AvailableModels() ([]AvailableModel, error) {
+	raw, err := c.app.call("available_models", nil)
+	if err != nil {
+		return nil, nil
+	}
+	var obj struct {
+		Models []AvailableModel `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, nil
+	}
+	return obj.Models, nil
+}
+
 // SetSessionData stores a key/value pair persisted across /reexec.
 func (c *Context) SetSessionData(key string, value any) error {
 	_, err := c.app.call("set_session_data", map[string]any{"key": key, "value": value})
