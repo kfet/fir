@@ -518,9 +518,12 @@ func TestListSessions_AllDirs(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		// Create a minimal session file.
+		// Create a minimal session file WITH a message so it is non-empty
+		// (empty/header-only sessions are now skipped by session/list).
 		f := filepath.Join(dir, "2026-01-01T00-00-00Z_test-id.jsonl")
-		if err := os.WriteFile(f, []byte(`{"type":"session","version":1,"id":"test","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}`+"\n"), 0o644); err != nil {
+		body := `{"type":"session","version":1,"id":"test","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}` + "\n" +
+			`{"type":"message","message":{"role":"user","content":"hi"}}` + "\n"
+		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -532,6 +535,38 @@ func TestListSessions_AllDirs(t *testing.T) {
 	}
 	if len(resp.Sessions) != 2 {
 		t.Errorf("expected 2 sessions from 2 dirs, got %d", len(resp.Sessions))
+	}
+}
+
+func TestListSessions_SkipsEmptySessions(t *testing.T) {
+	agentDir := t.TempDir()
+	t.Setenv("FIR_AGENT_DIR", agentDir)
+	dir := filepath.Join(agentDir, "sessions", "--proj--")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	header := `{"type":"session","version":1,"id":"x","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp"}` + "\n"
+	// Empty/header-only session (stillborn) — must be skipped.
+	empty := filepath.Join(dir, "2026-01-02T00-00-00Z_empty-id.jsonl")
+	if err := os.WriteFile(empty, []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Real session with a message — must be returned.
+	real := filepath.Join(dir, "2026-01-01T00-00-00Z_real-id.jsonl")
+	body := header + `{"type":"message","message":{"role":"user","content":"hi"}}` + "\n"
+	if err := os.WriteFile(real, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pa := &firAgent{sessions: make(map[string]*firSession)}
+	resp, err := pa.ListSessions(context.Background(), ListSessionsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("expected 1 non-empty session, got %d: %+v", len(resp.Sessions), resp.Sessions)
+	}
+	if resp.Sessions[0].SessionId != real {
+		t.Errorf("expected real session %q, got %q", real, resp.Sessions[0].SessionId)
 	}
 }
 

@@ -380,6 +380,13 @@ func (pa *firAgent) ListSessions(_ context.Context, params ListSessionsRequest) 
 
 	infos := make([]SessionInfo, 0, len(allSessions))
 	for _, s := range allSessions {
+		// Skip empty/header-only sessions ("stillborn" sessions left by a
+		// cancelled session/new or a crash). Returning one lets an ACP client
+		// resume into it via sessions[0] and bury real history; mirror the
+		// --continue guard (findMostRecentSession/sessionFileHasMessages).
+		if s.MessageCount == 0 {
+			continue
+		}
 		var title *string
 		if s.Name != "" {
 			title = &s.Name

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.73.1] - 2026-06-18
+
+### Fixed
+- ACP `session/list` now skips empty / header-only sessions (`MessageCount == 0`), matching the `--continue` most-recent selector (`findMostRecentSession`/`sessionFileHasMessages`). A cancelled `session/new` (for example an ACP client dropping its transport during a cold start) leaves a stillborn header-only session file; because `session/list` returned it sorted most-recent-first, a resuming client that picks the first entry (such as poe-acp’s `sessions[0]`) would attach to the empty session and bury the real conversation history. Empty sessions are now excluded from the listing, so resume lands on the newest session that actually has messages.
+
 ## [0.73.0] - 2026-06-18
 
 ### Added
