@@ -302,6 +302,25 @@ def _query_available_models(ctx: fir_ext.Context) -> list[dict]:
     return []
 
 
+# Per-session memo of models that returned a model-unavailability error this
+# session (keys are "provider/id"). Once a model 404s, escalation skips it for
+# the rest of the session instead of re-probing on every call: _degrade_role
+# treats memoized models as unavailable, so subsequent escalations degrade to
+# the next live flagship rather than repeating the failed call. The extension
+# process lives for the session, so module scope == session scope.
+_SESSION_UNAVAILABLE: set[str] = set()
+
+
+def _model_key(provider: str | None, model: str | None) -> str:
+    return f"{provider}/{model}"
+
+
+def _mark_model_unavailable(provider: str | None, model: str | None) -> None:
+    """Record that provider/model is unavailable for the rest of this session."""
+    if provider and model:
+        _SESSION_UNAVAILABLE.add(_model_key(provider, model))
+
+
 def _degrade_role(
     cfg: dict[str, str] | None,
     available: list[dict],
@@ -323,7 +342,8 @@ def _degrade_role(
     """
     if cfg is None or not available:
         return cfg
-    in_available = any(
+    cfg_key = _model_key(cfg["provider"], cfg["model"])
+    in_available = cfg_key not in _SESSION_UNAVAILABLE and any(
         m.get("provider") == cfg["provider"] and m.get("id") == cfg["model"]
         for m in available
     )
@@ -331,7 +351,12 @@ def _degrade_role(
         return cfg
     if cfg["provider"] != "anthropic":
         return cfg
-    ids = [m.get("id", "") for m in available if m.get("provider") == "anthropic"]
+    ids = [
+        m.get("id", "")
+        for m in available
+        if m.get("provider") == "anthropic"
+        and _model_key("anthropic", m.get("id", "")) not in _SESSION_UNAVAILABLE
+    ]
     best = _best_anthropic_haiku(ids) if role == "delegate" else _best_anthropic_flagship(ids)
     if best is None:
         return None
@@ -632,6 +657,9 @@ def _run_side_query_reactive(
     if err is None:
         return text, None, ""
     if model is not None and role_label and _is_model_unavailable_error(err):
+        # Memoize so subsequent escalations skip this dead model (Layer A
+        # then degrades to the next live flagship instead of re-probing).
+        _mark_model_unavailable(provider, model)
         text2, err2 = _run_side_query_with_card(
             ctx, question, model=None, provider=None, effort=None
         )
@@ -1141,6 +1169,7 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
     except Exception as exc:
         # Layer B: advisor unavailable → answer on the executor model.
         if _is_model_unavailable_error(str(exc)):
+            _mark_model_unavailable(advisor["provider"], advisor["model"])
             try:
                 answer = ctx.side_query(text)
             except Exception as exc2:

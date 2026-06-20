@@ -1393,6 +1393,90 @@ class TestReactiveFallback(unittest.TestCase):
         self.assertIn("aside LLM call failed", result["content"][0]["text"])
 
 
+class TestSessionUnavailableMemo(unittest.TestCase):
+    """Per-session 404 memo — once a model 404s, escalation skips it for the
+    rest of the session and Layer A degrades to the next live flagship instead
+    of re-probing the dead model on every call."""
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def test_fresh_load_starts_with_empty_memo(self):
+        mod = self._mod()
+        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+
+    def test_mark_ignores_falsy(self):
+        mod = self._mod()
+        mod._mark_model_unavailable(None, "x")
+        mod._mark_model_unavailable("anthropic", None)
+        self.assertEqual(mod._SESSION_UNAVAILABLE, set())
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        self.assertEqual(mod._SESSION_UNAVAILABLE, {"anthropic/claude-fable-5"})
+
+    def test_degrade_role_excludes_memoized_model(self):
+        mod = self._mod()
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        cfg = {"provider": "anthropic", "model": "claude-fable-5"}
+        # Not memoized -> fable (in the live catalogue) used as-is.
+        self.assertEqual(
+            mod._degrade_role(cfg, available, "advisor")["model"], "claude-fable-5"
+        )
+        # Memoized -> degrade to opus, even though fable is still in the catalogue.
+        mod._mark_model_unavailable("anthropic", "claude-fable-5")
+        out = mod._degrade_role(cfg, available, "advisor")
+        self.assertEqual(out["model"], "claude-opus-4-8")
+        self.assertEqual(out["_fallback"], "claude-fable-5")
+
+    def test_first_404_memoizes_then_second_call_degrades_to_opus(self):
+        # Anthropic still LISTS fable in /v1/models but it 404s on use. Layer A
+        # cannot pre-empt that on call 1 (fable looks available); Layer B catches
+        # the 404 and memoizes. Call 2 then degrades to opus with no failed probe.
+        mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: Claude Fable 5 is not available")
+            return "answer"
+
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        ctx.available_models = mock.MagicMock(return_value=available)
+
+        r1 = mod._run_aside([], "q1", ctx, escalate=True)
+        self.assertFalse(r1["is_error"])
+        self.assertTrue(
+            r1["content"][0]["text"].startswith(
+                "[advisor unavailable — answered on executor model]"
+            ),
+            r1["content"][0]["text"],
+        )
+        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+
+        r2 = mod._run_aside([], "q2", ctx, escalate=True)
+        self.assertFalse(r2["is_error"])
+        self.assertTrue(
+            r2["content"][0]["text"].startswith(
+                "[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]"
+            ),
+            r2["content"][0]["text"],
+        )
+        # fable probed once (call 1), executor fallback once, then opus -- no
+        # second fable probe.
+        self.assertEqual(calls, ["claude-fable-5", None, "claude-opus-4-8"])
+
+
 class TestAdviseCommand(unittest.TestCase):
     """/advise — slash command that always routes to the advisor model."""
 
