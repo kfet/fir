@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.74.1] - 2026-06-20
+
+### Changed
+
+- **aside advisor/delegate now memoizes unavailable models per session.** Anthropic still lists `claude-fable-5` in `/v1/models` but it 404s on use, so Layer A cannot pre-empt it. Previously every escalation re-probed the dead model and fell back to the executor. Now the first model-unavailability error is recorded for the session; `_degrade_role` treats memoized models as unavailable, so subsequent escalations degrade straight to the next live Anthropic flagship/Haiku (e.g. opus-4-8) instead of repeating the failed call.
+
 ## [0.74.0] - 2026-06-19
 
 ### Added
