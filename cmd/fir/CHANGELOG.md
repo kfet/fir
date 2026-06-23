@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- TUI no longer overwrites/loses the status-bar footer on a terminal height change (e.g. a tmux vertical pane resize). The differential renderer forced a full repaint on width changes but tracked no previous height, so a height-only resize ran the diff path against stale viewport geometry and could scroll the footer off-screen without redrawing it. A new `previousHeight` is now tracked and a height change triggers a full clear+redraw just like a width change. Regression coverage: `TestDoRender_HeightResizeForcesFullRedraw` in `pkg/tui/footer_overwrite_test.go` (with a small virtual-terminal emulator that models scroll-on-linefeed), plus a `TestDoRender_FooterNeverOverwritten` fuzz that guards footer visibility through content-height oscillations.
+
 ## [0.74.1] - 2026-06-20
 
 ### Changed

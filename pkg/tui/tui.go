@@ -205,6 +205,7 @@ type TUI struct {
 	renderMu            sync.Mutex
 	previousLines       []string
 	previousWidth       int
+	previousHeight      int
 	focusedComponent    Component
 	renderRequested     bool
 	cursorRow           int
@@ -458,6 +459,7 @@ func (t *TUI) DoRender() {
 	if t.forceRedraw.Swap(false) {
 		t.previousLines = nil
 		t.previousWidth = -1
+		t.previousHeight = -1
 		t.cursorRow = 0
 		t.hardwareCursorRow = 0
 		t.maxLinesRendered = 0
@@ -486,6 +488,11 @@ func (t *TUI) DoRender() {
 	t.applyLineResets(newLines)
 
 	widthChanged := t.previousWidth != 0 && t.previousWidth != width
+	// A height change (e.g. tmux vertical pane resize) invalidates the viewport
+	// geometry the diff path relies on (viewportTop, cursor row tracking). Like
+	// a width change it must trigger a full repaint, otherwise the diff render
+	// runs against stale geometry and can leave the footer overwritten.
+	heightChanged := t.previousHeight != 0 && t.previousHeight != height
 
 	fullRender := func(clear bool) {
 		t.fullRedrawCount++
@@ -513,6 +520,7 @@ func (t *TUI) DoRender() {
 		t.positionHardwareCursor(cursorPos, len(newLines))
 		t.previousLines = newLines
 		t.previousWidth = width
+		t.previousHeight = height
 	}
 
 	if len(t.previousLines) == 0 && !widthChanged {
@@ -520,7 +528,7 @@ func (t *TUI) DoRender() {
 		return
 	}
 
-	if widthChanged {
+	if widthChanged || heightChanged {
 		fullRender(true)
 		return
 	}
@@ -602,6 +610,7 @@ func (t *TUI) DoRender() {
 		t.positionHardwareCursor(cursorPos, len(newLines))
 		t.previousLines = newLines
 		t.previousWidth = width
+		t.previousHeight = height
 		t.previousViewportTop = max(0, t.maxLinesRendered-height)
 		return
 	}
@@ -679,6 +688,7 @@ func (t *TUI) DoRender() {
 	t.positionHardwareCursor(cursorPos, len(newLines))
 	t.previousLines = newLines
 	t.previousWidth = width
+	t.previousHeight = height
 }
 
 // segmentResetNoHyperlink resets ANSI styles without the OSC 8 hyperlink reset.

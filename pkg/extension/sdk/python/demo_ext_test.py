@@ -71,7 +71,7 @@ def _load_demo() -> None:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     finally:
-        fir_ext.run = orig_run  # ty: ignore[invalid-assignment]
+        fir_ext.run = orig_run
 
 
 # ---------------------------------------------------------------------------
