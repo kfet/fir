@@ -361,8 +361,14 @@ func buildCodexRequestBody(model *ai.Model, ctx ai.Context, options *ai.StreamOp
 	}
 
 	if options != nil && string(options.ReasoningEffort) != "" && model.Reasoning {
+		effort := clampCodexReasoningEffort(model.ID, string(options.ReasoningEffort))
+		// Further clamp to the model's advertised enum when the catalog
+		// pins one. Empty/unset ReasoningEffortValues = no extra clamping.
+		if len(model.ReasoningEffortValues) > 0 {
+			effort = clampEffortToEnum(effort, model.ReasoningEffortValues)
+		}
 		body["reasoning"] = map[string]any{
-			"effort":  clampCodexReasoningEffort(model.ID, string(options.ReasoningEffort)),
+			"effort":  effort,
 			"summary": "auto",
 		}
 	}

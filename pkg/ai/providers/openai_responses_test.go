@@ -408,6 +408,54 @@ func TestBuildOpenAIResponsesBody_OpenAIStillGetsEncryptedContent(t *testing.T) 
 	assert.Equal(t, "developer", first["role"])
 }
 
+// The outbound reasoning.effort must be clamped to the model's advertised
+// ReasoningEffortValues enum (from models.json). Providers whose models only
+// accept a restricted effort set (e.g. {high,xhigh,max}) otherwise 400 when
+// fir sends the unclamped global thinking level.
+func TestBuildOpenAIResponsesBody_ClampsEffortToEnum(t *testing.T) {
+	newModel := func(values []string) *ai.Model {
+		return &ai.Model{
+			ID:                    "fugu",
+			API:                   ai.ApiOpenAIResponses,
+			Provider:              ai.ProviderOpenAI,
+			BaseURL:               "https://api.sakana.ai/v1",
+			Reasoning:             true,
+			ContextWindow:         128000,
+			MaxTokens:             16384,
+			ReasoningEffortValues: values,
+		}
+	}
+	ctx := ai.Context{
+		SystemPrompt: "sys",
+		Messages:     []ai.Message{ai.NewUserMsg("hi", 0)},
+	}
+	effortOf := func(t *testing.T, model *ai.Model, level ai.ThinkingLevel) string {
+		t.Helper()
+		body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{APIKey: "sk", ReasoningEffort: level})
+		require.NoError(t, err)
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal(body, &parsed))
+		reasoning := parsed["reasoning"].(map[string]any)
+		return reasoning["effort"].(string)
+	}
+
+	restricted := []string{"high", "xhigh", "max"}
+	// Below the allowed range -> clamp up to the lowest allowed.
+	assert.Equal(t, "high", effortOf(t, newModel(restricted), ai.ThinkingLow))
+	assert.Equal(t, "high", effortOf(t, newModel(restricted), ai.ThinkingMedium))
+	// In range -> unchanged.
+	assert.Equal(t, "high", effortOf(t, newModel(restricted), ai.ThinkingHigh))
+	assert.Equal(t, "max", effortOf(t, newModel(restricted), ai.ThinkingMax))
+
+	// Above the allowed range -> clamp down to the highest allowed.
+	loMed := []string{"low", "medium"}
+	assert.Equal(t, "medium", effortOf(t, newModel(loMed), ai.ThinkingHigh))
+	assert.Equal(t, "medium", effortOf(t, newModel(loMed), ai.ThinkingMax))
+
+	// Empty values -> no clamping (pass through unchanged).
+	assert.Equal(t, "low", effortOf(t, newModel(nil), ai.ThinkingLow))
+}
+
 // Regression: Poe's /v1/responses only sends `response.output_text.delta`
 // (for text) and a final `response.completed` carrying the full
 // `response.output` array — no `response.output_item.added` / `.done`

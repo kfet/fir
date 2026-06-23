@@ -4,6 +4,7 @@
 
 ### Fixed
 - TUI no longer overwrites/loses the status-bar footer on a terminal height change (e.g. a tmux vertical pane resize). The differential renderer forced a full repaint on width changes but tracked no previous height, so a height-only resize ran the diff path against stale viewport geometry and could scroll the footer off-screen without redrawing it. A new `previousHeight` is now tracked and a height change triggers a full clear+redraw just like a width change. Regression coverage: `TestDoRender_HeightResizeForcesFullRedraw` in `pkg/tui/footer_overwrite_test.go` (with a small virtual-terminal emulator that models scroll-on-linefeed), plus a `TestDoRender_FooterNeverOverwritten` fuzz that guards footer visibility through content-height oscillations.
+- Outbound `reasoning.effort` is now clamped to the model's declared `ReasoningEffortValues` (from models.json) on the OpenAI Responses and Codex Responses paths, matching the existing completions-path behaviour. Previously these paths sent the raw global thinking level, so a model whose catalog pins a restricted effort enum (e.g. `{high,xhigh,max}`) would 400 when fir's level was `low`/`medium`. Requests below the allowed range clamp up to the lowest allowed value, above the range clamp down to the highest; empty/unset values preserve the previous (unclamped) behaviour.
 
 ## [0.74.1] - 2026-06-20
 

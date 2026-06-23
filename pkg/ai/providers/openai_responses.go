@@ -273,6 +273,13 @@ func buildOpenAIResponsesBody(model *ai.Model, ctx ai.Context, options *ai.Strea
 			if effort == "" {
 				effort = "medium"
 			}
+			// Clamp the effort to the model's advertised enum when the
+			// catalog pins one (e.g. a provider whose reasoning.effort
+			// only accepts a restricted set like {high,xhigh,max}).
+			// Empty/unset ReasoningEffortValues = no clamping.
+			if len(model.ReasoningEffortValues) > 0 {
+				effort = clampEffortToEnum(effort, model.ReasoningEffortValues)
+			}
 			body["reasoning"] = map[string]any{
 				"effort":  effort,
 				"summary": "auto",
