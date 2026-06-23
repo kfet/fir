@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+- Custom models from `models.json` can now declare `reasoningEffortValues`. The loader structs (`ModelDefinition` / `ModelOverride` in `pkg/models/modelregistry.go`) had no `reasoningEffortValues` field, so the value was silently dropped and the built `ai.Model` left it empty — meaning the outbound `reasoning.effort` clamp (`clampEffortToEnum`, guarded by `len(model.ReasoningEffortValues) > 0` on the Responses/Codex/Completions paths) never fired for custom models. A provider whose models only accept e.g. `{high, xhigh, max}` (fugu/fugu-ultra) would receive a raw `low` and 400. The field is now parsed for both custom model definitions and per-model overrides and propagated to `ai.Model`. Coverage extended in `TestModelRegistry_CustomModelCapabilities` / `TestModelRegistry_ModelOverrideCapabilities`.
+
+## [0.74.3] - 2026-06-23
+
+### Added
+- `-n` is now a short alias for `--session-name`, so `fir -n quick "…"` sets the session display name without the long flag.
+
+
 ## [0.74.2] - 2026-06-23
 
 ### Fixed

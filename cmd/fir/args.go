@@ -190,7 +190,7 @@ func ParseArgs(args []string) *Args {
 			result.Session = args[i]
 			mark("--session")
 
-		case arg == "--session-name" && i+1 < len(args):
+		case (arg == "--session-name" || arg == "-n") && i+1 < len(args):
 			i++
 			result.SessionName = args[i]
 			mark("--session-name")
@@ -410,7 +410,7 @@ Options:
                                  the resumed session's recorded invocation
                                  config (start with only the current argv)
   --session <path>               Use specific session file
-  --session-name <name>          Set display name for the session
+  --session-name <name>, -n      Set display name for the session
   --session-dir <dir>            Directory for session storage and lookup
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for cycling
