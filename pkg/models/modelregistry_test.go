@@ -773,6 +773,7 @@ func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
           "serverTools": ["web_search_20260209", "web_fetch_20260209"],
           "compaction": true,
           "adaptiveThinking": true,
+          "reasoningEffortValues": ["high", "xhigh", "max"],
           "sweScore": 73.5
         }
       ]
@@ -800,6 +801,9 @@ func TestModelRegistry_CustomModelCapabilities(t *testing.T) {
 	if m.SWEScore != 73.5 {
 		t.Fatalf("expected sweScore=73.5, got %v", m.SWEScore)
 	}
+	if got := m.ReasoningEffortValues; len(got) != 3 || got[0] != "high" || got[1] != "xhigh" || got[2] != "max" {
+		t.Fatalf("expected reasoningEffortValues=[high xhigh max], got %#v", got)
+	}
 	if m.SWEInferred {
 		t.Fatal("custom sweScore should be exact, not inferred")
 	}
@@ -820,6 +824,7 @@ func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
           "serverTools": ["web_search_20250305"],
           "compaction": true,
           "adaptiveThinking": true,
+          "reasoningEffortValues": ["medium", "high"],
           "sweScore": 81.2
         }
       }
@@ -846,6 +851,9 @@ func TestModelRegistry_ModelOverrideCapabilities(t *testing.T) {
 	}
 	if m.SWEScore != 81.2 {
 		t.Fatalf("expected sweScore override=81.2, got %v", m.SWEScore)
+	}
+	if got := m.ReasoningEffortValues; len(got) != 2 || got[0] != "medium" || got[1] != "high" {
+		t.Fatalf("expected reasoningEffortValues override=[medium high], got %#v", got)
 	}
 }
 

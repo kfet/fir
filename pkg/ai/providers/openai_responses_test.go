@@ -3,11 +3,15 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
+	"github.com/kfet/fir/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -583,4 +587,59 @@ func TestResponsesSSE_NormalOpenAIStream_NoDuplication(t *testing.T) {
 	require.Len(t, output.Content, 1, "normal OpenAI stream must not duplicate items via the Poe reconciler")
 	assert.True(t, output.Content[0].IsText())
 	assert.Equal(t, "Hello", output.Content[0].Text.Text)
+}
+
+// TestBuildOpenAIResponsesBody_CustomModelEnumClampEndToEnd is an end-to-end
+// check spanning the models.json loader and the Responses request builder: a
+// custom model definition that pins a restricted reasoningEffortValues enum
+// must (1) have that enum populated on the resulting ai.Model, and (2) cause the
+// Responses path to clamp a below-range thinking level (low) up to the lowest
+// allowed value (high). This guards the wiring from config → ai.Model →
+// outbound reasoning.effort that prevents HTTP 400s from providers with a
+// restricted effort set.
+func TestBuildOpenAIResponsesBody_CustomModelEnumClampEndToEnd(t *testing.T) {
+	tmp := t.TempDir()
+	modelsPath := filepath.Join(tmp, "models.json")
+	content := `{
+  "providers": {
+    "sakana": {
+      "baseUrl": "https://api.sakana.ai/v1",
+      "apiKey": "sk-test",
+      "api": "openai-responses",
+      "models": [
+        {
+          "id": "fugu",
+          "reasoning": true,
+          "reasoningEffortValues": ["high", "xhigh", "max"]
+        }
+      ]
+    }
+  }
+}`
+	require.NoError(t, os.WriteFile(modelsPath, []byte(content), 0o644))
+
+	authStore := auth.NewAuthStorage(filepath.Join(tmp, "auth.json"))
+	registry := models.NewModelRegistry(authStore, modelsPath)
+
+	model := registry.Find("sakana", "fugu")
+	require.NotNil(t, model, "custom model should load from models.json")
+
+	// (1) The restricted enum must be populated on the runtime model.
+	assert.Equal(t, []string{"high", "xhigh", "max"}, model.ReasoningEffortValues)
+	require.True(t, model.Reasoning, "model must advertise reasoning for effort to be emitted")
+
+	// (2) The Responses path must floor a below-range level up to the lowest
+	// allowed value ("low" -> "high").
+	ctx := ai.Context{
+		SystemPrompt: "sys",
+		Messages:     []ai.Message{ai.NewUserMsg("hi", 0)},
+	}
+	body, err := buildOpenAIResponsesBody(model, ctx, &ai.StreamOptions{APIKey: "sk", ReasoningEffort: ai.ThinkingLow})
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(body, &parsed))
+	reasoning, ok := parsed["reasoning"].(map[string]any)
+	require.True(t, ok, "reasoning block should be present")
+	assert.Equal(t, "high", reasoning["effort"], "below-range low must clamp up to lowest allowed (high)")
 }
