@@ -48,7 +48,7 @@ Binaries are served from the public [`kfet/fir-dist`](https://github.com/kfet/fi
 mirror — no authentication required. To install a specific version:
 
 ```bash
-VERSION=0.30.0 curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kfet/fir-dist/main/install.sh | VERSION=0.30.0 sh
 ```
 
 ### Go install
