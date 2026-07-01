@@ -272,6 +272,10 @@ var sweModelPatterns = []swePattern{
 	{"claude-opus-4-0", "claude-opus-4-0", 67.6},
 	{"claude-opus-4-20250514", "claude-opus-4-0", 67.6},
 	{"claude-opus-4", "claude-opus-4-0", 67.6},
+	// --- Claude Sonnet 5 ---
+	// Source: Anthropic announcement (2026-06-30). SWE-bench Verified pending
+	// system card; estimated low-80s for the gen-5 everyday agent model.
+	{"claude-sonnet-5", "claude-sonnet-5", 82.0},
 	// --- Claude Sonnet 4.6 ---
 	// Source: Anthropic system card — 79.6% SWE-bench Verified
 	{"claude-sonnet-4-6", "claude-sonnet-4-6", 79.6},
@@ -379,6 +383,8 @@ var sweLeaderboardPatterns = []struct {
 	{"claude 4 opus", "claude-opus-4-0"},
 	{"claude opus 40", "claude-opus-4-0"},
 	{"claude 40 opus", "claude-opus-4-0"},
+	{"claude sonnet 5", "claude-sonnet-5"},
+	{"claude 5 sonnet", "claude-sonnet-5"},
 	{"claude sonnet 46", "claude-sonnet-4-6"},
 	{"claude 46 sonnet", "claude-sonnet-4-6"},
 	{"claude 45 sonnet", "claude-sonnet-4-5"},
@@ -2379,6 +2385,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		if strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
+			strings.Contains(m.ID, "sonnet-5") ||
 			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.Compaction = true
 		}
@@ -2389,6 +2396,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 			strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
+			strings.Contains(m.ID, "sonnet-5") ||
 			strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 			m.AdaptiveThinking = true
 			// Advertise the supported effort enum so the provider clamps
@@ -2397,6 +2405,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			if len(m.ReasoningEffortValues) == 0 {
 				if strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 					strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
+					strings.Contains(m.ID, "sonnet-5") ||
 					strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {
 					m.ReasoningEffortValues = []string{"low", "medium", "high", "xhigh", "max"}
 				} else {

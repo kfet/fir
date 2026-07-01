@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
+## [0.75.0] - 2026-07-01
+
 ### Added
+- Claude **Sonnet 5** support. models.dev published `claude-sonnet-5` (gen-5 everyday agent model: 1M context, 128k output, $2/$10 in/out, released 2026-06-30); the model catalog was regenerated to pick it up and the generator (`cmd/generate-models`) now classifies it — adaptive (always-on, effort-based) thinking with the full `{low,medium,high,xhigh,max}` effort enum, compaction, and the standard Anthropic server-tool set — plus a curated SWE-bench baseline (82.0, pending system card) and leaderboard-name aliases. The regeneration also refreshed the rest of the live catalog.
 - Observe/send socket protocol gains an **abort** control: an external observer can now cancel a running turn — including a stuck/hung tool call — without killing the session (the ESC equivalent, `Agent.Abort()`). It threads through the existing `deliver_as` channel: `send_user_message` accepts `deliver_as="abort"` (content ignored), wired to `b.session.Agent.Abort()` in the session bridge. In the `fir send`/`fir observe --interact` CLI a bare `~` line sends abort (escape with `\~`), and `fir send <id> --abort` does a one-shot cancel. The `send_session` AI tool also accepts `deliver_as="abort"`. Previously the only out-of-band levers were steer/followUp (queued at turn boundaries, useless against a stuck tool) and `fir stop` (SIGTERMs the whole process).
 
 ### Fixed
