@@ -47,6 +47,28 @@ The ``escalate`` parameter only appears in the tool schema when an advisor
 is in effect, so users who explicitly disable it see no extra surface.
 Changes take effect on the next session start.
 
+Advisor / delegate as a fallback CHAIN
+--------------------------------------
+
+The advisor (and delegate) is an ORDERED FALLBACK CHAIN, not a single model.
+The bundled default advisor chain is
+``anthropic/claude-fable-5 -> claude-opus-4-8 -> claude-opus-4-7`` (Fable is
+kept first: it looks live in ``/v1/models`` but 404s at runtime, so we try it
+and let the 404 advance the chain).  ``aside.json`` accepts a JSON array to
+express a custom chain, alongside the back-compat single string:
+
+    {"advisor": ["anthropic/claude-fable-5:high", "anthropic/claude-opus-4-8"]}
+    {"advisor": "anthropic/claude-opus-4-8:high"}     # single (back-compat)
+    {"advisor": "off"}                                # disabled
+
+Resolution walks the chain in order.  Each candidate passes through the
+availability/memo filter (skip models memoized unavailable this session,
+degrade a pruned model to a live sibling of its tier).  A model-unavailability
+error memoizes that model and advances to the next candidate; when the whole
+chain is exhausted the query terminates on the executor / current-session
+model (never a hard failure).  ``/aside-advisor`` and ``/aside-delegate`` set a
+single pinned model; edit ``aside.json`` directly to configure a chain array.
+
 Delegate de-escalation
 ----------------------
 
@@ -93,13 +115,25 @@ if TYPE_CHECKING:
 
 _CONFIG_FILENAME = "aside.json"
 
-# Default advisor when no config file exists. Always points at the strongest
-# Anthropic flagship baked into fir's model registry — the highest Fable,
-# falling back to the highest Opus only when no Fable exists. Drift is caught
-# by DefaultAdvisorTracksHighestAnthropicFlagship in
-# pkg/resources/testdata/aside_test.py — bump this constant when fir adds a
-# newer flagship.
+# Default advisor when no config file exists. This is an ORDERED FALLBACK
+# CHAIN, not a single model. The head always points at the strongest Anthropic
+# flagship baked into fir's model registry — the highest Fable, falling back to
+# the highest Opus only when no Fable exists. Drift of the head is caught by
+# DefaultAdvisorTracksHighestAnthropicFlagship in
+# pkg/resources/testdata/aside_test.py — bump _DEFAULT_ADVISOR_SPEC when fir
+# adds a newer flagship.
+#
+# Fable is kept FIRST by explicit decision: it is NOT flagged unavailable in
+# /v1/models — it looks identical to a live model, and only a runtime 404
+# reveals it is dead. So we try it and let the 404 advance the chain to the
+# next candidate. The tail Opus versions are concrete fallbacks the chain walk
+# advances to when Fable (and higher Opuses) 404 at runtime.
 _DEFAULT_ADVISOR_SPEC = "anthropic/claude-fable-5"
+_DEFAULT_ADVISOR_CHAIN = [
+    _DEFAULT_ADVISOR_SPEC,
+    "anthropic/claude-opus-4-8",
+    "anthropic/claude-opus-4-7",
+]
 
 # Default delegate when no config file exists. Always points at the cheapest
 # current Anthropic tier (highest Haiku) baked into fir's model registry.
@@ -122,18 +156,39 @@ def _read_existing_config() -> dict | None:
     return fir_ext.load_config(_CONFIG_FILENAME)
 
 
-def _load_role_config(key: str, default_spec: str) -> dict[str, str] | None:
+def _parse_advisor_chain(specs: list[str]) -> list[dict[str, str]]:
+    """Parse a list of spec strings into a list of config dicts.
+
+    Malformed elements are skipped silently. Returns a possibly-empty list.
+    """
+    out: list[dict[str, str]] = []
+    for spec in specs:
+        if not isinstance(spec, str):
+            continue
+        parsed = _parse_advisor_spec(spec)
+        if parsed is not None:
+            out.append(parsed)
+    return out
+
+
+def _load_role_config(
+    key: str, default: str | list[str]
+) -> dict[str, str] | list[dict[str, str]] | None:
     """Read a model-role config (advisor or delegate) from aside.json.
 
-    Returns a dict with ``provider``, ``model`` and optional ``effort`` keys,
-    or ``None`` if the role is explicitly disabled.  Malformed files are
-    ignored silently — the extension falls back to the default in that case.
+    The ``"<key>"`` value may be:
+      * ``null`` / ``"off"`` / ``"none"`` / ``""`` → the role is disabled
+        (returns ``None``).
+      * a string ``"provider/model[:effort]"`` → a single spec, returned as a
+        dict (back-compat).
+      * an array of such strings → an ordered fallback CHAIN, returned as a
+        list of dicts (malformed elements skipped; an all-malformed / empty
+        array falls through to the default).
+      * missing / unparsable file → the bundled default (which may itself be a
+        chain, e.g. the advisor default).
 
-    Resolution order:
-      1. Explicit ``"<key>": null`` (or ``"<key>": "off"``) → disabled.
-      2. Explicit ``"<key>": "<spec>"`` → use it (validated; falls through
-         to default on parse failure).
-      3. File missing or unparsable → use the bundled default.
+    Returns a dict (single spec), a non-empty list of dicts (chain), or
+    ``None`` (disabled). The caller normalises dict-vs-list at resolution.
     """
     data = _read_existing_config()
     if isinstance(data, dict) and key in data:
@@ -147,17 +202,25 @@ def _load_role_config(key: str, default_spec: str) -> dict[str, str] | None:
             parsed = _parse_advisor_spec(value)
             if parsed is not None:
                 return parsed
-        # Malformed entry — fall through to default rather than disable.
+            # Malformed entry — fall through to default rather than disable.
+        elif isinstance(value, list):
+            chain = _parse_advisor_chain(value)
+            if chain:
+                return chain
+            # All elements malformed — fall through to default.
 
-    return _parse_advisor_spec(default_spec)
+    if isinstance(default, list):
+        chain = _parse_advisor_chain(default)
+        return chain if chain else None
+    return _parse_advisor_spec(default)
 
 
-def _load_advisor_config() -> dict[str, str] | None:
-    """Advisor model config — defaults to the strongest bundled Anthropic flagship."""
-    return _load_role_config("advisor", _DEFAULT_ADVISOR_SPEC)
+def _load_advisor_config() -> dict[str, str] | list[dict[str, str]] | None:
+    """Advisor model config — defaults to the bundled flagship-first chain."""
+    return _load_role_config("advisor", _DEFAULT_ADVISOR_CHAIN)
 
 
-def _load_delegate_config() -> dict[str, str] | None:
+def _load_delegate_config() -> dict[str, str] | list[dict[str, str]] | None:
     """Delegate model config — defaults to the cheapest bundled Anthropic tier."""
     return _load_role_config("delegate", _DEFAULT_DELEGATE_SPEC)
 
@@ -191,6 +254,16 @@ def _format_advisor_spec(cfg: dict[str, str]) -> str:
     return f"{base}:{effort}" if effort else base
 
 
+def _format_role_config(cfg: dict[str, str] | list[dict[str, str]]) -> str:
+    """Render a role config (single spec dict OR a chain list) for display.
+
+    A chain is rendered as ``a -> b -> c`` using the same per-spec form.
+    """
+    if isinstance(cfg, list):
+        return " -> ".join(_format_advisor_spec(c) for c in cfg)
+    return _format_advisor_spec(cfg)
+
+
 # Lazily-loaded advisor/delegate configs — populated on first access (after
 # the init handshake has set fir_ext.config_dirs). Tests that want to inject
 # a value can assign to _ADVISOR / _DELEGATE directly.
@@ -199,14 +272,14 @@ _ADVISOR: Any = _ADVISOR_UNSET
 _DELEGATE: Any = _ADVISOR_UNSET
 
 
-def _advisor() -> dict[str, str] | None:
+def _advisor() -> dict[str, str] | list[dict[str, str]] | None:
     global _ADVISOR
     if _ADVISOR is _ADVISOR_UNSET:
         _ADVISOR = _load_advisor_config()
     return _ADVISOR
 
 
-def _delegate() -> dict[str, str] | None:
+def _delegate() -> dict[str, str] | list[dict[str, str]] | None:
     global _DELEGATE
     if _DELEGATE is _ADVISOR_UNSET:
         _DELEGATE = _load_delegate_config()
@@ -366,20 +439,71 @@ def _degrade_role(
     return resolved
 
 
-def _resolve_advisor(ctx: fir_ext.Context) -> dict[str, str] | None:
-    """Availability-aware advisor resolution (Layer A)."""
-    cfg = _advisor()
+def _normalise_chain(
+    cfg: dict[str, str] | list | None,
+) -> list[dict[str, str]]:
+    """Normalise a role config (dict | list | None) to a list of spec dicts."""
     if cfg is None:
-        return None
-    return _degrade_role(cfg, _query_available_models(ctx), "advisor")
+        return []
+    if isinstance(cfg, dict):
+        return [cfg]
+    if isinstance(cfg, list):
+        return [c for c in cfg if isinstance(c, dict)]
+    return []
 
 
-def _resolve_delegate(ctx: fir_ext.Context) -> dict[str, str] | None:
-    """Availability-aware delegate resolution (Layer A)."""
-    cfg = _delegate()
-    if cfg is None:
-        return None
-    return _degrade_role(cfg, _query_available_models(ctx), "delegate")
+def _resolve_role_chain(
+    ctx: fir_ext.Context,
+    cfg: dict[str, str] | list | None,
+    role: str,
+) -> list[dict[str, str]]:
+    """Resolve an ORDERED candidate chain for a role (Layer A).
+
+    Each configured spec is passed through the existing availability/memo
+    filter (:func:`_degrade_role`): models already memoized unavailable this
+    session are skipped, and a spec whose own model has gone away degrades to
+    the highest available Anthropic model of its tier (recording ``_fallback``
+    for the trace). The author's ORDER is preserved — the chain is not
+    collapsed to a single "best" — and duplicate models (which degrade can
+    introduce) are removed keeping the first occurrence.
+
+    Returns a possibly-empty list; empty means "nothing to try this session"
+    and the caller falls back to the executor model.
+    """
+    specs = _normalise_chain(cfg)
+    if not specs:
+        return []
+    available = _query_available_models(ctx)
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for spec in specs:
+        # When availability is unknown ([]), _degrade_role can't rank a live
+        # sibling, so it would return a memoized-dead model unchanged and we'd
+        # re-probe it every call. Skip it here. (When availability IS known,
+        # _degrade_role handles the memo itself by degrading to a live model
+        # of the same tier — e.g. memoized fable -> opus — so we must NOT skip
+        # in that case or we'd lose that substitution.)
+        if not available and _model_key(spec["provider"], spec["model"]) in _SESSION_UNAVAILABLE:
+            continue
+        resolved = _degrade_role(spec, available, role)
+        if resolved is None:
+            continue
+        key = _model_key(resolved["provider"], resolved["model"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(resolved)
+    return out
+
+
+def _resolve_advisor_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
+    """Availability-aware advisor chain resolution (Layer A)."""
+    return _resolve_role_chain(ctx, _advisor(), "advisor")
+
+
+def _resolve_delegate_chain(ctx: fir_ext.Context) -> list[dict[str, str]]:
+    """Availability-aware delegate chain resolution (Layer A)."""
+    return _resolve_role_chain(ctx, _delegate(), "delegate")
 
 
 # Substrings (case-insensitive) that signal a model-unavailability error from
@@ -628,45 +752,89 @@ def _run_side_query_with_card(
     return text, None
 
 
-def _run_side_query_reactive(
+def _run_side_query_chain(
     ctx: fir_ext.Context,
     question: str,
     *,
-    model: str | None,
-    provider: str | None,
-    effort: str | None,
+    chain: list[dict[str, str]],
     role_label: str | None,
-) -> tuple[str | None, str | None, str]:
-    """Run a side query with Layer B reactive fallback.
+) -> tuple[str | None, str | None, dict[str, str] | None, str]:
+    """Run a side query, walking a candidate chain with executor fallback.
 
-    Runs the (possibly escalated/delegated) side query. When the call routed
-    to an advisor/delegate model (``model`` is set and ``role_label`` given)
-    and fails with a model-unavailability error, retry ONCE on the executor's
-    own model (no overrides). Returns ``(text, error, note)``:
+    Walks *chain* (an ordered list of resolved advisor/delegate specs) in
+    order. Returns ``(text, error, used_cfg, note)``:
 
-      * success on the routed model      → (text, None, "")
-      * unavailability → executor retry  → (text, None, "<note>\\n\\n")
-      * any other failure                → (None, error, "")
-
-    The note tells the caller the advisor/delegate was unavailable so the
-    answer came from the executor model; the caller drops the routing trace.
+      * A candidate succeeds → ``(text, None, <that cfg>, "")``. The caller
+        renders the routing trace from ``used_cfg`` (including a
+        ``(fallback: … unavailable)`` note when Layer A degraded it).
+      * A candidate fails with a model-unavailability error → the model is
+        memoized and the walk ADVANCES to the next candidate.
+      * A candidate fails with any OTHER error (overflow, connection, empty
+        content) → that error is surfaced immediately (no silent advance).
+      * The chain is exhausted after trying ≥1 candidate → retry on the
+        executor's own model (``model=None``); on success return
+        ``(text, None, None, "[<role> unavailable — answered on executor
+        model]\\n\\n")``. Escalation NEVER disables itself on a dead chain.
+      * The chain is empty (nothing resolvable, or ``role_label`` is None) →
+        a plain executor call with no note.
+      * Both the chain AND the executor fallback fail → the errors are chained
+        into one message so neither is lost.
     """
+    advisor_errs: list[str] = []
+    dead_models: list[str] = []
+    for cfg in chain:
+        text, err = _run_side_query_with_card(
+            ctx,
+            question,
+            model=cfg["model"],
+            provider=cfg["provider"],
+            effort=cfg.get("effort"),
+        )
+        if err is None:
+            # A later candidate answered — surface which higher-priority model
+            # it stood in for, reusing the "(fallback: … unavailable)" trace
+            # style. Layer A may have already set _fallback (degrade); only
+            # annotate when it hasn't.
+            if dead_models and "_fallback" not in cfg:
+                # Copy before annotating — _degrade_role returns the shared
+                # _ADVISOR spec dict on the in-available path, so mutating it
+                # in place would corrupt the session config.
+                cfg = dict(cfg)
+                cfg["_fallback"] = dead_models[0]
+            return text, None, cfg, ""
+        if _is_model_unavailable_error(err):
+            # Memoize so subsequent escalations skip this dead model and
+            # Layer A degrades past it instead of re-probing.
+            _mark_model_unavailable(cfg["provider"], cfg["model"])
+            advisor_errs.append(f"{cfg['provider']}/{cfg['model']}: {err}")
+            dead_models.append(cfg["model"])
+            continue
+        # Non-unavailability error (overflow, connection, empty content) — do
+        # not swallow it by advancing; surface it as-is.
+        return None, err, None, ""
+
+    # Chain exhausted or empty → executor terminal fallback.
     text, err = _run_side_query_with_card(
-        ctx, question, model=model, provider=provider, effort=effort
+        ctx, question, model=None, provider=None, effort=None
     )
     if err is None:
-        return text, None, ""
-    if model is not None and role_label and _is_model_unavailable_error(err):
-        # Memoize so subsequent escalations skip this dead model (Layer A
-        # then degrades to the next live flagship instead of re-probing).
-        _mark_model_unavailable(provider, model)
-        text2, err2 = _run_side_query_with_card(
-            ctx, question, model=None, provider=None, effort=None
-        )
-        if err2 is None:
+        # A non-empty chain that we walked to exhaustion earns the note; an
+        # empty chain (no advisor, or nothing resolvable) answers silently.
+        if advisor_errs and role_label:
             note = f"[{role_label} unavailable — answered on executor model]\n\n"
-            return text2, None, note
-    return None, err, ""
+            return text, None, None, note
+        return text, None, None, ""
+
+    # Executor fallback ALSO failed. When we had advisor candidates, chain both
+    # error sets so neither is discarded.
+    if advisor_errs and role_label:
+        joined = "; ".join(advisor_errs)
+        combined = (
+            f"{role_label} chain exhausted: {joined}; "
+            f"executor fallback also failed: {err}"
+        )
+        return None, combined, None, ""
+    return None, err, None, ""
 
 
 # ---------------------------------------------------------------------------
@@ -712,40 +880,22 @@ def _run_aside(
         return _error("escalate and delegate are mutually exclusive — pick one")
 
     # Resolve advisor/delegate override if requested and configured. Layer A:
-    # resolution is availability-aware — it degrades to the highest available
-    # Anthropic flagship/Haiku when the configured default has gone away.
-    advisor_used: dict[str, str] | None = None
-    delegate_used: dict[str, str] | None = None
-    sq_model: str | None = None
-    sq_provider: str | None = None
-    sq_effort: str | None = None
-    if escalate:
-        advisor = _resolve_advisor(ctx)
-        if advisor is not None:
-            sq_model = advisor["model"]
-            sq_provider = advisor["provider"]
-            sq_effort = advisor.get("effort")
-            advisor_used = advisor
-    if delegate:
-        delegate_cfg = _resolve_delegate(ctx)
-        if delegate_cfg is not None:
-            sq_model = delegate_cfg["model"]
-            sq_provider = delegate_cfg["provider"]
-            sq_effort = delegate_cfg.get("effort")
-            delegate_used = delegate_cfg
-
-    # Role label used by Layer B for the executor-fallback note.
-    role_label = "advisor" if advisor_used else ("delegate" if delegate_used else None)
+    # resolution produces an ORDERED candidate chain, each element passed
+    # through the availability/memo filter (degrading to a live model of its
+    # tier when needed, skipping models already memoized unavailable).
+    chain: list[dict[str, str]] = []
+    role_label: str | None = None
+    if escalate and _advisor() is not None:
+        chain = _resolve_advisor_chain(ctx)
+        role_label = "advisor"
+    elif delegate and _delegate() is not None:
+        chain = _resolve_delegate_chain(ctx)
+        role_label = "delegate"
 
     # No tools — pure ephemeral side query.
     if not tools:
-        synthesis, err, note = _run_side_query_reactive(
-            ctx,
-            instructions,
-            model=sq_model,
-            provider=sq_provider,
-            effort=sq_effort,
-            role_label=role_label,
+        synthesis, err, used_cfg, note = _run_side_query_chain(
+            ctx, instructions, chain=chain, role_label=role_label
         )
         if err is not None:
             return _side_query_error(RuntimeError(err))
@@ -755,9 +905,9 @@ def _run_aside(
         # it as an explicit error so the caller doesn't see a bare trace line.
         if not synthesis or not synthesis.strip():
             return _error("advisor returned no content")
-        # When note is set the answer came from the executor model (Layer B
-        # fallback) — drop the advisor/delegate trace prefix.
-        text = note + synthesis if note else _prefix_trace(synthesis, advisor_used, delegate_used)
+        # When note is set the answer came from the executor model (chain
+        # exhausted) — drop the advisor/delegate trace prefix.
+        text = note + synthesis if note else _prefix_for_role(synthesis, used_cfg, role_label)
         return {
             "content": [{"type": "text", "text": text}],
             "is_error": False,
@@ -838,13 +988,8 @@ def _run_aside(
     # Synthesise collected outputs.
     ctx.report_progress("Synthesizing...")
     prompt = _build_synthesis_prompt(results, instructions)
-    synthesis, err, note = _run_side_query_reactive(
-        ctx,
-        prompt,
-        model=sq_model,
-        provider=sq_provider,
-        effort=sq_effort,
-        role_label=role_label,
+    synthesis, err, used_cfg, note = _run_side_query_chain(
+        ctx, prompt, chain=chain, role_label=role_label
     )
     if err is not None:
         return _side_query_error(RuntimeError(err))
@@ -874,7 +1019,7 @@ def _run_aside(
                 "type": "text",
                 "text": (note + synthesis)
                 if note
-                else _prefix_trace(synthesis, advisor_used, delegate_used),
+                else _prefix_for_role(synthesis, used_cfg, role_label),
             }
         ],
         "is_error": False,
@@ -913,13 +1058,22 @@ def _prefix_delegate(text: str, delegate: dict[str, str] | None) -> str:
     return f"[delegate: {spec}]\n\n{text}"
 
 
-def _prefix_trace(
+def _prefix_for_role(
     text: str,
-    advisor: dict[str, str] | None,
-    delegate: dict[str, str] | None,
+    used_cfg: dict[str, str] | None,
+    role_label: str | None,
 ) -> str:
-    """Apply whichever trace prefix applies (at most one can be non-None)."""
-    return _prefix_delegate(_prefix_advisor(text, advisor), delegate)
+    """Apply the trace prefix for whichever role actually answered.
+
+    ``used_cfg`` is the resolved candidate that produced the answer (or None
+    when the chain was empty / disabled this session, in which case no prefix
+    is added — the executor answered plainly).
+    """
+    if role_label == "advisor":
+        return _prefix_advisor(text, used_cfg)
+    if role_label == "delegate":
+        return _prefix_delegate(text, used_cfg)
+    return text
 
 
 def _error(msg: str) -> dict:
@@ -1150,8 +1304,8 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
             ),
         }
 
-    advisor = _resolve_advisor(ctx)
-    if advisor is None:
+    advisor_cfg = _advisor()
+    if advisor_cfg is None:
         return {
             "message": (
                 "No advisor configured. Run `/aside-advisor <provider>/<model>` "
@@ -1159,33 +1313,17 @@ def cmd_advise(args: list[str], ctx: fir_ext.Context):
             ),
         }
 
-    try:
-        answer = ctx.side_query(
-            text,
-            model=advisor["model"],
-            provider=advisor["provider"],
-            effort=advisor.get("effort"),
-        )
-    except Exception as exc:
-        # Layer B: advisor unavailable → answer on the executor model.
-        if _is_model_unavailable_error(str(exc)):
-            _mark_model_unavailable(advisor["provider"], advisor["model"])
-            try:
-                answer = ctx.side_query(text)
-            except Exception as exc2:
-                return {"message": _side_query_error_text(exc2)}
-            return {
-                "message": (
-                    f"**advise:** {text}\n\n"
-                    "[advisor unavailable — answered on executor model]\n\n"
-                    f"{answer}"
-                ),
-                "print_response": True,
-                "markdown": True,
-            }
-        return {"message": _side_query_error_text(exc)}
+    chain = _resolve_advisor_chain(ctx)
+    answer, err, used_cfg, note = _run_side_query_chain(
+        ctx, text, chain=chain, role_label="advisor"
+    )
+    if err is not None:
+        return {"message": _side_query_error_text(RuntimeError(err))}
+    if not answer or not answer.strip():
+        return {"message": _side_query_error_text(RuntimeError("advisor returned no content"))}
+    body = note + answer if note else _prefix_advisor(answer, used_cfg)
     return {
-        "message": f"**advise:** {text}\n\n{_prefix_advisor(answer, advisor)}",
+        "message": f"**advise:** {text}\n\n{body}",
         "print_response": True,
         "markdown": True,
     }
@@ -1262,7 +1400,7 @@ def cmd_aside_advisor(args: list[str], ctx: fir_ext.Context):
         suffix = " (default — no aside.json)" if is_default else f" (from {cfg_path})"
         return {
             "message": (
-                f"aside-advisor: {_format_advisor_spec(advisor)}{suffix}\n\n"
+                f"aside-advisor: {_format_role_config(advisor)}{suffix}\n\n"
                 "Override:  /aside-advisor <provider>/<model>[:effort]\n"
                 "Disable:   /aside-advisor off"
             ),
@@ -1336,7 +1474,7 @@ def cmd_aside_delegate(args: list[str], ctx: fir_ext.Context):
         suffix = " (default — no aside.json)" if is_default else f" (from {cfg_path})"
         return {
             "message": (
-                f"aside-delegate: {_format_advisor_spec(delegate)}{suffix}\n\n"
+                f"aside-delegate: {_format_role_config(delegate)}{suffix}\n\n"
                 "Override:  /aside-delegate <provider>/<model>[:effort]\n"
                 "Disable:   /aside-delegate off"
             ),

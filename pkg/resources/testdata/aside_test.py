@@ -609,10 +609,14 @@ class TestLoadAdvisorConfig(unittest.TestCase):
     def test_missing_file_returns_default(self):
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
-        # Default tracks _DEFAULT_ADVISOR_SPEC. If someone bumps it to a
-        # newer flagship, the test still passes — we only assert the family.
-        self.assertEqual(cfg["provider"], "anthropic")
-        self.assertTrue(cfg["model"].startswith("claude-"))
+        # Default is now an ordered fallback CHAIN (list of specs). The head
+        # tracks _DEFAULT_ADVISOR_SPEC; if someone bumps it to a newer
+        # flagship, the test still passes — we only assert the family.
+        self.assertIsInstance(cfg, list)
+        self.assertGreaterEqual(len(cfg), 1)
+        head = cfg[0]
+        self.assertEqual(head["provider"], "anthropic")
+        self.assertTrue(head["model"].startswith("claude-"))
 
     def test_default_is_anthropic_flagship(self):
         # Floor for "no config" UX. Bump alongside _DEFAULT_ADVISOR_SPEC.
@@ -647,16 +651,54 @@ class TestLoadAdvisorConfig(unittest.TestCase):
 
     def test_malformed_spec_falls_back_to_default(self):
         # A bad spec should not silently disable escalation — fall back to
-        # the bundled default so the feature keeps working.
+        # the bundled default chain so the feature keeps working.
         self._cfg_path.write_text('{"advisor": "not-a-spec"}')
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
-        self.assertEqual(cfg["provider"], "anthropic")
+        self.assertIsInstance(cfg, list)
+        self.assertEqual(cfg[0]["provider"], "anthropic")
 
     def test_corrupt_json_falls_back_to_default(self):
         self._cfg_path.write_text('not json')
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
+        self.assertIsInstance(cfg, list)
+
+    def test_string_config_returns_single_dict_backcompat(self):
+        # A single string stays a single dict (back-compat) — NOT a chain.
+        self._cfg_path.write_text('{"advisor": "anthropic/claude-opus-4-8:high"}')
+        cfg = self.mod._load_advisor_config()
+        self.assertEqual(
+            cfg,
+            {"provider": "anthropic", "model": "claude-opus-4-8", "effort": "high"},
+        )
+
+    def test_array_config_returns_chain(self):
+        self._cfg_path.write_text(
+            '{"advisor": ["anthropic/claude-fable-5:high", "anthropic/claude-opus-4-8"]}'
+        )
+        cfg = self.mod._load_advisor_config()
+        self.assertEqual(
+            cfg,
+            [
+                {"provider": "anthropic", "model": "claude-fable-5", "effort": "high"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ],
+        )
+
+    def test_array_skips_malformed_elements(self):
+        self._cfg_path.write_text(
+            '{"advisor": ["bad-no-slash", "anthropic/claude-opus-4-8", 42]}'
+        )
+        cfg = self.mod._load_advisor_config()
+        self.assertEqual(cfg, [{"provider": "anthropic", "model": "claude-opus-4-8"}])
+
+    def test_array_all_malformed_falls_back_to_default(self):
+        self._cfg_path.write_text('{"advisor": ["bad", "also-bad"]}')
+        cfg = self.mod._load_advisor_config()
+        self.assertIsInstance(cfg, list)
+        # Fell through to the bundled default chain (head = flagship).
+        self.assertEqual(cfg[0]["provider"], "anthropic")
 
 
 class TestAsideAdvisorCommand(unittest.TestCase):
@@ -697,6 +739,20 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         result = self._handler()([], mock.MagicMock())
         self.assertIn("anthropic/claude-opus-4-x", result["message"])
         self.assertIn(str(self._cfg_path), result["message"])
+
+    def test_show_when_chain(self):
+        # An array config renders as an arrow-joined chain.
+        self._cfg_path.write_text(
+            '{"advisor": ["anthropic/claude-fable-5", "anthropic/claude-opus-4-8"]}'
+        )
+        self.mod._ADVISOR = [
+            {"provider": "anthropic", "model": "claude-fable-5"},
+            {"provider": "anthropic", "model": "claude-opus-4-8"},
+        ]
+        result = self._handler()([], mock.MagicMock())
+        self.assertIn(
+            "anthropic/claude-fable-5 -> anthropic/claude-opus-4-8", result["message"]
+        )
 
     def test_set_writes_config_file(self):
         result = self._handler()(["anthropic/claude-opus-4-x:high"], mock.MagicMock())
@@ -1379,7 +1435,7 @@ class TestReactiveFallback(unittest.TestCase):
         self.assertIn("context window full", text)
         self.assertEqual(ctx.side_query.call_count, 1)
 
-    def test_executor_retry_also_failing_returns_original_error(self):
+    def test_executor_retry_also_failing_chains_both_errors(self):
         mod = self._mod(advisor={"provider": "anthropic", "model": "claude-fable-5"})
 
         def sq(question, model=None, provider=None, effort=None):
@@ -1390,7 +1446,14 @@ class TestReactiveFallback(unittest.TestCase):
         ctx = self._ctx(sq)
         result = mod._run_aside([], "q", ctx, escalate=True)
         self.assertTrue(result["is_error"])
-        self.assertIn("aside LLM call failed", result["content"][0]["text"])
+        text = result["content"][0]["text"]
+        self.assertIn("aside LLM call failed", text)
+        # BOTH errors surfaced — neither the advisor chain error nor the
+        # executor fallback error is discarded.
+        self.assertIn("chain exhausted", text)
+        self.assertIn("model gone", text)
+        self.assertIn("executor fallback also failed", text)
+        self.assertIn("still gone", text)
 
 
 class TestSessionUnavailableMemo(unittest.TestCase):
@@ -1475,6 +1538,235 @@ class TestSessionUnavailableMemo(unittest.TestCase):
         # fable probed once (call 1), executor fallback once, then opus -- no
         # second fable probe.
         self.assertEqual(calls, ["claude-fable-5", None, "claude-opus-4-8"])
+
+
+class TestChainWalk(unittest.TestCase):
+    """Ordered fallback CHAIN semantics — walk candidates, advance past dead
+    models, terminate on the executor model."""
+
+    def _mod(self, advisor=None, delegate=None):
+        mod = _load_aside()
+        mod._ADVISOR = advisor
+        mod._DELEGATE = delegate
+        return mod
+
+    def _ctx(self, sq, available=None):
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+        if available is not None:
+            ctx.available_models = mock.MagicMock(return_value=available)
+        return ctx
+
+    def test_dead_first_model_advances_to_live_second(self):
+        # Explicit array chain: fable dead, opus-4-8 answers.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: Fable is not available")
+            return "opus answered"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        # Second candidate answered; trace notes the dead head as a fallback.
+        self.assertTrue(
+            text.startswith(
+                "[advisor: anthropic/claude-opus-4-8 (fallback: claude-fable-5 unavailable)]"
+            ),
+            text,
+        )
+        self.assertIn("opus answered", text)
+        # fable probed once, then opus — no executor fallback (2 calls only).
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8"])
+
+    def test_whole_chain_dead_falls_to_executor_with_note(self):
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model is not None:
+                raise RuntimeError("not_found_error: gone")
+            return "executor answered"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertFalse(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertTrue(
+            text.startswith("[advisor unavailable — answered on executor model]"), text
+        )
+        self.assertIn("executor answered", text)
+        # both candidates probed, then executor (model=None).
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", None])
+        # both memoized.
+        self.assertIn("anthropic/claude-fable-5", mod._SESSION_UNAVAILABLE)
+        self.assertIn("anthropic/claude-opus-4-8", mod._SESSION_UNAVAILABLE)
+
+    def test_chain_and_executor_both_dead_chains_both_errors(self):
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+
+        def sq(question, model=None, provider=None, effort=None):
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: fable gone")
+            if model == "claude-opus-4-8":
+                raise RuntimeError("not_found_error: opus gone")
+            raise RuntimeError("not_found_error: executor gone too")
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("chain exhausted", text)
+        self.assertIn("fable gone", text)
+        self.assertIn("opus gone", text)
+        self.assertIn("executor fallback also failed", text)
+        self.assertIn("executor gone too", text)
+
+    def test_overflow_not_swallowed_by_chain(self):
+        # A context-overflow error on the first candidate must surface with
+        # its hint — NOT be treated as unavailable and advance the chain.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            raise RuntimeError("side-query: Input exceeds context window limit")
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, escalate=True)
+        self.assertTrue(result["is_error"])
+        text = result["content"][0]["text"]
+        self.assertIn("context window full", text)
+        # Only the first candidate was tried — no advance, no executor retry.
+        self.assertEqual(calls, ["claude-fable-5"])
+
+    def test_memo_skips_dead_model_on_next_call(self):
+        # First call kills fable; second call must not re-probe it — the chain
+        # resolves to opus-4-8 directly.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-fable-5", "name": "Fable"},
+            {"provider": "anthropic", "id": "claude-opus-4-8", "name": "Opus"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: fable gone")
+            return "opus answered"
+
+        ctx = self._ctx(sq, available=available)
+        mod._run_aside([], "q1", ctx, escalate=True)
+        mod._run_aside([], "q2", ctx, escalate=True)
+        # Call 1: fable, opus. Call 2: opus only (fable memoized → skipped).
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-8"])
+
+    def test_memoized_model_not_reprobed_under_unknown_availability(self):
+        # Availability unknown ([]): once a chain head 404s and is memoized,
+        # a later call must NOT re-probe it — the resolved chain skips it and
+        # advances to the next live candidate directly.
+        mod = self._mod(
+            advisor=[
+                {"provider": "anthropic", "model": "claude-fable-5"},
+                {"provider": "anthropic", "model": "claude-opus-4-8"},
+            ]
+        )
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            if model == "claude-fable-5":
+                raise RuntimeError("not_found_error: fable gone")
+            return "opus answered"
+
+        # No available_models seeded → _query_available_models returns [].
+        ctx = _blocking_ctx()
+        ctx.side_query = mock.MagicMock(side_effect=sq)
+
+        mod._run_aside([], "q1", ctx, escalate=True)
+        mod._run_aside([], "q2", ctx, escalate=True)
+        # Call 1: fable (404) then opus. Call 2: opus only — fable skipped,
+        # not re-probed.
+        self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", "claude-opus-4-8"])
+
+    def test_default_chain_head_is_flagship_spec(self):
+        # The bundled default advisor chain leads with _DEFAULT_ADVISOR_SPEC.
+        mod = _load_aside()
+        chain = mod._parse_advisor_chain(mod._DEFAULT_ADVISOR_CHAIN)
+        self.assertGreaterEqual(len(chain), 2)
+        head_spec = mod._format_advisor_spec(chain[0])
+        self.assertEqual(head_spec, mod._DEFAULT_ADVISOR_SPEC)
+
+    def test_delegate_chain_from_array_config(self):
+        mod = self._mod(
+            delegate=[
+                {"provider": "anthropic", "model": "claude-haiku-9-9"},
+                {"provider": "anthropic", "model": "claude-haiku-4-5"},
+            ]
+        )
+        available = [
+            {"provider": "anthropic", "id": "claude-haiku-4-5", "name": "Haiku"},
+        ]
+        calls = []
+
+        def sq(question, model=None, provider=None, effort=None):
+            calls.append(model)
+            return "cheap reply"
+
+        ctx = self._ctx(sq, available=available)
+        result = mod._run_aside([], "q", ctx, delegate=True)
+        self.assertFalse(result["is_error"])
+        # haiku-9-9 not available → Layer A degrades to haiku-4-5; the second
+        # entry also resolves to haiku-4-5 → deduped. Single live candidate.
+        kwargs = ctx.side_query.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-4-5")
 
 
 class TestAdviseCommand(unittest.TestCase):
