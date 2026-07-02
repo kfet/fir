@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.76.0] - 2026-07-02
+
+### Changed
+- **aside advisor/delegate escalation is now an ordered fallback CHAIN, not a single model.** The advisor default is a chain `anthropic/claude-fable-5 -> claude-opus-4-8 -> claude-opus-4-7` (Fable kept first by design — it looks live in `/v1/models` but 404s at runtime, so we try it and let the 404 advance the chain). `aside.json`'s `"advisor"` / `"delegate"` now accept a JSON **array** of `provider/model[:effort]` specs (ordered chain) in addition to the back-compat single string and `null`/`"off"`. Resolution walks the chain in order — each candidate passing through the existing availability/memo filter (`_degrade_role`, which degrades a pruned model to a live sibling of its tier and skips models memoized unavailable this session) — and on a model-unavailability error memoizes that model and advances to the next candidate. A candidate that answers past a dead head is traced with the existing `(fallback: … unavailable)` style. When the whole chain is exhausted, the query terminates on the executor/current-session model (never a hard failure) prefixed `[advisor unavailable — answered on executor model]`. `/advise` and delegate routing share the same chain semantics. A memoized-dead model is no longer re-probed even when live availability is unknown.
+
+### Fixed
+- **aside chain no longer discards the executor-fallback error.** When an escalated/delegated side query exhausted its model chain *and* the terminal executor-model fallback also failed, the previous reactive path returned only the original advisor error and dropped the executor error. Both error sets are now chained into one message (`<role> chain exhausted: <joined>; executor fallback also failed: <err>`) so neither is lost. Context-overflow errors keep their dedicated hint path and are not treated as model-unavailability.
+
 ## [0.75.0] - 2026-07-01
 
 ### Added
