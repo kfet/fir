@@ -1173,3 +1173,35 @@ func TestIsBenignCloseErr(t *testing.T) {
 		})
 	}
 }
+
+func TestMcpShutdownGrace(t *testing.T) {
+	t.Setenv("FIR_MCP_SHUTDOWN_GRACE", "")
+	if got := mcpShutdownGrace(); got != 500*time.Millisecond {
+		t.Errorf("default = %v, want 500ms", got)
+	}
+	t.Setenv("FIR_MCP_SHUTDOWN_GRACE", "2s")
+	if got := mcpShutdownGrace(); got != 2*time.Second {
+		t.Errorf("override = %v, want 2s", got)
+	}
+	for _, bad := range []string{"nonsense", "0", "-1s"} {
+		t.Setenv("FIR_MCP_SHUTDOWN_GRACE", bad)
+		if got := mcpShutdownGrace(); got != 500*time.Millisecond {
+			t.Errorf("bad %q = %v, want default 500ms", bad, got)
+		}
+	}
+}
+
+func TestCommandTransport_SetsTerminateDuration(t *testing.T) {
+	t.Setenv("FIR_MCP_SHUTDOWN_GRACE", "750ms")
+	tr, err := commandTransport(ServerConfig{Command: "echo", Args: []string{"hi"}})
+	if err != nil {
+		t.Fatalf("commandTransport: %v", err)
+	}
+	ct, ok := tr.(*sdk.CommandTransport)
+	if !ok {
+		t.Fatalf("expected *sdk.CommandTransport, got %T", tr)
+	}
+	if ct.TerminateDuration != 750*time.Millisecond {
+		t.Errorf("TerminateDuration = %v, want 750ms", ct.TerminateDuration)
+	}
+}

@@ -25,6 +25,7 @@ var Registry = []Var{
 	{Name: "FIR_EXT_TIMEOUT", Description: "Extension init handshake timeout in seconds (default: 30)"},
 	{Name: "FIR_HARDWARE_CURSOR", Description: "Show hardware cursor in TUI (set to 1)"},
 	{Name: "FIR_MCP_CONFIG", Description: "Extra MCP config file path (--mcp-config flag wins)"},
+	{Name: "FIR_MCP_SHUTDOWN_GRACE", Description: "Grace before an stdio MCP server is SIGTERM/SIGKILL-ed on exit (Go duration, e.g. 500ms; default 500ms)"},
 	{Name: "FIR_POE_CLIENT_ID", Description: "Override Poe OAuth client ID (default: fir's registered client)"},
 	{Name: "FIR_POE_REDIRECT_URI", Description: "Override Poe OAuth redirect URI (defaults to http://localhost:1456/auth/callback)"},
 	{Name: "FIR_PTY_SOCKET_DIR", Description: "Override directory for PTY socket files"},

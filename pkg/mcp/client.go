@@ -394,7 +394,22 @@ func commandTransport(cfg ServerConfig) (sdk.Transport, error) {
 	for k, v := range cfg.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	return &sdk.CommandTransport{Command: cmd}, nil
+	return &sdk.CommandTransport{Command: cmd, TerminateDuration: mcpShutdownGrace()}, nil
+}
+
+// mcpShutdownGrace is how long the stdio MCP transport waits after closing a
+// server's stdin before escalating to SIGTERM, and again before SIGKILL, on
+// shutdown. Kept short so fir exits promptly even when a server ignores
+// stdin-close; a well-behaved server exits on stdin-close and never hits the
+// wait. Override with FIR_MCP_SHUTDOWN_GRACE (a Go duration, e.g. "500ms", "2s").
+func mcpShutdownGrace() time.Duration {
+	const def = 500 * time.Millisecond
+	if v := os.Getenv("FIR_MCP_SHUTDOWN_GRACE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return def
 }
 
 // Start launches async connections to all configured MCP servers. It returns
