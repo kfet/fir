@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.78.2] - 2026-07-10
+
+### Fixed
+- Release/CI no longer fails on a dirty tree: `pkg/tui/components/editor_atref_test.go` was committed (in the 0.78.0-era `@`-file autocomplete change) without gofmt, so `make all` reformatted it and CI's post-`make all` cleanliness check — and GoReleaser's dirty-tree guard — aborted the 0.78.1 release. The file is now gofmt-clean.
+
 ## [0.78.0] - 2026-07-10
 
 ### Added
