@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.78.0] - 2026-07-10
+
+### Added
+- Refreshed the model catalog: adds the OpenAI **gpt-5.6** family (`gpt-5.6`, and the `luna`/`sol`/`terra` variants plus their `-pro` counterparts), along with other new models surfaced upstream (e.g. `claude-sonnet-4.6`).
+
+### Fixed
+- Dropped stale dated model snapshots removed upstream (e.g. `claude-sonnet-4-20250514`); retargeted `TestGetModel_Anthropic` to a currently-present id (`claude-sonnet-4-5-20250929`).
+
 ## [0.76.0] - 2026-07-02
 
 ### Changed

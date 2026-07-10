@@ -8,12 +8,12 @@ import (
 )
 
 func TestGetModel_Anthropic(t *testing.T) {
-	m := GetModel(ProviderAnthropic, "claude-sonnet-4-20250514")
+	m := GetModel(ProviderAnthropic, "claude-sonnet-4-5-20250929")
 	if m == nil {
 		t.Fatal("expected non-nil model")
 	}
-	if m.ID != "claude-sonnet-4-20250514" {
-		t.Errorf("expected 'claude-sonnet-4-20250514', got %q", m.ID)
+	if m.ID != "claude-sonnet-4-5-20250929" {
+		t.Errorf("expected 'claude-sonnet-4-5-20250929', got %q", m.ID)
 	}
 	if m.Provider != ProviderAnthropic {
 		t.Errorf("expected provider %q, got %q", ProviderAnthropic, m.Provider)
