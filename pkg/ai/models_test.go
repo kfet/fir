@@ -7,36 +7,48 @@ import (
 	"testing"
 )
 
-func TestGetModel_Anthropic(t *testing.T) {
-	m := GetModel(ProviderAnthropic, "claude-sonnet-4-5-20250929")
-	if m == nil {
-		t.Fatal("expected non-nil model")
+// assertGetModelRoundTrip exercises GetModel for an arbitrary registered model
+// of the given provider and asserts the structural invariants that must hold
+// regardless of which exact (churnable, often dated) model IDs the catalog
+// currently ships. It deliberately does NOT pin any single model ID — those get
+// dropped on every `make generate-models` refresh, which is what made the old
+// tests flaky. wantAPI is the API every model of this provider must use.
+func assertGetModelRoundTrip(t *testing.T, provider Provider, wantAPI Api) {
+	t.Helper()
+	models := GetModels(provider)
+	if len(models) == 0 {
+		t.Fatalf("expected at least one registered model for provider %q", provider)
 	}
-	if m.ID != "claude-sonnet-4-5-20250929" {
-		t.Errorf("expected 'claude-sonnet-4-5-20250929', got %q", m.ID)
-	}
-	if m.Provider != ProviderAnthropic {
-		t.Errorf("expected provider %q, got %q", ProviderAnthropic, m.Provider)
-	}
-	if m.API != ApiAnthropicMessages {
-		t.Errorf("expected api %q, got %q", ApiAnthropicMessages, m.API)
-	}
-	if m.ContextWindow <= 0 {
-		t.Error("expected positive context window")
-	}
-	if m.MaxTokens <= 0 {
-		t.Error("expected positive max tokens")
+	for _, want := range models {
+		// Round-trip: the model returned by GetModels must be retrievable by ID.
+		m := GetModel(provider, want.ID)
+		if m == nil {
+			t.Fatalf("GetModel(%q, %q) returned nil for a registered model", provider, want.ID)
+		}
+		if m.ID != want.ID {
+			t.Errorf("expected ID %q, got %q", want.ID, m.ID)
+		}
+		if m.Provider != provider {
+			t.Errorf("model %q: expected provider %q, got %q", m.ID, provider, m.Provider)
+		}
+		if m.API != wantAPI {
+			t.Errorf("model %q: expected api %q, got %q", m.ID, wantAPI, m.API)
+		}
+		if m.ContextWindow <= 0 {
+			t.Errorf("model %q: expected positive context window, got %d", m.ID, m.ContextWindow)
+		}
+		if m.MaxTokens <= 0 {
+			t.Errorf("model %q: expected positive max tokens, got %d", m.ID, m.MaxTokens)
+		}
 	}
 }
 
+func TestGetModel_Anthropic(t *testing.T) {
+	assertGetModelRoundTrip(t, ProviderAnthropic, ApiAnthropicMessages)
+}
+
 func TestGetModel_OpenAI(t *testing.T) {
-	m := GetModel(ProviderOpenAI, "gpt-4o")
-	if m == nil {
-		t.Fatal("expected non-nil model")
-	}
-	if m.ID != "gpt-4o" {
-		t.Errorf("expected 'gpt-4o', got %q", m.ID)
-	}
+	assertGetModelRoundTrip(t, ProviderOpenAI, ApiOpenAIResponses)
 }
 
 func TestGetModel_NotFound(t *testing.T) {
