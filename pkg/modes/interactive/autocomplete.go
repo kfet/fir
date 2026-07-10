@@ -209,10 +209,17 @@ func (p *combinedAutocompleteProvider) ApplyCompletion(
 		newLines := make([]string, len(lines))
 		copy(newLines, lines)
 		newLines[cursorLine] = newLine
+		cursorCol := len(beforePrefix) + len(item.Value) + len(suffix)
+		// For a quoted directory value ending in `"`, place the cursor before
+		// the closing quote so the user can continue completing inside the
+		// quotes (e.g. `@"my dir/|"`).
+		if isDirectory && strings.HasSuffix(item.Value, "\"") {
+			cursorCol = len(beforePrefix) + len(item.Value) - 1
+		}
 		return tuicomp.ApplyCompletionResult{
 			Lines:      newLines,
 			CursorLine: cursorLine,
-			CursorCol:  len(beforePrefix) + len(item.Value) + len(suffix),
+			CursorCol:  cursorCol,
 		}
 	}
 
@@ -367,27 +374,37 @@ func (p *combinedAutocompleteProvider) filterStaticCandidates(candidates []strin
 // Helpers
 // ---------------------------------------------------------------------------
 
-func findLastDelimiter(text string) int {
-	for i := len(text) - 1; i >= 0; i-- {
-		if pathDelimiters[text[i]] {
-			return i
-		}
-	}
-	return -1
-}
-
 func isTokenStart(text string, index int) bool {
 	return index == 0 || pathDelimiters[text[index-1]]
 }
 
-func extractAtPrefix(text string) string {
-	lastDelim := findLastDelimiter(text)
-	tokenStart := 0
-	if lastDelim >= 0 {
-		tokenStart = lastDelim + 1
+// tokenStartIndex returns the byte index at which the token containing the end
+// of text begins. It is quote-aware: a double-quoted span started with `"`
+// groups whitespace and other delimiters together so that a path containing
+// spaces (e.g. `@"my file.txt`) is treated as a single token while the user is
+// still typing inside the (possibly unclosed) quotes.
+func tokenStartIndex(text string) int {
+	start := 0
+	inQuote := false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c == '"' {
+			// The quote char toggles quoting but does not itself split the
+			// token — this keeps a leading `@` (as in `@"...`) attached.
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && (c == ' ' || c == '\t' || c == '\'' || c == '=') {
+			start = i + 1
+		}
 	}
-	if tokenStart < len(text) && text[tokenStart] == '@' {
-		return text[tokenStart:]
+	return start
+}
+
+func extractAtPrefix(text string) string {
+	start := tokenStartIndex(text)
+	if start < len(text) && text[start] == '@' {
+		return text[start:]
 	}
 	return ""
 }
@@ -405,14 +422,27 @@ func parsePathPrefix(prefix string) (rawPrefix string, isAtPrefix bool) {
 	return prefix, false
 }
 
-func extractPathPrefix(text string, forceExtract bool) string {
-	lastDelim := findLastDelimiter(text)
-	var pathPrefix string
-	if lastDelim == -1 {
-		pathPrefix = text
-	} else {
-		pathPrefix = text[lastDelim+1:]
+// pathNeedsQuoting reports whether a completion path contains characters that
+// would break unquoted @-reference / path tokenization (whitespace or quote
+// characters). Such paths are wrapped in double quotes on insertion.
+func pathNeedsQuoting(s string) bool {
+	return strings.ContainsAny(s, " \t\"'")
+}
+
+// quotePath wraps s in double quotes if it needs quoting, escaping any embedded
+// double quotes with a backslash. A trailing "/" (directory marker) is kept
+// inside the quotes so the closing quote is always the last character — the
+// completion apply logic relies on that to place the cursor before it for
+// continued directory traversal.
+func quotePath(s string) string {
+	if !pathNeedsQuoting(s) {
+		return s
 	}
+	return "\"" + strings.ReplaceAll(s, "\"", "\\\"") + "\""
+}
+
+func extractPathPrefix(text string, forceExtract bool) string {
+	pathPrefix := text[tokenStartIndex(text):]
 
 	if forceExtract {
 		return pathPrefix
@@ -548,9 +578,9 @@ func (p *combinedAutocompleteProvider) getFileSuggestions(prefix string) []tuico
 			pathValue += "/"
 		}
 
-		value := pathValue
+		value := quotePath(pathValue)
 		if isAtPrefix {
-			value = "@" + value
+			value = "@" + quotePath(pathValue)
 		}
 
 		label := name
@@ -696,7 +726,7 @@ func (p *combinedAutocompleteProvider) getFuzzyFileSuggestions(rawPrefix string)
 		if item.isDir {
 			relPath += "/"
 		}
-		value := "@" + relPath
+		value := "@" + quotePath(relPath)
 
 		suggestions = append(suggestions, tuicomp.SelectItem{
 			Value: value,
@@ -734,7 +764,7 @@ func (p *combinedAutocompleteProvider) getFuzzyFileSuggestionsDir(expandedPrefix
 		if isDir {
 			relPath += "/"
 		}
-		value := "@" + relPath
+		value := "@" + quotePath(relPath)
 
 		suggestions = append(suggestions, tuicomp.SelectItem{
 			Value: value,

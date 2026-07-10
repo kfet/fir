@@ -2099,7 +2099,11 @@ func (e *Editor) updateAutocomplete() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-var atFileRefRe = regexp.MustCompile(`(?:^|[\s])@[^\s]*$`)
+// atFileRefRe matches a trailing @-file reference at the cursor. The reference
+// is either an unquoted run of non-whitespace (`@foo/bar`) or an open
+// double-quoted span (`@"my file`) which may contain spaces — this keeps file
+// completion active while the user types a path with spaces inside quotes.
+var atFileRefRe = regexp.MustCompile(`(?:^|[\s])@(?:"[^"]*|[^\s]*)$`)
 
 func matchAtFileRef(text string) bool {
 	return atFileRefRe.MatchString(text)

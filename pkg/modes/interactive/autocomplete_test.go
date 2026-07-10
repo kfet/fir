@@ -597,3 +597,145 @@ func TestApplyCompletion_CommandArg(t *testing.T) {
 		t.Fatalf("expected '/skills install testing ', got %q", result.Lines[0])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Quoting of paths containing spaces
+// ---------------------------------------------------------------------------
+
+func TestAutocomplete_AtFileWithSpaceQuoted(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "my file.txt"), []byte("x"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
+
+	result := p.GetSuggestions([]string{"@my"}, 0, 3)
+	if result == nil {
+		t.Fatal("expected suggestions for @my")
+	}
+	var got string
+	for _, item := range result.Items {
+		if strings.Contains(item.Label, "my file.txt") {
+			got = item.Value
+		}
+	}
+	if got != `@"my file.txt"` {
+		t.Fatalf(`expected value @"my file.txt", got %q`, got)
+	}
+}
+
+func TestAutocomplete_PlainFileWithSpaceQuoted(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "my file.txt"), []byte("x"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
+
+	// "./my" triggers path (non-@) completion.
+	result := p.GetSuggestions([]string{"./my"}, 0, 4)
+	if result == nil {
+		t.Fatal("expected suggestions for ./my")
+	}
+	var got string
+	for _, item := range result.Items {
+		if strings.Contains(item.Label, "my file.txt") {
+			got = item.Value
+		}
+	}
+	if got != `"my file.txt"` {
+		t.Fatalf(`expected value "my file.txt", got %q`, got)
+	}
+}
+
+func TestAutocomplete_NoSpaceNotQuoted(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "plain.txt"), []byte("x"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
+
+	result := p.GetSuggestions([]string{"@plain"}, 0, 6)
+	if result == nil {
+		t.Fatal("expected suggestions for @plain")
+	}
+	var got string
+	for _, item := range result.Items {
+		if strings.Contains(item.Label, "plain.txt") {
+			got = item.Value
+		}
+	}
+	if got != "@plain.txt" {
+		t.Fatalf("expected unquoted @plain.txt, got %q", got)
+	}
+}
+
+func TestAutocomplete_ContinueInsideOpenQuote(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "my file.txt"), []byte("x"), 0644)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
+
+	// User has typed the opening quote and part of a name with a space in it.
+	// The quote-aware tokenizer must keep the whole `@"my fi` as one token.
+	line := `@"my fi`
+	result := p.GetSuggestions([]string{line}, 0, len(line))
+	if result == nil {
+		t.Fatal(`expected suggestions for @"my fi`)
+	}
+	found := false
+	for _, item := range result.Items {
+		if strings.Contains(item.Label, "my file.txt") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected my file.txt when completing inside an open quote")
+	}
+}
+
+func TestAutocomplete_ApplyQuotedDirCursorBeforeQuote(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "my dir"), 0755)
+
+	p := NewCombinedAutocompleteProvider(testCommands(), dir, nil)
+
+	result := p.GetSuggestions([]string{"@my"}, 0, 3)
+	if result == nil {
+		t.Fatal("expected suggestions for @my")
+	}
+	var dirItem tuicomp.SelectItem
+	for _, item := range result.Items {
+		if strings.HasPrefix(item.Label, "my dir") {
+			dirItem = item
+		}
+	}
+	if dirItem.Value != `@"my dir/"` {
+		t.Fatalf(`expected value @"my dir/", got %q`, dirItem.Value)
+	}
+
+	applied := p.ApplyCompletion([]string{"@my"}, 0, 3, dirItem, "@my")
+	if applied.Lines[0] != `@"my dir/"` {
+		t.Fatalf(`expected line @"my dir/", got %q`, applied.Lines[0])
+	}
+	// Cursor must sit just before the closing quote to allow continuation.
+	wantCol := len(`@"my dir/`)
+	if applied.CursorCol != wantCol {
+		t.Fatalf("expected cursor col %d (before closing quote), got %d", wantCol, applied.CursorCol)
+	}
+}
+
+func TestTokenStartIndex_QuoteAware(t *testing.T) {
+	cases := []struct {
+		text string
+		want int
+	}{
+		{`@bar`, 0},
+		{`foo @bar`, 4},
+		{`@"my fi`, 0},
+		{`foo @"my fi`, 4},
+		{`@"a b" `, 7},
+		{`x="my fi`, 2},
+	}
+	for _, c := range cases {
+		if got := tokenStartIndex(c.text); got != c.want {
+			t.Errorf("tokenStartIndex(%q) = %d, want %d", c.text, got, c.want)
+		}
+	}
+}
