@@ -66,6 +66,71 @@ components; entry is locality → scope → catalog; components *merge* as
 discoveries bridge them. So the only singular thing is a dumb enumerable
 catalog — which fir already has as the sidecar dir, not a daemon.
 
+## Prior art: NapMem — the mirror-image bet
+
+NapMem ("From Passive Retrieval to Active Memory Navigation", arXiv:2607.05794,
+Alibaba Qwen) is the closest external cousin to this design, and reading it
+against ours sharpens the bet. It shares our premise and inverts our method — a
+useful adversary, not a refutation.
+
+**The shared ground: memory is an active loop, not passive retrieval.** NapMem
+also rejects one-shot RAG. It exposes memory as an action space — five tools
+(`search_records`, `search_conversation`, `get_records`, `get_conversation`,
+`read_file`) that an agent navigates across granularities, ≤4 calls/query, and
+*stops when the evidence suffices*. That is our loop: probe, read, reach
+further, stop when the model decides it has enough. On the top-line question —
+*should memory be agent-native navigation with a stop criterion?* — NapMem is
+independent confirmation. Everything below is mirror-image.
+
+**The opposition: NapMem is exactly the semantic machinery this doc refuses.**
+It builds a 4-layer pyramid (raw conversations → typed records
+`fact/event/instruction/preference` → topic tracks → user profile), linked by
+provenance, indexed by hybrid reciprocal-rank fusion over
+`Qwen3-Embedding-0.6B` + keywords, and — the crux — the navigation policy is
+*trained* with RL (GRPO on a 9B model, terminal reward for format + correct
+answer + memory-tool use). Constructed hierarchy, embeddings, LLM
+consolidation, a learned navigator: our "Why these constraints" rejects each by
+name. The model is the index; grep not vectors; no training; improve for free
+as models improve. Same premise, opposite engineering.
+
+**NapMem's own numbers lean toward the ICL-first bet.** The RL gain is largest
+at the *smallest* scale: trained 9B averages 62.74, but *untrained 397B* already
+scores 59.85 — essentially tied with the best baseline (Mem0, 59.25) — while
+untrained 9B is only 48.39 (and collapses to 20.75 on PersonaMem-v2). The value
+of the trained machinery *shrinks as the base model grows*. That is precisely
+this doc's "design should age by shrinking" prediction, observed in their own
+scaling data. The disagreement reduces to where the compute goes: spend the
+budget training a small navigator (NapMem), or spend it on scale at inference
+and let dumb scaffolding ride ICL (us). Their own scaling curve is
+an argument for our side of it.
+
+**The deepest agreement: calibration, not accuracy, is the metric.** Most of
+what NapMem's RL buys is calibration, not raw retrieval. Unnecessary memory
+calls on non-memory questions (GPQA) drop 34.5% → 6.9%; average tool calls
+3.97 → 2.15; evidence-hit ratio 20.7% → 34.9%; the paper's phrase is that it
+"learns to stop once evidence suffices". That is our *coverage honesty* under a
+different name — knowing when you have enough and when you have looked in the
+wrong place. External corroboration that this, not answer accuracy, is the
+load-bearing property (see "How we'll know it works").
+
+**NapMem's failure mode validates our verbatim-slice invariant.** Their
+documented error: an event-level memory ("salsa set at a fundraiser")
+over-generalised into a stable preference ("loves weekend salsa socials") — a
+frozen typed record asserting *past its warrant*, with no path back. This is
+the exact hazard our "checkability over determinism" and "marked slice is an
+entry point, never the whole record" invariants defend against. A verbatim
+bookmark keeps the transcript reachable for re-derivation; a consolidated
+record cannot be walked back to what it actually stood on.
+
+**The honest tension, recorded.** NapMem's ablation is the strongest external
+evidence *against* our flat-first stance: records-only tools score 44.93,
+without the upper levels 54.11, full pyramid 62.74 — the topic-track and
+profile abstractions measurably help. If flat recall ever underperforms on
+multi-hop synthesis within budget, this is the datapoint that predicts the
+pyramid ("bookmark the bookmarks", Phase 4) earns its keep. We hold flat-first
+anyway — the machinery's value shrinks with scale, and we bet on scale — but
+this is the number to watch, not wave away.
+
 ## Two layers: in-context learning first, agentic search in addition
 
 The single idea that organises everything below. The design **leans on
@@ -331,7 +396,10 @@ against.
 - **Phase 4 — recursion ("bookmark the bookmarks").** Roots as connected
   components that merge as discoveries bridge sessions. *Trigger only:*
   flat grep provably can't route within budget (Assumption 4 breaks). The
-  tree is shallow; we expect to defer this a long time.
+  tree is shallow; we expect to defer this a long time. *Pressure signal:*
+  NapMem's ablation (records-only 44.93 vs full pyramid 62.74; see "Prior
+  art") is the external datapoint that predicts when the hierarchy earns its
+  keep — watch it if flat recall underperforms on multi-hop synthesis.
 - **Phase 5 — multi-box federation.** Sync the small artifacts (sidecars
   + bookmarks) across boxes, fan out on local miss, root-per-box.
   *Trigger:* work genuinely spans machines.
