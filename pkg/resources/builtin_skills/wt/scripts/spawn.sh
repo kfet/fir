@@ -22,7 +22,7 @@ WORKTREE="${PWD}-wt-${FEATURE}"
 
 git worktree add "$WORKTREE" -b "$BRANCH" >/dev/null
 
-TASK_FILE="$(mktemp -t firtask)"
+TASK_FILE="$(mktemp -t firtask.XXXXXX)"
 printf '%s\n' "$TASK_TEXT" > "$TASK_FILE"
 
 # Capture the new window's id (tmux's stable `@N` handle) so verification is
