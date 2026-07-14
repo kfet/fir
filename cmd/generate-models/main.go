@@ -16,7 +16,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,7 +30,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -870,146 +868,18 @@ type poeModel struct {
 	} `json:"parameters"`
 }
 
-// poeChatRequest / poeChatErrorResponse are the minimal shapes used to probe
-// whether a Poe model is actually callable over /v1/chat/completions. Poe
-// occasionally lists a model in /v1/models (with full pricing and context
-// metadata, but an EMPTY supported_endpoints list) before it has enabled API
-// access — calling such a model returns 404 "Model not found". No catalog
-// field distinguishes these pre-release listings from genuinely callable
-// empty-endpoint bots, so the only reliable signal is a live request.
-type poeChatRequest struct {
-	Model     string           `json:"model"`
-	Messages  []poeChatMessage `json:"messages"`
-	MaxTokens int              `json:"max_tokens"`
-}
-
-type poeChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type poeChatErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
-}
-
-// poeToken resolves a Poe API token for probing, in order: the POE_API_KEY
-// environment variable, then fir's own auth.json (poe.access). Returns "" when
-// no token is available, in which case empty-endpoint models are kept (the
-// permissive default) and a warning is logged.
-func poeToken() string {
-	if t := strings.TrimSpace(os.Getenv("POE_API_KEY")); t != "" {
-		return t
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".config", "fir", "auth.json"))
-	if err != nil {
-		return ""
-	}
-	var auth struct {
-		Poe struct {
-			Access string `json:"access"`
-		} `json:"poe"`
-	}
-	if json.Unmarshal(data, &auth) != nil {
-		return ""
-	}
-	return strings.TrimSpace(auth.Poe.Access)
-}
-
-// poeModelNotFound reports whether the given Poe model id is rejected by
-// /v1/chat/completions with a definitive "model not found" 404. Any other
-// outcome (success, rate limit, bad request, transient network/5xx) is treated
-// as "the model exists" so a flaky probe never wrongly prunes a working model.
-// The caller must hold a valid token.
-func poeModelNotFound(token, id string) bool {
-	body, _ := json.Marshal(poeChatRequest{
-		Model:     id,
-		Messages:  []poeChatMessage{{Role: "user", Content: "ping"}},
-		MaxTokens: 1,
-	})
-	req, err := http.NewRequest(http.MethodPost, "https://api.poe.com/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false // transient — do not prune
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		return false
-	}
-	// A 404 is only authoritative when it's the not_found_error type;
-	// guard against unrelated 404s (e.g. a future routing change).
-	var er poeChatErrorResponse
-	rb, _ := io.ReadAll(resp.Body)
-	if json.Unmarshal(rb, &er) == nil && er.Error.Type != "" {
-		return er.Error.Type == "not_found_error"
-	}
-	return true
-}
-
-// poeUncallableEmptyEndpoint probes, concurrently, the subset of Poe model ids
-// that advertise an EMPTY supported_endpoints list and returns the set that is
-// confirmed uncallable (404 not_found). Models with explicit endpoints are
-// trusted as-is and never probed. With no token, returns an empty set and logs
-// a warning so generation stays permissive rather than silently pruning.
+// poeUncallableEmptyEndpoint previously probed each empty-supported_endpoints
+// Poe model with a live /v1/chat/completions request to detect not-yet-enabled
+// (404) listings. That probe made BILLABLE calls on the operator's Poe account.
+// generate-models MUST NEVER call a billable endpoint, so the probe is removed:
+// empty-endpoint models are kept permissively and any not-yet-enabled listing is
+// handled at runtime, not by spending points during catalog generation.
 func poeUncallableEmptyEndpoint(ids []string) map[string]bool {
-	out := map[string]bool{}
-	if len(ids) == 0 {
-		return out
+	if len(ids) > 0 {
+		log.Printf("  keeping %d empty-endpoint Poe models as-is (callability probe "+
+			"disabled; generate-models never calls billable endpoints)", len(ids))
 	}
-	token := poeToken()
-	if token == "" {
-		log.Printf("  WARNING: no Poe token (POE_API_KEY or fir auth.json); "+
-			"skipping callability probe for %d empty-endpoint models — they "+
-			"are kept as-is and may include pre-release/uncallable listings", len(ids))
-		return out
-	}
-	log.Printf("  probing %d empty-endpoint Poe models for callability...", len(ids))
-	const workers = 8
-	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
-		ch = make(chan string)
-	)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for id := range ch {
-				if poeModelNotFound(token, id) {
-					mu.Lock()
-					out[id] = true
-					mu.Unlock()
-				}
-			}
-		}()
-	}
-	for _, id := range ids {
-		ch <- id
-	}
-	close(ch)
-	wg.Wait()
-	if len(out) > 0 {
-		pruned := make([]string, 0, len(out))
-		for id := range out {
-			pruned = append(pruned, id)
-		}
-		sort.Strings(pruned)
-		log.Printf("  excluding %d uncallable Poe models (404 not_found): %s",
-			len(pruned), strings.Join(pruned, ", "))
-	}
-	return out
+	return map[string]bool{}
 }
 
 // poeContextDescRe captures context-window hints from free-text model
