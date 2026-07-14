@@ -3,6 +3,7 @@ package sdk
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -79,8 +80,8 @@ func TestEmbeddedHash(t *testing.T) {
 
 func TestSDKEnv(t *testing.T) {
 	env := SDKEnv("/base/path")
-	if len(env) != 3 {
-		t.Fatalf("len = %d, want 3", len(env))
+	if len(env) != 4 {
+		t.Fatalf("len = %d, want 4", len(env))
 	}
 	want := []string{
 		"PYTHONPATH=/base/path/python",
@@ -91,5 +92,10 @@ func TestSDKEnv(t *testing.T) {
 		if env[i] != w {
 			t.Errorf("env[%d] = %q, want %q", i, env[i], w)
 		}
+	}
+	// FIR_HOST_PID carries the fir host pid to extensions (see SDKEnv doc).
+	wantHostPid := "FIR_HOST_PID=" + strconv.Itoa(os.Getpid())
+	if env[3] != wantHostPid {
+		t.Errorf("env[3] = %q, want %q", env[3], wantHostPid)
 	}
 }

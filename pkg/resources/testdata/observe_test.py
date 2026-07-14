@@ -64,7 +64,7 @@ def _reset_observe_state(state_dir: str, sock_dir: str) -> None:
         {
             "session_id": "",
             "pid": os.getpid(),
-            "host_pid": os.getppid(),
+            "host_pid": observe._host_pid(),
             "socket_path": "",
             "store_path": "",
             "cwd": "",
@@ -124,10 +124,45 @@ class TestSidecar(unittest.TestCase):
         self.assertEqual(d["status"], "running")
         self.assertEqual(d["schema"], 1)
         self.assertEqual(d["pid"], os.getpid())
-        self.assertEqual(d["host_pid"], os.getppid())
+        self.assertEqual(d["host_pid"], observe._host_pid())
         self.assertTrue(d["socket_path"].endswith(".sock"))
         self.assertIn(self.session_id[:16], d["socket_path"])
         self.assertTrue(d["started_at"])  # non-empty timestamp
+
+    def test_host_pid_from_env_var(self) -> None:
+        """host_pid must come from FIR_HOST_PID (the fir binary), not getppid().
+
+        Under the forkserver architecture os.getppid() returns the python
+        forkserver pid, not the fir host, so signaling it does not stop the
+        session. The fir host exports FIR_HOST_PID; the sidecar must record it.
+        """
+        # A pid distinct from getppid() so we prove the env var wins.
+        fake_host = os.getppid() + 100000
+        prev = os.environ.get("FIR_HOST_PID")
+        os.environ["FIR_HOST_PID"] = str(fake_host)
+        try:
+            self.assertEqual(observe._host_pid(), fake_host)
+            # Re-seed _state so the sidecar picks up the env-derived value.
+            observe._state["host_pid"] = observe._host_pid()
+            ctx = _make_ctx(session_file="/tmp/foo.jsonl")
+            observe.on_session_start({"session_id": self.session_id}, ctx)
+            d = self._read_sidecar()
+            self.assertEqual(d["host_pid"], fake_host)
+            self.assertNotEqual(d["host_pid"], os.getppid())
+        finally:
+            if prev is None:
+                del os.environ["FIR_HOST_PID"]
+            else:
+                os.environ["FIR_HOST_PID"] = prev
+
+    def test_host_pid_falls_back_to_getppid(self) -> None:
+        """Without FIR_HOST_PID (old host / no SDK), fall back to getppid()."""
+        prev = os.environ.pop("FIR_HOST_PID", None)
+        try:
+            self.assertEqual(observe._host_pid(), os.getppid())
+        finally:
+            if prev is not None:
+                os.environ["FIR_HOST_PID"] = prev
 
     def test_session_start_skips_when_no_session_file(self) -> None:
         """In-memory sessions have no transcript; observe.py should bail."""

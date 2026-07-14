@@ -2,8 +2,10 @@ package extension
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -24,6 +26,31 @@ def ping(params, ctx):
     return {"content": [{"text": "pong"}], "is_error": False}
 
 fir_ext.run(name="forktest")
+`
+
+// hostPidExtScript is a minimal extension whose `report` tool returns the
+// FIR_HOST_PID it sees in its environment plus its own os.getppid(). Used to
+// prove the fork path plumbs the real fir host pid to children — getppid()
+// under the forkserver yields the forkserver pid, not fir.
+const hostPidExtScript = `import os
+import fir_ext
+
+@fir_ext.tool(
+    name="report",
+    description="report host pid",
+    parameters={"type": "object", "properties": {}},
+)
+def report(params, ctx):
+    return {
+        "content": [{"text": os.environ.get("FIR_HOST_PID", "")}],
+        "structuredContent": {
+            "fir_host_pid": os.environ.get("FIR_HOST_PID", ""),
+            "getppid": os.getppid(),
+        },
+        "is_error": False,
+    }
+
+fir_ext.run(name="hostpidtest")
 `
 
 // forkTestSetup extracts the SDK and starts a fork template, skipping the test
@@ -224,6 +251,92 @@ func TestForkEligible(t *testing.T) {
 		if got := forkEligible(c.cfg); got != c.want {
 			t.Errorf("forkEligible(%+v) = %v, want %v", c.cfg, got, c.want)
 		}
+	}
+}
+
+// TestForkChildReceivesHostPid proves the fork spawn path plumbs the real fir
+// host pid (this test process) to the forked extension via FIR_HOST_PID, and
+// that it is distinct from the forkserver pid — so the observe sidecar's
+// host_pid (derived from FIR_HOST_PID) signals fir, not the forkserver. This is
+// the regression guard for the observe host_pid bug: os.getppid() in the child
+// yields the forkserver, never the fir binary.
+func TestForkChildReceivesHostPid(t *testing.T) {
+	sdkDir, err := sdk.EnsureExtracted()
+	if err != nil {
+		t.Skipf("SDK unavailable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sdkDir, "python", "forkserver.py")); err != nil {
+		t.Skipf("forkserver template missing: %v", err)
+	}
+	// SDKEnv injects FIR_HOST_PID=os.Getpid() at call time in this process.
+	env := sdk.SDKEnv(sdkDir)
+	fs, err := StartForkServer(sdkDir, env, nil)
+	if err != nil {
+		t.Skipf("fork template unavailable (python3?): %v", err)
+	}
+	t.Cleanup(func() { _ = fs.Close() })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hostpidtest.py")
+	if err := os.WriteFile(path, []byte(hostPidExtScript), 0o644); err != nil {
+		t.Fatalf("write host-pid ext: %v", err)
+	}
+
+	cfg := ExtProcConfig{Name: "hostpidtest", Path: path, Scope: "builtin"}
+	proc := NewProcess(cfg, env, nil)
+	if err := proc.StartForked(fs); err != nil {
+		t.Fatalf("StartForked: %v", err)
+	}
+	t.Cleanup(func() { _ = proc.Stop(context.Background()) })
+	if _, err := Handshake(proc, "/tmp", nil, 10*time.Second); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	codec := proc.GetCodec()
+	if err := codec.WriteRequest(2, "tool_call", map[string]any{
+		"tool_call_id": "tc1",
+		"name":         "report",
+		"params":       map[string]any{},
+	}); err != nil {
+		t.Fatalf("write tool_call: %v", err)
+	}
+	msg, err := codec.ReadMessage()
+	if err != nil {
+		t.Fatalf("read tool response: %v", err)
+	}
+	resp, ok := msg.(*Response)
+	if !ok {
+		t.Fatalf("expected Response, got %T", msg)
+	}
+	if resp.Error != nil {
+		t.Fatalf("tool error: %v", resp.Error)
+	}
+	if resp.Result == nil {
+		t.Fatalf("nil result")
+	}
+	var result struct {
+		StructuredContent struct {
+			FirHostPid string `json:"fir_host_pid"`
+			Getppid    int    `json:"getppid"`
+		} `json:"structuredContent"`
+	}
+	if err := json.Unmarshal(*resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result %s: %v", string(*resp.Result), err)
+	}
+
+	gotHostPid, err := strconv.Atoi(result.StructuredContent.FirHostPid)
+	if err != nil {
+		t.Fatalf("child saw FIR_HOST_PID=%q (not a pid): %v", result.StructuredContent.FirHostPid, err)
+	}
+	if gotHostPid != os.Getpid() {
+		t.Fatalf("child FIR_HOST_PID = %d, want host pid %d", gotHostPid, os.Getpid())
+	}
+	// The whole point: getppid() in the child is the forkserver, NOT the host.
+	if result.StructuredContent.Getppid == os.Getpid() {
+		t.Fatalf("child getppid() == host pid %d; test cannot distinguish env var from getppid fallback", os.Getpid())
+	}
+	if gotHostPid == fs.Pid() {
+		t.Fatalf("FIR_HOST_PID = forkserver pid %d; should be fir host pid", fs.Pid())
 	}
 }
 

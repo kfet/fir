@@ -93,6 +93,25 @@ def _is_safe_session_id(sid: str) -> bool:
     return all(c.isalnum() or c in "-_" for c in sid)
 
 
+def _host_pid() -> int:
+    """The fir host process pid — the process users should signal to stop it.
+
+    The fir Go host exports its own pid as ``FIR_HOST_PID`` so extensions can
+    record and signal the real binary. This env var is authoritative because
+    ``os.getppid()`` is unreliable here: under the forkserver architecture the
+    extension is ``fork()``'d by the python forkserver
+    (pkg/extension/sdk/python/forkserver.py), so ``os.getppid()`` returns the
+    forkserver pid, not fir. ``getppid()`` is only a fallback for old hosts or
+    the (SDK-less) case where the env var is absent.
+    """
+    with contextlib.suppress(ValueError, TypeError):
+        v = int(os.environ.get("FIR_HOST_PID", ""))
+        if v > 0:
+            return v
+    return os.getppid()
+
+
+
 # ---------------------------------------------------------------------------
 # Per-session state (one extension process == one session)
 # ---------------------------------------------------------------------------
@@ -101,10 +120,12 @@ _state_lock = threading.Lock()
 _state: dict[str, Any] = {
     "session_id": "",
     "pid": os.getpid(),
-    # host_pid is the fir host process (our parent). The extension runs as a
-    # subprocess; `pid` above is the extension's own pid, useful for liveness
-    # checks but not for signaling fir itself. stop_session signals host_pid.
-    "host_pid": os.getppid(),
+    # host_pid is the fir host process, the one users should signal to stop
+    # the session. The fir host exports its pid as FIR_HOST_PID; os.getppid()
+    # is only a fallback (unreliable under the forkserver — see _host_pid).
+    # `pid` above is the extension's own pid, useful for liveness checks but
+    # not for signaling fir itself. stop_session signals host_pid.
+    "host_pid": _host_pid(),
     "socket_path": "",
     "store_path": "",
     # Observable-cards sidecar path; readers (observe_session, fir
