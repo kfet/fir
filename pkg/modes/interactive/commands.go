@@ -1632,7 +1632,7 @@ func (m *InteractiveMode) handleMCPCommand() {
 	lines = append(lines, "")
 	lines = append(lines, t.Fg("dim", "Use /mcp <server-name> to see full tool details."))
 
-	m.showMessage(strings.Join(lines, "\n"))
+	m.showMCPOverlay(lines)
 }
 
 func (m *InteractiveMode) handleMCPDetailCommand(serverName string) {
@@ -1670,7 +1670,30 @@ func (m *InteractiveMode) handleMCPDetailCommand(serverName string) {
 		lines = append(lines, "  "+t.Fg("dim", "Tools: none"))
 	}
 
-	m.showMessage(strings.Join(lines, "\n"))
+	m.showMCPOverlay(lines)
+}
+
+// showMCPOverlay renders the given lines into the collapsible MCP overlay above
+// the editor. Unlike the help/session overlays (which toggle), this always
+// refreshes the lines and shows the overlay — a repeat /mcp or /mcp <server>
+// re-shows the requested content. Ctrl+L collapses it.
+func (m *InteractiveMode) showMCPOverlay(lines []string) {
+	// mcpContainer and m.ui are created together in Init; guarding the
+	// container also covers the no-UI case (bare dispatch unit tests).
+	if m.mcpContainer == nil {
+		return
+	}
+	if m.mcpComponent == nil {
+		m.mcpComponent = components.NewOverlayComponent(lines)
+	} else {
+		m.mcpComponent.SetLines(lines)
+	}
+	if !m.mcpInContainer {
+		m.mcpContainer.AddChild(m.mcpComponent)
+		m.mcpInContainer = true
+	}
+	m.mcpHidden = false
+	m.ui.RequestRender(false)
 }
 
 // ============================================================================
@@ -1819,6 +1842,15 @@ func (m *InteractiveMode) clearTransientSurfaces() {
 		if m.helpInContainer {
 			m.helpContainer.Clear()
 			m.helpInContainer = false
+		}
+	}
+
+	// Collapse the MCP overlay if it is open.
+	if !m.mcpHidden {
+		m.mcpHidden = true
+		if m.mcpInContainer {
+			m.mcpContainer.Clear()
+			m.mcpInContainer = false
 		}
 	}
 

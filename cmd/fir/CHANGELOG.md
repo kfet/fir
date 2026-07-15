@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `/mcp` and `/mcp <server>` now render as a collapsible overlay above the editor (like `/session`, `/plan`, and `/help`) instead of printing into the conversation stream. Ctrl+L collapses it. Repeat invocations refresh-and-show (list vs a specific server) rather than toggling.
+
 ## [0.78.2] - 2026-07-10
 
 ### Fixed

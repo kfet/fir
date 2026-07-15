@@ -61,8 +61,12 @@ type InteractiveMode struct {
 	sessionInContainer     bool           // true = sessionComponent is currently a child of sessionContainer
 	helpContainer          *tui.Container // help overlay
 	helpComponent          *components.OverlayComponent
-	helpHidden             bool // true = help overlay collapsed
-	helpInContainer        bool // true = helpComponent is currently a child of helpContainer
+	helpHidden             bool           // true = help overlay collapsed
+	helpInContainer        bool           // true = helpComponent is currently a child of helpContainer
+	mcpContainer           *tui.Container // mcp-info overlay
+	mcpComponent           *components.OverlayComponent
+	mcpHidden              bool // true = mcp overlay collapsed
+	mcpInContainer         bool // true = mcpComponent is currently a child of mcpContainer
 	footerComponent        *components.FooterComponent
 	footerDataProvider     *FooterDataProvider
 	markdownTheme          tuicomp.MarkdownTheme
@@ -406,6 +410,11 @@ func (m *InteractiveMode) Init() error {
 	m.helpContainer = &tui.Container{}
 	m.helpHidden = true // start collapsed; /help to expand
 	m.ui.AddChild(m.helpContainer)
+
+	// Create MCP container (collapsible overlay above the editor)
+	m.mcpContainer = &tui.Container{}
+	m.mcpHidden = true // start collapsed; /mcp to expand
+	m.ui.AddChild(m.mcpContainer)
 
 	// Create editor container (holds editor or selector overlays)
 	m.editorContainer = &tui.Container{}

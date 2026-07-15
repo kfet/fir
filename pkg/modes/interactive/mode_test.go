@@ -16,6 +16,7 @@ import (
 	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/extension"
+	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	itheme "github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -207,6 +208,10 @@ func newTestModeInternal(t *testing.T, session *session.AgentSession) *testMode 
 	m.helpContainer = &tui.Container{}
 	m.helpHidden = true
 	ui.AddChild(m.helpContainer)
+
+	m.mcpContainer = &tui.Container{}
+	m.mcpHidden = true
+	ui.AddChild(m.mcpContainer)
 
 	m.footerComponent = components.NewFooterComponent(func() components.FooterData {
 		return m.getFooterData()
@@ -609,6 +614,79 @@ func TestInteractiveMode_ClearTransientSurfacesCollapsesHelp(t *testing.T) {
 	}
 	if len(tm.mode.helpContainer.ChildrenSnapshot()) != 0 {
 		t.Fatalf("expected empty help container, got %d children", len(tm.mode.helpContainer.ChildrenSnapshot()))
+	}
+}
+
+func TestInteractiveMode_MCPCommandShowsOverlay(t *testing.T) {
+	tm := newTestMode(t)
+	tm.mode.mcpDetails = func() []mcp.ServerDetail {
+		return []mcp.ServerDetail{
+			{Name: "demo", Status: "connected", Tools: []mcp.ToolInfo{{Name: "echo", Description: "Echo back"}}},
+		}
+	}
+
+	tm.mode.handleMCPCommand()
+	tm.waitRender()
+
+	// /mcp renders a sticky overlay rather than dumping into the stream.
+	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
+		t.Fatal("expected mcp overlay open after /mcp")
+	}
+	if len(tm.mode.mcpContainer.ChildrenSnapshot()) != 1 {
+		t.Fatalf("expected mcp component in container, got %d children", len(tm.mode.mcpContainer.ChildrenSnapshot()))
+	}
+	if !strings.Contains(tm.renderedOutput(), "MCP Servers") {
+		t.Fatalf("expected mcp overlay rendered, got %q", tm.renderedOutput())
+	}
+}
+
+func TestInteractiveMode_MCPDetailCommandShowsOverlay(t *testing.T) {
+	tm := newTestMode(t)
+	tm.mode.mcpDetails = func() []mcp.ServerDetail {
+		return []mcp.ServerDetail{
+			{Name: "demo", Status: "connected", Tools: []mcp.ToolInfo{{Name: "echo", Description: "Echo back"}}},
+		}
+	}
+
+	tm.mode.handleMCPDetailCommand("demo")
+	tm.waitRender()
+
+	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
+		t.Fatal("expected mcp overlay open after /mcp demo")
+	}
+	if !strings.Contains(tm.renderedOutput(), "echo") {
+		t.Fatalf("expected mcp detail overlay rendered, got %q", tm.renderedOutput())
+	}
+
+	// A repeat /mcp re-shows the overlay (refresh-and-show, not toggle).
+	tm.mode.handleMCPCommand()
+	tm.waitRender()
+	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
+		t.Fatal("expected mcp overlay still open after repeat /mcp")
+	}
+}
+
+func TestInteractiveMode_ClearTransientSurfacesCollapsesMCP(t *testing.T) {
+	tm := newTestMode(t)
+	tm.mode.mcpDetails = func() []mcp.ServerDetail {
+		return []mcp.ServerDetail{{Name: "demo", Status: "connected"}}
+	}
+
+	// Open the mcp overlay.
+	tm.mode.handleMCPCommand()
+	tm.waitRender()
+	if tm.mode.mcpHidden || !tm.mode.mcpInContainer {
+		t.Fatal("expected mcp overlay open")
+	}
+
+	// Ctrl+L / clearTransientSurfaces should dismiss it.
+	tm.mode.clearTransientSurfaces()
+	tm.waitRender()
+	if !tm.mode.mcpHidden || tm.mode.mcpInContainer {
+		t.Fatal("expected mcp overlay dismissed by clearTransientSurfaces")
+	}
+	if len(tm.mode.mcpContainer.ChildrenSnapshot()) != 0 {
+		t.Fatalf("expected empty mcp container, got %d children", len(tm.mode.mcpContainer.ChildrenSnapshot()))
 	}
 }
 
