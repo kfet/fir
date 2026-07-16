@@ -1004,7 +1004,7 @@ that integrate with fir's auth storage. Two flow models are supported:
    token refresh. The extension only handles genuinely
    provider-specific work via optional hooks (`auth/post_exchange`,
    `auth/api_key`, `auth/list_models`, `auth/modify_models`,
-   `auth/refresh`).
+   `auth/refresh`, `auth/resolve_endpoint`).
 
 2. **Imperative** (legacy / non-standard flows): the extension leaves
    `flow` empty and implements `auth/login` itself. fir invokes
@@ -1075,6 +1075,7 @@ that integrate with fir's auth storage. Two flow models are supported:
 | `auth/list_models` | When fir asks the provider to enumerate live model IDs. | Optional (returns `{"models": null}` to keep the static catalog) |
 | `auth/modify_models` | When fir applies provider-specific HTTP headers to outbound model requests. | Optional |
 | `auth/model_defaults` | When fir needs metadata for a live-listed model not in the built-in registry. | Optional |
+| `auth/resolve_endpoint` | Once when one of the provider's models is selected for inference. Params `{provider_id, model_id, base_url, api, api_key}`. Returns `null` (no change) or `{base_url?, api?, callable?}` — set `callable: false` to make fir refuse the selection with a clean error instead of failing mid-stream. The extension owns any probing/memoisation. | Optional |
 
 #### `auth/post_exchange` shape
 

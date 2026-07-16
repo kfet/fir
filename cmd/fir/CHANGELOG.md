@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Poe model endpoint/callability is now resolved lazily at **runtime**, entirely inside the `poe-auth` extension. A new provider-neutral host hook `auth/resolve_endpoint` fires once when a model is selected for inference (`{provider_id, model_id, base_url, api, api_key}` -> optional `{base_url?, api?, callable?}`). `poe_auth.py` uses it to probe an empty-`supported_endpoints` bot exactly once (a tiny `/v1/chat/completions` ping), memoise the verdict to `poe-endpoints.json` under fir's config dir (probe once, reuse forever - zero network on a memo hit), and return `callable=false` on a definitive `not_found_error` 404 so fir refuses the selection with a clean "not enabled on Poe" message instead of failing mid-stream. Models with explicit endpoints are never probed. New SDK decorator `fir_ext.auth_resolve_endpoint(provider)`.
+
+### Changed
+- `generate-models` no longer makes any billable Poe calls: the build-time empty-endpoint callability probe (which sent a `/v1/chat/completions` ping to every such model on each regen) was removed. Catalog generation is now fully offline/free; callability is resolved on-demand at inference selection (see Added).
+
 ## [0.82.0] - 2026-07-22
 
 ### Fixed
@@ -27,6 +33,9 @@
 
 ### Changed
 - `/mcp` and `/mcp <server>` now render as a collapsible overlay above the editor (like `/session`, `/plan`, and `/help`) instead of printing into the conversation stream. Ctrl+L collapses it. Repeat invocations refresh-and-show (list vs a specific server) rather than toggling.
+### Added
+- Poe model endpoint/callability is now resolved lazily at **runtime**, entirely inside the `poe-auth` extension — no billable build-time probe, `generate-models` stays free/offline. A new provider-neutral host hook `auth/resolve_endpoint` fires once when a model is selected for inference (`{provider_id, model_id, base_url, api, api_key}` → optional `{base_url?, api?, callable?}`). `poe_auth.py` uses it to probe an empty-`supported_endpoints` bot exactly once (a tiny `/v1/chat/completions` ping), memoise the verdict to `poe-endpoints.json` under fir's config dir (probe once, reuse forever — zero network on a memo hit), and return `callable=false` on a definitive `not_found_error` 404 so fir refuses the selection with a clean "not enabled on Poe" message instead of failing mid-stream. Models with explicit endpoints are never probed. New SDK decorator `fir_ext.auth_resolve_endpoint(provider)`.
+
 
 ## [0.78.2] - 2026-07-10
 

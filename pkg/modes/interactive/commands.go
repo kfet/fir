@@ -1514,7 +1514,10 @@ func (m *InteractiveMode) cycleModel(direction string) {
 	} else {
 		next = (idx - 1 + len(available)) % len(available)
 	}
-	m.session.SetModel(available[next])
+	if err := m.session.SetModel(available[next]); err != nil {
+		m.showStatus(err.Error())
+		return
+	}
 	m.footerComponent.Invalidate()
 	m.updateEditorBorderColor()
 	m.showStatus(fmt.Sprintf("Model: %s", available[next].ID))

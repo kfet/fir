@@ -56,15 +56,23 @@ func (m *InteractiveMode) showModelSelector(initialSearch string) {
 			m.session.ModelRegistryRef(),
 			m.keybindings,
 			func(model *ai.Model) {
-				m.session.SetModel(model)
+				if err := m.session.SetModel(model); err != nil {
+					done()
+					m.showStatus(err.Error())
+					return
+				}
 				m.footerComponent.Invalidate()
 				m.updateEditorBorderColor()
 				done()
 				m.showStatus(fmt.Sprintf("Model: %s", model.ID))
 			},
 			func(model *ai.Model) {
+				if err := m.session.SetModel(model); err != nil {
+					done()
+					m.showStatus(err.Error())
+					return
+				}
 				m.settings.SetDefaultModelAndProvider(model.Provider, model.ID)
-				m.session.SetModel(model)
 				m.footerComponent.Invalidate()
 				m.updateEditorBorderColor()
 				done()

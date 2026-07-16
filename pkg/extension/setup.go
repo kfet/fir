@@ -239,6 +239,33 @@ func Setup(asession *session.AgentSession, opts SetupOptions) (*SetupResult, err
 			}
 			return nil
 		},
+		ResolveModelEndpoint: func(model *ai.Model) *session.ModelEndpointCorrection {
+			apiKey := ""
+			if reg := asession.ModelRegistryRef(); reg != nil {
+				apiKey = reg.GetApiKeyForProvider(string(model.Provider))
+			}
+			raws, err := mgr.CallHook(context.Background(), "auth/resolve_endpoint", map[string]any{
+				"provider_id": string(model.Provider),
+				"model_id":    model.ID,
+				"base_url":    model.BaseURL,
+				"api":         string(model.API),
+				"api_key":     apiKey,
+			}, 30*time.Second)
+			if err != nil {
+				return nil
+			}
+			for _, raw := range raws {
+				var c struct {
+					BaseURL  string `json:"base_url"`
+					API      string `json:"api"`
+					Callable *bool  `json:"callable"`
+				}
+				if json.Unmarshal(raw, &c) == nil && (c.BaseURL != "" || c.API != "" || c.Callable != nil) {
+					return &session.ModelEndpointCorrection{BaseURL: c.BaseURL, API: c.API, Callable: c.Callable}
+				}
+			}
+			return nil
+		},
 	}
 	asession.SetHooks(hooks)
 

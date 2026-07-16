@@ -307,7 +307,9 @@ func (pa *firAgent) SetSessionModel(_ context.Context, params acpsdk.SetSessionM
 	if model == nil {
 		return acpsdk.SetSessionModelResponse{}, fmt.Errorf("model not found: %s", params.ModelId)
 	}
-	entry.session.SetModel(model)
+	if err := entry.session.SetModel(model); err != nil {
+		return acpsdk.SetSessionModelResponse{}, err
+	}
 	return acpsdk.SetSessionModelResponse{}, nil
 }
 

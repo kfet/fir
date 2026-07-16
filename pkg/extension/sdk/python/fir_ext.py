@@ -1419,6 +1419,7 @@ __all__ = [
     "auth_post_exchange",
     "auth_provider",
     "auth_refresh",
+    "auth_resolve_endpoint",
     "cli_verb",
     "command",
     "config_path",
@@ -1465,6 +1466,7 @@ _auth_api_key_handlers: dict[str, Callable] = {}
 _auth_list_models_handlers: dict[str, Callable] = {}
 _auth_modify_models_handlers: dict[str, Callable] = {}
 _auth_post_exchange_handlers: dict[str, Callable] = {}
+_auth_resolve_endpoint_handlers: dict[str, Callable] = {}
 
 # Hosted-provider registries — populated by register_provider() and the
 # provider_* decorators, consumed by run() to build the init payload and to
@@ -1770,6 +1772,34 @@ def auth_list_models(provider: str) -> Callable:
     return decorator
 
 
+def auth_resolve_endpoint(provider: str) -> Callable:
+    """Register an on-demand endpoint resolver for an auth provider.
+
+    fir invokes this once when one of the provider's models is selected for
+    inference, giving the extension a chance to correct the model's endpoint
+    (e.g. after a live probe) or veto it entirely. The decorated function
+    receives ``(params: dict, ctx: AuthContext)`` where *params* contains
+    ``{"provider_id", "model_id", "base_url", "api", "api_key"}``.
+
+    It should return either ``None`` (no correction — use the model as-is) or
+    a dict with any of:
+
+    * ``base_url`` — override the model's base URL,
+    * ``api`` — override the model's wire API,
+    * ``callable`` — ``False`` to mark the model unusable so fir refuses the
+      selection with a clean error instead of failing mid-stream.
+
+    The handler owns any probing and memoisation; fir treats it as a black
+    box and applies whatever correction it returns.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        _auth_resolve_endpoint_handlers[provider] = fn
+        return fn
+
+    return decorator
+
+
 def declare_oauth_provider(
     *,
     provider_id: str,
@@ -1809,6 +1839,8 @@ def declare_oauth_provider(
       onto outbound model requests (User-Agent impersonation, etc.).
     * :func:`auth_refresh` — replace the default standard refresh with a
       custom flow.
+    * :func:`auth_resolve_endpoint` — correct or veto a model's endpoint
+      on-demand when it is selected for inference (e.g. after a probe).
 
     Compared to the imperative :func:`auth_provider` (which receives a
     bare ``ctx`` and orchestrates the whole flow itself), this avoids
@@ -3401,6 +3433,16 @@ def run(
                 result = handler(params, auth_ctx)
                 if isinstance(result, list):
                     result = {"models": result}
+                _write_message(_make_response(msg_id, result), out_stream)
+
+            elif method == "auth/resolve_endpoint":
+                handler = _auth_resolve_endpoint_handlers.get(provider_id)
+                if handler is None:
+                    _write_message(_make_response(msg_id, None), out_stream)
+                    return
+                result = handler(params, auth_ctx)
+                if result is not None and not isinstance(result, dict):
+                    result = None
                 _write_message(_make_response(msg_id, result), out_stream)
 
             elif method == "auth/post_exchange":

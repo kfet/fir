@@ -23,8 +23,12 @@ custom-registered client whose redirect is not loopback).
 
 from __future__ import annotations
 
+import json
 import os
+import threading
 import time
+import urllib.error
+import urllib.request
 
 import fir_ext
 
@@ -126,4 +130,166 @@ def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
 # private bot they can address it by its ID directly.
 
 
+# ---------------------------------------------------------------------------
+# On-demand endpoint/callability resolution
+# ---------------------------------------------------------------------------
+#
+# generate-models keeps Poe models whose catalog ``supported_endpoints`` list
+# was EMPTY permissively (as ``openai-completions`` against api.poe.com/v1),
+# because it must never make a billable call to tell a genuinely-callable bot
+# from a not-yet-enabled pre-release listing (which 404s ``not_found_error``).
+#
+# We resolve that ambiguity here, lazily, only when such a model is actually
+# selected for inference — via the host's provider-neutral
+# ``auth/resolve_endpoint`` hook. The first selection probes the model once
+# with a tiny POST to /v1/chat/completions and memoises the verdict to a small
+# JSON file under fir's config dir; every later selection is a memo hit with
+# zero network calls. A definitive ``not_found_error`` 404 records
+# ``callable=false`` so fir refuses the selection with a clean message instead
+# of failing mid-stream. Models with explicit endpoints are never probed.
+
+_MODELS_URL = "https://api.poe.com/v1/models"
+_CHAT_URL = "https://api.poe.com/v1/chat/completions"
+_MEMO_FILENAME = "poe-endpoints.json"
+
+_memo_lock = threading.Lock()
+_memo_cache: dict | None = None  # model_id -> {"callable": bool, "base_url"?, "api"?}
+
+_empty_lock = threading.Lock()
+_empty_ids_cache: set[str] | None = None  # model IDs whose supported_endpoints was empty
+
+
+def _memo_path() -> str | None:
+    return fir_ext.config_path(_MEMO_FILENAME)
+
+
+def _load_memo() -> dict:
+    """Load (and cache) the on-disk memo. Missing/corrupt file -> empty dict."""
+    global _memo_cache
+    with _memo_lock:
+        if _memo_cache is not None:
+            return _memo_cache
+        _memo_cache = {}
+        path = _memo_path()
+        if path and os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if isinstance(data, dict):
+                    _memo_cache = data
+            except (OSError, ValueError):
+                _memo_cache = {}
+        return _memo_cache
+
+
+def _record_memo(model_id: str, entry: dict) -> None:
+    """Persist a single model's verdict, updating the in-memory cache too."""
+    memo = _load_memo()
+    with _memo_lock:
+        memo[model_id] = entry
+        path = _memo_path()
+        if not path:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(memo, fh)
+        except OSError:
+            pass
+
+
+def _fetch_empty_endpoint_ids() -> set[str]:
+    """Fetch Poe's free, unauthenticated catalog and return the set of model
+    IDs whose ``supported_endpoints`` list was empty (the ambiguous set)."""
+    ids: set[str] = set()
+    try:
+        req = urllib.request.Request(_MODELS_URL, headers={"User-Agent": "fir"})  # noqa: S310
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            data = json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError):
+        return ids
+    for m in data.get("data", []) or []:
+        if not m.get("supported_endpoints"):
+            mid = m.get("id")
+            if mid:
+                ids.add(mid)
+    return ids
+
+
+def _empty_endpoint_ids() -> set[str]:
+    """Cached accessor for the ambiguous (empty-supported_endpoints) ID set."""
+    global _empty_ids_cache
+    with _empty_lock:
+        if _empty_ids_cache is None:
+            _empty_ids_cache = _fetch_empty_endpoint_ids()
+        return _empty_ids_cache
+
+
+def _probe_model(model_id: str, api_key: str) -> dict:
+    """Probe a Poe model once with a tiny /v1/chat/completions ping.
+
+    Returns a memo entry dict. A definitive ``not_found_error`` 404 ->
+    ``{"callable": False}``. Any success or non-404 outcome (or a transient
+    failure) -> ``{"callable": True}`` so a flaky probe never wrongly prunes a
+    working model.
+    """
+    body = json.dumps(
+        {
+            "model": model_id,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(  # noqa: S310
+        _CHAT_URL,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            resp.read()
+        return {"callable": True}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            try:
+                raw = exc.read().decode("utf-8", "ignore")
+            except OSError:
+                raw = ""
+            if "not_found_error" in raw:
+                return {"callable": False}
+        return {"callable": True}
+    except (urllib.error.URLError, OSError):
+        return {"callable": True}
+
+
+@fir_ext.auth_resolve_endpoint(provider="poe")
+def resolve_endpoint(params: dict, ctx: fir_ext.AuthContext) -> dict | None:
+    """Resolve a Poe model's endpoint/callability on selection for inference.
+
+    Memo hit -> return the memoised verdict with zero network calls. Miss on a
+    model whose catalog ``supported_endpoints`` was empty -> probe once, persist,
+    and return the verdict. Models with explicit endpoints are left untouched.
+    """
+    model_id = params.get("model_id", "")
+    if not model_id:
+        return None
+
+    memo = _load_memo()
+    if model_id in memo:
+        return dict(memo[model_id])
+
+    # Only empty-supported_endpoints models are ambiguous; never probe others.
+    if model_id not in _empty_endpoint_ids():
+        return None
+
+    entry = _probe_model(model_id, params.get("api_key", ""))
+    _record_memo(model_id, entry)
+    return dict(entry)
+
+
 fir_ext.run(name="poe-auth")
+

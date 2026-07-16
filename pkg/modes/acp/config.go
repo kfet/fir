@@ -125,7 +125,9 @@ func (pa *firAgent) SetSessionConfigOption(_ context.Context, params SetSessionC
 		if model == nil {
 			return SetSessionConfigOptionResponse{}, fmt.Errorf("model not found: %s", params.Value)
 		}
-		entry.session.SetModel(model)
+		if err := entry.session.SetModel(model); err != nil {
+			return SetSessionConfigOptionResponse{}, err
+		}
 		firlog.Info("acp set model via config", "sessionId", params.SessionId, "model", params.Value)
 
 	case thinkingConfigID:

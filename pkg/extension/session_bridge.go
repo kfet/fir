@@ -179,7 +179,9 @@ func (b *SessionBridge) SetModel(model *ai.Model) bool {
 	if mr != nil && mr.GetApiKey(model) == "" {
 		return false
 	}
-	b.session.SetModel(model)
+	if err := b.session.SetModel(model); err != nil {
+		return false
+	}
 	return true
 }
 

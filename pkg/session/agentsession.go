@@ -165,7 +165,23 @@ type AgentSessionHooks struct {
 	OnToolCall ToolCallInterceptor
 	// OnToolResult is called after each tool execution. Return non-nil to modify result.
 	OnToolResult ToolResultInterceptor
+	// ResolveModelEndpoint is called once when a model is selected for
+	// inference (see SetModel). It lets a provider extension correct the
+	// model's endpoint on-demand or veto it. Return nil for no change.
+	ResolveModelEndpoint ModelEndpointResolver
 }
+
+// ModelEndpointCorrection is an optional adjustment to a model at selection
+// time, returned by a ModelEndpointResolver. Zero fields mean "no change".
+type ModelEndpointCorrection struct {
+	BaseURL  string // override model.BaseURL when non-empty
+	API      string // override model.API when non-empty
+	Callable *bool  // when non-nil and false, the selection is refused
+}
+
+// ModelEndpointResolver resolves/adjusts a model's endpoint when it is
+// selected for inference. Returns nil when there is nothing to change.
+type ModelEndpointResolver func(model *ai.Model) *ModelEndpointCorrection
 
 type AgentSessionOptions struct {
 	Agent            *agent.Agent
@@ -981,10 +997,32 @@ func (s *AgentSession) GetCompactionStats() *CompactionInfo {
 // Model management
 // ============================================================================
 
-// SetModel changes the current model.
-func (s *AgentSession) SetModel(model *ai.Model) {
+// SetModel changes the current model. When a ResolveModelEndpoint hook is
+// installed it is consulted once here (this is the "selected for inference"
+// point) so a provider extension can correct the model's endpoint on-demand or
+// veto it — returning an error that callers surface cleanly instead of the
+// selection failing mid-stream later.
+func (s *AgentSession) SetModel(model *ai.Model) error {
+	if s.hooks != nil && s.hooks.ResolveModelEndpoint != nil {
+		if corr := s.hooks.ResolveModelEndpoint(model); corr != nil {
+			if corr.Callable != nil && !*corr.Callable {
+				return fmt.Errorf("model %s is not enabled on %s", model.ID, model.Provider)
+			}
+			if corr.BaseURL != "" || corr.API != "" {
+				adjusted := *model
+				if corr.BaseURL != "" {
+					adjusted.BaseURL = corr.BaseURL
+				}
+				if corr.API != "" {
+					adjusted.API = ai.Api(corr.API)
+				}
+				model = &adjusted
+			}
+		}
+	}
 	s.Agent.SetModel(model)
 	s.SessionStore.AppendModelChange(model.Provider, model.ID)
+	return nil
 }
 
 // SetThinkingLevel changes the thinking level.
