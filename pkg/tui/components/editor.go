@@ -2051,17 +2051,22 @@ func (e *Editor) forceFileAutocomplete(explicitTab bool) {
 		// Single suggestion → apply immediately on tab
 		if explicitTab && len(suggestions.Items) == 1 {
 			item := suggestions.Items[0]
-			e.pushUndoSnapshot()
-			e.lastAction = ""
-			result := e.autocompleteProvider.ApplyCompletion(
-				e.state.lines, e.state.cursorLine, e.state.cursorCol,
-				item, suggestions.Prefix,
-			)
-			e.state.lines = result.Lines
-			e.state.cursorLine = result.CursorLine
-			e.setCursorCol(result.CursorCol)
-			e.fireOnChange()
+			e.applyForceCompletion(item, suggestions.Prefix)
 			return
+		}
+
+		// Multiple candidates on explicit Tab: extend to the longest common
+		// prefix (bash/zsh behaviour) before falling back to the select list.
+		if explicitTab {
+			lcp := longestCommonPrefix(suggestions.Items)
+			if len(lcp) > len(suggestions.Prefix) {
+				// LCP extends what the user typed → insert the shared prefix
+				// via a synthetic completion, then re-show the list for the
+				// remaining ambiguity. Do not select any individual candidate.
+				e.applyForceCompletion(SelectItem{Value: lcp}, suggestions.Prefix)
+				e.forceFileAutocomplete(false)
+				return
+			}
 		}
 
 		e.autocompletePrefix = suggestions.Prefix
@@ -2070,6 +2075,46 @@ func (e *Editor) forceFileAutocomplete(explicitTab bool) {
 	} else {
 		e.cancelAutocomplete()
 	}
+}
+
+// applyForceCompletion inserts item.Value in place of prefix at the cursor,
+// updating editor state and firing the change callback.
+func (e *Editor) applyForceCompletion(item SelectItem, prefix string) {
+	e.pushUndoSnapshot()
+	e.lastAction = ""
+	result := e.autocompleteProvider.ApplyCompletion(
+		e.state.lines, e.state.cursorLine, e.state.cursorCol,
+		item, prefix,
+	)
+	e.state.lines = result.Lines
+	e.state.cursorLine = result.CursorLine
+	e.setCursorCol(result.CursorCol)
+	e.fireOnChange()
+}
+
+// longestCommonPrefix returns the longest common byte-wise prefix shared by all
+// item Values. Comparison is case-sensitive.
+func longestCommonPrefix(items []SelectItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	lcp := items[0].Value
+	for _, item := range items[1:] {
+		v := item.Value
+		n := len(lcp)
+		if len(v) < n {
+			n = len(v)
+		}
+		i := 0
+		for i < n && lcp[i] == v[i] {
+			i++
+		}
+		lcp = lcp[:i]
+		if lcp == "" {
+			break
+		}
+	}
+	return lcp
 }
 
 func (e *Editor) cancelAutocomplete() {

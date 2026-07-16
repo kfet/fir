@@ -841,6 +841,110 @@ func TestEditor_AutocompleteRendered(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Force file completion (Tab LCP)
+// ---------------------------------------------------------------------------
+
+// mockForceFile implements AutocompleteProvider + ForceFileSuggestionsProvider.
+// It treats the entire line before the cursor as the completion prefix and
+// filters a fixed candidate set to those sharing that prefix.
+type mockForceFile struct {
+	candidates []string
+	applyCount int
+	appliedVal string
+}
+
+func (m *mockForceFile) GetSuggestions([]string, int, int) *AutocompleteSuggestions {
+	return nil
+}
+
+func (m *mockForceFile) ApplyCompletion(lines []string, cursorLine, cursorCol int, item SelectItem, prefix string) ApplyCompletionResult {
+	m.applyCount++
+	m.appliedVal = item.Value
+	newLines := make([]string, len(lines))
+	copy(newLines, lines)
+	line := newLines[cursorLine]
+	newLines[cursorLine] = line[:cursorCol-len(prefix)] + item.Value
+	return ApplyCompletionResult{
+		Lines:      newLines,
+		CursorLine: cursorLine,
+		CursorCol:  cursorCol - len(prefix) + len(item.Value),
+	}
+}
+
+func (m *mockForceFile) ShouldTriggerFileCompletion([]string, int, int) bool { return true }
+
+func (m *mockForceFile) GetForceFileSuggestions(lines []string, cursorLine, cursorCol int) *AutocompleteSuggestions {
+	prefix := lines[cursorLine][:cursorCol]
+	var items []SelectItem
+	for _, c := range m.candidates {
+		if strings.HasPrefix(c, prefix) {
+			items = append(items, SelectItem{Value: c, Label: c})
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return &AutocompleteSuggestions{Prefix: prefix, Items: items}
+}
+
+func TestEditor_ForceFileTabExtendsToLCP(t *testing.T) {
+	e := newTestEditor()
+	m := &mockForceFile{candidates: []string{"src/components/", "src/config/", "docs/"}}
+	e.SetAutocompleteProvider(m)
+
+	e.HandleInput("src/c")
+	e.HandleInput("\t")
+
+	if e.GetText() != "src/co" {
+		t.Errorf("Tab should extend buffer to LCP 'src/co', got %q", e.GetText())
+	}
+	if !e.IsShowingAutocomplete() {
+		t.Error("list should still be shown for remaining ambiguity")
+	}
+	if m.applyCount != 1 || m.appliedVal != "src/co" {
+		t.Errorf("expected a single synthetic LCP apply of 'src/co', got count=%d val=%q", m.applyCount, m.appliedVal)
+	}
+	if strings.Contains(e.GetText(), "components") {
+		t.Error("first match must NOT be fully inserted")
+	}
+}
+
+func TestEditor_ForceFileTabBranchPointShowsList(t *testing.T) {
+	e := newTestEditor()
+	m := &mockForceFile{candidates: []string{"src/components/", "src/config/"}}
+	e.SetAutocompleteProvider(m)
+
+	e.HandleInput("src/co")
+	e.HandleInput("\t")
+
+	if e.GetText() != "src/co" {
+		t.Errorf("buffer should be unchanged at branch point, got %q", e.GetText())
+	}
+	if !e.IsShowingAutocomplete() {
+		t.Error("list should be shown at branch point")
+	}
+	if m.applyCount != 0 {
+		t.Errorf("nothing should be applied at branch point, got count=%d", m.applyCount)
+	}
+}
+
+func TestEditor_ForceFileTabSingleAppliesFully(t *testing.T) {
+	e := newTestEditor()
+	m := &mockForceFile{candidates: []string{"src/components/", "src/config/", "docs/"}}
+	e.SetAutocompleteProvider(m)
+
+	e.HandleInput("src/comp")
+	e.HandleInput("\t")
+
+	if e.GetText() != "src/components/" {
+		t.Errorf("single candidate should apply fully, got %q", e.GetText())
+	}
+	if m.applyCount != 1 || m.appliedVal != "src/components/" {
+		t.Errorf("expected full apply of 'src/components/', got count=%d val=%q", m.applyCount, m.appliedVal)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
 

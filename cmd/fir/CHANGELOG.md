@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.80.0] - 2026-07-18
+
+### Changed
+- TUI editor Tab file completion now follows bash/zsh behaviour: with multiple candidates, Tab first extends the input to the longest common prefix (re-showing the list for the remaining ambiguity) instead of auto-jumping to the first match. Single candidates still complete fully.
+
 ## [0.79.0] - 2026-07-15
 
 ### Changed
