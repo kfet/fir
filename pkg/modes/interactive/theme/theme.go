@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kfet/fir/pkg/tui/components"
 )
@@ -275,6 +276,12 @@ type Theme struct {
 
 	fgColors map[ThemeColor]string // precomputed ANSI fg escapes
 	bgColors map[ThemeBg]string    // precomputed ANSI bg escapes
+}
+
+// MutedTimestamp returns a muted, bracketed local-time prefix like
+// "[15:04:05] " suitable for prefixing error output and tool cards.
+func (t *Theme) MutedTimestamp(ts time.Time) string {
+	return t.Fg("muted", "["+ts.Format("15:04:05")+"] ")
 }
 
 // Fg applies foreground color to text.

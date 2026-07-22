@@ -2,11 +2,39 @@ package components
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/kfet/agent"
 )
+
+// toolTsPattern matches the muted "[HH:MM:SS] " timestamp prefix on tool cards.
+var toolTsPattern = regexp.MustCompile(`\[\d{2}:\d{2}:\d{2}\] `)
+
+func TestToolExecution_TimestampPrefix(t *testing.T) {
+	// Text path.
+	comp := NewToolExecutionComponent("read", map[string]any{"path": "/tmp/test.txt"}, nil, nil, nil)
+	joined := strings.Join(comp.Render(80), "\n")
+	if !toolTsPattern.MatchString(joined) {
+		t.Errorf("expected muted timestamp prefix on tool card, got %q", joined)
+	}
+
+	// Box/bash path.
+	bashComp := NewToolExecutionComponent("bash", map[string]any{"command": "echo hi"}, nil, nil, nil)
+	bashJoined := strings.Join(bashComp.Render(80), "\n")
+	if !toolTsPattern.MatchString(bashJoined) {
+		t.Errorf("expected muted timestamp prefix on bash tool card, got %q", bashJoined)
+	}
+
+	// Dismissed one-line form.
+	comp.UpdateResult(&ToolResultData{Content: []ToolContentBlock{{Type: "text", Text: "ok"}}}, false)
+	comp.Dismiss()
+	dismissedJoined := strings.Join(comp.Render(80), "\n")
+	if !toolTsPattern.MatchString(dismissedJoined) {
+		t.Errorf("expected muted timestamp prefix on dismissed tool card, got %q", dismissedJoined)
+	}
+}
 
 func TestToolExecution_ReadPending(t *testing.T) {
 	args := map[string]any{"path": "/tmp/test.txt"}

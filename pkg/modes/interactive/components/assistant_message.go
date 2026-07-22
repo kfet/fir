@@ -4,6 +4,7 @@ package components
 
 import (
 	"strings"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
@@ -143,14 +144,14 @@ func (a *AssistantMessageComponent) UpdateContent(message *ai.AssistantMessage) 
 				abortMsg = message.ErrorMessage
 			}
 			a.contentContainer.AddChild(tuicomp.NewSpacer(1))
-			a.contentContainer.AddChild(tuicomp.NewText(t.Fg("error", abortMsg), 1, 0, nil))
+			a.contentContainer.AddChild(tuicomp.NewText(t.MutedTimestamp(time.Now())+t.Fg("error", abortMsg), 1, 0, nil))
 		} else if message.StopReason == ai.StopReasonError {
 			errorMsg := message.ErrorMessage
 			if errorMsg == "" {
 				errorMsg = "Unknown error"
 			}
 			a.contentContainer.AddChild(tuicomp.NewSpacer(1))
-			a.contentContainer.AddChild(tuicomp.NewText(t.Fg("error", "Error: "+errorMsg), 1, 0, nil))
+			a.contentContainer.AddChild(tuicomp.NewText(t.MutedTimestamp(time.Now())+t.Fg("error", "Error: "+errorMsg), 1, 0, nil))
 		}
 	}
 }

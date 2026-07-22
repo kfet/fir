@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/kfet/fir/pkg/ai"
 	firlog "github.com/kfet/fir/pkg/log"
@@ -89,7 +90,7 @@ func Run(asession *session.AgentSession, opts Options) error {
 			if errMsg == "" {
 				errMsg = fmt.Sprintf("Request %s", assistant.StopReason)
 			}
-			fmt.Fprintln(os.Stderr, errMsg)
+			fmt.Fprintln(os.Stderr, "["+time.Now().Format("15:04:05")+"] "+errMsg)
 			return ErrAgentAborted
 		}
 

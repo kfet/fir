@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.81.0] - 2026-07-22
+
+### Added
+- Error output now carries a muted local-time timestamp (`[HH:MM:SS]`) in both the interactive TUI (assistant error/abort lines, compaction-failure and stream-retry status messages, and `/mcp` server-error lines) and non-interactive print mode (stderr), so it is clear when a failure occurred.
+- Tool-call cards in the TUI now show a muted timestamp captured when the tool started, on the card title (text, bash/box, and collapsed/dismissed forms) — handy for debugging tool timing.
+
 ## [0.80.1] - 2026-07-22
 
 ### Changed

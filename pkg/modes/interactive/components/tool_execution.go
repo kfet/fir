@@ -53,6 +53,7 @@ type ToolExecutionComponent struct {
 	isPartial   bool
 	useBox      bool
 	result      *ToolResultData
+	started     time.Time // component creation time, shown as a muted card timestamp
 
 	// Inline spinner for hint-based tools while pending.
 	ui            tuicomp.RenderRequester
@@ -86,6 +87,7 @@ func NewToolExecutionComponent(
 		showImages:  showImages,
 		isPartial:   true,
 		useBox:      useBox,
+		started:     time.Now(),
 	}
 
 	tc.AddChild(tuicomp.NewSpacer(1))
@@ -246,10 +248,10 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 		if tc.useBox {
 			tc.contentBox.SetBgFn(bgFn)
 			tc.contentBox.Clear()
-			tc.contentBox.AddChild(tuicomp.NewText(line, 0, 0, nil))
+			tc.contentBox.AddChild(tuicomp.NewText(t.MutedTimestamp(tc.started)+line, 0, 0, nil))
 		} else {
 			tc.contentText.SetCustomBgFn(bgFn)
-			tc.contentText.SetText(line)
+			tc.contentText.SetText(t.MutedTimestamp(tc.started) + line)
 		}
 		return
 	}
@@ -260,7 +262,7 @@ func (tc *ToolExecutionComponent) updateDisplay() {
 		tc.renderBashContent()
 	} else {
 		tc.contentText.SetCustomBgFn(bgFn)
-		tc.contentText.SetText(tc.formatToolExecution() + tc.spinnerSuffix())
+		tc.contentText.SetText(t.MutedTimestamp(tc.started) + tc.formatToolExecution() + tc.spinnerSuffix())
 	}
 }
 
@@ -307,7 +309,7 @@ func (tc *ToolExecutionComponent) renderBashContent() {
 	}
 
 	tc.contentBox.AddChild(tuicomp.NewText(
-		cwdPrefix+t.Fg("toolTitle", t.Bold("$ "+commandDisplay))+timeoutSuffix, 0, 0, nil))
+		t.MutedTimestamp(tc.started)+cwdPrefix+t.Fg("toolTitle", t.Bold("$ "+commandDisplay))+timeoutSuffix, 0, 0, nil))
 
 	if tc.result != nil {
 		output := strings.TrimSpace(tc.getBashDisplayOutput())

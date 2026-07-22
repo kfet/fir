@@ -1,11 +1,15 @@
 package components
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/kfet/fir/pkg/ai"
 )
+
+// tsPattern matches the muted "[HH:MM:SS] " timestamp prefix.
+var tsPattern = regexp.MustCompile(`\[\d{2}:\d{2}:\d{2}\] `)
 
 func TestAssistantMessageComponent_TextContent(t *testing.T) {
 	msg := &ai.AssistantMessage{
@@ -85,6 +89,9 @@ func TestAssistantMessageComponent_Error(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "something went wrong") {
 		t.Errorf("expected error message, got %q", joined)
+	}
+	if !tsPattern.MatchString(joined) {
+		t.Errorf("expected muted timestamp prefix on error line, got %q", joined)
 	}
 }
 

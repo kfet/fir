@@ -1576,7 +1576,7 @@ func renderServerDetail(lines []string, d *mcp.ServerDetail, t *itheme.Theme) []
 	lines = append(lines, t.Bold(t.Fg("accent", d.Name))+" "+t.Fg("dim", "(")+stStr+t.Fg("dim", ")"))
 
 	if d.Error != "" {
-		lines = append(lines, "  "+t.Fg("error", "Error: "+d.Error))
+		lines = append(lines, "  "+t.MutedTimestamp(time.Now())+t.Fg("error", "Error: "+d.Error))
 	}
 
 	transport := d.Config.Transport

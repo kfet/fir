@@ -191,7 +191,7 @@ func (m *InteractiveMode) handleEvent(event session.AgentSessionEvent) {
 				m.loadingAnimation = nil
 			}
 			if event.ErrorMessage != "" {
-				m.showWarning("Compaction failed: " + event.ErrorMessage)
+				m.showWarning(itheme.GetTheme().MutedTimestamp(time.Now()) + "Compaction failed: " + event.ErrorMessage)
 			}
 			m.rebuildChatFromMessages()
 			if event.ErrorMessage == "" && event.CompactionResult != nil && !m.session.HasPendingWork() {
@@ -224,9 +224,9 @@ func (m *InteractiveMode) handleEvent(event session.AgentSessionEvent) {
 	case agent.EventAgentEnd:
 		m.onAgentEnd()
 	case agent.EventStreamRetry:
-		m.showStatus(fmt.Sprintf("Stream error (mid-tool-call): retrying — attempt %d", ae.RetryAttempt))
+		m.showStatus(itheme.GetTheme().MutedTimestamp(time.Now()) + fmt.Sprintf("Stream error (mid-tool-call): retrying — attempt %d", ae.RetryAttempt))
 	case agent.EventAutoResume:
-		m.showStatus(fmt.Sprintf("Stream error (transport): auto-resuming ▶ — attempt %d", ae.RetryAttempt))
+		m.showStatus(itheme.GetTheme().MutedTimestamp(time.Now()) + fmt.Sprintf("Stream error (transport): auto-resuming ▶ — attempt %d", ae.RetryAttempt))
 	}
 }
 
