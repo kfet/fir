@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.80.1] - 2026-07-22
+
+### Changed
+- Docs: the built-in `self` skill now documents the `~/.config/fir/mcp.d/*.json` per-server drop-in directory and the config merge precedence (`mcp.json` < `mcp.d/*.json` < project `.fir/mcp.json`), and notes that `/mcp reload` re-reads drop-ins and reports server-name collisions. (`docs/mcp.md` and `README.md` already covered this; the skill was the remaining gap.)
+
 ## [0.80.0] - 2026-07-18
 
 ### Changed

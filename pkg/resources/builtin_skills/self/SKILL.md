@@ -382,7 +382,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
 - **Tool steering** — `"steeringMode"` in settings controls whether the agent runs tools one-at-a-time or in parallel.
 - **call_tool bridge** — extensions can call any registered tool (built-in, extension, or MCP) programmatically via `ctx.call_tool(name, params)`. Results are returned directly and never enter conversation history. This enables extensions to build rich orchestration workflows.
 - **MCP channel servers** — MCP servers that advertise the `claude/channel` experimental capability can push messages into the running session via `notifications/claude/channel` notifications. Messages are injected into the agent conversation automatically. The server's `channel_reply` tool is a regular MCP tool. Configure channel servers in `.fir/mcp.json` like any other MCP server — no special config needed.
-- **MCP configuration** — configure MCP servers in `.fir/mcp.json` (project) or `<agent-dir>/mcp.json` (global). Three transports are supported:
+- **MCP configuration** — configure MCP servers in `.fir/mcp.json` (project) or `<agent-dir>/mcp.json` (global, e.g. `~/.config/fir/mcp.json`). You can also drop per-server files into the global `~/.config/fir/mcp.d/*.json` directory — handy for managing one MCP per file. All sources are merged with precedence (low to high): (1) `~/.config/fir/mcp.json`, (2) `~/.config/fir/mcp.d/*.json` (lexically sorted), (3) `<project>/.fir/mcp.json`. Three transports are supported:
   - **stdio** (default) — launches a local subprocess:
     ```json
     {
@@ -417,7 +417,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
       }
     }
     ```
-- **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Use `/mcp <name>` for detailed info about a specific server. Use `/mcp reload` to re-read MCP configs from disk without a full session reload.
+- **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Use `/mcp <name>` for detailed info about a specific server. Use `/mcp reload` to re-read `mcp.json` and `mcp.d/*.json` configs from disk and apply the diff to running servers without a full session reload; it reports collisions when multiple files define the same server name.
 
 ## settings.json Reference
 
