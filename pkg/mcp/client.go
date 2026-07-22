@@ -1050,6 +1050,16 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 		}
 	}
 
+	// Push the new aggregate tool set into the live agent. Unlike the initial
+	// Start path and the reconnect path, startServer does not fire
+	// onToolsChanged itself, so without this a /mcp reload that adds (or
+	// removes) a server updates the manager's view but never injects the tools
+	// into the running session's ToolSet — the model would not see or be able
+	// to call them until a full session restart.
+	if notify := m.loadOnToolsChanged(); notify != nil {
+		notify(m.allTools())
+	}
+
 	return m.allTools(), nil
 }
 

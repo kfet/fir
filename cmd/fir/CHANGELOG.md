@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.82.0] - 2026-07-22
+
+### Fixed
+- `/mcp reload` now injects a newly added server's tools into the **running** session. Previously, when a session started with at least one MCP server (so the MCP manager already existed), reloading after adding a new server (e.g. dropping a file into `mcp.d/` or editing `mcp.json`) connected the server — it showed as connected in `/mcp` and its tools listed under `/mcp <name>` — but the tools were never pushed into the live agent's tool set, so the model could neither see nor call them until a full session restart. `Manager.Reload` now fires the `onToolsChanged` notification (matching the initial-start and reconnect paths), so added/removed servers take effect immediately in both TUI and ACP modes.
+
 ## [0.81.0] - 2026-07-22
 
 ### Added

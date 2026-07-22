@@ -5,6 +5,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/kfet/agent"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -63,6 +66,51 @@ func TestManager_Reload_AddServer(t *testing.T) {
 	assert.Len(t, all, 2)
 
 	assert.True(t, mgr.hasSession("srv2"), "srv2 session should exist after Reload")
+}
+
+// TestManager_Reload_AddServer_FiresOnToolsChanged is a regression test for the
+// bug where `/mcp reload` connected a newly added server (visible in /mcp and
+// /mcp <name>) but never injected its tools into the running session's ToolSet,
+// so the model could not see or call them. The initial Start path and the
+// reconnect path both fire onToolsChanged; the Reload path did not. This test
+// asserts Reload fires the callback with the new server's tools included.
+func TestManager_Reload_AddServer_FiresOnToolsChanged(t *testing.T) {
+	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
+	server.AddTool(&sdk.Tool{Name: "myTool", InputSchema: emptySchema},
+		func(_ context.Context, _ *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+		})
+
+	// Start with one server already present (non-nil manager path — the
+	// condition under which the bug manifested).
+	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
+	mgr.dialFn = inMemoryDial(t, server)
+
+	tools := startAndWait(t, mgr, context.Background())
+	defer mgr.Close()
+	require.Len(t, tools, 1)
+
+	// Re-wire onToolsChanged to capture callbacks fired during Reload.
+	ch := make(chan []agent.AgentTool, 10)
+	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
+		ch <- tools
+	})
+
+	// Reload with srv2 added.
+	all, err := mgr.Reload(context.Background(), map[string]ServerConfig{
+		"srv1": {},
+		"srv2": {},
+	})
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	// The callback must fire with the new aggregate tool set (2 servers).
+	select {
+	case got := <-ch:
+		assert.Len(t, got, 2, "onToolsChanged must fire with both servers' tools after Reload adds a server")
+	case <-time.After(5 * time.Second):
+		t.Fatal("onToolsChanged was not fired by Reload after adding a server — tools would never reach the live agent")
+	}
 }
 
 // TestManager_Reload_ReconnectsDisconnected verifies that /reload restarts a
