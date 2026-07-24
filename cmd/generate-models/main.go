@@ -244,6 +244,11 @@ var sweModelPatterns = []swePattern{
 	// Mythos 5 is the same underlying model as Fable 5 (safeguards aside).
 	{"claude-fable-5", "claude-fable-5", 95.5},
 	{"claude-mythos-5", "claude-mythos-5", 95.5},
+	// --- Claude Opus 5 ---
+	// Source: Anthropic announcement (2026-07-24) — new SOTA on coding/knowledge
+	// work (Frontier-Bench, GDPval-AA); surpasses Opus 4.8. No public SWE-bench
+	// Verified number yet; curated estimate above the 4.x Opus line, below Fable 5.
+	{"claude-opus-5", "claude-opus-5", 83.0},
 	// --- Claude Opus 4.8 ---
 	// Source: Anthropic announcement — improved over Opus 4.7; use the latest
 	// known Opus score until the public system-card table is wired in.
@@ -368,6 +373,8 @@ var sweLeaderboardPatterns = []struct {
 	//   "Claude 4.5 Opus medium", "Claude 4 Opus (20250514)",
 	//   "Claude 4.5 Sonnet (high reasoning)", "Claude 4.5 Sonnet (20250929)",
 	//   "Claude 4 Sonnet (20250514)", "Claude 4.5 Haiku (high reasoning)"
+	{"claude opus 5", "claude-opus-5"},
+	{"claude 5 opus", "claude-opus-5"},
 	{"claude opus 48", "claude-opus-4-8"},
 	{"claude 48 opus", "claude-opus-4-8"},
 	{"claude opus 47", "claude-opus-4-7"},
@@ -2252,7 +2259,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 				"code_execution_20250825",
 			}
 		}
-		if strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
+		if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
 			strings.Contains(m.ID, "sonnet-5") ||
@@ -2262,7 +2269,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 		// Adaptive (always-on, effort-based) thinking models: Opus 4.6+, Sonnet
 		// 4.6, Fable/Mythos 5. These cannot disable thinking (no thinking.type=
 		// disabled) and use output_config.effort rather than a token budget.
-		if strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
+		if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-6") || strings.Contains(m.ID, "opus-4.6") ||
 			strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 			strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 			strings.Contains(m.ID, "sonnet-4-6") || strings.Contains(m.ID, "sonnet-4.6") ||
@@ -2273,7 +2280,7 @@ func applyOverridesAndAdditions(all []modelSpec) []modelSpec {
 			// declaratively. The "xhigh" tier exists only on Opus 4.7+ and the
 			// Fable/Mythos 5 generation; 4.6/Sonnet-4.6 stop at "high".
 			if len(m.ReasoningEffortValues) == 0 {
-				if strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
+				if strings.Contains(m.ID, "opus-5") || strings.Contains(m.ID, "opus-4-7") || strings.Contains(m.ID, "opus-4.7") ||
 					strings.Contains(m.ID, "opus-4-8") || strings.Contains(m.ID, "opus-4.8") ||
 					strings.Contains(m.ID, "sonnet-5") ||
 					strings.Contains(m.ID, "fable-5") || strings.Contains(m.ID, "mythos-5") {

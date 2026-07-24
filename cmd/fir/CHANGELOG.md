@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.84.0] - 2026-07-24
+
+### Changed
+- CI/lint determinism: the Python linters are now pinned (`RUFF_VERSION`/`TY_VERSION` in the Makefile; ruff 0.15.17, ty 0.0.63) instead of `uvx` resolving the latest release on every run. A ruff release (0.16) had started flagging previously-suppressed `# noqa` directives, turning a green tree red with no code change; pinning makes `make lint-python` reproducible. Bump the versions deliberately.
+
+### Fixed
+- Flaky `pkg/mcp` tests that could hang CI to the 10-minute global timeout are fixed at the root. `TestManager_Reload_Concurrent_ConfigChange` deadlocked because the shared `startAndWait` test helper installed a **blocking** `OnToolsChanged` callback (bounded channel, no longer drained after startup); `Reload` fires that callback while holding `reloadMu`, so once the buffer filled, every concurrent `Reload` wedged. The helper now uses a non-blocking send. Separately, `startAndWait` no longer counts callbacks against a fixed 20ms drain window (which raced and could return a partial tool list, e.g. `TestMCP_E2E_MultipleServers` “3 vs 6”) — it now waits deterministically on `WaitReady` (server `startWG`) and returns the complete `allTools()` aggregate. 100× `-race` stress of both tests is clean.
+
+### Added
+- **Claude Opus 5** (`claude-opus-5`) is now a first-class curated model in the generated catalog. Anthropic released it 2026-07-24 (frontier coding/knowledge-work performance at Opus pricing, $5/$25 per Mtok). Beyond the auto-pulled catalog entry, `generate-models` now applies the fir-specific curated metadata that the upstream sources don't carry: prompt-cache **compaction**, **adaptive (effort-based) thinking** with the full `low|medium|high|xhigh|max` effort enum, and a curated SWE-bench baseline (83.0, an estimate above the Opus 4.x line pending a public system-card number). Applies to the direct `anthropic-messages` model and all Bedrock region variants.
+
 ## [0.83.0] - 2026-07-23
 
 ### Added

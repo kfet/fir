@@ -44,36 +44,41 @@ func startAndWait(t *testing.T, mgr *Manager, ctx context.Context) []agent.Agent
 		mgr.Start(ctx)
 		return nil
 	}
+	// Keep a non-blocking onToolsChanged installed for tests that observe the
+	// callback path. The send MUST NOT block: Reload fires onToolsChanged while
+	// holding reloadMu, so a blocking send on a full buffer would wedge every
+	// concurrent Reload (e.g. TestManager_Reload_Concurrent_ConfigChange) into a
+	// deadlock that only the global test timeout could break.
 	ch := make(chan []agent.AgentTool, 10)
 	mgr.SetOnToolsChanged(func(tools []agent.AgentTool) {
-		ch <- tools
+		select {
+		case ch <- tools:
+		default:
+		}
 	})
 	mgr.Start(ctx)
-	// Wait for nConfigs callbacks, then keep draining briefly in case
-	// a callback fired before all tools were aggregated (race between
-	// concurrent startServer goroutines on slow CI runners).
-	var last []agent.AgentTool
-	received := 0
-	timeout := time.After(10 * time.Second)
-	for received < nConfigs {
-		select {
-		case last = <-ch:
-			received++
-		case <-timeout:
-			t.Fatalf("timeout waiting for MCP servers to start (%d/%d)", received, nConfigs)
-		}
+	// Deterministically wait for every configured server's initial connect to
+	// finish (startWG, via WaitReady) instead of counting onToolsChanged
+	// callbacks against a fixed drain window. The old count+drain approach
+	// raced: a second server's aggregate could arrive after the window and
+	// return a partial tool list ("3 vs 6") on a loaded CI runner. startWG.Done
+	// fires only after startServer installs the session and tools, so once
+	// WaitReady returns, allTools() is the complete, stable aggregate — no
+	// timing window, no flake.
+	waitCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		// Failsafe only (not a synchronisation mechanism): bound an otherwise
+		// unbounded wait so a genuinely broken connect fails fast instead of
+		// hanging to the global test timeout.
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 	}
-	// Drain any extra notifications that arrive within a short window so we
-	// return the most up-to-date aggregate tool list.
-	for {
-		select {
-		case last = <-ch:
-		case <-time.After(20 * time.Millisecond):
-			return last
-		}
+	if err := mgr.WaitReady(waitCtx); err != nil {
+		t.Fatalf("waiting for MCP servers to start: %v", err)
 	}
+	return mgr.allTools()
 }
-
 func TestManager_StartAndListTools(t *testing.T) {
 	server := sdk.NewServer(&sdk.Implementation{Name: "test", Version: "0"}, nil)
 	server.AddTool(
