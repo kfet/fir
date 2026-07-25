@@ -10,16 +10,8 @@ import (
 	"github.com/kfet/fir/pkg/config"
 )
 
-// DefaultModelPerProvider returns the default model ID for a provider, or ""
-// if the provider isn't registered (or has no default).  Backed by the
-// pkg/ai.RegisteredProvider registry; replaces a previous static map.
-func DefaultModelPerProvider(p ai.Provider) string {
-	r := ai.GetProviderRecord(p)
-	if r == nil {
-		return ""
-	}
-	return r.DefaultModelID
-}
+// DefaultModelPerProvider lives on ModelRegistry (DefaultModelForProvider) so
+// the catalog overlay's providerDefaults can override the compiled-in value.
 
 // OrderedProviders returns provider IDs in registry-defined preference order
 // (lower Priority first, then ID).  Replaces the previous knownProviderOrder
@@ -340,7 +332,7 @@ func ResolveCliModel(opts ResolveCliModelOptions) ResolveCliModelResult {
 	}
 
 	if provider != "" {
-		fallbackModel := buildFallbackModel(provider, pattern, allModels)
+		fallbackModel := buildFallbackModel(provider, pattern, allModels, opts.ModelRegistry)
 		if fallbackModel != nil {
 			rec := ai.GetProviderRecord(ai.Provider(provider))
 			// Provider claims this ID shape (e.g. bedrock ARN inference
@@ -395,7 +387,7 @@ func providerClaimsModelID(rec *ai.RegisteredProvider, modelID string) bool {
 // buildFallbackModel creates a model with a custom ID when the exact model
 // isn't found but we know the provider. Copies settings from the provider's
 // default model (or first model) and overrides the ID.
-func buildFallbackModel(provider, modelID string, availableModels []*ai.Model) *ai.Model {
+func buildFallbackModel(provider, modelID string, availableModels []*ai.Model, registry *ModelRegistry) *ai.Model {
 	var providerModels []*ai.Model
 	for _, m := range availableModels {
 		if m.Provider == provider {
@@ -406,7 +398,7 @@ func buildFallbackModel(provider, modelID string, availableModels []*ai.Model) *
 		return nil
 	}
 
-	defaultID := DefaultModelPerProvider(ai.Provider(provider))
+	defaultID := registry.DefaultModelForProvider(ai.Provider(provider))
 	var baseModel *ai.Model
 	if defaultID != "" {
 		for _, m := range providerModels {
@@ -461,7 +453,7 @@ func FindInitialModel(opts FindInitialModelOptions) InitialModelResult {
 	if len(available) > 0 {
 		// Try default model per provider
 		for _, prov := range OrderedProviders() {
-			defaultID := DefaultModelPerProvider(prov)
+			defaultID := opts.ModelRegistry.DefaultModelForProvider(prov)
 			if defaultID == "" {
 				continue
 			}
@@ -513,7 +505,7 @@ func RestoreModelFromSession(savedProvider, savedModelID string, currentModel *a
 	available := registry.GetAvailable()
 	if len(available) > 0 {
 		for _, prov := range OrderedProviders() {
-			defaultID := DefaultModelPerProvider(prov)
+			defaultID := registry.DefaultModelForProvider(prov)
 			for _, m := range available {
 				if m.Provider == prov && m.ID == defaultID {
 					msg := fmt.Sprintf("Could not restore model %s/%s (%s). Using %s/%s.",

@@ -1,0 +1,80 @@
+name: publish-catalog
+
+# Publish the model catalog overlay to the public kfet/fir-dist mirror.
+#
+# The overlay is how new-model metadata reaches the fleet WITHOUT a binary
+# release: fir fetches https://raw.githubusercontent.com/kfet/fir-dist/main/
+# catalog-v1.json on a TTL and merges it above the compiled-in catalog.
+# Merging a change to pkg/models/catalog-v1.json is therefore sufficient to
+# update every host within the TTL.
+#
+# Deliberately as simple as it can be: one static file, committed to a repo,
+# served over HTTPS. No service, no signing infrastructure — fir-dist already
+# gates binary execution, so serving it a JSON document is strictly less trust.
+#
+# The file is validated by `make test` (pkg/models TestEmbeddedCatalogIsValid)
+# on the PR before it can be merged, so this workflow only ever publishes a
+# document that already parses and validates.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pkg/models/catalog-v1.json"
+  # Manual re-publish, e.g. after rotating FIR_DIST_TOKEN.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Publish catalog to kfet/fir-dist
+        env:
+          # Same fine-grained PAT the release workflow uses to mirror assets:
+          # "Contents: read and write" on kfet/fir-dist only.
+          MIRROR_TOKEN: ${{ secrets.FIR_DIST_TOKEN }}
+          MIRROR_REPO: kfet/fir-dist
+          CATALOG: pkg/models/catalog-v1.json
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MIRROR_TOKEN:-}" ]; then
+            echo "::error::FIR_DIST_TOKEN not set — cannot publish catalog"
+            exit 1
+          fi
+
+          # Belt and braces: never publish something that isn't valid JSON.
+          jq -e 'has("schemaVersion") and has("generatedAt") and has("providers")' \
+            "$CATALOG" > /dev/null
+
+          export GH_TOKEN="$MIRROR_TOKEN"
+
+          BRANCH=$(gh api "repos/$MIRROR_REPO" --jq .default_branch)
+          TARGET=$(basename "$CATALOG")
+
+          # Reuse the existing blob's sha when updating, or omit it to create.
+          SHA=$(gh api "repos/$MIRROR_REPO/contents/$TARGET?ref=$BRANCH" \
+            --jq .sha 2>/dev/null || true)
+
+          ARGS=(
+            --method PUT "repos/$MIRROR_REPO/contents/$TARGET"
+            -f "message=chore(catalog): publish $TARGET from ${GITHUB_SHA::7}"
+            # Payload goes via argv, so this caps out near the execve
+            # limit (~2MB). Fine for a curated catalog; if it ever grows
+            # past that, switch to a git tree/commit push.
+            -f "content=$(base64 -w0 "$CATALOG")"
+            -f "branch=$BRANCH"
+          )
+          if [ -n "$SHA" ]; then
+            ARGS+=(-f "sha=$SHA")
+          fi
+
+          gh api "${ARGS[@]}" > /dev/null
+
+          echo "Published https://raw.githubusercontent.com/$MIRROR_REPO/$BRANCH/$TARGET"

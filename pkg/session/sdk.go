@@ -112,6 +112,10 @@ func CreateAgentSession(ctx context.Context, opts CreateAgentSessionOptions) (*C
 	// extReady is provided by the caller and closed once extensions finish loading.
 	modelRegistry.StartLiveModelFetch(ctx, filepath.Join(agentDir, "cache"), opts.ExtReady)
 
+	// Start background refresh of the fir-dist catalog overlay, so new-model
+	// metadata reaches long-lived processes without a binary release.
+	modelRegistry.StartCatalogOverlayFetch(ctx)
+
 	// Settings
 	settingsManager := opts.SettingsManager
 	if settingsManager == nil {

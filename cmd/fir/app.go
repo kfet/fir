@@ -718,6 +718,11 @@ func runListModels(args *Args) error {
 				continue
 			}
 		}
+		if args.Verbose {
+			// Provenance: which layer's definition won for this model.
+			fmt.Printf("%s/%s\t%s\n", m.Provider, m.ID, modelRegistry.ModelOrigin(m.Provider, m.ID))
+			continue
+		}
 		fmt.Printf("%s/%s\n", m.Provider, m.ID)
 	}
 
@@ -1262,7 +1267,7 @@ func registerBedrockEnvModel(reg *models.ModelRegistry, id string) {
 	// Clone settings from the bedrock default model so cost/context-window/
 	// reasoning flags inherit sensible values.
 	var base *ai.Model
-	defaultID := models.DefaultModelPerProvider(ai.ProviderAmazonBedrock)
+	defaultID := reg.DefaultModelForProvider(ai.ProviderAmazonBedrock)
 	for _, m := range reg.GetAll() {
 		if m.Provider != string(ai.ProviderAmazonBedrock) {
 			continue

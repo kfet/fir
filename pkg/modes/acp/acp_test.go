@@ -615,6 +615,26 @@ func TestResumeSession_DuplicateIDCleansUpOldSession(t *testing.T) {
 	}
 	pa.sessions[sessionPath] = oldSession
 
+	// ResumeSession may leave a partially-created session behind (createSession
+	// fails without a real LLM, but not before background goroutines start).
+	// Tear down whatever survives before t.TempDir()'s RemoveAll runs, or a
+	// late write races the cleanup.
+	t.Cleanup(func() {
+		pa.mu.Lock()
+		entries := make(map[string]*firSession, len(pa.sessions))
+		for id, e := range pa.sessions {
+			entries[id] = e
+		}
+		pa.sessions = make(map[string]*firSession)
+		pa.mu.Unlock()
+		for id, e := range entries {
+			if e == oldSession {
+				continue // synthetic fixture, nothing to tear down
+			}
+			pa.teardownSession(context.Background(), id, e)
+		}
+	})
+
 	// ResumeSession with the same ID should clean up oldSession before
 	// attempting to create a new one. createSession will fail (no real LLM),
 	// but cleanup must still have happened.

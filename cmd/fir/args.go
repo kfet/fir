@@ -441,6 +441,8 @@ Options:
   --no-themes                    Disable theme discovery
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
+                                 Add --verbose to show each model's origin
+                                 (builtin / overlay / user)
   --verbose                      Force verbose startup
   -v, -vv                        Increase log verbosity (-v: Debug, -vv: Trace).
                                  Also: FIR_LOG_LEVEL=info|debug|trace

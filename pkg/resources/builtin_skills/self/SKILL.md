@@ -221,6 +221,52 @@ newly added fragment is picked up by `/reload` in a running session, by the
 next `fir` process, or — for the Poe relay's dropdown — after a relay
 restart (the relay snapshots the catalog once at its own startup).
 
+#### Catalog overlay (fir-dist)
+
+Below your config, above the compiled-in catalog, fir merges a **catalog
+overlay**: a `models.d`-shaped document published as a static file at
+`https://raw.githubusercontent.com/kfet/fir-dist/main/catalog-v1.json`. It
+exists so a newly-released model can reach the whole fleet as *data* — no
+binary release, no redeploy. It can add models, correct metadata, and move a
+provider's default model (`providerDefaults`).
+
+Full precedence, lowest to highest:
+
+```
+compiled-in catalog  <  fir-dist overlay  <  models.json  <  models.d/*.json
+```
+
+**Your config always wins.** The overlay may not set `apiKey`, `baseUrl`,
+`headers` or `authHeader` at any level (provider, model, or `modelOverrides`) —
+endpoint and auth stay under operator control, so a typo in a published catalog
+can never redirect the fleet's credentials. It follows that the overlay can only
+add models to providers fir already knows about.
+
+- Fetched at startup and then every hour for the life of the session, cached
+  at `<agent-dir>/cache/catalog-v1.json`; a changed catalog is hot-applied, so
+  even a bot process that has been up for weeks follows within the TTL.
+  A binary also embeds a snapshot, so fir works fully offline; every failure
+  (no network, 404, malformed JSON, unknown schema version) is soft and logged
+  at debug, never a degradation.
+- Force a refresh with `/reload`, which refetches ignoring the TTL and
+  hot-applies a changed catalog to the running session.
+- `fir --list-models --verbose` prints each model's origin
+  (`builtin` / `overlay` / `user:models.json` / `user:models.d/<file>`) so you
+  can see which layer won.
+
+Escape hatches (env vars):
+
+| Variable | Effect |
+| --- | --- |
+| `FIR_NO_CATALOG_OVERLAY=1` | Disable overlay **fetching**. The embedded snapshot still applies — this pins a host to the catalog its binary shipped with. |
+| `FIR_CATALOG_OVERLAY_URL=<url>` | Fetch the overlay from somewhere else (staging file, local server). |
+
+Publishing: edit `pkg/models/catalog-v1.json` in the fir repo and merge to
+`main`; the `publish-catalog` workflow pushes it to fir-dist. **To roll a
+catalog change back, re-publish the old content with a fresh `generatedAt`** —
+a binary loads whichever of its embedded snapshot and its cache is newer, so
+reverting the commit alone can be a no-op.
+
 ### 2. Environment variables (Claude Code parity)
 
 Set `CLAUDE_CODE_USE_BEDROCK=1` and `ANTHROPIC_MODEL=<id-or-arn>` (plus standard AWS auth — `AWS_PROFILE` or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, optionally `AWS_REGION`). At startup fir registers the model under `amazon-bedrock` automatically so it appears in `/model`. Explicit `--provider`/`--model` flags still win.

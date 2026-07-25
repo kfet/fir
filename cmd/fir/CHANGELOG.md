@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- **Catalog overlay** — new-model metadata now ships as *data*, not as a binary release. fir fetches a `models.d`-shaped JSON document from the public fir-dist mirror (`catalog-v1.json`, 1-hour TTL, cached under `<agent-dir>/cache/`, refetched every hour for the life of the process and hot-applied on change) and merges it **above** the compiled-in catalog and **below** your `models.json` / `models.d` fragments — user config always wins. The overlay can add models, correct metadata, and move a provider's `DefaultModelID` via `providerDefaults`, so a launch like Claude Opus 5 no longer costs two releases plus a fleet redeploy: merging `pkg/models/catalog-v1.json` updates every host within the TTL. A snapshot is embedded in the binary, so fir is fully offline-first; a cold cache, no network, a 404, a malformed document or an unknown schema version all fail soft at debug level and never degrade below current behaviour. The overlay may not set `apiKey`/`baseUrl`/`headers`/`authHeader` at any level, so a published catalog can never redirect where requests go or what credentials ride along. The overlay may not set `apiKey`/`baseUrl`/`headers`/`authHeader` at any level, so a published catalog can never redirect where requests go or what credentials ride along. Escape hatches: `FIR_NO_CATALOG_OVERLAY=1` disables fetching (the embedded snapshot still applies), `FIR_CATALOG_OVERLAY_URL` repoints it, and `/reload` forces a refetch ignoring the TTL and hot-applies the result to the running session.
+- `fir --list-models --verbose` now prints each model's **origin** (`builtin`, `overlay`, `user:models.json`, `user:models.d/<file>`), so an operator can see which layer's definition won without reading source.
+
+### Fixed
+- Test binaries no longer reach the public catalog URL by default, so building a session in a test cannot depend on the network or schedule a post-test write into a `t.TempDir()`. Point `FIR_CATALOG_OVERLAY_URL` at a local server to exercise the fetch path.
+- `ModelRegistry.Refresh()` is now serialised against itself and no longer runs OAuth `ModifyModels` callbacks while holding the registry write lock. The extension-backed implementation does a blocking JSON-RPC round trip that can re-enter the registry, which would deadlock the process; the new model list is now computed off-lock and swapped in under it.
+
 ## [0.85.1] - 2026-07-25
 
 ### Fixed

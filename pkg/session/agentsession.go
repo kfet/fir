@@ -1295,6 +1295,9 @@ func (s *AgentSession) Reload() error {
 	if s.modelRegistry != nil {
 		s.modelRegistry.Refresh()
 		s.modelRegistry.RefreshLive(context.Background())
+		// Force a catalog-overlay refetch too, ignoring its TTL: /reload is
+		// the operator's "pick up everything now" gesture.
+		s.modelRegistry.ForceRefreshCatalogOverlay(context.Background())
 	}
 	return nil
 }
