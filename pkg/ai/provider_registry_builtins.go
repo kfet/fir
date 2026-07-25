@@ -27,7 +27,7 @@ func builtInProviders() []*RegisteredProvider {
 	return []*RegisteredProvider{
 		{
 			ID: ProviderAnthropic, DisplayName: "Anthropic", ShortName: "anth", Priority: 0,
-			DefaultModelID: "claude-opus-4-8",
+			DefaultModelID: "claude-opus-5",
 			KeyLink:        "https://console.anthropic.com/settings/keys",
 			EnvKeys: EnvKeySpec{
 				Primary:   "ANTHROPIC_API_KEY",
@@ -49,7 +49,7 @@ func builtInProviders() []*RegisteredProvider {
 		},
 		{
 			ID: ProviderAmazonBedrock, DisplayName: "Amazon Bedrock", ShortName: "bed", Priority: 3,
-			DefaultModelID: "us.anthropic.claude-opus-4-6-v1",
+			DefaultModelID: "us.anthropic.claude-opus-5",
 			EnvKeys: EnvKeySpec{
 				Authenticated: true,
 				// Listed for hermetic-test cleanup; not used as primary key lookup.

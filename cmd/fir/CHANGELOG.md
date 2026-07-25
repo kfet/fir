@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.85.0] - 2026-07-24
+
+### Changed
+- Built-in provider defaults now point at **Claude Opus 5**: the `anthropic` provider's `DefaultModelID` moves from `claude-opus-4-8` to `claude-opus-5`, and `amazon-bedrock` from `us.anthropic.claude-opus-4-6-v1` to `us.anthropic.claude-opus-5` (`pkg/ai/provider_registry_builtins.go`). This is the value used when no `defaultModel` is pinned in `settings.json`, so fresh installs and unpinned hosts now get Opus 5 without per-host configuration.
+
 ## [0.84.0] - 2026-07-24
 
 ### Changed
