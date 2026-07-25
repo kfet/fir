@@ -135,6 +135,21 @@ class TestSingleStep(unittest.TestCase):
         # Single-step is transparent: error flag preserved.
         self.assertTrue(out["is_error"])
 
+    def test_step_timeout_forwarded_to_call_tool(self):
+        ctx = _make_ctx([_text_result("ok")])
+        out = self.mod._run_pipe(
+            [{"tool": "Read", "params": {}, "timeout_s": 120}], "", ctx
+        )
+        self.assertFalse(out["is_error"])
+        # timeout_s is passed through to ctx.call_tool as timeout=.
+        self.assertEqual(ctx.call_tool.call_args.kwargs.get("timeout"), 120.0)
+
+    def test_step_without_timeout_uses_call_tool_default(self):
+        ctx = _make_ctx([_text_result("ok")])
+        self.mod._run_pipe([{"tool": "Read", "params": {}}], "", ctx)
+        # No timeout kwarg passed → ctx.call_tool applies its own default.
+        self.assertNotIn("timeout", ctx.call_tool.call_args.kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Multi-step
@@ -720,22 +735,13 @@ class TestWaitSleepSlicing(unittest.TestCase):
     def setUp(self):
         self.mod = _load_pipe()
 
-    def test_sleep_sliced_emits_heartbeats(self):
-        beats = []
-        with mock.patch.object(self.mod.time, "sleep", lambda s: None):
-            self.mod._sleep_sliced(
-                30.0, heartbeat=lambda: beats.append(1), heartbeat_every=10.0
-            )
-        # 30s with a beat every 10s, none on the final slice -> 2 beats.
-        self.assertEqual(len(beats), 2)
-
-    def test_sleep_sliced_no_heartbeat_for_short_sleep(self):
-        beats = []
-        with mock.patch.object(self.mod.time, "sleep", lambda s: None):
-            self.mod._sleep_sliced(
-                1.0, heartbeat=lambda: beats.append(1), heartbeat_every=10.0
-            )
-        self.assertEqual(beats, [])
+    def test_sleep_sliced_covers_full_duration(self):
+        slept = []
+        with mock.patch.object(self.mod.time, "sleep", lambda s: slept.append(s)):
+            self.mod._sleep_sliced(1.0)
+        # Sliced into <=_WAIT_SLEEP_SLICE chunks that sum to the full duration.
+        self.assertTrue(all(s <= self.mod._WAIT_SLEEP_SLICE for s in slept))
+        self.assertAlmostEqual(sum(slept), 1.0, places=6)
 
 
 class TestWaitValidationAndDescription(unittest.TestCase):

@@ -110,6 +110,13 @@ type ToolSpec struct {
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
 	DisplayHint *DisplayHint   `json:"display_hint,omitempty"`
+	// Timeout is the host-side tool_call timeout in seconds. 0/absent uses
+	// fir's default (30s, overridable via FIR_EXT_TOOL_TIMEOUT); > 0 sets an
+	// explicit bound; < 0 disables the host-side timeout (the call is then
+	// bounded only by the turn context). The wait is activity-aware, so it
+	// only clips a call that goes silent. If the tool body waits on a nested
+	// ctx.CallTool(..., timeout=T), keep T <= this value.
+	Timeout float64 `json:"timeout,omitempty"`
 }
 
 // CommandSpec declares a slash command.

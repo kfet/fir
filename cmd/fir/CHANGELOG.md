@@ -22,6 +22,12 @@
 
 ### Added
 - **Claude Opus 5** (`claude-opus-5`) is now a first-class curated model in the generated catalog. Anthropic released it 2026-07-24 (frontier coding/knowledge-work performance at Opus pricing, $5/$25 per Mtok). Beyond the auto-pulled catalog entry, `generate-models` now applies the fir-specific curated metadata that the upstream sources don't carry: prompt-cache **compaction**, **adaptive (effort-based) thinking** with the full `low|medium|high|xhigh|max` effort enum, and a curated SWE-bench baseline (83.0, an estimate above the Opus 4.x line pending a public system-card number). Applies to the direct `anthropic-messages` model and all Bedrock region variants.
+### Added
+- Extensions can now declare a **per-tool host-side timeout**. `ToolSpec` gains a `timeout` field (seconds): `0`/absent keeps the 30s default (now overridable via the `FIR_EXT_TOOL_TIMEOUT` env var), `> 0` sets an explicit bound, and `< 0` **disables** the host-side timeout so the call is bounded only by the turn context (ESC/turn abort) or the extension stream closing. The wait stays activity-aware, so it only clips a call that goes silent. Exposed as `fir_ext.tool(timeout=...)` in the Python SDK and `firext.ToolSpec.Timeout` in the Go SDK.
+- The `pipe` and `wait` builtins can no longer be clipped mid-work: they declare their host-side timeout disabled, so a single slow step (e.g. a slow MCP or bash call silently exceeding 30s) runs to completion instead of being cut off. `pipe` steps now accept an optional `timeout_s` (seconds); a single-step `pipe` is thus a run-with-timeout wrapper for any tool.
+
+### Fixed
+- Outstanding extension hook calls (`CallHook`) now fail fast when the extension's stream closes (crash / EOF) or the bridge context is cancelled, instead of blocking until their per-call timeout. This matters most for tool calls with a disabled host-side timeout, which otherwise had no deadline of their own. A `CallHook` that begins *after* the read loop has already exited now also fails fast (the bridge latches closed) instead of parking a waiter nothing will complete.
 
 ## [0.83.0] - 2026-07-23
 

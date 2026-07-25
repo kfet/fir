@@ -29,6 +29,20 @@ type ToolSpec struct {
 	Description string           `json:"description"`
 	Parameters  map[string]any   `json:"parameters,omitempty"`
 	DisplayHint *ToolDisplayHint `json:"display_hint,omitempty"`
+	// Timeout is the per-call host-side timeout for this tool's tool_call
+	// hook, in seconds. It controls how long fir waits for the extension
+	// to return a result (the wait is activity-aware — see
+	// Bridge.CallHook — so a chatty extension resets the deadline on any
+	// traffic, but a silent long-running call is bounded by this value).
+	//
+	// Semantics:
+	//   - 0 / absent : use the default (DefaultToolCallTimeout, 30s;
+	//     overridable via the FIR_EXT_TOOL_TIMEOUT env var, in seconds).
+	//   - > 0        : wait that many seconds.
+	//   - < 0        : disabled — no host-side timeout. The call is bounded
+	//     only by the turn context (which still cancels on ESC / turn abort)
+	//     or by the extension stream closing (crash / EOF).
+	Timeout float64 `json:"timeout,omitempty"`
 }
 
 // CommandSpec describes a slash command registered by an extension.

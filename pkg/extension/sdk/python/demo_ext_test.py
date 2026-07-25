@@ -345,6 +345,19 @@ class TestDemoInit(DemoTestCase):
             },
         )
 
+    def test_batch_example_declares_generous_timeout(self) -> None:
+        fake = FakeFir()
+        self.start_demo_ext(fake)
+        result = fake.send_init()
+        fake.stop()
+
+        tools = {t["name"]: t for t in result.get("tools", [])}
+        # batch_example orchestrates inner call_tool/side_query, so it declares
+        # a host-side timeout longer than the 30s default.
+        self.assertEqual(tools["batch_example"].get("timeout"), 180)
+        # Tools that don't declare a timeout omit the field entirely.
+        self.assertNotIn("timeout", tools["word_count"])
+
     def test_events_include_all_handlers(self) -> None:
         fake = FakeFir()
         self.start_demo_ext(fake)

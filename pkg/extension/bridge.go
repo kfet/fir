@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,8 +45,13 @@ type Bridge struct {
 	nextID atomic.Int64
 
 	// pending tracks outbound requests waiting for a response.
+	// closed is set (with closeErr) by failAllPending when the read loop
+	// exits, so a CallHook that starts after close fails fast instead of
+	// registering into the fresh map and blocking forever.
 	pendingMu sync.Mutex
 	pending   map[int64]chan *Response
+	closed    bool
+	closeErr  error
 
 	// sessionData is a per-extension key/value store persisted across /reexec.
 	sessionDataMu sync.RWMutex
@@ -209,8 +216,13 @@ func (b *Bridge) Run(ctx context.Context, api BridgeAPI) error {
 	case <-ctx.Done():
 		// Close stdin to unblock the reader goroutine.
 		b.proc.CloseStdin()
+		b.failAllPending(ctx.Err())
 		return ctx.Err()
 	case err := <-errCh:
+		// The extension's stream closed (crash / EOF). Fail outstanding
+		// CallHook waiters so they don't block — critical for tools with a
+		// disabled host-side timeout, which have no deadline of their own.
+		b.failAllPending(err)
 		return err
 	}
 }
@@ -690,6 +702,35 @@ func (b *Bridge) routeResponse(resp *Response) {
 	}
 }
 
+// failAllPending delivers an error Response to every outstanding CallHook
+// waiter and clears the pending map. Called when the bridge's read loop exits
+// (extension crash / EOF, or context cancellation) so waiters fail fast
+// instead of blocking. This is what bounds a tool with a disabled host-side
+// timeout (Timeout < 0) when the extension process dies mid-call: without it
+// such a call would hang until the turn context is cancelled. Each pending
+// channel is buffered (cap 1) and only ever delivered to once (routeResponse
+// and CallHook both delete under pendingMu before use), so the send never
+// blocks.
+//
+// It also latches the bridge closed (with closeErr) under pendingMu, so a
+// CallHook racing in *after* the read loop has exited fails fast at
+// registration instead of parking a channel in the fresh map that nothing
+// will ever complete.
+func (b *Bridge) failAllPending(err error) {
+	if err == nil {
+		err = fmt.Errorf("extension: connection closed")
+	}
+	b.pendingMu.Lock()
+	pend := b.pending
+	b.pending = make(map[int64]chan *Response)
+	b.closed = true
+	b.closeErr = err
+	b.pendingMu.Unlock()
+	for _, ch := range pend {
+		ch <- &Response{Error: &Error{Code: -32000, Message: err.Error()}}
+	}
+}
+
 // keepAliveInterval is the ticker interval for keepAlive. Exported for testing.
 var keepAliveInterval = 5 * time.Second
 
@@ -725,7 +766,44 @@ func (b *Bridge) EmitEvent(name string, data any) error {
 	return codec.WriteNotification("event/"+name, data)
 }
 
+// DefaultToolCallTimeout is the host-side timeout applied to an extension's
+// tool_call hook when the tool declares no explicit Timeout (ToolSpec.Timeout
+// == 0). The wait is activity-aware (see Bridge.CallHook): a chatty extension
+// resets the deadline on any inbound traffic, so this bounds only a call that
+// goes silent. Overridable via the FIR_EXT_TOOL_TIMEOUT environment variable
+// (in seconds); an invalid or non-positive value is ignored.
+const DefaultToolCallTimeout = 30 * time.Second
+
+// resolveToolCallTimeout converts a ToolSpec.Timeout (seconds) into the
+// duration passed to CallHook. See ToolSpec.Timeout for the semantics:
+//
+//	declared == 0 -> DefaultToolCallTimeout (or FIR_EXT_TOOL_TIMEOUT override)
+//	declared  > 0 -> that many seconds
+//	declared  < 0 -> 0 (host-side deadline disabled; call bounded only by ctx)
+func resolveToolCallTimeout(declared float64) time.Duration {
+	switch {
+	case declared < 0:
+		return 0 // CallHook treats a non-positive timeout as disabled.
+	case declared > 0:
+		return time.Duration(declared * float64(time.Second))
+	default:
+		d := DefaultToolCallTimeout
+		if v := os.Getenv("FIR_EXT_TOOL_TIMEOUT"); v != "" {
+			if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
+				d = time.Duration(secs * float64(time.Second))
+			}
+		}
+		return d
+	}
+}
+
 // CallHook sends a JSON-RPC request and waits for a response with timeout.
+//
+// A positive timeout is activity-aware: the deadline resets whenever the
+// extension sends us any message (request or response), so an extension that
+// stays busy — e.g. aside making repeated call_tool requests — is never
+// clipped mid-work. A non-positive timeout disables the host-side deadline
+// entirely; the call is then bounded only by ctx (turn cancel / ESC).
 func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout time.Duration) (json.RawMessage, error) {
 	codec := b.proc.GetCodec()
 	if codec == nil {
@@ -736,6 +814,14 @@ func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout ti
 	ch := make(chan *Response, 1)
 
 	b.pendingMu.Lock()
+	if b.closed {
+		err := b.closeErr
+		b.pendingMu.Unlock()
+		if err == nil {
+			err = fmt.Errorf("extension: connection closed")
+		}
+		return nil, err
+	}
 	b.pending[id] = ch
 	b.pendingMu.Unlock()
 
@@ -744,6 +830,26 @@ func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout ti
 		delete(b.pending, id)
 		b.pendingMu.Unlock()
 		return nil, err
+	}
+
+	// timeout <= 0 disables the host-side deadline: wait only on the
+	// response channel or ctx cancellation.
+	if timeout <= 0 {
+		select {
+		case resp := <-ch:
+			if resp.Error != nil {
+				return nil, resp.Error
+			}
+			if resp.Result != nil {
+				return *resp.Result, nil
+			}
+			return nil, nil
+		case <-ctx.Done():
+			b.pendingMu.Lock()
+			delete(b.pending, id)
+			b.pendingMu.Unlock()
+			return nil, ctx.Err()
+		}
 	}
 
 	// Use an activity-aware timeout: reset the deadline whenever the
@@ -788,6 +894,8 @@ func (b *Bridge) CallHook(ctx context.Context, name string, data any, timeout ti
 func (b *Bridge) RegisterTools(api BridgeAPI) {
 	for _, t := range b.caps.Tools {
 		tool := t // capture
+		// Resolve the declared per-tool timeout once at registration.
+		toolTimeout := resolveToolCallTimeout(tool.Timeout)
 		api.RegisterTool(ToolDefinition{
 			Name:        tool.Name,
 			Description: tool.Description,
@@ -811,7 +919,7 @@ func (b *Bridge) RegisterTools(api BridgeAPI) {
 					Name:       tool.Name,
 					Params:     ctx.Params,
 				}
-				raw, err := b.CallHook(ctx.Context, "tool_call", params, 30*time.Second)
+				raw, err := b.CallHook(ctx.Context, "tool_call", params, toolTimeout)
 				if err != nil {
 					return ToolResult{
 						Content: []ai.ToolResultContent{{Type: ai.ContentTypeText, Text: err.Error()}},

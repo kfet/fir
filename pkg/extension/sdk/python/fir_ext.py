@@ -157,13 +157,21 @@ Tool definition fields:
   * ``result_max_lines`` - default collapsed line count (default 10).
   * ``use_box`` - render output in a bordered box like the built-in ``bash``
     tool (default false).
+* ``timeout`` (number, optional) - host-side ``tool_call`` timeout in
+  seconds.  ``0``/absent uses fir's default (30s, overridable via
+  ``FIR_EXT_TOOL_TIMEOUT``); ``> 0`` sets an explicit bound; ``< 0`` disables
+  the host-side timeout (the call is then bounded only by the turn context).
+  The wait is activity-aware, so it only clips a call that goes silent.
 
 -------------------------------------------------------------------------------
 TOOL CALLS  (fir → extension, Request)
 -------------------------------------------------------------------------------
 
 When the AI invokes a tool that was registered by the extension during init,
-fir sends a ``tool_call`` **request** (timeout: **30 seconds**)::
+fir sends a ``tool_call`` **request**.  The host-side wait is the tool's
+declared ``timeout`` (default **30 seconds**; see the ``timeout`` field under
+Tool definition fields above), and is activity-aware — any message the
+extension sends resets the deadline, so only a *silent* call is clipped::
 
     {
       "jsonrpc": "2.0",
@@ -613,6 +621,7 @@ class ToolSpec(TypedDict, total=False):
     description: str
     parameters: dict   # JSON Schema; arbitrary nested shape
     display_hint: DisplayHint
+    timeout: float     # host-side tool_call timeout, seconds (see tool())
 
 
 class CommandSpec(TypedDict, total=False):
@@ -1547,6 +1556,7 @@ def tool(
     description: str,
     parameters: dict[str, Any] | None = None,
     display_hint: dict[str, Any] | None = None,
+    timeout: float | None = None,
 ) -> Callable:
     """Register a tool that fir can invoke via ``tool_call``.
 
@@ -1560,6 +1570,24 @@ def tool(
       be ``"path"``, ``"pattern"``, ``"accent"``, or ``""`` (plain).
     - ``result_max_lines``: default collapsed line count (default 10).
     - ``use_box``: render output in a bordered box like ``bash``.
+
+    *timeout* is the host-side per-call timeout, in **seconds**, that fir
+    applies while waiting for this tool's ``tool_call`` to return.  The wait
+    is activity-aware — any traffic the extension sends (e.g. nested
+    ``ctx.call_tool`` requests) resets fir's deadline — so this only bounds a
+    call that goes *silent*.  Semantics:
+
+    - ``None`` / ``0`` — use fir's default (30s, overridable via the
+      ``FIR_EXT_TOOL_TIMEOUT`` environment variable).
+    - ``> 0`` — wait that many seconds.
+    - ``< 0`` — **disabled**: no host-side timeout.  The call is bounded only
+      by the turn context (ESC / turn abort).  Use this for a tool that
+      legitimately runs long and whose real bound is an *inner*
+      ``ctx.call_tool(..., timeout=T)`` wait.
+
+    INVARIANT: if the tool body waits on ``ctx.call_tool(..., timeout=T)``,
+    keep ``T <= timeout`` (with ``timeout`` disabled, ``T`` is the single
+    authoritative bound).  Otherwise fir gives up before the extension does.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -1570,6 +1598,8 @@ def tool(
         }
         if display_hint is not None:
             spec["display_hint"] = display_hint
+        if timeout is not None:
+            spec["timeout"] = timeout
         _tools.append(spec)
         _tool_handlers[name] = fn
         return fn
@@ -2949,7 +2979,12 @@ class Context:
         params : dict, optional
             Parameters to pass to the tool.
         timeout : float, optional
-            How long to wait for the tool to finish.
+            How long to wait for the tool to finish.  When called from
+            inside a tool handler, keep this ``<=`` the tool's declared
+            ``timeout`` (see :func:`tool`) — otherwise fir's host-side
+            deadline fires before this inner wait does.  With the outer
+            timeout disabled (declared ``< 0``), this value is the single
+            authoritative bound.
 
         Returns
         -------

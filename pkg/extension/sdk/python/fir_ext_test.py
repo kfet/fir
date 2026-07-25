@@ -104,6 +104,25 @@ class TestInitHandshake(unittest.TestCase):
         self.assertEqual(result["tools"][0]["name"], "my_tool")
         self.assertIn("session_start", result["events"])
 
+    def test_tool_timeout_lands_in_spec(self):
+        @fir_ext.tool("no_to", "no timeout declared")
+        def no_to(params, ctx):
+            return {}
+
+        @fir_ext.tool("pos_to", "positive timeout", timeout=120)
+        def pos_to(params, ctx):
+            return {}
+
+        @fir_ext.tool("off_to", "disabled timeout", timeout=-1)
+        def off_to(params, ctx):
+            return {}
+
+        specs = {t["name"]: t for t in fir_ext._tools}
+        # Absent when not declared (omitted, not 0).
+        self.assertNotIn("timeout", specs["no_to"])
+        self.assertEqual(specs["pos_to"]["timeout"], 120)
+        self.assertEqual(specs["off_to"]["timeout"], -1)
+
 
 class TestToolCall(unittest.TestCase):
     def setUp(self):

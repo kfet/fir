@@ -166,6 +166,18 @@ def _error(msg: str) -> dict:
     return {"content": [{"type": "text", "text": msg}], "is_error": True}
 
 
+def _step_call_kwargs(step: Mapping[str, Any]) -> dict:
+    """Build the ctx.call_tool kwargs for a step, honouring an optional
+    per-step ``timeout_s`` (seconds). Bad values fall back to the default."""
+    t = step.get("timeout_s")
+    if t is None:
+        return {}
+    try:
+        return {"timeout": float(t)}
+    except (TypeError, ValueError):
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Core orchestration
 # ---------------------------------------------------------------------------
@@ -250,7 +262,7 @@ def _run_pipe(steps: list[dict], label: str, ctx: fir_ext.Context) -> dict:
         ctx.report_progress(progress)
 
         try:
-            result = ctx.call_tool(name, params)
+            result = ctx.call_tool(name, params, **_step_call_kwargs(step))
         except Exception as exc:
             text = _truncate(f"error calling tool: {exc}")
             results.append({"name": name, "output": text, "is_error": True, "leaf": i in leaves})
@@ -327,23 +339,18 @@ def _now() -> float:
     return time.monotonic()
 
 
-def _sleep_sliced(seconds: float, heartbeat: Any = None, heartbeat_every: float = 10.0) -> None:
+def _sleep_sliced(seconds: float) -> None:
     """Sleep *seconds* in small slices so cancellation aborts promptly.
 
-    If *heartbeat* is callable, it is invoked roughly every *heartbeat_every*
-    seconds during the sleep. This keeps the extension's bridge connection
-    marked active (the Go side resets its activity-aware tool-call deadline on
-    any message), so a large ``interval`` does not look like a hung tool."""
+    The ``wait`` tool declares its host-side timeout disabled (``timeout=-1``),
+    so a long interval is never mistaken for a hung tool — no keep-alive
+    heartbeat is needed. Slicing exists only so a cancelled/timed-out call
+    returns near the slice boundary instead of blocking the whole interval."""
     remaining = seconds
-    since_beat = 0.0
     while remaining > 0:
         chunk = _WAIT_SLEEP_SLICE if remaining > _WAIT_SLEEP_SLICE else remaining
         time.sleep(chunk)
         remaining -= chunk
-        since_beat += chunk
-        if heartbeat is not None and since_beat >= heartbeat_every and remaining > 0:
-            since_beat = 0.0
-            heartbeat()
 
 
 def _coerce_num(params: Mapping[str, Any], key: str, default: float, minimum: float) -> float:
@@ -399,7 +406,7 @@ def _run_probe(
         ctx.report_progress(progress)
 
         try:
-            result = ctx.call_tool(name, params)
+            result = ctx.call_tool(name, params, **_step_call_kwargs(step))
         except Exception as exc:
             text = _truncate(f"error calling tool: {exc}")
             prior_text.append(text)
@@ -536,12 +543,7 @@ def _run_wait(
             ctx.report_progress(
                 f"wait: poll {polls}/{max_polls}, {int(elapsed)}s, last={last_verdict}"
             )
-            _sleep_sliced(
-                interval,
-                heartbeat=lambda p=polls, lv=last_verdict: ctx.report_progress(
-                    f"wait: waiting (poll {p}/{max_polls}, last={lv})"
-                ),
-            )
+            _sleep_sliced(interval)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(state_path)
@@ -560,7 +562,9 @@ _PIPE_DESCRIPTION = (
     "an out-of-range {{step:N}} substitutes an empty string. Aborts on "
     "the first error unless that step has continue_on_error: true. Each "
     "step's output is capped at 50KB. Returns the raw result for a single "
-    "step. For multi-step pipes, only **leaf** step outputs are returned to "
+    "step. A step may set `timeout_s` (seconds) to run a slow tool longer "
+    "than the 60s default — a single-step pipe is thus a run-with-timeout "
+    "wrapper. For multi-step pipes, only **leaf** step outputs are returned to "
     "the LLM — a leaf is a step whose output is not referenced by any later "
     "step via {{prev}}, {{step:N}}, or {{step:N.field}}. Non-leaf step "
     "outputs are still fed (in full, post-truncation) into later steps' "
@@ -607,6 +611,16 @@ _PIPE_PARAMETERS: dict[str, Any] = {
                             "errors instead of aborting."
                         ),
                     },
+                    "timeout_s": {
+                        "type": "number",
+                        "description": (
+                            "Optional per-step timeout in seconds (default "
+                            "60). Use a larger value for a step that runs "
+                            "long (slow MCP/bash). Soft: on expiry the step "
+                            "errors and the pipe stops waiting, but the "
+                            "underlying call may keep running."
+                        ),
+                    },
                 },
                 "required": ["tool"],
             },
@@ -623,6 +637,12 @@ _PIPE_PARAMETERS: dict[str, Any] = {
     display_hint={
         "title_args": [{"name": "label", "style": "accent"}],
     },
+    # pipe is a legitimate long-runner: it chains tool calls and a single step
+    # (slow MCP/bash) can silently exceed the 30s default. Disable the
+    # host-side timeout so a slow step is never clipped mid-work; each step is
+    # still bounded by its own call_tool timeout (per-step `timeout_s`, default
+    # 60s) and the whole pipe by the turn context (ESC / abort).
+    timeout=-1,
 )
 def pipe(params: dict, ctx: fir_ext.Context):
     steps = params.get("steps") or []
@@ -698,6 +718,13 @@ _WAIT_PARAMETERS: dict[str, Any] = {
                             "errors instead of aborting the poll."
                         ),
                     },
+                    "timeout_s": {
+                        "type": "number",
+                        "description": (
+                            "Optional per-step timeout in seconds (default "
+                            "60) for a slow probe step."
+                        ),
+                    },
                 },
                 "required": ["tool"],
             },
@@ -726,6 +753,10 @@ _WAIT_PARAMETERS: dict[str, Any] = {
     display_hint={
         "title_args": [{"name": "label", "style": "accent"}],
     },
+    # wait blocks server-side across many polls and sleeps, far longer than the
+    # 30s default. Disable the host-side timeout; the loop is bounded by its own
+    # `timeout` / `max_polls` caps and by the turn context (ESC / abort).
+    timeout=-1,
 )
 def wait(params: dict, ctx: fir_ext.Context):
     steps = params.get("steps") or []

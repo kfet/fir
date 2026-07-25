@@ -242,6 +242,11 @@ def reload_mcp_demo(params: dict, ctx: fir_ext.Context) -> dict:
     display_hint={
         "title_args": [{"name": "directory", "style": "path"}],
     },
+    # This tool orchestrates several inner call_tool + side_query calls, so it
+    # can legitimately run longer than the 30s default. Declare a generous
+    # host-side timeout. INVARIANT: keep any inner ctx.call_tool(..., timeout=T)
+    # <= this value (the inner calls below use the 60s default, well under 180).
+    timeout=180,
 )
 def batch_example(params, ctx):
     """Probe a project directory, read key files, and synthesise a summary.

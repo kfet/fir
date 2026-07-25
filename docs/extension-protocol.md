@@ -180,6 +180,7 @@ Each entry in `tools` is an object:
 | `description` | — | Human/LLM-readable description. |
 | `parameters` | — | JSON Schema `object` describing inputs.  Defaults to `{"type":"object","properties":{}}`. |
 | `display_hint` | — | TUI rendering hints (see below). |
+| `timeout` | — | Host-side `tool_call` timeout in seconds.  `0`/absent → default (30s, overridable via `FIR_EXT_TOOL_TIMEOUT`); `> 0` → explicit bound; `< 0` → disabled (bounded only by the turn context).  The wait is activity-aware, so it only clips a call that goes silent (see [Tool Calls](#tool-calls--fir--extension)). |
 
 **`display_hint` fields:**
 
@@ -202,7 +203,18 @@ Each entry in `commands` is:
 ## Tool Calls  (fir → extension)
 
 When the AI invokes a tool registered by the extension during init, fir sends a
-`tool_call` **request**.  Timeout: **30 seconds**.
+`tool_call` **request**.  The host-side wait is the tool's declared `timeout`
+(default **30 seconds**; `0`/absent uses the default, `> 0` an explicit bound,
+`< 0` disables it — see the `timeout` field under [Tool Definitions](#tool-definitions)).
+The wait is **activity-aware**: any message the extension sends (including
+nested `call_tool` requests) resets the deadline, so only a *silent* call is
+clipped.  A disabled (`< 0`) timeout is bounded only by the turn context (ESC /
+turn abort).
+
+> **Invariant.**  When a tool handler waits on `ctx.call_tool(..., timeout=T)`,
+> keep `T <=` the tool's declared `timeout`, otherwise fir gives up before the
+> extension does.  With the outer timeout disabled, `T` is the single
+> authoritative bound.
 
 ### Request
 
