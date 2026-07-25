@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.85.1] - 2026-07-25
+
+### Fixed
+- Corrected Claude Opus 5's curated SWE-bench Verified score from the **83.0 placeholder estimate** shipped in v0.84.0 to the published **96.0%** (Claude Opus 5 System Card §8.2 — 500-problem subset, mean over five trials). The estimate was made before the system card was available and was far too low, which under-ranked Opus 5 in model sorting/selection. For reference the same source reports SWE-bench Pro 79.2%, Multilingual 89.5%, Multimodal 59.4%.
+
 ## [0.85.0] - 2026-07-24
 
 ### Changed

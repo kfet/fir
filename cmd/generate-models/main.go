@@ -245,10 +245,10 @@ var sweModelPatterns = []swePattern{
 	{"claude-fable-5", "claude-fable-5", 95.5},
 	{"claude-mythos-5", "claude-mythos-5", 95.5},
 	// --- Claude Opus 5 ---
-	// Source: Anthropic announcement (2026-07-24) — new SOTA on coding/knowledge
-	// work (Frontier-Bench, GDPval-AA); surpasses Opus 4.8. No public SWE-bench
-	// Verified number yet; curated estimate above the 4.x Opus line, below Fable 5.
-	{"claude-opus-5", "claude-opus-5", 83.0},
+	// Source: Claude Opus 5 System Card §8.2 — 96.0% SWE-bench Verified
+	// (500-problem subset, mean over five trials). Replaces the 83.0 placeholder
+	// estimate carried in v0.84.0 before the system card was published.
+	{"claude-opus-5", "claude-opus-5", 96.0},
 	// --- Claude Opus 4.8 ---
 	// Source: Anthropic announcement — improved over Opus 4.7; use the latest
 	// known Opus score until the public system-card table is wired in.
