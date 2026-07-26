@@ -122,7 +122,7 @@ def _exchange_code(code: str, redirect_uri: str, verifier: str) -> dict:
 
 def _token_request(body: dict) -> dict:
     data = json.dumps(body).encode()
-    req = urllib.request.Request(  # noqa: S310
+    req = urllib.request.Request(
         TOKEN_URL,
         data=data,
         headers={"Content-Type": "application/json"},

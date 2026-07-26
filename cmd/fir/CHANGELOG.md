@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Python linters now track the **latest** ruff/ty instead of pinned versions (`RUFF_VERSION`/`TY_VERSION` removed from the Makefile; `make lint-python` runs `uvx ruff@latest` / `uvx ty@latest`). Newer ruff releases carry fixes and better rules that are worth picking up as they land; the pin from v0.86.0 was hiding them. The `@latest` suffix is deliberate — a bare `uvx ruff` reuses a locally `uv tool install`ed ruff, which can silently differ from CI. Four stale `# noqa: S310` suppressions that ruff 0.16 flags as unused (RUF100) were removed from `poe_auth.py`, `codex_auth.py` and the SDK auth-provider example. If a future linter release turns the tree red, fix the code or adjust `pyproject.toml` rather than re-pinning.
+
 ## [0.86.0] - 2026-07-25
 
 ### Added

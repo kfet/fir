@@ -243,11 +243,12 @@ deploy: build-all
 # compatibility on a fresh install. See AGENTS.md and pyproject.toml.
 # ---------------------------------------------------------------------------
 
-# Pin the Python linters so CI is deterministic: uvx resolves the latest
-# release otherwise, and a ruff/ty bump can turn a green tree red without
-# any code change (e.g. ruff 0.16 broadened default rules). Bump deliberately.
-RUFF_VERSION := 0.15.17
-TY_VERSION := 0.0.63
+# The Python linters track the LATEST release: `uvx ruff@latest` resolves the
+# newest ruff/ty on every run, so we pick up upstream fixes and new rules as
+# they land. The explicit `@latest` matters -- bare `uvx ruff` reuses a locally
+# `uv tool install`ed ruff, which silently differs from CI. A linter bump can
+# turn a green tree red with no code change; when that happens fix the code (or
+# adjust pyproject.toml), do not re-pin.
 PYTHON_DIRS := pkg/extension/sdk/python pkg/resources/testdata .fir/extensions
 
 install-uv:
@@ -258,8 +259,8 @@ check-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv not found. Run 'make install-uv' first."; exit 1; }
 
 lint-python: check-uv
-	$(call RUN,lint python (ruff),uvx ruff@$(RUFF_VERSION) check $(PYTHON_DIRS))
-	$(call RUN,lint python (ty),uvx ty@$(TY_VERSION) check $(PYTHON_DIRS))
+	$(call RUN,lint python (ruff),uvx ruff@latest check $(PYTHON_DIRS))
+	$(call RUN,lint python (ty),uvx ty@latest check $(PYTHON_DIRS))
 
 test-python: test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner
 

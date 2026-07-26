@@ -120,7 +120,7 @@ def list_models(params: dict, ctx: fir_ext.AuthContext) -> list[str] | None:
         return None
 
     try:
-        req = urllib.request.Request(_MODELS_URL)  # noqa: S310
+        req = urllib.request.Request(_MODELS_URL)
         req.add_header("Authorization", f"Bearer {access_token}")
         if account_id:
             req.add_header("Chatgpt-Account-Id", account_id)

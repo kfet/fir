@@ -203,7 +203,7 @@ def _fetch_empty_endpoint_ids() -> set[str]:
     IDs whose ``supported_endpoints`` list was empty (the ambiguous set)."""
     ids: set[str] = set()
     try:
-        req = urllib.request.Request(_MODELS_URL, headers={"User-Agent": "fir"})  # noqa: S310
+        req = urllib.request.Request(_MODELS_URL, headers={"User-Agent": "fir"})
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
             data = json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
@@ -240,7 +240,7 @@ def _probe_model(model_id: str, api_key: str) -> dict:
             "max_tokens": 1,
         }
     ).encode("utf-8")
-    req = urllib.request.Request(  # noqa: S310
+    req = urllib.request.Request(
         _CHAT_URL,
         data=body,
         method="POST",
