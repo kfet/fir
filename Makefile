@@ -204,6 +204,11 @@ check-licenses:
 GITLEAKS_VERSION := 8.30.1
 
 check-secrets:
+	@if [ "$$(git rev-parse --is-shallow-repository)" = "true" ]; then \
+		echo "ERROR: shallow clone -- a full-history secret scan is impossible here."; \
+		echo "       CI must check out with fetch-depth: 0."; \
+		exit 1; \
+	fi
 	@if command -v gitleaks >/dev/null 2>&1; then \
 		gitleaks git . --log-opts="--all --full-history" --no-banner --redact; \
 	else \
