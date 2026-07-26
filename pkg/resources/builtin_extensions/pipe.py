@@ -463,7 +463,11 @@ def _wait_terminal(
     outcome: str, polls: int, elapsed: float, message: str, diag: str
 ) -> dict:
     """Build the single terminal payload returned to the model."""
-    is_error = outcome in ("error", "timeout")
+    # A timeout is a PARTIAL RESULT, not a failure: the probe loop ran clean
+    # and simply has not settled yet. Flagging it is_error poisons tool
+    # error-rate metrics and pushes the model to treat "still running" as
+    # "broken". Only outcome=error (probe blew up / WAIT:fail) is an error.
+    is_error = outcome == "error"
     body = [
         f"wait: {outcome}",
         f"polls: {polls}",
@@ -517,9 +521,16 @@ def _run_wait(
             else:
                 verdict, message = _parse_verdict(vtext)
                 if verdict is None:
+                    tail = next(
+                        (ln for ln in reversed(vtext.splitlines()) if ln.strip()),
+                        "<empty>",
+                    )
                     return _wait_terminal(
                         "error", polls, elapsed,
-                        "wait: verdict step emitted no WAIT: sentinel", vtext,
+                        "wait: verdict step emitted no WAIT: sentinel — its "
+                        f"final non-empty stdout line was {tail.strip()!r}, "
+                        "expected exactly WAIT:done, WAIT:continue, or "
+                        "WAIT:fail <msg>", vtext,
                     )
                 strikes = 0
                 last_verdict = verdict
@@ -535,9 +546,14 @@ def _run_wait(
                 # verdict == "continue": fall through.
 
             if elapsed >= timeout or polls >= max_polls:
+                cap = "max_polls" if polls >= max_polls else "timeout"
                 return _wait_terminal(
                     "timeout", polls, elapsed,
-                    f"wait: cap reached (polls={polls}, elapsed={elapsed:.1f}s)", vtext,
+                    f"wait: {cap} cap reached (polls={polls}/{max_polls}, "
+                    f"elapsed={elapsed:.1f}s/{timeout:.0f}s) — NOT a failure, the "
+                    f"probe never reported WAIT:fail. If the job is still "
+                    f"legitimately running, re-issue wait with a larger "
+                    f"{cap}.", vtext,
                 )
 
             ctx.report_progress(
@@ -669,9 +685,14 @@ _WAIT_DESCRIPTION = (
     "Every probe step sees two env vars (exported into Bash `command` params): "
     "WAIT_POLL (current poll index) and WAIT_STATE (a stable per-wait scratch "
     "file path, reused across polls) so you can self-implement settle/delta "
-    "logic. `interval` (default 5s, no backoff), `timeout` (overall cap, "
-    "default 300s) and `max_polls` (mandatory circuit-breaker, default 60) "
-    "bound the loop; hitting either cap returns outcome=timeout. The terminal "
+    "logic. `interval` (default 5s, no backoff), `timeout` (overall wall-clock "
+    "cap, default 900s) and `max_polls` (mandatory circuit-breaker, default "
+    "60) bound the loop; hitting either cap returns outcome=timeout. Budget "
+    "the caps for the REAL job: a CI/release workflow or a disk check wants "
+    "`timeout` 1800-3600 with `interval` 30-60, not the default. "
+    "outcome=timeout is NOT an error — it means the probe never said fail and "
+    "the job may still be running; re-issue wait with a larger cap to keep "
+    "waiting. The terminal "
     "payload reports outcome/polls/elapsed/message plus the last probe output "
     "(the bare WAIT: line is stripped). Returns once — progress is UI-only.\n\n"
     "[SYS_EXT] Reach for wait (not pipe) when you must BLOCK until something "
@@ -735,7 +756,11 @@ _WAIT_PARAMETERS: dict[str, Any] = {
         },
         "timeout": {
             "type": "number",
-            "description": "Overall wall-clock cap in seconds. Default 300.",
+            "description": (
+                "Overall wall-clock cap in seconds. Default 900. Raise it for "
+                "genuinely long jobs (CI/release runs, fsck, image builds): "
+                "1800-3600 is normal there."
+            ),
         },
         "max_polls": {
             "type": "integer",
@@ -762,7 +787,7 @@ def wait(params: dict, ctx: fir_ext.Context):
     steps = params.get("steps") or []
     label = params.get("label", "") or ""
     interval = _coerce_num(params, "interval", 5.0, 0.0)
-    timeout = _coerce_num(params, "timeout", 300.0, 0.0)
+    timeout = _coerce_num(params, "timeout", 900.0, 0.0)
     max_polls = int(_coerce_num(params, "max_polls", 60.0, 1.0))
     return _run_wait(steps, interval, timeout, max_polls, label, ctx)
 

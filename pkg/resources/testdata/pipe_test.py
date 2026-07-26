@@ -618,9 +618,11 @@ class TestWaitVerdict(unittest.TestCase):
     def test_max_polls_timeout(self):
         results = [_text_result("WAIT:continue") for _ in range(5)]
         out, ctx = self._run(results, max_polls=3)
-        self.assertTrue(out["is_error"])
+        # A cap hit is a partial result, not a failure.
+        self.assertFalse(out["is_error"])
         text = out["content"][0]["text"]
         self.assertIn("wait: timeout", text)
+        self.assertIn("max_polls cap reached", text)
         self.assertIn("polls: 3", text)
         self.assertEqual(ctx.call_tool.call_count, 3)
 
@@ -628,8 +630,25 @@ class TestWaitVerdict(unittest.TestCase):
         # Clock advances 1s per read; with timeout=2 the cap is hit quickly.
         results = [_text_result("WAIT:continue") for _ in range(20)]
         out, _ = self._run(results, timeout=2, max_polls=60)
+        self.assertFalse(out["is_error"])
+        text = out["content"][0]["text"]
+        self.assertIn("wait: timeout", text)
+        self.assertIn("timeout cap reached", text)
+
+    def test_wait_default_timeout_is_900(self):
+        # Regression guard: 300s under-budgeted every real CI/release wait.
+        with mock.patch.object(self.mod, "_run_wait") as run:
+            self.mod.wait(
+                {"steps": [{"tool": "Bash", "params": {"command": "true"}}]},
+                mock.MagicMock(),
+            )
+        # _run_wait(steps, interval, timeout, max_polls, label, ctx)
+        self.assertEqual(run.call_args.args[2], 900.0)
+
+    def test_missing_sentinel_reports_offending_line(self):
+        out, _ = self._run([_text_result("no verdict here")])
         self.assertTrue(out["is_error"])
-        self.assertIn("wait: timeout", out["content"][0]["text"])
+        self.assertIn("'no verdict here'", out["content"][0]["text"])
 
     def test_verdict_error_strike_escalation(self):
         # Three consecutive verdict-step errors -> outcome=error.
