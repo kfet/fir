@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // Re-export CursorMarker from tui package for convenience.

@@ -5,7 +5,7 @@ package components
 import (
 	"strings"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // Box is a container that applies padding and background to all children.

@@ -11,8 +11,8 @@ import (
 
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // --- Types ---

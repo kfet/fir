@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // make540Sessions creates 540 sessions that match the user-reported failure scenario.

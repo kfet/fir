@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // CountdownTimer is a reusable countdown timer for dialog components.

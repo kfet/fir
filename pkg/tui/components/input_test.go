@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 func TestInput_InitialEmpty(t *testing.T) {

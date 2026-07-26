@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // FooterData provides the data needed to render the footer.

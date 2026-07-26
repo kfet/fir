@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // XBM image constants for the Armin easter egg.

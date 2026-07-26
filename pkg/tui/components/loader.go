@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // elapsedThreshold is how long a loader can spin before we start appending

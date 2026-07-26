@@ -13,18 +13,19 @@ require (
 	github.com/kfet/firpty v0.1.0
 	github.com/kfet/pinexec v0.0.4
 	github.com/kfet/skipstone v0.1.2
+	github.com/kfet/tui v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.3.1
-	github.com/rivo/uniseg v0.4.7
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.16
 	golang.org/x/sys v0.41.0
-	golang.org/x/term v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	nhooyr.io/websocket v1.8.17
 )
 
 require (
+	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/image v0.36.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
 

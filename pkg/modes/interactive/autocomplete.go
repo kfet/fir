@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // SlashCommand describes a completable slash command.

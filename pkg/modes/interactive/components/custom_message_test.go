@@ -6,7 +6,7 @@ import (
 
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 func TestCustomMessageComponent_DefaultRendering(t *testing.T) {

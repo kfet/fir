@@ -31,8 +31,8 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/update"
+	"github.com/kfet/tui"
 )
 
 // sessionSetup holds common setup results shared between run modes.

@@ -5,8 +5,8 @@ package components
 import (
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // levelDescriptions maps thinking levels to human-readable descriptions.

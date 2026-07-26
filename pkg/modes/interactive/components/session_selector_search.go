@@ -9,7 +9,7 @@ import (
 	"unicode"
 
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // SortMode controls how sessions are sorted.

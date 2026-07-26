@@ -10,8 +10,8 @@ import (
 	"github.com/kfet/fir/pkg/config"
 	"github.com/kfet/fir/pkg/models"
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
-	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // ModelItem represents a model entry in the selector.

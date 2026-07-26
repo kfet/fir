@@ -5,7 +5,7 @@ package components
 import (
 	"sync"
 
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // CancellableLoader is a Loader that can be cancelled with Escape.

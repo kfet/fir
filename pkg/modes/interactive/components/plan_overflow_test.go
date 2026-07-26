@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/kfet/agent"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 func TestPlanComponent_LineOverflow(t *testing.T) {

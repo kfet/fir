@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // ansiRe matches all ANSI escape sequences for plain-text comparison.

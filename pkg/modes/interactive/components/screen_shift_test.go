@@ -10,7 +10,7 @@ import (
 
 	"github.com/kfet/fir/pkg/modes/interactive/components"
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
+	"github.com/kfet/tui"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

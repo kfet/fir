@@ -3,8 +3,8 @@
 package components
 
 import (
-	"github.com/kfet/fir/pkg/tui"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // CustomEditor wraps the Editor with app-level keybinding support.

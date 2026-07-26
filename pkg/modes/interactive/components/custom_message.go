@@ -7,8 +7,8 @@ import (
 
 	"github.com/kfet/fir/pkg/modes/interactive/theme"
 	"github.com/kfet/fir/pkg/session/store"
-	"github.com/kfet/fir/pkg/tui"
 	"github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/tui"
 )
 
 // MessageRenderer is a function that can render a custom message.
