@@ -46,6 +46,13 @@ ignore = [
 "*_test.py" = ["S101", "S106", "S108", "S603", "PLR2004"]
 "**/tests/**" = ["S101", "S106", "S108", "S603", "PLR2004"]
 ".fir/extensions/*.py" = ["E501", "S101", "T201", "S603", "S607", "PERF203"]
+# Builtin extensions are the same species of code as .fir/extensions: agent
+# tools that shell out (S603/S607), print to stdout (T201), assert internal
+# invariants (S101), and carry long embedded tool-description strings (E501).
+# Same carve-out, same reasons.
+"pkg/resources/builtin_extensions/*.py" = [
+  "E501", "S101", "T201", "S603", "S607", "PERF203",
+]
 "pkg/resources/testdata/*_test.py" = ["E402", "SIM117"]
 
 # --- ty (type checker) --------------------------------------------------------

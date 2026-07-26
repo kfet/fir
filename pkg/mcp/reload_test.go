@@ -105,12 +105,39 @@ func TestManager_Reload_AddServer_FiresOnToolsChanged(t *testing.T) {
 	assert.Len(t, all, 2)
 
 	// The callback must fire with the new aggregate tool set (2 servers).
-	select {
-	case got := <-ch:
-		assert.Len(t, got, 2, "onToolsChanged must fire with both servers' tools after Reload adds a server")
-	case <-time.After(5 * time.Second):
-		t.Fatal("onToolsChanged was not fired by Reload after adding a server — tools would never reach the live agent")
+	//
+	// onToolsChanged is NOT fired only by Reload: the background reconnect
+	// loop calls it too (installReconnectedSession), from its own goroutine.
+	// An in-memory session that drops mid-test therefore races an extra
+	// callback carrying whatever the aggregate was at that instant — often
+	// just srv1's single tool. Asserting on the FIRST value off the channel
+	// is thus flaky. Drain until we observe the aggregate we care about; a
+	// missing fire still fails, via the deadline.
+	deadline := time.After(5 * time.Second)
+	var seen [][]agent.AgentTool
+	for {
+		select {
+		case got := <-ch:
+			seen = append(seen, got)
+			if len(got) == 2 {
+				return // Reload published the full aggregate.
+			}
+		case <-deadline:
+			t.Fatalf("onToolsChanged never fired with both servers' tools after "+
+				"Reload added a server — tools would never reach the live agent "+
+				"(observed %d callback(s), sizes %v)", len(seen), toolCounts(seen))
+		}
 	}
+}
+
+// toolCounts renders the tool-set size of each observed onToolsChanged
+// callback, for failure diagnostics.
+func toolCounts(sets [][]agent.AgentTool) []int {
+	out := make([]int, len(sets))
+	for i, s := range sets {
+		out[i] = len(s)
+	}
+	return out
 }
 
 // TestManager_Reload_ReconnectsDisconnected verifies that /reload restarts a

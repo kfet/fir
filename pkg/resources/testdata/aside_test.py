@@ -44,6 +44,7 @@ def _blocking_ctx():
     side_query_stream wired up explicitly.
     """
     from unittest import mock as _mock
+
     ctx = _mock.MagicMock(spec=fir_ext.Context)
     del ctx.side_query_stream
     return ctx
@@ -162,16 +163,24 @@ class TestRunAside(unittest.TestCase):
         if available_tools is None:
             # Default: expose Read and Bash with a required "path"/"command" param.
             available_tools = [
-                {"name": "Read", "description": "Read a file", "parameters": {
-                    "type": "object",
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
-                }},
-                {"name": "Bash", "description": "Run a command", "parameters": {
-                    "type": "object",
-                    "properties": {"command": {"type": "string"}},
-                    "required": ["command"],
-                }},
+                {
+                    "name": "Read",
+                    "description": "Read a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+                {
+                    "name": "Bash",
+                    "description": "Run a command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                },
             ]
         ctx.list_tools = mock.MagicMock(return_value=available_tools)
         return ctx
@@ -232,9 +241,7 @@ class TestRunAside(unittest.TestCase):
 
     def test_call_tool_exception_handled(self):
         ctx = self._make_ctx(side_query_result="partial results")
-        ctx.call_tool = mock.MagicMock(
-            side_effect=RuntimeError("connection lost")
-        )
+        ctx.call_tool = mock.MagicMock(side_effect=RuntimeError("connection lost"))
         tools = [{"name": "Read", "params": {"path": "a.go"}}]
         result = self.mod._run_aside(tools, "summarise", ctx)
         # Should still succeed — error is included in synthesis
@@ -325,13 +332,19 @@ class TestAsideTool(unittest.TestCase):
             return_value={"content": [{"text": "ok"}], "is_error": False}
         )
         ctx.side_query = mock.MagicMock(return_value="synthesised")
-        ctx.list_tools = mock.MagicMock(return_value=[
-            {"name": "Bash", "description": "Run a command", "parameters": {
-                "type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"],
-            }},
-        ])
+        ctx.list_tools = mock.MagicMock(
+            return_value=[
+                {
+                    "name": "Bash",
+                    "description": "Run a command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                },
+            ]
+        )
         params = {
             "tools": [{"name": "Bash", "params": {"command": "echo hi"}}],
             "instructions": "summarise",
@@ -378,8 +391,16 @@ class TestAsideCommand(unittest.TestCase):
         handler = fir_ext._command_handlers["aside"]
         ctx = _blocking_ctx()
         args = [
-            "read", "the", "5", "largest", ".go", "files",
-            "and", "summarise", "their", "purpose",
+            "read",
+            "the",
+            "5",
+            "largest",
+            ".go",
+            "files",
+            "and",
+            "summarise",
+            "their",
+            "purpose",
         ]
         result = handler(args, ctx)
         self.assertEqual(result, {})
@@ -465,9 +486,7 @@ class TestAdvisorEscalation(unittest.TestCase):
         self.assertIn("advisor says so", text)
 
     def test_escalate_without_effort_omits_effort_kwarg(self):
-        mod = self._load_with_advisor(
-            {"provider": "anthropic", "model": "claude-opus-4-x"}
-        )
+        mod = self._load_with_advisor({"provider": "anthropic", "model": "claude-opus-4-x"})
         ctx = self._ctx()
         mod._run_aside([], "q", ctx, escalate=True)
         kwargs = ctx.side_query.call_args.kwargs
@@ -476,9 +495,7 @@ class TestAdvisorEscalation(unittest.TestCase):
         self.assertEqual(kwargs["model"], "claude-opus-4-x")
 
     def test_no_escalate_uses_no_overrides(self):
-        mod = self._load_with_advisor(
-            {"provider": "anthropic", "model": "claude-opus-4-x"}
-        )
+        mod = self._load_with_advisor({"provider": "anthropic", "model": "claude-opus-4-x"})
         ctx = self._ctx(side_query_result="plain reply")
         result = mod._run_aside([], "q", ctx, escalate=False)
         # All overrides default to None when not escalating.
@@ -514,9 +531,7 @@ class TestAdvisorEscalation(unittest.TestCase):
         1. Executor (cheap model) gathers data via aside without escalate.
         2. Executor then escalates to advisor with escalate=True for a decision.
         """
-        mod = self._load_with_advisor(
-            {"provider": "anthropic", "model": "claude-opus-4-x"}
-        )
+        mod = self._load_with_advisor({"provider": "anthropic", "model": "claude-opus-4-x"})
 
         # Step 1: Cheap model gathers data (no escalate).
         # Build a proper mock context with call_tool, list_tools, and side_query.
@@ -537,9 +552,7 @@ class TestAdvisorEscalation(unittest.TestCase):
                 }
             ]
         )
-        ctx_gather.side_query = mock.MagicMock(
-            return_value="Found 3 .go files, 5KB total"
-        )
+        ctx_gather.side_query = mock.MagicMock(return_value="Found 3 .go files, 5KB total")
         ctx_gather.report_progress = mock.MagicMock()
 
         gather_tools = [
@@ -561,9 +574,7 @@ class TestAdvisorEscalation(unittest.TestCase):
             ctx_gather.side_query.call_args.kwargs,
             {"model": None, "provider": None, "effort": None},
         )
-        self.assertEqual(
-            gather_result["content"][0]["text"], "Found 3 .go files, 5KB total"
-        )
+        self.assertEqual(gather_result["content"][0]["text"], "Found 3 .go files, 5KB total")
         # No advisor trace prefix.
         self.assertFalse(gather_result["content"][0]["text"].startswith("[advisor:"))
 
@@ -659,7 +670,7 @@ class TestLoadAdvisorConfig(unittest.TestCase):
         self.assertEqual(cfg[0]["provider"], "anthropic")
 
     def test_corrupt_json_falls_back_to_default(self):
-        self._cfg_path.write_text('not json')
+        self._cfg_path.write_text("not json")
         cfg = self.mod._load_advisor_config()
         self.assertIsNotNone(cfg)
         self.assertIsInstance(cfg, list)
@@ -687,9 +698,7 @@ class TestLoadAdvisorConfig(unittest.TestCase):
         )
 
     def test_array_skips_malformed_elements(self):
-        self._cfg_path.write_text(
-            '{"advisor": ["bad-no-slash", "anthropic/claude-opus-4-8", 42]}'
-        )
+        self._cfg_path.write_text('{"advisor": ["bad-no-slash", "anthropic/claude-opus-4-8", 42]}')
         cfg = self.mod._load_advisor_config()
         self.assertEqual(cfg, [{"provider": "anthropic", "model": "claude-opus-4-8"}])
 
@@ -750,9 +759,7 @@ class TestAsideAdvisorCommand(unittest.TestCase):
             {"provider": "anthropic", "model": "claude-opus-4-8"},
         ]
         result = self._handler()([], mock.MagicMock())
-        self.assertIn(
-            "anthropic/claude-fable-5 -> anthropic/claude-opus-4-8", result["message"]
-        )
+        self.assertIn("anthropic/claude-fable-5 -> anthropic/claude-opus-4-8", result["message"])
 
     def test_set_writes_config_file(self):
         result = self._handler()(["anthropic/claude-opus-4-x:high"], mock.MagicMock())
@@ -760,6 +767,7 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         # File persisted with the spec.
         self.assertTrue(self._cfg_path.is_file())
         import json as _json
+
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "anthropic/claude-opus-4-x:high"})
 
@@ -775,6 +783,7 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         self.assertIn("disabled", result["message"])
         self.assertTrue(self._cfg_path.is_file())
         import json as _json
+
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "off"})
 
@@ -782,6 +791,7 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         self._cfg_path.write_text('{"advisor": "anthropic/claude-opus-4-x"}')
         self._handler()(["off"], mock.MagicMock())
         import json as _json
+
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data["advisor"], "off")
 
@@ -789,9 +799,10 @@ class TestAsideAdvisorCommand(unittest.TestCase):
         # If aside.json gains other keys later, /aside-advisor off must
         # only flip the advisor key, not nuke the file.
         import json as _json
-        self._cfg_path.write_text(_json.dumps(
-            {"advisor": "anthropic/claude-opus-4-x", "future_key": "x"}
-        ))
+
+        self._cfg_path.write_text(
+            _json.dumps({"advisor": "anthropic/claude-opus-4-x", "future_key": "x"})
+        )
         self._handler()(["off"], mock.MagicMock())
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"advisor": "off", "future_key": "x"})
@@ -836,9 +847,7 @@ class TestDelegateRouting(unittest.TestCase):
         self.assertIn("cheap summary", text)
 
     def test_delegate_without_effort_omits_effort_kwarg(self):
-        mod = self._load_with_delegate(
-            {"provider": "anthropic", "model": "claude-haiku-4-5"}
-        )
+        mod = self._load_with_delegate({"provider": "anthropic", "model": "claude-haiku-4-5"})
         ctx = self._ctx()
         result = mod._run_aside([], "q", ctx, delegate=True)
         kwargs = ctx.side_query.call_args.kwargs
@@ -848,9 +857,7 @@ class TestDelegateRouting(unittest.TestCase):
         self.assertTrue(text.startswith("[delegate: anthropic/claude-haiku-4-5]"))
 
     def test_no_delegate_uses_no_overrides(self):
-        mod = self._load_with_delegate(
-            {"provider": "anthropic", "model": "claude-haiku-4-5"}
-        )
+        mod = self._load_with_delegate({"provider": "anthropic", "model": "claude-haiku-4-5"})
         ctx = self._ctx(side_query_result="plain reply")
         result = mod._run_aside([], "q", ctx, delegate=False)
         self.assertEqual(
@@ -882,20 +889,24 @@ class TestDelegateRouting(unittest.TestCase):
         ctx.side_query.assert_not_called()
 
     def test_delegate_with_tools_routes_synthesis_to_delegate(self):
-        mod = self._load_with_delegate(
-            {"provider": "anthropic", "model": "claude-haiku-4-5"}
-        )
+        mod = self._load_with_delegate({"provider": "anthropic", "model": "claude-haiku-4-5"})
         ctx = self._ctx(side_query_result="bulk synthesis")
         ctx.call_tool = mock.MagicMock(
             return_value={"content": [{"text": "log lines"}], "is_error": False}
         )
-        ctx.list_tools = mock.MagicMock(return_value=[
-            {"name": "Bash", "description": "Run a command", "parameters": {
-                "type": "object",
-                "properties": {"command": {"type": "string"}},
-                "required": ["command"],
-            }},
-        ])
+        ctx.list_tools = mock.MagicMock(
+            return_value=[
+                {
+                    "name": "Bash",
+                    "description": "Run a command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                },
+            ]
+        )
         result = mod._run_aside(
             [{"name": "Bash", "params": {"command": "cat big.log"}}],
             "summarise the log",
@@ -910,9 +921,7 @@ class TestDelegateRouting(unittest.TestCase):
         self.assertTrue(text.startswith("[delegate: anthropic/claude-haiku-4-5]"))
 
     def test_tool_handler_passes_delegate_flag(self):
-        self._load_with_delegate(
-            {"provider": "anthropic", "model": "claude-haiku-4-5"}
-        )
+        self._load_with_delegate({"provider": "anthropic", "model": "claude-haiku-4-5"})
         handler = fir_ext._tool_handlers["aside"]
         ctx = self._ctx(side_query_result="via handler")
         result = handler({"instructions": "q", "delegate": True}, ctx)
@@ -928,9 +937,7 @@ class TestDelegateRouting(unittest.TestCase):
         self.assertNotIn("Delegation", mod._aside_tool_description())
 
     def test_tool_schema_has_delegate_when_configured(self):
-        mod = self._load_with_delegate(
-            {"provider": "anthropic", "model": "claude-haiku-4-5"}
-        )
+        mod = self._load_with_delegate({"provider": "anthropic", "model": "claude-haiku-4-5"})
         params = mod._aside_tool_parameters()
         self.assertIn("delegate", params["properties"])
         self.assertIn("Delegation", mod._aside_tool_description())
@@ -979,7 +986,7 @@ class TestLoadDelegateConfig(unittest.TestCase):
         self.assertEqual(cfg["provider"], "anthropic")
 
     def test_corrupt_json_falls_back_to_default(self):
-        self._cfg_path.write_text('not json')
+        self._cfg_path.write_text("not json")
         cfg = self.mod._load_delegate_config()
         self.assertIsNotNone(cfg)
 
@@ -1037,6 +1044,7 @@ class TestAsideDelegateCommand(unittest.TestCase):
         self.assertIn("set to anthropic/claude-haiku-4-5:low", result["message"])
         self.assertTrue(self._cfg_path.is_file())
         import json as _json
+
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"delegate": "anthropic/claude-haiku-4-5:low"})
 
@@ -1050,6 +1058,7 @@ class TestAsideDelegateCommand(unittest.TestCase):
         self.assertIn("disabled", result["message"])
         self.assertTrue(self._cfg_path.is_file())
         import json as _json
+
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(data, {"delegate": "off"})
 
@@ -1057,9 +1066,12 @@ class TestAsideDelegateCommand(unittest.TestCase):
         # /aside-delegate off must only flip the delegate key — the advisor
         # pin (and any future keys) must survive.
         import json as _json
-        self._cfg_path.write_text(_json.dumps(
-            {"advisor": "anthropic/claude-fable-5", "delegate": "anthropic/claude-haiku-4-5"}
-        ))
+
+        self._cfg_path.write_text(
+            _json.dumps(
+                {"advisor": "anthropic/claude-fable-5", "delegate": "anthropic/claude-haiku-4-5"}
+            )
+        )
         self._handler()(["off"], mock.MagicMock())
         data = _json.loads(self._cfg_path.read_text())
         self.assertEqual(
@@ -1069,6 +1081,7 @@ class TestAsideDelegateCommand(unittest.TestCase):
 
     def test_set_preserves_advisor_key(self):
         import json as _json
+
         self._cfg_path.write_text('{"advisor": "off"}')
         self._handler()(["anthropic/claude-haiku-4-5"], mock.MagicMock())
         data = _json.loads(self._cfg_path.read_text())
@@ -1096,7 +1109,10 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
     _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
     _MODELS_GO = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "..", "..", "ai", "models_generated.go",
+        "..",
+        "..",
+        "ai",
+        "models_generated.go",
     )
 
     def test_default_advisor_matches_highest_flagship(self):
@@ -1118,9 +1134,7 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
         # pick the strongest flagship via the SAME ranking helper the runtime
         # degrade path uses (_best_anthropic_flagship). This guarantees test
         # and runtime agree on "which model is the flagship".
-        id_re = re.compile(
-            r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL
-        )
+        id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
         anthropic_ids = id_re.findall(models_src)
         best = mod._best_anthropic_flagship(anthropic_ids)
 
@@ -1130,7 +1144,8 @@ class DefaultAdvisorTracksHighestAnthropicFlagship(unittest.TestCase):
         )
         want_spec = "anthropic/" + best
         self.assertEqual(
-            got, want_spec,
+            got,
+            want_spec,
             "aside.py _DEFAULT_ADVISOR_SPEC out of sync with model registry:\n"
             f"  got:  {got}\n"
             f"  want: {want_spec}\n"
@@ -1152,7 +1167,10 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
     _ASIDE_PY = os.path.join(_ext_dir, "aside.py")
     _MODELS_GO = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "..", "..", "ai", "models_generated.go",
+        "..",
+        "..",
+        "ai",
+        "models_generated.go",
     )
 
     def test_default_delegate_matches_highest_haiku(self):
@@ -1172,9 +1190,7 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
 
         # Gather all anthropic ids and pick the highest Haiku via the same
         # runtime ranking helper (_best_anthropic_haiku).
-        id_re = re.compile(
-            r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL
-        )
+        id_re = re.compile(r'ID:\s*"([^"]+)"(?:[^}]*?)Provider:\s*"anthropic"', re.DOTALL)
         anthropic_ids = id_re.findall(models_src)
         best = mod._best_anthropic_haiku(anthropic_ids)
 
@@ -1184,15 +1200,14 @@ class DefaultDelegateTracksHighestAnthropicHaiku(unittest.TestCase):
         )
         want_spec = "anthropic/" + best
         self.assertEqual(
-            got, want_spec,
+            got,
+            want_spec,
             "aside.py _DEFAULT_DELEGATE_SPEC out of sync with model registry:\n"
             f"  got:  {got}\n"
             f"  want: {want_spec}\n"
             f"\nFix: edit pkg/resources/builtin_extensions/aside.py and update "
             f"_DEFAULT_DELEGATE_SPEC to {want_spec!r}.",
         )
-
-
 
 
 class TestRankingHelpers(unittest.TestCase):
@@ -1252,9 +1267,7 @@ class TestModelUnavailableSignature(unittest.TestCase):
 
     def test_does_not_match_overflow(self):
         self.assertFalse(
-            self.mod._is_model_unavailable_error(
-                "side-query: Input exceeds context window limit"
-            )
+            self.mod._is_model_unavailable_error("side-query: Input exceeds context window limit")
         )
 
     def test_does_not_match_generic_error(self):
@@ -1386,9 +1399,7 @@ class TestReactiveFallback(unittest.TestCase):
         result = mod._run_aside([], "design tradeoff?", ctx, escalate=True)
         self.assertFalse(result["is_error"])
         text = result["content"][0]["text"]
-        self.assertTrue(
-            text.startswith("[advisor unavailable — answered on executor model]"), text
-        )
+        self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
         self.assertIn("executor answer", text)
         # Two calls: routed (failed) then executor (succeeded).
         self.assertEqual(ctx.side_query.call_count, 2)
@@ -1487,9 +1498,7 @@ class TestSessionUnavailableMemo(unittest.TestCase):
         ]
         cfg = {"provider": "anthropic", "model": "claude-fable-5"}
         # Not memoized -> fable (in the live catalogue) used as-is.
-        self.assertEqual(
-            mod._degrade_role(cfg, available, "advisor")["model"], "claude-fable-5"
-        )
+        self.assertEqual(mod._degrade_role(cfg, available, "advisor")["model"], "claude-fable-5")
         # Memoized -> degrade to opus, even though fable is still in the catalogue.
         mod._mark_model_unavailable("anthropic", "claude-fable-5")
         out = mod._degrade_role(cfg, available, "advisor")
@@ -1615,9 +1624,7 @@ class TestChainWalk(unittest.TestCase):
         result = mod._run_aside([], "q", ctx, escalate=True)
         self.assertFalse(result["is_error"])
         text = result["content"][0]["text"]
-        self.assertTrue(
-            text.startswith("[advisor unavailable — answered on executor model]"), text
-        )
+        self.assertTrue(text.startswith("[advisor unavailable — answered on executor model]"), text)
         self.assertIn("executor answered", text)
         # both candidates probed, then executor (model=None).
         self.assertEqual(calls, ["claude-fable-5", "claude-opus-4-8", None])
@@ -1945,26 +1952,19 @@ class TestAsideStreamingCards(unittest.TestCase):
         self.assertGreaterEqual(len(calls), 2)
         first_kwargs = calls[0].kwargs
         self.assertTrue(
-            first_kwargs.get("slug") == "running"
-            or calls[0].args[1:2] == ("running",),
+            first_kwargs.get("slug") == "running" or calls[0].args[1:2] == ("running",),
             f"first card slug should be 'running', got {calls[0]}",
         )
         # Terminal card carries finish_reason as slug + full text as detail.
         terminal = calls[-1]
-        slug = (
-            terminal.kwargs.get("slug")
-            or (terminal.args[1] if len(terminal.args) > 1 else "")
-        )
-        detail = (
-            terminal.kwargs.get("detail")
-            or (terminal.args[2] if len(terminal.args) > 2 else "")
+        slug = terminal.kwargs.get("slug") or (terminal.args[1] if len(terminal.args) > 1 else "")
+        detail = terminal.kwargs.get("detail") or (
+            terminal.args[2] if len(terminal.args) > 2 else ""
         )
         self.assertEqual(slug, "stop")
         self.assertEqual(detail, "the answer is 42")
         # All cards share a "query/<unix-ms>" key.
-        keys = {
-            (c.kwargs.get("key") or c.args[0]) for c in calls
-        }
+        keys = {(c.kwargs.get("key") or c.args[0]) for c in calls}
         self.assertEqual(len(keys), 1, f"all cards should share one key, got {keys}")
         only_key = next(iter(keys))
         self.assertTrue(only_key.startswith("query/"), f"unexpected key: {only_key}")
@@ -1973,10 +1973,7 @@ class TestAsideStreamingCards(unittest.TestCase):
         # Mimics what the Go side sends back when the response only carried
         # a redacted thinking block (th=0, sig>0): stream.error is set with
         # the formatted block summary and stream.result has the blocks.
-        err = (
-            "side-query: response had no usable content "
-            "(blocks: [thinking(th=0,sig=940)])"
-        )
+        err = "side-query: response had no usable content (blocks: [thinking(th=0,sig=940)])"
 
         def factory(*_a, **_kw):
             return _FakeStream([], result=None, error=err)
@@ -2013,9 +2010,7 @@ class TestAsideStreamingCards(unittest.TestCase):
         def factory(question, model, provider, effort):
             # Capture call kwargs by reference in the closure so the test
             # can verify advisor overrides reach the streaming flavor.
-            captured.update(
-                question=question, model=model, provider=provider, effort=effort
-            )
+            captured.update(question=question, model=model, provider=provider, effort=effort)
             return _FakeStream(
                 [{"type": "text", "text": "advisor reply"}],
                 result={"text": "advisor reply", "finish_reason": "stop"},

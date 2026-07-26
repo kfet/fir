@@ -25,7 +25,12 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 _sdk_path = os.path.join(
-    os.path.dirname(__file__), "..", "..", "extension", "sdk", "python",
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "extension",
+    "sdk",
+    "python",
 )
 sys.path.insert(0, _sdk_path)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "builtin_extensions"))
@@ -55,18 +60,20 @@ def _reset_observe_state(state_dir: str, sock_dir: str) -> None:
     os.environ["XDG_STATE_HOME"] = state_dir
     os.environ["FIR_OBSERVE_DIR"] = sock_dir
     # Reset module state
-    observe._state.update({
-        "session_id": "",
-        "pid": os.getpid(),
-        "host_pid": os.getppid(),
-        "socket_path": "",
-        "store_path": "",
-        "cwd": "",
-        "started_at": "",
-        "status": "running",
-        "session_name": "",
-        "schema": 1,
-    })
+    observe._state.update(
+        {
+            "session_id": "",
+            "pid": os.getpid(),
+            "host_pid": os.getppid(),
+            "socket_path": "",
+            "store_path": "",
+            "cwd": "",
+            "started_at": "",
+            "status": "running",
+            "session_name": "",
+            "schema": 1,
+        }
+    )
     if observe._socket is not None:
         with suppress(Exception):
             observe._socket.close()
@@ -95,7 +102,10 @@ class TestSidecar(unittest.TestCase):
 
     def _sidecar_path(self) -> str:
         return os.path.join(
-            self.state_dir, "fir", "agents", f"{self.session_id}.json",
+            self.state_dir,
+            "fir",
+            "agents",
+            f"{self.session_id}.json",
         )
 
     def _read_sidecar(self) -> dict:
@@ -139,7 +149,8 @@ class TestSidecar(unittest.TestCase):
             with self.subTest(bad=bad):
                 observe.on_session_start({"session_id": bad}, ctx)
                 self.assertEqual(
-                    observe._state["session_id"], "",
+                    observe._state["session_id"],
+                    "",
                     f"unsafe session_id {bad!r} should be rejected",
                 )
 
@@ -210,7 +221,10 @@ class TestSocket(unittest.TestCase):
 
     def _socket_path(self) -> str:
         return os.path.join(
-            self.sock_dir, "fir", "observe", f"{self.session_id[:16]}.sock",
+            self.sock_dir,
+            "fir",
+            "observe",
+            f"{self.session_id[:16]}.sock",
         )
 
     def _connect(self, timeout: float = 10.0) -> socket.socket:
@@ -259,10 +273,11 @@ class TestSocket(unittest.TestCase):
         observe.on_session_start({"session_id": self.session_id}, ctx)
         c = self._connect()
         try:
-            c.sendall((
-                json.dumps({"deliver_as": "steer", "content": "stop, look at foo.go"})
-                + "\n"
-            ).encode())
+            c.sendall(
+                (
+                    json.dumps({"deliver_as": "steer", "content": "stop, look at foo.go"}) + "\n"
+                ).encode()
+            )
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
@@ -271,7 +286,8 @@ class TestSocket(unittest.TestCase):
         finally:
             c.close()
         ctx.send_user_message.assert_called_with(
-            "stop, look at foo.go", deliver_as="steer",
+            "stop, look at foo.go",
+            deliver_as="steer",
         )
 
     def test_followup_sigil_passes_through(self) -> None:
@@ -279,10 +295,11 @@ class TestSocket(unittest.TestCase):
         observe.on_session_start({"session_id": self.session_id}, ctx)
         c = self._connect()
         try:
-            c.sendall((
-                json.dumps({"deliver_as": "followUp", "content": "and update CHANGELOG"})
-                + "\n"
-            ).encode())
+            c.sendall(
+                (
+                    json.dumps({"deliver_as": "followUp", "content": "and update CHANGELOG"}) + "\n"
+                ).encode()
+            )
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
@@ -291,7 +308,8 @@ class TestSocket(unittest.TestCase):
         finally:
             c.close()
         ctx.send_user_message.assert_called_with(
-            "and update CHANGELOG", deliver_as="followUp",
+            "and update CHANGELOG",
+            deliver_as="followUp",
         )
 
     def test_abort_deliver_as_passes_through_with_empty_content(self) -> None:
@@ -315,9 +333,7 @@ class TestSocket(unittest.TestCase):
         observe.on_session_start({"session_id": self.session_id}, ctx)
         c = self._connect()
         try:
-            c.sendall((
-                json.dumps({"deliver_as": "garbage", "content": "x"}) + "\n"
-            ).encode())
+            c.sendall((json.dumps({"deliver_as": "garbage", "content": "x"}) + "\n").encode())
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
@@ -336,9 +352,7 @@ class TestSocket(unittest.TestCase):
             # A blank line, then a malformed JSON line, then a valid one.
             c.sendall(b"\n")
             c.sendall(b"not json\n")
-            c.sendall((
-                json.dumps({"content": "real message"}) + "\n"
-            ).encode())
+            c.sendall((json.dumps({"content": "real message"}) + "\n").encode())
             deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 if ctx.send_user_message.called:
@@ -381,9 +395,7 @@ class TestSocket(unittest.TestCase):
             c.sendall((json.dumps({"content": text}) + "\n").encode())
             c.close()
 
-        threads = [
-            threading.Thread(target=_client, args=(f"msg-{i}",)) for i in range(5)
-        ]
+        threads = [threading.Thread(target=_client, args=(f"msg-{i}",)) for i in range(5)]
         for t in threads:
             t.start()
         for t in threads:
@@ -418,10 +430,19 @@ class TestMetering(unittest.TestCase):
         }
         observe._state["model"] = {"provider": "", "id": ""}
         observe._state["usage"] = {
-            "input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
-            "total_tokens": 0, "requests": 0,
-            "cost": {"input": 0.0, "output": 0.0, "cache_read": 0.0,
-                     "cache_write": 0.0, "total": 0.0},
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 0,
+            "requests": 0,
+            "cost": {
+                "input": 0.0,
+                "output": 0.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0,
+                "total": 0.0,
+            },
         }
         self.session_id = "meter1234ef567890" + "0" * 19  # 36 chars
 
@@ -443,19 +464,28 @@ class TestMetering(unittest.TestCase):
 
     def test_assistant_message_end_records_usage_and_model(self) -> None:
         self._start()
-        observe.on_message_end({
-            "role": "assistant",
-            "provider": "anthropic",
-            "model": "claude-3-5-sonnet",
-            "usage": {
-                "input": 100, "output": 50,
-                "cache_read": 20, "cache_write": 10,
-                "total_tokens": 180,
-                "cost": {"input": 0.001, "output": 0.002,
-                         "cache_read": 0.0, "cache_write": 0.0,
-                         "total": 0.003},
+        observe.on_message_end(
+            {
+                "role": "assistant",
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet",
+                "usage": {
+                    "input": 100,
+                    "output": 50,
+                    "cache_read": 20,
+                    "cache_write": 10,
+                    "total_tokens": 180,
+                    "cost": {
+                        "input": 0.001,
+                        "output": 0.002,
+                        "cache_read": 0.0,
+                        "cache_write": 0.0,
+                        "total": 0.003,
+                    },
+                },
             },
-        }, MagicMock())
+            MagicMock(),
+        )
         s = self._read_sidecar()
         self.assertEqual(s["model"], {"provider": "anthropic", "id": "claude-3-5-sonnet"})
         self.assertEqual(s["usage"]["input"], 100)
@@ -478,14 +508,28 @@ class TestMetering(unittest.TestCase):
     def test_usage_accumulates_across_calls(self) -> None:
         self._start()
         for _ in range(3):
-            observe.on_message_end({
-                "role": "assistant",
-                "provider": "openai", "model": "gpt-4",
-                "usage": {"input": 10, "output": 5, "cache_read": 0,
-                          "cache_write": 0, "total_tokens": 15,
-                          "cost": {"input": 0, "output": 0, "cache_read": 0,
-                                   "cache_write": 0, "total": 0.01}},
-            }, MagicMock())
+            observe.on_message_end(
+                {
+                    "role": "assistant",
+                    "provider": "openai",
+                    "model": "gpt-4",
+                    "usage": {
+                        "input": 10,
+                        "output": 5,
+                        "cache_read": 0,
+                        "cache_write": 0,
+                        "total_tokens": 15,
+                        "cost": {
+                            "input": 0,
+                            "output": 0,
+                            "cache_read": 0,
+                            "cache_write": 0,
+                            "total": 0.01,
+                        },
+                    },
+                },
+                MagicMock(),
+            )
         s = self._read_sidecar()
         self.assertEqual(s["usage"]["input"], 30)
         self.assertEqual(s["usage"]["total_tokens"], 45)
@@ -509,15 +553,28 @@ class TestMetering(unittest.TestCase):
 
         def _hammer(n: int) -> None:
             for _ in range(50):
-                observe.on_message_end({
-                    "role": "assistant",
-                    "provider": "p", "model": "m",
-                    "usage": {"input": 1, "output": 1, "cache_read": 0,
-                              "cache_write": 0, "total_tokens": 2,
-                              "cost": {"input": 0, "output": 0,
-                                       "cache_read": 0, "cache_write": 0,
-                                       "total": 0.0001}},
-                }, MagicMock())
+                observe.on_message_end(
+                    {
+                        "role": "assistant",
+                        "provider": "p",
+                        "model": "m",
+                        "usage": {
+                            "input": 1,
+                            "output": 1,
+                            "cache_read": 0,
+                            "cache_write": 0,
+                            "total_tokens": 2,
+                            "cost": {
+                                "input": 0,
+                                "output": 0,
+                                "cache_read": 0,
+                                "cache_write": 0,
+                                "total": 0.0001,
+                            },
+                        },
+                    },
+                    MagicMock(),
+                )
                 observe.on_tool_execution_end({"is_error": False}, MagicMock())
 
         threads = [threading.Thread(target=_hammer, args=(i,)) for i in range(8)]
@@ -557,43 +614,55 @@ class TestFormatter(unittest.TestCase):
         self.assertIn("v3", out)
 
     def test_user_message(self):
-        line = ('{"type":"message","timestamp":"2026-04-27T12:00:00Z",'
-                '"message":{"role":"user","content":"hi there"}}')
+        line = (
+            '{"type":"message","timestamp":"2026-04-27T12:00:00Z",'
+            '"message":{"role":"user","content":"hi there"}}'
+        )
         out = self._fmt().render(line)
         self.assertIn("user", out)
         self.assertIn("hi there", out)
 
     def test_assistant_with_tool_use(self):
-        line = ('{"type":"message","timestamp":"2026-04-27T12:00:00Z","message":'
-                '{"role":"assistant","content":'
-                '[{"type":"text","text":"thinking..."},{"type":"tool_use","name":"bash"}]}}')
+        line = (
+            '{"type":"message","timestamp":"2026-04-27T12:00:00Z","message":'
+            '{"role":"assistant","content":'
+            '[{"type":"text","text":"thinking..."},{"type":"tool_use","name":"bash"}]}}'
+        )
         out = self._fmt().render(line)
         self.assertIn("assistant", out)
         self.assertIn("thinking", out)
         self.assertIn("→ bash", out)
 
     def test_model_change(self):
-        line = ('{"type":"model_change","timestamp":"2026-04-27T12:00:00Z",'
-                '"provider":"anthropic","modelId":"claude-opus-4"}')
+        line = (
+            '{"type":"model_change","timestamp":"2026-04-27T12:00:00Z",'
+            '"provider":"anthropic","modelId":"claude-opus-4"}'
+        )
         out = self._fmt().render(line)
         self.assertIn("model →", out)
         self.assertIn("anthropic", out)
 
     def test_compaction(self):
-        line = ('{"type":"compaction","timestamp":"2026-04-27T12:00:00Z",'
-                '"summary":"compressed 50 turns"}')
+        line = (
+            '{"type":"compaction","timestamp":"2026-04-27T12:00:00Z",'
+            '"summary":"compressed 50 turns"}'
+        )
         out = self._fmt().render(line)
         self.assertIn("compaction", out)
         self.assertIn("50 turns", out)
 
     def test_plan_update(self):
-        line = ('{"type":"plan_update","timestamp":"2026-04-27T12:00:00Z",'
-                '"planTitle":"Implement caching"}')
+        line = (
+            '{"type":"plan_update","timestamp":"2026-04-27T12:00:00Z",'
+            '"planTitle":"Implement caching"}'
+        )
         self.assertIn("Implement caching", self._fmt().render(line))
 
     def test_command(self):
-        line = ('{"type":"command","timestamp":"2026-04-27T12:00:00Z",'
-                '"command":"bash","args":"go test ./..."}')
+        line = (
+            '{"type":"command","timestamp":"2026-04-27T12:00:00Z",'
+            '"command":"bash","args":"go test ./..."}'
+        )
         out = self._fmt().render(line)
         self.assertIn("bash", out)
         self.assertIn("go test", out)
@@ -601,8 +670,7 @@ class TestFormatter(unittest.TestCase):
     def test_hidden_types_return_none(self):
         for ty in ("label", "branch_summary", "custom", "custom_message"):
             line = f'{{"type":"{ty}","timestamp":"2026-04-27T12:00:00Z"}}'
-            self.assertIsNone(self._fmt().render(line),
-                              f"type {ty} should be suppressed")
+            self.assertIsNone(self._fmt().render(line), f"type {ty} should be suppressed")
 
     def test_unknown_type_renders_name(self):
         line = '{"type":"future_type","timestamp":"2026-04-27T12:00:00Z"}'
@@ -681,9 +749,11 @@ class TestAgeString(unittest.TestCase):
     def test_formats(self):
         # Use a fixed reference time so tests are deterministic.
         ref = datetime(2026, 4, 27, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+
         def t(seconds: int) -> str:
             dt = datetime.fromtimestamp(ref - seconds, tz=timezone.utc)
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
         self.assertEqual(observe._age_string(t(30), ref), "30s")
         self.assertEqual(observe._age_string(t(5 * 60), ref), "5m00s")
         self.assertEqual(observe._age_string(t(2 * 3600 + 30 * 60), ref), "2h30m")
@@ -897,22 +967,26 @@ class TestHtopHelpers(unittest.TestCase):
         self.assertTrue(out.startswith("\x1b[H\x1b[2J"))
 
     def test_htop_render_populated(self) -> None:
-        sidecars = [{
-            "session_id": "deadbeefcafe1234",
-            "session_name": "demo",
-            "cwd": "/tmp/work",
-            "status": "running",
-            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "store_path": "",
-            "model": {"provider": "anthropic", "id": "claude"},
-            "usage": {"total_tokens": 12345, "cost": {"total": 1.23}},
-            "activity": {"tool_calls": 7, "tool_errors": 2,
-                         "last_event": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                                     time.gmtime())},
-        }]
+        sidecars = [
+            {
+                "session_id": "deadbeefcafe1234",
+                "session_name": "demo",
+                "cwd": "/tmp/work",
+                "status": "running",
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "store_path": "",
+                "model": {"provider": "anthropic", "id": "claude"},
+                "usage": {"total_tokens": 12345, "cost": {"total": 1.23}},
+                "activity": {
+                    "tool_calls": 7,
+                    "tool_errors": 2,
+                    "last_event": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                },
+            }
+        ]
         out = observe._htop_render(sidecars, color=False)
         self.assertIn("1 session ", out)  # singular, no trailing 's'
-        self.assertIn("deadbeef", out)    # truncated id
+        self.assertIn("deadbeef", out)  # truncated id
         self.assertIn("anthropic/claude", out)
         self.assertIn("12.3k", out)
         self.assertIn("$1.23", out)
@@ -951,14 +1025,21 @@ class TestCards(unittest.TestCase):
         """Put a sidecar in the state dir so _resolve_sidecar finds us."""
         sidecar = os.path.join(self.sidecar_dir, f"{self.session_id}.json")
         with open(sidecar, "w") as f:
-            json.dump({
-                "session_id": self.session_id, "cwd": self.tmpdir,
-                "store_path": store_path,
-                "cards_path": store_path + ".cards",
-                "status": "running", "started_at": "2026-01-01T00:00:00Z",
-                "pid": os.getpid(), "host_pid": os.getppid(),
-                "socket_path": "", "schema": 1,
-            }, f)
+            json.dump(
+                {
+                    "session_id": self.session_id,
+                    "cwd": self.tmpdir,
+                    "store_path": store_path,
+                    "cards_path": store_path + ".cards",
+                    "status": "running",
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "pid": os.getpid(),
+                    "host_pid": os.getppid(),
+                    "socket_path": "",
+                    "schema": 1,
+                },
+                f,
+            )
 
     def test_session_start_records_cards_path(self) -> None:
         """observe sidecar must publish cards_path next to store_path."""
@@ -976,12 +1057,14 @@ class TestCards(unittest.TestCase):
         self.assertEqual(observe._read_cards("/does/not/exist"), [])
 
     def test_read_cards_filters_malformed_entries(self) -> None:
-        path = self._write_cards([
-            {"source": "plan", "key": "active", "slug": "ok", "ts": "2026-01-01T00:00:00Z"},
-            {"source": "plan"},                       # missing key — dropped
-            {"key": "k"},                              # missing source — dropped
-            "not an object",                           # dropped
-        ])
+        path = self._write_cards(
+            [
+                {"source": "plan", "key": "active", "slug": "ok", "ts": "2026-01-01T00:00:00Z"},
+                {"source": "plan"},  # missing key — dropped
+                {"key": "k"},  # missing source — dropped
+                "not an object",  # dropped
+            ]
+        )
         got = observe._read_cards(path)
         self.assertEqual(len(got), 1)
         self.assertEqual(got[0]["slug"], "ok")
@@ -994,9 +1077,9 @@ class TestCards(unittest.TestCase):
 
     def test_header_orders_priority_sources_first(self) -> None:
         cards = [
-            {"source": "zalpha",  "key": "k", "slug": "z-slug", "ts": "2026-01-01T00:00:01Z"},
-            {"source": "plan",    "key": "k", "slug": "3/8",    "ts": "2026-01-01T00:00:02Z"},
-            {"source": "mood",    "key": "k", "slug": "#engaged", "ts": "2026-01-01T00:00:03Z"},
+            {"source": "zalpha", "key": "k", "slug": "z-slug", "ts": "2026-01-01T00:00:01Z"},
+            {"source": "plan", "key": "k", "slug": "3/8", "ts": "2026-01-01T00:00:02Z"},
+            {"source": "mood", "key": "k", "slug": "#engaged", "ts": "2026-01-01T00:00:03Z"},
         ]
         header = observe._render_cards_header(cards)
         # plan first (priority 0), then mood (priority 1), then zalpha
@@ -1010,11 +1093,11 @@ class TestCards(unittest.TestCase):
         # Five sources, header limit is 3, so two should collapse into
         # the "…+2 more (--ext)" suffix.
         cards = [
-            {"source": "plan",    "key": "k", "slug": "p", "ts": "2026-01-01T00:00:01Z"},
-            {"source": "mood",    "key": "k", "slug": "m", "ts": "2026-01-01T00:00:02Z"},
-            {"source": "model",   "key": "k", "slug": "M", "ts": "2026-01-01T00:00:03Z"},
-            {"source": "extA",    "key": "k", "slug": "a", "ts": "2026-01-01T00:00:04Z"},
-            {"source": "extB",    "key": "k", "slug": "b", "ts": "2026-01-01T00:00:05Z"},
+            {"source": "plan", "key": "k", "slug": "p", "ts": "2026-01-01T00:00:01Z"},
+            {"source": "mood", "key": "k", "slug": "m", "ts": "2026-01-01T00:00:02Z"},
+            {"source": "model", "key": "k", "slug": "M", "ts": "2026-01-01T00:00:03Z"},
+            {"source": "extA", "key": "k", "slug": "a", "ts": "2026-01-01T00:00:04Z"},
+            {"source": "extB", "key": "k", "slug": "b", "ts": "2026-01-01T00:00:05Z"},
         ]
         header = observe._render_cards_header(cards)
         self.assertIn("plan: p", header)
@@ -1024,7 +1107,7 @@ class TestCards(unittest.TestCase):
 
     def test_header_collapses_multiple_keys_per_source(self) -> None:
         cards = [
-            {"source": "plan", "key": "a", "slug": "old",  "ts": "2026-01-01T00:00:01Z"},
+            {"source": "plan", "key": "a", "slug": "old", "ts": "2026-01-01T00:00:01Z"},
             {"source": "plan", "key": "b", "slug": "newer", "ts": "2026-01-01T00:00:02Z"},
         ]
         header = observe._render_cards_header(cards)
@@ -1037,13 +1120,19 @@ class TestCards(unittest.TestCase):
     def test_render_card_detail_for_one_source(self) -> None:
         cards = [
             {
-                "source": "plan", "key": "active", "slug": "3/8",
+                "source": "plan",
+                "key": "active",
+                "slug": "3/8",
                 "detail": "Step three",
-                "ts": "2026-01-01T00:00:00Z", "entry_id": "tc-1",
+                "ts": "2026-01-01T00:00:00Z",
+                "entry_id": "tc-1",
             },
             {
-                "source": "mood", "key": "current", "slug": "#engaged",
-                "detail": "Feeling good", "ts": "2026-01-01T00:00:00Z",
+                "source": "mood",
+                "key": "current",
+                "slug": "#engaged",
+                "detail": "Feeling good",
+                "ts": "2026-01-01T00:00:00Z",
             },
         ]
         plan_detail = observe._render_card_detail(cards, "plan")
@@ -1063,11 +1152,16 @@ class TestCards(unittest.TestCase):
     def _write_minimal_session(self, path: str, include_message: bool = True) -> None:
         """Write a minimal session JSONL with header and (optionally) one message."""
         header = {
-            "type": "session", "version": 3, "id": self.session_id,
-            "timestamp": "2026-01-01T00:00:00Z", "cwd": self.tmpdir,
+            "type": "session",
+            "version": 3,
+            "id": self.session_id,
+            "timestamp": "2026-01-01T00:00:00Z",
+            "cwd": self.tmpdir,
         }
         msg_entry = {
-            "type": "message", "id": "e1", "parentId": "",
+            "type": "message",
+            "id": "e1",
+            "parentId": "",
             "timestamp": "2026-01-01T00:00:01Z",
             "message": {"role": "user", "content": "hello", "timestamp": 0},
         }
@@ -1080,18 +1174,24 @@ class TestCards(unittest.TestCase):
         """End-to-end smoke: a session with cards + transcript renders both."""
         store_path = os.path.join(self.tmpdir, "session.jsonl")
         self._write_minimal_session(store_path)
-        self._write_cards([
-            {
-                "source": "plan", "key": "active",
-                "slug": "1/3 in_progress", "detail": "Step 1",
-                "ts": "2026-01-01T00:00:00Z",
-            },
-            {
-                "source": "mood", "key": "current",
-                "slug": "#engaged", "detail": "good",
-                "ts": "2026-01-01T00:00:01Z",
-            },
-        ])
+        self._write_cards(
+            [
+                {
+                    "source": "plan",
+                    "key": "active",
+                    "slug": "1/3 in_progress",
+                    "detail": "Step 1",
+                    "ts": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "source": "mood",
+                    "key": "current",
+                    "slug": "#engaged",
+                    "detail": "good",
+                    "ts": "2026-01-01T00:00:01Z",
+                },
+            ]
+        )
         self._plant_sidecar(store_path)
         out = observe._snapshot_transcript(self.session_id, "", 10, False)
         self.assertIn("plan: 1/3 in_progress", out)
@@ -1102,12 +1202,17 @@ class TestCards(unittest.TestCase):
     def test_snapshot_transcript_raw_json_includes_cards_array(self) -> None:
         store_path = os.path.join(self.tmpdir, "session.jsonl")
         self._write_minimal_session(store_path, include_message=False)
-        self._write_cards([
-            {
-                "source": "plan", "key": "active", "slug": "1/3",
-                "detail": "x", "ts": "2026-01-01T00:00:00Z",
-            },
-        ])
+        self._write_cards(
+            [
+                {
+                    "source": "plan",
+                    "key": "active",
+                    "slug": "1/3",
+                    "detail": "x",
+                    "ts": "2026-01-01T00:00:00Z",
+                },
+            ]
+        )
         self._plant_sidecar(store_path)
         out = observe._snapshot_transcript(self.session_id, "", 10, True)
         # The first section must be the cards JSON object.
@@ -1117,19 +1222,31 @@ class TestCards(unittest.TestCase):
     def test_snapshot_transcript_ext_expands_one_source(self) -> None:
         store_path = os.path.join(self.tmpdir, "session.jsonl")
         self._write_minimal_session(store_path, include_message=False)
-        self._write_cards([
-            {
-                "source": "plan", "key": "active", "slug": "1/3",
-                "detail": "EXPAND ME", "ts": "2026-01-01T00:00:00Z",
-            },
-            {
-                "source": "mood", "key": "current", "slug": "x",
-                "detail": "not shown", "ts": "2026-01-01T00:00:00Z",
-            },
-        ])
+        self._write_cards(
+            [
+                {
+                    "source": "plan",
+                    "key": "active",
+                    "slug": "1/3",
+                    "detail": "EXPAND ME",
+                    "ts": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "source": "mood",
+                    "key": "current",
+                    "slug": "x",
+                    "detail": "not shown",
+                    "ts": "2026-01-01T00:00:00Z",
+                },
+            ]
+        )
         self._plant_sidecar(store_path)
         out = observe._snapshot_transcript(
-            self.session_id, "", 10, False, ext="plan",
+            self.session_id,
+            "",
+            10,
+            False,
+            ext="plan",
         )
         self.assertIn("EXPAND ME", out)
         self.assertNotIn("not shown", out)
@@ -1137,17 +1254,27 @@ class TestCards(unittest.TestCase):
     def _write_multi_line_session(self, path: str, n: int) -> None:
         """Write a session header + n user messages, one JSONL record each."""
         header = {
-            "type": "session", "version": 3, "id": self.session_id,
-            "timestamp": "2026-01-01T00:00:00Z", "cwd": self.tmpdir,
+            "type": "session",
+            "version": 3,
+            "id": self.session_id,
+            "timestamp": "2026-01-01T00:00:00Z",
+            "cwd": self.tmpdir,
         }
         with open(path, "w") as f:
             f.write(json.dumps(header) + "\n")
             for k in range(n):
-                f.write(json.dumps({
-                    "type": "message", "id": f"e{k}", "parentId": "",
-                    "timestamp": "2026-01-01T00:00:01Z",
-                    "message": {"role": "user", "content": f"msg{k}", "timestamp": 0},
-                }) + "\n")
+                f.write(
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "id": f"e{k}",
+                            "parentId": "",
+                            "timestamp": "2026-01-01T00:00:01Z",
+                            "message": {"role": "user", "content": f"msg{k}", "timestamp": 0},
+                        }
+                    )
+                    + "\n"
+                )
 
     def test_read_line_range_inclusive(self) -> None:
         store_path = os.path.join(self.tmpdir, "session.jsonl")
@@ -1170,7 +1297,12 @@ class TestCards(unittest.TestCase):
         self._write_multi_line_session(store_path, 5)
         self._plant_sidecar(store_path)
         out = observe._snapshot_transcript(
-            self.session_id, "", 50, False, start=2, end=3,
+            self.session_id,
+            "",
+            50,
+            False,
+            start=2,
+            end=3,
         )
         self.assertIn("transcript lines 2-3 of 6", out)
         self.assertIn("msg0", out)
@@ -1185,6 +1317,7 @@ class TestCards(unittest.TestCase):
         out = observe._snapshot_transcript(self.session_id, "", 50, False)
         self.assertNotIn("transcript lines", out)
         self.assertIn("msg2", out)
+
 
 if __name__ == "__main__":
     unittest.main()

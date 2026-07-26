@@ -417,8 +417,7 @@ def _degrade_role(
         return cfg
     cfg_key = _model_key(cfg["provider"], cfg["model"])
     in_available = cfg_key not in _SESSION_UNAVAILABLE and any(
-        m.get("provider") == cfg["provider"] and m.get("id") == cfg["model"]
-        for m in available
+        m.get("provider") == cfg["provider"] and m.get("id") == cfg["model"] for m in available
     )
     if in_available:
         return cfg
@@ -544,7 +543,6 @@ def _is_model_unavailable_error(msg: str) -> bool:
     if any(m in low for m in _OVERFLOW_MARKERS):
         return False
     return any(s in low for s in _MODEL_UNAVAILABLE_SIGNATURES)
-
 
 
 # ---------------------------------------------------------------------------
@@ -814,9 +812,7 @@ def _run_side_query_chain(
         return None, err, None, ""
 
     # Chain exhausted or empty → executor terminal fallback.
-    text, err = _run_side_query_with_card(
-        ctx, question, model=None, provider=None, effort=None
-    )
+    text, err = _run_side_query_with_card(ctx, question, model=None, provider=None, effort=None)
     if err is None:
         # A non-empty chain that we walked to exhaustion earns the note; an
         # empty chain (no advisor, or nothing resolvable) answers silently.
@@ -829,10 +825,7 @@ def _run_side_query_chain(
     # error sets so neither is discarded.
     if advisor_errs and role_label:
         joined = "; ".join(advisor_errs)
-        combined = (
-            f"{role_label} chain exhausted: {joined}; "
-            f"executor fallback also failed: {err}"
-        )
+        combined = f"{role_label} chain exhausted: {joined}; executor fallback also failed: {err}"
         return None, combined, None, ""
     return None, err, None, ""
 

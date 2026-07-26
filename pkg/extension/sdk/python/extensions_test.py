@@ -22,7 +22,7 @@ def _load_extension(name: str):
     """
     path = os.path.join(_EXTENSIONS_DIR, f"{name}.py")
     fake_fir_ext = MagicMock()
-    fake_fir_ext.on = lambda _event: (lambda fn: fn)
+    fake_fir_ext.on = lambda _event: lambda fn: fn
     with patch.dict(sys.modules, {"fir_ext": fake_fir_ext}):
         spec = importlib.util.spec_from_file_location(name, path)
         assert spec is not None and spec.loader is not None
@@ -75,9 +75,7 @@ class TestNotifyFormats(unittest.TestCase):
         self.assertEqual(result, "\x1b]777;notify;title;body\x1b\\")
 
     def test_osc777_in_tmux(self):
-        with patch.dict(
-            os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False
-        ):
+        with patch.dict(os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False):
             result = self._capture_tty(_notify._notify_osc777, "title", "body")
         self.assertEqual(
             result,
@@ -91,18 +89,14 @@ class TestNotifyFormats(unittest.TestCase):
         self.assertIn("99;i=1:p=body;body", result)
 
     def test_osc99_in_tmux(self):
-        with patch.dict(
-            os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False
-        ):
+        with patch.dict(os.environ, {"TMUX": "/tmp/tmux-1234/default,1,0"}, clear=False):
             result = self._capture_tty(_notify._notify_osc99, "title", "body")
         self.assertIn("Ptmux;", result)
         self.assertIn("99;i=_tmp_tmux-1234_default_1_0:d=0;title", result)
         self.assertIn("99;i=_tmp_tmux-1234_default_1_0:p=body;body", result)
 
     def test_notify_terminal_uses_osc99_in_kitty(self):
-        with patch.dict(
-            os.environ, {"KITTY_WINDOW_ID": "1", "TMUX": ""}, clear=False
-        ):
+        with patch.dict(os.environ, {"KITTY_WINDOW_ID": "1", "TMUX": ""}, clear=False):
             result = self._capture_tty(_notify.notify_terminal, "fir", "Ready for input")
         self.assertIn("99;", result)
 

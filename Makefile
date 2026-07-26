@@ -60,6 +60,9 @@ _all_parallel: vet test-race build-all lint-python test-python-sdk test-python-e
 
 fmt:
 	@gofmt -s -w .
+	@# Python formatting, symmetric with gofmt above. Guarded: hosts without
+	@# uv still get a working `make all`, and CI re-checks via lint-python.
+	@command -v uv >/dev/null 2>&1 && uvx ruff@latest format -q $(PYTHON_DIRS) || true
 
 install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/fir/
@@ -267,7 +270,7 @@ deploy: build-all
 # `uv tool install`ed ruff, which silently differs from CI. A linter bump can
 # turn a green tree red with no code change; when that happens fix the code (or
 # adjust pyproject.toml), do not re-pin.
-PYTHON_DIRS := pkg/extension/sdk/python pkg/resources/testdata .fir/extensions
+PYTHON_DIRS := pkg/extension/sdk/python pkg/resources/testdata pkg/resources/builtin_extensions .fir/extensions
 
 install-uv:
 	@echo "Installing uv via Astral installer..."
@@ -278,6 +281,7 @@ check-uv:
 
 lint-python: check-uv
 	$(call RUN,lint python (ruff),uvx ruff@latest check $(PYTHON_DIRS))
+	$(call RUN,format python (ruff),uvx ruff@latest format --check $(PYTHON_DIRS))
 	$(call RUN,lint python (ty),uvx ty@latest check $(PYTHON_DIRS))
 
 test-python: test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner

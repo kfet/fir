@@ -599,6 +599,7 @@ class TestCLIVerb(unittest.TestCase):
             calls.append(name)
 
         self.assertEqual(len(fir_ext._cli_signal_handlers), 1)
+
         # Multiple registrations stack.
         @fir_ext.on_cli_signal
         def handler2(name, host):
@@ -697,8 +698,7 @@ class TestHost(unittest.TestCase):
         start = time.monotonic()
         host.wake()
         t.join(timeout=1.0)
-        self.assertLess(time.monotonic() - start, 0.5,
-                        "wake() should unblock readline promptly")
+        self.assertLess(time.monotonic() - start, 0.5, "wake() should unblock readline promptly")
         self.assertEqual(result, [None])
         # After wake() further reads keep returning None (EOF state set).
         self.assertIsNone(host.readline(timeout=0.05))
@@ -831,6 +831,7 @@ class TestSideQueryStream(unittest.TestCase):
 
     def _make_stream(self, rid: int = 7, idle_timeout: float = 1.0):
         import queue as _queue
+
         pending: dict = {}
         results: dict = {}
         delta_queues: dict = {}
@@ -947,8 +948,15 @@ class TestSideQueryStreamDispatcher(unittest.TestCase):
         try:
             # init
             host_out.write(
-                json.dumps({"jsonrpc": "2.0", "id": 1, "method": "init",
-                            "params": {"version": "1", "cwd": "/tmp"}}) + "\n"
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "init",
+                        "params": {"version": "1", "cwd": "/tmp"},
+                    }
+                )
+                + "\n"
             )
             host_out.flush()
             init_resp = host_in.readline()
@@ -956,8 +964,15 @@ class TestSideQueryStreamDispatcher(unittest.TestCase):
 
             # call the probe tool
             host_out.write(
-                json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tool_call",
-                            "params": {"name": "probe", "params": {}, "tool_call_id": "x"}}) + "\n"
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "tool_call",
+                        "params": {"name": "probe", "params": {}, "tool_call_id": "x"},
+                    }
+                )
+                + "\n"
             )
             host_out.flush()
 
@@ -974,13 +989,23 @@ class TestSideQueryStreamDispatcher(unittest.TestCase):
                 {"request_id": rid, "type": "text", "text": "there", "seq": 2},
             ):
                 host_out.write(
-                    json.dumps({"jsonrpc": "2.0", "method": "side_query/delta",
-                                "params": body}) + "\n"
+                    json.dumps({"jsonrpc": "2.0", "method": "side_query/delta", "params": body})
+                    + "\n"
                 )
             host_out.write(
-                json.dumps({"jsonrpc": "2.0", "id": rid,
-                            "result": {"ok": True, "text": "hi there",
-                                       "finish_reason": "stop", "blocks": []}}) + "\n"
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": rid,
+                        "result": {
+                            "ok": True,
+                            "text": "hi there",
+                            "finish_reason": "stop",
+                            "blocks": [],
+                        },
+                    }
+                )
+                + "\n"
             )
             host_out.flush()
 
@@ -989,6 +1014,7 @@ class TestSideQueryStreamDispatcher(unittest.TestCase):
             self.assertEqual(tool_resp["id"], 2)
         finally:
             import contextlib
+
             host_out.close()
             with contextlib.suppress(Exception):
                 host_in.close()
@@ -1010,6 +1036,7 @@ class TestSideQueryStreamDispatcher(unittest.TestCase):
         # Simulating: dispatcher receives a side_query/delta for an rid
         # not in delta_queues. Should not raise.
         import importlib
+
         importlib.reload(fir_ext)
         # We exercise the routing logic by simulating what _dispatch does
         # in the side_query/delta branch.

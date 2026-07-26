@@ -69,17 +69,13 @@ class TestStripSpinnerSuffix(unittest.TestCase):
         self.assertEqual(tmuxspinner._strip_spinner_suffix("fir A"), "fir A")
 
     def test_counter_suffix_no_match(self):
-        self.assertEqual(
-            tmuxspinner._strip_spinner_suffix("fir foo bar"), "fir foo bar"
-        )
+        self.assertEqual(tmuxspinner._strip_spinner_suffix("fir foo bar"), "fir foo bar")
 
     def test_strip_glyph_only(self):
         # Each of the spinner frames is peeled when preceded by a space.
         for frame in tmuxspinner.SPINNER_FRAMES:
             self.assertEqual(tmuxspinner._strip_spinner_suffix(f"fir {frame}"), "fir")
-            self.assertEqual(
-                tmuxspinner._strip_spinner_suffix(f"fir mysess {frame}"), "fir mysess"
-            )
+            self.assertEqual(tmuxspinner._strip_spinner_suffix(f"fir mysess {frame}"), "fir mysess")
 
 
 class TestTrimAndFit(unittest.TestCase):
@@ -92,9 +88,7 @@ class TestTrimAndFit(unittest.TestCase):
         self.assertLessEqual(len(out), 4)
 
     def test_fit_title_preserves_status_drops_tab(self):
-        title = tmuxspinner._fit_title(
-            "very-long-window-name-from-shell", "", "|"
-        )
+        title = tmuxspinner._fit_title("very-long-window-name-from-shell", "", "|")
         self.assertLessEqual(len(title), tmuxspinner.MAX_TITLE_LEN)
         self.assertTrue(title.endswith(" |"))
         self.assertIn("…", title)
@@ -248,9 +242,12 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._pane_id = "%1"
         s._original_name = "fir"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
-             mock.patch.object(tmuxspinner, "_read_window_name",
-                               side_effect=_echo_last_set(mock_rn)):
+        with (
+            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(
+                tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
+            ),
+        ):
             s.start()
             self.assertTrue(s._running)
             # Let spinner loop iterate at least once.
@@ -267,9 +264,12 @@ class TestSpinnerStartStop(unittest.TestCase):
         s._original_name = "fir"
         s._session_name = "mysess"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
-             mock.patch.object(tmuxspinner, "_read_window_name",
-                               side_effect=_echo_last_set(mock_rn)):
+        with (
+            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(
+                tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
+            ),
+        ):
             s.start()
             time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.stop()
@@ -348,8 +348,9 @@ class TestModuleLevelGuard(unittest.TestCase):
                     pass
             # No event handlers should be registered.
             for key in ("agent_start", "agent_end", "session_shutdown", "session_named"):
-                self.assertNotIn(key, fir_ext._event_handlers,
-                                 f"{key} should not be registered without TMUX")
+                self.assertNotIn(
+                    key, fir_ext._event_handlers, f"{key} should not be registered without TMUX"
+                )
         finally:
             fir_ext._event_handlers.clear()
             fir_ext._event_handlers.update(saved)
@@ -374,10 +375,13 @@ class TestSpinnerShutdown(unittest.TestCase):
         s._original_name = "zsh"
         s._session_name = "mysess"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
-             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset, \
-             mock.patch.object(tmuxspinner, "_read_window_name",
-                               side_effect=_echo_last_set(mock_rn)):
+        with (
+            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset,
+            mock.patch.object(
+                tmuxspinner, "_read_window_name", side_effect=_echo_last_set(mock_rn)
+            ),
+        ):
             s.start()
             time.sleep(tmuxspinner.TICK_INTERVAL * 2)
             s.shutdown()
@@ -394,8 +398,10 @@ class TestSpinnerShutdown(unittest.TestCase):
         s._original_name = "zsh"
         s._session_name = "mysess"
 
-        with mock.patch.object(tmuxspinner, "_rename_window") as mock_rn, \
-             mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset:
+        with (
+            mock.patch.object(tmuxspinner, "_rename_window") as mock_rn,
+            mock.patch.object(tmuxspinner, "_unset_window_option") as mock_unset,
+        ):
             s.shutdown()
             mock_rn.assert_called_once_with("%1", "zsh")
             mock_unset.assert_called_once_with("%1", "@fir_original_name")
@@ -413,10 +419,12 @@ class TestStashRecovery(unittest.TestCase):
 
     def test_recovers_stashed_name(self):
         s = tmuxspinner.Spinner()
-        with mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}), \
-             mock.patch.object(tmuxspinner, "_disable_auto_rename"), \
-             mock.patch.object(tmuxspinner, "_get_window_option", return_value="zsh"), \
-             mock.patch.object(tmuxspinner, "_set_window_option") as mock_set:
+        with (
+            mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}),
+            mock.patch.object(tmuxspinner, "_disable_auto_rename"),
+            mock.patch.object(tmuxspinner, "_get_window_option", return_value="zsh"),
+            mock.patch.object(tmuxspinner, "_set_window_option") as mock_set,
+        ):
             with s._lock:
                 s._init_pane()
             self.assertEqual(s._original_name, "zsh")
@@ -425,11 +433,13 @@ class TestStashRecovery(unittest.TestCase):
 
     def test_reads_window_name_when_no_stash(self):
         s = tmuxspinner.Spinner()
-        with mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}), \
-             mock.patch.object(tmuxspinner, "_disable_auto_rename"), \
-             mock.patch.object(tmuxspinner, "_get_window_option", return_value=""), \
-             mock.patch.object(tmuxspinner, "_read_window_name", return_value="bash"), \
-             mock.patch.object(tmuxspinner, "_set_window_option") as mock_set:
+        with (
+            mock.patch.dict(os.environ, {"TMUX_PANE": "%1"}),
+            mock.patch.object(tmuxspinner, "_disable_auto_rename"),
+            mock.patch.object(tmuxspinner, "_get_window_option", return_value=""),
+            mock.patch.object(tmuxspinner, "_read_window_name", return_value="bash"),
+            mock.patch.object(tmuxspinner, "_set_window_option") as mock_set,
+        ):
             with s._lock:
                 s._init_pane()
             self.assertEqual(s._original_name, "bash")

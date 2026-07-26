@@ -101,7 +101,7 @@ import fir_ext
 # ---------------------------------------------------------------------------
 
 _LOG_KEY = "mood_log"
-_TURN_KEY = "mood_turn"               # monotonically increasing agent_end count
+_TURN_KEY = "mood_turn"  # monotonically increasing agent_end count
 _LAST_CHECKIN_KEY = "mood_last_checkin_turn"
 _STATUS_SET_TURN_KEY = "mood_status_turn"
 
@@ -253,8 +253,7 @@ def _clean_tag(s: Any) -> str | None:
 def mood_note(params: dict, ctx: fir_ext.Context) -> dict:
     note = (params.get("note") or "").strip()
     if not note:
-        return {"content": [{"type": "text", "text": "(empty note ignored)"}],
-                "is_error": False}
+        return {"content": [{"type": "text", "text": "(empty note ignored)"}], "is_error": False}
     tag = _clean_tag(params.get("tag"))
     entry: dict[str, Any] = {
         "kind": "mood",
@@ -279,9 +278,10 @@ def mood_note(params: dict, ctx: fir_ext.Context) -> dict:
             _set_int(ctx, _STATUS_SET_TURN_KEY, entry["turn"])
         except Exception:  # noqa: S110 — set_status failure is non-fatal
             pass
-    return {"content": [{"type": "text",
-                         "text": f"logged{' #' + tag if tag else ''}"}],
-            "is_error": False}
+    return {
+        "content": [{"type": "text", "text": f"logged{' #' + tag if tag else ''}"}],
+        "is_error": False,
+    }
 
 
 @fir_ext.tool(
@@ -309,16 +309,14 @@ def mood_recent(params: dict, ctx: fir_ext.Context) -> dict:
     entries = [e for e in _load_log(ctx) if e.get("kind") == "mood"]
     recent = entries[-n:]
     if not recent:
-        return {"content": [{"type": "text", "text": "(no mood entries yet)"}],
-                "is_error": False}
+        return {"content": [{"type": "text", "text": "(no mood entries yet)"}], "is_error": False}
     lines = []
     for e in recent:
         tag = e.get("tag")
-        head = f"[t{e.get('turn','?')} {e.get('ts','')}]"
+        head = f"[t{e.get('turn', '?')} {e.get('ts', '')}]"
         head += f" #{tag}" if tag else ""
-        lines.append(f"{head} {e.get('note','')}")
-    return {"content": [{"type": "text", "text": "\n".join(lines)}],
-            "is_error": False}
+        lines.append(f"{head} {e.get('note', '')}")
+    return {"content": [{"type": "text", "text": "\n".join(lines)}], "is_error": False}
 
 
 # ---------------------------------------------------------------------------
@@ -336,8 +334,7 @@ def cmd_mood(args: list, ctx: fir_ext.Context) -> dict:
     if not include_all:
         entries = [e for e in entries if e.get("kind") == "mood"]
     if not entries:
-        return {"message": "mood log is empty.",
-                "print_response": False}
+        return {"message": "mood log is empty.", "print_response": False}
     lines = ["mood log:" if not include_all else "mood log (with gating):"]
     for e in entries:
         kind = e.get("kind", "?")
@@ -348,7 +345,7 @@ def cmd_mood(args: list, ctx: fir_ext.Context) -> dict:
             prefix = f"  [t{turn} {ts}]"
             if tag:
                 prefix += f" #{tag}"
-            lines.append(f"{prefix} {e.get('note','')}")
+            lines.append(f"{prefix} {e.get('note', '')}")
         elif kind == "gating":
             decision = e.get("decision")
             marker = "·" if decision is None else ("✓" if decision else "—")
@@ -478,17 +475,29 @@ def _run_gating(ctx: fir_ext.Context) -> None:
             timeout=120.0,
         )
     except Exception as exc:
-        _append_entry(ctx, {
-            "kind": "gating", "turn": turn, "ts": _now_iso(),
-            "decision": None, "skipped_reason": f"aside call failed: {exc}",
-        })
+        _append_entry(
+            ctx,
+            {
+                "kind": "gating",
+                "turn": turn,
+                "ts": _now_iso(),
+                "decision": None,
+                "skipped_reason": f"aside call failed: {exc}",
+            },
+        )
         return
 
     if not isinstance(result, dict) or result.get("is_error"):
-        _append_entry(ctx, {
-            "kind": "gating", "turn": turn, "ts": _now_iso(),
-            "decision": None, "skipped_reason": "aside unavailable or errored",
-        })
+        _append_entry(
+            ctx,
+            {
+                "kind": "gating",
+                "turn": turn,
+                "ts": _now_iso(),
+                "decision": None,
+                "skipped_reason": "aside unavailable or errored",
+            },
+        )
         return
 
     # Pull text out of the tool result content blocks.
@@ -501,18 +510,30 @@ def _run_gating(ctx: fir_ext.Context) -> None:
     advisor_text = "\n".join(text_parts).strip()
     obj = _extract_json_obj(advisor_text)
     if not obj:
-        _append_entry(ctx, {
-            "kind": "gating", "turn": turn, "ts": _now_iso(),
-            "decision": None, "skipped_reason": "advisor reply unparseable",
-        })
+        _append_entry(
+            ctx,
+            {
+                "kind": "gating",
+                "turn": turn,
+                "ts": _now_iso(),
+                "decision": None,
+                "skipped_reason": "advisor reply unparseable",
+            },
+        )
         return
 
     decision = bool(obj.get("checkin"))
     reason = _sanitise_reason(str(obj.get("reason") or ""))[:240]
-    _append_entry(ctx, {
-        "kind": "gating", "turn": turn, "ts": _now_iso(),
-        "decision": decision, "reason": reason,
-    })
+    _append_entry(
+        ctx,
+        {
+            "kind": "gating",
+            "turn": turn,
+            "ts": _now_iso(),
+            "decision": decision,
+            "reason": reason,
+        },
+    )
 
     if not decision:
         return
@@ -552,16 +573,21 @@ def _run_gating(ctx: fir_ext.Context) -> None:
             deliver_as="steer",
         )
     except Exception as exc:
-        _append_entry(ctx, {
-            "kind": "gating", "turn": turn, "ts": _now_iso(),
-            "decision": None, "skipped_reason": f"send_message failed: {exc}",
-        })
+        _append_entry(
+            ctx,
+            {
+                "kind": "gating",
+                "turn": turn,
+                "ts": _now_iso(),
+                "decision": None,
+                "skipped_reason": f"send_message failed: {exc}",
+            },
+        )
         return
     _set_int(ctx, _LAST_CHECKIN_KEY, turn)
 
     # Debug breadcrumb — visible only in fir --debug logs (stderr).
-    print(f"mood: nudge steered at turn {turn} reason={reason!r}",
-          file=sys.stderr)
+    print(f"mood: nudge steered at turn {turn} reason={reason!r}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +604,7 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     # previously this only logged a breadcrumb; the tag would silently
     # disappear after /reexec even though the log itself was restored.)
     entries = _load_log(ctx)
-    print(f"mood: session_start (existing entries: {len(entries)})",
-          file=sys.stderr)
+    print(f"mood: session_start (existing entries: {len(entries)})", file=sys.stderr)
 
     last_mood = next(
         (e for e in reversed(entries) if e.get("kind") == "mood" and e.get("tag")),
@@ -599,8 +624,7 @@ def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -
     with contextlib.suppress(Exception):
         ctx.set_status(tag)
         _set_int(ctx, _STATUS_SET_TURN_KEY, 0)
-    print(f"mood: restored footer tag from last mood entry: #{tag}",
-          file=sys.stderr)
+    print(f"mood: restored footer tag from last mood entry: #{tag}", file=sys.stderr)
 
 
 @fir_ext.on("agent_end")
@@ -621,10 +645,16 @@ def on_agent_end(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> 
         # the extension or surface to the user.
         print(f"mood: gating crashed at turn {turn}: {exc}", file=sys.stderr)
         with contextlib.suppress(Exception):
-            _append_entry(ctx, {
-                "kind": "gating", "turn": turn, "ts": _now_iso(),
-                "decision": None, "skipped_reason": f"crash: {exc}",
-            })
+            _append_entry(
+                ctx,
+                {
+                    "kind": "gating",
+                    "turn": turn,
+                    "ts": _now_iso(),
+                    "decision": None,
+                    "skipped_reason": f"crash: {exc}",
+                },
+            )
     finally:
         _gating_inflight.release()
 

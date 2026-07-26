@@ -43,8 +43,9 @@ import threading
 import time
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__))))))
+ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 EXT = os.path.join(ROOT, ".fir/extensions/handoff.py")
 SDK = os.path.join(ROOT, "pkg/extension/sdk/python")
 
@@ -83,7 +84,7 @@ class Bridge:
         self.session_id = session_id
         self.next_id = 1
         self.responses: dict[int, dict] = {}
-        self.requests: list[dict] = []   # ext → us, with id
+        self.requests: list[dict] = []  # ext → us, with id
         self.restart_calls: list[dict] = []
         self.observable_writes: list[dict] = []
 
@@ -134,8 +135,12 @@ class Bridge:
             self.observable_writes.append(msg.get("params") or {})
             result = {"ok": True}
         elif method in (
-            "get_session_name", "get_session_data", "set_session_data",
-            "set_status", "notify", "send_user_message",
+            "get_session_name",
+            "get_session_data",
+            "set_session_data",
+            "set_status",
+            "notify",
+            "send_user_message",
         ):
             # Handoff doesn't actually call most of these in the paths
             # we test, but the SDK may probe them during init / lifecycle
@@ -147,9 +152,13 @@ class Bridge:
             else:
                 result = {"ok": True}
         else:
-            self._send({"jsonrpc": "2.0", "id": mid,
-                        "error": {"code": -32601,
-                                  "message": f"unknown {method}"}})
+            self._send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": mid,
+                    "error": {"code": -32601, "message": f"unknown {method}"},
+                }
+            )
             return
         self._send({"jsonrpc": "2.0", "id": mid, "result": result})
 
@@ -160,8 +169,7 @@ class Bridge:
     def request(self, method: str, params: dict, timeout: float = 5.0) -> dict:
         mid = self.next_id
         self.next_id += 1
-        self._send({"jsonrpc": "2.0", "id": mid,
-                    "method": method, "params": params})
+        self._send({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})
         deadline = time.time() + timeout
         while time.time() < deadline:
             if mid in self.responses:
@@ -196,9 +204,8 @@ def _text_of(result: dict) -> str:
 # are intentionally out-of-call-order so the sort test has something to
 # do. Each entry is one JSONL line.
 
-def _msg_entry(
-    eid: str, ts: str, role: str, text: str, **extra
-) -> dict:
+
+def _msg_entry(eid: str, ts: str, role: str, text: str, **extra) -> dict:
     """Build a realistic-looking SessionEntry (single-line JSONL)."""
     return {
         "type": "message",
@@ -242,16 +249,19 @@ class _BookmarkBase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp(prefix="handoff-bookmark-test-")
         self.transcript_path = os.path.join(
-            self.tmpdir, f"20250522-100000_{self.SESSION_ID}.jsonl",
+            self.tmpdir,
+            f"20250522-100000_{self.SESSION_ID}.jsonl",
         )
         self.bookmarks_path = os.path.join(
-            self.tmpdir, f"bookmarks-{self.SESSION_ID}.jsonl",
+            self.tmpdir,
+            f"bookmarks-{self.SESSION_ID}.jsonl",
         )
         self._populate_transcript()
         self.bridge = Bridge(self.transcript_path, self.SESSION_ID)
         # Drive the init handshake so the SDK registers everything.
         self.init_result = self.bridge.request(
-            "init", {"version": "1", "cwd": self.tmpdir, "config_dirs": []},
+            "init",
+            {"version": "1", "cwd": self.tmpdir, "config_dirs": []},
         )
 
     def tearDown(self) -> None:
@@ -263,33 +273,41 @@ class _BookmarkBase(unittest.TestCase):
     def _populate_transcript(self) -> None:
         """Default transcript — three turns, ts out of bookmark-call order."""
         self.entries = [
-            _msg_entry("e-001", "2025-05-22T14:00:00", "user",
-                       "Use SQLite for the MVP, no Postgres."),
-            _msg_entry("e-002", "2025-05-22T14:05:00", "assistant",
-                       "Acknowledged. Final DB schema: users(id, name)."),
-            _msg_entry("e-003", "2025-05-22T14:10:00", "user",
-                       "Skip auth entirely for the MVP."),
+            _msg_entry(
+                "e-001", "2025-05-22T14:00:00", "user", "Use SQLite for the MVP, no Postgres."
+            ),
+            _msg_entry(
+                "e-002",
+                "2025-05-22T14:05:00",
+                "assistant",
+                "Acknowledged. Final DB schema: users(id, name).",
+            ),
+            _msg_entry("e-003", "2025-05-22T14:10:00", "user", "Skip auth entirely for the MVP."),
         ]
         _write_transcript(self.transcript_path, self.entries)
 
     # --- helpers --------------------------------------------------------
 
-    def call_bookmark(self, quote: str, note: str,
-                      tool_call_id: str = "tc-1") -> dict:
-        r = self.bridge.request("tool_call", {
-            "tool_call_id": tool_call_id,
-            "name": "bookmark",
-            "params": {"quote": quote, "note": note},
-        })
+    def call_bookmark(self, quote: str, note: str, tool_call_id: str = "tc-1") -> dict:
+        r = self.bridge.request(
+            "tool_call",
+            {
+                "tool_call_id": tool_call_id,
+                "name": "bookmark",
+                "params": {"quote": quote, "note": note},
+            },
+        )
         return r["result"]
 
-    def call_self_handoff(self, content: str,
-                          tool_call_id: str = "ho-1") -> dict:
-        r = self.bridge.request("tool_call", {
-            "tool_call_id": tool_call_id,
-            "name": "self_handoff",
-            "params": {"content": content},
-        })
+    def call_self_handoff(self, content: str, tool_call_id: str = "ho-1") -> dict:
+        r = self.bridge.request(
+            "tool_call",
+            {
+                "tool_call_id": tool_call_id,
+                "name": "self_handoff",
+                "params": {"content": content},
+            },
+        )
         return r["result"]
 
 
@@ -313,17 +331,29 @@ class TestBookmarkExcludesBookmarkCall(_BookmarkBase):
     def _populate_transcript(self) -> None:
         self.entries = [
             # The real turn the model wants to pin (a tool result).
-            _msg_entry("e-real", "2025-05-22T14:00:00", "assistant",
-                       f"Applied the fix:\n{self.QUOTE}\nbuild is green."),
+            _msg_entry(
+                "e-real",
+                "2025-05-22T14:00:00",
+                "assistant",
+                f"Applied the fix:\n{self.QUOTE}\nbuild is green.",
+            ),
             # A *later* assistant turn that is itself a bookmark call,
             # carrying the same quote in its arguments — the trap.
             {
-                "type": "message", "id": "e-bmcall", "parentId": "",
+                "type": "message",
+                "id": "e-bmcall",
+                "parentId": "",
                 "timestamp": "2025-05-22T14:09:00",
-                "message": {"role": "assistant", "content": [
-                    {"type": "toolCall", "name": "bookmark",
-                     "arguments": {"quote": self.QUOTE, "note": "the fix"}},
-                ]},
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "name": "bookmark",
+                            "arguments": {"quote": self.QUOTE, "note": "the fix"},
+                        },
+                    ],
+                },
             },
         ]
         _write_transcript(self.transcript_path, self.entries)
@@ -363,16 +393,16 @@ class TestInit(_BookmarkBase):
 
     def test_bookmark_description_mentions_all_turn_types(self) -> None:
         result = self.init_result["result"]
-        spec = next(t for t in result.get("tools", [])
-                    if t["name"] == "bookmark")
+        spec = next(t for t in result.get("tools", []) if t["name"] == "bookmark")
         desc = spec.get("description", "")
         # Must explicitly cover every turn kind so the model knows the
         # search is unscoped.
-        for needle in ("user message", "assistant message",
-                       "tool call", "tool result"):
-            self.assertIn(needle, desc.lower(),
-                          f"bookmark description must mention {needle!r}: "
-                          f"got {desc[:300]!r}")
+        for needle in ("user message", "assistant message", "tool call", "tool result"):
+            self.assertIn(
+                needle,
+                desc.lower(),
+                f"bookmark description must mention {needle!r}: got {desc[:300]!r}",
+            )
 
 
 class TestBookmarkExactQuote(_BookmarkBase):
@@ -420,10 +450,8 @@ class TestBookmarkDecodedQuote(_BookmarkBase):
 
     def _populate_transcript(self) -> None:
         self.entries = [
-            _msg_entry("e-html", "2025-05-22T15:00:00", "user",
-                       "use <tag> now"),
-            _msg_entry("e-nl", "2025-05-22T15:05:00", "assistant",
-                       "line one\nline two"),
+            _msg_entry("e-html", "2025-05-22T15:00:00", "user", "use <tag> now"),
+            _msg_entry("e-nl", "2025-05-22T15:05:00", "assistant", "line one\nline two"),
         ]
         _write_transcript(self.transcript_path, self.entries)
 
@@ -446,12 +474,9 @@ class TestBookmarkAmbiguousQuote(_BookmarkBase):
     def _populate_transcript(self) -> None:
         # Three turns that all share the substring "MVP".
         self.entries = [
-            _msg_entry("e-a", "2025-05-22T13:00:00", "user",
-                       "MVP iteration one."),
-            _msg_entry("e-b", "2025-05-22T13:10:00", "assistant",
-                       "MVP iteration two."),
-            _msg_entry("e-c", "2025-05-22T13:20:00", "user",
-                       "MVP iteration three."),
+            _msg_entry("e-a", "2025-05-22T13:00:00", "user", "MVP iteration one."),
+            _msg_entry("e-b", "2025-05-22T13:10:00", "assistant", "MVP iteration two."),
+            _msg_entry("e-c", "2025-05-22T13:20:00", "user", "MVP iteration three."),
         ]
         _write_transcript(self.transcript_path, self.entries)
 
@@ -472,8 +497,9 @@ class TestBookmarkNoMatch(_BookmarkBase):
     def test_unmatched_quote_returns_tool_error(self) -> None:
         r = self.call_bookmark("this phrase appears nowhere", "ignored")
         self.assertTrue(r.get("is_error"), r)
-        self.assertFalse(os.path.exists(self.bookmarks_path),
-                         "no bookmarks file should be created on miss")
+        self.assertFalse(
+            os.path.exists(self.bookmarks_path), "no bookmarks file should be created on miss"
+        )
         # The error tells the model how to recover.
         text = _text_of(r)
         self.assertIn("not found", text.lower())
@@ -483,12 +509,9 @@ class TestBookmarkSortsByOriginalTs(_BookmarkBase):
     def _populate_transcript(self) -> None:
         # Timestamps assigned so that bookmark-call order != ts order.
         self.entries = [
-            _msg_entry("e-x", "2025-05-22T16:00:00", "user",
-                       "AAA later but bookmarked first"),
-            _msg_entry("e-y", "2025-05-22T14:00:00", "user",
-                       "BBB earlier but bookmarked second"),
-            _msg_entry("e-z", "2025-05-22T15:00:00", "user",
-                       "CCC middle, bookmarked third"),
+            _msg_entry("e-x", "2025-05-22T16:00:00", "user", "AAA later but bookmarked first"),
+            _msg_entry("e-y", "2025-05-22T14:00:00", "user", "BBB earlier but bookmarked second"),
+            _msg_entry("e-z", "2025-05-22T15:00:00", "user", "CCC middle, bookmarked third"),
         ]
         _write_transcript(self.transcript_path, self.entries)
 
@@ -501,14 +524,14 @@ class TestBookmarkSortsByOriginalTs(_BookmarkBase):
         rows = _read_jsonl(self.bookmarks_path)
         self.assertEqual([r["id"] for r in rows], ["e-y", "e-z", "e-x"])
         # The injected notes follow the entries.
-        self.assertEqual([r["_bookmark_note"] for r in rows],
-                         ["second call", "third call", "first call"])
+        self.assertEqual(
+            [r["_bookmark_note"] for r in rows], ["second call", "third call", "first call"]
+        )
 
 
 class TestCardOnEveryBookmark(_BookmarkBase):
     def test_card_updates_with_count_path_and_recent_notes(self) -> None:
-        self.call_bookmark("Final DB schema",
-                           "final DB schema", tool_call_id="tc-1")
+        self.call_bookmark("Final DB schema", "final DB schema", tool_call_id="tc-1")
         # First put_observable: 1 pinned.
         ow = self.bridge.observable_writes
         self.assertGreater(len(ow), 0)
@@ -522,8 +545,7 @@ class TestCardOnEveryBookmark(_BookmarkBase):
         self.assertIn("14:05", first["detail"])
 
         # Second bookmark: count bumps and slug reflects it.
-        self.call_bookmark("Skip auth",
-                           "skip auth for MVP", tool_call_id="tc-2")
+        self.call_bookmark("Skip auth", "skip auth for MVP", tool_call_id="tc-2")
         second = self.bridge.observable_writes[-1]
         self.assertEqual(second["key"], "bookmarks")
         self.assertEqual(second["slug"], "2 pinned")
@@ -534,12 +556,10 @@ class TestCardOnEveryBookmark(_BookmarkBase):
         # Pin a bunch so the count grows — slug stays "<N> pinned".
         for i in range(15):
             ts = f"2025-05-22T15:{i:02d}:00"
-            self.entries.append(_msg_entry(
-                f"e-x-{i}", ts, "user", f"line marker XYZ-{i}"))
+            self.entries.append(_msg_entry(f"e-x-{i}", ts, "user", f"line marker XYZ-{i}"))
         _write_transcript(self.transcript_path, self.entries)
         for i in range(12):
-            r = self.call_bookmark(
-                f"line marker XYZ-{i}", f"n{i}", tool_call_id=f"tc-{i}")
+            r = self.call_bookmark(f"line marker XYZ-{i}", f"n{i}", tool_call_id=f"tc-{i}")
             self.assertFalse(r.get("is_error"), r)
         last = self.bridge.observable_writes[-1]
         self.assertLessEqual(len(last["slug"]), 24, last)

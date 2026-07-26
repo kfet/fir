@@ -71,9 +71,9 @@ import fir_ext
 # Validation thresholds (self_handoff)
 # ---------------------------------------------------------------------------
 
-MIN_CONTENT_LEN = 200          # chars after strip — below this is junk
-MAX_CONTENT_LEN = 64 * 1024    # chars — above this is an accidental dump
-MIN_NON_BLANK_LINES = 3        # a briefing has structure
+MIN_CONTENT_LEN = 200  # chars after strip — below this is junk
+MAX_CONTENT_LEN = 64 * 1024  # chars — above this is an accidental dump
+MIN_NON_BLANK_LINES = 3  # a briefing has structure
 
 # ---------------------------------------------------------------------------
 # Bookmark constants
@@ -332,7 +332,7 @@ def _parse_pin_branch(out: str) -> list[tuple[str, str]]:
         # Strip common list bullets the model might prepend.
         for bullet in ("- ", "* "):
             if line.startswith(bullet):
-                line = line[len(bullet):].strip()
+                line = line[len(bullet) :].strip()
         if "|||" not in line:
             continue
         quote, note = line.split("|||", 1)
@@ -406,7 +406,8 @@ def _bookmarks_path(ctx: fir_ext.Context) -> str:
     if not session_file or not session_id:
         return ""
     return os.path.join(
-        os.path.dirname(session_file), f"bookmarks-{session_id}.jsonl",
+        os.path.dirname(session_file),
+        f"bookmarks-{session_id}.jsonl",
     )
 
 
@@ -454,7 +455,8 @@ def _is_bookmark_call(value: Any) -> bool:
 
 
 def _find_turn_by_quote(
-    transcript_path: str, quote: str,
+    transcript_path: str,
+    quote: str,
 ) -> tuple[dict | None, int]:
     """Reverse-scan ``transcript_path`` for ``quote``.
 
@@ -644,7 +646,7 @@ def _sibling_transcript(bm_path: str) -> str:
     base = os.path.basename(bm_path)
     if not base.startswith("bookmarks-") or not base.endswith(".jsonl"):
         return ""
-    sid = base[len("bookmarks-"):-len(".jsonl")]
+    sid = base[len("bookmarks-") : -len(".jsonl")]
     try:
         names = os.listdir(d)
     except OSError:
@@ -687,8 +689,11 @@ def _rewrite_card_file(bm_path: str, slug: str, detail: str) -> None:
         return
     patched = False
     for c in cards:
-        if (isinstance(c, dict) and c.get("key") == _CARD_KEY
-                and "handoff" in str(c.get("source", ""))):
+        if (
+            isinstance(c, dict)
+            and c.get("key") == _CARD_KEY
+            and "handoff" in str(c.get("source", ""))
+        ):
             c["slug"] = slug
             c["detail"] = detail
             patched = True
@@ -847,9 +852,7 @@ def bookmark(params: dict, ctx: fir_ext.Context) -> dict:
     return _write_bookmark(ctx, params.get("quote"), params.get("note"))
 
 
-def _write_bookmark(
-    ctx: fir_ext.Context, quote: str | None, note: str | None
-) -> dict:
+def _write_bookmark(ctx: fir_ext.Context, quote: str | None, note: str | None) -> dict:
     """Resolve ``quote`` to a past turn and persist it with ``note``.
 
     Shared by the model-facing ``bookmark`` tool and the argless
@@ -1066,8 +1069,7 @@ def on_session_start(params: Any, ctx: fir_ext.Context) -> None:
         if bm and os.path.exists(bm):
             _repair_bookmarks_file(
                 bm,
-                publish=lambda slug, detail: ctx.put_observable(
-                    _CARD_KEY, slug, detail),
+                publish=lambda slug, detail: ctx.put_observable(_CARD_KEY, slug, detail),
             )
     if session_file:
         threading.Thread(

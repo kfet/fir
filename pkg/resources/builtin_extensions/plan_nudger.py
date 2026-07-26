@@ -103,16 +103,18 @@ def _nudge(ctx) -> None:
     # don't retry every turn on persistent failure or quiet replies.
     _nudged_at = stagnation
 
-    prompt = PROMPT.format(plan_state=json.dumps(
-        {
-            "total": plan_total,
-            "completed": plan_completed,
-            "metadata": plan_metadata,
-            "stagnation_count": stagnation,
-        },
-        indent=2,
-        sort_keys=True,
-    ))
+    prompt = PROMPT.format(
+        plan_state=json.dumps(
+            {
+                "total": plan_total,
+                "completed": plan_completed,
+                "metadata": plan_metadata,
+                "stagnation_count": stagnation,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
     text = ctx.side_query(prompt)
     message = (text or "").strip()

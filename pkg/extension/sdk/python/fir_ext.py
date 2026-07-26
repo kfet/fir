@@ -602,7 +602,7 @@ class TitleArgSpec(TypedDict, total=False):
     """One entry in a ``DisplayHint.title_args`` list."""
 
     name: str
-    style: str   # "path" | "pattern" | "accent" | ""
+    style: str  # "path" | "pattern" | "accent" | ""
     label: str
 
 
@@ -619,9 +619,9 @@ class ToolSpec(TypedDict, total=False):
 
     name: str
     description: str
-    parameters: dict   # JSON Schema; arbitrary nested shape
+    parameters: dict  # JSON Schema; arbitrary nested shape
     display_hint: DisplayHint
-    timeout: float     # host-side tool_call timeout, seconds (see tool())
+    timeout: float  # host-side tool_call timeout, seconds (see tool())
 
 
 class CommandSpec(TypedDict, total=False):
@@ -859,7 +859,7 @@ class ProviderStreamStartParams(TypedDict, total=False):
     provider_id: str
     stream_id: str
     model: dict
-    prompt: dict   # ai.Context — system prompt + messages + tools
+    prompt: dict  # ai.Context — system prompt + messages + tools
     options: dict  # ai.StreamOptions
 
 
@@ -900,8 +900,8 @@ class InitResult(TypedDict, total=False):
     commands: list[CommandSpec]
     events: list[str]
     auth_providers: list[AuthProviderSpec]
-    providers: list   # list[dict] — see Provider/register_provider
-    tool_name_map: dict   # str -> str
+    providers: list  # list[dict] — see Provider/register_provider
+    tool_name_map: dict  # str -> str
     cli_verbs: list[str]
 
 
@@ -913,7 +913,7 @@ class ToolCallParams(TypedDict, total=False):
 
     tool_call_id: str
     name: str
-    params: dict   # caller-defined; per-tool schema
+    params: dict  # caller-defined; per-tool schema
 
 
 # -- hook payloads ----------------------------------------------------------
@@ -995,7 +995,7 @@ class PlanInfo(TypedDict, total=False):
 class SessionUpdateParams(TypedDict, total=False):
     """Params for the generic ``session_update`` event."""
 
-    type: str   # "session_named" | "plan_update"
+    type: str  # "session_named" | "plan_update"
     session_name: str
     plan: PlanInfo
 
@@ -1065,7 +1065,7 @@ class OkResult(TypedDict, total=False):
 
 class NotifyParams(TypedDict, total=False):
     message: str
-    level: str   # "info" | "warning" | "error"
+    level: str  # "info" | "warning" | "error"
 
 
 class ExecParams(TypedDict, total=False):
@@ -1081,7 +1081,7 @@ class ExecResult(TypedDict, total=False):
 
 class SendMessageParams(TypedDict, total=False):
     custom_type: str
-    content: object   # any JSON-serialisable value
+    content: object  # any JSON-serialisable value
     display: bool
     deliver_as: str
     trigger_turn: bool
@@ -1118,7 +1118,7 @@ class SideQueryParams(TypedDict, total=False):
     question: str
     model: str
     provider: str
-    effort: str   # "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    effort: str  # "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 
 
 class SideQueryBlock(TypedDict, total=False):
@@ -1545,6 +1545,7 @@ def config_path(filename: str | None = None) -> str | None:
     if not name or not config_dirs:
         return None
     return os.path.join(config_dirs[0], name)
+
 
 # ---------------------------------------------------------------------------
 # Decorators
@@ -2147,9 +2148,7 @@ def _decl_google_api_to_wire(api: DeclGoogleApi) -> dict[str, Any]:
     if api.envelope:
         out["envelope"] = api.envelope
     if api.system_instruction_prefix:
-        out["system_instruction_prefix"] = [
-            {"text": t} for t in api.system_instruction_prefix
-        ]
+        out["system_instruction_prefix"] = [{"text": t} for t in api.system_instruction_prefix]
     if api.system_instruction_role:
         out["system_instruction_role"] = api.system_instruction_role
     if api.reasoning_header_prefix:
@@ -3516,7 +3515,9 @@ def run(
         )
 
     def _run_provider_stream(
-        provider_id: str, stream_id: str, params: dict[str, Any],
+        provider_id: str,
+        stream_id: str,
+        params: dict[str, Any],
         cancel: threading.Event,
     ) -> None:
         """Drive a @provider_stream generator and forward its events.
@@ -3527,15 +3528,18 @@ def run(
         """
         handler = _provider_stream_handlers.get(provider_id)
         if handler is None:
-            _send_provider_event(stream_id, {
-                "type": "error",
-                "reason": "error",
-                "error": {
-                    "role": "assistant",
-                    "stopReason": "error",
-                    "errorMessage": f"no provider_stream handler for {provider_id!r}",
+            _send_provider_event(
+                stream_id,
+                {
+                    "type": "error",
+                    "reason": "error",
+                    "error": {
+                        "role": "assistant",
+                        "stopReason": "error",
+                        "errorMessage": f"no provider_stream handler for {provider_id!r}",
+                    },
                 },
-            })
+            )
             with _stream_cancels_lock:
                 _stream_cancels.pop(stream_id, None)
             return
@@ -3557,15 +3561,18 @@ def run(
                     # a terminal error and stop iterating so we don't leak.
                     break
         except Exception as exc:
-            _send_provider_event(stream_id, {
-                "type": "error",
-                "reason": "error",
-                "error": {
-                    "role": "assistant",
-                    "stopReason": "error",
-                    "errorMessage": f"{type(exc).__name__}: {exc}",
+            _send_provider_event(
+                stream_id,
+                {
+                    "type": "error",
+                    "reason": "error",
+                    "error": {
+                        "role": "assistant",
+                        "stopReason": "error",
+                        "errorMessage": f"{type(exc).__name__}: {exc}",
+                    },
                 },
-            })
+            )
             terminal_seen = True
         finally:
             # Close the generator so its own try/finally runs even when we
@@ -3576,33 +3583,33 @@ def run(
                 with contextlib.suppress(Exception):
                     gen.close()
             if not terminal_seen:
-                _send_provider_event(stream_id, {
-                    "type": "error",
-                    "reason": "aborted" if cancel.is_set() else "error",
-                    "error": {
-                        "role": "assistant",
-                        "stopReason": "aborted" if cancel.is_set() else "error",
-                        "errorMessage": (
-                            "stream cancelled" if cancel.is_set()
-                            else "provider generator exited without terminal event"
-                        ),
+                _send_provider_event(
+                    stream_id,
+                    {
+                        "type": "error",
+                        "reason": "aborted" if cancel.is_set() else "error",
+                        "error": {
+                            "role": "assistant",
+                            "stopReason": "aborted" if cancel.is_set() else "error",
+                            "errorMessage": (
+                                "stream cancelled"
+                                if cancel.is_set()
+                                else "provider generator exited without terminal event"
+                            ),
+                        },
                     },
-                })
+                )
             with _stream_cancels_lock:
                 _stream_cancels.pop(stream_id, None)
 
-    def _handle_provider_request(
-        method: str, msg_id: Any, params: dict[str, Any]
-    ) -> None:
+    def _handle_provider_request(method: str, msg_id: Any, params: dict[str, Any]) -> None:
         """Dispatch a provider/* RPC from fir."""
         try:
             if method == "provider/stream/start":
                 provider_id = params.get("provider_id", "")
                 stream_id = params.get("stream_id", "")
                 if not stream_id:
-                    _write_message(
-                        _make_error(msg_id, -32602, "missing stream_id"), out
-                    )
+                    _write_message(_make_error(msg_id, -32602, "missing stream_id"), out)
                     return
                 # Pre-register the cancel event before spawning the worker
                 # so a fast provider/stream/cancel can't be dropped on the
@@ -3638,7 +3645,8 @@ def run(
                 if handler is None:
                     _write_message(
                         _make_error(
-                            msg_id, -32601,
+                            msg_id,
+                            -32601,
                             f"no provider_list_models handler for {provider_id!r}",
                         ),
                         out,
@@ -3731,6 +3739,7 @@ def run(
                         code = 1
                 except Exception:
                     import traceback
+
                     traceback.print_exc(file=sys.stderr)
                     code = 1
                 _write_message(_make_response(mid, {"exit_code": code}), out)
@@ -3763,6 +3772,7 @@ def run(
                         h(name, _cli_host)
                     except Exception:  # noqa: PERF203 — per-handler isolation
                         import traceback
+
                         traceback.print_exc(file=sys.stderr)
 
             threading.Thread(target=_run_sig_handlers, daemon=True).start()
@@ -3806,9 +3816,11 @@ def run(
                     except RuntimeError as exc:
                         if "shutdown" not in str(exc):
                             import traceback
+
                             traceback.print_exc(file=sys.stderr)
                     except Exception:
                         import traceback
+
                         traceback.print_exc(file=sys.stderr)
 
                 t = threading.Thread(target=_run_event, daemon=True)
@@ -3859,7 +3871,8 @@ def run(
     # the full timeout after the connection is closed.
     for rid, evt in list(pending.items()):
         results[rid] = {
-            "jsonrpc": "2.0", "id": rid,
+            "jsonrpc": "2.0",
+            "id": rid,
             "error": {"code": -32000, "message": "shutdown"},
         }
         evt.set()

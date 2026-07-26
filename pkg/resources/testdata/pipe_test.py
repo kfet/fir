@@ -137,9 +137,7 @@ class TestSingleStep(unittest.TestCase):
 
     def test_step_timeout_forwarded_to_call_tool(self):
         ctx = _make_ctx([_text_result("ok")])
-        out = self.mod._run_pipe(
-            [{"tool": "Read", "params": {}, "timeout_s": 120}], "", ctx
-        )
+        out = self.mod._run_pipe([{"tool": "Read", "params": {}, "timeout_s": 120}], "", ctx)
         self.assertFalse(out["is_error"])
         # timeout_s is passed through to ctx.call_tool as timeout=.
         self.assertEqual(ctx.call_tool.call_args.kwargs.get("timeout"), 120.0)
@@ -192,9 +190,7 @@ class TestMultiStep(unittest.TestCase):
             captured.append(params)
             return _text_result("z")
 
-        ctx = _make_ctx(
-            [_text_result("A"), _text_result("B"), grab]
-        )
+        ctx = _make_ctx([_text_result("A"), _text_result("B"), grab])
         steps = [
             {"tool": "Read"},
             {"tool": "Read"},
@@ -499,10 +495,12 @@ class TestLeafDetection(unittest.TestCase):
     def test_errored_non_leaf_visible_under_continue_on_error(self):
         # Step 0 is non-leaf (referenced by step 1), errors, but continues.
         # The LLM must still see the error output.
-        ctx = _make_ctx([
-            _text_result("FAIL_OUTPUT", is_error=True),
-            _text_result("after"),
-        ])
+        ctx = _make_ctx(
+            [
+                _text_result("FAIL_OUTPUT", is_error=True),
+                _text_result("after"),
+            ]
+        )
         steps = [
             {"tool": "Read", "continue_on_error": True},
             {"tool": "Bash", "params": {"cmd": "{{prev}}"}},
@@ -557,8 +555,9 @@ class TestWaitVerdict(unittest.TestCase):
     def setUp(self):
         self.mod = _load_pipe()
 
-    def _run(self, call_results, *, steps=None, interval=5, timeout=300,
-             max_polls=60, available=None):
+    def _run(
+        self, call_results, *, steps=None, interval=5, timeout=300, max_polls=60, available=None
+    ):
         ctx = _wait_ctx(self, self.mod, call_results, available=available)
         steps = steps or [{"tool": "Bash", "params": {"command": "probe"}}]
         out = self.mod._run_wait(steps, interval, timeout, max_polls, "", ctx)
@@ -575,10 +574,12 @@ class TestWaitVerdict(unittest.TestCase):
         self.assertNotIn("WAIT:done", text)
 
     def test_continue_then_done(self):
-        out, ctx = self._run([
-            _text_result("checking...\nWAIT:continue"),
-            _text_result("ready\nWAIT:done"),
-        ])
+        out, ctx = self._run(
+            [
+                _text_result("checking...\nWAIT:continue"),
+                _text_result("ready\nWAIT:done"),
+            ]
+        )
         self.assertFalse(out["is_error"])
         text = out["content"][0]["text"]
         self.assertIn("wait: success", text)
@@ -652,11 +653,13 @@ class TestWaitVerdict(unittest.TestCase):
 
     def test_verdict_error_strike_escalation(self):
         # Three consecutive verdict-step errors -> outcome=error.
-        out, ctx = self._run([
-            _text_result("err1", is_error=True),
-            _text_result("err2", is_error=True),
-            _text_result("err3", is_error=True),
-        ])
+        out, ctx = self._run(
+            [
+                _text_result("err1", is_error=True),
+                _text_result("err2", is_error=True),
+                _text_result("err3", is_error=True),
+            ]
+        )
         self.assertTrue(out["is_error"])
         text = out["content"][0]["text"]
         self.assertIn("failed 3 polls in a row", text)
@@ -664,13 +667,15 @@ class TestWaitVerdict(unittest.TestCase):
 
     def test_verdict_error_strikes_reset_on_success(self):
         # Two errors, then a successful continue resets strikes, then done.
-        out, ctx = self._run([
-            _text_result("e1", is_error=True),
-            _text_result("e2", is_error=True),
-            _text_result("WAIT:continue"),
-            _text_result("e3", is_error=True),
-            _text_result("WAIT:done"),
-        ])
+        out, ctx = self._run(
+            [
+                _text_result("e1", is_error=True),
+                _text_result("e2", is_error=True),
+                _text_result("WAIT:continue"),
+                _text_result("e3", is_error=True),
+                _text_result("WAIT:done"),
+            ]
+        )
         self.assertFalse(out["is_error"])
         self.assertIn("wait: success", out["content"][0]["text"])
         self.assertEqual(ctx.call_tool.call_count, 5)
@@ -790,11 +795,15 @@ class TestWaitValidationAndDescription(unittest.TestCase):
     def test_earlier_step_abort_counts_as_strike(self):
         # An earlier (non-verdict) step errors and aborts the chain before the
         # verdict runs — treated as continue + strike, escalating after 3.
-        ctx = _wait_ctx(self, self.mod, [
-            _text_result("e1", is_error=True),
-            _text_result("e2", is_error=True),
-            _text_result("e3", is_error=True),
-        ])
+        ctx = _wait_ctx(
+            self,
+            self.mod,
+            [
+                _text_result("e1", is_error=True),
+                _text_result("e2", is_error=True),
+                _text_result("e3", is_error=True),
+            ],
+        )
         steps = [
             {"tool": "Bash", "params": {"command": "guard"}},
             {"tool": "Bash", "params": {"command": "verdict"}},
@@ -802,7 +811,6 @@ class TestWaitValidationAndDescription(unittest.TestCase):
         out = self.mod._run_wait(steps, 5, 300, 60, "", ctx)
         self.assertTrue(out["is_error"])
         self.assertIn("failed 3 polls in a row", out["content"][0]["text"])
-
 
 
 # ---------------------------------------------------------------------------
@@ -826,23 +834,23 @@ class TestHashBlockFiltering(unittest.TestCase):
         self.pipe = _load_pipe()
 
     def test_result_text_drops_hash_block(self):
-        self.assertEqual(
-            self.pipe._result_text(_hashed_result("hello")), "hello"
-        )
+        self.assertEqual(self.pipe._result_text(_hashed_result("hello")), "hello")
 
     def test_result_text_keeps_hash_like_line_inside_output(self):
         # A [hash: ...] line embedded in a normal output block is real
         # output (e.g. catting a file) and must survive.
         text = "before\n[hash: 0123456789abcdef]\nafter"
-        self.assertEqual(
-            self.pipe._result_text(_text_result(text)), text
-        )
+        self.assertEqual(self.pipe._result_text(_text_result(text)), text)
 
     def test_wait_verdict_parses_despite_trailing_hash_block(self):
         ctx = _make_ctx([_hashed_result("checking...\nWAIT:done")])
         result = self.pipe._run_wait(
             [{"tool": "Bash", "params": {"command": "true"}}],
-            0.01, 30, 5, "", ctx,
+            0.01,
+            30,
+            5,
+            "",
+            ctx,
         )
         text = result["content"][0]["text"]
         self.assertFalse(result.get("is_error", False), text)
@@ -861,11 +869,10 @@ class TestHashBlockFiltering(unittest.TestCase):
                 {"tool": "Bash", "params": {"command": "first"}},
                 {"tool": "Bash", "params": {"command": "use {{prev}}"}},
             ],
-            "", ctx,
+            "",
+            ctx,
         )
         self.assertEqual(seen["cmd"], "use alpha")
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -904,7 +911,11 @@ class TestMetaChannel(unittest.TestCase):
         ctx = _make_ctx([_meta_result("checking...\nWAIT:done")])
         result = self.pipe._run_wait(
             [{"tool": "Bash", "params": {"command": "true"}}],
-            0.01, 30, 5, "", ctx,
+            0.01,
+            30,
+            5,
+            "",
+            ctx,
         )
         text = result["content"][0]["text"]
         self.assertFalse(result.get("is_error", False), text)
@@ -914,7 +925,11 @@ class TestMetaChannel(unittest.TestCase):
         ctx = _make_ctx([_meta_result("ready\nWAIT:done", h="deadbeefcafef00d")])
         result = self.pipe._run_wait(
             [{"tool": "Bash", "params": {"command": "true"}}],
-            0.01, 30, 5, "", ctx,
+            0.01,
+            30,
+            5,
+            "",
+            ctx,
         )
         text = result["content"][0]["text"]
         self.assertNotIn("deadbeefcafef00d", text)
@@ -932,7 +947,8 @@ class TestMetaChannel(unittest.TestCase):
                 {"tool": "Bash", "params": {"command": "first"}},
                 {"tool": "Bash", "params": {"command": "use {{prev}}"}},
             ],
-            "", ctx,
+            "",
+            ctx,
         )
         self.assertEqual(seen["cmd"], "use alpha")
 

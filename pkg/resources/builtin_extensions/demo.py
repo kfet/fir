@@ -71,8 +71,8 @@ import fir_ext
 def word_count(params: dict, ctx: fir_ext.Context) -> dict:
     words = params.get("text", "").split()
     n = len(words)
-    ctx.set_label("last_wc", str(n))          # set_label
-    ctx.notify(f"word_count: {n} words")       # notify
+    ctx.set_label("last_wc", str(n))  # set_label
+    ctx.notify(f"word_count: {n} words")  # notify
     return {"count": n, "words": words}
 
 
@@ -142,11 +142,11 @@ def change_model(params: dict, ctx: fir_ext.Context) -> dict:
 )
 def inject_message(params: dict, ctx: fir_ext.Context) -> fir_ext.OkResult:
     if params["kind"] == "user":
-        ctx.send_user_message(params["content"])           # send_user_message
+        ctx.send_user_message(params["content"])  # send_user_message
     elif params["kind"] == "abort":
-        ctx.send_user_message("", deliver_as="abort")      # abort current turn
+        ctx.send_user_message("", deliver_as="abort")  # abort current turn
     else:
-        ctx.send_message("demo_note", params["content"])   # send_message
+        ctx.send_message("demo_note", params["content"])  # send_message
     return {"ok": True}
 
 
@@ -172,9 +172,7 @@ def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
         return {"ok": False, "skipped": True}
     # restart_session: optional prepend_context demonstrates the
     # [SYS_EXT]-wrapped briefing carried into the new session.
-    ctx.restart_session(
-        params["prompt"], prepend_context=params.get("prepend_context", "")
-    )
+    ctx.restart_session(params["prompt"], prepend_context=params.get("prepend_context", ""))
     return {"ok": True}
 
 
@@ -196,7 +194,7 @@ def restart_demo(params: dict, ctx: fir_ext.Context) -> dict:
 def reload_ext_demo(params: dict, ctx: fir_ext.Context) -> dict:
     # reload_extension: targeted single-extension reload. Returns a
     # JSON-RPC error for builtins / self-reload, surfaced here as a failure.
-    ctx.reload_extension(params["name"])               # reload_extension
+    ctx.reload_extension(params["name"])  # reload_extension
     return {"ok": True}
 
 
@@ -215,7 +213,7 @@ def reload_ext_demo(params: dict, ctx: fir_ext.Context) -> dict:
 def reload_mcp_demo(params: dict, ctx: fir_ext.Context) -> dict:
     # reload_mcp: re-reads MCP config from disk and reloads servers.
     # Returns a dict with 'collisions' and 'errors' arrays.
-    return ctx.reload_mcp()                             # reload_mcp
+    return ctx.reload_mcp()  # reload_mcp
 
 
 @fir_ext.tool(
@@ -267,12 +265,15 @@ def batch_example(params, ctx):
     extra = params.get("extra_instructions", "")
 
     # Discover which key files exist.
-    probe = ctx.exec("sh", [
-        "-c",
-        f'cd {directory} && for f in README.md CHANGELOG.md go.mod '
-        f'package.json Cargo.toml pyproject.toml Makefile; '
-        f'do [ -f "$f" ] && echo "$f"; done',
-    ])
+    probe = ctx.exec(
+        "sh",
+        [
+            "-c",
+            f"cd {directory} && for f in README.md CHANGELOG.md go.mod "
+            f"package.json Cargo.toml pyproject.toml Makefile; "
+            f'do [ -f "$f" ] && echo "$f"; done',
+        ],
+    )
     found = [f for f in probe.get("stdout", "").strip().splitlines() if f]
 
     # Collect outputs from tool calls.
@@ -280,19 +281,19 @@ def batch_example(params, ctx):
 
     for fname in found:
         ctx.report_progress(f"Reading {fname}")
-        result = ctx.call_tool("Read", {
-            "path": f"{directory}/{fname}",
-            "limit": 40,
-        })
+        result = ctx.call_tool(
+            "Read",
+            {
+                "path": f"{directory}/{fname}",
+                "limit": 40,
+            },
+        )
         text = _extract_text(result)
         outputs.append(f"--- {fname} ---\n{text}")
 
     # Git status.
     ctx.report_progress("Running git status")
-    git_cmd = (
-        f"cd {directory} && git status --short 2>/dev/null"
-        " || echo 'not a git repo'"
-    )
+    git_cmd = f"cd {directory} && git status --short 2>/dev/null || echo 'not a git repo'"
     git_result = ctx.call_tool("Bash", {"command": git_cmd})
     outputs.append(f"--- git status ---\n{_extract_text(git_result)}")
 
@@ -350,6 +351,7 @@ def _extract_text(result):
 def _json_compact(obj):
     """JSON-encode with no unnecessary whitespace."""
     import json
+
     return json.dumps(obj, separators=(",", ":"))
 
 
@@ -376,68 +378,54 @@ def on_hook_tool_call(
 
 @fir_ext.on("session_start")
 def on_session_start(params: fir_ext.SessionStartParams, ctx: fir_ext.Context) -> None:
-    ctx.set_status("demo ready")                      # set_status
-    ctx.set_session_data("started", "true")            # set_session_data
-    ctx.list_tools()                                   # list_tools (read-only discovery)
-    ctx.available_models()                             # available_models (live-availability)
-    ctx.prepend("Demo extension is active.")           # prepend
-    ctx.agent_info()                                   # agent_info
-    ctx.get_session_file()                             # get_session_file
-    ctx.get_session_name()                             # get_session_name
-    ctx.get_session_id()                               # get_session_id
+    ctx.set_status("demo ready")  # set_status
+    ctx.set_session_data("started", "true")  # set_session_data
+    ctx.list_tools()  # list_tools (read-only discovery)
+    ctx.available_models()  # available_models (live-availability)
+    ctx.prepend("Demo extension is active.")  # prepend
+    ctx.agent_info()  # agent_info
+    ctx.get_session_file()  # get_session_file
+    ctx.get_session_name()  # get_session_name
+    ctx.get_session_id()  # get_session_id
     ctx.put_observable("hello", "ready", "demo extension up")  # put_observable
-    ctx.clear_observable("hello")                      # clear_observable
+    ctx.clear_observable("hello")  # clear_observable
 
 
 @fir_ext.on("session_shutdown")
-def on_session_shutdown(
-    params: fir_ext.SessionShutdownParams, ctx: fir_ext.Context
-) -> None:
-    _ = ctx.get_session_data("started")                # get_session_data
-    ctx.set_status("")                                 # set_status (clear)
+def on_session_shutdown(params: fir_ext.SessionShutdownParams, ctx: fir_ext.Context) -> None:
+    _ = ctx.get_session_data("started")  # get_session_data
+    ctx.set_status("")  # set_status (clear)
 
 
 @fir_ext.on("agent_start")
-def on_agent_start(
-    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
-) -> None:
-    ctx.set_session_name("demo session")              # set_session_name
-    ctx.get_session_name()                             # get_session_name
+def on_agent_start(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> None:
+    ctx.set_session_name("demo session")  # set_session_name
+    ctx.get_session_name()  # get_session_name
 
 
 @fir_ext.on("agent_end")
-def on_agent_end(
-    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
-) -> None:
-    ctx.notify("Agent finished", level="info")        # notify
-    ctx.clear_label("last_wc")                        # clear_label
+def on_agent_end(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> None:
+    ctx.notify("Agent finished", level="info")  # notify
+    ctx.clear_label("last_wc")  # clear_label
 
 
 @fir_ext.on("turn_start")
-def on_turn_start(
-    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
-) -> None:
-    pass   # subscribed; no outbound call needed
+def on_turn_start(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> None:
+    pass  # subscribed; no outbound call needed
 
 
 @fir_ext.on("turn_end")
-def on_turn_end(
-    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
-) -> None:
-    ctx.continue_session()                             # continue_session
+def on_turn_end(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> None:
+    ctx.continue_session()  # continue_session
 
 
 @fir_ext.on("message_start")
-def on_message_start(
-    params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context
-) -> None:
+def on_message_start(params: fir_ext.AgentLifecycleParams, ctx: fir_ext.Context) -> None:
     pass
 
 
 @fir_ext.on("message_end")
-def on_message_end(
-    params: fir_ext.MessageEndParams, ctx: fir_ext.Context
-) -> None:
+def on_message_end(params: fir_ext.MessageEndParams, ctx: fir_ext.Context) -> None:
     # Assistant messages now carry provider/model/usage so observers can
     # meter token + cost spend without parsing the transcript. User and
     # tool-result messages get only `role`. Older fir builds emitted no
@@ -458,28 +446,22 @@ def on_message_end(
 
 
 @fir_ext.on("tool_execution_start")
-def on_tool_execution_start(
-    params: fir_ext.ToolExecutionStartParams, ctx: fir_ext.Context
-) -> None:
+def on_tool_execution_start(params: fir_ext.ToolExecutionStartParams, ctx: fir_ext.Context) -> None:
     name = params.get("tool_name", "")
     tcid = params.get("tool_call_id", "")
     if tcid:
-        ctx.set_label(tcid, f"running:{name}")        # set_label
+        ctx.set_label(tcid, f"running:{name}")  # set_label
 
 
 @fir_ext.on("tool_execution_end")
-def on_tool_execution_end(
-    params: fir_ext.ToolExecutionEndParams, ctx: fir_ext.Context
-) -> None:
+def on_tool_execution_end(params: fir_ext.ToolExecutionEndParams, ctx: fir_ext.Context) -> None:
     tcid = params.get("tool_call_id", "")
     if tcid:
-        ctx.clear_label(tcid)                         # clear_label
+        ctx.clear_label(tcid)  # clear_label
 
 
 @fir_ext.on("provider_error")
-def on_provider_error(
-    params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context
-) -> None:
+def on_provider_error(params: fir_ext.ProviderErrorParams, ctx: fir_ext.Context) -> None:
     # Emitted when a turn ends in a provider/LLM error. `retryable` tells you
     # whether it is a transient class (overloaded/rate-limit/5xx/transport)
     # worth auto-resuming, vs a terminal error (auth/400/context-length).
@@ -501,9 +483,7 @@ def on_provider_error(
 
 
 @fir_ext.command(name="demo-echo", description="Echo arguments back as a TUI message")
-def cmd_demo_echo(
-    args: list, ctx: fir_ext.Context
-) -> fir_ext.CommandHookResult:
+def cmd_demo_echo(args: list, ctx: fir_ext.Context) -> fir_ext.CommandHookResult:
     msg = " ".join(args) if args else "(no arguments)"
     return {"message": f"demo-echo: {msg}"}
 
@@ -512,9 +492,7 @@ def cmd_demo_echo(
     name="demo-markdown",
     description="Echo arguments back as a high-contrast markdown response",
 )
-def cmd_demo_markdown(
-    args: list, ctx: fir_ext.Context
-) -> fir_ext.CommandHookResult:
+def cmd_demo_markdown(args: list, ctx: fir_ext.Context) -> fir_ext.CommandHookResult:
     """Demonstrate print_response + markdown: prose rendered in a high-contrast
     accent-bordered box in the main conversation area (see /advise)."""
     msg = " ".join(args) if args else "(no arguments)"
@@ -639,8 +617,13 @@ def echo_stream(params: fir_ext.ProviderStreamStartParams, ctx: fir_ext.Context)
             "cacheRead": 0,
             "cacheWrite": 0,
             "totalTokens": 1 + len(text),
-            "cost": {"input": 0.0, "output": 0.0,
-                     "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0},
+            "cost": {
+                "input": 0.0,
+                "output": 0.0,
+                "cacheRead": 0.0,
+                "cacheWrite": 0.0,
+                "total": 0.0,
+            },
         },
         "stopReason": "stop",
         "timestamp": int(_time.time() * 1000),
@@ -657,8 +640,11 @@ def echo_stream(params: fir_ext.ProviderStreamStartParams, ctx: fir_ext.Context)
                 yield {
                     "type": "error",
                     "reason": "aborted",
-                    "error": {**final_msg, "stopReason": "aborted",
-                              "errorMessage": "cancelled by host"},
+                    "error": {
+                        **final_msg,
+                        "stopReason": "aborted",
+                        "errorMessage": "cancelled by host",
+                    },
                 }
                 return
             if chunk:

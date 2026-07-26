@@ -141,6 +141,7 @@ def _lookup_field(text: str, path: str) -> str:
 def _substitute(value: Any, prior: list[str]) -> Any:
     """Recursively substitute template tokens in strings inside a params value."""
     if isinstance(value, str):
+
         def repl(m: re.Match[str]) -> str:
             kind = m.group(1)
             field = m.group(3)
@@ -231,9 +232,7 @@ def _validate_steps(steps: list[dict], ctx: fir_ext.Context, prefix: str = "pipe
         params = step.get("params") or {}
         missing = [r for r in required if r not in params]
         if missing:
-            errors.append(
-                f"steps[{i}] ({name}): missing required params: " + ", ".join(missing)
-            )
+            errors.append(f"steps[{i}] ({name}): missing required params: " + ", ".join(missing))
 
     if errors:
         return f"{prefix} validation failed:\n" + "\n".join(errors)
@@ -315,9 +314,7 @@ def _format_results_markdown(results: list[dict]) -> str:
             parts.append(r["output"])
         else:
             size = len(r["output"])
-            parts.append(
-                f"## Step {i}: {r['name']}{tag} (intermediate, {size} bytes — omitted)"
-            )
+            parts.append(f"## Step {i}: {r['name']}{tag} (intermediate, {size} bytes — omitted)")
         parts.append("")
     return "\n".join(parts).rstrip() + "\n"
 
@@ -370,10 +367,7 @@ def _inject_env(params: Any, poll: int, state_path: str) -> Any:
     any string ``command`` param. Steps without a command are passed through
     unchanged."""
     if isinstance(params, dict) and isinstance(params.get("command"), str):
-        prefix = (
-            f"export WAIT_POLL={poll}\n"
-            f"export WAIT_STATE={shlex.quote(state_path)}\n"
-        )
+        prefix = f"export WAIT_POLL={poll}\nexport WAIT_STATE={shlex.quote(state_path)}\n"
         new = dict(params)
         new["command"] = prefix + params["command"]
         return new
@@ -459,9 +453,7 @@ def _strip_sentinel(text: str) -> str:
     return "\n".join(lines)
 
 
-def _wait_terminal(
-    outcome: str, polls: int, elapsed: float, message: str, diag: str
-) -> dict:
+def _wait_terminal(outcome: str, polls: int, elapsed: float, message: str, diag: str) -> dict:
     """Build the single terminal payload returned to the model."""
     # A timeout is a PARTIAL RESULT, not a failure: the probe loop ran clean
     # and simply has not settled yet. Flagging it is_error poisons tool
@@ -514,8 +506,11 @@ def _run_wait(
                 last_verdict = "error"
                 if strikes >= 3:
                     return _wait_terminal(
-                        "error", polls, elapsed,
-                        "wait: verdict step failed 3 polls in a row", vtext,
+                        "error",
+                        polls,
+                        elapsed,
+                        "wait: verdict step failed 3 polls in a row",
+                        vtext,
                     )
                 # Treat as continue and fall through to the cap check / sleep.
             else:
@@ -526,34 +521,47 @@ def _run_wait(
                         "<empty>",
                     )
                     return _wait_terminal(
-                        "error", polls, elapsed,
+                        "error",
+                        polls,
+                        elapsed,
                         "wait: verdict step emitted no WAIT: sentinel — its "
                         f"final non-empty stdout line was {tail.strip()!r}, "
                         "expected exactly WAIT:done, WAIT:continue, or "
-                        "WAIT:fail <msg>", vtext,
+                        "WAIT:fail <msg>",
+                        vtext,
                     )
                 strikes = 0
                 last_verdict = verdict
                 if verdict == "done":
                     return _wait_terminal(
-                        "success", polls, elapsed, message or "verdict: done", vtext,
+                        "success",
+                        polls,
+                        elapsed,
+                        message or "verdict: done",
+                        vtext,
                     )
                 if verdict == "fail":
                     return _wait_terminal(
-                        "error", polls, elapsed,
-                        "wait: " + (message or "verdict reported fail"), vtext,
+                        "error",
+                        polls,
+                        elapsed,
+                        "wait: " + (message or "verdict reported fail"),
+                        vtext,
                     )
                 # verdict == "continue": fall through.
 
             if elapsed >= timeout or polls >= max_polls:
                 cap = "max_polls" if polls >= max_polls else "timeout"
                 return _wait_terminal(
-                    "timeout", polls, elapsed,
+                    "timeout",
+                    polls,
+                    elapsed,
                     f"wait: {cap} cap reached (polls={polls}/{max_polls}, "
                     f"elapsed={elapsed:.1f}s/{timeout:.0f}s) — NOT a failure, the "
                     f"probe never reported WAIT:fail. If the job is still "
                     f"legitimately running, re-issue wait with a larger "
-                    f"{cap}.", vtext,
+                    f"{cap}.",
+                    vtext,
                 )
 
             ctx.report_progress(

@@ -29,8 +29,7 @@ def _load_notify():
     with mock.patch.object(fir_ext, "run"):
         import notify
     new_handlers = {
-        k: v for k, v in fir_ext._event_handlers.items()
-        if k not in before or id(v) != before[k]
+        k: v for k, v in fir_ext._event_handlers.items() if k not in before or id(v) != before[k]
     }
     return notify, new_handlers
 

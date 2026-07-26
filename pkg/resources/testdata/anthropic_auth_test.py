@@ -150,9 +150,7 @@ class TestPostExchangeAccountCapture(unittest.TestCase):
         personal = call("Personal Space")
         self.assertEqual(work["extra"]["accountId"], "me@x.com-acme-corp")
         self.assertEqual(personal["extra"]["accountId"], "me@x.com-personal-space")
-        self.assertNotEqual(
-            work["extra"]["accountId"], personal["extra"]["accountId"]
-        )
+        self.assertNotEqual(work["extra"]["accountId"], personal["extra"]["accountId"])
         # No raw uuids in the slot-key-bound account id.
         self.assertNotIn("u-123", work["extra"]["accountId"])
         self.assertNotIn("o-1", work["extra"]["accountId"])

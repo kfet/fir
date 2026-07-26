@@ -197,12 +197,14 @@ def _run_countdown(
 
 # Relative: 45s, 45m, 1h, 1h30m, 1h30m10s, 90s
 _RE_RELATIVE = re.compile(
-    r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", re.IGNORECASE,
+    r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$",
+    re.IGNORECASE,
 )
 
 # Absolute 12-hour: 2pm, 2:30pm
 _RE_12H = re.compile(
-    r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$", re.IGNORECASE,
+    r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$",
+    re.IGNORECASE,
 )
 
 # Absolute 24-hour: 14:00
@@ -219,7 +221,9 @@ def _parse_target(raw: str) -> datetime | None:
         minutes = int(m.group(2) or 0)
         seconds = int(m.group(3) or 0)
         return _now() + timedelta(
-            hours=hours, minutes=minutes, seconds=seconds,
+            hours=hours,
+            minutes=minutes,
+            seconds=seconds,
         )
 
     m = _RE_12H.fullmatch(raw)
@@ -233,7 +237,10 @@ def _parse_target(raw: str) -> datetime | None:
             hour = 0
         now = _now()
         target = now.replace(
-            hour=hour, minute=minute, second=0, microsecond=0,
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0,
         )
         if target <= now:
             target += timedelta(days=1)
@@ -244,7 +251,10 @@ def _parse_target(raw: str) -> datetime | None:
         hour, minute = int(m.group(1)), int(m.group(2))
         now = _now()
         target = now.replace(
-            hour=hour, minute=minute, second=0, microsecond=0,
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0,
         )
         if target <= now:
             target += timedelta(days=1)
@@ -276,12 +286,9 @@ _USAGE = (
 def _format_entry(e: _ScheduleEntry) -> str:
     """Format a single schedule entry for display."""
     remaining = e.target - _now()
-    line = (
-        f"  [{e.id}] in {_format_countdown(remaining)} "
-        f"(at {_format_time(e.target)})"
-    )
+    line = f"  [{e.id}] in {_format_countdown(remaining)} (at {_format_time(e.target)})"
     if e.message:
-        line += f" — \"{e.message}\""
+        line += f' — "{e.message}"'
     else:
         line += " — continue"
     return line
@@ -300,7 +307,8 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
     if not args:
         with _lock:
             entries = sorted(
-                _schedules.values(), key=lambda e: e.target,
+                _schedules.values(),
+                key=lambda e: e.target,
             )
         if not entries:
             return {"message": _USAGE}
@@ -348,11 +356,11 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
             else:
                 # Multiple — list them
                 entries = sorted(
-                    _schedules.values(), key=lambda e: e.target,
+                    _schedules.values(),
+                    key=lambda e: e.target,
                 )
                 lines = [
-                    "Multiple schedules active. "
-                    "Specify an id or use `cancel all`:",
+                    "Multiple schedules active. Specify an id or use `cancel all`:",
                 ]
                 for e in entries:
                     lines.append(_format_entry(e))
@@ -373,23 +381,19 @@ def cmd_schedule(args: list[str], ctx: fir_ext.Context):
         if len(args) >= 2:
             target = _parse_target(args[0] + args[1])
             if target is not None:
-                message = (
-                    " ".join(args[2:]) if len(args) > 2 else None
-                )
+                message = " ".join(args[2:]) if len(args) > 2 else None
         if target is None:
             raw = " ".join(args)
-            return {
-                "message": (
-                    f"Could not parse '{raw}'.\n"
-                    "Try: 45m, 1h30m, 2pm, 14:00, 2:30pm"
-                )
-            }
+            return {"message": (f"Could not parse '{raw}'.\nTry: 45m, 1h30m, 2pm, 14:00, 2:30pm")}
 
     # ── create new schedule entry ─────────────────────────────────────
     stop = threading.Event()
     sid = _next_id()
     entry = _ScheduleEntry(
-        id=sid, target=target, message=message, stop_event=stop,
+        id=sid,
+        target=target,
+        message=message,
+        stop_event=stop,
     )
 
     t = threading.Thread(
@@ -429,8 +433,7 @@ def _serialize_schedules() -> str:
     with _lock:
         entries = list(_schedules.values())
     records = [
-        {"id": e.id, "target_iso": e.target.isoformat(), "message": e.message}
-        for e in entries
+        {"id": e.id, "target_iso": e.target.isoformat(), "message": e.message} for e in entries
     ]
     return json.dumps(records)
 
@@ -465,7 +468,10 @@ def _restore_schedules(data: str, ctx: fir_ext.Context) -> int:
 
         stop = threading.Event()
         entry = _ScheduleEntry(
-            id=sid, target=target, message=message, stop_event=stop,
+            id=sid,
+            target=target,
+            message=message,
+            stop_event=stop,
         )
         t = threading.Thread(
             target=_run_countdown,

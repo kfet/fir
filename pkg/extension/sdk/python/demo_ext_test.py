@@ -237,12 +237,14 @@ class FakeFir:
         params: dict = {"version": "1", "cwd": cwd}
         if config_dirs is not None:
             params["config_dirs"] = config_dirs
-        self.send({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "init",
-            "params": params,
-        })
+        self.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "init",
+                "params": params,
+            }
+        )
         resp = self.wait_for_response(1)
         assert resp is not None, "no init response"
         return resp.get("result", {})
@@ -253,23 +255,31 @@ class FakeFir:
     def send_tool_call(
         self, msg_id: int, tool_name: str, params: Optional[dict] = None
     ) -> Optional[dict]:
-        self.send({
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": "tool_call",
-            "params": {"tool_call_id": f"tc-{msg_id}", "name": tool_name, "params": params or {}},
-        })
+        self.send(
+            {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "method": "tool_call",
+                "params": {
+                    "tool_call_id": f"tc-{msg_id}",
+                    "name": tool_name,
+                    "params": params or {},
+                },
+            }
+        )
         return self.wait_for_response(msg_id)
 
     def send_hook(
         self, msg_id: int, hook_name: str, params: Optional[dict] = None
     ) -> Optional[dict]:
-        self.send({
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "method": hook_name,
-            "params": params or {},
-        })
+        self.send(
+            {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "method": hook_name,
+                "params": params or {},
+            }
+        )
         return self.wait_for_response(msg_id)
 
     def wait_for_method(self, method: str, timeout: float = 3.0) -> Optional[dict]:
@@ -338,10 +348,15 @@ class TestDemoInit(DemoTestCase):
         self.assertSetEqual(
             tool_names,
             {
-                "word_count", "shell_run",
-                "change_model", "inject_message", "restart_demo",
-                "reload_ext_demo", "reload_mcp_demo",
-                "batch_example", "show_config_dirs",
+                "word_count",
+                "shell_run",
+                "change_model",
+                "inject_message",
+                "restart_demo",
+                "reload_ext_demo",
+                "reload_mcp_demo",
+                "batch_example",
+                "show_config_dirs",
             },
         )
 
@@ -368,11 +383,16 @@ class TestDemoInit(DemoTestCase):
         self.assertSetEqual(
             events,
             {
-                "session_start", "session_shutdown",
-                "agent_start", "agent_end",
-                "turn_start", "turn_end",
-                "message_start", "message_end",
-                "tool_execution_start", "tool_execution_end",
+                "session_start",
+                "session_shutdown",
+                "agent_start",
+                "agent_end",
+                "turn_start",
+                "turn_end",
+                "message_start",
+                "message_end",
+                "tool_execution_start",
+                "tool_execution_end",
                 "provider_error",
                 "hook/tool_call",
             },
@@ -385,7 +405,6 @@ class TestDemoInit(DemoTestCase):
 
 
 class TestDemoTools(DemoTestCase):
-
     # -- word_count ----------------------------------------------------------
 
     def test_word_count_returns_count(self) -> None:
@@ -427,9 +446,7 @@ class TestDemoTools(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        resp = fake.send_hook(
-            7, "hook/command", {"name": "demo-echo", "args": ["hello"]}
-        )
+        resp = fake.send_hook(7, "hook/command", {"name": "demo-echo", "args": ["hello"]})
         self.assertIsNotNone(resp)
         assert resp is not None
         result = resp["result"]
@@ -441,9 +458,7 @@ class TestDemoTools(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        resp = fake.send_hook(
-            8, "hook/command", {"name": "demo-markdown", "args": ["hi", "there"]}
-        )
+        resp = fake.send_hook(8, "hook/command", {"name": "demo-markdown", "args": ["hi", "there"]})
         self.assertIsNotNone(resp)
         assert resp is not None
         result = resp["result"]
@@ -694,10 +709,14 @@ class TestDemoTools(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send_tool_call(2, "batch_example", {
-            "directory": "/tmp/proj",
-            "extra_instructions": "focus on test coverage",
-        })
+        fake.send_tool_call(
+            2,
+            "batch_example",
+            {
+                "directory": "/tmp/proj",
+                "extra_instructions": "focus on test coverage",
+            },
+        )
         msg = fake.wait_for_method("side_query")
         self.assertIsNotNone(msg, "expected side_query call")
         assert msg is not None
@@ -971,11 +990,16 @@ class TestDemoAPIConverage(DemoTestCase):
     def test_demo_covers_all_events(self) -> None:
         """demo.py should subscribe to every known event type."""
         known_events = {
-            "session_start", "session_shutdown",
-            "agent_start", "agent_end",
-            "turn_start", "turn_end",
-            "message_start", "message_end",
-            "tool_execution_start", "tool_execution_end",
+            "session_start",
+            "session_shutdown",
+            "agent_start",
+            "agent_end",
+            "turn_start",
+            "turn_end",
+            "message_start",
+            "message_end",
+            "tool_execution_start",
+            "tool_execution_end",
         }
         registered = set(fir_ext._event_handlers.keys())
         missing = known_events - registered
@@ -1030,19 +1054,21 @@ class TestDemoCLIVerb(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send({
-            "jsonrpc": "2.0",
-            "id": 100,
-            "method": "cli_invoke",
-            "params": {
-                "verb": "demo-cli",
-                "argv": ["hello", "world"],
-                "cwd": "/tmp",
-                "stdin_is_tty": True,
-                "stdout_is_tty": True,
-                "stderr_is_tty": True,
-            },
-        })
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "cli_invoke",
+                "params": {
+                    "verb": "demo-cli",
+                    "argv": ["hello", "world"],
+                    "cwd": "/tmp",
+                    "stdin_is_tty": True,
+                    "stdout_is_tty": True,
+                    "stderr_is_tty": True,
+                },
+            }
+        )
         resp = fake.wait_for_response(100)
         fake.stop()
         assert resp is not None
@@ -1057,12 +1083,14 @@ class TestDemoCLIVerb(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send({
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "cli_invoke",
-            "params": {"verb": "no-such-verb", "argv": []},
-        })
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "cli_invoke",
+                "params": {"verb": "no-such-verb", "argv": []},
+            }
+        )
         resp = fake.wait_for_response(101)
         fake.stop()
         assert resp is not None
@@ -1072,19 +1100,21 @@ class TestDemoCLIVerb(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send({
-            "jsonrpc": "2.0",
-            "id": 102,
-            "method": "cli_invoke",
-            "params": {
-                "verb": "demo-cli",
-                "argv": [],
-                "cwd": "/tmp",
-                "stdin_is_tty": False,  # signals piped stdin → handler will read
-                "stdout_is_tty": True,
-                "stderr_is_tty": True,
-            },
-        })
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "cli_invoke",
+                "params": {
+                    "verb": "demo-cli",
+                    "argv": [],
+                    "cwd": "/tmp",
+                    "stdin_is_tty": False,  # signals piped stdin → handler will read
+                    "stdout_is_tty": True,
+                    "stderr_is_tty": True,
+                },
+            }
+        )
         # Forward two stdin lines, then EOF.
         fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line1\n"}})
         fake.send({"jsonrpc": "2.0", "method": "cli_stdin", "params": {"data": "line2\n"}})
@@ -1093,9 +1123,7 @@ class TestDemoCLIVerb(DemoTestCase):
         fake.stop()
         assert resp is not None
         self.assertEqual(resp["result"]["exit_code"], 0)
-        joined = "".join(
-            m["params"]["data"] for m in fake.received_with_method("cli_stdout")
-        )
+        joined = "".join(m["params"]["data"] for m in fake.received_with_method("cli_stdout"))
         self.assertIn("line1", joined)
         self.assertIn("line2", joined)
 
@@ -1125,11 +1153,14 @@ class TestDemoProvider(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send({
-            "jsonrpc": "2.0", "id": 200,
-            "method": "provider/listModels",
-            "params": {"provider_id": "echo", "base_url": "", "api_key": ""},
-        })
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 200,
+                "method": "provider/listModels",
+                "params": {"provider_id": "echo", "base_url": "", "api_key": ""},
+            }
+        )
         resp = fake.wait_for_response(200)
         fake.stop()
         assert resp is not None
@@ -1167,21 +1198,24 @@ class TestDemoProvider(DemoTestCase):
         self.start_demo_ext(fake)
         fake.send_init()
         stream_id = "stream-abc"
-        fake.send({
-            "jsonrpc": "2.0", "id": 201,
-            "method": "provider/stream/start",
-            "params": {
-                "provider_id": "echo",
-                "stream_id": stream_id,
-                "model": {"id": "echo-1", "api": "ext:echo", "provider": "echo"},
-                "prompt": {
-                    "messages": [
-                        {"role": "user", "content": "hello"},
-                    ],
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 201,
+                "method": "provider/stream/start",
+                "params": {
+                    "provider_id": "echo",
+                    "stream_id": stream_id,
+                    "model": {"id": "echo-1", "api": "ext:echo", "provider": "echo"},
+                    "prompt": {
+                        "messages": [
+                            {"role": "user", "content": "hello"},
+                        ],
+                    },
+                    "options": {},
                 },
-                "options": {},
-            },
-        })
+            }
+        )
         # Ack returns immediately.
         resp = fake.wait_for_response(201)
         assert resp is not None
@@ -1209,11 +1243,14 @@ class TestDemoProvider(DemoTestCase):
         fake = FakeFir()
         self.start_demo_ext(fake)
         fake.send_init()
-        fake.send({
-            "jsonrpc": "2.0", "id": 202,
-            "method": "provider/stream/cancel",
-            "params": {"stream_id": "no-such-stream"},
-        })
+        fake.send(
+            {
+                "jsonrpc": "2.0",
+                "id": 202,
+                "method": "provider/stream/cancel",
+                "params": {"stream_id": "no-such-stream"},
+            }
+        )
         resp = fake.wait_for_response(202)
         fake.stop()
         assert resp is not None
@@ -1223,9 +1260,6 @@ class TestDemoProvider(DemoTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
 
 
 class TestTypedSurface(unittest.TestCase):
@@ -1250,11 +1284,17 @@ class TestTypedSurface(unittest.TestCase):
             "provider": "anthropic",
             "model": "claude",
             "usage": {
-                "input": 1, "output": 2, "cache_read": 0, "cache_write": 0,
+                "input": 1,
+                "output": 2,
+                "cache_read": 0,
+                "cache_write": 0,
                 "total_tokens": 3,
                 "cost": {
-                    "input": 0.0, "output": 0.0, "cache_read": 0.0,
-                    "cache_write": 0.0, "total": 0.0,
+                    "input": 0.0,
+                    "output": 0.0,
+                    "cache_read": 0.0,
+                    "cache_write": 0.0,
+                    "total": 0.0,
                 },
             },
         }
@@ -1269,12 +1309,19 @@ class TestTypedSurface(unittest.TestCase):
 
     def test_all_lists_typed_names(self) -> None:
         promised = {
-            "ToolResult", "ExecResult", "MessageEndParams",
-            "ToolCallHookParams", "ToolCallHookResult",
-            "CommandHookResult", "OkResult",
-            "SessionStartParams", "ToolExecutionStartParams",
-            "ToolExecutionEndParams", "AgentLifecycleParams",
-            "Context", "Host",
+            "ToolResult",
+            "ExecResult",
+            "MessageEndParams",
+            "ToolCallHookParams",
+            "ToolCallHookResult",
+            "CommandHookResult",
+            "OkResult",
+            "SessionStartParams",
+            "ToolExecutionStartParams",
+            "ToolExecutionEndParams",
+            "AgentLifecycleParams",
+            "Context",
+            "Host",
         }
         missing = promised - set(fir_ext.__all__)
         self.assertSetEqual(missing, set(), f"missing from __all__: {sorted(missing)}")

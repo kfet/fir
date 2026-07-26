@@ -29,8 +29,7 @@ def _load_auto_namer():
     with mock.patch.object(fir_ext, "run"):
         import auto_namer
     new_handlers = {
-        k: v for k, v in fir_ext._event_handlers.items()
-        if k not in before or id(v) != before[k]
+        k: v for k, v in fir_ext._event_handlers.items() if k not in before or id(v) != before[k]
     }
     return auto_namer, new_handlers
 

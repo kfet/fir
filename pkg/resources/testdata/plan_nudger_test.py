@@ -102,7 +102,8 @@ class TestStateTracking(unittest.TestCase):
 
     def test_non_plan_update_is_ignored(self):
         self.update(
-            {"type": "session_named", "session_name": "x"}, mock.MagicMock(),
+            {"type": "session_named", "session_name": "x"},
+            mock.MagicMock(),
         )
         self.assertEqual(self.mod.plan_total, 0)
         self.assertEqual(self.mod.stagnation, 0)
@@ -177,8 +178,8 @@ class TestTurnEndGating(unittest.TestCase):
         self.assertEqual(len(ctx.side_query_calls), 1)
         prompt = ctx.side_query_calls[0]["prompt"]
         # Prompt carries the plan-state JSON verbatim.
-        self.assertIn("\"total\": 3", prompt)
-        self.assertIn("\"stagnation_count\": 2", prompt)
+        self.assertIn('"total": 3', prompt)
+        self.assertIn('"stagnation_count": 2', prompt)
 
         self.assertEqual(len(ctx.send_user_message_calls), 1)
         msg = ctx.send_user_message_calls[0]
@@ -244,7 +245,8 @@ class TestTurnEndGating(unittest.TestCase):
 
         self.turn_end({}, ctx)
         self.assertEqual(
-            len(ctx.side_query_calls), 2,
+            len(ctx.side_query_calls),
+            2,
             "guard must clear on stagnation reset, otherwise the second "
             "real stagnation episode is silently suppressed",
         )
@@ -283,8 +285,8 @@ class TestPrompt(unittest.TestCase):
         prompt = self.mod.PROMPT.format(
             plan_state=json.dumps({"total": 4, "stagnation_count": 3}),
         )
-        self.assertIn("\"total\": 4", prompt)
-        self.assertIn("\"stagnation_count\": 3", prompt)
+        self.assertIn('"total": 4', prompt)
+        self.assertIn('"stagnation_count": 3', prompt)
 
     def test_offers_empty_response_as_valid(self):
         # The "empty response = noop" affordance is what lets the

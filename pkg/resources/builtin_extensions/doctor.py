@@ -24,6 +24,7 @@ import fir_ext
 # Storage
 # ---------------------------------------------------------------------------
 
+
 # Doctor log is a cross-project failure history, so it lives in the global
 # (lowest-priority) config dir advertised by the host — typically
 # ~/.config/fir. Falls back to ~/.config/fir when running outside fir.
@@ -35,6 +36,7 @@ def _doctor_dir() -> Path:
 
 def _doctor_log() -> Path:
     return _doctor_dir() / "doctor.jsonl"
+
 
 # In-memory buffer for the current session (flushed on session_end).
 _session: dict[str, Any] = {}
@@ -75,11 +77,13 @@ def on_session_start(params, ctx: fir_ext.Context) -> None:
     global _session_end_fired
     if params is None:
         params = {}
-    _session.update({
-        "session_id": params.get("session_id", "unknown"),
-        "start_time": time.time(),
-        "cwd": params.get("cwd", os.getcwd()),
-    })
+    _session.update(
+        {
+            "session_id": params.get("session_id", "unknown"),
+            "start_time": time.time(),
+            "cwd": params.get("cwd", os.getcwd()),
+        }
+    )
     _tool_errors.clear()
     _session_end_fired = False
 
@@ -87,12 +91,14 @@ def on_session_start(params, ctx: fir_ext.Context) -> None:
 @fir_ext.on("tool_execution_end")
 def on_tool_execution_end(params: dict, ctx: fir_ext.Context) -> None:
     if params.get("is_error"):
-        _tool_errors.append({
-            "tool": params.get("tool_name", ""),
-            "tool_call_id": params.get("tool_call_id", ""),
-            "error_text": params.get("error_text", ""),
-            "ts": time.time(),
-        })
+        _tool_errors.append(
+            {
+                "tool": params.get("tool_name", ""),
+                "tool_call_id": params.get("tool_call_id", ""),
+                "error_text": params.get("error_text", ""),
+                "ts": time.time(),
+            }
+        )
 
 
 @fir_ext.on("session_end")

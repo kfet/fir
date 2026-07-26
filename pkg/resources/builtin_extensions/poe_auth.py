@@ -115,9 +115,7 @@ def post_exchange(params: dict, ctx: fir_ext.AuthContext) -> dict:
 @fir_ext.auth_refresh(provider="poe")
 def refresh(params: dict, ctx: fir_ext.AuthContext) -> dict:
     """Poe does not issue refresh tokens — direct the user to re-login."""
-    raise RuntimeError(
-        "Poe API key has expired. Run `fir --login poe` to obtain a new key."
-    )
+    raise RuntimeError("Poe API key has expired. Run `fir --login poe` to obtain a new key.")
 
 
 # NOTE: intentionally no ``@fir_ext.auth_list_models`` handler.
@@ -292,4 +290,3 @@ def resolve_endpoint(params: dict, ctx: fir_ext.AuthContext) -> dict | None:
 
 
 fir_ext.run(name="poe-auth")
-

@@ -112,11 +112,10 @@ class TestResolveEndpoint(unittest.TestCase):
         )
 
     def test_miss_probes_and_persists(self):
-        with mock.patch.object(
-            self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}
-        ), mock.patch.object(
-            self.poe, "_probe_model", return_value={"callable": True}
-        ) as probe:
+        with (
+            mock.patch.object(self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}),
+            mock.patch.object(self.poe, "_probe_model", return_value={"callable": True}) as probe,
+        ):
             out = self._resolve("ambi")
         self.assertEqual(out, {"callable": True})
         probe.assert_called_once()
@@ -126,21 +125,19 @@ class TestResolveEndpoint(unittest.TestCase):
 
     def test_hit_no_network(self):
         # Seed the memo file, then a second resolve must not probe.
-        with mock.patch.object(
-            self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}
-        ), mock.patch.object(
-            self.poe, "_probe_model", return_value={"callable": True}
-        ) as probe:
+        with (
+            mock.patch.object(self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}),
+            mock.patch.object(self.poe, "_probe_model", return_value={"callable": True}) as probe,
+        ):
             self._resolve("ambi")  # miss -> one probe
             self._resolve("ambi")  # hit -> no probe
             self._resolve("ambi")  # hit -> no probe
         probe.assert_called_once()
 
     def test_404_records_not_callable(self):
-        with mock.patch.object(
-            self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}
-        ), mock.patch.object(
-            self.poe, "_probe_model", return_value={"callable": False}
+        with (
+            mock.patch.object(self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}),
+            mock.patch.object(self.poe, "_probe_model", return_value={"callable": False}),
         ):
             out = self._resolve("ambi")
         self.assertEqual(out, {"callable": False})
@@ -149,9 +146,10 @@ class TestResolveEndpoint(unittest.TestCase):
 
     def test_explicit_endpoint_model_not_probed(self):
         # Model not in the empty-endpoint set -> no correction, no probe.
-        with mock.patch.object(
-            self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}
-        ), mock.patch.object(self.poe, "_probe_model") as probe:
+        with (
+            mock.patch.object(self.poe, "_fetch_empty_endpoint_ids", return_value={"ambi"}),
+            mock.patch.object(self.poe, "_probe_model") as probe,
+        ):
             out = self._resolve("explicit")
         self.assertIsNone(out)
         probe.assert_not_called()
@@ -159,24 +157,22 @@ class TestResolveEndpoint(unittest.TestCase):
     def test_probe_404_not_found_body(self):
         # _probe_model classifies a not_found_error 404 as callable=false.
         err = urllib.error.HTTPError(
-            self.poe._CHAT_URL, 404, "Not Found", email.message.Message(),
+            self.poe._CHAT_URL,
+            404,
+            "Not Found",
+            email.message.Message(),
             io.BytesIO(b'{"error":{"type":"not_found_error"}}'),
         )
         with mock.patch.object(urllib.request, "urlopen", side_effect=err):
-            self.assertEqual(
-                self.poe._probe_model("x", "k"), {"callable": False}
-            )
+            self.assertEqual(self.poe._probe_model("x", "k"), {"callable": False})
 
     def test_probe_transient_stays_callable(self):
         err = urllib.error.HTTPError(
             self.poe._CHAT_URL, 429, "Too Many Requests", email.message.Message(), io.BytesIO(b"")
         )
         with mock.patch.object(urllib.request, "urlopen", side_effect=err):
-            self.assertEqual(
-                self.poe._probe_model("x", "k"), {"callable": True}
-            )
+            self.assertEqual(self.poe._probe_model("x", "k"), {"callable": True})
 
 
 if __name__ == "__main__":
     unittest.main()
-

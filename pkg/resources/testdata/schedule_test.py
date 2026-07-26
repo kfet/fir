@@ -15,7 +15,12 @@ from unittest import mock
 _ext_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "builtin_extensions")
 sys.path.insert(0, _ext_dir)
 _sdk_dir = os.path.join(
-    os.path.dirname(_ext_dir), "..", "pkg", "extension", "sdk", "python",
+    os.path.dirname(_ext_dir),
+    "..",
+    "pkg",
+    "extension",
+    "sdk",
+    "python",
 )
 sys.path.insert(0, os.path.normpath(_sdk_dir))
 
@@ -57,10 +62,10 @@ class _Timeout:
 
     def __enter__(self):
         if hasattr(signal, "SIGALRM"):
+
             def _handler(signum, frame):
-                raise TimeoutError(
-                    f"Test timed out after {self.seconds}s"
-                )
+                raise TimeoutError(f"Test timed out after {self.seconds}s")
+
             self._old = signal.signal(signal.SIGALRM, _handler)
             signal.alarm(self.seconds)
         return self
@@ -84,7 +89,8 @@ class TestFormatCountdown(unittest.TestCase):
 
     def test_minutes_seconds(self):
         self.assertEqual(
-            schedule._format_countdown(timedelta(minutes=3, seconds=7)), "3m07s",
+            schedule._format_countdown(timedelta(minutes=3, seconds=7)),
+            "3m07s",
         )
 
     def test_hours_minutes_seconds(self):
@@ -98,7 +104,8 @@ class TestFormatCountdown(unittest.TestCase):
 
     def test_negative_clamps(self):
         self.assertEqual(
-            schedule._format_countdown(timedelta(seconds=-10)), "0s",
+            schedule._format_countdown(timedelta(seconds=-10)),
+            "0s",
         )
 
 
@@ -124,7 +131,9 @@ class TestParseTarget(unittest.TestCase):
     def setUp(self):
         self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc)
         self._patch = mock.patch.object(
-            schedule, "_now", return_value=self._fixed,
+            schedule,
+            "_now",
+            return_value=self._fixed,
         )
         self._patch.start()
 
@@ -154,7 +163,8 @@ class TestParseTarget(unittest.TestCase):
     def test_hours_minutes_seconds(self):
         t = schedule._parse_target("1h5m10s")
         self.assertEqual(
-            t, self._fixed + timedelta(hours=1, minutes=5, seconds=10),
+            t,
+            self._fixed + timedelta(hours=1, minutes=5, seconds=10),
         )
 
     def test_pm(self):
@@ -228,10 +238,13 @@ class TestCmdSchedule(unittest.TestCase):
     def setUp(self):
         self._fixed = datetime(2026, 3, 9, 10, 0, 0, tzinfo=timezone.utc)
         self._now_patch = mock.patch.object(
-            schedule, "_now", return_value=self._fixed,
+            schedule,
+            "_now",
+            return_value=self._fixed,
         )
         self._thread_patch = mock.patch(
-            "threading.Thread", side_effect=_FakeThread,
+            "threading.Thread",
+            side_effect=_FakeThread,
         )
         self._now_patch.start()
         self._thread_patch.start()
@@ -369,7 +382,8 @@ class TestCountdownThread(unittest.TestCase):
             ctx.continue_session.assert_not_called()
             ctx.send_message.assert_called_once()
             self.assertIn(
-                "do it", ctx.send_message.call_args.kwargs.get("content", ""),
+                "do it",
+                ctx.send_message.call_args.kwargs.get("content", ""),
             )
 
     def test_cancel_no_fire(self):
@@ -467,7 +481,9 @@ class TestIntegration(unittest.TestCase):
             self._now_patch.stop()
             frozen_now = self._clock()  # snapshot the fast clock once
             frozen_patch = mock.patch.object(
-                schedule, "_now", return_value=frozen_now,
+                schedule,
+                "_now",
+                return_value=frozen_now,
             )
             frozen_patch.start()
             try:

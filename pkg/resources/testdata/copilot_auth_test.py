@@ -120,7 +120,11 @@ class TestModifyModels(unittest.TestCase):
             "credentials": {"access": token, "extra": {}},
             "models": [
                 {"provider": "github-copilot", "id": "gpt-4o", "baseUrl": ""},
-                {"provider": "anthropic", "id": "claude-3.5-sonnet", "baseUrl": "https://api.anthropic.com"},
+                {
+                    "provider": "anthropic",
+                    "id": "claude-3.5-sonnet",
+                    "baseUrl": "https://api.anthropic.com",
+                },
             ],
         }
         result = _mod.modify_models(params, None)

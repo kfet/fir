@@ -31,10 +31,11 @@ def _load_hello():
     with mock.patch.object(fir_ext, "run"):
         import hello
     new_handlers = {
-        k: v for k, v in fir_ext._event_handlers.items()
+        k: v
+        for k, v in fir_ext._event_handlers.items()
         if k not in before_handlers or id(v) != before_handlers[k]
     }
-    new_tools = fir_ext._tools[len(before_tools):]
+    new_tools = fir_ext._tools[len(before_tools) :]
     return hello, new_handlers, new_tools
 
 

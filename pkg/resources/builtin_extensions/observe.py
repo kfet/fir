@@ -119,13 +119,13 @@ _state: dict[str, Any] = {
     # (e.g. `fir htop`) read these to render top-style metrics without
     # parsing the transcript.
     "activity": {
-        "last_event": "",          # ISO-8601 UTC of the most recent event
-        "last_event_type": "",     # e.g. "message_end", "tool_execution_end"
-        "turns": 0,                # turn_end count
-        "messages": 0,             # message_end count (any role)
-        "assistant_messages": 0,   # message_end with role=assistant
-        "tool_calls": 0,           # tool_execution_end count
-        "tool_errors": 0,          # tool_execution_end with is_error=true
+        "last_event": "",  # ISO-8601 UTC of the most recent event
+        "last_event_type": "",  # e.g. "message_end", "tool_execution_end"
+        "turns": 0,  # turn_end count
+        "messages": 0,  # message_end count (any role)
+        "assistant_messages": 0,  # message_end with role=assistant
+        "tool_calls": 0,  # tool_execution_end count
+        "tool_errors": 0,  # tool_execution_end with is_error=true
     },
     # Most-recent provider/model from an assistant message_end (best-effort).
     "model": {
@@ -147,7 +147,7 @@ _state: dict[str, Any] = {
             "cache_write": 0.0,
             "total": 0.0,
         },
-        "requests": 0,             # number of assistant messages contributing
+        "requests": 0,  # number of assistant messages contributing
     },
 }
 _socket: socket.socket | None = None
@@ -745,7 +745,9 @@ def _snapshot_session_list(include_all: bool = False) -> str:
         status = s.get("status", "") or ""
         age = _age_string(s.get("started_at", "") or "", now)
         pid_val = s.get("host_pid") or s.get("pid") or 0
-        lines.append(f"{sid:<{id_w}}  {pid_val:>{pid_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}")
+        lines.append(
+            f"{sid:<{id_w}}  {pid_val:>{pid_w}}  {name:<{name_w}}  {cwd:<{cwd_w}}  {status:<9}  {age}"
+        )
     if hidden:
         lines.append(f"({hidden} ended/crashed hidden — use --all to show)")
     return "\n".join(lines)
@@ -836,9 +838,7 @@ def _read_cards(cards_path: str) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [
-        item
-        for item in data
-        if isinstance(item, dict) and item.get("source") and item.get("key")
+        item for item in data if isinstance(item, dict) and item.get("source") and item.get("key")
     ]
 
 
@@ -1003,7 +1003,9 @@ def _send_one(id_prefix: str, cwd_flag: str, content: str, deliver_as: str) -> N
     "abort" carries no content (cancels the current turn).
     """
     if deliver_as not in ("", "steer", "followUp", "abort"):
-        raise ValueError(f"deliver_as must be '', 'steer', 'followUp', or 'abort' (got {deliver_as!r})")
+        raise ValueError(
+            f"deliver_as must be '', 'steer', 'followUp', or 'abort' (got {deliver_as!r})"
+        )
     if deliver_as != "abort" and (not content or not content.strip()):
         raise ValueError("content is empty")
     s = _resolve_sidecar(id_prefix, cwd_flag)
@@ -1083,7 +1085,7 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             else:
                 return {"message": "/observe: --cwd requires an argument"}
         elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd="):]
+            cwd_flag = a[len("--cwd=") :]
         elif a == "--ext":
             if i + 1 < len(args):
                 ext = args[i + 1]
@@ -1091,20 +1093,20 @@ def cmd_observe(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             else:
                 return {"message": "/observe: --ext requires an argument"}
         elif a.startswith("--ext="):
-            ext = a[len("--ext="):]
+            ext = a[len("--ext=") :]
         elif a.startswith("--lines="):
             try:
-                lines = int(a[len("--lines="):])
+                lines = int(a[len("--lines=") :])
             except ValueError:
                 return {"message": f"/observe: invalid --lines value: {a}"}
         elif a.startswith("--start="):
             try:
-                start = int(a[len("--start="):])
+                start = int(a[len("--start=") :])
             except ValueError:
                 return {"message": f"/observe: invalid --start value: {a}"}
         elif a.startswith("--end="):
             try:
-                end = int(a[len("--end="):])
+                end = int(a[len("--end=") :])
             except ValueError:
                 return {"message": f"/observe: invalid --end value: {a}"}
         elif a.startswith("--"):
@@ -1149,7 +1151,7 @@ def cmd_send(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
             else:
                 return {"message": "/send: --cwd requires an argument"}
         elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd="):]
+            cwd_flag = a[len("--cwd=") :]
         elif a.startswith("--") and not msg_parts:
             return {"message": f"/send: unknown flag: {a}"}
         elif not id_prefix and not cwd_flag and not msg_parts:
@@ -1476,9 +1478,7 @@ def _verb_observe_tail(
                 conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 conn.connect(sock_path)
             except OSError as e:
-                host.eprintln(
-                    f"warning: --interact: connect socket: {e} (continuing read-only)"
-                )
+                host.eprintln(f"warning: --interact: connect socket: {e} (continuing read-only)")
                 conn = None
             if conn is not None:
                 # Daemon thread; we never join — the verb either exits via
@@ -1543,9 +1543,7 @@ def _verb_observe_tail(
             f.close()
 
 
-def _interact_send_loop(
-    host: fir_ext.Host, conn: socket.socket, stop: threading.Event
-) -> None:
+def _interact_send_loop(host: fir_ext.Host, conn: socket.socket, stop: threading.Event) -> None:
     """--interact stdin pump: each non-empty line of host.readline() is sent
     as one NDJSON message through `conn`. Ends on EOF or `stop`."""
     try:
@@ -1590,20 +1588,18 @@ def _parse_observe_args(argv: list[str]) -> tuple[str, str, bool, bool, bool, st
             include_all = True
         elif a == "--cwd":
             if i + 1 >= len(argv):
-                return ("", "", False, False, False,
-                        "--cwd requires an argument (path or '.')")
+                return ("", "", False, False, False, "--cwd requires an argument (path or '.')")
             cwd_flag = argv[i + 1]
             i += 1
         elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd="):]
+            cwd_flag = a[len("--cwd=") :]
         elif a in ("--help", "-h"):
             return ("", "", False, False, False, "__HELP__")
         elif a.startswith("--"):
             return ("", "", False, False, False, f"unknown flag: {a}")
         else:
             if id_prefix:
-                return ("", "", False, False, False,
-                        f"unexpected extra argument: {a}")
+                return ("", "", False, False, False, f"unexpected extra argument: {a}")
             id_prefix = a
         i += 1
     return (id_prefix, cwd_flag, json_out, interact, include_all, None)
@@ -1651,7 +1647,7 @@ def _parse_send_args(argv: list[str]) -> tuple[str, str, str, str | None]:
             cwd_flag = argv[i + 1]
             i += 1
         elif a.startswith("--cwd="):
-            cwd_flag = a[len("--cwd="):]
+            cwd_flag = a[len("--cwd=") :]
         elif a in ("--help", "-h"):
             return ("", "", "", "__HELP__")
         elif a.startswith("--"):
@@ -1697,9 +1693,7 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         conn.connect(sock_path)
     except OSError as e:
         sid8 = (s.get("session_id", "") or "")[:8]
-        host.eprintln(
-            f"connect to session {sid8}: {e}\n(is the session still running?)"
-        )
+        host.eprintln(f"connect to session {sid8}: {e}\n(is the session still running?)")
         return 1
 
     # --abort is a one-shot: fire the ESC-equivalent and exit without
@@ -1722,10 +1716,10 @@ def cli_send(argv: list[str], host: fir_ext.Host) -> int:
         sid8 = (s.get("session_id", "") or "")[:8]
         name = s.get("session_name", "") or sid8
         suffix = f" ({sid8})" if s.get("session_name") else ""
+        host.eprintln(f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect.")
         host.eprintln(
-            f"Connected to session {name}{suffix}. Enter to send. Ctrl-\\ to disconnect."
+            "  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn"
         )
-        host.eprintln("  ! prefix → steer (interrupt)   + prefix → followUp (queue)   ~ → abort turn")
 
     try:
         while True:
@@ -1800,7 +1794,7 @@ def _parse_htop_args(argv: list[str]) -> tuple[float, str | None]:
             continue
         if a.startswith("--interval="):
             try:
-                interval = _parse_duration(a[len("--interval="):])
+                interval = _parse_duration(a[len("--interval=") :])
             except ValueError as e:
                 return (0.0, f"invalid --interval: {e}")
         elif a.startswith("--"):
@@ -1956,7 +1950,7 @@ def _htop_render(sidecars: list[dict[str, Any]], color: bool) -> str:
         out.append(dim("  (no fir sessions found — try `fir` in another terminal)"))
     for s in sidecars:
         sid = (s.get("session_id") or "")[:8]
-        name = (s.get("session_name") or "-")
+        name = s.get("session_name") or "-"
         cwd = os.path.basename(s.get("cwd") or "")
         status = s.get("status") or ""
         age = _age_string(s.get("started_at") or "", now)

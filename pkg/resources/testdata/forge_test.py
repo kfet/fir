@@ -64,20 +64,23 @@ class TestGlobalConfigDir(unittest.TestCase):
         self.mod = _load_forge()
 
     def test_prefers_non_project_dir(self):
-        with mock.patch.object(fir_ext, "cwd", "/proj"), mock.patch.object(
-            fir_ext, "config_dirs", ["/proj/.fir", "/home/u/.config/fir"]
+        with (
+            mock.patch.object(fir_ext, "cwd", "/proj"),
+            mock.patch.object(fir_ext, "config_dirs", ["/proj/.fir", "/home/u/.config/fir"]),
         ):
             self.assertEqual(self.mod._global_config_dir(), "/home/u/.config/fir")
 
     def test_skips_project_fir_even_if_last(self):
-        with mock.patch.object(fir_ext, "cwd", "/proj"), mock.patch.object(
-            fir_ext, "config_dirs", ["/home/u/.config/fir", "/proj/.fir"]
+        with (
+            mock.patch.object(fir_ext, "cwd", "/proj"),
+            mock.patch.object(fir_ext, "config_dirs", ["/home/u/.config/fir", "/proj/.fir"]),
         ):
             self.assertEqual(self.mod._global_config_dir(), "/home/u/.config/fir")
 
     def test_only_project_dir_falls_back(self):
-        with mock.patch.object(fir_ext, "cwd", "/proj"), mock.patch.object(
-            fir_ext, "config_dirs", ["/proj/.fir"]
+        with (
+            mock.patch.object(fir_ext, "cwd", "/proj"),
+            mock.patch.object(fir_ext, "config_dirs", ["/proj/.fir"]),
         ):
             self.assertEqual(self.mod._global_config_dir(), "/proj/.fir")
 
@@ -86,8 +89,9 @@ class TestGlobalConfigDir(unittest.TestCase):
             self.assertIsNone(self.mod._global_config_dir())
 
     def test_no_cwd(self):
-        with mock.patch.object(fir_ext, "cwd", ""), mock.patch.object(
-            fir_ext, "config_dirs", ["/home/u/.config/fir"]
+        with (
+            mock.patch.object(fir_ext, "cwd", ""),
+            mock.patch.object(fir_ext, "config_dirs", ["/home/u/.config/fir"]),
         ):
             self.assertEqual(self.mod._global_config_dir(), "/home/u/.config/fir")
 

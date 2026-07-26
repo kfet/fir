@@ -70,7 +70,16 @@ def _find_js_ts_entries(pkg_dir: str) -> list[str]:
     entry_basenames = ("index", "main")
     entries = []
     for root, dirs, files in os.walk(pkg_dir):
-        for skip in (".git", "node_modules", "vendor", "__pycache__", "test", "tests", "dist", "build"):
+        for skip in (
+            ".git",
+            "node_modules",
+            "vendor",
+            "__pycache__",
+            "test",
+            "tests",
+            "dist",
+            "build",
+        ):
             if skip in dirs:
                 dirs.remove(skip)
         dirname = os.path.basename(root)
@@ -168,7 +177,9 @@ def _run_install_and_hook(args: list[str]) -> str:
 def cmd_install(args: list[str], ctx: fir_ext.Context) -> dict[str, Any]:
     """Usage: /install <source> [--local]"""
     if not args:
-        return {"message": "Usage: /install <source> [--local]\n\nExamples:\n  /install github.com/user/repo\n  /install /path/to/local/pkg\n  /install github.com/user/repo@v1.2 --local"}
+        return {
+            "message": "Usage: /install <source> [--local]\n\nExamples:\n  /install github.com/user/repo\n  /install /path/to/local/pkg\n  /install github.com/user/repo@v1.2 --local"
+        }
     try:
         return {"message": _run_install_and_hook(args)}
     except RuntimeError as e:
