@@ -30,3 +30,6 @@ cmd/fir/fir
 
 # per-project telegram bot state (contains token)
 .fir/telegram/
+
+# local MCP overrides (real servers/keys); the tracked .fir/mcp.json is a demo placeholder
+.fir/mcp.local.json

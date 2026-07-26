@@ -1,4 +1,4 @@
-.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses _all_parallel $(CROSS_TARGETS)
+.PHONY: build build-all install install-completions test test-e2e test-cover test-race test-live vet fmt clean pgo generate-models check-uv lint-python test-python test-python-sdk test-python-ext test-python-schedule test-python-tmuxspinner test-go-sdk install-uv publish deploy tidy check-size notices check-licenses check-secrets _all_parallel $(CROSS_TARGETS)
 
 # Output directory for all build artifacts
 BINDIR    := bin
@@ -196,6 +196,19 @@ THIRD_PARTY_NOTICES.md: go.mod go.sum hack/notices.tpl
 
 check-licenses:
 	$(call RUN,check licenses,$(GO_LICENSES) check ./cmd/fir --disallowed_types=forbidden,restricted 2>/dev/null)
+
+# Full-history secret scan. Triaged findings live in .gitleaksignore; anything
+# not listed there is a real failure. ~2s over the whole repo, so no incremental
+# mode. Skipped (not failed) when gitleaks is absent, so `make all` stays hermetic
+# on a bare checkout; CI installs a pinned binary and calls this explicitly.
+GITLEAKS_VERSION := 8.30.1
+
+check-secrets:
+	@if command -v gitleaks >/dev/null 2>&1; then \
+		gitleaks git . --log-opts="--all --full-history" --no-banner --redact; \
+	else \
+		echo "gitleaks not installed, skipping secret scan (see Makefile check-secrets)"; \
+	fi
 
 
 # ---------------------------------------------------------------------------

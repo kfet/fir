@@ -1,0 +1,15 @@
+# gitleaks findings triaged 2026-07-26 (full-history scan, gitleaks 8.30.1).
+# Fingerprint format: <commit>:<file>:<rule>:<line>
+# Anything NOT listed here is a real failure. Do not add path/regex allowlists
+# to a gitleaks.toml instead -- that would exempt future leaks in the same files.
+
+# Poe access key for bot "fir-air", committed 2026-04-11 in a tracked config file.
+# REAL LEAK. Key ROTATED 2026-07-26; the value in history is dead.
+# Left in history deliberately: rewriting would invalidate every changelog sha.
+6bd3d4e2399ca591d16312165fb103e2a74de5e6:.fir/mcp.json:generic-api-key:6
+
+# False positives: the public Google OAuth client id/secret constants used by
+# gemini-cli and antigravity. These ship in every copy of those tools and are
+# not secret. Files have since moved out of this repo to github.com/kfet/ai.
+e67b0212e9c85207f684457cdf0e0cb0e0d5d412:pkg/ai/oauth/google_antigravity.go:generic-api-key:23
+e67b0212e9c85207f684457cdf0e0cb0e0d5d412:pkg/ai/oauth/google_gemini_cli.go:generic-api-key:24
