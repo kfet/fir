@@ -22,7 +22,7 @@ fir can store more than one Anthropic OAuth login at a time (e.g. a personal and
 With no explicit token, the script reports usage for **every** stored Anthropic account, one labelled section each:
 
 ```
-▸ kalin.f@gmail.com (Personal)
+▸ you@example.com (Personal)
   Five Hour  7% — resets Jun 16, 4:49 PM EEST
   Seven Day  2% — resets Jun 23, 2:59 AM EEST
 

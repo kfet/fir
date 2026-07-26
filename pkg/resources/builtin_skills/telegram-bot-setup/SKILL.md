@@ -10,7 +10,7 @@ Goal: bind one Telegram bot to one fir project worktree with isolated state (tok
 
 ## Prerequisites
 
-- `bun` installed (`/Users/kfet/.bun/bin/bun` or `/opt/homebrew/bin/bun`).
+- `bun` installed (typically `~/.bun/bin/bun`, or `/opt/homebrew/bin/bun` on macOS). The JSON below needs an **absolute** path — `~` is not expanded there — so run `command -v bun` and paste the result.
 - Telegram bot token from @BotFather.
 - The telegram bridge installed under `~/.config/fir/packages/...`. If missing, install just the subdirectory (sparse checkout, ~v0.27.0+):
   `fir install github.com/anthropics/claude-plugins-official/external_plugins/telegram`
@@ -42,8 +42,8 @@ Goal: bind one Telegram bot to one fir project worktree with isolated state (tok
    {
      "mcpServers": {
        "telegram": {
-         "command": "/Users/kfet/.bun/bin/bun",
-         "args": ["run", "--cwd", "/Users/kfet/.config/fir/packages/git/github.com/anthropics/claude-plugins-official/external_plugins/telegram", "--shell=bun", "--silent", "start"],
+         "command": "<absolute path to bun, e.g. /home/you/.bun/bin/bun>",
+         "args": ["run", "--cwd", "<absolute path to your home>/.config/fir/packages/git/github.com/anthropics/claude-plugins-official/external_plugins/telegram", "--shell=bun", "--silent", "start"],
          "env": { "TELEGRAM_STATE_DIR": "<absolute path to state_dir>" }
        }
      }

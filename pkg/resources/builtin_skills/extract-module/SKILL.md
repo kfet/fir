@@ -16,7 +16,7 @@ Avoid producing ranked tables that invite "pick the top one." Instead, for each 
 
 ## Discover the precedent — don't reinvent
 
-There are already extracted siblings under `/Users/kfet/dev/ai/`. **Find them, study them, adopt what applies.**
+There are already extracted siblings under `~/dev/ai/` (wherever this machine keeps its repo checkouts). **Find them, study them, adopt what applies.**
 
 ```bash
 grep -rh "github.com/kfet" go.mod go.sum \
@@ -25,7 +25,7 @@ grep -rh "github.com/kfet" go.mod go.sum \
   | sort -u
 ```
 
-For each sibling repo found, inspect on disk at `/Users/kfet/dev/ai/<name>/`:
+For each sibling repo found, inspect it on disk at `~/dev/ai/<name>/`:
 
 - Top-level layout (`ls`)
 - `Makefile` — coverage gate, test/fmt/vet targets, release flow
@@ -47,7 +47,7 @@ Concretely, the `Makefile` must have a `cover` target invoked by `all` that:
 3. Computes the total coverage percentage.
 4. **Exits non-zero** if the percentage is below the threshold.
 
-Copy the exact recipe from the strictest sibling (`/Users/kfet/dev/ai/skipstone/Makefile` or `/Users/kfet/dev/ai/firpty/Makefile`) — do not roll your own. If a `.covignore` is needed for files that genuinely cannot be covered (e.g. real PTY syscalls, real network exec), copy the sibling's `.covignore` shape too and document each exemption inline.
+Copy the exact recipe from the strictest sibling (`~/dev/ai/skipstone/Makefile` or `~/dev/ai/firpty/Makefile`) — do not roll your own. If a `.covignore` is needed for files that genuinely cannot be covered (e.g. real PTY syscalls, real network exec), copy the sibling's `.covignore` shape too and document each exemption inline.
 
 If you write the Makefile and `make all` passes without a coverage check having run, you have skipped this step. Re-check before declaring the extraction done.
 
