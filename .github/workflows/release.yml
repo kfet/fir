@@ -207,22 +207,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest = Apple Silicon (arm64); ubuntu-latest = Linuxbrew.
+        # macos-latest = Apple Silicon (arm64); macos-15-intel = Intel
+        # (amd64); ubuntu-latest = Linuxbrew. The two mac legs matter because
+        # fir ships both darwin arm64 and amd64, and the formula's Intel path
+        # (/usr/local prefix, amd64 asset selection) differs from arm64's
+        # /opt/homebrew.
         #
-        # The Intel (amd64) mac leg is temporarily absent. It used macos-13,
-        # which GitHub has retired — the label stopped resolving and every
-        # release run hung on it indefinitely (v0.89.0 ~7h, v0.90.0 50m+,
-        # both cancelled by hand). Artifacts were never at risk: this job is
-        # post-publish and fail-fast is false, so only the run's terminal
-        # state was affected.
-        #
-        # Intel coverage is worth restoring — fir ships darwin-amd64 and the
-        # formula's Intel path (/usr/local prefix, amd64 asset selection)
-        # differs from arm64's /opt/homebrew. The successor label is believed
-        # to be macos-15-intel; runner-probe.yml validates it out-of-band so
-        # a wrong guess cannot hang a release. Restore this leg once that
-        # probe has been seen to get picked up.
-        os: [macos-latest, ubuntu-latest]
+        # This previously used macos-13 for the Intel leg. GitHub retired that
+        # image, the label stopped resolving, and the job sat in "waiting for
+        # a runner" until cancelled by hand (v0.89.0 ~7h, v0.90.0 50m+).
+        # macos-15-intel is its successor and was verified out-of-band before
+        # being put back here — see runner-probe.yml, which exists so that a
+        # candidate label is never trialled inside a release run. Run it
+        # (Actions → runner-probe → Run workflow) before changing any label
+        # below.
+        os: [macos-latest, macos-15-intel, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # Linuxbrew intermittently dies with "Broken pipe" right after `brew tap`
     # (during Homebrew's JSON-API / auto-update pipe work). Disabling those
