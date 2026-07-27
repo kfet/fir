@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ServerConfig describes a single MCP server to connect to.
@@ -25,6 +26,123 @@ type ServerConfig struct {
 	// MCP server as filesystem roots. When empty, the process working directory
 	// is used as the single default root.
 	Roots []string `json:"roots,omitempty"`
+	// Auth optionally overrides how fir authenticates to an HTTP-based MCP
+	// server. It is absent by default: a bare {"url":…, "transport":"streamable"}
+	// entry already performs the full MCP OAuth discovery + login dance when the
+	// server answers 401. See AuthConfig.
+	Auth *AuthConfig `json:"auth,omitempty"`
+}
+
+// AuthMode selects the authentication strategy for an HTTP MCP server.
+type AuthMode string
+
+const (
+	// AuthModeAuto is the default (empty) mode: connect unauthenticated and,
+	// on a 401, run the MCP authorization-spec discovery chain and OAuth login.
+	AuthModeAuto AuthMode = ""
+	// AuthModeOAuth forces the OAuth flow — fir authenticates before the first
+	// request instead of waiting for a 401.
+	AuthModeOAuth AuthMode = "oauth"
+	// AuthModeBearer sends AuthConfig.Token as a static bearer token and never
+	// attempts OAuth. Use for servers that just want a personal access token.
+	AuthModeBearer AuthMode = "bearer"
+	// AuthModeNone disables all authentication handling. A 401 is surfaced
+	// verbatim as a connection error.
+	AuthModeNone AuthMode = "none"
+)
+
+// AuthConfig holds optional per-server authentication overrides. Every field is
+// an escape hatch; a spec-compliant server needs none of them.
+type AuthConfig struct {
+	// Mode selects the strategy. Empty means AuthModeAuto. When Token is set
+	// and Mode is empty, bearer mode is inferred.
+	Mode AuthMode `json:"mode,omitempty"`
+	// Token is a static bearer token used when Mode resolves to
+	// AuthModeBearer. A value of the form ${VAR} or $VAR is read from the
+	// process environment so secrets need not be written to disk.
+	Token string `json:"token,omitempty"`
+	// ClientID is a pre-registered OAuth client identifier, for authorization
+	// servers that do not support RFC 7591 dynamic client registration. When
+	// empty (the default) fir registers itself dynamically.
+	ClientID string `json:"client_id,omitempty"`
+	// ClientSecret accompanies ClientID for confidential clients. Native apps
+	// (RFC 8252) normally have none; leave empty. Supports ${VAR} expansion.
+	ClientSecret string `json:"client_secret,omitempty"`
+	// Scopes overrides the scopes requested at the authorization endpoint.
+	// When empty, fir uses the scope from the 401 challenge, then the
+	// protected-resource metadata's scopes_supported, and otherwise omits the
+	// scope parameter entirely.
+	Scopes []string `json:"scopes,omitempty"`
+}
+
+// ResolveMode returns the effective AuthMode for a config, applying the
+// "Token set implies bearer" inference. A nil config resolves to AuthModeAuto.
+func (a *AuthConfig) ResolveMode() AuthMode {
+	if a == nil {
+		return AuthModeAuto
+	}
+	if a.Mode == AuthModeAuto && a.Token != "" {
+		return AuthModeBearer
+	}
+	return a.Mode
+}
+
+// Validate reports whether the config is internally consistent.
+func (a *AuthConfig) Validate() error {
+	if a == nil {
+		return nil
+	}
+	switch a.ResolveMode() {
+	case AuthModeAuto, AuthModeOAuth, AuthModeNone:
+	case AuthModeBearer:
+		if expandEnvRef(a.Token) == "" {
+			return fmt.Errorf("auth.token is required (and must resolve to a non-empty value) for mode %q", AuthModeBearer)
+		}
+	default:
+		return fmt.Errorf("unsupported auth.mode %q; valid values: oauth, bearer, none", a.Mode)
+	}
+	return nil
+}
+
+// BearerToken returns the resolved static bearer token, expanding a ${VAR} or
+// $VAR reference against the process environment.
+func (a *AuthConfig) BearerToken() string {
+	if a == nil {
+		return ""
+	}
+	return expandEnvRef(a.Token)
+}
+
+// expandEnvRef resolves a value that is entirely an environment-variable
+// reference ("${VAR}" or "$VAR") against the process environment. Any other
+// value — including one that merely contains a "$" — is returned unchanged, so
+// a literal token with a dollar sign in it is never mangled.
+func expandEnvRef(v string) string {
+	if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+		return os.Getenv(v[2 : len(v)-1])
+	}
+	if strings.HasPrefix(v, "$") && len(v) > 1 && isEnvName(v[1:]) {
+		return os.Getenv(v[1:])
+	}
+	return v
+}
+
+// isEnvName reports whether s is a plausible environment-variable name
+// (letters, digits, underscore; not starting with a digit).
+func isEnvName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		case c >= '0' && c <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
 
 // ConfigFile is the top-level structure of .fir/mcp.json.

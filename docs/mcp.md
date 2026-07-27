@@ -57,14 +57,138 @@ a remote MCP server over HTTP. No `command` is needed — only `url`.
 | Field       | Type              | Required | Description |
 |-------------|-------------------|----------|-------------|
 | `transport` | string            | no       | `"stdio"` (default), `"sse"`, or `"streamable"` |
-| `url`       | string            | for `sse`/`streamable` | HTTP endpoint of the remote MCP server |
+| `url`       | string            | for `sse`/`streamable` | HTTP endpoint of the remote MCP server. Must be `https://` unless the host is loopback — see [Transport security](#transport-security) |
 | `command`   | string            | for `stdio` | Executable to launch (looked up on `PATH`) |
 | `args`      | array of strings  | no       | Command-line arguments passed to a stdio server |
 | `env`       | map string→string | no       | Environment variable overrides for a stdio subprocess; the parent process environment is always inherited first |
 | `roots`     | array of strings  | no       | `file://` URIs advertised to the server as filesystem roots; defaults to the working directory |
+| `auth`      | object            | no       | Authentication overrides for `sse`/`streamable` servers; see [Authentication](#authentication-oauth). Absent by default — a spec-compliant server needs none |
 
 Each top-level key under `mcpServers` is the **server name** — choose something short and
 descriptive, as it appears in every tool name the server exposes.
+
+---
+
+## Authentication (OAuth)
+
+**Zero configuration is the default and the main path.** A bare entry
+
+```json
+{"mcpServers": {"my-remote": {"transport": "streamable", "url": "https://my-server.example.com/mcp"}}}
+```
+
+already authenticates against any server that implements the MCP authorization
+specification. fir connects unauthenticated and, on a `401`, runs the full discovery chain:
+
+1. **RFC 9728 protected-resource metadata** — from the `resource_metadata` parameter of the
+   `WWW-Authenticate` challenge, falling back to the well-known path derived from the server
+   URL (`/.well-known/oauth-protected-resource/<path>`, then the bare origin form) when the
+   401 carries no challenge header. If the server publishes no document at all, its own
+   origin is used as the authorization-server issuer.
+2. **RFC 8414 authorization-server metadata** — tried for each advertised issuer in turn,
+   over `/.well-known/oauth-authorization-server/<path>`, then the two OpenID Connect
+   Discovery forms.
+3. **RFC 7591 dynamic client registration** — fir registers itself as a public native client
+   with the loopback redirect URI it is about to listen on. Registration is re-run on every
+   interactive login because the loopback port is ephemeral (RFC 8252 §7.3); a stored
+   `client_id` is reused only for refresh, which involves no redirect URI.
+4. **Authorization code + PKCE (S256)** with the RFC 8707 `resource` indicator (the canonical
+   MCP server URL) on the authorization, token and refresh requests.
+
+Tokens are persisted in `auth.json` next to provider credentials, under an `mcp:<server>` key.
+They survive a restart. A rotated refresh token is written back on every refresh.
+
+### Logging in
+
+fir **never opens a browser on its own** — structurally, not by policy. The MCP manager holds
+no login-UI hook at all, so no reconnect cycle, background goroutine or non-interactive mode
+can start a browser flow. (MCP servers connect from goroutines that may predate the terminal
+UI and must not touch its widget tree; and the auto-reconnect loop re-dials forever, so an
+automatic prompt there would be a browser-window storm.) A server that needs credentials fails
+its connection with an actionable message naming the command to run:
+
+```
+MCP server "my-remote" requires OAuth authentication (no stored credential); run: fir mcp login my-remote
+```
+
+| Command | Context |
+|---------|---------|
+| `fir mcp list` | Show configured servers and their auth state |
+| `fir mcp login <server>` | Run the OAuth flow from a plain terminal |
+| `fir mcp logout <server>` | Delete stored credentials for a server |
+| `/mcp login <server>` | Run the OAuth flow inside an interactive session |
+| `/mcp logout <server>` | Delete stored credentials from inside a session |
+
+The login flow races the loopback callback against a manual paste prompt, so it also works
+over SSH where the browser cannot reach `127.0.0.1`.
+
+`fir mcp login` probes the server unauthenticated first, so it picks up the `resource_metadata`
+pointer from the 401 challenge (RFC 9728 §5.1) rather than having to guess the well-known path.
+
+Non-interactive contexts — ACP mode, `-p`, CI — take the same path as everything else and fail
+immediately with the message above rather than blocking on a browser that will never open.
+
+### Transport security
+
+fir refuses to send credentials over plaintext. A `sse`/`streamable` server whose URL is not
+`https://` is rejected before any connection is made, unless the host is loopback
+(`127.0.0.0/8`, `::1`, or `localhost`) so local development servers keep working. This applies
+to OAuth bearers and static PATs alike: both ride the data path, and `http://mcp.internal:8080/mcp`
+would put them on the wire in the clear. `oauthex` already enforces the same rule on the
+discovery and token legs.
+
+The escape hatch is `"auth": {"mode": "none"}`, which sends no credentials at all and is
+therefore allowed over plain HTTP.
+
+### Token lifecycle
+
+- A token within 60 seconds of expiry is refreshed **before** the request is sent.
+- A `401` on a live token triggers one silent refresh and a single replay of the request.
+- When the refresh token is itself revoked or expired, the dead credential is deleted and the
+  next connection reports that a login is required.
+- The browser step runs **only** from `fir mcp login` / `/mcp login`. A failing server simply
+  keeps reporting the actionable error on each reconnect cycle; it never escalates to a prompt.
+- While a login is in flight, other requests to that server **fail fast** with
+  `an interactive login is in progress` rather than queuing behind a human. Requests never
+  ignore their own deadline waiting on the auth lock.
+- A stored token is **bound to the server URL it was minted for**. `.fir/mcp.json` is
+  project-local and therefore attacker-controllable: without the binding, a repo declaring
+  `{"github": {"url": "https://evil.example/mcp"}}` would be handed the token fir holds for
+  the real server. A URL mismatch degrades to "no token".
+
+### The `auth` object
+
+Every field is an escape hatch. Omit the whole object unless you need one.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | string | `"oauth"` forces a login before the first request; `"bearer"` sends a static token and never attempts OAuth (inferred when `token` is set); `"none"` disables all auth handling so a 401 surfaces verbatim. Empty (the default) is the auto path described above |
+| `token` | string | Static bearer token / PAT. A value of the form `${VAR}` or `$VAR` is read from the process environment, so the secret need not be written to disk. A literal token containing `$` is never expanded |
+| `client_id` | string | Pre-registered OAuth client, for authorization servers without dynamic registration |
+| `client_secret` | string | Accompanies `client_id` for confidential clients. Native apps normally have none. Supports `${VAR}` expansion |
+| `scopes` | array of strings | Overrides the requested scope. Otherwise fir uses the challenge's `scope`, then the protected resource's `scopes_supported`, and otherwise omits the `scope` parameter entirely |
+
+```json
+{
+  "mcpServers": {
+    "pat-server": {
+      "transport": "streamable",
+      "url": "https://a.example/mcp",
+      "auth": {"token": "${MY_SERVER_PAT}"}
+    },
+    "no-dcr": {
+      "transport": "streamable",
+      "url": "https://b.example/mcp",
+      "auth": {"client_id": "abc123", "scopes": ["mcp:read", "mcp:write"]}
+    },
+    "unauthenticated": {
+      "transport": "streamable",
+      "url": "https://c.example/mcp",
+      "auth": {"mode": "none"}
+    }
+  }
+}
+```
 
 ---
 
@@ -156,9 +280,10 @@ supplement project defaults without modifying files on disk.
 
 ## Limitations
 
-- **No per-server authentication UI.** If an MCP server requires credentials, pass them via
-  `env` in the config or ensure they are already in the environment. fir does not prompt for
-  MCP credentials interactively.
+- **Login is user-initiated, never automatic.** fir performs the full OAuth discovery and
+  token lifecycle on its own (see [Authentication](#authentication-oauth)), but the browser
+  step must be started explicitly with `fir mcp login <server>` or `/mcp login <server>`.
+  Stdio servers still take credentials via `env`.
 - **Error isolation is per-server.** If one MCP server fails to start, the entire `session/new`
   request is rejected. Servers that exit mid-session cause subsequent tool calls to that server
   to return errors; other servers and built-in tools remain unaffected.

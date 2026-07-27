@@ -427,6 +427,104 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 		return
 	}
 
+	callbacks := m.oauthLoginCallbacks()
+
+	err := authStorage.Login(context.Background(), providerID, callbacks)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg != "Login cancelled" {
+			m.showWarning(fmt.Sprintf("Failed to login to %s: %s", providerName, errMsg))
+		}
+		return
+	}
+
+	registry.Refresh()
+	m.showStatus(fmt.Sprintf("Logged in to %s. Credentials saved.", providerName))
+}
+
+// ============================================================================
+// Tree / fork / user message selectors
+// ============================================================================
+
+func (m *InteractiveMode) showTreeSelector() {
+	m.showTreeSelectorAt("")
+}
+
+// showTreeSelectorAt shows the interactive session-tree selector, optionally
+// pre-selecting a specific entry (used when re-opening after an action).
+func (m *InteractiveMode) showTreeSelectorAt(initialSelectedID string) {
+	if m.session == nil {
+		m.showWarning("No session available")
+		return
+	}
+	tree := m.session.SessionStore.GetTree()
+	if len(tree) == 0 {
+		m.showStatus("No entries in session")
+		return
+	}
+
+	leafID := m.session.SessionStore.GetLeafID()
+
+	m.showSelector(func(done func()) (tui.Component, tui.Component) {
+		selector := components.NewTreeSelectorComponent(
+			tree,
+			leafID,
+			func(entryID string) {
+				done()
+				if entryID == leafID {
+					m.showStatus("Already at this point")
+					return
+				}
+				go m.handleTreeNavigation(entryID)
+			},
+			func() { done() },
+		)
+		selector.SetOnLabelEdit(func(entryID, label string) {
+			if m.session != nil {
+				m.session.SessionStore.AppendLabelChange(entryID, label)
+				m.ui.RequestRender(false)
+			}
+		})
+		if initialSelectedID != "" {
+			selector.SetInitialSelection(initialSelectedID)
+		}
+		return selector, selector
+	})
+}
+
+// handleTreeNavigation navigates to entryID and refreshes the chat display.
+func (m *InteractiveMode) handleTreeNavigation(entryID string) {
+	result, err := m.session.NavigateTree(entryID, false, "")
+	if err != nil {
+		m.showWarning(fmt.Sprintf("Navigation failed: %s", err))
+		return
+	}
+	if result.Cancelled {
+		m.showStatus("Navigation cancelled")
+		return
+	}
+	m.rebuildChatFromMessages()
+	if m.editor != nil && result.EditorText != "" && strings.TrimSpace(m.editor.GetText()) == "" {
+		m.editor.SetText(result.EditorText)
+	}
+	m.showStatus("Navigated to selected point")
+}
+
+// loadAllSessionsForSelector lists every session across this fir agent's
+// session root (honouring --agent-dir / FIR_AGENT_DIR via m.agentDir, which
+// NewInteractiveMode resolves once) plus the legacy pi agent dir.
+func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo, error) {
+	return store.ListAllSessions(m.agentDir, session.PiAgentDir())
+}
+
+// oauthLoginCallbacks builds the TUI OAuth login UI: an in-editor prompt for
+// manual code entry, browser auto-open for the authorization URL, and status
+// lines for progress. Shared by the provider login selector and /mcp login.
+//
+// The returned callbacks mutate TUI state directly, so they must be driven
+// from the UI goroutine (a slash-command handler), never from a background
+// goroutine such as an MCP connect.
+func (m *InteractiveMode) oauthLoginCallbacks() pinoauth.LoginCallbacks {
 	// manualInputCancel, when non-nil, dismisses the active manual-input
 	// prompt by simulating Escape. Protected by manualInputMu.
 	var manualInputMu sync.Mutex
@@ -537,91 +635,5 @@ func (m *InteractiveMode) performOAuthLogin(providerID string) {
 			m.showStatus(message)
 		},
 	}
-
-	err := authStorage.Login(context.Background(), providerID, callbacks)
-	if err != nil {
-		errMsg := err.Error()
-		if errMsg != "Login cancelled" {
-			m.showWarning(fmt.Sprintf("Failed to login to %s: %s", providerName, errMsg))
-		}
-		return
-	}
-
-	registry.Refresh()
-	m.showStatus(fmt.Sprintf("Logged in to %s. Credentials saved.", providerName))
-}
-
-// ============================================================================
-// Tree / fork / user message selectors
-// ============================================================================
-
-func (m *InteractiveMode) showTreeSelector() {
-	m.showTreeSelectorAt("")
-}
-
-// showTreeSelectorAt shows the interactive session-tree selector, optionally
-// pre-selecting a specific entry (used when re-opening after an action).
-func (m *InteractiveMode) showTreeSelectorAt(initialSelectedID string) {
-	if m.session == nil {
-		m.showWarning("No session available")
-		return
-	}
-	tree := m.session.SessionStore.GetTree()
-	if len(tree) == 0 {
-		m.showStatus("No entries in session")
-		return
-	}
-
-	leafID := m.session.SessionStore.GetLeafID()
-
-	m.showSelector(func(done func()) (tui.Component, tui.Component) {
-		selector := components.NewTreeSelectorComponent(
-			tree,
-			leafID,
-			func(entryID string) {
-				done()
-				if entryID == leafID {
-					m.showStatus("Already at this point")
-					return
-				}
-				go m.handleTreeNavigation(entryID)
-			},
-			func() { done() },
-		)
-		selector.SetOnLabelEdit(func(entryID, label string) {
-			if m.session != nil {
-				m.session.SessionStore.AppendLabelChange(entryID, label)
-				m.ui.RequestRender(false)
-			}
-		})
-		if initialSelectedID != "" {
-			selector.SetInitialSelection(initialSelectedID)
-		}
-		return selector, selector
-	})
-}
-
-// handleTreeNavigation navigates to entryID and refreshes the chat display.
-func (m *InteractiveMode) handleTreeNavigation(entryID string) {
-	result, err := m.session.NavigateTree(entryID, false, "")
-	if err != nil {
-		m.showWarning(fmt.Sprintf("Navigation failed: %s", err))
-		return
-	}
-	if result.Cancelled {
-		m.showStatus("Navigation cancelled")
-		return
-	}
-	m.rebuildChatFromMessages()
-	if m.editor != nil && result.EditorText != "" && strings.TrimSpace(m.editor.GetText()) == "" {
-		m.editor.SetText(result.EditorText)
-	}
-	m.showStatus("Navigated to selected point")
-}
-
-// loadAllSessionsForSelector lists every session across this fir agent's
-// session root (honouring --agent-dir / FIR_AGENT_DIR via m.agentDir, which
-// NewInteractiveMode resolves once) plus the legacy pi agent dir.
-func (m *InteractiveMode) loadAllSessionsForSelector() ([]store.SessionListInfo, error) {
-	return store.ListAllSessions(m.agentDir, session.PiAgentDir())
+	return callbacks
 }

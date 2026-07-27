@@ -24,9 +24,9 @@ import (
 
 // inMemoryDial returns a dialFn that connects to a pre-built MCP server via
 // an in-memory transport. The server is started in a background goroutine.
-func inMemoryDial(t *testing.T, server *sdk.Server) func(ServerConfig) (sdk.Transport, error) {
+func inMemoryDial(t *testing.T, server *sdk.Server) func(string, ServerConfig) (sdk.Transport, error) {
 	t.Helper()
-	return func(_ ServerConfig) (sdk.Transport, error) {
+	return func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		serverTransport, clientTransport := sdk.NewInMemoryTransports()
 		go func() {
 			_ = server.Run(context.Background(), serverTransport)
@@ -161,7 +161,7 @@ func TestManager_MultipleServers(t *testing.T) {
 
 	var dialCalls atomic.Int32
 	serverMap := map[string]*sdk.Server{"srvA": serverA, "srvB": serverB}
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		// We can't easily map config→server by name here, so round-robin
 		// between the two. The actual tool names identify which server answered.
 		n := dialCalls.Add(1)
@@ -539,7 +539,7 @@ func TestCreateTransport_Stdio(t *testing.T) {
 		Command: "true",
 		Env:     map[string]string{"CUSTOM": "value"},
 	}
-	tr, err := createTransport(cfg)
+	tr, err := (&Manager{}).createTransport("srv", cfg)
 	require.NoError(t, err)
 	ct, ok := tr.(*sdk.CommandTransport)
 	require.True(t, ok, "expected *sdk.CommandTransport for stdio transport")
@@ -549,18 +549,18 @@ func TestCreateTransport_Stdio(t *testing.T) {
 // TestCreateTransport_SSE verifies that transport="sse" produces an
 // *sdk.SSEClientTransport pointing at the configured URL.
 func TestCreateTransport_SSE(t *testing.T) {
-	cfg := ServerConfig{Transport: "sse", URL: "http://example.com/sse"}
-	tr, err := createTransport(cfg)
+	cfg := ServerConfig{Transport: "sse", URL: "https://example.com/sse"}
+	tr, err := (&Manager{}).createTransport("srv", cfg)
 	require.NoError(t, err)
 	st, ok := tr.(*sdk.SSEClientTransport)
 	require.True(t, ok, "expected *sdk.SSEClientTransport for sse transport")
-	assert.Equal(t, "http://example.com/sse", st.Endpoint)
+	assert.Equal(t, "https://example.com/sse", st.Endpoint)
 }
 
 // TestCreateTransport_SSE_MissingURL verifies that transport="sse" without a
 // URL returns an error.
 func TestCreateTransport_SSE_MissingURL(t *testing.T) {
-	_, err := createTransport(ServerConfig{Transport: "sse"})
+	_, err := (&Manager{}).createTransport("srv", ServerConfig{Transport: "sse"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "url is required")
 }
@@ -568,18 +568,18 @@ func TestCreateTransport_SSE_MissingURL(t *testing.T) {
 // TestCreateTransport_Streamable verifies that transport="streamable" produces
 // an *sdk.StreamableClientTransport pointing at the configured URL.
 func TestCreateTransport_Streamable(t *testing.T) {
-	cfg := ServerConfig{Transport: "streamable", URL: "http://example.com/mcp"}
-	tr, err := createTransport(cfg)
+	cfg := ServerConfig{Transport: "streamable", URL: "https://example.com/mcp"}
+	tr, err := (&Manager{}).createTransport("srv", cfg)
 	require.NoError(t, err)
 	st, ok := tr.(*sdk.StreamableClientTransport)
 	require.True(t, ok, "expected *sdk.StreamableClientTransport for streamable transport")
-	assert.Equal(t, "http://example.com/mcp", st.Endpoint)
+	assert.Equal(t, "https://example.com/mcp", st.Endpoint)
 }
 
 // TestCreateTransport_Streamable_MissingURL verifies that transport="streamable"
 // without a URL returns an error.
 func TestCreateTransport_Streamable_MissingURL(t *testing.T) {
-	_, err := createTransport(ServerConfig{Transport: "streamable"})
+	_, err := (&Manager{}).createTransport("srv", ServerConfig{Transport: "streamable"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "url is required")
 }
@@ -587,7 +587,7 @@ func TestCreateTransport_Streamable_MissingURL(t *testing.T) {
 // TestCreateTransport_UnknownTransport verifies that an unrecognised transport
 // name returns an error rather than silently falling through to stdio.
 func TestCreateTransport_UnknownTransport(t *testing.T) {
-	_, err := createTransport(ServerConfig{Transport: "ftp", Command: "true"})
+	_, err := (&Manager{}).createTransport("srv", ServerConfig{Transport: "ftp", Command: "true"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported transport")
 	assert.Contains(t, err.Error(), "ftp")
@@ -684,7 +684,7 @@ func TestManager_Status_AfterClose(t *testing.T) {
 
 func TestManager_Status_ConnectError(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
-	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		return nil, errors.New("no such binary")
 	}
 
@@ -766,7 +766,7 @@ func TestManager_OnServerReady_Success(t *testing.T) {
 
 func TestManager_OnServerReady_Error(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
-	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		return nil, errors.New("dial failed")
 	}
 
@@ -855,7 +855,7 @@ func TestManager_ServerEvents_BufferedUntilConsumerAttaches(t *testing.T) {
 	realDial := inMemoryDial(t, server)
 	dialEntered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		// By the time dialFn runs, startServer has already emitted the
 		// "connecting" event into the buffered channel. Signal that, then
 		// hold the connection open so the server stays connecting.
@@ -864,7 +864,7 @@ func TestManager_ServerEvents_BufferedUntilConsumerAttaches(t *testing.T) {
 		default:
 		}
 		<-release
-		return realDial(cfg)
+		return realDial("srv", cfg)
 	}
 
 	// Start with NO consumer attached yet.
@@ -903,9 +903,9 @@ func TestManager_OnServerDisconnected(t *testing.T) {
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial("srv", cfg)
 		}
 		return nil, errors.New("dial fails after first connect")
 	}
@@ -1027,9 +1027,9 @@ func TestManager_Status_AfterServerDisconnect(t *testing.T) {
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial("srv", cfg)
 		}
 		return nil, errors.New("dial fails after first connect")
 	}
@@ -1116,7 +1116,7 @@ func TestManager_WaitReady_Success(t *testing.T) {
 // returns when the initial connect fails (not just on success).
 func TestManager_WaitReady_ReturnsOnFailedConnect(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"bad": {}}, false)
-	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		return nil, errors.New("nope")
 	}
 
@@ -1140,7 +1140,7 @@ func TestManager_WaitReady_ContextCanceled(t *testing.T) {
 	block := make(chan struct{})
 	defer close(block)
 	mgr := NewManager(map[string]ServerConfig{"slow": {}}, false)
-	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		<-block
 		return nil, errors.New("never")
 	}

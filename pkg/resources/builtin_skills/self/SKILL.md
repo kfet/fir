@@ -463,6 +463,23 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
       }
     }
     ```
+- **MCP authentication (OAuth)** — remote (`streamable`/`sse`) MCP servers need **no configuration** to authenticate. fir connects unauthenticated; on a `401` it runs the MCP authorization-spec discovery chain automatically — RFC 9728 protected-resource metadata (from the `WWW-Authenticate` challenge, falling back to the well-known path), RFC 8414 authorization-server metadata, RFC 7591 dynamic client registration — then an authorization-code + PKCE login with the RFC 8707 `resource` indicator. Tokens are stored in `auth.json` under an `mcp:<server>` key, bound to the server URL they were minted for, refreshed proactively before expiry and silently on a 401.
+  - fir never opens a browser on its own — the MCP manager holds no login-UI hook at all, so no reconnect cycle or background goroutine can start one. A server that needs a login reports `run: fir mcp login <server>`. Log in with **`fir mcp login <server>`** from a terminal, or **`/mcp login <server>`** inside a session; **`fir mcp logout <server>`** / **`/mcp logout <server>`** removes stored credentials; **`fir mcp list`** shows each server's auth state.
+  - Credentials never ride plaintext: a non-`https://` server URL is rejected unless the host is loopback (`127.0.0.1`, `::1`, `localhost`). Use `"auth": {"mode": "none"}` for a plain-HTTP server that needs no credentials.
+  - Optional `auth` overrides (all absent by default — a spec-compliant server needs none):
+    ```json
+    {
+      "mcpServers": {
+        "pat-server":  {"transport": "streamable", "url": "https://a.example/mcp",
+                        "auth": {"token": "${MY_SERVER_PAT}"}},
+        "no-dcr":      {"transport": "streamable", "url": "https://b.example/mcp",
+                        "auth": {"client_id": "abc123", "scopes": ["mcp:read"]}},
+        "no-auth":     {"transport": "streamable", "url": "https://c.example/mcp",
+                        "auth": {"mode": "none"}}
+      }
+    }
+    ```
+    `mode` is `oauth` (force login before the first request), `bearer` (static token; inferred when `token` is set), or `none` (opt out entirely — a 401 surfaces verbatim). `token` accepts `${VAR}`/`$VAR` so a secret need not be written to disk. `client_id`/`client_secret` cover authorization servers without dynamic registration. `scopes` overrides the scope fir requests (otherwise: challenge `scope`, then `scopes_supported`, then no `scope` parameter at all).
 - **MCP inspection** — use `/mcp` to see all configured MCP servers with their connection status, transport, capabilities (resources, prompts), and a full list of exposed tools with descriptions. Use `/mcp <name>` for detailed info about a specific server. Use `/mcp reload` to re-read `mcp.json` and `mcp.d/*.json` configs from disk and apply the diff to running servers without a full session reload; it reports collisions when multiple files define the same server name.
 
 ## settings.json Reference

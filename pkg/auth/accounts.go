@@ -28,6 +28,18 @@ import (
 
 const slotSep = "#"
 
+// MCPKeyPrefix namespaces credentials that belong to an MCP server rather than
+// to an AI provider. MCP tokens share auth.json (and its flock, 0600 mode and
+// atomic rewrite) but must never be offered as a provider account in the model
+// selector or in `fir login list`, so every listing helper filters them out.
+// See IsMCPKey and pkg/mcp's credential store.
+const MCPKeyPrefix = "mcp:"
+
+// IsMCPKey reports whether a storage key names an MCP server credential.
+func IsMCPKey(key string) bool {
+	return strings.HasPrefix(key, MCPKeyPrefix)
+}
+
 // SlotKey composes a provider id and account id into a storage slot key.
 // An empty or "default" account id maps to the bare provider key.
 func SlotKey(provider, accountID string) string {
@@ -81,6 +93,9 @@ func (s *AuthStorage) AccountsForProvider(provider string) []Account {
 	defer s.mu.RUnlock()
 	var out []Account
 	for key, cred := range s.data {
+		if IsMCPKey(key) {
+			continue
+		}
 		base, acctID := SplitSlot(key)
 		if base != provider {
 			continue
@@ -109,6 +124,9 @@ func (s *AuthStorage) AllAccounts() []Account {
 	s.mu.RLock()
 	keys := make([]string, 0, len(s.data))
 	for k := range s.data {
+		if IsMCPKey(k) {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	creds := make(map[string]AuthCredential, len(s.data))

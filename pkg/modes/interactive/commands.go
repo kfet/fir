@@ -226,9 +226,14 @@ func (m *InteractiveMode) handleSlashCommand(text string) {
 		m.handlePlanCommand()
 	case "/mcp":
 		if len(parts) > 1 {
-			if parts[1] == "reload" {
+			switch parts[1] {
+			case "reload":
 				m.handleMCPReloadCommand()
-			} else {
+			case "login":
+				m.handleMCPLoginCommand(strings.Join(parts[2:], " "))
+			case "logout":
+				m.handleMCPLogoutCommand(strings.Join(parts[2:], " "))
+			default:
 				m.handleMCPDetailCommand(parts[1])
 			}
 		} else {
@@ -1149,6 +1154,48 @@ func (m *InteractiveMode) handleMCPReloadCommand() {
 	m.showStatus("MCP servers reloaded")
 }
 
+// handleMCPLoginCommand runs the OAuth login flow for one remote MCP server.
+//
+// This is the interactive counterpart of `fir mcp login <server>`. fir never
+// starts a login on its own: MCP servers connect from background goroutines
+// that must not touch TUI state, so an automatic prompt is neither safe nor
+// welcome. A server that needs credentials reports the command to run; this is
+// it.
+func (m *InteractiveMode) handleMCPLoginCommand(serverName string) {
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" {
+		m.showWarning("Usage: /mcp login <server>")
+		return
+	}
+	if m.mcpLogin == nil {
+		m.showWarning("MCP login not available")
+		return
+	}
+	if err := m.mcpLogin(context.Background(), serverName, m.oauthLoginCallbacks()); err != nil {
+		m.showWarning(fmt.Sprintf("MCP login failed: %v", err))
+		return
+	}
+	m.showStatus(fmt.Sprintf("Logged in to MCP server %q. Credentials saved.", serverName))
+}
+
+// handleMCPLogoutCommand removes stored credentials for one MCP server.
+func (m *InteractiveMode) handleMCPLogoutCommand(serverName string) {
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" {
+		m.showWarning("Usage: /mcp logout <server>")
+		return
+	}
+	if m.mcpLogout == nil {
+		m.showWarning("MCP logout not available")
+		return
+	}
+	if err := m.mcpLogout(serverName); err != nil {
+		m.showWarning(fmt.Sprintf("MCP logout failed: %v", err))
+		return
+	}
+	m.showStatus(fmt.Sprintf("Removed stored credentials for MCP server %q.", serverName))
+}
+
 func (m *InteractiveMode) handleSkillsCommand(args []string) {
 	if len(args) == 0 || args[0] == "list" {
 		m.handleSkillsList()
@@ -1634,6 +1681,7 @@ func (m *InteractiveMode) handleMCPCommand() {
 
 	lines = append(lines, "")
 	lines = append(lines, t.Fg("dim", "Use /mcp <server-name> to see full tool details."))
+	lines = append(lines, t.Fg("dim", "Use /mcp login <server-name> to authenticate a remote server."))
 
 	m.showMCPOverlay(lines)
 }

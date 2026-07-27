@@ -25,6 +25,7 @@ import (
 	"github.com/kfet/fir/pkg/session"
 	"github.com/kfet/fir/pkg/session/store"
 	tuicomp "github.com/kfet/fir/pkg/tui/components"
+	"github.com/kfet/pinoauth"
 	"github.com/kfet/tui"
 )
 
@@ -150,6 +151,10 @@ type InteractiveMode struct {
 	mcpDetails func() []mcp.ServerDetail
 	// mcpReload reloads MCP server configs (optional).
 	mcpReload func() error
+	// mcpLogin runs the OAuth login flow for one MCP server (optional).
+	mcpLogin func(ctx context.Context, server string, cb pinoauth.LoginCallbacks) error
+	// mcpLogout removes stored credentials for one MCP server (optional).
+	mcpLogout func(server string) error
 }
 
 // InteractiveModeOptions configures the interactive mode.
@@ -169,6 +174,10 @@ type InteractiveModeOptions struct {
 	MCPDetails func() []mcp.ServerDetail
 	// MCPReload reloads MCP server configs from disk (optional).
 	MCPReload func() error
+	// MCPLogin runs the OAuth login flow for one MCP server (optional).
+	MCPLogin func(ctx context.Context, server string, cb pinoauth.LoginCallbacks) error
+	// MCPLogout removes stored credentials for one MCP server (optional).
+	MCPLogout func(server string) error
 }
 
 // NewInteractiveMode creates a new interactive mode.
@@ -218,6 +227,8 @@ func NewInteractiveMode(
 		mcpStatus:          opts.MCPStatus,
 		mcpDetails:         opts.MCPDetails,
 		mcpReload:          opts.MCPReload,
+		mcpLogin:           opts.MCPLogin,
+		mcpLogout:          opts.MCPLogout,
 	}
 
 	m.markdownTheme = itheme.GetMarkdownTheme()
@@ -983,6 +994,7 @@ func (m *InteractiveMode) setupAutocomplete() {
 		for _, d := range m.mcpDetails() {
 			mcpSpec.Values = append(mcpSpec.Values, d.Name)
 		}
+		mcpSpec.Values = append(mcpSpec.Values, "reload", "login", "logout")
 		sort.Strings(mcpSpec.Values)
 		argSpecs["mcp"] = mcpSpec
 	}

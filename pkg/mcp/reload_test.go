@@ -155,9 +155,9 @@ func TestManager_Reload_ReconnectsDisconnected(t *testing.T) {
 	var connectCount atomic.Int32
 	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		connectCount.Add(1)
-		return realDial(cfg)
+		return realDial(name, cfg)
 	}
 
 	startAndWait(t, mgr, context.Background())
@@ -204,9 +204,9 @@ func TestManager_Reload_Unchanged(t *testing.T) {
 	connectCount := 0
 	realDial := inMemoryDial(t, server)
 	mgr := NewManager(map[string]ServerConfig{"srv1": {}}, false)
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		connectCount++
-		return realDial(cfg)
+		return realDial(name, cfg)
 	}
 
 	startAndWait(t, mgr, context.Background())

@@ -19,7 +19,9 @@ import (
 
 	"github.com/kfet/agent"
 	"github.com/kfet/fir/pkg/ai"
+	"github.com/kfet/fir/pkg/auth"
 	firlog "github.com/kfet/fir/pkg/log"
+	"github.com/kfet/pinoauth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -188,14 +190,31 @@ type Manager struct {
 	// progressReg routes progress notifications to active tool-call callbacks.
 	progressReg progressRegistry
 
-	// dialFn creates a Transport for the given server config.
-	// Defaults to commandTransport. Replaced in tests to inject in-memory transports.
-	dialFn func(cfg ServerConfig) (sdk.Transport, error)
+	// dialFn creates a Transport for the given server.
+	// Defaults to Manager.createTransport. Replaced in tests to inject
+	// in-memory transports.
+	dialFn func(name string, cfg ServerConfig) (sdk.Transport, error)
+
+	// credStore persists OAuth credentials for HTTP MCP servers. Zero value
+	// (no auth.AuthStorage) keeps tokens in memory for the process lifetime.
+	credStore credentialStore
+
+	// auths holds per-server OAuth state (string → *serverAuth). Entries
+	// outlive individual connections so the cached token and the discovered
+	// challenge survive reconnects. authsMu serialises entry
+	// creation/replacement (see serverAuthFor).
+	auths   sync.Map
+	authsMu sync.Mutex
 
 	// startWG tracks in-flight initial connection attempts started by Start.
 	// WaitReady blocks until every goroutine launched by Start has finished
 	// its initial connect (success or failure).
 	startWG sync.WaitGroup
+
+	// started reports whether Start has been called. LoginServer consults it
+	// to decide whether bringing a server up is its business at all: a
+	// Manager built only to mint a token (`fir mcp login`) is never started.
+	started atomic.Bool
 
 	// reconnectWG tracks in-flight reconnect-loop goroutines. Close waits
 	// on this WG so callers know all loops have observed cancellation
@@ -210,14 +229,205 @@ type Manager struct {
 func NewManager(configs map[string]ServerConfig, verbose bool) *Manager {
 	mgr := &Manager{
 		verbose:      verbose,
-		dialFn:       createTransport,
 		serverEvents: make(chan ServerEvent, serverEventBuffer),
 		done:         make(chan struct{}),
 	}
+	mgr.dialFn = mgr.createTransport
 	for k, v := range configs {
 		mgr.servers.Store(k, newServerEntry(v))
 	}
 	return mgr
+}
+
+// SetAuth configures credential storage for HTTP MCP servers that use OAuth.
+// storage may be nil, in which case tokens are held in memory only.
+//
+// There is deliberately no "login UI" hook here. fir never starts a browser
+// flow on its own: MCP servers connect from background goroutines, potentially
+// before a terminal UI exists, and the TUI's login callbacks mutate widget
+// trees with no locking. A server that needs credentials fails its connection
+// with an *AuthRequiredError naming `fir mcp login <server>`; the browser step
+// runs only through LoginServer, which a foreground command drives.
+//
+// Call before Start.
+func (m *Manager) SetAuth(storage *auth.AuthStorage) {
+	m.credStore = newCredentialStore(storage)
+}
+
+// LoginServer runs the interactive OAuth login flow for one configured server
+// and, on success, brings the server up so the new token is used immediately.
+//
+// This is the ONLY path that opens a browser, and it exists solely to be
+// driven by a foreground command the user typed — `fir mcp login <server>` or
+// `/mcp login <server>`. Nothing calls it automatically: the dial path reports
+// an *AuthRequiredError and stops, which is what makes "fir never opens a
+// browser on its own" structural rather than a policy someone could relax.
+// If the credential minted here also fails, the next reconnect reports the
+// same actionable error again — it does not re-prompt.
+func (m *Manager) LoginServer(ctx context.Context, name string, ui pinoauth.LoginCallbacks) error {
+	var cfg ServerConfig
+	if !m.withEntry(name, func(e *serverEntry) { cfg = e.config }) {
+		return fmt.Errorf("MCP server %q not configured", name)
+	}
+	if cfg.Transport != "sse" && cfg.Transport != "streamable" {
+		return fmt.Errorf("MCP server %q uses the %s transport; OAuth applies to sse and streamable servers only",
+			name, transportLabel(cfg.Transport))
+	}
+	sa, err := m.serverAuthFor(name, cfg)
+	if err != nil {
+		return err
+	}
+	if sa == nil {
+		return fmt.Errorf("MCP server %q has authentication disabled (auth.mode %q)", name, AuthModeNone)
+	}
+	if sa.mode() == AuthModeBearer {
+		return fmt.Errorf("MCP server %q uses a static bearer token; there is nothing to log in to", name)
+	}
+	sa.clearPending()
+	// Probe the server unauthenticated first. A spec-compliant server answers
+	// 401 with a WWW-Authenticate challenge naming its resource_metadata
+	// document (RFC 9728 §5.1) — the authoritative pointer, better than the
+	// well-known path we would otherwise have to guess. `fir mcp login` runs
+	// in its own process with no prior traffic, so without this probe the CLI
+	// could never use the header path at all.
+	sa.probeChallenge(ctx)
+	if err := sa.Login(ctx, ui); err != nil {
+		return err
+	}
+	// Get the fresh token into use — but only if this Manager is actually
+	// running servers. `fir mcp login` builds a Manager purely to reach this
+	// method and never calls Start; connecting there would be wasted work, and
+	// a later Start would then dial a second session over the top of the
+	// first, orphaning its reconnect loop.
+	if !m.started.Load() {
+		return nil
+	}
+	// reloadMu serialises this against Reload and against a concurrent
+	// LoginServer, so the snapshot below cannot go stale between the read and
+	// the restart.
+	m.reloadMu.Lock()
+	defer m.reloadMu.Unlock()
+	// If a reconnect loop is parked on backoff, kicking it is enough. But the
+	// common case for LoginServer is a server whose *initial* connect failed
+	// with AuthRequiredError — no loop was ever started for it — so fall back
+	// to a synchronous restart.
+	var hasLoop, connected, connecting bool
+	m.withEntry(name, func(e *serverEntry) {
+		hasLoop = e.reconnectCancel != nil
+		connected = e.session != nil
+		connecting = e.connecting
+	})
+	switch {
+	case connected || connecting:
+		// Nothing to do; the next request picks up the new token.
+	case hasLoop:
+		m.withEntry(name, func(e *serverEntry) {
+			select {
+			case e.kick <- struct{}{}:
+			default:
+			}
+		})
+	default:
+		if _, err := m.startServer(ctx, name, cfg); err != nil {
+			return fmt.Errorf("reconnect after login: %w", err)
+		}
+		if notify := m.loadOnToolsChanged(); notify != nil {
+			notify(m.allTools())
+		}
+	}
+	return nil
+}
+
+// LogoutServer deletes any stored OAuth credential for a server and forgets
+// the in-memory token. The next connection attempt starts from scratch.
+//
+// Storage is cleared before the in-memory state so a concurrent connect cannot
+// re-create the auth entry and lazily re-load the credential from disk in the
+// gap, which would leave a live token behind a "logout".
+func (m *Manager) LogoutServer(name string) error {
+	err := m.credStore.Delete(name)
+	if v, ok := m.auths.Load(name); ok {
+		v.(*serverAuth).forget()
+	}
+	m.auths.Delete(name)
+	return err
+}
+
+// AuthStatus returns a one-line human description of a server's authentication
+// state, or "" for a server where authentication does not apply (stdio, or a
+// misconfigured URL). Intended for `fir mcp list`.
+func (m *Manager) AuthStatus(name string) string {
+	var cfg ServerConfig
+	if !m.withEntry(name, func(e *serverEntry) { cfg = e.config }) {
+		return ""
+	}
+	if cfg.Transport != "sse" && cfg.Transport != "streamable" {
+		return ""
+	}
+	switch cfg.Auth.ResolveMode() {
+	case AuthModeNone:
+		return "auth: disabled (mode \"none\")"
+	case AuthModeBearer:
+		if cfg.Auth.BearerToken() == "" {
+			return "auth: static bearer token (NOT SET — check the environment variable)"
+		}
+		return "auth: static bearer token"
+	}
+	sa, err := m.serverAuthFor(name, cfg)
+	if err != nil {
+		return "auth: misconfigured: " + err.Error()
+	}
+	if sa == nil {
+		return ""
+	}
+	if cred := m.credStore.Load(name, sa.resource); cred != nil {
+		if cred.Token != nil && cred.Token.Expired() && cred.Token.RefreshToken == "" {
+			return "auth: OAuth token expired — run: fir mcp login " + name
+		}
+		issuer := cred.Issuer
+		if issuer == "" {
+			issuer = "unknown issuer"
+		}
+		return "auth: OAuth token stored (" + issuer + ")"
+	}
+	return "auth: no stored OAuth token (login on demand)"
+}
+
+// transportLabel renders a possibly-empty transport value for error messages.
+func transportLabel(t string) string {
+	if t == "" {
+		return "stdio"
+	}
+	return t
+}
+
+// serverAuthFor returns the OAuth state for a server, creating it on first
+// use. Returns nil when the server needs no auth handling (stdio transport or
+// auth mode "none"), and an error when its auth config is invalid.
+func (m *Manager) serverAuthFor(name string, cfg ServerConfig) (*serverAuth, error) {
+	if cfg.Transport != "sse" && cfg.Transport != "streamable" {
+		return nil, nil
+	}
+	// Serialise the check-delete-create sequence: two callers racing with
+	// different configs could otherwise each see a stale entry and one would
+	// get a serverAuth built from the other's config.
+	m.authsMu.Lock()
+	defer m.authsMu.Unlock()
+	if v, ok := m.auths.Load(name); ok {
+		sa := v.(*serverAuth)
+		// A config change (new URL or new auth block) invalidates the cached
+		// state; a fresh entry is built below.
+		if sa.matches(cfg) {
+			return sa, nil
+		}
+		m.auths.Delete(name)
+	}
+	sa, err := newServerAuth(name, cfg, m.credStore)
+	if err != nil || sa == nil {
+		return nil, err
+	}
+	m.auths.Store(name, sa)
+	return sa, nil
 }
 
 // newServerEntry constructs an entry with reconnect channels initialised.
@@ -361,19 +571,28 @@ func (m *Manager) hasSession(name string) bool {
 
 // createTransport builds a Transport from a ServerConfig based on the
 // Transport field. Supported values: "stdio" (default when empty), "sse",
-// "streamable".
-func createTransport(cfg ServerConfig) (sdk.Transport, error) {
+// "streamable". HTTP transports are given an *http.Client that handles MCP
+// OAuth (see oauth.go); stdio transports get none.
+func (m *Manager) createTransport(name string, cfg ServerConfig) (sdk.Transport, error) {
 	switch cfg.Transport {
 	case "sse":
 		if cfg.URL == "" {
 			return nil, fmt.Errorf("url is required for sse transport")
 		}
-		return &sdk.SSEClientTransport{Endpoint: cfg.URL}, nil
+		sa, err := m.serverAuthFor(name, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return &sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: authHTTPClient(sa)}, nil
 	case "streamable":
 		if cfg.URL == "" {
 			return nil, fmt.Errorf("url is required for streamable transport")
 		}
-		return &sdk.StreamableClientTransport{Endpoint: cfg.URL}, nil
+		sa, err := m.serverAuthFor(name, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return &sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: authHTTPClient(sa)}, nil
 	default: // "stdio" or ""
 		if cfg.Transport != "" && cfg.Transport != "stdio" {
 			return nil, fmt.Errorf("unsupported transport %q; valid values: stdio, sse, streamable", cfg.Transport)
@@ -417,6 +636,7 @@ func mcpShutdownGrace() time.Duration {
 // OnToolsChanged is called with the aggregate tool list. Failures are recorded
 // and logged but do not prevent other servers from starting.
 func (m *Manager) Start(ctx context.Context) {
+	m.started.Store(true)
 	firlog.Info("mcp starting", "servers", m.configsLen())
 	m.forEachServer(func(name string, e *serverEntry) bool {
 		e.connecting = true
@@ -838,8 +1058,54 @@ func reconnectBackoff(attempt int) time.Duration {
 //
 // On any failure the partially-opened session (if any) is closed before
 // returning so we never leak.
+//
+// When an HTTP server demands OAuth and no usable credential exists, the dial
+// fails with an *AuthRequiredError naming `fir mcp login <server>`. No browser
+// is opened here — see SetAuth.
 func (m *Manager) dialAndInitialize(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
-	transport, err := m.dialFn(cfg)
+	session, tools, caps, err := m.dialOnce(ctx, name, cfg)
+	if err == nil {
+		// A background 401 (e.g. on the standalone SSE stream) may have
+		// recorded an auth requirement that this successful dial disproves.
+		// Clear it so an unrelated failure later cannot consume it.
+		if v, ok := m.auths.Load(name); ok {
+			v.(*serverAuth).clearPending()
+		}
+		return session, tools, caps, nil
+	}
+	// The OAuth round-tripper never prompts a human; when it decides an
+	// interactive login is the only way forward it records the requirement on
+	// the server's auth state. Surface that instead of the raw transport
+	// error, because its message names the command that fixes it. The browser
+	// step itself happens only in LoginServer, driven by a foreground command.
+	if authErr := m.pendingAuthError(name, err); authErr != nil {
+		firlog.Warn("mcp oauth: login required", "server", name, "err", authErr)
+		return nil, nil, nil, authErr
+	}
+	return nil, nil, nil, err
+}
+
+// pendingAuthError returns the *AuthRequiredError recorded for a server, if
+// any. It prefers the recorded value over unwrapping dialErr because the SDK
+// funnels transport errors through several layers and we do not want to depend
+// on all of them preserving %w.
+func (m *Manager) pendingAuthError(name string, dialErr error) *AuthRequiredError {
+	if v, ok := m.auths.Load(name); ok {
+		if p := v.(*serverAuth).takePending(); p != nil {
+			return p
+		}
+	}
+	var authErr *AuthRequiredError
+	if errors.As(dialErr, &authErr) {
+		return authErr
+	}
+	return nil
+}
+
+// dialOnce performs a single Connect → list-tools → assemble-tools sequence.
+// See dialAndInitialize for the OAuth retry that wraps it.
+func (m *Manager) dialOnce(ctx context.Context, name string, cfg ServerConfig) (*sdk.ClientSession, []agent.AgentTool, *sdk.ServerCapabilities, error) {
+	transport, err := m.dialFn(name, cfg)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("create transport: %w", err)
 	}
@@ -1025,6 +1291,7 @@ func (m *Manager) Reload(ctx context.Context, newConfigs map[string]ServerConfig
 	for name := range oldConfigs {
 		if _, exists := newConfigs[name]; !exists {
 			m.servers.Delete(name)
+			m.auths.Delete(name)
 		}
 	}
 	for name, cfg := range newConfigs {

@@ -167,7 +167,7 @@ func TestManagerChannelNotificationE2E(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{
 		"test-channel": {Command: "unused"},
 	}, false)
-	mgr.dialFn = func(cfg ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, cfg ServerConfig) (sdk.Transport, error) {
 		return server.transport, nil
 	}
 

@@ -32,6 +32,7 @@ import (
 	"github.com/kfet/fir/pkg/session/compaction"
 	"github.com/kfet/fir/pkg/session/store"
 	"github.com/kfet/fir/pkg/update"
+	"github.com/kfet/pinoauth"
 	"github.com/kfet/tui"
 )
 
@@ -377,6 +378,28 @@ func reportSettingsErrors(settingsManager *config.SettingsManager, context strin
 func mcpReloadFunc(mgrPtr **mcp.Manager, sess *session.AgentSession, cwd string, args *Args) func() error {
 	return func() error {
 		return session.ReloadMCP(context.Background(), mgrPtr, sess, cwd, args.MCPConfig, nil)
+	}
+}
+
+// mcpLoginFunc returns the /mcp login handler: it drives the OAuth flow for
+// one server through the TUI's login callbacks. The manager pointer is
+// dereferenced late because /reload replaces the manager.
+func mcpLoginFunc(mgrPtr **mcp.Manager) func(context.Context, string, pinoauth.LoginCallbacks) error {
+	return func(ctx context.Context, server string, cb pinoauth.LoginCallbacks) error {
+		if mgrPtr == nil || *mgrPtr == nil {
+			return fmt.Errorf("no MCP servers configured")
+		}
+		return (*mgrPtr).LoginServer(ctx, server, cb)
+	}
+}
+
+// mcpLogoutFunc returns the /mcp logout handler.
+func mcpLogoutFunc(mgrPtr **mcp.Manager) func(string) error {
+	return func(server string) error {
+		if mgrPtr == nil || *mgrPtr == nil {
+			return fmt.Errorf("no MCP servers configured")
+		}
+		return (*mgrPtr).LogoutServer(server)
 	}
 }
 
@@ -1055,6 +1078,8 @@ func runInteractiveMode(args *Args, noticeCh <-chan string) error {
 			MCPStatus:       mcp.StatusFunc(setup.mcpManager),
 			MCPDetails:      mcp.DetailsFunc(setup.mcpManager),
 			MCPReload:       mcpReloadFunc(&setup.mcpManager, setup.result.Session, setup.cwd, args),
+			MCPLogin:        mcpLoginFunc(&setup.mcpManager),
+			MCPLogout:       mcpLogoutFunc(&setup.mcpManager),
 		},
 	)
 	interactive.SetVersion(version)

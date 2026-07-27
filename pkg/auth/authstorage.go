@@ -350,12 +350,16 @@ func (s *AuthStorage) Remove(provider string) error {
 	return nil
 }
 
-// List returns all providers with stored credentials.
+// List returns all providers with stored credentials. MCP server credentials
+// (see MCPKeyPrefix) are excluded — they are not provider accounts.
 func (s *AuthStorage) List() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]string, 0, len(s.data))
 	for k := range s.data {
+		if IsMCPKey(k) {
+			continue
+		}
 		result = append(result, k)
 	}
 	return result

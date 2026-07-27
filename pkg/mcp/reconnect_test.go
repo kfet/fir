@@ -131,7 +131,7 @@ func TestManager_OnDemandReconnect_KicksLoop(t *testing.T) {
 	// Counting dial that fails the first reconnect attempt, then succeeds.
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		n := dialCount.Add(1)
 		// First (initial) connect succeeds. First reconnect fails so we
 		// enter a backoff sleep that the kick will interrupt. Subsequent
@@ -139,7 +139,7 @@ func TestManager_OnDemandReconnect_KicksLoop(t *testing.T) {
 		if n == 2 {
 			return nil, errors.New("simulated reconnect dial failure")
 		}
-		return realDial(cfg)
+		return realDial(name, cfg)
 	}
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = dial
@@ -179,9 +179,9 @@ func TestManager_OnDemand_RespectsContext(t *testing.T) {
 	// will be stuck retrying.
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial(name, cfg)
 		}
 		return nil, errors.New("permanent dial failure")
 	}
@@ -210,7 +210,7 @@ func TestManager_OnDemand_RespectsContext(t *testing.T) {
 // connected" rather than blocking forever.
 func TestManager_OnDemand_NoLoopReturnsNotConnected(t *testing.T) {
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
-	mgr.dialFn = func(_ ServerConfig) (sdk.Transport, error) {
+	mgr.dialFn = func(_ string, _ ServerConfig) (sdk.Transport, error) {
 		return nil, errors.New("initial dial fails")
 	}
 	mgr.Start(context.Background())
@@ -239,12 +239,12 @@ func TestManager_ConcurrentCallTool_SingleFlight(t *testing.T) {
 	realDial := inMemoryDial(t, server)
 	// Fail the first reconnect attempt so the loop enters its backoff
 	// sleep deterministically. Subsequent attempts succeed.
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		n := dialCount.Add(1)
 		if n == 2 {
 			return nil, errors.New("simulated transient dial failure")
 		}
-		return realDial(cfg)
+		return realDial(name, cfg)
 	}
 	mgr := NewManager(map[string]ServerConfig{"srv": {}}, false)
 	mgr.dialFn = dial
@@ -300,9 +300,9 @@ func TestManager_Close_CancelsReconnect(t *testing.T) {
 	// Dial succeeds first, fails forever after — loop will be stuck retrying.
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial(name, cfg)
 		}
 		return nil, errors.New("permanent")
 	}
@@ -342,9 +342,9 @@ func TestManager_ReconnectBackoff_SurfacesErrAfterThreshold(t *testing.T) {
 	server := makePingServer()
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial(name, cfg)
 		}
 		return nil, errors.New("permanent dial failure")
 	}
@@ -534,9 +534,9 @@ func TestManager_ReconnectWarning_DoesNotLeakToDefaultSlog(t *testing.T) {
 	server := makePingServer()
 	var dialCount atomic.Int32
 	realDial := inMemoryDial(t, server)
-	dial := func(cfg ServerConfig) (sdk.Transport, error) {
+	dial := func(name string, cfg ServerConfig) (sdk.Transport, error) {
 		if dialCount.Add(1) == 1 {
-			return realDial(cfg)
+			return realDial(name, cfg)
 		}
 		return nil, errors.New("permanent dial failure")
 	}

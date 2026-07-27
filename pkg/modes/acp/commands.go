@@ -13,6 +13,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/kfet/fir/pkg/auth"
 	"github.com/kfet/fir/pkg/mcp"
 	"github.com/kfet/fir/pkg/resources"
 	"github.com/kfet/fir/pkg/session"
@@ -421,6 +422,9 @@ func cmdLogout(ctx *commandContext, args string) {
 	creds := authStorage.GetAll()
 	loggedIn := make([]string, 0, len(creds))
 	for k := range creds {
+		if auth.IsMCPKey(k) {
+			continue // MCP server tokens are not provider accounts
+		}
 		loggedIn = append(loggedIn, k)
 	}
 	sort.Strings(loggedIn)

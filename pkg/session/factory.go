@@ -217,6 +217,17 @@ func StartMCPManager(ctx context.Context, sess *AgentSession, configs map[string
 	}
 	mgr := mcp.NewManager(configs, false)
 
+	// OAuth credentials for HTTP MCP servers live in the same auth.json as
+	// provider credentials. The Manager has no login-UI hook by construction:
+	// MCP servers connect from background goroutines, potentially before the
+	// TUI exists, so nothing here can safely drive a browser. A server that
+	// needs a login fails with an *mcp.AuthRequiredError naming
+	// `fir mcp login <server>`; `/mcp login <server>` runs the same flow from
+	// the UI goroutine.
+	if reg := sess.ModelRegistryRef(); reg != nil {
+		mgr.SetAuth(reg.AuthStorage())
+	}
+
 	// Auto-reply: when a channel message arrives from a message_id-addressed
 	// reply tool, stream LLM output directly without manual reply() calls.
 	var ar *autoreply.State

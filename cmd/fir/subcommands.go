@@ -85,6 +85,15 @@ var subcommands = []subcommand{
 		},
 	},
 	{
+		Name: "mcp",
+		Run:  runMCPSubcommand,
+		Help: [][2]string{
+			{"fir mcp [list]", "List configured MCP servers and their auth state"},
+			{"fir mcp login <server>", "OAuth login for a remote (sse/streamable) MCP server"},
+			{"fir mcp logout <server>", "Remove stored credentials for an MCP server"},
+		},
+	},
+	{
 		Name: "completion",
 		Run:  runCompletion,
 		Help: [][2]string{{"fir completion <bash|zsh>", "Print shell completion script"}},

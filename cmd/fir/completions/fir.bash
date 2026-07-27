@@ -20,7 +20,7 @@ _fir_complete() {
     local subcommand=""
     if [[ $cword -ge 2 ]]; then
         case ${words[1]} in
-            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|completion)
+            update|skills|extensions|install|uninstall|packages|sessions|observe|htop|send|login|logout|mcp|completion)
                 subcommand=${words[1]}
                 ;;
         esac
@@ -96,7 +96,7 @@ _fir_complete() {
 
     # First positional: subcommand or @file or message
     if [[ $cword -eq 1 ]]; then
-        local subs="update skills extensions install uninstall packages sessions observe htop send login logout completion"
+        local subs="update skills extensions install uninstall packages sessions observe htop send login logout mcp completion"
         if [[ $cur == @* ]]; then
             local stripped=${cur#@}
             local files=( $(compgen -f -- "$stripped") )
@@ -180,6 +180,12 @@ _fir_complete_subcommand() {
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "list $(_fir_providers)" -- "$cur") )
             fi ;;
+        mcp)
+            if [[ $pos -eq 1 ]]; then
+                COMPREPLY=( $(compgen -W "list login logout" -- "$cur") )
+            elif [[ $pos -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "$(_fir_mcp_servers)" -- "$cur") )
+            fi ;;
         completion)
             if [[ $pos -eq 1 ]]; then
                 COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
@@ -190,6 +196,13 @@ _fir_complete_subcommand() {
 }
 
 # --- Dynamic data sources (cached per shell) ---
+
+_fir_mcp_servers() {
+    if [[ -z ${_FIR_MCP_SERVERS_CACHE+x} ]]; then
+        _FIR_MCP_SERVERS_CACHE=$(fir mcp list 2>/dev/null | awk 'NR>1 && $1 != "" {print $1}')
+    fi
+    printf '%s\n' "$_FIR_MCP_SERVERS_CACHE"
+}
 
 _fir_models() {
     if [[ -z ${_FIR_MODELS_CACHE+x} ]]; then

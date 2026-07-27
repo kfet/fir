@@ -26,6 +26,7 @@ _fir() {
         'send:Send messages to a live fir session'
         'login:OAuth login for a provider'
         'logout:Remove a stored account slot'
+        'mcp:Inspect MCP servers or manage their credentials'
         'completion:Print shell completion script'
     )
 
@@ -42,6 +43,7 @@ _fir() {
             observe)     _fir_observe; return ;;
             send)        _fir_send; return ;;
             login)       _fir_login; return ;;
+            mcp)         _fir_mcp; return ;;
             completion)  _fir_completion; return ;;
         esac
     fi
@@ -117,6 +119,7 @@ _fir_first_arg() {
         'sessions:List sessions'
         'login:OAuth login'
         'logout:Remove a stored account'
+        'mcp:Manage MCP servers'
         'completion:Print shell completion script'
     )
     # Slash-prefixed skill invocation: `fir /<skill> ...` (cached per shell).
@@ -232,6 +235,30 @@ _fir_login() {
             'subcommand:subcommand:((list\:List\ available\ OAuth\ providers))' \
             'providers:provider:_fir_providers'
     fi
+}
+
+_fir_mcp() {
+    if (( CURRENT == 3 )); then
+        _values 'subcommand' \
+            'list[List configured MCP servers and their auth state]' \
+            'login[OAuth login for a remote MCP server]' \
+            'logout[Remove stored credentials for an MCP server]'
+    elif (( CURRENT == 4 )); then
+        case ${words[3]} in
+            login|logout) _fir_mcp_servers ;;
+        esac
+    fi
+}
+
+_fir_mcp_servers() {
+    local -a servers
+    local cache_var=_fir_mcp_servers_cache
+    if (( ${(P)+cache_var} == 0 )); then
+        typeset -ga _fir_mcp_servers_cache
+        _fir_mcp_servers_cache=(${(f)"$(fir mcp list 2>/dev/null | awk 'NR>1 && $1 != "" {print $1}')"})
+    fi
+    servers=(${(P)cache_var})
+    _describe 'MCP server' servers
 }
 
 _fir_completion() {
