@@ -196,12 +196,33 @@ jobs:
   # ---------------------------------------------------------------
   brew-smoke:
     needs: release
+    # Bounds a WEDGED brew install (these jobs do network installs and have
+    # hung before). It does NOT bound time spent waiting for a runner —
+    # timeout-minutes only starts counting once a runner picks the job up.
+    # A `runs-on` label that no available runner matches sits in "waiting for
+    # a runner" until GitHub's ~24h queue cull, which is exactly how the
+    # retired macos-13 leg hung v0.89.0 and v0.90.0. Hence: only use labels
+    # that are known to resolve.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest = Apple Silicon (arm64); macos-13 = Intel (amd64),
-        # so we smoke-test the brew install path on BOTH mac architectures.
-        os: [macos-latest, macos-13, ubuntu-latest]
+        # macos-latest = Apple Silicon (arm64); ubuntu-latest = Linuxbrew.
+        #
+        # The Intel (amd64) mac leg is temporarily absent. It used macos-13,
+        # which GitHub has retired — the label stopped resolving and every
+        # release run hung on it indefinitely (v0.89.0 ~7h, v0.90.0 50m+,
+        # both cancelled by hand). Artifacts were never at risk: this job is
+        # post-publish and fail-fast is false, so only the run's terminal
+        # state was affected.
+        #
+        # Intel coverage is worth restoring — fir ships darwin-amd64 and the
+        # formula's Intel path (/usr/local prefix, amd64 asset selection)
+        # differs from arm64's /opt/homebrew. The successor label is believed
+        # to be macos-15-intel; runner-probe.yml validates it out-of-band so
+        # a wrong guess cannot hang a release. Restore this leg once that
+        # probe has been seen to get picked up.
+        os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # Linuxbrew intermittently dies with "Broken pipe" right after `brew tap`
     # (during Homebrew's JSON-API / auto-update pipe work). Disabling those

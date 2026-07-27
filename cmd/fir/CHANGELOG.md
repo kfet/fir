@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **The release workflow no longer hangs forever on a retired runner.** `brew-smoke` matrixed over `macos-13` to cover Intel macOS; GitHub has retired that image, so the label stopped resolving and the job sat in "waiting for a runner" until cancelled by hand — v0.89.0 for ~7h, v0.90.0 for 50m+. Artifacts were never at risk (the job is post-publish with `fail-fast: false`); only the run's terminal state was affected. The Intel leg is dropped for now and `timeout-minutes` added. Note that `timeout-minutes` does **not** bound queue time — it only starts once a runner picks the job up, so it guards a wedged `brew install`, not an unresolvable label; GitHub's ~24h queue cull is the only backstop there. Intel coverage is worth restoring (fir ships `darwin-amd64`, and the formula's `/usr/local` Intel path differs from arm64's `/opt/homebrew`): new manual-only `runner-probe.yml` validates a candidate label such as `macos-15-intel` out-of-band, so an unverified label can never hang a release run again.
+
 ## [0.90.0] - 2026-07-27
 
 ### Added

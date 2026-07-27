@@ -1,0 +1,43 @@
+name: runner-probe
+
+# Out-of-band validation that a GitHub-hosted runner label still resolves.
+#
+# Why this exists: a `runs-on` label that matches no available runner does NOT
+# fail fast. The job sits in "waiting for a runner" until GitHub's ~24h queue
+# cull, and `timeout-minutes` does not help — it only starts counting once a
+# runner picks the job up. That is how the retired `macos-13` leg of
+# release.yml's brew-smoke job hung two consecutive release runs.
+#
+# So: never introduce an unverified runner label straight into a release
+# workflow. Dispatch this first. If the job gets picked up and goes green
+# within a few minutes, the label is good and can be adopted. If it sits in
+# "waiting for a runner", cancel it — nothing else is affected.
+#
+# Manual only; never runs on push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label to probe (e.g. macos-15-intel)'
+        required: true
+        type: string
+        default: 'macos-15-intel'
+
+jobs:
+  probe:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: Report what we actually landed on
+        run: |
+          set -euxo pipefail
+          echo "requested label: ${{ inputs.runner }}"
+          uname -s -m
+          # Confirm the architecture really is what the label promises —
+          # the point of an Intel leg is that it is not arm64.
+          echo "arch: $(uname -m)"
+          if [ "$(uname -s)" = "Darwin" ]; then
+            sw_vers || true
+            echo "homebrew prefix: $(brew --prefix 2>/dev/null || echo '<no brew>')"
+          fi
