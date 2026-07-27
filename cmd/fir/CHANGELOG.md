@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Bumped the MCP Go SDK from v1.3.1 to v1.6.1 (and, transitively, `google/jsonschema-go` to v0.4.3 and `segmentio/encoding` to v0.5.4). No API breakage in fir's usage; the SDK's `oauthex` package now ships the RFC 9728 / 8414 / 7591 discovery primitives fir uses for MCP OAuth. The `go` directive moves to 1.25.0 to match the SDK's minimum — CI already resolves its toolchain from `go.mod`.
+
 ## [0.89.0] - 2026-07-27
 
 ### Fixed
