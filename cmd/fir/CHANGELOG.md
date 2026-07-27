@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- A tool result with no content no longer reaches the model as an empty string. Every provider converter flattened an empty `ai.ToolResultMessage` to `""` (Anthropic: `strings.Join(nil, "\n")`); providers accept it, but the model then sees a tool call answered with literally nothing, indistinguishable from a tool whose output genuinely *was* the empty string. `TransformMessages` — the one copy-on-write, LLM-bound-only chokepoint every converter (anthropic, openai, openai-responses, google, google-shared, bedrock) already calls — now floors blank results to an out-of-band marker (`<system>Tool executed successfully and produced no output.</system>`, or `...Tool failed...` when `IsError`). Blank means no blocks or only whitespace text; an image-bearing result is never blank. The floor is wire-time only: persisted history keeps the truthful empty content, so the wording can change without rewriting old sessions. Sources of empty results include MCP tools returning zero content items (`pkg/mcp/tool_adapter.go`) and extension tools. Tests: `TestTransformMessages_FloorsEmptyToolResult`, `...FloorsWhitespaceOnlyToolResult`, `...FloorsEmptyErrorToolResult`, `...LeavesNonEmptyToolResultAlone`, `...FloorDoesNotMutateInput`, `...DoesNotFloorImageOnlyToolResult`.
+
 ## [0.88.0] - 2026-07-27
 
 ### Fixed

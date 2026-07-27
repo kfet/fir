@@ -16,6 +16,40 @@ const (
 // NormalizeToolCallIDFunc normalizes tool call IDs for cross-provider compatibility.
 type NormalizeToolCallIDFunc func(id string, model *ai.Model, source *ai.AssistantMessage) string
 
+// isBlankToolResult reports whether a tool result carries nothing a model can
+// read: no content blocks at all, or only empty/whitespace text blocks. A
+// result holding an image (or any other non-text block) is never blank.
+func isBlankToolResult(content []ai.ToolResultContent) bool {
+	for _, c := range content {
+		if c.IsText() || (c.Type == "" && c.Text != "") {
+			if strings.TrimSpace(c.Text) != "" {
+				return false
+			}
+			continue
+		}
+		// Any non-text block (image, etc.) is real content.
+		return false
+	}
+	return true
+}
+
+// emptyToolResultMarker is the LLM-bound stand-in for a tool result with no
+// content. Wire-time only: the persisted message keeps its truthful empty
+// content, so the wording can change freely without rewriting history.
+//
+// Every converter previously flattened an empty result to the empty string
+// (Anthropic: strings.Join(nil, "\n")). Providers accept that, but the model
+// then sees a tool call answered with literally nothing — indistinguishable
+// from a tool whose output *was* the empty string. The marker is deliberately
+// shaped as an out-of-band annotation rather than plain prose so it does not
+// read as text the tool itself rendered.
+func emptyToolResultMarker(isError bool) string {
+	if isError {
+		return "<system>Tool failed and produced no output.</system>"
+	}
+	return "<system>Tool executed successfully and produced no output.</system>"
+}
+
 // TransformMessages normalizes messages for cross-provider compatibility.
 // It handles:
 //   - Thinking block conversion (keep signatures for same model, convert to text for others)
@@ -40,12 +74,19 @@ func TransformMessages(messages []ai.Message, model *ai.Model, normalizeToolCall
 			normalizedID, ok := toolCallIDMap[tr.ToolCallID]
 			needsID := ok && normalizedID != tr.ToolCallID
 			rendered := ai.RenderToolResultMeta(tr.Meta)
-			if needsID || rendered != "" {
+			needsFloor := rendered == "" && isBlankToolResult(tr.Content)
+			if needsID || rendered != "" || needsFloor {
 				// Copy-on-write: never mutate the persisted message or its
 				// content slice — transform output is LLM-bound only.
 				tr2 := *tr
 				if needsID {
 					tr2.ToolCallID = normalizedID
+				}
+				if needsFloor {
+					tr2.Content = []ai.ToolResultContent{{
+						Type: ai.ContentTypeText,
+						Text: emptyToolResultMarker(tr.IsError),
+					}}
 				}
 				if rendered != "" {
 					content := make([]ai.ToolResultContent, len(tr.Content), len(tr.Content)+1)
