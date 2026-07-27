@@ -70,6 +70,8 @@ func (pa *firAgent) removeSession(sessionID string) (*firSession, bool) {
 		delete(pa.sessions, sessionID)
 	}
 	pa.mu.Unlock()
+	// A released session has no in-flight work left to report on.
+	pa.stopSessionHeartbeats(sessionID)
 	return entry, ok
 }
 
@@ -119,6 +121,7 @@ func (pa *firAgent) reapIdle(now time.Time) []string {
 	pa.mu.Unlock()
 
 	for i, sid := range victims {
+		pa.stopSessionHeartbeats(sid)
 		firlog.Info("acp idle reaper: tearing down idle session",
 			"sessionId", sid, "idleSeconds", now.Sub(entries[i].lastActive()).Seconds())
 		// Remember where this session's transcript lives (and its cwd) so a

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **ACP mode now emits periodic `in_progress` `tool_call` updates while a tool runs, so a relay watchdog no longer cancels long, quiet tool calls mid-work.** A relay in front of ACP mode (`poe-acp -idle-write-timeout`, default 2m) cancels a turn that emits no agent output within its window — and per its own docs SSE keepalives do **not** reset that timer, only a `tool_call` update does. ACP mode emitted a `tool_call` update on tool start and tool end and nothing in between, and never handled `agent.EventToolExecutionUpdate` at all, so a single tool quiet for >2m looked identical to a hung agent: the relay cancelled the turn and fir persisted an assistant message with `StopReason=error` / `"http request: ... context canceled"` (23 such kills in one local session corpus, 5 in two days). A per-tool-call ticker (`pkg/modes/acp/heartbeat.go`) now emits an `in_progress` `tool_call` update every 30s while a tool runs — also touching the session so the idle reaper counts a long tool as activity — and `EventToolExecutionUpdate` is forwarded as an `in_progress` update; heartbeats stop on tool end, agent end (covers cancel/error), session release and idle reap so no goroutine outlives its work. `FIR_ACP_TOOL_HEARTBEAT` overrides the interval (`<=0` disables). Tests: `TestToolHeartbeat_EmitsWhileToolRuns`, `TestToolHeartbeat_DisabledByEnv`, `TestToolHeartbeat_StoppedOnAgentEnd`, `TestToolExecutionUpdate_EmitsInProgress`.
+
 ## [0.87.0] - 2026-07-26
 
 ### Changed

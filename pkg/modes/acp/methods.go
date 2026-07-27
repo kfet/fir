@@ -858,7 +858,24 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 
 		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.StartToolCall(acpsdk.ToolCallId(ev.ToolCallID), BuildToolTitle(ev.ToolName, argsMap), startOpts...)))
 
+		// Keep the tool call visibly alive while it runs (see heartbeat.go).
+		pa.startToolHeartbeat(sessionID, entry, ev.ToolCallID)
+
+	case agent.EventToolExecutionUpdate:
+		// A tool streamed partial progress. Forward it as an in_progress
+		// tool_call update: it keeps relay watchdogs fed and surfaces the
+		// tool status message to the client. Content is deliberately not
+		// forwarded here — the full result lands on EventToolExecutionEnd.
+		var updateOpts []acpsdk.ToolCallUpdateOpt
+		updateOpts = append(updateOpts, acpsdk.WithUpdateStatus("in_progress"))
+		if ev.StatusMessage != "" {
+			updateOpts = append(updateOpts, acpsdk.WithUpdateContent([]acpsdk.ToolCallContent{textContent(ev.StatusMessage)}))
+		}
+		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...)))
+
 	case agent.EventToolExecutionEnd:
+		pa.stopToolHeartbeat(sessionID, ev.ToolCallID)
+
 		var argsMap map[string]any
 		if v, ok := entry.pendingArgs.LoadAndDelete(ev.ToolCallID); ok {
 			argsMap, _ = v.(map[string]any)
@@ -892,6 +909,11 @@ func (pa *firAgent) handleEvent(sessionID string, entry *firSession, event sessi
 		}
 
 		_ = pa.conn.SessionUpdate(context.Background(), entry.notification(acpsdk.SessionId(sessionID), acpsdk.UpdateToolCall(acpsdk.ToolCallId(ev.ToolCallID), updateOpts...)))
+
+	case agent.EventAgentEnd:
+		// The turn is over (normally, or via cancel/error). Never leave a
+		// heartbeat goroutine reporting on work that has stopped.
+		pa.stopSessionHeartbeats(sessionID)
 
 	case agent.EventMessageEnd:
 		// Surface inference errors (e.g. Bedrock API failures) to the ACP client.

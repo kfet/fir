@@ -137,6 +137,11 @@ type firAgent struct {
 	// mapping. It is therefore best-effort: lost across a process restart,
 	// at which point the relay falls back to re-resuming via -32001.)
 	reaped map[string]reapedSession
+	// toolHeartbeats holds a stop channel per in-flight tool call, keyed by
+	// heartbeatKey(sessionID, toolCallID). See heartbeat.go: a long silent
+	// tool call must keep emitting tool_call updates or a relay watchdog
+	// cancels the turn mid-work.
+	toolHeartbeats map[string]chan struct{}
 	// nowFn returns the current time; injectable so tests use a fake clock.
 	// nil means time.Now.
 	nowFn func() time.Time
