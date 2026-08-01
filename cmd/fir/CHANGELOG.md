@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`fir install org/repo/subdir` now works for a second subdirectory of the same repo.** All subdirs of a repo share one clone directory, and the re-install path only ran `git pull` — never `git sparse-checkout add` — so the new subdir was never checked out and the install reported "Discovered: 0 skill(s), 0 extension(s)" with exit 0. Installs into an existing clone now sparse-add the subdirectory (no-op on a full clone, idempotent), a whole-repo install on top of a sparse clone disables sparse checkout, and a missing install path is now a hard error instead of a silent success. `fir uninstall` no longer deletes a shared clone while sibling subdirs are still installed (it shrinks the sparse set instead), and `fir update` pulls the clone root once per repo rather than each subdirectory. Pinned installs (`repo/sub@v1`) also work on the shared-clone path — a pinned clone has a detached HEAD where `git pull --ff-only` fails, so fir now fetches and checks the ref out; installing two subdirs of one repo at *different* refs is rejected with a clear message, since they share one working tree. A failed install no longer leaves a stray clone behind, and `fir uninstall` / `fir update` match a package by canonical identity, so an alternate spelling of the same source (`https://github.com/o/r/sub` vs `github.com/o/r/sub`) is no longer a no-op.
+
 ## [0.90.1] - 2026-07-28
 
 ### Fixed

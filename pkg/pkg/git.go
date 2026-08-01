@@ -98,6 +98,85 @@ func SparseCloneRef(url, ref, subDir, dest string) error {
 	return nil
 }
 
+// Fetch updates remote-tracking refs and tags for the repository at dir.
+func Fetch(dir string) error {
+	return runGit(dir, "fetch", "--tags", "origin")
+}
+
+// CheckoutRef checks out ref (branch, tag, or commit) in the repository at dir.
+func CheckoutRef(dir, ref string) error {
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("invalid ref %q: must not start with '-'", ref)
+	}
+	return runGit(dir, "checkout", "--force", ref)
+}
+
+// IsSparse reports whether the repository at dir has sparse checkout enabled.
+func IsSparse(dir string) bool {
+	cmd := exec.Command("git", "-C", dir, "config", "--bool", "core.sparseCheckout")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "true"
+}
+
+// SparseAdd makes subDir available in an existing clone at dir.
+// It is idempotent and safe to call on a non-sparse (full) clone, where it is
+// a no-op because every path is already checked out.
+func SparseAdd(dir, subDir string) error {
+	if subDir == "" || !IsSparse(dir) {
+		return nil
+	}
+	if strings.HasPrefix(subDir, "-") {
+		return fmt.Errorf("invalid subdirectory %q: must not start with '-'", subDir)
+	}
+	if err := runGit(dir, "sparse-checkout", "add", subDir); err != nil {
+		return err
+	}
+	// "sparse-checkout add" updates the working tree itself, but a clone made
+	// with --no-checkout may still have no HEAD checked out.
+	return runGit(dir, "checkout")
+}
+
+// SparseSet restricts an existing sparse clone at dir to exactly subDirs.
+// It is a no-op on a non-sparse clone or when subDirs is empty.
+func SparseSet(dir string, subDirs []string) error {
+	if len(subDirs) == 0 || !IsSparse(dir) {
+		return nil
+	}
+	for _, s := range subDirs {
+		if strings.HasPrefix(s, "-") {
+			return fmt.Errorf("invalid subdirectory %q: must not start with '-'", s)
+		}
+	}
+	return runGit(dir, append([]string{"sparse-checkout", "set"}, subDirs...)...)
+}
+
+// SparseDisable turns off sparse checkout at dir, restoring a full working
+// tree. It is a no-op when the clone is not sparse.
+func SparseDisable(dir string) error {
+	if !IsSparse(dir) {
+		return nil
+	}
+	if err := runGit(dir, "sparse-checkout", "disable"); err != nil {
+		return err
+	}
+	return runGit(dir, "checkout")
+}
+
+// runGit runs a git command in dir, wrapping failures with stderr output.
+func runGit(dir string, args ...string) error {
+	full := append([]string{"-C", dir}, args...)
+	cmd := exec.Command("git", full...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git %s in %s: %w\n%s", strings.Join(args, " "), dir, err, stderr.String())
+	}
+	return nil
+}
+
 // CurrentRef returns the short HEAD commit hash of the repository at dir.
 func CurrentRef(dir string) (string, error) {
 	cmd := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD")
