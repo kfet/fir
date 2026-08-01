@@ -292,9 +292,13 @@ init response.
 |                         |             "metadata":{...}}}``               |
 |                         | Generic session-state change event.            |
 +-------------------------+------------------------------------------------+
-| ``agent_start``         | *(params key absent)* — LLM turn starting      |
+| ``agent_start``         | *(params key absent)* — agent loop starting;   |
+|                         | once per loop, in every mode. A prompt sent    |
+|                         | mid-stream is folded in as a follow-up turn,   |
+|                         | so it yields turn_start only.                  |
 +-------------------------+------------------------------------------------+
-| ``agent_end``           | *(params key absent)* — LLM turn finished      |
+| ``agent_end``           | *(params key absent)* — agent loop finished;   |
+|                         | always paired 1:1 with ``agent_start``         |
 +-------------------------+------------------------------------------------+
 | ``turn_start``          | *(params key absent)* — streaming turn starting|
 +-------------------------+------------------------------------------------+

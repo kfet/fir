@@ -374,9 +374,9 @@ the `events` array of the init response.  For hooks, use the full `hook/` name.
 | `session_shutdown` | *(params key absent)* — session is about to stop; last chance for cleanup. |
 | `session_named` | `{"name": "..."}` — fired when the session acquires a display name (on start if one already exists, or when it is set later). |
 | `session_update` | `{"type": "session_named"│"plan_update", "session_name": "...", "plan": {"total": N, "completed": N, "metadata": {...}}}` — generic session state change. |
-| `agent_start` | *(params key absent)* — LLM turn is starting. |
-| `agent_end` | *(params key absent)* — LLM turn has finished. |
-| `turn_start` | *(params key absent)* — streaming turn is starting. |
+| `agent_start` | *(params key absent)* — the agent loop is starting. Emitted once per agent loop, in every mode (CLI, TUI, ACP). A prompt submitted while the agent is already streaming is queued as a follow-up and runs inside the *current* loop, so it produces `turn_start`/`turn_end` but no additional `agent_start`. |
+| `agent_end` | *(params key absent)* — the agent loop has finished. Always paired 1:1 with `agent_start`. |
+| `turn_start` | *(params key absent)* — streaming turn is starting. One per turn, so a loop that drains queued follow-ups emits several. |
 | `turn_end` | *(params key absent)* — streaming turn has finished. |
 | `message_start` | *(params key absent)* — LLM message block is starting. |
 | `message_end` | `{role, provider?, model?, stop_reason?, response_id?, usage?}` — LLM message block has finished. `role` is `"user"`, `"assistant"`, or `"toolResult"`. Assistant messages also carry `provider`, `model`, `stop_reason`, `response_id`, and a `usage` object: `{input, output, cache_read, cache_write, total_tokens, cost: {input, output, cache_read, cache_write, total}}`. Token counts are integers; cost values are USD floats from the upstream provider (zero when unavailable). |
