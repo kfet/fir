@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.93.0] - 2026-08-02
+
+### Added
+- **Extension tool calls now carry real detail in `--mode acp`.** Every non-builtin tool rendered as a bare tool name in an ACP client, so a turn that ran three `rexec` calls to three different hosts showed three identical lines reading just `rexec` — no host, no command, nothing to tell the calls apart. Builtins escaped this only because `BuildToolTitle` had a hardcoded switch over their names, with `default: return toolName`. Extensions already ship the metadata needed (`display_hint.title_args` / `use_box`, which the interactive TUI has always consumed); ACP simply ignored it. Titles are now built from `TitleArgs` with TUI semantics preserved — argument order, boolean args as badges, missing/empty args skipped, `pattern` values wrapped — plus the bash-style 80-character truncation and backtick escaping, so `rexec` reads as `rexec zboxserver make all`. Boxed hinted tools also get a start-content block (context args, then the command in a fenced block) the way `bash` gets `$ <cmd>`, and tool kind is derived from a conservative, name-agnostic heuristic over argument names (`command` ⇒ execute, `pattern` ⇒ search, `content`/`newText` ⇒ edit, `path` ⇒ read) so extension calls keep a client-side icon instead of collapsing to `other`. Both the live path (via the start event's `DisplayHint`) and history replay (which resolves the hint from the session's registered tools) are wired; builtin titles are byte-identical to before.
+
 ## [0.92.1] - 2026-08-02
 
 ### Fixed
