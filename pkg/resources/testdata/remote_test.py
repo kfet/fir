@@ -53,7 +53,7 @@ def _payload(result):
 
 
 class TestToolRegistration(unittest.TestCase):
-    def test_all_five_tools_registered(self):
+    def test_all_six_tools_registered(self):
         names = {t["name"] for t in REMOTE_TOOL_SPECS}
         self.assertEqual({"rexec", "rjob", "rput", "rget", "rtmux", "rhosts"}, names)
 
@@ -122,7 +122,20 @@ class TestScriptBuilding(unittest.TestCase):
 
 class TestDetachScript(unittest.TestCase):
     def setUp(self):
-        self.script = remote._detach_scripts("fir-1-abc", "make all\n", "/srv/x", "box")
+        self.script = remote._detach_script("fir-1-abc", "make all\n", "/srv/x", "box")
+
+    @staticmethod
+    def _decode_runner(script):
+        """Decode the base64-embedded runner script back out."""
+        import base64
+        import re
+
+        blobs = re.findall(r"printf %s ([A-Za-z0-9+/=]+)", script)
+        decoded = [base64.b64decode(b).decode() for b in blobs]
+        return next(d for d in decoded if d.startswith("#!/bin/bash"))
+
+    def _runner(self):
+        return self._decode_runner(self.script)
 
     def test_carries_command_as_base64_not_heredoc(self):
         self.assertNotIn("<<", self.script)
@@ -144,15 +157,6 @@ class TestDetachScript(unittest.TestCase):
         self.assertIn("fir-1-abc.pid", runner)
         self.assertIn("fir-1-abc.log", runner)
 
-    def _runner(self):
-        """Decode the base64-embedded runner script back out."""
-        import base64
-        import re
-
-        blobs = re.findall(r"printf %s ([A-Za-z0-9+/=]+)", self.script)
-        decoded = [base64.b64decode(b).decode() for b in blobs]
-        return next(d for d in decoded if d.startswith("#!/bin/bash"))
-
     def test_runner_cds_into_cwd(self):
         runner = self._runner()
         self.assertIn("cd -- /srv/x", runner)
@@ -161,8 +165,21 @@ class TestDetachScript(unittest.TestCase):
     def test_failed_cd_still_records_an_exit_code(self):
         """Otherwise the job sits in state=unknown forever with an empty log."""
         runner = self._runner()
-        self.assertIn("fir: cd failed: /srv/x", runner)
+        self.assertIn("fir: cd failed:", runner)
+        self.assertIn("/srv/x", runner)
         self.assertIn("echo 127 >", runner)
+
+    def test_failed_cd_message_quotes_the_cwd(self):
+        """A cwd with a quote or $( ) must not corrupt the runner script."""
+        import shlex
+
+        cwd = '/srv/a"b$(id)'
+        script = remote._detach_script("fir-1-abc", "true\n", cwd, "box")
+        runner = TestDetachScript._decode_runner(script)
+        # Every mention of the cwd is shell-quoted; none of it is bare inside
+        # a double-quoted echo where $( ) would be expanded.
+        self.assertNotIn(f'"fir: cd failed: {cwd}"', runner)
+        self.assertEqual(2, runner.count(shlex.quote(cwd)))
 
     def test_job_id_validation(self):
         self.assertTrue(remote._is_safe_job_id("fir-1700000000-abc123"))
@@ -191,6 +208,20 @@ class TestClassify(unittest.TestCase):
     def test_255_from_the_remote_command_itself_is_treated_as_transport(self):
         # Ambiguous by construction; we document the heuristic by pinning it.
         self.assertEqual("unreachable", remote._classify(255, ""))
+
+    def test_a_remote_file_permission_error_is_not_an_auth_failure(self):
+        """scp exits 1 with 'Permission denied' for an unwritable remote path.
+
+        Real ssh auth failures always print the method list — `Permission
+        denied (publickey)` — so the trailing paren is what distinguishes
+        "your key was rejected" from "that directory is root-owned".
+        """
+        self.assertEqual("nonzero_exit", remote._classify(1, "scp: /root/x: Permission denied"))
+        self.assertEqual("nonzero_exit", remote._classify(126, "bash: x: Permission denied"))
+        # The method list is the tell for a genuine ssh auth rejection.
+        self.assertEqual(
+            "auth_failed", remote._classify(255, "kfet@box: Permission denied (publickey).")
+        )
 
 
 class TestEnvelope(unittest.TestCase):
@@ -294,6 +325,11 @@ Host beta
         hosts = {h["host"]: h for h in remote._parse_ssh_config(self.CONFIG)}
         self.assertEqual("10.0.0.9", hosts["beta"]["hostname"])
 
+    def test_only_a_leading_key_equals_value_is_split_on_equals(self):
+        """`HostName a=b` is one value; only `HostName=a` is the equals form."""
+        hosts = {h["host"]: h for h in remote._parse_ssh_config("Host g\n  HostName a=b\n")}
+        self.assertEqual("a=b", hosts["g"]["hostname"])
+
     def test_wildcards_flagged_as_patterns(self):
         hosts = {h["host"]: h for h in remote._parse_ssh_config(self.CONFIG)}
         self.assertTrue(hosts["*"]["pattern"])
@@ -319,6 +355,20 @@ Host beta
         from pathlib import Path
 
         self.assertEqual("", remote._read_ssh_config(Path("/nonexistent/ssh/config")))
+
+    def test_absolute_include_glob_never_raises(self):
+        """A pattern with `..` used to blow up Path('/').glob and crash rhosts."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sub = Path(tmp) / "d"
+            sub.mkdir()
+            (sub / "extra").write_text("Host viadots\n")
+            main = Path(tmp) / "config"
+            main.write_text(f"Include {sub}/../d/*\n")
+            hosts = remote._parse_ssh_config(remote._read_ssh_config(main))
+            self.assertEqual(["viadots"], [h["host"] for h in hosts])
 
 
 class TestTmuxScripts(unittest.TestCase):
@@ -346,12 +396,16 @@ class TestTmuxScripts(unittest.TestCase):
     def test_new_waits_for_an_interactive_shell_to_be_ready(self):
         """Typeahead sent into a booting shell is echoed and then discarded."""
         script = remote._tmux_new_script("s1", None, None)
-        self.assertIn("cksum", script)
         self.assertIn("sleep 0.25", script)
+        self.assertIn('[ "$cur" = "$prev" ]', script)
+        # One capture per iteration: an emptiness test and a stability test
+        # taken from two different captures can agree on a moving pane.
+        self.assertEqual(1, script.count("capture-pane"))
 
     def test_new_with_a_command_does_not_wait(self):
         script = remote._tmux_new_script("s1", "fir --mode acp", None)
-        self.assertNotIn("cksum", script)
+        self.assertNotIn("sleep 0.25", script)
+        self.assertNotIn("capture-pane", script)
 
     def test_failures_propagate_the_exit_code(self):
         for script in (
@@ -569,6 +623,13 @@ class TestToolValidation(unittest.TestCase):
         with self.assertRaises(fir_ext.ToolError):
             remote.rput({"host": "box", "local": "/nope/missing", "remote": "/tmp/x"}, self.ctx)
 
+    def test_non_numeric_timeout_is_a_tool_error_not_a_crash(self):
+        """A bare ValueError would surface as an unstructured failure."""
+        with self.assertRaises(fir_ext.ToolError):
+            remote.rexec({"host": "box", "command": "ls", "timeout_s": "30s"}, self.ctx)
+        with self.assertRaises(fir_ext.ToolError):
+            remote.rtmux({"host": "box", "action": "cap", "target": "s", "lines": "lots"}, self.ctx)
+
 
 class TestToolPlumbing(unittest.TestCase):
     """Tool bodies against a stubbed _ssh_exec — no network."""
@@ -633,6 +694,21 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("systemd", env["launcher"])
         self.assertIn(env["job_id"], env["log_path"])
 
+    def test_missing_remote_timeout_binary_is_named_not_left_as_a_bare_127(self):
+        """The wrapper is argv-level, so a host without coreutils fails here."""
+        err = "bash: line 1: timeout: command not found\n"
+        with mock.patch.object(remote, "_run_local", return_value=(127, "", err, False)):
+            result = remote.rexec({"host": "box", "command": "ls"}, self.ctx)
+        env = _payload(result)
+        self.assertEqual("nonzero_exit", env["outcome"])
+        self.assertIn("coreutils", env["hint"])
+
+    def test_ordinary_command_not_found_gets_no_coreutils_hint(self):
+        err = "bash: line 1: frobnicate: command not found\n"
+        with mock.patch.object(remote, "_run_local", return_value=(127, "", err, False)):
+            env = _payload(remote.rexec({"host": "box", "command": "frobnicate"}, self.ctx))
+        self.assertNotIn("hint", env)
+
     def test_rjob_status_parses_state(self):
         out = "META:{}\nPID:5\nSTATE:done\nRC:0\nLOGBYTES:3\n---LOG---\nok\n"
         with mock.patch.object(remote, "_run_local", return_value=(0, out, "", False)):
@@ -686,6 +762,7 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertFalse(first["unchanged"])
         self.assertEqual("hello world", first["capture"])
         self.assertEqual(11, first["capture_bytes"])
+        self.assertFalse(first["capture_truncated"])
         self.assertTrue(first["cursor_visible"])
         self.assertTrue(second["unchanged"])
         self.assertEqual("", second["capture"])
@@ -724,6 +801,10 @@ class TestToolPlumbing(unittest.TestCase):
         env = _payload(result)
         self.assertEqual(1, env["host_count"])
         self.assertEqual("a", env["hosts"][0]["host"])
+        # rhosts shares the one envelope shape, so a model that learned the
+        # keys from rexec can read this result without special-casing.
+        for key in ("outcome", "exit_code", "stdout_bytes", "connect_reused", "job_id"):
+            self.assertIn(key, env)
 
     def test_rhosts_probe_classifies_and_skips_wildcards(self):
         config = "Host a\nHost b\nHost *\n"
@@ -762,6 +843,42 @@ class TestToolPlumbing(unittest.TestCase):
         self.assertEqual("box:/tmp/x", captured["argvs"][0][-1])
         self.assertEqual("get", get["direction"])
         self.assertEqual("box:/tmp/x", captured["argvs"][1][-2])
+
+    def test_scp_remote_permission_error_is_signal_not_auth_failure(self):
+        """scp exits 1 for an unwritable remote path; that is not an auth failure."""
+        err = "scp: dest open '/root/x': Permission denied\n"
+        with mock.patch.object(remote, "_run_local", return_value=(1, "", err, False)):
+            result = remote.rput({"host": "box", "local": __file__, "remote": "/root/x"}, self.ctx)
+        self.assertFalse(result["is_error"])
+        self.assertEqual("nonzero_exit", _payload(result)["outcome"])
+
+    def test_scp_real_auth_failure_is_an_error(self):
+        err = "kfet@box: Permission denied (publickey).\n"
+        with mock.patch.object(remote, "_run_local", return_value=(1, "", err, False)):
+            result = remote.rput({"host": "box", "local": __file__, "remote": "/tmp/x"}, self.ctx)
+        self.assertTrue(result["is_error"])
+        self.assertEqual("auth_failed", _payload(result)["outcome"])
+
+    def test_sub_second_timeout_never_disables_the_remote_timeout(self):
+        """`timeout ... 0` means NO limit to GNU timeout — never emit a bare 0."""
+        captured = {}
+
+        def fake_run(argv, stdin_data, timeout_s):
+            captured["argv"] = argv
+            return 124, "", "", True
+
+        with mock.patch.object(remote, "_run_local", fake_run):
+            result = remote.rexec({"host": "box", "command": "true", "timeout_s": 0.4}, self.ctx)
+        self.assertEqual(["timeout", "-k", "5", "1", "bash", "-l", "-s"], captured["argv"][-7:])
+        # The envelope reports the bound that was actually applied, not the
+        # sub-second value that would have meant "no limit".
+        self.assertEqual(1, _payload(result)["timeout_s"])
+
+    def test_detach_log_path_is_resolvable_not_a_literal_dollar_home(self):
+        with mock.patch.object(remote, "_run_local", return_value=(0, "systemd\n", "", False)):
+            env = _payload(remote.rexec({"host": "box", "command": "x", "detach": True}, self.ctx))
+        self.assertTrue(env["log_path"].startswith("~/.cache/fir/rjobs/"), env["log_path"])
+        self.assertNotIn("$HOME", env["log_path"])
 
 
 def _localhost_ssh_works() -> bool:

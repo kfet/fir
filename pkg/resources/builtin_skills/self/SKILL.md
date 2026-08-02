@@ -418,7 +418,7 @@ For project-specific settings (`.fir/settings.json`), relative paths also resolv
 
 ## Remote hosts (`remote` extension)
 
-The builtin `remote` extension gives the agent five tools for working over ssh, so remote work never needs hand-written ssh one-liners inside `Bash`:
+The builtin `remote` extension gives the agent six tools for working over ssh, so remote work never needs hand-written ssh one-liners inside `Bash`:
 
 - **`rexec(host, command, timeout_s, cwd, detach)`** — run a shell script on a remote host. The script is shipped on **ssh stdin** to `bash -l -s`, never as `ssh host "bash -lc '...'"`, so nothing is re-split by an intermediate shell and no escaping is needed. `detach=True` runs it under `systemd-run --user --collect` (fallback: double-forked `setsid`) on the remote box and returns a job id.
 - **`rjob(host, id, action)`** — `status` / `log` / `tail` / `kill` for a detached job. State lives entirely in `~/.cache/fir/rjobs/<id>.{log,rc,pid}` **on the remote host** — there is no local registry to drift.

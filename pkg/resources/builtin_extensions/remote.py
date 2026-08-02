@@ -26,7 +26,12 @@ Transport rules (the whole point — see docs in each builder):
 2. The ssh flags are owned here, not by the model — BatchMode, ConnectTimeout,
    ServerAliveInterval, and a ControlMaster mux socket so repeated calls skip
    the 150-500ms handshake. The mux degrades gracefully when the socket dies.
-3. Host configuration lives in ``~/.ssh/config``. There is no fir-side host
+3. The remote side runs under GNU ``timeout -k``, which is what makes a
+   runaway command bounded and its process *group* signalled. That is a hard
+   requirement on the remote host (coreutils; present on Linux, absent on a
+   stock macOS/BSD without it) — the wrapper is argv-level, so a host lacking
+   it fails every call with 127. ``_ssh_exec`` recognises that and says so.
+4. Host configuration lives in ``~/.ssh/config``. There is no fir-side host
    registry; the tools accept whatever ``ssh`` accepts.
 
 Every tool returns the same discriminated envelope (see ``_envelope``), never
@@ -38,6 +43,7 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+import glob
 import hashlib
 import json
 import os
@@ -63,8 +69,11 @@ _MAX_STREAM_BYTES = 40 * 1024
 _HEAD_FRACTION = 0.6
 
 #: Remote directory holding detached-job state. The remote filesystem *is*
-#: the job registry — we never keep a local copy that can drift.
-_RJOBS_DIR = "$HOME/.cache/fir/rjobs"
+#: the job registry — we never keep a local copy that can drift. The `$HOME`
+#: form is what the shipped scripts use; the `~` form is what we show the
+#: model, which would otherwise be handed a literal `$HOME` it cannot resolve.
+_RJOBS_DISPLAY = "~/.cache/fir/rjobs"
+_RJOBS_DIR = "$HOME" + _RJOBS_DISPLAY[1:]
 
 #: Grace period between TERM and KILL for the remote ``timeout`` wrapper.
 _TIMEOUT_KILL_GRACE = 5
@@ -79,6 +88,9 @@ _RC_NO_JOB = 96
 
 #: GNU ``timeout`` reports this when it had to kill the command.
 _RC_TIMEOUT = 124
+
+#: ControlMaster socket template. ``%C`` is ssh's hash of the connection.
+_CONTROL_PATH = "~/.ssh/fir-cm-%C"
 
 _OUTCOME_OK = "ok"
 _OUTCOME_NONZERO = "nonzero_exit"
@@ -106,11 +118,6 @@ _ERROR_OUTCOMES = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _control_path() -> str:
-    """ControlMaster socket template. ``%C`` is ssh's hash of the connection."""
-    return "~/.ssh/fir-cm-%C"
-
-
 def _ssh_flags() -> list[str]:
     """The ssh options this extension owns so the model never writes them.
 
@@ -129,17 +136,16 @@ def _ssh_flags() -> list[str]:
         "-o",
         "ControlMaster=auto",
         "-o",
-        f"ControlPath={_control_path()}",
+        f"ControlPath={_CONTROL_PATH}",
         "-o",
         "ControlPersist=120",
     ]
 
 
-def _check_host(host: str) -> str:
+def _check_host(host: str) -> None:
     """Reject an option-like host before ssh silently reinterprets it."""
     if host.startswith("-"):
         raise fir_ext.ToolError(f"invalid host {host!r}: must not start with '-'")
-    return host
 
 
 def _ssh_argv(host: str, remote_argv: list[str]) -> list[str]:
@@ -152,14 +158,9 @@ def _ssh_argv(host: str, remote_argv: list[str]) -> list[str]:
     return ["ssh", *_ssh_flags(), host, "--", *remote_argv]
 
 
-def _scp_argv(sources: list[str], dest: str, recursive: bool = True) -> list[str]:
+def _scp_argv(sources: list[str], dest: str) -> list[str]:
     """scp argv sharing the same connection flags (and hence the same mux)."""
-    argv = ["scp", *_ssh_flags(), "-p"]
-    if recursive:
-        argv.append("-r")
-    argv.extend(sources)
-    argv.append(dest)
-    return argv
+    return ["scp", *_ssh_flags(), "-p", "-r", *sources, dest]
 
 
 # Cache of host -> resolved ControlPath, so reuse detection costs one cheap
@@ -181,7 +182,7 @@ def _resolved_control_path(host: str) -> str:
     path = ""
     try:
         proc = subprocess.run(
-            ["ssh", "-o", f"ControlPath={_control_path()}", "-G", host],
+            ["ssh", "-o", f"ControlPath={_CONTROL_PATH}", "-G", host],
             capture_output=True,
             text=True,
             timeout=10,
@@ -200,12 +201,7 @@ def _resolved_control_path(host: str) -> str:
 def _connection_reused(host: str) -> bool:
     """True when a live mux socket for *host* existed before this call."""
     path = _resolved_control_path(host)
-    if not path:
-        return False
-    try:
-        return os.path.exists(os.path.expanduser(path))
-    except OSError:
-        return False
+    return bool(path) and os.path.exists(os.path.expanduser(path))
 
 
 # ---------------------------------------------------------------------------
@@ -213,17 +209,12 @@ def _connection_reused(host: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _script_preamble(cwd: str | None) -> str:
-    """Leading lines every shipped script gets."""
-    lines = ["# fir remote.py — shipped over ssh stdin, never re-split by a shell"]
-    if cwd:
-        lines.append(f"cd -- {shlex.quote(cwd)} || exit 127")
-    return "\n".join(lines) + "\n"
-
-
-def _build_script(command: str, cwd: str | None) -> str:
+def _build_script(command: str, cwd: str | None = None) -> str:
     """The exact bytes written to ``bash -l -s`` on the remote host."""
-    return _script_preamble(cwd) + command + "\n"
+    preamble = "# fir remote.py — shipped over ssh stdin, never re-split by a shell\n"
+    if cwd:
+        preamble += f"cd -- {shlex.quote(cwd)} || exit 127\n"
+    return preamble + command + "\n"
 
 
 def _b64(text: str) -> str:
@@ -237,6 +228,21 @@ def _write_file_cmd(path_expr: str, content: str) -> str:
     return f"printf %s {_b64(content)} | base64 -d > {path_expr}"
 
 
+def _num(params: dict, key: str, default: float, tool: str) -> float:
+    """Coerce a numeric parameter, reporting a bad one as a tool error.
+
+    The JSON schema declares these as numbers, but a model can still send
+    ``"30s"``; a bare ValueError would surface as an unstructured crash.
+    """
+    raw = params.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        raise fir_ext.ToolError(f"{tool}: {key!r} must be a number, got {raw!r}") from None
+
+
 def _new_job_id() -> str:
     return f"fir-{int(time.time())}-{secrets.token_hex(3)}"
 
@@ -248,7 +254,7 @@ def _is_safe_job_id(job_id: str) -> bool:
     return all(c.isalnum() or c in "-_" for c in job_id)
 
 
-def _detach_scripts(job_id: str, command: str, cwd: str | None, host: str) -> str:
+def _detach_script(job_id: str, command: str, cwd: str | None, host: str) -> str:
     """Outer script that stages and launches a detached remote job.
 
     The launched job must survive the ssh channel closing. Two things matter:
@@ -272,7 +278,7 @@ def _detach_scripts(job_id: str, command: str, cwd: str | None, host: str) -> st
             # state=unknown forever with an empty log — the one state the
             # model cannot act on.
             f"cd -- {shlex.quote(cwd)} || {{ "
-            f'echo "fir: cd failed: {cwd}" >> "$D/{job_id}.log"; '
+            f'echo "fir: cd failed:" {shlex.quote(cwd)} >> "$D/{job_id}.log"; '
             f'echo 127 > "$D/{job_id}.rc"; exit 127; }}\n'
             if cwd
             else ""
@@ -316,8 +322,14 @@ def _detach_scripts(job_id: str, command: str, cwd: str | None, host: str) -> st
 # Outcome classification
 # ---------------------------------------------------------------------------
 
+#: Substrings that identify an ssh *authentication* rejection. "permission
+#: denied (" carries the trailing paren deliberately: real ssh auth failures
+#: always print the method list ("Permission denied (publickey)"), whereas a
+#: bare "Permission denied" is an ordinary remote filesystem error — scp says
+#: it for an unwritable destination, and that is signal, not a transport
+#: failure the model should see flagged as is_error.
 _AUTH_PATTERNS = (
-    "permission denied",
+    "permission denied (",
     "too many authentication failures",
     "no supported authentication methods",
     "host key verification failed",
@@ -339,22 +351,28 @@ _UNREACHABLE_PATTERNS = (
 )
 
 
+def _transport_outcome(stderr: str) -> str | None:
+    """The outcome *stderr* implies if it is ssh/scp complaining, else None."""
+    low = (stderr or "").lower()
+    if any(p in low for p in _AUTH_PATTERNS):
+        return _OUTCOME_AUTH_FAILED
+    if any(p in low for p in _UNREACHABLE_PATTERNS):
+        return _OUTCOME_UNREACHABLE
+    return None
+
+
 def _classify(exit_code: int, stderr: str) -> str:
     """Map an ssh exit code + stderr onto an outcome.
 
     ssh reserves 255 for its *own* failures, but a remote command may also
-    exit 255, so we only reclassify when the stderr actually looks like ssh
-    complaining. Anything else is honest remote signal.
+    exit 255, so 255 is always a transport outcome — auth when the stderr
+    names an authentication problem, unreachable otherwise. Any other nonzero
+    code is honest remote signal.
     """
-    low = (stderr or "").lower()
-    if exit_code == 255:
-        if any(p in low for p in _AUTH_PATTERNS):
-            return _OUTCOME_AUTH_FAILED
-        if any(p in low for p in _UNREACHABLE_PATTERNS):
-            return _OUTCOME_UNREACHABLE
-        return _OUTCOME_UNREACHABLE
     if exit_code == 0:
         return _OUTCOME_OK
+    if exit_code == 255:
+        return _transport_outcome(stderr) or _OUTCOME_UNREACHABLE
     return _OUTCOME_NONZERO
 
 
@@ -419,8 +437,19 @@ def _result(env: dict[str, Any]) -> dict[str, Any]:
     """Wrap an envelope as a fir tool result, flagging error outcomes."""
     return {
         "content": [{"type": "text", "text": json.dumps(env, indent=2)}],
-        "is_error": env.get("outcome") in _ERROR_OUTCOMES,
+        "is_error": env["outcome"] in _ERROR_OUTCOMES,
     }
+
+
+def _set_stdout(env: dict[str, Any], text: str) -> None:
+    """Replace an envelope's stdout, keeping ``stdout_bytes`` honest.
+
+    Tools that parse the raw stream into structure (tmux sessions, a job log,
+    a pane capture) blank or rewrite stdout; the byte count must move with it
+    or the model sees a size that no longer describes anything it was shown.
+    """
+    env["stdout"] = text
+    env["stdout_bytes"] = len(text.encode("utf-8", "replace"))
 
 
 # ---------------------------------------------------------------------------
@@ -465,52 +494,42 @@ def _ssh_exec(
     script: str,
     timeout_s: float,
     *,
-    remote_timeout: bool = True,
     job_id: str | None = None,
 ) -> dict[str, Any]:
     """Ship *script* to *host* over ssh stdin and return a full envelope.
 
-    When *remote_timeout* is set the remote side runs under ``timeout -k``,
-    which puts the command in its own process group and signals the *group* —
-    so a timed-out command does not leave orphans behind. The local timeout is
-    deliberately looser so the remote one normally wins and we can report the
-    clean 124.
+    The remote side runs under ``timeout -k``, which puts the command in its
+    own process group and signals the *group* — so a timed-out command does
+    not leave orphans behind. The local timeout is deliberately looser so the
+    remote one normally wins and we can report the clean 124.
     """
     reused = _connection_reused(host)
-    if remote_timeout:
-        remote_argv = [
-            "timeout",
-            "-k",
-            str(_TIMEOUT_KILL_GRACE),
-            str(int(timeout_s)),
-            "bash",
-            "-l",
-            "-s",
-        ]
-    else:
-        remote_argv = ["bash", "-l", "-s"]
-    argv = _ssh_argv(host, remote_argv)
+    # GNU timeout reads a duration of 0 as "no limit", so a sub-second
+    # timeout_s must floor to 1 rather than silently disabling the bound.
+    remote_seconds = str(max(1, int(timeout_s)))
+    argv = _ssh_argv(
+        host, ["timeout", "-k", str(_TIMEOUT_KILL_GRACE), remote_seconds, "bash", "-l", "-s"]
+    )
     started = time.time()
     rc, out, err, local_timed_out = _run_local(argv, script, timeout_s + _LOCAL_TIMEOUT_SLACK)
     duration_ms = int((time.time() - started) * 1000)
 
+    extra: dict[str, Any] = {}
     if local_timed_out or rc == _RC_TIMEOUT:
-        return _envelope(
-            _OUTCOME_TIMEOUT,
-            host,
-            exit_code=_RC_TIMEOUT,
-            stdout=out,
-            stderr=err
-            or (
-                f"remote command exceeded timeout_s={int(timeout_s)}; "
-                "its process group was signalled"
-            ),
-            duration_ms=duration_ms,
-            connect_reused=reused,
-            job_id=job_id,
-            timeout_s=int(timeout_s),
+        outcome, rc = _OUTCOME_TIMEOUT, _RC_TIMEOUT
+        err = err or (
+            f"remote command exceeded timeout_s={remote_seconds}; its process group was signalled"
         )
-    outcome = _classify(rc, err)
+        # The *effective* bound, i.e. after the floor-to-1 clamp — reporting
+        # the raw request would tell the model a limit that was not applied.
+        extra["timeout_s"] = int(remote_seconds)
+    else:
+        outcome = _classify(rc, err)
+        if outcome == _OUTCOME_NONZERO and "timeout: " in err and "not found" in err:
+            # The timeout wrapper is argv-level, so a remote host without GNU
+            # coreutils fails every call here — and 127 with a bare
+            # "command not found" reads as the user's command failing.
+            extra["hint"] = "remote host lacks GNU `timeout` (coreutils); install it there"
     return _envelope(
         outcome,
         host,
@@ -520,6 +539,7 @@ def _ssh_exec(
         duration_ms=duration_ms,
         connect_reused=reused,
         job_id=job_id,
+        **extra,
     )
 
 
@@ -532,6 +552,10 @@ def _ssh_config_path() -> Path:
     return Path.home() / ".ssh" / "config"
 
 
+#: The ssh-config keywords worth surfacing in `rhosts`.
+_CONFIG_FIELDS = ("hostname", "user", "port")
+
+
 def _parse_ssh_config(text: str) -> list[dict[str, Any]]:
     """Extract ``Host`` stanzas with the handful of fields worth showing.
 
@@ -542,24 +566,33 @@ def _parse_ssh_config(text: str) -> list[dict[str, Any]]:
     # Entries created by the most recent Host line — one Host line can declare
     # several aliases, and the following keywords apply to all of them.
     current: list[dict[str, Any]] = []
-    fields = {"hostname": "hostname", "user": "user", "port": "port"}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.replace("=", " ", 1).split(None, 1)
-        if len(parts) != 2:
+        # ssh accepts both `Key value` and `Key=value`. Split on `=` only when
+        # it sits in the *first* token — a value may legitimately contain one.
+        head = line.split(None, 1)
+        if "=" in head[0]:
+            key, value = head[0].split("=", 1)
+            if len(head) > 1:
+                value = f"{value} {head[1]}"
+        elif len(head) > 1:
+            key, value = head
+        else:
             continue
-        key, value = parts[0].lower(), parts[1].strip()
+        key, value = key.lower(), value.strip()
+        if not value:
+            continue
         if key == "host":
             current = [
                 {"host": alias, "pattern": any(c in alias for c in "*?!")}
                 for alias in value.split()
             ]
             hosts.extend(current)
-        elif key in fields:
+        elif key in _CONFIG_FIELDS:
             for entry in current:
-                entry[fields[key]] = value
+                entry[key] = value
     return hosts
 
 
@@ -575,15 +608,15 @@ def _read_ssh_config(path: Path, depth: int = 0) -> str:
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.lower().startswith("include "):
-            pattern = stripped.split(None, 1)[1].strip()
-            base = Path.home() / ".ssh"
-            expanded = os.path.expanduser(pattern)
-            candidates = (
-                sorted(Path("/").glob(expanded.lstrip("/")))
-                if os.path.isabs(expanded)
-                else sorted(base.glob(pattern))
+            # ssh resolves a relative Include against ~/.ssh.
+            pattern = os.path.expanduser(stripped.split(None, 1)[1].strip())
+            if not os.path.isabs(pattern):
+                pattern = os.path.join(str(Path.home() / ".ssh"), pattern)
+            out.extend(
+                _read_ssh_config(Path(inc), depth + 1)
+                for inc in sorted(glob.glob(pattern))
+                if os.path.isfile(inc)
             )
-            out.extend(_read_ssh_config(inc, depth + 1) for inc in candidates if inc.is_file())
             continue
         out.append(line)
     return "\n".join(out)
@@ -675,6 +708,12 @@ _capture_hashes: dict[tuple[str, str], str] = {}
 _capture_lock = threading.Lock()
 
 
+def _forget_capture(host: str, target: str) -> None:
+    """Drop the memo for a pane that just moved or went away."""
+    with _capture_lock:
+        _capture_hashes.pop((host, target), None)
+
+
 def _capture_unchanged(host: str, target: str, capture: str) -> tuple[bool, str]:
     """Record the capture hash; return (unchanged, hash)."""
     digest = hashlib.sha256(capture.encode("utf-8", "replace")).hexdigest()[:16]
@@ -689,11 +728,11 @@ def _tmux_outcome(env: dict[str, Any]) -> dict[str, Any]:
     """Reclassify a tmux exec envelope into no_tmux / no_target where apt."""
     if env["outcome"] != _OUTCOME_NONZERO:
         return env
-    if env.get("exit_code") == _RC_NO_TMUX:
+    if env["exit_code"] == _RC_NO_TMUX:
         env["outcome"] = _OUTCOME_NO_TMUX
         env["hint"] = "install tmux or use rexec detach=True"
         return env
-    low = (env.get("stderr") or "").lower()
+    low = env["stderr"].lower()
     if any(p in low for p in _NO_TARGET_PATTERNS):
         env["outcome"] = _OUTCOME_NO_TARGET
         env["hint"] = "run rtmux action=ls to see what exists on this host"
@@ -795,17 +834,17 @@ def rexec(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if not command.strip():
         raise fir_ext.ToolError("rexec: 'command' is required")
     cwd = params.get("cwd") or None
-    timeout_s = float(params.get("timeout_s") or 120)
+    timeout_s = _num(params, "timeout_s", 120, "rexec")
     if timeout_s <= 0:
         timeout_s = 120.0
 
     if params.get("detach"):
         job_id = _new_job_id()
-        script = _build_script(_detach_scripts(job_id, command, cwd, host), None)
+        script = _build_script(_detach_script(job_id, command, cwd, host))
         env = _ssh_exec(host, script, min(timeout_s, 60), job_id=job_id)
         if env["outcome"] == _OUTCOME_OK:
-            env["launcher"] = (env.get("stdout") or "").strip()
-            env["log_path"] = f"~/.cache/fir/rjobs/{job_id}.log"
+            env["launcher"] = (env["stdout"]).strip()
+            env["log_path"] = f"{_RJOBS_DISPLAY}/{job_id}.log"
             env["hint"] = f"poll with rjob(host={host!r}, id={job_id!r})"
         return _result(env)
 
@@ -844,7 +883,7 @@ def _rjob_script(job_id: str, action: str, lines: int) -> str:
         "log": f'cat "$D/{job_id}.log" 2>/dev/null',
         "tail": f'tail -n {lines} "$D/{job_id}.log" 2>/dev/null',
         "status": f'tail -n {min(lines, 20)} "$D/{job_id}.log" 2>/dev/null',
-    }.get(action, f'tail -n {lines} "$D/{job_id}.log" 2>/dev/null')
+    }[action]
     return (
         head + f'echo "META:$(cat "$D/{job_id}.meta" 2>/dev/null | tr -d "\\n")"\n'
         f'P=$(cat "$D/{job_id}.pid" 2>/dev/null)\n'
@@ -938,7 +977,7 @@ def rjob(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     host = (params.get("host") or "").strip()
     job_id = (params.get("id") or "").strip()
     action = (params.get("action") or "status").strip()
-    lines = int(params.get("lines") or 40)
+    lines = int(_num(params, "lines", 40, "rjob"))
     if not host:
         raise fir_ext.ToolError("rjob: 'host' is required")
     _check_host(host)
@@ -947,20 +986,22 @@ def rjob(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if action not in ("status", "log", "tail", "kill"):
         raise fir_ext.ToolError(f"rjob: unknown action {action!r}")
 
-    script = _build_script(_rjob_script(job_id, action, max(1, lines)), None)
+    script = _build_script(_rjob_script(job_id, action, max(1, lines)))
     env = _ssh_exec(host, script, 60, job_id=job_id)
-    if env["outcome"] == _OUTCOME_NONZERO and env.get("exit_code") == _RC_NO_JOB:
+    if env["outcome"] == _OUTCOME_NONZERO and env["exit_code"] == _RC_NO_JOB:
         env["outcome"] = _OUTCOME_NO_TARGET
         env["hint"] = "no such job on this host — check the id and the host"
         return _result(env)
     if env["outcome"] == _OUTCOME_OK and action != "kill":
-        info = _parse_rjob_stdout(env.get("stdout") or "")
+        info = _parse_rjob_stdout(env["stdout"])
         env["state"] = info["state"]
         env["job_exit_code"] = info["job_exit_code"]
         env["pid"] = info.get("pid")
         env["meta"] = info.get("meta", {})
         env["log_bytes"] = info.get("log_bytes", 0)
         log, truncated = _truncate(info["log"])
+        # stdout_bytes is the *untruncated* log size here — deliberately not
+        # _set_stdout, which reports the length of what was actually shown.
         env["stdout"] = log
         env["stdout_bytes"] = len(info["log"].encode("utf-8", "replace"))
         env["stdout_truncated"] = truncated
@@ -976,26 +1017,21 @@ def _copy(
     host: str, sources: list[str], dest: str, direction: str, timeout_s: float
 ) -> dict[str, Any]:
     reused = _connection_reused(host)
-    argv = _scp_argv(sources, dest)
     started = time.time()
-    rc, out, err, timed_out = _run_local(argv, None, timeout_s)
+    rc, out, err, timed_out = _run_local(_scp_argv(sources, dest), None, timeout_s)
     duration_ms = int((time.time() - started) * 1000)
     if timed_out:
-        return _envelope(
-            _OUTCOME_TIMEOUT,
-            host,
-            exit_code=_RC_TIMEOUT,
-            stdout=out,
-            stderr=err or f"scp exceeded timeout_s={int(timeout_s)}",
-            duration_ms=duration_ms,
-            connect_reused=reused,
-            direction=direction,
+        outcome, rc = _OUTCOME_TIMEOUT, _RC_TIMEOUT
+        err = err or f"scp exceeded timeout_s={int(timeout_s)}"
+    elif rc == 0:
+        outcome = _OUTCOME_OK
+    else:
+        # scp reports nearly everything as exit 1, so the stderr text — not
+        # the exit code — is the only discriminator between "the host refused
+        # us" and "that remote path is read-only".
+        outcome = _transport_outcome(err) or (
+            _OUTCOME_UNREACHABLE if rc == 255 else _OUTCOME_NONZERO
         )
-    outcome = _classify(rc, err) if rc != 1 else _OUTCOME_NONZERO
-    if rc == 1 and any(p in (err or "").lower() for p in _AUTH_PATTERNS):
-        outcome = _OUTCOME_AUTH_FAILED
-    elif rc == 1 and any(p in (err or "").lower() for p in _UNREACHABLE_PATTERNS):
-        outcome = _OUTCOME_UNREACHABLE
     return _envelope(
         outcome,
         host,
@@ -1073,7 +1109,7 @@ def rput(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if not (host and local and remote):
         raise fir_ext.ToolError("rput: 'host', 'local' and 'remote' are required")
     _check_host(host)
-    timeout_s = float(params.get("timeout_s") or 300)
+    timeout_s = _num(params, "timeout_s", 300, "rput")
     local_path = os.path.expanduser(local)
     if not os.path.exists(local_path):
         raise fir_ext.ToolError(f"rput: local path does not exist: {local_path}")
@@ -1103,7 +1139,7 @@ def rget(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if not (host and local and remote):
         raise fir_ext.ToolError("rget: 'host', 'remote' and 'local' are required")
     _check_host(host)
-    timeout_s = float(params.get("timeout_s") or 300)
+    timeout_s = _num(params, "timeout_s", 300, "rget")
     local_path = os.path.expanduser(local)
     env = _copy(host, [f"{host}:{remote}"], local_path, "get", timeout_s)
     if env["outcome"] == _OUTCOME_OK:
@@ -1238,15 +1274,17 @@ def _pane_settle_fragment(name: str) -> str:
     *discarded* when the shell flushes typeahead at startup — so the keys
     appear in the pane, look sent, and never run. We poll until the pane is
     non-empty (a prompt has been drawn) and byte-stable across two samples,
-    capped so a slow host costs seconds, not the whole call.
+    capped so a slow host costs seconds, not the whole call. One capture per
+    iteration: comparing a checksum and an emptiness test taken from two
+    *different* captures can agree on a pane that is still moving.
     """
     cap = _tmux_cmd(["capture-pane", "-p", "-t", name])
     return (
         "prev=\n"
         "for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do\n"
-        f"  cur=$({cap} 2>/dev/null | cksum)\n"
-        f'  body=$({cap} 2>/dev/null | tr -d "[:space:]")\n'
-        '  if [ -n "$body" ] && [ "$cur" = "$prev" ]; then break; fi\n'
+        f"  cur=$({cap} 2>/dev/null)\n"
+        '  if [ -n "$(printf %s "$cur" | tr -d "[:space:]")" ] && '
+        '[ "$cur" = "$prev" ]; then break; fi\n'
         '  prev="$cur"\n'
         "  sleep 0.25\n"
         "done\n"
@@ -1296,6 +1334,11 @@ def _tmux_kill_script(target: str) -> str:
     return _TMUX_GUARD + _tmux_cmd(["kill-session", "-t", target]) + " || exit $?\n"
 
 
+def _tmux_exec(host: str, script: str, timeout_s: float = 45) -> dict[str, Any]:
+    """Ship a tmux script and reclassify its failure as no_tmux / no_target."""
+    return _tmux_outcome(_ssh_exec(host, _build_script(script), timeout_s))
+
+
 def _split_marker(stdout: str, marker: str) -> tuple[str, str]:
     """Split *stdout* at a whole-line *marker*. Returns (before, after)."""
     lines = stdout.splitlines()
@@ -1328,21 +1371,20 @@ def rtmux(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     if action not in ("ls", "new", "send", "cap", "kill"):
         raise fir_ext.ToolError(f"rtmux: unknown action {action!r}")
     target = (params.get("target") or "").strip()
-    lines = max(1, int(params.get("lines") or 120))
+    lines = max(1, int(_num(params, "lines", 120, "rtmux")))
 
     if action == "ls":
-        env = _tmux_outcome(_ssh_exec(host, _build_script(_tmux_ls_script(), None), 45))
+        env = _tmux_exec(host, _tmux_ls_script())
         if env["outcome"] == _OUTCOME_OK:
-            env["sessions"] = _parse_tmux_ls(env.get("stdout") or "")
-            env["stdout"] = ""
-            env["stdout_bytes"] = 0
+            env["sessions"] = _parse_tmux_ls(env["stdout"])
             env["session_count"] = len(env["sessions"])
+            _set_stdout(env, "")
         return _result(env)
 
     if action == "new":
         name = (params.get("name") or "").strip() or _new_session_name()
         script = _tmux_new_script(name, params.get("command") or None, params.get("cwd"))
-        env = _tmux_outcome(_ssh_exec(host, _build_script(script, None), 45))
+        env = _tmux_exec(host, script)
         if env["outcome"] == _OUTCOME_OK:
             env["name"] = name
             env["hint"] = (
@@ -1355,11 +1397,10 @@ def rtmux(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
         raise fir_ext.ToolError(f"rtmux: 'target' is required for action={action!r}")
 
     if action == "kill":
-        env = _tmux_outcome(_ssh_exec(host, _build_script(_tmux_kill_script(target), None), 30))
+        env = _tmux_exec(host, _tmux_kill_script(target), 30)
         if env["outcome"] == _OUTCOME_OK:
             env["killed"] = target
-        with _capture_lock:
-            _capture_hashes.pop((host, target), None)
+        _forget_capture(host, target)
         return _result(env)
 
     if action == "send":
@@ -1370,35 +1411,30 @@ def rtmux(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
         if not text and not keys:
             raise fir_ext.ToolError("rtmux: action=send needs 'text' and/or 'keys'")
         script = _tmux_send_script(target, text, [str(k) for k in keys], min(lines, 40))
-        env = _tmux_outcome(_ssh_exec(host, _build_script(script, None), 45))
+        env = _tmux_exec(host, script)
         if env["outcome"] == _OUTCOME_OK:
-            _, tail = _split_marker(env.get("stdout") or "", "---TAIL---")
-            tail = _strip_ansi(tail).rstrip()
-            env["stdout"] = tail
-            env["stdout_bytes"] = len(tail.encode("utf-8", "replace"))
+            _, tail = _split_marker(env["stdout"], "---TAIL---")
+            _set_stdout(env, _strip_ansi(tail).rstrip())
             env["sent_text"] = text or ""
             env["sent_keys"] = keys
             # A send always invalidates our capture memo — the pane just moved.
-            with _capture_lock:
-                _capture_hashes.pop((host, target), None)
+            _forget_capture(host, target)
         return _result(env)
 
     # action == "cap"
-    env = _tmux_outcome(_ssh_exec(host, _build_script(_tmux_cap_script(target, lines), None), 45))
+    env = _tmux_exec(host, _tmux_cap_script(target, lines))
     if env["outcome"] == _OUTCOME_OK:
-        body, cursor = _split_marker(env.get("stdout") or "", "---CURSOR---")
+        body, cursor = _split_marker(env["stdout"], "---CURSOR---")
         capture = _strip_ansi(body).rstrip()
         unchanged, digest = _capture_unchanged(host, target, capture)
-        capture_bytes = len(capture.encode("utf-8", "replace"))
         shown, truncated = _truncate(capture)
         env["capture"] = "" if unchanged else shown
-        env["capture_bytes"] = capture_bytes
-        env["truncated"] = truncated
+        env["capture_bytes"] = len(capture.encode("utf-8", "replace"))
+        env["capture_truncated"] = truncated
         env["unchanged"] = unchanged
         env["capture_hash"] = digest
         env["cursor_visible"] = cursor.strip() in ("1", "on")
-        env["stdout"] = ""
-        env["stdout_bytes"] = 0
+        _set_stdout(env, "")
         if unchanged:
             env["hint"] = "pane identical to the last capture — nothing re-emitted"
     return _result(env)
@@ -1465,25 +1501,18 @@ def rhosts(params: dict, ctx: fir_ext.Context) -> dict[str, Any]:
     path = _ssh_config_path()
     text = _read_ssh_config(path)
     hosts = _parse_ssh_config(text)
-    env: dict[str, Any] = {
-        "outcome": _OUTCOME_OK,
-        "host": "",
-        "exit_code": 0,
-        "stdout": "",
-        "stdout_bytes": 0,
-        "stdout_truncated": False,
-        "stderr": "" if text else f"no readable ssh config at {path}",
-        "duration_ms": 0,
-        "connect_reused": False,
-        "job_id": None,
-        "config_path": str(path),
-        "hosts": hosts,
-        "host_count": len(hosts),
-    }
+    env = _envelope(
+        _OUTCOME_OK,
+        "",
+        stderr="" if text else f"no readable ssh config at {path}",
+        config_path=str(path),
+        hosts=hosts,
+        host_count=len(hosts),
+    )
     if not params.get("probe"):
         return _result(env)
 
-    timeout_s = float(params.get("timeout_s") or 15)
+    timeout_s = _num(params, "timeout_s", 15, "rhosts")
     targets = [h["host"] for h in hosts if not h.get("pattern") and not h["host"].startswith("-")]
     started = time.time()
     results: list[dict[str, Any]] = []
